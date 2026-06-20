@@ -56,9 +56,14 @@ export type KnowledgeContext = {
 export type ClarificationQuestion = {
   id: string;
   title: string;
+  question?: string;
   reason: string;
   options: string[];
   recommendedOption?: string;
+  recommendation?: string;
+  relatedPath?: string;
+  status?: "pending" | "answered" | "skipped";
+  required?: boolean;
 };
 
 export type IntentResult = {
@@ -86,10 +91,11 @@ export type ProductDesignState = {
   projectId: string;
   version: number;
   title: string;
+  summary?: string;
   businessGoal: string;
   background?: string;
-  targetUsers: string[];
-  userScenarios: string[];
+  targetUsers: Array<Record<string, unknown>>;
+  userScenarios: Array<Record<string, unknown>>;
   pages: Array<Record<string, unknown>>;
   features: Array<Record<string, unknown>>;
   backendConfigs: Array<Record<string, unknown>>;
@@ -98,9 +104,11 @@ export type ProductDesignState = {
   stateRules: Array<Record<string, unknown>>;
   exceptionScenarios: Array<Record<string, unknown>>;
   acceptanceCriteria: Array<Record<string, unknown>>;
+  prototypeOutline?: Record<string, unknown>;
   assumptions: Array<Record<string, unknown>>;
-  knowledgeRefs: KnowledgeReference[];
-  pendingQuestions: ClarificationQuestion[];
+  knowledgeRefs: Array<Record<string, unknown>>;
+  pendingQuestions: Array<Record<string, unknown>>;
+  confirmedFacts: Array<Record<string, unknown>>;
   prototypeSpec?: PrototypeSpec;
   prdDocument?: RequirementDocumentDraft;
   status:
@@ -112,13 +120,15 @@ export type ProductDesignState = {
     | "patching"
     | "qa_failed"
     | "confirmed";
+  createdBy: string;
+  updatedBy?: string;
   createdAt: string;
   updatedAt: string;
 };
 
 export type ProductDesignDraft = Omit<
   ProductDesignState,
-  "id" | "projectId" | "version" | "prototypeSpec" | "prdDocument" | "status" | "createdAt" | "updatedAt"
+  "id" | "version" | "prototypeSpec" | "prdDocument" | "status" | "createdAt" | "updatedAt"
 >;
 
 export type RequirementDocSection = {
@@ -133,7 +143,7 @@ export type RequirementDocumentDraft = {
   projectId: string;
   title: string;
   sections: RequirementDocSection[];
-  knowledgeRefs: KnowledgeReference[];
+      knowledgeRefs: Array<Record<string, unknown>>;
   assumptions: Array<Record<string, unknown>>;
   validationNotes: string[];
 };
@@ -214,6 +224,7 @@ export type VibeStreamEventType =
   | "step_failed"
   | "message_delta"
   | "state_updated"
+  | "state_version_created"
   | "prd_updated"
   | "prototype_updated"
   | "qa_completed"

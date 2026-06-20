@@ -7,7 +7,15 @@ export class SystemController {
     return {
       ok: true,
       service: "ai-product-workbench-api",
-      modules: ["auth", "admin-users", "projects", "files", "model-gateway", "ai-vibe"],
+      modules: [
+        "auth",
+        "admin-users",
+        "projects",
+        "files",
+        "model-gateway",
+        "ai-vibe",
+        "product-design-state",
+      ],
     };
   }
 }

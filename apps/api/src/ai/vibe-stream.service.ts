@@ -111,6 +111,7 @@ function toContractEventType(
 ): ContractEventType {
   if (type === "state_updated" && step === "patch_planning") return "patch_applied";
   if (type === "state_updated") return "state_updated";
+  if (type === "state_version_created") return "state_version_created";
   if (type === "prd_updated") return "prd_generated";
   if (type === "prototype_updated") return "prototype_generated";
   if (type === "qa_completed") return "qa_completed";

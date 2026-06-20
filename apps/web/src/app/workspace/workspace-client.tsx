@@ -13,6 +13,7 @@ import {
   Code2,
   Crosshair,
   Edit3,
+  Database,
   FileUp,
   FileText,
   ImagePlus,
@@ -52,7 +53,7 @@ type ProjectStatus =
 
 type MessageRole = "user" | "assistant";
 type StepStatus = "pending" | "running" | "success" | "failed" | "skipped";
-type PreviewTab = "prd" | "prototype" | "qa";
+type PreviewTab = "prd" | "prototype" | "qa" | "state";
 type PreviewState = "empty" | "generating" | "ready" | "error";
 type QaStatus = "unchecked" | "checking" | "passed" | "issues" | "failed";
 type DeviceMode = "desktop" | "mobile";
@@ -130,6 +131,28 @@ type QaIssue = {
   suggestion: string;
 };
 
+type ProductDesignStateSummary = {
+  id: string;
+  version: number;
+  title: string;
+  status: string;
+  updatedAt: string;
+  counts: {
+    pages: number;
+    backendConfigs: number;
+    frontendRules: number;
+    businessRules: number;
+    stateRules: number;
+    exceptionScenarios: number;
+    acceptanceCriteria: number;
+    assumptions: number;
+    pendingQuestions: number;
+    confirmedFacts: number;
+  };
+  assumptions: Array<{ id: string; content: string; status: string }>;
+  pendingQuestions: Array<{ id: string; question: string; status: string }>;
+};
+
 type WorkspaceProject = {
   id: string;
   conversationId?: string;
@@ -145,6 +168,7 @@ type WorkspaceProject = {
   prototypeHtml: string;
   qaStatus: QaStatus;
   qaIssues: QaIssue[];
+  productDesignState?: ProductDesignStateSummary | null;
 };
 
 type PreviewPatch = Partial<
@@ -157,6 +181,7 @@ type PreviewPatch = Partial<
     | "prototypeHtml"
     | "qaStatus"
     | "qaIssues"
+    | "productDesignState"
   >
 >;
 
@@ -261,6 +286,7 @@ type VibeRunEvent = {
     | "step_failed"
     | "message_delta"
     | "state_updated"
+    | "state_version_created"
     | "prd_updated"
     | "prototype_updated"
     | "qa_completed"
@@ -279,6 +305,10 @@ type UploadFilesResponse = {
 
 type GetFileResponse = {
   file: ApiFileAsset;
+};
+
+type GetProductDesignStateResponse = {
+  state: unknown | null;
 };
 
 const STATUS_META: Record<ProjectStatus, { label: string; className: string }> = {
@@ -692,6 +722,7 @@ function mapProject(project: ApiProject, messages: ChatMessage[] = []): Workspac
         : "",
     qaStatus: project.status === "qa_failed" ? "issues" : "unchecked",
     qaIssues: project.status === "qa_failed" ? DEFAULT_QA_ISSUES : [],
+    productDesignState: null,
   };
 }
 
@@ -723,13 +754,15 @@ function extractPreviewFromPayload(payload: unknown) {
   const prdSections = mapPrdSections(data.prdDocument);
   const prototypeHtml = extractPrototypeHtml(data);
   const qa = mapQaReport(data.qaReport);
+  const productDesignState = mapProductDesignStateSummary(data.productDesignState);
   const nextAction = asRecord(data.nextAction);
   const questions = mapClarificationQuestions(nextAction?.questions);
 
-  if (!prdSections.length && !prototypeHtml && !qa && !questions.length) return null;
+  if (!prdSections.length && !prototypeHtml && !qa && !questions.length && !productDesignState) return null;
 
   const patch: PreviewPatch = {};
   if (questions.length) patch.clarificationQuestions = questions;
+  if (productDesignState) patch.productDesignState = productDesignState;
   if (prdSections.length) {
     patch.prdState = "ready";
     patch.prdSections = prdSections;
@@ -743,6 +776,63 @@ function extractPreviewFromPayload(payload: unknown) {
     patch.qaIssues = qa.issues;
   }
   return patch;
+}
+
+function mapProductDesignStateSummary(value: unknown): ProductDesignStateSummary | null {
+  const state = asRecord(value);
+  if (!state) return null;
+  const id = asText(state.id);
+  if (!id) return null;
+  const counts = asRecord(state.counts);
+  const countArray = (key: string) => {
+    const counted = counts?.[key];
+    if (typeof counted === "number") return counted;
+    const arrayValue = state[key];
+    return Array.isArray(arrayValue) ? arrayValue.length : 0;
+  };
+  const assumptions = Array.isArray(state.assumptions) ? state.assumptions : [];
+  const pendingQuestions = Array.isArray(state.pendingQuestions) ? state.pendingQuestions : [];
+  return {
+    id,
+    version: typeof state.version === "number" ? state.version : 0,
+    title: asText(state.title) || "ProductDesignState",
+    status: asText(state.status) || "draft",
+    updatedAt: asText(state.updatedAt),
+    counts: {
+      pages: countArray("pages"),
+      backendConfigs: countArray("backendConfigs"),
+      frontendRules: countArray("frontendRules"),
+      businessRules: countArray("businessRules"),
+      stateRules: countArray("stateRules"),
+      exceptionScenarios: countArray("exceptionScenarios"),
+      acceptanceCriteria: countArray("acceptanceCriteria"),
+      assumptions: countArray("assumptions"),
+      pendingQuestions: countArray("pendingQuestions"),
+      confirmedFacts: countArray("confirmedFacts"),
+    },
+    assumptions: assumptions.slice(0, 3).flatMap((item) => {
+      const assumption = asRecord(item);
+      if (!assumption) return [];
+      return [
+        {
+          id: asText(assumption.id),
+          content: asText(assumption.content) || asText(assumption.description) || "AI 推断",
+          status: asText(assumption.status) || "pending",
+        },
+      ];
+    }),
+    pendingQuestions: pendingQuestions.slice(0, 3).flatMap((item) => {
+      const question = asRecord(item);
+      if (!question) return [];
+      return [
+        {
+          id: asText(question.id),
+          question: asText(question.question) || asText(question.title) || "待确认问题",
+          status: asText(question.status) || "pending",
+        },
+      ];
+    }),
+  };
 }
 
 function mapPrdSections(value: unknown): PrdSection[] {
@@ -855,6 +945,7 @@ function preservePreviewState(project: WorkspaceProject) {
     prototypeHtml: project.prototypeHtml,
     qaStatus: project.qaStatus,
     qaIssues: project.qaIssues,
+    productDesignState: project.productDesignState,
   };
 }
 
@@ -1007,6 +1098,15 @@ export function WorkspaceClient() {
           setPreviewTab(previewPatch.prototypeHtml ? "prototype" : previewPatch.qaIssues?.length ? "qa" : "prd");
         }
       }
+
+      const stateResponse = await apiRequest<GetProductDesignStateResponse>(
+        `/projects/${projectId}/product-design-state`,
+      );
+      const stateSummary = mapProductDesignStateSummary(stateResponse.state);
+      previewPatch = {
+        ...(previewPatch ?? {}),
+        productDesignState: stateSummary,
+      };
 
       setProjects((items) =>
         items.map((project) =>
@@ -1291,6 +1391,25 @@ export function WorkspaceClient() {
         ...project,
         status: "qa_failed",
         summary: event.content || "Agent 执行失败",
+      }));
+      return;
+    }
+
+    if (event.type === "state_updated") {
+      const stateSummary = mapProductDesignStateSummary(event.data);
+      if (!stateSummary) return;
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        productDesignState: stateSummary,
+        summary: `ProductDesignState v${stateSummary.version} 已更新`,
+      }));
+      return;
+    }
+
+    if (event.type === "state_version_created") {
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        summary: "ProductDesignState 版本快照已保存",
       }));
       return;
     }
@@ -1580,7 +1699,7 @@ export function WorkspaceClient() {
           conversationId: targetConversationId,
           message,
           selectedRegion,
-          previewMode: previewTab,
+          previewMode: previewTab === "prototype" ? "prototype" : "prd",
           fileIds,
         }),
       });
@@ -2621,6 +2740,7 @@ function PreviewPanel({
         />
       ) : null}
       {previewTab === "qa" ? <QaReportPanel project={project} /> : null}
+      {previewTab === "state" ? <StatePanel project={project} /> : null}
     </section>
   );
 }
@@ -2636,6 +2756,7 @@ function PreviewTabs({
     { key: "prd", label: "PRD", icon: FileText },
     { key: "prototype", label: "原型", icon: Code2 },
     { key: "qa", label: "QA", icon: ClipboardCheck },
+    { key: "state", label: "状态", icon: Database },
   ];
 
   return (
@@ -2830,6 +2951,119 @@ function PrototypePreview({
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatePanel({ project }: { project: WorkspaceProject | null }) {
+  const state = project?.productDesignState;
+
+  if (!state) {
+    return (
+      <PreviewEmpty
+        icon={Database}
+        title="暂无产品工程状态"
+        description="生成需求后，ProductDesignState 的版本、规则和待确认项会显示在这里。"
+      />
+    );
+  }
+
+  const metrics = [
+    ["页面", state.counts.pages],
+    ["后台配置", state.counts.backendConfigs],
+    ["前端规则", state.counts.frontendRules],
+    ["业务规则", state.counts.businessRules],
+    ["状态规则", state.counts.stateRules],
+    ["异常场景", state.counts.exceptionScenarios],
+    ["验收标准", state.counts.acceptanceCriteria],
+    ["AI 推断", state.counts.assumptions],
+    ["待确认", state.counts.pendingQuestions],
+    ["已确认事实", state.counts.confirmedFacts],
+  ];
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-[940px] space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
+                <Database className="h-4 w-4" />
+                ProductDesignState
+              </div>
+              <h2 className="mt-2 truncate text-lg font-semibold text-gray-950">{state.title}</h2>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">v{state.version}</span>
+                <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">{state.status}</span>
+                {state.updatedAt ? <span>更新于 {formatRelativeTime(state.updatedAt)}</span> : null}
+              </div>
+            </div>
+            <div className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
+              单一事实源
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-5 gap-3">
+          {metrics.map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+              <div className="text-xs text-gray-500">{label}</div>
+              <div className="mt-1 text-xl font-semibold text-gray-950">{value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <StateList
+            title="AI 推断"
+            empty="暂无 AI 推断"
+            items={state.assumptions.map((item) => ({
+              id: item.id,
+              title: item.content,
+              meta: item.status,
+            }))}
+          />
+          <StateList
+            title="待确认问题"
+            empty="暂无待确认问题"
+            items={state.pendingQuestions.map((item) => ({
+              id: item.id,
+              title: item.question,
+              meta: item.status,
+            }))}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StateList({
+  title,
+  empty,
+  items,
+}: {
+  title: string;
+  empty: string;
+  items: Array<{ id: string; title: string; meta: string }>;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="text-sm font-semibold text-gray-950">{title}</div>
+      {items.length ? (
+        <div className="mt-3 space-y-2">
+          {items.map((item, index) => (
+            <div key={item.id || index} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+              <div className="line-clamp-2 text-sm leading-6 text-gray-800">{item.title}</div>
+              <div className="mt-1 text-xs text-gray-500">{item.meta}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-6 text-center text-sm text-gray-500">
+          {empty}
+        </div>
+      )}
     </div>
   );
 }

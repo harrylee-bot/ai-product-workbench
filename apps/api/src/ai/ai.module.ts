@@ -16,13 +16,17 @@ import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent
 import { QaAgentService } from "./agents/qa-agent.service";
 import { RequirementAnalystAgentService } from "./agents/requirement-analyst-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
+import {
+  ProductDesignStateResourceController,
+  ProjectProductDesignStateController,
+} from "./product-design-state.controller";
 import { VibeController } from "./vibe.controller";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
 
 @Module({
   imports: [PrismaModule, ProjectModule, FileModule, ModelGatewayModule],
-  controllers: [VibeController],
+  controllers: [VibeController, ProjectProductDesignStateController, ProductDesignStateResourceController],
   providers: [
     VibeService,
     AiOrchestratorService,

@@ -189,13 +189,17 @@ export class AiOrchestratorService {
             }),
         );
         patchPlan = patch.data;
-        state = await this.stateService.applyPatch(context.projectId, state, patchPlan);
+        state = await this.stateService.applyPatch(context.projectId, state, patchPlan, {
+          userId: context.userId,
+          runId: context.runId,
+          messageId: input.userMessageId,
+        });
         await this.stream.emit({
           runId: context.runId,
           projectId: context.projectId,
           type: "state_updated",
           step: "patch_planning",
-          data: state,
+          data: stateSummary(state),
         });
       } else {
         await this.emit(context, "message_delta", "正在生成结构化产品设计状态...");
@@ -217,13 +221,25 @@ export class AiOrchestratorService {
               },
             }),
         );
-        state = await this.stateService.createDraft(context.projectId, design.data);
+        state = await this.stateService.createDraft(context.projectId, design.data, {
+          userId: context.userId,
+          runId: context.runId,
+          messageId: input.userMessageId,
+          reason: "Product Designer Agent 完成结构化设计",
+        });
         await this.stream.emit({
           runId: context.runId,
           projectId: context.projectId,
           type: "state_updated",
           step: "product_design",
-          data: state,
+          data: stateSummary(state),
+        });
+        await this.stream.emit({
+          runId: context.runId,
+          projectId: context.projectId,
+          type: "state_version_created",
+          step: "product_design",
+          data: { stateId: state.id, version: state.version },
         });
       }
 
@@ -302,6 +318,10 @@ export class AiOrchestratorService {
         prdDocument: prd.data,
         prototypeSpec: prototypeSpec.data,
         status: ProductDesignStateStatus.prototype_ready,
+        userId: context.userId,
+        runId: context.runId,
+        messageId: input.userMessageId,
+        reason: "PRD 与 PrototypeSpec 生成完成",
       });
 
       await this.emit(context, "message_delta", "正在进行一致性 QA 校验...");
@@ -530,4 +550,27 @@ function stepCopy(step: string, status: "started" | "completed") {
     knowledge_extraction: ["正在抽取知识候选...", "知识候选抽取完成"],
   };
   return text[step]?.[status === "started" ? 0 : 1] ?? step;
+}
+
+function stateSummary(state: ProductDesignState) {
+  return {
+    id: state.id,
+    projectId: state.projectId,
+    version: state.version,
+    title: state.title,
+    status: state.status,
+    counts: {
+      pages: state.pages.length,
+      backendConfigs: state.backendConfigs.length,
+      frontendRules: state.frontendRules.length,
+      businessRules: state.businessRules.length,
+      stateRules: state.stateRules.length,
+      exceptionScenarios: state.exceptionScenarios.length,
+      acceptanceCriteria: state.acceptanceCriteria.length,
+      assumptions: state.assumptions.length,
+      pendingQuestions: state.pendingQuestions.length,
+      confirmedFacts: state.confirmedFacts.length,
+    },
+    updatedAt: state.updatedAt,
+  };
 }
