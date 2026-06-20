@@ -67,6 +67,66 @@ describe("PatchAgentService", () => {
     );
     expect(result.data.operations[0].path).not.toMatch(/prd|html|prototypeSpec/i);
   });
+
+  it("marks a high-risk confirmation when the request conflicts with strong_rule knowledge", async () => {
+    const modelGateway = {
+      generateJson: vi.fn().mockRejectedValue(
+        new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
+      ),
+    };
+    const service = new PatchAgentService(modelGateway as never);
+
+    const result = await service.run({
+      runId: "run-1",
+      projectId: "project-1",
+      traceId: "trace-1",
+      userId: "user-1",
+      input: {
+        userInput: "去掉每日一次限制，允许用户重复签到。",
+        selectedRegion: {
+          type: "document",
+          targetId: "prd-1",
+          documentId: "prd-1",
+          sectionId: "business_rules",
+          sourcePaths: ["businessRules"],
+        },
+        productDesignState: baseState(),
+        knowledgeContext: {
+          query: "去掉每日一次限制",
+          strongRules: [
+            {
+              id: "knowledge_ref_1",
+              knowledgeId: "knowledge-1",
+              title: "每日一次签到规则",
+              snippet: "用户每日只能签到一次。",
+              content: "用户每日只能签到一次。",
+              type: "strong_rule",
+              sourceType: "knowledge_base",
+              sourceId: "knowledge-1",
+            },
+          ],
+          defaultRules: [],
+          referenceCases: [],
+          designPatterns: [],
+          prdWritingRules: [],
+          prototypeRules: [],
+          businessConcepts: [],
+          conflicts: [],
+          unknownAreas: [],
+          summary: "命中强规则",
+        },
+      },
+    });
+
+    expect(result.data.needsUserConfirmation).toBe(true);
+    expect(result.data.risks?.[0]).toEqual(
+      expect.objectContaining({
+        level: "high",
+        message: expect.stringContaining("每日一次签到规则"),
+      }),
+    );
+    expect(result.data.clarificationQuestions?.[0].id).toBe("confirm_strong_rule_conflict");
+  });
 });
 
 function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignState {

@@ -172,6 +172,57 @@ enum PatchRecordStatus {
   needs_confirmation
 }
 
+enum KnowledgeType {
+  strong_rule
+  default_rule
+  reference_case
+  design_pattern
+  prd_writing_rule
+  prototype_rule
+  business_concept
+}
+
+enum KnowledgeStatus {
+  draft
+  active
+  disabled
+  archived
+}
+
+enum KnowledgeScope {
+  global
+  project
+}
+
+enum KnowledgePriority {
+  low
+  medium
+  high
+}
+
+enum KnowledgeSource {
+  manual
+  project_extraction
+  file_extraction
+  prd_confirmation
+  prototype_confirmation
+}
+
+enum KnowledgeCandidateSource {
+  prd
+  prototype
+  product_design_state
+  conversation
+  uploaded_file
+}
+
+enum KnowledgeCandidateStatus {
+  pending
+  approved
+  rejected
+  merged
+}
+
 enum AgentRunStatus {
   running
   succeeded
@@ -282,6 +333,7 @@ model Project {
   prototypeArtifacts          PrototypeArtifact[]
   prototypeVersions           PrototypeVersion[]
   patchRecords                PatchRecord[]
+  knowledgeCandidates         KnowledgeCandidate[]
   agentRuns                   AgentRunLog[]
   vibeStreamEvents            VibeStreamEventLog[]
 
@@ -756,6 +808,128 @@ model PatchRecord {
   @@index([generatedByRunId])
   @@index([createdAt])
   @@map("patch_records")
+}
+
+model KnowledgeItem {
+  id                        String            @id @default(uuid())
+  title                     String
+  content                   String
+  summary                   String?
+  type                      KnowledgeType
+  status                    KnowledgeStatus   @default(draft)
+  scope                     KnowledgeScope    @default(global)
+  categoryId                String?           @map("category_id")
+  tags                      Json?
+  priority                  KnowledgePriority @default(medium)
+  source                    KnowledgeSource
+  sourceProjectId           String?           @map("source_project_id")
+  sourceFileId              String?           @map("source_file_id")
+  sourcePrdDocumentId       String?           @map("source_prd_document_id")
+  sourcePrototypeArtifactId String?           @map("source_prototype_artifact_id")
+  createdBy                 String            @map("created_by")
+  updatedBy                 String?           @map("updated_by")
+  createdAt                 DateTime          @default(now()) @map("created_at")
+  updatedAt                 DateTime          @updatedAt @map("updated_at")
+  category                  KnowledgeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  versions                  KnowledgeVersion[]
+
+  @@index([type])
+  @@index([status])
+  @@index([scope])
+  @@index([categoryId])
+  @@index([createdAt])
+  @@map("knowledge_items")
+}
+
+model KnowledgeCategory {
+  id          String          @id @default(uuid())
+  name        String
+  description String?
+  parentId    String?         @map("parent_id")
+  order       Int             @default(0)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  parent      KnowledgeCategory? @relation("KnowledgeCategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    KnowledgeCategory[] @relation("KnowledgeCategoryTree")
+  items       KnowledgeItem[]
+
+  @@index([parentId])
+  @@index([order])
+  @@map("knowledge_categories")
+}
+
+model KnowledgeTag {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("knowledge_tags")
+}
+
+model KnowledgeVersion {
+  id              String        @id @default(uuid())
+  knowledgeItemId String        @map("knowledge_item_id")
+  version         Int
+  snapshot        Json
+  changeSummary   String?       @map("change_summary")
+  createdBy       String        @map("created_by")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  knowledgeItem   KnowledgeItem @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
+
+  @@index([knowledgeItemId])
+  @@index([version])
+  @@map("knowledge_versions")
+}
+
+model KnowledgeCandidate {
+  id                  String                   @id @default(uuid())
+  projectId           String                   @map("project_id")
+  title               String
+  content             String
+  summary             String?
+  suggestedType       KnowledgeType            @map("suggested_type")
+  suggestedCategoryId String?                  @map("suggested_category_id")
+  suggestedTags       Json?                    @map("suggested_tags")
+  confidence          Float
+  source              KnowledgeCandidateSource
+  sourceRefId         String?                  @map("source_ref_id")
+  sourcePath          String?                  @map("source_path")
+  reason              String
+  status              KnowledgeCandidateStatus @default(pending)
+  reviewedBy          String?                  @map("reviewed_by")
+  reviewedAt          DateTime?                @map("reviewed_at")
+  reviewComment       String?                  @map("review_comment")
+  createdByRunId      String?                  @map("created_by_run_id")
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @updatedAt @map("updated_at")
+  project             Project                  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+  @@index([suggestedType])
+  @@index([createdAt])
+  @@map("knowledge_candidates")
+}
+
+model KnowledgeRetrievalLog {
+  id                   String   @id @default(uuid())
+  projectId            String?  @map("project_id")
+  conversationId       String?  @map("conversation_id")
+  runId                String?  @map("run_id")
+  agentName            String?  @map("agent_name")
+  query                String
+  taskType             String?  @map("task_type")
+  matchedKnowledgeIds  Json     @map("matched_knowledge_ids")
+  selectedKnowledgeIds Json     @map("selected_knowledge_ids")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([projectId])
+  @@index([runId])
+  @@index([agentName])
+  @@index([createdAt])
+  @@map("knowledge_retrieval_logs")
 }
 
 model AgentRunLog {

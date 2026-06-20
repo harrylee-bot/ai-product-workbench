@@ -55,7 +55,12 @@ export class RequirementAnalystAgentService extends BaseAgentService<
     return {
       completenessScore: shouldAskUser ? 0.45 : 0.76,
       knownFromUser,
-      knownFromKnowledge: input.knowledgeContext.referenceCases.map((item) => item.title),
+      knownFromKnowledge: [
+        ...input.knowledgeContext.strongRules,
+        ...input.knowledgeContext.defaultRules,
+        ...input.knowledgeContext.referenceCases,
+        ...input.knowledgeContext.businessConcepts,
+      ].map((item) => item.title),
       inferredByAI: [
         "页面需覆盖默认态、成功态、异常态。",
         "PRD 与原型需共享同一套状态和验收口径。",

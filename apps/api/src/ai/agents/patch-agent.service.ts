@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { AgentName, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import type {
+  KnowledgeContext,
   PatchPlan,
   ProductDesignState,
   PrototypeSpec,
@@ -16,6 +17,7 @@ type PatchAgentInput = {
   productDesignState: ProductDesignState;
   prdDocument?: RequirementDocument;
   prototypeSpec?: PrototypeSpec;
+  knowledgeContext?: KnowledgeContext;
 };
 
 @Injectable()
@@ -47,6 +49,7 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
     const intent = inferPatchIntent(input.userInput);
     const operationPath = affectedStatePaths[0] ?? (patchType === "prototype" ? "frontendRules" : "businessRules");
 
+    const conflict = detectStrongRuleConflict(input);
     return {
       id: `patch_plan_${Date.now().toString(36)}`,
       projectId: input.productDesignState.projectId,
@@ -104,13 +107,28 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
         htmlPrototype: "full",
         qa: "basic",
       },
-      risks: [{
-        level: "low",
-        message: "一期 Patch 会整体重新生成 PRD 与 HTML 原型，确保状态一致。",
-        relatedPaths: affectedStatePaths,
-      }],
-      needUserConfirm: false,
-      needsUserConfirmation: false,
+      risks: [
+        {
+          level: conflict ? "high" : "low",
+          message: conflict
+            ? `修改可能与强规则冲突：${conflict.title}`
+            : "一期 Patch 会整体重新生成 PRD 与 HTML 原型，确保状态一致。",
+          relatedPaths: affectedStatePaths,
+        },
+      ],
+      needUserConfirm: Boolean(conflict),
+      needsUserConfirmation: Boolean(conflict),
+      clarificationQuestions: conflict
+        ? [
+            {
+              id: "confirm_strong_rule_conflict",
+              title: "请确认是否继续覆盖强规则",
+              reason: `当前修改可能影响知识库强规则「${conflict.title}」。`,
+              options: ["取消修改", "我确认继续修改并保留风险记录"],
+              recommendedOption: "取消修改",
+            },
+          ]
+        : undefined,
       reason: "一期 Patch 先生成可追踪修改计划，后续由 ProductDesignStateService 统一应用版本。",
       summary: `根据局部修改指令更新 ${affectedStatePaths.join("、") || "ProductDesignState"}。`,
     };
@@ -128,6 +146,24 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
       : fallback.operations;
     const impactAnalysis = normalizeImpactAnalysis(output.impactAnalysis, fallback, operations);
 
+    const conflict = detectStrongRuleConflict(input);
+    const risks = normalizeRisks(output.risks, fallback.risks);
+    const nextRisks = conflict
+      ? [
+          {
+            level: "high" as const,
+            message: `修改可能与强规则冲突：${conflict.title}`,
+            relatedPaths: impactAnalysis.affectedStatePaths,
+          },
+          ...risks,
+        ]
+      : risks;
+    const needsConfirmation = Boolean(
+      output.needUserConfirm ||
+      output.needsUserConfirmation ||
+      conflict,
+    );
+
     return {
       id: typeof output.id === "string" && output.id ? output.id : fallback.id,
       projectId: input.productDesignState.projectId,
@@ -139,18 +175,23 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
       operations,
       impactAnalysis,
       regenerationPlan: normalizeRegenerationPlan(output.regenerationPlan) ?? fallback.regenerationPlan,
-      risks: Array.isArray(output.risks)
-        ? output.risks.map((risk) => ({
-            level: risk.level === "high" || risk.level === "medium" || risk.level === "low" ? risk.level : "low",
-            message: typeof risk.message === "string" ? risk.message : "Patch 风险待确认。",
-            relatedPaths: Array.isArray(risk.relatedPaths) ? risk.relatedPaths.map(String) : undefined,
-          }))
-        : fallback.risks,
-      needUserConfirm: Boolean(output.needUserConfirm || output.needsUserConfirmation),
-      needsUserConfirmation: Boolean(output.needUserConfirm || output.needsUserConfirmation),
-      clarificationQuestions: Array.isArray(output.clarificationQuestions)
-        ? output.clarificationQuestions
-        : undefined,
+      risks: nextRisks,
+      needUserConfirm: needsConfirmation,
+      needsUserConfirmation: needsConfirmation,
+      clarificationQuestions: conflict
+        ? [
+            ...(Array.isArray(output.clarificationQuestions) ? output.clarificationQuestions : []),
+            {
+              id: "confirm_strong_rule_conflict",
+              title: "请确认是否继续覆盖强规则",
+              reason: `当前修改可能影响知识库强规则「${conflict.title}」。`,
+              options: ["取消修改", "我确认继续修改并保留风险记录"],
+              recommendedOption: "取消修改",
+            },
+          ]
+        : Array.isArray(output.clarificationQuestions)
+          ? output.clarificationQuestions
+          : undefined,
       reason: typeof output.reason === "string" ? output.reason : fallback.reason,
       summary: typeof output.summary === "string" ? output.summary : fallback.summary,
     };
@@ -246,6 +287,43 @@ function normalizeImpactAnalysis(
     reason: typeof record.reason === "string" ? record.reason : fallbackImpact.reason,
   };
 }
+
+function detectStrongRuleConflict(input: PatchAgentInput) {
+  const rules = input.knowledgeContext?.strongRules ?? [];
+  if (!rules.length) return undefined;
+  const destructive = /删除|去掉|不要|取消|移除|放开|不限制|不限|无需|禁用规则|忽略|允许|取消限制|remove|delete|disable|ignore|without/i.test(input.userInput);
+  if (!destructive) return undefined;
+  const text = input.userInput.toLowerCase();
+  return rules.find((rule) => {
+    const title = rule.title.toLowerCase();
+    const snippet = (rule.snippet || rule.content || "").toLowerCase();
+    const tokens = [...title.split(/\s+/), ...snippet.split(/\s+/)]
+      .map((item) => item.trim())
+      .filter((item) => item.length >= 2);
+    if (!tokens.length) return true;
+    return tokens.some((token) => text.includes(token));
+  }) ?? rules[0];
+}
+
+function normalizeRisks(value: unknown, fallback?: PatchRiskLike[]): PatchRiskLike[] {
+  if (!Array.isArray(value)) return fallback ?? [];
+  return value.map((risk) => {
+    const record = risk && typeof risk === "object" && !Array.isArray(risk)
+      ? risk as Record<string, unknown>
+      : {};
+    const level: PatchRiskLike["level"] =
+      record.level === "high" || record.level === "medium" || record.level === "low"
+        ? record.level
+        : "low";
+    return {
+      level,
+      message: typeof record.message === "string" ? record.message : "Patch 风险待确认。",
+      relatedPaths: Array.isArray(record.relatedPaths) ? record.relatedPaths.map(String) : undefined,
+    };
+  });
+}
+
+type PatchRiskLike = NonNullable<PatchPlan["risks"]>[number];
 
 function normalizeRegenerationPlan(value: unknown): PatchPlan["regenerationPlan"] | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;

@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { FileModule } from "../files/file.module";
+import { KnowledgeModule } from "../knowledge/knowledge.module";
 import { ModelGatewayModule } from "../model-gateway/model-gateway.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { ProjectModule } from "../projects/project.module";
@@ -40,7 +41,7 @@ import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
 
 @Module({
-  imports: [PrismaModule, ProjectModule, FileModule, ModelGatewayModule],
+  imports: [PrismaModule, ProjectModule, FileModule, KnowledgeModule, ModelGatewayModule],
   controllers: [
     VibeController,
     ProjectProductDesignStateController,

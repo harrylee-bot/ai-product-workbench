@@ -16,6 +16,7 @@ import type {
   AttachmentSummary,
   IntentResult,
   KnowledgeCandidate,
+  KnowledgeCandidateDraft,
   PatchPlan,
   ProductDesignState,
   PrototypeArtifact,
@@ -56,7 +57,7 @@ export type OrchestratorResult = {
   prototypeArtifact?: PrototypeArtifact;
   qaReport?: QAReport;
   patchPlan?: PatchPlan;
-  knowledgeCandidates?: KnowledgeCandidate[];
+  knowledgeCandidates?: Array<KnowledgeCandidate | KnowledgeCandidateDraft>;
   nextAction?: {
     type: "ask_clarification" | "review_prd" | "review_prototype" | "review_qa" | "answer";
     questions?: ProductDesignState["pendingQuestions"];
@@ -189,6 +190,7 @@ export class AiOrchestratorService {
                 productDesignState: state!,
                 prdDocument: state?.prdDocument,
                 prototypeSpec: state?.prototypeSpec,
+                knowledgeContext: knowledge.data,
               },
             }),
         );
@@ -403,7 +405,7 @@ export class AiOrchestratorService {
         prototypeArtifact: savedPrototype.artifact,
         qaReport: qa.data,
         patchPlan,
-        knowledgeCandidates: knowledgeCandidates.data,
+        knowledgeCandidates: knowledgeCandidates.data.candidates,
         nextAction: {
           type: qa.data.passed ? "review_prototype" : "review_qa",
         },

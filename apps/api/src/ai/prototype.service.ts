@@ -5,12 +5,14 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
+  KnowledgeCandidateSource,
   ProjectStatus,
   PrototypeArtifactStatus,
   PrototypeTargetDevice,
   UserRole,
 } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { KnowledgeCandidateService } from "../knowledge/knowledge-candidate.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
@@ -22,6 +24,7 @@ import type {
 } from "./ai-vibe.types";
 import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service";
 import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
+import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 
 type PrototypeSpecRecord = {
@@ -70,6 +73,8 @@ export class PrototypeService {
     private readonly stateService: ProductDesignStateService,
     private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
     private readonly prototypeCodeAgent: PrototypeCodeAgentService,
+    private readonly knowledgeExtractorAgent?: KnowledgeExtractorAgentService,
+    private readonly knowledgeCandidateService?: KnowledgeCandidateService,
   ) {}
 
   async generateForUser(
@@ -244,7 +249,42 @@ export class PrototypeService {
     const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
     const artifact = this.toArtifactItem(updated as PrototypeArtifactRecord);
     const version = await this.createVersion(spec, artifact, user.id, reason ?? "用户确认原型");
-    return { artifact, version };
+    const knowledgeCandidates = await this.extractKnowledgeCandidatesAfterConfirm(user.id, spec, artifact);
+    return { artifact, version, knowledgeCandidates };
+  }
+
+  private async extractKnowledgeCandidatesAfterConfirm(
+    userId: string,
+    spec: PrototypeSpec,
+    artifact: PrototypeArtifact,
+  ) {
+    if (!this.knowledgeExtractorAgent || !this.knowledgeCandidateService) return { items: [] };
+    const state = await this.stateService.getStateByIdForProject(
+      artifact.productDesignStateId,
+      artifact.projectId,
+    );
+    if (!state) return { items: [] };
+    const runId = `knowledge-prototype-${Date.now()}`;
+    const output = await this.knowledgeExtractorAgent.run({
+      runId,
+      projectId: artifact.projectId,
+      traceId: runId,
+      userId,
+      input: {
+        projectId: artifact.projectId,
+        productDesignState: state,
+        prototypeSpec: spec,
+        confirmedByUser: true,
+        source: KnowledgeCandidateSource.prototype,
+        sourceRefId: artifact.id,
+        runId,
+      },
+    });
+    return this.knowledgeCandidateService.createMany(artifact.projectId, output.data.candidates, {
+      source: KnowledgeCandidateSource.prototype,
+      sourceRefId: artifact.id,
+      runId,
+    });
   }
 
   private async createVersion(

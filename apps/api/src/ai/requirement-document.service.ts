@@ -1,6 +1,12 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { ProjectStatus, RequirementDocumentStatus, UserRole } from "@prisma/client";
+import {
+  KnowledgeCandidateSource,
+  ProjectStatus,
+  RequirementDocumentStatus,
+  UserRole,
+} from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { KnowledgeCandidateService } from "../knowledge/knowledge-candidate.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
@@ -9,6 +15,7 @@ import type {
   RequirementDocumentDraft,
 } from "./ai-vibe.types";
 import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
+import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 
 type RequirementDocumentRecord = {
@@ -36,6 +43,8 @@ export class RequirementDocumentService {
     private readonly prisma: PrismaService,
     private readonly stateService: ProductDesignStateService,
     private readonly prdWriterAgent: PrdWriterAgentService,
+    private readonly knowledgeExtractorAgent?: KnowledgeExtractorAgentService,
+    private readonly knowledgeCandidateService?: KnowledgeCandidateService,
   ) {}
 
   async generateForUser(
@@ -147,7 +156,38 @@ export class RequirementDocumentService {
     });
     const document = this.toDocumentItem(updated as RequirementDocumentRecord);
     const version = await this.createVersion(document, user.id, reason ?? "用户确认 PRD");
-    return { document, version };
+    const knowledgeCandidates = await this.extractKnowledgeCandidatesAfterConfirm(user.id, document);
+    return { document, version, knowledgeCandidates };
+  }
+
+  private async extractKnowledgeCandidatesAfterConfirm(userId: string, document: RequirementDocument) {
+    if (!this.knowledgeExtractorAgent || !this.knowledgeCandidateService) return { items: [] };
+    const state = await this.stateService.getStateByIdForProject(
+      document.productDesignStateId,
+      document.projectId,
+    );
+    if (!state) return { items: [] };
+    const runId = `knowledge-prd-${Date.now()}`;
+    const output = await this.knowledgeExtractorAgent.run({
+      runId,
+      projectId: document.projectId,
+      traceId: runId,
+      userId,
+      input: {
+        projectId: document.projectId,
+        productDesignState: state,
+        prdDocument: document,
+        confirmedByUser: true,
+        source: KnowledgeCandidateSource.prd,
+        sourceRefId: document.id,
+        runId,
+      },
+    });
+    return this.knowledgeCandidateService.createMany(document.projectId, output.data.candidates, {
+      source: KnowledgeCandidateSource.prd,
+      sourceRefId: document.id,
+      runId,
+    });
   }
 
   async listVersionsForUser(user: AuthenticatedUser, documentId: string) {

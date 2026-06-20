@@ -1,6 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { AgentName, ModelTaskType, UserIntent } from "@prisma/client";
+import { AgentName, KnowledgeType, ModelTaskType, UserIntent } from "@prisma/client";
+import { KnowledgeRetrievalService } from "../../knowledge/knowledge-retrieval.service";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
+import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
 import { BaseAgentService } from "./base-agent.service";
 import type { KnowledgeContext, ProductDesignState } from "../ai-vibe.types";
 
@@ -18,8 +20,35 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
   readonly agentName = AgentName.knowledge_agent;
   readonly taskType = ModelTaskType.knowledge_classification;
 
-  constructor(modelGateway: ModelGatewayService) {
+  constructor(
+    modelGateway: ModelGatewayService,
+    private readonly retrieval: KnowledgeRetrievalService,
+  ) {
     super(modelGateway);
+  }
+
+  async run(invocation: AgentInvocation<KnowledgeInput, KnowledgeContext>): Promise<AgentOutput<KnowledgeContext>> {
+    const fallback = this.fallback(invocation.input);
+    const taskType = taskTypeFromIntent(invocation.input.intent);
+    const preferredTypes = preferredTypesForTask(taskType);
+    const output = await this.retrieval.search({
+      projectId: invocation.projectId,
+      runId: invocation.runId,
+      agentName: this.agentName,
+      query: buildSearchQuery(invocation.input),
+      taskType,
+      preferredTypes,
+      limit: 8,
+    });
+    return {
+      data: {
+        ...fallback,
+        ...groupReferences(output.references, fallback, invocation.input.userInput),
+        summary: output.references.length
+          ? `命中 ${output.references.length} 条正式知识库规则，已按类型提供给后续 Agent。`
+          : fallback.summary,
+      },
+    };
   }
 
   protected buildMessages(input: KnowledgeInput) {
@@ -52,10 +81,15 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
         {
           id: "pattern_reviewable_prototype",
           title: "评审型原型默认规则",
+          snippet: "原型应覆盖核心页面、关键状态、异常态和基础点击反馈。",
           content: "原型应覆盖核心页面、关键状态、异常态和基础点击反馈，便于业务评审。",
+          type: KnowledgeType.design_pattern,
           sourceType: "ai_assumption",
         },
       ],
+      prdWritingRules: [],
+      prototypeRules: [],
+      businessConcepts: [],
       conflicts: [],
       unknownAreas: ["业务专属强规则", "已有系统约束", "历史活动差异"],
       summary: attachmentRefs.length
@@ -63,4 +97,97 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
         : "暂无正式知识库命中，本轮将基于通用产品最佳实践补全，并标记为 AI 推断。",
     };
   }
+}
+
+function buildSearchQuery(input: KnowledgeInput) {
+  const stateText = input.productDesignState
+    ? [
+        input.productDesignState.title,
+        input.productDesignState.summary,
+        input.productDesignState.businessGoal,
+      ].filter(Boolean).join(" ")
+    : "";
+  return [input.userInput, input.businessType, stateText].filter(Boolean).join(" ");
+}
+
+function taskTypeFromIntent(intent: UserIntent): ModelTaskType {
+  if (intent === UserIntent.generate_prd) return ModelTaskType.prd_generation;
+  if (intent === UserIntent.generate_prototype) return ModelTaskType.prototype_design;
+  if (intent === UserIntent.patch_document || intent === UserIntent.patch_prototype) {
+    return ModelTaskType.patch_planning;
+  }
+  return ModelTaskType.product_design;
+}
+
+export function preferredTypesForTask(taskType: ModelTaskType): KnowledgeType[] {
+  if (taskType === ModelTaskType.requirement_analysis) {
+    return [
+      KnowledgeType.strong_rule,
+      KnowledgeType.default_rule,
+      KnowledgeType.business_concept,
+      KnowledgeType.reference_case,
+    ];
+  }
+  if (taskType === ModelTaskType.prd_generation) {
+    return [
+      KnowledgeType.prd_writing_rule,
+      KnowledgeType.strong_rule,
+      KnowledgeType.default_rule,
+    ];
+  }
+  if (taskType === ModelTaskType.prototype_design) {
+    return [
+      KnowledgeType.prototype_rule,
+      KnowledgeType.design_pattern,
+      KnowledgeType.reference_case,
+    ];
+  }
+  if (taskType === ModelTaskType.patch_planning) {
+    return [
+      KnowledgeType.strong_rule,
+      KnowledgeType.default_rule,
+      KnowledgeType.business_concept,
+    ];
+  }
+  if (taskType === ModelTaskType.qa_check) {
+    return [
+      KnowledgeType.strong_rule,
+      KnowledgeType.default_rule,
+      KnowledgeType.prd_writing_rule,
+      KnowledgeType.prototype_rule,
+    ];
+  }
+  return [
+    KnowledgeType.strong_rule,
+    KnowledgeType.default_rule,
+    KnowledgeType.design_pattern,
+    KnowledgeType.business_concept,
+    KnowledgeType.reference_case,
+  ];
+}
+
+function groupReferences(
+  references: KnowledgeContext["strongRules"],
+  fallback: KnowledgeContext,
+  query: string,
+): KnowledgeContext {
+  return {
+    query,
+    strongRules: references.filter((item) => item.type === KnowledgeType.strong_rule),
+    defaultRules: references.filter((item) => item.type === KnowledgeType.default_rule),
+    referenceCases: [
+      ...references.filter((item) => item.type === KnowledgeType.reference_case),
+      ...fallback.referenceCases,
+    ],
+    designPatterns: [
+      ...references.filter((item) => item.type === KnowledgeType.design_pattern),
+      ...fallback.designPatterns,
+    ],
+    prdWritingRules: references.filter((item) => item.type === KnowledgeType.prd_writing_rule),
+    prototypeRules: references.filter((item) => item.type === KnowledgeType.prototype_rule),
+    businessConcepts: references.filter((item) => item.type === KnowledgeType.business_concept),
+    conflicts: fallback.conflicts,
+    unknownAreas: fallback.unknownAreas,
+    summary: fallback.summary,
+  };
 }

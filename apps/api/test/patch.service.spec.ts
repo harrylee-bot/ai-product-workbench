@@ -59,6 +59,9 @@ describe("PatchService", () => {
   const stream = {
     emit: vi.fn(),
   };
+  const knowledgeRetrieval = {
+    search: vi.fn(),
+  };
   const stateService = {
     getCurrentState: vi.fn(),
     applyPatch: vi.fn(),
@@ -92,6 +95,7 @@ describe("PatchService", () => {
     fileAssetService as never,
     runLog as never,
     stream as never,
+    knowledgeRetrieval as never,
     stateService as never,
     documentService as never,
     prototypeService as never,
@@ -143,6 +147,10 @@ describe("PatchService", () => {
     runLog.completeRun.mockResolvedValue(undefined);
     runLog.failRun.mockResolvedValue(undefined);
     stream.emit.mockResolvedValue(undefined);
+    knowledgeRetrieval.search.mockResolvedValue({
+      results: [],
+      references: [],
+    });
   });
 
   it("creates a PatchRecord, applies ProductDesignState operations, regenerates artifacts, and completes QA", async () => {
@@ -226,7 +234,16 @@ describe("PatchService", () => {
         input: expect.objectContaining({
           productDesignState: stateWithArtifacts,
           patchPlan: expect.objectContaining({ id: "patch-plan-1" }),
+          knowledgeContext: expect.objectContaining({
+            strongRules: [],
+          }),
         }),
+      }),
+    );
+    expect(knowledgeRetrieval.search).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "project-1",
+        agentName: AgentName.patch_agent,
       }),
     );
     expect(stream.emit).toHaveBeenCalledWith(

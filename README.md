@@ -1,6 +1,6 @@
 # AI产品工作台（内测）
 
-当前实现范围覆盖模块 1-10：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统。
+当前实现范围覆盖模块 1-11：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀。
 
 ## 已实现能力
 
@@ -14,6 +14,7 @@
 - 模块 8：RequirementDocument / RequirementDocumentVersion 数据模型，PRD Writer 从 ProductDesignState 渲染 16 个结构化章节，保存 sections / blocks / sourcePaths / tags，支持当前 PRD 查询、详情、预览、确认、版本列表；工作台 PRD 预览展示来源路径、AI 推断、知识库、已确认和待确认标签，并支持段落级定位入口。
 - 模块 9：PrototypeSpecRecord / PrototypeArtifact / PrototypeVersion 数据模型，Prototype Designer 从 ProductDesignState 生成 PrototypeSpec，Prototype Code 生成单文件 HTML，保存 artifact 与版本，支持当前原型、详情、text/html 预览、确认、版本列表；工作台原型 Tab 使用 sandbox iframe 预览，支持桌面/移动模式和基于 artifact/page/component 的局部修改选区。
 - 模块 10：PatchRecord 数据模型，支持 PRD section / HTML 原型组件 selectedRegion、Patch Agent 影响范围分析、PatchPlan 记录、ProductDesignState PatchOperation 应用、Patch 后重新生成 PRD / PrototypeSpec / HTML、QA 校验、失败恢复、Patch 历史查询、取消和确认入口。
+- 模块 11：KnowledgeItem / KnowledgeCategory / KnowledgeTag / KnowledgeVersion / KnowledgeCandidate / KnowledgeRetrievalLog 数据模型，支持管理员创建、编辑、启用/禁用知识，知识分类、标签、类型、版本、候选审核、通过/拒绝/合并；Knowledge Agent 使用 active 知识做关键词检索并写入 ProductDesignState.knowledgeRefs，Patch Agent 检测 strong_rule 冲突，PRD/原型确认后只生成 pending 知识候选，正式入库必须管理员审核。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
@@ -51,7 +52,7 @@ npm run dev
 - `MODEL_GATEWAY_ENCRYPTION_KEY`：可选，推荐生产配置。支持 32 字节 base64 或 64 位 hex；未配置时会从 `JWT_SECRET` 派生加密密钥。
 - `JWT_SECRET`：生产必须配置稳定值，否则已加密的模型 API Key 可能无法解密。
 
-模块 6/7/8/9/10 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService / PatchService 保存状态、文档、原型、Patch 记录、版本和变更日志。
+模块 6/7/8/9/10/11 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService / PatchService / KnowledgeCandidateService 保存状态、文档、原型、Patch 记录、知识候选、版本和变更日志。
 
 ## 服务器部署
 
@@ -186,10 +187,22 @@ bash deploy/server-deploy.sh
 - `GET /api/patches/:patchId`
 - `POST /api/patches/:patchId/cancel`
 - `POST /api/patches/:patchId/confirm`
+- `POST /api/admin/knowledge/items`
+- `GET /api/admin/knowledge/items`
+- `GET /api/admin/knowledge/items/:knowledgeId`
+- `PATCH /api/admin/knowledge/items/:knowledgeId`
+- `POST /api/admin/knowledge/items/:knowledgeId/enable`
+- `POST /api/admin/knowledge/items/:knowledgeId/disable`
+- `POST /api/admin/knowledge/categories`
+- `GET /api/admin/knowledge/categories`
+- `GET /api/admin/knowledge/candidates`
+- `POST /api/admin/knowledge/candidates/:candidateId/approve`
+- `POST /api/admin/knowledge/candidates/:candidateId/reject`
+- `POST /api/admin/knowledge/candidates/:candidateId/merge`
 
 `POST /api/ai/vibe/handle-message` 会立即保存用户消息并返回 `runId`，真实 AI 协作在后台执行。前端使用带 Authorization header 的 fetch stream 连接 `GET /api/ai/vibe/runs/:runId/stream`，按事件实时更新 Agent 时间线和右侧预览。
 
-模块 6/7/8/9/10 流式事件落库遵守统一事件结构：
+模块 6/7/8/9/10/11 流式事件落库遵守统一事件结构：
 
 ```json
 {
@@ -200,7 +213,7 @@ bash deploy/server-deploy.sh
 }
 ```
 
-模块 7/8/9/10 核心约束：
+模块 7/8/9/10/11 核心约束：
 
 - ProductDesignState 是 PRD、PrototypeSpec、HTML 原型和 Patch 的唯一事实源。
 - Patch Agent 只能生成作用于 ProductDesignState 的 PatchPlan；服务端会通过 ProductDesignStateService 应用 PatchOperation、递增版本并创建快照。
@@ -209,6 +222,9 @@ bash deploy/server-deploy.sh
 - PrototypeSpec 必须关联 ProductDesignState id/version；PrototypeArtifact 必须由 PrototypeSpec 渲染生成，单文件 HTML 入库前执行安全扫描，禁止远程脚本、eval、document.cookie、敏感 localStorage、window.parent、iframe 和真实网络请求。
 - 原型预览接口返回 `text/html`，前端通过 `<iframe sandbox="allow-scripts">` 展示，不允许表单、弹窗或顶层导航权限。
 - PatchRecord 保存 selectedRegion、PatchPlan、operations、before/after ProductDesignState 版本、受影响 PRD/Prototype 产物和执行状态；Patch Agent 只能输出 PatchPlan，PatchOperation 只能作用于 ProductDesignState，Patch 后必须重新生成 PRD/Prototype 并执行 QA，失败时恢复到 Patch 前的 State 与项目产物指针。
+- 知识库只检索 `active` 知识；Knowledge Agent 将命中的 strong_rule、default_rule、reference_case、design_pattern、prd_writing_rule、prototype_rule、business_concept 提供给后续 Agent，Product Designer 采用后写入 ProductDesignState.knowledgeRefs。
+- 上传文件和 AI 生成内容不会自动成为正式知识；PRD/原型确认后只生成 KnowledgeCandidate，必须管理员 approve 或 merge 后才会进入正式 KnowledgeItem。
+- Patch Agent 在局部修改可能违反 strong_rule 时必须将 PatchPlan 标记为 `needsUserConfirmation` 并记录 high risk；即使用户确认继续修改，也不会自动改写知识库。
 - QA Agent 只做一致性校验，不直接修改业务数据。
 - 所有重要状态变更必须写入 ProductDesignChangeLog，并保留 before / after / reason / runId / messageId。
 - 所有 Agent 调用模型必须经过 Model Gateway，并记录 AgentStepLog / ModelCallLog。
@@ -246,6 +262,7 @@ bash deploy/server-deploy.sh
 - 普通用户只能访问自己项目下的文件和解析结果。
 - 管理员可以查看所有项目详情、会话、消息、文件和解析状态。
 - 模型供应商、模型配置、任务模型配置和模型调用日志接口仅管理员可访问。
+- 知识库管理、知识分类、知识候选审核接口仅管理员可访问。
 - 普通用户不能查看、配置或获取模型 API Key。
 - 一期管理员不直接发送用户项目消息。
 - 归档项目默认不出现在项目列表中，归档后不可继续发送消息。

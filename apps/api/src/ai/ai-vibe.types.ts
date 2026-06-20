@@ -1,4 +1,12 @@
-import type { AgentName, ModelTaskType, UserIntent } from "@prisma/client";
+import type {
+  AgentName,
+  KnowledgeCandidateSource,
+  KnowledgeCandidateStatus,
+  KnowledgePriority,
+  KnowledgeType,
+  ModelTaskType,
+  UserIntent,
+} from "@prisma/client";
 
 export type SelectedRegion = {
   type: "document" | "prototype";
@@ -36,8 +44,13 @@ export type AttachmentSummary = {
 
 export type KnowledgeReference = {
   id: string;
+  knowledgeId?: string;
   title: string;
+  snippet?: string;
   content: string;
+  type?: KnowledgeType;
+  relatedPath?: string;
+  usedByAgent?: string;
   sourceType: "knowledge_base" | "attachment" | "conversation" | "ai_assumption";
   sourceId?: string;
 };
@@ -54,6 +67,9 @@ export type KnowledgeContext = {
   defaultRules: KnowledgeReference[];
   referenceCases: KnowledgeReference[];
   designPatterns: KnowledgeReference[];
+  prdWritingRules: KnowledgeReference[];
+  prototypeRules: KnowledgeReference[];
+  businessConcepts: KnowledgeReference[];
   conflicts: KnowledgeConflict[];
   unknownAreas: string[];
   summary: string;
@@ -540,16 +556,37 @@ export type QAReport = {
   autoFixable: boolean;
 };
 
-export type KnowledgeCandidate = {
-  id: string;
+export type KnowledgeCandidateDraft = {
   title: string;
   content: string;
-  sourceType: "prd" | "prototype" | "chat" | "patch";
-  sourceId: string;
+  summary?: string;
+  suggestedType: KnowledgeType;
+  suggestedCategoryName?: string;
+  suggestedCategoryId?: string;
+  suggestedTags: string[];
   confidence: number;
-  suggestedSection: string;
-  tags: string[];
-  status: "pending_review";
+  source?: KnowledgeCandidateSource;
+  sourceRefId?: string;
+  sourcePath?: string;
+  reason: string;
+};
+
+export type KnowledgeExtractorOutput = {
+  candidates: KnowledgeCandidateDraft[];
+};
+
+export type KnowledgeCandidate = KnowledgeCandidateDraft & {
+  id: string;
+  projectId: string;
+  source: KnowledgeCandidateSource;
+  status: KnowledgeCandidateStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewComment?: string;
+  createdByRunId?: string;
+  priority?: KnowledgePriority;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type VibeStreamEventType =

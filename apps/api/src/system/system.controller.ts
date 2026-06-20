@@ -18,6 +18,7 @@ export class SystemController {
         "requirement-documents",
         "prototype-artifacts",
         "patch-records",
+        "knowledge-base",
       ],
     };
   }

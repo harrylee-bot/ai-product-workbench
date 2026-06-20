@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import {
   AgentName,
   AgentStepStatus,
+  KnowledgeType,
   MessageType,
   PatchRecordStatus as PrismaPatchRecordStatus,
   ProductDesignStateStatus,
@@ -11,12 +12,14 @@ import {
 } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { FileAssetService } from "../files/file-asset.service";
+import { KnowledgeRetrievalService } from "../knowledge/knowledge-retrieval.service";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
   AttachmentSummary,
+  KnowledgeContext,
   PatchPlan,
   PatchRecord,
   ProductDesignState,
@@ -84,6 +87,7 @@ export class PatchService {
     private readonly fileAssetService: FileAssetService,
     private readonly runLog: AgentRunLogService,
     private readonly stream: VibeStreamService,
+    private readonly knowledgeRetrieval: KnowledgeRetrievalService,
     private readonly stateService: ProductDesignStateService,
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
@@ -281,6 +285,7 @@ export class PatchService {
 
       const state = await this.stateService.getCurrentState(input.projectId);
       if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
+      const knowledgeContext = await this.getPatchKnowledgeContext(input);
 
       const patch = await this.runAgentStep(
         input,
@@ -297,6 +302,7 @@ export class PatchService {
             productDesignState: state,
             prdDocument: state.prdDocument,
             prototypeSpec: state.prototypeSpec,
+            knowledgeContext,
           },
         }),
       );
@@ -351,7 +357,7 @@ export class PatchService {
         };
       }
 
-      return await this.applyPatchPlan(input, patchRecord, plan, state);
+      return await this.applyPatchPlan(input, patchRecord, plan, state, knowledgeContext);
     } catch (error) {
       await this.handlePatchFailure(input, patchRecord, error);
       throw error;
@@ -377,6 +383,7 @@ export class PatchService {
       if (state.version !== row.beforeProductDesignStateVersion) {
         throw new BadRequestException("PATCH_STATE_VERSION_CHANGED");
       }
+      const knowledgeContext = await this.getPatchKnowledgeContext(input);
 
       const patch = await this.runAgentStep(
         input,
@@ -393,6 +400,7 @@ export class PatchService {
             productDesignState: state,
             prdDocument: state.prdDocument,
             prototypeSpec: state.prototypeSpec,
+            knowledgeContext,
           },
         }),
       );
@@ -446,7 +454,7 @@ export class PatchService {
         };
       }
 
-      return await this.applyPatchPlan(input, patchRecord, plan, state);
+      return await this.applyPatchPlan(input, patchRecord, plan, state, knowledgeContext);
     } catch (error) {
       await this.handlePatchFailure(input, patchRecord, error);
       throw error;
@@ -458,6 +466,7 @@ export class PatchService {
     patchRecord: PatchRecord,
     plan: PatchPlan,
     beforeState: ProductDesignState,
+    knowledgeContext?: KnowledgeContext,
   ) {
     let statePatchApplied = false;
     const projectSnapshot = await this.prisma.project.findUnique({
@@ -592,6 +601,7 @@ export class PatchService {
             prdDocument,
             prototypeSpec: prototypeSpec.data,
             patchPlan: plan,
+            knowledgeContext,
           },
         }),
       );
@@ -718,6 +728,38 @@ export class PatchService {
       },
       content: error instanceof Error ? error.message : "PATCH_FAILED",
     });
+  }
+
+  private async getPatchKnowledgeContext(input: PatchExecutionInput): Promise<KnowledgeContext> {
+    const search = await this.knowledgeRetrieval.search({
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      runId: input.runId,
+      agentName: AgentName.patch_agent,
+      query: input.userInstruction,
+      taskType: "patch_planning",
+      preferredTypes: [
+        KnowledgeType.strong_rule,
+        KnowledgeType.default_rule,
+        KnowledgeType.business_concept,
+      ],
+      limit: 8,
+    });
+    return {
+      query: input.userInstruction,
+      strongRules: search.references.filter((item) => item.type === KnowledgeType.strong_rule),
+      defaultRules: search.references.filter((item) => item.type === KnowledgeType.default_rule),
+      referenceCases: [],
+      designPatterns: [],
+      prdWritingRules: [],
+      prototypeRules: [],
+      businessConcepts: search.references.filter((item) => item.type === KnowledgeType.business_concept),
+      conflicts: [],
+      unknownAreas: [],
+      summary: search.references.length
+        ? `Patch 命中 ${search.references.length} 条知识库规则。`
+        : "Patch 未命中正式知识库规则。",
+    };
   }
 
   private async runAgentStep<T>(

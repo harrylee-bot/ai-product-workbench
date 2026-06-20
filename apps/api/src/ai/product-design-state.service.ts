@@ -1247,6 +1247,7 @@ function normalizeKnowledgeRefs(items: unknown[]) {
       snippet: String(record.snippet ?? record.content ?? ""),
       type: normalizeKnowledgeType(record.type ?? record.sourceType),
       relatedPath: record.relatedPath,
+      usedByAgent: record.usedByAgent,
       ...record,
     };
   });
@@ -1330,7 +1331,10 @@ function normalizeKnowledgeType(value: unknown) {
     value === "strong_rule" ||
     value === "default_rule" ||
     value === "reference_case" ||
-    value === "design_pattern"
+    value === "design_pattern" ||
+    value === "prd_writing_rule" ||
+    value === "prototype_rule" ||
+    value === "business_concept"
   ) {
     return value;
   }
