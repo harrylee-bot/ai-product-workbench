@@ -381,6 +381,7 @@ model Project {
   evolutionPlans              EvolutionPlan[]
   evolutionPatchExecutions    EvolutionPatchExecution[]
   productMemories             ProductMemory[]
+  orchestrationRuns           OrchestrationRun[]
 
   @@index([ownerId])
   @@index([status])
@@ -1049,6 +1050,26 @@ model ProductMemory {
   @@index([patchRecordId])
   @@index([createdAt])
   @@map("product_memories")
+}
+
+model OrchestrationRun {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  status       String
+  triggerType  String   @map("trigger_type")
+  moduleStates Json     @map("module_states")
+  result       Json
+  createdBy    String   @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  completedAt  DateTime? @map("completed_at")
+  project      Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+  @@index([triggerType])
+  @@index([createdAt])
+  @@map("orchestration_runs")
 }
 
 model KnowledgeItem {

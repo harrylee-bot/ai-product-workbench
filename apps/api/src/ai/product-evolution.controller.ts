@@ -3,6 +3,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import { EvolutionEngineService } from "./evolution-engine.service";
+import { EvolutionOrchestratorService } from "./evolution-orchestrator.service";
 import { FeedbackAnalysisService } from "./feedback-analysis.service";
 import { InteractionCaptureService } from "./interaction-capture.service";
 import { MultiAgentReviewService } from "./multi-agent-review.service";
@@ -13,6 +14,7 @@ import {
   ApplyEvolutionPlanDto,
   CreateInteractionDto,
   RollbackPatchDto,
+  RunEvolutionCycleDto,
   RunProjectWorkflowDto,
   SaveProductMemoryDto,
 } from "./product-evolution.dto";
@@ -86,11 +88,29 @@ export class ProjectReviewController {
 @Controller("evolution")
 @UseGuards(JwtAuthGuard)
 export class EvolutionController {
-  constructor(private readonly evolutionEngine: EvolutionEngineService) {}
+  constructor(
+    private readonly evolutionEngine: EvolutionEngineService,
+    private readonly evolutionOrchestrator: EvolutionOrchestratorService,
+  ) {}
 
   @Post("run")
   run(@CurrentUser() user: AuthenticatedUser, @Body() dto: RunProjectWorkflowDto) {
     return this.evolutionEngine.runForUser(user, dto);
+  }
+
+  @Post("run-cycle")
+  runCycle(@CurrentUser() user: AuthenticatedUser, @Body() dto: RunEvolutionCycleDto) {
+    return this.evolutionOrchestrator.runCycleForUser(user, dto);
+  }
+
+  @Get("run/:runId")
+  getRun(@CurrentUser() user: AuthenticatedUser, @Param("runId") runId: string) {
+    return this.evolutionOrchestrator.getRunForUser(user, runId);
+  }
+
+  @Get("status/:projectId")
+  status(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
+    return this.evolutionOrchestrator.getStatusForUser(user, projectId);
   }
 }
 

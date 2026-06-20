@@ -8,6 +8,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from "class-validator";
@@ -102,4 +103,31 @@ export class SaveProductMemoryDto {
   @IsOptional()
   @IsString({ message: "patchRecordId 格式不正确" })
   patchRecordId?: string;
+}
+
+export class RunEvolutionCycleDto {
+  @IsString({ message: "projectId 不能为空" })
+  @IsNotEmpty({ message: "projectId 不能为空" })
+  projectId!: string;
+
+  @IsOptional()
+  @IsIn(["event", "batch", "manual", "patch"], { message: "triggerType 不正确" })
+  triggerType?: "event" | "batch" | "manual" | "patch";
+
+  @IsOptional()
+  @IsArray({ message: "eventIds 格式不正确" })
+  @ArrayMaxSize(100, { message: "单次最多调度 100 条反馈事件" })
+  @IsString({ each: true, message: "eventIds 格式不正确" })
+  eventIds?: string[];
+
+  @IsOptional()
+  @IsString({ message: "conversationId 格式不正确" })
+  conversationId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: "maxCycles 必须是整数" })
+  @Min(1, { message: "maxCycles 不能小于 1" })
+  @Max(5, { message: "maxCycles 不能超过 5" })
+  maxCycles?: number;
 }

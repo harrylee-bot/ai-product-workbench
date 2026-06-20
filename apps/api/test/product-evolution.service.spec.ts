@@ -2,6 +2,7 @@ import { BadRequestException } from "@nestjs/common";
 import { ProjectStatus, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EvolutionEngineService } from "../src/ai/evolution-engine.service";
+import { EvolutionOrchestratorService } from "../src/ai/evolution-orchestrator.service";
 import { InteractionCaptureService } from "../src/ai/interaction-capture.service";
 import { PatchExecutionEngineService } from "../src/ai/patch-execution-engine.service";
 import { ProductMemoryService } from "../src/ai/product-memory.service";
@@ -48,6 +49,12 @@ describe("Product evolution modules", () => {
       create: vi.fn(),
       findMany: vi.fn(),
     },
+    orchestrationRun: {
+      create: vi.fn(),
+      update: vi.fn(),
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+    },
   };
   const modelGateway = {
     generateJson: vi.fn(),
@@ -64,6 +71,18 @@ describe("Product evolution modules", () => {
   const productMemory = {
     recordPatchExecutionMemory: vi.fn(),
   };
+  const feedbackAnalysis = {
+    analyzeForUser: vi.fn(),
+  };
+  const multiAgentReview = {
+    runForUser: vi.fn(),
+  };
+  const evolutionEngine = {
+    runForUser: vi.fn(),
+  };
+  const patchExecutionEngine = {
+    applyForUser: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -76,6 +95,41 @@ describe("Product evolution modules", () => {
       changeReason: "修复流程阻塞",
       createdAt: "2026-06-21T08:10:00.000Z",
     });
+    feedbackAnalysis.analyzeForUser.mockResolvedValue({
+      items: [{ id: "insight-1" }],
+    });
+    multiAgentReview.runForUser.mockResolvedValue({
+      reviewReport: { id: "review-1" },
+    });
+    evolutionEngine.runForUser.mockResolvedValue({
+      evolutionPlan: { id: "evolution-1" },
+    });
+    patchExecutionEngine.applyForUser.mockResolvedValue({
+      success: true,
+      patchResult: { success: true, newStateVersion: 3 },
+      patchExecution: { id: "execution-1" },
+      productMemory: { id: "memory-1" },
+      runId: "run-1",
+    });
+    prisma.orchestrationRun.create.mockImplementation(async ({ data }) => ({
+      id: "orchestration-1",
+      ...data,
+      createdAt: new Date("2026-06-21T08:00:00Z"),
+      updatedAt: new Date("2026-06-21T08:00:00Z"),
+      completedAt: data.completedAt ?? null,
+    }));
+    prisma.orchestrationRun.update.mockImplementation(async ({ data }) => ({
+      id: "orchestration-1",
+      projectId: "project-1",
+      triggerType: "manual",
+      moduleStates: data.moduleStates ?? {},
+      result: data.result ?? {},
+      createdBy: "user-1",
+      status: data.status ?? "running",
+      createdAt: new Date("2026-06-21T08:00:00Z"),
+      updatedAt: new Date("2026-06-21T08:01:00Z"),
+      completedAt: data.completedAt ?? null,
+    }));
   });
 
   it("records only explicit interaction feedback and rejects analytics metadata", async () => {
@@ -381,6 +435,52 @@ describe("Product evolution modules", () => {
     });
     expect(patchService.applyEvolutionPlanForUser).not.toHaveBeenCalled();
     expect(stateService.getCurrentState).not.toHaveBeenCalled();
+  });
+
+  it("orchestrates modules 15 to 19 while only recording orchestration state", async () => {
+    const service = new EvolutionOrchestratorService(
+      prisma as never,
+      feedbackAnalysis as never,
+      multiAgentReview as never,
+      evolutionEngine as never,
+      patchExecutionEngine as never,
+    );
+
+    const result = await service.runCycleForUser(user, {
+      projectId: "project-1",
+      triggerType: "manual",
+      eventIds: ["event-1"],
+      conversationId: "conversation-1",
+    });
+
+    expect(result.run.status).toBe("completed");
+    expect(feedbackAnalysis.analyzeForUser).toHaveBeenCalledWith(user, {
+      projectId: "project-1",
+      eventIds: ["event-1"],
+    });
+    expect(multiAgentReview.runForUser).toHaveBeenCalledWith(user, { projectId: "project-1" });
+    expect(evolutionEngine.runForUser).toHaveBeenCalledWith(user, { projectId: "project-1" });
+    expect(patchExecutionEngine.applyForUser).toHaveBeenCalledWith(user, {
+      projectId: "project-1",
+      evolutionPlanId: "evolution-1",
+      conversationId: "conversation-1",
+    });
+    expect(prisma.orchestrationRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: "project-1",
+        status: "running",
+        triggerType: "manual",
+      }),
+    });
+    expect(prisma.orchestrationRun.update).toHaveBeenLastCalledWith({
+      where: { id: "orchestration-1" },
+      data: expect.objectContaining({
+        status: "completed",
+        completedAt: expect.any(Date),
+      }),
+    });
+    expect(stateService.getCurrentState).not.toHaveBeenCalled();
+    expect(patchService.applyEvolutionPlanForUser).not.toHaveBeenCalled();
   });
 });
 

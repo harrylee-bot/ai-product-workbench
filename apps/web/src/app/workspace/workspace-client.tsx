@@ -14,6 +14,7 @@ import {
   Crosshair,
   Edit3,
   Database,
+  GitBranch,
   FileUp,
   FileText,
   History,
@@ -306,6 +307,34 @@ type ProductMemoryTimelineItem = {
   createdAt: string;
 };
 
+type OrchestrationModuleKey =
+  | "semanticAnalysis"
+  | "multiAgentReview"
+  | "evolutionPlanning"
+  | "patchExecution"
+  | "memorySave";
+
+type OrchestrationModuleState = {
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  startedAt?: string;
+  completedAt?: string;
+  summary?: string;
+  errorMessage?: string;
+  relatedId?: string;
+};
+
+type OrchestrationRunItem = {
+  id: string;
+  projectId: string;
+  status: "running" | "completed" | "failed";
+  triggerType: "event" | "batch" | "manual" | "patch";
+  moduleStates: Record<OrchestrationModuleKey, OrchestrationModuleState>;
+  result?: unknown;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
 type WorkspaceProject = {
   id: string;
   conversationId?: string;
@@ -335,6 +364,7 @@ type WorkspaceProject = {
   patchExecutions: EvolutionPatchExecutionItem[];
   productMemories: ProductMemoryItem[];
   memoryTimeline: ProductMemoryTimelineItem[];
+  latestOrchestrationRun?: OrchestrationRunItem | null;
 };
 
 type PreviewPatch = Partial<
@@ -361,6 +391,7 @@ type PreviewPatch = Partial<
     | "patchExecutions"
     | "productMemories"
     | "memoryTimeline"
+    | "latestOrchestrationRun"
   >
 >;
 
@@ -549,6 +580,11 @@ type ListProductMemoryTimelineResponse = {
   total: number;
 };
 
+type GetEvolutionOrchestrationStatusResponse = {
+  latestRun: OrchestrationRunItem | null;
+  runningRun: OrchestrationRunItem | null;
+};
+
 type PatchRecordStatus =
   | "planned"
   | "applying"
@@ -589,6 +625,14 @@ type ListPatchRecordsResponse = {
   page: number;
   pageSize: number;
 };
+
+const ORCHESTRATION_MODULES: Array<{ key: OrchestrationModuleKey; label: string }> = [
+  { key: "semanticAnalysis", label: "分析" },
+  { key: "multiAgentReview", label: "评审" },
+  { key: "evolutionPlanning", label: "方案" },
+  { key: "patchExecution", label: "Patch" },
+  { key: "memorySave", label: "记忆" },
+];
 
 const STATUS_META: Record<ProjectStatus, { label: string; className: string }> = {
   draft: {
@@ -895,6 +939,7 @@ function mapProject(project: ApiProject, messages: ChatMessage[] = []): Workspac
     patchExecutions: [],
     productMemories: [],
     memoryTimeline: [],
+    latestOrchestrationRun: null,
   };
 }
 
@@ -1252,6 +1297,7 @@ function preservePreviewState(project: WorkspaceProject) {
     patchExecutions: project.patchExecutions,
     productMemories: project.productMemories,
     memoryTimeline: project.memoryTimeline,
+    latestOrchestrationRun: project.latestOrchestrationRun,
   };
 }
 
@@ -1296,7 +1342,7 @@ export function WorkspaceClient() {
   const [qaActionLoading, setQaActionLoading] = useState(false);
   const [versionActionLoading, setVersionActionLoading] = useState(false);
   const [feedbackDraft, setFeedbackDraft] = useState("");
-  const [feedbackActionLoading, setFeedbackActionLoading] = useState<"capture" | "analyze" | "review" | "evolution" | "apply" | null>(null);
+  const [feedbackActionLoading, setFeedbackActionLoading] = useState<"capture" | "analyze" | "review" | "evolution" | "apply" | "orchestrate" | null>(null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [inlineAssistantDraft, setInlineAssistantDraft] = useState<InlineAssistantDraft | null>(null);
   const [inlineAssistantInstruction, setInlineAssistantInstruction] = useState("");
@@ -1462,6 +1508,7 @@ export function WorkspaceClient() {
         patchExecutionsResponse,
         memoryResponse,
         memoryTimelineResponse,
+        orchestrationStatusResponse,
       ] = await Promise.all([
         apiRequest<GetLatestQaResponse>(`/projects/${projectId}/qa/latest`).catch(() => ({ qaReport: null })),
         apiRequest<GetVersionTimelineResponse>(`/projects/${projectId}/version-timeline`).catch(() => ({ items: [] })),
@@ -1472,6 +1519,7 @@ export function WorkspaceClient() {
         apiRequest<ListPatchExecutionsResponse>(`/projects/${projectId}/patch-executions`).catch(() => ({ items: [], total: 0 })),
         apiRequest<ListProductMemoryResponse>(`/projects/${projectId}/memory`).catch(() => ({ items: [], total: 0 })),
         apiRequest<ListProductMemoryTimelineResponse>(`/projects/${projectId}/memory/timeline`).catch(() => ({ items: [], total: 0 })),
+        apiRequest<GetEvolutionOrchestrationStatusResponse>(`/evolution/status/${projectId}`).catch(() => ({ latestRun: null, runningRun: null })),
       ]);
       const latestQa = mapQaReport(qaResponse.qaReport);
       const latestQaReport = mapQaReportSummary(qaResponse.qaReport);
@@ -1486,6 +1534,7 @@ export function WorkspaceClient() {
         patchExecutions: patchExecutionsResponse.items,
         productMemories: memoryResponse.items,
         memoryTimeline: memoryTimelineResponse.items,
+        latestOrchestrationRun: orchestrationStatusResponse.runningRun ?? orchestrationStatusResponse.latestRun,
         ...(latestQa
           ? {
               qaStatus: latestQa.status,
@@ -1647,6 +1696,7 @@ export function WorkspaceClient() {
       patchExecutionsResponse,
       memoryResponse,
       memoryTimelineResponse,
+      orchestrationStatusResponse,
     ] = await Promise.all([
       apiRequest<ListInteractionsResponse>(`/projects/${projectId}/interactions`).catch(() => ({ items: [], total: 0 })),
       apiRequest<ListInsightsResponse>(`/projects/${projectId}/insights`).catch(() => ({ items: [], total: 0 })),
@@ -1655,6 +1705,7 @@ export function WorkspaceClient() {
       apiRequest<ListPatchExecutionsResponse>(`/projects/${projectId}/patch-executions`).catch(() => ({ items: [], total: 0 })),
       apiRequest<ListProductMemoryResponse>(`/projects/${projectId}/memory`).catch(() => ({ items: [], total: 0 })),
       apiRequest<ListProductMemoryTimelineResponse>(`/projects/${projectId}/memory/timeline`).catch(() => ({ items: [], total: 0 })),
+      apiRequest<GetEvolutionOrchestrationStatusResponse>(`/evolution/status/${projectId}`).catch(() => ({ latestRun: null, runningRun: null })),
     ]);
     updateProject(projectId, (project) => ({
       ...project,
@@ -1665,6 +1716,7 @@ export function WorkspaceClient() {
       patchExecutions: patchExecutionsResponse.items,
       productMemories: memoryResponse.items,
       memoryTimeline: memoryTimelineResponse.items,
+      latestOrchestrationRun: orchestrationStatusResponse.runningRun ?? orchestrationStatusResponse.latestRun,
     }));
   };
 
@@ -1848,6 +1900,36 @@ export function WorkspaceClient() {
       window.setTimeout(() => void loadProjectDetail(currentProject.id), 300);
     } catch (error) {
       setFeedbackError(error instanceof Error ? error.message : "进化 Patch 执行失败");
+    } finally {
+      setFeedbackActionLoading(null);
+    }
+  };
+
+  const runEvolutionCycle = async () => {
+    if (!currentProject) return;
+    setFeedbackActionLoading("orchestrate");
+    setFeedbackError(null);
+    try {
+      const response = await apiRequest<{ run: OrchestrationRunItem }>("/evolution/run-cycle", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          triggerType: "manual",
+          conversationId: currentProject.conversationId,
+          maxCycles: 1,
+        }),
+      });
+      updateProject(currentProject.id, (project) => ({
+        ...project,
+        latestOrchestrationRun: response.run,
+        summary: response.run.status === "completed" ? "进化总调度已完成" : "进化总调度执行失败",
+        updatedAt: "刚刚",
+      }));
+      await refreshFeedbackLoop(currentProject.id);
+      window.setTimeout(() => void loadProjectDetail(currentProject.id), 300);
+      setPreviewTab("feedback");
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : "进化总调度失败");
     } finally {
       setFeedbackActionLoading(null);
     }
@@ -2749,6 +2831,7 @@ export function WorkspaceClient() {
             onRunProductReview={runProductReview}
             onRunEvolutionPlan={runEvolutionPlan}
             onApplyEvolutionPlan={applyEvolutionPlan}
+            onRunEvolutionCycle={runEvolutionCycle}
           />
         </div>
       </main>
@@ -3611,6 +3694,7 @@ function PreviewPanel({
   onRunProductReview,
   onRunEvolutionPlan,
   onApplyEvolutionPlan,
+  onRunEvolutionCycle,
 }: {
   project: WorkspaceProject | null;
   previewTab: PreviewTab;
@@ -3627,7 +3711,7 @@ function PreviewPanel({
   qaActionLoading: boolean;
   versionActionLoading: boolean;
   feedbackDraft: string;
-  feedbackActionLoading: "capture" | "analyze" | "review" | "evolution" | "apply" | null;
+  feedbackActionLoading: "capture" | "analyze" | "review" | "evolution" | "apply" | "orchestrate" | null;
   feedbackError: string | null;
   onPreviewTabChange: (tab: PreviewTab) => void;
   onDeviceModeChange: (mode: DeviceMode) => void;
@@ -3649,6 +3733,7 @@ function PreviewPanel({
   onRunProductReview: () => void;
   onRunEvolutionPlan: () => void;
   onApplyEvolutionPlan: () => void;
+  onRunEvolutionCycle: () => void;
 }) {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-slate-100">
@@ -3753,6 +3838,7 @@ function PreviewPanel({
           onRunProductReview={onRunProductReview}
           onRunEvolutionPlan={onRunEvolutionPlan}
           onApplyEvolutionPlan={onApplyEvolutionPlan}
+          onRunEvolutionCycle={onRunEvolutionCycle}
         />
       ) : null}
       {patchHistoryOpen ? (
@@ -4558,10 +4644,11 @@ function FeedbackLoopPanel({
   onRunProductReview,
   onRunEvolutionPlan,
   onApplyEvolutionPlan,
+  onRunEvolutionCycle,
 }: {
   project: WorkspaceProject | null;
   feedbackDraft: string;
-  loading: "capture" | "analyze" | "review" | "evolution" | "apply" | null;
+  loading: "capture" | "analyze" | "review" | "evolution" | "apply" | "orchestrate" | null;
   error: string | null;
   onFeedbackDraftChange: (value: string) => void;
   onSubmitFeedback: () => void;
@@ -4569,6 +4656,7 @@ function FeedbackLoopPanel({
   onRunProductReview: () => void;
   onRunEvolutionPlan: () => void;
   onApplyEvolutionPlan: () => void;
+  onRunEvolutionCycle: () => void;
 }) {
   const latestPlan = project?.latestEvolutionPlan ?? null;
   const latestReview = project?.latestReviewReport ?? null;
@@ -4577,10 +4665,12 @@ function FeedbackLoopPanel({
   const executions = project?.patchExecutions ?? [];
   const memories = project?.productMemories ?? [];
   const memoryTimeline = project?.memoryTimeline ?? [];
+  const latestOrchestration = project?.latestOrchestrationRun ?? null;
   const canAnalyze = Boolean(project && events.length);
   const canReview = Boolean(project && insights.length);
   const canEvolution = Boolean(project && insights.length && latestReview);
   const canApply = Boolean(project && latestPlan && !latestPlan.executedAt);
+  const canOrchestrate = Boolean(project && events.length && project.productDesignState);
 
   if (!project) {
     return (
@@ -4641,6 +4731,25 @@ function FeedbackLoopPanel({
         </div>
 
         <div className="grid gap-3 md:grid-cols-4">
+          <button
+            type="button"
+            onClick={onRunEvolutionCycle}
+            disabled={!canOrchestrate || loading === "orchestrate"}
+            className="rounded-lg border border-gray-900 bg-gray-950 p-3 text-left text-white shadow-sm hover:bg-gray-800 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-200 disabled:text-gray-400 md:col-span-4"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                {loading === "orchestrate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitBranch className="h-4 w-4" />}
+                运行 Evolution Orchestrator
+              </div>
+              <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs">
+                15 → 19
+              </span>
+            </div>
+            <div className="mt-1 text-xs leading-5 text-gray-300">
+              按顺序调度语义分析、评审、方案、Patch 和产品记忆。
+            </div>
+          </button>
           <WorkflowAction
             title="语义分析"
             description="将显式反馈转为 ProductInsight"
@@ -4674,6 +4783,36 @@ function FeedbackLoopPanel({
             onClick={onApplyEvolutionPlan}
           />
         </div>
+
+        {latestOrchestration ? (
+          <FeedbackSection title="Orchestration Run" icon={GitBranch}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={clsx("rounded-md border px-2 py-1 text-xs font-medium", orchestrationStatusClassName(latestOrchestration.status))}>
+                  {orchestrationStatusLabel(latestOrchestration.status)}
+                </span>
+                <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-500">
+                  {latestOrchestration.triggerType}
+                </span>
+              </div>
+              <span className="text-xs text-gray-400">{formatRelativeTime(latestOrchestration.updatedAt)}</span>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-5">
+              {ORCHESTRATION_MODULES.map((module) => {
+                const state = latestOrchestration.moduleStates[module.key];
+                return (
+                  <div key={module.key} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-gray-900">{module.label}</span>
+                      <span className={clsx("h-2 w-2 rounded-full", orchestrationModuleDotClassName(state?.status))} />
+                    </div>
+                    <div className="mt-1 truncate text-[11px] text-gray-500">{state?.summary ?? orchestrationModuleStatusLabel(state?.status)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </FeedbackSection>
+        ) : null}
 
         <div className="grid gap-4 lg:grid-cols-2">
           <FeedbackSection title="ProductInsight" icon={Sparkles}>
@@ -4885,6 +5024,34 @@ function memoryCategoryClassName(category?: ProductMemoryItem["category"]) {
   if (category === "flow") return "border-sky-200 bg-sky-50 text-sky-700";
   if (category === "business") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   return "border-gray-200 bg-white text-gray-600";
+}
+
+function orchestrationStatusLabel(status: OrchestrationRunItem["status"]) {
+  if (status === "completed") return "已完成";
+  if (status === "failed") return "失败";
+  return "运行中";
+}
+
+function orchestrationStatusClassName(status: OrchestrationRunItem["status"]) {
+  if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "failed") return "border-rose-200 bg-rose-50 text-rose-700";
+  return "border-sky-200 bg-sky-50 text-sky-700";
+}
+
+function orchestrationModuleStatusLabel(status?: OrchestrationModuleState["status"]) {
+  if (status === "completed") return "已完成";
+  if (status === "failed") return "失败";
+  if (status === "running") return "运行中";
+  if (status === "skipped") return "跳过";
+  return "等待";
+}
+
+function orchestrationModuleDotClassName(status?: OrchestrationModuleState["status"]) {
+  if (status === "completed") return "bg-emerald-500";
+  if (status === "failed") return "bg-rose-500";
+  if (status === "running") return "bg-sky-500";
+  if (status === "skipped") return "bg-amber-400";
+  return "bg-gray-300";
 }
 
 function StateList({

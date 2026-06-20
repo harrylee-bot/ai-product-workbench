@@ -127,3 +127,34 @@ export type ProductMemoryTimelineItem = {
   patchRecordId?: string;
   createdAt: string;
 };
+
+export type OrchestrationRunStatus = "running" | "completed" | "failed";
+export type OrchestrationTriggerType = "event" | "batch" | "manual" | "patch";
+export type OrchestrationModuleKey =
+  | "semanticAnalysis"
+  | "multiAgentReview"
+  | "evolutionPlanning"
+  | "patchExecution"
+  | "memorySave";
+
+export type OrchestrationModuleState = {
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  startedAt?: string;
+  completedAt?: string;
+  summary?: string;
+  errorMessage?: string;
+  relatedId?: string;
+};
+
+export type OrchestrationRunItem = {
+  id: string;
+  projectId: string;
+  status: OrchestrationRunStatus;
+  triggerType: OrchestrationTriggerType;
+  moduleStates: Record<OrchestrationModuleKey, OrchestrationModuleState>;
+  result: unknown;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};

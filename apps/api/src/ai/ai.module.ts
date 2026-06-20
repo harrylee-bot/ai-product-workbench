@@ -7,6 +7,7 @@ import { ProjectModule } from "../projects/project.module";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
 import { EvolutionEngineService } from "./evolution-engine.service";
+import { EvolutionOrchestratorService } from "./evolution-orchestrator.service";
 import { FeedbackAnalysisService } from "./feedback-analysis.service";
 import { InteractionCaptureService } from "./interaction-capture.service";
 import { MultiAgentReviewService } from "./multi-agent-review.service";
@@ -126,6 +127,7 @@ import {
     FeedbackAnalysisService,
     MultiAgentReviewService,
     EvolutionEngineService,
+    EvolutionOrchestratorService,
     PatchExecutionEngineService,
     ProductMemoryService,
     IntentAgentService,

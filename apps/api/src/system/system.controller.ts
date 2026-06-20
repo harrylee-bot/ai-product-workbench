@@ -34,6 +34,7 @@ export class SystemController {
         "evolution-engine",
         "patch-execution-engine",
         "product-memory",
+        "evolution-orchestrator",
       ],
     };
   }
