@@ -380,6 +380,7 @@ model Project {
   productReviewReports        ProductReviewReport[]
   evolutionPlans              EvolutionPlan[]
   evolutionPatchExecutions    EvolutionPatchExecution[]
+  productMemories             ProductMemory[]
 
   @@index([ownerId])
   @@index([status])
@@ -1019,6 +1020,35 @@ model EvolutionPatchExecution {
   @@index([result])
   @@index([createdAt])
   @@map("evolution_patch_executions")
+}
+
+model ProductMemory {
+  id               String   @id @default(uuid())
+  projectId        String   @map("project_id")
+  version          Int
+  category         String?
+  changeReason     String   @map("change_reason")
+  evolutionPlan    Json     @map("evolution_plan")
+  patchResult      Json     @map("patch_result")
+  beforeState      Json     @map("before_state")
+  afterState       Json     @map("after_state")
+  insights         Json
+  agentReport      Json     @map("agent_report")
+  evolutionPlanId  String?  @map("evolution_plan_id")
+  patchExecutionId String?  @map("patch_execution_id")
+  patchRecordId    String?  @map("patch_record_id")
+  createdBy        String   @map("created_by")
+  createdAt        DateTime @default(now()) @map("created_at")
+  project          Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([version])
+  @@index([category])
+  @@index([evolutionPlanId])
+  @@index([patchExecutionId])
+  @@index([patchRecordId])
+  @@index([createdAt])
+  @@map("product_memories")
 }
 
 model KnowledgeItem {

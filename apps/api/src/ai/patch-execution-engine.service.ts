@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { PatchService } from "./patch.service";
+import { ProductMemoryService } from "./product-memory.service";
 import { RollbackService } from "./rollback.service";
 import {
   arrayOfText,
@@ -52,6 +53,7 @@ export class PatchExecutionEngineService {
     private readonly prisma: PrismaService,
     private readonly patchService: PatchService,
     private readonly rollbackService: RollbackService,
+    private readonly productMemory: ProductMemoryService,
   ) {}
 
   async applyForUser(
@@ -92,16 +94,27 @@ export class PatchExecutionEngineService {
         where: { id: input.evolutionPlanId },
         data: { executedAt: new Date() },
       });
+      const patchResult = {
+        success: true,
+        appliedOperations: evolutionPlan.patchOperations,
+        newStateVersion: patchRecord.afterProductDesignStateVersion ?? 0,
+        rollbackId: patchRecord.id,
+      };
+      const productMemory = await this.productMemory.recordPatchExecutionMemory({
+        projectId: input.projectId,
+        evolutionPlanId: input.evolutionPlanId,
+        patchExecutionId: execution.id,
+        patchRecordId: patchRecord.id,
+        patchResult,
+        createdBy: user.id,
+        afterStateFallback: result.result.productDesignState,
+      });
 
       return {
         success: true,
-        patchResult: {
-          success: true,
-          appliedOperations: evolutionPlan.patchOperations,
-          newStateVersion: patchRecord.afterProductDesignStateVersion ?? 0,
-          rollbackId: patchRecord.id,
-        },
+        patchResult,
         patchExecution: this.toExecutionItem(execution as EvolutionPatchExecutionRow),
+        productMemory,
         patchRecord,
         productDesignState: result.result.productDesignState,
         prdDocument: result.result.prdDocument,
@@ -120,15 +133,32 @@ export class PatchExecutionEngineService {
           createdBy: user.id,
         },
       });
+      const patchResult = {
+        success: false,
+        appliedOperations: [],
+        newStateVersion: 0,
+        rollbackId: execution.id,
+      };
+      let productMemory: Awaited<ReturnType<ProductMemoryService["recordPatchExecutionMemory"]>> | undefined;
+      try {
+        productMemory = await this.productMemory.recordPatchExecutionMemory({
+          projectId: input.projectId,
+          evolutionPlanId: input.evolutionPlanId,
+          patchExecutionId: execution.id,
+          patchResult: {
+            ...patchResult,
+            errorMessage: error instanceof Error ? error.message : "PATCH_EXECUTION_FAILED",
+          },
+          createdBy: user.id,
+        });
+      } catch {
+        productMemory = undefined;
+      }
       return {
         success: false,
-        patchResult: {
-          success: false,
-          appliedOperations: [],
-          newStateVersion: 0,
-          rollbackId: execution.id,
-        },
+        patchResult,
         patchExecution: this.toExecutionItem(execution as EvolutionPatchExecutionRow),
+        productMemory,
         errorMessage: error instanceof Error ? error.message : "PATCH_EXECUTION_FAILED",
       };
     }

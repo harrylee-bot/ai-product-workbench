@@ -1,6 +1,6 @@
 # AI产品工作台（内测）
 
-当前实现范围覆盖模块 1-13、二期 0A/0B/0C 与二期 14-18：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀、管理后台与日志、QA 版本与回滚，以及 PRD 编辑体验、HTML 原型交互编辑体验、AI Inline Assistant、Interaction Capture、Semantic Feedback Analyzer、Multi-Agent Review、Evolution Engine 与 Patch Execution Engine。
+当前实现范围覆盖模块 1-13、二期 0A/0B/0C 与二期 14-19：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀、管理后台与日志、QA 版本与回滚，以及 PRD 编辑体验、HTML 原型交互编辑体验、AI Inline Assistant、Interaction Capture、Semantic Feedback Analyzer、Multi-Agent Review、Evolution Engine、Patch Execution Engine 与 Product Memory System。
 
 ## 已实现能力
 
@@ -25,6 +25,7 @@
 - 二期 16：Multi-Agent Review System 只读取 ProductDesignState + ProductInsight，生成 ProductReviewReport；包含 UX、Business、Risk、Clarity、Growth 五类独立输出、冲突检测和 consensusScore，不修改业务数据。
 - 二期 17：Evolution Engine 只基于 ProductDesignState、ProductInsight 和 ProductReviewReport 生成 EvolutionPlan，包含 reason、priority、patchOperations、prdChanges、prototypeChanges 和 impactedAreas，不执行 Patch。
 - 二期 18：Patch Execution Engine 只执行 EvolutionPlan，通过 PatchService 将 patchOperations 转为 ProductDesignState PatchPlan，执行后重新生成 PRD、Prototype、QA，记录 EvolutionPatchExecution Patch Log，并支持回滚入口。
+- 二期 19：Product Memory System 新增 ProductMemory，Patch 执行后记录 EvolutionPlan、PatchResult、before/after ProductDesignState 快照、ProductInsight 与多 Agent 报告；提供记忆列表和时间线查询，工作台“反馈”Tab 展示产品记忆，不参与决策、不生成 Patch、不修改 ProductDesignState。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
@@ -62,7 +63,7 @@ npm run dev
 - `MODEL_GATEWAY_ENCRYPTION_KEY`：可选，推荐生产配置。支持 32 字节 base64 或 64 位 hex；未配置时会从 `JWT_SECRET` 派生加密密钥。
 - `JWT_SECRET`：生产必须配置稳定值，否则已加密的模型 API Key 可能无法解密。
 
-模块 6/7/8/9/10/11/12/13、二期 0A/0B/0C 与二期 14-18 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService / PatchService / QaService / RollbackService / KnowledgeCandidateService / ProductInsight / ProductReviewReport / EvolutionPlan / EvolutionPatchExecution 保存状态、文档、原型、Patch、QA、回滚记录、知识候选、反馈洞察、评审报告、进化计划、执行日志、版本和变更日志。管理后台只读取这些业务数据和审计日志，不绕过 ProductDesignState 修改普通工作流。
+模块 6/7/8/9/10/11/12/13、二期 0A/0B/0C 与二期 14-19 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService / PatchService / QaService / RollbackService / KnowledgeCandidateService / ProductInsight / ProductReviewReport / EvolutionPlan / EvolutionPatchExecution / ProductMemory 保存状态、文档、原型、Patch、QA、回滚记录、知识候选、反馈洞察、评审报告、进化计划、执行日志、产品记忆、版本和变更日志。管理后台只读取这些业务数据和审计日志，不绕过 ProductDesignState 修改普通工作流。
 
 ## 服务器部署
 
@@ -227,6 +228,9 @@ bash deploy/server-deploy.sh
 - `POST /api/patch/apply`
 - `POST /api/patch/rollback`
 - `GET /api/projects/:projectId/patch-executions`
+- `POST /api/memory/save`
+- `GET /api/projects/:projectId/memory`
+- `GET /api/projects/:projectId/memory/timeline`
 - `POST /api/projects/:projectId/qa/run`
 - `GET /api/projects/:projectId/qa/latest`
 - `GET /api/projects/:projectId/qa-reports`
@@ -267,7 +271,7 @@ bash deploy/server-deploy.sh
 
 `POST /api/ai/vibe/handle-message` 会立即保存用户消息并返回 `runId`，真实 AI 协作在后台执行。前端使用带 Authorization header 的 fetch stream 连接 `GET /api/ai/vibe/runs/:runId/stream`，按事件实时更新 Agent 时间线和右侧预览。
 
-模块 6/7/8/9/10/11/12/13、二期 0A/0B/0C 与二期 14-18 流式事件落库遵守统一事件结构：
+模块 6/7/8/9/10/11/12/13、二期 0A/0B/0C 与二期 14-19 流式事件落库遵守统一事件结构：
 
 ```json
 {
@@ -278,7 +282,7 @@ bash deploy/server-deploy.sh
 }
 ```
 
-模块 7/8/9/10/11/12/13、二期 0A/0B/0C 与二期 14-18 核心约束：
+模块 7/8/9/10/11/12/13、二期 0A/0B/0C 与二期 14-19 核心约束：
 
 - ProductDesignState 是 PRD、PrototypeSpec、HTML 原型和 Patch 的唯一事实源。
 - Patch Agent 只能生成作用于 ProductDesignState 的 PatchPlan；服务端会通过 ProductDesignStateService 应用 PatchOperation、递增版本并创建快照。
@@ -305,6 +309,7 @@ bash deploy/server-deploy.sh
 - EvolutionPlan 只能生成决策与 PatchOperation，不得执行修改；PatchOperation targetPath 必须指向 ProductDesignState 允许字段。
 - Patch Execution Engine 只能执行 EvolutionPlan，不能生成新产品决策；执行必须通过 PatchService / ProductDesignStateService 更新 State、创建版本、重新生成 PRD / Prototype 并执行 QA。
 - EvolutionPatchExecution 记录 Patch Log，包括 evolutionPlanId、patchRecordId、result、appliedOperations、newStateVersion、rollbackId、errorMessage 和 createdAt。
+- ProductMemory 只记录历史，不参与决策、不生成 Patch、不修改 ProductDesignState；必须保存 EvolutionPlan、PatchResult、before/after state、insights、agentReport，并通过 projectId、evolutionPlanId、patchExecutionId、patchRecordId 支持追溯和回放。
 
 文件与附件：
 

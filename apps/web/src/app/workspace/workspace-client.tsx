@@ -32,6 +32,7 @@ import {
   GitCompare,
   LayoutTemplate,
   ListTree,
+  MemoryStick,
   Wand2,
   X,
 } from "lucide-react";
@@ -280,6 +281,31 @@ type EvolutionPatchExecutionItem = {
   createdAt: string;
 };
 
+type ProductMemoryItem = {
+  id: string;
+  projectId: string;
+  version: number;
+  category?: "ux" | "flow" | "business" | "risk";
+  changeReason: string;
+  evolutionPlanId?: string;
+  patchExecutionId?: string;
+  patchRecordId?: string;
+  createdAt: string;
+};
+
+type ProductMemoryTimelineItem = {
+  id: string;
+  projectId: string;
+  version: number;
+  category?: "ux" | "flow" | "business" | "risk";
+  title: string;
+  description: string;
+  evolutionPlanId?: string;
+  patchExecutionId?: string;
+  patchRecordId?: string;
+  createdAt: string;
+};
+
 type WorkspaceProject = {
   id: string;
   conversationId?: string;
@@ -307,6 +333,8 @@ type WorkspaceProject = {
   latestReviewReport?: ProductReviewReportItem | null;
   latestEvolutionPlan?: EvolutionPlanItem | null;
   patchExecutions: EvolutionPatchExecutionItem[];
+  productMemories: ProductMemoryItem[];
+  memoryTimeline: ProductMemoryTimelineItem[];
 };
 
 type PreviewPatch = Partial<
@@ -331,6 +359,8 @@ type PreviewPatch = Partial<
     | "latestReviewReport"
     | "latestEvolutionPlan"
     | "patchExecutions"
+    | "productMemories"
+    | "memoryTimeline"
   >
 >;
 
@@ -506,6 +536,16 @@ type GetLatestEvolutionResponse = {
 
 type ListPatchExecutionsResponse = {
   items: EvolutionPatchExecutionItem[];
+  total: number;
+};
+
+type ListProductMemoryResponse = {
+  items: ProductMemoryItem[];
+  total: number;
+};
+
+type ListProductMemoryTimelineResponse = {
+  items: ProductMemoryTimelineItem[];
   total: number;
 };
 
@@ -853,6 +893,8 @@ function mapProject(project: ApiProject, messages: ChatMessage[] = []): Workspac
     latestReviewReport: null,
     latestEvolutionPlan: null,
     patchExecutions: [],
+    productMemories: [],
+    memoryTimeline: [],
   };
 }
 
@@ -1208,6 +1250,8 @@ function preservePreviewState(project: WorkspaceProject) {
     latestReviewReport: project.latestReviewReport,
     latestEvolutionPlan: project.latestEvolutionPlan,
     patchExecutions: project.patchExecutions,
+    productMemories: project.productMemories,
+    memoryTimeline: project.memoryTimeline,
   };
 }
 
@@ -1416,6 +1460,8 @@ export function WorkspaceClient() {
         reviewResponse,
         evolutionResponse,
         patchExecutionsResponse,
+        memoryResponse,
+        memoryTimelineResponse,
       ] = await Promise.all([
         apiRequest<GetLatestQaResponse>(`/projects/${projectId}/qa/latest`).catch(() => ({ qaReport: null })),
         apiRequest<GetVersionTimelineResponse>(`/projects/${projectId}/version-timeline`).catch(() => ({ items: [] })),
@@ -1424,6 +1470,8 @@ export function WorkspaceClient() {
         apiRequest<GetLatestReviewResponse>(`/projects/${projectId}/review/latest`).catch(() => ({ reviewReport: null })),
         apiRequest<GetLatestEvolutionResponse>(`/projects/${projectId}/evolution/latest`).catch(() => ({ evolutionPlan: null })),
         apiRequest<ListPatchExecutionsResponse>(`/projects/${projectId}/patch-executions`).catch(() => ({ items: [], total: 0 })),
+        apiRequest<ListProductMemoryResponse>(`/projects/${projectId}/memory`).catch(() => ({ items: [], total: 0 })),
+        apiRequest<ListProductMemoryTimelineResponse>(`/projects/${projectId}/memory/timeline`).catch(() => ({ items: [], total: 0 })),
       ]);
       const latestQa = mapQaReport(qaResponse.qaReport);
       const latestQaReport = mapQaReportSummary(qaResponse.qaReport);
@@ -1436,6 +1484,8 @@ export function WorkspaceClient() {
         latestReviewReport: reviewResponse.reviewReport,
         latestEvolutionPlan: evolutionResponse.evolutionPlan,
         patchExecutions: patchExecutionsResponse.items,
+        productMemories: memoryResponse.items,
+        memoryTimeline: memoryTimelineResponse.items,
         ...(latestQa
           ? {
               qaStatus: latestQa.status,
@@ -1595,12 +1645,16 @@ export function WorkspaceClient() {
       reviewResponse,
       evolutionResponse,
       patchExecutionsResponse,
+      memoryResponse,
+      memoryTimelineResponse,
     ] = await Promise.all([
       apiRequest<ListInteractionsResponse>(`/projects/${projectId}/interactions`).catch(() => ({ items: [], total: 0 })),
       apiRequest<ListInsightsResponse>(`/projects/${projectId}/insights`).catch(() => ({ items: [], total: 0 })),
       apiRequest<GetLatestReviewResponse>(`/projects/${projectId}/review/latest`).catch(() => ({ reviewReport: null })),
       apiRequest<GetLatestEvolutionResponse>(`/projects/${projectId}/evolution/latest`).catch(() => ({ evolutionPlan: null })),
       apiRequest<ListPatchExecutionsResponse>(`/projects/${projectId}/patch-executions`).catch(() => ({ items: [], total: 0 })),
+      apiRequest<ListProductMemoryResponse>(`/projects/${projectId}/memory`).catch(() => ({ items: [], total: 0 })),
+      apiRequest<ListProductMemoryTimelineResponse>(`/projects/${projectId}/memory/timeline`).catch(() => ({ items: [], total: 0 })),
     ]);
     updateProject(projectId, (project) => ({
       ...project,
@@ -1609,6 +1663,8 @@ export function WorkspaceClient() {
       latestReviewReport: reviewResponse.reviewReport,
       latestEvolutionPlan: evolutionResponse.evolutionPlan,
       patchExecutions: patchExecutionsResponse.items,
+      productMemories: memoryResponse.items,
+      memoryTimeline: memoryTimelineResponse.items,
     }));
   };
 
@@ -1732,6 +1788,7 @@ export function WorkspaceClient() {
       const response = await apiRequest<{
         success: boolean;
         patchExecution: EvolutionPatchExecutionItem;
+        productMemory?: ProductMemoryItem;
         productDesignState?: unknown;
         prdDocument?: unknown;
         prototypeArtifact?: unknown;
@@ -1762,6 +1819,26 @@ export function WorkspaceClient() {
             summary: "进化 Patch 已执行并重新生成",
             updatedAt: "刚刚",
             patchExecutions: [response.patchExecution, ...project.patchExecutions],
+            productMemories: response.productMemory
+              ? [response.productMemory, ...project.productMemories]
+              : project.productMemories,
+            memoryTimeline: response.productMemory
+              ? [
+                  {
+                    id: response.productMemory.id,
+                    projectId: response.productMemory.projectId,
+                    version: response.productMemory.version,
+                    category: response.productMemory.category,
+                    title: `ProductDesignState v${response.productMemory.version}`,
+                    description: response.productMemory.changeReason,
+                    evolutionPlanId: response.productMemory.evolutionPlanId,
+                    patchExecutionId: response.productMemory.patchExecutionId,
+                    patchRecordId: response.productMemory.patchRecordId,
+                    createdAt: response.productMemory.createdAt,
+                  },
+                  ...project.memoryTimeline,
+                ]
+              : project.memoryTimeline,
           },
           previewPatch,
         ),
@@ -4498,6 +4575,8 @@ function FeedbackLoopPanel({
   const insights = project?.productInsights ?? [];
   const events = project?.interactionEvents ?? [];
   const executions = project?.patchExecutions ?? [];
+  const memories = project?.productMemories ?? [];
+  const memoryTimeline = project?.memoryTimeline ?? [];
   const canAnalyze = Boolean(project && events.length);
   const canReview = Boolean(project && insights.length);
   const canEvolution = Boolean(project && insights.length && latestReview);
@@ -4555,7 +4634,9 @@ function FeedbackLoopPanel({
             <FeedbackMetric label="反馈" value={events.length} />
             <FeedbackMetric label="洞察" value={insights.length} />
             <FeedbackMetric label="评审" value={latestReview ? 1 : 0} />
+            <FeedbackMetric label="方案" value={latestPlan ? 1 : 0} />
             <FeedbackMetric label="执行" value={executions.length} />
+            <FeedbackMetric label="记忆" value={memories.length} />
           </div>
         </div>
 
@@ -4676,6 +4757,36 @@ function FeedbackLoopPanel({
             <EmptyMini text="暂无进化方案，完成评审后生成 EvolutionPlan。" />
           )}
         </FeedbackSection>
+
+        <FeedbackSection title="Product Memory" icon={MemoryStick}>
+          {memoryTimeline.length ? (
+            <div className="space-y-2">
+              {memoryTimeline.slice(0, 8).map((memory) => (
+                <div key={memory.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-700">
+                        v{memory.version}
+                      </span>
+                      <span className={clsx("rounded-md border px-2 py-0.5 text-xs font-medium", memoryCategoryClassName(memory.category))}>
+                        {memoryCategoryLabel(memory.category)}
+                      </span>
+                    </div>
+                    <span className="text-xs text-gray-400">{formatRelativeTime(memory.createdAt)}</span>
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-gray-600">{memory.description}</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-400">
+                    {memory.evolutionPlanId ? <span>Plan {memory.evolutionPlanId.slice(0, 8)}</span> : null}
+                    {memory.patchExecutionId ? <span>Execution {memory.patchExecutionId.slice(0, 8)}</span> : null}
+                    {memory.patchRecordId ? <span>Patch {memory.patchRecordId.slice(0, 8)}</span> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyMini text="暂无产品记忆。执行 EvolutionPlan Patch 后会自动记录 before/after State 与决策链路。" />
+          )}
+        </FeedbackSection>
       </div>
     </div>
   );
@@ -4759,6 +4870,21 @@ function priorityClassName(priority: EvolutionPlanItem["priority"]) {
   if (priority === "high") return "border-rose-200 bg-rose-50 text-rose-700";
   if (priority === "medium") return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-gray-200 bg-gray-50 text-gray-700";
+}
+
+function memoryCategoryLabel(category?: ProductMemoryItem["category"]) {
+  if (category === "ux") return "UX";
+  if (category === "flow") return "Flow";
+  if (category === "business") return "Business";
+  if (category === "risk") return "Risk";
+  return "Memory";
+}
+
+function memoryCategoryClassName(category?: ProductMemoryItem["category"]) {
+  if (category === "risk") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (category === "flow") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (category === "business") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  return "border-gray-200 bg-white text-gray-600";
 }
 
 function StateList({

@@ -7,12 +7,14 @@ import { FeedbackAnalysisService } from "./feedback-analysis.service";
 import { InteractionCaptureService } from "./interaction-capture.service";
 import { MultiAgentReviewService } from "./multi-agent-review.service";
 import { PatchExecutionEngineService } from "./patch-execution-engine.service";
+import { ProductMemoryService } from "./product-memory.service";
 import {
   AnalyzeFeedbackDto,
   ApplyEvolutionPlanDto,
   CreateInteractionDto,
   RollbackPatchDto,
   RunProjectWorkflowDto,
+  SaveProductMemoryDto,
 } from "./product-evolution.dto";
 
 @Controller("interactions")
@@ -127,5 +129,32 @@ export class ProjectPatchExecutionController {
   @Get()
   list(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
     return this.patchExecutionEngine.listForProject(user, projectId);
+  }
+}
+
+@Controller("memory")
+@UseGuards(JwtAuthGuard)
+export class ProductMemoryController {
+  constructor(private readonly productMemory: ProductMemoryService) {}
+
+  @Post("save")
+  save(@CurrentUser() user: AuthenticatedUser, @Body() dto: SaveProductMemoryDto) {
+    return this.productMemory.saveForUser(user, dto);
+  }
+}
+
+@Controller("projects/:projectId/memory")
+@UseGuards(JwtAuthGuard)
+export class ProjectMemoryController {
+  constructor(private readonly productMemory: ProductMemoryService) {}
+
+  @Get()
+  list(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
+    return this.productMemory.listForProject(user, projectId);
+  }
+
+  @Get("timeline")
+  timeline(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
+    return this.productMemory.timelineForProject(user, projectId);
   }
 }

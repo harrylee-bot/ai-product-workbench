@@ -11,6 +11,7 @@ import { FeedbackAnalysisService } from "./feedback-analysis.service";
 import { InteractionCaptureService } from "./interaction-capture.service";
 import { MultiAgentReviewService } from "./multi-agent-review.service";
 import { PatchExecutionEngineService } from "./patch-execution-engine.service";
+import { ProductMemoryService } from "./product-memory.service";
 import { IntentAgentService } from "./agents/intent-agent.service";
 import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
 import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
@@ -69,8 +70,10 @@ import {
   ProjectEvolutionController,
   ProjectInsightController,
   ProjectInteractionController,
+  ProjectMemoryController,
   ProjectPatchExecutionController,
   ProjectReviewController,
+  ProductMemoryController,
 } from "./product-evolution.controller";
 
 @Module({
@@ -103,6 +106,8 @@ import {
     ProjectEvolutionController,
     PatchExecutionController,
     ProjectPatchExecutionController,
+    ProductMemoryController,
+    ProjectMemoryController,
   ],
   providers: [
     VibeService,
@@ -122,6 +127,7 @@ import {
     MultiAgentReviewService,
     EvolutionEngineService,
     PatchExecutionEngineService,
+    ProductMemoryService,
     IntentAgentService,
     KnowledgeAgentService,
     RequirementAnalystAgentService,

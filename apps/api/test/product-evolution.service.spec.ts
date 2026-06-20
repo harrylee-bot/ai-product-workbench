@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EvolutionEngineService } from "../src/ai/evolution-engine.service";
 import { InteractionCaptureService } from "../src/ai/interaction-capture.service";
 import { PatchExecutionEngineService } from "../src/ai/patch-execution-engine.service";
+import { ProductMemoryService } from "../src/ai/product-memory.service";
 
 describe("Product evolution modules", () => {
   const user = {
@@ -35,6 +36,17 @@ describe("Product evolution modules", () => {
     evolutionPatchExecution: {
       create: vi.fn(),
       findMany: vi.fn(),
+      findFirst: vi.fn(),
+    },
+    patchRecord: {
+      findFirst: vi.fn(),
+    },
+    productDesignVersion: {
+      findFirst: vi.fn(),
+    },
+    productMemory: {
+      create: vi.fn(),
+      findMany: vi.fn(),
     },
   };
   const modelGateway = {
@@ -49,10 +61,21 @@ describe("Product evolution modules", () => {
   const rollbackService = {
     rollbackProductDesignStateForUser: vi.fn(),
   };
+  const productMemory = {
+    recordPatchExecutionMemory: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
     prisma.project.findUnique.mockResolvedValue(baseProject());
+    productMemory.recordPatchExecutionMemory.mockResolvedValue({
+      id: "memory-1",
+      projectId: "project-1",
+      version: 3,
+      category: "flow",
+      changeReason: "修复流程阻塞",
+      createdAt: "2026-06-21T08:10:00.000Z",
+    });
   });
 
   it("records only explicit interaction feedback and rejects analytics metadata", async () => {
@@ -163,6 +186,7 @@ describe("Product evolution modules", () => {
       prisma as never,
       patchService as never,
       rollbackService as never,
+      productMemory as never,
     );
     prisma.evolutionPlan.findFirst.mockResolvedValue({
       id: "evolution-1",
@@ -215,6 +239,7 @@ describe("Product evolution modules", () => {
     });
 
     expect(result.success).toBe(true);
+    expect(result.productMemory).toEqual(expect.objectContaining({ id: "memory-1", version: 3 }));
     expect(result.patchResult).toEqual(
       expect.objectContaining({
         success: true,
@@ -239,6 +264,123 @@ describe("Product evolution modules", () => {
         newStateVersion: 3,
       }),
     });
+    expect(productMemory.recordPatchExecutionMemory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "project-1",
+        evolutionPlanId: "evolution-1",
+        patchExecutionId: "execution-1",
+        patchRecordId: "patch-1",
+      }),
+    );
+  });
+
+  it("saves ProductMemory from execution records without mutating ProductDesignState or creating patches", async () => {
+    const service = new ProductMemoryService(prisma as never);
+    prisma.evolutionPatchExecution.findFirst.mockResolvedValue({
+      id: "execution-1",
+      projectId: "project-1",
+      evolutionPlanId: "evolution-1",
+      patchRecordId: "patch-1",
+      result: "success",
+      appliedOperations: [{ type: "add", targetPath: "userScenarios" }],
+      newStateVersion: 3,
+      rollbackId: "patch-1",
+      errorMessage: null,
+      createdBy: "user-1",
+      createdAt: new Date("2026-06-21T08:10:00Z"),
+    });
+    prisma.evolutionPlan.findFirst.mockResolvedValue({
+      id: "evolution-1",
+      projectId: "project-1",
+      reason: "修复流程阻塞",
+      priority: "high",
+      patchOperations: [{ type: "add", targetPath: "userScenarios" }],
+      prdChanges: [],
+      prototypeChanges: [],
+      impactedAreas: ["userScenarios"],
+      sourceInsightIds: ["insight-1"],
+      sourceReviewId: "review-1",
+      generatedBy: "user-1",
+      executedAt: new Date("2026-06-21T08:10:00Z"),
+      createdAt: new Date("2026-06-21T08:05:00Z"),
+    });
+    prisma.patchRecord.findFirst.mockResolvedValue({
+      id: "patch-1",
+      projectId: "project-1",
+      beforeProductDesignStateVersion: 2,
+      afterProductDesignStateVersion: 3,
+      patchPlan: {},
+      operations: [{ op: "add", path: "userScenarios" }],
+      status: "applied",
+      errorMessage: null,
+      createdBy: "user-1",
+      createdAt: new Date("2026-06-21T08:10:00Z"),
+    });
+    prisma.productInsight.findMany.mockResolvedValue([
+      {
+        id: "insight-1",
+        projectId: "project-1",
+        issueType: "flow",
+        severity: "medium",
+        affectedArea: ["prototype"],
+        rootCause: "用户反馈流程卡住",
+        suggestion: "补充下一步引导",
+        sourceEvents: ["event-1"],
+        generatedBy: "user-1",
+        createdAt: new Date("2026-06-21T08:00:00Z"),
+      },
+    ]);
+    prisma.productReviewReport.findFirst.mockResolvedValue({
+      id: "review-1",
+      projectId: "project-1",
+      issues: [],
+      conflicts: [],
+      improvements: ["补充下一步引导"],
+      consensusScore: 0.82,
+      agentOutputs: {},
+      generatedBy: "user-1",
+      createdAt: new Date("2026-06-21T08:00:00Z"),
+    });
+    prisma.productDesignVersion.findFirst.mockImplementation(async ({ where }) => ({
+      version: where.version,
+      snapshot: { ...baseState(), version: where.version },
+    }));
+    prisma.productMemory.create.mockImplementation(async ({ data }) => ({
+      id: "memory-1",
+      ...data,
+      category: data.category ?? null,
+      evolutionPlanId: data.evolutionPlanId ?? null,
+      patchExecutionId: data.patchExecutionId ?? null,
+      patchRecordId: data.patchRecordId ?? null,
+      createdAt: new Date("2026-06-21T08:11:00Z"),
+    }));
+
+    const result = await service.saveForUser(user, {
+      projectId: "project-1",
+      patchExecutionId: "execution-1",
+    });
+
+    expect(result.memory).toEqual(
+      expect.objectContaining({
+        id: "memory-1",
+        projectId: "project-1",
+        version: 3,
+        category: "flow",
+        evolutionPlanId: "evolution-1",
+        patchExecutionId: "execution-1",
+        patchRecordId: "patch-1",
+      }),
+    );
+    expect(prisma.productMemory.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        changeReason: "修复流程阻塞",
+        version: 3,
+        beforeState: expect.objectContaining({ version: 2 }),
+        afterState: expect.objectContaining({ version: 3 }),
+      }),
+    });
+    expect(patchService.applyEvolutionPlanForUser).not.toHaveBeenCalled();
+    expect(stateService.getCurrentState).not.toHaveBeenCalled();
   });
 });
 

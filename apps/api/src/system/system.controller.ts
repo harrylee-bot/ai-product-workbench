@@ -33,6 +33,7 @@ export class SystemController {
         "multi-agent-review",
         "evolution-engine",
         "patch-execution-engine",
+        "product-memory",
       ],
     };
   }

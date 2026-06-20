@@ -85,3 +85,21 @@ export class RollbackPatchDto {
   @MaxLength(1000, { message: "reason 不能超过 1000 个字符" })
   reason?: string;
 }
+
+export class SaveProductMemoryDto {
+  @IsString({ message: "projectId 不能为空" })
+  @IsNotEmpty({ message: "projectId 不能为空" })
+  projectId!: string;
+
+  @IsOptional()
+  @IsString({ message: "evolutionPlanId 格式不正确" })
+  evolutionPlanId?: string;
+
+  @IsOptional()
+  @IsString({ message: "patchExecutionId 格式不正确" })
+  patchExecutionId?: string;
+
+  @IsOptional()
+  @IsString({ message: "patchRecordId 格式不正确" })
+  patchRecordId?: string;
+}

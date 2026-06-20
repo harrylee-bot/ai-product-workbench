@@ -93,3 +93,37 @@ export type EvolutionPatchExecutionItem = {
   createdBy: string;
   createdAt: string;
 };
+
+export type ProductMemoryCategory = "ux" | "flow" | "business" | "risk";
+
+export type ProductMemoryItem = {
+  id: string;
+  projectId: string;
+  version: number;
+  category?: ProductMemoryCategory;
+  changeReason: string;
+  evolutionPlan: unknown;
+  patchResult: unknown;
+  beforeState: unknown;
+  afterState: unknown;
+  insights: unknown;
+  agentReport: unknown;
+  evolutionPlanId?: string;
+  patchExecutionId?: string;
+  patchRecordId?: string;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type ProductMemoryTimelineItem = {
+  id: string;
+  projectId: string;
+  version: number;
+  category?: ProductMemoryCategory;
+  title: string;
+  description: string;
+  evolutionPlanId?: string;
+  patchExecutionId?: string;
+  patchRecordId?: string;
+  createdAt: string;
+};
