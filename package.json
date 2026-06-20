@@ -13,8 +13,8 @@
     "build": "npm --workspace @ai-product-workbench/api run build && npm --workspace @ai-product-workbench/web run build",
     "typecheck": "npm --workspace @ai-product-workbench/api run typecheck && npm --workspace @ai-product-workbench/web run typecheck",
     "test": "npm --workspace @ai-product-workbench/api run test",
-    "db:generate": "npm --workspace @ai-product-workbench/database run generate",
-    "db:migrate": "npm --workspace @ai-product-workbench/database run migrate",
+    "db:generate": "prisma generate --schema packages/database/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema packages/database/prisma/schema.prisma",
     "db:seed": "npm --workspace @ai-product-workbench/database run seed"
   },
   "devDependencies": {

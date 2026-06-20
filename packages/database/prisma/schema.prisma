@@ -17,6 +17,40 @@ enum UserStatus {
   disabled
 }
 
+enum ProjectStatus {
+  draft
+  clarifying
+  designing
+  prd_ready
+  prototype_ready
+  qa_failed
+  completed
+  archived
+  deleted
+}
+
+enum ConversationStatus {
+  active
+  archived
+  deleted
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+}
+
+enum MessageType {
+  text
+  clarification
+  agent_summary
+  error
+  prd_update
+  prototype_update
+  qa_update
+}
+
 model User {
   id             String          @id @default(cuid())
   username       String          @unique
@@ -29,22 +63,101 @@ model User {
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")
   loginAuditLogs LoginAuditLog[]
+  projects       Project[]
+  conversations  Conversation[]
+  messages       Message[]
 
   @@map("users")
 }
 
 model LoginAuditLog {
-  id          String   @id @default(cuid())
-  userId      String?  @map("user_id")
-  account     String
-  success     Boolean
-  failReason  String?  @map("fail_reason")
-  ip          String?
-  userAgent   String?  @map("user_agent")
-  createdAt   DateTime @default(now()) @map("created_at")
-  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  account    String
+  success    Boolean
+  failReason String?  @map("fail_reason")
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([account])
   @@index([userId])
   @@map("login_audit_logs")
+}
+
+model Project {
+  id                          String         @id @default(cuid())
+  ownerId                     String         @map("owner_id")
+  title                       String
+  description                 String?
+  status                      ProjectStatus  @default(draft)
+  currentConversationId       String?        @map("current_conversation_id")
+  currentProductDesignStateId String?        @map("current_product_design_state_id")
+  currentPrdDocumentId        String?        @map("current_prd_document_id")
+  currentPrototypeArtifactId  String?        @map("current_prototype_artifact_id")
+  latestQaReportId            String?        @map("latest_qa_report_id")
+  lastActivityAt              DateTime       @default(now()) @map("last_activity_at")
+  archivedAt                  DateTime?      @map("archived_at")
+  deletedAt                   DateTime?      @map("deleted_at")
+  createdAt                   DateTime       @default(now()) @map("created_at")
+  updatedAt                   DateTime       @updatedAt @map("updated_at")
+  owner                       User           @relation(fields: [ownerId], references: [id])
+  conversations               Conversation[]
+  messages                    Message[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([lastActivityAt])
+  @@index([deletedAt])
+  @@map("projects")
+}
+
+model Conversation {
+  id            String             @id @default(cuid())
+  projectId     String             @map("project_id")
+  ownerId       String             @map("owner_id")
+  title         String
+  summary       String?
+  messageCount  Int                @default(0) @map("message_count")
+  lastMessageAt DateTime?          @map("last_message_at")
+  status        ConversationStatus @default(active)
+  deletedAt     DateTime?          @map("deleted_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  project       Project            @relation(fields: [projectId], references: [id])
+  owner         User               @relation(fields: [ownerId], references: [id])
+  messages      Message[]
+
+  @@index([projectId])
+  @@index([ownerId])
+  @@index([lastMessageAt])
+  @@index([deletedAt])
+  @@map("conversations")
+}
+
+model Message {
+  id                         String       @id @default(cuid())
+  projectId                  String       @map("project_id")
+  conversationId             String       @map("conversation_id")
+  userId                     String?      @map("user_id")
+  role                       MessageRole
+  type                       MessageType  @default(text)
+  content                    String
+  attachments                Json?
+  metadata                   Json?
+  relatedRunId               String?      @map("related_run_id")
+  relatedPrdDocumentId       String?      @map("related_prd_document_id")
+  relatedPrototypeArtifactId String?      @map("related_prototype_artifact_id")
+  relatedQaReportId          String?      @map("related_qa_report_id")
+  createdAt                  DateTime     @default(now()) @map("created_at")
+  project                    Project      @relation(fields: [projectId], references: [id])
+  conversation               Conversation @relation(fields: [conversationId], references: [id])
+  user                       User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([conversationId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("messages")
 }

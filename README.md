@@ -1,6 +1,15 @@
-# AI产品工作台（内测）模块 1
+# AI产品工作台（内测）
 
-一期实现范围：用户登录、JWT 鉴权、角色权限、用户管理、前端权限路由和基础页面。
+当前实现范围覆盖模块 1-3：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统。
+
+## 已实现能力
+
+- 模块 1：登录、JWT 鉴权、角色权限、用户管理、前端权限路由。
+- 模块 2：用户端工作台三栏布局、项目侧栏、需求对话、PRD/原型/QA 预览、底部吸附输入框、加号扩展菜单。
+- 模块 3：Project / Conversation / Message 数据模型，项目创建、列表、搜索、打开、重命名、归档、软删除，默认会话与消息落库。
+- 模块 6 预留：`POST /api/ai/vibe/handle-message` 已提供占位实现，会保存用户消息和 AI 回复，并更新项目活跃时间。
+
+一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
 ## 技术栈
 
@@ -37,12 +46,14 @@ npm run dev
 ## 页面路由
 
 - `/login`：登录页，未登录可访问。
-- `/workspace`：工作台占位页，登录用户可访问。
+- `/workspace`：AI 产品工作台，登录用户可访问。
 - `/admin`：重定向到 `/admin/users`。
 - `/admin/users`：用户管理页，仅管理员可访问。
 - `/403`：无权限页，登录用户可访问。
 
 ## 核心 API
+
+认证与用户：
 
 - `POST /api/auth/login`
 - `GET /api/auth/me`
@@ -53,6 +64,31 @@ npm run dev
 - `POST /api/admin/users/:id/disable`
 - `POST /api/admin/users/:id/enable`
 - `POST /api/admin/users/:id/reset-password`
+
+项目、会话与消息：
+
+- `POST /api/projects`
+- `GET /api/projects`
+- `GET /api/projects/:projectId`
+- `PATCH /api/projects/:projectId`
+- `POST /api/projects/:projectId/archive`
+- `POST /api/projects/:projectId/restore`
+- `DELETE /api/projects/:projectId`
+- `GET /api/projects/:projectId/conversations`
+- `POST /api/projects/:projectId/conversations`
+- `POST /api/projects/:projectId/conversations/default`
+- `PATCH /api/conversations/:conversationId`
+- `DELETE /api/conversations/:conversationId`
+- `GET /api/conversations/:conversationId/messages`
+- `POST /api/ai/vibe/handle-message`
+
+## 权限规则
+
+- 普通用户只能访问自己的项目、会话和消息。
+- 管理员可以查看所有项目详情、会话和消息。
+- 一期管理员不直接修改用户项目内容。
+- 归档项目默认不出现在项目列表中，归档后不可继续发送消息。
+- 删除项目为软删除，默认列表不展示。
 
 ## 视觉依据
 

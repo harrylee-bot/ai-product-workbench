@@ -3,10 +3,10 @@
 import clsx from "clsx";
 import {
   AlertCircle,
+  Archive,
   Camera,
   Check,
   CheckCircle2,
-  ChevronRight,
   ChevronsLeft,
   ChevronsRight,
   Circle,
@@ -27,6 +27,7 @@ import {
   ScreenShare,
   Smartphone,
   Sparkles,
+  Trash2,
   Wand2,
   X,
 } from "lucide-react";
@@ -35,15 +36,21 @@ import { Modal } from "@/components/modal";
 import { ProtectedRoute } from "@/components/protected-route";
 import { Button, FieldLabel, TextInput } from "@/components/ui";
 import { UserMenu } from "@/components/user-menu";
+import { apiRequest, toQueryString } from "@/lib/api";
 
 type ProjectStatus =
   | "draft"
+  | "clarifying"
+  | "designing"
   | "generating"
   | "waiting"
   | "prd_ready"
   | "prototype_ready"
   | "qa_failed"
-  | "done";
+  | "done"
+  | "completed"
+  | "archived"
+  | "deleted";
 
 type MessageRole = "user" | "assistant";
 type StepStatus = "pending" | "running" | "success" | "failed" | "skipped";
@@ -104,6 +111,7 @@ type QaIssue = {
 
 type WorkspaceProject = {
   id: string;
+  conversationId?: string;
   title: string;
   summary: string;
   updatedAt: string;
@@ -118,10 +126,81 @@ type WorkspaceProject = {
   qaIssues: QaIssue[];
 };
 
+type ApiProject = {
+  id: string;
+  title: string;
+  description?: string;
+  status: ProjectStatus;
+  currentConversationId?: string;
+  lastActivityAt: string;
+  latestMessagePreview?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ApiConversation = {
+  id: string;
+  projectId: string;
+  title: string;
+  summary?: string;
+  messageCount: number;
+  lastMessageAt?: string;
+  status: "active" | "archived" | "deleted";
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ApiMessage = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  type: string;
+  content: string;
+  metadata?: unknown;
+  createdAt: string;
+};
+
+type ListProjectsResponse = {
+  items: ApiProject[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+type CreateProjectResponse = {
+  project: ApiProject;
+  defaultConversation: ApiConversation;
+};
+
+type GetProjectResponse = {
+  project: ApiProject;
+  conversations: ApiConversation[];
+};
+
+type ListMessagesResponse = {
+  items: ApiMessage[];
+  hasMore: boolean;
+};
+
+type HandleMessageResponse = {
+  projectId: string;
+  conversationId: string;
+  userMessage: ApiMessage;
+  assistantMessage: ApiMessage;
+  runId: string | null;
+};
+
 const STATUS_META: Record<ProjectStatus, { label: string; className: string }> = {
   draft: {
     label: "草稿",
     className: "border-gray-200 bg-white text-gray-600",
+  },
+  clarifying: {
+    label: "等待确认",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+  designing: {
+    label: "生成中",
+    className: "border-sky-200 bg-sky-50 text-sky-700",
   },
   generating: {
     label: "生成中",
@@ -146,6 +225,18 @@ const STATUS_META: Record<ProjectStatus, { label: string; className: string }> =
   done: {
     label: "已完成",
     className: "border-green-200 bg-green-50 text-green-700",
+  },
+  completed: {
+    label: "已完成",
+    className: "border-green-200 bg-green-50 text-green-700",
+  },
+  archived: {
+    label: "已归档",
+    className: "border-gray-200 bg-gray-100 text-gray-600",
+  },
+  deleted: {
+    label: "已删除",
+    className: "border-rose-200 bg-rose-50 text-rose-700",
   },
 };
 
@@ -356,90 +447,6 @@ const SAMPLE_PROTOTYPE_HTML = `<!doctype html>
 </body>
 </html>`;
 
-const INITIAL_PROJECTS: WorkspaceProject[] = [
-  {
-    id: "project-signin",
-    title: "签到活动需求与原型",
-    summary: "已生成 PRD 与 HTML 原型，QA 提示 2 个待修正点",
-    updatedAt: "刚刚",
-    status: "qa_failed",
-    messages: [
-      {
-        id: "m-1",
-        role: "user",
-        content: "帮我做一个签到活动需求和原型，重点看用户端体验。",
-        time: "10:24",
-      },
-      {
-        id: "m-2",
-        role: "assistant",
-        content:
-          "已完成一期生成：PRD 覆盖背景、范围、流程和验收标准；原型提供移动端签到主路径；QA 发现 2 个一致性问题，可继续局部修改。",
-        time: "10:26",
-      },
-    ],
-    prdState: "ready",
-    prdSections: DEFAULT_PRD_SECTIONS,
-    prototypeState: "ready",
-    prototypeHtml: SAMPLE_PROTOTYPE_HTML,
-    qaStatus: "issues",
-    qaIssues: DEFAULT_QA_ISSUES,
-  },
-  {
-    id: "project-points",
-    title: "会员积分商城后台配置",
-    summary: "等待确认积分兑换、库存扣减和审核规则",
-    updatedAt: "12 分钟前",
-    status: "waiting",
-    messages: [
-      {
-        id: "m-3",
-        role: "user",
-        content: "设计一个会员积分商城后台配置页。",
-        time: "09:48",
-      },
-      {
-        id: "m-4",
-        role: "assistant",
-        content: "我需要先确认几个规则细节，确认后再生成 PRD 和原型会更准确。",
-        time: "09:49",
-      },
-    ],
-    clarificationQuestions: [
-      {
-        id: "cq-1",
-        title: "商品兑换是否需要人工审核？",
-        options: ["不需要，用户兑换后自动扣减库存", "高价值商品需要审核", "全部兑换都需要审核"],
-      },
-      {
-        id: "cq-2",
-        title: "一期是否包含物流发货管理？",
-        options: ["只做虚拟权益", "包含实物发货", "先预留字段不做流程"],
-      },
-    ],
-    prdState: "empty",
-    prdSections: [],
-    prototypeState: "empty",
-    prototypeHtml: "",
-    qaStatus: "unchecked",
-    qaIssues: [],
-  },
-  {
-    id: "project-doc",
-    title: "初版需求文档补全",
-    summary: "草稿项目，尚未开始生成",
-    updatedAt: "昨天",
-    status: "draft",
-    messages: [],
-    prdState: "empty",
-    prdSections: [],
-    prototypeState: "empty",
-    prototypeHtml: "",
-    qaStatus: "unchecked",
-    qaIssues: [],
-  },
-];
-
 function createAgentSteps() {
   return AGENT_TEMPLATE.map((step) => ({ ...step }));
 }
@@ -456,19 +463,103 @@ function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function deriveProjectTitle(message: string) {
-  const compact = message.replace(/\s+/g, "").slice(0, 16);
-  if (!compact) return "未命名产品项目";
-  return compact.length >= 16 ? `${compact.slice(0, 15)}...` : compact;
+function formatRelativeTime(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(Math.floor(diffMs / 60000), 0);
+  if (diffMinutes < 1) return "刚刚";
+  if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} 小时前`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "昨天";
+  if (diffDays < 7) return `${diffDays} 天前`;
+  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function formatMessageTime(value?: string) {
+  const date = value ? new Date(value) : new Date();
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(Number.isNaN(date.getTime()) ? new Date() : date);
+}
+
+function mapProject(project: ApiProject, messages: ChatMessage[] = []): WorkspaceProject {
+  const hasGeneratedPreview =
+    project.status === "prd_ready" ||
+    project.status === "prototype_ready" ||
+    project.status === "qa_failed" ||
+    project.status === "completed";
+
+  return {
+    id: project.id,
+    conversationId: project.currentConversationId,
+    title: project.title,
+    summary: project.latestMessagePreview ?? project.description ?? "新项目，等待输入产品需求",
+    updatedAt: formatRelativeTime(project.lastActivityAt),
+    status: project.status,
+    messages,
+    prdState: hasGeneratedPreview ? "ready" : "empty",
+    prdSections: hasGeneratedPreview ? DEFAULT_PRD_SECTIONS : [],
+    prototypeState:
+      project.status === "prototype_ready" ||
+      project.status === "qa_failed" ||
+      project.status === "completed"
+        ? "ready"
+        : "empty",
+    prototypeHtml:
+      project.status === "prototype_ready" ||
+      project.status === "qa_failed" ||
+      project.status === "completed"
+        ? SAMPLE_PROTOTYPE_HTML
+        : "",
+    qaStatus: project.status === "qa_failed" ? "issues" : "unchecked",
+    qaIssues: project.status === "qa_failed" ? DEFAULT_QA_ISSUES : [],
+  };
+}
+
+function mapMessage(message: ApiMessage): ChatMessage | null {
+  if (message.role === "system") return null;
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    time: formatMessageTime(message.createdAt),
+  };
+}
+
+function preservePreviewState(project: WorkspaceProject) {
+  return {
+    clarificationQuestions: project.clarificationQuestions,
+    prdState: project.prdState,
+    prdSections: project.prdSections,
+    prototypeState: project.prototypeState,
+    prototypeHtml: project.prototypeHtml,
+    qaStatus: project.qaStatus,
+    qaIssues: project.qaIssues,
+  };
 }
 
 export function WorkspaceClient() {
-  const [projects, setProjects] = useState<WorkspaceProject[]>(INITIAL_PROJECTS);
-  const [currentProjectId, setCurrentProjectId] = useState(INITIAL_PROJECTS[0]?.id ?? "");
+  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [currentProjectId, setCurrentProjectId] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [projectEditor, setProjectEditor] = useState<WorkspaceProject | null>(null);
+  const [projectTitleDraft, setProjectTitleDraft] = useState("");
+  const [projectActionLoading, setProjectActionLoading] = useState<"save" | "archive" | "delete" | null>(null);
+  const [projectActionError, setProjectActionError] = useState<string | null>(null);
+  const [projectListLoading, setProjectListLoading] = useState(true);
+  const [projectListError, setProjectListError] = useState<string | null>(null);
+  const [projectDetailLoading, setProjectDetailLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
   const [previewTab, setPreviewTab] = useState<PreviewTab>("prd");
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
@@ -499,6 +590,82 @@ export function WorkspaceClient() {
     };
   }, []);
 
+  const loadProjects = async (preferredProjectId = currentProjectId) => {
+    setProjectListLoading(true);
+    setProjectListError(null);
+    try {
+      const response = await apiRequest<ListProjectsResponse>(
+        `/projects${toQueryString({ page: 1, pageSize: 50 })}`,
+      );
+      const mappedProjects = response.items.map((project) => mapProject(project));
+      setProjects((previousProjects) =>
+        mappedProjects.map((project) => {
+          const previous = previousProjects.find((item) => item.id === project.id);
+          return previous ? { ...project, ...preservePreviewState(previous), messages: previous.messages } : project;
+        }),
+      );
+
+      if (mappedProjects.length === 0) {
+        setCurrentProjectId("");
+        return;
+      }
+
+      const nextProjectId =
+        mappedProjects.find((project) => project.id === preferredProjectId)?.id ?? mappedProjects[0].id;
+      setCurrentProjectId(nextProjectId);
+      await loadProjectDetail(nextProjectId);
+    } catch (error) {
+      setProjectListError(error instanceof Error ? error.message : "项目列表加载失败");
+    } finally {
+      setProjectListLoading(false);
+    }
+  };
+
+  const loadProjectDetail = async (projectId: string) => {
+    setProjectDetailLoading(true);
+    setWorkspaceError(null);
+    try {
+      const detail = await apiRequest<GetProjectResponse>(`/projects/${projectId}`);
+      const conversationId =
+        detail.project.currentConversationId ?? detail.conversations.find((item) => item.status === "active")?.id;
+      let messages: ChatMessage[] = [];
+
+      if (conversationId) {
+        const response = await apiRequest<ListMessagesResponse>(
+          `/conversations/${conversationId}/messages${toQueryString({ limit: 50 })}`,
+        );
+        messages = response.items.map(mapMessage).filter((message): message is ChatMessage => Boolean(message));
+      }
+
+      setProjects((items) =>
+        items.map((project) =>
+          project.id === projectId
+            ? {
+                ...project,
+                ...mapProject(
+                  {
+                    ...detail.project,
+                    currentConversationId: conversationId,
+                    latestMessagePreview: messages.at(-1)?.content ?? project.summary,
+                  },
+                  messages,
+                ),
+                ...preservePreviewState(project),
+              }
+            : project,
+        ),
+      );
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "项目详情加载失败");
+    } finally {
+      setProjectDetailLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadProjects();
+  }, []);
+
   const clearRunTimers = () => {
     timersRef.current.forEach((timer) => window.clearTimeout(timer));
     timersRef.current = [];
@@ -509,56 +676,143 @@ export function WorkspaceClient() {
     timersRef.current.push(timer);
   };
 
-  const createProject = () => {
+  const createProject = async () => {
     const title = newProjectName.trim() || "未命名产品项目";
-    const project: WorkspaceProject = {
-      id: createId("project"),
-      title,
-      summary: "新项目，等待输入产品需求",
-      updatedAt: "刚刚",
-      status: "draft",
-      messages: [],
-      prdState: "empty",
-      prdSections: [],
-      prototypeState: "empty",
-      prototypeHtml: "",
-      qaStatus: "unchecked",
-      qaIssues: [],
-    };
-    setProjects((items) => [project, ...items]);
-    setCurrentProjectId(project.id);
-    setNewProjectOpen(false);
-    setNewProjectName("");
-    setComposerValue("");
-    setPreviewTab("prd");
-    setSelectedRegion(null);
-    setLocalEditEnabled(false);
-    setAgentSteps(createAgentSteps());
+    setWorkspaceError(null);
+    setIsCreatingProject(true);
+
+    try {
+      const response = await apiRequest<CreateProjectResponse>("/projects", {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      });
+      const project = mapProject(
+        {
+          ...response.project,
+          currentConversationId: response.defaultConversation.id,
+        },
+        [],
+      );
+
+      setProjects((items) => [project, ...items]);
+      setCurrentProjectId(project.id);
+      setNewProjectOpen(false);
+      setNewProjectName("");
+      setComposerValue("");
+      setPreviewTab("prd");
+      setSelectedRegion(null);
+      setLocalEditEnabled(false);
+      setAgentSteps(createAgentSteps());
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "项目创建失败");
+    } finally {
+      setIsCreatingProject(false);
+    }
   };
 
-  const ensureProjectForMessage = (message: string) => {
-    if (currentProject) return currentProject.id;
-
-    const project: WorkspaceProject = {
-      id: createId("project"),
-      title: deriveProjectTitle(message),
-      summary: "正在生成产品设计方案",
-      updatedAt: "刚刚",
-      status: "generating",
-      messages: [],
-      prdState: "empty",
-      prdSections: [],
-      prototypeState: "empty",
-      prototypeHtml: "",
-      qaStatus: "unchecked",
-      qaIssues: [],
-    };
-    setProjects((items) => [project, ...items]);
-    setCurrentProjectId(project.id);
-    return project.id;
+  const openProjectEditor = (project: WorkspaceProject) => {
+    setProjectEditor(project);
+    setProjectTitleDraft(project.title);
+    setProjectActionError(null);
+    setProjectActionLoading(null);
   };
 
-  const runMockGeneration = (targetProjectId: string) => {
+  const closeProjectEditor = () => {
+    if (projectActionLoading) return;
+    resetProjectEditor();
+  };
+
+  const resetProjectEditor = () => {
+    setProjectEditor(null);
+    setProjectTitleDraft("");
+    setProjectActionError(null);
+  };
+
+  const saveProjectTitle = async () => {
+    if (!projectEditor) return;
+    const title = projectTitleDraft.trim();
+    if (!title) {
+      setProjectActionError("项目名称不能为空");
+      return;
+    }
+
+    setProjectActionLoading("save");
+    setProjectActionError(null);
+    try {
+      const updated = await apiRequest<ApiProject>(`/projects/${projectEditor.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      });
+
+      setProjects((items) =>
+        items.map((project) =>
+          project.id === projectEditor.id
+            ? {
+                ...project,
+                ...mapProject(
+                  {
+                    ...updated,
+                    latestMessagePreview: project.summary,
+                  },
+                  project.messages,
+                ),
+                ...preservePreviewState(project),
+              }
+            : project,
+        ),
+      );
+      resetProjectEditor();
+    } catch (error) {
+      setProjectActionError(error instanceof Error ? error.message : "项目更新失败");
+    } finally {
+      setProjectActionLoading(null);
+    }
+  };
+
+  const archiveProject = async () => {
+    if (!projectEditor) return;
+    setProjectActionLoading("archive");
+    setProjectActionError(null);
+    try {
+      await apiRequest<ApiProject>(`/projects/${projectEditor.id}/archive`, { method: "POST" });
+      const remainingProjects = projects.filter((project) => project.id !== projectEditor.id);
+      setProjects(remainingProjects);
+      const nextProjectId =
+        currentProjectId === projectEditor.id ? remainingProjects[0]?.id ?? "" : currentProjectId;
+      setCurrentProjectId(nextProjectId);
+      resetProjectEditor();
+      if (nextProjectId) void loadProjectDetail(nextProjectId);
+    } catch (error) {
+      setProjectActionError(error instanceof Error ? error.message : "项目归档失败");
+    } finally {
+      setProjectActionLoading(null);
+    }
+  };
+
+  const deleteProject = async () => {
+    if (!projectEditor) return;
+    const confirmed = window.confirm(`确认删除“${projectEditor.title}”？项目会被软删除，默认列表中不再展示。`);
+    if (!confirmed) return;
+
+    setProjectActionLoading("delete");
+    setProjectActionError(null);
+    try {
+      await apiRequest<{ success: true }>(`/projects/${projectEditor.id}`, { method: "DELETE" });
+      const remainingProjects = projects.filter((project) => project.id !== projectEditor.id);
+      setProjects(remainingProjects);
+      const nextProjectId =
+        currentProjectId === projectEditor.id ? remainingProjects[0]?.id ?? "" : currentProjectId;
+      setCurrentProjectId(nextProjectId);
+      resetProjectEditor();
+      if (nextProjectId) void loadProjectDetail(nextProjectId);
+    } catch (error) {
+      setProjectActionError(error instanceof Error ? error.message : "项目删除失败");
+    } finally {
+      setProjectActionLoading(null);
+    }
+  };
+
+  const runMockGeneration = (targetProjectId: string, assistantMessage?: ChatMessage) => {
     clearRunTimers();
     setIsRunning(true);
     setAgentSteps(createAgentSteps());
@@ -680,16 +934,11 @@ export function WorkspaceClient() {
                 updatedAt: "刚刚",
                 qaStatus: "issues",
                 qaIssues: DEFAULT_QA_ISSUES,
-                messages: [
-                  ...project.messages,
-                  {
-                    id: createId("assistant"),
-                    role: "assistant",
-                    content:
-                      "已完成一期生成：PRD、HTML 原型和 QA 报告都已就绪。QA 发现 2 个可修正点，你可以在右侧选中文档段落或开启原型局部编辑后继续改。",
-                    time: getClockTime(),
-                  },
-                ],
+                messages: assistantMessage
+                  ? project.messages.some((message) => message.id === assistantMessage.id)
+                    ? project.messages
+                    : [...project.messages, assistantMessage]
+                  : project.messages,
               }
             : project,
         ),
@@ -699,11 +948,37 @@ export function WorkspaceClient() {
     }, 7600);
   };
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     const message = composerValue.trim();
     if (!message || isRunning) return;
+    if (!currentProject) {
+      setWorkspaceError("请先新建项目，再发送产品需求");
+      return;
+    }
 
-    const targetProjectId = ensureProjectForMessage(message);
+    let targetConversationId = currentProject.conversationId;
+    setWorkspaceError(null);
+
+    if (!targetConversationId) {
+      try {
+        const conversation = await apiRequest<ApiConversation>(
+          `/projects/${currentProject.id}/conversations/default`,
+          { method: "POST" },
+        );
+        targetConversationId = conversation.id;
+        setProjects((items) =>
+          items.map((project) =>
+            project.id === currentProject.id
+              ? { ...project, conversationId: conversation.id }
+              : project,
+          ),
+        );
+      } catch (error) {
+        setWorkspaceError(error instanceof Error ? error.message : "默认会话创建失败");
+        return;
+      }
+    }
+
     const userMessage: ChatMessage = {
       id: createId("user"),
       role: "user",
@@ -714,10 +989,9 @@ export function WorkspaceClient() {
 
     setProjects((items) =>
       items.map((project) =>
-        project.id === targetProjectId
+        project.id === currentProject.id
           ? {
               ...project,
-              title: project.messages.length === 0 ? deriveProjectTitle(message) : project.title,
               summary: selectedRegion
                 ? `正在根据“${selectedRegion.label ?? "选中区域"}”生成局部修改`
                 : "正在生成产品设计方案",
@@ -732,7 +1006,43 @@ export function WorkspaceClient() {
     setComposerValue("");
     setSelectedRegion(null);
     setLocalEditEnabled(false);
-    runMockGeneration(targetProjectId);
+
+    try {
+      const response = await apiRequest<HandleMessageResponse>("/ai/vibe/handle-message", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          conversationId: targetConversationId,
+          message,
+          selectedRegion,
+          previewMode: previewTab,
+        }),
+      });
+      const savedUserMessage = mapMessage(response.userMessage);
+      const savedAssistantMessage = mapMessage(response.assistantMessage);
+
+      if (savedUserMessage) {
+        setProjects((items) =>
+          items.map((project) =>
+            project.id === currentProject.id
+              ? {
+                  ...project,
+                  conversationId: response.conversationId,
+                  messages: project.messages.map((item) =>
+                    item.id === userMessage.id ? { ...savedUserMessage, selectedRegion } : item,
+                  ),
+                }
+              : project,
+          ),
+        );
+      }
+
+      runMockGeneration(currentProject.id, savedAssistantMessage ?? undefined);
+      void loadProjects(currentProject.id);
+    } catch (error) {
+      setIsRunning(false);
+      setWorkspaceError(error instanceof Error ? error.message : "消息发送失败");
+    }
   };
 
   const replyWithClarification = (answer: string) => {
@@ -761,6 +1071,17 @@ export function WorkspaceClient() {
     setComposerValue((value) => value || "请把选中区域调整为：");
   };
 
+  const selectProject = (projectId: string) => {
+    setCurrentProjectId(projectId);
+    setSelectedRegion(null);
+    setLocalEditEnabled(false);
+    setComposerValue("");
+    setAgentSteps(createAgentSteps());
+    setIsRunning(false);
+    clearRunTimers();
+    void loadProjectDetail(projectId);
+  };
+
   return (
     <ProtectedRoute>
       <main className="grid h-[100dvh] max-h-[100dvh] min-h-0 grid-rows-[56px_minmax(0,1fr)] overflow-hidden bg-slate-50 text-gray-950">
@@ -778,27 +1099,26 @@ export function WorkspaceClient() {
             filteredProjects={filteredProjects}
             currentProjectId={currentProjectId}
             projectSearch={projectSearch}
+            projectListLoading={projectListLoading}
+            projectListError={projectListError}
             onSearchChange={setProjectSearch}
             onCollapseToggle={() => setSidebarCollapsed((value) => !value)}
             onNewProject={() => setNewProjectOpen(true)}
-            onSelectProject={(projectId) => {
-              setCurrentProjectId(projectId);
-              setSelectedRegion(null);
-              setLocalEditEnabled(false);
-              setComposerValue("");
-              setAgentSteps(createAgentSteps());
-              setIsRunning(false);
-              clearRunTimers();
-            }}
+            onRetryProjects={() => void loadProjects(currentProjectId)}
+            onSelectProject={selectProject}
+            onEditProject={openProjectEditor}
           />
           <ChatPanel
             project={currentProject}
             composerValue={composerValue}
             isRunning={isRunning}
+            projectDetailLoading={projectDetailLoading}
+            workspaceError={workspaceError}
             agentSteps={agentSteps}
             selectedRegion={selectedRegion}
             onComposerChange={setComposerValue}
             onPromptClick={setComposerValue}
+            onNewProject={() => setNewProjectOpen(true)}
             onSend={sendMessage}
             onClarificationClick={replyWithClarification}
             onClearSelectedRegion={() => setSelectedRegion(null)}
@@ -824,10 +1144,23 @@ export function WorkspaceClient() {
         value={newProjectName}
         onChange={setNewProjectName}
         onCreate={createProject}
+        creating={isCreatingProject}
         onClose={() => {
+          if (isCreatingProject) return;
           setNewProjectOpen(false);
           setNewProjectName("");
         }}
+      />
+      <ProjectEditorDialog
+        project={projectEditor}
+        titleDraft={projectTitleDraft}
+        loading={projectActionLoading}
+        error={projectActionError}
+        onTitleChange={setProjectTitleDraft}
+        onSave={saveProjectTitle}
+        onArchive={archiveProject}
+        onDelete={deleteProject}
+        onClose={closeProjectEditor}
       />
     </ProtectedRoute>
   );
@@ -870,19 +1203,27 @@ function WorkspaceSidebar({
   filteredProjects,
   currentProjectId,
   projectSearch,
+  projectListLoading,
+  projectListError,
   onSearchChange,
   onCollapseToggle,
   onNewProject,
+  onRetryProjects,
   onSelectProject,
+  onEditProject,
 }: {
   collapsed: boolean;
   filteredProjects: WorkspaceProject[];
   currentProjectId: string;
   projectSearch: string;
+  projectListLoading: boolean;
+  projectListError: string | null;
   onSearchChange: (value: string) => void;
   onCollapseToggle: () => void;
   onNewProject: () => void;
+  onRetryProjects: () => void;
   onSelectProject: (projectId: string) => void;
+  onEditProject: (project: WorkspaceProject) => void;
 }) {
   return (
     <aside className="flex min-w-0 flex-col border-r border-gray-200 bg-white">
@@ -946,17 +1287,46 @@ function WorkspaceSidebar({
       </div>
 
       <div className={clsx("min-h-0 flex-1 overflow-y-auto", collapsed ? "px-2 py-3" : "p-3")}>
-        <div className="space-y-2">
-          {filteredProjects.map((project) => (
-            <ProjectListItem
-              key={project.id}
-              project={project}
-              selected={project.id === currentProjectId}
-              collapsed={collapsed}
-              onClick={() => onSelectProject(project.id)}
-            />
-          ))}
-        </div>
+        {projectListLoading ? (
+          <SidebarNotice
+            collapsed={collapsed}
+            icon={Loader2}
+            title="加载中"
+            description="正在同步项目列表"
+            iconClassName="animate-spin text-sky-600"
+          />
+        ) : projectListError ? (
+          <SidebarNotice
+            collapsed={collapsed}
+            icon={AlertCircle}
+            title="加载失败"
+            description={projectListError}
+            actionLabel="重试"
+            onAction={onRetryProjects}
+          />
+        ) : filteredProjects.length === 0 ? (
+          <SidebarNotice
+            collapsed={collapsed}
+            icon={FileText}
+            title={projectSearch.trim() ? "没有匹配项目" : "暂无项目"}
+            description={projectSearch.trim() ? "换个关键词试试" : "先新建项目，再发送产品需求"}
+            actionLabel={projectSearch.trim() ? undefined : "新建项目"}
+            onAction={projectSearch.trim() ? undefined : onNewProject}
+          />
+        ) : (
+          <div className="space-y-2">
+            {filteredProjects.map((project) => (
+              <ProjectListItem
+                key={project.id}
+                project={project}
+                selected={project.id === currentProjectId}
+                collapsed={collapsed}
+                onClick={() => onSelectProject(project.id)}
+                onEdit={() => onEditProject(project)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       <div className={clsx("border-t border-gray-200", collapsed ? "px-2 py-3" : "p-4")}>
@@ -972,16 +1342,61 @@ function WorkspaceSidebar({
   );
 }
 
+function SidebarNotice({
+  collapsed,
+  icon: Icon,
+  title,
+  description,
+  actionLabel,
+  iconClassName,
+  onAction,
+}: {
+  collapsed: boolean;
+  icon: typeof FileText;
+  title: string;
+  description: string;
+  actionLabel?: string;
+  iconClassName?: string;
+  onAction?: () => void;
+}) {
+  if (collapsed) {
+    return (
+      <div className="flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-gray-50">
+        <Icon className={clsx("h-4 w-4 text-gray-400", iconClassName)} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-4 text-center">
+      <Icon className={clsx("mx-auto h-5 w-5 text-gray-400", iconClassName)} />
+      <div className="mt-2 text-sm font-medium text-gray-900">{title}</div>
+      <div className="mt-1 text-xs leading-5 text-gray-500">{description}</div>
+      {actionLabel && onAction ? (
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          {actionLabel}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function ProjectListItem({
   project,
   selected,
   collapsed,
   onClick,
+  onEdit,
 }: {
   project: WorkspaceProject;
   selected: boolean;
   collapsed: boolean;
   onClick: () => void;
+  onEdit: () => void;
 }) {
   const status = STATUS_META[project.status];
 
@@ -1002,20 +1417,26 @@ function ProjectListItem({
   }
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={clsx(
-        "w-full rounded-lg border p-3 text-left transition hover:bg-gray-50",
-        selected ? "border-gray-950 bg-gray-50" : "border-gray-200 bg-white",
+        "w-full rounded-lg border bg-white p-3 text-left transition hover:bg-gray-50",
+        selected ? "border-gray-950 bg-gray-50" : "border-gray-200",
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+        <button type="button" onClick={onClick} className="min-w-0 flex-1 text-left">
           <div className="truncate text-sm font-semibold text-gray-950">{project.title}</div>
           <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{project.summary}</div>
-        </div>
-        <ChevronRight className={clsx("mt-0.5 h-4 w-4 shrink-0", selected ? "text-gray-950" : "text-gray-300")} />
+        </button>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-900"
+          aria-label="编辑项目"
+          title="编辑项目"
+        >
+          <Edit3 className="h-3.5 w-3.5" />
+        </button>
       </div>
       <div className="mt-3 flex items-center justify-between gap-2">
         <span className={clsx("inline-flex h-6 items-center rounded-full border px-2 text-xs font-medium", status.className)}>
@@ -1023,7 +1444,7 @@ function ProjectListItem({
         </span>
         <span className="text-xs text-gray-400">{project.updatedAt}</span>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -1031,10 +1452,13 @@ function ChatPanel({
   project,
   composerValue,
   isRunning,
+  projectDetailLoading,
+  workspaceError,
   agentSteps,
   selectedRegion,
   onComposerChange,
   onPromptClick,
+  onNewProject,
   onSend,
   onClarificationClick,
   onClearSelectedRegion,
@@ -1042,16 +1466,20 @@ function ChatPanel({
   project: WorkspaceProject | null;
   composerValue: string;
   isRunning: boolean;
+  projectDetailLoading: boolean;
+  workspaceError: string | null;
   agentSteps: AgentStep[];
   selectedRegion: SelectedRegion | null;
   onComposerChange: (value: string) => void;
   onPromptClick: (value: string) => void;
+  onNewProject: () => void;
   onSend: () => void;
   onClarificationClick: (value: string) => void;
   onClearSelectedRegion: () => void;
 }) {
   const messages = project?.messages ?? [];
   const showWelcome = messages.length === 0;
+  const showEmptyWorkspace = !project;
 
   return (
     <section className="relative grid h-full min-h-0 min-w-0 grid-rows-[48px_minmax(0,1fr)] overflow-hidden border-r border-gray-200 bg-slate-50">
@@ -1064,7 +1492,19 @@ function ChatPanel({
       </div>
 
       <div className="min-h-0 overflow-y-auto px-4 pb-[116px] pt-4">
-        {showWelcome ? (
+        {workspaceError ? (
+          <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm leading-6 text-rose-700">
+            {workspaceError}
+          </div>
+        ) : null}
+        {projectDetailLoading ? (
+          <div className="flex min-h-full items-center justify-center py-10 text-sm text-gray-500">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin text-sky-600" />
+            正在加载会话消息...
+          </div>
+        ) : showEmptyWorkspace ? (
+          <EmptyWorkspaceState onNewProject={onNewProject} onPromptClick={onPromptClick} />
+        ) : showWelcome ? (
           <WelcomeState onPromptClick={onPromptClick} />
         ) : (
           <div className="space-y-4">
@@ -1086,7 +1526,7 @@ function ChatPanel({
 
       <ChatComposer
         value={composerValue}
-        disabled={isRunning}
+        disabled={isRunning || projectDetailLoading}
         selectedRegion={selectedRegion}
         onChange={onComposerChange}
         onSend={onSend}
@@ -1109,6 +1549,48 @@ function WelcomeState({ onPromptClick }: { onPromptClick: (value: string) => voi
         </p>
         <div className="mt-6 grid gap-2">
           {PROMPTS.map((prompt) => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => onPromptClick(prompt)}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-3 text-left text-sm text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyWorkspaceState({
+  onNewProject,
+  onPromptClick,
+}: {
+  onNewProject: () => void;
+  onPromptClick: (value: string) => void;
+}) {
+  return (
+    <div className="flex min-h-full flex-col justify-center py-10">
+      <div className="mx-auto w-full max-w-[420px] text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-white text-gray-950 shadow-sm ring-1 ring-gray-200">
+          <Plus className="h-5 w-5" />
+        </div>
+        <h1 className="mt-5 text-2xl font-semibold leading-tight text-gray-950">先新建一个产品项目</h1>
+        <p className="mt-3 text-sm leading-6 text-gray-500">
+          一期每次产品设计都归属于一个项目。新建项目后，再在底部输入需求。
+        </p>
+        <button
+          type="button"
+          onClick={onNewProject}
+          className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-gray-950 px-4 text-sm font-medium text-white hover:bg-gray-800"
+        >
+          <Plus className="h-4 w-4" />
+          新建项目
+        </button>
+        <div className="mt-6 grid gap-2">
+          {PROMPTS.slice(0, 2).map((prompt) => (
             <button
               key={prompt}
               type="button"
@@ -1816,12 +2298,14 @@ function NewProjectDialog({
   value,
   onChange,
   onCreate,
+  creating,
   onClose,
 }: {
   open: boolean;
   value: string;
   onChange: (value: string) => void;
   onCreate: () => void;
+  creating: boolean;
   onClose: () => void;
 }) {
   return (
@@ -1831,12 +2315,12 @@ function NewProjectDialog({
       onClose={onClose}
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={creating}>
             取消
           </Button>
-          <Button type="button" onClick={onCreate}>
-            <Check className="h-4 w-4" />
-            创建
+          <Button type="button" onClick={onCreate} disabled={creating}>
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            {creating ? "创建中..." : "创建"}
           </Button>
         </>
       }
@@ -1847,8 +2331,84 @@ function NewProjectDialog({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder="例如：签到活动需求与原型"
+          disabled={creating}
           autoFocus
         />
+      </div>
+    </Modal>
+  );
+}
+
+function ProjectEditorDialog({
+  project,
+  titleDraft,
+  loading,
+  error,
+  onTitleChange,
+  onSave,
+  onArchive,
+  onDelete,
+  onClose,
+}: {
+  project: WorkspaceProject | null;
+  titleDraft: string;
+  loading: "save" | "archive" | "delete" | null;
+  error: string | null;
+  onTitleChange: (value: string) => void;
+  onSave: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const busy = Boolean(loading);
+
+  return (
+    <Modal
+      open={Boolean(project)}
+      title="项目设置"
+      onClose={onClose}
+      footer={
+        <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" onClick={onArchive} disabled={busy}>
+              {loading === "archive" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
+              归档
+            </Button>
+            <Button type="button" variant="danger" onClick={onDelete} disabled={busy}>
+              {loading === "delete" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              删除
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
+              取消
+            </Button>
+            <Button type="button" onClick={onSave} disabled={busy}>
+              {loading === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              保存
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <FieldLabel>项目名称</FieldLabel>
+          <TextInput
+            value={titleDraft}
+            onChange={(event) => onTitleChange(event.target.value)}
+            disabled={busy}
+            autoFocus
+          />
+        </div>
+        {error ? (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm leading-6 text-rose-700">
+            {error}
+          </div>
+        ) : null}
+        <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-xs leading-5 text-gray-500">
+          归档项目会从默认列表隐藏；删除为软删除，后续可在后台审计中恢复或追溯。
+        </div>
       </div>
     </Modal>
   );
