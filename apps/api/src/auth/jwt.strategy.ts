@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PassportStrategy } from "@nestjs/passport";
 import { ExtractJwt, Strategy } from "passport-jwt";
@@ -8,15 +8,18 @@ import type { AuthenticatedUser, JwtPayload } from "./auth.types";
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
+  private readonly prisma: PrismaService;
+
   constructor(
-    private readonly prisma: PrismaService,
-    configService: ConfigService,
+    @Inject(PrismaService) prisma: PrismaService,
+    @Inject(ConfigService) configService: ConfigService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: configService.get<string>("JWT_SECRET") ?? "dev-secret-change-me",
     });
+    this.prisma = prisma;
   }
 
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {

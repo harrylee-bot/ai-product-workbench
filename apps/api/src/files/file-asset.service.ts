@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -36,9 +37,9 @@ export class FileAssetService {
   private readonly uploadRoot: string;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly parser: FileParserService,
-    configService: ConfigService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(FileParserService) private readonly parser: FileParserService,
+    @Inject(ConfigService) configService: ConfigService,
   ) {
     this.uploadRoot =
       configService.get<string>("FILE_UPLOAD_ROOT") ??

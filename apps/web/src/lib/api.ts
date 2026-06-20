@@ -7,6 +7,12 @@ type ApiOptions = RequestInit & {
   tokenOverride?: string;
 };
 
+type ApiHealthResponse = {
+  ok: boolean;
+  service: string;
+  modules?: string[];
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -64,4 +70,16 @@ export function toQueryString(params: Record<string, string | number | undefined
   });
   const serialized = query.toString();
   return serialized ? `?${serialized}` : "";
+}
+
+export async function assertWorkbenchApiAvailable() {
+  const response = await apiRequest<ApiHealthResponse>("/system/health", { skipAuth: true });
+  const modules = new Set(response.modules ?? []);
+  if (
+    !response.ok ||
+    response.service !== "ai-product-workbench-api" ||
+    !modules.has("projects")
+  ) {
+    throw new ApiError("API 服务未启动或端口被旧服务占用，请重启后端服务", 503);
+  }
 }

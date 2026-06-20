@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { apiRequest } from "./api";
+import { apiRequest, assertWorkbenchApiAvailable } from "./api";
 import { clearSession, readSession, saveSession } from "./auth-storage";
 import type { LoginResponse, PublicUser, Session } from "./types";
 
@@ -47,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    await assertWorkbenchApiAvailable();
     const user = await apiRequest<PublicUser>("/auth/me", {
       tokenOverride: stored.accessToken,
     });
@@ -61,7 +62,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setSession(stored);
-    apiRequest<PublicUser>("/auth/me", { tokenOverride: stored.accessToken })
+    assertWorkbenchApiAvailable()
+      .then(() => apiRequest<PublicUser>("/auth/me", { tokenOverride: stored.accessToken }))
       .then((user) => {
         applySession({ accessToken: stored.accessToken, user });
       })
@@ -87,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (account: string, password: string) => {
+      await assertWorkbenchApiAvailable();
       const result = await apiRequest<LoginResponse>("/auth/login", {
         method: "POST",
         skipAuth: true,

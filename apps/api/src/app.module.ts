@@ -6,6 +6,7 @@ import { AuthModule } from "./auth/auth.module";
 import { FileModule } from "./files/file.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ProjectModule } from "./projects/project.module";
+import { SystemModule } from "./system/system.module";
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ProjectModule } from "./projects/project.module";
     ProjectModule,
     FileModule,
     AiModule,
+    SystemModule,
   ],
 })
 export class AppModule {}

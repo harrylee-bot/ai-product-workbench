@@ -37,6 +37,8 @@ npm run dev
 - 前端：http://localhost:3000
 - 后端：http://localhost:4000/api
 
+如果工作台提示 `not found`，优先检查 `4000` 端口是否被旧的 mock API 占用。真实后端应提供 `GET /api/system/health`，返回 `service: "ai-product-workbench-api"` 且包含 `projects` 模块。
+
 ## 默认账号
 
 | 角色 | 用户名 | 邮箱 | 密码 |
