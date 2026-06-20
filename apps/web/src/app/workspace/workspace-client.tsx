@@ -763,11 +763,11 @@ export function WorkspaceClient() {
 
   return (
     <ProtectedRoute>
-      <main className="fixed inset-0 grid grid-rows-[56px_minmax(0,1fr)] overflow-hidden bg-slate-50 text-gray-950">
+      <main className="grid h-[100dvh] max-h-[100dvh] min-h-0 grid-rows-[56px_minmax(0,1fr)] overflow-hidden bg-slate-50 text-gray-950">
         <WorkspaceTopBar currentProject={currentProject} isRunning={isRunning} />
         <div
           className={clsx(
-            "grid min-h-0 overflow-x-auto overflow-y-hidden transition-[grid-template-columns] duration-200",
+            "grid h-full min-h-0 overflow-x-auto overflow-y-hidden transition-[grid-template-columns] duration-200",
             sidebarCollapsed
               ? "min-w-[1044px] grid-cols-[64px_minmax(460px,520px)_minmax(520px,1fr)]"
               : "min-w-[1260px] grid-cols-[280px_minmax(460px,520px)_minmax(520px,1fr)]",
@@ -1054,7 +1054,7 @@ function ChatPanel({
   const showWelcome = messages.length === 0;
 
   return (
-    <section className="grid h-full min-h-0 min-w-0 grid-rows-[48px_minmax(0,1fr)_auto] overflow-hidden border-r border-gray-200 bg-slate-50">
+    <section className="relative grid h-full min-h-0 min-w-0 grid-rows-[48px_minmax(0,1fr)] overflow-hidden border-r border-gray-200 bg-slate-50">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
           <MessageSquare className="h-4 w-4" />
@@ -1063,7 +1063,7 @@ function ChatPanel({
         <span className="text-xs text-gray-500">{isRunning ? "生成中..." : "可继续输入"}</span>
       </div>
 
-      <div className="min-h-0 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 overflow-y-auto px-4 pb-[116px] pt-4">
         {showWelcome ? (
           <WelcomeState onPromptClick={onPromptClick} />
         ) : (
@@ -1278,7 +1278,7 @@ function ChatComposer({
   ];
 
   return (
-    <div className="z-20 shrink-0 border-t border-gray-200 bg-slate-50/95 p-3 shadow-[0_-10px_24px_rgba(15,23,42,0.06)] backdrop-blur">
+    <div className="absolute inset-x-0 bottom-0 z-20 shrink-0 border-t border-gray-200 bg-slate-50/95 p-3 shadow-[0_-10px_24px_rgba(15,23,42,0.06)] backdrop-blur">
       {selectedRegion ? (
         <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
           <div className="min-w-0 text-xs text-sky-800">
@@ -1389,7 +1389,7 @@ function PreviewPanel({
   onClearSelectedRegion: () => void;
 }) {
   return (
-    <section className="flex min-w-0 flex-col bg-slate-100">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-slate-100">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4">
         <PreviewTabs activeTab={previewTab} onChange={onPreviewTabChange} />
         <div className="flex items-center gap-2">
