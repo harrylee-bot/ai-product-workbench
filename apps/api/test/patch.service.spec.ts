@@ -74,6 +74,9 @@ describe("PatchService", () => {
   const prototypeService = {
     saveGeneratedPrototype: vi.fn(),
   };
+  const qaService = {
+    runForProject: vi.fn(),
+  };
   const patchAgent = {
     run: vi.fn(),
   };
@@ -99,6 +102,7 @@ describe("PatchService", () => {
     stateService as never,
     documentService as never,
     prototypeService as never,
+    qaService as never,
     patchAgent as never,
     prdWriterAgent as never,
     prototypeDesignerAgent as never,
@@ -184,10 +188,7 @@ describe("PatchService", () => {
       prototypeSpec: basePrototypeSpec(),
       artifact: baseArtifact(),
     });
-    qaAgent.run.mockResolvedValue({
-      data: { passed: true, issues: [], suggestions: ["通过"], autoFixable: true },
-      modelCallLogId: "model-qa",
-    });
+    qaService.runForProject.mockResolvedValue(baseQaReport());
 
     const result = await service.createPatchForUser(user, "project-1", {
       conversationId: "conversation-1",
@@ -229,15 +230,13 @@ describe("PatchService", () => {
       expect.any(Object),
       expect.objectContaining({ reason: "Patch 后重新生成 HTML 原型" }),
     );
-    expect(qaAgent.run).toHaveBeenCalledWith(
+    expect(qaService.runForProject).toHaveBeenCalledWith(
+      "project-1",
+      "user-1",
       expect.objectContaining({
-        input: expect.objectContaining({
-          productDesignState: stateWithArtifacts,
-          patchPlan: expect.objectContaining({ id: "patch-plan-1" }),
-          knowledgeContext: expect.objectContaining({
-            strongRules: [],
-          }),
-        }),
+        trigger: "patch",
+        runId: "run-1",
+        relatedPatchId: "patch-1",
       }),
     );
     expect(knowledgeRetrieval.search).toHaveBeenCalledWith(
@@ -556,10 +555,38 @@ function patchRecordRow(input: Record<string, unknown>) {
       typeof input.afterProductDesignStateVersion === "number" ? input.afterProductDesignStateVersion : null,
     affectedPrdDocumentId: input.affectedPrdDocumentId ? String(input.affectedPrdDocumentId) : null,
     affectedPrototypeArtifactId: input.affectedPrototypeArtifactId ? String(input.affectedPrototypeArtifactId) : null,
+    relatedQaReportId: input.relatedQaReportId ? String(input.relatedQaReportId) : null,
     generatedByRunId: input.generatedByRunId ? String(input.generatedByRunId) : "run-1",
     errorMessage: input.errorMessage ? String(input.errorMessage) : null,
     createdBy: String(input.createdBy ?? "user-1"),
     createdAt: input.createdAt instanceof Date ? input.createdAt : new Date("2026-06-20T08:00:00Z"),
     updatedAt: input.updatedAt instanceof Date ? input.updatedAt : new Date("2026-06-20T08:00:00Z"),
+  };
+}
+
+function baseQaReport() {
+  return {
+    id: "qa-1",
+    projectId: "project-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 3,
+    prdDocumentId: "prd-1",
+    prototypeArtifactId: "artifact-1",
+    prototypeSpecId: "spec-1",
+    status: "passed",
+    trigger: "patch",
+    checkTypes: ["state_schema"],
+    summary: "QA 通过",
+    issues: [],
+    blockingCount: 0,
+    majorCount: 0,
+    minorCount: 0,
+    infoCount: 0,
+    generatedByRunId: "run-1",
+    relatedPatchId: "patch-1",
+    createdBy: "user-1",
+    createdAt: "2026-06-20T08:00:00.000Z",
+    updatedAt: "2026-06-20T08:00:00.000Z",
+    passed: true,
   };
 }

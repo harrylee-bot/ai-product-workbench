@@ -527,6 +527,7 @@ export type PatchRecord = {
   afterProductDesignStateVersion?: number;
   affectedPrdDocumentId?: string;
   affectedPrototypeArtifactId?: string;
+  relatedQaReportId?: string;
   generatedByRunId?: string;
   errorMessage?: string;
   createdBy: string;
@@ -534,26 +535,100 @@ export type PatchRecord = {
   updatedAt: string;
 };
 
+export type QACheckType =
+  | "state_schema"
+  | "prd_completeness"
+  | "prototype_completeness"
+  | "state_prd_consistency"
+  | "state_prototype_consistency"
+  | "prd_prototype_consistency"
+  | "knowledge_rule_compliance"
+  | "assumption_risk"
+  | "patch_regression";
+
+export type QAIssueSeverity = "blocking" | "major" | "minor" | "info";
+export type QAReportStatus = "running" | "passed" | "failed" | "warning";
+export type QAReportTrigger = "initial_generation" | "patch" | "manual" | "rollback" | "pre_confirm";
+export type QAIssueStatus = "open" | "resolved" | "ignored";
+
 export type QAIssue = {
-  level: "error" | "warning" | "info";
-  type:
-    | "prd_prototype_mismatch"
-    | "missing_state"
-    | "missing_exception"
-    | "knowledge_conflict"
-    | "implementation_detail_leak"
-    | "patch_scope_risk"
-    | "missing_knowledge_reference"
-    | "unmarked_assumption";
-  message: string;
-  targetPath?: string;
+  id: string;
+  checkType: QACheckType;
+  severity: QAIssueSeverity;
+  title: string;
+  description: string;
+  relatedStatePaths?: string[];
+  relatedPrdSectionIds?: string[];
+  relatedPrototypePageIds?: string[];
+  relatedPrototypeComponentIds?: string[];
+  relatedKnowledgeIds?: string[];
+  suggestion?: string;
+  autoFixable?: boolean;
+  status: QAIssueStatus;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type QAReport = {
-  passed: boolean;
+  id: string;
+  projectId: string;
+  productDesignStateId: string;
+  productDesignStateVersion: number;
+  prdDocumentId?: string;
+  prototypeArtifactId?: string;
+  prototypeSpecId?: string;
+  status: QAReportStatus;
+  trigger: QAReportTrigger;
+  checkTypes: QACheckType[];
+  summary: string;
   issues: QAIssue[];
-  suggestions: string[];
-  autoFixable: boolean;
+  blockingCount: number;
+  majorCount: number;
+  minorCount: number;
+  infoCount: number;
+  generatedByRunId?: string;
+  relatedPatchId?: string;
+  relatedRollbackId?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  passed: boolean;
+};
+
+export type QAAgentOutput = {
+  status: QAReportStatus;
+  summary: string;
+  issues: QAIssue[];
+};
+
+export type RollbackRecord = {
+  id: string;
+  projectId: string;
+  rollbackType: "product_design_state";
+  fromProductDesignStateVersion: number;
+  toProductDesignStateVersion: number;
+  beforePrdDocumentId?: string;
+  afterPrdDocumentId?: string;
+  beforePrototypeArtifactId?: string;
+  afterPrototypeArtifactId?: string;
+  reason?: string;
+  status: "running" | "completed" | "failed";
+  generatedByRunId?: string;
+  errorMessage?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectVersionTimelineItem = {
+  id: string;
+  type: "product_design_state" | "prd" | "prototype" | "patch" | "qa" | "rollback";
+  version?: number;
+  title: string;
+  description?: string;
+  relatedId: string;
+  createdAt: string;
+  createdBy?: string;
 };
 
 export type KnowledgeCandidateDraft = {
@@ -604,6 +679,9 @@ export type VibeStreamEventType =
   | "patch_completed"
   | "patch_failed"
   | "qa_completed"
+  | "rollback_started"
+  | "rollback_completed"
+  | "rollback_failed"
   | "knowledge_candidate_created"
   | "run_completed"
   | "run_failed";

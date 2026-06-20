@@ -36,6 +36,17 @@ import {
   PrototypeArtifactController,
 } from "./prototype.controller";
 import { PrototypeService } from "./prototype.service";
+import {
+  ProjectQaController,
+  ProjectQaReportsController,
+  ProjectRollbackController,
+  ProjectVersionTimelineController,
+  QaReportController,
+} from "./qa.controller";
+import { QaRuleCheckService } from "./qa-rule-check.service";
+import { QaService } from "./qa.service";
+import { RollbackService } from "./rollback.service";
+import { VersionHistoryService } from "./version-history.service";
 import { VibeController } from "./vibe.controller";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
@@ -52,6 +63,11 @@ import { VibeStreamService } from "./vibe-stream.service";
     PrdDocumentController,
     ProjectPrototypeController,
     PrototypeArtifactController,
+    ProjectQaController,
+    ProjectQaReportsController,
+    QaReportController,
+    ProjectVersionTimelineController,
+    ProjectRollbackController,
   ],
   providers: [
     VibeService,
@@ -62,6 +78,10 @@ import { VibeStreamService } from "./vibe-stream.service";
     PatchService,
     RequirementDocumentService,
     PrototypeService,
+    QaRuleCheckService,
+    QaService,
+    VersionHistoryService,
+    RollbackService,
     IntentAgentService,
     KnowledgeAgentService,
     RequirementAnalystAgentService,

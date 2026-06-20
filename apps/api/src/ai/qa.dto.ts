@@ -1,0 +1,65 @@
+import { Transform, Type } from "class-transformer";
+import { ArrayMaxSize, IsArray, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
+import { QAReportStatus, QAReportTrigger } from "@prisma/client";
+import type { QACheckType } from "./ai-vibe.types";
+
+const emptyToUndefined = ({ value }: { value: unknown }) =>
+  typeof value === "string" && value.trim() === "" ? undefined : value;
+
+const QA_CHECK_TYPES = [
+  "state_schema",
+  "prd_completeness",
+  "prototype_completeness",
+  "state_prd_consistency",
+  "state_prototype_consistency",
+  "prd_prototype_consistency",
+  "knowledge_rule_compliance",
+  "assumption_risk",
+  "patch_regression",
+] as const;
+
+export class RunQaDto {
+  @IsOptional()
+  @IsArray({ message: "checkTypes 格式不正确" })
+  @ArrayMaxSize(9, { message: "checkTypes 最多 9 项" })
+  @IsEnum(QA_CHECK_TYPES, { each: true, message: "checkType 不正确" })
+  checkTypes?: QACheckType[];
+}
+
+export class ListQaReportsQueryDto {
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsEnum(QAReportStatus, { message: "QA 状态不正确" })
+  status?: QAReportStatus;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsEnum(QAReportTrigger, { message: "QA 触发类型不正确" })
+  trigger?: QAReportTrigger;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  pageSize?: number;
+}
+
+export class RollbackProductDesignStateByVersionDto {
+  @Type(() => Number)
+  @IsInt({ message: "targetVersion 必须是整数" })
+  @Min(1, { message: "targetVersion 必须大于 0" })
+  targetVersion!: number;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString({ message: "回滚原因格式不正确" })
+  @MaxLength(500, { message: "回滚原因不能超过 500 个字符" })
+  reason?: string;
+}

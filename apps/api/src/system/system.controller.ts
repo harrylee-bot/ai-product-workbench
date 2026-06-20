@@ -22,6 +22,9 @@ export class SystemController {
         "admin-dashboard",
         "admin-logs",
         "admin-audit",
+        "qa-reports",
+        "version-timeline",
+        "rollback-records",
       ],
     };
   }

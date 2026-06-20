@@ -172,6 +172,31 @@ enum PatchRecordStatus {
   needs_confirmation
 }
 
+enum QAReportStatus {
+  running
+  passed
+  failed
+  warning
+}
+
+enum QAReportTrigger {
+  initial_generation
+  patch
+  manual
+  rollback
+  pre_confirm
+}
+
+enum RollbackType {
+  product_design_state
+}
+
+enum RollbackRecordStatus {
+  running
+  completed
+  failed
+}
+
 enum KnowledgeType {
   strong_rule
   default_rule
@@ -345,6 +370,8 @@ model Project {
   prototypeArtifacts          PrototypeArtifact[]
   prototypeVersions           PrototypeVersion[]
   patchRecords                PatchRecord[]
+  qaReports                   QAReport[]
+  rollbackRecords             RollbackRecord[]
   knowledgeCandidates         KnowledgeCandidate[]
   agentRuns                   AgentRunLog[]
   vibeStreamEvents            VibeStreamEventLog[]
@@ -807,6 +834,7 @@ model PatchRecord {
   afterProductDesignStateVersion  Int?              @map("after_product_design_state_version")
   affectedPrdDocumentId           String?           @map("affected_prd_document_id")
   affectedPrototypeArtifactId     String?           @map("affected_prototype_artifact_id")
+  relatedQaReportId               String?           @map("related_qa_report_id")
   generatedByRunId                String?           @map("generated_by_run_id")
   errorMessage                    String?           @map("error_message")
   createdBy                       String            @map("created_by")
@@ -821,6 +849,68 @@ model PatchRecord {
   @@index([generatedByRunId])
   @@index([createdAt])
   @@map("patch_records")
+}
+
+model QAReport {
+  id                        String          @id @default(uuid())
+  projectId                 String          @map("project_id")
+  productDesignStateId      String          @map("product_design_state_id")
+  productDesignStateVersion Int             @map("product_design_state_version")
+  prdDocumentId             String?         @map("prd_document_id")
+  prototypeArtifactId       String?         @map("prototype_artifact_id")
+  prototypeSpecId           String?         @map("prototype_spec_id")
+  status                    QAReportStatus
+  trigger                   QAReportTrigger
+  checkTypes                Json            @map("check_types")
+  summary                   String
+  issues                    Json
+  blockingCount             Int             @default(0) @map("blocking_count")
+  majorCount                Int             @default(0) @map("major_count")
+  minorCount                Int             @default(0) @map("minor_count")
+  infoCount                 Int             @default(0) @map("info_count")
+  generatedByRunId          String?         @map("generated_by_run_id")
+  relatedPatchId            String?         @map("related_patch_id")
+  relatedRollbackId         String?         @map("related_rollback_id")
+  createdBy                 String          @map("created_by")
+  createdAt                 DateTime        @default(now()) @map("created_at")
+  updatedAt                 DateTime        @updatedAt @map("updated_at")
+  project                   Project         @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([productDesignStateId])
+  @@index([productDesignStateVersion])
+  @@index([status])
+  @@index([trigger])
+  @@index([generatedByRunId])
+  @@index([relatedPatchId])
+  @@index([relatedRollbackId])
+  @@index([createdAt])
+  @@map("qa_reports")
+}
+
+model RollbackRecord {
+  id                            String               @id @default(uuid())
+  projectId                     String               @map("project_id")
+  rollbackType                  RollbackType         @map("rollback_type")
+  fromProductDesignStateVersion Int                  @map("from_product_design_state_version")
+  toProductDesignStateVersion   Int                  @map("to_product_design_state_version")
+  beforePrdDocumentId           String?              @map("before_prd_document_id")
+  afterPrdDocumentId            String?              @map("after_prd_document_id")
+  beforePrototypeArtifactId     String?              @map("before_prototype_artifact_id")
+  afterPrototypeArtifactId      String?              @map("after_prototype_artifact_id")
+  reason                        String?
+  status                        RollbackRecordStatus @default(running)
+  generatedByRunId              String?              @map("generated_by_run_id")
+  errorMessage                  String?              @map("error_message")
+  createdBy                     String               @map("created_by")
+  createdAt                     DateTime             @default(now()) @map("created_at")
+  updatedAt                     DateTime             @updatedAt @map("updated_at")
+  project                       Project              @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("rollback_records")
 }
 
 model KnowledgeItem {

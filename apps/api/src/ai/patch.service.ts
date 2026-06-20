@@ -36,6 +36,7 @@ import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent
 import { QaAgentService } from "./agents/qa-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { PrototypeService } from "./prototype.service";
+import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 
@@ -72,6 +73,7 @@ type PatchRecordRow = {
   afterProductDesignStateVersion: number | null;
   affectedPrdDocumentId: string | null;
   affectedPrototypeArtifactId: string | null;
+  relatedQaReportId: string | null;
   generatedByRunId: string | null;
   errorMessage: string | null;
   createdBy: string;
@@ -91,6 +93,7 @@ export class PatchService {
     private readonly stateService: ProductDesignStateService,
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
+    private readonly qaService: QaService,
     private readonly patchAgent: PatchAgentService,
     private readonly prdWriterAgent: PrdWriterAgentService,
     private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
@@ -590,20 +593,17 @@ export class PatchService {
         reason: "Patch 后同步 PRD 与 PrototypeSpec",
       });
 
-      const qa = await this.runAgentStep(input, AgentName.qa_agent, "qa_check", () =>
-        this.qaAgent.run({
+      const qa = await this.runAgentStep(input, AgentName.qa_agent, "qa_check", async () => ({
+        data: await this.qaService.runForProject(input.projectId, input.userId, {
+          trigger: "patch",
           runId: input.runId,
-          projectId: input.projectId,
           traceId: input.traceId,
-          userId: input.userId,
-          input: {
-            productDesignState: stateWithArtifacts,
-            prdDocument,
-            prototypeSpec: prototypeSpec.data,
-            patchPlan: plan,
-            knowledgeContext,
-          },
+          relatedPatchId: patchRecord.id,
+          prdDocument,
+          prototypeSpec: prototypeSpec.data,
+          prototypeArtifact: savedPrototype.artifact,
         }),
+      }),
       );
       await this.stream.emit({
         runId: input.runId,
@@ -620,6 +620,7 @@ export class PatchService {
           afterProductDesignStateVersion: stateWithArtifacts.version,
           affectedPrdDocumentId: prdDocument.id,
           affectedPrototypeArtifactId: savedPrototype.artifact.id,
+          relatedQaReportId: qa.data.id,
         },
       });
       patchRecord = this.toPatchRecord(finalRecord as PatchRecordRow);
@@ -871,6 +872,7 @@ export class PatchService {
       affectedPrdDocumentId: row.affectedPrdDocumentId ?? undefined,
       affectedPrototypeArtifactId: row.affectedPrototypeArtifactId ?? undefined,
       generatedByRunId: row.generatedByRunId ?? undefined,
+      relatedQaReportId: row.relatedQaReportId ?? undefined,
       errorMessage: row.errorMessage ?? undefined,
       createdBy: row.createdBy,
       createdAt: row.createdAt.toISOString(),

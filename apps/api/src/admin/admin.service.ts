@@ -578,6 +578,7 @@ export class AdminService {
         afterProductDesignStateVersion: patch.afterProductDesignStateVersion ?? undefined,
         affectedPrdDocumentId: patch.affectedPrdDocumentId ?? undefined,
         affectedPrototypeArtifactId: patch.affectedPrototypeArtifactId ?? undefined,
+        relatedQaReportId: patch.relatedQaReportId ?? undefined,
         generatedByRunId: patch.generatedByRunId ?? undefined,
         errorMessage: patch.errorMessage ?? undefined,
         createdAt: patch.createdAt.toISOString(),
@@ -615,6 +616,7 @@ export class AdminService {
       afterProductDesignStateVersion: patch.afterProductDesignStateVersion ?? undefined,
       affectedPrdDocumentId: patch.affectedPrdDocumentId ?? undefined,
       affectedPrototypeArtifactId: patch.affectedPrototypeArtifactId ?? undefined,
+      relatedQaReportId: patch.relatedQaReportId ?? undefined,
       generatedByRunId: patch.generatedByRunId ?? undefined,
       errorMessage: patch.errorMessage ?? undefined,
       createdBy: patch.createdBy,
@@ -625,39 +627,39 @@ export class AdminService {
 
   async listQaReports(query: ListQaReportsQueryDto) {
     const { page, pageSize } = normalizePagination(query);
-    const where: Prisma.VibeStreamEventLogWhereInput = {
+    const where: Prisma.QAReportWhereInput = {
       projectId: query.projectId,
-      eventType: "qa_completed",
+      status: query.status,
+      trigger: query.trigger,
     };
 
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.vibeStreamEventLog.findMany({
+      this.prisma.qAReport.findMany({
         where,
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: { project: { select: { id: true, title: true, status: true } } },
       }),
-      this.prisma.vibeStreamEventLog.count({ where }),
+      this.prisma.qAReport.count({ where }),
     ]);
 
     return {
-      items: items.map((event) => {
-        const report = extractQaReport(event.payload);
-        return {
-          id: event.id,
-          qaReportId: event.id,
-          projectId: event.projectId,
-          projectTitle: event.project.title,
-          projectStatus: event.project.status,
-          runId: event.runId,
-          status: report?.passed === false ? "failed" : "passed",
-          issueCount: report?.issues.length ?? 0,
-          criticalIssueCount: report?.issues.filter((issue) => issue.severity === "critical").length ?? 0,
-          summary: report?.summary,
-          createdAt: event.createdAt.toISOString(),
-        };
-      }),
+      items: items.map((report) => ({
+        id: report.id,
+        qaReportId: report.id,
+        projectId: report.projectId,
+        projectTitle: report.project.title,
+        projectStatus: report.project.status,
+        productDesignStateVersion: report.productDesignStateVersion,
+        trigger: report.trigger,
+        runId: report.generatedByRunId ?? "-",
+        status: report.status,
+        issueCount: report.blockingCount + report.majorCount + report.minorCount + report.infoCount,
+        criticalIssueCount: report.blockingCount + report.majorCount,
+        summary: report.summary,
+        createdAt: report.createdAt.toISOString(),
+      })),
       total,
       page,
       pageSize,
@@ -665,26 +667,40 @@ export class AdminService {
   }
 
   async getQaReport(qaReportId: string) {
-    const event = await this.prisma.vibeStreamEventLog.findUnique({
+    const report = await this.prisma.qAReport.findUnique({
       where: { id: qaReportId },
       include: { project: { select: { id: true, title: true, status: true } } },
     });
-    if (!event || event.eventType !== "qa_completed") throw new NotFoundException("ADMIN_LOG_NOT_FOUND");
-    const report = extractQaReport(event.payload);
+    if (!report) throw new NotFoundException("ADMIN_LOG_NOT_FOUND");
 
     return {
-      id: event.id,
-      qaReportId: event.id,
-      projectId: event.projectId,
-      projectTitle: event.project.title,
-      projectStatus: event.project.status,
-      runId: event.runId,
-      status: report?.passed === false ? "failed" : "passed",
-      issueCount: report?.issues.length ?? 0,
-      criticalIssueCount: report?.issues.filter((issue) => issue.severity === "critical").length ?? 0,
-      summary: report?.summary,
-      report: report ?? event.payload,
-      createdAt: event.createdAt.toISOString(),
+      id: report.id,
+      qaReportId: report.id,
+      projectId: report.projectId,
+      projectTitle: report.project.title,
+      projectStatus: report.project.status,
+      productDesignStateId: report.productDesignStateId,
+      productDesignStateVersion: report.productDesignStateVersion,
+      prdDocumentId: report.prdDocumentId ?? undefined,
+      prototypeArtifactId: report.prototypeArtifactId ?? undefined,
+      prototypeSpecId: report.prototypeSpecId ?? undefined,
+      trigger: report.trigger,
+      runId: report.generatedByRunId ?? undefined,
+      status: report.status,
+      issueCount: report.blockingCount + report.majorCount + report.minorCount + report.infoCount,
+      criticalIssueCount: report.blockingCount + report.majorCount,
+      blockingCount: report.blockingCount,
+      majorCount: report.majorCount,
+      minorCount: report.minorCount,
+      infoCount: report.infoCount,
+      summary: report.summary,
+      issues: report.issues,
+      checkTypes: report.checkTypes,
+      relatedPatchId: report.relatedPatchId ?? undefined,
+      relatedRollbackId: report.relatedRollbackId ?? undefined,
+      createdBy: report.createdBy,
+      createdAt: report.createdAt.toISOString(),
+      updatedAt: report.updatedAt.toISOString(),
     };
   }
 
@@ -740,22 +756,4 @@ function selectedRegionSummary(value: Prisma.JsonValue) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "ProductDesignState";
   const record = value as Record<string, unknown>;
   return String(record.type ?? record.path ?? record.target ?? "ProductDesignState");
-}
-
-type QaIssue = { severity?: string };
-
-function extractQaReport(payload: unknown): { passed?: boolean; summary?: string; issues: QaIssue[] } | null {
-  if (!payload || typeof payload !== "object") return null;
-  const record = payload as Record<string, unknown>;
-  const eventPayload = record.payload && typeof record.payload === "object"
-    ? (record.payload as Record<string, unknown>)
-    : record;
-  const data = eventPayload.data && typeof eventPayload.data === "object"
-    ? (eventPayload.data as Record<string, unknown>)
-    : eventPayload;
-  return {
-    passed: typeof data.passed === "boolean" ? data.passed : undefined,
-    summary: typeof data.summary === "string" ? data.summary : undefined,
-    issues: Array.isArray(data.issues) ? (data.issues as QaIssue[]) : [],
-  };
 }

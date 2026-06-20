@@ -269,6 +269,83 @@ export class ProductDesignStateService {
     return { state: next, version: this.toVersionItem(createdVersion) };
   }
 
+  async restoreVersionSnapshotForProject(
+    projectId: string,
+    targetVersion: number,
+    options: { userId: string; reason?: string; runId?: string; messageId?: string },
+  ) {
+    const currentRecord = await this.prisma.productDesignState.findFirst({
+      where: { projectId },
+      orderBy: { version: "desc" },
+    });
+    if (!currentRecord) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
+    const current = this.toStateItem(currentRecord as ProductDesignStateRecord);
+    const version = await this.prisma.productDesignVersion.findFirst({
+      where: { projectId, version: targetVersion },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!version) throw new NotFoundException("ROLLBACK_VERSION_NOT_FOUND");
+
+    const snapshot = this.normalizeStatePayload(version.snapshot);
+    if (!snapshot) throw new BadRequestException("ROLLBACK_VERSION_INVALID");
+
+    const nextVersion = current.version + 1;
+    const restored: ProductDesignState = {
+      ...this.cloneState(snapshot),
+      id: current.id,
+      projectId,
+      version: nextVersion,
+      prdDocument: undefined,
+      prototypeSpec: undefined,
+      status: "design_ready",
+      createdBy: current.createdBy,
+      createdAt: current.createdAt,
+      updatedBy: options.userId,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updated = await this.prisma.productDesignState.update({
+      where: { id: current.id },
+      data: {
+        version: restored.version,
+        ...this.toPrismaStateData(restored),
+        prdDocument: Prisma.JsonNull,
+        prototypeSpec: Prisma.JsonNull,
+        updatedBy: options.userId,
+      },
+    });
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { currentProductDesignStateId: current.id },
+    });
+
+    const next = this.toStateItem(updated as ProductDesignStateRecord);
+    await this.writeChangeLog({
+      projectId,
+      stateId: next.id,
+      changeType: ProductDesignChangeType.rollback,
+      path: "*",
+      before: current,
+      after: next,
+      reason: options.reason ?? `回滚到 ProductDesignState v${targetVersion}`,
+      runId: options.runId,
+      messageId: options.messageId,
+      createdBy: options.userId,
+    });
+    const createdVersion = await this.createVersionSnapshot(
+      next,
+      options.userId,
+      options.reason ?? `回滚到 ProductDesignState v${targetVersion}`,
+    );
+
+    return {
+      state: next,
+      version: this.toVersionItem(createdVersion),
+      fromVersion: current.version,
+      targetSnapshotVersion: targetVersion,
+    };
+  }
+
   async restoreStateAfterPatchFailure(
     projectId: string,
     snapshot: ProductDesignState,

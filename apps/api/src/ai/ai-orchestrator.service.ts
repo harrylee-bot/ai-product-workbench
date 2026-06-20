@@ -37,6 +37,7 @@ import { RequirementAnalystAgentService } from "./agents/requirement-analyst-age
 import { IntentAgentService } from "./agents/intent-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { PrototypeService } from "./prototype.service";
+import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 
@@ -72,6 +73,7 @@ export class AiOrchestratorService {
     private readonly stateService: ProductDesignStateService,
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
+    private readonly qaService: QaService,
     private readonly messageService: MessageService,
     private readonly prisma: PrismaService,
     private readonly intentAgent: IntentAgentService,
@@ -347,20 +349,16 @@ export class AiOrchestratorService {
       });
 
       await this.emit(context, "message_delta", "正在进行一致性 QA 校验...");
-      const qa = await this.runAgentStep(context, AgentName.qa_agent, "qa_check", () =>
-        this.qaAgent.run({
+      const qa = await this.runAgentStep(context, AgentName.qa_agent, "qa_check", async () => ({
+        data: await this.qaService.runForProject(context.projectId, context.userId, {
+          trigger: patchPlan ? "patch" : "initial_generation",
           runId: context.runId,
-          projectId: context.projectId,
           traceId: context.traceId,
-          userId: context.userId,
-          input: {
-            productDesignState: state!,
-            prdDocument,
-            prototypeSpec: prototypeSpec.data,
-            patchPlan,
-            knowledgeContext: knowledge.data,
-          },
+          prdDocument,
+          prototypeSpec: prototypeSpec.data,
+          prototypeArtifact: savedPrototype.artifact,
         }),
+      }),
       );
       await this.stream.emit({
         runId: context.runId,

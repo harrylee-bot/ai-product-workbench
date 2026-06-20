@@ -99,6 +99,8 @@ type QaReportItem = {
   id: string;
   projectTitle: string;
   status: string;
+  trigger: string;
+  productDesignStateVersion: number;
   issueCount: number;
   criticalIssueCount: number;
   summary?: string;
@@ -205,12 +207,18 @@ const qaConfig: LogPageConfig<QaReportItem> = {
   subtitle: "QA 校验结果、问题数量与关联 runId",
   path: "/admin/logs/qa-reports",
   detailPath: (id) => `/admin/logs/qa-reports/${id}`,
-  minWidth: 1040,
-  filters: [{ key: "projectId", placeholder: "projectId" }],
+  minWidth: 1160,
+  filters: [
+    { key: "projectId", placeholder: "projectId" },
+    { key: "status", placeholder: "状态", type: "select", options: ["running", "passed", "failed", "warning"] },
+    { key: "trigger", placeholder: "触发方式", type: "select", options: ["initial_generation", "patch", "manual", "rollback", "pre_confirm"] },
+  ],
   columns: [
     { label: "QA ID", render: (item) => <Mono>{item.id}</Mono> },
     { label: "项目", render: (item) => item.projectTitle },
     { label: "状态", render: (item) => <StatusBadge status={item.status} /> },
+    { label: "触发", render: (item) => item.trigger },
+    { label: "State", render: (item) => `v${item.productDesignStateVersion}` },
     { label: "问题数", render: (item) => item.issueCount },
     { label: "严重问题", render: (item) => item.criticalIssueCount },
     { label: "runId", render: (item) => <Mono>{item.runId}</Mono> },

@@ -23,6 +23,7 @@ import {
   Monitor,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
   Smartphone,
@@ -143,6 +144,30 @@ type QaIssue = {
   suggestion: string;
 };
 
+type QaReportSummary = {
+  id: string;
+  status: "running" | "passed" | "failed" | "warning";
+  trigger?: string;
+  summary: string;
+  blockingCount: number;
+  majorCount: number;
+  minorCount: number;
+  infoCount: number;
+  productDesignStateVersion: number;
+  createdAt: string;
+};
+
+type VersionTimelineItem = {
+  id: string;
+  type: "product_design_state" | "prd" | "prototype" | "patch" | "qa" | "rollback";
+  version?: number;
+  title: string;
+  description?: string;
+  relatedId: string;
+  createdAt: string;
+  createdBy?: string;
+};
+
 type ProductDesignStateSummary = {
   id: string;
   version: number;
@@ -184,6 +209,8 @@ type WorkspaceProject = {
   prototypeHtml: string;
   qaStatus: QaStatus;
   qaIssues: QaIssue[];
+  latestQaReport?: QaReportSummary | null;
+  versionTimeline: VersionTimelineItem[];
   productDesignState?: ProductDesignStateSummary | null;
 };
 
@@ -201,6 +228,8 @@ type PreviewPatch = Partial<
     | "prototypeHtml"
     | "qaStatus"
     | "qaIssues"
+    | "latestQaReport"
+    | "versionTimeline"
     | "productDesignState"
   >
 >;
@@ -317,6 +346,9 @@ type VibeRunEvent = {
     | "patch_completed"
     | "patch_failed"
     | "qa_completed"
+    | "rollback_started"
+    | "rollback_completed"
+    | "rollback_failed"
     | "knowledge_candidate_created"
     | "run_completed"
     | "run_failed";
@@ -344,6 +376,14 @@ type GetCurrentPrdResponse = {
 
 type GetCurrentPrototypeResponse = {
   artifact: unknown | null;
+};
+
+type GetLatestQaResponse = {
+  qaReport: unknown | null;
+};
+
+type GetVersionTimelineResponse = {
+  items: VersionTimelineItem[];
 };
 
 type PatchRecordStatus =
@@ -659,6 +699,8 @@ function mapProject(project: ApiProject, messages: ChatMessage[] = []): Workspac
     prototypeHtml: "",
     qaStatus: project.status === "qa_failed" ? "issues" : "unchecked",
     qaIssues: project.status === "qa_failed" ? DEFAULT_QA_ISSUES : [],
+    latestQaReport: null,
+    versionTimeline: [],
     productDesignState: null,
   };
 }
@@ -717,6 +759,7 @@ function extractPreviewFromPayload(payload: unknown) {
   if (qa) {
     patch.qaStatus = qa.status;
     patch.qaIssues = qa.issues;
+    patch.latestQaReport = mapQaReportSummary(data.qaReport);
   }
   return patch;
 }
@@ -865,21 +908,53 @@ function mapQaReport(value: unknown): { status: QaStatus; issues: QaIssue[] } | 
   const mappedIssues = issues.flatMap((item, index) => {
     const issue = asRecord(item);
     if (!issue) return [];
-    const level = asQaLevel(asText(issue.level));
+    const level = asQaLevel(asText(issue.level) || asText(issue.severity));
     return [
       {
         id: asText(issue.id) || `qa-${index + 1}`,
         level,
-        type: asText(issue.type) || "一致性检查",
+        type: asText(issue.type) || asText(issue.title) || asText(issue.checkType) || "一致性检查",
         description: asText(issue.message) || asText(issue.description) || "发现一个待确认问题。",
         suggestion: suggestions[index] || asText(issue.suggestion) || "请补充规则后重新生成或触发 QA。",
       },
     ];
   });
 
+  const status = asText(report.status);
   return {
-    status: Boolean(report.passed) ? "passed" : mappedIssues.length ? "issues" : "failed",
+    status:
+      status === "running"
+        ? "checking"
+        : status === "passed" || status === "warning"
+          ? "passed"
+          : Boolean(report.passed)
+            ? "passed"
+            : mappedIssues.length
+              ? "issues"
+              : "failed",
     issues: mappedIssues,
+  };
+}
+
+function mapQaReportSummary(value: unknown): QaReportSummary | null {
+  const report = asRecord(value);
+  if (!report) return null;
+  const id = asText(report.id);
+  if (!id) return null;
+  const status = asText(report.status);
+  return {
+    id,
+    status: status === "running" || status === "passed" || status === "failed" || status === "warning"
+      ? status
+      : Boolean(report.passed) ? "passed" : "failed",
+    trigger: asText(report.trigger) || undefined,
+    summary: asText(report.summary) || "QA 已完成",
+    blockingCount: asNumber(report.blockingCount),
+    majorCount: asNumber(report.majorCount),
+    minorCount: asNumber(report.minorCount),
+    infoCount: asNumber(report.infoCount),
+    productDesignStateVersion: asNumber(report.productDesignStateVersion),
+    createdAt: asText(report.createdAt),
   };
 }
 
@@ -913,6 +988,8 @@ function mapClarificationQuestions(value: unknown): ClarificationQuestion[] {
 
 function asQaLevel(value: string): QaIssue["level"] {
   if (value === "error" || value === "warning" || value === "info") return value;
+  if (value === "blocking" || value === "major") return "error";
+  if (value === "minor") return "warning";
   return "warning";
 }
 
@@ -923,6 +1000,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asText(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function asNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function arrayOfText(value: unknown) {
@@ -968,6 +1049,8 @@ function preservePreviewState(project: WorkspaceProject) {
     prototypeHtml: project.prototypeHtml,
     qaStatus: project.qaStatus,
     qaIssues: project.qaIssues,
+    latestQaReport: project.latestQaReport,
+    versionTimeline: project.versionTimeline,
     productDesignState: project.productDesignState,
   };
 }
@@ -1010,6 +1093,8 @@ export function WorkspaceClient() {
   const [patchHistoryError, setPatchHistoryError] = useState<string | null>(null);
   const [patchActionLoadingId, setPatchActionLoadingId] = useState<string | null>(null);
   const [patchConfirmationDrafts, setPatchConfirmationDrafts] = useState<Record<string, string>>({});
+  const [qaActionLoading, setQaActionLoading] = useState(false);
+  const [versionActionLoading, setVersionActionLoading] = useState(false);
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>(createAgentSteps);
   const [isRunning, setIsRunning] = useState(false);
   const timersRef = useRef<number[]>([]);
@@ -1161,6 +1246,23 @@ export function WorkspaceClient() {
           prototypeHtml: currentArtifact.html,
         };
       }
+      const [qaResponse, timelineResponse] = await Promise.all([
+        apiRequest<GetLatestQaResponse>(`/projects/${projectId}/qa/latest`).catch(() => ({ qaReport: null })),
+        apiRequest<GetVersionTimelineResponse>(`/projects/${projectId}/version-timeline`).catch(() => ({ items: [] })),
+      ]);
+      const latestQa = mapQaReport(qaResponse.qaReport);
+      const latestQaReport = mapQaReportSummary(qaResponse.qaReport);
+      previewPatch = {
+        ...previewPatch,
+        versionTimeline: timelineResponse.items,
+        latestQaReport,
+        ...(latestQa
+          ? {
+              qaStatus: latestQa.status,
+              qaIssues: latestQa.issues,
+            }
+          : {}),
+      };
 
       setProjects((items) =>
         items.map((project) =>
@@ -1265,6 +1367,89 @@ export function WorkspaceClient() {
       setPatchHistoryError(error instanceof Error ? error.message : "确认 Patch 失败");
     } finally {
       setPatchActionLoadingId(null);
+    }
+  };
+
+  const runManualQa = async () => {
+    if (!currentProject) return;
+    setQaActionLoading(true);
+    setWorkspaceError(null);
+    updateProject(currentProject.id, (project) => ({
+      ...project,
+      qaStatus: "checking",
+      summary: "正在重新执行 QA",
+    }));
+    setPreviewTab("qa");
+    try {
+      const response = await apiRequest<{ qaReport: unknown }>(`/projects/${currentProject.id}/qa/run`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      const qa = mapQaReport(response.qaReport);
+      const latestQaReport = mapQaReportSummary(response.qaReport);
+      updateProject(currentProject.id, (project) => ({
+        ...project,
+        status: qa?.status && qa.status !== "passed" ? "qa_failed" : project.status === "qa_failed" ? "prototype_ready" : project.status,
+        summary: latestQaReport?.summary ?? project.summary,
+        qaStatus: qa?.status ?? project.qaStatus,
+        qaIssues: qa?.issues ?? project.qaIssues,
+        latestQaReport,
+      }));
+      window.setTimeout(() => void loadProjectDetail(currentProject.id), 250);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "QA 运行失败");
+      updateProject(currentProject.id, (project) => ({
+        ...project,
+        qaStatus: "failed",
+        summary: "QA 运行失败",
+      }));
+    } finally {
+      setQaActionLoading(false);
+    }
+  };
+
+  const rollbackToStateVersion = async (version: number) => {
+    if (!currentProject) return;
+    if (!window.confirm(`确认回滚到 ProductDesignState v${version}？系统会创建一个新版本并重新生成 PRD、原型和 QA。`)) {
+      return;
+    }
+    setVersionActionLoading(true);
+    setWorkspaceError(null);
+    setPreviewTab("state");
+    try {
+      const response = await apiRequest<{
+        productDesignState?: unknown;
+        prdDocument?: unknown;
+        prototypeArtifact?: unknown;
+        qaReport?: unknown;
+      }>(`/projects/${currentProject.id}/rollback/product-design-state`, {
+        method: "POST",
+        body: JSON.stringify({
+          targetVersion: version,
+          reason: `用户从工作台回滚到 ProductDesignState v${version}`,
+        }),
+      });
+      const previewPatch = extractPreviewFromPayload({
+        productDesignState: response.productDesignState,
+        prdDocument: response.prdDocument,
+        prototypeArtifact: response.prototypeArtifact,
+        qaReport: response.qaReport,
+      });
+      updateProject(currentProject.id, (project) =>
+        mergePreviewPatch(
+          {
+            ...project,
+            summary: `已回滚到 v${version} 并重新生成`,
+            updatedAt: "刚刚",
+          },
+          previewPatch,
+        ),
+      );
+      window.setTimeout(() => void loadProjectDetail(currentProject.id), 250);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "回滚失败");
+    } finally {
+      setVersionActionLoading(false);
     }
   };
 
@@ -2037,6 +2222,8 @@ export function WorkspaceClient() {
             patchHistoryError={patchHistoryError}
             patchActionLoadingId={patchActionLoadingId}
             patchConfirmationDrafts={patchConfirmationDrafts}
+            qaActionLoading={qaActionLoading}
+            versionActionLoading={versionActionLoading}
             onPreviewTabChange={setPreviewTab}
             onDeviceModeChange={setDeviceMode}
             onLocalEditToggle={() => setLocalEditEnabled((value) => !value)}
@@ -2050,6 +2237,8 @@ export function WorkspaceClient() {
               setPatchConfirmationDrafts((drafts) => ({ ...drafts, [patchId]: value }))
             }
             onConfirmPatch={confirmPatch}
+            onRunQa={runManualQa}
+            onRollbackToVersion={rollbackToStateVersion}
           />
         </div>
       </main>
@@ -2875,6 +3064,8 @@ function PreviewPanel({
   patchHistoryError,
   patchActionLoadingId,
   patchConfirmationDrafts,
+  qaActionLoading,
+  versionActionLoading,
   onPreviewTabChange,
   onDeviceModeChange,
   onLocalEditToggle,
@@ -2886,6 +3077,8 @@ function PreviewPanel({
   onCancelPatch,
   onPatchConfirmationChange,
   onConfirmPatch,
+  onRunQa,
+  onRollbackToVersion,
 }: {
   project: WorkspaceProject | null;
   previewTab: PreviewTab;
@@ -2899,6 +3092,8 @@ function PreviewPanel({
   patchHistoryError: string | null;
   patchActionLoadingId: string | null;
   patchConfirmationDrafts: Record<string, string>;
+  qaActionLoading: boolean;
+  versionActionLoading: boolean;
   onPreviewTabChange: (tab: PreviewTab) => void;
   onDeviceModeChange: (mode: DeviceMode) => void;
   onLocalEditToggle: () => void;
@@ -2910,6 +3105,8 @@ function PreviewPanel({
   onCancelPatch: (patchId: string) => void;
   onPatchConfirmationChange: (patchId: string, value: string) => void;
   onConfirmPatch: (patchId: string, confirmation: string) => void;
+  onRunQa: () => void;
+  onRollbackToVersion: (version: number) => void;
 }) {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-slate-100">
@@ -2992,8 +3189,14 @@ function PreviewPanel({
           onSelectPrototypeRegion={onSelectPrototypeRegion}
         />
       ) : null}
-      {previewTab === "qa" ? <QaReportPanel project={project} /> : null}
-      {previewTab === "state" ? <StatePanel project={project} /> : null}
+      {previewTab === "qa" ? <QaReportPanel project={project} loading={qaActionLoading} onRunQa={onRunQa} /> : null}
+      {previewTab === "state" ? (
+        <StatePanel
+          project={project}
+          rollbackLoading={versionActionLoading}
+          onRollbackToVersion={onRollbackToVersion}
+        />
+      ) : null}
       {patchHistoryOpen ? (
         <PatchHistoryPanel
           items={patchHistoryItems}
@@ -3432,7 +3635,15 @@ function PrototypePreview({
   );
 }
 
-function StatePanel({ project }: { project: WorkspaceProject | null }) {
+function StatePanel({
+  project,
+  rollbackLoading,
+  onRollbackToVersion,
+}: {
+  project: WorkspaceProject | null;
+  rollbackLoading: boolean;
+  onRollbackToVersion: (version: number) => void;
+}) {
   const state = project?.productDesignState;
 
   if (!state) {
@@ -3510,9 +3721,113 @@ function StatePanel({ project }: { project: WorkspaceProject | null }) {
             }))}
           />
         </div>
+        <VersionTimeline
+          items={project?.versionTimeline ?? []}
+          currentStateVersion={state.version}
+          loading={rollbackLoading}
+          onRollbackToVersion={onRollbackToVersion}
+        />
       </div>
     </div>
   );
+}
+
+function VersionTimeline({
+  items,
+  currentStateVersion,
+  loading,
+  onRollbackToVersion,
+}: {
+  items: VersionTimelineItem[];
+  currentStateVersion: number;
+  loading: boolean;
+  onRollbackToVersion: (version: number) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+          <History className="h-4 w-4" />
+          版本时间线
+        </div>
+        {loading ? <Loader2 className="h-4 w-4 animate-spin text-sky-600" /> : null}
+      </div>
+      {items.length ? (
+        <div className="mt-4 space-y-3">
+          {items.slice(0, 12).map((item) => {
+            const canRollback =
+              item.type === "product_design_state" &&
+              typeof item.version === "number" &&
+              item.version < currentStateVersion;
+            return (
+              <div key={item.id} className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                <TimelineIcon type={item.type} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-gray-950">{item.title}</span>
+                    <span className="rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-500">
+                      {timelineTypeLabel(item.type)}
+                    </span>
+                  </div>
+                  {item.description ? (
+                    <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{item.description}</div>
+                  ) : null}
+                  <div className="mt-1 text-xs text-gray-400">{formatRelativeTime(item.createdAt)}</div>
+                </div>
+                {canRollback ? (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => onRollbackToVersion(item.version!)}
+                    className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    回滚
+                  </button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-8 text-center text-sm text-gray-500">
+          暂无版本记录
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimelineIcon({ type }: { type: VersionTimelineItem["type"] }) {
+  const Icon =
+    type === "prd"
+      ? FileText
+      : type === "prototype"
+        ? Code2
+        : type === "qa"
+          ? ClipboardCheck
+          : type === "rollback"
+            ? RotateCcw
+            : type === "patch"
+              ? Edit3
+              : Database;
+  return (
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600">
+      <Icon className="h-4 w-4" />
+    </div>
+  );
+}
+
+function timelineTypeLabel(type: VersionTimelineItem["type"]) {
+  const labels: Record<VersionTimelineItem["type"], string> = {
+    product_design_state: "State",
+    prd: "PRD",
+    prototype: "原型",
+    patch: "Patch",
+    qa: "QA",
+    rollback: "回滚",
+  };
+  return labels[type];
 }
 
 function StateList({
@@ -3545,20 +3860,62 @@ function StateList({
   );
 }
 
-function QaReportPanel({ project }: { project: WorkspaceProject | null }) {
+function QaReportPanel({
+  project,
+  loading,
+  onRunQa,
+}: {
+  project: WorkspaceProject | null;
+  loading: boolean;
+  onRunQa: () => void;
+}) {
   const status = project?.qaStatus ?? "unchecked";
   const issues = project?.qaIssues ?? [];
+  const report = project?.latestQaReport ?? null;
+
+  const action = (
+    <button
+      type="button"
+      onClick={onRunQa}
+      disabled={!project || loading}
+      className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+      重新 QA
+    </button>
+  );
 
   if (status === "unchecked") {
-    return <PreviewEmpty icon={ClipboardCheck} title="未校验" description="PRD 和原型生成后，QA 结果会显示在这里。" />;
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+        <div className="mx-auto max-w-[900px]">
+          <div className="mb-3 flex justify-end">{action}</div>
+          <PreviewEmpty icon={ClipboardCheck} title="未校验" description="PRD 和原型生成后，QA 结果会显示在这里。" />
+        </div>
+      </div>
+    );
   }
 
   if (status === "checking") {
-    return <PreviewLoading title="校验中..." description="QA Agent 正在检查 PRD、原型和需求输入的一致性。" />;
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+        <div className="mx-auto max-w-[900px]">
+          <div className="mb-3 flex justify-end">{action}</div>
+          <PreviewLoading title="校验中..." description="QA Agent 正在检查 PRD、原型和需求输入的一致性。" />
+        </div>
+      </div>
+    );
   }
 
   if (status === "failed") {
-    return <PreviewError title="校验失败" description="可以稍后重新触发 QA 或补充更多上下文。" />;
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+        <div className="mx-auto max-w-[900px]">
+          <div className="mb-3 flex justify-end">{action}</div>
+          <PreviewError title="校验失败" description="可以稍后重新触发 QA 或补充更多上下文。" />
+        </div>
+      </div>
+    );
   }
 
   const passed = status === "passed";
@@ -3566,6 +3923,7 @@ function QaReportPanel({ project }: { project: WorkspaceProject | null }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-6">
       <div className="mx-auto max-w-[900px] space-y-4">
+        <div className="flex justify-end">{action}</div>
         <div
           className={clsx(
             "rounded-lg border bg-white p-5 shadow-sm",
@@ -3583,10 +3941,18 @@ function QaReportPanel({ project }: { project: WorkspaceProject | null }) {
                 {passed ? "通过" : "存在问题"}
               </div>
               <p className="mt-2 text-sm leading-6 text-gray-500">
-                {passed
-                  ? "PRD、原型和需求输入暂未发现明显冲突。"
-                  : "QA Agent 发现以下一致性问题，建议修复后再进入评审。"}
+                {report?.summary ??
+                  (passed
+                    ? "PRD、原型和需求输入暂未发现明显冲突。"
+                    : "QA Agent 发现以下一致性问题，建议修复后再进入评审。")}
               </p>
+              {report ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
+                  <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">State v{report.productDesignStateVersion}</span>
+                  {report.trigger ? <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">{report.trigger}</span> : null}
+                  {report.createdAt ? <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">{formatRelativeTime(report.createdAt)}</span> : null}
+                </div>
+              ) : null}
             </div>
             <span
               className={clsx(
@@ -3600,6 +3966,22 @@ function QaReportPanel({ project }: { project: WorkspaceProject | null }) {
             </span>
           </div>
         </div>
+
+        {report ? (
+          <div className="grid grid-cols-4 gap-3">
+            {[
+              ["阻塞", report.blockingCount, "text-rose-700"],
+              ["重要", report.majorCount, "text-orange-700"],
+              ["轻微", report.minorCount, "text-amber-700"],
+              ["提示", report.infoCount, "text-sky-700"],
+            ].map(([label, value, className]) => (
+              <div key={label} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+                <div className="text-xs text-gray-500">{label}</div>
+                <div className={clsx("mt-1 text-xl font-semibold", className)}>{value}</div>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         <div className="space-y-3">
           {issues.map((issue) => (

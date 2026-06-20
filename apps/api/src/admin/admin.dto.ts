@@ -10,6 +10,8 @@ import {
   ModelTaskType,
   PatchRecordStatus,
   ProjectStatus,
+  QAReportStatus,
+  QAReportTrigger,
 } from "@prisma/client";
 
 const emptyToUndefined = ({ value }: { value: unknown }) =>
@@ -160,6 +162,16 @@ export class ListQaReportsQueryDto extends AdminPaginationQueryDto {
   @Transform(emptyToUndefined)
   @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsEnum(QAReportStatus, { message: "QA 状态不正确" })
+  status?: QAReportStatus;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsEnum(QAReportTrigger, { message: "QA 触发类型不正确" })
+  trigger?: QAReportTrigger;
 }
 
 export class ListAdminAuditLogsQueryDto extends AdminPaginationQueryDto {
