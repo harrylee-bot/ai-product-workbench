@@ -93,6 +93,35 @@ enum FileChunkSourceType {
   pdf_page
 }
 
+enum ModelProviderType {
+  openai_compatible
+}
+
+enum ModelTaskType {
+  intent_detection
+  knowledge_classification
+  requirement_analysis
+  product_design
+  prd_generation
+  prototype_design
+  prototype_code_generation
+  patch_planning
+  qa_check
+  knowledge_extraction
+  general_chat
+}
+
+enum ModelResponseFormat {
+  text
+  json
+}
+
+enum ModelCallStatus {
+  running
+  succeeded
+  failed
+}
+
 model User {
   id             String          @id @default(cuid())
   username       String          @unique
@@ -287,4 +316,98 @@ model FileChunk {
   @@index([projectId])
   @@index([chunkIndex])
   @@map("file_chunks")
+}
+
+model ModelProvider {
+  id              String            @id @default(uuid())
+  name            String
+  type            ModelProviderType @default(openai_compatible)
+  baseUrl         String            @map("base_url")
+  apiKeyEncrypted String            @map("api_key_encrypted")
+  defaultHeaders  Json?             @map("default_headers")
+  timeoutMs       Int               @default(60000) @map("timeout_ms")
+  isDefault       Boolean           @default(false) @map("is_default")
+  isEnabled       Boolean           @default(true) @map("is_enabled")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  models          ModelConfig[]
+  callLogs        ModelCallLog[]
+
+  @@index([isDefault])
+  @@index([isEnabled])
+  @@map("model_providers")
+}
+
+model ModelConfig {
+  id                 String             @id @default(uuid())
+  providerId         String             @map("provider_id")
+  displayName        String             @map("display_name")
+  modelName          String             @map("model_name")
+  contextWindow      Int?               @map("context_window")
+  maxOutputTokens    Int?               @map("max_output_tokens")
+  supportsStreaming  Boolean            @default(true) @map("supports_streaming")
+  supportsJsonMode   Boolean            @default(false) @map("supports_json_mode")
+  defaultTemperature Float              @default(0.2) @map("default_temperature")
+  defaultMaxTokens   Int?               @map("default_max_tokens")
+  isEnabled          Boolean            @default(true) @map("is_enabled")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  provider           ModelProvider      @relation(fields: [providerId], references: [id])
+  taskProfiles       ModelTaskProfile[]
+  callLogs           ModelCallLog[]
+
+  @@index([providerId])
+  @@index([isEnabled])
+  @@map("model_configs")
+}
+
+model ModelTaskProfile {
+  id             String              @id @default(uuid())
+  taskType       ModelTaskType       @unique @map("task_type")
+  modelConfigId  String              @map("model_config_id")
+  temperature    Float?
+  maxTokens      Int?                @map("max_tokens")
+  responseFormat ModelResponseFormat @default(text) @map("response_format")
+  retryCount     Int                 @default(1) @map("retry_count")
+  timeoutMs      Int?                @map("timeout_ms")
+  isEnabled      Boolean             @default(true) @map("is_enabled")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  modelConfig    ModelConfig         @relation(fields: [modelConfigId], references: [id])
+
+  @@index([taskType])
+  @@index([isEnabled])
+  @@map("model_task_profiles")
+}
+
+model ModelCallLog {
+  id               String          @id @default(uuid())
+  traceId          String?         @map("trace_id")
+  runId            String?         @map("run_id")
+  agentName        String?         @map("agent_name")
+  taskType         ModelTaskType   @map("task_type")
+  providerId       String          @map("provider_id")
+  modelConfigId    String          @map("model_config_id")
+  modelName        String          @map("model_name")
+  status           ModelCallStatus
+  inputSummary     String?         @map("input_summary")
+  outputSummary    String?         @map("output_summary")
+  promptTokens     Int?            @map("prompt_tokens")
+  completionTokens Int?            @map("completion_tokens")
+  totalTokens      Int?            @map("total_tokens")
+  durationMs       Int?            @map("duration_ms")
+  errorCode        String?         @map("error_code")
+  errorMessage     String?         @map("error_message")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  completedAt      DateTime?       @map("completed_at")
+  provider         ModelProvider   @relation(fields: [providerId], references: [id])
+  modelConfig      ModelConfig     @relation(fields: [modelConfigId], references: [id])
+
+  @@index([traceId])
+  @@index([runId])
+  @@index([agentName])
+  @@index([taskType])
+  @@index([status])
+  @@index([createdAt])
+  @@map("model_call_logs")
 }

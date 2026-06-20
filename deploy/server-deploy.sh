@@ -6,6 +6,7 @@ APP_HOST="${APP_HOST:-8.130.160.177}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-ai_workbench}"
 JWT_SECRET="${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}"
 JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
+MODEL_GATEWAY_ENCRYPTION_KEY="${MODEL_GATEWAY_ENCRYPTION_KEY:-}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
 NODE_IMAGE="${NODE_IMAGE:-node:22-bookworm-slim}"
 
@@ -77,6 +78,7 @@ docker run -d \
   -e DATABASE_URL="postgresql://ai_workbench:${POSTGRES_PASSWORD}@ai-product-workbench-postgres:5432/ai_product_workbench?schema=public" \
   -e JWT_SECRET="$JWT_SECRET" \
   -e JWT_EXPIRES_IN="$JWT_EXPIRES_IN" \
+  -e MODEL_GATEWAY_ENCRYPTION_KEY="$MODEL_GATEWAY_ENCRYPTION_KEY" \
   -e API_PORT=4000 \
   -e WEB_ORIGIN="http://${APP_HOST}:3000" \
   -e FILE_UPLOAD_ROOT=/app/apps/api/storage/uploads \

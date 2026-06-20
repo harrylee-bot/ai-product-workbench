@@ -4,6 +4,7 @@ import { AdminUsersModule } from "./admin-users/admin-users.module";
 import { AiModule } from "./ai/ai.module";
 import { AuthModule } from "./auth/auth.module";
 import { FileModule } from "./files/file.module";
+import { ModelGatewayModule } from "./model-gateway/model-gateway.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ProjectModule } from "./projects/project.module";
 import { SystemModule } from "./system/system.module";
@@ -19,6 +20,7 @@ import { SystemModule } from "./system/system.module";
     AdminUsersModule,
     ProjectModule,
     FileModule,
+    ModelGatewayModule,
     AiModule,
     SystemModule,
   ],

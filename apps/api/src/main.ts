@@ -18,7 +18,7 @@ async function bootstrap() {
     origin: corsOrigin(),
     credentials: false,
     allowedHeaders: ["Content-Type", "Authorization"],
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
 
   app.useGlobalFilters(new HttpExceptionFilter());
