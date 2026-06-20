@@ -1,12 +1,13 @@
 # AI产品工作台（内测）
 
-当前实现范围覆盖模块 1-3：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统。
+当前实现范围覆盖模块 1-4：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析。
 
 ## 已实现能力
 
 - 模块 1：登录、JWT 鉴权、角色权限、用户管理、前端权限路由。
 - 模块 2：用户端工作台三栏布局、项目侧栏、需求对话、PRD/原型/QA 预览、底部吸附输入框、加号扩展菜单。
 - 模块 3：Project / Conversation / Message 数据模型，项目创建、列表、搜索、打开、重命名、归档、软删除，默认会话与消息落库。
+- 模块 4：FileAsset / FileParseResult / FileChunk 数据模型，项目文件上传、解析状态管理、txt/md/docx/pdf/image/zip/rp 一期解析、附件 chips、消息附件摘要落库。
 - 模块 6 预留：`POST /api/ai/vibe/handle-message` 已提供占位实现，会保存用户消息和 AI 回复，并更新项目活跃时间。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
@@ -82,11 +83,23 @@ npm run dev
 - `GET /api/conversations/:conversationId/messages`
 - `POST /api/ai/vibe/handle-message`
 
+文件与附件：
+
+- `POST /api/projects/:projectId/files`
+- `GET /api/projects/:projectId/files`
+- `GET /api/files/:fileId`
+- `GET /api/files/:fileId/parse-result`
+- `POST /api/files/:fileId/reparse`
+- `DELETE /api/files/:fileId`
+
+模块 4 一期支持 `txt`、`md`、`docx`、`pdf`、`png`、`jpg`、`jpeg`、`zip`、`rp`。单次最多上传 10 个文件，普通文件最大 50MB，图片最大 10MB。图片、扫描版 PDF 和 Axure 页面预览只生成视觉上下文，不在模块 4 中自研 OCR 或调用模型；`.rp` 只作为参考资料保存，不做逆向解析。Zip 解析会做路径穿越、条目数量和解压大小限制。
+
 ## 权限规则
 
 - 普通用户只能访问自己的项目、会话和消息。
-- 管理员可以查看所有项目详情、会话和消息。
-- 一期管理员不直接修改用户项目内容。
+- 普通用户只能访问自己项目下的文件和解析结果。
+- 管理员可以查看所有项目详情、会话、消息、文件和解析状态。
+- 一期管理员不直接发送用户项目消息。
 - 归档项目默认不出现在项目列表中，归档后不可继续发送消息。
 - 删除项目为软删除，默认列表不展示。
 

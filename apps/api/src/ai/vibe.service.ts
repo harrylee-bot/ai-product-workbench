@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { MessageType, ProjectStatus, UserRole } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { FileAssetService } from "../files/file-asset.service";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import type { HandleVibeMessageDto } from "./dto";
@@ -10,6 +11,7 @@ export class VibeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly messageService: MessageService,
+    private readonly fileAssetService: FileAssetService,
   ) {}
 
   async handleMessage(user: AuthenticatedUser, dto: HandleVibeMessageDto) {
@@ -44,13 +46,27 @@ export class VibeService {
       throw new NotFoundException("会话不存在");
     }
 
+    const fileIds = [...new Set(dto.fileIds ?? [])];
+    const attachmentSummaries = await this.fileAssetService.getAttachmentSummaries(fileIds, project.id);
+    if (fileIds.length !== attachmentSummaries.length) {
+      throw new ForbiddenException("附件不存在或无权访问");
+    }
+
     const userMessage = await this.messageService.createUserMessage({
       projectId: project.id,
       conversationId: conversation.id,
       userId: user.id,
       content: dto.message.trim(),
+      attachments: attachmentSummaries.length ? attachmentSummaries : undefined,
       metadata: dto.selectedRegion ? { selectedRegion: dto.selectedRegion } : undefined,
     });
+
+    await this.fileAssetService.attachFilesToMessage(
+      attachmentSummaries.map((item) => item.fileId),
+      userMessage.id,
+      project.id,
+      conversation.id,
+    );
 
     const assistantMessage = await this.messageService.createAssistantMessage({
       projectId: project.id,

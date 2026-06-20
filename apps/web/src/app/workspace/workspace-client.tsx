@@ -4,7 +4,6 @@ import clsx from "clsx";
 import {
   AlertCircle,
   Archive,
-  Camera,
   Check,
   CheckCircle2,
   ChevronsLeft,
@@ -24,7 +23,6 @@ import {
   RefreshCw,
   Search,
   Send,
-  ScreenShare,
   Smartphone,
   Sparkles,
   Trash2,
@@ -58,6 +56,13 @@ type PreviewTab = "prd" | "prototype" | "qa";
 type PreviewState = "empty" | "generating" | "ready" | "error";
 type QaStatus = "unchecked" | "checking" | "passed" | "issues" | "failed";
 type DeviceMode = "desktop" | "mobile";
+type FileAssetStatus =
+  | "uploaded"
+  | "parsing"
+  | "parsed"
+  | "parse_failed"
+  | "unsupported"
+  | "deleted";
 
 type SelectedRegion =
   | {
@@ -80,6 +85,22 @@ type ChatMessage = {
   content: string;
   time: string;
   selectedRegion?: SelectedRegion | null;
+  attachments?: MessageAttachment[];
+};
+
+type MessageAttachment = {
+  fileId: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  parseStatus?: FileAssetStatus;
+  summary?: string;
+};
+
+type ComposerAttachment = MessageAttachment & {
+  id: string;
+  status: FileAssetStatus | "uploading";
+  error?: string;
 };
 
 type ClarificationQuestion = {
@@ -155,8 +176,25 @@ type ApiMessage = {
   role: "user" | "assistant" | "system";
   type: string;
   content: string;
+  attachments?: unknown;
   metadata?: unknown;
   createdAt: string;
+};
+
+type ApiFileAsset = {
+  id: string;
+  projectId: string;
+  conversationId?: string;
+  messageId?: string;
+  originalName: string;
+  mimeType: string;
+  extension: string;
+  size: number;
+  status: FileAssetStatus;
+  parseResultId?: string;
+  parseError?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type ListProjectsResponse = {
@@ -187,6 +225,14 @@ type HandleMessageResponse = {
   userMessage: ApiMessage;
   assistantMessage: ApiMessage;
   runId: string | null;
+};
+
+type UploadFilesResponse = {
+  items: ApiFileAsset[];
+};
+
+type GetFileResponse = {
+  file: ApiFileAsset;
 };
 
 const STATUS_META: Record<ProjectStatus, { label: string; className: string }> = {
@@ -488,6 +534,74 @@ function formatMessageTime(value?: string) {
   }).format(Number.isNaN(date.getTime()) ? new Date() : date);
 }
 
+function formatFileSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(size / 1024 / 1024).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function getAttachmentStatusLabel(status?: FileAssetStatus | "uploading") {
+  switch (status) {
+    case "uploading":
+      return "上传中";
+    case "uploaded":
+      return "已上传";
+    case "parsing":
+      return "解析中";
+    case "parsed":
+      return "已解析";
+    case "parse_failed":
+      return "解析失败";
+    case "unsupported":
+      return "不支持解析";
+    default:
+      return "已添加";
+  }
+}
+
+function mapComposerAttachment(file: ApiFileAsset): ComposerAttachment {
+  return {
+    id: file.id,
+    fileId: file.id,
+    fileName: file.originalName,
+    fileType: file.extension,
+    fileSize: file.size,
+    parseStatus: file.status,
+    status: file.status,
+  };
+}
+
+function mapMessageAttachments(value: unknown): MessageAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const attachments: MessageAttachment[] = [];
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const attachment = item as Record<string, unknown>;
+    const fileId = typeof attachment.fileId === "string" ? attachment.fileId : "";
+    const fileName = typeof attachment.fileName === "string" ? attachment.fileName : "";
+    const fileType = typeof attachment.fileType === "string" ? attachment.fileType : "file";
+    const size =
+      typeof attachment.size === "number"
+        ? attachment.size
+        : typeof attachment.fileSize === "number"
+          ? attachment.fileSize
+          : 0;
+    if (!fileId || !fileName) return;
+    attachments.push({
+      fileId,
+      fileName,
+      fileType,
+      fileSize: size,
+      parseStatus:
+        typeof attachment.parseStatus === "string"
+          ? (attachment.parseStatus as FileAssetStatus)
+          : undefined,
+      summary: typeof attachment.summary === "string" ? attachment.summary : undefined,
+    });
+  });
+  return attachments;
+}
+
 function mapProject(project: ApiProject, messages: ChatMessage[] = []): WorkspaceProject {
   const hasGeneratedPreview =
     project.status === "prd_ready" ||
@@ -529,6 +643,7 @@ function mapMessage(message: ApiMessage): ChatMessage | null {
     role: message.role,
     content: message.content,
     time: formatMessageTime(message.createdAt),
+    attachments: mapMessageAttachments(message.attachments),
   };
 }
 
@@ -561,6 +676,7 @@ export function WorkspaceClient() {
   const [projectDetailLoading, setProjectDetailLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [previewTab, setPreviewTab] = useState<PreviewTab>("prd");
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [localEditEnabled, setLocalEditEnabled] = useState(false);
@@ -568,6 +684,7 @@ export function WorkspaceClient() {
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>(createAgentSteps);
   const [isRunning, setIsRunning] = useState(false);
   const timersRef = useRef<number[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentProject = useMemo(
     () => projects.find((project) => project.id === currentProjectId) ?? null,
@@ -589,6 +706,44 @@ export function WorkspaceClient() {
       timersRef.current.forEach((timer) => window.clearTimeout(timer));
     };
   }, []);
+
+  const pollFileStatus = (fileId: string, attempts = 0) => {
+    if (attempts >= 12) return;
+
+    schedule(async () => {
+      try {
+        const response = await apiRequest<GetFileResponse>(`/files/${fileId}`);
+        const nextAttachment = mapComposerAttachment(response.file);
+        setComposerAttachments((items) =>
+          items.map((item) =>
+            item.fileId === fileId
+              ? {
+                  ...item,
+                  ...nextAttachment,
+                }
+              : item,
+          ),
+        );
+
+        if (["uploaded", "parsing"].includes(response.file.status)) {
+          pollFileStatus(fileId, attempts + 1);
+        }
+      } catch (error) {
+        setComposerAttachments((items) =>
+          items.map((item) =>
+            item.fileId === fileId
+              ? {
+                  ...item,
+                  status: "parse_failed",
+                  parseStatus: "parse_failed",
+                  error: error instanceof Error ? error.message : "文件状态同步失败",
+                }
+              : item,
+          ),
+        );
+      }
+    }, attempts === 0 ? 900 : 1600);
+  };
 
   const loadProjects = async (preferredProjectId = currentProjectId) => {
     setProjectListLoading(true);
@@ -699,6 +854,7 @@ export function WorkspaceClient() {
       setNewProjectOpen(false);
       setNewProjectName("");
       setComposerValue("");
+      setComposerAttachments([]);
       setPreviewTab("prd");
       setSelectedRegion(null);
       setLocalEditEnabled(false);
@@ -948,9 +1104,98 @@ export function WorkspaceClient() {
     }, 7600);
   };
 
+  const uploadComposerFiles = async (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? []);
+    if (!files.length) return;
+    if (!currentProject) {
+      setWorkspaceError("请先新建项目，再上传资料");
+      return;
+    }
+
+    const remainingSlots = Math.max(10 - composerAttachments.length, 0);
+    if (!remainingSlots) {
+      setWorkspaceError("单条消息最多携带 10 个附件");
+      return;
+    }
+
+    const selectedFiles = files.slice(0, remainingSlots);
+    const uploadingItems: ComposerAttachment[] = selectedFiles.map((file) => {
+      const extension = file.name.split(".").pop()?.toLowerCase() ?? "file";
+      return {
+        id: createId("upload"),
+        fileId: "",
+        fileName: file.name,
+        fileType: extension,
+        fileSize: file.size,
+        status: "uploading",
+      };
+    });
+
+    setWorkspaceError(null);
+    setComposerAttachments((items) => [...items, ...uploadingItems]);
+
+    try {
+      const formData = new FormData();
+      selectedFiles.forEach((file) => formData.append("files", file));
+      if (currentProject.conversationId) formData.append("conversationId", currentProject.conversationId);
+
+      const response = await apiRequest<UploadFilesResponse>(`/projects/${currentProject.id}/files`, {
+        method: "POST",
+        body: formData,
+      });
+      const uploadedItems = response.items.map(mapComposerAttachment);
+
+      setComposerAttachments((items) => {
+        const uploadIds = new Set(uploadingItems.map((item) => item.id));
+        return [...items.filter((item) => !uploadIds.has(item.id)), ...uploadedItems];
+      });
+
+      uploadedItems.forEach((item) => pollFileStatus(item.fileId));
+    } catch (error) {
+      const uploadIds = new Set(uploadingItems.map((item) => item.id));
+      setComposerAttachments((items) =>
+        items.map((item) =>
+          uploadIds.has(item.id)
+            ? {
+                ...item,
+                status: "parse_failed",
+                parseStatus: "parse_failed",
+                error: error instanceof Error ? error.message : "上传失败",
+              }
+            : item,
+        ),
+      );
+      setWorkspaceError(error instanceof Error ? error.message : "文件上传失败");
+    }
+  };
+
+  const removeComposerAttachment = (attachmentId: string) => {
+    setComposerAttachments((items) => items.filter((item) => item.id !== attachmentId));
+  };
+
+  const openFilePicker = (accept: string) => {
+    if (!currentProject) {
+      setWorkspaceError("请先新建项目，再上传资料");
+      return;
+    }
+    if (!fileInputRef.current) return;
+    fileInputRef.current.accept = accept;
+    fileInputRef.current.value = "";
+    fileInputRef.current.click();
+  };
+
   const sendMessage = async () => {
-    const message = composerValue.trim();
+    const typedMessage = composerValue.trim();
+    const fileIds = composerAttachments
+      .filter((attachment) => attachment.fileId && attachment.status !== "uploading")
+      .map((attachment) => attachment.fileId);
+    const hasUploadingFiles = composerAttachments.some((attachment) => attachment.status === "uploading");
+    const message = typedMessage || (fileIds.length ? "请基于上传附件继续分析。" : "");
     if (!message || isRunning) return;
+    if (hasUploadingFiles) {
+      setWorkspaceError("附件还在上传中，请稍等几秒再发送");
+      return;
+    }
     if (!currentProject) {
       setWorkspaceError("请先新建项目，再发送产品需求");
       return;
@@ -985,6 +1230,15 @@ export function WorkspaceClient() {
       content: message,
       time: getClockTime(),
       selectedRegion,
+      attachments: composerAttachments
+        .filter((attachment) => attachment.fileId)
+        .map((attachment) => ({
+          fileId: attachment.fileId,
+          fileName: attachment.fileName,
+          fileType: attachment.fileType,
+          fileSize: attachment.fileSize,
+          parseStatus: attachment.parseStatus,
+        })),
     };
 
     setProjects((items) =>
@@ -1004,6 +1258,7 @@ export function WorkspaceClient() {
     );
 
     setComposerValue("");
+    setComposerAttachments([]);
     setSelectedRegion(null);
     setLocalEditEnabled(false);
 
@@ -1016,6 +1271,7 @@ export function WorkspaceClient() {
           message,
           selectedRegion,
           previewMode: previewTab,
+          fileIds,
         }),
       });
       const savedUserMessage = mapMessage(response.userMessage);
@@ -1111,12 +1367,16 @@ export function WorkspaceClient() {
           <ChatPanel
             project={currentProject}
             composerValue={composerValue}
+            composerAttachments={composerAttachments}
             isRunning={isRunning}
             projectDetailLoading={projectDetailLoading}
             workspaceError={workspaceError}
             agentSteps={agentSteps}
             selectedRegion={selectedRegion}
             onComposerChange={setComposerValue}
+            onUploadFiles={() => openFilePicker(".txt,.md,.docx,.pdf,.zip,.rp")}
+            onUploadImages={() => openFilePicker("image/png,image/jpeg,.png,.jpg,.jpeg")}
+            onRemoveAttachment={removeComposerAttachment}
             onPromptClick={setComposerValue}
             onNewProject={() => setNewProjectOpen(true)}
             onSend={sendMessage}
@@ -1161,6 +1421,13 @@ export function WorkspaceClient() {
         onArchive={archiveProject}
         onDelete={deleteProject}
         onClose={closeProjectEditor}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => void uploadComposerFiles(event.target.files)}
       />
     </ProtectedRoute>
   );
@@ -1451,12 +1718,16 @@ function ProjectListItem({
 function ChatPanel({
   project,
   composerValue,
+  composerAttachments,
   isRunning,
   projectDetailLoading,
   workspaceError,
   agentSteps,
   selectedRegion,
   onComposerChange,
+  onUploadFiles,
+  onUploadImages,
+  onRemoveAttachment,
   onPromptClick,
   onNewProject,
   onSend,
@@ -1465,12 +1736,16 @@ function ChatPanel({
 }: {
   project: WorkspaceProject | null;
   composerValue: string;
+  composerAttachments: ComposerAttachment[];
   isRunning: boolean;
   projectDetailLoading: boolean;
   workspaceError: string | null;
   agentSteps: AgentStep[];
   selectedRegion: SelectedRegion | null;
   onComposerChange: (value: string) => void;
+  onUploadFiles: () => void;
+  onUploadImages: () => void;
+  onRemoveAttachment: (attachmentId: string) => void;
   onPromptClick: (value: string) => void;
   onNewProject: () => void;
   onSend: () => void;
@@ -1491,7 +1766,7 @@ function ChatPanel({
         <span className="text-xs text-gray-500">{isRunning ? "生成中..." : "可继续输入"}</span>
       </div>
 
-      <div className="min-h-0 overflow-y-auto px-4 pb-[116px] pt-4">
+      <div className="min-h-0 overflow-y-auto px-4 pb-[168px] pt-4">
         {workspaceError ? (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm leading-6 text-rose-700">
             {workspaceError}
@@ -1528,7 +1803,11 @@ function ChatPanel({
         value={composerValue}
         disabled={isRunning || projectDetailLoading}
         selectedRegion={selectedRegion}
+        attachments={composerAttachments}
         onChange={onComposerChange}
+        onUploadFiles={onUploadFiles}
+        onUploadImages={onUploadImages}
+        onRemoveAttachment={onRemoveAttachment}
         onSend={onSend}
         onClearSelectedRegion={onClearSelectedRegion}
       />
@@ -1630,6 +1909,25 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           </div>
         ) : null}
         <div>{message.content}</div>
+        {message.attachments?.length ? (
+          <div className="mt-3 grid gap-1.5">
+            {message.attachments.map((attachment) => (
+              <div
+                key={attachment.fileId}
+                className={clsx(
+                  "flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs",
+                  isUser ? "bg-white/10 text-gray-200" : "bg-gray-50 text-gray-600",
+                )}
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{attachment.fileName}</span>
+                <span className={clsx("shrink-0", isUser ? "text-gray-300" : "text-gray-400")}>
+                  {getAttachmentStatusLabel(attachment.parseStatus)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className={clsx("mt-2 text-xs", isUser ? "text-gray-300" : "text-gray-400")}>{message.time}</div>
       </div>
     </div>
@@ -1709,14 +2007,22 @@ function ChatComposer({
   value,
   disabled,
   selectedRegion,
+  attachments,
   onChange,
+  onUploadFiles,
+  onUploadImages,
+  onRemoveAttachment,
   onSend,
   onClearSelectedRegion,
 }: {
   value: string;
   disabled: boolean;
   selectedRegion: SelectedRegion | null;
+  attachments: ComposerAttachment[];
   onChange: (value: string) => void;
+  onUploadFiles: () => void;
+  onUploadImages: () => void;
+  onRemoveAttachment: (attachmentId: string) => void;
   onSend: () => void;
   onClearSelectedRegion: () => void;
 }) {
@@ -1753,11 +2059,10 @@ function ChatComposer({
   }, [toolsOpen]);
 
   const addActions = [
-    { label: "上传文件", icon: FileUp },
-    { label: "上传图片", icon: ImagePlus },
-    { label: "截取屏幕截图", icon: ScreenShare },
-    { label: "拍照", icon: Camera },
+    { label: "上传资料", icon: FileUp, onClick: onUploadFiles },
+    { label: "上传图片", icon: ImagePlus, onClick: onUploadImages },
   ];
+  const canSend = Boolean(value.trim() || attachments.some((attachment) => attachment.fileId));
 
   return (
     <div className="absolute inset-x-0 bottom-0 z-20 shrink-0 border-t border-gray-200 bg-slate-50/95 p-3 shadow-[0_-10px_24px_rgba(15,23,42,0.06)] backdrop-blur">
@@ -1778,6 +2083,17 @@ function ChatComposer({
         </div>
       ) : null}
       <div className="rounded-[16px] border border-gray-200 bg-white px-3 py-2.5 shadow-sm focus-within:border-gray-300 focus-within:ring-2 focus-within:ring-gray-900/10">
+        {attachments.length ? (
+          <div className="mb-2 flex max-h-[76px] flex-wrap gap-2 overflow-y-auto pr-1">
+            {attachments.map((attachment) => (
+              <AttachmentChip
+                key={attachment.id}
+                attachment={attachment}
+                onRemove={() => onRemoveAttachment(attachment.id)}
+              />
+            ))}
+          </div>
+        ) : null}
         <textarea
           ref={textareaRef}
           value={value}
@@ -1803,7 +2119,10 @@ function ChatComposer({
                     <button
                       key={action.label}
                       type="button"
-                      onClick={() => setToolsOpen(false)}
+                      onClick={() => {
+                        setToolsOpen(false);
+                        action.onClick();
+                      }}
                       className="flex h-10 w-full items-center gap-3 px-3 text-left text-sm text-gray-800 hover:bg-gray-50"
                     >
                       <Icon className="h-4 w-4 text-gray-500" />
@@ -1831,7 +2150,7 @@ function ChatComposer({
           <button
             type="button"
             onClick={onSend}
-            disabled={!value.trim() || disabled}
+            disabled={!canSend || disabled}
             className="inline-flex h-9 items-center gap-2 rounded-[12px] bg-gray-950 px-3.5 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
           >
             {disabled ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -1839,6 +2158,52 @@ function ChatComposer({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AttachmentChip({
+  attachment,
+  onRemove,
+}: {
+  attachment: ComposerAttachment;
+  onRemove: () => void;
+}) {
+  const failed = attachment.status === "parse_failed";
+  const parsed = attachment.status === "parsed";
+  const busy = attachment.status === "uploading" || attachment.status === "parsing";
+
+  return (
+    <div
+      className={clsx(
+        "flex h-9 max-w-full items-center gap-2 rounded-lg border px-2 text-xs",
+        failed
+          ? "border-rose-200 bg-rose-50 text-rose-700"
+          : parsed
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-gray-200 bg-gray-50 text-gray-600",
+      )}
+      title={attachment.error ?? attachment.fileName}
+    >
+      {busy ? (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+      ) : failed ? (
+        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <FileText className="h-3.5 w-3.5 shrink-0" />
+      )}
+      <span className="min-w-0 max-w-[180px] truncate font-medium">{attachment.fileName}</span>
+      <span className="shrink-0 text-gray-400">{formatFileSize(attachment.fileSize)}</span>
+      <span className="shrink-0">{getAttachmentStatusLabel(attachment.status)}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-white hover:text-gray-900"
+        aria-label={`移除 ${attachment.fileName}`}
+        title="移除"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }

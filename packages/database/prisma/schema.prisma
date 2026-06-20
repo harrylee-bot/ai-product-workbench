@@ -51,6 +51,48 @@ enum MessageType {
   qa_update
 }
 
+enum FileStorageProvider {
+  local
+  s3
+  oss
+}
+
+enum FileAssetStatus {
+  uploaded
+  parsing
+  parsed
+  parse_failed
+  unsupported
+  deleted
+}
+
+enum ParseResultStatus {
+  success
+  partial_success
+  failed
+}
+
+enum FileParserType {
+  plain_text
+  markdown
+  docx
+  pdf
+  image
+  zip
+  axure_html_zip
+  rp_reference
+  unsupported
+}
+
+enum FileChunkSourceType {
+  text
+  section
+  page
+  image_context
+  axure_page
+  pdf_page
+}
+
 model User {
   id             String          @id @default(cuid())
   username       String          @unique
@@ -66,6 +108,7 @@ model User {
   projects       Project[]
   conversations  Conversation[]
   messages       Message[]
+  fileAssets     FileAsset[]
 
   @@map("users")
 }
@@ -105,6 +148,7 @@ model Project {
   owner                       User           @relation(fields: [ownerId], references: [id])
   conversations               Conversation[]
   messages                    Message[]
+  fileAssets                  FileAsset[]
 
   @@index([ownerId])
   @@index([status])
@@ -128,6 +172,7 @@ model Conversation {
   project       Project            @relation(fields: [projectId], references: [id])
   owner         User               @relation(fields: [ownerId], references: [id])
   messages      Message[]
+  fileAssets    FileAsset[]
 
   @@index([projectId])
   @@index([ownerId])
@@ -154,10 +199,92 @@ model Message {
   project                    Project      @relation(fields: [projectId], references: [id])
   conversation               Conversation @relation(fields: [conversationId], references: [id])
   user                       User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fileAssets                 FileAsset[]
 
   @@index([projectId])
   @@index([conversationId])
   @@index([userId])
   @@index([createdAt])
   @@map("messages")
+}
+
+model FileAsset {
+  id              String              @id @default(uuid())
+  projectId       String              @map("project_id")
+  conversationId  String?             @map("conversation_id")
+  messageId       String?             @map("message_id")
+  uploadedBy      String              @map("uploaded_by")
+  originalName    String              @map("original_name")
+  storedName      String              @map("stored_name")
+  mimeType        String              @map("mime_type")
+  extension       String
+  size            Int
+  storageProvider FileStorageProvider @default(local) @map("storage_provider")
+  storagePath     String              @map("storage_path")
+  publicUrl       String?             @map("public_url")
+  status          FileAssetStatus     @default(uploaded)
+  parseResultId   String?             @map("parse_result_id")
+  parseError      String?             @map("parse_error")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  deletedAt       DateTime?           @map("deleted_at")
+  project         Project             @relation(fields: [projectId], references: [id])
+  conversation    Conversation?       @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  message         Message?            @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  uploader        User                @relation(fields: [uploadedBy], references: [id])
+  parseResult     FileParseResult?
+  chunks          FileChunk[]
+
+  @@index([projectId])
+  @@index([conversationId])
+  @@index([messageId])
+  @@index([uploadedBy])
+  @@index([status])
+  @@index([createdAt])
+  @@map("file_assets")
+}
+
+model FileParseResult {
+  id              String            @id @default(uuid())
+  fileAssetId     String            @unique @map("file_asset_id")
+  projectId       String            @map("project_id")
+  status          ParseResultStatus
+  parserType      FileParserType    @map("parser_type")
+  title           String?
+  summary         String?
+  extractedText   String?           @map("extracted_text")
+  wordCount       Int?              @map("word_count")
+  sections        Json?
+  pages           Json?
+  images          Json?
+  visualContexts  Json?             @map("visual_contexts")
+  axureInfo       Json?             @map("axure_info")
+  errorMessage    String?           @map("error_message")
+  warnings        Json?
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  fileAsset       FileAsset         @relation(fields: [fileAssetId], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+  @@index([parserType])
+  @@map("file_parse_results")
+}
+
+model FileChunk {
+  id             String              @id @default(uuid())
+  fileAssetId    String              @map("file_asset_id")
+  projectId      String              @map("project_id")
+  chunkIndex     Int                 @map("chunk_index")
+  content        String
+  tokenEstimate  Int?                @map("token_estimate")
+  sourceType     FileChunkSourceType @map("source_type")
+  sourceRef      String?             @map("source_ref")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  fileAsset      FileAsset           @relation(fields: [fileAssetId], references: [id])
+
+  @@index([fileAssetId])
+  @@index([projectId])
+  @@index([chunkIndex])
+  @@map("file_chunks")
 }

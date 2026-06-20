@@ -1,4 +1,4 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString } from "class-validator";
+import { ArrayMaxSize, IsArray, IsIn, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class HandleVibeMessageDto {
   @IsString({ message: "projectId 不能为空" })
@@ -19,4 +19,10 @@ export class HandleVibeMessageDto {
   @IsOptional()
   @IsIn(["prd", "prototype"], { message: "previewMode 不正确" })
   previewMode?: "prd" | "prototype";
+
+  @IsOptional()
+  @IsArray({ message: "fileIds 格式不正确" })
+  @ArrayMaxSize(10, { message: "单条消息最多携带 10 个附件" })
+  @IsString({ each: true, message: "fileIds 格式不正确" })
+  fileIds?: string[];
 }
