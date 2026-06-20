@@ -43,6 +43,22 @@ until docker exec ai-product-workbench-postgres pg_isready -U ai_workbench -d ai
   sleep 2
 done
 
+wait_for_http() {
+  local url="$1"
+  local label="$2"
+  local attempt
+
+  for attempt in $(seq 1 60); do
+    if curl --fail --silent "$url" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "${label} did not become ready: ${url}" >&2
+  return 1
+}
+
 docker build \
   --build-arg NODE_IMAGE="$NODE_IMAGE" \
   -f apps/api/Dockerfile \
@@ -75,8 +91,8 @@ docker run -d \
   -e NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
   ai-product-workbench-web:latest
 
-curl --fail --silent "http://127.0.0.1:4000/api/system/health" >/dev/null
-curl --fail --silent "http://127.0.0.1:3000/login" >/dev/null
+wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
+wait_for_http "http://127.0.0.1:3000/login" "Web"
 
 echo "Deployed:"
 echo "  Web: http://${APP_HOST}:3000/login"

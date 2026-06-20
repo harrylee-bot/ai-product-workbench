@@ -24,4 +24,4 @@ COPY --from=build /app/apps/web/.next apps/web/.next
 COPY --from=build /app/apps/web/next.config.ts apps/web/next.config.ts
 WORKDIR /app/apps/web
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["npx", "next", "start", "--hostname", "0.0.0.0", "--port", "3000"]
