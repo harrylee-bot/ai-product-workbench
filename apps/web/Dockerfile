@@ -1,4 +1,6 @@
-FROM node:22-bookworm-slim AS deps
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
@@ -11,7 +13,7 @@ COPY apps/web apps/web
 WORKDIR /app/apps/web
 RUN npm run build
 
-FROM node:22-bookworm-slim AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0

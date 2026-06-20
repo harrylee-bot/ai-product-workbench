@@ -83,6 +83,18 @@ JWT_SECRET=replace-with-a-long-random-secret \
 bash deploy/server-deploy.sh
 ```
 
+如果服务器访问 Docker Hub 超时，可临时指定镜像源：
+
+```bash
+POSTGRES_IMAGE=docker.1panel.live/library/postgres:16-alpine \
+NODE_IMAGE=docker.1panel.live/library/node:22-bookworm-slim \
+SKIP_GIT_PULL=1 \
+APP_HOST=8.130.160.177 \
+POSTGRES_PASSWORD=ai_workbench \
+JWT_SECRET=replace-with-a-long-random-secret \
+bash deploy/server-deploy.sh
+```
+
 ## 默认账号
 
 | 角色 | 用户名 | 邮箱 | 密码 |

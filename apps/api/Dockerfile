@@ -1,4 +1,6 @@
-FROM node:22-bookworm-slim AS deps
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
@@ -11,7 +13,7 @@ COPY packages/database packages/database
 RUN npm run db:generate
 RUN npm --workspace @ai-product-workbench/api run build
 
-FROM node:22-bookworm-slim AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json tsconfig.base.json ./

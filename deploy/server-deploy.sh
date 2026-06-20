@@ -6,6 +6,8 @@ APP_HOST="${APP_HOST:-8.130.160.177}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-ai_workbench}"
 JWT_SECRET="${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}"
 JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
+NODE_IMAGE="${NODE_IMAGE:-node:22-bookworm-slim}"
 
 cd "$APP_DIR"
 
@@ -32,7 +34,7 @@ if ! docker ps -a --format '{{.Names}}' | grep -qx ai-product-workbench-postgres
     -e POSTGRES_USER=ai_workbench \
     -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
     -v ai-product-workbench-postgres:/var/lib/postgresql/data \
-    postgres:16-alpine
+    "$POSTGRES_IMAGE"
 elif ! docker ps --format '{{.Names}}' | grep -qx ai-product-workbench-postgres; then
   docker start ai-product-workbench-postgres >/dev/null
 fi
@@ -41,8 +43,12 @@ until docker exec ai-product-workbench-postgres pg_isready -U ai_workbench -d ai
   sleep 2
 done
 
-docker build -f apps/api/Dockerfile -t ai-product-workbench-api:latest .
 docker build \
+  --build-arg NODE_IMAGE="$NODE_IMAGE" \
+  -f apps/api/Dockerfile \
+  -t ai-product-workbench-api:latest .
+docker build \
+  --build-arg NODE_IMAGE="$NODE_IMAGE" \
   --build-arg NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
   -f apps/web/Dockerfile \
   -t ai-product-workbench-web:latest .

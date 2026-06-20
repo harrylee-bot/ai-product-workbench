@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     container_name: ai-product-workbench-postgres
     restart: unless-stopped
     environment:
@@ -19,6 +19,8 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
     container_name: ai-product-workbench-api
     restart: unless-stopped
     depends_on:
@@ -41,6 +43,7 @@ services:
       context: ..
       dockerfile: apps/web/Dockerfile
       args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
     container_name: ai-product-workbench-web
     restart: unless-stopped
