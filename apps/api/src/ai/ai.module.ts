@@ -50,6 +50,11 @@ import { VersionHistoryService } from "./version-history.service";
 import { VibeController } from "./vibe.controller";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
+import {
+  InlineAssistantController,
+  PrdEditingController,
+  PrototypeEditingController,
+} from "./editing.controller";
 
 @Module({
   imports: [PrismaModule, ProjectModule, FileModule, KnowledgeModule, ModelGatewayModule],
@@ -68,6 +73,9 @@ import { VibeStreamService } from "./vibe-stream.service";
     QaReportController,
     ProjectVersionTimelineController,
     ProjectRollbackController,
+    PrdEditingController,
+    PrototypeEditingController,
+    InlineAssistantController,
   ],
   providers: [
     VibeService,

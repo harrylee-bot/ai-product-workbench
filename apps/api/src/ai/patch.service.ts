@@ -47,6 +47,11 @@ type CreatePatchInput = {
   attachmentFileIds?: string[];
 };
 
+type CreatePatchCandidateInput = CreatePatchInput & {
+  source?: "prd_edit" | "prd_rewrite" | "prd_diff" | "prototype_edit" | "prototype_restructure" | "prototype_flow_update" | "inline_edit";
+  interactionEvent?: Record<string, unknown>;
+};
+
 type PatchExecutionInput = {
   projectId: string;
   conversationId: string;
@@ -170,6 +175,85 @@ export class PatchService {
     };
   }
 
+  async createPatchCandidateForUser(
+    user: AuthenticatedUser,
+    projectId: string,
+    input: CreatePatchCandidateInput,
+  ) {
+    const project = await this.assertProjectAccess(user, projectId);
+    this.assertOwnerMutation(user, project.ownerId);
+    await this.assertConversation(projectId, input.conversationId);
+    const selectedRegion = normalizeSelectedRegion(input.selectedRegion);
+    const instruction = input.userInstruction.trim();
+    if (!instruction) throw new BadRequestException("PATCH_INSTRUCTION_EMPTY");
+
+    const attachmentFileIds = [...new Set(input.attachmentFileIds ?? [])];
+    const attachments = await this.fileAssetService.getAttachmentSummaries(attachmentFileIds, projectId);
+    if (attachmentFileIds.length !== attachments.length) {
+      throw new ForbiddenException("附件不存在或无权访问");
+    }
+
+    const userMessage = await this.messageService.createUserMessage({
+      projectId,
+      conversationId: input.conversationId,
+      userId: user.id,
+      content: instruction,
+      attachments: attachments.length ? toInputJson(attachments) : undefined,
+      metadata: toInputJson({
+        selectedRegion,
+        patchMode: true,
+        patchCandidateOnly: true,
+        source: input.source ?? "inline_edit",
+        interactionEvent: input.interactionEvent,
+      }),
+    });
+    await this.fileAssetService.attachFilesToMessage(
+      attachmentFileIds,
+      userMessage.id,
+      projectId,
+      input.conversationId,
+    );
+
+    const run = await this.runLog.createRun({
+      projectId,
+      conversationId: input.conversationId,
+      userId: user.id,
+      userInput: instruction,
+    });
+    await this.runLog.markRunIntent(
+      run.id,
+      selectedRegion.type === "prototype" ? UserIntent.patch_prototype : UserIntent.patch_document,
+    );
+    await this.recordInteractionEvent(run.id, projectId, input.source ?? "inline_edit", {
+      selectedRegion,
+      instruction,
+      ...input.interactionEvent,
+    });
+
+    const result = await this.createCandidatePatch({
+      projectId,
+      conversationId: input.conversationId,
+      userId: user.id,
+      userInstruction: instruction,
+      selectedRegion,
+      attachments,
+      runId: run.id,
+      traceId: run.traceId,
+      instructionMessageId: userMessage.id,
+    });
+
+    return {
+      projectId,
+      conversationId: input.conversationId,
+      userMessage,
+      assistantMessage: result.assistantMessage,
+      runId: run.id,
+      status: "candidate_created",
+      patchRecord: result.patchRecord,
+      result: result.result,
+    };
+  }
+
   async listForProject(
     user: AuthenticatedUser,
     projectId: string,
@@ -223,8 +307,7 @@ export class PatchService {
     if (row.status !== PrismaPatchRecordStatus.needs_confirmation) {
       throw new BadRequestException("PATCH_CONFIRMATION_NOT_REQUIRED");
     }
-    const confirmationText = confirmation.trim();
-    if (!confirmationText) throw new BadRequestException("PATCH_CONFIRMATION_EMPTY");
+    const confirmationText = confirmation.trim() || "用户确认应用 Patch 候选";
     const selectedRegion = normalizeSelectedRegion(recordFromJson(row.selectedRegion));
     const userMessage = await this.messageService.createUserMessage({
       projectId: row.projectId,
@@ -274,6 +357,94 @@ export class PatchService {
       patchRecord: result.patchRecord,
       result: result.result,
     };
+  }
+
+  private async createCandidatePatch(input: PatchExecutionInput) {
+    let patchRecord: PatchRecord | undefined;
+    try {
+      await this.stream.emit({
+        runId: input.runId,
+        projectId: input.projectId,
+        type: "patch_started",
+        content: "正在生成 Patch 候选...",
+      });
+
+      const state = await this.stateService.getCurrentState(input.projectId);
+      if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
+      const knowledgeContext = await this.getPatchKnowledgeContext(input);
+      const patch = await this.runAgentStep(
+        input,
+        AgentName.patch_agent,
+        "patch_planning",
+        () => this.patchAgent.run({
+          runId: input.runId,
+          projectId: input.projectId,
+          traceId: input.traceId,
+          userId: input.userId,
+          input: {
+            userInput: input.userInstruction,
+            selectedRegion: input.selectedRegion,
+            productDesignState: state,
+            prdDocument: state.prdDocument,
+            prototypeSpec: state.prototypeSpec,
+            knowledgeContext,
+          },
+        }),
+      );
+      const plan: PatchPlan = {
+        ...patch.data,
+        needUserConfirm: true,
+        needsUserConfirmation: true,
+      };
+      const createdRecord = await this.prisma.patchRecord.create({
+        data: {
+          projectId: input.projectId,
+          conversationId: input.conversationId,
+          instructionMessageId: input.instructionMessageId,
+          selectedRegion: toInputJson(input.selectedRegion),
+          userInstruction: input.userInstruction,
+          patchPlan: toInputJson({
+            ...plan,
+            candidateOnly: true,
+            confirmationRequiredReason: "二期编辑体验要求用户确认后才能执行。",
+          }),
+          operations: toInputJson(plan.operations),
+          status: PrismaPatchRecordStatus.needs_confirmation,
+          beforeProductDesignStateVersion: state.version,
+          generatedByRunId: input.runId,
+          createdBy: input.userId,
+        },
+      });
+      patchRecord = this.toPatchRecord(createdRecord as PatchRecordRow);
+      await this.stream.emit({
+        runId: input.runId,
+        projectId: input.projectId,
+        type: "patch_plan_created",
+        step: "patch_planning",
+        data: { patchId: patchRecord.id, patchPlan: plan, candidateOnly: true },
+        content: "Patch 候选已生成，等待用户确认",
+      });
+
+      const message = "已生成 Patch 候选，请在修改历史中确认后再应用。";
+      const assistantMessage = await this.messageService.createAssistantMessage({
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        content: message,
+        type: MessageType.agent_summary,
+        metadata: toInputJson({ patchRecord, patchPlan: plan, candidateOnly: true }),
+        relatedRunId: input.runId,
+      });
+      const result = patchConfirmationResult(patchRecord, plan);
+      await this.runLog.completeRun(input.runId, { patchRecord, patchPlan: plan, candidateOnly: true }, message);
+      await this.prisma.project.update({
+        where: { id: input.projectId },
+        data: { status: ProjectStatus.clarifying, lastActivityAt: new Date() },
+      });
+      return { patchRecord, assistantMessage, result };
+    } catch (error) {
+      await this.handlePatchFailure(input, patchRecord, error);
+      throw error;
+    }
   }
 
   private async executePatch(input: PatchExecutionInput) {
@@ -728,6 +899,29 @@ export class PatchService {
         errorMessage: error instanceof Error ? error.message : "PATCH_FAILED",
       },
       content: error instanceof Error ? error.message : "PATCH_FAILED",
+    });
+  }
+
+  private async recordInteractionEvent(
+    runId: string,
+    projectId: string,
+    source: NonNullable<CreatePatchCandidateInput["source"]>,
+    payload: Record<string, unknown>,
+  ) {
+    await this.stream.emit({
+      runId,
+      projectId,
+      type: "patch_plan_created",
+      step: "patch_planning",
+      data: {
+        interactionEvent: {
+          source,
+          action: payload.action ?? "inline_patch_candidate",
+          timestamp: new Date().toISOString(),
+          payload,
+        },
+      },
+      content: "已记录局部编辑交互事件",
     });
   }
 

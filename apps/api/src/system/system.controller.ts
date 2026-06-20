@@ -25,6 +25,9 @@ export class SystemController {
         "qa-reports",
         "version-timeline",
         "rollback-records",
+        "prd-editing",
+        "prototype-editing",
+        "inline-assistant",
       ],
     };
   }

@@ -17,5 +17,8 @@ describe("SystemController", () => {
     expect(result.modules).toContain("admin-dashboard");
     expect(result.modules).toContain("admin-logs");
     expect(result.modules).toContain("admin-audit");
+    expect(result.modules).toContain("prd-editing");
+    expect(result.modules).toContain("prototype-editing");
+    expect(result.modules).toContain("inline-assistant");
   });
 });

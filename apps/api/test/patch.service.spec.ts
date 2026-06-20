@@ -258,6 +258,73 @@ describe("PatchService", () => {
     expect(runLog.markRunIntent).toHaveBeenCalledWith("run-1", UserIntent.patch_prototype);
   });
 
+  it("creates an inline editing Patch candidate without mutating ProductDesignState", async () => {
+    const beforeState = baseState();
+    stateService.getCurrentState.mockResolvedValue(beforeState);
+    patchAgent.run.mockResolvedValue({ data: basePatchPlan() });
+
+    const result = await service.createPatchCandidateForUser(user, "project-1", {
+      conversationId: "conversation-1",
+      selectedRegion: {
+        type: "document",
+        targetId: "prd-1",
+        documentId: "prd-1",
+        sectionId: "frontend_rules",
+        label: "前端展示规则",
+        sourcePaths: ["frontendRules"],
+      },
+      userInstruction: "编辑动作：rewrite\n选区内容：按钮文案为立即签到。\n用户指令：表达更清楚。",
+      source: "inline_edit",
+      interactionEvent: {
+        action: "rewrite",
+        selectedText: "按钮文案为立即签到。",
+      },
+    });
+
+    expect(result.status).toBe("candidate_created");
+    expect(result.patchRecord.status).toBe(PatchRecordStatus.needs_confirmation);
+    expect(stateService.applyPatch).not.toHaveBeenCalled();
+    expect(documentService.saveGeneratedDocument).not.toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+    expect(qaService.runForProject).not.toHaveBeenCalled();
+    expect(prisma.patchRecord.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        selectedRegion: expect.objectContaining({ type: "document", sectionId: "frontend_rules" }),
+        patchPlan: expect.objectContaining({
+          candidateOnly: true,
+          needUserConfirm: true,
+          needsUserConfirmation: true,
+        }),
+        status: PatchRecordStatus.needs_confirmation,
+        beforeProductDesignStateVersion: 1,
+      }),
+    });
+    expect(stream.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "patch_plan_created",
+        step: "patch_planning",
+        data: expect.objectContaining({
+          interactionEvent: expect.objectContaining({
+            source: "inline_edit",
+            action: "rewrite",
+            payload: expect.objectContaining({
+              selectedText: "按钮文案为立即签到。",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(messageService.createAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "已生成 Patch 候选，请在修改历史中确认后再应用。",
+        metadata: expect.objectContaining({
+          candidateOnly: true,
+        }),
+      }),
+    );
+    expect(runLog.markRunIntent).toHaveBeenCalledWith("run-1", UserIntent.patch_document);
+  });
+
   it("rolls ProductDesignState back when regeneration fails after patch application", async () => {
     const beforeState = baseState({ version: 7 });
     const patchedState = baseState({ version: 8, status: "patching", prdDocument: undefined, prototypeSpec: undefined });

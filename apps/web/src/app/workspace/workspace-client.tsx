@@ -29,6 +29,9 @@ import {
   Smartphone,
   Sparkles,
   Trash2,
+  GitCompare,
+  LayoutTemplate,
+  ListTree,
   Wand2,
   X,
 } from "lucide-react";
@@ -59,6 +62,17 @@ type PreviewTab = "prd" | "prototype" | "qa" | "state";
 type PreviewState = "empty" | "generating" | "ready" | "error";
 type QaStatus = "unchecked" | "checking" | "passed" | "issues" | "failed";
 type DeviceMode = "desktop" | "mobile";
+type InlineEditAction =
+  | "edit"
+  | "rewrite"
+  | "expand"
+  | "simplify"
+  | "compress"
+  | "diff"
+  | "component_edit"
+  | "layout_edit"
+  | "flow_update"
+  | "redesign";
 type FileAssetStatus =
   | "uploaded"
   | "parsing"
@@ -410,6 +424,16 @@ type PatchRecordItem = {
   updatedAt: string;
 };
 
+type InlineAssistantDraft = {
+  source: "prd" | "prototype" | "inline";
+  endpoint: "/prd/edit" | "/prd/rewrite" | "/prd/diff" | "/prototype/edit" | "/prototype/restructure" | "/prototype/flow-update" | "/ai/inline-edit";
+  action: InlineEditAction;
+  title: string;
+  instruction: string;
+  selectedRegion: SelectedRegion;
+  selectedText?: string;
+};
+
 type ListPatchRecordsResponse = {
   items: PatchRecordItem[];
   total: number;
@@ -466,6 +490,19 @@ const STATUS_META: Record<ProjectStatus, { label: string; className: string }> =
     label: "已删除",
     className: "border-rose-200 bg-rose-50 text-rose-700",
   },
+};
+
+const INLINE_ACTION_LABELS: Record<InlineEditAction, string> = {
+  edit: "编辑",
+  rewrite: "改写",
+  expand: "扩写",
+  simplify: "精简",
+  compress: "压缩",
+  diff: "Diff",
+  component_edit: "组件编辑",
+  layout_edit: "布局调整",
+  flow_update: "Flow 优化",
+  redesign: "组件优化",
 };
 
 const PATCH_STATUS_META: Record<PatchRecordStatus, { label: string; className: string }> = {
@@ -1095,6 +1132,9 @@ export function WorkspaceClient() {
   const [patchConfirmationDrafts, setPatchConfirmationDrafts] = useState<Record<string, string>>({});
   const [qaActionLoading, setQaActionLoading] = useState(false);
   const [versionActionLoading, setVersionActionLoading] = useState(false);
+  const [inlineAssistantDraft, setInlineAssistantDraft] = useState<InlineAssistantDraft | null>(null);
+  const [inlineAssistantInstruction, setInlineAssistantInstruction] = useState("");
+  const [inlineAssistantLoading, setInlineAssistantLoading] = useState(false);
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>(createAgentSteps);
   const [isRunning, setIsRunning] = useState(false);
   const timersRef = useRef<number[]>([]);
@@ -1450,6 +1490,61 @@ export function WorkspaceClient() {
       setWorkspaceError(error instanceof Error ? error.message : "回滚失败");
     } finally {
       setVersionActionLoading(false);
+    }
+  };
+
+  const openInlineAssistant = (draft: InlineAssistantDraft) => {
+    setSelectedRegion(draft.selectedRegion);
+    setInlineAssistantDraft(draft);
+    setInlineAssistantInstruction(draft.instruction);
+  };
+
+  const submitInlineAssistant = async () => {
+    if (!currentProject || !inlineAssistantDraft) return;
+    const instruction = inlineAssistantInstruction.trim();
+    if (!instruction) {
+      setWorkspaceError("请输入要生成的局部修改建议");
+      return;
+    }
+    if (!currentProject.conversationId) {
+      setWorkspaceError("请先创建会话后再进行局部编辑");
+      return;
+    }
+    setInlineAssistantLoading(true);
+    setWorkspaceError(null);
+    try {
+      const response = await apiRequest<HandleMessageResponse>(inlineAssistantDraft.endpoint, {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          conversationId: currentProject.conversationId,
+          selectedRegion: inlineAssistantDraft.selectedRegion,
+          selectedText: inlineAssistantDraft.selectedText,
+          action: inlineAssistantDraft.action,
+          instruction,
+        }),
+      });
+      const savedUserMessage = mapMessage(response.userMessage);
+      const savedAssistantMessage = mapMessage(response.assistantMessage);
+      updateProject(currentProject.id, (project) => ({
+        ...project,
+        status: "clarifying",
+        summary: "Patch 候选已生成，等待确认",
+        updatedAt: "刚刚",
+        messages: [
+          ...project.messages,
+          ...(savedUserMessage ? [{ ...savedUserMessage, selectedRegion: inlineAssistantDraft.selectedRegion }] : []),
+          ...(savedAssistantMessage ? [savedAssistantMessage] : []),
+        ],
+      }));
+      setPatchHistoryOpen(true);
+      await loadPatchHistory(currentProject.id);
+      setInlineAssistantDraft(null);
+      setInlineAssistantInstruction("");
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Inline Assistant 生成失败");
+    } finally {
+      setInlineAssistantLoading(false);
     }
   };
 
@@ -2239,6 +2334,7 @@ export function WorkspaceClient() {
             onConfirmPatch={confirmPatch}
             onRunQa={runManualQa}
             onRollbackToVersion={rollbackToStateVersion}
+            onInlineEdit={openInlineAssistant}
           />
         </div>
       </main>
@@ -2271,6 +2367,18 @@ export function WorkspaceClient() {
         multiple
         className="hidden"
         onChange={(event) => void uploadComposerFiles(event.target.files)}
+      />
+      <InlineAssistantDialog
+        draft={inlineAssistantDraft}
+        value={inlineAssistantInstruction}
+        loading={inlineAssistantLoading}
+        onChange={setInlineAssistantInstruction}
+        onSubmit={submitInlineAssistant}
+        onClose={() => {
+          if (inlineAssistantLoading) return;
+          setInlineAssistantDraft(null);
+          setInlineAssistantInstruction("");
+        }}
       />
     </ProtectedRoute>
   );
@@ -3079,6 +3187,7 @@ function PreviewPanel({
   onConfirmPatch,
   onRunQa,
   onRollbackToVersion,
+  onInlineEdit,
 }: {
   project: WorkspaceProject | null;
   previewTab: PreviewTab;
@@ -3107,6 +3216,7 @@ function PreviewPanel({
   onConfirmPatch: (patchId: string, confirmation: string) => void;
   onRunQa: () => void;
   onRollbackToVersion: (version: number) => void;
+  onInlineEdit: (draft: InlineAssistantDraft) => void;
 }) {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-slate-100">
@@ -3179,6 +3289,7 @@ function PreviewPanel({
           project={project}
           isRunning={isRunning}
           onSelectSection={onSelectPrdSection}
+          onInlineEdit={onInlineEdit}
         />
       ) : null}
       {previewTab === "prototype" ? (
@@ -3187,6 +3298,7 @@ function PreviewPanel({
           deviceMode={deviceMode}
           localEditEnabled={localEditEnabled}
           onSelectPrototypeRegion={onSelectPrototypeRegion}
+          onInlineEdit={onInlineEdit}
         />
       ) : null}
       {previewTab === "qa" ? <QaReportPanel project={project} loading={qaActionLoading} onRunQa={onRunQa} /> : null}
@@ -3446,7 +3558,7 @@ function PatchHistoryItem({
             value={confirmation}
             onChange={(event) => onConfirmationChange(event.target.value)}
             rows={2}
-            placeholder="输入确认说明，留空则按计划应用"
+            placeholder="可补充确认说明，留空也会按候选 Patch 应用"
             className="min-h-14 w-full resize-none rounded-md border border-amber-200 bg-white px-2 py-1.5 text-xs leading-5 text-gray-900 outline-none placeholder:text-gray-400 focus:border-amber-300 focus:ring-2 focus:ring-amber-200/60"
           />
           <button
@@ -3456,7 +3568,7 @@ function PatchHistoryItem({
             className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-md bg-gray-950 px-2 text-xs font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-            确认并应用
+            确认应用 Patch
           </button>
         </div>
       ) : null}
@@ -3469,14 +3581,92 @@ function PatchHistoryItem({
   );
 }
 
+function InlineAssistantDialog({
+  draft,
+  value,
+  loading,
+  onChange,
+  onSubmit,
+  onClose,
+}: {
+  draft: InlineAssistantDraft | null;
+  value: string;
+  loading: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  if (!draft) return null;
+  const sourceLabel = draft.source === "prototype" ? "原型" : draft.source === "prd" ? "PRD" : "Inline";
+
+  return (
+    <Modal
+      open={Boolean(draft)}
+      title="AI 局部编辑助手"
+      onClose={onClose}
+      footer={
+        <>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
+            取消
+          </Button>
+          <Button type="button" onClick={onSubmit} disabled={loading || !value.trim()}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+            生成 Patch 候选
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+            <Sparkles className="h-4 w-4" />
+            {draft.title}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
+            <span className="rounded-md border border-gray-200 bg-white px-2 py-1">{sourceLabel}</span>
+            <span className="rounded-md border border-gray-200 bg-white px-2 py-1">
+              {INLINE_ACTION_LABELS[draft.action]}
+            </span>
+            <span className="rounded-md border border-gray-200 bg-white px-2 py-1">
+              {draft.selectedRegion.label ?? "选中区域"}
+            </span>
+          </div>
+        </div>
+        {draft.selectedText ? (
+          <div>
+            <FieldLabel>选区内容</FieldLabel>
+            <div className="mt-2 max-h-32 overflow-y-auto rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-gray-600">
+              {draft.selectedText}
+            </div>
+          </div>
+        ) : null}
+        <div>
+          <FieldLabel>修改指令</FieldLabel>
+          <textarea
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            rows={5}
+            className="mt-2 min-h-32 w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900 shadow-sm outline-none placeholder:text-gray-400 focus:border-gray-900 focus:ring-3 focus:ring-gray-900/10"
+          />
+        </div>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+          AI 只会生成 Patch 候选，不会直接写入 ProductDesignState。确认后会重新生成 PRD、HTML 原型并执行 QA。
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function PrdPreview({
   project,
   isRunning,
   onSelectSection,
+  onInlineEdit,
 }: {
   project: WorkspaceProject | null;
   isRunning: boolean;
   onSelectSection: (section: PrdSection) => void;
+  onInlineEdit: (draft: InlineAssistantDraft) => void;
 }) {
   const state = project?.prdState ?? "empty";
 
@@ -3538,6 +3728,45 @@ function PrdPreview({
                   修改
                 </button>
               </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[
+                  { label: "改写", icon: Wand2, endpoint: "/prd/rewrite" as const, action: "rewrite" as const, instruction: `请改写「${section.title}」，保持业务含义一致但表达更清晰。` },
+                  { label: "扩写", icon: ListTree, endpoint: "/prd/rewrite" as const, action: "expand" as const, instruction: `请扩展「${section.title}」，补充必要规则、边界和验收点。` },
+                  { label: "精简", icon: GitCompare, endpoint: "/prd/rewrite" as const, action: "simplify" as const, instruction: `请简化「${section.title}」，保留关键规则并减少冗余表述。` },
+                  { label: "Diff", icon: GitCompare, endpoint: "/prd/diff" as const, action: "diff" as const, instruction: `请基于「${section.title}」生成结构化差异建议。` },
+                ].map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <button
+                      key={action.label}
+                      type="button"
+                      onClick={() =>
+                        onInlineEdit({
+                          source: "prd",
+                          endpoint: action.endpoint,
+                          action: action.action,
+                          title: `${action.label}：${section.title}`,
+                          instruction: action.instruction,
+                          selectedText: section.paragraphs.join("\n"),
+                          selectedRegion: {
+                            type: "document",
+                            sectionId: section.id,
+                            targetId: project?.prdDocumentId ?? section.id,
+                            documentId: project?.prdDocumentId,
+                            sourcePaths: section.sourcePaths,
+                            selectedText: section.paragraphs.join("\n"),
+                            label: section.title,
+                          },
+                        })
+                      }
+                      className="inline-flex h-7 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-600 opacity-0 transition group-hover:opacity-100 hover:bg-gray-50 focus:opacity-100"
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {action.label}
+                    </button>
+                  );
+                })}
+              </div>
               <div className="mt-3 space-y-3 text-sm leading-7 text-gray-700">
                 {section.paragraphs.map((paragraph) => (
                   <p key={paragraph}>{paragraph}</p>
@@ -3566,11 +3795,13 @@ function PrototypePreview({
   deviceMode,
   localEditEnabled,
   onSelectPrototypeRegion,
+  onInlineEdit,
 }: {
   project: WorkspaceProject | null;
   deviceMode: DeviceMode;
   localEditEnabled: boolean;
   onSelectPrototypeRegion: () => void;
+  onInlineEdit: (draft: InlineAssistantDraft) => void;
 }) {
   const state = project?.prototypeState ?? "empty";
 
@@ -3587,14 +3818,53 @@ function PrototypePreview({
   }
 
   const target = getFirstPrototypeTarget(project?.prototypeSpec);
+  const selectedPrototypeRegion: SelectedRegion = {
+    type: "prototype",
+    targetId: project?.prototypeArtifactId,
+    artifactId: project?.prototypeArtifactId,
+    pageId: target.pageId,
+    componentId: target.componentId,
+    domSelector: target.componentId ? `[data-component-id="${target.componentId}"]` : undefined,
+    sourcePaths: target.sourcePaths,
+    label: target.label,
+  };
 
   return (
     <div className="relative min-h-0 flex-1 overflow-auto p-6">
-      {localEditEnabled ? (
-        <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-          请选择要修改的区域，然后在左侧输入修改意见
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+        <div className="text-sm font-medium text-gray-800">
+          {localEditEnabled ? "局部编辑已开启" : "原型编辑"}
         </div>
-      ) : null}
+        <div className="flex flex-wrap gap-2">
+          {[
+            { label: "组件优化", icon: Wand2, endpoint: "/prototype/edit" as const, action: "redesign" as const, instruction: `请优化「${target.label}」组件的文案、状态和视觉层级。` },
+            { label: "布局调整", icon: LayoutTemplate, endpoint: "/prototype/restructure" as const, action: "layout_edit" as const, instruction: `请调整「${target.label}」所在页面布局，让信息层级更清晰。` },
+            { label: "Flow", icon: ListTree, endpoint: "/prototype/flow-update" as const, action: "flow_update" as const, instruction: `请优化「${target.label}」相关交互流程，并生成结构化 Flow Patch。` },
+          ].map((action) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.label}
+                type="button"
+                onClick={() =>
+                  onInlineEdit({
+                    source: "prototype",
+                    endpoint: action.endpoint,
+                    action: action.action,
+                    title: `${action.label}：${target.label}`,
+                    instruction: action.instruction,
+                    selectedRegion: selectedPrototypeRegion,
+                  })
+                }
+                className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {action.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div
         className={clsx(
           "mx-auto overflow-hidden rounded-lg border bg-white shadow-sm transition",
