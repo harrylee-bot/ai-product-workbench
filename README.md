@@ -1,6 +1,6 @@
 # AI产品工作台（内测）
 
-当前实现范围覆盖模块 1-8：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览。
+当前实现范围覆盖模块 1-9：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览。
 
 ## 已实现能力
 
@@ -12,6 +12,7 @@
 - 模块 6：AI Orchestrator 串行调度 Intent、Knowledge、Requirement Analyst、Product Designer、PRD Writer、Prototype Designer、Prototype Code、Patch、QA、Knowledge Extractor；所有 Agent 通过 Model Gateway 调用模型，未配置模型时使用结构化兜底输出；工作台通过 run stream 实时展示 Agent 时间线、PRD、HTML 原型和 QA 结果。
 - 模块 7：ProductDesignState / ProductDesignVersion / ProductDesignChangeLog 数据模型，状态创建、查询、更新、PatchOperation、版本快照、回滚、AI 推断确认/否定、澄清问题回答；工作台右侧新增“状态”Tab 展示版本、规则数量、AI 推断和待确认问题。
 - 模块 8：RequirementDocument / RequirementDocumentVersion 数据模型，PRD Writer 从 ProductDesignState 渲染 16 个结构化章节，保存 sections / blocks / sourcePaths / tags，支持当前 PRD 查询、详情、预览、确认、版本列表；工作台 PRD 预览展示来源路径、AI 推断、知识库、已确认和待确认标签，并支持段落级定位入口。
+- 模块 9：PrototypeSpecRecord / PrototypeArtifact / PrototypeVersion 数据模型，Prototype Designer 从 ProductDesignState 生成 PrototypeSpec，Prototype Code 生成单文件 HTML，保存 artifact 与版本，支持当前原型、详情、text/html 预览、确认、版本列表；工作台原型 Tab 使用 sandbox iframe 预览，支持桌面/移动模式和基于 artifact/page/component 的局部修改选区。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
@@ -49,7 +50,7 @@ npm run dev
 - `MODEL_GATEWAY_ENCRYPTION_KEY`：可选，推荐生产配置。支持 32 字节 base64 或 64 位 hex；未配置时会从 `JWT_SECRET` 派生加密密钥。
 - `JWT_SECRET`：生产必须配置稳定值，否则已加密的模型 API Key 可能无法解密。
 
-模块 6/7/8 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService 保存状态、文档、版本和变更日志。
+模块 6/7/8/9 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService 保存状态、文档、原型、版本和变更日志。
 
 ## 服务器部署
 
@@ -173,10 +174,16 @@ bash deploy/server-deploy.sh
 - `GET /api/prd-documents/:documentId/preview`
 - `POST /api/prd-documents/:documentId/confirm`
 - `GET /api/prd-documents/:documentId/versions`
+- `POST /api/projects/:projectId/prototype/generate`
+- `GET /api/projects/:projectId/prototype/current`
+- `GET /api/prototype-artifacts/:artifactId`
+- `GET /api/prototype-artifacts/:artifactId/preview`
+- `POST /api/prototype-artifacts/:artifactId/confirm`
+- `GET /api/prototype-artifacts/:artifactId/versions`
 
 `POST /api/ai/vibe/handle-message` 会立即保存用户消息并返回 `runId`，真实 AI 协作在后台执行。前端使用带 Authorization header 的 fetch stream 连接 `GET /api/ai/vibe/runs/:runId/stream`，按事件实时更新 Agent 时间线和右侧预览。
 
-模块 6/7/8 流式事件落库遵守统一事件结构：
+模块 6/7/8/9 流式事件落库遵守统一事件结构：
 
 ```json
 {
@@ -187,12 +194,14 @@ bash deploy/server-deploy.sh
 }
 ```
 
-模块 7/8 核心约束：
+模块 7/8/9 核心约束：
 
 - ProductDesignState 是 PRD、PrototypeSpec、HTML 原型和 Patch 的唯一事实源。
 - Patch Agent 只能生成作用于 ProductDesignState 的 PatchPlan；服务端会通过 ProductDesignStateService 应用 PatchOperation、递增版本并创建快照。
 - PRD 与 PrototypeSpec 只能作为 ProductDesignState 的结构化渲染结果保存，不作为状态源。
 - RequirementDocument 必须关联 ProductDesignState id/version，默认包含 16 个结构化章节，章节和 block 保留 sourcePaths 与标签，禁止包含接口、SQL、数据库、代码、部署等研发实现细节。
+- PrototypeSpec 必须关联 ProductDesignState id/version；PrototypeArtifact 必须由 PrototypeSpec 渲染生成，单文件 HTML 入库前执行安全扫描，禁止远程脚本、eval、document.cookie、敏感 localStorage、window.parent、iframe 和真实网络请求。
+- 原型预览接口返回 `text/html`，前端通过 `<iframe sandbox="allow-scripts">` 展示，不允许表单、弹窗或顶层导航权限。
 - QA Agent 只做一致性校验，不直接修改业务数据。
 - 所有重要状态变更必须写入 ProductDesignChangeLog，并保留 before / after / reason / runId / messageId。
 - 所有 Agent 调用模型必须经过 Model Gateway，并记录 AgentStepLog / ModelCallLog。

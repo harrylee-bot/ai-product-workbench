@@ -25,6 +25,11 @@ import {
   ProjectPrdController,
 } from "./requirement-document.controller";
 import { RequirementDocumentService } from "./requirement-document.service";
+import {
+  ProjectPrototypeController,
+  PrototypeArtifactController,
+} from "./prototype.controller";
+import { PrototypeService } from "./prototype.service";
 import { VibeController } from "./vibe.controller";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
@@ -37,6 +42,8 @@ import { VibeStreamService } from "./vibe-stream.service";
     ProductDesignStateResourceController,
     ProjectPrdController,
     PrdDocumentController,
+    ProjectPrototypeController,
+    PrototypeArtifactController,
   ],
   providers: [
     VibeService,
@@ -45,6 +52,7 @@ import { VibeStreamService } from "./vibe-stream.service";
     VibeStreamService,
     ProductDesignStateService,
     RequirementDocumentService,
+    PrototypeService,
     IntentAgentService,
     KnowledgeAgentService,
     RequirementAnalystAgentService,

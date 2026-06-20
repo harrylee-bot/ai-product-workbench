@@ -1453,7 +1453,15 @@ function toPrototypeOutline(prototypeSpec: PrototypeSpec, previous?: Record<stri
     targetView: previous?.targetView ?? "both",
     pageIds: prototypeSpec.pages.map((page) => String(page.id ?? "")).filter(Boolean),
     mainInteractions: prototypeSpec.interactions
-      .map((interaction) => String(interaction.id ?? interaction.trigger ?? interaction.result ?? ""))
+      .map((interaction) =>
+        String(
+          interaction.id ??
+            interaction.action ??
+            interaction.event ??
+            interaction.mockResult ??
+            "",
+        ),
+      )
       .filter(Boolean),
     stylePreference: previous?.stylePreference,
     lastPrototypeSpecId: prototypeSpec.id,

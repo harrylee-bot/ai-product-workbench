@@ -237,24 +237,187 @@ export type RequirementDocumentVersion = {
   createdAt: string;
 };
 
+export type PrototypeTargetDevice = "desktop" | "mobile" | "both";
+export type PrototypeArtifactStatus = "generating" | "ready" | "failed";
+
+export type PrototypeStyleGuide = {
+  tone: "professional" | "clean" | "business" | "consumer" | "dashboard" | "mobile_app";
+  primaryColor?: string;
+  backgroundColor?: string;
+  layoutDensity: "compact" | "comfortable" | "spacious";
+  borderRadius: "none" | "small" | "medium" | "large";
+  typography?: {
+    fontFamily?: string;
+    titleSize?: string;
+    bodySize?: string;
+  };
+  notes?: string[];
+};
+
+export type PrototypeComponentSpec = {
+  id: string;
+  name: string;
+  type:
+    | "header"
+    | "nav"
+    | "hero"
+    | "card"
+    | "form"
+    | "input"
+    | "button"
+    | "table"
+    | "tabs"
+    | "modal"
+    | "drawer"
+    | "list"
+    | "empty_state"
+    | "status_badge"
+    | "calendar"
+    | "timeline"
+    | "chart_placeholder"
+    | "image_placeholder"
+    | "custom";
+  description?: string;
+  content?: string;
+  props?: Record<string, unknown>;
+  children?: PrototypeComponentSpec[];
+  states?: string[];
+  interactions?: string[];
+  sourcePaths: string[];
+};
+
+export type PrototypePageState = {
+  id: string;
+  name: string;
+  description: string;
+  visibleComponents?: string[];
+  hiddenComponents?: string[];
+  disabledComponents?: string[];
+  copyChanges?: Record<string, string>;
+  sourcePaths: string[];
+};
+
+export type PrototypePageSpec = {
+  id: string;
+  name: string;
+  route?: string;
+  sourcePageId?: string;
+  device: "desktop" | "mobile" | "responsive";
+  layout:
+    | "single_column"
+    | "two_column"
+    | "dashboard"
+    | "form"
+    | "list"
+    | "detail"
+    | "mobile_page"
+    | "custom";
+  description?: string;
+  components: PrototypeComponentSpec[];
+  states?: PrototypePageState[];
+  sourcePaths: string[];
+  order: number;
+};
+
+export type PrototypeNavigation = {
+  id: string;
+  fromPageId: string;
+  toPageId: string;
+  triggerComponentId?: string;
+  label?: string;
+};
+
+export type PrototypeInteraction = {
+  id: string;
+  pageId: string;
+  componentId: string;
+  event: "click" | "change" | "submit" | "hover";
+  action:
+    | "navigate"
+    | "open_modal"
+    | "close_modal"
+    | "toggle_state"
+    | "show_toast"
+    | "switch_tab"
+    | "update_mock_data";
+  targetPageId?: string;
+  targetComponentId?: string;
+  mockResult?: string;
+  sourcePaths: string[];
+};
+
 export type PrototypeSpec = {
   id: string;
   projectId: string;
-  pages: Array<Record<string, unknown>>;
-  components: Array<Record<string, unknown>>;
-  states: Array<Record<string, unknown>>;
-  interactions: Array<Record<string, unknown>>;
-  dialogs: Array<Record<string, unknown>>;
-  styleGuide: Record<string, unknown>;
+  productDesignStateId: string;
+  productDesignStateVersion: number;
+  title: string;
+  targetDevice: PrototypeTargetDevice;
+  styleGuide: PrototypeStyleGuide;
+  pages: PrototypePageSpec[];
+  navigation: PrototypeNavigation[];
+  interactions: PrototypeInteraction[];
+  assumptions: AssumptionReference[];
+  knowledgeRefs: Array<Record<string, unknown>>;
+  generatedByRunId?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type PrototypeArtifact = {
   id: string;
   projectId: string;
-  html: string;
-  entryFile: string;
+  prototypeSpecId: string;
+  productDesignStateId: string;
+  productDesignStateVersion: number;
+  title: string;
+  status: PrototypeArtifactStatus;
+  htmlContent?: string;
+  entryFilePath?: string;
   previewUrl?: string;
+  targetDevice: PrototypeTargetDevice;
+  pageCount: number;
+  generatedByRunId?: string;
+  errorMessage?: string;
+  createdBy: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  html?: string;
+  entryFile?: string;
   assets: Array<{ name: string; path: string; type: string }>;
+};
+
+export type PrototypeArtifactDraft = {
+  id?: string;
+  projectId: string;
+  prototypeSpecId?: string;
+  productDesignStateId?: string;
+  productDesignStateVersion?: number;
+  title?: string;
+  status?: PrototypeArtifactStatus;
+  htmlContent?: string;
+  html?: string;
+  entryFilePath?: string;
+  entryFile?: string;
+  previewUrl?: string;
+  targetDevice?: PrototypeTargetDevice;
+  pageCount?: number;
+  generatedByRunId?: string;
+  errorMessage?: string;
+  assets?: Array<{ name: string; path: string; type: string }>;
+};
+
+export type PrototypeVersion = {
+  id: string;
+  projectId: string;
+  artifactId: string;
+  version: number;
+  prototypeSpecSnapshot: PrototypeSpec;
+  artifactSnapshot: PrototypeArtifact;
+  reason?: string;
+  createdBy: string;
+  createdAt: string;
 };
 
 export type PatchOperation = {

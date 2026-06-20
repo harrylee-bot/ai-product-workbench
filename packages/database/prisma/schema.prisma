@@ -151,6 +151,18 @@ enum RequirementDocumentStatus {
   confirmed
 }
 
+enum PrototypeTargetDevice {
+  desktop
+  mobile
+  both
+}
+
+enum PrototypeArtifactStatus {
+  generating
+  ready
+  failed
+}
+
 enum AgentRunStatus {
   running
   succeeded
@@ -257,6 +269,9 @@ model Project {
   productDesignChangeLogs     ProductDesignChangeLog[]
   requirementDocuments        RequirementDocument[]
   requirementDocumentVersions RequirementDocumentVersion[]
+  prototypeSpecs              PrototypeSpecRecord[]
+  prototypeArtifacts          PrototypeArtifact[]
+  prototypeVersions           PrototypeVersion[]
   agentRuns                   AgentRunLog[]
   vibeStreamEvents            VibeStreamEventLog[]
 
@@ -529,6 +544,8 @@ model ProductDesignState {
   versions            ProductDesignVersion[]
   changeLogs          ProductDesignChangeLog[]
   requirementDocuments RequirementDocument[]
+  prototypeSpecs      PrototypeSpecRecord[]
+  prototypeArtifacts  PrototypeArtifact[]
 
   @@unique([projectId, version])
   @@index([projectId])
@@ -621,6 +638,83 @@ model RequirementDocumentVersion {
   @@index([projectId])
   @@index([version])
   @@map("requirement_document_versions")
+}
+
+model PrototypeSpecRecord {
+  id                        String                @id @default(uuid())
+  projectId                 String                @map("project_id")
+  productDesignStateId      String                @map("product_design_state_id")
+  productDesignStateVersion Int                   @map("product_design_state_version")
+  title                     String
+  targetDevice              PrototypeTargetDevice @default(both) @map("target_device")
+  styleGuide                Json                  @map("style_guide")
+  pages                     Json
+  navigation                Json
+  interactions              Json
+  assumptions               Json?
+  knowledgeRefs             Json?                 @map("knowledge_refs")
+  generatedByRunId          String?               @map("generated_by_run_id")
+  createdAt                 DateTime              @default(now()) @map("created_at")
+  updatedAt                 DateTime              @updatedAt @map("updated_at")
+  project                   Project               @relation(fields: [projectId], references: [id])
+  productDesignState        ProductDesignState    @relation(fields: [productDesignStateId], references: [id])
+  artifacts                 PrototypeArtifact[]
+
+  @@index([projectId])
+  @@index([productDesignStateId])
+  @@index([updatedAt])
+  @@map("prototype_spec_records")
+}
+
+model PrototypeArtifact {
+  id                        String                  @id @default(uuid())
+  projectId                 String                  @map("project_id")
+  prototypeSpecId           String                  @map("prototype_spec_id")
+  productDesignStateId      String                  @map("product_design_state_id")
+  productDesignStateVersion Int                     @map("product_design_state_version")
+  title                     String
+  status                    PrototypeArtifactStatus @default(generating)
+  htmlContent               String?                 @map("html_content")
+  entryFilePath             String?                 @map("entry_file_path")
+  previewUrl                String?                 @map("preview_url")
+  targetDevice              PrototypeTargetDevice   @default(both) @map("target_device")
+  pageCount                 Int                     @default(1) @map("page_count")
+  generatedByRunId          String?                 @map("generated_by_run_id")
+  errorMessage              String?                 @map("error_message")
+  createdBy                 String                  @map("created_by")
+  updatedBy                 String?                 @map("updated_by")
+  createdAt                 DateTime                @default(now()) @map("created_at")
+  updatedAt                 DateTime                @updatedAt @map("updated_at")
+  project                   Project                 @relation(fields: [projectId], references: [id])
+  productDesignState        ProductDesignState      @relation(fields: [productDesignStateId], references: [id])
+  prototypeSpec             PrototypeSpecRecord     @relation(fields: [prototypeSpecId], references: [id])
+  versions                  PrototypeVersion[]
+
+  @@index([projectId])
+  @@index([prototypeSpecId])
+  @@index([productDesignStateId])
+  @@index([status])
+  @@index([updatedAt])
+  @@map("prototype_artifacts")
+}
+
+model PrototypeVersion {
+  id                    String            @id @default(uuid())
+  projectId             String            @map("project_id")
+  artifactId            String            @map("artifact_id")
+  version               Int
+  prototypeSpecSnapshot Json              @map("prototype_spec_snapshot")
+  artifactSnapshot      Json              @map("artifact_snapshot")
+  reason                String?
+  createdBy             String            @map("created_by")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  project               Project           @relation(fields: [projectId], references: [id])
+  artifact              PrototypeArtifact @relation(fields: [artifactId], references: [id])
+
+  @@index([projectId])
+  @@index([artifactId])
+  @@index([version])
+  @@map("prototype_versions")
 }
 
 model AgentRunLog {

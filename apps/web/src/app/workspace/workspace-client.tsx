@@ -74,6 +74,7 @@ type SelectedRegion =
     }
   | {
       type: "prototype";
+      targetId?: string;
       pageId: string;
       componentId?: string;
       domSelector?: string;
@@ -170,6 +171,9 @@ type WorkspaceProject = {
   prdDocumentId?: string;
   prdSections: PrdSection[];
   prototypeState: PreviewState;
+  prototypeArtifactId?: string;
+  prototypeEntryFilePath?: string;
+  prototypeSpec?: unknown;
   prototypeHtml: string;
   qaStatus: QaStatus;
   qaIssues: QaIssue[];
@@ -184,6 +188,9 @@ type PreviewPatch = Partial<
     | "prdDocumentId"
     | "prdSections"
     | "prototypeState"
+    | "prototypeArtifactId"
+    | "prototypeEntryFilePath"
+    | "prototypeSpec"
     | "prototypeHtml"
     | "qaStatus"
     | "qaIssues"
@@ -321,6 +328,10 @@ type GetCurrentPrdResponse = {
   document: unknown | null;
 };
 
+type GetCurrentPrototypeResponse = {
+  artifact: unknown | null;
+};
+
 const STATUS_META: Record<ProjectStatus, { label: string; className: string }> = {
   draft: {
     label: "草稿",
@@ -430,48 +441,6 @@ const PROMPTS = [
   "根据这个活动页面截图生成可演示原型",
 ];
 
-const DEFAULT_PRD_SECTIONS: PrdSection[] = [
-  {
-    id: "background",
-    title: "1. 背景与目标",
-    paragraphs: [
-      "为提升新用户首周活跃和老用户连续访问频次，设计一个签到活动能力，支持运营配置奖励、周期和补签规则。",
-      "一期目标是在用户端提供清晰的签到入口、连续签到进度和奖励反馈，并在后台沉淀可复用的活动配置结构。",
-    ],
-  },
-  {
-    id: "users",
-    title: "2. 用户与场景",
-    paragraphs: [
-      "目标用户包含普通用户、活动运营和客服支持。普通用户关注签到路径短、奖励可理解；运营关注配置效率和活动效果；客服关注异常补偿与记录追踪。",
-    ],
-  },
-  {
-    id: "scope",
-    title: "3. 一期范围",
-    paragraphs: [
-      "包含活动入口、签到日历、奖励领取、连续签到提示、基础异常态、活动规则展示、运营端查看基础数据。",
-      "暂不包含复杂人群分层、多活动并行、自动化补偿和高级风控策略。",
-    ],
-  },
-  {
-    id: "flow",
-    title: "4. 核心流程",
-    paragraphs: [
-      "用户进入活动页后读取当日签到状态，点击签到后完成奖励发放，页面刷新连续天数和下一档奖励。",
-      "当用户已签到、活动未开始、活动已结束或接口异常时，页面展示对应状态和可操作建议。",
-    ],
-  },
-  {
-    id: "acceptance",
-    title: "5. 验收标准",
-    paragraphs: [
-      "签到按钮在未签到状态下可点击，成功后 1 秒内反馈结果；已签到状态不可重复提交。",
-      "PRD、原型和 QA 报告中的规则文案保持一致，奖励名称、天数和异常态不得相互冲突。",
-    ],
-  },
-];
-
 const DEFAULT_QA_ISSUES: QaIssue[] = [
   {
     id: "qa-1",
@@ -488,109 +457,6 @@ const DEFAULT_QA_ISSUES: QaIssue[] = [
     suggestion: "补充已结束时的按钮禁用态和结果说明，便于研发理解兜底状态。",
   },
 ];
-
-const SAMPLE_PROTOTYPE_HTML = `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: #f4f7f6;
-      color: #18201d;
-      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
-      letter-spacing: 0;
-    }
-    .page { max-width: 420px; margin: 0 auto; padding: 20px 18px 28px; }
-    .hero {
-      border-radius: 20px;
-      background: linear-gradient(135deg, #12352e, #1e6d5f);
-      color: white;
-      padding: 24px;
-      box-shadow: 0 18px 45px rgba(18, 53, 46, .20);
-    }
-    .hero small { display: block; opacity: .72; font-size: 13px; }
-    h1 { margin: 8px 0 0; font-size: 28px; line-height: 1.18; letter-spacing: 0; }
-    .reward {
-      margin-top: 18px;
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-    }
-    .reward div {
-      border-radius: 14px;
-      background: rgba(255,255,255,.14);
-      padding: 12px 10px;
-      text-align: center;
-      font-size: 12px;
-    }
-    .reward strong { display: block; font-size: 18px; margin-bottom: 3px; }
-    .panel {
-      margin-top: 16px;
-      border: 1px solid #dfe8e4;
-      border-radius: 18px;
-      background: white;
-      padding: 18px;
-    }
-    .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 14px; }
-    .day {
-      aspect-ratio: 1;
-      border-radius: 12px;
-      display: grid;
-      place-items: center;
-      background: #eef3f1;
-      color: #61716b;
-      font-size: 13px;
-      font-weight: 700;
-    }
-    .day.done { background: #e4f7ee; color: #148457; }
-    .day.today { background: #17221f; color: white; }
-    button {
-      width: 100%;
-      height: 48px;
-      border: 0;
-      border-radius: 14px;
-      background: #17221f;
-      color: white;
-      font-size: 16px;
-      font-weight: 700;
-      margin-top: 16px;
-      cursor: pointer;
-    }
-    .rule { color: #5f6f69; font-size: 13px; line-height: 1.65; margin: 12px 0 0; }
-  </style>
-</head>
-<body>
-  <main class="page">
-    <section class="hero">
-      <small>连续签到赢奖励</small>
-      <h1>今天签到可领取 20 积分</h1>
-      <div class="reward">
-        <div><strong>3天</strong>加赠券</div>
-        <div><strong>7天</strong>翻倍卡</div>
-        <div><strong>14天</strong>礼包</div>
-      </div>
-    </section>
-    <section class="panel">
-      <strong>本周期进度</strong>
-      <div class="days">
-        <div class="day done">1</div>
-        <div class="day done">2</div>
-        <div class="day today">3</div>
-        <div class="day">4</div>
-        <div class="day">5</div>
-        <div class="day">6</div>
-        <div class="day">7</div>
-      </div>
-      <button>立即签到</button>
-      <p class="rule">每天 00:00 刷新签到状态，连续签到达到节点奖励后自动发放到用户账户。</p>
-    </section>
-  </main>
-</body>
-</html>`;
 
 function createAgentSteps() {
   return AGENT_TEMPLATE.map((step) => ({ ...step }));
@@ -702,12 +568,6 @@ function mapMessageAttachments(value: unknown): MessageAttachment[] {
 }
 
 function mapProject(project: ApiProject, messages: ChatMessage[] = []): WorkspaceProject {
-  const hasGeneratedPreview =
-    project.status === "prd_ready" ||
-    project.status === "prototype_ready" ||
-    project.status === "qa_failed" ||
-    project.status === "completed";
-
   return {
     id: project.id,
     conversationId: project.currentConversationId,
@@ -716,20 +576,15 @@ function mapProject(project: ApiProject, messages: ChatMessage[] = []): Workspac
     updatedAt: formatRelativeTime(project.lastActivityAt),
     status: project.status,
     messages,
-    prdState: hasGeneratedPreview ? "ready" : "empty",
-    prdSections: hasGeneratedPreview ? DEFAULT_PRD_SECTIONS : [],
+    prdState: "empty",
+    prdSections: [],
     prototypeState:
       project.status === "prototype_ready" ||
       project.status === "qa_failed" ||
       project.status === "completed"
         ? "ready"
         : "empty",
-    prototypeHtml:
-      project.status === "prototype_ready" ||
-      project.status === "qa_failed" ||
-      project.status === "completed"
-        ? SAMPLE_PROTOTYPE_HTML
-        : "",
+    prototypeHtml: "",
     qaStatus: project.status === "qa_failed" ? "issues" : "unchecked",
     qaIssues: project.status === "qa_failed" ? DEFAULT_QA_ISSUES : [],
     productDesignState: null,
@@ -780,7 +635,11 @@ function extractPreviewFromPayload(payload: unknown) {
     patch.prdSections = prdSections;
   }
   if (prototypeHtml) {
+    const artifact = extractPrototypeArtifact(data);
     patch.prototypeState = "ready";
+    patch.prototypeArtifactId = artifact?.id;
+    patch.prototypeEntryFilePath = artifact?.entryFilePath;
+    patch.prototypeSpec = extractPrototypeSpec(data);
     patch.prototypeHtml = prototypeHtml;
   }
   if (qa) {
@@ -885,8 +744,44 @@ function splitParagraphs(content: string) {
 
 function extractPrototypeHtml(value: unknown) {
   const record = asRecord(value);
-  const artifact = asRecord(record?.prototypeArtifact) ?? asRecord(value);
-  return asText(artifact?.html);
+  const artifact = asRecord(record?.prototypeArtifact) ?? asRecord(record?.artifact) ?? asRecord(value);
+  return asText(artifact?.htmlContent) || asText(artifact?.html);
+}
+
+function extractPrototypeArtifact(value: unknown) {
+  const record = asRecord(value);
+  const artifact = asRecord(record?.prototypeArtifact) ?? asRecord(record?.artifact) ?? asRecord(value);
+  if (!artifact) return null;
+  const id = asText(artifact.id);
+  const html = extractPrototypeHtml(artifact);
+  const status = asText(artifact.status);
+  if (!id && !html && !status) return null;
+  return {
+    id: id || undefined,
+    html,
+    status,
+    entryFilePath: asText(artifact.entryFilePath) || asText(artifact.entryFile) || undefined,
+  };
+}
+
+function extractPrototypeSpec(value: unknown) {
+  const record = asRecord(value);
+  return record?.prototypeSpec ?? null;
+}
+
+function getFirstPrototypeTarget(specValue: unknown) {
+  const spec = asRecord(specValue);
+  const pages = Array.isArray(spec?.pages) ? spec.pages : [];
+  const firstPage = asRecord(pages[0]);
+  const components = Array.isArray(firstPage?.components) ? firstPage.components : [];
+  const firstComponent = components.map(asRecord).find(Boolean);
+  const pageName = asText(firstPage?.name) || "原型页面";
+  const componentName = asText(firstComponent?.name) || "主要组件";
+  return {
+    pageId: asText(firstPage?.id) || "page_main",
+    componentId: asText(firstComponent?.id) || undefined,
+    label: `${pageName} / ${componentName}`,
+  };
 }
 
 function mapQaReport(value: unknown): { status: QaStatus; issues: QaIssue[] } | null {
@@ -975,8 +870,12 @@ function preservePreviewState(project: WorkspaceProject) {
   return {
     clarificationQuestions: project.clarificationQuestions,
     prdState: project.prdState,
+    prdDocumentId: project.prdDocumentId,
     prdSections: project.prdSections,
     prototypeState: project.prototypeState,
+    prototypeArtifactId: project.prototypeArtifactId,
+    prototypeEntryFilePath: project.prototypeEntryFilePath,
+    prototypeSpec: project.prototypeSpec,
     prototypeHtml: project.prototypeHtml,
     qaStatus: project.qaStatus,
     qaIssues: project.qaIssues,
@@ -1154,6 +1053,19 @@ export function WorkspaceClient() {
             }
           : {}),
       };
+      const prototypeResponse = await apiRequest<GetCurrentPrototypeResponse>(
+        `/projects/${projectId}/prototype/current`,
+      );
+      const currentArtifact = extractPrototypeArtifact(prototypeResponse.artifact);
+      if (currentArtifact?.html || currentArtifact?.status) {
+        previewPatch = {
+          ...previewPatch,
+          prototypeState: currentArtifact.status === "failed" ? "error" : "ready",
+          prototypeArtifactId: currentArtifact.id,
+          prototypeEntryFilePath: currentArtifact.entryFilePath,
+          prototypeHtml: currentArtifact.html,
+        };
+      }
 
       setProjects((items) =>
         items.map((project) =>
@@ -1379,6 +1291,9 @@ export function WorkspaceClient() {
       prdDocumentId: isPatch ? project.prdDocumentId : undefined,
       prdSections: isPatch ? project.prdSections : [],
       prototypeState: isPatch ? project.prototypeState : "empty",
+      prototypeArtifactId: isPatch ? project.prototypeArtifactId : undefined,
+      prototypeEntryFilePath: isPatch ? project.prototypeEntryFilePath : undefined,
+      prototypeSpec: isPatch ? project.prototypeSpec : undefined,
       prototypeHtml: isPatch ? project.prototypeHtml : "",
       qaStatus: "unchecked",
       qaIssues: [],
@@ -1481,11 +1396,15 @@ export function WorkspaceClient() {
     if (event.type === "prototype_updated") {
       const prototypeHtml = extractPrototypeHtml(event.data);
       if (!prototypeHtml) return;
+      const artifact = extractPrototypeArtifact(event.data);
       updateProject(targetProjectId, (project) => ({
         ...project,
         status: "prototype_ready",
         summary: "HTML 原型已生成，正在校验一致性",
         prototypeState: "ready",
+        prototypeArtifactId: artifact?.id ?? project.prototypeArtifactId,
+        prototypeEntryFilePath: artifact?.entryFilePath ?? project.prototypeEntryFilePath,
+        prototypeSpec: extractPrototypeSpec(event.data) ?? project.prototypeSpec,
         prototypeHtml,
       }));
       setPreviewTab("prototype");
@@ -1805,12 +1724,14 @@ export function WorkspaceClient() {
 
   const selectPrototypeRegion = () => {
     if (!localEditEnabled) return;
+    const target = getFirstPrototypeTarget(currentProject?.prototypeSpec);
     setSelectedRegion({
       type: "prototype",
-      pageId: "signin-activity-home",
-      componentId: "signin-calendar",
-      domSelector: ".panel",
-      label: "签到活动页 / 本周期进度区域",
+      targetId: currentProject?.prototypeArtifactId,
+      pageId: target.pageId,
+      componentId: target.componentId,
+      domSelector: target.componentId ? `[data-component-id="${target.componentId}"]` : undefined,
+      label: target.label,
     });
     setComposerValue((value) => value || "请把选中区域调整为：");
   };
@@ -2986,6 +2907,8 @@ function PrototypePreview({
     return <PreviewError title="原型生成失败" description="可以回到对话区补充页面结构或重新生成。" />;
   }
 
+  const target = getFirstPrototypeTarget(project?.prototypeSpec);
+
   return (
     <div className="relative min-h-0 flex-1 overflow-auto p-6">
       {localEditEnabled ? (
@@ -3004,12 +2927,15 @@ function PrototypePreview({
           <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
           <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
           <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-          <span className="ml-2 truncate text-xs text-gray-500">prototype/signin-activity.html</span>
+          <span className="ml-2 truncate text-xs text-gray-500">
+            {project?.prototypeEntryFilePath ?? "index.html"}
+          </span>
         </div>
         <div className="relative h-[calc(100%-36px)] bg-white">
           <iframe
             title="HTML 原型预览"
             srcDoc={project?.prototypeHtml ?? ""}
+            sandbox="allow-scripts"
             className="h-full w-full border-0"
           />
           {localEditEnabled ? (
@@ -3020,7 +2946,7 @@ function PrototypePreview({
               aria-label="选择原型区域"
             >
               <span className="absolute left-1/2 top-1/2 rounded-lg border border-sky-300 bg-white/95 px-3 py-2 text-sm font-medium text-sky-800 shadow-sm">
-                点击选择签到进度区域
+                点击选择{target.label}
               </span>
             </button>
           ) : null}

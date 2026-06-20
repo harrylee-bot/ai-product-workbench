@@ -35,6 +35,7 @@ import { QaAgentService } from "./agents/qa-agent.service";
 import { RequirementAnalystAgentService } from "./agents/requirement-analyst-agent.service";
 import { IntentAgentService } from "./agents/intent-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
+import { PrototypeService } from "./prototype.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 
@@ -69,6 +70,7 @@ export class AiOrchestratorService {
     private readonly stream: VibeStreamService,
     private readonly stateService: ProductDesignStateService,
     private readonly documentService: RequirementDocumentService,
+    private readonly prototypeService: PrototypeService,
     private readonly messageService: MessageService,
     private readonly prisma: PrismaService,
     private readonly intentAgent: IntentAgentService,
@@ -310,14 +312,25 @@ export class AiOrchestratorService {
             },
           }),
       );
+
+      const savedPrototype = await this.prototypeService.saveGeneratedPrototype(
+        state,
+        prototypeSpec.data,
+        prototypeArtifact.data,
+        {
+          userId: context.userId,
+          runId: context.runId,
+          reason: "Prototype Designer 与 Code Agent 生成 HTML 原型",
+        },
+      );
       await this.stream.emit({
         runId: context.runId,
         projectId: context.projectId,
         type: "prototype_updated",
         step: "prototype_code_generation",
         data: {
-          prototypeSpec: prototypeSpec.data,
-          prototypeArtifact: prototypeArtifact.data,
+          prototypeSpec: savedPrototype.prototypeSpec,
+          prototypeArtifact: savedPrototype.artifact,
         },
       });
 
@@ -387,7 +400,7 @@ export class AiOrchestratorService {
         productDesignState: state,
         prdDocument,
         prototypeSpec: prototypeSpec.data,
-        prototypeArtifact: prototypeArtifact.data,
+        prototypeArtifact: savedPrototype.artifact,
         qaReport: qa.data,
         patchPlan,
         knowledgeCandidates: knowledgeCandidates.data,

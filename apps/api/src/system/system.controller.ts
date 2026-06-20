@@ -16,6 +16,7 @@ export class SystemController {
         "ai-vibe",
         "product-design-state",
         "requirement-documents",
+        "prototype-artifacts",
       ],
     };
   }
