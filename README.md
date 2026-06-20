@@ -1,6 +1,6 @@
 # AI产品工作台（内测）
 
-当前实现范围覆盖模块 1-5：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关。
+当前实现范围覆盖模块 1-6：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑。
 
 ## 已实现能力
 
@@ -9,7 +9,7 @@
 - 模块 3：Project / Conversation / Message 数据模型，项目创建、列表、搜索、打开、重命名、归档、软删除，默认会话与消息落库。
 - 模块 4：FileAsset / FileParseResult / FileChunk 数据模型，项目文件上传、解析状态管理、txt/md/docx/pdf/image/zip/rp 一期解析、附件 chips、消息附件摘要落库。
 - 模块 5：ModelProvider / ModelConfig / ModelTaskProfile / ModelCallLog 数据模型，OpenAI-compatible 模型网关、文本生成、JSON 生成、流式输出、超时重试、token usage、调用日志、admin 配置 API、API Key 加密存储与脱敏返回。
-- 模块 6 预留：`POST /api/ai/vibe/handle-message` 已提供占位实现，会保存用户消息和 AI 回复，并更新项目活跃时间。
+- 模块 6：ProductDesignState / AgentRunLog / AgentStepLog / VibeStreamEventLog 数据模型，AI Orchestrator 串行调度 Intent、Knowledge、Requirement Analyst、Product Designer、PRD Writer、Prototype Designer、Prototype Code、Patch、QA、Knowledge Extractor；所有 Agent 通过 Model Gateway 调用模型，未配置模型时使用结构化兜底输出；工作台通过 run stream 实时展示 Agent 时间线、PRD、HTML 原型和 QA 结果。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
@@ -46,6 +46,8 @@ npm run dev
 
 - `MODEL_GATEWAY_ENCRYPTION_KEY`：可选，推荐生产配置。支持 32 字节 base64 或 64 位 hex；未配置时会从 `JWT_SECRET` 派生加密密钥。
 - `JWT_SECRET`：生产必须配置稳定值，否则已加密的模型 API Key 可能无法解密。
+
+模块 6 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出。
 
 ## 服务器部署
 
@@ -150,6 +152,28 @@ bash deploy/server-deploy.sh
 - `DELETE /api/conversations/:conversationId`
 - `GET /api/conversations/:conversationId/messages`
 - `POST /api/ai/vibe/handle-message`
+- `GET /api/ai/vibe/runs/:runId`
+- `GET /api/ai/vibe/runs/:runId/stream`
+
+`POST /api/ai/vibe/handle-message` 会立即保存用户消息并返回 `runId`，真实 AI 协作在后台执行。前端使用带 Authorization header 的 fetch stream 连接 `GET /api/ai/vibe/runs/:runId/stream`，按事件实时更新 Agent 时间线和右侧预览。
+
+模块 6 流式事件落库遵守统一事件结构：
+
+```json
+{
+  "eventType": "agent_started | agent_completed | state_updated | prd_generated | prototype_generated | patch_applied | qa_completed",
+  "timestamp": "ISO-8601",
+  "projectId": "project id",
+  "payload": {}
+}
+```
+
+模块 6 核心约束：
+
+- ProductDesignState 是 PRD、PrototypeSpec、HTML 原型和 Patch 的唯一事实源。
+- Patch Agent 只能生成作用于 ProductDesignState 的 PatchPlan；服务端会通过 ProductDesignStateService 创建新版本快照。
+- QA Agent 只做一致性校验，不直接修改业务数据。
+- 所有 Agent 调用模型必须经过 Model Gateway，并记录 AgentStepLog / ModelCallLog。
 
 文件与附件：
 

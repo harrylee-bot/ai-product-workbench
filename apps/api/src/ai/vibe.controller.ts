@@ -1,4 +1,6 @@
-import { Body, Controller, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Sse, UseGuards } from "@nestjs/common";
+import type { MessageEvent } from "@nestjs/common";
+import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
@@ -13,5 +15,19 @@ export class VibeController {
   @Post("handle-message")
   handleMessage(@CurrentUser() user: AuthenticatedUser, @Body() dto: HandleVibeMessageDto) {
     return this.vibeService.handleMessage(user, dto);
+  }
+
+  @Get("runs/:runId")
+  getRun(@CurrentUser() user: AuthenticatedUser, @Param("runId") runId: string) {
+    return this.vibeService.getRun(user, runId);
+  }
+
+  @Sse("runs/:runId/stream")
+  async streamRun(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("runId") runId: string,
+  ): Promise<Observable<MessageEvent>> {
+    await this.vibeService.assertRunAccess(user, runId);
+    return this.vibeService.streamRun(runId);
   }
 }

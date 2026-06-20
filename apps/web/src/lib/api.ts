@@ -67,6 +67,100 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
   return payload as T;
 }
 
+export async function streamApiEvents<T>(
+  path: string,
+  onEvent: (event: T, meta: { type?: string }) => void,
+  options: { signal?: AbortSignal } = {},
+) {
+  const session = readSession();
+  const headers = new Headers();
+
+  if (session?.accessToken) {
+    headers.set("Authorization", `Bearer ${session.accessToken}`);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers,
+      signal: options.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    throw new ApiError("无法连接 API 服务，请确认后端已启动并可访问", 503);
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const message =
+      typeof payload?.message === "string" ? payload.message : "流式连接失败，请稍后重试";
+
+    if ((response.status === 401 || message.includes("禁用")) && typeof window !== "undefined") {
+      clearSession();
+      window.dispatchEvent(
+        new CustomEvent("auth:expired", {
+          detail: { message },
+        }),
+      );
+    }
+
+    throw new ApiError(message, response.status);
+  }
+
+  if (!response.body) {
+    throw new ApiError("当前浏览器不支持流式响应", 500);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const parts = buffer.split(/\r?\n\r?\n/);
+      buffer = parts.pop() ?? "";
+      parts.forEach((part) => parseSseBlock(part, onEvent));
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    throw error;
+  }
+
+  if (buffer.trim()) {
+    parseSseBlock(buffer, onEvent);
+  }
+}
+
+function parseSseBlock<T>(
+  block: string,
+  onEvent: (event: T, meta: { type?: string }) => void,
+) {
+  let type: string | undefined;
+  const dataLines: string[] = [];
+
+  block.split(/\r?\n/).forEach((line) => {
+    if (line.startsWith("event:")) {
+      type = line.slice(6).trim();
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  });
+
+  if (!dataLines.length) return;
+  const rawData = dataLines.join("\n");
+
+  try {
+    onEvent(JSON.parse(rawData) as T, { type });
+  } catch {
+    onEvent(rawData as T, { type });
+  }
+}
+
 export function toQueryString(params: Record<string, string | number | undefined>) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {

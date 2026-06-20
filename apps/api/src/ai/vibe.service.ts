@@ -1,10 +1,17 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { MessageType, ProjectStatus, UserRole } from "@prisma/client";
+import { ProjectStatus, UserRole } from "@prisma/client";
+import type { MessageEvent } from "@nestjs/common";
+import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { FileAssetService } from "../files/file-asset.service";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { AgentRunLogService } from "./agent-run-log.service";
+import { AiOrchestratorService } from "./ai-orchestrator.service";
+import type { SelectedRegion } from "./ai-vibe.types";
 import type { HandleVibeMessageDto } from "./dto";
+import { ProductDesignStateService } from "./product-design-state.service";
+import { VibeStreamService } from "./vibe-stream.service";
 
 @Injectable()
 export class VibeService {
@@ -12,6 +19,10 @@ export class VibeService {
     private readonly prisma: PrismaService,
     private readonly messageService: MessageService,
     private readonly fileAssetService: FileAssetService,
+    private readonly runLogService: AgentRunLogService,
+    private readonly stateService: ProductDesignStateService,
+    private readonly orchestrator: AiOrchestratorService,
+    private readonly streamService: VibeStreamService,
   ) {}
 
   async handleMessage(user: AuthenticatedUser, dto: HandleVibeMessageDto) {
@@ -68,12 +79,11 @@ export class VibeService {
       conversation.id,
     );
 
-    const assistantMessage = await this.messageService.createAssistantMessage({
+    const run = await this.runLogService.createRun({
       projectId: project.id,
       conversationId: conversation.id,
-      content:
-        "已收到你的需求。模块 6 接入后这里会返回真实多 Agent 生成结果；当前已先保存项目会话消息。",
-      type: MessageType.agent_summary,
+      userId: user.id,
+      userInput: dto.message.trim(),
     });
 
     await this.prisma.project.update({
@@ -84,12 +94,60 @@ export class VibeService {
       },
     });
 
+    const recentMessages = await this.messageService.getRecentMessages(conversation.id, 20);
+    const productDesignState = await this.stateService.getCurrentState(project.id);
+
+    void this.orchestrator
+      .run({
+        userMessageId: userMessage.id,
+        attachments: attachmentSummaries,
+        context: {
+          runId: run.id,
+          projectId: project.id,
+          conversationId: conversation.id,
+          userId: user.id,
+          userInput: dto.message.trim(),
+          selectedRegion: dto.selectedRegion as SelectedRegion | undefined,
+          previewMode: dto.previewMode,
+          recentMessages,
+          attachments: attachmentSummaries,
+          productDesignState,
+          traceId: run.traceId,
+        },
+      })
+      .catch(() => undefined);
+
     return {
       projectId: project.id,
       conversationId: conversation.id,
       userMessage,
-      assistantMessage,
-      runId: null,
+      assistantMessage: null,
+      runId: run.id,
+      status: "running",
     };
+  }
+
+  async getRun(user: AuthenticatedUser, runId: string) {
+    await this.assertRunAccess(user, runId);
+    return this.runLogService.getRun(runId);
+  }
+
+  streamRun(runId: string): Observable<MessageEvent> {
+    return this.streamService.stream(runId);
+  }
+
+  async assertRunAccess(user: AuthenticatedUser, runId: string) {
+    const run = await this.prisma.agentRunLog.findUnique({
+      where: { id: runId },
+      include: { project: true },
+    });
+
+    if (!run || run.project.deletedAt || run.project.status === ProjectStatus.deleted) {
+      throw new NotFoundException("执行记录不存在");
+    }
+
+    if (user.role !== UserRole.admin && run.project.ownerId !== user.id) {
+      throw new ForbiddenException("你无权访问该执行记录");
+    }
   }
 }

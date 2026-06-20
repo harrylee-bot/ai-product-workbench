@@ -122,6 +122,61 @@ enum ModelCallStatus {
   failed
 }
 
+enum ProductDesignStateStatus {
+  draft
+  clarifying
+  design_ready
+  prd_ready
+  prototype_ready
+  patching
+  qa_failed
+  confirmed
+}
+
+enum AgentRunStatus {
+  running
+  succeeded
+  failed
+  cancelled
+}
+
+enum AgentStepStatus {
+  pending
+  running
+  succeeded
+  failed
+  skipped
+}
+
+enum AgentName {
+  orchestrator
+  intent_agent
+  knowledge_agent
+  requirement_analyst_agent
+  product_designer_agent
+  prd_writer_agent
+  prototype_designer_agent
+  prototype_code_agent
+  patch_agent
+  qa_agent
+  knowledge_extractor_agent
+}
+
+enum UserIntent {
+  new_requirement
+  complete_requirement
+  clarification_answer
+  generate_prd
+  generate_prototype
+  patch_document
+  patch_prototype
+  global_adjustment
+  export_word
+  export_html
+  knowledge_update
+  general_question
+}
+
 model User {
   id             String          @id @default(cuid())
   username       String          @unique
@@ -138,6 +193,7 @@ model User {
   conversations  Conversation[]
   messages       Message[]
   fileAssets     FileAsset[]
+  agentRuns      AgentRunLog[]
 
   @@map("users")
 }
@@ -178,6 +234,9 @@ model Project {
   conversations               Conversation[]
   messages                    Message[]
   fileAssets                  FileAsset[]
+  productDesignStates         ProductDesignState[]
+  agentRuns                   AgentRunLog[]
+  vibeStreamEvents            VibeStreamEventLog[]
 
   @@index([ownerId])
   @@index([status])
@@ -202,6 +261,7 @@ model Conversation {
   owner         User               @relation(fields: [ownerId], references: [id])
   messages      Message[]
   fileAssets    FileAsset[]
+  agentRuns     AgentRunLog[]
 
   @@index([projectId])
   @@index([ownerId])
@@ -402,6 +462,7 @@ model ModelCallLog {
   completedAt      DateTime?       @map("completed_at")
   provider         ModelProvider   @relation(fields: [providerId], references: [id])
   modelConfig      ModelConfig     @relation(fields: [modelConfigId], references: [id])
+  agentStepLogs    AgentStepLog[]
 
   @@index([traceId])
   @@index([runId])
@@ -410,4 +471,110 @@ model ModelCallLog {
   @@index([status])
   @@index([createdAt])
   @@map("model_call_logs")
+}
+
+model ProductDesignState {
+  id                  String                   @id @default(uuid())
+  projectId           String                   @map("project_id")
+  version             Int
+  title               String
+  businessGoal        String                   @map("business_goal")
+  background          String?
+  targetUsers         Json                     @map("target_users")
+  userScenarios       Json                     @map("user_scenarios")
+  pages               Json
+  features            Json
+  backendConfigs      Json                     @map("backend_configs")
+  frontendRules       Json                     @map("frontend_rules")
+  businessRules       Json                     @map("business_rules")
+  stateRules          Json                     @map("state_rules")
+  exceptionScenarios  Json                     @map("exception_scenarios")
+  acceptanceCriteria  Json                     @map("acceptance_criteria")
+  assumptions         Json
+  knowledgeRefs       Json                     @map("knowledge_refs")
+  pendingQuestions    Json                     @map("pending_questions")
+  prototypeSpec       Json?                    @map("prototype_spec")
+  prdDocument         Json?                    @map("prd_document")
+  status              ProductDesignStateStatus @default(draft)
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @updatedAt @map("updated_at")
+  project             Project                  @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, version])
+  @@index([projectId])
+  @@index([status])
+  @@map("product_design_states")
+}
+
+model AgentRunLog {
+  id             String          @id @default(uuid())
+  projectId      String          @map("project_id")
+  conversationId String          @map("conversation_id")
+  userId         String          @map("user_id")
+  intent         UserIntent?
+  status         AgentRunStatus  @default(running)
+  inputSummary   String          @map("input_summary")
+  outputSummary  String?         @map("output_summary")
+  result         Json?
+  errorMessage   String?         @map("error_message")
+  traceId        String          @map("trace_id")
+  startedAt      DateTime        @default(now()) @map("started_at")
+  endedAt        DateTime?       @map("ended_at")
+  durationMs     Int?            @map("duration_ms")
+  project        Project         @relation(fields: [projectId], references: [id])
+  conversation   Conversation    @relation(fields: [conversationId], references: [id])
+  user           User            @relation(fields: [userId], references: [id])
+  steps          AgentStepLog[]
+  streamEvents   VibeStreamEventLog[]
+
+  @@index([projectId])
+  @@index([conversationId])
+  @@index([userId])
+  @@index([intent])
+  @@index([status])
+  @@index([traceId])
+  @@index([startedAt])
+  @@map("agent_run_logs")
+}
+
+model AgentStepLog {
+  id              String          @id @default(uuid())
+  runId           String          @map("run_id")
+  agentName       AgentName       @map("agent_name")
+  status          AgentStepStatus @default(pending)
+  inputSummary    String          @map("input_summary")
+  outputSummary   String?         @map("output_summary")
+  modelCallLogId  String?         @map("model_call_log_id")
+  modelProviderId String?         @map("model_provider_id")
+  modelName       String?         @map("model_name")
+  tokenUsage      Json?           @map("token_usage")
+  startedAt       DateTime?       @map("started_at")
+  endedAt         DateTime?       @map("ended_at")
+  durationMs      Int?            @map("duration_ms")
+  errorMessage    String?         @map("error_message")
+  run             AgentRunLog     @relation(fields: [runId], references: [id])
+  modelCallLog    ModelCallLog?   @relation(fields: [modelCallLogId], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@index([agentName])
+  @@index([status])
+  @@index([modelCallLogId])
+  @@map("agent_step_logs")
+}
+
+model VibeStreamEventLog {
+  id        String      @id @default(uuid())
+  runId     String      @map("run_id")
+  projectId String      @map("project_id")
+  eventType String      @map("event_type")
+  payload   Json
+  createdAt DateTime    @default(now()) @map("created_at")
+  run       AgentRunLog @relation(fields: [runId], references: [id])
+  project   Project     @relation(fields: [projectId], references: [id])
+
+  @@index([runId])
+  @@index([projectId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("vibe_stream_event_logs")
 }

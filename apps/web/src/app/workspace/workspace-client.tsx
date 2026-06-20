@@ -34,7 +34,7 @@ import { Modal } from "@/components/modal";
 import { ProtectedRoute } from "@/components/protected-route";
 import { Button, FieldLabel, TextInput } from "@/components/ui";
 import { UserMenu } from "@/components/user-menu";
-import { apiRequest, toQueryString } from "@/lib/api";
+import { apiRequest, streamApiEvents, toQueryString } from "@/lib/api";
 
 type ProjectStatus =
   | "draft"
@@ -147,6 +147,19 @@ type WorkspaceProject = {
   qaIssues: QaIssue[];
 };
 
+type PreviewPatch = Partial<
+  Pick<
+    WorkspaceProject,
+    | "clarificationQuestions"
+    | "prdState"
+    | "prdSections"
+    | "prototypeState"
+    | "prototypeHtml"
+    | "qaStatus"
+    | "qaIssues"
+  >
+>;
+
 type ApiProject = {
   id: string;
   title: string;
@@ -223,8 +236,41 @@ type HandleMessageResponse = {
   projectId: string;
   conversationId: string;
   userMessage: ApiMessage;
-  assistantMessage: ApiMessage;
-  runId: string | null;
+  assistantMessage: ApiMessage | null;
+  runId: string;
+  status: "running";
+};
+
+type AgentStepName =
+  | "intent_detection"
+  | "knowledge_retrieval"
+  | "requirement_analysis"
+  | "product_design"
+  | "prd_generation"
+  | "prototype_design"
+  | "prototype_code_generation"
+  | "patch_planning"
+  | "qa_check"
+  | "knowledge_extraction";
+
+type VibeRunEvent = {
+  runId: string;
+  type:
+    | "step_started"
+    | "step_completed"
+    | "step_failed"
+    | "message_delta"
+    | "state_updated"
+    | "prd_updated"
+    | "prototype_updated"
+    | "qa_completed"
+    | "knowledge_candidate_created"
+    | "run_completed"
+    | "run_failed";
+  step?: AgentStepName;
+  content?: string;
+  data?: unknown;
+  createdAt: string;
 };
 
 type UploadFilesResponse = {
@@ -323,6 +369,19 @@ const AGENT_TEMPLATE: AgentStep[] = [
     status: "skipped",
   },
 ];
+
+const STEP_KEY_BY_EVENT_STEP: Record<AgentStepName, string> = {
+  intent_detection: "intent",
+  knowledge_retrieval: "knowledge",
+  requirement_analysis: "analyst",
+  product_design: "designer",
+  prd_generation: "prd",
+  prototype_design: "prototypeDesigner",
+  prototype_code_generation: "prototypeCode",
+  patch_planning: "patch",
+  qa_check: "qa",
+  knowledge_extraction: "knowledgeExtractor",
+};
 
 const PROMPTS = [
   "帮我做一个签到活动需求和原型",
@@ -636,7 +695,8 @@ function mapProject(project: ApiProject, messages: ChatMessage[] = []): Workspac
   };
 }
 
-function mapMessage(message: ApiMessage): ChatMessage | null {
+function mapMessage(message: ApiMessage | null): ChatMessage | null {
+  if (!message) return null;
   if (message.role === "system") return null;
   return {
     id: message.id,
@@ -645,6 +705,145 @@ function mapMessage(message: ApiMessage): ChatMessage | null {
     time: formatMessageTime(message.createdAt),
     attachments: mapMessageAttachments(message.attachments),
   };
+}
+
+function extractPreviewFromApiMessages(messages: ApiMessage[]) {
+  const assistantMessages = [...messages].reverse();
+  for (const message of assistantMessages) {
+    const preview = extractPreviewFromPayload(message.metadata);
+    if (preview) return preview;
+  }
+  return null;
+}
+
+function extractPreviewFromPayload(payload: unknown) {
+  const data = asRecord(payload);
+  if (!data) return null;
+
+  const prdSections = mapPrdSections(data.prdDocument);
+  const prototypeHtml = extractPrototypeHtml(data);
+  const qa = mapQaReport(data.qaReport);
+  const nextAction = asRecord(data.nextAction);
+  const questions = mapClarificationQuestions(nextAction?.questions);
+
+  if (!prdSections.length && !prototypeHtml && !qa && !questions.length) return null;
+
+  const patch: PreviewPatch = {};
+  if (questions.length) patch.clarificationQuestions = questions;
+  if (prdSections.length) {
+    patch.prdState = "ready";
+    patch.prdSections = prdSections;
+  }
+  if (prototypeHtml) {
+    patch.prototypeState = "ready";
+    patch.prototypeHtml = prototypeHtml;
+  }
+  if (qa) {
+    patch.qaStatus = qa.status;
+    patch.qaIssues = qa.issues;
+  }
+  return patch;
+}
+
+function mapPrdSections(value: unknown): PrdSection[] {
+  const doc = asRecord(value);
+  const sections = Array.isArray(doc?.sections) ? doc.sections : [];
+
+  return sections.flatMap((item, index) => {
+    const section = asRecord(item);
+    if (!section) return [];
+    const title = asText(section.title) || `第 ${index + 1} 节`;
+    const content = asText(section.content);
+    return [
+      {
+        id: asText(section.id) || `section-${index + 1}`,
+        title,
+        paragraphs: splitParagraphs(content || "待补充内容"),
+      },
+    ];
+  });
+}
+
+function splitParagraphs(content: string) {
+  const paragraphs = content
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return paragraphs.length ? paragraphs : [content];
+}
+
+function extractPrototypeHtml(value: unknown) {
+  const record = asRecord(value);
+  const artifact = asRecord(record?.prototypeArtifact) ?? asRecord(value);
+  return asText(artifact?.html);
+}
+
+function mapQaReport(value: unknown): { status: QaStatus; issues: QaIssue[] } | null {
+  const report = asRecord(value);
+  if (!report) return null;
+  const issues = Array.isArray(report.issues) ? report.issues : [];
+  const suggestions = Array.isArray(report.suggestions) ? report.suggestions.map(asText) : [];
+  const mappedIssues = issues.flatMap((item, index) => {
+    const issue = asRecord(item);
+    if (!issue) return [];
+    const level = asQaLevel(asText(issue.level));
+    return [
+      {
+        id: asText(issue.id) || `qa-${index + 1}`,
+        level,
+        type: asText(issue.type) || "一致性检查",
+        description: asText(issue.message) || asText(issue.description) || "发现一个待确认问题。",
+        suggestion: suggestions[index] || asText(issue.suggestion) || "请补充规则后重新生成或触发 QA。",
+      },
+    ];
+  });
+
+  return {
+    status: Boolean(report.passed) ? "passed" : mappedIssues.length ? "issues" : "failed",
+    issues: mappedIssues,
+  };
+}
+
+function statusFromRunResult(
+  result: Record<string, unknown> | null,
+  qa: { status: QaStatus; issues: QaIssue[] } | null,
+): ProjectStatus {
+  const nextAction = asRecord(result?.nextAction);
+  if (nextAction?.type === "ask_clarification") return "clarifying";
+  if (qa?.status && qa.status !== "passed") return "qa_failed";
+  if (extractPrototypeHtml(result)) return "prototype_ready";
+  if (mapPrdSections(result?.prdDocument).length) return "prd_ready";
+  return "draft";
+}
+
+function mapClarificationQuestions(value: unknown): ClarificationQuestion[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    const question = asRecord(item);
+    if (!question) return [];
+    const options = Array.isArray(question.options) ? question.options.map(asText).filter(Boolean) : [];
+    return [
+      {
+        id: asText(question.id) || `clarify-${index + 1}`,
+        title: asText(question.title) || "请补充确认信息",
+        options: options.length ? options : ["按常规最佳实践先生成", "我补充具体规则", "暂不纳入一期"],
+      },
+    ];
+  });
+}
+
+function asQaLevel(value: string): QaIssue["level"] {
+  if (value === "error" || value === "warning" || value === "info") return value;
+  return "warning";
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asText(value: unknown) {
+  return typeof value === "string" ? value : "";
 }
 
 function preservePreviewState(project: WorkspaceProject) {
@@ -657,6 +856,16 @@ function preservePreviewState(project: WorkspaceProject) {
     qaStatus: project.qaStatus,
     qaIssues: project.qaIssues,
   };
+}
+
+function mergePreviewPatch(project: WorkspaceProject, patch: PreviewPatch | null | undefined) {
+  if (!patch) return project;
+  return {
+    ...project,
+    ...Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => value !== undefined),
+    ),
+  } as WorkspaceProject;
 }
 
 export function WorkspaceClient() {
@@ -684,6 +893,7 @@ export function WorkspaceClient() {
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>(createAgentSteps);
   const [isRunning, setIsRunning] = useState(false);
   const timersRef = useRef<number[]>([]);
+  const streamAbortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentProject = useMemo(
@@ -704,6 +914,7 @@ export function WorkspaceClient() {
   useEffect(() => {
     return () => {
       timersRef.current.forEach((timer) => window.clearTimeout(timer));
+      streamAbortRef.current?.abort();
     };
   }, []);
 
@@ -784,29 +995,37 @@ export function WorkspaceClient() {
       const conversationId =
         detail.project.currentConversationId ?? detail.conversations.find((item) => item.status === "active")?.id;
       let messages: ChatMessage[] = [];
+      let previewPatch: PreviewPatch | null = null;
 
       if (conversationId) {
         const response = await apiRequest<ListMessagesResponse>(
           `/conversations/${conversationId}/messages${toQueryString({ limit: 50 })}`,
         );
         messages = response.items.map(mapMessage).filter((message): message is ChatMessage => Boolean(message));
+        previewPatch = extractPreviewFromApiMessages(response.items);
+        if (previewPatch) {
+          setPreviewTab(previewPatch.prototypeHtml ? "prototype" : previewPatch.qaIssues?.length ? "qa" : "prd");
+        }
       }
 
       setProjects((items) =>
         items.map((project) =>
           project.id === projectId
-            ? {
-                ...project,
-                ...mapProject(
-                  {
-                    ...detail.project,
-                    currentConversationId: conversationId,
-                    latestMessagePreview: messages.at(-1)?.content ?? project.summary,
-                  },
-                  messages,
-                ),
-                ...preservePreviewState(project),
-              }
+            ? mergePreviewPatch(
+                {
+                  ...project,
+                  ...mapProject(
+                    {
+                      ...detail.project,
+                      currentConversationId: conversationId,
+                      latestMessagePreview: messages.at(-1)?.content ?? project.summary,
+                    },
+                    messages,
+                  ),
+                  ...preservePreviewState(project),
+                },
+                previewPatch,
+              )
             : project,
         ),
       );
@@ -968,140 +1187,229 @@ export function WorkspaceClient() {
     }
   };
 
-  const runMockGeneration = (targetProjectId: string, assistantMessage?: ChatMessage) => {
-    clearRunTimers();
+  const stopRunStream = () => {
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+  };
+
+  const updateProject = (
+    targetProjectId: string,
+    updater: (project: WorkspaceProject) => WorkspaceProject,
+  ) => {
+    setProjects((items) =>
+      items.map((project) => (project.id === targetProjectId ? updater(project) : project)),
+    );
+  };
+
+  const updateStep = (stepName: AgentStepName | undefined, status: StepStatus, description?: string) => {
+    if (!stepName) return;
+    const key = STEP_KEY_BY_EVENT_STEP[stepName];
+    setAgentSteps((steps) =>
+      steps.map((step) =>
+        step.key === key
+          ? {
+              ...step,
+              status,
+              description: description || step.description,
+            }
+          : step,
+      ),
+    );
+  };
+
+  const startRunState = (targetProjectId: string, isPatch: boolean) => {
+    stopRunStream();
     setIsRunning(true);
     setAgentSteps(createAgentSteps());
     setPreviewTab("prd");
-    setProjects((items) =>
-      items.map((project) =>
-        project.id === targetProjectId
-          ? {
-              ...project,
-              status: "generating",
-              summary: "AI 正在协作生成 PRD、原型和 QA 报告",
-              updatedAt: "刚刚",
-              clarificationQuestions: undefined,
-              prdState: "generating",
-              prototypeState: "empty",
-              qaStatus: "unchecked",
-              qaIssues: [],
-            }
-          : project,
-      ),
-    );
+    updateProject(targetProjectId, (project) => ({
+      ...project,
+      status: "generating",
+      summary: isPatch ? "正在分析局部修改影响范围" : "AI 正在协作生成 PRD、原型和 QA 报告",
+      updatedAt: "刚刚",
+      clarificationQuestions: undefined,
+      prdState: "generating",
+      prdSections: isPatch ? project.prdSections : [],
+      prototypeState: isPatch ? project.prototypeState : "empty",
+      prototypeHtml: isPatch ? project.prototypeHtml : "",
+      qaStatus: "unchecked",
+      qaIssues: [],
+    }));
+  };
 
-    const activeKeys = [
-      "intent",
-      "knowledge",
-      "analyst",
-      "designer",
-      "prd",
-      "prototypeDesigner",
-      "prototypeCode",
-      "qa",
-    ];
+  const startRunStream = (targetProjectId: string, runId: string) => {
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
 
-    activeKeys.forEach((key, index) => {
-      schedule(() => {
-        setAgentSteps((steps) =>
-          steps.map((step) => (step.key === key ? { ...step, status: "running" } : step)),
-        );
-
-        if (key === "prototypeDesigner") {
-          setProjects((items) =>
-            items.map((project) =>
-              project.id === targetProjectId
-                ? {
-                    ...project,
-                    summary: "正在生成 HTML 原型",
-                    prototypeState: "generating",
-                  }
-                : project,
-            ),
-          );
-          setPreviewTab("prototype");
-        }
-
-        if (key === "qa") {
-          setProjects((items) =>
-            items.map((project) =>
-              project.id === targetProjectId
-                ? {
-                    ...project,
-                    summary: "正在校验 PRD 与原型一致性",
-                    qaStatus: "checking",
-                  }
-                : project,
-            ),
-          );
-          setPreviewTab("qa");
-        }
-      }, 360 + index * 760);
-
-      schedule(() => {
-        setAgentSteps((steps) =>
-          steps.map((step) => (step.key === key ? { ...step, status: "success" } : step)),
-        );
-
-        if (key === "prd") {
-          setProjects((items) =>
-            items.map((project) =>
-              project.id === targetProjectId
-                ? {
-                    ...project,
-                    status: "prd_ready",
-                    summary: "PRD 已生成，正在继续生成原型",
-                    prdState: "ready",
-                    prdSections: DEFAULT_PRD_SECTIONS,
-                  }
-                : project,
-            ),
-          );
-        }
-
-        if (key === "prototypeCode") {
-          setProjects((items) =>
-            items.map((project) =>
-              project.id === targetProjectId
-                ? {
-                    ...project,
-                    status: "prototype_ready",
-                    summary: "HTML 原型已生成，正在校验一致性",
-                    prototypeState: "ready",
-                    prototypeHtml: SAMPLE_PROTOTYPE_HTML,
-                  }
-                : project,
-            ),
-          );
-          setPreviewTab("prototype");
-        }
-      }, 820 + index * 760);
+    void streamApiEvents<VibeRunEvent>(
+      `/ai/vibe/runs/${runId}/stream`,
+      (event) => handleRunEvent(targetProjectId, runId, event, controller),
+      { signal: controller.signal },
+    ).catch((error) => {
+      if (controller.signal.aborted) return;
+      setIsRunning(false);
+      setWorkspaceError(error instanceof Error ? error.message : "Agent 流式连接失败");
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        status: "qa_failed",
+        summary: "Agent 流式连接中断，请稍后重试",
+      }));
     });
+  };
 
-    schedule(() => {
-      setProjects((items) =>
-        items.map((project) =>
-          project.id === targetProjectId
-            ? {
-                ...project,
-                status: "qa_failed",
-                summary: "已生成 PRD 与原型，QA 提示 2 个待修正点",
-                updatedAt: "刚刚",
-                qaStatus: "issues",
-                qaIssues: DEFAULT_QA_ISSUES,
-                messages: assistantMessage
-                  ? project.messages.some((message) => message.id === assistantMessage.id)
-                    ? project.messages
-                    : [...project.messages, assistantMessage]
-                  : project.messages,
-              }
-            : project,
+  const handleRunEvent = (
+    targetProjectId: string,
+    runId: string,
+    event: VibeRunEvent,
+    controller: AbortController,
+  ) => {
+    if (!event || event.runId !== runId) return;
+
+    if (event.type === "message_delta") {
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        summary: event.content || project.summary,
+        updatedAt: "刚刚",
+      }));
+      return;
+    }
+
+    if (event.type === "step_started") {
+      updateStep(event.step, "running", event.content);
+      applyStartedPreviewState(targetProjectId, event);
+      return;
+    }
+
+    if (event.type === "step_completed") {
+      updateStep(event.step, "success", event.content);
+      return;
+    }
+
+    if (event.type === "step_failed") {
+      updateStep(event.step, "failed", event.content);
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        status: "qa_failed",
+        summary: event.content || "Agent 执行失败",
+      }));
+      return;
+    }
+
+    if (event.type === "prd_updated") {
+      const prdSections = mapPrdSections(event.data);
+      if (!prdSections.length) return;
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        status: "prd_ready",
+        summary: "PRD 已生成，正在继续生成原型",
+        prdState: "ready",
+        prdSections,
+      }));
+      setPreviewTab("prd");
+      return;
+    }
+
+    if (event.type === "prototype_updated") {
+      const prototypeHtml = extractPrototypeHtml(event.data);
+      if (!prototypeHtml) return;
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        status: "prototype_ready",
+        summary: "HTML 原型已生成，正在校验一致性",
+        prototypeState: "ready",
+        prototypeHtml,
+      }));
+      setPreviewTab("prototype");
+      return;
+    }
+
+    if (event.type === "qa_completed") {
+      const qa = mapQaReport(event.data);
+      if (!qa) return;
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        status: qa.status === "passed" ? "prototype_ready" : "qa_failed",
+        summary: qa.status === "passed" ? "QA 校验通过" : `QA 发现 ${qa.issues.length} 个待确认问题`,
+        qaStatus: qa.status,
+        qaIssues: qa.issues,
+      }));
+      setPreviewTab("qa");
+      return;
+    }
+
+    if (event.type === "run_completed") {
+      const result = asRecord(event.data);
+      const messageContent = asText(result?.message) || event.content || "Agent 协作已完成。";
+      const qa = mapQaReport(result?.qaReport);
+      const previewPatch = extractPreviewFromPayload(result);
+      const assistantMessage: ChatMessage = {
+        id: `assistant-${runId}`,
+        role: "assistant",
+        content: messageContent,
+        time: formatMessageTime(event.createdAt),
+      };
+
+      updateProject(targetProjectId, (project) =>
+        mergePreviewPatch(
+          {
+            ...project,
+            status: statusFromRunResult(result, qa),
+            summary: messageContent,
+            updatedAt: "刚刚",
+            messages: project.messages.some((message) => message.id === assistantMessage.id)
+              ? project.messages
+              : [...project.messages, assistantMessage],
+          },
+          previewPatch,
         ),
       );
-      setPreviewTab("qa");
       setIsRunning(false);
-    }, 7600);
+      controller.abort();
+      window.setTimeout(() => void loadProjectDetail(targetProjectId), 250);
+      return;
+    }
+
+    if (event.type === "run_failed") {
+      setIsRunning(false);
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        status: "qa_failed",
+        summary: event.content || "Agent 执行失败",
+        prdState: project.prdState === "generating" ? "error" : project.prdState,
+        prototypeState: project.prototypeState === "generating" ? "error" : project.prototypeState,
+        qaStatus: "failed",
+      }));
+      controller.abort();
+    }
+  };
+
+  const applyStartedPreviewState = (targetProjectId: string, event: VibeRunEvent) => {
+    if (event.step === "prd_generation") {
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        summary: event.content || "正在生成 PRD 草案",
+        prdState: "generating",
+      }));
+      setPreviewTab("prd");
+    }
+
+    if (event.step === "prototype_design" || event.step === "prototype_code_generation") {
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        summary: event.content || "正在生成 HTML 原型",
+        prototypeState: "generating",
+      }));
+      setPreviewTab("prototype");
+    }
+
+    if (event.step === "qa_check") {
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        summary: event.content || "正在校验 PRD 与原型一致性",
+        qaStatus: "checking",
+      }));
+      setPreviewTab("qa");
+    }
   };
 
   const uploadComposerFiles = async (fileList: FileList | null) => {
@@ -1241,6 +1549,8 @@ export function WorkspaceClient() {
         })),
     };
 
+    startRunState(currentProject.id, Boolean(selectedRegion));
+
     setProjects((items) =>
       items.map((project) =>
         project.id === currentProject.id
@@ -1293,10 +1603,19 @@ export function WorkspaceClient() {
         );
       }
 
-      runMockGeneration(currentProject.id, savedAssistantMessage ?? undefined);
-      void loadProjects(currentProject.id);
+      if (savedAssistantMessage) {
+        updateProject(currentProject.id, (project) => ({
+          ...project,
+          messages: project.messages.some((item) => item.id === savedAssistantMessage.id)
+            ? project.messages
+            : [...project.messages, savedAssistantMessage],
+        }));
+      }
+
+      startRunStream(currentProject.id, response.runId);
     } catch (error) {
       setIsRunning(false);
+      stopRunStream();
       setWorkspaceError(error instanceof Error ? error.message : "消息发送失败");
     }
   };
@@ -1334,7 +1653,7 @@ export function WorkspaceClient() {
     setComposerValue("");
     setAgentSteps(createAgentSteps());
     setIsRunning(false);
-    clearRunTimers();
+    stopRunStream();
     void loadProjectDetail(projectId);
   };
 
