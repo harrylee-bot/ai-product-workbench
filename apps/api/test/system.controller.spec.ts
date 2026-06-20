@@ -10,5 +10,6 @@ describe("SystemController", () => {
       service: "ai-product-workbench-api",
     });
     expect(result.modules).toContain("projects");
+    expect(result.modules).toContain("requirement-documents");
   });
 });

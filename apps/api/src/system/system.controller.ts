@@ -15,6 +15,7 @@ export class SystemController {
         "model-gateway",
         "ai-vibe",
         "product-design-state",
+        "requirement-documents",
       ],
     };
   }

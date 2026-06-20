@@ -7,13 +7,13 @@ import type {
   PatchPlan,
   ProductDesignState,
   PrototypeSpec,
-  RequirementDocumentDraft,
+  RequirementDocument,
 } from "../ai-vibe.types";
 import { BaseAgentService } from "./base-agent.service";
 
 type KnowledgeExtractorInput = {
   productDesignState: ProductDesignState;
-  prdDocument?: RequirementDocumentDraft;
+  prdDocument?: RequirementDocument;
   prototypeSpec?: PrototypeSpec;
   patchPlan?: PatchPlan;
   confirmedByUser?: boolean;

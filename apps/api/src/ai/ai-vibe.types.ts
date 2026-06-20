@@ -110,7 +110,7 @@ export type ProductDesignState = {
   pendingQuestions: Array<Record<string, unknown>>;
   confirmedFacts: Array<Record<string, unknown>>;
   prototypeSpec?: PrototypeSpec;
-  prdDocument?: RequirementDocumentDraft;
+  prdDocument?: RequirementDocument;
   status:
     | "draft"
     | "clarifying"
@@ -131,21 +131,110 @@ export type ProductDesignDraft = Omit<
   "id" | "version" | "prototypeSpec" | "prdDocument" | "status" | "createdAt" | "updatedAt"
 >;
 
+export type RequirementDocTag =
+  | "ai_assumption"
+  | "knowledge_base"
+  | "user_confirmed"
+  | "pending_question";
+
+export type RequirementDocSectionType =
+  | "overview"
+  | "background"
+  | "business_goal"
+  | "target_users"
+  | "user_scenarios"
+  | "scope"
+  | "page_requirements"
+  | "backend_configs"
+  | "frontend_rules"
+  | "business_rules"
+  | "state_rules"
+  | "exception_scenarios"
+  | "acceptance_criteria"
+  | "assumptions"
+  | "knowledge_refs"
+  | "pending_questions"
+  | "appendix";
+
+export type RequirementDocBlock = {
+  id: string;
+  type: "paragraph" | "bullet_list" | "table" | "quote" | "warning" | "info";
+  content: string;
+  sourcePaths?: string[];
+  tags?: RequirementDocTag[];
+};
+
 export type RequirementDocSection = {
   id: string;
   title: string;
+  type: RequirementDocSectionType;
+  level: 1 | 2 | 3;
+  order: number;
   content: string;
-  sourceStatePaths: string[];
+  blocks?: RequirementDocBlock[];
+  sourcePaths: string[];
+  tags?: RequirementDocTag[];
+  createdAt?: string;
+  updatedAt?: string;
+  sourceStatePaths?: string[];
+};
+
+export type AssumptionReference = {
+  assumptionId: string;
+  content: string;
+  relatedSectionIds: string[];
+  status: "pending" | "confirmed" | "rejected";
+};
+
+export type ClarificationQuestionReference = {
+  questionId: string;
+  question: string;
+  reason: string;
+  relatedSectionIds: string[];
+  status: "pending" | "answered" | "skipped";
+};
+
+export type RequirementDocumentStatus = "draft" | "generating" | "ready" | "failed" | "confirmed";
+
+export type RequirementDocument = {
+  id: string;
+  projectId: string;
+  productDesignStateId: string;
+  productDesignStateVersion: number;
+  title: string;
+  status: RequirementDocumentStatus;
+  sections: RequirementDocSection[];
+  assumptions: AssumptionReference[];
+  knowledgeRefs: Array<Record<string, unknown>>;
+  pendingQuestions: ClarificationQuestionReference[];
+  validationNotes: string[];
+  generatedByRunId?: string;
+  createdBy: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type RequirementDocumentDraft = {
-  id: string;
+  id?: string;
   projectId: string;
   title: string;
   sections: RequirementDocSection[];
-      knowledgeRefs: Array<Record<string, unknown>>;
-  assumptions: Array<Record<string, unknown>>;
+  knowledgeRefs: Array<Record<string, unknown>>;
+  assumptions: AssumptionReference[];
+  pendingQuestions: ClarificationQuestionReference[];
   validationNotes: string[];
+};
+
+export type RequirementDocumentVersion = {
+  id: string;
+  documentId: string;
+  projectId: string;
+  version: number;
+  snapshot: RequirementDocument;
+  reason?: string;
+  createdBy: string;
+  createdAt: string;
 };
 
 export type PrototypeSpec = {

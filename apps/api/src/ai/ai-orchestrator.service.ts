@@ -22,7 +22,7 @@ import type {
   PrototypeSpec,
   QAReport,
   RequirementAnalysis,
-  RequirementDocumentDraft,
+  RequirementDocument,
 } from "./ai-vibe.types";
 import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
@@ -35,6 +35,7 @@ import { QaAgentService } from "./agents/qa-agent.service";
 import { RequirementAnalystAgentService } from "./agents/requirement-analyst-agent.service";
 import { IntentAgentService } from "./agents/intent-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
+import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 
 type OrchestratorInput = {
@@ -49,7 +50,7 @@ export type OrchestratorResult = {
   intent: IntentResult;
   message: string;
   productDesignState?: ProductDesignState;
-  prdDocument?: RequirementDocumentDraft;
+  prdDocument?: RequirementDocument;
   prototypeSpec?: PrototypeSpec;
   prototypeArtifact?: PrototypeArtifact;
   qaReport?: QAReport;
@@ -67,6 +68,7 @@ export class AiOrchestratorService {
     private readonly runLog: AgentRunLogService,
     private readonly stream: VibeStreamService,
     private readonly stateService: ProductDesignStateService,
+    private readonly documentService: RequirementDocumentService,
     private readonly messageService: MessageService,
     private readonly prisma: PrismaService,
     private readonly intentAgent: IntentAgentService,
@@ -248,7 +250,7 @@ export class AiOrchestratorService {
       }
 
       await this.emit(context, "message_delta", "正在生成 PRD 草案...");
-      const prd = await this.runAgentStep(context, AgentName.prd_writer_agent, "prd_generation", () =>
+      const prdDraft = await this.runAgentStep(context, AgentName.prd_writer_agent, "prd_generation", () =>
         this.prdWriterAgent.run({
           runId: context.runId,
           projectId: context.projectId,
@@ -260,12 +262,17 @@ export class AiOrchestratorService {
           },
         }),
       );
+      const prdDocument = await this.documentService.saveGeneratedDocument(state, prdDraft.data, {
+        userId: context.userId,
+        runId: context.runId,
+        reason: "PRD Writer Agent 生成 PRD",
+      });
       await this.stream.emit({
         runId: context.runId,
         projectId: context.projectId,
         type: "prd_updated",
         step: "prd_generation",
-        data: prd.data,
+        data: prdDocument,
       });
 
       await this.emit(context, "message_delta", "正在生成原型规格...");
@@ -315,7 +322,7 @@ export class AiOrchestratorService {
       });
 
       state = await this.stateService.attachGeneratedArtifacts(state.id, {
-        prdDocument: prd.data,
+        prdDocument,
         prototypeSpec: prototypeSpec.data,
         status: ProductDesignStateStatus.prototype_ready,
         userId: context.userId,
@@ -333,7 +340,7 @@ export class AiOrchestratorService {
           userId: context.userId,
           input: {
             productDesignState: state!,
-            prdDocument: prd.data,
+            prdDocument,
             prototypeSpec: prototypeSpec.data,
             patchPlan,
             knowledgeContext: knowledge.data,
@@ -360,7 +367,7 @@ export class AiOrchestratorService {
             userId: context.userId,
             input: {
               productDesignState: state!,
-              prdDocument: prd.data,
+              prdDocument,
               prototypeSpec: prototypeSpec.data,
               patchPlan,
               confirmedByUser: false,
@@ -378,7 +385,7 @@ export class AiOrchestratorService {
         intent: intent.data,
         message: finalMessage,
         productDesignState: state,
-        prdDocument: prd.data,
+        prdDocument,
         prototypeSpec: prototypeSpec.data,
         prototypeArtifact: prototypeArtifact.data,
         qaReport: qa.data,

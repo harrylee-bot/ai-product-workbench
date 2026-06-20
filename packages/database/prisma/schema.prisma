@@ -143,6 +143,14 @@ enum ProductDesignChangeType {
   answer_question
 }
 
+enum RequirementDocumentStatus {
+  draft
+  generating
+  ready
+  failed
+  confirmed
+}
+
 enum AgentRunStatus {
   running
   succeeded
@@ -247,6 +255,8 @@ model Project {
   productDesignStates         ProductDesignState[]
   productDesignVersions       ProductDesignVersion[]
   productDesignChangeLogs     ProductDesignChangeLog[]
+  requirementDocuments        RequirementDocument[]
+  requirementDocumentVersions RequirementDocumentVersion[]
   agentRuns                   AgentRunLog[]
   vibeStreamEvents            VibeStreamEventLog[]
 
@@ -518,6 +528,7 @@ model ProductDesignState {
   project             Project                  @relation(fields: [projectId], references: [id])
   versions            ProductDesignVersion[]
   changeLogs          ProductDesignChangeLog[]
+  requirementDocuments RequirementDocument[]
 
   @@unique([projectId, version])
   @@index([projectId])
@@ -564,6 +575,52 @@ model ProductDesignChangeLog {
   @@index([runId])
   @@index([createdAt])
   @@map("product_design_change_logs")
+}
+
+model RequirementDocument {
+  id                        String                    @id @default(uuid())
+  projectId                 String                    @map("project_id")
+  productDesignStateId      String                    @map("product_design_state_id")
+  productDesignStateVersion Int                       @map("product_design_state_version")
+  title                     String
+  status                    RequirementDocumentStatus @default(draft)
+  sections                  Json
+  assumptions               Json?
+  knowledgeRefs             Json?                     @map("knowledge_refs")
+  pendingQuestions          Json?                     @map("pending_questions")
+  validationNotes           Json?                     @map("validation_notes")
+  generatedByRunId          String?                   @map("generated_by_run_id")
+  createdBy                 String                    @map("created_by")
+  updatedBy                 String?                   @map("updated_by")
+  createdAt                 DateTime                  @default(now()) @map("created_at")
+  updatedAt                 DateTime                  @updatedAt @map("updated_at")
+  project                   Project                   @relation(fields: [projectId], references: [id])
+  productDesignState        ProductDesignState        @relation(fields: [productDesignStateId], references: [id])
+  versions                  RequirementDocumentVersion[]
+
+  @@index([projectId])
+  @@index([productDesignStateId])
+  @@index([status])
+  @@index([updatedAt])
+  @@map("requirement_documents")
+}
+
+model RequirementDocumentVersion {
+  id        String              @id @default(uuid())
+  documentId String             @map("document_id")
+  projectId String              @map("project_id")
+  version   Int
+  snapshot  Json
+  reason    String?
+  createdBy String              @map("created_by")
+  createdAt DateTime            @default(now()) @map("created_at")
+  document  RequirementDocument @relation(fields: [documentId], references: [id])
+  project   Project             @relation(fields: [projectId], references: [id])
+
+  @@index([documentId])
+  @@index([projectId])
+  @@index([version])
+  @@map("requirement_document_versions")
 }
 
 model AgentRunLog {

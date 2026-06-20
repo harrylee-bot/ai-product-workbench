@@ -5,7 +5,7 @@ import type {
   PatchPlan,
   ProductDesignState,
   PrototypeSpec,
-  RequirementDocumentDraft,
+  RequirementDocument,
   SelectedRegion,
 } from "../ai-vibe.types";
 import { BaseAgentService } from "./base-agent.service";
@@ -14,7 +14,7 @@ type PatchAgentInput = {
   userInput: string;
   selectedRegion: SelectedRegion;
   productDesignState: ProductDesignState;
-  prdDocument?: RequirementDocumentDraft;
+  prdDocument?: RequirementDocument;
   prototypeSpec?: PrototypeSpec;
 };
 

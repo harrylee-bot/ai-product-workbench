@@ -120,7 +120,11 @@ type AgentStep = {
 type PrdSection = {
   id: string;
   title: string;
+  type?: string;
+  order?: number;
   paragraphs: string[];
+  sourcePaths?: string[];
+  tags?: string[];
 };
 
 type QaIssue = {
@@ -163,6 +167,7 @@ type WorkspaceProject = {
   messages: ChatMessage[];
   clarificationQuestions?: ClarificationQuestion[];
   prdState: PreviewState;
+  prdDocumentId?: string;
   prdSections: PrdSection[];
   prototypeState: PreviewState;
   prototypeHtml: string;
@@ -176,6 +181,7 @@ type PreviewPatch = Partial<
     WorkspaceProject,
     | "clarificationQuestions"
     | "prdState"
+    | "prdDocumentId"
     | "prdSections"
     | "prototypeState"
     | "prototypeHtml"
@@ -309,6 +315,10 @@ type GetFileResponse = {
 
 type GetProductDesignStateResponse = {
   state: unknown | null;
+};
+
+type GetCurrentPrdResponse = {
+  document: unknown | null;
 };
 
 const STATUS_META: Record<ProjectStatus, { label: string; className: string }> = {
@@ -752,6 +762,7 @@ function extractPreviewFromPayload(payload: unknown) {
   if (!data) return null;
 
   const prdSections = mapPrdSections(data.prdDocument);
+  const prdDocument = asRecord(data.prdDocument);
   const prototypeHtml = extractPrototypeHtml(data);
   const qa = mapQaReport(data.qaReport);
   const productDesignState = mapProductDesignStateSummary(data.productDesignState);
@@ -765,6 +776,7 @@ function extractPreviewFromPayload(payload: unknown) {
   if (productDesignState) patch.productDesignState = productDesignState;
   if (prdSections.length) {
     patch.prdState = "ready";
+    patch.prdDocumentId = asText(prdDocument?.id) || undefined;
     patch.prdSections = prdSections;
   }
   if (prototypeHtml) {
@@ -844,14 +856,23 @@ function mapPrdSections(value: unknown): PrdSection[] {
     if (!section) return [];
     const title = asText(section.title) || `第 ${index + 1} 节`;
     const content = asText(section.content);
+    const blocks = Array.isArray(section.blocks) ? section.blocks : [];
+    const blockContent = blocks
+      .map((block) => asText(asRecord(block)?.content))
+      .filter(Boolean)
+      .join("\n");
     return [
       {
         id: asText(section.id) || `section-${index + 1}`,
         title,
-        paragraphs: splitParagraphs(content || "待补充内容"),
+        type: asText(section.type),
+        order: typeof section.order === "number" ? section.order : index + 1,
+        paragraphs: splitParagraphs(content || blockContent || "待补充内容"),
+        sourcePaths: arrayOfText(section.sourcePaths ?? section.sourceStatePaths),
+        tags: arrayOfText(section.tags),
       },
     ];
-  });
+  }).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
 function splitParagraphs(content: string) {
@@ -934,6 +955,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asText(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function arrayOfText(value: unknown) {
+  return Array.isArray(value) ? value.map(asText).filter(Boolean) : [];
+}
+
+function getPrdTagLabel(tag: string) {
+  const labels: Record<string, string> = {
+    ai_assumption: "AI 推断",
+    knowledge_base: "知识库",
+    user_confirmed: "已确认",
+    pending_question: "待确认",
+  };
+  return labels[tag] ?? tag;
 }
 
 function preservePreviewState(project: WorkspaceProject) {
@@ -1103,9 +1138,21 @@ export function WorkspaceClient() {
         `/projects/${projectId}/product-design-state`,
       );
       const stateSummary = mapProductDesignStateSummary(stateResponse.state);
+      const prdResponse = await apiRequest<GetCurrentPrdResponse>(
+        `/projects/${projectId}/prd/current`,
+      );
+      const prdDocument = asRecord(prdResponse.document);
+      const currentPrdSections = mapPrdSections(prdResponse.document);
       previewPatch = {
         ...(previewPatch ?? {}),
         productDesignState: stateSummary,
+        ...(currentPrdSections.length
+          ? {
+              prdState: "ready" as const,
+              prdDocumentId: asText(prdDocument?.id) || undefined,
+              prdSections: currentPrdSections,
+            }
+          : {}),
       };
 
       setProjects((items) =>
@@ -1329,6 +1376,7 @@ export function WorkspaceClient() {
       updatedAt: "刚刚",
       clarificationQuestions: undefined,
       prdState: "generating",
+      prdDocumentId: isPatch ? project.prdDocumentId : undefined,
       prdSections: isPatch ? project.prdSections : [],
       prototypeState: isPatch ? project.prototypeState : "empty",
       prototypeHtml: isPatch ? project.prototypeHtml : "",
@@ -1416,12 +1464,14 @@ export function WorkspaceClient() {
 
     if (event.type === "prd_updated") {
       const prdSections = mapPrdSections(event.data);
+      const prdDocument = asRecord(event.data);
       if (!prdSections.length) return;
       updateProject(targetProjectId, (project) => ({
         ...project,
         status: "prd_ready",
         summary: "PRD 已生成，正在继续生成原型",
         prdState: "ready",
+        prdDocumentId: asText(prdDocument?.id) || project.prdDocumentId,
         prdSections,
       }));
       setPreviewTab("prd");
@@ -1747,7 +1797,7 @@ export function WorkspaceClient() {
     setSelectedRegion({
       type: "document",
       sectionId: section.id,
-      targetId: `${section.id}-body`,
+      targetId: currentProject?.prdDocumentId ?? `${section.id}-body`,
       label: section.title,
     });
     setComposerValue((value) => value || `请修改「${section.title}」：`);
@@ -2858,7 +2908,27 @@ function PrdPreview({
           {project?.prdSections.map((section) => (
             <section key={section.id} className="group">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-gray-950">{section.title}</h2>
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-gray-950">{section.title}</h2>
+                  {section.tags?.length ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {section.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className={clsx(
+                            "inline-flex h-6 items-center rounded-full border px-2 text-xs font-medium",
+                            tag === "ai_assumption" && "border-amber-200 bg-amber-50 text-amber-700",
+                            tag === "knowledge_base" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+                            tag === "pending_question" && "border-sky-200 bg-sky-50 text-sky-700",
+                            tag === "user_confirmed" && "border-gray-200 bg-gray-50 text-gray-700",
+                          )}
+                        >
+                          {getPrdTagLabel(tag)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   onClick={() => onSelectSection(section)}
@@ -2873,6 +2943,11 @@ function PrdPreview({
                   <p key={paragraph}>{paragraph}</p>
                 ))}
               </div>
+              {section.sourcePaths?.length ? (
+                <div className="mt-3 text-xs text-gray-400">
+                  来源：{section.sourcePaths.join(" / ")}
+                </div>
+              ) : null}
             </section>
           ))}
         </div>

@@ -20,19 +20,31 @@ import {
   ProductDesignStateResourceController,
   ProjectProductDesignStateController,
 } from "./product-design-state.controller";
+import {
+  PrdDocumentController,
+  ProjectPrdController,
+} from "./requirement-document.controller";
+import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeController } from "./vibe.controller";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
 
 @Module({
   imports: [PrismaModule, ProjectModule, FileModule, ModelGatewayModule],
-  controllers: [VibeController, ProjectProductDesignStateController, ProductDesignStateResourceController],
+  controllers: [
+    VibeController,
+    ProjectProductDesignStateController,
+    ProductDesignStateResourceController,
+    ProjectPrdController,
+    PrdDocumentController,
+  ],
   providers: [
     VibeService,
     AiOrchestratorService,
     AgentRunLogService,
     VibeStreamService,
     ProductDesignStateService,
+    RequirementDocumentService,
     IntentAgentService,
     KnowledgeAgentService,
     RequirementAnalystAgentService,

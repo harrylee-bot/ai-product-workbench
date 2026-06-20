@@ -7,13 +7,13 @@ import type {
   ProductDesignState,
   PrototypeSpec,
   QAReport,
-  RequirementDocumentDraft,
+  RequirementDocument,
 } from "../ai-vibe.types";
 import { BaseAgentService } from "./base-agent.service";
 
 type QaAgentInput = {
   productDesignState: ProductDesignState;
-  prdDocument?: RequirementDocumentDraft;
+  prdDocument?: RequirementDocument;
   prototypeSpec?: PrototypeSpec;
   patchPlan?: PatchPlan;
   knowledgeContext?: KnowledgeContext;

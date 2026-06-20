@@ -18,9 +18,9 @@ import type {
   PatchOperation,
   PatchPlan,
   ProductDesignDraft,
+  RequirementDocument,
   ProductDesignState,
   PrototypeSpec,
-  RequirementDocumentDraft,
 } from "./ai-vibe.types";
 
 type StateArrayKey =
@@ -131,6 +131,13 @@ export class ProductDesignStateService {
     });
 
     const state = project?.productDesignStates[0];
+    return state ? this.toStateItem(state as ProductDesignStateRecord) : undefined;
+  }
+
+  async getStateByIdForProject(stateId: string, projectId: string): Promise<ProductDesignState | undefined> {
+    const state = await this.prisma.productDesignState.findFirst({
+      where: { id: stateId, projectId },
+    });
     return state ? this.toStateItem(state as ProductDesignStateRecord) : undefined;
   }
 
@@ -452,7 +459,7 @@ export class ProductDesignStateService {
   async attachGeneratedArtifacts(
     stateId: string,
     input: {
-      prdDocument?: RequirementDocumentDraft;
+      prdDocument?: RequirementDocument;
       prototypeSpec?: PrototypeSpec;
       status?: ProductDesignStateStatus;
       userId?: string;
@@ -1066,7 +1073,7 @@ export class ProductDesignStateService {
       pendingQuestions: this.arrayOf<Record<string, unknown>>(state.pendingQuestions),
       confirmedFacts: this.arrayOf<Record<string, unknown>>(state.confirmedFacts),
       prototypeSpec: state.prototypeSpec ? (state.prototypeSpec as PrototypeSpec) : undefined,
-      prdDocument: state.prdDocument ? (state.prdDocument as RequirementDocumentDraft) : undefined,
+      prdDocument: state.prdDocument ? (state.prdDocument as RequirementDocument) : undefined,
       status: state.status,
       createdBy: state.createdBy,
       updatedBy: state.updatedBy ?? undefined,
