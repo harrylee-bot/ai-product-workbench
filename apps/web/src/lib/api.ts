@@ -36,10 +36,16 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch {
+    throw new ApiError("无法连接 API 服务，请确认后端已启动并可访问", 503);
+  }
+
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {

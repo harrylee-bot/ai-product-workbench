@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="${APP_DIR:-/opt/ai-product-workbench}"
+APP_HOST="${APP_HOST:-8.130.160.177}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-ai_workbench}"
+JWT_SECRET="${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}"
+JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
+
+cd "$APP_DIR"
+
+if [ "${SKIP_GIT_PULL:-0}" != "1" ] && [ -d .git ]; then
+  git fetch origin main
+  git checkout main
+  git reset --hard origin/main
+else
+  echo "Using code already present in ${APP_DIR}"
+fi
+
+docker network create ai-product-workbench >/dev/null 2>&1 || true
+docker volume create ai-product-workbench-postgres >/dev/null
+docker volume create ai-product-workbench-storage >/dev/null
+
+docker rm -f ai-product-workbench-web ai-product-workbench-api >/dev/null 2>&1 || true
+
+if ! docker ps -a --format '{{.Names}}' | grep -qx ai-product-workbench-postgres; then
+  docker run -d \
+    --name ai-product-workbench-postgres \
+    --restart unless-stopped \
+    --network ai-product-workbench \
+    -e POSTGRES_DB=ai_product_workbench \
+    -e POSTGRES_USER=ai_workbench \
+    -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+    -v ai-product-workbench-postgres:/var/lib/postgresql/data \
+    postgres:16-alpine
+elif ! docker ps --format '{{.Names}}' | grep -qx ai-product-workbench-postgres; then
+  docker start ai-product-workbench-postgres >/dev/null
+fi
+
+until docker exec ai-product-workbench-postgres pg_isready -U ai_workbench -d ai_product_workbench >/dev/null 2>&1; do
+  sleep 2
+done
+
+docker build -f apps/api/Dockerfile -t ai-product-workbench-api:latest .
+docker build \
+  --build-arg NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
+  -f apps/web/Dockerfile \
+  -t ai-product-workbench-web:latest .
+
+docker run -d \
+  --name ai-product-workbench-api \
+  --restart unless-stopped \
+  --network ai-product-workbench \
+  -p 4000:4000 \
+  -e DATABASE_URL="postgresql://ai_workbench:${POSTGRES_PASSWORD}@ai-product-workbench-postgres:5432/ai_product_workbench?schema=public" \
+  -e JWT_SECRET="$JWT_SECRET" \
+  -e JWT_EXPIRES_IN="$JWT_EXPIRES_IN" \
+  -e API_PORT=4000 \
+  -e WEB_ORIGIN="http://${APP_HOST}:3000" \
+  -e FILE_UPLOAD_ROOT=/app/apps/api/storage/uploads \
+  -v ai-product-workbench-storage:/app/apps/api/storage \
+  ai-product-workbench-api:latest
+
+docker run -d \
+  --name ai-product-workbench-web \
+  --restart unless-stopped \
+  --network ai-product-workbench \
+  -p 3000:3000 \
+  -e NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
+  ai-product-workbench-web:latest
+
+curl --fail --silent "http://127.0.0.1:4000/api/system/health" >/dev/null
+curl --fail --silent "http://127.0.0.1:3000/login" >/dev/null
+
+echo "Deployed:"
+echo "  Web: http://${APP_HOST}:3000/login"
+echo "  API: http://${APP_HOST}:4000/api/system/health"

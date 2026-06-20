@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-product-workbench-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_product_workbench
+      POSTGRES_USER: ai_workbench
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_workbench}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_workbench -d ai_product_workbench"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: ai-product-workbench-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://ai_workbench:${POSTGRES_PASSWORD:-ai_workbench}@postgres:5432/ai_product_workbench?schema=public
+      JWT_SECRET: ${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      API_PORT: 4000
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://8.130.160.177:3000}
+      FILE_UPLOAD_ROOT: /app/apps/api/storage/uploads
+    ports:
+      - "4000:4000"
+    volumes:
+      - api-storage:/app/apps/api/storage
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
+    container_name: ai-product-workbench-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres-data:
+  api-storage:

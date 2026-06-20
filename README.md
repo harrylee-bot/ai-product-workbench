@@ -39,6 +39,50 @@ npm run dev
 
 如果工作台提示 `not found`，优先检查 `4000` 端口是否被旧的 mock API 占用。真实后端应提供 `GET /api/system/health`，返回 `service: "ai-product-workbench-api"` 且包含 `projects` 模块。
 
+本地 API 启动不再强制要求 PostgreSQL 已连接，但登录、项目、会话、文件等业务接口仍需要数据库可用。若登录页提示无法连接 API，请先确认 `npm run dev:api` 已启动；若提示数据库不可用，请启动 PostgreSQL 并执行迁移和种子。
+
+## 服务器部署
+
+当前服务器部署目标：
+
+- Web：http://8.130.160.177:3000/login
+- API：http://8.130.160.177:4000/api/system/health
+
+服务器已有 Caddy 占用 `80/443`，因此默认部署只暴露 `3000/4000`，不改动现有 Caddy 站点。部署脚本使用原生 Docker 命令，不依赖 `docker compose` 插件。
+
+首次部署：
+
+```bash
+ssh root@8.130.160.177
+git clone git@github.com:harrylee-bot/ai-product-workbench.git /opt/ai-product-workbench
+cd /opt/ai-product-workbench
+APP_HOST=8.130.160.177 \
+POSTGRES_PASSWORD=ai_workbench \
+JWT_SECRET=replace-with-a-long-random-secret \
+bash deploy/server-deploy.sh
+```
+
+后续每次发布：
+
+```bash
+ssh root@8.130.160.177
+cd /opt/ai-product-workbench
+APP_HOST=8.130.160.177 \
+POSTGRES_PASSWORD=ai_workbench \
+JWT_SECRET=replace-with-a-long-random-secret \
+bash deploy/server-deploy.sh
+```
+
+如果服务器没有 GitHub 访问凭据，也可以从本机上传代码包到 `/opt/ai-product-workbench` 后执行：
+
+```bash
+SKIP_GIT_PULL=1 \
+APP_HOST=8.130.160.177 \
+POSTGRES_PASSWORD=ai_workbench \
+JWT_SECRET=replace-with-a-long-random-secret \
+bash deploy/server-deploy.sh
+```
+
 ## 默认账号
 
 | 角色 | 用户名 | 邮箱 | 密码 |
