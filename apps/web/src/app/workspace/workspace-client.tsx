@@ -1063,7 +1063,7 @@ function ChatPanel({
         <span className="text-xs text-gray-500">{isRunning ? "生成中..." : "可继续输入"}</span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[190px] pt-4">
         {showWelcome ? (
           <WelcomeState onPromptClick={onPromptClick} />
         ) : (
@@ -1268,7 +1268,7 @@ function ChatComposer({
   ];
 
   return (
-    <div className="sticky bottom-0 z-20 mt-auto shrink-0 border-t border-gray-200 bg-white p-3 shadow-[0_-10px_24px_rgba(15,23,42,0.06)]">
+    <div className="absolute inset-x-0 bottom-0 z-20 shrink-0 border-t border-gray-200 bg-slate-50/95 p-3 shadow-[0_-10px_24px_rgba(15,23,42,0.06)] backdrop-blur">
       {selectedRegion ? (
         <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
           <div className="min-w-0 text-xs text-sky-800">
@@ -1285,63 +1285,65 @@ function ChatComposer({
           </button>
         </div>
       ) : null}
-      <textarea
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            onSend();
-          }
-        }}
-        placeholder="描述你的产品想法，例如：帮我做一个签到活动需求和原型"
-        className="max-h-[180px] min-h-[92px] w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm leading-6 text-gray-900 shadow-sm outline-none placeholder:text-gray-400 focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10 disabled:bg-gray-50"
-      />
-      <div className="mt-2 flex items-center justify-between gap-3">
-        <div ref={toolsRef} className="relative">
-          {toolsOpen ? (
-            <div className="absolute bottom-11 left-0 z-30 w-44 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
-              {addActions.map((action) => {
-                const Icon = action.icon;
-                return (
-                  <button
-                    key={action.label}
-                    type="button"
-                    onClick={() => setToolsOpen(false)}
-                    className="flex h-10 w-full items-center gap-3 px-3 text-left text-sm text-gray-800 hover:bg-gray-50"
-                  >
-                    <Icon className="h-4 w-4 text-gray-500" />
-                    {action.label}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+      <div className="rounded-[16px] border border-gray-200 bg-white p-3 shadow-sm focus-within:border-gray-300 focus-within:ring-2 focus-within:ring-gray-900/10">
+        <textarea
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder="描述你的产品想法，例如：帮我做一个签到活动需求和原型"
+          className="max-h-[150px] min-h-[78px] w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 disabled:text-gray-500"
+        />
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <div ref={toolsRef} className="relative">
+            {toolsOpen ? (
+              <div className="absolute bottom-11 left-0 z-30 w-44 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
+                {addActions.map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <button
+                      key={action.label}
+                      type="button"
+                      onClick={() => setToolsOpen(false)}
+                      className="flex h-10 w-full items-center gap-3 px-3 text-left text-sm text-gray-800 hover:bg-gray-50"
+                    >
+                      <Icon className="h-4 w-4 text-gray-500" />
+                      {action.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setToolsOpen((value) => !value)}
+              className={clsx(
+                "inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20",
+                toolsOpen && "bg-gray-100 text-gray-950",
+              )}
+              aria-expanded={toolsOpen}
+              aria-haspopup="menu"
+              aria-label="添加内容"
+              title="添加"
+            >
+              <Plus className={clsx("h-5 w-5 transition-transform", toolsOpen && "rotate-45")} />
+            </button>
+          </div>
           <button
             type="button"
-            onClick={() => setToolsOpen((value) => !value)}
-            className={clsx(
-              "inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20",
-              toolsOpen && "bg-gray-100 text-gray-950",
-            )}
-            aria-expanded={toolsOpen}
-            aria-haspopup="menu"
-            aria-label="添加内容"
-            title="添加"
+            onClick={onSend}
+            disabled={!value.trim() || disabled}
+            className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-gray-950 px-4 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
           >
-            <Plus className={clsx("h-5 w-5 transition-transform", toolsOpen && "rotate-45")} />
+            {disabled ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {disabled ? "生成中..." : "发送"}
           </button>
         </div>
-        <button
-          type="button"
-          onClick={onSend}
-          disabled={!value.trim() || disabled}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-gray-950 px-4 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {disabled ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          {disabled ? "生成中..." : "发送"}
-        </button>
       </div>
     </div>
   );
