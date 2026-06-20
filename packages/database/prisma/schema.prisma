@@ -223,6 +223,17 @@ enum KnowledgeCandidateStatus {
   merged
 }
 
+enum AdminAuditTargetType {
+  user
+  project
+  model_provider
+  model_config
+  model_task_profile
+  knowledge_item
+  knowledge_candidate
+  system
+}
+
 enum AgentRunStatus {
   running
   succeeded
@@ -284,6 +295,7 @@ model User {
   messages       Message[]
   fileAssets     FileAsset[]
   agentRuns      AgentRunLog[]
+  adminAuditLogs AdminAuditLog[]
 
   @@map("users")
 }
@@ -507,6 +519,7 @@ model ModelConfig {
   maxOutputTokens    Int?               @map("max_output_tokens")
   supportsStreaming  Boolean            @default(true) @map("supports_streaming")
   supportsJsonMode   Boolean            @default(false) @map("supports_json_mode")
+  supportsMultimodal Boolean            @default(false) @map("supports_multimodal")
   defaultTemperature Float              @default(0.2) @map("default_temperature")
   defaultMaxTokens   Int?               @map("default_max_tokens")
   isEnabled          Boolean            @default(true) @map("is_enabled")
@@ -930,6 +943,25 @@ model KnowledgeRetrievalLog {
   @@index([agentName])
   @@index([createdAt])
   @@map("knowledge_retrieval_logs")
+}
+
+model AdminAuditLog {
+  id          String               @id @default(uuid())
+  adminUserId String               @map("admin_user_id")
+  action      String
+  targetType  AdminAuditTargetType @map("target_type")
+  targetId    String?              @map("target_id")
+  detail      Json?
+  ip          String?
+  userAgent   String?              @map("user_agent")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  adminUser   User                 @relation(fields: [adminUserId], references: [id])
+
+  @@index([adminUserId])
+  @@index([targetType])
+  @@index([targetId])
+  @@index([createdAt])
+  @@map("admin_audit_logs")
 }
 
 model AgentRunLog {

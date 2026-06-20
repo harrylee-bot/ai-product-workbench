@@ -1,0 +1,168 @@
+import {
+  AdminAuditTargetType,
+  AgentRunStatus,
+  AgentStepStatus,
+  KnowledgeCandidateStatus,
+  ModelCallStatus,
+  ProjectStatus,
+  UserRole,
+  UserStatus,
+} from "@prisma/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AdminAuditService } from "../src/admin/admin-audit.service";
+import { AdminService } from "../src/admin/admin.service";
+
+describe("Admin module services", () => {
+  const prisma = {
+    $transaction: vi.fn(),
+    user: { count: vi.fn() },
+    project: { count: vi.fn(), findUnique: vi.fn() },
+    agentRunLog: { count: vi.fn(), findUnique: vi.fn() },
+    modelCallLog: { count: vi.fn() },
+    knowledgeCandidate: { count: vi.fn() },
+    fileAsset: { count: vi.fn() },
+    adminAuditLog: { create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
+  };
+  const service = new AdminService(prisma as never);
+  const audit = new AdminAuditService(prisma as never);
+  const admin = {
+    id: "admin-1",
+    username: "admin",
+    displayName: "管理员",
+    role: UserRole.admin,
+    status: UserStatus.active,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(async (items) => Promise.all(items));
+  });
+
+  it("aggregates dashboard stats from operational tables", async () => {
+    prisma.user.count.mockResolvedValue(2);
+    prisma.project.count
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(1);
+    prisma.agentRunLog.count.mockResolvedValue(5);
+    prisma.modelCallLog.count
+      .mockResolvedValueOnce(12)
+      .mockResolvedValueOnce(3);
+    prisma.knowledgeCandidate.count.mockResolvedValue(6);
+    prisma.fileAsset.count.mockResolvedValue(1);
+
+    const result = await service.getDashboardStats();
+
+    expect(result).toMatchObject({
+      userCount: 2,
+      projectCount: 4,
+      todayAgentRunCount: 5,
+      todayModelCallCount: 12,
+      todayFailedModelCallCount: 3,
+      pendingKnowledgeCandidateCount: 6,
+      failedFileParseCount: 1,
+      qaFailedProjectCount: 1,
+    });
+    expect(prisma.knowledgeCandidate.count).toHaveBeenCalledWith({
+      where: { status: KnowledgeCandidateStatus.pending },
+    });
+    expect(prisma.project.count).toHaveBeenLastCalledWith({
+      where: { status: ProjectStatus.qa_failed, deletedAt: null },
+    });
+  });
+
+  it("writes sanitized admin audit details", async () => {
+    prisma.adminAuditLog.create.mockResolvedValue({});
+
+    await audit.record({
+      admin,
+      action: "model_provider.update",
+      targetType: AdminAuditTargetType.model_provider,
+      targetId: "provider-1",
+      detail: {
+        name: "OpenAI",
+        apiKey: "sk-secret",
+        nested: { authorization: "Bearer token" },
+      },
+      meta: { ip: "127.0.0.1", userAgent: "vitest" },
+    });
+
+    expect(prisma.adminAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "model_provider.update",
+        adminUserId: "admin-1",
+        targetId: "provider-1",
+        detail: {
+          name: "OpenAI",
+          apiKey: "****",
+          nested: { authorization: "****" },
+        },
+      }),
+    });
+  });
+
+  it("returns agent run details with step timeline and contract events", async () => {
+    prisma.agentRunLog.findUnique.mockResolvedValue({
+      id: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      intent: null,
+      status: AgentRunStatus.succeeded,
+      inputSummary: "用户需求摘要",
+      outputSummary: "输出摘要",
+      result: null,
+      errorMessage: null,
+      traceId: "trace-1",
+      startedAt: new Date("2026-06-21T08:00:00Z"),
+      endedAt: new Date("2026-06-21T08:00:05Z"),
+      durationMs: 5000,
+      project: { id: "project-1", title: "签到活动" },
+      conversation: { id: "conversation-1", title: "默认会话" },
+      user: { id: "user-1", username: "zhangsan", displayName: "张三" },
+      steps: [
+        {
+          id: "step-1",
+          agentName: "qa_agent",
+          status: AgentStepStatus.succeeded,
+          inputSummary: "检查",
+          outputSummary: "通过",
+          modelCallLogId: "model-log-1",
+          modelProviderId: "provider-1",
+          modelName: "gpt-test",
+          tokenUsage: null,
+          startedAt: new Date("2026-06-21T08:00:01Z"),
+          endedAt: new Date("2026-06-21T08:00:04Z"),
+          durationMs: 3000,
+          errorMessage: null,
+        },
+      ],
+      streamEvents: [
+        {
+          id: "event-1",
+          eventType: "qa_completed",
+          payload: { eventType: "qa_completed", payload: { data: { passed: true } } },
+          createdAt: new Date("2026-06-21T08:00:04Z"),
+        },
+      ],
+    });
+
+    const result = await service.getAgentRun("run-1");
+
+    expect(result).toMatchObject({
+      id: "run-1",
+      traceId: "trace-1",
+      projectTitle: "签到活动",
+      steps: [
+        {
+          agentName: "qa_agent",
+          modelCallLogId: "model-log-1",
+        },
+      ],
+      events: [
+        {
+          eventType: "qa_completed",
+        },
+      ],
+    });
+  });
+});

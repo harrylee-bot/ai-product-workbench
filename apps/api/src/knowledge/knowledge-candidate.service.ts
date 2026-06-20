@@ -1,12 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import {
+  AdminAuditTargetType,
   KnowledgeCandidateSource,
   KnowledgeCandidateStatus,
   KnowledgeSource,
   KnowledgeStatus,
   Prisma,
 } from "@prisma/client";
-import type { AuthenticatedUser } from "../auth/auth.types";
+import { AdminAuditService } from "../admin/admin-audit.service";
+import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
 import { toInputJson } from "../ai/ai-vibe.helpers";
 import { PrismaService } from "../prisma/prisma.service";
 import type {
@@ -30,6 +32,7 @@ export class KnowledgeCandidateService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly itemService: KnowledgeItemService,
+    private readonly audit?: AdminAuditService,
   ) {}
 
   async createMany(
@@ -99,6 +102,7 @@ export class KnowledgeCandidateService {
     user: AuthenticatedUser,
     candidateId: string,
     dto: ApproveKnowledgeCandidateDto,
+    meta?: RequestMeta,
   ) {
     const candidate = await this.getPendingCandidate(candidateId);
     if (dto.categoryId) await this.assertCategory(dto.categoryId);
@@ -138,6 +142,11 @@ export class KnowledgeCandidateService {
       return { item, reviewed };
     });
 
+    await this.recordAudit(user, "knowledge_candidate.approve", reviewed.id, meta, {
+      projectId: reviewed.projectId,
+      createdKnowledgeItemId: item.id,
+    });
+
     return {
       candidate: this.toCandidate(reviewed),
       item: this.itemService.toItem(item),
@@ -148,6 +157,7 @@ export class KnowledgeCandidateService {
     user: AuthenticatedUser,
     candidateId: string,
     dto: RejectKnowledgeCandidateDto,
+    meta?: RequestMeta,
   ) {
     const candidate = await this.getPendingCandidate(candidateId);
     const reviewed = await this.prisma.knowledgeCandidate.update({
@@ -159,6 +169,10 @@ export class KnowledgeCandidateService {
         reviewComment: dto.reviewComment.trim(),
       },
     });
+    await this.recordAudit(user, "knowledge_candidate.reject", reviewed.id, meta, {
+      projectId: reviewed.projectId,
+      reviewComment: reviewed.reviewComment,
+    });
     return { candidate: this.toCandidate(reviewed) };
   }
 
@@ -166,6 +180,7 @@ export class KnowledgeCandidateService {
     user: AuthenticatedUser,
     candidateId: string,
     dto: MergeKnowledgeCandidateDto,
+    meta?: RequestMeta,
   ) {
     const candidate = await this.getPendingCandidate(candidateId);
     const target = await this.prisma.knowledgeItem.findUnique({
@@ -198,6 +213,11 @@ export class KnowledgeCandidateService {
         },
       });
       return { item, reviewed };
+    });
+
+    await this.recordAudit(user, "knowledge_candidate.merge", reviewed.id, meta, {
+      projectId: reviewed.projectId,
+      targetKnowledgeItemId: item.id,
     });
 
     return {
@@ -262,6 +282,23 @@ export class KnowledgeCandidateService {
   private async assertCategory(categoryId: string) {
     const category = await this.prisma.knowledgeCategory.findUnique({ where: { id: categoryId } });
     if (!category) throw new NotFoundException("KNOWLEDGE_CATEGORY_NOT_FOUND");
+  }
+
+  private async recordAudit(
+    admin: AuthenticatedUser,
+    action: string,
+    targetId: string,
+    meta?: RequestMeta,
+    detail?: Record<string, unknown>,
+  ) {
+    await this.audit?.record({
+      admin,
+      action,
+      targetType: AdminAuditTargetType.knowledge_candidate,
+      targetId,
+      detail,
+      meta,
+    });
   }
 }
 

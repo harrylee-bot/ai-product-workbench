@@ -1,8 +1,11 @@
 import { Body, Controller, Get, Param, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { UserRole } from "@prisma/client";
+import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
+import { CurrentUser } from "../common/current-user.decorator";
+import { CurrentRequestMeta } from "../common/request-meta.decorator";
 import {
   CreateModelConfigDto,
   CreateModelProviderDto,
@@ -25,23 +28,40 @@ export class ModelGatewayAdminController {
   }
 
   @Post("model-providers")
-  createProvider(@Body() dto: CreateModelProviderDto) {
-    return this.adminService.createProvider(dto);
+  createProvider(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Body() dto: CreateModelProviderDto,
+  ) {
+    return this.adminService.createProvider(dto, user, meta);
   }
 
   @Patch("model-providers/:providerId")
-  updateProvider(@Param("providerId") providerId: string, @Body() dto: UpdateModelProviderDto) {
-    return this.adminService.updateProvider(providerId, dto);
+  updateProvider(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Param("providerId") providerId: string,
+    @Body() dto: UpdateModelProviderDto,
+  ) {
+    return this.adminService.updateProvider(providerId, dto, user, meta);
   }
 
   @Post("model-providers/:providerId/enable")
-  enableProvider(@Param("providerId") providerId: string) {
-    return this.adminService.enableProvider(providerId);
+  enableProvider(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Param("providerId") providerId: string,
+  ) {
+    return this.adminService.enableProvider(providerId, user, meta);
   }
 
   @Post("model-providers/:providerId/disable")
-  disableProvider(@Param("providerId") providerId: string) {
-    return this.adminService.disableProvider(providerId);
+  disableProvider(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Param("providerId") providerId: string,
+  ) {
+    return this.adminService.disableProvider(providerId, user, meta);
   }
 
   @Get("model-configs")
@@ -50,16 +70,22 @@ export class ModelGatewayAdminController {
   }
 
   @Post("model-configs")
-  createModelConfig(@Body() dto: CreateModelConfigDto) {
-    return this.adminService.createModelConfig(dto);
+  createModelConfig(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Body() dto: CreateModelConfigDto,
+  ) {
+    return this.adminService.createModelConfig(dto, user, meta);
   }
 
   @Patch("model-configs/:modelConfigId")
   updateModelConfig(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
     @Param("modelConfigId") modelConfigId: string,
     @Body() dto: UpdateModelConfigDto,
   ) {
-    return this.adminService.updateModelConfig(modelConfigId, dto);
+    return this.adminService.updateModelConfig(modelConfigId, dto, user, meta);
   }
 
   @Get("model-task-profiles")
@@ -69,10 +95,12 @@ export class ModelGatewayAdminController {
 
   @Put("model-task-profiles/:taskType")
   upsertTaskProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
     @Param("taskType") taskType: string,
     @Body() dto: UpsertModelTaskProfileDto,
   ) {
-    return this.adminService.upsertTaskProfile(taskType, dto);
+    return this.adminService.upsertTaskProfile(taskType, dto, user, meta);
   }
 
   @Get("model-call-logs")

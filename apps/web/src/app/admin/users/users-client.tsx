@@ -1,11 +1,11 @@
 "use client";
 
-import { Home, KeyRound, Plus, RotateCcw, Search, ShieldCheck, UserCog } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { KeyRound, Plus, RotateCcw, Search, ShieldCheck } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { AdminShell } from "@/components/admin-shell";
+import { AdminFilterBar, AdminPagination, AdminTable, EmptyRow, LoadingRows } from "@/components/admin-ui";
 import { Modal } from "@/components/modal";
-import { ProtectedRoute } from "@/components/protected-route";
 import { Button, FieldLabel, InlineError, RoleBadge, Select, StatusBadge, TextInput } from "@/components/ui";
 import { apiRequest, toQueryString } from "@/lib/api";
 import type { AdminUser, UserRole, UserStatus, UsersResponse } from "@/lib/types";
@@ -49,7 +49,6 @@ function formatDate(value?: string) {
 }
 
 export function AdminUsersClient() {
-  const router = useRouter();
   const [keyword, setKeyword] = useState("");
   const [role, setRole] = useState<UserRole | "">("");
   const [status, setStatus] = useState<UserStatus | "">("");
@@ -72,8 +71,6 @@ export function AdminUsersClient() {
     status: "active",
   });
   const [passwordForm, setPasswordForm] = useState({ password: "", confirmPassword: "" });
-
-  const totalPages = useMemo(() => Math.max(Math.ceil(total / pageSize), 1), [pageSize, total]);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -257,39 +254,24 @@ export function AdminUsersClient() {
   }
 
   return (
-    <ProtectedRoute requireAdmin>
-      <main className="grid min-h-screen grid-cols-[220px_1fr] bg-[#F6F7F9] text-gray-950">
-        <aside className="border-r border-gray-200 bg-white px-4 py-6">
-          <div className="px-2 text-base font-semibold">管理后台</div>
-          <nav className="mt-8 space-y-2">
-            <button className="flex h-10 w-full items-center gap-2 rounded-[10px] bg-gray-100 px-3 text-sm font-medium text-gray-900">
-              <UserCog className="h-4 w-4" />
-              用户管理
-            </button>
-            <button
-              type="button"
-              onClick={() => router.push("/workspace")}
-              className="flex h-10 w-full items-center gap-2 rounded-[10px] px-3 text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-            >
-              <Home className="h-4 w-4" />
-              返回工作台
-            </button>
-          </nav>
-        </aside>
+    <AdminShell
+      title="用户管理"
+      actions={
+        <Button type="button" onClick={openCreate}>
+          <Plus className="h-4 w-4" />
+          新建用户
+        </Button>
+      }
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-gray-950">用户管理</h2>
+          <p className="mt-2 text-sm text-gray-500">内测用户账号、角色和启用状态</p>
+        </div>
+      </div>
 
-        <section className="px-8 py-7">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-950">用户管理</h1>
-              <p className="mt-2 text-sm text-gray-500">管理内测用户账号、角色和启用状态</p>
-            </div>
-            <Button type="button" onClick={openCreate}>
-              <Plus className="h-4 w-4" />
-              新建用户
-            </Button>
-          </div>
-
-          <div className="mt-7 flex flex-wrap items-center gap-3 border-y border-gray-200 bg-white px-4 py-4">
+      <div className="mt-7">
+        <AdminFilterBar>
             <div className="relative w-[280px]">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <TextInput
@@ -328,38 +310,21 @@ export function AdminUsersClient() {
               <RotateCcw className="h-4 w-4" />
               刷新
             </Button>
-          </div>
+        </AdminFilterBar>
+      </div>
 
-          {notice ? (
-            <div className="mt-4 rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              {notice}
-            </div>
-          ) : null}
-          {error ? <div className="mt-4"><InlineError message={error} /></div> : null}
+      {notice ? (
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {notice}
+        </div>
+      ) : null}
+      {error ? <div className="mt-4"><InlineError message={error} /></div> : null}
 
-          <div className="mt-4 overflow-hidden border border-gray-200 bg-white">
-            <div className="overflow-x-auto">
-              <table className="min-w-[1080px] w-full border-collapse text-left text-sm">
-                <thead className="bg-gray-50 text-xs font-medium text-gray-500">
-                  <tr>
-                    <th className="px-4 py-3">用户名</th>
-                    <th className="px-4 py-3">显示名称</th>
-                    <th className="px-4 py-3">邮箱</th>
-                    <th className="px-4 py-3">角色</th>
-                    <th className="px-4 py-3">状态</th>
-                    <th className="px-4 py-3">最近登录</th>
-                    <th className="px-4 py-3">创建时间</th>
-                    <th className="px-4 py-3 text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 text-gray-700">
-                  {loading ? <LoadingRows /> : null}
+      <div className="mt-4">
+        <AdminTable columns={["用户名", "显示名称", "邮箱", "角色", "状态", "最近登录", "创建时间", "操作"]}>
+                  {loading ? <LoadingRows columns={8} /> : null}
                   {!loading && users.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-16 text-center text-sm text-gray-500">
-                        暂无用户
-                      </td>
-                    </tr>
+                    <EmptyRow columns={8} label="暂无用户" />
                   ) : null}
                   {!loading
                     ? users.map((user) => (
@@ -391,35 +356,16 @@ export function AdminUsersClient() {
                         </tr>
                       ))
                     : null}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        </AdminTable>
+      </div>
 
-          <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
-            <div>
-              共 {total} 个用户，第 {page} / {totalPages} 页
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={page <= 1 || loading}
-                onClick={() => setPage((value) => Math.max(value - 1, 1))}
-              >
-                上一页
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={page >= totalPages || loading}
-                onClick={() => setPage((value) => Math.min(value + 1, totalPages))}
-              >
-                下一页
-              </Button>
-            </div>
-          </div>
-        </section>
+      <AdminPagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        loading={loading}
+        onPageChange={setPage}
+      />
 
         <CreateUserModal
           open={modal === "create"}
@@ -456,24 +402,7 @@ export function AdminUsersClient() {
           onClose={closeModal}
           onConfirm={() => void submitStatusChange()}
         />
-      </main>
-    </ProtectedRoute>
-  );
-}
-
-function LoadingRows() {
-  return (
-    <>
-      {Array.from({ length: 5 }).map((_, index) => (
-        <tr key={index}>
-          {Array.from({ length: 8 }).map((__, cellIndex) => (
-            <td key={cellIndex} className="px-4 py-3">
-              <div className="h-5 animate-pulse rounded bg-gray-100" />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
+    </AdminShell>
   );
 }
 

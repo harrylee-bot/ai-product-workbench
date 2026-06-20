@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import {
+  AdminAuditTargetType,
   KnowledgeSource,
   KnowledgeStatus,
   Prisma,
 } from "@prisma/client";
-import type { AuthenticatedUser } from "../auth/auth.types";
+import { AdminAuditService } from "../admin/admin-audit.service";
+import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
 import { toInputJson } from "../ai/ai-vibe.helpers";
 import { PrismaService } from "../prisma/prisma.service";
 import type {
@@ -19,9 +21,12 @@ type KnowledgeCategoryRow = Prisma.KnowledgeCategoryGetPayload<Record<string, ne
 
 @Injectable()
 export class KnowledgeItemService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit?: AdminAuditService,
+  ) {}
 
-  async createItem(user: AuthenticatedUser, dto: CreateKnowledgeItemDto) {
+  async createItem(user: AuthenticatedUser, dto: CreateKnowledgeItemDto, meta?: RequestMeta) {
     await this.assertCategory(dto.categoryId);
     const item = await this.prisma.knowledgeItem.create({
       data: {
@@ -40,10 +45,20 @@ export class KnowledgeItemService {
       },
     });
     await this.createVersionSnapshot(item, user.id, "创建知识");
+    await this.recordAudit(user, "knowledge_item.create", item.id, meta, {
+      title: item.title,
+      type: item.type,
+      status: item.status,
+    });
     return this.toItem(item);
   }
 
-  async updateItem(user: AuthenticatedUser, knowledgeId: string, dto: UpdateKnowledgeItemDto) {
+  async updateItem(
+    user: AuthenticatedUser,
+    knowledgeId: string,
+    dto: UpdateKnowledgeItemDto,
+    meta?: RequestMeta,
+  ) {
     const current = await this.getItemRow(knowledgeId);
     await this.assertCategory(dto.categoryId);
 
@@ -72,6 +87,11 @@ export class KnowledgeItemService {
       data: updateData,
     });
     await this.createVersionSnapshot(updated, user.id, dto.changeSummary ?? "更新知识");
+    await this.recordAudit(user, "knowledge_item.update", updated.id, meta, {
+      title: updated.title,
+      type: updated.type,
+      status: updated.status,
+    });
     return this.toItem(updated);
   }
 
@@ -113,12 +133,12 @@ export class KnowledgeItemService {
     };
   }
 
-  async enableItem(user: AuthenticatedUser, knowledgeId: string) {
-    return this.updateItemStatus(user, knowledgeId, KnowledgeStatus.active, "启用知识");
+  async enableItem(user: AuthenticatedUser, knowledgeId: string, meta?: RequestMeta) {
+    return this.updateItemStatus(user, knowledgeId, KnowledgeStatus.active, "启用知识", meta);
   }
 
-  async disableItem(user: AuthenticatedUser, knowledgeId: string) {
-    return this.updateItemStatus(user, knowledgeId, KnowledgeStatus.disabled, "禁用知识");
+  async disableItem(user: AuthenticatedUser, knowledgeId: string, meta?: RequestMeta) {
+    return this.updateItemStatus(user, knowledgeId, KnowledgeStatus.disabled, "禁用知识", meta);
   }
 
   async createCategory(dto: CreateKnowledgeCategoryDto) {
@@ -191,6 +211,7 @@ export class KnowledgeItemService {
     knowledgeId: string,
     status: KnowledgeStatus,
     changeSummary: string,
+    meta?: RequestMeta,
   ) {
     await this.getItemRow(knowledgeId);
     const updated = await this.prisma.knowledgeItem.update({
@@ -198,6 +219,13 @@ export class KnowledgeItemService {
       data: { status, updatedBy: user.id },
     });
     await this.createVersionSnapshot(updated, user.id, changeSummary);
+    await this.recordAudit(
+      user,
+      status === KnowledgeStatus.active ? "knowledge_item.enable" : "knowledge_item.disable",
+      updated.id,
+      meta,
+      { title: updated.title, status: updated.status },
+    );
     return { success: true, item: this.toItem(updated) };
   }
 
@@ -223,6 +251,23 @@ export class KnowledgeItemService {
       createdAt: category.createdAt.toISOString(),
       updatedAt: category.updatedAt.toISOString(),
     };
+  }
+
+  private async recordAudit(
+    admin: AuthenticatedUser,
+    action: string,
+    targetId: string,
+    meta?: RequestMeta,
+    detail?: Record<string, unknown>,
+  ) {
+    await this.audit?.record({
+      admin,
+      action,
+      targetType: AdminAuditTargetType.knowledge_item,
+      targetId,
+      detail,
+      meta,
+    });
   }
 }
 

@@ -130,6 +130,10 @@ export class CreateModelConfigDto {
   supportsJsonMode?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  supportsMultimodal?: boolean;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
@@ -183,6 +187,10 @@ export class UpdateModelConfigDto {
   @IsOptional()
   @IsBoolean()
   supportsJsonMode?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsMultimodal?: boolean;
 
   @IsOptional()
   @Type(() => Number)

@@ -19,6 +19,9 @@ export class SystemController {
         "prototype-artifacts",
         "patch-records",
         "knowledge-base",
+        "admin-dashboard",
+        "admin-logs",
+        "admin-audit",
       ],
     };
   }

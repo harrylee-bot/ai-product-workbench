@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { AdminModule } from "./admin/admin.module";
 import { AdminUsersModule } from "./admin-users/admin-users.module";
 import { AiModule } from "./ai/ai.module";
 import { AuthModule } from "./auth/auth.module";
@@ -18,6 +19,7 @@ import { SystemModule } from "./system/system.module";
     }),
     PrismaModule,
     AuthModule,
+    AdminModule,
     AdminUsersModule,
     ProjectModule,
     FileModule,

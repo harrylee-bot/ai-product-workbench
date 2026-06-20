@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import bcrypt from "bcryptjs";
-import { Prisma, User, UserRole, UserStatus } from "@prisma/client";
+import { AdminAuditTargetType, Prisma, User, UserRole, UserStatus } from "@prisma/client";
+import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
+import { AdminAuditService } from "../admin/admin-audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import type { CreateUserDto, ListUsersQueryDto, UpdateUserDto } from "./dto";
 
@@ -18,7 +20,10 @@ type UserItem = {
 
 @Injectable()
 export class AdminUsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit?: AdminAuditService,
+  ) {}
 
   async listUsers(query: ListUsersQueryDto) {
     const page = Math.max(Number(query.page ?? 1), 1);
@@ -54,7 +59,7 @@ export class AdminUsersService {
     };
   }
 
-  async createUser(dto: CreateUserDto) {
+  async createUser(dto: CreateUserDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
     try {
       const passwordHash = await bcrypt.hash(dto.password, 12);
       const user = await this.prisma.user.create({
@@ -68,6 +73,14 @@ export class AdminUsersService {
         },
       });
 
+      if (admin) {
+        await this.recordAudit(admin, "user.create", AdminAuditTargetType.user, user.id, meta, {
+          username: user.username,
+          role: user.role,
+          status: user.status,
+        });
+      }
+
       return this.toUserItem(user);
     } catch (error) {
       this.throwUniqueError(error);
@@ -75,7 +88,7 @@ export class AdminUsersService {
     }
   }
 
-  async updateUser(id: string, dto: UpdateUserDto) {
+  async updateUser(id: string, dto: UpdateUserDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
     try {
       const user = await this.prisma.user.update({
         where: { id },
@@ -87,6 +100,14 @@ export class AdminUsersService {
         },
       });
 
+      if (admin) {
+        await this.recordAudit(admin, "user.update", AdminAuditTargetType.user, user.id, meta, {
+          username: user.username,
+          role: user.role,
+          status: user.status,
+        });
+      }
+
       return this.toUserItem(user);
     } catch (error) {
       this.throwUniqueError(error);
@@ -95,23 +116,32 @@ export class AdminUsersService {
     }
   }
 
-  async disableUser(id: string) {
+  async disableUser(id: string, admin?: AuthenticatedUser, meta?: RequestMeta) {
     await this.updateStatus(id, UserStatus.disabled);
+    if (admin) {
+      await this.recordAudit(admin, "user.disable", AdminAuditTargetType.user, id, meta);
+    }
     return { success: true };
   }
 
-  async enableUser(id: string) {
+  async enableUser(id: string, admin?: AuthenticatedUser, meta?: RequestMeta) {
     await this.updateStatus(id, UserStatus.active);
+    if (admin) {
+      await this.recordAudit(admin, "user.enable", AdminAuditTargetType.user, id, meta);
+    }
     return { success: true };
   }
 
-  async resetPassword(id: string, password: string) {
+  async resetPassword(id: string, password: string, admin?: AuthenticatedUser, meta?: RequestMeta) {
     try {
       const passwordHash = await bcrypt.hash(password, 12);
       await this.prisma.user.update({
         where: { id },
         data: { passwordHash },
       });
+      if (admin) {
+        await this.recordAudit(admin, "user.reset_password", AdminAuditTargetType.user, id, meta);
+      }
       return { success: true };
     } catch (error) {
       this.throwNotFoundError(error);
@@ -174,5 +204,23 @@ export class AdminUsersService {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       throw new BadRequestException("用户不存在");
     }
+  }
+
+  private async recordAudit(
+    admin: AuthenticatedUser,
+    action: string,
+    targetType: AdminAuditTargetType,
+    targetId: string,
+    meta?: RequestMeta,
+    detail?: Record<string, unknown>,
+  ) {
+    await this.audit?.record({
+      admin,
+      action,
+      targetType,
+      targetId,
+      detail,
+      meta,
+    });
   }
 }

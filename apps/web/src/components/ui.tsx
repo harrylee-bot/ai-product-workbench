@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 export function Button({
   children,
@@ -12,7 +12,7 @@ export function Button({
   return (
     <button
       className={clsx(
-        "inline-flex h-10 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium transition",
+        "inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20",
         "disabled:cursor-not-allowed disabled:opacity-60",
         variant === "primary" && "bg-gray-950 text-white hover:bg-gray-800",
@@ -37,7 +37,7 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={clsx(
-        "h-11 w-full rounded-[10px] border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm transition",
+        "h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm transition",
         "placeholder:text-gray-400 hover:border-gray-400",
         "focus:border-gray-900 focus:outline-none focus:ring-3 focus:ring-gray-900/10",
         "disabled:bg-gray-100 disabled:text-gray-500",
@@ -52,8 +52,23 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
     <select
       {...props}
       className={clsx(
-        "h-10 rounded-[10px] border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm transition",
+        "h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm transition",
         "hover:border-gray-400 focus:border-gray-900 focus:outline-none focus:ring-3 focus:ring-gray-900/10",
+        props.className,
+      )}
+    />
+  );
+}
+
+export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={clsx(
+        "min-h-[92px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm transition",
+        "placeholder:text-gray-400 hover:border-gray-400",
+        "focus:border-gray-900 focus:outline-none focus:ring-3 focus:ring-gray-900/10",
+        "disabled:bg-gray-100 disabled:text-gray-500",
         props.className,
       )}
     />

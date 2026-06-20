@@ -1,6 +1,6 @@
 # AI产品工作台（内测）
 
-当前实现范围覆盖模块 1-11：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀。
+当前实现范围覆盖模块 1-12：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀、管理后台与日志。
 
 ## 已实现能力
 
@@ -15,6 +15,7 @@
 - 模块 9：PrototypeSpecRecord / PrototypeArtifact / PrototypeVersion 数据模型，Prototype Designer 从 ProductDesignState 生成 PrototypeSpec，Prototype Code 生成单文件 HTML，保存 artifact 与版本，支持当前原型、详情、text/html 预览、确认、版本列表；工作台原型 Tab 使用 sandbox iframe 预览，支持桌面/移动模式和基于 artifact/page/component 的局部修改选区。
 - 模块 10：PatchRecord 数据模型，支持 PRD section / HTML 原型组件 selectedRegion、Patch Agent 影响范围分析、PatchPlan 记录、ProductDesignState PatchOperation 应用、Patch 后重新生成 PRD / PrototypeSpec / HTML、QA 校验、失败恢复、Patch 历史查询、取消和确认入口。
 - 模块 11：KnowledgeItem / KnowledgeCategory / KnowledgeTag / KnowledgeVersion / KnowledgeCandidate / KnowledgeRetrievalLog 数据模型，支持管理员创建、编辑、启用/禁用知识，知识分类、标签、类型、版本、候选审核、通过/拒绝/合并；Knowledge Agent 使用 active 知识做关键词检索并写入 ProductDesignState.knowledgeRefs，Patch Agent 检测 strong_rule 冲突，PRD/原型确认后只生成 pending 知识候选，正式入库必须管理员审核。
+- 模块 12：AdminLayout / AdminSidebar / AdminTopBar、Dashboard、项目管理、模型管理、知识管理、日志中心和系统审计；新增 AdminAuditLog / AdminAuditTargetType，管理员关键操作写入审计；后台支持用户、项目、模型、知识、Agent Run、模型调用、文件解析、Patch、QA 报告的搜索、筛选、分页与详情查看。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
@@ -52,7 +53,7 @@ npm run dev
 - `MODEL_GATEWAY_ENCRYPTION_KEY`：可选，推荐生产配置。支持 32 字节 base64 或 64 位 hex；未配置时会从 `JWT_SECRET` 派生加密密钥。
 - `JWT_SECRET`：生产必须配置稳定值，否则已加密的模型 API Key 可能无法解密。
 
-模块 6/7/8/9/10/11 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService / PatchService / KnowledgeCandidateService 保存状态、文档、原型、Patch 记录、知识候选、版本和变更日志。
+模块 6/7/8/9/10/11/12 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService / PatchService / KnowledgeCandidateService 保存状态、文档、原型、Patch 记录、知识候选、版本和变更日志。管理后台只读取这些业务数据和审计日志，不绕过 ProductDesignState 修改普通工作流。
 
 ## 服务器部署
 
@@ -123,8 +124,20 @@ bash deploy/server-deploy.sh
 
 - `/login`：登录页，未登录可访问。
 - `/workspace`：AI 产品工作台，登录用户可访问。
-- `/admin`：重定向到 `/admin/users`。
+- `/admin`：管理后台概览页，仅管理员可访问。
 - `/admin/users`：用户管理页，仅管理员可访问。
+- `/admin/projects`：项目管理只读页，仅管理员可访问。
+- `/admin/model-providers`：模型供应商配置页，仅管理员可访问。
+- `/admin/model-configs`：模型配置页，仅管理员可访问。
+- `/admin/model-task-profiles`：任务模型映射页，仅管理员可访问。
+- `/admin/knowledge/items`：知识条目管理页，仅管理员可访问。
+- `/admin/knowledge/candidates`：知识候选审核页，仅管理员可访问。
+- `/admin/logs/agent-runs`：Agent Run 日志页，仅管理员可访问。
+- `/admin/logs/model-calls`：模型调用日志页，仅管理员可访问。
+- `/admin/logs/file-parses`：文件解析日志页，仅管理员可访问。
+- `/admin/logs/patches`：Patch 日志页，仅管理员可访问。
+- `/admin/logs/qa-reports`：QA 报告页，仅管理员可访问。
+- `/admin/audit-logs`：系统审计日志页，仅管理员可访问。
 - `/403`：无权限页，登录用户可访问。
 
 ## 核心 API
@@ -199,10 +212,28 @@ bash deploy/server-deploy.sh
 - `POST /api/admin/knowledge/candidates/:candidateId/approve`
 - `POST /api/admin/knowledge/candidates/:candidateId/reject`
 - `POST /api/admin/knowledge/candidates/:candidateId/merge`
+- `GET /api/admin/dashboard/stats`
+- `GET /api/admin/projects`
+- `GET /api/admin/projects/:projectId`
+- `GET /api/admin/projects/:projectId/runs`
+- `GET /api/admin/projects/:projectId/patches`
+- `GET /api/admin/projects/:projectId/files`
+- `GET /api/admin/projects/:projectId/qa-reports`
+- `GET /api/admin/logs/agent-runs`
+- `GET /api/admin/logs/agent-runs/:runId`
+- `GET /api/admin/logs/model-calls`
+- `GET /api/admin/logs/model-calls/:logId`
+- `GET /api/admin/logs/file-parses`
+- `GET /api/admin/logs/file-parses/:fileId`
+- `GET /api/admin/logs/patches`
+- `GET /api/admin/logs/patches/:patchId`
+- `GET /api/admin/logs/qa-reports`
+- `GET /api/admin/logs/qa-reports/:qaReportId`
+- `GET /api/admin/audit-logs`
 
 `POST /api/ai/vibe/handle-message` 会立即保存用户消息并返回 `runId`，真实 AI 协作在后台执行。前端使用带 Authorization header 的 fetch stream 连接 `GET /api/ai/vibe/runs/:runId/stream`，按事件实时更新 Agent 时间线和右侧预览。
 
-模块 6/7/8/9/10/11 流式事件落库遵守统一事件结构：
+模块 6/7/8/9/10/11/12 流式事件落库遵守统一事件结构：
 
 ```json
 {
@@ -213,7 +244,7 @@ bash deploy/server-deploy.sh
 }
 ```
 
-模块 7/8/9/10/11 核心约束：
+模块 7/8/9/10/11/12 核心约束：
 
 - ProductDesignState 是 PRD、PrototypeSpec、HTML 原型和 Patch 的唯一事实源。
 - Patch Agent 只能生成作用于 ProductDesignState 的 PatchPlan；服务端会通过 ProductDesignStateService 应用 PatchOperation、递增版本并创建快照。
@@ -228,6 +259,9 @@ bash deploy/server-deploy.sh
 - QA Agent 只做一致性校验，不直接修改业务数据。
 - 所有重要状态变更必须写入 ProductDesignChangeLog，并保留 before / after / reason / runId / messageId。
 - 所有 Agent 调用模型必须经过 Model Gateway，并记录 AgentStepLog / ModelCallLog。
+- 管理后台只做配置、查看、审核和排查，不直接修改用户项目内容；项目详情、Agent Run、模型调用、文件解析、Patch、QA 报告均为只读排查视图。
+- AdminAuditLog 记录管理员关键操作，包含 adminUserId、action、targetType、targetId、detail、ip、userAgent、createdAt；detail 会脱敏 password、apiKey、token、secret、authorization 等敏感字段。
+- QA 报告在模块 13 独立模型前，后台从符合事件白名单的 `qa_completed` 事件读取。
 
 文件与附件：
 
@@ -253,16 +287,20 @@ bash deploy/server-deploy.sh
 - `GET /api/admin/model-task-profiles`
 - `PUT /api/admin/model-task-profiles/:taskType`
 - `GET /api/admin/model-call-logs`
+- `GET /api/admin/logs/model-calls`
+- `GET /api/admin/logs/model-calls/:logId`
 
-模型网关一期支持 OpenAI-compatible `POST /v1/chat/completions`。所有后续 Agent 必须通过 `ModelGatewayService` 调用模型；API Key 入库前加密，接口只返回 `apiKeyMasked` 和 `hasApiKey`，ModelCallLog 只保存输入/输出摘要，不保存完整 prompt。
+模型网关一期支持 OpenAI-compatible `POST /v1/chat/completions`。所有后续 Agent 必须通过 `ModelGatewayService` 调用模型；API Key 入库前加密，接口只返回 `apiKeyMasked` 和 `hasApiKey`，ModelCallLog 只保存输入/输出摘要，不保存完整 prompt。模型配置支持 `supportsStreaming`、`supportsJsonMode`、`supportsMultimodal`、默认 temperature 和 token 上限。
 
 ## 权限规则
 
 - 普通用户只能访问自己的项目、会话和消息。
 - 普通用户只能访问自己项目下的文件和解析结果。
 - 管理员可以查看所有项目详情、会话、消息、文件和解析状态。
+- 管理员可以访问 `/admin` 概览、项目只读详情、日志中心和审计日志。
 - 模型供应商、模型配置、任务模型配置和模型调用日志接口仅管理员可访问。
 - 知识库管理、知识分类、知识候选审核接口仅管理员可访问。
+- Dashboard、项目聚合、Agent Run 日志、文件解析日志、Patch 日志、QA 报告、AdminAuditLog 接口仅管理员可访问。
 - 普通用户不能查看、配置或获取模型 API Key。
 - 一期管理员不直接发送用户项目消息。
 - 归档项目默认不出现在项目列表中，归档后不可继续发送消息。

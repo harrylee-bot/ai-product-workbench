@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import {
+  AdminAuditTargetType,
   ModelConfig,
   ModelProvider,
   ModelProviderType,
@@ -7,6 +8,8 @@ import {
   ModelTaskType,
   Prisma,
 } from "@prisma/client";
+import { AdminAuditService } from "../admin/admin-audit.service";
+import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { ApiKeyEncryptionService } from "./api-key-encryption.service";
 import type {
@@ -23,6 +26,7 @@ export class ModelGatewayAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: ApiKeyEncryptionService,
+    private readonly audit?: AdminAuditService,
   ) {}
 
   async listProviders() {
@@ -33,8 +37,8 @@ export class ModelGatewayAdminService {
     return { items: items.map((provider) => this.toProviderItem(provider)) };
   }
 
-  async createProvider(dto: CreateModelProviderDto) {
-    return this.prisma.$transaction(async (tx) => {
+  async createProvider(dto: CreateModelProviderDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
+    const provider = await this.prisma.$transaction(async (tx) => {
       const shouldBeDefault = Boolean(dto.isDefault) || (await tx.modelProvider.count()) === 0;
       if (shouldBeDefault) {
         await tx.modelProvider.updateMany({
@@ -55,21 +59,31 @@ export class ModelGatewayAdminService {
         },
       });
 
-      return this.toProviderItem(provider);
+      return provider;
     });
+
+    if (admin) {
+      await this.recordAudit(admin, "model_provider.create", AdminAuditTargetType.model_provider, provider.id, meta, {
+        name: provider.name,
+        isDefault: provider.isDefault,
+      });
+    }
+
+    return this.toProviderItem(provider);
   }
 
-  async updateProvider(providerId: string, dto: UpdateModelProviderDto) {
-    return this.prisma.$transaction(async (tx) => {
-      if (dto.isDefault) {
-        await tx.modelProvider.updateMany({
-          where: { isDefault: true, id: { not: providerId } },
-          data: { isDefault: false },
-        });
-      }
+  async updateProvider(providerId: string, dto: UpdateModelProviderDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
+    let provider: ModelProvider;
+    try {
+      provider = await this.prisma.$transaction(async (tx) => {
+        if (dto.isDefault) {
+          await tx.modelProvider.updateMany({
+            where: { isDefault: true, id: { not: providerId } },
+            data: { isDefault: false },
+          });
+        }
 
-      try {
-        const provider = await tx.modelProvider.update({
+        return tx.modelProvider.update({
           where: { id: providerId },
           data: {
             name: dto.name?.trim(),
@@ -85,22 +99,36 @@ export class ModelGatewayAdminService {
             isDefault: dto.isDefault,
           },
         });
+      });
+    } catch (error) {
+      this.throwNotFound(error, "模型供应商不存在");
+      throw error;
+    }
 
-        return this.toProviderItem(provider);
-      } catch (error) {
-        this.throwNotFound(error, "模型供应商不存在");
-        throw error;
-      }
-    });
+    if (admin) {
+      await this.recordAudit(admin, "model_provider.update", AdminAuditTargetType.model_provider, provider.id, meta, {
+        name: provider.name,
+        isDefault: provider.isDefault,
+        apiKeyUpdated: Boolean(dto.apiKey),
+      });
+    }
+
+    return this.toProviderItem(provider);
   }
 
-  async enableProvider(providerId: string) {
+  async enableProvider(providerId: string, admin?: AuthenticatedUser, meta?: RequestMeta) {
     await this.updateProviderStatus(providerId, true);
+    if (admin) {
+      await this.recordAudit(admin, "model_provider.enable", AdminAuditTargetType.model_provider, providerId, meta);
+    }
     return { success: true };
   }
 
-  async disableProvider(providerId: string) {
+  async disableProvider(providerId: string, admin?: AuthenticatedUser, meta?: RequestMeta) {
     await this.updateProviderStatus(providerId, false);
+    if (admin) {
+      await this.recordAudit(admin, "model_provider.disable", AdminAuditTargetType.model_provider, providerId, meta);
+    }
     return { success: true };
   }
 
@@ -113,7 +141,7 @@ export class ModelGatewayAdminService {
     return { items: items.map((config) => this.toModelConfigItem(config)) };
   }
 
-  async createModelConfig(dto: CreateModelConfigDto) {
+  async createModelConfig(dto: CreateModelConfigDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
     await this.ensureProviderExists(dto.providerId);
 
     const config = await this.prisma.modelConfig.create({
@@ -125,16 +153,25 @@ export class ModelGatewayAdminService {
         maxOutputTokens: dto.maxOutputTokens,
         supportsStreaming: dto.supportsStreaming,
         supportsJsonMode: dto.supportsJsonMode,
+        supportsMultimodal: dto.supportsMultimodal,
         defaultTemperature: dto.defaultTemperature,
         defaultMaxTokens: dto.defaultMaxTokens,
       },
       include: { provider: true },
     });
 
+    if (admin) {
+      await this.recordAudit(admin, "model_config.create", AdminAuditTargetType.model_config, config.id, meta, {
+        displayName: config.displayName,
+        modelName: config.modelName,
+        providerId: config.providerId,
+      });
+    }
+
     return this.toModelConfigItem(config);
   }
 
-  async updateModelConfig(modelConfigId: string, dto: UpdateModelConfigDto) {
+  async updateModelConfig(modelConfigId: string, dto: UpdateModelConfigDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
     if (dto.providerId) await this.ensureProviderExists(dto.providerId);
 
     try {
@@ -148,12 +185,21 @@ export class ModelGatewayAdminService {
           maxOutputTokens: dto.maxOutputTokens,
           supportsStreaming: dto.supportsStreaming,
           supportsJsonMode: dto.supportsJsonMode,
+          supportsMultimodal: dto.supportsMultimodal,
           defaultTemperature: dto.defaultTemperature,
           defaultMaxTokens: dto.defaultMaxTokens,
           isEnabled: dto.isEnabled,
         },
         include: { provider: true },
       });
+
+      if (admin) {
+        await this.recordAudit(admin, "model_config.update", AdminAuditTargetType.model_config, config.id, meta, {
+          displayName: config.displayName,
+          modelName: config.modelName,
+          isEnabled: config.isEnabled,
+        });
+      }
 
       return this.toModelConfigItem(config);
     } catch (error) {
@@ -175,7 +221,7 @@ export class ModelGatewayAdminService {
     return { items: items.map((profile) => this.toTaskProfileItem(profile)) };
   }
 
-  async upsertTaskProfile(taskType: string, dto: UpsertModelTaskProfileDto) {
+  async upsertTaskProfile(taskType: string, dto: UpsertModelTaskProfileDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
     if (!this.isTaskType(taskType)) {
       throw new BadRequestException("任务类型不正确");
     }
@@ -209,6 +255,14 @@ export class ModelGatewayAdminService {
         },
       },
     });
+
+    if (admin) {
+      await this.recordAudit(admin, "model_task_profile.upsert", AdminAuditTargetType.model_task_profile, profile.id, meta, {
+        taskType: profile.taskType,
+        modelConfigId: profile.modelConfigId,
+        isEnabled: profile.isEnabled,
+      });
+    }
 
     return this.toTaskProfileItem(profile);
   }
@@ -315,6 +369,7 @@ export class ModelGatewayAdminService {
       maxOutputTokens: config.maxOutputTokens,
       supportsStreaming: config.supportsStreaming,
       supportsJsonMode: config.supportsJsonMode,
+      supportsMultimodal: config.supportsMultimodal,
       defaultTemperature: config.defaultTemperature,
       defaultMaxTokens: config.defaultMaxTokens,
       isEnabled: config.isEnabled,
@@ -390,5 +445,23 @@ export class ModelGatewayAdminService {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       throw new BadRequestException(message);
     }
+  }
+
+  private async recordAudit(
+    admin: AuthenticatedUser,
+    action: string,
+    targetType: AdminAuditTargetType,
+    targetId: string,
+    meta?: RequestMeta,
+    detail?: Record<string, unknown>,
+  ) {
+    await this.audit?.record({
+      admin,
+      action,
+      targetType,
+      targetId,
+      detail,
+      meta,
+    });
   }
 }

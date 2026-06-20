@@ -1,10 +1,11 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { UserRole } from "@prisma/client";
-import type { AuthenticatedUser } from "../auth/auth.types";
+import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
 import { CurrentUser } from "../common/current-user.decorator";
+import { CurrentRequestMeta } from "../common/request-meta.decorator";
 import { KnowledgeCandidateService } from "./knowledge-candidate.service";
 import {
   ApproveKnowledgeCandidateDto,
@@ -28,8 +29,12 @@ export class KnowledgeAdminController {
   ) {}
 
   @Post("items")
-  createItem(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateKnowledgeItemDto) {
-    return this.items.createItem(user, dto);
+  createItem(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Body() dto: CreateKnowledgeItemDto,
+  ) {
+    return this.items.createItem(user, dto, meta);
   }
 
   @Get("items")
@@ -45,20 +50,29 @@ export class KnowledgeAdminController {
   @Patch("items/:knowledgeId")
   updateItem(
     @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
     @Param("knowledgeId") knowledgeId: string,
     @Body() dto: UpdateKnowledgeItemDto,
   ) {
-    return this.items.updateItem(user, knowledgeId, dto);
+    return this.items.updateItem(user, knowledgeId, dto, meta);
   }
 
   @Post("items/:knowledgeId/enable")
-  enableItem(@CurrentUser() user: AuthenticatedUser, @Param("knowledgeId") knowledgeId: string) {
-    return this.items.enableItem(user, knowledgeId);
+  enableItem(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Param("knowledgeId") knowledgeId: string,
+  ) {
+    return this.items.enableItem(user, knowledgeId, meta);
   }
 
   @Post("items/:knowledgeId/disable")
-  disableItem(@CurrentUser() user: AuthenticatedUser, @Param("knowledgeId") knowledgeId: string) {
-    return this.items.disableItem(user, knowledgeId);
+  disableItem(
+    @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Param("knowledgeId") knowledgeId: string,
+  ) {
+    return this.items.disableItem(user, knowledgeId, meta);
   }
 
   @Post("categories")
@@ -79,27 +93,30 @@ export class KnowledgeAdminController {
   @Post("candidates/:candidateId/approve")
   approveCandidate(
     @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
     @Param("candidateId") candidateId: string,
     @Body() dto: ApproveKnowledgeCandidateDto,
   ) {
-    return this.candidates.approveCandidate(user, candidateId, dto);
+    return this.candidates.approveCandidate(user, candidateId, dto, meta);
   }
 
   @Post("candidates/:candidateId/reject")
   rejectCandidate(
     @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
     @Param("candidateId") candidateId: string,
     @Body() dto: RejectKnowledgeCandidateDto,
   ) {
-    return this.candidates.rejectCandidate(user, candidateId, dto);
+    return this.candidates.rejectCandidate(user, candidateId, dto, meta);
   }
 
   @Post("candidates/:candidateId/merge")
   mergeCandidate(
     @CurrentUser() user: AuthenticatedUser,
+    @CurrentRequestMeta() meta: RequestMeta,
     @Param("candidateId") candidateId: string,
     @Body() dto: MergeKnowledgeCandidateDto,
   ) {
-    return this.candidates.mergeCandidate(user, candidateId, dto);
+    return this.candidates.mergeCandidate(user, candidateId, dto, meta);
   }
 }
