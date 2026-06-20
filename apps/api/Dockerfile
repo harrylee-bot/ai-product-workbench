@@ -20,6 +20,7 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/database/package.json packages/database/package.json
 RUN npm ci --omit=dev && npm cache clean --force
+RUN npm install --no-save tsx
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/database/prisma packages/database/prisma
 COPY --from=build /app/node_modules/.prisma node_modules/.prisma
