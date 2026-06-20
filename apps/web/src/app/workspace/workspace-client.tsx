@@ -16,6 +16,7 @@ import {
   Database,
   FileUp,
   FileText,
+  History,
   ImagePlus,
   Loader2,
   MessageSquare,
@@ -70,14 +71,20 @@ type SelectedRegion =
       type: "document";
       sectionId: string;
       targetId: string;
+      documentId?: string;
+      blockId?: string;
+      sourcePaths?: string[];
+      selectedText?: string;
       label: string;
     }
   | {
       type: "prototype";
       targetId?: string;
+      artifactId?: string;
       pageId: string;
       componentId?: string;
       domSelector?: string;
+      sourcePaths?: string[];
       label?: string;
     };
 
@@ -276,7 +283,9 @@ type HandleMessageResponse = {
   userMessage: ApiMessage;
   assistantMessage: ApiMessage | null;
   runId: string;
-  status: "running";
+  status: "running" | "completed";
+  patchRecord?: unknown;
+  result?: unknown;
 };
 
 type AgentStepName =
@@ -302,6 +311,11 @@ type VibeRunEvent = {
     | "state_version_created"
     | "prd_updated"
     | "prototype_updated"
+    | "patch_started"
+    | "patch_plan_created"
+    | "patch_applying"
+    | "patch_completed"
+    | "patch_failed"
     | "qa_completed"
     | "knowledge_candidate_created"
     | "run_completed"
@@ -330,6 +344,37 @@ type GetCurrentPrdResponse = {
 
 type GetCurrentPrototypeResponse = {
   artifact: unknown | null;
+};
+
+type PatchRecordStatus =
+  | "planned"
+  | "applying"
+  | "applied"
+  | "failed"
+  | "cancelled"
+  | "needs_confirmation";
+
+type PatchRecordItem = {
+  id: string;
+  userInstruction: string;
+  status: PatchRecordStatus;
+  selectedRegion?: SelectedRegion | null;
+  patchPlan?: unknown;
+  operations?: Array<{ op?: string; path?: string; reason?: string }>;
+  beforeProductDesignStateVersion?: number;
+  afterProductDesignStateVersion?: number;
+  affectedPrdDocumentId?: string;
+  affectedPrototypeArtifactId?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ListPatchRecordsResponse = {
+  items: PatchRecordItem[];
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
 const STATUS_META: Record<ProjectStatus, { label: string; className: string }> = {
@@ -380,6 +425,33 @@ const STATUS_META: Record<ProjectStatus, { label: string; className: string }> =
   deleted: {
     label: "已删除",
     className: "border-rose-200 bg-rose-50 text-rose-700",
+  },
+};
+
+const PATCH_STATUS_META: Record<PatchRecordStatus, { label: string; className: string }> = {
+  planned: {
+    label: "待应用",
+    className: "border-gray-200 bg-gray-50 text-gray-700",
+  },
+  applying: {
+    label: "应用中",
+    className: "border-sky-200 bg-sky-50 text-sky-700",
+  },
+  applied: {
+    label: "已完成",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  failed: {
+    label: "失败",
+    className: "border-rose-200 bg-rose-50 text-rose-700",
+  },
+  cancelled: {
+    label: "已取消",
+    className: "border-gray-200 bg-white text-gray-500",
+  },
+  needs_confirmation: {
+    label: "待确认",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
   },
 };
 
@@ -780,6 +852,7 @@ function getFirstPrototypeTarget(specValue: unknown) {
   return {
     pageId: asText(firstPage?.id) || "page_main",
     componentId: asText(firstComponent?.id) || undefined,
+    sourcePaths: arrayOfText(firstComponent?.sourcePaths ?? firstPage?.sourcePaths),
     label: `${pageName} / ${componentName}`,
   };
 }
@@ -856,6 +929,22 @@ function arrayOfText(value: unknown) {
   return Array.isArray(value) ? value.map(asText).filter(Boolean) : [];
 }
 
+function getPatchImpactPaths(record: PatchRecordItem) {
+  const plan = asRecord(record.patchPlan);
+  const impact = asRecord(plan?.impactAnalysis);
+  const paths = arrayOfText(impact?.affectedStatePaths);
+  if (paths.length) return paths;
+  return (record.operations ?? []).map((operation) => operation.path).filter((path): path is string => Boolean(path));
+}
+
+function getSelectedRegionLabel(region?: SelectedRegion | null) {
+  if (!region) return "未标记区域";
+  if (region.type === "prototype") {
+    return region.label || region.componentId || region.pageId || region.targetId || "选中区域";
+  }
+  return region.label || region.sectionId || region.targetId || "选中区域";
+}
+
 function getPrdTagLabel(tag: string) {
   const labels: Record<string, string> = {
     ai_assumption: "AI 推断",
@@ -915,6 +1004,12 @@ export function WorkspaceClient() {
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [localEditEnabled, setLocalEditEnabled] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<SelectedRegion | null>(null);
+  const [patchHistoryOpen, setPatchHistoryOpen] = useState(false);
+  const [patchHistoryItems, setPatchHistoryItems] = useState<PatchRecordItem[]>([]);
+  const [patchHistoryLoading, setPatchHistoryLoading] = useState(false);
+  const [patchHistoryError, setPatchHistoryError] = useState<string | null>(null);
+  const [patchActionLoadingId, setPatchActionLoadingId] = useState<string | null>(null);
+  const [patchConfirmationDrafts, setPatchConfirmationDrafts] = useState<Record<string, string>>({});
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>(createAgentSteps);
   const [isRunning, setIsRunning] = useState(false);
   const timersRef = useRef<number[]>([]);
@@ -1099,9 +1194,78 @@ export function WorkspaceClient() {
     void loadProjects();
   }, []);
 
+  useEffect(() => {
+    if (!currentProjectId || !patchHistoryOpen) return;
+    void loadPatchHistory(currentProjectId);
+  }, [currentProjectId, patchHistoryOpen]);
+
   const clearRunTimers = () => {
     timersRef.current.forEach((timer) => window.clearTimeout(timer));
     timersRef.current = [];
+  };
+
+  const loadPatchHistory = async (projectId = currentProjectId) => {
+    if (!projectId) return;
+    setPatchHistoryLoading(true);
+    setPatchHistoryError(null);
+    try {
+      const response = await apiRequest<ListPatchRecordsResponse>(
+        `/projects/${projectId}/patches${toQueryString({ page: 1, pageSize: 30 })}`,
+      );
+      setPatchHistoryItems(response.items);
+    } catch (error) {
+      setPatchHistoryError(error instanceof Error ? error.message : "Patch 历史加载失败");
+    } finally {
+      setPatchHistoryLoading(false);
+    }
+  };
+
+  const cancelPatch = async (patchId: string) => {
+    if (!currentProject) return;
+    setPatchActionLoadingId(patchId);
+    setPatchHistoryError(null);
+    try {
+      await apiRequest(`/patches/${patchId}/cancel`, { method: "POST" });
+      await loadPatchHistory(currentProject.id);
+    } catch (error) {
+      setPatchHistoryError(error instanceof Error ? error.message : "取消 Patch 失败");
+    } finally {
+      setPatchActionLoadingId(null);
+    }
+  };
+
+  const confirmPatch = async (patchId: string, confirmation: string) => {
+    if (!currentProject) return;
+    const userConfirmation = confirmation.trim() || "确认应用该局部修改。";
+    setPatchActionLoadingId(patchId);
+    setPatchHistoryError(null);
+    try {
+      const response = await apiRequest<HandleMessageResponse>(`/patches/${patchId}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({ userConfirmation }),
+      });
+      if (response.result) {
+        const previewPatch = extractPreviewFromPayload(response.result);
+        updateProject(currentProject.id, (project) => mergePreviewPatch(project, previewPatch));
+      }
+      if (response.assistantMessage) {
+        const savedAssistantMessage = mapMessage(response.assistantMessage);
+        if (savedAssistantMessage) {
+          updateProject(currentProject.id, (project) => ({
+            ...project,
+            messages: project.messages.some((item) => item.id === savedAssistantMessage.id)
+              ? project.messages
+              : [...project.messages, savedAssistantMessage],
+          }));
+        }
+      }
+      startRunStream(currentProject.id, response.runId);
+      await loadPatchHistory(currentProject.id);
+    } catch (error) {
+      setPatchHistoryError(error instanceof Error ? error.message : "确认 Patch 失败");
+    } finally {
+      setPatchActionLoadingId(null);
+    }
   };
 
   const schedule = (callback: () => void, delay: number) => {
@@ -1377,6 +1541,14 @@ export function WorkspaceClient() {
       return;
     }
 
+    if (event.type === "patch_started" || event.type === "patch_plan_created" || event.type === "patch_applying") {
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        summary: event.content || "正在执行局部修改",
+      }));
+      return;
+    }
+
     if (event.type === "prd_updated") {
       const prdSections = mapPrdSections(event.data);
       const prdDocument = asRecord(event.data);
@@ -1422,6 +1594,44 @@ export function WorkspaceClient() {
         qaIssues: qa.issues,
       }));
       setPreviewTab("qa");
+      return;
+    }
+
+    if (event.type === "patch_completed") {
+      const data = asRecord(event.data);
+      const result = asRecord(data?.result);
+      const previewPatch = extractPreviewFromPayload(result);
+      const qa = mapQaReport(result?.qaReport);
+      updateProject(targetProjectId, (project) =>
+        mergePreviewPatch(
+          {
+            ...project,
+            status: qa?.status && qa.status !== "passed" ? "qa_failed" : "prototype_ready",
+            summary: event.content || "局部修改已完成",
+            updatedAt: "刚刚",
+          },
+          previewPatch,
+        ),
+      );
+      setIsRunning(false);
+      controller.abort();
+      window.setTimeout(() => void loadProjectDetail(targetProjectId), 250);
+      if (patchHistoryOpen) window.setTimeout(() => void loadPatchHistory(targetProjectId), 300);
+      return;
+    }
+
+    if (event.type === "patch_failed") {
+      setIsRunning(false);
+      updateProject(targetProjectId, (project) => ({
+        ...project,
+        status: "qa_failed",
+        summary: event.content || "局部修改失败",
+        prdState: project.prdState === "generating" ? "error" : project.prdState,
+        prototypeState: project.prototypeState === "generating" ? "error" : project.prototypeState,
+        qaStatus: "failed",
+      }));
+      controller.abort();
+      if (patchHistoryOpen) window.setTimeout(() => void loadPatchHistory(targetProjectId), 300);
       return;
     }
 
@@ -1661,17 +1871,30 @@ export function WorkspaceClient() {
     setLocalEditEnabled(false);
 
     try {
-      const response = await apiRequest<HandleMessageResponse>("/ai/vibe/handle-message", {
+      const isPatchMessage = Boolean(selectedRegion);
+      const response = await apiRequest<HandleMessageResponse>(
+        isPatchMessage ? `/projects/${currentProject.id}/patches` : "/ai/vibe/handle-message",
+        {
         method: "POST",
-        body: JSON.stringify({
-          projectId: currentProject.id,
-          conversationId: targetConversationId,
-          message,
-          selectedRegion,
-          previewMode: previewTab === "prototype" ? "prototype" : "prd",
-          fileIds,
-        }),
-      });
+        body: JSON.stringify(
+          isPatchMessage
+            ? {
+                conversationId: targetConversationId,
+                selectedRegion,
+                userInstruction: message,
+                attachmentFileIds: fileIds,
+              }
+            : {
+                projectId: currentProject.id,
+                conversationId: targetConversationId,
+                message,
+                selectedRegion,
+                previewMode: previewTab === "prototype" ? "prototype" : "prd",
+                fileIds,
+              },
+        ),
+      },
+      );
       const savedUserMessage = mapMessage(response.userMessage);
       const savedAssistantMessage = mapMessage(response.assistantMessage);
 
@@ -1700,6 +1923,11 @@ export function WorkspaceClient() {
         }));
       }
 
+      if (response.result) {
+        const previewPatch = extractPreviewFromPayload(response.result);
+        updateProject(currentProject.id, (project) => mergePreviewPatch(project, previewPatch));
+      }
+
       startRunStream(currentProject.id, response.runId);
     } catch (error) {
       setIsRunning(false);
@@ -1717,6 +1945,8 @@ export function WorkspaceClient() {
       type: "document",
       sectionId: section.id,
       targetId: currentProject?.prdDocumentId ?? `${section.id}-body`,
+      documentId: currentProject?.prdDocumentId,
+      sourcePaths: section.sourcePaths,
       label: section.title,
     });
     setComposerValue((value) => value || `请修改「${section.title}」：`);
@@ -1728,9 +1958,11 @@ export function WorkspaceClient() {
     setSelectedRegion({
       type: "prototype",
       targetId: currentProject?.prototypeArtifactId,
+      artifactId: currentProject?.prototypeArtifactId,
       pageId: target.pageId,
       componentId: target.componentId,
       domSelector: target.componentId ? `[data-component-id="${target.componentId}"]` : undefined,
+      sourcePaths: target.sourcePaths,
       label: target.label,
     });
     setComposerValue((value) => value || "请把选中区域调整为：");
@@ -1799,12 +2031,25 @@ export function WorkspaceClient() {
             localEditEnabled={localEditEnabled}
             selectedRegion={selectedRegion}
             isRunning={isRunning}
+            patchHistoryItems={patchHistoryItems}
+            patchHistoryOpen={patchHistoryOpen}
+            patchHistoryLoading={patchHistoryLoading}
+            patchHistoryError={patchHistoryError}
+            patchActionLoadingId={patchActionLoadingId}
+            patchConfirmationDrafts={patchConfirmationDrafts}
             onPreviewTabChange={setPreviewTab}
             onDeviceModeChange={setDeviceMode}
             onLocalEditToggle={() => setLocalEditEnabled((value) => !value)}
             onSelectPrdSection={selectPrdSection}
             onSelectPrototypeRegion={selectPrototypeRegion}
             onClearSelectedRegion={() => setSelectedRegion(null)}
+            onPatchHistoryToggle={() => setPatchHistoryOpen((value) => !value)}
+            onRefreshPatchHistory={() => void loadPatchHistory(currentProject?.id)}
+            onCancelPatch={cancelPatch}
+            onPatchConfirmationChange={(patchId, value) =>
+              setPatchConfirmationDrafts((drafts) => ({ ...drafts, [patchId]: value }))
+            }
+            onConfirmPatch={confirmPatch}
           />
         </div>
       </main>
@@ -2624,12 +2869,23 @@ function PreviewPanel({
   localEditEnabled,
   selectedRegion,
   isRunning,
+  patchHistoryItems,
+  patchHistoryOpen,
+  patchHistoryLoading,
+  patchHistoryError,
+  patchActionLoadingId,
+  patchConfirmationDrafts,
   onPreviewTabChange,
   onDeviceModeChange,
   onLocalEditToggle,
   onSelectPrdSection,
   onSelectPrototypeRegion,
   onClearSelectedRegion,
+  onPatchHistoryToggle,
+  onRefreshPatchHistory,
+  onCancelPatch,
+  onPatchConfirmationChange,
+  onConfirmPatch,
 }: {
   project: WorkspaceProject | null;
   previewTab: PreviewTab;
@@ -2637,18 +2893,44 @@ function PreviewPanel({
   localEditEnabled: boolean;
   selectedRegion: SelectedRegion | null;
   isRunning: boolean;
+  patchHistoryItems: PatchRecordItem[];
+  patchHistoryOpen: boolean;
+  patchHistoryLoading: boolean;
+  patchHistoryError: string | null;
+  patchActionLoadingId: string | null;
+  patchConfirmationDrafts: Record<string, string>;
   onPreviewTabChange: (tab: PreviewTab) => void;
   onDeviceModeChange: (mode: DeviceMode) => void;
   onLocalEditToggle: () => void;
   onSelectPrdSection: (section: PrdSection) => void;
   onSelectPrototypeRegion: () => void;
   onClearSelectedRegion: () => void;
+  onPatchHistoryToggle: () => void;
+  onRefreshPatchHistory: () => void;
+  onCancelPatch: (patchId: string) => void;
+  onPatchConfirmationChange: (patchId: string, value: string) => void;
+  onConfirmPatch: (patchId: string, confirmation: string) => void;
 }) {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-slate-100">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4">
         <PreviewTabs activeTab={previewTab} onChange={onPreviewTabChange} />
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onPatchHistoryToggle}
+            disabled={!project}
+            className={clsx(
+              "inline-flex h-8 items-center gap-1 rounded-lg px-3 text-sm font-medium",
+              patchHistoryOpen
+                ? "bg-gray-950 text-white hover:bg-gray-800"
+                : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50",
+              !project && "cursor-not-allowed opacity-50",
+            )}
+          >
+            <History className="h-4 w-4" />
+            修改历史
+          </button>
           {previewTab === "prototype" ? (
             <>
               <DeviceSwitch value={deviceMode} onChange={onDeviceModeChange} />
@@ -2712,6 +2994,20 @@ function PreviewPanel({
       ) : null}
       {previewTab === "qa" ? <QaReportPanel project={project} /> : null}
       {previewTab === "state" ? <StatePanel project={project} /> : null}
+      {patchHistoryOpen ? (
+        <PatchHistoryPanel
+          items={patchHistoryItems}
+          loading={patchHistoryLoading}
+          error={patchHistoryError}
+          actionLoadingId={patchActionLoadingId}
+          confirmationDrafts={patchConfirmationDrafts}
+          onRefresh={onRefreshPatchHistory}
+          onCancelPatch={onCancelPatch}
+          onConfirmationChange={onPatchConfirmationChange}
+          onConfirmPatch={onConfirmPatch}
+          onClose={onPatchHistoryToggle}
+        />
+      ) : null}
     </section>
   );
 }
@@ -2786,6 +3082,186 @@ function DeviceSwitch({
       >
         <Smartphone className="h-4 w-4" />
       </button>
+    </div>
+  );
+}
+
+function PatchHistoryPanel({
+  items,
+  loading,
+  error,
+  actionLoadingId,
+  confirmationDrafts,
+  onRefresh,
+  onCancelPatch,
+  onConfirmationChange,
+  onConfirmPatch,
+  onClose,
+}: {
+  items: PatchRecordItem[];
+  loading: boolean;
+  error: string | null;
+  actionLoadingId: string | null;
+  confirmationDrafts: Record<string, string>;
+  onRefresh: () => void;
+  onCancelPatch: (patchId: string) => void;
+  onConfirmationChange: (patchId: string, value: string) => void;
+  onConfirmPatch: (patchId: string, confirmation: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="absolute bottom-0 right-0 top-12 z-20 flex w-[360px] flex-col border-l border-gray-200 bg-white shadow-xl">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+          <History className="h-4 w-4" />
+          Patch 历史
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+            aria-label="刷新 Patch 历史"
+            title="刷新"
+          >
+            <RefreshCw className={clsx("h-4 w-4", loading && "animate-spin")} />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+            aria-label="关闭 Patch 历史"
+            title="关闭"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {error ? (
+          <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm leading-6 text-rose-700">
+            {error}
+          </div>
+        ) : null}
+        {loading ? (
+          <div className="flex h-40 items-center justify-center text-sm text-gray-500">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin text-sky-600" />
+            正在加载 Patch 历史...
+          </div>
+        ) : items.length ? (
+          <div className="space-y-3">
+            {items.map((item) => (
+              <PatchHistoryItem
+                key={item.id}
+                item={item}
+                loading={actionLoadingId === item.id}
+                confirmation={confirmationDrafts[item.id] ?? ""}
+                onConfirmationChange={(value) => onConfirmationChange(item.id, value)}
+                onConfirm={() => onConfirmPatch(item.id, confirmationDrafts[item.id] ?? "")}
+                onCancel={() => onCancelPatch(item.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-10 text-center text-sm text-gray-500">
+            暂无局部修改记录
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function PatchHistoryItem({
+  item,
+  loading,
+  confirmation,
+  onConfirmationChange,
+  onConfirm,
+  onCancel,
+}: {
+  item: PatchRecordItem;
+  loading: boolean;
+  confirmation: string;
+  onConfirmationChange: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const status = PATCH_STATUS_META[item.status];
+  const paths = getPatchImpactPaths(item);
+  const canCancel = item.status === "planned" || item.status === "needs_confirmation";
+  const needsConfirmation = item.status === "needs_confirmation";
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-gray-950">
+            {getSelectedRegionLabel(item.selectedRegion)}
+          </div>
+          <div className="mt-1 text-xs text-gray-400">{formatRelativeTime(item.createdAt)}</div>
+        </div>
+        <span className={clsx("inline-flex h-6 shrink-0 items-center rounded-full border px-2 text-xs font-medium", status.className)}>
+          {status.label}
+        </span>
+      </div>
+      <p className="mt-3 line-clamp-3 text-sm leading-6 text-gray-600">{item.userInstruction}</p>
+      {paths.length ? (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {paths.slice(0, 4).map((path) => (
+            <span key={path} className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-500">
+              {path}
+            </span>
+          ))}
+          {paths.length > 4 ? (
+            <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-500">
+              +{paths.length - 4}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-500">
+        <span>
+          v{item.beforeProductDesignStateVersion ?? "-"} → v{item.afterProductDesignStateVersion ?? "-"}
+        </span>
+        {canCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+            取消
+          </button>
+        ) : null}
+      </div>
+      {needsConfirmation ? (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2">
+          <textarea
+            value={confirmation}
+            onChange={(event) => onConfirmationChange(event.target.value)}
+            rows={2}
+            placeholder="输入确认说明，留空则按计划应用"
+            className="min-h-14 w-full resize-none rounded-md border border-amber-200 bg-white px-2 py-1.5 text-xs leading-5 text-gray-900 outline-none placeholder:text-gray-400 focus:border-amber-300 focus:ring-2 focus:ring-amber-200/60"
+          />
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-md bg-gray-950 px-2 text-xs font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            确认并应用
+          </button>
+        </div>
+      ) : null}
+      {item.errorMessage ? (
+        <div className="mt-3 rounded-md border border-rose-100 bg-rose-50 px-2 py-1.5 text-xs leading-5 text-rose-700">
+          {item.errorMessage}
+        </div>
+      ) : null}
     </div>
   );
 }

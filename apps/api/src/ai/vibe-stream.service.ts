@@ -114,6 +114,15 @@ function toContractEventType(
   if (type === "state_version_created") return "state_version_created";
   if (type === "prd_updated") return "prd_generated";
   if (type === "prototype_updated") return "prototype_generated";
+  if (
+    type === "patch_started" ||
+    type === "patch_plan_created" ||
+    type === "patch_applying" ||
+    type === "patch_completed" ||
+    type === "patch_failed"
+  ) {
+    return "patch_applied";
+  }
   if (type === "qa_completed") return "qa_completed";
   if (type === "knowledge_candidate_created") return "state_updated";
   if (type === "step_started" || type === "message_delta") return "agent_started";

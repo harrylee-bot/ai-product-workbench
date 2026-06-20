@@ -21,6 +21,11 @@ import {
   ProjectProductDesignStateController,
 } from "./product-design-state.controller";
 import {
+  PatchResourceController,
+  ProjectPatchController,
+} from "./patch.controller";
+import { PatchService } from "./patch.service";
+import {
   PrdDocumentController,
   ProjectPrdController,
 } from "./requirement-document.controller";
@@ -40,6 +45,8 @@ import { VibeStreamService } from "./vibe-stream.service";
     VibeController,
     ProjectProductDesignStateController,
     ProductDesignStateResourceController,
+    ProjectPatchController,
+    PatchResourceController,
     ProjectPrdController,
     PrdDocumentController,
     ProjectPrototypeController,
@@ -51,6 +58,7 @@ import { VibeStreamService } from "./vibe-stream.service";
     AgentRunLogService,
     VibeStreamService,
     ProductDesignStateService,
+    PatchService,
     RequirementDocumentService,
     PrototypeService,
     IntentAgentService,

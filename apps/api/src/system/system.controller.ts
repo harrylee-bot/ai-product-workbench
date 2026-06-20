@@ -17,6 +17,7 @@ export class SystemController {
         "product-design-state",
         "requirement-documents",
         "prototype-artifacts",
+        "patch-records",
       ],
     };
   }

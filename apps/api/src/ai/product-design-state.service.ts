@@ -269,6 +269,57 @@ export class ProductDesignStateService {
     return { state: next, version: this.toVersionItem(createdVersion) };
   }
 
+  async restoreStateAfterPatchFailure(
+    projectId: string,
+    snapshot: ProductDesignState,
+    options: { userId?: string; runId?: string; messageId?: string; reason?: string } = {},
+  ) {
+    const currentRecord = await this.prisma.productDesignState.findFirst({
+      where: { id: snapshot.id, projectId },
+    });
+    if (!currentRecord) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
+    const current = this.toStateItem(currentRecord as ProductDesignStateRecord);
+    const nextVersion = await this.getNextStateVersion(projectId);
+    const restored: ProductDesignState = {
+      ...this.cloneState(snapshot),
+      version: nextVersion,
+      status: snapshot.status,
+      updatedBy: options.userId ?? "system",
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updated = await this.prisma.productDesignState.update({
+      where: { id: snapshot.id },
+      data: {
+        version: restored.version,
+        ...this.toPrismaStateData(restored),
+        prdDocument: restored.prdDocument ? toInputJson(restored.prdDocument) : Prisma.JsonNull,
+        prototypeSpec: restored.prototypeSpec ? toInputJson(restored.prototypeSpec) : Prisma.JsonNull,
+        updatedBy: options.userId ?? "system",
+      },
+    });
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { currentProductDesignStateId: snapshot.id },
+    });
+    const next = this.toStateItem(updated as ProductDesignStateRecord);
+    const reason = options.reason ?? `Patch 失败，回滚到 v${snapshot.version}`;
+    await this.writeChangeLog({
+      projectId,
+      stateId: next.id,
+      changeType: ProductDesignChangeType.rollback,
+      path: "*",
+      before: current,
+      after: next,
+      reason,
+      runId: options.runId,
+      messageId: options.messageId,
+      createdBy: options.userId ?? "system",
+    });
+    const version = await this.createVersionSnapshot(next, options.userId ?? "system", reason);
+    return { state: next, version: this.toVersionItem(version) };
+  }
+
   async listChangeLogsForUser(user: AuthenticatedUser, stateId: string) {
     await this.getAccessibleState(user, stateId);
     const items = await this.prisma.productDesignChangeLog.findMany({

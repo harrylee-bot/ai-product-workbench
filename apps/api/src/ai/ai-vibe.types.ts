@@ -3,12 +3,18 @@ import type { AgentName, ModelTaskType, UserIntent } from "@prisma/client";
 export type SelectedRegion = {
   type: "document" | "prototype";
   targetId?: string;
+  documentId?: string;
+  artifactId?: string;
   pageId?: string;
   componentId?: string;
   sectionId?: string;
+  blockId?: string;
   domSelector?: string;
+  sourcePaths?: string[];
+  selectedText?: string;
   textRange?: { start: number; end: number };
   bbox?: { x: number; y: number; width: number; height: number };
+  boundingBox?: { x: number; y: number; width: number; height: number };
   screenshotUrl?: string;
   label?: string;
 };
@@ -421,19 +427,95 @@ export type PrototypeVersion = {
 };
 
 export type PatchOperation = {
-  op: "add" | "update" | "delete";
+  op: "add" | "update" | "delete" | "replace" | "remove" | "append";
   path: string;
   value?: unknown;
   reason: string;
 };
 
+export type PatchIntent =
+  | "copy_change"
+  | "rule_change"
+  | "layout_change"
+  | "state_change"
+  | "config_change"
+  | "flow_change"
+  | "add_requirement"
+  | "remove_requirement"
+  | "clarification"
+  | "unknown";
+
+export type PatchImpactAnalysis = {
+  affectedStatePaths: string[];
+  affectedPrdSectionIds: string[];
+  affectedPrototypePageIds: string[];
+  affectedPrototypeComponentIds: string[];
+  affectedAcceptanceCriteriaIds: string[];
+  requiresPrdRegeneration: boolean;
+  requiresPrototypeRegeneration: boolean;
+  requiresQaCheck: boolean;
+  reason: string;
+};
+
+export type RegenerationPlan = {
+  prd: "none" | "affected_sections" | "full";
+  prototypeSpec: "none" | "affected_pages" | "full";
+  htmlPrototype: "none" | "affected_pages" | "full";
+  qa: "none" | "basic" | "full";
+};
+
+export type PatchRisk = {
+  level: "low" | "medium" | "high";
+  message: string;
+  relatedPaths?: string[];
+};
+
 export type PatchPlan = {
+  id?: string;
+  projectId?: string;
+  intent?: PatchIntent;
+  selectedRegion?: SelectedRegion;
+  impactAnalysis?: PatchImpactAnalysis;
   patchType: "document" | "prototype" | "state" | "global";
   targetNodes: string[];
   impactScope: string[];
   operations: PatchOperation[];
+  regenerationPlan?: RegenerationPlan;
+  risks?: PatchRisk[];
   needUserConfirm: boolean;
+  needsUserConfirmation?: boolean;
+  clarificationQuestions?: ClarificationQuestion[];
   reason: string;
+  summary?: string;
+};
+
+export type PatchRecordStatus =
+  | "planned"
+  | "applying"
+  | "applied"
+  | "failed"
+  | "cancelled"
+  | "needs_confirmation";
+
+export type PatchRecord = {
+  id: string;
+  projectId: string;
+  conversationId: string;
+  instructionMessageId?: string;
+  selectedRegion: SelectedRegion;
+  userInstruction: string;
+  patchPlan: PatchPlan;
+  operations: PatchOperation[];
+  status: PatchRecordStatus;
+  beforeProductDesignStateVersion: number;
+  afterProductDesignStateVersion?: number;
+  affectedPrdDocumentId?: string;
+  affectedPrototypeArtifactId?: string;
+  generatedByRunId?: string;
+  errorMessage?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type QAIssue = {
@@ -479,6 +561,11 @@ export type VibeStreamEventType =
   | "state_version_created"
   | "prd_updated"
   | "prototype_updated"
+  | "patch_started"
+  | "patch_plan_created"
+  | "patch_applying"
+  | "patch_completed"
+  | "patch_failed"
   | "qa_completed"
   | "knowledge_candidate_created"
   | "run_completed"

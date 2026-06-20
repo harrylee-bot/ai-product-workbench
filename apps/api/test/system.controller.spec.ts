@@ -12,5 +12,6 @@ describe("SystemController", () => {
     expect(result.modules).toContain("projects");
     expect(result.modules).toContain("requirement-documents");
     expect(result.modules).toContain("prototype-artifacts");
+    expect(result.modules).toContain("patch-records");
   });
 });
