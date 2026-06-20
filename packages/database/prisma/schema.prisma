@@ -375,6 +375,11 @@ model Project {
   knowledgeCandidates         KnowledgeCandidate[]
   agentRuns                   AgentRunLog[]
   vibeStreamEvents            VibeStreamEventLog[]
+  interactionEvents           ProductInteractionEvent[]
+  productInsights             ProductInsight[]
+  productReviewReports        ProductReviewReport[]
+  evolutionPlans              EvolutionPlan[]
+  evolutionPatchExecutions    EvolutionPatchExecution[]
 
   @@index([ownerId])
   @@index([status])
@@ -911,6 +916,109 @@ model RollbackRecord {
   @@index([status])
   @@index([createdAt])
   @@map("rollback_records")
+}
+
+model ProductInteractionEvent {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  type       String
+  targetType String   @map("target_type")
+  targetId   String?  @map("target_id")
+  content    String?
+  metadata   Json?
+  createdBy  String   @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  project    Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([type])
+  @@index([targetType])
+  @@index([createdAt])
+  @@map("product_interaction_events")
+}
+
+model ProductInsight {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  issueType    String   @map("issue_type")
+  severity     String
+  affectedArea Json     @map("affected_area")
+  rootCause    String   @map("root_cause")
+  suggestion   String
+  sourceEvents Json     @map("source_events")
+  generatedBy  String   @map("generated_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  project      Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([issueType])
+  @@index([severity])
+  @@index([createdAt])
+  @@map("product_insights")
+}
+
+model ProductReviewReport {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  issues         Json
+  conflicts      Json
+  improvements   Json
+  consensusScore Float    @map("consensus_score")
+  agentOutputs   Json     @map("agent_outputs")
+  generatedBy    String   @map("generated_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  project        Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([consensusScore])
+  @@index([createdAt])
+  @@map("product_review_reports")
+}
+
+model EvolutionPlan {
+  id               String   @id @default(uuid())
+  projectId        String   @map("project_id")
+  reason           String
+  priority         String
+  patchOperations  Json     @map("patch_operations")
+  prdChanges       Json     @map("prd_changes")
+  prototypeChanges Json     @map("prototype_changes")
+  impactedAreas    Json     @map("impacted_areas")
+  sourceInsightIds Json     @map("source_insight_ids")
+  sourceReviewId   String?  @map("source_review_id")
+  generatedBy      String   @map("generated_by")
+  executedAt       DateTime? @map("executed_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  project          Project  @relation(fields: [projectId], references: [id])
+  patchExecutions  EvolutionPatchExecution[]
+
+  @@index([projectId])
+  @@index([priority])
+  @@index([createdAt])
+  @@map("evolution_plans")
+}
+
+model EvolutionPatchExecution {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  evolutionPlanId   String   @map("evolution_plan_id")
+  patchRecordId     String?  @map("patch_record_id")
+  result            String
+  appliedOperations Json     @map("applied_operations")
+  newStateVersion   Int?     @map("new_state_version")
+  rollbackId        String?  @map("rollback_id")
+  errorMessage      String?  @map("error_message")
+  createdBy         String   @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+  project           Project  @relation(fields: [projectId], references: [id])
+  evolutionPlan     EvolutionPlan @relation(fields: [evolutionPlanId], references: [id])
+
+  @@index([projectId])
+  @@index([evolutionPlanId])
+  @@index([patchRecordId])
+  @@index([result])
+  @@index([createdAt])
+  @@map("evolution_patch_executions")
 }
 
 model KnowledgeItem {

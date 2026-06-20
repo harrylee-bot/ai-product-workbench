@@ -35,6 +35,11 @@ import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service
 import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
 import { QaAgentService } from "./agents/qa-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
+import {
+  assertStateOnlyPatchOperations,
+  toPatchPlanOperation,
+} from "./product-evolution.helpers";
+import type { EvolutionPatchOperation } from "./product-evolution.types";
 import { PrototypeService } from "./prototype.service";
 import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
@@ -50,6 +55,14 @@ type CreatePatchInput = {
 type CreatePatchCandidateInput = CreatePatchInput & {
   source?: "prd_edit" | "prd_rewrite" | "prd_diff" | "prototype_edit" | "prototype_restructure" | "prototype_flow_update" | "inline_edit";
   interactionEvent?: Record<string, unknown>;
+};
+
+type ApplyEvolutionPlanInput = {
+  evolutionPlanId: string;
+  conversationId?: string;
+  reason: string;
+  operations: EvolutionPatchOperation[];
+  impactedAreas?: string[];
 };
 
 type PatchExecutionInput = {
@@ -357,6 +370,131 @@ export class PatchService {
       patchRecord: result.patchRecord,
       result: result.result,
     };
+  }
+
+  async applyEvolutionPlanForUser(
+    user: AuthenticatedUser,
+    projectId: string,
+    input: ApplyEvolutionPlanInput,
+  ) {
+    const project = await this.assertProjectAccess(user, projectId);
+    this.assertOwnerMutation(user, project.ownerId);
+    assertStateOnlyPatchOperations(input.operations);
+    const conversationId = input.conversationId
+      ? (await this.assertConversation(projectId, input.conversationId)).id
+      : await this.ensureConversationId(projectId, project.ownerId);
+    const userInstruction = input.reason.trim() || "执行 EvolutionPlan";
+    const selectedRegion: SelectedRegion = {
+      type: "document",
+      targetId: input.evolutionPlanId,
+      label: "EvolutionPlan",
+      sourcePaths: input.operations.map((operation) => operation.targetPath),
+    };
+
+    const userMessage = await this.messageService.createUserMessage({
+      projectId,
+      conversationId,
+      userId: user.id,
+      content: `执行进化方案：${userInstruction}`,
+      metadata: toInputJson({
+        patchExecutionEngine: true,
+        evolutionPlanId: input.evolutionPlanId,
+        selectedRegion,
+      }),
+    });
+    const run = await this.runLog.createRun({
+      projectId,
+      conversationId,
+      userId: user.id,
+      userInput: userInstruction,
+    });
+    await this.runLog.markRunIntent(run.id, UserIntent.global_adjustment);
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { status: ProjectStatus.designing, lastActivityAt: new Date() },
+    });
+
+    const executionInput: PatchExecutionInput = {
+      projectId,
+      conversationId,
+      userId: user.id,
+      userInstruction,
+      selectedRegion,
+      attachments: [],
+      runId: run.id,
+      traceId: run.traceId,
+      instructionMessageId: userMessage.id,
+    };
+    let patchRecord: PatchRecord | undefined;
+    try {
+      await this.stream.emit({
+        runId: run.id,
+        projectId,
+        type: "patch_started",
+        content: "正在执行 EvolutionPlan Patch...",
+      });
+      const state = await this.stateService.getCurrentState(projectId);
+      if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
+      const plan: PatchPlan = {
+        id: input.evolutionPlanId,
+        projectId,
+        patchType: "state",
+        targetNodes: input.operations.map((operation) => operation.targetPath),
+        impactScope: input.impactedAreas?.length ? input.impactedAreas : input.operations.map((operation) => operation.targetPath),
+        operations: input.operations.map(toPatchPlanOperation),
+        regenerationPlan: {
+          prd: "full",
+          prototypeSpec: "full",
+          htmlPrototype: "full",
+          qa: "full",
+        },
+        risks: [],
+        needUserConfirm: false,
+        needsUserConfirmation: false,
+        reason: userInstruction,
+        summary: "Patch Execution Engine 执行 EvolutionPlan",
+      };
+      const createdRecord = await this.prisma.patchRecord.create({
+        data: {
+          projectId,
+          conversationId,
+          instructionMessageId: userMessage.id,
+          selectedRegion: toInputJson(selectedRegion),
+          userInstruction,
+          patchPlan: toInputJson({
+            ...plan,
+            source: "evolution_plan",
+            evolutionPlanId: input.evolutionPlanId,
+          }),
+          operations: toInputJson(plan.operations),
+          status: PrismaPatchRecordStatus.planned,
+          beforeProductDesignStateVersion: state.version,
+          generatedByRunId: run.id,
+          createdBy: user.id,
+        },
+      });
+      patchRecord = this.toPatchRecord(createdRecord as PatchRecordRow);
+      await this.stream.emit({
+        runId: run.id,
+        projectId,
+        type: "patch_plan_created",
+        step: "patch_planning",
+        data: { patchId: patchRecord.id, patchPlan: plan, evolutionPlanId: input.evolutionPlanId },
+        content: "EvolutionPlan Patch 已创建",
+      });
+
+      const result = await this.applyPatchPlan(executionInput, patchRecord, plan, state);
+      return {
+        ...result,
+        userMessage,
+        runId: run.id,
+        conversationId,
+        projectId,
+      };
+    } catch (error) {
+      await this.handlePatchFailure(executionInput, patchRecord, error);
+      throw error;
+    }
   }
 
   private async createCandidatePatch(input: PatchExecutionInput) {
@@ -1028,6 +1166,22 @@ export class PatchService {
     });
     if (!conversation) throw new NotFoundException("PATCH_CONVERSATION_NOT_FOUND");
     return conversation;
+  }
+
+  private async ensureConversationId(projectId: string, ownerId: string) {
+    const existing = await this.prisma.conversation.findFirst({
+      where: { projectId, deletedAt: null, status: "active" },
+      orderBy: { createdAt: "asc" },
+    });
+    if (existing) return existing.id;
+    const created = await this.prisma.conversation.create({
+      data: { projectId, ownerId, title: "默认会话" },
+    });
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { currentConversationId: created.id },
+    });
+    return created.id;
   }
 
   private async getAccessiblePatch(user: AuthenticatedUser, patchId: string) {

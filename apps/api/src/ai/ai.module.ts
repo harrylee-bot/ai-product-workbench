@@ -6,6 +6,11 @@ import { PrismaModule } from "../prisma/prisma.module";
 import { ProjectModule } from "../projects/project.module";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
+import { EvolutionEngineService } from "./evolution-engine.service";
+import { FeedbackAnalysisService } from "./feedback-analysis.service";
+import { InteractionCaptureService } from "./interaction-capture.service";
+import { MultiAgentReviewService } from "./multi-agent-review.service";
+import { PatchExecutionEngineService } from "./patch-execution-engine.service";
 import { IntentAgentService } from "./agents/intent-agent.service";
 import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
 import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
@@ -55,6 +60,18 @@ import {
   PrdEditingController,
   PrototypeEditingController,
 } from "./editing.controller";
+import {
+  EvolutionController,
+  FeedbackAnalysisController,
+  InteractionController,
+  MultiAgentReviewController,
+  PatchExecutionController,
+  ProjectEvolutionController,
+  ProjectInsightController,
+  ProjectInteractionController,
+  ProjectPatchExecutionController,
+  ProjectReviewController,
+} from "./product-evolution.controller";
 
 @Module({
   imports: [PrismaModule, ProjectModule, FileModule, KnowledgeModule, ModelGatewayModule],
@@ -76,6 +93,16 @@ import {
     PrdEditingController,
     PrototypeEditingController,
     InlineAssistantController,
+    InteractionController,
+    ProjectInteractionController,
+    FeedbackAnalysisController,
+    ProjectInsightController,
+    MultiAgentReviewController,
+    ProjectReviewController,
+    EvolutionController,
+    ProjectEvolutionController,
+    PatchExecutionController,
+    ProjectPatchExecutionController,
   ],
   providers: [
     VibeService,
@@ -90,6 +117,11 @@ import {
     QaService,
     VersionHistoryService,
     RollbackService,
+    InteractionCaptureService,
+    FeedbackAnalysisService,
+    MultiAgentReviewService,
+    EvolutionEngineService,
+    PatchExecutionEngineService,
     IntentAgentService,
     KnowledgeAgentService,
     RequirementAnalystAgentService,

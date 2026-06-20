@@ -28,6 +28,11 @@ export class SystemController {
         "prd-editing",
         "prototype-editing",
         "inline-assistant",
+        "interaction-capture",
+        "semantic-feedback-analyzer",
+        "multi-agent-review",
+        "evolution-engine",
+        "patch-execution-engine",
       ],
     };
   }

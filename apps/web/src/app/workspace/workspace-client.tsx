@@ -58,7 +58,7 @@ type ProjectStatus =
 
 type MessageRole = "user" | "assistant";
 type StepStatus = "pending" | "running" | "success" | "failed" | "skipped";
-type PreviewTab = "prd" | "prototype" | "qa" | "state";
+type PreviewTab = "prd" | "prototype" | "qa" | "state" | "feedback";
 type PreviewState = "empty" | "generating" | "ready" | "error";
 type QaStatus = "unchecked" | "checking" | "passed" | "issues" | "failed";
 type DeviceMode = "desktop" | "mobile";
@@ -204,6 +204,82 @@ type ProductDesignStateSummary = {
   pendingQuestions: Array<{ id: string; question: string; status: string }>;
 };
 
+type ProductInteractionEventItem = {
+  id: string;
+  projectId: string;
+  type: "patch" | "comment" | "selection" | "feedback";
+  targetType: "prd" | "prototype" | "state";
+  targetId?: string;
+  content?: string;
+  metadata?: unknown;
+  createdBy: string;
+  createdAt: string;
+};
+
+type ProductInsightItem = {
+  id: string;
+  projectId: string;
+  issueType: "ux" | "logic" | "flow" | "content";
+  severity: "low" | "medium" | "high";
+  affectedArea: string[];
+  rootCause: string;
+  suggestion: string;
+  sourceEvents: string[];
+  createdAt: string;
+};
+
+type ProductReviewReportItem = {
+  id: string;
+  projectId: string;
+  issues: Array<{
+    title: string;
+    issueType: string;
+    severity: string;
+    affectedArea: string[];
+    reason: string;
+  }>;
+  conflicts: string[];
+  improvements: string[];
+  consensusScore: number;
+  agentOutputs: unknown;
+  createdAt: string;
+};
+
+type EvolutionPatchOperation = {
+  type: "add" | "update" | "delete";
+  targetPath: string;
+  value?: unknown;
+  reason?: string;
+};
+
+type EvolutionPlanItem = {
+  id: string;
+  projectId: string;
+  reason: string;
+  priority: "low" | "medium" | "high";
+  patchOperations: EvolutionPatchOperation[];
+  prdChanges: unknown[];
+  prototypeChanges: unknown[];
+  impactedAreas: string[];
+  sourceInsightIds: string[];
+  sourceReviewId?: string;
+  executedAt?: string;
+  createdAt: string;
+};
+
+type EvolutionPatchExecutionItem = {
+  id: string;
+  projectId: string;
+  evolutionPlanId: string;
+  patchRecordId?: string;
+  result: "success" | "failed";
+  appliedOperations: EvolutionPatchOperation[];
+  newStateVersion?: number;
+  rollbackId?: string;
+  errorMessage?: string;
+  createdAt: string;
+};
+
 type WorkspaceProject = {
   id: string;
   conversationId?: string;
@@ -226,6 +302,11 @@ type WorkspaceProject = {
   latestQaReport?: QaReportSummary | null;
   versionTimeline: VersionTimelineItem[];
   productDesignState?: ProductDesignStateSummary | null;
+  interactionEvents: ProductInteractionEventItem[];
+  productInsights: ProductInsightItem[];
+  latestReviewReport?: ProductReviewReportItem | null;
+  latestEvolutionPlan?: EvolutionPlanItem | null;
+  patchExecutions: EvolutionPatchExecutionItem[];
 };
 
 type PreviewPatch = Partial<
@@ -245,6 +326,11 @@ type PreviewPatch = Partial<
     | "latestQaReport"
     | "versionTimeline"
     | "productDesignState"
+    | "interactionEvents"
+    | "productInsights"
+    | "latestReviewReport"
+    | "latestEvolutionPlan"
+    | "patchExecutions"
   >
 >;
 
@@ -398,6 +484,29 @@ type GetLatestQaResponse = {
 
 type GetVersionTimelineResponse = {
   items: VersionTimelineItem[];
+};
+
+type ListInteractionsResponse = {
+  items: ProductInteractionEventItem[];
+  total: number;
+};
+
+type ListInsightsResponse = {
+  items: ProductInsightItem[];
+  total: number;
+};
+
+type GetLatestReviewResponse = {
+  reviewReport: ProductReviewReportItem | null;
+};
+
+type GetLatestEvolutionResponse = {
+  evolutionPlan: EvolutionPlanItem | null;
+};
+
+type ListPatchExecutionsResponse = {
+  items: EvolutionPatchExecutionItem[];
+  total: number;
 };
 
 type PatchRecordStatus =
@@ -739,6 +848,11 @@ function mapProject(project: ApiProject, messages: ChatMessage[] = []): Workspac
     latestQaReport: null,
     versionTimeline: [],
     productDesignState: null,
+    interactionEvents: [],
+    productInsights: [],
+    latestReviewReport: null,
+    latestEvolutionPlan: null,
+    patchExecutions: [],
   };
 }
 
@@ -1089,6 +1203,11 @@ function preservePreviewState(project: WorkspaceProject) {
     latestQaReport: project.latestQaReport,
     versionTimeline: project.versionTimeline,
     productDesignState: project.productDesignState,
+    interactionEvents: project.interactionEvents,
+    productInsights: project.productInsights,
+    latestReviewReport: project.latestReviewReport,
+    latestEvolutionPlan: project.latestEvolutionPlan,
+    patchExecutions: project.patchExecutions,
   };
 }
 
@@ -1132,6 +1251,9 @@ export function WorkspaceClient() {
   const [patchConfirmationDrafts, setPatchConfirmationDrafts] = useState<Record<string, string>>({});
   const [qaActionLoading, setQaActionLoading] = useState(false);
   const [versionActionLoading, setVersionActionLoading] = useState(false);
+  const [feedbackDraft, setFeedbackDraft] = useState("");
+  const [feedbackActionLoading, setFeedbackActionLoading] = useState<"capture" | "analyze" | "review" | "evolution" | "apply" | null>(null);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [inlineAssistantDraft, setInlineAssistantDraft] = useState<InlineAssistantDraft | null>(null);
   const [inlineAssistantInstruction, setInlineAssistantInstruction] = useState("");
   const [inlineAssistantLoading, setInlineAssistantLoading] = useState(false);
@@ -1286,9 +1408,22 @@ export function WorkspaceClient() {
           prototypeHtml: currentArtifact.html,
         };
       }
-      const [qaResponse, timelineResponse] = await Promise.all([
+      const [
+        qaResponse,
+        timelineResponse,
+        interactionsResponse,
+        insightsResponse,
+        reviewResponse,
+        evolutionResponse,
+        patchExecutionsResponse,
+      ] = await Promise.all([
         apiRequest<GetLatestQaResponse>(`/projects/${projectId}/qa/latest`).catch(() => ({ qaReport: null })),
         apiRequest<GetVersionTimelineResponse>(`/projects/${projectId}/version-timeline`).catch(() => ({ items: [] })),
+        apiRequest<ListInteractionsResponse>(`/projects/${projectId}/interactions`).catch(() => ({ items: [], total: 0 })),
+        apiRequest<ListInsightsResponse>(`/projects/${projectId}/insights`).catch(() => ({ items: [], total: 0 })),
+        apiRequest<GetLatestReviewResponse>(`/projects/${projectId}/review/latest`).catch(() => ({ reviewReport: null })),
+        apiRequest<GetLatestEvolutionResponse>(`/projects/${projectId}/evolution/latest`).catch(() => ({ evolutionPlan: null })),
+        apiRequest<ListPatchExecutionsResponse>(`/projects/${projectId}/patch-executions`).catch(() => ({ items: [], total: 0 })),
       ]);
       const latestQa = mapQaReport(qaResponse.qaReport);
       const latestQaReport = mapQaReportSummary(qaResponse.qaReport);
@@ -1296,6 +1431,11 @@ export function WorkspaceClient() {
         ...previewPatch,
         versionTimeline: timelineResponse.items,
         latestQaReport,
+        interactionEvents: interactionsResponse.items,
+        productInsights: insightsResponse.items,
+        latestReviewReport: reviewResponse.reviewReport,
+        latestEvolutionPlan: evolutionResponse.evolutionPlan,
+        patchExecutions: patchExecutionsResponse.items,
         ...(latestQa
           ? {
               qaStatus: latestQa.status,
@@ -1445,6 +1585,194 @@ export function WorkspaceClient() {
       }));
     } finally {
       setQaActionLoading(false);
+    }
+  };
+
+  const refreshFeedbackLoop = async (projectId: string) => {
+    const [
+      interactionsResponse,
+      insightsResponse,
+      reviewResponse,
+      evolutionResponse,
+      patchExecutionsResponse,
+    ] = await Promise.all([
+      apiRequest<ListInteractionsResponse>(`/projects/${projectId}/interactions`).catch(() => ({ items: [], total: 0 })),
+      apiRequest<ListInsightsResponse>(`/projects/${projectId}/insights`).catch(() => ({ items: [], total: 0 })),
+      apiRequest<GetLatestReviewResponse>(`/projects/${projectId}/review/latest`).catch(() => ({ reviewReport: null })),
+      apiRequest<GetLatestEvolutionResponse>(`/projects/${projectId}/evolution/latest`).catch(() => ({ evolutionPlan: null })),
+      apiRequest<ListPatchExecutionsResponse>(`/projects/${projectId}/patch-executions`).catch(() => ({ items: [], total: 0 })),
+    ]);
+    updateProject(projectId, (project) => ({
+      ...project,
+      interactionEvents: interactionsResponse.items,
+      productInsights: insightsResponse.items,
+      latestReviewReport: reviewResponse.reviewReport,
+      latestEvolutionPlan: evolutionResponse.evolutionPlan,
+      patchExecutions: patchExecutionsResponse.items,
+    }));
+  };
+
+  const submitFeedback = async () => {
+    if (!currentProject) return;
+    const content = feedbackDraft.trim();
+    if (!content) {
+      setFeedbackError("请输入用户显式反馈内容");
+      return;
+    }
+    setFeedbackActionLoading("capture");
+    setFeedbackError(null);
+    try {
+      const targetType = previewTab === "prototype" ? "prototype" : previewTab === "state" ? "state" : "prd";
+      const response = await apiRequest<{ event: ProductInteractionEventItem }>("/interactions", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          type: "feedback",
+          targetType,
+          targetId:
+            targetType === "prototype"
+              ? currentProject.prototypeArtifactId
+              : targetType === "prd"
+                ? currentProject.prdDocumentId
+                : currentProject.productDesignState?.id,
+          content,
+          metadata: {
+            source: "workspace_feedback_panel",
+            previewTab,
+            selectedRegion,
+          },
+        }),
+      });
+      updateProject(currentProject.id, (project) => ({
+        ...project,
+        interactionEvents: [response.event, ...project.interactionEvents],
+        summary: "已记录用户显式反馈",
+        updatedAt: "刚刚",
+      }));
+      setFeedbackDraft("");
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : "反馈记录失败");
+    } finally {
+      setFeedbackActionLoading(null);
+    }
+  };
+
+  const analyzeFeedback = async () => {
+    if (!currentProject) return;
+    setFeedbackActionLoading("analyze");
+    setFeedbackError(null);
+    try {
+      const response = await apiRequest<{ items: ProductInsightItem[] }>("/feedback/analyze", {
+        method: "POST",
+        body: JSON.stringify({ projectId: currentProject.id }),
+      });
+      updateProject(currentProject.id, (project) => ({
+        ...project,
+        productInsights: [...response.items, ...project.productInsights],
+        summary: "反馈语义分析已完成",
+        updatedAt: "刚刚",
+      }));
+      await refreshFeedbackLoop(currentProject.id);
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : "反馈分析失败");
+    } finally {
+      setFeedbackActionLoading(null);
+    }
+  };
+
+  const runProductReview = async () => {
+    if (!currentProject) return;
+    setFeedbackActionLoading("review");
+    setFeedbackError(null);
+    try {
+      const response = await apiRequest<{ reviewReport: ProductReviewReportItem }>("/review/run", {
+        method: "POST",
+        body: JSON.stringify({ projectId: currentProject.id }),
+      });
+      updateProject(currentProject.id, (project) => ({
+        ...project,
+        latestReviewReport: response.reviewReport,
+        summary: "多 Agent 产品评审已完成",
+        updatedAt: "刚刚",
+      }));
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : "多 Agent 评审失败");
+    } finally {
+      setFeedbackActionLoading(null);
+    }
+  };
+
+  const runEvolutionPlan = async () => {
+    if (!currentProject) return;
+    setFeedbackActionLoading("evolution");
+    setFeedbackError(null);
+    try {
+      const response = await apiRequest<{ evolutionPlan: EvolutionPlanItem }>("/evolution/run", {
+        method: "POST",
+        body: JSON.stringify({ projectId: currentProject.id }),
+      });
+      updateProject(currentProject.id, (project) => ({
+        ...project,
+        latestEvolutionPlan: response.evolutionPlan,
+        summary: "EvolutionPlan 已生成，等待执行",
+        updatedAt: "刚刚",
+      }));
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : "进化方案生成失败");
+    } finally {
+      setFeedbackActionLoading(null);
+    }
+  };
+
+  const applyEvolutionPlan = async () => {
+    if (!currentProject?.latestEvolutionPlan) return;
+    setFeedbackActionLoading("apply");
+    setFeedbackError(null);
+    try {
+      const response = await apiRequest<{
+        success: boolean;
+        patchExecution: EvolutionPatchExecutionItem;
+        productDesignState?: unknown;
+        prdDocument?: unknown;
+        prototypeArtifact?: unknown;
+        qaReport?: unknown;
+        runId?: string;
+        errorMessage?: string;
+      }>("/patch/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          evolutionPlanId: currentProject.latestEvolutionPlan.id,
+          conversationId: currentProject.conversationId,
+        }),
+      });
+      if (!response.success) {
+        throw new Error(response.errorMessage || "进化 Patch 执行失败");
+      }
+      const previewPatch = extractPreviewFromPayload({
+        productDesignState: response.productDesignState,
+        prdDocument: response.prdDocument,
+        prototypeArtifact: response.prototypeArtifact,
+        qaReport: response.qaReport,
+      });
+      updateProject(currentProject.id, (project) =>
+        mergePreviewPatch(
+          {
+            ...project,
+            summary: "进化 Patch 已执行并重新生成",
+            updatedAt: "刚刚",
+            patchExecutions: [response.patchExecution, ...project.patchExecutions],
+          },
+          previewPatch,
+        ),
+      );
+      setPreviewTab("qa");
+      if (response.runId) startRunStream(currentProject.id, response.runId);
+      window.setTimeout(() => void loadProjectDetail(currentProject.id), 300);
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : "进化 Patch 执行失败");
+    } finally {
+      setFeedbackActionLoading(null);
     }
   };
 
@@ -2319,6 +2647,9 @@ export function WorkspaceClient() {
             patchConfirmationDrafts={patchConfirmationDrafts}
             qaActionLoading={qaActionLoading}
             versionActionLoading={versionActionLoading}
+            feedbackDraft={feedbackDraft}
+            feedbackActionLoading={feedbackActionLoading}
+            feedbackError={feedbackError}
             onPreviewTabChange={setPreviewTab}
             onDeviceModeChange={setDeviceMode}
             onLocalEditToggle={() => setLocalEditEnabled((value) => !value)}
@@ -2335,6 +2666,12 @@ export function WorkspaceClient() {
             onRunQa={runManualQa}
             onRollbackToVersion={rollbackToStateVersion}
             onInlineEdit={openInlineAssistant}
+            onFeedbackDraftChange={setFeedbackDraft}
+            onSubmitFeedback={submitFeedback}
+            onAnalyzeFeedback={analyzeFeedback}
+            onRunProductReview={runProductReview}
+            onRunEvolutionPlan={runEvolutionPlan}
+            onApplyEvolutionPlan={applyEvolutionPlan}
           />
         </div>
       </main>
@@ -3174,6 +3511,9 @@ function PreviewPanel({
   patchConfirmationDrafts,
   qaActionLoading,
   versionActionLoading,
+  feedbackDraft,
+  feedbackActionLoading,
+  feedbackError,
   onPreviewTabChange,
   onDeviceModeChange,
   onLocalEditToggle,
@@ -3188,6 +3528,12 @@ function PreviewPanel({
   onRunQa,
   onRollbackToVersion,
   onInlineEdit,
+  onFeedbackDraftChange,
+  onSubmitFeedback,
+  onAnalyzeFeedback,
+  onRunProductReview,
+  onRunEvolutionPlan,
+  onApplyEvolutionPlan,
 }: {
   project: WorkspaceProject | null;
   previewTab: PreviewTab;
@@ -3203,6 +3549,9 @@ function PreviewPanel({
   patchConfirmationDrafts: Record<string, string>;
   qaActionLoading: boolean;
   versionActionLoading: boolean;
+  feedbackDraft: string;
+  feedbackActionLoading: "capture" | "analyze" | "review" | "evolution" | "apply" | null;
+  feedbackError: string | null;
   onPreviewTabChange: (tab: PreviewTab) => void;
   onDeviceModeChange: (mode: DeviceMode) => void;
   onLocalEditToggle: () => void;
@@ -3217,6 +3566,12 @@ function PreviewPanel({
   onRunQa: () => void;
   onRollbackToVersion: (version: number) => void;
   onInlineEdit: (draft: InlineAssistantDraft) => void;
+  onFeedbackDraftChange: (value: string) => void;
+  onSubmitFeedback: () => void;
+  onAnalyzeFeedback: () => void;
+  onRunProductReview: () => void;
+  onRunEvolutionPlan: () => void;
+  onApplyEvolutionPlan: () => void;
 }) {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-slate-100">
@@ -3309,6 +3664,20 @@ function PreviewPanel({
           onRollbackToVersion={onRollbackToVersion}
         />
       ) : null}
+      {previewTab === "feedback" ? (
+        <FeedbackLoopPanel
+          project={project}
+          feedbackDraft={feedbackDraft}
+          loading={feedbackActionLoading}
+          error={feedbackError}
+          onFeedbackDraftChange={onFeedbackDraftChange}
+          onSubmitFeedback={onSubmitFeedback}
+          onAnalyzeFeedback={onAnalyzeFeedback}
+          onRunProductReview={onRunProductReview}
+          onRunEvolutionPlan={onRunEvolutionPlan}
+          onApplyEvolutionPlan={onApplyEvolutionPlan}
+        />
+      ) : null}
       {patchHistoryOpen ? (
         <PatchHistoryPanel
           items={patchHistoryItems}
@@ -3339,6 +3708,7 @@ function PreviewTabs({
     { key: "prototype", label: "原型", icon: Code2 },
     { key: "qa", label: "QA", icon: ClipboardCheck },
     { key: "state", label: "状态", icon: Database },
+    { key: "feedback", label: "反馈", icon: GitCompare },
   ];
 
   return (
@@ -4098,6 +4468,297 @@ function timelineTypeLabel(type: VersionTimelineItem["type"]) {
     rollback: "回滚",
   };
   return labels[type];
+}
+
+function FeedbackLoopPanel({
+  project,
+  feedbackDraft,
+  loading,
+  error,
+  onFeedbackDraftChange,
+  onSubmitFeedback,
+  onAnalyzeFeedback,
+  onRunProductReview,
+  onRunEvolutionPlan,
+  onApplyEvolutionPlan,
+}: {
+  project: WorkspaceProject | null;
+  feedbackDraft: string;
+  loading: "capture" | "analyze" | "review" | "evolution" | "apply" | null;
+  error: string | null;
+  onFeedbackDraftChange: (value: string) => void;
+  onSubmitFeedback: () => void;
+  onAnalyzeFeedback: () => void;
+  onRunProductReview: () => void;
+  onRunEvolutionPlan: () => void;
+  onApplyEvolutionPlan: () => void;
+}) {
+  const latestPlan = project?.latestEvolutionPlan ?? null;
+  const latestReview = project?.latestReviewReport ?? null;
+  const insights = project?.productInsights ?? [];
+  const events = project?.interactionEvents ?? [];
+  const executions = project?.patchExecutions ?? [];
+  const canAnalyze = Boolean(project && events.length);
+  const canReview = Boolean(project && insights.length);
+  const canEvolution = Boolean(project && insights.length && latestReview);
+  const canApply = Boolean(project && latestPlan && !latestPlan.executedAt);
+
+  if (!project) {
+    return (
+      <PreviewEmpty
+        icon={GitCompare}
+        title="暂无项目"
+        description="选择或新建项目后，可以从用户显式反馈生成产品进化方案。"
+      />
+    );
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-[980px] space-y-4">
+        {error ? (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm leading-6 text-rose-700">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+              <MessageSquare className="h-4 w-4" />
+              用户显式反馈
+            </div>
+            <textarea
+              value={feedbackDraft}
+              onChange={(event) => onFeedbackDraftChange(event.target.value)}
+              rows={4}
+              placeholder="记录用户主动表达的问题、建议、选区反馈或原型体验反馈"
+              className="mt-3 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-6 text-gray-900 outline-none focus:border-gray-900 focus:bg-white focus:ring-2 focus:ring-gray-900/10"
+            />
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-500">
+                仅记录主动反馈，不采集点击率、漏斗或行为路径。
+              </span>
+              <button
+                type="button"
+                onClick={onSubmitFeedback}
+                disabled={loading === "capture"}
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-gray-950 px-3 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
+              >
+                {loading === "capture" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                记录反馈
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <FeedbackMetric label="反馈" value={events.length} />
+            <FeedbackMetric label="洞察" value={insights.length} />
+            <FeedbackMetric label="评审" value={latestReview ? 1 : 0} />
+            <FeedbackMetric label="执行" value={executions.length} />
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-4">
+          <WorkflowAction
+            title="语义分析"
+            description="将显式反馈转为 ProductInsight"
+            icon={Search}
+            disabled={!canAnalyze}
+            loading={loading === "analyze"}
+            onClick={onAnalyzeFeedback}
+          />
+          <WorkflowAction
+            title="多 Agent 评审"
+            description="UX、商业、风险、清晰度、增长聚合"
+            icon={ClipboardCheck}
+            disabled={!canReview}
+            loading={loading === "review"}
+            onClick={onRunProductReview}
+          />
+          <WorkflowAction
+            title="生成 EvolutionPlan"
+            description="只生成进化方案，不执行修改"
+            icon={ListTree}
+            disabled={!canEvolution}
+            loading={loading === "evolution"}
+            onClick={onRunEvolutionPlan}
+          />
+          <WorkflowAction
+            title="执行 Patch"
+            description="只通过 ProductDesignState 修改"
+            icon={GitCompare}
+            disabled={!canApply}
+            loading={loading === "apply"}
+            onClick={onApplyEvolutionPlan}
+          />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <FeedbackSection title="ProductInsight" icon={Sparkles}>
+            {insights.length ? (
+              <div className="space-y-2">
+                {insights.slice(0, 6).map((insight) => (
+                  <div key={insight.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-gray-950">{insight.issueType}</span>
+                      <span className={clsx("rounded-md border px-2 py-0.5 text-xs", severityClassName(insight.severity))}>
+                        {insight.severity}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">{insight.rootCause}</p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{insight.suggestion}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyMini text="暂无洞察，先记录反馈并运行语义分析。" />
+            )}
+          </FeedbackSection>
+
+          <FeedbackSection title="Review Report" icon={ClipboardCheck}>
+            {latestReview ? (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-gray-950">一致性评分</span>
+                    <span className="text-lg font-semibold text-gray-950">{Math.round(latestReview.consensusScore * 100)}%</span>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-gray-200">
+                    <div
+                      className="h-2 rounded-full bg-emerald-500"
+                      style={{ width: `${Math.max(Math.min(latestReview.consensusScore * 100, 100), 8)}%` }}
+                    />
+                  </div>
+                </div>
+                {latestReview.improvements.slice(0, 4).map((item) => (
+                  <div key={item} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-600">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyMini text="暂无评审报告，先生成 ProductInsight。" />
+            )}
+          </FeedbackSection>
+        </div>
+
+        <FeedbackSection title="EvolutionPlan" icon={ListTree}>
+          {latestPlan ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={clsx("rounded-md border px-2 py-1 text-xs font-medium", priorityClassName(latestPlan.priority))}>
+                  {latestPlan.priority}
+                </span>
+                {latestPlan.executedAt ? (
+                  <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                    已执行
+                  </span>
+                ) : null}
+                <span className="text-xs text-gray-400">{formatRelativeTime(latestPlan.createdAt)}</span>
+              </div>
+              <p className="text-sm leading-6 text-gray-700">{latestPlan.reason}</p>
+              <div className="grid gap-2 md:grid-cols-2">
+                {latestPlan.patchOperations.map((operation, index) => (
+                  <div key={`${operation.targetPath}-${index}`} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="font-medium text-gray-900">{operation.type}</span>
+                      <span className="truncate text-gray-500">{operation.targetPath}</span>
+                    </div>
+                    {operation.reason ? (
+                      <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{operation.reason}</div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <EmptyMini text="暂无进化方案，完成评审后生成 EvolutionPlan。" />
+          )}
+        </FeedbackSection>
+      </div>
+    </div>
+  );
+}
+
+function FeedbackMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className="mt-1 text-2xl font-semibold text-gray-950">{value}</div>
+    </div>
+  );
+}
+
+function WorkflowAction({
+  title,
+  description,
+  icon: Icon,
+  disabled,
+  loading,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  icon: typeof FileText;
+  disabled: boolean;
+  loading: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || loading}
+      className="rounded-lg border border-gray-200 bg-white p-3 text-left shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+        {loading ? <Loader2 className="h-4 w-4 animate-spin text-sky-600" /> : <Icon className="h-4 w-4 text-gray-600" />}
+        {title}
+      </div>
+      <div className="mt-1 text-xs leading-5 text-gray-500">{description}</div>
+    </button>
+  );
+}
+
+function FeedbackSection({
+  title,
+  icon: Icon,
+  children,
+}: {
+  title: string;
+  icon: typeof FileText;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-950">
+        <Icon className="h-4 w-4" />
+        {title}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function EmptyMini({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-8 text-center text-sm text-gray-500">
+      {text}
+    </div>
+  );
+}
+
+function severityClassName(severity: ProductInsightItem["severity"]) {
+  if (severity === "high") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (severity === "medium") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-gray-200 bg-white text-gray-600";
+}
+
+function priorityClassName(priority: EvolutionPlanItem["priority"]) {
+  if (priority === "high") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (priority === "medium") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-gray-200 bg-gray-50 text-gray-700";
 }
 
 function StateList({
