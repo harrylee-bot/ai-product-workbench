@@ -763,11 +763,11 @@ export function WorkspaceClient() {
 
   return (
     <ProtectedRoute>
-      <main className="h-screen overflow-hidden bg-slate-50 text-gray-950">
+      <main className="fixed inset-0 grid grid-rows-[56px_minmax(0,1fr)] overflow-hidden bg-slate-50 text-gray-950">
         <WorkspaceTopBar currentProject={currentProject} isRunning={isRunning} />
         <div
           className={clsx(
-            "grid h-[calc(100vh-56px)] overflow-x-auto transition-[grid-template-columns] duration-200",
+            "grid min-h-0 overflow-x-auto overflow-y-hidden transition-[grid-template-columns] duration-200",
             sidebarCollapsed
               ? "min-w-[1044px] grid-cols-[64px_minmax(460px,520px)_minmax(520px,1fr)]"
               : "min-w-[1260px] grid-cols-[280px_minmax(460px,520px)_minmax(520px,1fr)]",
@@ -1054,7 +1054,7 @@ function ChatPanel({
   const showWelcome = messages.length === 0;
 
   return (
-    <section className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-gray-200 bg-slate-50">
+    <section className="grid h-full min-h-0 min-w-0 grid-rows-[48px_minmax(0,1fr)_auto] overflow-hidden border-r border-gray-200 bg-slate-50">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
           <MessageSquare className="h-4 w-4" />
@@ -1063,7 +1063,7 @@ function ChatPanel({
         <span className="text-xs text-gray-500">{isRunning ? "生成中..." : "可继续输入"}</span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[190px] pt-4">
+      <div className="min-h-0 overflow-y-auto px-4 py-4">
         {showWelcome ? (
           <WelcomeState onPromptClick={onPromptClick} />
         ) : (
@@ -1240,6 +1240,16 @@ function ChatComposer({
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "0px";
+    const nextHeight = Math.min(textarea.scrollHeight, 150);
+    textarea.style.height = `${Math.max(nextHeight, 32)}px`;
+  }, [value]);
 
   useEffect(() => {
     if (!toolsOpen) return;
@@ -1268,7 +1278,7 @@ function ChatComposer({
   ];
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-20 shrink-0 border-t border-gray-200 bg-slate-50/95 p-3 shadow-[0_-10px_24px_rgba(15,23,42,0.06)] backdrop-blur">
+    <div className="z-20 shrink-0 border-t border-gray-200 bg-slate-50/95 p-3 shadow-[0_-10px_24px_rgba(15,23,42,0.06)] backdrop-blur">
       {selectedRegion ? (
         <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
           <div className="min-w-0 text-xs text-sky-800">
@@ -1285,10 +1295,12 @@ function ChatComposer({
           </button>
         </div>
       ) : null}
-      <div className="rounded-[16px] border border-gray-200 bg-white p-3 shadow-sm focus-within:border-gray-300 focus-within:ring-2 focus-within:ring-gray-900/10">
+      <div className="rounded-[16px] border border-gray-200 bg-white px-3 py-2.5 shadow-sm focus-within:border-gray-300 focus-within:ring-2 focus-within:ring-gray-900/10">
         <textarea
+          ref={textareaRef}
           value={value}
           disabled={disabled}
+          rows={1}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -1297,9 +1309,9 @@ function ChatComposer({
             }
           }}
           placeholder="描述你的产品想法，例如：帮我做一个签到活动需求和原型"
-          className="max-h-[150px] min-h-[78px] w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 disabled:text-gray-500"
+          className="max-h-[150px] min-h-8 w-full resize-none overflow-y-auto border-0 bg-transparent px-1 py-1 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400 disabled:text-gray-500"
         />
-        <div className="mt-2 flex items-center justify-between gap-3">
+        <div className="mt-1.5 flex items-center justify-between gap-3">
           <div ref={toolsRef} className="relative">
             {toolsOpen ? (
               <div className="absolute bottom-11 left-0 z-30 w-44 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl">
@@ -1338,7 +1350,7 @@ function ChatComposer({
             type="button"
             onClick={onSend}
             disabled={!value.trim() || disabled}
-            className="inline-flex h-10 items-center gap-2 rounded-[12px] bg-gray-950 px-4 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
+            className="inline-flex h-9 items-center gap-2 rounded-[12px] bg-gray-950 px-3.5 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
           >
             {disabled ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             {disabled ? "生成中..." : "发送"}
