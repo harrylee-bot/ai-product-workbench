@@ -28,7 +28,7 @@
 - 二期 19：Product Memory System 新增 ProductMemory，Patch 执行后记录 EvolutionPlan、PatchResult、before/after ProductDesignState 快照、ProductInsight 与多 Agent 报告；提供记忆列表和时间线查询，工作台“反馈”Tab 展示产品记忆，不参与决策、不生成 Patch、不修改 ProductDesignState。
 - 二期 20：Evolution Orchestrator 新增 OrchestrationRun，按 Module15 → Module19 顺序调度语义分析、多 Agent 评审、进化方案、Patch 执行和产品记忆保存；支持 manual/event/batch/patch 触发和最多 5 轮循环执行，工作台“反馈”Tab 可一键运行总调度并查看每个模块状态；调度器只记录状态和结果，不做产品决策、不直接修改 ProductDesignState、不直接生成 Patch。
 - 三期 0A：PRD Editing Experience System 将 PRD 预览升级为可交互对象，支持段落双击原地编辑、文本选区 floating editor、rewrite / expand / simplify / restructure / diff AI 编辑动作；所有编辑通过 `POST /api/patch/draft` 或 PRD 编辑 API 生成 `needs_confirmation` Patch 候选，并持久化 ProductInteractionEvent，不直接修改 PRD 或 ProductDesignState。
-- 三期 0B：Prototype Interaction System 将原型 Tab 升级为当前页面内的交互编辑器，支持 PrototypeState 读取、Component Tree、组件选择、框选编辑、SelectionEngine、FloatingToolbar、AI UI 建议、PatchDraft Panel 和 PatchPreviewModal；`POST /api/prototype/get` 返回由 PrototypeSpec/Artifact 派生的 PrototypeState，`POST /api/prototype/update`、`POST /api/prototype/edit`、`POST /api/prototype/restructure`、`POST /api/prototype/flow-update` 只生成 `needs_confirmation` Patch 候选，`POST /api/patch/preview` 只读 PatchPlan 预览，确认后才会通过 PatchService 修改 ProductDesignState 并重新生成 PRD/Prototype/QA。
+- 三期 0B：Prototype Interaction System 将原型 Tab 升级为当前页面内的交互编辑器，支持 PrototypeState 读取、Component Tree、组件选择、框选编辑、SelectionEngine、FloatingToolbar、AI UI 建议、PatchDraft Panel 和 PatchPreviewModal；刷新页面后会通过 `POST /api/prototype/get` 水合 PrototypeSpec/PrototypeState，框选区域不会回退到第一个组件，PatchPreview 优先读取当前原型编辑生成的 PatchRecord；`POST /api/prototype/get` 返回由 PrototypeSpec/Artifact 派生的 PrototypeState，`POST /api/prototype/update`、`POST /api/prototype/edit`、`POST /api/prototype/restructure`、`POST /api/prototype/flow-update` 只生成 `needs_confirmation` Patch 候选，`POST /api/patch/preview` 只读 PatchPlan 预览，确认后才会通过 PatchService 修改 ProductDesignState 并重新生成 PRD/Prototype/QA。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
@@ -305,6 +305,7 @@ bash deploy/server-deploy.sh
 - PrototypeSpec 必须关联 ProductDesignState id/version；PrototypeArtifact 必须由 PrototypeSpec 渲染生成，单文件 HTML 入库前执行安全扫描，禁止远程脚本、eval、document.cookie、敏感 localStorage、window.parent、iframe 和真实网络请求。
 - 原型预览接口返回 `text/html`，前端通过 `<iframe sandbox="allow-scripts">` 展示，不允许表单、弹窗或顶层导航权限。
 - PatchRecord 保存 selectedRegion、PatchPlan、operations、before/after ProductDesignState 版本、受影响 PRD/Prototype 产物和执行状态；Patch Agent 只能输出 PatchPlan，PatchOperation 只能作用于 ProductDesignState，Patch 后必须重新生成 PRD/Prototype 并执行 QA，失败时恢复到 Patch 前的 State 与项目产物指针。
+- `patch_applied` 事件必须归类为 `targetType: "state"`，因为 Patch 执行的直接目标是 ProductDesignState；PRD 与 Prototype 只能作为后续重新生成的派生产物。
 - QAReport 保存 checkTypes、issues、blocking/major/minor/info 计数、trigger、关联 ProductDesignState/PRD/Prototype/Patch/Rollback；QA 只做一致性校验和报告持久化，不直接修改 ProductDesignState、PRD 或 HTML。
 - 回滚只支持 ProductDesignState 版本回滚；系统会以历史快照创建新的 ProductDesignState 版本，再重新生成 PRD、PrototypeSpec、HTML 原型并执行 QA，RollbackRecord 记录回滚前后版本、产物指针、runId、状态和失败原因。
 - 知识库只检索 `active` 知识；Knowledge Agent 将命中的 strong_rule、default_rule、reference_case、design_pattern、prd_writing_rule、prototype_rule、business_concept 提供给后续 Agent，Product Designer 采用后写入 ProductDesignState.knowledgeRefs。

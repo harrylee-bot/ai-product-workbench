@@ -1196,6 +1196,15 @@ function extractPrototypeSpec(value: unknown) {
   return record?.prototypeSpec ?? null;
 }
 
+function extractPrototypeStateSpec(response: PrototypeStateResponse) {
+  return response.prototypeSpec ?? asRecord(response.prototypeState)?.root ?? null;
+}
+
+function extractPatchRecordId(value: unknown) {
+  const record = asRecord(value);
+  return asText(record?.id) || asText(record?.patchId) || undefined;
+}
+
 function getFirstPrototypeTarget(specValue: unknown) {
   const spec = asRecord(specValue);
   const pages = Array.isArray(spec?.pages) ? spec.pages : [];
@@ -1302,8 +1311,9 @@ function prototypeRegionFromComponent(
 function prototypeRegionFromBox(
   project: WorkspaceProject | null,
   bbox: { x: number; y: number; width: number; height: number },
+  specValue: unknown = project?.prototypeSpec,
 ): SelectedRegion {
-  const target = getFirstPrototypeTarget(project?.prototypeSpec);
+  const target = getFirstPrototypeTarget(specValue);
   return {
     type: "prototype",
     targetId: project?.prototypeArtifactId,
@@ -1316,6 +1326,31 @@ function prototypeRegionFromBox(
     bbox,
     boundingBox: bbox,
   };
+}
+
+function isPrototypePatchForRegion(item: PatchRecordItem, region: SelectedRegion) {
+  const selectedRegion = item.selectedRegion;
+  if (!selectedRegion || selectedRegion.type !== "prototype" || region.type !== "prototype") return false;
+  if (selectedRegion.componentId && region.componentId) {
+    return selectedRegion.componentId === region.componentId
+      && (!selectedRegion.pageId || !region.pageId || selectedRegion.pageId === region.pageId);
+  }
+
+  const selectedBox = selectedRegion.bbox ?? selectedRegion.boundingBox;
+  const currentBox = region.bbox ?? region.boundingBox;
+  if (selectedBox && currentBox) {
+    return Math.round(selectedBox.x) === Math.round(currentBox.x)
+      && Math.round(selectedBox.y) === Math.round(currentBox.y)
+      && Math.round(selectedBox.width) === Math.round(currentBox.width)
+      && Math.round(selectedBox.height) === Math.round(currentBox.height);
+  }
+
+  return Boolean(
+    selectedRegion.label
+      && region.label
+      && selectedRegion.label === region.label
+      && (!selectedRegion.artifactId || !region.artifactId || selectedRegion.artifactId === region.artifactId),
+  );
 }
 
 function mapQaReport(value: unknown): { status: QaStatus; issues: QaIssue[] } | null {
@@ -1527,6 +1562,7 @@ export function WorkspaceClient() {
   const [inlineAssistantDraft, setInlineAssistantDraft] = useState<InlineAssistantDraft | null>(null);
   const [inlineAssistantInstruction, setInlineAssistantInstruction] = useState("");
   const [inlineAssistantLoading, setInlineAssistantLoading] = useState(false);
+  const [currentPrototypePatchId, setCurrentPrototypePatchId] = useState<string | null>(null);
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>(createAgentSteps);
   const [isRunning, setIsRunning] = useState(false);
   const timersRef = useRef<number[]>([]);
@@ -1754,6 +1790,10 @@ export function WorkspaceClient() {
   useEffect(() => {
     void loadProjects();
   }, []);
+
+  useEffect(() => {
+    setCurrentPrototypePatchId(null);
+  }, [currentProjectId]);
 
   useEffect(() => {
     if (!currentProjectId || !patchHistoryOpen) return;
@@ -2162,6 +2202,7 @@ export function WorkspaceClient() {
 
   const openInlineAssistant = (draft: InlineAssistantDraft) => {
     setSelectedRegion(draft.selectedRegion);
+    if (draft.source === "prototype") setCurrentPrototypePatchId(null);
     setInlineAssistantDraft(draft);
     setInlineAssistantInstruction(draft.instruction);
   };
@@ -2179,24 +2220,31 @@ export function WorkspaceClient() {
     }
     setInlineAssistantLoading(true);
     setWorkspaceError(null);
+    const submittedDraft = inlineAssistantDraft;
     try {
-      const response = await apiRequest<HandleMessageResponse>(inlineAssistantDraft.endpoint, {
+      const response = await apiRequest<HandleMessageResponse>(submittedDraft.endpoint, {
         method: "POST",
         body: JSON.stringify({
           projectId: currentProject.id,
           conversationId: currentProject.conversationId,
-          selectedRegion: inlineAssistantDraft.selectedRegion,
-          selectedText: inlineAssistantDraft.selectedText,
-          replacementText: inlineAssistantDraft.replacementText,
-          diffBaseText: inlineAssistantDraft.diffBaseText,
-          diffTargetText: inlineAssistantDraft.diffTargetText,
-          source: inlineAssistantDraft.endpoint === "/patch/draft" && inlineAssistantDraft.source === "prd" ? "prd_edit" : undefined,
-          action: inlineAssistantDraft.action,
+          selectedRegion: submittedDraft.selectedRegion,
+          selectedText: submittedDraft.selectedText,
+          replacementText: submittedDraft.replacementText,
+          diffBaseText: submittedDraft.diffBaseText,
+          diffTargetText: submittedDraft.diffTargetText,
+          source: submittedDraft.endpoint === "/patch/draft" && submittedDraft.source === "prd" ? "prd_edit" : undefined,
+          action: submittedDraft.action,
           instruction,
         }),
       });
       const savedUserMessage = mapMessage(response.userMessage);
       const savedAssistantMessage = mapMessage(response.assistantMessage);
+      if (submittedDraft.source === "prototype") {
+        const result = asRecord(response.result);
+        setCurrentPrototypePatchId(
+          extractPatchRecordId(response.patchRecord) ?? extractPatchRecordId(result?.patchRecord) ?? null,
+        );
+      }
       updateProject(currentProject.id, (project) => ({
         ...project,
         status: "clarifying",
@@ -2204,7 +2252,7 @@ export function WorkspaceClient() {
         updatedAt: "刚刚",
         messages: [
           ...project.messages,
-          ...(savedUserMessage ? [{ ...savedUserMessage, selectedRegion: inlineAssistantDraft.selectedRegion }] : []),
+          ...(savedUserMessage ? [{ ...savedUserMessage, selectedRegion: submittedDraft.selectedRegion }] : []),
           ...(savedAssistantMessage ? [savedAssistantMessage] : []),
         ],
       }));
@@ -2986,6 +3034,7 @@ export function WorkspaceClient() {
             deviceMode={deviceMode}
             localEditEnabled={localEditEnabled}
             selectedRegion={selectedRegion}
+            currentPrototypePatchId={currentPrototypePatchId}
             isRunning={isRunning}
             patchHistoryItems={patchHistoryItems}
             patchHistoryOpen={patchHistoryOpen}
@@ -3851,6 +3900,7 @@ function PreviewPanel({
   deviceMode,
   localEditEnabled,
   selectedRegion,
+  currentPrototypePatchId,
   isRunning,
   patchHistoryItems,
   patchHistoryOpen,
@@ -3890,6 +3940,7 @@ function PreviewPanel({
   deviceMode: DeviceMode;
   localEditEnabled: boolean;
   selectedRegion: SelectedRegion | null;
+  currentPrototypePatchId: string | null;
   isRunning: boolean;
   patchHistoryItems: PatchRecordItem[];
   patchHistoryOpen: boolean;
@@ -4003,6 +4054,7 @@ function PreviewPanel({
           project={project}
           deviceMode={deviceMode}
           localEditEnabled={localEditEnabled}
+          currentPrototypePatchId={currentPrototypePatchId}
           onSelectPrototypeRegion={onSelectPrototypeRegion}
           onOpenPatchHistory={() => {
             if (!patchHistoryOpen) onPatchHistoryToggle();
@@ -4711,6 +4763,7 @@ function PrototypePreview({
   project,
   deviceMode,
   localEditEnabled,
+  currentPrototypePatchId,
   onSelectPrototypeRegion,
   onOpenPatchHistory,
   onInlineEdit,
@@ -4718,6 +4771,7 @@ function PrototypePreview({
   project: WorkspaceProject | null;
   deviceMode: DeviceMode;
   localEditEnabled: boolean;
+  currentPrototypePatchId: string | null;
   onSelectPrototypeRegion: (region?: SelectedRegion) => void;
   onOpenPatchHistory: () => void;
   onInlineEdit: (draft: InlineAssistantDraft) => void;
@@ -4729,21 +4783,27 @@ function PrototypePreview({
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
   const [multiSelectedIds, setMultiSelectedIds] = useState<string[]>([]);
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [selectedBoxRegion, setSelectedBoxRegion] = useState<SelectedRegion | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [patchPreview, setPatchPreview] = useState<PatchPreviewItem | null>(null);
   const [prototypeError, setPrototypeError] = useState<string | null>(null);
   const [prototypeLoading, setPrototypeLoading] = useState<"state" | "event" | "suggest" | "preview" | null>(null);
-  const components = useMemo(() => getPrototypeComponents(project?.prototypeSpec), [project?.prototypeSpec]);
-  const selectedComponent = components.find((item) => item.id === selectedComponentId) ?? components[0] ?? null;
+  const [hydratedPrototypeSpec, setHydratedPrototypeSpec] = useState<unknown>(null);
+  const effectivePrototypeSpec = project?.prototypeSpec ?? hydratedPrototypeSpec;
+  const components = useMemo(() => getPrototypeComponents(effectivePrototypeSpec), [effectivePrototypeSpec]);
+  const selectedComponent = components.find((item) => item.id === selectedComponentId) ?? null;
+  const activeComponent = selectedBoxRegion ? null : selectedComponent ?? components[0] ?? null;
 
   useEffect(() => {
     setSelectedComponentId(null);
     setMultiSelectedIds([]);
     setSelectionBox(null);
+    setSelectedBoxRegion(null);
     setPatchPreview(null);
     setMachineState("view");
     setPrototypeStateVersion(undefined);
     setPrototypeError(null);
+    setHydratedPrototypeSpec(null);
   }, [project?.id, project?.prototypeArtifactId]);
 
   useEffect(() => {
@@ -4760,6 +4820,7 @@ function PrototypePreview({
         if (typeof response.prototypeState?.version === "number") {
           setPrototypeStateVersion(response.prototypeState.version);
         }
+        setHydratedPrototypeSpec(extractPrototypeStateSpec(response));
       })
       .catch((error) => setPrototypeError(error instanceof Error ? error.message : "PrototypeState 加载失败"))
       .finally(() => setPrototypeLoading((value) => (value === "state" ? null : value)));
@@ -4777,8 +4838,8 @@ function PrototypePreview({
     return <PreviewError title="原型生成失败" description="可以回到对话区补充页面结构或重新生成。" />;
   }
 
-  const fallbackTarget = getFirstPrototypeTarget(project?.prototypeSpec);
-  const target = selectedComponent ?? {
+  const fallbackTarget = getFirstPrototypeTarget(effectivePrototypeSpec);
+  const target = activeComponent ?? {
     id: fallbackTarget.componentId ?? "prototype-root",
     pageId: fallbackTarget.pageId,
     name: "主要区域",
@@ -4787,7 +4848,13 @@ function PrototypePreview({
     sourcePaths: fallbackTarget.sourcePaths,
     depth: 0,
   };
-  const selectedPrototypeRegion = prototypeRegionFromComponent(project, target);
+  const selectedPrototypeRegion = selectedBoxRegion ?? prototypeRegionFromComponent(project, target);
+  const actionTarget = selectedBoxRegion
+    ? {
+        name: selectedBoxRegion.label ?? "框选区域",
+        pathLabel: selectedBoxRegion.label ?? "框选区域",
+      }
+    : target;
 
   const recordPrototypeInteraction = async (
     type: "selection" | "comment" | "feedback" | "patch",
@@ -4842,6 +4909,7 @@ function PrototypePreview({
     setSelectedComponentId(component.id);
     setMultiSelectedIds([component.id]);
     setSelectionBox(null);
+    setSelectedBoxRegion(null);
     setMachineState("selected");
     void recordPrototypeInteraction("selection", region, `选择原型组件：${component.pathLabel}`, {
       source: "prototype_interaction_system",
@@ -4852,10 +4920,11 @@ function PrototypePreview({
   };
 
   const selectBox = (box: { x: number; y: number; width: number; height: number }) => {
-    const region = prototypeRegionFromBox(project, box);
+    const region = prototypeRegionFromBox(project, box, effectivePrototypeSpec);
     setSelectionBox(box);
+    setSelectedBoxRegion(region);
     setSelectedComponentId(null);
-    setMultiSelectedIds(components.slice(0, Math.min(3, components.length)).map((item) => item.id));
+    setMultiSelectedIds([]);
     setMachineState("selected");
     void recordPrototypeInteraction("selection", region, "框选原型区域", {
       source: "prototype_interaction_system",
@@ -4897,12 +4966,15 @@ function PrototypePreview({
     setPrototypeLoading("preview");
     setMachineState("patch_preview");
     try {
-      const response = await apiRequest<ListPatchRecordsResponse>(
-        `/projects/${project.id}/patches${toQueryString({ page: 1, pageSize: 1, status: "needs_confirmation" })}`,
-      );
-      const patchId = response.items[0]?.id;
+      let patchId = currentPrototypePatchId;
       if (!patchId) {
-        setPrototypeError("暂无待确认 Patch，可先从工具栏生成 Patch 候选。");
+        const response = await apiRequest<ListPatchRecordsResponse>(
+          `/projects/${project.id}/patches${toQueryString({ page: 1, pageSize: 20, status: "needs_confirmation" })}`,
+        );
+        patchId = response.items.find((item) => isPrototypePatchForRegion(item, selectedPrototypeRegion))?.id ?? null;
+      }
+      if (!patchId) {
+        setPrototypeError("暂无当前原型区域的待确认 Patch，可先从工具栏生成 Patch 候选。");
         return;
       }
       const preview = await apiRequest<PatchPreviewResponse>("/patch/preview", {
@@ -4922,6 +4994,7 @@ function PrototypePreview({
     const rect = canvasRef.current.getBoundingClientRect();
     setDragStart({ x: event.clientX - rect.left, y: event.clientY - rect.top });
     setSelectionBox(null);
+    setSelectedBoxRegion(null);
   };
 
   const handleCanvasPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -4995,11 +5068,11 @@ function PrototypePreview({
               {localEditEnabled ? "Prototype Interaction System" : "原型预览"}
             </div>
             <div className="mt-0.5 text-xs text-gray-500">
-              {selectedComponent ? selectedComponent.pathLabel : selectionBox ? "框选区域" : "未选择组件"}
+              {selectedBoxRegion?.label ?? activeComponent?.pathLabel ?? (selectionBox ? "框选区域" : "未选择组件")}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {prototypeEditorActions(target).map((action) => {
+            {prototypeEditorActions(actionTarget).map((action) => {
               const Icon = action.icon;
               return (
                 <button
@@ -5074,13 +5147,13 @@ function PrototypePreview({
             />
             {localEditEnabled ? (
               <div className="absolute inset-0 bg-sky-500/0">
-                {selectedComponent ? (
+                {activeComponent ? (
                   <button
                     type="button"
-                    onClick={() => selectComponent(selectedComponent)}
+                    onClick={() => selectComponent(activeComponent)}
                     className="absolute left-8 top-8 rounded-lg border border-sky-400 bg-white/95 px-3 py-2 text-left text-xs font-medium text-sky-800 shadow-sm ring-2 ring-sky-100"
                   >
-                    <span className="block text-sm">{selectedComponent.name}</span>
+                    <span className="block text-sm">{activeComponent.name}</span>
                     <span className="mt-0.5 block text-sky-600">点击选择组件，拖拽可框选</span>
                   </button>
                 ) : null}

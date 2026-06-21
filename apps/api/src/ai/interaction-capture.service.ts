@@ -144,7 +144,13 @@ function toInteractionType(eventType: ContractEventType): InteractionEventType {
 
 function toTargetType(eventType: ContractEventType): InteractionTargetType {
   if (eventType === "prototype_generated") return "prototype";
-  if (eventType === "state_updated" || eventType === "state_version_created") return "state";
+  if (
+    eventType === "state_updated"
+    || eventType === "state_version_created"
+    || eventType === "patch_applied"
+  ) {
+    return "state";
+  }
   return "prd";
 }
 

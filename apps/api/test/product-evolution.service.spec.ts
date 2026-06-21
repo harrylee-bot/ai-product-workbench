@@ -170,6 +170,40 @@ describe("Product evolution modules", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it("classifies patch_applied contract events as ProductDesignState events", async () => {
+    const service = new InteractionCaptureService(prisma as never);
+    prisma.productInteractionEvent.create.mockImplementation(async ({ data }) => ({
+      id: "event-patch-1",
+      ...data,
+      targetId: data.targetId ?? null,
+      content: data.content ?? null,
+      metadata: data.metadata ?? null,
+      createdAt: new Date("2026-06-21T08:00:00Z"),
+    }));
+
+    const created = await service.createContractEventForUser(user, {
+      projectId: "project-1",
+      eventType: "patch_applied",
+      targetId: "state-1",
+      payload: { patchId: "patch-1" },
+    });
+
+    expect(created.event).toEqual(
+      expect.objectContaining({
+        type: "patch",
+        targetType: "state",
+        targetId: "state-1",
+        content: "event-schema:patch_applied",
+        metadata: expect.objectContaining({
+          eventSchema: "v1",
+          eventType: "patch_applied",
+          projectId: "project-1",
+          payload: { patchId: "patch-1" },
+        }),
+      }),
+    );
+  });
+
   it("creates an EvolutionPlan with ProductDesignState-only patch operations", async () => {
     const service = new EvolutionEngineService(prisma as never, stateService as never, modelGateway as never);
     stateService.getCurrentState.mockResolvedValue(baseState());
