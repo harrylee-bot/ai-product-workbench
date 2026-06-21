@@ -1207,31 +1207,46 @@ function extractPatchRecordId(value: unknown) {
 
 function getFirstPrototypeTarget(specValue: unknown) {
   const spec = asRecord(specValue);
-  const pages = Array.isArray(spec?.pages) ? spec.pages : [];
+  const pages = getPrototypePageValues(specValue);
   const firstPage = asRecord(pages[0]);
-  const components = Array.isArray(firstPage?.components) ? firstPage.components : [];
+  const pageProps = asRecord(firstPage?.props) ?? {};
+  const components = getPrototypeChildValues(firstPage ?? {}, "components");
   const firstComponent = components.map(asRecord).find(Boolean);
-  const pageName = asText(firstPage?.name) || "原型页面";
-  const componentName = asText(firstComponent?.name) || "主要组件";
+  const componentProps = asRecord(firstComponent?.props) ?? {};
+  const pageName = asText(firstPage?.name) || asText(pageProps.name) || "原型页面";
+  const componentName = asText(firstComponent?.name) || asText(componentProps.name) || asText(componentProps.content) || "主要组件";
   return {
     pageId: asText(firstPage?.id) || "page_main",
     componentId: asText(firstComponent?.id) || undefined,
-    sourcePaths: arrayOfText(firstComponent?.sourcePaths ?? firstPage?.sourcePaths),
+    sourcePaths: arrayOfText(componentProps.sourcePaths ?? firstComponent?.sourcePaths ?? pageProps.sourcePaths ?? firstPage?.sourcePaths),
     label: `${pageName} / ${componentName}`,
   };
 }
 
-function getPrototypeComponents(specValue: unknown): PrototypeComponentView[] {
+function getPrototypePageValues(specValue: unknown) {
   const spec = asRecord(specValue);
-  const pages = Array.isArray(spec?.pages) ? spec.pages : [];
+  if (Array.isArray(spec?.pages)) return spec.pages;
+  return getPrototypeChildValues(spec ?? {}, "pages");
+}
+
+function getPrototypeChildValues(value: Record<string, unknown>, preferredKey: "pages" | "components") {
+  const preferred = value[preferredKey];
+  if (Array.isArray(preferred)) return preferred;
+  const children = value.children;
+  return Array.isArray(children) ? children : [];
+}
+
+function getPrototypeComponents(specValue: unknown): PrototypeComponentView[] {
+  const pages = getPrototypePageValues(specValue);
   const components: PrototypeComponentView[] = [];
 
   pages.forEach((pageValue, pageIndex) => {
     const page = asRecord(pageValue);
     if (!page) return;
+    const props = asRecord(page.props) ?? {};
     const pageId = asText(page.id) || `page-${pageIndex + 1}`;
-    const pageName = asText(page.name) || `页面 ${pageIndex + 1}`;
-    const pageComponents = Array.isArray(page.components) ? page.components : [];
+    const pageName = asText(page.name) || asText(props.name) || `页面 ${pageIndex + 1}`;
+    const pageComponents = getPrototypeChildValues(page, "components");
     pageComponents.forEach((componentValue, componentIndex) => {
       collectPrototypeComponentViews(
         componentValue,
@@ -1256,8 +1271,9 @@ function collectPrototypeComponentViews(
 ) {
   const component = asRecord(value);
   if (!component) return;
+  const props = asRecord(component.props) ?? {};
   const id = asText(component.id) || `${context.pageId}-component-${context.index + 1}`;
-  const name = asText(component.name) || asText(component.content) || `组件 ${context.index + 1}`;
+  const name = asText(component.name) || asText(props.name) || asText(component.content) || asText(props.content) || `组件 ${context.index + 1}`;
   const type = asText(component.type) || "custom";
   const current: PrototypeComponentView = {
     id,
@@ -1265,15 +1281,15 @@ function collectPrototypeComponentViews(
     parentId: context.parent?.id,
     name,
     type,
-    content: asText(component.content) || undefined,
-    sourcePaths: arrayOfText(component.sourcePaths),
+    content: asText(component.content) || asText(props.content) || undefined,
+    sourcePaths: arrayOfText(component.sourcePaths ?? props.sourcePaths),
     depth: context.depth,
     pathLabel: `${context.pageName} / ${name}`,
     domSelector: `[data-component-id="${id}"]`,
   };
   output.push(current);
 
-  const children = Array.isArray(component.children) ? component.children : [];
+  const children = getPrototypeChildValues(component, "components");
   children.forEach((child, index) =>
     collectPrototypeComponentViews(
       child,
