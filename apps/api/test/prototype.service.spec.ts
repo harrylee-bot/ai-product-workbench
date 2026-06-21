@@ -135,6 +135,40 @@ describe("HTML prototype artifact module", () => {
     });
   });
 
+  it("derives PrototypeState from current artifact and PrototypeSpec without mutating state", async () => {
+    const state = baseState();
+    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
+    prisma.project.findUnique.mockResolvedValue(baseProject({ currentPrototypeArtifactId: "artifact-1" }));
+    prisma.prototypeArtifact.findFirst.mockResolvedValue(artifactRecord({
+      id: "artifact-1",
+      prototypeSpecId: spec.id,
+      productDesignStateId: state.id,
+      productDesignStateVersion: state.version,
+      htmlContent: renderHtmlFromPrototypeSpec(spec),
+    }));
+    prisma.prototypeSpecRecord.findUnique.mockResolvedValue(specRecord(spec as unknown as Record<string, unknown>));
+
+    const result = await service.getPrototypeStateForUser(user, { projectId: "project-1" });
+
+    expect(result.prototypeState).toEqual(
+      expect.objectContaining({
+        id: "artifact-1",
+        version: 3,
+        root: expect.objectContaining({
+          type: "prototype",
+          children: expect.arrayContaining([
+            expect.objectContaining({
+              id: "page_home",
+              type: "page",
+            }),
+          ]),
+        }),
+      }),
+    );
+    expect(prisma.prototypeArtifact.update).not.toHaveBeenCalled();
+    expect(prisma.project.update).not.toHaveBeenCalled();
+  });
+
   it("rejects unsafe HTML before allowing preview", async () => {
     const state = baseState();
     const spec = renderPrototypeSpecFromState(state, "both", "run-1");

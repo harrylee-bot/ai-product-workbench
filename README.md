@@ -1,6 +1,6 @@
 # AI产品工作台（内测）
 
-当前实现范围覆盖模块 1-13、二期 0A/0B/0C、二期 14-20 与三期 0A：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀、管理后台与日志、QA 版本与回滚，以及 PRD 编辑体验、HTML 原型交互编辑体验、AI Inline Assistant、Interaction Capture、Semantic Feedback Analyzer、Multi-Agent Review、Evolution Engine、Patch Execution Engine、Product Memory System、Evolution Orchestrator 与 PRD Editing Experience System。
+当前实现范围覆盖模块 1-13、二期 0A/0B/0C、二期 14-20 与三期 0A/0B：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀、管理后台与日志、QA 版本与回滚，以及 PRD 编辑体验、HTML 原型交互编辑体验、AI Inline Assistant、Interaction Capture、Semantic Feedback Analyzer、Multi-Agent Review、Evolution Engine、Patch Execution Engine、Product Memory System、Evolution Orchestrator、PRD Editing Experience System 与 Prototype Interaction System。
 
 ## 已实现能力
 
@@ -28,6 +28,7 @@
 - 二期 19：Product Memory System 新增 ProductMemory，Patch 执行后记录 EvolutionPlan、PatchResult、before/after ProductDesignState 快照、ProductInsight 与多 Agent 报告；提供记忆列表和时间线查询，工作台“反馈”Tab 展示产品记忆，不参与决策、不生成 Patch、不修改 ProductDesignState。
 - 二期 20：Evolution Orchestrator 新增 OrchestrationRun，按 Module15 → Module19 顺序调度语义分析、多 Agent 评审、进化方案、Patch 执行和产品记忆保存；支持 manual/event/batch/patch 触发和最多 5 轮循环执行，工作台“反馈”Tab 可一键运行总调度并查看每个模块状态；调度器只记录状态和结果，不做产品决策、不直接修改 ProductDesignState、不直接生成 Patch。
 - 三期 0A：PRD Editing Experience System 将 PRD 预览升级为可交互对象，支持段落双击原地编辑、文本选区 floating editor、rewrite / expand / simplify / restructure / diff AI 编辑动作；所有编辑通过 `POST /api/patch/draft` 或 PRD 编辑 API 生成 `needs_confirmation` Patch 候选，并持久化 ProductInteractionEvent，不直接修改 PRD 或 ProductDesignState。
+- 三期 0B：Prototype Interaction System 将原型 Tab 升级为当前页面内的交互编辑器，支持 PrototypeState 读取、Component Tree、组件选择、框选编辑、SelectionEngine、FloatingToolbar、AI UI 建议、PatchDraft Panel 和 PatchPreviewModal；`POST /api/prototype/get` 返回由 PrototypeSpec/Artifact 派生的 PrototypeState，`POST /api/prototype/update`、`POST /api/prototype/edit`、`POST /api/prototype/restructure`、`POST /api/prototype/flow-update` 只生成 `needs_confirmation` Patch 候选，`POST /api/patch/preview` 只读 PatchPlan 预览，确认后才会通过 PatchService 修改 ProductDesignState 并重新生成 PRD/Prototype/QA。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
@@ -65,7 +66,7 @@ npm run dev
 - `MODEL_GATEWAY_ENCRYPTION_KEY`：可选，推荐生产配置。支持 32 字节 base64 或 64 位 hex；未配置时会从 `JWT_SECRET` 派生加密密钥。
 - `JWT_SECRET`：生产必须配置稳定值，否则已加密的模型 API Key 可能无法解密。
 
-模块 6/7/8/9/10/11/12/13、二期 0A/0B/0C 与二期 14-20 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService / PatchService / QaService / RollbackService / KnowledgeCandidateService / ProductInsight / ProductReviewReport / EvolutionPlan / EvolutionPatchExecution / ProductMemory / OrchestrationRun 保存状态、文档、原型、Patch、QA、回滚记录、知识候选、反馈洞察、评审报告、进化计划、执行日志、产品记忆、调度状态、版本和变更日志。管理后台只读取这些业务数据和审计日志，不绕过 ProductDesignState 修改普通工作流。
+模块 6/7/8/9/10/11/12/13、二期 0A/0B/0C、二期 14-20 与三期 0A/0B 在没有配置 `ModelTaskProfile` 或模型供应商不可用时，会使用确定性结构化兜底结果，保证内测链路可演示；配置模型后，Agent 会优先通过 Model Gateway 生成 JSON 输出，并通过 ProductDesignStateService / RequirementDocumentService / PrototypeService / PatchService / QaService / RollbackService / KnowledgeCandidateService / ProductInsight / ProductReviewReport / EvolutionPlan / EvolutionPatchExecution / ProductMemory / OrchestrationRun 保存状态、文档、原型、Patch、QA、回滚记录、知识候选、反馈洞察、评审报告、进化计划、执行日志、产品记忆、调度状态、版本和变更日志。管理后台只读取这些业务数据和审计日志，不绕过 ProductDesignState 修改普通工作流。
 
 ## 服务器部署
 
@@ -203,6 +204,8 @@ bash deploy/server-deploy.sh
 - `GET /api/prd-documents/:documentId/versions`
 - `POST /api/projects/:projectId/prototype/generate`
 - `GET /api/projects/:projectId/prototype/current`
+- `POST /api/prototype/get`
+- `POST /api/prototype/update`
 - `GET /api/prototype-artifacts/:artifactId`
 - `GET /api/prototype-artifacts/:artifactId/preview`
 - `POST /api/prototype-artifacts/:artifactId/confirm`
@@ -213,6 +216,7 @@ bash deploy/server-deploy.sh
 - `POST /api/patches/:patchId/cancel`
 - `POST /api/patches/:patchId/confirm`
 - `POST /api/patch/draft`
+- `POST /api/patch/preview`
 - `POST /api/prd/edit`
 - `POST /api/prd/rewrite`
 - `POST /api/prd/diff`
@@ -220,6 +224,8 @@ bash deploy/server-deploy.sh
 - `POST /api/prototype/restructure`
 - `POST /api/prototype/flow-update`
 - `POST /api/ai/inline-edit`
+- `POST /api/ai/suggest`
+- `POST /api/events`
 - `POST /api/interactions`
 - `GET /api/projects/:projectId/interactions`
 - `POST /api/feedback/analyze`

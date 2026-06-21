@@ -104,6 +104,8 @@ type SelectedRegion =
       componentId?: string;
       domSelector?: string;
       sourcePaths?: string[];
+      bbox?: { x: number; y: number; width: number; height: number };
+      boundingBox?: { x: number; y: number; width: number; height: number };
       label?: string;
     };
 
@@ -609,6 +611,72 @@ type PatchRecordItem = {
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type PrototypeEditorMachineState =
+  | "view"
+  | "selected"
+  | "editing"
+  | "ai_suggesting"
+  | "patch_draft"
+  | "patch_preview"
+  | "applied";
+
+type PrototypeComponentView = {
+  id: string;
+  pageId: string;
+  parentId?: string;
+  name: string;
+  type: string;
+  content?: string;
+  sourcePaths?: string[];
+  depth: number;
+  pathLabel: string;
+  domSelector?: string;
+};
+
+type PrototypeStateResponse = {
+  prototypeState: {
+    id: string;
+    version?: number;
+    updatedAt?: string;
+    root?: unknown;
+    sourceStateRef?: unknown;
+  } | null;
+  prototypeSpec?: unknown;
+  artifact?: unknown;
+};
+
+type PatchPreviewItem = {
+  patchId: string;
+  status: PatchRecordStatus;
+  selectedRegion?: SelectedRegion;
+  patchPlan?: unknown;
+  operations?: Array<{ op?: string; path?: string; reason?: string; value?: unknown }>;
+  targetNodes?: string[];
+  impactScope?: string[];
+  risks?: Array<{ level?: string; message?: string; relatedPaths?: string[] }>;
+  regenerationPlan?: unknown;
+  beforeProductDesignStateVersion?: number;
+  afterProductDesignStateVersion?: number;
+  previewOnly?: boolean;
+  requiresConfirmation?: boolean;
+  message?: string;
+};
+
+type PatchPreviewResponse = {
+  patchPreview: PatchPreviewItem;
+};
+
+type AiSuggestionResponse = {
+  suggestion: {
+    action: InlineEditAction;
+    title: string;
+    summary: string;
+    instruction: string;
+    selectedRegion: SelectedRegion;
+    patchDraft?: unknown;
+  };
 };
 
 type InlineAssistantDraft = {
@@ -1141,6 +1209,112 @@ function getFirstPrototypeTarget(specValue: unknown) {
     componentId: asText(firstComponent?.id) || undefined,
     sourcePaths: arrayOfText(firstComponent?.sourcePaths ?? firstPage?.sourcePaths),
     label: `${pageName} / ${componentName}`,
+  };
+}
+
+function getPrototypeComponents(specValue: unknown): PrototypeComponentView[] {
+  const spec = asRecord(specValue);
+  const pages = Array.isArray(spec?.pages) ? spec.pages : [];
+  const components: PrototypeComponentView[] = [];
+
+  pages.forEach((pageValue, pageIndex) => {
+    const page = asRecord(pageValue);
+    if (!page) return;
+    const pageId = asText(page.id) || `page-${pageIndex + 1}`;
+    const pageName = asText(page.name) || `页面 ${pageIndex + 1}`;
+    const pageComponents = Array.isArray(page.components) ? page.components : [];
+    pageComponents.forEach((componentValue, componentIndex) => {
+      collectPrototypeComponentViews(
+        componentValue,
+        {
+          pageId,
+          pageName,
+          depth: 0,
+          index: componentIndex,
+        },
+        components,
+      );
+    });
+  });
+
+  return components;
+}
+
+function collectPrototypeComponentViews(
+  value: unknown,
+  context: { pageId: string; pageName: string; depth: number; index: number; parent?: PrototypeComponentView },
+  output: PrototypeComponentView[],
+) {
+  const component = asRecord(value);
+  if (!component) return;
+  const id = asText(component.id) || `${context.pageId}-component-${context.index + 1}`;
+  const name = asText(component.name) || asText(component.content) || `组件 ${context.index + 1}`;
+  const type = asText(component.type) || "custom";
+  const current: PrototypeComponentView = {
+    id,
+    pageId: context.pageId,
+    parentId: context.parent?.id,
+    name,
+    type,
+    content: asText(component.content) || undefined,
+    sourcePaths: arrayOfText(component.sourcePaths),
+    depth: context.depth,
+    pathLabel: `${context.pageName} / ${name}`,
+    domSelector: `[data-component-id="${id}"]`,
+  };
+  output.push(current);
+
+  const children = Array.isArray(component.children) ? component.children : [];
+  children.forEach((child, index) =>
+    collectPrototypeComponentViews(
+      child,
+      {
+        pageId: context.pageId,
+        pageName: context.pageName,
+        depth: context.depth + 1,
+        index,
+        parent: current,
+      },
+      output,
+    ),
+  );
+}
+
+function prototypeRegionFromComponent(
+  project: WorkspaceProject | null,
+  component: PrototypeComponentView,
+  bbox?: { x: number; y: number; width: number; height: number },
+): SelectedRegion {
+  return {
+    type: "prototype",
+    targetId: project?.prototypeArtifactId,
+    artifactId: project?.prototypeArtifactId,
+    pageId: component.pageId,
+    componentId: component.id,
+    domSelector: component.domSelector,
+    sourcePaths: component.sourcePaths,
+    label: component.pathLabel,
+    bbox,
+    boundingBox: bbox,
+  };
+}
+
+function prototypeRegionFromBox(
+  project: WorkspaceProject | null,
+  bbox: { x: number; y: number; width: number; height: number },
+): SelectedRegion {
+  const target = getFirstPrototypeTarget(project?.prototypeSpec);
+  return {
+    type: "prototype",
+    targetId: project?.prototypeArtifactId,
+    artifactId: project?.prototypeArtifactId,
+    pageId: target.pageId,
+    componentId: target.componentId,
+    domSelector: target.componentId ? `[data-component-id="${target.componentId}"]` : undefined,
+    sourcePaths: target.sourcePaths,
+    label: `框选区域 ${Math.round(bbox.width)}×${Math.round(bbox.height)}`,
+    bbox,
+    boundingBox: bbox,
   };
 }
 
@@ -2729,7 +2903,12 @@ export function WorkspaceClient() {
     setComposerValue((value) => value || `请修改「${section.title}」：`);
   };
 
-  const selectPrototypeRegion = () => {
+  const selectPrototypeRegion = (region?: SelectedRegion) => {
+    if (region) {
+      setSelectedRegion(region);
+      setComposerValue((value) => value || "请把选中区域调整为：");
+      return;
+    }
     if (!localEditEnabled) return;
     const target = getFirstPrototypeTarget(currentProject?.prototypeSpec);
     setSelectedRegion({
@@ -3727,7 +3906,7 @@ function PreviewPanel({
   onDeviceModeChange: (mode: DeviceMode) => void;
   onLocalEditToggle: () => void;
   onSelectPrdSection: (section: PrdSection) => void;
-  onSelectPrototypeRegion: () => void;
+  onSelectPrototypeRegion: (region?: SelectedRegion) => void;
   onClearSelectedRegion: () => void;
   onPatchHistoryToggle: () => void;
   onRefreshPatchHistory: () => void;
@@ -3825,6 +4004,10 @@ function PreviewPanel({
           deviceMode={deviceMode}
           localEditEnabled={localEditEnabled}
           onSelectPrototypeRegion={onSelectPrototypeRegion}
+          onOpenPatchHistory={() => {
+            if (!patchHistoryOpen) onPatchHistoryToggle();
+            onRefreshPatchHistory();
+          }}
           onInlineEdit={onInlineEdit}
         />
       ) : null}
@@ -4529,15 +4712,58 @@ function PrototypePreview({
   deviceMode,
   localEditEnabled,
   onSelectPrototypeRegion,
+  onOpenPatchHistory,
   onInlineEdit,
 }: {
   project: WorkspaceProject | null;
   deviceMode: DeviceMode;
   localEditEnabled: boolean;
-  onSelectPrototypeRegion: () => void;
+  onSelectPrototypeRegion: (region?: SelectedRegion) => void;
+  onOpenPatchHistory: () => void;
   onInlineEdit: (draft: InlineAssistantDraft) => void;
 }) {
   const state = project?.prototypeState ?? "empty";
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [machineState, setMachineState] = useState<PrototypeEditorMachineState>("view");
+  const [prototypeStateVersion, setPrototypeStateVersion] = useState<number | undefined>();
+  const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
+  const [multiSelectedIds, setMultiSelectedIds] = useState<string[]>([]);
+  const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [patchPreview, setPatchPreview] = useState<PatchPreviewItem | null>(null);
+  const [prototypeError, setPrototypeError] = useState<string | null>(null);
+  const [prototypeLoading, setPrototypeLoading] = useState<"state" | "event" | "suggest" | "preview" | null>(null);
+  const components = useMemo(() => getPrototypeComponents(project?.prototypeSpec), [project?.prototypeSpec]);
+  const selectedComponent = components.find((item) => item.id === selectedComponentId) ?? components[0] ?? null;
+
+  useEffect(() => {
+    setSelectedComponentId(null);
+    setMultiSelectedIds([]);
+    setSelectionBox(null);
+    setPatchPreview(null);
+    setMachineState("view");
+    setPrototypeStateVersion(undefined);
+    setPrototypeError(null);
+  }, [project?.id, project?.prototypeArtifactId]);
+
+  useEffect(() => {
+    if (!project || state !== "ready") return;
+    setPrototypeLoading("state");
+    apiRequest<PrototypeStateResponse>("/prototype/get", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: project.id,
+        artifactId: project.prototypeArtifactId,
+      }),
+    })
+      .then((response) => {
+        if (typeof response.prototypeState?.version === "number") {
+          setPrototypeStateVersion(response.prototypeState.version);
+        }
+      })
+      .catch((error) => setPrototypeError(error instanceof Error ? error.message : "PrototypeState 加载失败"))
+      .finally(() => setPrototypeLoading((value) => (value === "state" ? null : value)));
+  }, [project?.id, project?.prototypeArtifactId, state]);
 
   if (state === "empty") {
     return <PreviewEmpty icon={Code2} title="暂无原型" description="AI 生成的 HTML 原型会显示在这里。" />;
@@ -4551,92 +4777,589 @@ function PrototypePreview({
     return <PreviewError title="原型生成失败" description="可以回到对话区补充页面结构或重新生成。" />;
   }
 
-  const target = getFirstPrototypeTarget(project?.prototypeSpec);
-  const selectedPrototypeRegion: SelectedRegion = {
-    type: "prototype",
-    targetId: project?.prototypeArtifactId,
-    artifactId: project?.prototypeArtifactId,
-    pageId: target.pageId,
-    componentId: target.componentId,
-    domSelector: target.componentId ? `[data-component-id="${target.componentId}"]` : undefined,
-    sourcePaths: target.sourcePaths,
-    label: target.label,
+  const fallbackTarget = getFirstPrototypeTarget(project?.prototypeSpec);
+  const target = selectedComponent ?? {
+    id: fallbackTarget.componentId ?? "prototype-root",
+    pageId: fallbackTarget.pageId,
+    name: "主要区域",
+    type: "custom",
+    pathLabel: fallbackTarget.label,
+    sourcePaths: fallbackTarget.sourcePaths,
+    depth: 0,
+  };
+  const selectedPrototypeRegion = prototypeRegionFromComponent(project, target);
+
+  const recordPrototypeInteraction = async (
+    type: "selection" | "comment" | "feedback" | "patch",
+    region: SelectedRegion,
+    content: string,
+    metadata: Record<string, unknown>,
+  ) => {
+    if (!project) return;
+    setPrototypeLoading("event");
+    try {
+      const response = await apiRequest<{ event: ProductInteractionEventItem }>("/interactions", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: project.id,
+          type,
+          targetType: "prototype",
+          targetId: region.type === "prototype" ? region.targetId ?? region.artifactId : region.targetId,
+          content,
+          metadata,
+        }),
+      });
+      setPrototypeError(null);
+      onSelectPrototypeRegion(region);
+      void response.event;
+    } catch (error) {
+      setPrototypeError(error instanceof Error ? error.message : "原型交互事件记录失败");
+    } finally {
+      setPrototypeLoading((value) => (value === "event" ? null : value));
+    }
+  };
+
+  const openAction = (
+    action: InlineEditAction,
+    label: string,
+    endpoint: InlineAssistantDraft["endpoint"],
+    instruction: string,
+    region = selectedPrototypeRegion,
+  ) => {
+    setMachineState("patch_draft");
+    onInlineEdit({
+      source: "prototype",
+      endpoint,
+      action,
+      title: `${label}：${region.label ?? target.name}`,
+      instruction,
+      selectedRegion: region,
+    });
+  };
+
+  const selectComponent = (component: PrototypeComponentView) => {
+    const region = prototypeRegionFromComponent(project, component);
+    setSelectedComponentId(component.id);
+    setMultiSelectedIds([component.id]);
+    setSelectionBox(null);
+    setMachineState("selected");
+    void recordPrototypeInteraction("selection", region, `选择原型组件：${component.pathLabel}`, {
+      source: "prototype_interaction_system",
+      interaction: "component_select",
+      componentId: component.id,
+      pageId: component.pageId,
+    });
+  };
+
+  const selectBox = (box: { x: number; y: number; width: number; height: number }) => {
+    const region = prototypeRegionFromBox(project, box);
+    setSelectionBox(box);
+    setSelectedComponentId(null);
+    setMultiSelectedIds(components.slice(0, Math.min(3, components.length)).map((item) => item.id));
+    setMachineState("selected");
+    void recordPrototypeInteraction("selection", region, "框选原型区域", {
+      source: "prototype_interaction_system",
+      interaction: "drag_selection",
+      bbox: box,
+    });
+  };
+
+  const openAiSuggestion = async () => {
+    if (!project) return;
+    setPrototypeLoading("suggest");
+    setMachineState("ai_suggesting");
+    try {
+      const response = await apiRequest<AiSuggestionResponse>("/ai/suggest", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: project.id,
+          selectedRegion: selectedPrototypeRegion,
+          action: "redesign",
+          instruction: "请给出该组件的 UI 优化建议，并整理为 PatchDraft 输入。",
+        }),
+      });
+      openAction(
+        response.suggestion.action,
+        "AI 建议",
+        "/prototype/edit",
+        response.suggestion.instruction,
+        response.suggestion.selectedRegion,
+      );
+    } catch (error) {
+      setPrototypeError(error instanceof Error ? error.message : "AI 建议生成失败");
+    } finally {
+      setPrototypeLoading((value) => (value === "suggest" ? null : value));
+    }
+  };
+
+  const openLatestPatchPreview = async () => {
+    if (!project) return;
+    setPrototypeLoading("preview");
+    setMachineState("patch_preview");
+    try {
+      const response = await apiRequest<ListPatchRecordsResponse>(
+        `/projects/${project.id}/patches${toQueryString({ page: 1, pageSize: 1, status: "needs_confirmation" })}`,
+      );
+      const patchId = response.items[0]?.id;
+      if (!patchId) {
+        setPrototypeError("暂无待确认 Patch，可先从工具栏生成 Patch 候选。");
+        return;
+      }
+      const preview = await apiRequest<PatchPreviewResponse>("/patch/preview", {
+        method: "POST",
+        body: JSON.stringify({ patchId }),
+      });
+      setPatchPreview(preview.patchPreview);
+    } catch (error) {
+      setPrototypeError(error instanceof Error ? error.message : "Patch Preview 加载失败");
+    } finally {
+      setPrototypeLoading((value) => (value === "preview" ? null : value));
+    }
+  };
+
+  const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!localEditEnabled || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    setDragStart({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+    setSelectionBox(null);
+  };
+
+  const handleCanvasPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!localEditEnabled || !dragStart || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    setSelectionBox({
+      x: Math.min(dragStart.x, current.x),
+      y: Math.min(dragStart.y, current.y),
+      width: Math.abs(current.x - dragStart.x),
+      height: Math.abs(current.y - dragStart.y),
+    });
+  };
+
+  const handleCanvasPointerUp = () => {
+    if (!localEditEnabled || !selectionBox) {
+      setDragStart(null);
+      return;
+    }
+    if (selectionBox.width > 24 && selectionBox.height > 24) selectBox(selectionBox);
+    setDragStart(null);
   };
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-auto p-6">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
-        <div className="text-sm font-medium text-gray-800">
-          {localEditEnabled ? "局部编辑已开启" : "原型编辑"}
+    <div className="relative grid min-h-0 flex-1 grid-cols-[240px_minmax(0,1fr)] overflow-hidden">
+      <aside className="min-h-0 border-r border-gray-200 bg-white">
+        <div className="flex h-12 items-center justify-between border-b border-gray-200 px-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+            <ListTree className="h-4 w-4" />
+            Component Tree
+          </div>
+          {prototypeLoading === "state" ? <Loader2 className="h-4 w-4 animate-spin text-sky-600" /> : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { label: "组件优化", icon: Wand2, endpoint: "/prototype/edit" as const, action: "redesign" as const, instruction: `请优化「${target.label}」组件的文案、状态和视觉层级。` },
-            { label: "布局调整", icon: LayoutTemplate, endpoint: "/prototype/restructure" as const, action: "layout_edit" as const, instruction: `请调整「${target.label}」所在页面布局，让信息层级更清晰。` },
-            { label: "Flow", icon: ListTree, endpoint: "/prototype/flow-update" as const, action: "flow_update" as const, instruction: `请优化「${target.label}」相关交互流程，并生成结构化 Flow Patch。` },
-          ].map((action) => {
-            const Icon = action.icon;
-            return (
+        <div className="border-b border-gray-100 px-3 py-2 text-xs leading-5 text-gray-500">
+          State v{prototypeStateVersion ?? project?.productDesignState?.version ?? "-"} · {machineStateLabel(machineState)}
+        </div>
+        <div className="min-h-0 overflow-y-auto p-2">
+          {components.length ? (
+            components.map((component) => (
               <button
-                key={action.label}
+                key={component.id}
                 type="button"
-                onClick={() =>
-                  onInlineEdit({
-                    source: "prototype",
-                    endpoint: action.endpoint,
-                    action: action.action,
-                    title: `${action.label}：${target.label}`,
-                    instruction: action.instruction,
-                    selectedRegion: selectedPrototypeRegion,
-                  })
-                }
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                onClick={() => selectComponent(component)}
+                className={clsx(
+                  "mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs transition",
+                  selectedComponentId === component.id || multiSelectedIds.includes(component.id)
+                    ? "bg-sky-50 text-sky-800 ring-1 ring-sky-200"
+                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-950",
+                )}
+                style={{ paddingLeft: 8 + component.depth * 14 }}
               >
-                <Icon className="h-3.5 w-3.5" />
-                {action.label}
+                <Circle className="h-2.5 w-2.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{component.name}</span>
+                <span className="shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] uppercase text-gray-400">
+                  {component.type}
+                </span>
               </button>
-            );
-          })}
+            ))
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-8 text-center text-sm text-gray-500">
+              暂无组件树，仍可通过画布框选生成 Patch。
+            </div>
+          )}
         </div>
-      </div>
-      <div
-        className={clsx(
-          "mx-auto overflow-hidden rounded-lg border bg-white shadow-sm transition",
-          localEditEnabled ? "border-sky-400 ring-2 ring-sky-200" : "border-gray-200",
-          deviceMode === "mobile" ? "h-[720px] w-[390px]" : "h-[720px] max-w-[1120px]",
-        )}
-      >
-        <div className="flex h-9 items-center gap-2 border-b border-gray-200 bg-gray-50 px-3">
-          <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
-          <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-          <span className="ml-2 truncate text-xs text-gray-500">
-            {project?.prototypeEntryFilePath ?? "index.html"}
-          </span>
-        </div>
-        <div className="relative h-[calc(100%-36px)] bg-white">
-          <iframe
-            title="HTML 原型预览"
-            srcDoc={project?.prototypeHtml ?? ""}
-            sandbox="allow-scripts"
-            className="h-full w-full border-0"
-          />
-          {localEditEnabled ? (
+      </aside>
+
+      <div className="min-h-0 overflow-auto p-6">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-gray-800">
+              {localEditEnabled ? "Prototype Interaction System" : "原型预览"}
+            </div>
+            <div className="mt-0.5 text-xs text-gray-500">
+              {selectedComponent ? selectedComponent.pathLabel : selectionBox ? "框选区域" : "未选择组件"}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {prototypeEditorActions(target).map((action) => {
+              const Icon = action.icon;
+              return (
+                <button
+                  key={action.label}
+                  type="button"
+                  onClick={() => openAction(action.action, action.label, action.endpoint, action.instruction)}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {action.label}
+                </button>
+              );
+            })}
             <button
               type="button"
-              onClick={onSelectPrototypeRegion}
-              className="absolute inset-0 cursor-crosshair bg-sky-500/0 text-left"
-              aria-label="选择原型区域"
+              onClick={openAiSuggestion}
+              disabled={prototypeLoading === "suggest"}
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-900 bg-gray-950 px-2.5 text-xs font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
-              <span className="absolute left-1/2 top-1/2 rounded-lg border border-sky-300 bg-white/95 px-3 py-2 text-sm font-medium text-sky-800 shadow-sm">
-                点击选择{target.label}
-              </span>
+              {prototypeLoading === "suggest" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              AI 建议
             </button>
-          ) : null}
+            <button
+              type="button"
+              onClick={openLatestPatchPreview}
+              disabled={prototypeLoading === "preview"}
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {prototypeLoading === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitCompare className="h-3.5 w-3.5" />}
+              Preview
+            </button>
+          </div>
         </div>
+
+        {prototypeError ? (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
+            {prototypeError}
+          </div>
+        ) : null}
+
+        <div
+          className={clsx(
+            "mx-auto overflow-hidden rounded-lg border bg-white shadow-sm transition",
+            localEditEnabled ? "border-sky-400 ring-2 ring-sky-200" : "border-gray-200",
+            deviceMode === "mobile" ? "h-[720px] w-[390px]" : "h-[720px] max-w-[1120px]",
+          )}
+        >
+          <div className="flex h-9 items-center gap-2 border-b border-gray-200 bg-gray-50 px-3">
+            <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            <span className="ml-2 truncate text-xs text-gray-500">
+              {project?.prototypeEntryFilePath ?? "index.html"}
+            </span>
+            <span className="ml-auto rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-500">
+              {localEditEnabled ? "SelectionEngine on" : "view"}
+            </span>
+          </div>
+          <div
+            ref={canvasRef}
+            className={clsx("relative h-[calc(100%-36px)] bg-white", localEditEnabled && "cursor-crosshair")}
+            onPointerDown={handleCanvasPointerDown}
+            onPointerMove={handleCanvasPointerMove}
+            onPointerUp={handleCanvasPointerUp}
+            onPointerLeave={() => setDragStart(null)}
+          >
+            <iframe
+              title="HTML 原型预览"
+              srcDoc={project?.prototypeHtml ?? ""}
+              sandbox="allow-scripts"
+              className="h-full w-full border-0"
+            />
+            {localEditEnabled ? (
+              <div className="absolute inset-0 bg-sky-500/0">
+                {selectedComponent ? (
+                  <button
+                    type="button"
+                    onClick={() => selectComponent(selectedComponent)}
+                    className="absolute left-8 top-8 rounded-lg border border-sky-400 bg-white/95 px-3 py-2 text-left text-xs font-medium text-sky-800 shadow-sm ring-2 ring-sky-100"
+                  >
+                    <span className="block text-sm">{selectedComponent.name}</span>
+                    <span className="mt-0.5 block text-sky-600">点击选择组件，拖拽可框选</span>
+                  </button>
+                ) : null}
+                {selectionBox ? (
+                  <div
+                    className="absolute border border-sky-500 bg-sky-500/10"
+                    style={{
+                      left: selectionBox.x,
+                      top: selectionBox.y,
+                      width: selectionBox.width,
+                      height: selectionBox.height,
+                    }}
+                  />
+                ) : null}
+                {machineState !== "view" ? (
+                  <PrototypeFloatingToolbar
+                    label={selectedPrototypeRegion.label ?? "选中区域"}
+                    loading={prototypeLoading}
+                    onComponentEdit={() =>
+                      openAction(
+                        "redesign",
+                        "组件优化",
+                        "/prototype/edit",
+                        `请优化「${selectedPrototypeRegion.label ?? "选中区域"}」组件的文案、状态和视觉层级。`,
+                      )
+                    }
+                    onLayoutEdit={() =>
+                      openAction(
+                        "layout_edit",
+                        "布局调整",
+                        "/prototype/restructure",
+                        `请调整「${selectedPrototypeRegion.label ?? "选中区域"}」所在页面布局，让信息层级更清晰。`,
+                      )
+                    }
+                    onFlowEdit={() =>
+                      openAction(
+                        "flow_update",
+                        "Flow",
+                        "/prototype/flow-update",
+                        `请优化「${selectedPrototypeRegion.label ?? "选中区域"}」相关交互流程，并生成结构化 Flow Patch。`,
+                      )
+                    }
+                    onAiSuggest={openAiSuggestion}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_280px]">
+          <PrototypeStateMachineBar state={machineState} />
+          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+            <div className="text-xs font-medium text-gray-500">PatchDraft Panel</div>
+            <div className="mt-1 truncate text-sm text-gray-800">
+              {selectedPrototypeRegion.label ?? "选择组件后生成 Patch 候选"}
+            </div>
+            <button
+              type="button"
+              onClick={openLatestPatchPreview}
+              className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs font-medium text-gray-700 hover:bg-gray-100"
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              查看最近 Patch Preview
+            </button>
+          </div>
+        </div>
+
+        {patchPreview ? (
+          <PatchPreviewModal
+            preview={patchPreview}
+            onClose={() => {
+              setPatchPreview(null);
+              setMachineState("patch_draft");
+            }}
+            onOpenHistory={() => {
+              setPatchPreview(null);
+              setMachineState("patch_preview");
+              onOpenPatchHistory();
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );
+}
+
+function PrototypeFloatingToolbar({
+  label,
+  loading,
+  onComponentEdit,
+  onLayoutEdit,
+  onFlowEdit,
+  onAiSuggest,
+}: {
+  label: string;
+  loading: "state" | "event" | "suggest" | "preview" | null;
+  onComponentEdit: () => void;
+  onLayoutEdit: () => void;
+  onFlowEdit: () => void;
+  onAiSuggest: () => void;
+}) {
+  return (
+    <div className="absolute left-1/2 top-4 z-20 w-[420px] max-w-[calc(100%-32px)] -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2 shadow-xl">
+      <div className="mb-2 flex items-center justify-between gap-3 px-1">
+        <div className="min-w-0 truncate text-xs font-medium text-gray-500">{label}</div>
+        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-600" /> : null}
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        <PrototypeToolbarButton icon={Wand2} label="组件" onClick={onComponentEdit} />
+        <PrototypeToolbarButton icon={LayoutTemplate} label="布局" onClick={onLayoutEdit} />
+        <PrototypeToolbarButton icon={ListTree} label="Flow" onClick={onFlowEdit} />
+        <PrototypeToolbarButton icon={Sparkles} label="AI" onClick={onAiSuggest} />
+      </div>
+    </div>
+  );
+}
+
+function PrototypeToolbarButton({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
+
+function PrototypeStateMachineBar({ state }: { state: PrototypeEditorMachineState }) {
+  const steps: PrototypeEditorMachineState[] = [
+    "view",
+    "selected",
+    "editing",
+    "ai_suggesting",
+    "patch_draft",
+    "patch_preview",
+    "applied",
+  ];
+  const activeIndex = steps.indexOf(state);
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {steps.map((step, index) => (
+          <div
+            key={step}
+            className={clsx(
+              "inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium",
+              index <= activeIndex
+                ? "border-sky-200 bg-sky-50 text-sky-700"
+                : "border-gray-200 bg-gray-50 text-gray-400",
+            )}
+          >
+            {machineStateLabel(step)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PatchPreviewModal({
+  preview,
+  onClose,
+  onOpenHistory,
+}: {
+  preview: PatchPreviewItem;
+  onClose: () => void;
+  onOpenHistory: () => void;
+}) {
+  const operations = preview.operations ?? [];
+  const risks = preview.risks ?? [];
+  return (
+    <Modal
+      open
+      title="Patch Preview"
+      onClose={onClose}
+      footer={
+        <>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            关闭
+          </Button>
+          <Button type="button" onClick={onOpenHistory}>
+            <History className="h-4 w-4" />
+            去修改历史确认
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500">
+              {preview.patchId}
+            </span>
+            <span className={clsx("rounded-md border px-2 py-1 text-xs font-medium", PATCH_STATUS_META[preview.status]?.className)}>
+              {PATCH_STATUS_META[preview.status]?.label ?? preview.status}
+            </span>
+          </div>
+          <div className="mt-2 text-sm leading-6 text-gray-700">
+            {preview.message ?? "Patch 预览已生成。"}
+          </div>
+        </div>
+        <div>
+          <FieldLabel>Operations</FieldLabel>
+          <div className="mt-2 space-y-2">
+            {operations.length ? operations.map((operation, index) => (
+              <div key={`${operation.path}-${index}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="font-medium text-gray-950">{operation.op ?? "update"}</span>
+                  <span className="truncate text-gray-500">{operation.path ?? "ProductDesignState"}</span>
+                </div>
+                {operation.reason ? (
+                  <div className="mt-1 text-xs leading-5 text-gray-500">{operation.reason}</div>
+                ) : null}
+              </div>
+            )) : (
+              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-8 text-center text-sm text-gray-500">
+                暂无可展示操作
+              </div>
+            )}
+          </div>
+        </div>
+        {risks.length ? (
+          <div>
+            <FieldLabel>Risks</FieldLabel>
+            <div className="mt-2 space-y-2">
+              {risks.map((risk, index) => (
+                <div key={`${risk.message}-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
+                  {risk.message ?? "存在待确认风险"}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">
+          Preview 只读取 PatchPlan。确认应用后才会修改 ProductDesignState，并重新生成 PRD、Prototype 与 QA。
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function machineStateLabel(state: PrototypeEditorMachineState) {
+  const labels: Record<PrototypeEditorMachineState, string> = {
+    view: "VIEW",
+    selected: "SELECTED",
+    editing: "EDITING",
+    ai_suggesting: "AI",
+    patch_draft: "DRAFT",
+    patch_preview: "PREVIEW",
+    applied: "APPLIED",
+  };
+  return labels[state];
+}
+
+function prototypeEditorActions(target: Pick<PrototypeComponentView, "pathLabel" | "name">): Array<{
+  label: string;
+  icon: LucideIcon;
+  endpoint: InlineAssistantDraft["endpoint"];
+  action: InlineEditAction;
+  instruction: string;
+}> {
+  const label = target.pathLabel || target.name;
+  return [
+    { label: "组件优化", icon: Wand2, endpoint: "/prototype/edit", action: "redesign", instruction: `请优化「${label}」组件的文案、状态和视觉层级。` },
+    { label: "布局调整", icon: LayoutTemplate, endpoint: "/prototype/restructure", action: "layout_edit", instruction: `请调整「${label}」所在页面布局，让信息层级更清晰。` },
+    { label: "Flow", icon: ListTree, endpoint: "/prototype/flow-update", action: "flow_update", instruction: `请优化「${label}」相关交互流程，并生成结构化 Flow Patch。` },
+  ];
 }
 
 function StatePanel({

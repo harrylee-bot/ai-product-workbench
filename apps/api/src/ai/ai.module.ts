@@ -42,6 +42,7 @@ import { RequirementDocumentService } from "./requirement-document.service";
 import {
   ProjectPrototypeController,
   PrototypeArtifactController,
+  PrototypeStateController,
 } from "./prototype.controller";
 import { PrototypeService } from "./prototype.service";
 import {
@@ -64,6 +65,8 @@ import {
   PrototypeEditingController,
 } from "./editing.controller";
 import {
+  AiSuggestionController,
+  EventController,
   EvolutionController,
   FeedbackAnalysisController,
   InteractionController,
@@ -90,6 +93,7 @@ import {
     ProjectPrdController,
     PrdDocumentController,
     ProjectPrototypeController,
+    PrototypeStateController,
     PrototypeArtifactController,
     ProjectQaController,
     ProjectQaReportsController,
@@ -101,6 +105,8 @@ import {
     InlineAssistantController,
     InteractionController,
     ProjectInteractionController,
+    EventController,
+    AiSuggestionController,
     FeedbackAnalysisController,
     ProjectInsightController,
     MultiAgentReviewController,
