@@ -12,6 +12,16 @@ import type {
   ProductInteractionEventItem,
 } from "./product-evolution.types";
 
+type ContractEventType =
+  | "agent_started"
+  | "agent_completed"
+  | "state_updated"
+  | "state_version_created"
+  | "prd_generated"
+  | "prototype_generated"
+  | "patch_applied"
+  | "qa_completed";
+
 type ProductInteractionEventRow = {
   id: string;
   projectId: string;
@@ -71,6 +81,32 @@ export class InteractionCaptureService {
     };
   }
 
+  async createContractEventForUser(
+    user: AuthenticatedUser,
+    input: {
+      eventType: ContractEventType;
+      projectId: string;
+      targetId?: string;
+      payload?: Record<string, unknown>;
+    },
+  ) {
+    const timestamp = new Date().toISOString();
+    return this.createForUser(user, {
+      projectId: input.projectId,
+      type: toInteractionType(input.eventType),
+      targetType: toTargetType(input.eventType),
+      targetId: input.targetId,
+      content: contractEventContent(input.eventType),
+      metadata: {
+        eventSchema: "v1",
+        eventType: input.eventType,
+        timestamp,
+        projectId: input.projectId,
+        payload: input.payload ?? {},
+      },
+    });
+  }
+
   toItem(row: ProductInteractionEventRow): ProductInteractionEventItem {
     return {
       id: row.id,
@@ -98,4 +134,20 @@ export class InteractionCaptureService {
       throw new BadRequestException("INTERACTION_ANALYTICS_FORBIDDEN");
     }
   }
+}
+
+function toInteractionType(eventType: ContractEventType): InteractionEventType {
+  if (eventType === "patch_applied") return "patch";
+  if (eventType === "prd_generated" || eventType === "prototype_generated") return "selection";
+  return "comment";
+}
+
+function toTargetType(eventType: ContractEventType): InteractionTargetType {
+  if (eventType === "prototype_generated") return "prototype";
+  if (eventType === "state_updated" || eventType === "state_version_created") return "state";
+  return "prd";
+}
+
+function contractEventContent(eventType: ContractEventType) {
+  return `event-schema:${eventType}`;
 }

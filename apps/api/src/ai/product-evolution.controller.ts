@@ -10,8 +10,10 @@ import { MultiAgentReviewService } from "./multi-agent-review.service";
 import { PatchExecutionEngineService } from "./patch-execution-engine.service";
 import { ProductMemoryService } from "./product-memory.service";
 import {
+  AiSuggestDto,
   AnalyzeFeedbackDto,
   ApplyEvolutionPlanDto,
+  CreateContractEventDto,
   CreateInteractionDto,
   RollbackPatchDto,
   RunEvolutionCycleDto,
@@ -41,6 +43,51 @@ export class ProjectInteractionController {
   }
 }
 
+@Controller("events")
+@UseGuards(JwtAuthGuard)
+export class EventController {
+  constructor(private readonly interactionCapture: InteractionCaptureService) {}
+
+  @Post()
+  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateContractEventDto) {
+    return this.interactionCapture.createContractEventForUser(user, dto);
+  }
+}
+
+@Controller("ai")
+@UseGuards(JwtAuthGuard)
+export class AiSuggestionController {
+  @Post("suggest")
+  suggest(@Body() dto: AiSuggestDto) {
+    const action = dto.action ?? "component_edit";
+    const label = typeof dto.selectedRegion.label === "string"
+      ? dto.selectedRegion.label
+      : typeof dto.selectedRegion.componentId === "string"
+        ? dto.selectedRegion.componentId
+        : "选中组件";
+
+    return {
+      suggestion: {
+        action,
+        title: `建议优化「${label}」`,
+        summary: "AI 建议已整理为 PatchDraft 输入，确认生成后才会进入 Patch Preview。",
+        instruction: `请针对「${label}」执行${prototypeActionLabel(action)}：${dto.instruction.trim()}`,
+        selectedRegion: dto.selectedRegion,
+        patchDraft: {
+          projectId: dto.projectId,
+          selectedRegion: dto.selectedRegion,
+          action,
+          source: action === "flow_update"
+            ? "prototype_flow_update"
+            : action === "layout_edit"
+              ? "prototype_restructure"
+              : "prototype_edit",
+        },
+      },
+    };
+  }
+}
+
 @Controller("feedback")
 @UseGuards(JwtAuthGuard)
 export class FeedbackAnalysisController {
@@ -50,6 +97,13 @@ export class FeedbackAnalysisController {
   analyze(@CurrentUser() user: AuthenticatedUser, @Body() dto: AnalyzeFeedbackDto) {
     return this.feedbackAnalysis.analyzeForUser(user, dto);
   }
+}
+
+function prototypeActionLabel(action: NonNullable<AiSuggestDto["action"]>) {
+  if (action === "layout_edit") return "布局调整";
+  if (action === "flow_update") return "Flow 优化";
+  if (action === "redesign") return "组件优化";
+  return "组件编辑";
 }
 
 @Controller("projects/:projectId/insights")

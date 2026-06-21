@@ -16,9 +16,11 @@ import { KnowledgeCandidateService } from "../knowledge/knowledge-candidate.serv
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
+  PrototypeComponentSpec,
   ProductDesignState,
   PrototypeArtifact,
   PrototypeArtifactDraft,
+  PrototypePageSpec,
   PrototypeSpec,
   PrototypeVersion,
 } from "./ai-vibe.types";
@@ -64,6 +66,14 @@ type PrototypeArtifactRecord = {
   updatedBy: string | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type PrototypeStateNode = {
+  id: string;
+  type: string;
+  props: Record<string, unknown>;
+  layout: Record<string, unknown>;
+  children: PrototypeStateNode[];
 };
 
 @Injectable()
@@ -199,6 +209,54 @@ export class PrototypeService {
         });
     return {
       artifact: artifact ? this.toArtifactItem(artifact as PrototypeArtifactRecord) : null,
+    };
+  }
+
+  async getPrototypeStateForUser(
+    user: AuthenticatedUser,
+    input: { projectId: string; artifactId?: string },
+  ) {
+    const project = await this.assertProjectAccess(user, input.projectId, { allowArchived: true });
+    const artifact = input.artifactId
+      ? await this.prisma.prototypeArtifact.findFirst({
+          where: { id: input.artifactId, projectId: input.projectId },
+        })
+      : project.currentPrototypeArtifactId
+        ? await this.prisma.prototypeArtifact.findFirst({
+            where: { id: project.currentPrototypeArtifactId, projectId: input.projectId },
+          })
+        : await this.prisma.prototypeArtifact.findFirst({
+            where: { projectId: input.projectId },
+            orderBy: { updatedAt: "desc" },
+          });
+
+    if (!artifact) return { prototypeState: null };
+    const specRecord = await this.prisma.prototypeSpecRecord.findUnique({
+      where: { id: artifact.prototypeSpecId },
+    });
+    const artifactItem = this.toArtifactItem(artifact as PrototypeArtifactRecord);
+    const spec = specRecord ? this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord) : undefined;
+
+    return {
+      prototypeState: {
+        id: artifactItem.id,
+        projectId: artifactItem.projectId,
+        artifactId: artifactItem.id,
+        prototypeSpecId: artifactItem.prototypeSpecId,
+        productDesignStateId: artifactItem.productDesignStateId,
+        productDesignStateVersion: artifactItem.productDesignStateVersion,
+        version: artifactItem.productDesignStateVersion,
+        updatedAt: artifactItem.updatedAt,
+        root: prototypeStateRoot(spec, artifactItem),
+        pages: spec?.pages ?? [],
+        interactions: spec?.interactions ?? [],
+        sourceStateRef: {
+          productDesignStateId: artifactItem.productDesignStateId,
+          version: artifactItem.productDesignStateVersion,
+        },
+      },
+      prototypeSpec: spec,
+      artifact: artifactItem,
     };
   }
 
@@ -418,6 +476,66 @@ export class PrototypeService {
       createdAt: version.createdAt.toISOString(),
     };
   }
+}
+
+function prototypeStateRoot(
+  spec: PrototypeSpec | undefined,
+  artifact: PrototypeArtifact,
+): PrototypeStateNode {
+  return {
+    id: artifact.id,
+    type: "prototype",
+    props: {
+      title: artifact.title,
+      artifactId: artifact.id,
+      prototypeSpecId: artifact.prototypeSpecId,
+      status: artifact.status,
+      sourceStateRef: artifact.productDesignStateId,
+    },
+    layout: {
+      targetDevice: artifact.targetDevice,
+      pageCount: artifact.pageCount,
+    },
+    children: spec?.pages.map(prototypePageNode) ?? [],
+  };
+}
+
+function prototypePageNode(page: PrototypePageSpec): PrototypeStateNode {
+  return {
+    id: page.id,
+    type: "page",
+    props: {
+      name: page.name,
+      route: page.route,
+      description: page.description,
+      sourceStateRef: page.sourcePageId,
+      sourcePaths: page.sourcePaths,
+    },
+    layout: {
+      device: page.device,
+      layout: page.layout,
+      order: page.order,
+    },
+    children: page.components.map(prototypeComponentNode),
+  };
+}
+
+function prototypeComponentNode(component: PrototypeComponentSpec): PrototypeStateNode {
+  return {
+    id: component.id,
+    type: component.type,
+    props: {
+      name: component.name,
+      description: component.description,
+      content: component.content,
+      sourcePaths: component.sourcePaths,
+      states: component.states,
+      interactions: component.interactions,
+      ...(component.props ?? {}),
+    },
+    layout: {},
+    children: (component.children ?? []).map(prototypeComponentNode),
+  };
 }
 
 export function validateHtmlSafety(html: string): { ok: true } | { ok: false; reason: string } {

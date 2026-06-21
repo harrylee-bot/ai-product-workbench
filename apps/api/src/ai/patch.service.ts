@@ -302,6 +302,33 @@ export class PatchService {
     return { patchRecord: this.toPatchRecord(row as PatchRecordRow) };
   }
 
+  async previewForUser(user: AuthenticatedUser, patchId: string) {
+    const row = await this.getAccessiblePatch(user, patchId);
+    const patchRecord = this.toPatchRecord(row as PatchRecordRow);
+    const plan = patchRecord.patchPlan;
+    return {
+      patchPreview: {
+        patchId: patchRecord.id,
+        status: patchRecord.status,
+        selectedRegion: patchRecord.selectedRegion,
+        patchPlan: plan,
+        operations: patchRecord.operations,
+        targetNodes: plan.targetNodes ?? [],
+        impactScope: plan.impactScope ?? [],
+        risks: plan.risks ?? [],
+        regenerationPlan: plan.regenerationPlan,
+        beforeProductDesignStateVersion: patchRecord.beforeProductDesignStateVersion,
+        afterProductDesignStateVersion: patchRecord.afterProductDesignStateVersion,
+        previewOnly: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
+        requiresConfirmation: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
+        message:
+          patchRecord.status === PrismaPatchRecordStatus.needs_confirmation
+            ? "Patch 候选已生成，确认后才会应用到 ProductDesignState。"
+            : "Patch 预览已生成。",
+      },
+    };
+  }
+
   async cancelForUser(user: AuthenticatedUser, patchId: string) {
     const row = await this.getAccessiblePatch(user, patchId);
     this.assertOwnerMutation(user, row.project.ownerId);

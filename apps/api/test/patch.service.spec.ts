@@ -344,6 +344,32 @@ describe("PatchService", () => {
     expect(runLog.markRunIntent).toHaveBeenCalledWith("run-1", UserIntent.patch_document);
   });
 
+  it("previews a Patch candidate without applying ProductDesignState operations", async () => {
+    prisma.patchRecord.findUnique.mockResolvedValue({
+      ...patchRecordRow({
+        id: "patch-preview-1",
+        status: PatchRecordStatus.needs_confirmation,
+      }),
+      project: baseProject(),
+    });
+
+    const result = await service.previewForUser(user, "patch-preview-1");
+
+    expect(result.patchPreview).toEqual(
+      expect.objectContaining({
+        patchId: "patch-preview-1",
+        status: PatchRecordStatus.needs_confirmation,
+        previewOnly: true,
+        requiresConfirmation: true,
+        operations: basePatchPlan().operations,
+      }),
+    );
+    expect(stateService.applyPatch).not.toHaveBeenCalled();
+    expect(documentService.saveGeneratedDocument).not.toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+    expect(qaService.runForProject).not.toHaveBeenCalled();
+  });
+
   it("rolls ProductDesignState back when regeneration fails after patch application", async () => {
     const beforeState = baseState({ version: 7 });
     const patchedState = baseState({ version: 8, status: "patching", prdDocument: undefined, prototypeSpec: undefined });

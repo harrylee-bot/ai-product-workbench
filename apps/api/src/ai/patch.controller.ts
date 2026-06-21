@@ -7,6 +7,7 @@ import {
   CreatePatchDraftDto,
   CreatePatchDto,
   ListPatchRecordsQueryDto,
+  PreviewPatchDto,
 } from "./patch.dto";
 import { PatchService } from "./patch.service";
 
@@ -57,6 +58,11 @@ export class PatchDraftController {
         diffTargetText: dto.diffTargetText,
       },
     });
+  }
+
+  @Post("preview")
+  preview(@CurrentUser() user: AuthenticatedUser, @Body() dto: PreviewPatchDto) {
+    return this.patchService.previewForUser(user, dto.patchId);
   }
 }
 

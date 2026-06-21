@@ -132,3 +132,9 @@ export class ConfirmPatchDto {
   @MaxLength(1000, { message: "确认说明不能超过 1000 个字符" })
   userConfirmation!: string;
 }
+
+export class PreviewPatchDto {
+  @IsString({ message: "patchId 不能为空" })
+  @IsNotEmpty({ message: "patchId 不能为空" })
+  patchId!: string;
+}

@@ -39,6 +39,59 @@ export class CreateInteractionDto {
   metadata?: Record<string, unknown>;
 }
 
+export class CreateContractEventDto {
+  @IsIn([
+    "agent_started",
+    "agent_completed",
+    "state_updated",
+    "state_version_created",
+    "prd_generated",
+    "prototype_generated",
+    "patch_applied",
+    "qa_completed",
+  ], { message: "事件类型不符合 event-schema" })
+  eventType!:
+    | "agent_started"
+    | "agent_completed"
+    | "state_updated"
+    | "state_version_created"
+    | "prd_generated"
+    | "prototype_generated"
+    | "patch_applied"
+    | "qa_completed";
+
+  @IsString({ message: "projectId 不能为空" })
+  @IsNotEmpty({ message: "projectId 不能为空" })
+  projectId!: string;
+
+  @IsOptional()
+  @IsString({ message: "targetId 格式不正确" })
+  @MaxLength(200, { message: "targetId 不能超过 200 个字符" })
+  targetId?: string;
+
+  @IsOptional()
+  @IsObject({ message: "payload 格式不正确" })
+  payload?: Record<string, unknown>;
+}
+
+export class AiSuggestDto {
+  @IsString({ message: "projectId 不能为空" })
+  @IsNotEmpty({ message: "projectId 不能为空" })
+  projectId!: string;
+
+  @IsObject({ message: "selectedRegion 格式不正确" })
+  selectedRegion!: Record<string, unknown>;
+
+  @IsString({ message: "修改目标不能为空" })
+  @IsNotEmpty({ message: "修改目标不能为空" })
+  @MaxLength(4000, { message: "修改目标不能超过 4000 个字符" })
+  instruction!: string;
+
+  @IsOptional()
+  @IsIn(["component_edit", "layout_edit", "flow_update", "redesign"], { message: "action 不正确" })
+  action?: "component_edit" | "layout_edit" | "flow_update" | "redesign";
+}
+
 export class AnalyzeFeedbackDto {
   @IsString({ message: "projectId 不能为空" })
   @IsNotEmpty({ message: "projectId 不能为空" })
