@@ -37,6 +37,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/modal";
 import { ProtectedRoute } from "@/components/protected-route";
@@ -70,6 +71,7 @@ type InlineEditAction =
   | "expand"
   | "simplify"
   | "compress"
+  | "restructure"
   | "diff"
   | "component_edit"
   | "layout_edit"
@@ -611,12 +613,15 @@ type PatchRecordItem = {
 
 type InlineAssistantDraft = {
   source: "prd" | "prototype" | "inline";
-  endpoint: "/prd/edit" | "/prd/rewrite" | "/prd/diff" | "/prototype/edit" | "/prototype/restructure" | "/prototype/flow-update" | "/ai/inline-edit";
+  endpoint: "/prd/edit" | "/prd/rewrite" | "/prd/diff" | "/patch/draft" | "/prototype/edit" | "/prototype/restructure" | "/prototype/flow-update" | "/ai/inline-edit";
   action: InlineEditAction;
   title: string;
   instruction: string;
   selectedRegion: SelectedRegion;
   selectedText?: string;
+  replacementText?: string;
+  diffBaseText?: string;
+  diffTargetText?: string;
 };
 
 type ListPatchRecordsResponse = {
@@ -691,6 +696,7 @@ const INLINE_ACTION_LABELS: Record<InlineEditAction, string> = {
   expand: "扩写",
   simplify: "精简",
   compress: "压缩",
+  restructure: "重构",
   diff: "Diff",
   component_edit: "组件编辑",
   layout_edit: "布局调整",
@@ -2007,6 +2013,10 @@ export function WorkspaceClient() {
           conversationId: currentProject.conversationId,
           selectedRegion: inlineAssistantDraft.selectedRegion,
           selectedText: inlineAssistantDraft.selectedText,
+          replacementText: inlineAssistantDraft.replacementText,
+          diffBaseText: inlineAssistantDraft.diffBaseText,
+          diffTargetText: inlineAssistantDraft.diffTargetText,
+          source: inlineAssistantDraft.endpoint === "/patch/draft" && inlineAssistantDraft.source === "prd" ? "prd_edit" : undefined,
           action: inlineAssistantDraft.action,
           instruction,
         }),
@@ -4202,6 +4212,19 @@ function PrdPreview({
   onInlineEdit: (draft: InlineAssistantDraft) => void;
 }) {
   const state = project?.prdState ?? "empty";
+  const articleRef = useRef<HTMLElement | null>(null);
+  const [floatingEditor, setFloatingEditor] = useState<{
+    section: PrdSection;
+    selectedText: string;
+    top: number;
+    left: number;
+  } | null>(null);
+  const [inlineDraft, setInlineDraft] = useState<{
+    sectionId: string;
+    paragraphIndex: number;
+    originalText: string;
+    value: string;
+  } | null>(null);
 
   if (state === "empty") {
     return <PreviewEmpty icon={FileText} title="暂无 PRD" description="输入产品需求后，AI 生成的 PRD 会显示在这里。" />;
@@ -4215,9 +4238,126 @@ function PrdPreview({
     return <PreviewError title="PRD 生成失败" description="可以在左侧补充需求后重新发送。" />;
   }
 
+  const openFloatingEditor = (section: PrdSection, selectedText?: string, rect?: DOMRect) => {
+    const articleRect = articleRef.current?.getBoundingClientRect();
+    const top = rect && articleRect ? Math.max(rect.top - articleRect.top - 46, 8) : 78;
+    const left = rect && articleRect ? Math.min(Math.max(rect.left - articleRect.left, 12), Math.max(articleRect.width - 360, 12)) : 12;
+    setFloatingEditor({
+      section,
+      selectedText: selectedText?.trim() || section.paragraphs.join("\n"),
+      top,
+      left,
+    });
+    onSelectSection(section);
+  };
+
+  const handleSectionMouseUp = (section: PrdSection) => {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim();
+    if (!selection || !selectedText) return;
+    const container = articleRef.current;
+    const anchorNode = selection.anchorNode;
+    if (!container || !anchorNode || !container.contains(anchorNode)) return;
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    openFloatingEditor(section, selectedText, rect);
+  };
+
+  const openAction = (
+    section: PrdSection,
+    action: InlineEditAction,
+    label: string,
+    endpoint: InlineAssistantDraft["endpoint"],
+    instruction: string,
+    selectedText = section.paragraphs.join("\n"),
+    extra?: Pick<InlineAssistantDraft, "replacementText" | "diffBaseText" | "diffTargetText">,
+  ) => {
+    onInlineEdit({
+      source: "prd",
+      endpoint,
+      action,
+      title: `${label}：${section.title}`,
+      instruction,
+      selectedText,
+      selectedRegion: prdSelectedRegion(project, section, selectedText),
+      ...extra,
+    });
+  };
+
+  const saveInlineDraft = () => {
+    if (!inlineDraft) return;
+    const section = project?.prdSections.find((item) => item.id === inlineDraft.sectionId);
+    if (!section) return;
+    const nextText = inlineDraft.value.trim();
+    if (!nextText || nextText === inlineDraft.originalText.trim()) {
+      setInlineDraft(null);
+      return;
+    }
+    openAction(
+      section,
+      "edit",
+      "原地编辑",
+      "/patch/draft",
+      `请将选中的 PRD 段落按我的原地编辑内容生成 Patch 候选。`,
+      inlineDraft.originalText,
+      {
+        replacementText: nextText,
+        diffBaseText: inlineDraft.originalText,
+        diffTargetText: nextText,
+      },
+    );
+    setInlineDraft(null);
+  };
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-      <article className="mx-auto min-h-full max-w-[760px] rounded-lg bg-white px-10 py-9 shadow-sm ring-1 ring-gray-200">
+      <article ref={articleRef} className="relative mx-auto min-h-full max-w-[760px] rounded-lg bg-white px-10 py-9 shadow-sm ring-1 ring-gray-200">
+        {floatingEditor ? (
+          <div
+            className="absolute z-20 w-[340px] rounded-lg border border-gray-200 bg-white p-2 shadow-xl"
+            style={{ top: floatingEditor.top, left: floatingEditor.left }}
+          >
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+              <div className="truncate text-xs font-medium text-gray-500">{floatingEditor.section.title}</div>
+              <button
+                type="button"
+                onClick={() => setFloatingEditor(null)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="关闭"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="mb-2 line-clamp-2 rounded-md bg-gray-50 px-2 py-1.5 text-xs leading-5 text-gray-500">
+              {floatingEditor.selectedText}
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {prdFloatingActions(floatingEditor.section, floatingEditor.selectedText).map((action) => {
+                const Icon = action.icon;
+                return (
+                  <button
+                    key={action.label}
+                    type="button"
+                    onClick={() => {
+                      openAction(
+                        floatingEditor.section,
+                        action.action,
+                        action.label,
+                        action.endpoint,
+                        action.instruction,
+                        floatingEditor.selectedText,
+                      );
+                      setFloatingEditor(null);
+                    }}
+                    className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {action.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         <div className="border-b border-gray-200 pb-5">
           <div className="text-xs font-medium text-gray-500">产品需求文档</div>
           <h1 className="mt-2 text-2xl font-semibold leading-tight text-gray-950">
@@ -4229,7 +4369,7 @@ function PrdPreview({
         </div>
         <div className="mt-6 space-y-7">
           {project?.prdSections.map((section) => (
-            <section key={section.id} className="group">
+            <section key={section.id} className="group" onMouseUp={() => handleSectionMouseUp(section)}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="text-base font-semibold text-gray-950">{section.title}</h2>
@@ -4254,7 +4394,7 @@ function PrdPreview({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onSelectSection(section)}
+                  onClick={() => openFloatingEditor(section)}
                   className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-600 opacity-0 transition group-hover:opacity-100 hover:bg-gray-50"
                 >
                   <Edit3 className="h-3.5 w-3.5" />
@@ -4262,36 +4402,13 @@ function PrdPreview({
                 </button>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                {[
-                  { label: "改写", icon: Wand2, endpoint: "/prd/rewrite" as const, action: "rewrite" as const, instruction: `请改写「${section.title}」，保持业务含义一致但表达更清晰。` },
-                  { label: "扩写", icon: ListTree, endpoint: "/prd/rewrite" as const, action: "expand" as const, instruction: `请扩展「${section.title}」，补充必要规则、边界和验收点。` },
-                  { label: "精简", icon: GitCompare, endpoint: "/prd/rewrite" as const, action: "simplify" as const, instruction: `请简化「${section.title}」，保留关键规则并减少冗余表述。` },
-                  { label: "Diff", icon: GitCompare, endpoint: "/prd/diff" as const, action: "diff" as const, instruction: `请基于「${section.title}」生成结构化差异建议。` },
-                ].map((action) => {
+                {prdSectionActions(section).map((action) => {
                   const Icon = action.icon;
                   return (
                     <button
                       key={action.label}
                       type="button"
-                      onClick={() =>
-                        onInlineEdit({
-                          source: "prd",
-                          endpoint: action.endpoint,
-                          action: action.action,
-                          title: `${action.label}：${section.title}`,
-                          instruction: action.instruction,
-                          selectedText: section.paragraphs.join("\n"),
-                          selectedRegion: {
-                            type: "document",
-                            sectionId: section.id,
-                            targetId: project?.prdDocumentId ?? section.id,
-                            documentId: project?.prdDocumentId,
-                            sourcePaths: section.sourcePaths,
-                            selectedText: section.paragraphs.join("\n"),
-                            label: section.title,
-                          },
-                        })
-                      }
+                      onClick={() => openAction(section, action.action, action.label, action.endpoint, action.instruction)}
                       className="inline-flex h-7 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 text-xs font-medium text-gray-600 opacity-0 transition group-hover:opacity-100 hover:bg-gray-50 focus:opacity-100"
                     >
                       <Icon className="h-3.5 w-3.5" />
@@ -4301,8 +4418,53 @@ function PrdPreview({
                 })}
               </div>
               <div className="mt-3 space-y-3 text-sm leading-7 text-gray-700">
-                {section.paragraphs.map((paragraph) => (
-                  <p key={paragraph}>{paragraph}</p>
+                {section.paragraphs.map((paragraph, paragraphIndex) => (
+                  inlineDraft?.sectionId === section.id && inlineDraft.paragraphIndex === paragraphIndex ? (
+                    <div key={`${section.id}-${paragraphIndex}`} className="rounded-lg border border-gray-300 bg-gray-50 p-2">
+                      <textarea
+                        value={inlineDraft.value}
+                        onChange={(event) => setInlineDraft({ ...inlineDraft, value: event.target.value })}
+                        onMouseUp={(event) => event.stopPropagation()}
+                        rows={Math.min(Math.max(inlineDraft.value.split("\n").length + 1, 3), 8)}
+                        className="w-full resize-none rounded-md border border-gray-200 bg-white px-3 py-2 text-sm leading-7 text-gray-900 outline-none focus:border-gray-900 focus:ring-3 focus:ring-gray-900/10"
+                        autoFocus
+                      />
+                      <div className="mt-2 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setInlineDraft(null)}
+                          className="inline-flex h-8 items-center rounded-md px-2 text-xs font-medium text-gray-500 hover:bg-gray-100"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          onClick={saveInlineDraft}
+                          className="inline-flex h-8 items-center gap-1 rounded-md bg-gray-950 px-2.5 text-xs font-medium text-white hover:bg-gray-800"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          生成 Patch 候选
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p
+                      key={`${section.id}-${paragraphIndex}`}
+                      onDoubleClick={() => {
+                        setFloatingEditor(null);
+                        setInlineDraft({
+                          sectionId: section.id,
+                          paragraphIndex,
+                          originalText: paragraph,
+                          value: paragraph,
+                        });
+                        onSelectSection(section);
+                      }}
+                      className="rounded-md px-1 transition hover:bg-gray-50"
+                    >
+                      {paragraph}
+                    </p>
+                  )
                 ))}
               </div>
               {section.sourcePaths?.length ? (
@@ -4321,6 +4483,45 @@ function PrdPreview({
       </article>
     </div>
   );
+}
+
+function prdSelectedRegion(project: WorkspaceProject | null, section: PrdSection, selectedText?: string): SelectedRegion {
+  return {
+    type: "document",
+    sectionId: section.id,
+    targetId: project?.prdDocumentId ?? section.id,
+    documentId: project?.prdDocumentId,
+    sourcePaths: section.sourcePaths,
+    selectedText,
+    label: section.title,
+  };
+}
+
+function prdSectionActions(section: PrdSection): Array<{
+  label: string;
+  icon: LucideIcon;
+  endpoint: InlineAssistantDraft["endpoint"];
+  action: InlineEditAction;
+  instruction: string;
+}> {
+  return [
+    { label: "改写", icon: Wand2, endpoint: "/prd/rewrite", action: "rewrite", instruction: `请改写「${section.title}」，保持业务含义一致但表达更清晰。` },
+    { label: "扩写", icon: ListTree, endpoint: "/prd/rewrite", action: "expand", instruction: `请扩展「${section.title}」，补充必要规则、边界和验收点。` },
+    { label: "精简", icon: GitCompare, endpoint: "/prd/rewrite", action: "simplify", instruction: `请简化「${section.title}」，保留关键规则并减少冗余表述。` },
+    { label: "重构", icon: LayoutTemplate, endpoint: "/patch/draft", action: "restructure", instruction: `请重构「${section.title}」的信息结构，生成只作用于 ProductDesignState 的 Patch 候选。` },
+    { label: "Diff", icon: GitCompare, endpoint: "/prd/diff", action: "diff", instruction: `请基于「${section.title}」生成结构化差异建议。` },
+  ];
+}
+
+function prdFloatingActions(section: PrdSection, selectedText: string) {
+  return prdSectionActions(section).map((action) => ({
+    ...action,
+    instruction: action.action === "diff"
+      ? `请只针对选中的 PRD 文本生成结构化差异建议。`
+      : action.action === "restructure"
+        ? `请只针对选中的 PRD 文本重构信息层级，并生成 Patch 候选。`
+        : `${action.instruction}\n仅作用于当前选区：${selectedText}`,
+  }));
 }
 
 function PrototypePreview({

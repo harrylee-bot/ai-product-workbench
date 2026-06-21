@@ -241,6 +241,7 @@ export class PatchService {
       selectedRegion,
       instruction,
       ...input.interactionEvent,
+      userId: user.id,
     });
 
     const result = await this.createCandidatePatch({
@@ -1046,6 +1047,33 @@ export class PatchService {
     source: NonNullable<CreatePatchCandidateInput["source"]>,
     payload: Record<string, unknown>,
   ) {
+    if (!payload.userId) throw new BadRequestException("PATCH_INTERACTION_USER_REQUIRED");
+    const selectedRegion = payload.selectedRegion && typeof payload.selectedRegion === "object" && !Array.isArray(payload.selectedRegion)
+      ? payload.selectedRegion as SelectedRegion
+      : undefined;
+    const targetId = selectedRegion?.type === "prototype"
+      ? selectedRegion.targetId || selectedRegion.artifactId
+      : selectedRegion?.targetId || selectedRegion?.documentId;
+    await this.prisma.productInteractionEvent.create({
+      data: {
+        projectId,
+        type: payload.selectedText ? "selection" : "patch",
+        targetType: selectedRegion?.type === "prototype" ? "prototype" : "prd",
+        targetId,
+        content: typeof payload.instruction === "string" ? payload.instruction : undefined,
+        metadata: toInputJson({
+          runId,
+          source,
+          action: payload.action ?? "inline_patch_candidate",
+          selectedRegion,
+          selectedText: payload.selectedText,
+          replacementText: payload.replacementText,
+          diffBaseText: payload.diffBaseText,
+          diffTargetText: payload.diffTargetText,
+        }),
+        createdBy: String(payload.userId),
+      },
+    });
     await this.stream.emit({
       runId,
       projectId,

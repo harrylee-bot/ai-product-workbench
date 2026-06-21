@@ -1,6 +1,6 @@
 # AI产品工作台（内测）
 
-当前实现范围覆盖模块 1-13、二期 0A/0B/0C 与二期 14-20：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀、管理后台与日志、QA 版本与回滚，以及 PRD 编辑体验、HTML 原型交互编辑体验、AI Inline Assistant、Interaction Capture、Semantic Feedback Analyzer、Multi-Agent Review、Evolution Engine、Patch Execution Engine、Product Memory System 与 Evolution Orchestrator。
+当前实现范围覆盖模块 1-13、二期 0A/0B/0C、二期 14-20 与三期 0A：用户登录与权限、Vibe Coding 工作台页面、项目与会话系统、文件上传与多模态解析、Model Gateway 模型网关、AI Vibe Coding Engine 多 Agent 协作逻辑、ProductDesignState 产品工程状态、PRD 生成与文档预览、HTML 原型生成与预览、局部修改 Patch 系统、知识库与知识沉淀、管理后台与日志、QA 版本与回滚，以及 PRD 编辑体验、HTML 原型交互编辑体验、AI Inline Assistant、Interaction Capture、Semantic Feedback Analyzer、Multi-Agent Review、Evolution Engine、Patch Execution Engine、Product Memory System、Evolution Orchestrator 与 PRD Editing Experience System。
 
 ## 已实现能力
 
@@ -27,6 +27,7 @@
 - 二期 18：Patch Execution Engine 只执行 EvolutionPlan，通过 PatchService 将 patchOperations 转为 ProductDesignState PatchPlan，执行后重新生成 PRD、Prototype、QA，记录 EvolutionPatchExecution Patch Log，并支持回滚入口。
 - 二期 19：Product Memory System 新增 ProductMemory，Patch 执行后记录 EvolutionPlan、PatchResult、before/after ProductDesignState 快照、ProductInsight 与多 Agent 报告；提供记忆列表和时间线查询，工作台“反馈”Tab 展示产品记忆，不参与决策、不生成 Patch、不修改 ProductDesignState。
 - 二期 20：Evolution Orchestrator 新增 OrchestrationRun，按 Module15 → Module19 顺序调度语义分析、多 Agent 评审、进化方案、Patch 执行和产品记忆保存；支持 manual/event/batch/patch 触发和最多 5 轮循环执行，工作台“反馈”Tab 可一键运行总调度并查看每个模块状态；调度器只记录状态和结果，不做产品决策、不直接修改 ProductDesignState、不直接生成 Patch。
+- 三期 0A：PRD Editing Experience System 将 PRD 预览升级为可交互对象，支持段落双击原地编辑、文本选区 floating editor、rewrite / expand / simplify / restructure / diff AI 编辑动作；所有编辑通过 `POST /api/patch/draft` 或 PRD 编辑 API 生成 `needs_confirmation` Patch 候选，并持久化 ProductInteractionEvent，不直接修改 PRD 或 ProductDesignState。
 
 一期规则：空工作台不会自动创建项目。用户需要先点击“新建项目”，再在项目中发送产品需求。
 
@@ -211,6 +212,7 @@ bash deploy/server-deploy.sh
 - `GET /api/patches/:patchId`
 - `POST /api/patches/:patchId/cancel`
 - `POST /api/patches/:patchId/confirm`
+- `POST /api/patch/draft`
 - `POST /api/prd/edit`
 - `POST /api/prd/rewrite`
 - `POST /api/prd/diff`
@@ -290,7 +292,8 @@ bash deploy/server-deploy.sh
 
 - ProductDesignState 是 PRD、PrototypeSpec、HTML 原型和 Patch 的唯一事实源。
 - Patch Agent 只能生成作用于 ProductDesignState 的 PatchPlan；服务端会通过 ProductDesignStateService 应用 PatchOperation、递增版本并创建快照。
-- PRD 编辑、原型编辑和 AI Inline Assistant 都只能调用 PatchService 生成 Patch 候选；候选状态为 `needs_confirmation`，用户确认后才会通过 ProductDesignStateService 执行。
+- PRD 编辑、原型编辑、AI Inline Assistant 和三期 PRD Editing System 都只能调用 PatchService 生成 Patch 候选；候选状态为 `needs_confirmation`，用户确认后才会通过 ProductDesignStateService 执行。
+- 三期 PRD Editing System 的双击编辑、选区 floating editor 和 AI 编辑动作必须发生在当前工作台页面内；每次编辑必须持久化 ProductInteractionEvent，用于后续反馈分析和追溯。
 - PRD 与 PrototypeSpec 只能作为 ProductDesignState 的结构化渲染结果保存，不作为状态源。
 - RequirementDocument 必须关联 ProductDesignState id/version，默认包含 16 个结构化章节，章节和 block 保留 sourcePaths 与标签，禁止包含接口、SQL、数据库、代码、部署等研发实现细节。
 - PrototypeSpec 必须关联 ProductDesignState id/version；PrototypeArtifact 必须由 PrototypeSpec 渲染生成，单文件 HTML 入库前执行安全扫描，禁止远程脚本、eval、document.cookie、敏感 localStorage、window.parent、iframe 和真实网络请求。

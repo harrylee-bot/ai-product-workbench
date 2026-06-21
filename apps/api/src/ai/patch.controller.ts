@@ -2,7 +2,12 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/co
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
-import { ConfirmPatchDto, CreatePatchDto, ListPatchRecordsQueryDto } from "./patch.dto";
+import {
+  ConfirmPatchDto,
+  CreatePatchDraftDto,
+  CreatePatchDto,
+  ListPatchRecordsQueryDto,
+} from "./patch.dto";
 import { PatchService } from "./patch.service";
 
 @Controller("projects/:projectId/patches")
@@ -29,6 +34,32 @@ export class ProjectPatchController {
   }
 }
 
+@Controller("patch")
+@UseGuards(JwtAuthGuard)
+export class PatchDraftController {
+  constructor(private readonly patchService: PatchService) {}
+
+  @Post("draft")
+  draft(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreatePatchDraftDto) {
+    const action = dto.action ?? "edit";
+    return this.patchService.createPatchCandidateForUser(user, dto.projectId, {
+      conversationId: dto.conversationId,
+      selectedRegion: withDraftSelectedText(dto.selectedRegion, dto.selectedText),
+      userInstruction: draftInstruction(dto, action),
+      attachmentFileIds: dto.attachmentFileIds,
+      source: dto.source ?? "inline_edit",
+      interactionEvent: {
+        ...dto.interactionEvent,
+        action,
+        selectedText: dto.selectedText,
+        replacementText: dto.replacementText,
+        diffBaseText: dto.diffBaseText,
+        diffTargetText: dto.diffTargetText,
+      },
+    });
+  }
+}
+
 @Controller("patches")
 @UseGuards(JwtAuthGuard)
 export class PatchResourceController {
@@ -52,4 +83,21 @@ export class PatchResourceController {
   ) {
     return this.patchService.confirmForUser(user, patchId, dto.userConfirmation);
   }
+}
+
+function withDraftSelectedText(region: Record<string, unknown>, selectedText?: string) {
+  return selectedText ? { ...region, selectedText } : region;
+}
+
+function draftInstruction(dto: CreatePatchDraftDto, action: string) {
+  const instruction = dto.instruction ?? dto.userInstruction ?? "";
+  const lines = [
+    `编辑动作：${action}`,
+    dto.selectedText ? `选区内容：${dto.selectedText}` : "",
+    dto.diffBaseText ? `原内容：${dto.diffBaseText}` : "",
+    dto.diffTargetText ? `目标内容：${dto.diffTargetText}` : "",
+    dto.replacementText ? `建议替换为：${dto.replacementText}` : "",
+    `用户指令：${instruction.trim()}`,
+  ].filter(Boolean);
+  return lines.join("\n");
 }

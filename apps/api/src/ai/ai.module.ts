@@ -29,6 +29,7 @@ import {
   ProjectProductDesignStateController,
 } from "./product-design-state.controller";
 import {
+  PatchDraftController,
   PatchResourceController,
   ProjectPatchController,
 } from "./patch.controller";
@@ -84,6 +85,7 @@ import {
     ProjectProductDesignStateController,
     ProductDesignStateResourceController,
     ProjectPatchController,
+    PatchDraftController,
     PatchResourceController,
     ProjectPrdController,
     PrdDocumentController,

@@ -36,6 +36,9 @@ describe("PatchService", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    productInteractionEvent: {
+      create: vi.fn(),
+    },
     $transaction: vi.fn(),
   };
   const messageService = {
@@ -124,6 +127,7 @@ describe("PatchService", () => {
     prisma.conversation.findFirst.mockResolvedValue({ id: "conversation-1", projectId: "project-1" });
     prisma.patchRecord.create.mockImplementation(async ({ data }) => patchRecordRow({ id: "patch-1", ...data }));
     prisma.patchRecord.update.mockImplementation(async ({ data }) => patchRecordRow({ id: "patch-1", ...data }));
+    prisma.productInteractionEvent.create.mockResolvedValue({});
     messageService.createUserMessage.mockResolvedValue({
       id: "message-user-1",
       projectId: "project-1",
@@ -314,6 +318,21 @@ describe("PatchService", () => {
         }),
       }),
     );
+    expect(prisma.productInteractionEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: "project-1",
+        type: "selection",
+        targetType: "prd",
+        targetId: "prd-1",
+        content: expect.stringContaining("表达更清楚"),
+        createdBy: "user-1",
+        metadata: expect.objectContaining({
+          source: "inline_edit",
+          action: "rewrite",
+          selectedText: "按钮文案为立即签到。",
+        }),
+      }),
+    });
     expect(messageService.createAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         content: "已生成 Patch 候选，请在修改历史中确认后再应用。",
