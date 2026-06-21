@@ -1228,6 +1228,18 @@ function getFirstPrototypeTarget(specValue: unknown) {
   };
 }
 
+function getFirstPrototypePageTarget(specValue: unknown) {
+  const pages = getPrototypePageValues(specValue);
+  const firstPage = asRecord(pages[0]);
+  const pageProps = asRecord(firstPage?.props) ?? {};
+  const pageName = asText(firstPage?.name) || asText(pageProps.name) || "原型页面";
+  return {
+    pageId: asText(firstPage?.id) || "page_main",
+    sourcePaths: arrayOfText(pageProps.sourcePaths ?? firstPage?.sourcePaths),
+    label: pageName,
+  };
+}
+
 function getPrototypePageValues(specValue: unknown) {
   const spec = asRecord(specValue);
   if (Array.isArray(spec?.pages)) return spec.pages;
@@ -1334,14 +1346,12 @@ function prototypeRegionFromBox(
   bbox: { x: number; y: number; width: number; height: number },
   specValue: unknown = project?.prototypeSpec,
 ): SelectedRegion {
-  const target = getFirstPrototypeTarget(specValue);
+  const target = getFirstPrototypePageTarget(specValue);
   return {
     type: "prototype",
     targetId: project?.prototypeArtifactId,
     artifactId: project?.prototypeArtifactId,
     pageId: target.pageId,
-    componentId: target.componentId,
-    domSelector: target.componentId ? `[data-component-id="${target.componentId}"]` : undefined,
     sourcePaths: target.sourcePaths,
     label: `框选区域 ${Math.round(bbox.width)}×${Math.round(bbox.height)}`,
     bbox,
@@ -1356,6 +1366,9 @@ function isPrototypePatchForRegion(item: PatchRecordItem, region: SelectedRegion
 function isPrototypeRegionMatch(candidate: SelectedRegion | null | undefined, region: SelectedRegion) {
   const selectedRegion = candidate;
   if (!selectedRegion || selectedRegion.type !== "prototype" || region.type !== "prototype") return false;
+  const selectedArtifactId = selectedRegion.artifactId ?? selectedRegion.targetId;
+  const currentArtifactId = region.artifactId ?? region.targetId;
+  if (currentArtifactId && selectedArtifactId !== currentArtifactId) return false;
   if (selectedRegion.componentId && region.componentId) {
     return selectedRegion.componentId === region.componentId
       && (!selectedRegion.pageId || !region.pageId || selectedRegion.pageId === region.pageId);
@@ -1852,6 +1865,7 @@ export function WorkspaceClient() {
     setPatchHistoryError(null);
     try {
       await apiRequest(`/patches/${patchId}/cancel`, { method: "POST" });
+      setCurrentPrototypePatch((patch) => (patch?.id === patchId ? null : patch));
       await loadPatchHistory(currentProject.id);
     } catch (error) {
       setPatchHistoryError(error instanceof Error ? error.message : "取消 Patch 失败");
@@ -1886,6 +1900,7 @@ export function WorkspaceClient() {
         }
       }
       startRunStream(currentProject.id, response.runId);
+      setCurrentPrototypePatch((patch) => (patch?.id === patchId ? null : patch));
       await loadPatchHistory(currentProject.id);
     } catch (error) {
       setPatchHistoryError(error instanceof Error ? error.message : "确认 Patch 失败");
@@ -2978,12 +2993,13 @@ export function WorkspaceClient() {
   const selectPrototypeRegion = (region?: SelectedRegion) => {
     if (region) {
       setSelectedRegion(region);
+      setCurrentPrototypePatch((patch) => (patch && isPrototypeRegionMatch(patch.selectedRegion, region) ? patch : null));
       setComposerValue((value) => value || "请把选中区域调整为：");
       return;
     }
     if (!localEditEnabled) return;
     const target = getFirstPrototypeTarget(currentProject?.prototypeSpec);
-    setSelectedRegion({
+    const fallbackRegion: SelectedRegion = {
       type: "prototype",
       targetId: currentProject?.prototypeArtifactId,
       artifactId: currentProject?.prototypeArtifactId,
@@ -2992,7 +3008,9 @@ export function WorkspaceClient() {
       domSelector: target.componentId ? `[data-component-id="${target.componentId}"]` : undefined,
       sourcePaths: target.sourcePaths,
       label: target.label,
-    });
+    };
+    setSelectedRegion(fallbackRegion);
+    setCurrentPrototypePatch((patch) => (patch && isPrototypeRegionMatch(patch.selectedRegion, fallbackRegion) ? patch : null));
     setComposerValue((value) => value || "请把选中区域调整为：");
   };
 
@@ -4802,6 +4820,7 @@ function PrototypePreview({
 }) {
   const state = project?.prototypeState ?? "empty";
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const hydrationRequestKeyRef = useRef<string | null>(null);
   const [machineState, setMachineState] = useState<PrototypeEditorMachineState>("view");
   const [prototypeStateVersion, setPrototypeStateVersion] = useState<number | undefined>();
   const [selectedComponentId, setSelectedComponentId] = useState<string | null>(null);
@@ -4828,11 +4847,14 @@ function PrototypePreview({
     setPrototypeStateVersion(undefined);
     setPrototypeError(null);
     setHydratedPrototypeSpec(null);
+    hydrationRequestKeyRef.current = null;
   }, [project?.id, project?.prototypeArtifactId]);
 
   useEffect(() => {
     if (!project || state !== "ready") return;
     let ignore = false;
+    const requestKey = `${project.id}:${project.prototypeArtifactId ?? ""}`;
+    hydrationRequestKeyRef.current = requestKey;
     setPrototypeLoading("state");
     apiRequest<PrototypeStateResponse>("/prototype/get", {
       method: "POST",
@@ -4842,17 +4864,21 @@ function PrototypePreview({
       }),
     })
       .then((response) => {
-        if (ignore) return;
+        if (ignore || hydrationRequestKeyRef.current !== requestKey) return;
         if (typeof response.prototypeState?.version === "number") {
           setPrototypeStateVersion(response.prototypeState.version);
         }
         setHydratedPrototypeSpec(extractPrototypeStateSpec(response));
       })
       .catch((error) => {
-        if (!ignore) setPrototypeError(error instanceof Error ? error.message : "PrototypeState 加载失败");
+        if (!ignore && hydrationRequestKeyRef.current === requestKey) {
+          setPrototypeError(error instanceof Error ? error.message : "PrototypeState 加载失败");
+        }
       })
       .finally(() => {
-        if (!ignore) setPrototypeLoading((value) => (value === "state" ? null : value));
+        if (!ignore && hydrationRequestKeyRef.current === requestKey) {
+          setPrototypeLoading((value) => (value === "state" ? null : value));
+        }
       });
     return () => {
       ignore = true;
