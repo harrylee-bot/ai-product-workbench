@@ -613,6 +613,11 @@ type PatchRecordItem = {
   updatedAt: string;
 };
 
+type PrototypePatchReference = {
+  id: string;
+  selectedRegion: SelectedRegion;
+};
+
 type PrototypeEditorMachineState =
   | "view"
   | "selected"
@@ -1345,7 +1350,11 @@ function prototypeRegionFromBox(
 }
 
 function isPrototypePatchForRegion(item: PatchRecordItem, region: SelectedRegion) {
-  const selectedRegion = item.selectedRegion;
+  return isPrototypeRegionMatch(item.selectedRegion, region);
+}
+
+function isPrototypeRegionMatch(candidate: SelectedRegion | null | undefined, region: SelectedRegion) {
+  const selectedRegion = candidate;
   if (!selectedRegion || selectedRegion.type !== "prototype" || region.type !== "prototype") return false;
   if (selectedRegion.componentId && region.componentId) {
     return selectedRegion.componentId === region.componentId
@@ -1578,7 +1587,7 @@ export function WorkspaceClient() {
   const [inlineAssistantDraft, setInlineAssistantDraft] = useState<InlineAssistantDraft | null>(null);
   const [inlineAssistantInstruction, setInlineAssistantInstruction] = useState("");
   const [inlineAssistantLoading, setInlineAssistantLoading] = useState(false);
-  const [currentPrototypePatchId, setCurrentPrototypePatchId] = useState<string | null>(null);
+  const [currentPrototypePatch, setCurrentPrototypePatch] = useState<PrototypePatchReference | null>(null);
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>(createAgentSteps);
   const [isRunning, setIsRunning] = useState(false);
   const timersRef = useRef<number[]>([]);
@@ -1808,7 +1817,7 @@ export function WorkspaceClient() {
   }, []);
 
   useEffect(() => {
-    setCurrentPrototypePatchId(null);
+    setCurrentPrototypePatch(null);
   }, [currentProjectId]);
 
   useEffect(() => {
@@ -2218,7 +2227,7 @@ export function WorkspaceClient() {
 
   const openInlineAssistant = (draft: InlineAssistantDraft) => {
     setSelectedRegion(draft.selectedRegion);
-    if (draft.source === "prototype") setCurrentPrototypePatchId(null);
+    if (draft.source === "prototype") setCurrentPrototypePatch(null);
     setInlineAssistantDraft(draft);
     setInlineAssistantInstruction(draft.instruction);
   };
@@ -2257,9 +2266,8 @@ export function WorkspaceClient() {
       const savedAssistantMessage = mapMessage(response.assistantMessage);
       if (submittedDraft.source === "prototype") {
         const result = asRecord(response.result);
-        setCurrentPrototypePatchId(
-          extractPatchRecordId(response.patchRecord) ?? extractPatchRecordId(result?.patchRecord) ?? null,
-        );
+        const patchId = extractPatchRecordId(response.patchRecord) ?? extractPatchRecordId(result?.patchRecord);
+        setCurrentPrototypePatch(patchId ? { id: patchId, selectedRegion: submittedDraft.selectedRegion } : null);
       }
       updateProject(currentProject.id, (project) => ({
         ...project,
@@ -3050,7 +3058,7 @@ export function WorkspaceClient() {
             deviceMode={deviceMode}
             localEditEnabled={localEditEnabled}
             selectedRegion={selectedRegion}
-            currentPrototypePatchId={currentPrototypePatchId}
+            currentPrototypePatch={currentPrototypePatch}
             isRunning={isRunning}
             patchHistoryItems={patchHistoryItems}
             patchHistoryOpen={patchHistoryOpen}
@@ -3916,7 +3924,7 @@ function PreviewPanel({
   deviceMode,
   localEditEnabled,
   selectedRegion,
-  currentPrototypePatchId,
+  currentPrototypePatch,
   isRunning,
   patchHistoryItems,
   patchHistoryOpen,
@@ -3956,7 +3964,7 @@ function PreviewPanel({
   deviceMode: DeviceMode;
   localEditEnabled: boolean;
   selectedRegion: SelectedRegion | null;
-  currentPrototypePatchId: string | null;
+  currentPrototypePatch: PrototypePatchReference | null;
   isRunning: boolean;
   patchHistoryItems: PatchRecordItem[];
   patchHistoryOpen: boolean;
@@ -4070,7 +4078,7 @@ function PreviewPanel({
           project={project}
           deviceMode={deviceMode}
           localEditEnabled={localEditEnabled}
-          currentPrototypePatchId={currentPrototypePatchId}
+          currentPrototypePatch={currentPrototypePatch}
           onSelectPrototypeRegion={onSelectPrototypeRegion}
           onOpenPatchHistory={() => {
             if (!patchHistoryOpen) onPatchHistoryToggle();
@@ -4779,7 +4787,7 @@ function PrototypePreview({
   project,
   deviceMode,
   localEditEnabled,
-  currentPrototypePatchId,
+  currentPrototypePatch,
   onSelectPrototypeRegion,
   onOpenPatchHistory,
   onInlineEdit,
@@ -4787,7 +4795,7 @@ function PrototypePreview({
   project: WorkspaceProject | null;
   deviceMode: DeviceMode;
   localEditEnabled: boolean;
-  currentPrototypePatchId: string | null;
+  currentPrototypePatch: PrototypePatchReference | null;
   onSelectPrototypeRegion: (region?: SelectedRegion) => void;
   onOpenPatchHistory: () => void;
   onInlineEdit: (draft: InlineAssistantDraft) => void;
@@ -4824,6 +4832,7 @@ function PrototypePreview({
 
   useEffect(() => {
     if (!project || state !== "ready") return;
+    let ignore = false;
     setPrototypeLoading("state");
     apiRequest<PrototypeStateResponse>("/prototype/get", {
       method: "POST",
@@ -4833,13 +4842,21 @@ function PrototypePreview({
       }),
     })
       .then((response) => {
+        if (ignore) return;
         if (typeof response.prototypeState?.version === "number") {
           setPrototypeStateVersion(response.prototypeState.version);
         }
         setHydratedPrototypeSpec(extractPrototypeStateSpec(response));
       })
-      .catch((error) => setPrototypeError(error instanceof Error ? error.message : "PrototypeState 加载失败"))
-      .finally(() => setPrototypeLoading((value) => (value === "state" ? null : value)));
+      .catch((error) => {
+        if (!ignore) setPrototypeError(error instanceof Error ? error.message : "PrototypeState 加载失败");
+      })
+      .finally(() => {
+        if (!ignore) setPrototypeLoading((value) => (value === "state" ? null : value));
+      });
+    return () => {
+      ignore = true;
+    };
   }, [project?.id, project?.prototypeArtifactId, state]);
 
   if (state === "empty") {
@@ -4982,13 +4999,15 @@ function PrototypePreview({
     setPrototypeLoading("preview");
     setMachineState("patch_preview");
     try {
-      let patchId = currentPrototypePatchId;
-      if (!patchId) {
-        const response = await apiRequest<ListPatchRecordsResponse>(
-          `/projects/${project.id}/patches${toQueryString({ page: 1, pageSize: 20, status: "needs_confirmation" })}`,
-        );
-        patchId = response.items.find((item) => isPrototypePatchForRegion(item, selectedPrototypeRegion))?.id ?? null;
-      }
+      const response = await apiRequest<ListPatchRecordsResponse>(
+        `/projects/${project.id}/patches${toQueryString({ page: 1, pageSize: 50, status: "needs_confirmation" })}`,
+      );
+      const currentPatch = currentPrototypePatch && isPrototypeRegionMatch(currentPrototypePatch.selectedRegion, selectedPrototypeRegion)
+        ? response.items.find((item) => item.id === currentPrototypePatch.id && isPrototypePatchForRegion(item, selectedPrototypeRegion))
+        : undefined;
+      const patchId = currentPatch?.id
+        ?? response.items.find((item) => isPrototypePatchForRegion(item, selectedPrototypeRegion))?.id
+        ?? null;
       if (!patchId) {
         setPrototypeError("暂无当前原型区域的待确认 Patch，可先从工具栏生成 Patch 候选。");
         return;
@@ -5273,7 +5292,10 @@ function PrototypeFloatingToolbar({
   onAiSuggest: () => void;
 }) {
   return (
-    <div className="absolute left-1/2 top-4 z-20 w-[420px] max-w-[calc(100%-32px)] -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2 shadow-xl">
+    <div
+      className="absolute left-1/2 top-4 z-20 w-[420px] max-w-[calc(100%-32px)] -translate-x-1/2 rounded-lg border border-gray-200 bg-white p-2 shadow-xl"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       <div className="mb-2 flex items-center justify-between gap-3 px-1">
         <div className="min-w-0 truncate text-xs font-medium text-gray-500">{label}</div>
         {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-600" /> : null}
