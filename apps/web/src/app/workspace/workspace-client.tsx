@@ -4832,7 +4832,7 @@ function PrototypePreview({
   const [prototypeError, setPrototypeError] = useState<string | null>(null);
   const [prototypeLoading, setPrototypeLoading] = useState<"state" | "event" | "suggest" | "preview" | null>(null);
   const [hydratedPrototypeSpec, setHydratedPrototypeSpec] = useState<unknown>(null);
-  const effectivePrototypeSpec = project?.prototypeSpec ?? hydratedPrototypeSpec;
+  const effectivePrototypeSpec = hydratedPrototypeSpec ?? project?.prototypeSpec;
   const components = useMemo(() => getPrototypeComponents(effectivePrototypeSpec), [effectivePrototypeSpec]);
   const selectedComponent = components.find((item) => item.id === selectedComponentId) ?? null;
   const activeComponent = selectedBoxRegion ? null : selectedComponent ?? components[0] ?? null;
