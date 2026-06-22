@@ -349,8 +349,8 @@ function buildPreviewArtifacts(input: {
       content: [
         "可以在右侧需求结果中查看结构化需求。",
         "可以在右侧设计结果中查看网页原型。",
-        "可以在右侧执行路径中追踪策略、评审、补丁预览和进化结果。",
-        `补丁预览状态为「${input.previewSession.status}」，确认前不会直接应用变更。`,
+        "可以在对话流中的执行路径里追踪策略、评审、补丁预览和进化结果。",
+        `补丁预览状态为「${previewStatusName(input.previewSession.status)}」，确认前不会直接应用变更。`,
       ].join("；"),
     },
   ];
@@ -490,6 +490,21 @@ function riskName(riskLevel: string) {
   if (riskLevel === "medium") return "中";
   if (riskLevel === "low") return "低";
   return riskLevel;
+}
+
+function previewStatusName(status: string) {
+  const labels: Record<string, string> = {
+    ready: "已生成",
+    preview: "待预览",
+    applied: "已应用",
+    already_applied: "已应用",
+    blocked: "已阻止",
+    completed: "已完成",
+    pending: "待处理",
+    running: "运行中",
+    failed: "失败",
+  };
+  return labels[status] ?? status;
 }
 
 function escapeHtml(value: string) {

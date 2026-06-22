@@ -12,7 +12,6 @@ import {
 } from "@/components/preview-panel";
 import { ProjectList, type Phase1Project } from "@/components/project-list";
 import { ProtectedRoute } from "@/components/protected-route";
-import { UserMenu } from "@/components/user-menu";
 import { apiRequest } from "@/lib/api";
 
 type ProjectsResponse = {
@@ -102,6 +101,7 @@ export function Phase1WorkspaceClient() {
 
 function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const {
     selectedProjectId,
     selectedConversationId,
@@ -207,38 +207,37 @@ function Phase1WorkspaceInner() {
   });
 
   return (
-    <main className="flex h-screen min-h-0 flex-col bg-[#F6F7F9]">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4">
-        <div>
-          <div className="text-sm font-semibold text-gray-950">智能产品工作台</div>
-          <div className="text-xs text-gray-500">三系统融合智能产品操作系统</div>
-        </div>
-        <UserMenu />
-      </header>
-
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_440px] overflow-hidden">
-        <ProjectList
-          projects={projectsQuery.data?.items ?? []}
-          selectedProjectId={selectedProjectId}
-          loading={projectsQuery.isLoading}
-          onSelectProject={(project) =>
-            setSelectedProject(project.id, project.currentConversationId ?? project.defaultConversationId ?? "")
-          }
-        />
-        <ChatPanel
-          messages={messagesQuery.data?.items ?? []}
-          disabled={projectsQuery.isLoading}
-          sending={sendMessage.isPending}
-          onSend={async (content) => {
-            await sendMessage.mutateAsync(content);
-          }}
-        />
-        <PreviewPanel
-          decision={decision}
-          prdPreview={prdPreview}
-          prototypePreview={prototypePreview}
-        />
-      </div>
+    <main
+      className="grid h-screen min-h-0 overflow-hidden bg-[#F6F7F9]"
+      style={{
+        gridTemplateColumns: sidebarCollapsed
+          ? "72px minmax(420px, 1fr) minmax(560px, 48vw)"
+          : "300px minmax(420px, 1fr) minmax(560px, 48vw)",
+      }}
+    >
+      <ProjectList
+        projects={projectsQuery.data?.items ?? []}
+        selectedProjectId={selectedProjectId}
+        loading={projectsQuery.isLoading}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+        onSelectProject={(project) =>
+          setSelectedProject(project.id, project.currentConversationId ?? project.defaultConversationId ?? "")
+        }
+      />
+      <ChatPanel
+        messages={messagesQuery.data?.items ?? []}
+        decision={decision}
+        disabled={projectsQuery.isLoading}
+        sending={sendMessage.isPending}
+        onSend={async (content) => {
+          await sendMessage.mutateAsync(content);
+        }}
+      />
+      <PreviewPanel
+        prdPreview={prdPreview}
+        prototypePreview={prototypePreview}
+      />
     </main>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Activity, Building2, Check, CircleDollarSign, Code2, FileText, GitBranch, Scale, ShieldAlert } from "lucide-react";
 
 export type PatchOperation = {
@@ -300,6 +300,8 @@ export type Phase1PrototypePreview = {
   entryFilePath?: string;
 };
 
+type PreviewMode = "prototype" | "prd";
+
 const STRATEGY_LABELS: Record<Phase2Strategy["name"], string> = {
   conservative_fix: "保守修正",
   ux_improve: "体验优化",
@@ -360,435 +362,62 @@ const MUTATION_LABELS: Record<SystemMutation["type"], string> = {
 };
 
 export function PreviewPanel({
-  decision,
   prdPreview,
   prototypePreview,
 }: {
-  decision?: Phase2DecisionView | null;
   prdPreview?: Phase1PrdPreview | null;
   prototypePreview?: Phase1PrototypePreview | null;
 }) {
-  const strategies = decision?.decisionPlan.strategies ?? [];
-  const selectedId = decision?.selection.selectedStrategyId ?? "";
-  const companyRuntime = decision?.companyRuntime;
-  const constraintContext = decision?.constraintContext ?? decision?.decisionPlan.constraintContext ?? null;
-  const selectedScore = selectedId ? decision?.decisionPlan.scores?.[selectedId] : null;
-  const graph =
-    decision?.selfGeneration?.applied?.graph ??
-    decision?.selfGeneration?.executionPlan ??
-    decision?.executionPlan ??
-    null;
-  const agents = graph?.nodes.filter((node) => node.type === "agent") ?? [];
-  const edges = graph?.edges ?? [];
+  const [mode, setMode] = useState<PreviewMode>("prototype");
+
+  useEffect(() => {
+    if (prototypePreview?.html) {
+      setMode("prototype");
+      return;
+    }
+    if (prdPreview) {
+      setMode("prd");
+    }
+  }, [prdPreview?.id, prototypePreview?.id, prototypePreview?.html]);
 
   return (
-    <aside className="flex min-h-0 flex-col bg-white">
-      <div className="border-b border-gray-200 px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">智能结果中心</div>
-        <div className="text-xs text-gray-500">需求结果 / 设计结果 / 执行路径</div>
+    <aside className="flex min-h-0 flex-col bg-[#F7F8FA]">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-4">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-gray-950">结果预览</div>
+          <div className="truncate text-xs text-gray-500">需求文档与网页原型</div>
+        </div>
+        <div className="inline-flex rounded-full bg-gray-100 p-1">
+          <button
+            type="button"
+            onClick={() => setMode("prd")}
+            className={[
+              "h-8 rounded-full px-3 text-sm font-medium transition",
+              mode === "prd" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900",
+            ].join(" ")}
+          >
+            需求
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("prototype")}
+            className={[
+              "h-8 rounded-full px-3 text-sm font-medium transition",
+              mode === "prototype" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900",
+            ].join(" ")}
+          >
+            预览
+          </button>
+        </div>
       </div>
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-        <ResultSection
-          title="需求结果"
-          description="需求文档与产品设计状态由系统自动沉淀"
-          icon={FileText}
-          ready={Boolean(prdPreview)}
-        >
-          <PrdPreviewView prdPreview={prdPreview} />
-        </ResultSection>
-
-        <ResultSection
-          title="设计结果"
-          description="原型结构与可运行网页预览自动生成"
-          icon={Code2}
-          ready={Boolean(prototypePreview?.html)}
-        >
-          <PrototypePreviewView prototypePreview={prototypePreview} />
-        </ResultSection>
-
-        <ResultSection
-          title="执行路径"
-          description="约束、决策、评审、补丁预览与进化记录统一展示"
-          icon={GitBranch}
-          ready={Boolean(decision)}
-        >
-          {!decision ? (
-            <div className="rounded-lg border border-dashed border-gray-200 px-3 py-10 text-center text-sm leading-6 text-gray-500">
-              发送需求后，这里会展示不少于 3 个策略、5 个评审智能体的评分、零维补丁预览和系统预览。
-            </div>
-          ) : (
-          <div className="space-y-5">
-            <section className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase text-amber-700">
-                  <ShieldAlert className="h-3.5 w-3.5" />
-                  约束视图
-                </div>
-                <span className="rounded-md border border-amber-300 bg-white px-2 py-0.5 text-xs text-amber-700">
-                  已应用 {constraintCount(constraintContext)} 条
-                </span>
-              </div>
-              <div className="mt-3 grid gap-2 text-xs md:grid-cols-4">
-                <Metric label="必须" value={constraintContext?.mustFollow.length ?? 0} />
-                <Metric label="优先" value={constraintContext?.prefer.length ?? 0} />
-                <Metric label="避免" value={constraintContext?.avoid.length ?? 0} />
-                <Metric label="提醒" value={constraintContext?.warn.length ?? 0} />
-              </div>
-              <div className="mt-3 space-y-1">
-                {firstConstraints(constraintContext).map((constraint) => (
-                  <div key={constraint.id} className="rounded-md bg-white px-2 py-1.5 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-gray-800">{RULE_LABELS[constraint.rule]}</span>
-                      <span className="text-amber-700">{SCOPE_LABELS[constraint.scope]}</span>
-                    </div>
-                    <div className="mt-1 leading-5 text-gray-600">{toChineseText(constraint.effect)}</div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase text-orange-700">
-                  <Scale className="h-3.5 w-3.5" />
-                  决策视图
-                </div>
-                <span className="rounded-md border border-orange-300 bg-white px-2 py-0.5 text-xs text-orange-700">
-                  {strategies.length} 个策略
-                </span>
-              </div>
-              <div className="mt-2 text-sm font-semibold text-gray-950">
-                {STRATEGY_LABELS[decision.selectedStrategy.name]}
-              </div>
-              <div className="mt-1 text-xs leading-5 text-orange-900">
-                {toChineseText(decision.decisionPlan.reasoning?.[0] ?? decision.selection.reason)}
-              </div>
-              {selectedScore ? (
-                <div className="mt-3 grid gap-2 text-xs md:grid-cols-5">
-                  <Metric label="易用" value={selectedScore.usability} />
-                  <Metric label="可行" value={selectedScore.feasibility} />
-                  <Metric label="风险" value={selectedScore.risk} />
-                  <Metric label="业务" value={selectedScore.businessValue} />
-                  <Metric label="得分" value={selectedScore.weightedScore.toFixed(2)} />
-                </div>
-              ) : null}
-            </section>
-
-            <section className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase text-cyan-700">
-                  <Activity className="h-3.5 w-3.5" />
-                  进化视图
-                </div>
-                <span className="rounded-md border border-cyan-300 bg-white px-2 py-0.5 text-xs text-cyan-700">
-                  策略版本 v{decision.evolution.policyVersion}
-                </span>
-              </div>
-              <div className="mt-2 text-sm font-semibold text-gray-950">
-                {evolutionCopy(decision.evolution.signal.signalType)}
-              </div>
-              <div className="mt-1 text-xs leading-5 text-cyan-900">{toChineseText(decision.evolution.signal.reason)}</div>
-              <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
-                <Metric label="策略" value={shortId(decision.evolution.signal.strategyId)} />
-                <Metric label="变化" value={signed(decision.evolution.strategyDelta)} />
-                <Metric label="结果" value={OUTCOME_LABELS[decision.evolution.finalOutcome]} />
-              </div>
-            </section>
-
-            {companyRuntime ? (
-              <section className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase text-indigo-700">
-                    <Building2 className="h-3.5 w-3.5" />
-                    公司看板
-                  </div>
-                  <span className="rounded-md border border-indigo-300 bg-white px-2 py-0.5 text-xs text-indigo-700">
-                    {companyRuntime.ceoPlan.approved ? "首席决策已批准" : "等待首席决策"}
-                  </span>
-                </div>
-                <div className="mt-2 text-sm font-semibold text-gray-950">{toChineseText(companyRuntime.company.name)}</div>
-                <div className="mt-1 text-xs leading-5 text-indigo-900">{toChineseText(companyRuntime.company.strategy)}</div>
-
-                <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
-                  <Metric label="预算" value={`${compactNumber(companyRuntime.company.budget)} 元`} />
-                  <Metric label="部门" value={companyRuntime.company.departments.length} />
-                  <Metric
-                    label="智能体"
-                    value={companyRuntime.company.departments.reduce((sum, department) => sum + department.agents.length, 0)}
-                  />
-                </div>
-
-                <div className="mt-3 rounded-md border border-indigo-200 bg-white px-2 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs font-semibold text-gray-950">{toChineseText(companyRuntime.productInitiative.name)}</div>
-                    <span className="rounded-md bg-gray-950 px-2 py-0.5 text-xs text-white">
-                      {departmentLabel(companyRuntime.productInitiative.priority as DepartmentType)}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-xs leading-5 text-gray-600">{toChineseText(companyRuntime.productInitiative.goal)}</div>
-                  <div className="mt-2 flex items-center gap-1 text-xs font-medium text-indigo-800">
-                    <CircleDollarSign className="h-3.5 w-3.5" />
-                    已分配 {compactNumber(companyRuntime.productInitiative.allocatedBudget)} 元
-                  </div>
-                </div>
-
-                <div className="mt-3 space-y-1">
-                  {companyRuntime.company.departments.map((department) => (
-                    <div key={department.id} className="rounded-md bg-white px-2 py-1.5 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-gray-800">{departmentLabel(department.type)}</span>
-                        <span className="text-indigo-700">{compactNumber(department.budgetAllocation)} 元</span>
-                      </div>
-                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-indigo-100">
-                        <div
-                          className="h-full rounded-full bg-indigo-500"
-                          style={{
-                            width: `${Math.max(
-                              6,
-                              Math.min(100, (department.budgetAllocation / companyRuntime.company.budget) * 100),
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="mt-1 truncate text-gray-500">{toChineseText(department.agents[0]?.name ?? "暂无智能体")}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
-                  <PlanMetric label="工程" value={`${companyRuntime.engineeringPlan.modules.length} 个模块`} />
-                  <PlanMetric label="设计" value={`${companyRuntime.designPlan.uxFlows.length} 条流程`} />
-                  <PlanMetric label="质检" value={riskLabel(companyRuntime.qaReport.riskLevel)} tone={companyRuntime.qaReport.riskLevel} />
-                  <PlanMetric label="增长" value={`${companyRuntime.growthPlan.experiments.length} 个实验`} />
-                </div>
-              </section>
-            ) : null}
-
-            <section>
-              <div className="text-xs font-semibold uppercase text-gray-500">策略列表</div>
-              <div className="mt-2 space-y-2">
-                {strategies.map((strategy) => (
-                  <div
-                    key={strategy.id}
-                    className={[
-                      "rounded-lg border px-3 py-2",
-                      strategy.id === selectedId
-                        ? "border-gray-950 bg-gray-950 text-white"
-                        : "border-gray-200 bg-gray-50 text-gray-800",
-                    ].join(" ")}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-semibold">{STRATEGY_LABELS[strategy.name]}</div>
-                      <span className="rounded-md border border-current px-2 py-0.5 text-xs">
-                        {IMPACT_LABELS[strategy.impact]}
-                      </span>
-                    </div>
-                    <div className={strategy.id === selectedId ? "mt-1 text-xs leading-5 text-gray-200" : "mt-1 text-xs leading-5 text-gray-500"}>
-                      {toChineseText(strategy.description)}
-                    </div>
-                    <div className="mt-2 text-xs">
-                      {strategy.patchOperations.length} 项操作
-                      {strategy.id === selectedId ? " · 已选中" : ""}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <div className="text-xs font-semibold uppercase text-gray-500">评审委员会</div>
-              <div className="mt-2 space-y-2">
-                {decision.reviewBoard.reviews.map((review) => (
-                  <div key={review.agentName} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-sm font-semibold text-gray-950">{agentLabel(review.agentName)}</div>
-                      <span className="text-xs text-gray-500">
-                        倾向 {shortId(review.preferredStrategyId)}
-                      </span>
-                    </div>
-                    <div className="mt-2 grid grid-cols-4 gap-1 text-center text-xs">
-                      <Score label="易用" value={review.scores.usability} />
-                      <Score label="可行" value={review.scores.feasibility} />
-                      <Score label="风险" value={review.scores.risk} />
-                      <Score label="业务" value={review.scores.businessValue} />
-                    </div>
-                    {review.objections[0] ? (
-                      <div className="mt-2 text-xs leading-5 text-gray-500">{toChineseText(review.objections[0])}</div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-              <div className="text-xs font-semibold uppercase text-gray-500">策略选择器</div>
-              <div className="mt-2 text-sm font-semibold text-gray-950">
-                {STRATEGY_LABELS[decision.selectedStrategy.name]}
-              </div>
-              <div className="mt-1 text-xs leading-5 text-gray-600">{toChineseText(decision.selection.reason)}</div>
-            </section>
-
-            <section className="rounded-lg border border-gray-950 bg-white px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-semibold uppercase text-gray-500">零维补丁预览</div>
-                <span className="rounded-md bg-gray-950 px-2 py-0.5 text-xs text-white">
-                  {statusLabel(decision.previewSession.status)}
-                </span>
-              </div>
-              <div className="mt-2 text-sm font-semibold text-gray-950">{toChineseText(decision.previewSession.message)}</div>
-              <div className="mt-1 text-xs leading-5 text-gray-500">
-                补丁记录 {shortId(decision.previewSession.patchRecordId)} · 预览 {shortId(decision.previewSession.id)}
-              </div>
-              <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
-                <div className="rounded-md border border-gray-200 bg-gray-50 px-2 py-2">
-                  风险：{riskLabel(decision.previewSession.riskPanel?.level)}
-                </div>
-                <div className="rounded-md border border-gray-200 bg-gray-50 px-2 py-2">
-                  影响域：{decision.patchDraft.targetDomains.map(domainLabel).join("、")}
-                </div>
-              </div>
-              <div className="mt-3 space-y-2">
-                {(decision.previewSession.diff?.operations ?? decision.patchDraft.operations).map((operation, index) => (
-                  <div key={`${operation.path}-${index}`} className="rounded-md border border-gray-200 px-2 py-2 text-xs">
-                    <div className="font-semibold text-gray-950">{OPERATION_LABELS[operation.op]}</div>
-                    <div className="mt-1 break-all text-gray-500">{operation.path}</div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-semibold uppercase text-emerald-700">系统进化</div>
-                <span className="rounded-md border border-emerald-300 bg-white px-2 py-0.5 text-xs text-emerald-700">
-                  策略版本 v{decision.evolution.policyVersion}
-                </span>
-              </div>
-              <div className="mt-2 text-sm font-semibold text-gray-950">
-                {evolutionCopy(decision.evolution.signal.signalType)}
-              </div>
-              <div className="mt-1 text-xs leading-5 text-emerald-800">
-                {toChineseText(decision.evolution.signal.reason)}
-              </div>
-              <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
-                <div className="rounded-md border border-emerald-200 bg-white px-2 py-2">
-                  <div className="text-gray-500">策略</div>
-                  <div className="mt-1 font-semibold text-gray-950">
-                    {shortId(decision.evolution.signal.strategyId)} {signed(decision.evolution.strategyDelta)}
-                  </div>
-                </div>
-                <div className="rounded-md border border-emerald-200 bg-white px-2 py-2">
-                  <div className="text-gray-500">结果</div>
-                  <div className="mt-1 font-semibold text-gray-950">
-                    {OUTCOME_LABELS[decision.evolution.finalOutcome]} · {decision.evolution.metrics.executionTime} 毫秒
-                  </div>
-                </div>
-              </div>
-              <div className="mt-3 space-y-1">
-                {Object.entries(decision.evolution.agentDeltas).map(([agent, delta]) => (
-                  <div key={agent} className="flex items-center justify-between rounded-md bg-white px-2 py-1 text-xs">
-                    <span className="text-gray-600">{agentLabel(agent)}</span>
-                    <span className={delta >= 0 ? "font-semibold text-emerald-700" : "font-semibold text-red-600"}>
-                      {signed(delta)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
-                <div className="rounded-md border border-emerald-200 bg-white px-2 py-2">
-                  风险规避 {decision.evolution.policy.decisionBias.riskAversion.toFixed(2)}
-                </div>
-                <div className="rounded-md border border-emerald-200 bg-white px-2 py-2">
-                  创新倾向 {decision.evolution.policy.decisionBias.innovationBias.toFixed(2)}
-                </div>
-              </div>
-              <div className="mt-3 text-xs font-medium text-emerald-800">系统正在学习...</div>
-            </section>
-
-            <section className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase text-sky-700">
-                  <GitBranch className="h-3.5 w-3.5" />
-                  系统看板
-                </div>
-                <span className="rounded-md border border-sky-300 bg-white px-2 py-0.5 text-xs text-sky-700">
-                  图版本 v{graph?.version ?? 0}
-                </span>
-              </div>
-
-              <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
-                <Metric label="智能体" value={agents.length} />
-                <Metric label="流程边" value={edges.length} />
-                <Metric label="追踪" value={shortId(decision.evolution.traceId)} />
-              </div>
-
-              {decision.selfGeneration ? (
-                <>
-                  <div className="mt-3 rounded-md border border-sky-200 bg-white px-2 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold text-gray-950">系统预览</div>
-                      <span className={riskClass(decision.selfGeneration.proposal.riskLevel)}>
-                        {riskLabel(decision.selfGeneration.proposal.riskLevel)}
-                      </span>
-                    </div>
-                    <div className="mt-2 text-xs leading-5 text-gray-600">
-                      {toChineseText(decision.selfGeneration.insight.opportunity)}
-                    </div>
-                    <div className="mt-2 text-xs text-gray-500">
-                      提案 {shortId(decision.selfGeneration.proposal.id)} · {statusLabel(decision.selfGeneration.proposal.status)}
-                    </div>
-                  </div>
-
-                  <div className="mt-2 space-y-1">
-                    {decision.selfGeneration.proposal.mutations.map((mutation) => (
-                      <div
-                        key={mutation.id}
-                        className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 text-xs"
-                      >
-                        <span className="min-w-0 truncate text-gray-700">
-                          {MUTATION_LABELS[mutation.type]} · {targetLabel(mutation.target)}
-                        </span>
-                        <span className={riskTextClass(mutation.riskLevel)}>{riskLabel(mutation.riskLevel)}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 space-y-1">
-                    {decision.selfGeneration.proposal.impactAnalysis.slice(0, 3).map((item) => (
-                      <div key={item} className="text-xs leading-5 text-sky-800">
-                        {toChineseText(item)}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-xs font-medium text-sky-800">
-                      {decision.selfGeneration.applied ? (
-                        <>
-                          <Check className="h-3.5 w-3.5" />
-                          已应用到系统图
-                        </>
-                      ) : (
-                        <>
-                          <ShieldAlert className="h-3.5 w-3.5" />
-                          等待预览门禁
-                        </>
-                      )}
-                    </div>
-                    <span className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-xs text-sky-700">
-                      自动排队
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <div className="mt-3 rounded-md border border-dashed border-sky-200 bg-white px-2 py-4 text-center text-xs text-gray-500">
-                  下一次编排后会显示自生成预览。
-                </div>
-              )}
-            </section>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {mode === "prd" ? (
+          <div className="h-full overflow-y-auto p-4">
+            <PrdPreviewView prdPreview={prdPreview} />
           </div>
-          )}
-        </ResultSection>
+        ) : (
+          <PrototypePreviewView prototypePreview={prototypePreview} />
+        )}
       </div>
     </aside>
   );
@@ -871,36 +500,35 @@ function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview | null }
 function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1PrototypePreview | null }) {
   if (!prototypePreview?.html) {
     return (
-      <EmptyPreview
-        title="暂无原型"
-        description="发送需求后，系统会生成一份网页原型，并在这里直接预览。"
-      />
+      <div className="h-full p-4">
+        <EmptyPreview
+          title="暂无原型"
+          description="发送需求后，系统会生成一份网页原型，并在这里直接预览。"
+        />
+      </div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-        <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700">
-          <Code2 className="h-4 w-4" />
-          原型预览
+    <div className="flex h-full min-h-0 flex-col bg-[#EEF4FF]">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-blue-100 bg-white/75 px-4">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-gray-950">{toChineseText(prototypePreview.title)}</div>
+          <div className="text-xs text-gray-500">网页原型预览</div>
         </div>
-        <h2 className="mt-2 truncate text-lg font-semibold leading-tight text-gray-950">{toChineseText(prototypePreview.title)}</h2>
-        <div className="mt-1 text-xs text-gray-500">可交互网页预览</div>
+        <div className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-medium text-blue-700">
+          已生成
+        </div>
       </div>
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div className="flex h-8 items-center gap-2 border-b border-gray-200 bg-gray-50 px-3">
-          <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
-          <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-          <span className="ml-2 truncate text-xs text-gray-500">网页原型</span>
-        </div>
+      <div className="min-h-0 flex-1 p-4">
+        <div className="h-full overflow-hidden rounded-xl border border-blue-100 bg-white shadow-sm">
         <iframe
           title="原型预览"
           srcDoc={prototypePreview.html}
           sandbox="allow-scripts"
-          className="h-[620px] w-full border-0 bg-white"
+            className="h-full min-h-[680px] w-full border-0 bg-white"
         />
+        </div>
       </div>
     </div>
   );
