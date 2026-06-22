@@ -54,6 +54,7 @@ export function AdminModelProvidersClient() {
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState<ModelProviderItem | null>(null);
   const [form, setForm] = useState<ProviderForm>(defaultProviderForm());
+  const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const loadItems = useCallback(async () => {
@@ -76,6 +77,7 @@ export function AdminModelProvidersClient() {
   function openCreate() {
     setEditing(null);
     setForm(defaultProviderForm());
+    setModalOpen(true);
   }
 
   function openEdit(provider: ModelProviderItem) {
@@ -87,6 +89,7 @@ export function AdminModelProvidersClient() {
       timeoutMs: String(provider.timeoutMs),
       isDefault: provider.isDefault,
     });
+    setModalOpen(true);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -114,6 +117,7 @@ export function AdminModelProvidersClient() {
         });
         setNotice("供应商已创建");
       }
+      setModalOpen(false);
       setEditing(null);
       setForm(defaultProviderForm());
       await loadItems();
@@ -172,12 +176,13 @@ export function AdminModelProvidersClient() {
         </AdminTable>
       </div>
       <ProviderModal
-        open={Boolean(editing) || form.name !== "" || form.baseUrl !== "" || form.apiKey !== ""}
+        open={modalOpen}
         editing={editing}
         form={form}
         submitting={submitting}
         onChange={setForm}
         onClose={() => {
+          setModalOpen(false);
           setEditing(null);
           setForm(defaultProviderForm());
         }}
