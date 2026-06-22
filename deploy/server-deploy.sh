@@ -12,6 +12,7 @@ DEFAULT_MODEL_BASE_URL="${DEFAULT_MODEL_BASE_URL:-}"
 DEFAULT_MODEL_API_KEY="${DEFAULT_MODEL_API_KEY:-}"
 DEFAULT_MODEL_NAME="${DEFAULT_MODEL_NAME:-}"
 KNOWLEDGE_APP_PORT="${KNOWLEDGE_APP_PORT:-3001}"
+KNOWLEDGE_APP_PUBLIC_URL="${KNOWLEDGE_APP_PUBLIC_URL:-http://${APP_HOST}:${KNOWLEDGE_APP_PORT}}"
 SILVERBULLET_IMAGE="${SILVERBULLET_IMAGE:-ghcr.io/silverbulletmd/silverbullet:v2}"
 SILVERBULLET_USER="${SILVERBULLET_USER:-}"
 SILVERBULLET_PASSWORD="${SILVERBULLET_PASSWORD:-}"
@@ -75,7 +76,7 @@ docker build \
 docker build \
   --build-arg NODE_IMAGE="$NODE_IMAGE" \
   --build-arg NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
-  --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL="http://${APP_HOST}:${KNOWLEDGE_APP_PORT}" \
+  --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
   -f apps/web/Dockerfile \
   -t ai-product-workbench-web:latest .
 
@@ -105,7 +106,7 @@ docker run -d \
   --network ai-product-workbench \
   -p 3000:3000 \
   -e NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
-  -e NEXT_PUBLIC_KNOWLEDGE_APP_URL="http://${APP_HOST}:${KNOWLEDGE_APP_PORT}" \
+  -e NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
   ai-product-workbench-web:latest
 
 STORAGE_MOUNT="$(docker volume inspect ai-product-workbench-storage -f '{{ .Mountpoint }}')"
@@ -133,4 +134,4 @@ wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/" "Knowledge app"
 echo "Deployed:"
 echo "  Web: http://${APP_HOST}:3000/login"
 echo "  API: http://${APP_HOST}:4000/api/system/health"
-echo "  Knowledge: http://${APP_HOST}:${KNOWLEDGE_APP_PORT}"
+echo "  Knowledge: ${KNOWLEDGE_APP_PUBLIC_URL}"

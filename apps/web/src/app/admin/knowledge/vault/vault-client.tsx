@@ -9,7 +9,7 @@ import { apiRequest } from "@/lib/api";
 import type { KnowledgeVaultEntry, KnowledgeVaultStatus } from "@/lib/types";
 
 const KNOWLEDGE_APP_URL =
-  process.env.NEXT_PUBLIC_KNOWLEDGE_APP_URL ?? "http://8.130.160.177:3001";
+  process.env.NEXT_PUBLIC_KNOWLEDGE_APP_URL ?? "https://knowledge.8-130-160-177.sslip.io";
 
 export function AdminKnowledgeVaultClient() {
   const [status, setStatus] = useState<KnowledgeVaultStatus | null>(null);
