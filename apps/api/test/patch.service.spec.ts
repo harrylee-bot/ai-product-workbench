@@ -483,6 +483,21 @@ describe("PatchService", () => {
         }),
       }),
     );
+    const emittedTypes = stream.emit.mock.calls.map(([event]) => event.type);
+    expect(emittedTypes).toEqual(
+      expect.arrayContaining([
+        "patch_started",
+        "patch_plan_created",
+        "prd_updated",
+        "prototype_updated",
+        "qa_completed",
+        "patch_completed",
+      ]),
+    );
+    expect(emittedTypes.indexOf("patch_plan_created")).toBeLessThan(emittedTypes.indexOf("prd_updated"));
+    expect(emittedTypes.indexOf("prd_updated")).toBeLessThan(emittedTypes.indexOf("prototype_updated"));
+    expect(emittedTypes.indexOf("prototype_updated")).toBeLessThan(emittedTypes.indexOf("qa_completed"));
+    expect(emittedTypes.indexOf("qa_completed")).toBeLessThan(emittedTypes.indexOf("patch_completed"));
     expect(runLog.completeRun).toHaveBeenCalledWith(
       "run-1",
       expect.objectContaining({
