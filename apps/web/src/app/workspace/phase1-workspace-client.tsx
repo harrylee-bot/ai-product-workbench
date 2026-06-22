@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { create } from "zustand";
 import { ChatPanel, type Phase1Message } from "@/components/chat-panel";
 import {
@@ -13,7 +13,7 @@ import {
 import { ProjectList, type Phase1Conversation, type Phase1Project } from "@/components/project-list";
 import { ProtectedRoute } from "@/components/protected-route";
 import { ErrorState } from "@/components/ui";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, streamApiEvents } from "@/lib/api";
 
 type ProjectsResponse = {
   items: Phase1Project[];
@@ -30,27 +30,23 @@ type MessagesResponse = {
   items: Phase1Message[];
 };
 
-type MessageResponse = {
+type VibeHandleMessageResponse = {
+  projectId: string;
+  conversationId: string;
   userMessage?: Phase1Message & {
     projectId?: string;
     conversationId?: string;
   };
-  assistantMessage: Phase1Message;
-  decisionPlan: Phase2DecisionView["decisionPlan"];
-  reviewBoard: Phase2DecisionView["reviewBoard"];
-  selection: Phase2DecisionView["selection"];
-  selectedStrategy: Phase2DecisionView["selectedStrategy"];
-  patchDraft: Phase2DecisionView["patchDraft"];
-  previewSession: Phase2DecisionView["previewSession"];
-  evolution: Phase2DecisionView["evolution"];
-  selfGeneration?: Phase2DecisionView["selfGeneration"];
-  executionPlan?: Phase2DecisionView["executionPlan"];
-  companyRuntime?: Phase2DecisionView["companyRuntime"];
-  knowledgeSearch?: Phase2DecisionView["knowledgeSearch"];
-  constraintContext?: Phase2DecisionView["constraintContext"];
-  agentInput?: Phase2DecisionView["agentInput"];
-  prdPreview?: Phase1PrdPreview;
-  prototypePreview?: Phase1PrototypePreview;
+  assistantMessage: null;
+  runId: string;
+  status: "running";
+};
+
+type VibeStreamEvent = {
+  type: string;
+  eventType?: string;
+  payload?: unknown;
+  data?: unknown;
 };
 
 type CreateConversationResponse = {
@@ -126,9 +122,11 @@ export function Phase1WorkspaceClient() {
 
 function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
+  const runStreamAbortRef = useRef<AbortController | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewWidth, setPreviewWidth] = useState(WORKSPACE_PREVIEW_DEFAULT_WIDTH);
   const [resizingPreview, setResizingPreview] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const {
     selectedProjectId,
     selectedConversationId,
@@ -183,6 +181,58 @@ function Phase1WorkspaceInner() {
     queryFn: () => apiRequest<MessagesResponse>(`/conversations/${selectedConversationId}/messages`),
   });
 
+  useEffect(() => {
+    return () => runStreamAbortRef.current?.abort();
+  }, []);
+
+  const watchVibeRun = (runId: string, projectId: string, conversationId: string) => {
+    runStreamAbortRef.current?.abort();
+    const controller = new AbortController();
+    runStreamAbortRef.current = controller;
+    setActiveRunId(runId);
+
+    void streamApiEvents<VibeStreamEvent>(
+      `/ai/vibe/runs/${runId}/stream`,
+      (event) => {
+        const eventType = event.eventType ?? event.type;
+        const payload = payloadRecord(event);
+
+        if (eventType === "prd_updated" && payload) {
+          setArtifactPreview({ prdPreview: normalizePrdPreview(payload) });
+        }
+
+        if (eventType === "prototype_updated" && payload) {
+          const artifactPayload = asRecord(payload.prototypeArtifact) ?? payload;
+          setArtifactPreview({ prototypePreview: normalizePrototypePreview(artifactPayload) });
+        }
+
+        if (eventType === "run_completed" || eventType === "run_failed") {
+          const result = payload;
+          const prdPayload = asRecord(result?.prdDocument);
+          const prototypePayload = asRecord(result?.prototypeArtifact);
+          if (prdPayload || prototypePayload) {
+            setArtifactPreview({
+              prdPreview: prdPayload ? normalizePrdPreview(prdPayload) : undefined,
+              prototypePreview: prototypePayload ? normalizePrototypePreview(prototypePayload) : undefined,
+            });
+          }
+          setActiveRunId(null);
+          controller.abort();
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["phase1-messages", conversationId] }),
+            queryClient.invalidateQueries({ queryKey: ["phase1-project", projectId] }),
+            queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+          ]);
+        }
+      },
+      { signal: controller.signal },
+    ).catch((error) => {
+      if (controller.signal.aborted) return;
+      setActiveRunId(null);
+      window.alert(error instanceof Error ? error.message : "运行流连接失败");
+    });
+  };
+
   const sendMessage = useMutation({
     mutationFn: async (content: string) => {
       let projectId = selectedProjectId;
@@ -198,38 +248,21 @@ function Phase1WorkspaceInner() {
         setSelectedProject(projectId, conversationId);
       }
 
-      return apiRequest<MessageResponse>("/messages", {
+      return apiRequest<VibeHandleMessageResponse>("/ai/vibe/handle-message", {
         method: "POST",
         body: JSON.stringify({
           projectId,
           conversationId,
-          content,
+          message: content,
         }),
       });
     },
     onSuccess: async (response) => {
-      const responseProjectId = response.userMessage?.projectId ?? selectedProjectId;
-      const responseConversationId = response.userMessage?.conversationId ?? selectedConversationId;
+      const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
+      const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
 
-      setDecision({
-        decisionPlan: response.decisionPlan,
-        reviewBoard: response.reviewBoard,
-        selection: response.selection,
-        selectedStrategy: response.selectedStrategy,
-        patchDraft: response.patchDraft,
-        previewSession: response.previewSession,
-        evolution: response.evolution,
-        selfGeneration: response.selfGeneration,
-        executionPlan: response.executionPlan,
-        companyRuntime: response.companyRuntime,
-        knowledgeSearch: response.knowledgeSearch,
-        constraintContext: response.constraintContext,
-        agentInput: response.agentInput,
-      });
-      setArtifactPreview({
-        prdPreview: response.prdPreview ?? null,
-        prototypePreview: response.prototypePreview ?? null,
-      });
+      setDecision(null);
+      watchVibeRun(response.runId, responseProjectId, responseConversationId);
       await Promise.all([
         responseConversationId
           ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", responseConversationId] })
@@ -406,7 +439,7 @@ function Phase1WorkspaceInner() {
         messages={messagesQuery.data?.items ?? []}
         decision={decision}
         disabled={projectsQuery.isLoading}
-        sending={sendMessage.isPending}
+        sending={sendMessage.isPending || Boolean(activeRunId)}
         onSend={async (content) => {
           await sendMessage.mutateAsync(content);
         }}
@@ -480,6 +513,10 @@ function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | nul
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function payloadRecord(event: VibeStreamEvent) {
+  return asRecord(event.payload) ?? asRecord(event.data);
 }
 
 function asText(value: unknown) {
