@@ -35,7 +35,7 @@ export function ChatPanel({
   return (
     <section className="flex min-h-0 flex-col border-r border-gray-200 bg-[#F8FAFC]">
       <div className="border-b border-gray-200 bg-white px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">AI 输入</div>
+        <div className="text-sm font-semibold text-gray-950">智能输入</div>
         <div className="mt-1 text-xs text-gray-500">只需要说出目标，系统自动完成决策与生成</div>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">

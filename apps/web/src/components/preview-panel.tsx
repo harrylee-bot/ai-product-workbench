@@ -384,7 +384,7 @@ export function PreviewPanel({
   return (
     <aside className="flex min-h-0 flex-col bg-white">
       <div className="border-b border-gray-200 px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">AI 结果中心</div>
+        <div className="text-sm font-semibold text-gray-950">智能结果中心</div>
         <div className="text-xs text-gray-500">需求结果 / 设计结果 / 执行路径</div>
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
@@ -399,7 +399,7 @@ export function PreviewPanel({
 
         <ResultSection
           title="设计结果"
-          description="原型结构与可运行 HTML 自动生成"
+          description="原型结构与可运行网页预览自动生成"
           icon={Code2}
           ready={Boolean(prototypePreview?.html)}
         >
@@ -873,7 +873,7 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
     return (
       <EmptyPreview
         title="暂无原型"
-        description="发送需求后，系统会生成一份 HTML 原型，并在这里直接预览。"
+        description="发送需求后，系统会生成一份网页原型，并在这里直接预览。"
       />
     );
   }
@@ -886,7 +886,7 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
           原型预览
         </div>
         <h2 className="mt-2 truncate text-lg font-semibold leading-tight text-gray-950">{toChineseText(prototypePreview.title)}</h2>
-        <div className="mt-1 text-xs text-gray-500">{prototypePreview.entryFilePath ?? "index.html"}</div>
+        <div className="mt-1 text-xs text-gray-500">可交互网页预览</div>
       </div>
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
         <div className="flex h-8 items-center gap-2 border-b border-gray-200 bg-gray-50 px-3">

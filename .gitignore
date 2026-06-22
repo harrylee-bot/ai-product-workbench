@@ -11,3 +11,4 @@ output
 *.tsbuildinfo
 .turbo
 .vercel
+.playwright-cli
