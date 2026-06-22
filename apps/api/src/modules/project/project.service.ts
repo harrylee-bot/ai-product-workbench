@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { Conversation, Project, ProjectStatus, UserRole } from "@prisma/client";
+import { Conversation, ConversationStatus, Project, ProjectStatus, UserRole } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { Phase1User } from "../auth/auth.types";
 import type { CreateProjectDto, ListProjectsQueryDto } from "./dto";
@@ -57,8 +57,11 @@ export class ProjectService {
       orderBy: { lastActivityAt: "desc" },
       include: {
         conversations: {
-          where: { deletedAt: null },
-          orderBy: { createdAt: "asc" },
+          where: {
+            deletedAt: null,
+            status: { not: ConversationStatus.deleted },
+          },
+          orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
           take: 1,
         },
       },
@@ -75,8 +78,12 @@ export class ProjectService {
   async get(user: Phase1User, projectId: string) {
     const project = await this.getAccessibleProject(user, projectId);
     const conversations = await this.prisma.conversation.findMany({
-      where: { projectId, deletedAt: null },
-      orderBy: { createdAt: "asc" },
+      where: {
+        projectId,
+        deletedAt: null,
+        status: { not: ConversationStatus.deleted },
+      },
+      orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
     });
     const state = await this.prisma.productDesignState.findFirst({
       where: { projectId },
@@ -129,6 +136,9 @@ export class ProjectService {
       id: conversation.id,
       projectId: conversation.projectId,
       title: conversation.title,
+      messageCount: conversation.messageCount,
+      lastMessageAt: conversation.lastMessageAt?.toISOString(),
+      status: conversation.status,
       createdAt: conversation.createdAt.toISOString(),
       updatedAt: conversation.updatedAt.toISOString(),
     };

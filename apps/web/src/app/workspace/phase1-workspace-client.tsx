@@ -10,7 +10,7 @@ import {
   type Phase1PrototypePreview,
   type Phase2DecisionView,
 } from "@/components/preview-panel";
-import { ProjectList, type Phase1Project } from "@/components/project-list";
+import { ProjectList, type Phase1Conversation, type Phase1Project } from "@/components/project-list";
 import { ProtectedRoute } from "@/components/protected-route";
 import { apiRequest } from "@/lib/api";
 
@@ -20,7 +20,7 @@ type ProjectsResponse = {
 
 type ProjectDetailResponse = {
   project: Phase1Project;
-  conversations: Array<{ id: string; projectId: string; title: string }>;
+  conversations: Phase1Conversation[];
   prd?: unknown;
   prototype?: unknown;
 };
@@ -49,6 +49,16 @@ type MessageResponse = {
   agentInput?: Phase2DecisionView["agentInput"];
   prdPreview?: Phase1PrdPreview;
   prototypePreview?: Phase1PrototypePreview;
+};
+
+type CreateConversationResponse = {
+  conversation: Phase1Conversation;
+};
+
+type DeleteConversationResponse = {
+  success: boolean;
+  deletedConversationId: string;
+  nextConversation: Phase1Conversation;
 };
 
 type Phase1WorkspaceState = {
@@ -134,7 +144,13 @@ function Phase1WorkspaceInner() {
   useEffect(() => {
     const detail = detailQuery.data;
     if (!detail) return;
-    const conversationId = detail.project.currentConversationId ?? detail.conversations[0]?.id ?? "";
+    const activeConversationIds = new Set(detail.conversations.map((conversation) => conversation.id));
+    const currentConversationId = activeConversationIds.has(detail.project.currentConversationId ?? "")
+      ? detail.project.currentConversationId
+      : undefined;
+    const conversationId = activeConversationIds.has(selectedConversationId)
+      ? selectedConversationId
+      : currentConversationId ?? detail.conversations[0]?.id ?? "";
     if (conversationId && conversationId !== selectedConversationId) {
       setSelectedProject(detail.project.id, conversationId);
     }
@@ -206,6 +222,61 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  const createConversation = useMutation({
+    mutationFn: async () => {
+      if (!selectedProjectId) {
+        const response = await apiRequest<{ project: Phase1Project; defaultConversation: Phase1Conversation }>("/projects", {
+          method: "POST",
+          body: JSON.stringify({ title: "智能产品项目" }),
+        });
+        return { conversation: response.defaultConversation };
+      }
+
+      return apiRequest<CreateConversationResponse>("/conversations", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          title: "新对话",
+        }),
+      });
+    },
+    onSuccess: async (response) => {
+      const conversation = response.conversation;
+      setSelectedProject(conversation.projectId, conversation.id);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase1-project", conversation.projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["phase1-messages", conversation.id] }),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "新建对话失败");
+    },
+  });
+
+  const deleteConversation = useMutation({
+    mutationFn: async (conversation: Phase1Conversation) => {
+      const response = await apiRequest<DeleteConversationResponse>(`/conversations/${conversation.id}`, {
+        method: "DELETE",
+      });
+      return { deleted: conversation, response };
+    },
+    onSuccess: async ({ deleted, response }) => {
+      if (deleted.id === selectedConversationId) {
+        setSelectedProject(response.nextConversation.projectId, response.nextConversation.id);
+      }
+      queryClient.removeQueries({ queryKey: ["phase1-messages", response.deletedConversationId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase1-project", response.nextConversation.projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["phase1-messages", response.nextConversation.id] }),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "删除对话失败");
+    },
+  });
+
   return (
     <main
       className="grid h-screen min-h-0 overflow-hidden bg-[#F6F7F9]"
@@ -217,13 +288,23 @@ function Phase1WorkspaceInner() {
     >
       <ProjectList
         projects={projectsQuery.data?.items ?? []}
+        conversations={detailQuery.data?.conversations ?? []}
         selectedProjectId={selectedProjectId}
+        selectedConversationId={selectedConversationId}
         loading={projectsQuery.isLoading}
         collapsed={sidebarCollapsed}
+        creatingConversation={createConversation.isPending}
+        deletingConversationId={deleteConversation.variables?.id}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
         onSelectProject={(project) =>
           setSelectedProject(project.id, project.currentConversationId ?? project.defaultConversationId ?? "")
         }
+        onSelectConversation={(conversation) => setSelectedProject(conversation.projectId, conversation.id)}
+        onCreateConversation={() => void createConversation.mutate()}
+        onDeleteConversation={(conversation) => {
+          const confirmed = window.confirm("删除后仅从历史对话中隐藏，消息和系统内容会保留用于后续知识库。确认删除吗？");
+          if (confirmed) deleteConversation.mutate(conversation);
+        }}
       />
       <ChatPanel
         messages={messagesQuery.data?.items ?? []}
