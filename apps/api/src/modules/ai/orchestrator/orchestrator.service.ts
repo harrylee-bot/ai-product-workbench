@@ -78,6 +78,31 @@ type ArtifactGeneration = {
   fallbackReason?: string;
 };
 
+type CompactArtifactContext = {
+  userInput: string;
+  projectTitle: string;
+  selectedStrategy: PreviewArtifactContext["selectedStrategy"];
+  decisionPlan: PreviewArtifactContext["decisionPlan"];
+  knowledgeSummary: string;
+  knowledgeReferences: Array<{
+    title: string;
+    type?: string;
+    snippet: string;
+  }>;
+  constraints: {
+    mustFollow: string[];
+    prefer: string[];
+    avoid: string[];
+    warn: string[];
+  };
+  agentSkills: Array<{
+    name: string;
+    description: string;
+    capabilities: string[];
+  }>;
+  companyRuntime: PreviewArtifactContext["companyRuntime"];
+};
+
 @Injectable()
 export class OrchestratorService {
   constructor(
@@ -326,6 +351,7 @@ export class OrchestratorService {
     meta: { traceId: string; userId: string },
   ): Promise<ArtifactGeneration> {
     const fallback = buildPreviewArtifacts(context);
+    const modelContext = buildCompactArtifactContext(context);
 
     if (process.env.AI_ARTIFACT_GENERATION_MODE?.trim().toLowerCase() === "template") {
       return {
@@ -342,7 +368,8 @@ export class OrchestratorService {
         traceId: meta.traceId,
         userId: meta.userId,
         temperature: 0.35,
-        maxTokens: 8192,
+        maxTokens: 5000,
+        timeoutMs: 120000,
         messages: [
           {
             role: "system",
@@ -383,7 +410,7 @@ export class OrchestratorService {
                 "原型必须像真实产品页面，不要只输出说明文字。",
                 "不要引入远程脚本、远程样式、外部图片或实际提交表单。",
               ],
-              context,
+              context: modelContext,
             }),
           },
         ],
@@ -669,6 +696,8 @@ function canFallbackArtifactGeneration(error: unknown) {
     "MODEL_TASK_PROFILE_NOT_FOUND",
     "MODEL_PROVIDER_NOT_FOUND",
     "MODEL_CONFIG_NOT_FOUND",
+    "MODEL_CALL_TIMEOUT",
+    "MODEL_JSON_PARSE_FAILED",
   ].includes(error.code);
 }
 
@@ -680,6 +709,52 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function safeModelText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function buildCompactArtifactContext(context: PreviewArtifactContext): CompactArtifactContext {
+  return {
+    userInput: context.userInput,
+    projectTitle: context.projectTitle,
+    selectedStrategy: context.selectedStrategy,
+    decisionPlan: {
+      strategies: context.decisionPlan.strategies,
+      reasoning: context.decisionPlan.reasoning?.slice(0, 3),
+    },
+    knowledgeSummary: context.knowledgeSummary,
+    knowledgeReferences: context.knowledgeReferences.slice(0, 6).map((reference) => ({
+      title: reference.title,
+      type: reference.type,
+      snippet: compactText(reference.snippet || reference.content, 280),
+    })),
+    constraints: {
+      mustFollow: context.constraintContext.mustFollow.map((constraint) => compactText(constraint.effect, 220)).slice(0, 8),
+      prefer: context.constraintContext.prefer.map((constraint) => compactText(constraint.effect, 180)).slice(0, 6),
+      avoid: context.constraintContext.avoid.map((constraint) => compactText(constraint.effect, 180)).slice(0, 6),
+      warn: context.constraintContext.warn.map((constraint) => compactText(constraint.effect, 180)).slice(0, 4),
+    },
+    agentSkills: context.agentSkills.slice(0, 4).map((skill) => ({
+      name: skill.name,
+      description: compactText(skill.description, 180),
+      capabilities: skill.capabilities.slice(0, 4).map((capability) => compactText(capability, 80)),
+    })),
+    companyRuntime: {
+      productInitiative: {
+        name: compactText(context.companyRuntime.productInitiative.name, 80),
+        goal: compactText(context.companyRuntime.productInitiative.goal, 220),
+        features: context.companyRuntime.productInitiative.features.slice(0, 8).map((feature) => compactText(feature, 120)),
+      },
+      qaReport: {
+        riskLevel: context.companyRuntime.qaReport.riskLevel,
+        recommendations: context.companyRuntime.qaReport.recommendations.slice(0, 5).map((item) => compactText(item, 140)),
+      },
+    },
+  };
+}
+
+function compactText(value: string | undefined, maxLength: number) {
+  const text = (value ?? "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
 }
 
 function ensureHtmlDocument(html: string, title: string) {
