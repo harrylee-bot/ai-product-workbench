@@ -3031,7 +3031,7 @@ export function WorkspaceClient() {
         <WorkspaceTopBar currentProject={currentProject} isRunning={isRunning} />
         <div
           className={clsx(
-            "grid h-[calc(100dvh-56px)] max-h-[calc(100dvh-56px)] min-h-0 overflow-x-auto overflow-y-hidden transition-[grid-template-columns] duration-200",
+            "grid h-[calc(100dvh-56px)] max-h-[calc(100dvh-56px)] min-h-0 grid-rows-[minmax(0,1fr)] overflow-x-auto overflow-y-hidden transition-[grid-template-columns] duration-200",
             sidebarCollapsed
               ? "min-w-[1044px] grid-cols-[64px_minmax(460px,520px)_minmax(520px,1fr)]"
               : "min-w-[1260px] grid-cols-[280px_minmax(460px,520px)_minmax(520px,1fr)]",
