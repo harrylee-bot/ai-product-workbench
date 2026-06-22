@@ -109,8 +109,8 @@ function generateStrategies(intent: string, content: string): FusionStrategy[] {
         value: { type: "constraint_applied", content: "所有变更必须遵守三系统融合约束。" },
       },
     ]),
-    strategy(`strategy_${hash}_balanced`, "balanced", "平衡方案：同时增强 PRD、原型和状态表达，兼顾收益与可行性。", "medium", [
-      { op: "add", path: "/prd/acceptanceCriteria/-", value: "用户可看到 Constraint、Decision、Evolution 的完整链路。" },
+    strategy(`strategy_${hash}_balanced`, "balanced", "平衡方案：同时增强需求文档、原型和状态表达，兼顾收益与可行性。", "medium", [
+      { op: "add", path: "/prd/acceptanceCriteria/-", value: "用户可看到约束系统、决策系统、进化系统的完整链路。" },
       { op: "add", path: "/prototype/pages/-", value: { name: "三系统融合视图", purpose: "展示三系统融合结果。" } },
     ]),
     strategy(`strategy_${hash}_aggressive`, "aggressive", "进取方案：扩大产品结构和交互范围，提升业务价值但引入更高风险。", "medium", [

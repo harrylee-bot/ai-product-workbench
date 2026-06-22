@@ -51,7 +51,7 @@ export class MutationEngine {
       );
     }
     if (mutation.type === "remove_agent" && !graph.nodes.some((node) => node.id === mutation.target)) {
-      throw new ForbiddenException("目标 Agent 不存在");
+      throw new ForbiddenException("目标智能体不存在");
     }
     return true;
   }

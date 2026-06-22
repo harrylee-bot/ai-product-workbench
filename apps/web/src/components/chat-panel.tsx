@@ -49,7 +49,7 @@ export function ChatPanel({
                   : "mr-auto border border-gray-200 bg-white text-gray-700",
               ].join(" ")}
             >
-              {message.content}
+              {toChineseText(message.content)}
             </div>
           ))
         ) : (
@@ -75,4 +75,26 @@ export function ChatPanel({
       </form>
     </section>
   );
+}
+
+function toChineseText(value: string) {
+  return value
+    .replace(/AI Product Workbench/g, "智能产品工作台")
+    .replace(/AI Product OS/g, "智能产品操作系统")
+    .replace(/AI Product Company/g, "智能产品公司")
+    .replace(/Triple System Fusion/g, "三系统融合")
+    .replace(/Triple System/g, "三系统融合")
+    .replace(/Constraint System/g, "约束系统")
+    .replace(/Decision System/g, "决策系统")
+    .replace(/Evolution System/g, "进化系统")
+    .replace(/Constraint/g, "约束系统")
+    .replace(/Decision/g, "决策系统")
+    .replace(/Evolution/g, "进化系统")
+    .replace(/Patch Preview/g, "补丁预览")
+    .replace(/PatchDraft/g, "补丁草稿")
+    .replace(/Patch/g, "补丁")
+    .replace(/Prototype/g, "原型")
+    .replace(/PRD/g, "需求文档")
+    .replace(/QA/g, "质检")
+    .replace(/AI/g, "智能");
 }

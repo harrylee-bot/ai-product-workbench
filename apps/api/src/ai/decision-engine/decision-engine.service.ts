@@ -20,7 +20,7 @@ export class DecisionEngineService {
       throw new Error("Decision Engine strategies must be distinct.");
     }
     if (operationSets.size !== strategies.length) {
-      throw new Error("Decision Engine strategies must have independent patchOperations.");
+      throw new Error("决策引擎策略必须拥有相互独立的补丁操作。");
     }
 
     return { strategies };

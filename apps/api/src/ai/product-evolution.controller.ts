@@ -70,7 +70,7 @@ export class AiSuggestionController {
       suggestion: {
         action,
         title: `建议优化「${label}」`,
-        summary: "AI 建议已整理为 PatchDraft 输入，确认生成后才会进入 Patch Preview。",
+        summary: "智能建议已整理为补丁草稿输入，确认生成后才会进入补丁预览。",
         instruction: `请针对「${label}」执行${prototypeActionLabel(action)}：${dto.instruction.trim()}`,
         selectedRegion: dto.selectedRegion,
         patchDraft: {
@@ -101,7 +101,7 @@ export class FeedbackAnalysisController {
 
 function prototypeActionLabel(action: NonNullable<AiSuggestDto["action"]>) {
   if (action === "layout_edit") return "布局调整";
-  if (action === "flow_update") return "Flow 优化";
+  if (action === "flow_update") return "流程优化";
   if (action === "redesign") return "组件优化";
   return "组件编辑";
 }

@@ -740,7 +740,7 @@ const STATUS_META: Record<ProjectStatus, { label: string; className: string }> =
     className: "border-amber-200 bg-amber-50 text-amber-700",
   },
   prd_ready: {
-    label: "PRD 已生成",
+    label: "需求文档已生成",
     className: "border-emerald-200 bg-emerald-50 text-emerald-700",
   },
   prototype_ready: {
@@ -748,7 +748,7 @@ const STATUS_META: Record<ProjectStatus, { label: string; className: string }> =
     className: "border-cyan-200 bg-cyan-50 text-cyan-700",
   },
   qa_failed: {
-    label: "QA 未通过",
+    label: "质检未通过",
     className: "border-rose-200 bg-rose-50 text-rose-700",
   },
   done: {
@@ -776,10 +776,10 @@ const INLINE_ACTION_LABELS: Record<InlineEditAction, string> = {
   simplify: "精简",
   compress: "压缩",
   restructure: "重构",
-  diff: "Diff",
+  diff: "差异",
   component_edit: "组件编辑",
   layout_edit: "布局调整",
-  flow_update: "Flow 优化",
+  flow_update: "流程优化",
   redesign: "组件优化",
 };
 
@@ -811,38 +811,38 @@ const PATCH_STATUS_META: Record<PatchRecordStatus, { label: string; className: s
 };
 
 const AGENT_TEMPLATE: AgentStep[] = [
-  { key: "intent", name: "Intent Agent", description: "正在理解你的需求", status: "pending" },
-  { key: "knowledge", name: "Knowledge Agent", description: "正在检索知识库", status: "pending" },
+  { key: "intent", name: "意图智能体", description: "正在理解你的需求", status: "pending" },
+  { key: "knowledge", name: "知识智能体", description: "正在检索知识库", status: "pending" },
   {
     key: "analyst",
-    name: "Requirement Analyst Agent",
+    name: "需求分析智能体",
     description: "正在分析需求完整度",
     status: "pending",
   },
   {
     key: "designer",
-    name: "Product Designer Agent",
+    name: "产品设计智能体",
     description: "正在生成产品设计方案",
     status: "pending",
   },
-  { key: "prd", name: "PRD Writer Agent", description: "正在生成 PRD", status: "pending" },
+  { key: "prd", name: "需求文档智能体", description: "正在生成需求文档", status: "pending" },
   {
     key: "prototypeDesigner",
-    name: "Prototype Designer Agent",
+    name: "原型设计智能体",
     description: "正在生成原型规格",
     status: "pending",
   },
   {
     key: "prototypeCode",
-    name: "Prototype Code Agent",
-    description: "正在生成 HTML 原型",
+    name: "原型代码智能体",
+    description: "正在生成网页原型",
     status: "pending",
   },
-  { key: "qa", name: "QA Agent", description: "正在校验一致性", status: "pending" },
-  { key: "patch", name: "Patch Agent", description: "正在分析局部修改", status: "skipped" },
+  { key: "qa", name: "质检智能体", description: "正在校验一致性", status: "pending" },
+  { key: "patch", name: "补丁智能体", description: "正在分析局部修改", status: "skipped" },
   {
     key: "knowledgeExtractor",
-    name: "Knowledge Extractor Agent",
+    name: "知识抽取智能体",
     description: "正在抽取知识候选",
     status: "skipped",
   },
@@ -864,7 +864,7 @@ const STEP_KEY_BY_EVENT_STEP: Record<AgentStepName, string> = {
 const PROMPTS = [
   "帮我做一个签到活动需求和原型",
   "设计一个会员积分商城后台配置页",
-  "把上传的初版需求文档补全成 PRD",
+  "把上传的初版需求文档补全成正式需求文档",
   "根据这个活动页面截图生成可演示原型",
 ];
 
@@ -872,9 +872,9 @@ const DEFAULT_QA_ISSUES: QaIssue[] = [
   {
     id: "qa-1",
     level: "warning",
-    type: "PRD 与原型不一致",
-    description: "PRD 提到活动规则展示，当前原型只展示了奖励说明，没有完整规则入口。",
-    suggestion: "在原型底部补充“活动规则”入口，并与 PRD 第 4 节规则描述保持一致。",
+    type: "需求文档与原型不一致",
+    description: "需求文档提到活动规则展示，当前原型只展示了奖励说明，没有完整规则入口。",
+    suggestion: "在原型底部补充“活动规则”入口，并与需求文档第 4 节规则描述保持一致。",
   },
   {
     id: "qa-2",
@@ -1104,7 +1104,7 @@ function mapProductDesignStateSummary(value: unknown): ProductDesignStateSummary
   return {
     id,
     version: typeof state.version === "number" ? state.version : 0,
-    title: asText(state.title) || "ProductDesignState",
+    title: asText(state.title) || "产品设计状态",
     status: asText(state.status) || "draft",
     updatedAt: asText(state.updatedAt),
     counts: {
@@ -1125,7 +1125,7 @@ function mapProductDesignStateSummary(value: unknown): ProductDesignStateSummary
       return [
         {
           id: asText(assumption.id),
-          content: asText(assumption.content) || asText(assumption.description) || "AI 推断",
+          content: asText(assumption.content) || asText(assumption.description) || "智能推断",
           status: asText(assumption.status) || "pending",
         },
       ];
@@ -1412,7 +1412,7 @@ function mapQaReport(value: unknown): { status: QaStatus; issues: QaIssue[] } | 
         level,
         type: asText(issue.type) || asText(issue.title) || asText(issue.checkType) || "一致性检查",
         description: asText(issue.message) || asText(issue.description) || "发现一个待确认问题。",
-        suggestion: suggestions[index] || asText(issue.suggestion) || "请补充规则后重新生成或触发 QA。",
+        suggestion: suggestions[index] || asText(issue.suggestion) || "请补充规则后重新生成或触发质检。",
       },
     ];
   });
@@ -1445,7 +1445,7 @@ function mapQaReportSummary(value: unknown): QaReportSummary | null {
       ? status
       : Boolean(report.passed) ? "passed" : "failed",
     trigger: asText(report.trigger) || undefined,
-    summary: asText(report.summary) || "QA 已完成",
+    summary: asText(report.summary) || "质检已完成",
     blockingCount: asNumber(report.blockingCount),
     majorCount: asNumber(report.majorCount),
     minorCount: asNumber(report.minorCount),
@@ -1525,7 +1525,7 @@ function getSelectedRegionLabel(region?: SelectedRegion | null) {
 
 function getPrdTagLabel(tag: string) {
   const labels: Record<string, string> = {
-    ai_assumption: "AI 推断",
+    ai_assumption: "智能推断",
     knowledge_base: "知识库",
     user_confirmed: "已确认",
     pending_question: "待确认",
@@ -1922,7 +1922,7 @@ export function WorkspaceClient() {
     updateProject(currentProject.id, (project) => ({
       ...project,
       qaStatus: "checking",
-      summary: "正在重新执行 QA",
+      summary: "正在重新执行质检",
     }));
     setPreviewTab("qa");
     try {
@@ -1942,11 +1942,11 @@ export function WorkspaceClient() {
       }));
       window.setTimeout(() => void loadProjectDetail(currentProject.id), 250);
     } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : "QA 运行失败");
+      setWorkspaceError(error instanceof Error ? error.message : "质检运行失败");
       updateProject(currentProject.id, (project) => ({
         ...project,
         qaStatus: "failed",
-        summary: "QA 运行失败",
+        summary: "质检运行失败",
       }));
     } finally {
       setQaActionLoading(false);
@@ -2066,11 +2066,11 @@ export function WorkspaceClient() {
       updateProject(currentProject.id, (project) => ({
         ...project,
         latestReviewReport: response.reviewReport,
-        summary: "多 Agent 产品评审已完成",
+        summary: "多智能体产品评审已完成",
         updatedAt: "刚刚",
       }));
     } catch (error) {
-      setFeedbackError(error instanceof Error ? error.message : "多 Agent 评审失败");
+      setFeedbackError(error instanceof Error ? error.message : "多智能体评审失败");
     } finally {
       setFeedbackActionLoading(null);
     }
@@ -2088,7 +2088,7 @@ export function WorkspaceClient() {
       updateProject(currentProject.id, (project) => ({
         ...project,
         latestEvolutionPlan: response.evolutionPlan,
-        summary: "EvolutionPlan 已生成，等待执行",
+        summary: "进化方案已生成，等待执行",
         updatedAt: "刚刚",
       }));
     } catch (error) {
@@ -2492,7 +2492,7 @@ export function WorkspaceClient() {
     updateProject(targetProjectId, (project) => ({
       ...project,
       status: "generating",
-      summary: isPatch ? "正在分析局部修改影响范围" : "AI 正在协作生成 PRD、原型和 QA 报告",
+      summary: isPatch ? "正在分析局部修改影响范围" : "智能体正在协作生成需求文档、原型和质检报告",
       updatedAt: "刚刚",
       clarificationQuestions: undefined,
       prdState: "generating",
@@ -2519,11 +2519,11 @@ export function WorkspaceClient() {
     ).catch((error) => {
       if (controller.signal.aborted) return;
       setIsRunning(false);
-      setWorkspaceError(error instanceof Error ? error.message : "Agent 流式连接失败");
+      setWorkspaceError(error instanceof Error ? error.message : "智能体流式连接失败");
       updateProject(targetProjectId, (project) => ({
         ...project,
         status: "qa_failed",
-        summary: "Agent 流式连接中断，请稍后重试",
+        summary: "智能体流式连接中断，请稍后重试",
       }));
     });
   };
@@ -2561,7 +2561,7 @@ export function WorkspaceClient() {
       updateProject(targetProjectId, (project) => ({
         ...project,
         status: "qa_failed",
-        summary: event.content || "Agent 执行失败",
+        summary: event.content || "智能体执行失败",
       }));
       return;
     }
@@ -2572,7 +2572,7 @@ export function WorkspaceClient() {
       updateProject(targetProjectId, (project) => ({
         ...project,
         productDesignState: stateSummary,
-        summary: `ProductDesignState v${stateSummary.version} 已更新`,
+        summary: `产品设计状态 v${stateSummary.version} 已更新`,
       }));
       return;
     }
@@ -2580,7 +2580,7 @@ export function WorkspaceClient() {
     if (event.type === "state_version_created") {
       updateProject(targetProjectId, (project) => ({
         ...project,
-        summary: "ProductDesignState 版本快照已保存",
+        summary: "产品设计状态版本快照已保存",
       }));
       return;
     }
@@ -2600,7 +2600,7 @@ export function WorkspaceClient() {
       updateProject(targetProjectId, (project) => ({
         ...project,
         status: "prd_ready",
-        summary: "PRD 已生成，正在继续生成原型",
+        summary: "需求文档已生成，正在继续生成原型",
         prdState: "ready",
         prdDocumentId: asText(prdDocument?.id) || project.prdDocumentId,
         prdSections,
@@ -2616,7 +2616,7 @@ export function WorkspaceClient() {
       updateProject(targetProjectId, (project) => ({
         ...project,
         status: "prototype_ready",
-        summary: "HTML 原型已生成，正在校验一致性",
+        summary: "网页原型已生成，正在校验一致性",
         prototypeState: "ready",
         prototypeArtifactId: artifact?.id ?? project.prototypeArtifactId,
         prototypeEntryFilePath: artifact?.entryFilePath ?? project.prototypeEntryFilePath,
@@ -2633,7 +2633,7 @@ export function WorkspaceClient() {
       updateProject(targetProjectId, (project) => ({
         ...project,
         status: qa.status === "passed" ? "prototype_ready" : "qa_failed",
-        summary: qa.status === "passed" ? "QA 校验通过" : `QA 发现 ${qa.issues.length} 个待确认问题`,
+        summary: qa.status === "passed" ? "质检校验通过" : `质检发现 ${qa.issues.length} 个待确认问题`,
         qaStatus: qa.status,
         qaIssues: qa.issues,
       }));
@@ -2729,7 +2729,7 @@ export function WorkspaceClient() {
     if (event.step === "prd_generation") {
       updateProject(targetProjectId, (project) => ({
         ...project,
-        summary: event.content || "正在生成 PRD 草案",
+        summary: event.content || "正在生成需求文档草案",
         prdState: "generating",
       }));
       setPreviewTab("prd");
@@ -2738,7 +2738,7 @@ export function WorkspaceClient() {
     if (event.step === "prototype_design" || event.step === "prototype_code_generation") {
       updateProject(targetProjectId, (project) => ({
         ...project,
-        summary: event.content || "正在生成 HTML 原型",
+        summary: event.content || "正在生成网页原型",
         prototypeState: "generating",
       }));
       setPreviewTab("prototype");
@@ -2747,7 +2747,7 @@ export function WorkspaceClient() {
     if (event.step === "qa_check") {
       updateProject(targetProjectId, (project) => ({
         ...project,
-        summary: event.content || "正在校验 PRD 与原型一致性",
+        summary: event.content || "正在校验需求文档与原型一致性",
         qaStatus: "checking",
       }));
       setPreviewTab("qa");
@@ -3803,7 +3803,7 @@ function ChatComposer({
       {selectedRegion ? (
         <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
           <div className="min-w-0 text-xs text-sky-800">
-            已选择：{selectedRegion.type === "document" ? "PRD" : "原型"} /{" "}
+            已选择：{selectedRegion.type === "document" ? "需求文档" : "原型"} /{" "}
             <span className="font-medium">{selectedRegion.label ?? "选中区域"}</span>
           </div>
           <button
@@ -4075,7 +4075,7 @@ function PreviewPanel({
       {selectedRegion ? (
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-800">
           <span>
-            当前选中：{selectedRegion.type === "document" ? "PRD" : "原型"} /{" "}
+            当前选中：{selectedRegion.type === "document" ? "需求文档" : "原型"} /{" "}
             <strong>{selectedRegion.label ?? "选中区域"}</strong>
           </span>
           <button
@@ -4160,9 +4160,9 @@ function PreviewTabs({
   onChange: (tab: PreviewTab) => void;
 }) {
   const tabs: Array<{ key: PreviewTab; label: string; icon: typeof FileText }> = [
-    { key: "prd", label: "PRD", icon: FileText },
+    { key: "prd", label: "需求文档", icon: FileText },
     { key: "prototype", label: "原型", icon: Code2 },
-    { key: "qa", label: "QA", icon: ClipboardCheck },
+    { key: "qa", label: "质检", icon: ClipboardCheck },
     { key: "state", label: "状态", icon: Database },
     { key: "feedback", label: "反馈", icon: GitCompare },
   ];
@@ -4423,12 +4423,12 @@ function InlineAssistantDialog({
   onClose: () => void;
 }) {
   if (!draft) return null;
-  const sourceLabel = draft.source === "prototype" ? "原型" : draft.source === "prd" ? "PRD" : "Inline";
+  const sourceLabel = draft.source === "prototype" ? "原型" : draft.source === "prd" ? "需求文档" : "行内编辑";
 
   return (
     <Modal
       open={Boolean(draft)}
-      title="AI 局部编辑助手"
+      title="智能局部编辑助手"
       onClose={onClose}
       footer={
         <>
@@ -4437,7 +4437,7 @@ function InlineAssistantDialog({
           </Button>
           <Button type="button" onClick={onSubmit} disabled={loading || !value.trim()}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-            生成 Patch 候选
+            生成补丁候选
           </Button>
         </>
       }
@@ -4476,7 +4476,7 @@ function InlineAssistantDialog({
           />
         </div>
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-          AI 只会生成 Patch 候选，不会直接写入 ProductDesignState。确认后会重新生成 PRD、HTML 原型并执行 QA。
+          智能系统只会生成补丁候选，不会直接写入产品设计状态。确认后会重新生成需求文档、网页原型并执行质检。
         </div>
       </div>
     </Modal>
@@ -4510,15 +4510,15 @@ function PrdPreview({
   } | null>(null);
 
   if (state === "empty") {
-    return <PreviewEmpty icon={FileText} title="暂无 PRD" description="输入产品需求后，AI 生成的 PRD 会显示在这里。" />;
+    return <PreviewEmpty icon={FileText} title="暂无需求文档" description="输入产品需求后，智能生成的需求文档会显示在这里。" />;
   }
 
   if (state === "generating") {
-    return <PreviewLoading title="正在生成 PRD..." description="PRD Writer Agent 会先整理目标、范围、流程和验收标准。" />;
+    return <PreviewLoading title="正在生成需求文档..." description="需求文档智能体会先整理目标、范围、流程和验收标准。" />;
   }
 
   if (state === "error") {
-    return <PreviewError title="PRD 生成失败" description="可以在左侧补充需求后重新发送。" />;
+    return <PreviewError title="需求文档生成失败" description="可以在左侧补充需求后重新发送。" />;
   }
 
   const openFloatingEditor = (section: PrdSection, selectedText?: string, rect?: DOMRect) => {
@@ -4580,7 +4580,7 @@ function PrdPreview({
       "edit",
       "原地编辑",
       "/patch/draft",
-      `请将选中的 PRD 段落按我的原地编辑内容生成 Patch 候选。`,
+      `请将选中的需求文档段落按我的原地编辑内容生成补丁候选。`,
       inlineDraft.originalText,
       {
         replacementText: nextText,
@@ -4647,7 +4647,7 @@ function PrdPreview({
             {project?.title ?? "未命名产品项目"}
           </h1>
           <p className="mt-3 text-sm leading-6 text-gray-500">
-            该文档由多 Agent 协作生成，当前为一期可评审版本。
+            该文档由多智能体协作生成，当前为一期可评审版本。
           </p>
         </div>
         <div className="mt-6 space-y-7">
@@ -4760,7 +4760,7 @@ function PrdPreview({
         </div>
         {isRunning ? (
           <div className="mt-8 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-            Agent 正在继续生成，PRD 内容可能会实时更新。
+            智能体正在继续生成，需求文档内容可能会实时更新。
           </div>
         ) : null}
       </article>
@@ -4791,8 +4791,8 @@ function prdSectionActions(section: PrdSection): Array<{
     { label: "改写", icon: Wand2, endpoint: "/prd/rewrite", action: "rewrite", instruction: `请改写「${section.title}」，保持业务含义一致但表达更清晰。` },
     { label: "扩写", icon: ListTree, endpoint: "/prd/rewrite", action: "expand", instruction: `请扩展「${section.title}」，补充必要规则、边界和验收点。` },
     { label: "精简", icon: GitCompare, endpoint: "/prd/rewrite", action: "simplify", instruction: `请简化「${section.title}」，保留关键规则并减少冗余表述。` },
-    { label: "重构", icon: LayoutTemplate, endpoint: "/patch/draft", action: "restructure", instruction: `请重构「${section.title}」的信息结构，生成只作用于 ProductDesignState 的 Patch 候选。` },
-    { label: "Diff", icon: GitCompare, endpoint: "/prd/diff", action: "diff", instruction: `请基于「${section.title}」生成结构化差异建议。` },
+    { label: "重构", icon: LayoutTemplate, endpoint: "/patch/draft", action: "restructure", instruction: `请重构「${section.title}」的信息结构，生成只作用于产品设计状态的补丁候选。` },
+    { label: "差异", icon: GitCompare, endpoint: "/prd/diff", action: "diff", instruction: `请基于「${section.title}」生成结构化差异建议。` },
   ];
 }
 
@@ -4800,9 +4800,9 @@ function prdFloatingActions(section: PrdSection, selectedText: string) {
   return prdSectionActions(section).map((action) => ({
     ...action,
     instruction: action.action === "diff"
-      ? `请只针对选中的 PRD 文本生成结构化差异建议。`
+      ? `请只针对选中的需求文档文本生成结构化差异建议。`
       : action.action === "restructure"
-        ? `请只针对选中的 PRD 文本重构信息层级，并生成 Patch 候选。`
+        ? `请只针对选中的需求文档文本重构信息层级，并生成补丁候选。`
         : `${action.instruction}\n仅作用于当前选区：${selectedText}`,
   }));
 }
@@ -4892,11 +4892,11 @@ function PrototypePreview({
   }, [project?.id, project?.prototypeArtifactId, state]);
 
   if (state === "empty") {
-    return <PreviewEmpty icon={Code2} title="暂无原型" description="AI 生成的 HTML 原型会显示在这里。" />;
+    return <PreviewEmpty icon={Code2} title="暂无原型" description="智能生成的网页原型会显示在这里。" />;
   }
 
   if (state === "generating") {
-    return <PreviewLoading title="正在生成 HTML 原型..." description="Prototype Code Agent 正在把原型规格转换成可预览页面。" />;
+    return <PreviewLoading title="正在生成网页原型..." description="原型代码智能体正在把原型规格转换成可预览页面。" />;
   }
 
   if (state === "error") {
@@ -5009,18 +5009,18 @@ function PrototypePreview({
           projectId: project.id,
           selectedRegion: selectedPrototypeRegion,
           action: "redesign",
-          instruction: "请给出该组件的 UI 优化建议，并整理为 PatchDraft 输入。",
+          instruction: "请给出该组件的界面优化建议，并整理为补丁草稿输入。",
         }),
       });
       openAction(
         response.suggestion.action,
-        "AI 建议",
+        "智能建议",
         "/prototype/edit",
         response.suggestion.instruction,
         response.suggestion.selectedRegion,
       );
     } catch (error) {
-      setPrototypeError(error instanceof Error ? error.message : "AI 建议生成失败");
+      setPrototypeError(error instanceof Error ? error.message : "智能建议生成失败");
     } finally {
       setPrototypeLoading((value) => (value === "suggest" ? null : value));
     }
@@ -5041,7 +5041,7 @@ function PrototypePreview({
         ?? response.items.find((item) => isPrototypePatchForRegion(item, selectedPrototypeRegion))?.id
         ?? null;
       if (!patchId) {
-        setPrototypeError("暂无当前原型区域的待确认 Patch，可先从工具栏生成 Patch 候选。");
+        setPrototypeError("暂无当前原型区域的待确认补丁，可先从工具栏生成补丁候选。");
         return;
       }
       const preview = await apiRequest<PatchPreviewResponse>("/patch/preview", {
@@ -5050,7 +5050,7 @@ function PrototypePreview({
       });
       setPatchPreview(preview.patchPreview);
     } catch (error) {
-      setPrototypeError(error instanceof Error ? error.message : "Patch Preview 加载失败");
+      setPrototypeError(error instanceof Error ? error.message : "补丁预览加载失败");
     } finally {
       setPrototypeLoading((value) => (value === "preview" ? null : value));
     }
@@ -5091,12 +5091,12 @@ function PrototypePreview({
         <div className="flex h-12 items-center justify-between border-b border-gray-200 px-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
             <ListTree className="h-4 w-4" />
-            Component Tree
+            组件树
           </div>
           {prototypeLoading === "state" ? <Loader2 className="h-4 w-4 animate-spin text-sky-600" /> : null}
         </div>
         <div className="border-b border-gray-100 px-3 py-2 text-xs leading-5 text-gray-500">
-          State v{prototypeStateVersion ?? project?.productDesignState?.version ?? "-"} · {machineStateLabel(machineState)}
+          状态 v{prototypeStateVersion ?? project?.productDesignState?.version ?? "-"} · {machineStateLabel(machineState)}
         </div>
         <div className="min-h-0 overflow-y-auto p-2">
           {components.length ? (
@@ -5122,7 +5122,7 @@ function PrototypePreview({
             ))
           ) : (
             <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-8 text-center text-sm text-gray-500">
-              暂无组件树，仍可通过画布框选生成 Patch。
+              暂无组件树，仍可通过画布框选生成补丁。
             </div>
           )}
         </div>
@@ -5132,7 +5132,7 @@ function PrototypePreview({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
           <div className="min-w-0">
             <div className="text-sm font-medium text-gray-800">
-              {localEditEnabled ? "Prototype Interaction System" : "原型预览"}
+              {localEditEnabled ? "原型交互系统" : "原型预览"}
             </div>
             <div className="mt-0.5 text-xs text-gray-500">
               {selectedBoxRegion?.label ?? activeComponent?.pathLabel ?? (selectionBox ? "框选区域" : "未选择组件")}
@@ -5160,7 +5160,7 @@ function PrototypePreview({
               className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-900 bg-gray-950 px-2.5 text-xs font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {prototypeLoading === "suggest" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              AI 建议
+              智能建议
             </button>
             <button
               type="button"
@@ -5169,7 +5169,7 @@ function PrototypePreview({
               className="inline-flex h-8 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {prototypeLoading === "preview" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitCompare className="h-3.5 w-3.5" />}
-              Preview
+              预览
             </button>
           </div>
         </div>
@@ -5195,7 +5195,7 @@ function PrototypePreview({
               {project?.prototypeEntryFilePath ?? "index.html"}
             </span>
             <span className="ml-auto rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-500">
-              {localEditEnabled ? "SelectionEngine on" : "view"}
+              {localEditEnabled ? "选择引擎已开启" : "查看"}
             </span>
           </div>
           <div
@@ -5258,9 +5258,9 @@ function PrototypePreview({
                     onFlowEdit={() =>
                       openAction(
                         "flow_update",
-                        "Flow",
+                        "流程",
                         "/prototype/flow-update",
-                        `请优化「${selectedPrototypeRegion.label ?? "选中区域"}」相关交互流程，并生成结构化 Flow Patch。`,
+                        `请优化「${selectedPrototypeRegion.label ?? "选中区域"}」相关交互流程，并生成结构化流程补丁。`,
                       )
                     }
                     onAiSuggest={openAiSuggestion}
@@ -5274,9 +5274,9 @@ function PrototypePreview({
         <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_280px]">
           <PrototypeStateMachineBar state={machineState} />
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
-            <div className="text-xs font-medium text-gray-500">PatchDraft Panel</div>
+            <div className="text-xs font-medium text-gray-500">补丁草稿面板</div>
             <div className="mt-1 truncate text-sm text-gray-800">
-              {selectedPrototypeRegion.label ?? "选择组件后生成 Patch 候选"}
+              {selectedPrototypeRegion.label ?? "选择组件后生成补丁候选"}
             </div>
             <button
               type="button"
@@ -5284,7 +5284,7 @@ function PrototypePreview({
               className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs font-medium text-gray-700 hover:bg-gray-100"
             >
               <GitCompare className="h-3.5 w-3.5" />
-              查看最近 Patch Preview
+              查看最近补丁预览
             </button>
           </div>
         </div>
@@ -5335,8 +5335,8 @@ function PrototypeFloatingToolbar({
       <div className="grid grid-cols-4 gap-1.5">
         <PrototypeToolbarButton icon={Wand2} label="组件" onClick={onComponentEdit} />
         <PrototypeToolbarButton icon={LayoutTemplate} label="布局" onClick={onLayoutEdit} />
-        <PrototypeToolbarButton icon={ListTree} label="Flow" onClick={onFlowEdit} />
-        <PrototypeToolbarButton icon={Sparkles} label="AI" onClick={onAiSuggest} />
+        <PrototypeToolbarButton icon={ListTree} label="流程" onClick={onFlowEdit} />
+        <PrototypeToolbarButton icon={Sparkles} label="智能" onClick={onAiSuggest} />
       </div>
     </div>
   );
@@ -5417,7 +5417,7 @@ function PatchPreviewModal({
   return (
     <Modal
       open
-      title="Patch Preview"
+      title="补丁预览"
       onClose={onClose}
       footer={
         <>
@@ -5439,39 +5439,39 @@ function PatchPreviewModal({
             </span>
             {preview.id ? (
               <span className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500">
-                Preview {preview.id.slice(0, 8)}
+                预览 {preview.id.slice(0, 8)}
               </span>
             ) : null}
             <span className={clsx("rounded-md border px-2 py-1 text-xs font-medium", PATCH_STATUS_META[preview.status]?.className)}>
               {PATCH_STATUS_META[preview.status]?.label ?? preview.status}
             </span>
             <span className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500">
-              Risk {riskLevel}
+              风险 {riskLevelLabel(riskLevel)}
             </span>
           </div>
           <div className="mt-2 text-sm leading-6 text-gray-700">
-            {preview.message ?? "Patch 预览已生成。"}
+            {translateWorkspaceText(preview.message ?? "补丁预览已生成。")}
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-            <FieldLabel>Before</FieldLabel>
+            <FieldLabel>应用前</FieldLabel>
             <div className="mt-2 text-sm font-semibold text-gray-950">
-              ProductDesignState v{preview.beforeProductDesignStateVersion ?? "-"}
+              产品设计状态 v{preview.beforeProductDesignStateVersion ?? "-"}
             </div>
             <div className="mt-1 text-xs leading-5 text-gray-500">当前确认基线，版本变化会阻止应用。</div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-            <FieldLabel>After</FieldLabel>
+            <FieldLabel>应用后</FieldLabel>
             <div className="mt-2 text-sm font-semibold text-gray-950">
-              {preview.afterProductDesignStateVersion ? `ProductDesignState v${preview.afterProductDesignStateVersion}` : "Preview projection"}
+              {preview.afterProductDesignStateVersion ? `产品设计状态 v${preview.afterProductDesignStateVersion}` : "预览投影"}
             </div>
-            <div className="mt-1 text-xs leading-5 text-gray-500">确认后才会生成新版本、PRD、Prototype 与 QA。</div>
+            <div className="mt-1 text-xs leading-5 text-gray-500">确认后才会生成新版本、需求文档、原型与质检结果。</div>
           </div>
         </div>
         {diff ? (
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-            <FieldLabel>Diff Summary</FieldLabel>
+            <FieldLabel>差异摘要</FieldLabel>
             <div className="mt-2 text-sm leading-6 text-gray-700">
               {asText(diff.summary) || asText(diff.reason) || "结构化差异已生成。"}
             </div>
@@ -5487,16 +5487,16 @@ function PatchPreviewModal({
           </div>
         ) : null}
         <div>
-          <FieldLabel>Operations</FieldLabel>
+          <FieldLabel>操作列表</FieldLabel>
           <div className="mt-2 space-y-2">
             {diffOperations.length ? diffOperations.map((operation, index) => (
               <div key={`${operation.path}-${index}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                 <div className="flex items-center justify-between gap-3 text-xs">
-                  <span className="font-medium text-gray-950">{operation.op ?? "update"}</span>
-                  <span className="truncate text-gray-500">{operation.path ?? "ProductDesignState"}</span>
+                  <span className="font-medium text-gray-950">{operationLabel(operation.op ?? "update")}</span>
+                  <span className="truncate text-gray-500">{translateWorkspaceText(operation.path ?? "产品设计状态")}</span>
                 </div>
                 {operation.reason ? (
-                  <div className="mt-1 text-xs leading-5 text-gray-500">{operation.reason}</div>
+                  <div className="mt-1 text-xs leading-5 text-gray-500">{translateWorkspaceText(operation.reason)}</div>
                 ) : null}
               </div>
             )) : (
@@ -5508,44 +5508,104 @@ function PatchPreviewModal({
         </div>
         {riskPanel ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-            <FieldLabel>Risk Panel</FieldLabel>
+            <FieldLabel>风险面板</FieldLabel>
             <div className="mt-2 grid gap-2 text-xs leading-5 text-amber-800 md:grid-cols-2">
               <div>确认必需：{riskPanel.requiresConfirmation ? "是" : "否"}</div>
               <div>版本化应用：{riskPanel.versionedApply ? "是" : "否"}</div>
-              <div>重生成 PRD：{checks?.requiresPrdRegeneration ? "是" : "否"}</div>
+              <div>重生成需求文档：{checks?.requiresPrdRegeneration ? "是" : "否"}</div>
               <div>重生成原型：{checks?.requiresPrototypeRegeneration ? "是" : "否"}</div>
             </div>
           </div>
         ) : null}
         {risks.length ? (
           <div>
-            <FieldLabel>Risks</FieldLabel>
+            <FieldLabel>风险项</FieldLabel>
             <div className="mt-2 space-y-2">
               {risks.map((risk, index) => (
                 <div key={`${risk.message}-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
-                  {risk.message ?? "存在待确认风险"}
+                  {translateWorkspaceText(risk.message ?? "存在待确认风险")}
                 </div>
               ))}
             </div>
           </div>
         ) : null}
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">
-          Preview 只读取 PatchPlan。确认应用后才会修改 ProductDesignState，并重新生成 PRD、Prototype 与 QA。
+          预览只读取补丁计划。确认应用后才会修改产品设计状态，并重新生成需求文档、原型与质检结果。
         </div>
       </div>
     </Modal>
   );
 }
 
+function riskLevelLabel(value: string) {
+  const labels: Record<string, string> = {
+    low: "低",
+    medium: "中",
+    high: "高",
+  };
+  return labels[value] ?? translateWorkspaceText(value);
+}
+
+function operationLabel(value: string) {
+  const labels: Record<string, string> = {
+    add: "新增",
+    update: "更新",
+    delete: "删除",
+    replace: "替换",
+    remove: "删除",
+    create: "创建",
+  };
+  return labels[value] ?? translateWorkspaceText(value);
+}
+
+function translateWorkspaceText(value: string) {
+  return value
+    .replace(/AI Product Workbench/g, "智能产品工作台")
+    .replace(/AI Product Company/g, "智能产品公司")
+    .replace(/AI Product OS/g, "智能产品操作系统")
+    .replace(/Triple System Fusion/g, "三系统融合")
+    .replace(/Triple System/g, "三系统融合")
+    .replace(/Constraint System/g, "约束系统")
+    .replace(/Decision System/g, "决策系统")
+    .replace(/Evolution System/g, "进化系统")
+    .replace(/Evolution Orchestrator/g, "进化编排器")
+    .replace(/EvolutionPlan Patch Preview/g, "进化计划补丁预览")
+    .replace(/EvolutionPlan Patch/g, "进化计划补丁")
+    .replace(/EvolutionPlan/g, "进化方案")
+    .replace(/ProductDesignState/g, "产品设计状态")
+    .replace(/ProductInsight/g, "产品洞察")
+    .replace(/Product Memory/g, "产品记忆")
+    .replace(/Patch Execution Engine/g, "补丁执行引擎")
+    .replace(/Patch Preview/g, "补丁预览")
+    .replace(/PatchDraft/g, "补丁草稿")
+    .replace(/PatchPlan/g, "补丁计划")
+    .replace(/Patch/g, "补丁")
+    .replace(/PrototypeSpec/g, "原型规格")
+    .replace(/PrototypeState/g, "原型状态")
+    .replace(/Prototype/g, "原型")
+    .replace(/PRD Writer Agent/g, "需求文档智能体")
+    .replace(/QA Agent/g, "质检智能体")
+    .replace(/Agent/g, "智能体")
+    .replace(/PRD/g, "需求文档")
+    .replace(/QA/g, "质检")
+    .replace(/Flow/g, "流程")
+    .replace(/Diff/g, "差异")
+    .replace(/before\/after State/g, "应用前后状态")
+    .replace(/Before/g, "应用前")
+    .replace(/After/g, "应用后")
+    .replace(/State/g, "状态")
+    .replace(/AI/g, "智能");
+}
+
 function machineStateLabel(state: PrototypeEditorMachineState) {
   const labels: Record<PrototypeEditorMachineState, string> = {
-    view: "VIEW",
-    selected: "SELECTED",
-    editing: "EDITING",
-    ai_suggesting: "AI",
-    patch_draft: "DRAFT",
-    patch_preview: "PREVIEW",
-    applied: "APPLIED",
+    view: "查看",
+    selected: "已选中",
+    editing: "编辑中",
+    ai_suggesting: "智能建议",
+    patch_draft: "补丁草稿",
+    patch_preview: "补丁预览",
+    applied: "已应用",
   };
   return labels[state];
 }
@@ -5561,7 +5621,7 @@ function prototypeEditorActions(target: Pick<PrototypeComponentView, "pathLabel"
   return [
     { label: "组件优化", icon: Wand2, endpoint: "/prototype/edit", action: "redesign", instruction: `请优化「${label}」组件的文案、状态和视觉层级。` },
     { label: "布局调整", icon: LayoutTemplate, endpoint: "/prototype/restructure", action: "layout_edit", instruction: `请调整「${label}」所在页面布局，让信息层级更清晰。` },
-    { label: "Flow", icon: ListTree, endpoint: "/prototype/flow-update", action: "flow_update", instruction: `请优化「${label}」相关交互流程，并生成结构化 Flow Patch。` },
+    { label: "流程优化", icon: ListTree, endpoint: "/prototype/flow-update", action: "flow_update", instruction: `请优化「${label}」相关交互流程，并生成结构化流程补丁。` },
   ];
 }
 
@@ -5581,7 +5641,7 @@ function StatePanel({
       <PreviewEmpty
         icon={Database}
         title="暂无产品工程状态"
-        description="生成需求后，ProductDesignState 的版本、规则和待确认项会显示在这里。"
+        description="生成需求后，产品设计状态的版本、规则和待确认项会显示在这里。"
       />
     );
   }
@@ -5594,7 +5654,7 @@ function StatePanel({
     ["状态规则", state.counts.stateRules],
     ["异常场景", state.counts.exceptionScenarios],
     ["验收标准", state.counts.acceptanceCriteria],
-    ["AI 推断", state.counts.assumptions],
+    ["智能推断", state.counts.assumptions],
     ["待确认", state.counts.pendingQuestions],
     ["已确认事实", state.counts.confirmedFacts],
   ];
@@ -5607,7 +5667,7 @@ function StatePanel({
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
                 <Database className="h-4 w-4" />
-                ProductDesignState
+                产品设计状态
               </div>
               <h2 className="mt-2 truncate text-lg font-semibold text-gray-950">{state.title}</h2>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -5633,8 +5693,8 @@ function StatePanel({
 
         <div className="grid grid-cols-2 gap-4">
           <StateList
-            title="AI 推断"
-            empty="暂无 AI 推断"
+            title="智能推断"
+            empty="暂无智能推断"
             items={state.assumptions.map((item) => ({
               id: item.id,
               title: item.content,
@@ -5750,11 +5810,11 @@ function TimelineIcon({ type }: { type: VersionTimelineItem["type"] }) {
 
 function timelineTypeLabel(type: VersionTimelineItem["type"]) {
   const labels: Record<VersionTimelineItem["type"], string> = {
-    product_design_state: "State",
-    prd: "PRD",
+    product_design_state: "状态",
+    prd: "需求文档",
     prototype: "原型",
-    patch: "Patch",
-    qa: "QA",
+    patch: "补丁",
+    qa: "质检",
     rollback: "回滚",
   };
   return labels[type];
@@ -5867,34 +5927,34 @@ function FeedbackLoopPanel({
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 {loading === "orchestrate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitBranch className="h-4 w-4" />}
-                运行 Evolution Orchestrator
+                运行进化编排器
               </div>
               <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs">
                 15 → 19
               </span>
             </div>
             <div className="mt-1 text-xs leading-5 text-gray-300">
-              按顺序调度语义分析、评审、方案、Patch 和产品记忆。
+              按顺序调度语义分析、评审、方案、补丁和产品记忆。
             </div>
           </button>
           <WorkflowAction
             title="语义分析"
-            description="将显式反馈转为 ProductInsight"
+            description="将显式反馈转为产品洞察"
             icon={Search}
             disabled={!canAnalyze}
             loading={loading === "analyze"}
             onClick={onAnalyzeFeedback}
           />
           <WorkflowAction
-            title="多 Agent 评审"
-            description="UX、商业、风险、清晰度、增长聚合"
+            title="多智能体评审"
+            description="体验、商业、风险、清晰度、增长聚合"
             icon={ClipboardCheck}
             disabled={!canReview}
             loading={loading === "review"}
             onClick={onRunProductReview}
           />
           <WorkflowAction
-            title="生成 EvolutionPlan"
+            title="生成进化方案"
             description="只生成进化方案，不执行修改"
             icon={ListTree}
             disabled={!canEvolution}
@@ -5902,8 +5962,8 @@ function FeedbackLoopPanel({
             onClick={onRunEvolutionPlan}
           />
           <WorkflowAction
-            title="执行 Patch"
-            description="只通过 ProductDesignState 修改"
+            title="执行补丁"
+            description="只通过产品设计状态修改"
             icon={GitCompare}
             disabled={!canApply}
             loading={loading === "apply"}
@@ -5912,7 +5972,7 @@ function FeedbackLoopPanel({
         </div>
 
         {latestOrchestration ? (
-          <FeedbackSection title="Orchestration Run" icon={GitBranch}>
+          <FeedbackSection title="编排运行" icon={GitBranch}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={clsx("rounded-md border px-2 py-1 text-xs font-medium", orchestrationStatusClassName(latestOrchestration.status))}>
@@ -5942,7 +6002,7 @@ function FeedbackLoopPanel({
         ) : null}
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <FeedbackSection title="ProductInsight" icon={Sparkles}>
+          <FeedbackSection title="产品洞察" icon={Sparkles}>
             {insights.length ? (
               <div className="space-y-2">
                 {insights.slice(0, 6).map((insight) => (
@@ -5963,7 +6023,7 @@ function FeedbackLoopPanel({
             )}
           </FeedbackSection>
 
-          <FeedbackSection title="Review Report" icon={ClipboardCheck}>
+          <FeedbackSection title="评审报告" icon={ClipboardCheck}>
             {latestReview ? (
               <div className="space-y-3">
                 <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
@@ -5985,12 +6045,12 @@ function FeedbackLoopPanel({
                 ))}
               </div>
             ) : (
-              <EmptyMini text="暂无评审报告，先生成 ProductInsight。" />
+              <EmptyMini text="暂无评审报告，先生成产品洞察。" />
             )}
           </FeedbackSection>
         </div>
 
-        <FeedbackSection title="EvolutionPlan" icon={ListTree}>
+        <FeedbackSection title="进化方案" icon={ListTree}>
           {latestPlan ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -6020,11 +6080,11 @@ function FeedbackLoopPanel({
               </div>
             </div>
           ) : (
-            <EmptyMini text="暂无进化方案，完成评审后生成 EvolutionPlan。" />
+            <EmptyMini text="暂无进化方案，完成评审后生成进化方案。" />
           )}
         </FeedbackSection>
 
-        <FeedbackSection title="Product Memory" icon={MemoryStick}>
+        <FeedbackSection title="产品记忆" icon={MemoryStick}>
           {memoryTimeline.length ? (
             <div className="space-y-2">
               {memoryTimeline.slice(0, 8).map((memory) => (
@@ -6050,7 +6110,7 @@ function FeedbackLoopPanel({
               ))}
             </div>
           ) : (
-            <EmptyMini text="暂无产品记忆。执行 EvolutionPlan Patch 后会自动记录 before/after State 与决策链路。" />
+            <EmptyMini text="暂无产品记忆。执行进化补丁后会自动记录应用前后状态与决策链路。" />
           )}
         </FeedbackSection>
       </div>
@@ -6139,11 +6199,11 @@ function priorityClassName(priority: EvolutionPlanItem["priority"]) {
 }
 
 function memoryCategoryLabel(category?: ProductMemoryItem["category"]) {
-  if (category === "ux") return "UX";
-  if (category === "flow") return "Flow";
-  if (category === "business") return "Business";
-  if (category === "risk") return "Risk";
-  return "Memory";
+  if (category === "ux") return "体验";
+  if (category === "flow") return "流程";
+  if (category === "business") return "业务";
+  if (category === "risk") return "风险";
+  return "记忆";
 }
 
 function memoryCategoryClassName(category?: ProductMemoryItem["category"]) {
@@ -6232,7 +6292,7 @@ function QaReportPanel({
       className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-      重新 QA
+      重新质检
     </button>
   );
 
@@ -6241,7 +6301,7 @@ function QaReportPanel({
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-[900px]">
           <div className="mb-3 flex justify-end">{action}</div>
-          <PreviewEmpty icon={ClipboardCheck} title="未校验" description="PRD 和原型生成后，QA 结果会显示在这里。" />
+          <PreviewEmpty icon={ClipboardCheck} title="未校验" description="需求文档和原型生成后，质检结果会显示在这里。" />
         </div>
       </div>
     );
@@ -6252,7 +6312,7 @@ function QaReportPanel({
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-[900px]">
           <div className="mb-3 flex justify-end">{action}</div>
-          <PreviewLoading title="校验中..." description="QA Agent 正在检查 PRD、原型和需求输入的一致性。" />
+          <PreviewLoading title="校验中..." description="质检智能体正在检查需求文档、原型和需求输入的一致性。" />
         </div>
       </div>
     );
@@ -6263,7 +6323,7 @@ function QaReportPanel({
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-[900px]">
           <div className="mb-3 flex justify-end">{action}</div>
-          <PreviewError title="校验失败" description="可以稍后重新触发 QA 或补充更多上下文。" />
+          <PreviewError title="校验失败" description="可以稍后重新触发质检或补充更多上下文。" />
         </div>
       </div>
     );
@@ -6294,12 +6354,12 @@ function QaReportPanel({
               <p className="mt-2 text-sm leading-6 text-gray-500">
                 {report?.summary ??
                   (passed
-                    ? "PRD、原型和需求输入暂未发现明显冲突。"
-                    : "QA Agent 发现以下一致性问题，建议修复后再进入评审。")}
+                    ? "需求文档、原型和需求输入暂未发现明显冲突。"
+                    : "质检智能体发现以下一致性问题，建议修复后再进入评审。")}
               </p>
               {report ? (
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
-                  <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">State v{report.productDesignStateVersion}</span>
+                  <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">状态 v{report.productDesignStateVersion}</span>
                   {report.trigger ? <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">{report.trigger}</span> : null}
                   {report.createdAt ? <span className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1">{formatRelativeTime(report.createdAt)}</span> : null}
                 </div>
@@ -6313,7 +6373,7 @@ function QaReportPanel({
                   : "border-rose-200 bg-rose-50 text-rose-700",
               )}
             >
-              {passed ? "QA 通过" : `${issues.length} 个问题`}
+              {passed ? "质检通过" : `${issues.length} 个问题`}
             </span>
           </div>
         </div>

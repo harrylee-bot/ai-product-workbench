@@ -43,7 +43,7 @@ export class PatchPreviewService {
     userInstruction?: string;
   }): Promise<PreviewSession> {
     if (!input.draft.operations.length) {
-      throw new BadRequestException("PatchDraft 必须包含 operations");
+      throw new BadRequestException("补丁草稿必须包含操作列表");
     }
 
     const conversation = await this.prisma.conversation.findUnique({

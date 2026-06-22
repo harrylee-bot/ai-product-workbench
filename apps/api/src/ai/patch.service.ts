@@ -408,11 +408,11 @@ export class PatchService {
     const conversationId = input.conversationId
       ? (await this.assertConversation(projectId, input.conversationId)).id
       : await this.ensureConversationId(projectId, project.ownerId);
-    const userInstruction = input.reason.trim() || "执行 EvolutionPlan";
+    const userInstruction = input.reason.trim() || "执行进化方案";
     const selectedRegion: SelectedRegion = {
       type: "document",
       targetId: input.evolutionPlanId,
-      label: "EvolutionPlan",
+      label: "进化方案",
       sourcePaths: input.operations.map((operation) => operation.targetPath),
     };
 
@@ -457,7 +457,7 @@ export class PatchService {
         runId: run.id,
         projectId,
         type: "patch_started",
-        content: "正在执行 EvolutionPlan Patch...",
+        content: "正在执行进化方案补丁...",
       });
       const state = await this.stateService.getCurrentState(projectId);
       if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
@@ -478,7 +478,7 @@ export class PatchService {
         needUserConfirm: false,
         needsUserConfirmation: false,
         reason: userInstruction,
-        summary: "Patch Execution Engine 执行 EvolutionPlan",
+        summary: "补丁执行引擎执行进化方案",
       };
       const createdRecord = await this.prisma.patchRecord.create({
         data: {
@@ -506,7 +506,7 @@ export class PatchService {
         where: { id: preview.id },
         data: {
           status: "applying",
-          message: "EvolutionPlan Patch Preview 已生成，正在应用同一份计划。",
+          message: "进化计划补丁预览已生成，正在应用同一份计划。",
         },
       });
       await this.stream.emit({
@@ -520,7 +520,7 @@ export class PatchService {
           patchPlan: plan,
           evolutionPlanId: input.evolutionPlanId,
         },
-        content: "EvolutionPlan Patch 已创建",
+        content: "进化计划补丁已创建",
       });
 
       const result = await this.applyPatchPlan(executionInput, patchRecord, plan, state);
@@ -529,7 +529,7 @@ export class PatchService {
         data: {
           status: "applied",
           afterProductDesignStateVersion: result.patchRecord.afterProductDesignStateVersion,
-          message: "EvolutionPlan Patch Preview 已应用并生成新版本。",
+          message: "进化计划补丁预览已应用并生成新版本。",
         },
       });
       return {
@@ -784,7 +784,7 @@ export class PatchService {
         where: { id: preview.id },
         data: {
           status: "applying",
-          message: "用户已确认，正在应用同一份 Patch Preview。",
+          message: "用户已确认，正在应用同一份补丁预览。",
         },
       });
       await this.stream.emit({
@@ -793,7 +793,7 @@ export class PatchService {
         type: "patch_plan_created",
         step: "patch_planning",
         data: { patchId: patchRecord.id, patchPreviewId: preview.id, patchPlan: plan },
-        content: "局部修改计划已确认，准备应用 Patch Preview",
+        content: "局部修改计划已确认，准备应用补丁预览",
       });
 
       const result = await this.applyPatchPlan(input, patchRecord, plan, state);
@@ -802,7 +802,7 @@ export class PatchService {
         data: {
           status: "applied",
           afterProductDesignStateVersion: result.patchRecord.afterProductDesignStateVersion,
-          message: "Patch Preview 已应用并生成新版本。",
+          message: "补丁预览已应用并生成新版本。",
         },
       });
       return result;
@@ -848,7 +848,7 @@ export class PatchService {
         type: "patch_applying",
         step: "patch_planning",
         data: { patchId: patchRecord.id },
-        content: "正在应用 ProductDesignState Patch...",
+        content: "正在应用产品设计状态补丁...",
       });
 
       const patchedState = await this.stateService.applyPatch(input.projectId, beforeState, plan, {
@@ -863,7 +863,7 @@ export class PatchService {
         type: "state_updated",
         step: "patch_planning",
         data: stateSummary(patchedState, patchRecord.id),
-        content: `ProductDesignState v${patchedState.version} 已更新`,
+        content: `产品设计状态 v${patchedState.version} 已更新`,
       });
       await this.stream.emit({
         runId: input.runId,
@@ -885,7 +885,7 @@ export class PatchService {
       const prdDocument = await this.documentService.saveGeneratedDocument(patchedState, prdDraft.data, {
         userId: input.userId,
         runId: input.runId,
-        reason: "Patch 后重新生成 PRD",
+        reason: "补丁应用后重新生成需求文档",
       });
       await this.stream.emit({
         runId: input.runId,
@@ -926,7 +926,7 @@ export class PatchService {
         {
           userId: input.userId,
           runId: input.runId,
-          reason: "Patch 后重新生成 HTML 原型",
+          reason: "补丁应用后重新生成网页原型",
         },
       );
       await this.stream.emit({
@@ -947,7 +947,7 @@ export class PatchService {
         userId: input.userId,
         runId: input.runId,
         messageId: input.instructionMessageId,
-        reason: "Patch 后同步 PRD 与 PrototypeSpec",
+        reason: "补丁应用后同步需求文档与原型规格",
       });
 
       const qa = await this.runAgentStep(input, AgentName.qa_agent, "qa_check", async () => ({
@@ -983,8 +983,8 @@ export class PatchService {
       patchRecord = this.toPatchRecord(finalRecord as PatchRecordRow);
 
       const message = qa.data.passed
-        ? "局部修改已应用，PRD、HTML 原型和 QA 已同步更新。"
-        : `局部修改已应用，QA 发现 ${qa.data.issues.length} 个待确认问题。`;
+        ? "局部修改已应用，需求文档、网页原型和质检结果已同步更新。"
+        : `局部修改已应用，质检发现 ${qa.data.issues.length} 个待确认问题。`;
       const result = {
         productDesignState: stateWithArtifacts,
         prdDocument,
@@ -1168,7 +1168,7 @@ export class PatchService {
         patchPlan: toInputJson(plan),
         operations: toInputJson(operations),
         message:
-          "Patch Preview 已生成。确认前不会修改 ProductDesignState、PRD 或 Prototype。",
+          "补丁预览已生成。确认前不会修改产品设计状态、需求文档或原型。",
         createdBy: row.createdBy,
       },
     });
@@ -1366,8 +1366,8 @@ export class PatchService {
       requiresConfirmation: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
       message: row.message ?? (
         patchRecord.status === PrismaPatchRecordStatus.needs_confirmation
-          ? "Patch 候选已生成，确认后才会应用到 ProductDesignState。"
-          : "Patch Preview 已生成。"
+          ? "补丁候选已生成，确认后才会应用到产品设计状态。"
+          : "补丁预览已生成。"
       ),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -1517,10 +1517,10 @@ function stateSummary(state: ProductDesignState, patchId: string) {
 function stepCopy(step: string, status: "started" | "completed") {
   const textMap: Record<string, [string, string]> = {
     patch_planning: ["正在分析局部修改...", "局部修改计划已完成"],
-    prd_generation: ["正在重新生成 PRD...", "PRD 已更新"],
+    prd_generation: ["正在重新生成需求文档...", "需求文档已更新"],
     prototype_design: ["正在重新生成原型规格...", "原型规格已更新"],
-    prototype_code_generation: ["正在重新生成 HTML 原型...", "HTML 原型已更新"],
-    qa_check: ["正在执行 Patch 后 QA...", "QA 校验完成"],
+    prototype_code_generation: ["正在重新生成网页原型...", "网页原型已更新"],
+    qa_check: ["正在执行补丁应用后质检...", "质检校验完成"],
   };
   return textMap[step]?.[status === "started" ? 0 : 1] ?? step;
 }

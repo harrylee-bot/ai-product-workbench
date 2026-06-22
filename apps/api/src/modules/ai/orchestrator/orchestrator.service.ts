@@ -111,7 +111,7 @@ export class OrchestratorService {
       riskLevel: previewSession.riskPanel?.level,
     });
 
-    const assistantContent = "Triple System Fusion 已完成：Constraint、Decision、Evolution 均已参与并记录。";
+    const assistantContent = "三系统融合已完成：约束系统、决策系统、进化系统均已参与并记录。";
     const assistantMessage = await this.createMessage({
       projectId: conversation.projectId,
       conversationId: conversation.id,
