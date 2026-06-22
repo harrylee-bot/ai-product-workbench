@@ -4,6 +4,7 @@ import { ConstraintModule } from "../../constraint/constraint.module";
 import { FusionDecisionModule } from "../../decision/decision.module";
 import { FusionEvolutionModule } from "../../evolution/evolution.module";
 import { ModelGatewayModule } from "../../model-gateway/model-gateway.module";
+import { AgentSkillRegistryService } from "../../ai/agent-skill-registry.service";
 import { DecisionEngineService } from "../../ai/decision-engine/decision-engine.service";
 import { DecisionTraceService } from "../../ai/evolution-engine/decision-trace.service";
 import { EvolutionEngineService } from "../../ai/evolution-engine/evolution.engine.service";
@@ -25,6 +26,7 @@ import { StateModule } from "../state/state.module";
 import { IntentAgent } from "./agents/intent/intent.agent";
 import { OrchestratorController } from "./orchestrator/orchestrator.controller";
 import { OrchestratorService } from "./orchestrator/orchestrator.service";
+import { VibeSkillsController } from "./vibe-skills.controller";
 
 @Module({
   imports: [
@@ -36,10 +38,11 @@ import { OrchestratorService } from "./orchestrator/orchestrator.service";
     StateModule,
     ModelGatewayModule,
   ],
-  controllers: [OrchestratorController, PatchPreviewController, SystemMutationController],
+  controllers: [OrchestratorController, VibeSkillsController, PatchPreviewController, SystemMutationController],
   providers: [
     OrchestratorService,
     IntentAgent,
+    AgentSkillRegistryService,
     DecisionEngineService,
     DecisionTraceService,
     EvolutionEngineService,

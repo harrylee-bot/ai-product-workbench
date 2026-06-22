@@ -10,6 +10,8 @@ import {
   UserRole,
 } from "@prisma/client";
 import { CompanyRuntimeService } from "../../../company/company-runtime.service";
+import { AgentSkillRegistryService, type AgentSkillDefinition } from "../../../ai/agent-skill-registry.service";
+import type { KnowledgeReference } from "../../../ai/ai-vibe.types";
 import { PatchBuilderService } from "../../../ai/patch-builder/patch-builder.service";
 import { PatchPreviewService } from "../../../ai/patch-builder/patch-preview.service";
 import { SelfGenerationEngine } from "../../../ai/self-generation/self-generation.engine";
@@ -39,6 +41,8 @@ type PreviewArtifactContext = {
     avoid: Array<{ effect: string; scope: string }>;
     warn: Array<{ effect: string; scope: string }>;
   };
+  agentSkills: AgentSkillDefinition[];
+  skillReferences: KnowledgeReference[];
   companyRuntime: {
     productInitiative: {
       name: string;
@@ -85,6 +89,7 @@ export class OrchestratorService {
     private readonly evolutionSystem: FusionEvolutionService,
     private readonly stateService: StateService,
     private readonly modelGateway: ModelGatewayService,
+    private readonly skillRegistry: AgentSkillRegistryService,
   ) {}
 
   async handleUserMessage(input: {
@@ -122,10 +127,14 @@ export class OrchestratorService {
       constraintContext,
       createdBy: input.user.id,
     });
+    const agentSkills = await this.skillRegistry.getVibeCodingSkills(content);
+    const skillReferences = this.skillRegistry.toKnowledgeReferences(agentSkills);
     const agentInput = {
       userInput: content,
       constraintContext,
       decisionContext: decisionResult.decisionPlan,
+      agentSkills,
+      skillReferences,
     };
     const intent = this.intentAgent.run(agentInput);
     const executionPlan = await this.systemGraph.ensureGraph(conversation.projectId, input.user.id);
@@ -176,6 +185,8 @@ export class OrchestratorService {
       selectedStrategy,
       decisionPlan,
       constraintContext,
+      agentSkills,
+      skillReferences,
       companyRuntime,
       previewSession,
     };
@@ -216,6 +227,8 @@ export class OrchestratorService {
         intent,
         constraintContext,
         agentInput,
+        agentSkills,
+        skillReferences,
         decisionTraceId: evolution.traceId,
         decisionPlan,
         reviewBoard,
@@ -244,6 +257,8 @@ export class OrchestratorService {
       intent,
       constraintContext,
       agentInput,
+      agentSkills,
+      skillReferences,
       decisionPlan,
       reviewBoard,
       selection,
@@ -318,6 +333,7 @@ export class OrchestratorService {
               rules: [
                 "必须围绕用户输入生成具体业务方案，不能写 mock、示例、占位内容。",
                 "必须保留约束系统、决策系统、进化系统已经给出的策略和限制。",
+                "如果 context.agentSkills 有内容，必须把这些 Obsidian Agent Skills 当作 Vibe Coding 的可用知识库能力，并在 PRD 或原型设计中体现其约束。",
                 "prototype.html 必须是完整 HTML 页面，包含 <!doctype html>、<html lang=\"zh-CN\">、<head> 和 <body>。",
                 "原型必须像真实产品页面，不要只输出说明文字。",
                 "不要引入远程脚本、远程样式、外部图片或实际提交表单。",
@@ -474,6 +490,12 @@ function buildPreviewArtifacts(input: PreviewArtifactContext): PreviewArtifacts 
     {
       title: "策略与规则",
       content: `当前选中策略：${strategyName(input.selectedStrategy.name)}。${input.selectedStrategy.description} 关键约束：${rules.map((rule) => rule.content).slice(0, 4).join("；") || "所有输出必须经过三系统融合流程。"}`,
+    },
+    {
+      title: "知识库与技能",
+      content: input.agentSkills.length
+        ? `本次 Vibe Coding 已加载 ${input.agentSkills.map((skill) => skill.name).join("、")}，用于维护 Obsidian Markdown 知识、Bases 视图、Canvas 结构和网页资料提取等知识库能力。`
+        : "当前未检测到可用的 Obsidian Agent Skills，系统将仅使用内置知识库上下文生成方案。",
     },
     {
       title: "验收标准",
