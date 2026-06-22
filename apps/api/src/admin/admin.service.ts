@@ -316,7 +316,17 @@ export class AdminService {
         project: { select: { id: true, title: true } },
         user: { select: { id: true, username: true, displayName: true } },
         conversation: { select: { id: true, title: true } },
-        steps: { orderBy: [{ startedAt: "asc" }, { id: "asc" }] },
+        steps: {
+          orderBy: [{ startedAt: "asc" }, { id: "asc" }],
+          include: {
+            modelCallLog: {
+              include: {
+                provider: { select: { id: true, name: true } },
+                modelConfig: { select: { id: true, displayName: true } },
+              },
+            },
+          },
+        },
         streamEvents: { orderBy: { createdAt: "asc" }, take: 100 },
       },
     });
@@ -348,6 +358,13 @@ export class AdminService {
         inputSummary: step.inputSummary,
         outputSummary: step.outputSummary ?? undefined,
         modelCallLogId: step.modelCallLogId ?? undefined,
+        modelCall: step.modelCallLog
+          ? {
+              ...this.toModelCallItem(step.modelCallLog),
+              inputSummary: step.modelCallLog.inputSummary ?? undefined,
+              outputSummary: step.modelCallLog.outputSummary ?? undefined,
+            }
+          : undefined,
         modelProviderId: step.modelProviderId ?? undefined,
         modelName: step.modelName ?? undefined,
         tokenUsage: step.tokenUsage ?? undefined,

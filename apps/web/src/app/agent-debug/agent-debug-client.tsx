@@ -12,7 +12,7 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AdminStatusBadge, JsonViewer } from "@/components/admin-ui";
 import { ProtectedRoute } from "@/components/protected-route";
 import { Button, InlineError, Select, TextInput } from "@/components/ui";
@@ -56,6 +56,7 @@ type AgentStep = {
   endedAt?: string;
   durationMs?: number;
   errorMessage?: string;
+  modelCall?: ModelCallLog;
 };
 
 type StreamEvent = {
@@ -69,6 +70,28 @@ type AgentRunDetail = AgentRunItem & {
   result?: unknown;
   steps: AgentStep[];
   events: StreamEvent[];
+};
+
+type ModelCallLog = {
+  id: string;
+  traceId?: string;
+  runId?: string;
+  agentName?: string;
+  taskType: string;
+  providerName: string;
+  modelDisplayName: string;
+  modelName: string;
+  status: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  durationMs?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  createdAt: string;
+  completedAt?: string;
 };
 
 type Filters = {
@@ -358,6 +381,7 @@ function AgentDebugContent() {
 
 function AgentRunDetailView({ run }: { run: AgentRunDetail }) {
   const normalizedEvents = useMemo(() => run.events.map(normalizeEvent), [run.events]);
+  const debugArtifacts = useMemo(() => buildDebugArtifacts(normalizedEvents), [normalizedEvents]);
 
   return (
     <div className="mx-auto flex max-w-[1280px] flex-col gap-4 p-5">
@@ -381,6 +405,8 @@ function AgentRunDetailView({ run }: { run: AgentRunDetail }) {
           <Metric label="耗时" value={formatDuration(run.durationMs)} />
         </div>
       </section>
+
+      <DebugArtifactsPanel artifacts={debugArtifacts} />
 
       <section className="border border-gray-200 bg-white">
         <SectionTitle
@@ -417,6 +443,106 @@ function AgentRunDetailView({ run }: { run: AgentRunDetail }) {
       {run.result !== undefined ? (
         <CollapsibleJson title="最终结果 JSON" value={run.result} defaultOpen={false} />
       ) : null}
+    </div>
+  );
+}
+
+type DebugArtifacts = {
+  knowledgeHits: Array<Record<string, unknown>>;
+  qaIssues: Array<Record<string, unknown>>;
+  patchEvents: Array<Record<string, unknown>>;
+};
+
+function DebugArtifactsPanel({ artifacts }: { artifacts: DebugArtifacts }) {
+  const hasAny = artifacts.knowledgeHits.length || artifacts.qaIssues.length || artifacts.patchEvents.length;
+  return (
+    <section className="border border-gray-200 bg-white">
+      <SectionTitle
+        icon={<Braces className="h-4 w-4" />}
+        title="调试摘要"
+        subtitle="从事件流自动提取知识命中、QA 问题和 Patch 预览"
+      />
+      {hasAny ? (
+        <div className="grid gap-px bg-gray-200 xl:grid-cols-3">
+          <DebugArtifactColumn
+            title="知识命中"
+            empty="未记录知识命中"
+            items={artifacts.knowledgeHits}
+            renderItem={(item) => (
+              <>
+                <div className="truncate text-sm font-semibold text-gray-950">{toText(item.title, "未命名知识")}</div>
+                <div className="mt-1 truncate text-xs text-gray-500">
+                  {toText(item.type, "knowledge")} · {toText(item.knowledgeId ?? item.sourceId, toText(item.id, "-"))}
+                </div>
+              </>
+            )}
+          />
+          <DebugArtifactColumn
+            title="QA 问题"
+            empty="未记录 QA 问题"
+            items={artifacts.qaIssues}
+            renderItem={(item) => (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className={clsx("h-2 w-2 rounded-full", qaSeverityClass(toText(item.severity, "info")))} />
+                  <div className="min-w-0 truncate text-sm font-semibold text-gray-950">
+                    {toText(item.title, "未命名 QA 问题")}
+                  </div>
+                </div>
+                <div className="mt-1 truncate text-xs text-gray-500">
+                  {toText(item.checkType, "qa")} · {toText(item.status, "open")}
+                </div>
+              </>
+            )}
+          />
+          <DebugArtifactColumn
+            title="Patch Diff / Preview"
+            empty="未记录 Patch 预览"
+            items={artifacts.patchEvents}
+            renderItem={(item) => (
+              <>
+                <div className="truncate text-sm font-semibold text-gray-950">
+                  {toText(item.title, "Patch 事件")}
+                </div>
+                <div className="mt-1 truncate text-xs text-gray-500">
+                  {toText(item.status, "unknown")} · operations {toText(item.operationCount, "0")}
+                </div>
+              </>
+            )}
+          />
+        </div>
+      ) : (
+        <div className="px-5 py-8 text-sm text-gray-500">事件流里暂无可提取的调试摘要。</div>
+      )}
+    </section>
+  );
+}
+
+function DebugArtifactColumn({
+  title,
+  empty,
+  items,
+  renderItem,
+}: {
+  title: string;
+  empty: string;
+  items: Array<Record<string, unknown>>;
+  renderItem: (item: Record<string, unknown>) => ReactNode;
+}) {
+  return (
+    <div className="bg-white p-4">
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</div>
+      {items.length ? (
+        <div className="space-y-2">
+          {items.slice(0, 8).map((item, index) => (
+            <div key={`${title}-${index}`} className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+              {renderItem(item)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-gray-200 px-3 py-4 text-sm text-gray-500">{empty}</div>
+      )}
     </div>
   );
 }
@@ -465,6 +591,7 @@ function AgentStepBlock({
             value={step.errorMessage ?? `状态：${statusLabel(step.status)}；模型：${step.modelName ?? "未记录"}；Token：${formatTokenUsage(step.tokenUsage)}`}
           />
           <FallbackNotice fallback={extractFallbackFromSummary(step.outputSummary)} />
+          {step.modelCall ? <ModelCallBlock modelCall={step.modelCall} /> : null}
           {step.tokenUsage !== undefined ? (
             <div className="bg-white p-4 lg:col-span-3">
               <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-500">
@@ -477,6 +604,36 @@ function AgentStepBlock({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function ModelCallBlock({ modelCall }: { modelCall: ModelCallLog }) {
+  return (
+    <div className="bg-white p-4 lg:col-span-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-gray-500">
+        <Braces className="h-3.5 w-3.5" />
+        Model Call Log
+        <StatusPill status={modelCall.status} compact />
+        <span>{modelCall.providerName}</span>
+        <span>{modelCall.modelDisplayName || modelCall.modelName}</span>
+      </div>
+      <div className="grid gap-px overflow-hidden border border-gray-200 bg-gray-200 md:grid-cols-2">
+        <StepTextBlock title="模型输入摘要" value={modelCall.inputSummary ?? "未记录模型输入摘要"} />
+        <StepTextBlock title="模型输出摘要" value={modelCall.outputSummary ?? "未记录模型输出摘要"} />
+      </div>
+      <div className="mt-3 grid gap-2 text-xs text-gray-500 sm:grid-cols-4">
+        <span>Task: {modelCall.taskType}</span>
+        <span>Token: {modelCall.promptTokens ?? 0}/{modelCall.completionTokens ?? 0}</span>
+        <span>Total: {modelCall.totalTokens ?? 0}</span>
+        <span>耗时: {formatDuration(modelCall.durationMs)}</span>
+      </div>
+      {modelCall.errorCode || modelCall.errorMessage ? (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {modelCall.errorCode ? `${modelCall.errorCode}: ` : ""}
+          {modelCall.errorMessage ?? "模型调用失败"}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -717,6 +874,93 @@ function normalizeEvent(event: StreamEvent): NormalizedEvent {
   };
 }
 
+function buildDebugArtifacts(events: NormalizedEvent[]): DebugArtifacts {
+  const knowledgeHits: Array<Record<string, unknown>> = [];
+  const qaIssues: Array<Record<string, unknown>> = [];
+  const patchEvents: Array<Record<string, unknown>> = [];
+
+  for (const event of events) {
+    const data = asRecord(event.data);
+    if (!data) continue;
+
+    if (event.step === "knowledge_retrieval" || event.type === "knowledge_candidate_created") {
+      knowledgeHits.push(...extractKnowledgeHits(data));
+    }
+
+    if (event.type === "qa_completed" || event.step === "qa_check") {
+      qaIssues.push(...extractQaIssues(data));
+    }
+
+    if (event.type === "patch_plan_created" || event.type === "patch_completed") {
+      patchEvents.push(extractPatchEvent(event, data));
+    }
+  }
+
+  return {
+    knowledgeHits: uniqueRecords(knowledgeHits, "knowledgeId", "sourceId", "id", "title"),
+    qaIssues: uniqueRecords(qaIssues, "id", "title"),
+    patchEvents,
+  };
+}
+
+function extractKnowledgeHits(data: Record<string, unknown>) {
+  const buckets = [
+    "strongRules",
+    "defaultRules",
+    "referenceCases",
+    "designPatterns",
+    "prdWritingRules",
+    "prototypeRules",
+    "businessConcepts",
+  ];
+  const refs = buckets.flatMap((key) => arrayOfRecords(data[key]));
+  const skills = arrayOfRecords(data.agentSkills).map((skill) => ({
+    id: skill.id,
+    knowledgeId: `agent-skill:${toText(skill.name, "unknown")}`,
+    title: `Vibe Coding Skill：${toText(skill.name, "unknown")}`,
+    type: "agent_skill",
+    sourceId: skill.id,
+  }));
+  return [...refs, ...skills];
+}
+
+function extractQaIssues(data: Record<string, unknown>) {
+  const direct = arrayOfRecords(data.issues);
+  if (direct.length) return direct;
+  const qaReport = asRecord(data.qaReport) ?? asRecord(data.report);
+  return qaReport ? arrayOfRecords(qaReport.issues) : [];
+}
+
+function extractPatchEvent(event: NormalizedEvent, data: Record<string, unknown>) {
+  const result = asRecord(data.result);
+  const patchPreview = asRecord(data.patchPreview) ?? asRecord(result?.patchPreview);
+  const patchPlan = asRecord(data.patchPlan) ?? asRecord(result?.patchPlan);
+  const operations = arrayOfRecords(patchPlan?.operations);
+  return {
+    id: toText(data.patchId ?? data.patchRecordId ?? patchPreview?.id ?? event.id, event.id),
+    title: toText(patchPreview?.title ?? patchPlan?.summary ?? event.content, eventLabel(event.type)),
+    status: toText(patchPreview?.status ?? data.status ?? "recorded", "recorded"),
+    operationCount: String(operations.length),
+    eventType: event.type,
+  };
+}
+
+function uniqueRecords(items: Array<Record<string, unknown>>, ...keys: string[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keys.map((name) => toText(item[name])).find(Boolean) ?? JSON.stringify(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function arrayOfRecords(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(asRecord(item)))
+    : [];
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -830,6 +1074,13 @@ function fallbackLevelMeta(level: string) {
     label: "降级预览",
     className: "border-amber-200 bg-amber-50 text-amber-700",
   };
+}
+
+function qaSeverityClass(severity: string) {
+  if (severity === "blocking" || severity === "critical") return "bg-red-500";
+  if (severity === "major") return "bg-orange-500";
+  if (severity === "minor" || severity === "warning") return "bg-amber-500";
+  return "bg-emerald-500";
 }
 
 function formatDate(value?: string) {
