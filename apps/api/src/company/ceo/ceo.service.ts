@@ -45,7 +45,15 @@ export class CEOLayerService {
 
 function inferProductName(input: string) {
   const text = input.trim().replace(/\s+/g, " ");
-  return text.length > 28 ? `${text.slice(0, 28)}产品` : `${text || "智能产品"}运行时`;
+  const withoutLead = text
+    .replace(/^(请)?(帮我|我要|需要)?(生成|设计|创建|做)(一个|一套)?/, "")
+    .trim();
+  const candidate = (withoutLead || text).split(/[，,。.;；:：]/)[0]?.trim() || "智能产品";
+  const shortName = candidate.length > 22 ? candidate.slice(0, 22) : candidate;
+  if (/(工具|系统|平台|看板|后台|工作台|应用|小程序|网站|原型)$/.test(shortName)) {
+    return shortName;
+  }
+  return `${shortName}方案`;
 }
 
 function slug(value: string) {
