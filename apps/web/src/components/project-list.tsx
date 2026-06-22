@@ -111,14 +111,9 @@ export function ProjectList({
     <aside className="flex min-h-0 flex-col border-r border-gray-200 bg-[#FBFBFB]">
       <div className="px-5 pb-4 pt-5">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-200">
-              <Sparkles className="h-5 w-5 text-blue-600" />
-            </span>
-            <div className="min-w-0">
-              <div className="truncate text-xl font-semibold text-gray-950">智能产品工作台</div>
-              <div className="mt-1 truncate text-xs leading-5 text-gray-500">说出目标，系统自动决策与生成</div>
-            </div>
+          <div className="min-w-0">
+            <div className="truncate text-xl font-semibold text-gray-950">智能产品工作台</div>
+            <div className="mt-1 truncate text-xs leading-5 text-gray-500">说出目标，系统自动决策与生成</div>
           </div>
           <button
             type="button"
