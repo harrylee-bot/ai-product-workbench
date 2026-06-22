@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { create } from "zustand";
-import { ChatPanel, type Phase1Message } from "@/components/chat-panel";
+import { ChatPanel, type Phase1Message, type VibeRunStepStatus, type VibeRunView } from "@/components/chat-panel";
 import {
   PreviewPanel,
   type Phase1PrdPreview,
@@ -45,8 +45,11 @@ type VibeHandleMessageResponse = {
 type VibeStreamEvent = {
   type: string;
   eventType?: string;
+  step?: string;
+  content?: string;
   payload?: unknown;
   data?: unknown;
+  createdAt?: string;
 };
 
 type CreateConversationResponse = {
@@ -127,6 +130,7 @@ function Phase1WorkspaceInner() {
   const [previewWidth, setPreviewWidth] = useState(WORKSPACE_PREVIEW_DEFAULT_WIDTH);
   const [resizingPreview, setResizingPreview] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [runState, setRunState] = useState<VibeRunView | null>(null);
   const {
     selectedProjectId,
     selectedConversationId,
@@ -185,17 +189,25 @@ function Phase1WorkspaceInner() {
     return () => runStreamAbortRef.current?.abort();
   }, []);
 
+  useEffect(() => {
+    runStreamAbortRef.current?.abort();
+    setActiveRunId(null);
+    setRunState(null);
+  }, [selectedProjectId, selectedConversationId]);
+
   const watchVibeRun = (runId: string, projectId: string, conversationId: string) => {
     runStreamAbortRef.current?.abort();
     const controller = new AbortController();
     runStreamAbortRef.current = controller;
     setActiveRunId(runId);
+    setRunState(createInitialRunState(runId));
 
     void streamApiEvents<VibeStreamEvent>(
       `/ai/vibe/runs/${runId}/stream`,
       (event) => {
         const eventType = event.eventType ?? event.type;
         const payload = payloadRecord(event);
+        setRunState((current) => reduceRunState(current ?? createInitialRunState(runId), event));
 
         if (eventType === "prd_updated" && payload) {
           setArtifactPreview({ prdPreview: normalizePrdPreview(payload) });
@@ -438,6 +450,7 @@ function Phase1WorkspaceInner() {
       <ChatPanel
         messages={messagesQuery.data?.items ?? []}
         decision={decision}
+        runState={runState}
         disabled={projectsQuery.isLoading}
         sending={sendMessage.isPending || Boolean(activeRunId)}
         onSend={async (content) => {
@@ -509,6 +522,168 @@ function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | nul
     html,
     entryFilePath: asText(record.entryFilePath) || "index.html",
   };
+}
+
+const VIBE_RUN_STEPS = [
+  { step: "intent_detection", title: "理解意图", agent: "Intent Agent", detail: "识别用户目标、选区和是否进入生成链路" },
+  { step: "knowledge_retrieval", title: "检索知识", agent: "Knowledge Agent", detail: "加载知识库、附件和 Vibe Coding skills" },
+  { step: "requirement_analysis", title: "分析需求", agent: "Requirement Analyst", detail: "判断需求完整度、缺口、冲突和澄清问题" },
+  { step: "product_planning", title: "规划方案", agent: "Product Planner", detail: "生成正式需求执行计划和下游 agent 顺序" },
+  { step: "product_design", title: "生成产品状态", agent: "Product Designer", detail: "把计划落到 ProductDesignState 唯一事实源" },
+  { step: "prd_generation", title: "生成 PRD", agent: "PRD Writer", detail: "只基于 ProductDesignState 输出结构化 PRD" },
+  { step: "prototype_design", title: "设计原型结构", agent: "Prototype Designer", detail: "只基于 ProductDesignState 输出 PrototypeSpec" },
+  { step: "prototype_code_generation", title: "生成 HTML", agent: "Prototype Code", detail: "只基于 PrototypeSpec 输出单文件 HTML 原型" },
+  { step: "patch_planning", title: "规划局部修改", agent: "Patch Agent", detail: "输出只作用于 ProductDesignState 的 PatchPlan" },
+  { step: "qa_check", title: "QA 闸门", agent: "QA Agent", detail: "检查一致性并决定确认、知识、发布和导出闸门" },
+  { step: "knowledge_extraction", title: "抽取知识候选", agent: "Knowledge Extractor", detail: "从稳定产物中沉淀待审核知识候选" },
+];
+
+function createInitialRunState(runId: string): VibeRunView {
+  return {
+    runId,
+    status: "running",
+    currentLabel: "正在连接 Vibe Coding 主链路...",
+    steps: VIBE_RUN_STEPS.map((step) => ({ ...step, status: "pending" })),
+  };
+}
+
+function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunView {
+  const eventType = event.eventType ?? event.type;
+  const payload = payloadRecord(event);
+  let next: VibeRunView = {
+    ...current,
+    currentLabel: event.content ?? current.currentLabel,
+    steps: current.steps.map((step) => ({ ...step })),
+  };
+
+  if (event.step) {
+    if (eventType === "step_started") {
+      next = updateStep(next, event.step, "running", event.content);
+    }
+    if (eventType === "step_completed") {
+      next = updateStep(next, event.step, "done", event.content);
+    }
+    if (eventType === "step_failed") {
+      next = updateStep(next, event.step, "failed", event.content);
+      next.status = "failed";
+      next.errorMessage = event.content ?? "Agent 执行失败";
+    }
+    if (eventType === "fallback_used") {
+      next = updateStep(next, event.step, undefined, event.content);
+    }
+  }
+
+  if (eventType === "message_delta" && event.content) {
+    next.currentLabel = event.content;
+  }
+
+  if (eventType === "prd_updated") {
+    next = updateStep(next, "prd_generation", "done", "PRD 已更新");
+  }
+
+  if (eventType === "prototype_updated") {
+    next = updateStep(next, "prototype_code_generation", "done", "HTML 原型已更新");
+  }
+
+  if (eventType === "patch_started") {
+    next = updateStep(next, "patch_planning", "running", event.content ?? "正在规划局部修改");
+  }
+
+  if (eventType === "patch_plan_created") {
+    next = updateStep(next, "patch_planning", "done", "局部修改计划已生成，等待用户确认");
+  }
+
+  if (eventType === "patch_applying") {
+    next.currentLabel = event.content ?? "正在应用已确认的局部修改";
+  }
+
+  if (eventType === "patch_completed") {
+    next.currentLabel = event.content ?? "局部修改已完成并重新生成产物";
+  }
+
+  if (eventType === "patch_failed") {
+    next = updateStep(next, "patch_planning", "failed", event.content ?? "局部修改失败");
+    next.status = "failed";
+    next.errorMessage = event.content ?? "局部修改失败";
+  }
+
+  if (eventType === "qa_completed" && payload) {
+    next = updateStep(next, "qa_check", "done", "QA 校验完成");
+    next.qaIssueCount = readArrayLength(payload.issues);
+  }
+
+  if (eventType === "export_ready" && payload) {
+    next.exportFileName = asText(payload.fileName);
+    next.summary = next.exportFileName ? `已准备导出文件：${next.exportFileName}` : "导出文件已准备好";
+  }
+
+  if (eventType === "knowledge_candidate_created") {
+    next = updateStep(next, "knowledge_extraction", "done", event.content ?? "知识候选已生成");
+  }
+
+  if (eventType === "step_completed" && event.step === "knowledge_retrieval" && payload) {
+    next.knowledgeHitCount = [
+      readArrayLength(payload.strongRules),
+      readArrayLength(payload.defaultRules),
+      readArrayLength(payload.referenceCases),
+      readArrayLength(payload.designPatterns),
+      readArrayLength(payload.prdWritingRules),
+      readArrayLength(payload.prototypeRules),
+      readArrayLength(payload.businessConcepts),
+    ].reduce((sum, value) => sum + value, 0);
+  }
+
+  if (eventType === "run_completed") {
+    next.status = "completed";
+    next.summary = event.content ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
+    next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step);
+  }
+
+  if (eventType === "run_failed") {
+    next.status = "failed";
+    next.errorMessage = event.content ?? asText(payload?.message) ?? "Vibe Coding 主链路执行失败";
+    next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "failed" } : step);
+  }
+
+  return next;
+}
+
+function updateStep(
+  state: VibeRunView,
+  stepName: string,
+  status?: VibeRunStepStatus,
+  message?: string,
+): VibeRunView {
+  let matched = false;
+  const steps = state.steps.map((step) => {
+    if (step.step !== stepName) return step;
+    matched = true;
+    return {
+      ...step,
+      status: status ?? step.status,
+      message: message ?? step.message,
+    };
+  });
+
+  if (!matched) {
+    steps.push({
+      step: stepName,
+      title: stepName,
+      agent: "Vibe Agent",
+      detail: "后端返回的扩展步骤",
+      status: status ?? "running",
+      message,
+    });
+  }
+
+  return {
+    ...state,
+    steps,
+  };
+}
+
+function readArrayLength(value: unknown) {
+  return Array.isArray(value) ? value.length : 0;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
