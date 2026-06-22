@@ -1,7 +1,24 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { Activity, Building2, Check, CircleDollarSign, Code2, FileText, GitBranch, Scale, ShieldAlert } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
+import {
+  Activity,
+  Building2,
+  Check,
+  CheckCircle2,
+  CircleDollarSign,
+  Crop,
+  FileText,
+  GitBranch,
+  Loader2,
+  MousePointer2,
+  PencilLine,
+  Scale,
+  ShieldAlert,
+  Sparkles,
+  Wand2,
+  X,
+} from "lucide-react";
 
 export type PatchOperation = {
   op: "add" | "update" | "delete" | "replace";
@@ -321,6 +338,34 @@ export type Phase1PrototypePreview = {
 };
 
 type PreviewMode = "prototype" | "prd";
+type PrototypeCanvasMode = "browse" | "select";
+type PrototypeLocalAction = "copy_generate" | "visual_refine" | "layout_adjust" | "interaction_fill";
+
+type CanvasRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type PrototypeCanvasSelection = CanvasRect & {
+  id: string;
+  kind: "point" | "box";
+  label: string;
+  createdAt: number;
+};
+
+type PrototypeLocalGeneration = {
+  title: string;
+  changes: string[];
+};
+
+const LOCAL_ACTIONS: Array<{ id: PrototypeLocalAction; label: string; icon: typeof Sparkles }> = [
+  { id: "copy_generate", label: "文案生成", icon: PencilLine },
+  { id: "visual_refine", label: "视觉优化", icon: Wand2 },
+  { id: "layout_adjust", label: "布局调整", icon: Crop },
+  { id: "interaction_fill", label: "交互补齐", icon: MousePointer2 },
+];
 
 const STRATEGY_LABELS: Record<Phase2Strategy["name"], string> = {
   conservative_fix: "保守修正",
@@ -518,6 +563,29 @@ function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview | null }
 }
 
 function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1PrototypePreview | null }) {
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [canvasMode, setCanvasMode] = useState<PrototypeCanvasMode>("select");
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [draftBox, setDraftBox] = useState<CanvasRect | null>(null);
+  const [selection, setSelection] = useState<PrototypeCanvasSelection | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [localAction, setLocalAction] = useState<PrototypeLocalAction>("copy_generate");
+  const [instruction, setInstruction] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generation, setGeneration] = useState<PrototypeLocalGeneration | null>(null);
+
+  useEffect(() => {
+    setCanvasMode("select");
+    setDragStart(null);
+    setDraftBox(null);
+    setSelection(null);
+    setDialogOpen(false);
+    setLocalAction("copy_generate");
+    setInstruction("");
+    setGenerating(false);
+    setGeneration(null);
+  }, [prototypePreview?.id, prototypePreview?.html]);
+
   if (!prototypePreview?.html) {
     return (
       <div className="h-full p-4">
@@ -529,29 +597,436 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
     );
   }
 
+  const activeBox = draftBox ?? selection;
+
+  const startSelection = (event: PointerEvent<HTMLDivElement>) => {
+    if (canvasMode !== "select" || !canvasRef.current) return;
+    const point = getCanvasPoint(event, canvasRef.current);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragStart(point);
+    setDraftBox({ ...point, width: 0, height: 0 });
+    setSelection(null);
+    setGeneration(null);
+  };
+
+  const updateSelection = (event: PointerEvent<HTMLDivElement>) => {
+    if (canvasMode !== "select" || !dragStart || !canvasRef.current) return;
+    const point = getCanvasPoint(event, canvasRef.current);
+    setDraftBox(rectFromPoints(dragStart, point));
+  };
+
+  const finishSelection = (event: PointerEvent<HTMLDivElement>) => {
+    if (canvasMode !== "select" || !dragStart || !canvasRef.current) return;
+    const point = getCanvasPoint(event, canvasRef.current);
+    const canvasBounds = canvasRef.current.getBoundingClientRect();
+    const rawRect = rectFromPoints(dragStart, point);
+    const isBox = rawRect.width >= 18 && rawRect.height >= 18;
+    const nextRect = isBox ? rawRect : pointSelectionRect(point, canvasBounds.width, canvasBounds.height);
+    const nextSelection: PrototypeCanvasSelection = {
+      ...nextRect,
+      id: `prototype-selection-${Date.now()}`,
+      kind: isBox ? "box" : "point",
+      label: selectionLabel(nextRect, isBox ? "box" : "point"),
+      createdAt: Date.now(),
+    };
+
+    setSelection(nextSelection);
+    setDraftBox(null);
+    setDragStart(null);
+    setDialogOpen(true);
+    setInstruction("");
+    setLocalAction("copy_generate");
+  };
+
+  const cancelSelectionDrag = () => {
+    setDragStart(null);
+    setDraftBox(null);
+  };
+
+  const clearSelection = () => {
+    setSelection(null);
+    setDialogOpen(false);
+    setInstruction("");
+    setGeneration(null);
+  };
+
+  const generateLocalDraft = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selection || !instruction.trim()) return;
+    setGenerating(true);
+    setGeneration(null);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 480));
+    setGeneration(buildLocalGeneration(selection, localAction, instruction));
+    setGenerating(false);
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--color-accent-soft)]">
+    <div className="relative flex h-full min-h-0 flex-col bg-[var(--color-accent-soft)]">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-blue-100 bg-white/80 px-4 backdrop-blur">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-gray-950">{toChineseText(prototypePreview.title)}</div>
-          <div className="text-xs text-gray-500">网页原型预览</div>
+          <div className="text-xs text-gray-500">
+            {selection ? selection.label : canvasMode === "select" ? "画布选择" : "网页原型预览"}
+          </div>
         </div>
-        <div className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-[var(--shadow-control)]">
-          已生成
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="inline-flex rounded-full bg-blue-50 p-1 shadow-inner">
+            <button
+              type="button"
+              onClick={() => setCanvasMode("browse")}
+              className={[
+                "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-blue-900/10",
+                canvasMode === "browse" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-900",
+              ].join(" ")}
+            >
+              <MousePointer2 className="h-3.5 w-3.5" />
+              浏览
+            </button>
+            <button
+              type="button"
+              onClick={() => setCanvasMode("select")}
+              className={[
+                "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-blue-900/10",
+                canvasMode === "select" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-900",
+              ].join(" ")}
+            >
+              <Crop className="h-3.5 w-3.5" />
+              选择
+            </button>
+          </div>
+          <div className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-[var(--shadow-control)]">
+            已生成
+          </div>
         </div>
       </div>
       <div className="min-h-0 flex-1 p-2.5">
         <div className="h-full overflow-hidden rounded-[14px] border border-blue-100 bg-white shadow-[var(--shadow-panel)]">
-          <iframe
-            title="原型预览"
-            srcDoc={prototypePreview.html}
-            sandbox="allow-scripts"
-            className="h-full min-h-[720px] w-full border-0 bg-white"
-          />
+          <div className="flex h-10 items-center gap-2 border-b border-blue-100 bg-gray-50 px-3">
+            <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            <span className="ml-2 truncate text-xs text-gray-500">{prototypePreview.entryFilePath ?? "index.html"}</span>
+            {generation ? (
+              <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                局部草稿
+              </span>
+            ) : null}
+          </div>
+          <div ref={canvasRef} className="relative h-[calc(100%-40px)] min-h-[680px] bg-white">
+            <iframe
+              title="原型预览"
+              srcDoc={prototypePreview.html}
+              sandbox="allow-scripts"
+              className={[
+                "h-full min-h-[680px] w-full border-0 bg-white",
+                canvasMode === "select" ? "pointer-events-none select-none" : "",
+              ].join(" ")}
+            />
+
+            {canvasMode === "select" ? (
+              <div
+                className="absolute inset-0 z-10 cursor-crosshair bg-blue-500/0"
+                onPointerDown={startSelection}
+                onPointerMove={updateSelection}
+                onPointerUp={finishSelection}
+                onPointerCancel={cancelSelectionDrag}
+                onPointerLeave={cancelSelectionDrag}
+              >
+                {activeBox ? <PrototypeSelectionBox box={activeBox} selected={Boolean(selection && !draftBox)} /> : null}
+
+                {selection && !draftBox ? (
+                  <div
+                    className="absolute z-20 flex items-center gap-1 rounded-full border border-blue-200 bg-white p-1 shadow-[var(--shadow-float)]"
+                    style={{
+                      left: clamp(selection.x, 8, Math.max(8, selection.x + selection.width - 156)),
+                      top: Math.max(8, selection.y - 44),
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setDialogOpen(true)}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-primary)] px-3 text-xs font-semibold text-white transition hover:bg-[var(--color-primary-hover)] focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      局部生成
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
+                      title="清除选区"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
+
+      {dialogOpen && selection ? (
+        <PrototypeLocalEditDialog
+          selection={selection}
+          action={localAction}
+          instruction={instruction}
+          generating={generating}
+          generation={generation}
+          onActionChange={(value) => {
+            setLocalAction(value);
+            setGeneration(null);
+          }}
+          onInstructionChange={(value) => {
+            setInstruction(value);
+            setGeneration(null);
+          }}
+          onClose={() => setDialogOpen(false)}
+          onSubmit={generateLocalDraft}
+        />
+      ) : null}
     </div>
   );
+}
+
+function PrototypeSelectionBox({ box, selected }: { box: CanvasRect; selected: boolean }) {
+  return (
+    <div
+      className={[
+        "absolute rounded-[10px] border bg-blue-500/10 shadow-[0_0_0_9999px_rgba(15,23,42,0.03)]",
+        selected ? "border-blue-600 ring-4 ring-blue-500/15" : "border-blue-500",
+      ].join(" ")}
+      style={{ left: box.x, top: box.y, width: box.width, height: box.height }}
+    >
+      <span className="absolute -left-px -top-7 rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700 shadow-[var(--shadow-control)]">
+        {selectionLabel(box, selected ? "box" : "point")}
+      </span>
+      {selected ? (
+        <>
+          <span className="absolute -left-1.5 -top-1.5 h-3 w-3 rounded-full border border-blue-600 bg-white" />
+          <span className="absolute -right-1.5 -top-1.5 h-3 w-3 rounded-full border border-blue-600 bg-white" />
+          <span className="absolute -bottom-1.5 -left-1.5 h-3 w-3 rounded-full border border-blue-600 bg-white" />
+          <span className="absolute -bottom-1.5 -right-1.5 h-3 w-3 rounded-full border border-blue-600 bg-white" />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function PrototypeLocalEditDialog({
+  selection,
+  action,
+  instruction,
+  generating,
+  generation,
+  onActionChange,
+  onInstructionChange,
+  onClose,
+  onSubmit,
+}: {
+  selection: PrototypeCanvasSelection;
+  action: PrototypeLocalAction;
+  instruction: string;
+  generating: boolean;
+  generation: PrototypeLocalGeneration | null;
+  onActionChange: (value: PrototypeLocalAction) => void;
+  onInstructionChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="false"
+      aria-label="局部生成"
+      className="absolute right-4 top-16 z-30 w-[380px] max-w-[calc(100%-32px)] overflow-hidden rounded-[16px] border border-gray-200 bg-white shadow-[var(--shadow-float)]"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+            <Sparkles className="h-4 w-4 text-blue-600" />
+            局部生成
+          </div>
+          <div className="mt-1 truncate text-xs text-gray-500">{selection.label}</div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
+          title="关闭"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <form onSubmit={onSubmit} className="space-y-3 px-4 py-3">
+        <div className="grid grid-cols-2 gap-2">
+          {LOCAL_ACTIONS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onActionChange(item.id)}
+                className={[
+                  "flex h-9 items-center justify-center gap-1.5 rounded-[10px] border px-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
+                  action === item.id
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-950",
+                ].join(" ")}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <textarea
+          value={instruction}
+          onChange={(event) => onInstructionChange(event.target.value)}
+          placeholder="描述这个局部区域要生成或调整的内容"
+          rows={4}
+          className="block max-h-[150px] min-h-[104px] w-full resize-none rounded-[12px] border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm leading-6 text-gray-900 shadow-none outline-none transition placeholder:text-gray-400 focus:border-gray-950 focus:bg-white focus:ring-3 focus:ring-gray-950/10"
+        />
+
+        <div className="rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
+          当前输出会作为局部补丁草稿保留，不覆盖完整原型。
+        </div>
+
+        {generation ? (
+          <div className="rounded-[12px] border border-emerald-200 bg-emerald-50 px-3 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+              <CheckCircle2 className="h-4 w-4" />
+              {generation.title}
+            </div>
+            <div className="mt-2 space-y-1.5">
+              {generation.changes.map((change) => (
+                <div key={change} className="rounded-lg bg-white/80 px-2 py-1.5 text-xs leading-5 text-emerald-900">
+                  {change}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 items-center rounded-[10px] border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
+          >
+            收起
+          </button>
+          <button
+            type="submit"
+            disabled={!instruction.trim() || generating}
+            className="inline-flex h-9 items-center gap-1.5 rounded-[10px] bg-[var(--color-primary)] px-3 text-sm font-semibold text-white transition hover:bg-[var(--color-primary-hover)] focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {generating ? "生成中" : "生成局部草稿"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function getCanvasPoint(event: PointerEvent<HTMLDivElement>, element: HTMLDivElement) {
+  const rect = element.getBoundingClientRect();
+  return {
+    x: clamp(event.clientX - rect.left, 0, rect.width),
+    y: clamp(event.clientY - rect.top, 0, rect.height),
+  };
+}
+
+function rectFromPoints(start: { x: number; y: number }, end: { x: number; y: number }): CanvasRect {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+}
+
+function pointSelectionRect(point: { x: number; y: number }, canvasWidth: number, canvasHeight: number): CanvasRect {
+  const width = Math.min(240, Math.max(144, canvasWidth * 0.24));
+  const height = Math.min(156, Math.max(96, canvasHeight * 0.18));
+  return {
+    x: clamp(point.x - width / 2, 8, Math.max(8, canvasWidth - width - 8)),
+    y: clamp(point.y - height / 2, 8, Math.max(8, canvasHeight - height - 8)),
+    width,
+    height,
+  };
+}
+
+function selectionLabel(box: CanvasRect, kind: "point" | "box") {
+  const prefix = kind === "point" ? "点击选区" : "框选区域";
+  return `${prefix} ${Math.round(box.width)}×${Math.round(box.height)}`;
+}
+
+function buildLocalGeneration(
+  selection: PrototypeCanvasSelection,
+  action: PrototypeLocalAction,
+  instruction: string,
+): PrototypeLocalGeneration {
+  const actionLabel = localActionLabel(action);
+  const cleanInstruction = instruction.trim();
+  return {
+    title: `${actionLabel}草稿已生成`,
+    changes: localDraftChanges(selection, action, cleanInstruction),
+  };
+}
+
+function localActionLabel(action: PrototypeLocalAction) {
+  return LOCAL_ACTIONS.find((item) => item.id === action)?.label ?? "局部生成";
+}
+
+function localDraftChanges(
+  selection: PrototypeCanvasSelection,
+  action: PrototypeLocalAction,
+  instruction: string,
+) {
+  const scope = `作用范围：${selection.label}`;
+  const guard = "应用方式：生成局部补丁候选，不替换完整 HTML。";
+  if (action === "copy_generate") {
+    return [
+      scope,
+      `主文案：围绕「${instruction}」生成更明确的标题与一句核心说明。`,
+      "按钮文案：补充 1 个主行动和 1 个次级行动，保持当前布局不变。",
+      guard,
+    ];
+  }
+  if (action === "visual_refine") {
+    return [
+      scope,
+      `视觉层级：针对「${instruction}」强化选区内的标题、说明与按钮优先级。`,
+      "样式策略：只调整局部间距、对比度、边框与阴影，不触碰页面外层结构。",
+      guard,
+    ];
+  }
+  if (action === "layout_adjust") {
+    return [
+      scope,
+      `布局草案：根据「${instruction}」重排选区内部信息块。`,
+      "约束：保留选区外的导航、页面容器和其它模块位置。",
+      guard,
+    ];
+  }
+  return [
+    scope,
+    `交互补齐：为「${instruction}」补充局部状态、反馈和异常提示。`,
+    "状态范围：只影响选区内控件的 hover、loading、empty 或 error 表达。",
+    guard,
+  ];
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function EmptyPreview({ title, description }: { title: string; description: string }) {
