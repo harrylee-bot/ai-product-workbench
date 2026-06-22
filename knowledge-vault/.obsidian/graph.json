@@ -48,6 +48,13 @@
         "a": 1,
         "rgb": 9737364
       }
+    },
+    {
+      "query": "tag:#规格文档",
+      "color": {
+        "a": 1,
+        "rgb": 16753920
+      }
     }
   ],
   "collapse-display": false,
