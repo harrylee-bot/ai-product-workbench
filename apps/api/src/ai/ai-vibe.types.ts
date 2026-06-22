@@ -7,6 +7,7 @@ import type {
   ModelTaskType,
   UserIntent,
 } from "@prisma/client";
+import type { AgentFallbackMetadata } from "./agent-fallback-policy";
 
 export type SelectedRegion = {
   type: "document" | "prototype";
@@ -784,6 +785,7 @@ export type VibeStreamEventType =
   | "rollback_completed"
   | "rollback_failed"
   | "knowledge_candidate_created"
+  | "fallback_used"
   | "run_completed"
   | "run_failed";
 
@@ -889,6 +891,7 @@ export type AgentInvocation<TInput, TOutput> = {
 export type AgentOutput<T> = {
   data: T;
   modelCallLogId?: string;
+  fallback?: AgentFallbackMetadata;
 };
 
 export type ModelBackedAgent = {

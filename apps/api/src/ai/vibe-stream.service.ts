@@ -178,6 +178,8 @@ function classifyStreamEvent(type: VibeStreamEventType): {
       return { category: "rollback", phase: "failed" };
     case "knowledge_candidate_created":
       return { category: "knowledge", phase: "created" };
+    case "fallback_used":
+      return { category: "agent", phase: "progress" };
     case "run_completed":
       return { category: "run", phase: "completed" };
     case "run_failed":
@@ -205,6 +207,7 @@ function toLegacyEventType(
   }
   if (type === "qa_completed") return "qa_completed";
   if (type === "knowledge_candidate_created") return "state_updated";
+  if (type === "fallback_used") return "agent_started";
   if (type === "step_started" || type === "message_delta") return "agent_started";
   return "agent_completed";
 }

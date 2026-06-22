@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import {
   Activity,
+  AlertTriangle,
   Bot,
   Braces,
   ChevronDown,
@@ -463,6 +464,7 @@ function AgentStepBlock({
             title="执行记录"
             value={step.errorMessage ?? `状态：${statusLabel(step.status)}；模型：${step.modelName ?? "未记录"}；Token：${formatTokenUsage(step.tokenUsage)}`}
           />
+          <FallbackNotice fallback={extractFallbackFromSummary(step.outputSummary)} />
           {step.tokenUsage !== undefined ? (
             <div className="bg-white p-4 lg:col-span-3">
               <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-500">
@@ -481,6 +483,7 @@ function AgentStepBlock({
 function EventRow({ event }: { event: NormalizedEvent }) {
   const [open, setOpen] = useState(false);
   const hasData = event.data !== undefined || event.raw !== undefined;
+  const fallback = event.type === "fallback_used" ? asRecord(event.data) : undefined;
 
   return (
     <div className="px-5 py-4">
@@ -492,6 +495,7 @@ function EventRow({ event }: { event: NormalizedEvent }) {
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-semibold text-gray-950">{eventLabel(event.type)}</span>
             {event.step ? <span className="text-xs text-gray-500">{agentLabel(event.step)}</span> : null}
+            {fallback ? <FallbackLevelPill level={toText(fallback.level, "degraded_preview")} /> : null}
             <span className="text-xs text-gray-400">{formatDate(event.createdAt)}</span>
           </div>
           {event.content ? <p className="mt-1 text-sm leading-6 text-gray-700">{event.content}</p> : null}
@@ -513,6 +517,38 @@ function EventRow({ event }: { event: NormalizedEvent }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function FallbackNotice({ fallback }: { fallback?: Record<string, unknown> }) {
+  if (!fallback) return null;
+  return (
+    <div className="bg-amber-50 p-4 lg:col-span-3">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-900">
+            Fallback 已启用
+            <FallbackLevelPill level={toText(fallback.level, "degraded_preview")} />
+          </div>
+          <p className="mt-1 text-sm leading-6 text-amber-900">
+            {toText(fallback.userMessage, "该步骤使用了降级结果。")}
+          </p>
+          <p className="mt-1 text-xs text-amber-800">
+            {toText(fallback.reason, "")}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FallbackLevelPill({ level }: { level: string }) {
+  const meta = fallbackLevelMeta(level);
+  return (
+    <span className={clsx("rounded-full border px-2 py-0.5 text-xs font-semibold", meta.className)}>
+      {meta.label}
+    </span>
   );
 }
 
@@ -695,6 +731,16 @@ function toOptionalText(value: unknown) {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function extractFallbackFromSummary(value?: string) {
+  if (!value?.includes('"fallback"')) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return asRecord(parsed?.fallback);
+  } catch {
+    return undefined;
+  }
+}
+
 function statusMeta(status: string): {
   label: string;
   shortLabel: string;
@@ -744,11 +790,46 @@ function eventLabel(type: string) {
     agent_step: "Agent 步骤",
     agent_started: "Agent 开始",
     agent_completed: "Agent 完成",
+    step_started: "步骤开始",
+    step_completed: "步骤完成",
+    step_failed: "步骤失败",
+    message_delta: "消息片段",
+    state_updated: "产品状态更新",
+    state_version_created: "状态版本创建",
+    prd_updated: "PRD 更新",
+    prototype_updated: "原型更新",
+    patch_started: "Patch 开始",
+    patch_plan_created: "PatchPlan 创建",
+    patch_applying: "Patch 应用中",
+    patch_completed: "Patch 完成",
+    patch_failed: "Patch 失败",
+    qa_completed: "QA 完成",
+    fallback_used: "Fallback 启用",
     run_started: "运行开始",
     run_completed: "运行完成",
+    run_failed: "运行失败",
     error: "错误",
   };
   return map[type] ?? type;
+}
+
+function fallbackLevelMeta(level: string) {
+  if (level === "acceptable_result") {
+    return {
+      label: "可接受结果",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    };
+  }
+  if (level === "model_unavailable") {
+    return {
+      label: "模型不可用",
+      className: "border-red-200 bg-red-50 text-red-700",
+    };
+  }
+  return {
+    label: "降级预览",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+  };
 }
 
 function formatDate(value?: string) {

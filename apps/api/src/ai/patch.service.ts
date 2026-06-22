@@ -16,8 +16,10 @@ import { KnowledgeRetrievalService } from "../knowledge/knowledge-retrieval.serv
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
+import { fallbackStepOutput } from "./agent-fallback-policy";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
+  AgentOutput,
   AttachmentSummary,
   KnowledgeContext,
   PatchPlan,
@@ -1217,7 +1219,7 @@ export class PatchService {
     input: { runId: string; projectId: string; userInstruction: string },
     agentName: AgentName,
     step: NonNullable<Parameters<VibeStreamService["emit"]>[0]["step"]>,
-    handler: () => Promise<{ data: T; modelCallLogId?: string }>,
+    handler: () => Promise<AgentOutput<T>>,
   ) {
     const stepLog = await this.runLog.createStep({
       runId: input.runId,
@@ -1235,9 +1237,19 @@ export class PatchService {
     });
     try {
       const result = await handler();
-      await this.runLog.completeStep(stepLog.id, result.data, {
+      await this.runLog.completeStep(stepLog.id, fallbackStepOutput(result.data, result.fallback), {
         modelCallLogId: result.modelCallLogId,
       });
+      if (result.fallback) {
+        await this.stream.emit({
+          runId: input.runId,
+          projectId: input.projectId,
+          type: "fallback_used",
+          step,
+          content: result.fallback.userMessage,
+          data: result.fallback,
+        });
+      }
       await this.stream.emit({
         runId: input.runId,
         projectId: input.projectId,

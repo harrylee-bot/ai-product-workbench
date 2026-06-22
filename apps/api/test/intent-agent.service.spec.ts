@@ -61,5 +61,13 @@ describe("IntentAgentService", () => {
 
     expect(result.data.intent).toBe(UserIntent.generate_prototype);
     expect(result.data.reason).toBe("用户希望生成或刷新原型。");
+    expect(result.fallback).toEqual(
+      expect.objectContaining({
+        level: "degraded_preview",
+        action: "review_required",
+        agentName: AgentName.intent_agent,
+        taskType: ModelTaskType.intent_detection,
+      }),
+    );
   });
 });

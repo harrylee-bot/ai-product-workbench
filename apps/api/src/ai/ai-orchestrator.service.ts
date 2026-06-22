@@ -10,10 +10,12 @@ import {
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
+import { fallbackStepOutput } from "./agent-fallback-policy";
 import { toInputJson } from "./ai-vibe.helpers";
 import { isCasualGeneralInput } from "./intent-classifier.helpers";
 import type {
   AgentRunContext,
+  AgentOutput,
   AttachmentSummary,
   IntentResult,
   KnowledgeCandidate,
@@ -459,7 +461,7 @@ export class AiOrchestratorService {
     context: AgentRunContext,
     agentName: AgentName,
     step: NonNullable<Parameters<VibeStreamService["emit"]>[0]["step"]>,
-    handler: () => Promise<{ data: T; modelCallLogId?: string }>,
+    handler: () => Promise<AgentOutput<T>>,
   ) {
     const stepLog = await this.runLog.createStep({
       runId: context.runId,
@@ -478,9 +480,19 @@ export class AiOrchestratorService {
 
     try {
       const result = await handler();
-      await this.runLog.completeStep(stepLog.id, result.data, {
+      await this.runLog.completeStep(stepLog.id, fallbackStepOutput(result.data, result.fallback), {
         modelCallLogId: result.modelCallLogId,
       });
+      if (result.fallback) {
+        await this.stream.emit({
+          runId: context.runId,
+          projectId: context.projectId,
+          type: "fallback_used",
+          step,
+          content: result.fallback.userMessage,
+          data: result.fallback,
+        });
+      }
       await this.stream.emit({
         runId: context.runId,
         projectId: context.projectId,

@@ -1,7 +1,7 @@
 import { AgentName, ModelTaskType } from "@prisma/client";
-import { ModelGatewayError } from "../../model-gateway/model-gateway.error";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import type { ModelMessage } from "../../model-gateway/model-gateway.types";
+import { decideAgentFallback } from "../agent-fallback-policy";
 import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
 
 export abstract class BaseAgentService<TInput, TOutput> {
@@ -28,8 +28,12 @@ export abstract class BaseAgentService<TInput, TOutput> {
         modelCallLogId: result.modelCallLogId,
       };
     } catch (error) {
-      if (this.canFallback(error)) {
-        return { data: this.fallback(invocation.input) };
+      const fallbackDecision = this.fallbackDecision(error);
+      if (fallbackDecision.allowed && fallbackDecision.metadata) {
+        return {
+          data: this.fallback(invocation.input),
+          fallback: fallbackDecision.metadata,
+        };
       }
 
       throw error;
@@ -48,31 +52,12 @@ export abstract class BaseAgentService<TInput, TOutput> {
     return {};
   }
 
-  private canFallback(error: unknown) {
-    const fallbackMode = process.env.AI_AGENT_FALLBACK_MODE?.trim().toLowerCase();
-    if (fallbackMode === "never") return false;
-
-    if (!(error instanceof ModelGatewayError)) return false;
-
-    if (fallbackMode === "always") {
-      return [
-        "MODEL_TASK_PROFILE_NOT_FOUND",
-        "MODEL_PROVIDER_NOT_FOUND",
-        "MODEL_PROVIDER_DISABLED",
-        "MODEL_CONFIG_NOT_FOUND",
-        "MODEL_CONFIG_DISABLED",
-        "MODEL_CALL_FAILED",
-        "MODEL_CALL_TIMEOUT",
-        "MODEL_API_KEY_INVALID",
-        "MODEL_PROVIDER_UNAUTHORIZED",
-        "MODEL_JSON_PARSE_FAILED",
-      ].includes(error.code);
-    }
-
-    return [
-      "MODEL_TASK_PROFILE_NOT_FOUND",
-      "MODEL_PROVIDER_NOT_FOUND",
-      "MODEL_CONFIG_NOT_FOUND",
-    ].includes(error.code);
+  private fallbackDecision(error: unknown) {
+    return decideAgentFallback({
+      agentName: this.agentName,
+      taskType: this.taskType,
+      error,
+      fallbackMode: process.env.AI_AGENT_FALLBACK_MODE,
+    });
   }
 }

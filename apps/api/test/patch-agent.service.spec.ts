@@ -66,6 +66,15 @@ describe("PatchAgentService", () => {
       }),
     );
     expect(result.data.operations[0].path).not.toMatch(/prd|html|prototypeSpec/i);
+    expect(result.fallback).toEqual(
+      expect.objectContaining({
+        level: "degraded_preview",
+        action: "review_required",
+        allowsConfirmation: false,
+        agentName: AgentName.patch_agent,
+        taskType: ModelTaskType.patch_planning,
+      }),
+    );
   });
 
   it("marks a high-risk confirmation when the request conflicts with strong_rule knowledge", async () => {
