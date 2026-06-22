@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  Activity,
   CircleDollarSign,
   Clock3,
   Code2,
@@ -90,7 +89,7 @@ export function StatePreviewView({
           </div>
           <div className="mt-2 space-y-1.5">
             {pendingItems.map((item) => (
-              <div key={item} className="rounded-lg bg-white/80 px-2.5 py-2 text-xs leading-5 text-amber-900">
+              <div key={item} className="break-words rounded-lg bg-white/80 px-2.5 py-2 text-xs leading-5 text-amber-900" title={item}>
                 {item}
               </div>
             ))}
@@ -114,8 +113,8 @@ export function StatePreviewView({
                     {index < timeline.length - 1 ? <span className="h-7 w-px bg-gray-200" /> : null}
                   </div>
                   <div className="min-w-0 pb-2">
-                    <div className="text-xs font-semibold text-gray-950">{item.title}</div>
-                    <div className="mt-0.5 text-[11px] leading-4 text-gray-500">{item.meta}</div>
+                    <div className="break-words text-xs font-semibold text-gray-950" title={item.title}>{item.title}</div>
+                    <div className="mt-0.5 break-words text-[11px] leading-4 text-gray-500" title={item.meta}>{item.meta}</div>
                   </div>
                 </div>
               );
@@ -134,7 +133,7 @@ function StateMetric({ icon: Icon, label, value }: { icon: LucideIcon; label: st
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-gray-100 text-gray-700">
           <Icon className="h-4 w-4" />
         </span>
-        <div className="text-lg font-semibold text-gray-950">{value}</div>
+        <div className="min-w-0 break-words text-right text-lg font-semibold text-gray-950" title={String(value)}>{value}</div>
       </div>
       <div className="mt-2 text-xs text-gray-500">{label}</div>
     </div>
@@ -145,7 +144,7 @@ function InferenceRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[12px] border border-gray-200 bg-gray-50 px-3 py-2">
       <div className="text-[11px] font-semibold text-gray-500">{label}</div>
-      <div className="mt-1 text-xs leading-5 text-gray-800">{toChineseText(value)}</div>
+      <div className="mt-1 break-words text-xs leading-5 text-gray-800" title={toChineseText(value)}>{toChineseText(value)}</div>
     </div>
   );
 }

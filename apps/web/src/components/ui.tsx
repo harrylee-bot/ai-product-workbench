@@ -37,7 +37,7 @@ export function Button({
   return (
     <button
       className={clsx(
-        "inline-flex shrink-0 items-center justify-center gap-2 rounded-[var(--radius-control)] text-sm font-semibold transition",
+        "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-control)] text-sm font-semibold transition",
         uiClass.focusRing,
         "disabled:cursor-not-allowed disabled:opacity-60",
         size === "sm" && "h-9 px-3",
@@ -160,7 +160,7 @@ export function Badge({
   return (
     <span
       className={clsx(
-        "inline-flex h-6 shrink-0 items-center rounded-full border px-2 text-xs font-semibold",
+        "inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-full border px-2 text-xs font-semibold",
         badgeToneClass[tone],
         className,
       )}
@@ -226,7 +226,7 @@ export function SegmentedControl<T extends string>({
             aria-selected={selected}
             onClick={() => onChange(option.value)}
             className={clsx(
-              "inline-flex h-8 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-semibold transition",
+              "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-sm font-semibold transition",
               uiClass.focusRing,
               selected ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900",
             )}

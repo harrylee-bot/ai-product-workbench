@@ -1,8 +1,8 @@
 "use client";
 
 import { Loader2, MessageCircle, MoreVertical, PanelLeftClose, PanelLeftOpen, Plus, Search, Sparkles, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { Button, EmptyState, IconButton, LoadingState } from "@/components/ui";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { Button, EmptyState, IconButton } from "@/components/ui";
 import { UserMenu } from "@/components/user-menu";
 
 export type Phase1Project = {
@@ -59,6 +59,31 @@ export function ProjectList({
 }) {
   const currentProject = projects.find((project) => project.id === selectedProjectId);
   const [openProjectMenuId, setOpenProjectMenuId] = useState<string | null>(null);
+  const projectMenuScopeRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!openProjectMenuId) return;
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (projectMenuScopeRef.current?.contains(target)) return;
+      setOpenProjectMenuId(null);
+    };
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenProjectMenuId(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openProjectMenuId]);
 
   if (collapsed) {
     return (
@@ -71,6 +96,7 @@ export function ProjectList({
           onClick={onToggleCollapsed}
           className="mt-5 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
           aria-label="展开最近对话"
+          title="展开最近对话"
         >
           <PanelLeftOpen className="h-4 w-4" />
         </button>
@@ -81,6 +107,7 @@ export function ProjectList({
             disabled={creatingConversation}
             className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] bg-gray-100 text-gray-900 transition hover:bg-gray-200 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="新建对话"
+            title={creatingConversation ? "正在创建对话" : "新建对话"}
           >
             <Plus className="h-4 w-4" />
           </button>
@@ -89,6 +116,7 @@ export function ProjectList({
             onClick={onToggleCollapsed}
             className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
             aria-label="查看最近对话"
+            title="查看最近对话"
           >
             <MessageCircle className="h-4 w-4" />
           </button>
@@ -97,6 +125,7 @@ export function ProjectList({
             onClick={onToggleCollapsed}
             className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
             aria-label="搜索最近对话"
+            title="搜索最近对话"
           >
             <Search className="h-4 w-4" />
           </button>
@@ -131,6 +160,7 @@ export function ProjectList({
           disabled={creatingConversation}
           size="sm"
           className="mt-3 w-full"
+          title={creatingConversation ? "正在创建对话" : "新建对话"}
         >
           {creatingConversation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           {creatingConversation ? "创建中..." : "新对话"}
@@ -141,7 +171,7 @@ export function ProjectList({
           {currentProject ? projectTitleLabel(currentProject.title) : "尚未选择项目"}
         </div>
         {loading ? (
-          <LoadingState label="加载对话中..." className="mx-1" />
+          <SidebarLoadingSkeleton />
         ) : conversations?.length ? (
           conversations.map((conversation) => (
             <ConversationRow
@@ -172,6 +202,7 @@ export function ProjectList({
                 selected={selectedProjectId === project.id}
                 deleting={deletingProjectId === project.id}
                 menuOpen={openProjectMenuId === project.id}
+                menuScopeRef={openProjectMenuId === project.id ? projectMenuScopeRef : undefined}
                 onSelect={(item) => {
                   setOpenProjectMenuId(null);
                   onSelectProject(item);
@@ -192,6 +223,19 @@ export function ProjectList({
         <UserMenu placement="top" />
       </div>
     </aside>
+  );
+}
+
+function SidebarLoadingSkeleton() {
+  return (
+    <div className="mx-1 space-y-2" aria-label="加载对话中">
+      {[0, 1, 2].map((item) => (
+        <div key={item} className="rounded-[var(--radius-control)] border border-gray-200 bg-white px-3 py-2 shadow-[var(--shadow-control)]">
+          <div className="h-3 w-8/12 animate-pulse rounded-full bg-gray-200" />
+          <div className="mt-2 h-2.5 w-5/12 animate-pulse rounded-full bg-gray-100" />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -220,6 +264,7 @@ function ConversationRow({
       <button
         type="button"
         onClick={() => onSelect(conversation)}
+        title={conversationTitleLabel(conversation.title)}
         className="min-w-0 flex-1 rounded-[var(--radius-control)] px-3 py-2 text-left focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
       >
         <div className="truncate text-sm font-medium">{conversationTitleLabel(conversation.title)}</div>
@@ -249,17 +294,20 @@ function ProjectRow({
   onSelect,
   onToggleMenu,
   onDelete,
+  menuScopeRef,
 }: {
   project: Phase1Project;
   selected: boolean;
   deleting?: boolean;
   menuOpen?: boolean;
+  menuScopeRef?: RefObject<HTMLDivElement | null>;
   onSelect: (project: Phase1Project) => void;
   onToggleMenu: (projectId: string) => void;
   onDelete: (project: Phase1Project) => void;
 }) {
   return (
     <div
+      ref={menuScopeRef}
       className={[
         "group relative mb-1 flex items-center gap-1 rounded-[var(--radius-control)] border transition",
         selected
@@ -270,6 +318,7 @@ function ProjectRow({
       <button
         type="button"
         onClick={() => onSelect(project)}
+        title={projectTitleLabel(project.title)}
         className="min-w-0 flex-1 rounded-[var(--radius-control)] px-3 py-2 text-left focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
       >
         <div className="truncate text-sm font-medium">{projectTitleLabel(project.title)}</div>
@@ -287,19 +336,23 @@ function ProjectRow({
           menuOpen || selected ? "bg-gray-100 opacity-100" : "opacity-0 group-hover:opacity-100",
         ].join(" ")}
         aria-label="打开项目操作"
+        aria-expanded={menuOpen}
+        aria-haspopup="menu"
         title="项目操作"
       >
         {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreVertical className="h-4 w-4" />}
       </button>
       {menuOpen ? (
-        <div className="absolute right-2 top-9 z-20 w-36 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-[var(--shadow-float)]">
+        <div role="menu" aria-label="项目操作" className="absolute right-2 top-9 z-20 w-36 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-[var(--shadow-float)]">
           <button
             type="button"
+            role="menuitem"
             onClick={(event) => {
               event.stopPropagation();
               onDelete(project);
             }}
             disabled={deleting}
+            title={deleting ? "正在删除项目" : "删除项目"}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 transition hover:bg-red-50 focus:outline-none focus-visible:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />

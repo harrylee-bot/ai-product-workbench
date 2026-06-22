@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -19,7 +19,18 @@ import type {
 export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionView | null }) {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackItems, setFeedbackItems] = useState<Array<{ id: string; text: string; status: string }>>([]);
+  const [suggesting, setSuggesting] = useState(false);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+  const suggestionTimerRef = useRef<number | null>(null);
   const workflow = buildFeedbackWorkflow(decision, feedbackItems.length);
+
+  useEffect(() => {
+    return () => {
+      if (suggestionTimerRef.current !== null) {
+        window.clearTimeout(suggestionTimerRef.current);
+      }
+    };
+  }, []);
 
   const addFeedback = () => {
     const text = feedbackText.trim();
@@ -29,6 +40,34 @@ export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionVi
       ...items,
     ]);
     setFeedbackText("");
+    setWorkflowError(null);
+  };
+
+  const generatePatchSuggestion = () => {
+    if (!decision) {
+      setWorkflowError("需要先完成一次生成结果，才能基于当前补丁上下文生成建议。");
+      return;
+    }
+
+    setSuggesting(true);
+    setWorkflowError(null);
+    if (suggestionTimerRef.current !== null) {
+      window.clearTimeout(suggestionTimerRef.current);
+    }
+
+    suggestionTimerRef.current = window.setTimeout(() => {
+      const operationCount = decision.patchDraft.operations.length;
+      setFeedbackItems((items) => [
+        {
+          id: `feedback-suggestion-${Date.now()}`,
+          text: `建议先按当前 ${operationCount} 个补丁操作做小范围回归：确认选区影响、QA 风险和用户反馈是否一致，再决定是否应用到完整原型。`,
+          status: "补丁建议",
+        },
+        ...items,
+      ]);
+      setSuggesting(false);
+      suggestionTimerRef.current = null;
+    }, 560);
   };
 
   return (
@@ -55,7 +94,7 @@ export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionVi
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold text-gray-950">{step.title}</div>
-                  <div className="mt-0.5 truncate text-[11px] text-gray-500">{step.detail}</div>
+                  <div className="mt-0.5 line-clamp-2 break-words text-[11px] leading-4 text-gray-500" title={step.detail}>{step.detail}</div>
                 </div>
                 {index < workflow.length - 1 ? <ArrowRight className="h-3.5 w-3.5 text-gray-300" /> : null}
               </div>
@@ -68,20 +107,45 @@ export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionVi
           <textarea
             value={feedbackText}
             onChange={(event) => setFeedbackText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && feedbackText) {
+                event.currentTarget.blur();
+              }
+            }}
+            aria-label="反馈内容"
             rows={4}
             placeholder="输入用户反馈、验收意见或需要回归的问题"
             className="mt-2 block min-h-[104px] w-full resize-none rounded-[12px] border border-blue-100 bg-white px-3 py-2 text-sm leading-6 text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-gray-950 focus:ring-3 focus:ring-gray-950/10"
           />
           <div className="mt-2 flex items-center justify-end gap-2">
-            <Button type="button" size="sm" variant="secondary" disabled={!decision}>
-              <Sparkles className="h-4 w-4" />
-              生成补丁建议
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={!decision || suggesting}
+              onClick={generatePatchSuggestion}
+              title={!decision ? "需要先完成一次生成结果" : suggesting ? "正在生成补丁建议" : "生成补丁建议"}
+            >
+              <Sparkles className={suggesting ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+              {suggesting ? "生成中" : "生成补丁建议"}
             </Button>
-            <Button type="button" size="sm" disabled={!feedbackText.trim()} onClick={addFeedback}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!feedbackText.trim()}
+              onClick={addFeedback}
+              title={feedbackText.trim() ? "记录反馈" : "请输入反馈内容"}
+            >
               <MessageSquare className="h-4 w-4" />
               记录反馈
             </Button>
           </div>
+          {suggesting ? <FeedbackSuggestionSkeleton /> : null}
+          {workflowError ? (
+            <div role="alert" className="mt-2 rounded-[12px] border border-red-100 bg-white px-3 py-2 text-xs leading-5 text-red-700">
+              {workflowError}
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-2">
@@ -92,7 +156,7 @@ export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionVi
                   <div className="text-xs font-semibold text-gray-950">{item.status}</div>
                   <Badge tone="accent" className="bg-blue-50">待归因</Badge>
                 </div>
-                <div className="mt-2 text-sm leading-6 text-gray-700">{item.text}</div>
+                <div className="mt-2 break-words text-sm leading-6 text-gray-700">{item.text}</div>
               </div>
             ))
           ) : (
@@ -101,6 +165,18 @@ export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionVi
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function FeedbackSuggestionSkeleton() {
+  return (
+    <div className="mt-2 rounded-[12px] border border-blue-100 bg-white px-3 py-3" aria-live="polite" aria-label="补丁建议生成中">
+      <div className="h-3 w-28 animate-pulse rounded-full bg-blue-100" />
+      <div className="mt-3 space-y-2">
+        <div className="h-3 animate-pulse rounded-full bg-gray-100" />
+        <div className="h-3 w-9/12 animate-pulse rounded-full bg-gray-100" />
       </div>
     </div>
   );

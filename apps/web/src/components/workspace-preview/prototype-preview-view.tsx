@@ -6,7 +6,9 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent,
+  type RefObject,
 } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -43,6 +45,9 @@ const LOCAL_ACTIONS: Array<{ id: PrototypeLocalAction; label: string; icon: Luci
 
 export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1PrototypePreview | null }) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const canvasOverlayRef = useRef<HTMLDivElement | null>(null);
+  const localDialogRef = useRef<HTMLDivElement | null>(null);
+  const localInstructionRef = useRef<HTMLTextAreaElement | null>(null);
   const componentNodes = useMemo(
     () => derivePrototypeComponents(prototypePreview?.html ?? ""),
     [prototypePreview?.html],
@@ -57,6 +62,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
   const [instruction, setInstruction] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generation, setGeneration] = useState<PrototypeLocalGeneration | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   useEffect(() => {
     setCanvasMode("select");
@@ -69,6 +75,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setInstruction("");
     setGenerating(false);
     setGeneration(null);
+    setGenerationError(null);
   }, [prototypePreview?.id, prototypePreview?.html]);
 
   useEffect(() => {
@@ -77,6 +84,42 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
       current && componentNodes.some((node) => node.id === current) ? current : componentNodes[0].id
     ));
   }, [componentNodes]);
+
+  useEffect(() => {
+    if (dialogOpen) {
+      window.requestAnimationFrame(() => localInstructionRef.current?.focus());
+    }
+  }, [dialogOpen, selection?.id]);
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+
+    const closeDialog = () => {
+      setDialogOpen(false);
+      window.requestAnimationFrame(() => canvasOverlayRef.current?.focus());
+    };
+
+    const closeOnPointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (localDialogRef.current?.contains(target)) return;
+      closeDialog();
+    };
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDialog();
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [dialogOpen]);
 
   if (!prototypePreview?.html) {
     return (
@@ -93,12 +136,14 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
 
   const startSelection = (event: PointerEvent<HTMLDivElement>) => {
     if (canvasMode !== "select" || !canvasRef.current) return;
+    event.currentTarget.focus({ preventScroll: true });
     const point = getCanvasPoint(event, canvasRef.current);
     event.currentTarget.setPointerCapture(event.pointerId);
     setDragStart(point);
     setDraftBox({ ...point, width: 0, height: 0 });
     setSelection(null);
     setGeneration(null);
+    setGenerationError(null);
   };
 
   const updateSelection = (event: PointerEvent<HTMLDivElement>) => {
@@ -128,6 +173,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setDialogOpen(true);
     setInstruction("");
     setLocalAction("copy_generate");
+    setGenerationError(null);
   };
 
   const cancelSelectionDrag = () => {
@@ -140,6 +186,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setDialogOpen(false);
     setInstruction("");
     setGeneration(null);
+    setGenerationError(null);
   };
 
   const selectComponent = (node: PrototypeComponentNode, index: number) => {
@@ -147,6 +194,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setCanvasMode("select");
     setDialogOpen(false);
     setGeneration(null);
+    setGenerationError(null);
 
     const bounds = canvasRef.current?.getBoundingClientRect();
     const width = Math.min(280, Math.max(160, (bounds?.width ?? 640) * 0.3));
@@ -169,15 +217,62 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     });
   };
 
+  const createKeyboardSelection = () => {
+    if (!canvasRef.current) return;
+    const bounds = canvasRef.current.getBoundingClientRect();
+    const nextRect = pointSelectionRect(
+      { x: bounds.width / 2, y: Math.min(bounds.height / 2, 360) },
+      bounds.width,
+      bounds.height,
+    );
+
+    setSelection({
+      ...nextRect,
+      id: `prototype-keyboard-selection-${Date.now()}`,
+      kind: "point",
+      label: selectionLabel(nextRect, "point"),
+      createdAt: Date.now(),
+    });
+    setDraftBox(null);
+    setDragStart(null);
+    setDialogOpen(true);
+    setInstruction("");
+    setLocalAction("copy_generate");
+    setGeneration(null);
+    setGenerationError(null);
+  };
+
+  const handleCanvasKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      if (selection || draftBox || dialogOpen) {
+        event.preventDefault();
+        cancelSelectionDrag();
+        clearSelection();
+      }
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      createKeyboardSelection();
+    }
+  };
+
   const generateLocalDraft = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selection || !instruction.trim()) return;
     setGenerating(true);
     setGeneration(null);
+    setGenerationError(null);
 
-    await new Promise((resolve) => window.setTimeout(resolve, 480));
-    setGeneration(buildLocalGeneration(selection, localAction, instruction));
-    setGenerating(false);
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 480));
+      setGeneration(buildLocalGeneration(selection, localAction, instruction));
+    } catch {
+      setGenerationError("局部草稿生成失败，请保留选区后重试。");
+    } finally {
+      setGenerating(false);
+    }
   };
 
   return (
@@ -221,6 +316,8 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
                   key={node.id}
                   type="button"
                   onClick={() => selectComponent(node, index)}
+                  aria-pressed={active}
+                  title={`${node.name} · ${node.type} · ${node.detail}`}
                   className={[
                     "w-full rounded-[10px] border px-2 py-2 text-left transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
                     active
@@ -272,12 +369,17 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
 
             {canvasMode === "select" ? (
               <div
+                ref={canvasOverlayRef}
+                role="group"
+                tabIndex={0}
+                aria-label="原型画布选区层，按 Enter 创建中心选区，按 Escape 清除选区"
                 className="absolute inset-0 z-10 cursor-crosshair bg-blue-500/0"
                 onPointerDown={startSelection}
                 onPointerMove={updateSelection}
                 onPointerUp={finishSelection}
                 onPointerCancel={cancelSelectionDrag}
                 onPointerLeave={cancelSelectionDrag}
+                onKeyDown={handleCanvasKeyDown}
               >
                 {activeBox ? <PrototypeSelectionBox box={activeBox} selected={Boolean(selection && !draftBox)} /> : null}
 
@@ -296,8 +398,10 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
                       variant="secondary"
                       onClick={() => {
                         setLocalAction("copy_generate");
+                        setGenerationError(null);
                         setDialogOpen(true);
                       }}
+                      title="生成选区文案"
                       className="h-8 rounded-full px-3 text-xs"
                     >
                       文案
@@ -307,8 +411,10 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
                       size="sm"
                       onClick={() => {
                         setLocalAction("visual_refine");
+                        setGenerationError(null);
                         setDialogOpen(true);
                       }}
+                      title="打开局部生成编辑器"
                       className="h-8 rounded-full px-3 text-xs"
                     >
                       <Sparkles className="h-3.5 w-3.5" />
@@ -332,13 +438,18 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
           instruction={instruction}
           generating={generating}
           generation={generation}
+          generationError={generationError}
+          dialogRef={localDialogRef}
+          instructionRef={localInstructionRef}
           onActionChange={(value) => {
             setLocalAction(value);
             setGeneration(null);
+            setGenerationError(null);
           }}
           onInstructionChange={(value) => {
             setInstruction(value);
             setGeneration(null);
+            setGenerationError(null);
           }}
           onClose={() => setDialogOpen(false)}
           onSubmit={generateLocalDraft}
@@ -378,6 +489,9 @@ function PrototypeLocalEditDialog({
   instruction,
   generating,
   generation,
+  generationError,
+  dialogRef,
+  instructionRef,
   onActionChange,
   onInstructionChange,
   onClose,
@@ -388,6 +502,9 @@ function PrototypeLocalEditDialog({
   instruction: string;
   generating: boolean;
   generation: PrototypeLocalGeneration | null;
+  generationError: string | null;
+  dialogRef: RefObject<HTMLDivElement | null>;
+  instructionRef: RefObject<HTMLTextAreaElement | null>;
   onActionChange: (value: PrototypeLocalAction) => void;
   onInstructionChange: (value: string) => void;
   onClose: () => void;
@@ -395,9 +512,11 @@ function PrototypeLocalEditDialog({
 }) {
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="false"
       aria-label="局部生成"
+      aria-describedby="prototype-local-edit-help"
       className="absolute right-3 top-14 z-30 w-[360px] max-w-[calc(100%-24px)] overflow-hidden rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-float)]"
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -407,7 +526,7 @@ function PrototypeLocalEditDialog({
             <Sparkles className="h-4 w-4 text-blue-600" />
             局部生成
           </div>
-          <div className="mt-1 truncate text-xs text-gray-500">{selection.label}</div>
+          <div className="mt-1 truncate text-xs text-gray-500" title={selection.label}>{selection.label}</div>
         </div>
         <IconButton label="关闭" onClick={onClose} className="h-8 w-8 shrink-0 rounded-full">
           <X className="h-4 w-4" />
@@ -422,7 +541,10 @@ function PrototypeLocalEditDialog({
               <button
                 key={item.id}
                 type="button"
+                role="tab"
+                aria-selected={action === item.id}
                 onClick={() => onActionChange(item.id)}
+                title={item.label}
                 className={[
                   "flex h-9 items-center justify-center gap-1.5 rounded-[10px] border px-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
                   action === item.id
@@ -438,26 +560,36 @@ function PrototypeLocalEditDialog({
         </div>
 
         <textarea
+          ref={instructionRef}
           value={instruction}
           onChange={(event) => onInstructionChange(event.target.value)}
           placeholder="描述这个局部区域要生成或调整的内容"
+          aria-label="局部生成指令"
           rows={4}
           className="block max-h-[140px] min-h-[96px] w-full resize-none rounded-[12px] border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-6 text-gray-900 shadow-none outline-none transition placeholder:text-gray-400 focus:border-gray-950 focus:bg-white focus:ring-3 focus:ring-gray-950/10"
         />
 
-        <div className="rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
+        <div id="prototype-local-edit-help" className="rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
           当前输出会作为局部补丁草稿保留，不覆盖完整原型。
         </div>
 
+        {generating ? <PrototypeLocalSkeleton /> : null}
+
+        {generationError ? (
+          <div role="alert" className="rounded-[12px] border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
+            {generationError}
+          </div>
+        ) : null}
+
         {generation ? (
-          <div className="rounded-[12px] border border-emerald-200 bg-emerald-50 px-3 py-3">
+          <div className="rounded-[12px] border border-emerald-200 bg-emerald-50 px-3 py-3" aria-live="polite">
             <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
               <CheckCircle2 className="h-4 w-4" />
               {generation.title}
             </div>
             <div className="mt-2 space-y-1.5">
               {generation.changes.map((change) => (
-                <div key={change} className="rounded-lg bg-white/80 px-2 py-1.5 text-xs leading-5 text-emerald-900">
+                <div key={change} className="break-words rounded-lg bg-white/80 px-2 py-1.5 text-xs leading-5 text-emerald-900">
                   {change}
                 </div>
               ))}
@@ -466,15 +598,33 @@ function PrototypeLocalEditDialog({
         ) : null}
 
         <div className="flex items-center justify-end gap-2 pt-1">
-          <Button type="button" size="sm" variant="secondary" onClick={onClose}>
+          <Button type="button" size="sm" variant="secondary" onClick={onClose} title="收起局部生成编辑器">
             收起
           </Button>
-          <Button type="submit" size="sm" disabled={!instruction.trim() || generating}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!instruction.trim() || generating}
+            title={generating ? "正在生成局部草稿" : instruction.trim() ? "生成局部草稿" : "请输入局部生成指令"}
+          >
             {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {generating ? "生成中" : "生成局部草稿"}
           </Button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function PrototypeLocalSkeleton() {
+  return (
+    <div className="rounded-[12px] border border-gray-200 bg-white px-3 py-3" aria-live="polite" aria-label="局部草稿生成中">
+      <div className="h-3 w-28 animate-pulse rounded-full bg-gray-200" />
+      <div className="mt-3 space-y-2">
+        <div className="h-3 animate-pulse rounded-full bg-gray-100" />
+        <div className="h-3 w-10/12 animate-pulse rounded-full bg-gray-100" />
+        <div className="h-3 w-7/12 animate-pulse rounded-full bg-gray-100" />
+      </div>
     </div>
   );
 }
@@ -500,7 +650,7 @@ function PrototypePatchPreview({
       {generation ? (
         <div className="space-y-1.5">
           {generation.changes.slice(0, 3).map((change) => (
-            <div key={change} className="rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[11px] leading-4 text-emerald-900">
+            <div key={change} className="break-words rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[11px] leading-4 text-emerald-900">
               {change}
             </div>
           ))}

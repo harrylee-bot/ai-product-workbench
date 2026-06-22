@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   ArrowUp,
   ClipboardList,
@@ -34,6 +34,8 @@ export function ChatComposer({
   sending?: boolean;
   onSend: (content: string) => Promise<void> | void;
 }) {
+  const menuId = useId();
+  const formRef = useRef<HTMLFormElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -41,6 +43,31 @@ export function ChatComposer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [focused, setFocused] = useState(false);
   const canSend = Boolean(draft.trim() || attachments.length) && !disabled && !sending;
+  const sendTitle = sending ? "生成中，请稍候" : canSend ? "发送消息" : "请输入内容或添加附件";
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (formRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen]);
 
   async function submitDraft() {
     if (!canSend) return;
@@ -85,7 +112,7 @@ export function ChatComposer({
   }
 
   return (
-    <form onSubmit={submit} className="shrink-0 border-t border-[var(--color-border)] bg-white px-3 py-2.5 shadow-[0_-10px_26px_rgba(15,23,42,0.04)]">
+    <form ref={formRef} onSubmit={submit} className="shrink-0 border-t border-[var(--color-border)] bg-white px-3 py-2.5 shadow-[0_-10px_26px_rgba(15,23,42,0.04)]">
       <div
         className={[
           "rounded-[14px] border bg-white shadow-[var(--shadow-control)] transition",
@@ -142,13 +169,17 @@ export function ChatComposer({
                 onClick={() => setMenuOpen((value) => !value)}
                 disabled={disabled || sending}
                 aria-label="打开输入工具"
+                aria-controls={menuOpen ? menuId : undefined}
                 aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                title={disabled || sending ? "当前不可添加输入工具" : "打开输入工具"}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-control)] border border-gray-200 bg-gray-50 text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus className={["h-4 w-4 transition", menuOpen ? "rotate-45" : ""].join(" ")} />
               </button>
               {menuOpen ? (
                 <ComposerMenu
+                  id={menuId}
                   onAttach={() => fileInputRef.current?.click()}
                   onInsertRequirement={() => insertTemplate("requirement")}
                   onInsertReference={() => insertTemplate("reference")}
@@ -175,6 +206,7 @@ export function ChatComposer({
             size="icon"
             disabled={!canSend}
             aria-label={sending ? "生成中" : "发送"}
+            title={sendTitle}
             className={[
               "h-9 w-9 rounded-full px-0",
               canSend ? "shadow-[var(--shadow-control)]" : "",
@@ -224,6 +256,7 @@ function SelectionHint({
       <button
         type="button"
         onClick={onSetSelection}
+        title="切换到选区模式"
         className="shrink-0 rounded-full border border-gray-200 bg-white px-2 py-1 font-semibold text-gray-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus-visible:ring-3 focus-visible:ring-blue-500/15"
       >
         选区
@@ -233,11 +266,13 @@ function SelectionHint({
 }
 
 function ComposerMenu({
+  id,
   onAttach,
   onInsertRequirement,
   onInsertReference,
   onInsertSelection,
 }: {
+  id: string;
   onAttach: () => void;
   onInsertRequirement: () => void;
   onInsertReference: () => void;
@@ -271,14 +306,21 @@ function ComposerMenu({
   ];
 
   return (
-    <div className="absolute bottom-11 left-0 z-30 w-72 overflow-hidden rounded-[14px] border border-gray-200 bg-white p-1.5 shadow-[var(--shadow-float)]">
+    <div
+      id={id}
+      role="menu"
+      aria-label="输入工具菜单"
+      className="absolute bottom-11 left-0 z-30 w-72 max-w-[calc(100vw-32px)] overflow-hidden rounded-[14px] border border-gray-200 bg-white p-1.5 shadow-[var(--shadow-float)]"
+    >
       {items.map((item) => {
         const Icon = item.icon;
         return (
           <button
             key={item.label}
             type="button"
+            role="menuitem"
             onClick={item.onClick}
+            title={item.label}
             className="flex w-full items-start gap-2 rounded-[10px] px-2.5 py-2 text-left transition hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50"
           >
             <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-700">
