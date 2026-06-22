@@ -82,6 +82,14 @@ type Phase1WorkspaceState = {
   }) => void;
 };
 
+const WORKSPACE_SIDEBAR_WIDTH = 284;
+const WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 64;
+const WORKSPACE_RESIZER_WIDTH = 8;
+const WORKSPACE_CHAT_MIN_WIDTH = 432;
+const WORKSPACE_PREVIEW_MIN_WIDTH = 520;
+const WORKSPACE_PREVIEW_DEFAULT_WIDTH = 720;
+const WORKSPACE_PREVIEW_MAX_WIDTH = 980;
+
 const usePhase1Workspace = create<Phase1WorkspaceState>((set) => ({
   selectedProjectId: "",
   selectedConversationId: "",
@@ -119,7 +127,7 @@ export function Phase1WorkspaceClient() {
 function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [previewWidth, setPreviewWidth] = useState(1040);
+  const [previewWidth, setPreviewWidth] = useState(WORKSPACE_PREVIEW_DEFAULT_WIDTH);
   const [resizingPreview, setResizingPreview] = useState(false);
   const {
     selectedProjectId,
@@ -345,7 +353,8 @@ function Phase1WorkspaceInner() {
     window.addEventListener("pointercancel", stopResize);
   }
 
-  const sidebarWidth = sidebarCollapsed ? 72 : 300;
+  const sidebarWidth = sidebarCollapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : WORKSPACE_SIDEBAR_WIDTH;
+  const shellMinWidth = sidebarWidth + WORKSPACE_CHAT_MIN_WIDTH + WORKSPACE_RESIZER_WIDTH + WORKSPACE_PREVIEW_MIN_WIDTH;
   const queryError =
     errorMessage(projectsQuery.error)
     ?? errorMessage(detailQuery.error)
@@ -358,7 +367,8 @@ function Phase1WorkspaceInner() {
         resizingPreview ? "cursor-col-resize select-none" : "",
       ].join(" ")}
       style={{
-        gridTemplateColumns: `${sidebarWidth}px minmax(360px, 1fr) 10px ${previewWidth}px`,
+        gridTemplateColumns: `${sidebarWidth}px minmax(${WORKSPACE_CHAT_MIN_WIDTH}px, 1fr) ${WORKSPACE_RESIZER_WIDTH}px minmax(${WORKSPACE_PREVIEW_MIN_WIDTH}px, ${previewWidth}px)`,
+        minWidth: `${shellMinWidth}px`,
       }}
     >
       {resizingPreview ? <div className="fixed inset-0 z-50 cursor-col-resize bg-transparent" /> : null}
@@ -406,10 +416,10 @@ function Phase1WorkspaceInner() {
         aria-label="拖动调整预览宽度"
         aria-orientation="vertical"
         onPointerDown={startPreviewResize}
-        className="group relative flex cursor-col-resize items-center justify-center border-l border-r border-[var(--color-border)] bg-[var(--color-app-bg)] transition hover:bg-[var(--color-accent-soft)]"
+        className="group relative flex min-w-0 cursor-col-resize items-center justify-center border-l border-r border-[var(--color-border)] bg-[var(--color-app-bg)] transition hover:bg-[var(--color-accent-soft)]"
         title="拖动调整预览宽度"
       >
-        <span className="h-14 w-1 rounded-full bg-gray-300 transition group-hover:bg-[var(--color-accent)]" />
+        <span className="h-12 w-1 rounded-full bg-gray-300 transition group-hover:bg-[var(--color-accent)]" />
       </div>
       <PreviewPanel
         prdPreview={prdPreview}
@@ -476,13 +486,13 @@ function asText(value: unknown) {
 
 function clampPreviewWidth(width: number, sidebarCollapsed: boolean) {
   if (typeof window === "undefined") return width;
-  const sidebarWidth = sidebarCollapsed ? 72 : 300;
-  const minChatWidth = 360;
-  const resizerWidth = 10;
-  const minPreviewWidth = 560;
+  const sidebarWidth = sidebarCollapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : WORKSPACE_SIDEBAR_WIDTH;
   const maxPreviewWidth = Math.max(
-    minPreviewWidth,
-    window.innerWidth - sidebarWidth - minChatWidth - resizerWidth,
+    WORKSPACE_PREVIEW_MIN_WIDTH,
+    Math.min(
+      WORKSPACE_PREVIEW_MAX_WIDTH,
+      window.innerWidth - sidebarWidth - WORKSPACE_CHAT_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH,
+    ),
   );
-  return Math.min(Math.max(width, minPreviewWidth), maxPreviewWidth);
+  return Math.min(Math.max(width, WORKSPACE_PREVIEW_MIN_WIDTH), maxPreviewWidth);
 }
