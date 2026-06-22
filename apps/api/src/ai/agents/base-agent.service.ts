@@ -49,18 +49,30 @@ export abstract class BaseAgentService<TInput, TOutput> {
   }
 
   private canFallback(error: unknown) {
+    const fallbackMode = process.env.AI_AGENT_FALLBACK_MODE?.trim().toLowerCase();
+    if (fallbackMode === "never") return false;
+
     if (!(error instanceof ModelGatewayError)) return false;
+
+    if (fallbackMode === "always") {
+      return [
+        "MODEL_TASK_PROFILE_NOT_FOUND",
+        "MODEL_PROVIDER_NOT_FOUND",
+        "MODEL_PROVIDER_DISABLED",
+        "MODEL_CONFIG_NOT_FOUND",
+        "MODEL_CONFIG_DISABLED",
+        "MODEL_CALL_FAILED",
+        "MODEL_CALL_TIMEOUT",
+        "MODEL_API_KEY_INVALID",
+        "MODEL_PROVIDER_UNAUTHORIZED",
+        "MODEL_JSON_PARSE_FAILED",
+      ].includes(error.code);
+    }
+
     return [
       "MODEL_TASK_PROFILE_NOT_FOUND",
       "MODEL_PROVIDER_NOT_FOUND",
-      "MODEL_PROVIDER_DISABLED",
       "MODEL_CONFIG_NOT_FOUND",
-      "MODEL_CONFIG_DISABLED",
-      "MODEL_CALL_FAILED",
-      "MODEL_CALL_TIMEOUT",
-      "MODEL_API_KEY_INVALID",
-      "MODEL_PROVIDER_UNAUTHORIZED",
-      "MODEL_JSON_PARSE_FAILED",
     ].includes(error.code);
   }
 }

@@ -3,6 +3,7 @@ import { CompanyModule } from "../../company/company.module";
 import { ConstraintModule } from "../../constraint/constraint.module";
 import { FusionDecisionModule } from "../../decision/decision.module";
 import { FusionEvolutionModule } from "../../evolution/evolution.module";
+import { ModelGatewayModule } from "../../model-gateway/model-gateway.module";
 import { DecisionEngineService } from "../../ai/decision-engine/decision-engine.service";
 import { DecisionTraceService } from "../../ai/evolution-engine/decision-trace.service";
 import { EvolutionEngineService } from "../../ai/evolution-engine/evolution.engine.service";
@@ -26,7 +27,15 @@ import { OrchestratorController } from "./orchestrator/orchestrator.controller";
 import { OrchestratorService } from "./orchestrator/orchestrator.service";
 
 @Module({
-  imports: [PrismaModule, CompanyModule, ConstraintModule, FusionDecisionModule, FusionEvolutionModule, StateModule],
+  imports: [
+    PrismaModule,
+    CompanyModule,
+    ConstraintModule,
+    FusionDecisionModule,
+    FusionEvolutionModule,
+    StateModule,
+    ModelGatewayModule,
+  ],
   controllers: [OrchestratorController, PatchPreviewController, SystemMutationController],
   providers: [
     OrchestratorService,

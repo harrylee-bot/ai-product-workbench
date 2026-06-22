@@ -102,7 +102,7 @@ export class ModelGatewayDefaultsService implements OnModuleInit {
       contextWindow: 128000,
       maxOutputTokens: 8192,
       supportsStreaming: true,
-      supportsJsonMode: true,
+      supportsJsonMode: false,
       supportsMultimodal: false,
       defaultTemperature: 0.2,
       defaultMaxTokens: 4096,

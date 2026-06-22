@@ -36,10 +36,11 @@ services:
       KNOWLEDGE_VAULT_ROOT: /app/apps/api/storage/knowledge-vault
       AGENT_SKILLS_ROOT: /app/agent-skills/obsidian-skills/skills:/root/.codex/skills
       MODEL_GATEWAY_ENCRYPTION_KEY: ${MODEL_GATEWAY_ENCRYPTION_KEY:-}
-      DEFAULT_MODEL_PROVIDER_NAME: ${DEFAULT_MODEL_PROVIDER_NAME:-}
-      DEFAULT_MODEL_BASE_URL: ${DEFAULT_MODEL_BASE_URL:-}
+      DEFAULT_MODEL_PROVIDER_NAME: ${DEFAULT_MODEL_PROVIDER_NAME:-DataToken 默认供应商}
+      DEFAULT_MODEL_BASE_URL: ${DEFAULT_MODEL_BASE_URL:-https://datatoken.shop}
       DEFAULT_MODEL_API_KEY: ${DEFAULT_MODEL_API_KEY:-}
-      DEFAULT_MODEL_NAME: ${DEFAULT_MODEL_NAME:-}
+      DEFAULT_MODEL_NAME: ${DEFAULT_MODEL_NAME:-gpt-5.5}
+      AI_AGENT_FALLBACK_MODE: ${AI_AGENT_FALLBACK_MODE:-config_only}
     ports:
       - "4000:4000"
     volumes:
