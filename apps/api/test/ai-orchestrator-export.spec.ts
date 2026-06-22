@@ -39,7 +39,7 @@ describe("AiOrchestrator export intents", () => {
   const prdWriterAgent = { run: vi.fn() };
   const prototypeDesignerAgent = { run: vi.fn() };
   const prototypeCodeAgent = { run: vi.fn() };
-  const patchAgent = { run: vi.fn() };
+  const patchService = { createPatchCandidateFromRun: vi.fn() };
   const qaAgent = { run: vi.fn() };
   const knowledgeExtractorAgent = { run: vi.fn() };
   const service = new AiOrchestratorService(
@@ -49,6 +49,7 @@ describe("AiOrchestrator export intents", () => {
     documentService as never,
     prototypeService as never,
     exportService as never,
+    patchService as never,
     qaService as never,
     messageService as never,
     prisma as never,
@@ -60,7 +61,6 @@ describe("AiOrchestrator export intents", () => {
     prdWriterAgent as never,
     prototypeDesignerAgent as never,
     prototypeCodeAgent as never,
-    patchAgent as never,
     qaAgent as never,
     knowledgeExtractorAgent as never,
   );

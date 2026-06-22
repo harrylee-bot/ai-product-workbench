@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AiOrchestratorService } from "../src/ai/ai-orchestrator.service";
 import type {
   KnowledgeContext,
+  PatchPlan,
+  PatchRecord,
   ProductBuildPlan,
   ProductDesignState,
   PrototypeArtifact,
@@ -57,7 +59,7 @@ describe("AiOrchestrator main vibe chain", () => {
   const prdWriterAgent = { run: vi.fn() };
   const prototypeDesignerAgent = { run: vi.fn() };
   const prototypeCodeAgent = { run: vi.fn() };
-  const patchAgent = { run: vi.fn() };
+  const patchService = { createPatchCandidateFromRun: vi.fn() };
   const qaAgent = { run: vi.fn() };
   const knowledgeExtractorAgent = { run: vi.fn() };
   const service = new AiOrchestratorService(
@@ -67,6 +69,7 @@ describe("AiOrchestrator main vibe chain", () => {
     documentService as never,
     prototypeService as never,
     exportService as never,
+    patchService as never,
     qaService as never,
     messageService as never,
     prisma as never,
@@ -78,7 +81,6 @@ describe("AiOrchestrator main vibe chain", () => {
     prdWriterAgent as never,
     prototypeDesignerAgent as never,
     prototypeCodeAgent as never,
-    patchAgent as never,
     qaAgent as never,
     knowledgeExtractorAgent as never,
   );
@@ -145,6 +147,17 @@ describe("AiOrchestrator main vibe chain", () => {
           sourcePath: "businessRules[0]",
           reason: "从生成链路中发现可复用规则。",
         }],
+      },
+    });
+    patchService.createPatchCandidateFromRun.mockResolvedValue({
+      patchRecord: basePatchRecord(),
+      patchPreview: basePatchPreview(),
+      assistantMessage: { id: "assistant-patch-1" },
+      result: {
+        patchRecord: basePatchRecord(),
+        patchPreview: basePatchPreview(),
+        patchPlan: basePatchPlan(),
+        nextAction: { type: "confirm_patch" },
       },
     });
   });
@@ -242,6 +255,65 @@ describe("AiOrchestrator main vibe chain", () => {
       where: { id: "project-1" },
       data: expect.objectContaining({ status: ProjectStatus.prototype_ready }),
     });
+  });
+
+  it("routes selected-region patches to confirmation without applying or regenerating artifacts", async () => {
+    intentAgent.run.mockResolvedValueOnce({
+      data: {
+        intent: UserIntent.patch_prototype,
+        confidence: 0.96,
+        reason: "用户选中了原型局部区域并要求修改。",
+        requiresSelection: true,
+        isAmbiguous: false,
+      },
+    });
+
+    const selectedRegion = {
+      type: "prototype",
+      targetId: "artifact-1",
+      artifactId: "artifact-1",
+      pageId: "page_home",
+      componentId: "page_home_button",
+      label: "签到按钮",
+    };
+    const result = await service.run({
+      userMessageId: "message-1",
+      attachments: [],
+      context: {
+        runId: "run-1",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "把按钮改成醒目的红色",
+        selectedRegion,
+        recentMessages: [],
+        attachments: [],
+        productDesignState: baseState(),
+        traceId: "trace-1",
+      },
+    });
+
+    expect(patchService.createPatchCandidateFromRun).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      userInstruction: "把按钮改成醒目的红色",
+      selectedRegion: expect.objectContaining({ type: "prototype", targetId: "artifact-1" }),
+      runId: "run-1",
+      traceId: "trace-1",
+      instructionMessageId: "message-1",
+      knowledgeContext: expect.objectContaining({ summary: "未命中知识。" }),
+    }));
+    expect(stateService.applyPatch).not.toHaveBeenCalled();
+    expect(documentService.saveGeneratedDocument).not.toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+    expect(qaService.runForProject).not.toHaveBeenCalled();
+    expect(knowledgeExtractorAgent.run).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      patchRecord: expect.objectContaining({ id: "patch-1", status: "needs_confirmation" }),
+      patchPlan: expect.objectContaining({ needUserConfirm: true, needsUserConfirmation: true }),
+      nextAction: expect.objectContaining({ type: "confirm_patch" }),
+    }));
   });
 });
 
@@ -352,6 +424,73 @@ function baseBuildPlan(): ProductBuildPlan {
     qaFocus: ["PRD 与原型一致"],
     risks: [],
     createdAt: "2026-06-20T08:00:00.000Z",
+  };
+}
+
+function basePatchPlan(): PatchPlan {
+  return {
+    id: "patch-plan-1",
+    projectId: "project-1",
+    patchType: "prototype",
+    targetNodes: ["pages[0].components[0]"],
+    impactScope: ["prototypeSpec", "htmlPrototype"],
+    operations: [{
+      op: "replace",
+      path: "/pages/0/components/0/content",
+      value: "醒目签到",
+      reason: "用户要求按钮更醒目。",
+    }],
+    regenerationPlan: {
+      prd: "affected_sections",
+      prototypeSpec: "affected_pages",
+      htmlPrototype: "affected_pages",
+      qa: "full",
+    },
+    risks: [{ level: "low", message: "仅影响按钮文案和视觉表达。" }],
+    needUserConfirm: true,
+    needsUserConfirmation: true,
+    reason: "用户选中签到按钮后要求局部调整。",
+    summary: "调整签到按钮表达。",
+  };
+}
+
+function basePatchRecord(): PatchRecord {
+  return {
+    id: "patch-1",
+    projectId: "project-1",
+    conversationId: "conversation-1",
+    instructionMessageId: "message-1",
+    selectedRegion: {
+      type: "prototype",
+      targetId: "artifact-1",
+      artifactId: "artifact-1",
+      pageId: "page_home",
+      componentId: "page_home_button",
+      label: "签到按钮",
+    },
+    userInstruction: "把按钮改成醒目的红色",
+    patchPlan: basePatchPlan(),
+    operations: basePatchPlan().operations,
+    status: "needs_confirmation",
+    beforeProductDesignStateVersion: 1,
+    generatedByRunId: "run-1",
+    createdBy: "user-1",
+    createdAt: "2026-06-20T08:00:00.000Z",
+    updatedAt: "2026-06-20T08:00:00.000Z",
+  };
+}
+
+function basePatchPreview() {
+  return {
+    id: "patch-preview-1",
+    patchId: "patch-1",
+    status: "needs_confirmation",
+    previewStatus: "ready",
+    patchPlan: basePatchPlan(),
+    operations: basePatchPlan().operations,
+    requiresConfirmation: true,
+    previewOnly: true,
+    message: "补丁预览已生成。确认前不会修改产品设计状态、需求文档或原型。",
   };
 }
 

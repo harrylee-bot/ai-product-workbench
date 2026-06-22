@@ -245,6 +245,14 @@ describe("PatchService", () => {
         }),
       }),
     );
+    expect(stream.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "run_completed",
+        data: expect.objectContaining({
+          nextAction: expect.objectContaining({ type: "confirm_patch" }),
+        }),
+      }),
+    );
     expect(runLog.markRunIntent).toHaveBeenCalledWith("run-1", UserIntent.patch_prototype);
   });
 

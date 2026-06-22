@@ -19,9 +19,11 @@ import type {
   ExportArtifactSummary,
   AttachmentSummary,
   IntentResult,
+  KnowledgeContext,
   KnowledgeCandidate,
   KnowledgeCandidateDraft,
   PatchPlan,
+  PatchRecord,
   ProductBuildPlan,
   ProductDesignState,
   PrototypeArtifact,
@@ -32,7 +34,6 @@ import type {
 } from "./ai-vibe.types";
 import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
-import { PatchAgentService } from "./agents/patch-agent.service";
 import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
 import { ProductDesignerAgentService } from "./agents/product-designer-agent.service";
 import { ProductPlannerAgentService } from "./agents/product-planner-agent.service";
@@ -47,6 +48,7 @@ import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { ExportService } from "./export.service";
+import { PatchService } from "./patch.service";
 
 type OrchestratorInput = {
   context: AgentRunContext;
@@ -66,11 +68,14 @@ export type OrchestratorResult = {
   qaReport?: QAReport;
   productBuildPlan?: ProductBuildPlan;
   patchPlan?: PatchPlan;
+  patchRecord?: PatchRecord;
+  patchPreview?: unknown;
   knowledgeCandidates?: Array<KnowledgeCandidate | KnowledgeCandidateDraft>;
   exportArtifact?: ExportArtifactSummary;
   nextAction?: {
-    type: "ask_clarification" | "review_prd" | "review_prototype" | "review_qa" | "answer" | "download_export";
+    type: "ask_clarification" | "review_prd" | "review_prototype" | "review_qa" | "answer" | "download_export" | "confirm_patch";
     questions?: ProductDesignState["pendingQuestions"];
+    risks?: PatchPlan["risks"];
   };
 };
 
@@ -83,6 +88,7 @@ export class AiOrchestratorService {
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
     private readonly exportService: ExportService,
+    private readonly patchService: PatchService,
     private readonly qaService: QaService,
     private readonly messageService: MessageService,
     private readonly prisma: PrismaService,
@@ -94,7 +100,6 @@ export class AiOrchestratorService {
     private readonly prdWriterAgent: PrdWriterAgentService,
     private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
     private readonly prototypeCodeAgent: PrototypeCodeAgentService,
-    private readonly patchAgent: PatchAgentService,
     private readonly qaAgent: QaAgentService,
     private readonly knowledgeExtractorAgent: KnowledgeExtractorAgentService,
   ) {}
@@ -186,45 +191,11 @@ export class AiOrchestratorService {
 
       const isPatch =
         intent.data.intent === UserIntent.patch_document || intent.data.intent === UserIntent.patch_prototype;
-      let patchPlan: PatchPlan | undefined;
       let productBuildPlan: ProductBuildPlan | undefined;
       let state = context.productDesignState;
 
       if (isPatch && context.selectedRegion && state) {
-        await this.emit(context, "message_delta", "正在分析局部修改影响范围...");
-        const patch = await this.runAgentStep(
-          context,
-          AgentName.patch_agent,
-          "patch_planning",
-          () =>
-            this.patchAgent.run({
-              runId: context.runId,
-              projectId: context.projectId,
-              traceId: context.traceId,
-              userId: context.userId,
-              input: {
-                userInput: context.userInput,
-                selectedRegion: context.selectedRegion!,
-                productDesignState: state!,
-                prdDocument: state?.prdDocument,
-                prototypeSpec: state?.prototypeSpec,
-                knowledgeContext: knowledge.data,
-              },
-            }),
-        );
-        patchPlan = patch.data;
-        state = await this.stateService.applyPatch(context.projectId, state, patchPlan, {
-          userId: context.userId,
-          runId: context.runId,
-          messageId: input.userMessageId,
-        });
-        await this.stream.emit({
-          runId: context.runId,
-          projectId: context.projectId,
-          type: "state_updated",
-          step: "patch_planning",
-          data: stateSummary(state),
-        });
+        return this.finishPatchCandidate(context, input, intent.data, knowledge.data);
       } else {
         await this.emit(context, "message_delta", "正在规划正式需求执行方案...");
         const plan = await this.runAgentStep(
@@ -391,7 +362,7 @@ export class AiOrchestratorService {
       await this.emit(context, "message_delta", "正在进行一致性 QA 校验...");
       const qa = await this.runAgentStep(context, AgentName.qa_agent, "qa_check", async () => ({
         data: await this.qaService.runForProject(context.projectId, context.userId, {
-          trigger: patchPlan ? "patch" : "initial_generation",
+          trigger: "initial_generation",
           runId: context.runId,
           traceId: context.traceId,
           prdDocument,
@@ -422,7 +393,6 @@ export class AiOrchestratorService {
               productDesignState: state!,
               prdDocument,
               prototypeSpec: prototypeSpec.data,
-              patchPlan,
               confirmedByUser: false,
             },
           }),
@@ -443,7 +413,6 @@ export class AiOrchestratorService {
         prototypeArtifact: savedPrototype.artifact,
         qaReport: qa.data,
         productBuildPlan,
-        patchPlan,
         knowledgeCandidates: knowledgeCandidates.data.candidates,
         nextAction: {
           type: qa.data.passed ? "review_prototype" : "review_qa",
@@ -557,6 +526,43 @@ export class AiOrchestratorService {
     return result;
   }
 
+  private async finishPatchCandidate(
+    context: AgentRunContext,
+    input: OrchestratorInput,
+    intent: IntentResult,
+    knowledgeContext: KnowledgeContext,
+  ) {
+    await this.emit(context, "message_delta", "正在生成局部修改预览，确认前不会改动当前 PRD 或原型...");
+    const candidate = await this.patchService.createPatchCandidateFromRun({
+      projectId: context.projectId,
+      conversationId: context.conversationId,
+      userId: context.userId,
+      userInstruction: context.userInput,
+      selectedRegion: context.selectedRegion!,
+      attachments: input.attachments,
+      runId: context.runId,
+      traceId: context.traceId,
+      instructionMessageId: input.userMessageId,
+      knowledgeContext,
+    });
+    const patchPlan = candidate.patchRecord.patchPlan;
+    return {
+      runId: context.runId,
+      projectId: context.projectId,
+      intent,
+      message: "已生成 Patch 候选，请确认后再应用并重新生成 PRD、原型和 QA。",
+      productDesignState: context.productDesignState,
+      patchPlan,
+      patchRecord: candidate.patchRecord,
+      patchPreview: candidate.patchPreview,
+      nextAction: {
+        type: "confirm_patch",
+        questions: patchPlan.clarificationQuestions ?? [],
+        risks: patchPlan.risks ?? [],
+      },
+    } satisfies OrchestratorResult;
+  }
+
   private async finishRun(
     context: AgentRunContext,
     result: OrchestratorResult,
@@ -578,6 +584,8 @@ export class AiOrchestratorService {
         qaReport: result.qaReport,
         productBuildPlan: result.productBuildPlan,
         patchPlan: result.patchPlan,
+        patchRecord: result.patchRecord,
+        patchPreview: result.patchPreview,
         exportArtifact: result.exportArtifact,
         knowledgeCandidates: result.knowledgeCandidates,
       }),

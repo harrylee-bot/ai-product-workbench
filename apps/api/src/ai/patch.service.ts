@@ -77,6 +77,12 @@ type PatchExecutionInput = {
   runId: string;
   traceId: string;
   instructionMessageId: string;
+  knowledgeContext?: KnowledgeContext;
+};
+
+type CreatePatchCandidateFromRunInput = Omit<PatchExecutionInput, "selectedRegion" | "userInstruction"> & {
+  selectedRegion: SelectedRegion | Record<string, unknown>;
+  userInstruction: string;
 };
 
 type PatchRecordRow = {
@@ -281,8 +287,21 @@ export class PatchService {
       runId: run.id,
       status: "candidate_created",
       patchRecord: result.patchRecord,
+      patchPreview: result.patchPreview,
       result: result.result,
     };
+  }
+
+  async createPatchCandidateFromRun(input: CreatePatchCandidateFromRunInput) {
+    const selectedRegion = normalizeSelectedRegion(input.selectedRegion as Record<string, unknown>);
+    const instruction = input.userInstruction.trim();
+    if (!instruction) throw new BadRequestException("PATCH_INSTRUCTION_EMPTY");
+
+    return this.createCandidatePatch({
+      ...input,
+      userInstruction: instruction,
+      selectedRegion,
+    });
   }
 
   async listForProject(
@@ -569,7 +588,7 @@ export class PatchService {
 
       const state = await this.stateService.getCurrentState(input.projectId);
       if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
-      const knowledgeContext = await this.getPatchKnowledgeContext(input);
+      const knowledgeContext = input.knowledgeContext ?? await this.getPatchKnowledgeContext(input);
       const patch = await this.runAgentStep(
         input,
         AgentName.patch_agent,
@@ -636,6 +655,13 @@ export class PatchService {
       });
       const result = patchConfirmationResult(patchRecord, plan, patchPreview);
       await this.runLog.completeRun(input.runId, { patchRecord, patchPlan: plan, patchPreview, candidateOnly: true }, message);
+      await this.stream.emit({
+        runId: input.runId,
+        projectId: input.projectId,
+        type: "run_completed",
+        content: message,
+        data: { ...result, runId: input.runId, projectId: input.projectId, message },
+      });
       await this.prisma.project.update({
         where: { id: input.projectId },
         data: { status: ProjectStatus.clarifying, lastActivityAt: new Date() },
