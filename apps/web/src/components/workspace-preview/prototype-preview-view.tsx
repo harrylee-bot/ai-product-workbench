@@ -2,7 +2,6 @@
 
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -13,9 +12,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import {
   CheckCircle2,
-  Code2,
   Crop,
-  Layers,
   Loader2,
   MousePointer2,
   PencilLine,
@@ -25,13 +22,12 @@ import {
 } from "lucide-react";
 import { Badge, Button, IconButton, SegmentedControl } from "@/components/ui";
 import { EmptyPreview } from "./empty-preview";
-import { derivePrototypeComponents, toChineseText } from "./helpers";
+import { toChineseText } from "./helpers";
 import type {
   CanvasRect,
   Phase1PrototypePreview,
   PrototypeCanvasMode,
   PrototypeCanvasSelection,
-  PrototypeComponentNode,
   PrototypeLocalAction,
   PrototypeLocalGeneration,
 } from "./types";
@@ -48,12 +44,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
   const canvasOverlayRef = useRef<HTMLDivElement | null>(null);
   const localDialogRef = useRef<HTMLDivElement | null>(null);
   const localInstructionRef = useRef<HTMLTextAreaElement | null>(null);
-  const componentNodes = useMemo(
-    () => derivePrototypeComponents(prototypePreview?.html ?? ""),
-    [prototypePreview?.html],
-  );
   const [canvasMode, setCanvasMode] = useState<PrototypeCanvasMode>("select");
-  const [activeComponentId, setActiveComponentId] = useState("");
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [draftBox, setDraftBox] = useState<CanvasRect | null>(null);
   const [selection, setSelection] = useState<PrototypeCanvasSelection | null>(null);
@@ -66,7 +57,6 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
 
   useEffect(() => {
     setCanvasMode("select");
-    setActiveComponentId("");
     setDragStart(null);
     setDraftBox(null);
     setSelection(null);
@@ -77,13 +67,6 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setGeneration(null);
     setGenerationError(null);
   }, [prototypePreview?.id, prototypePreview?.html]);
-
-  useEffect(() => {
-    if (!componentNodes.length) return;
-    setActiveComponentId((current) => (
-      current && componentNodes.some((node) => node.id === current) ? current : componentNodes[0].id
-    ));
-  }, [componentNodes]);
 
   useEffect(() => {
     if (dialogOpen) {
@@ -189,34 +172,6 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setGenerationError(null);
   };
 
-  const selectComponent = (node: PrototypeComponentNode, index: number) => {
-    setActiveComponentId(node.id);
-    setCanvasMode("select");
-    setDialogOpen(false);
-    setGeneration(null);
-    setGenerationError(null);
-
-    const bounds = canvasRef.current?.getBoundingClientRect();
-    const width = Math.min(280, Math.max(160, (bounds?.width ?? 640) * 0.3));
-    const height = Math.min(180, Math.max(96, (bounds?.height ?? 640) * 0.18));
-    const maxX = Math.max(8, (bounds?.width ?? 640) - width - 8);
-    const maxY = Math.max(8, (bounds?.height ?? 640) - height - 8);
-    const nextRect = {
-      x: clamp(24 + (index % 3) * 86, 8, maxX),
-      y: clamp(32 + index * 48, 8, maxY),
-      width,
-      height,
-    };
-
-    setSelection({
-      ...nextRect,
-      id: `prototype-component-${node.id}`,
-      kind: "box",
-      label: `${node.name} 组件选区`,
-      createdAt: Date.now(),
-    });
-  };
-
   const createKeyboardSelection = () => {
     if (!canvasRef.current) return;
     const bounds = canvasRef.current.getBoundingClientRect();
@@ -299,46 +254,8 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[174px_minmax(0,1fr)] gap-2 p-2">
-        <aside className="flex min-h-0 flex-col rounded-[var(--radius-control)] border border-blue-100 bg-white shadow-[var(--shadow-control)]">
-          <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-blue-100 px-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-gray-900">
-              <Layers className="h-3.5 w-3.5 text-blue-600" />
-              Component Tree
-            </div>
-            <Badge tone="neutral" className="bg-gray-50">{componentNodes.length}</Badge>
-          </div>
-          <div className="workbench-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
-            {componentNodes.map((node, index) => {
-              const active = node.id === activeComponentId;
-              return (
-                <button
-                  key={node.id}
-                  type="button"
-                  onClick={() => selectComponent(node, index)}
-                  aria-pressed={active}
-                  title={`${node.name} · ${node.type} · ${node.detail}`}
-                  className={[
-                    "w-full rounded-[10px] border px-2 py-2 text-left transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
-                    active
-                      ? "border-blue-200 bg-blue-50 text-blue-900"
-                      : "border-transparent bg-white text-gray-600 hover:border-gray-200 hover:bg-gray-50 hover:text-gray-950",
-                  ].join(" ")}
-                  style={{ paddingLeft: 8 + node.depth * 10 }}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={["h-2 w-2 shrink-0 rounded-full", active ? "bg-blue-600" : "bg-gray-300"].join(" ")} />
-                    <span className="min-w-0 truncate text-xs font-semibold">{node.name}</span>
-                  </div>
-                  <div className="mt-1 truncate text-[11px] text-gray-500">{node.type} · {node.detail}</div>
-                </button>
-              );
-            })}
-          </div>
-          <PrototypePatchPreview selection={selection} generation={generation} />
-        </aside>
-
-        <div className="min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-blue-100 bg-white shadow-[var(--shadow-panel)]">
+      <div className="min-h-0 flex-1 p-2">
+        <div className="h-full min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-blue-100 bg-white shadow-[var(--shadow-panel)]">
           <div className="flex h-9 items-center gap-2 border-b border-blue-100 bg-gray-50 px-3">
             <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
             <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
@@ -625,45 +542,6 @@ function PrototypeLocalSkeleton() {
         <div className="h-3 w-10/12 animate-pulse rounded-full bg-gray-100" />
         <div className="h-3 w-7/12 animate-pulse rounded-full bg-gray-100" />
       </div>
-    </div>
-  );
-}
-
-function PrototypePatchPreview({
-  selection,
-  generation,
-}: {
-  selection: PrototypeCanvasSelection | null;
-  generation: PrototypeLocalGeneration | null;
-}) {
-  return (
-    <div className="shrink-0 border-t border-blue-100 p-2">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs font-semibold text-gray-900">
-          <Code2 className="h-3.5 w-3.5 text-blue-600" />
-          Patch Preview
-        </div>
-        <Badge tone={generation ? "success" : selection ? "accent" : "neutral"} className="bg-white">
-          {generation ? "已生成" : selection ? "待生成" : "未选区"}
-        </Badge>
-      </div>
-      {generation ? (
-        <div className="space-y-1.5">
-          {generation.changes.slice(0, 3).map((change) => (
-            <div key={change} className="break-words rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[11px] leading-4 text-emerald-900">
-              {change}
-            </div>
-          ))}
-        </div>
-      ) : selection ? (
-        <div className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-2 text-[11px] leading-4 text-blue-800">
-          {selection.label}
-        </div>
-      ) : (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-2 text-[11px] leading-4 text-gray-500">
-          选择画布区域后会展示局部补丁草稿。
-        </div>
-      )}
     </div>
   );
 }
