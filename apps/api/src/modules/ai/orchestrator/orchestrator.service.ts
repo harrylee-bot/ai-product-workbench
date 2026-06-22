@@ -272,7 +272,9 @@ export class OrchestratorService {
 
     const assistantContent = artifactGeneration.usedModel
       ? "三系统融合已完成：约束、决策、进化流程均已参与，并已调用真实模型生成 PRD 与原型。"
-      : "三系统融合已完成：当前未配置可用模型，已使用本地模板生成 PRD 与原型。";
+      : artifactGeneration.fallbackReason
+        ? "三系统融合已完成：真实模型调用未及时完成，已使用知识库约束生成可预览 PRD 与原型。"
+        : "三系统融合已完成：当前未配置可用模型，已使用本地模板生成 PRD 与原型。";
     const assistantMessage = await this.createMessage({
       projectId: conversation.projectId,
       conversationId: conversation.id,
@@ -368,8 +370,8 @@ export class OrchestratorService {
         traceId: meta.traceId,
         userId: meta.userId,
         temperature: 0.35,
-        maxTokens: 5000,
-        timeoutMs: 120000,
+        maxTokens: 3500,
+        timeoutMs: 25000,
         messages: [
           {
             role: "system",
@@ -697,6 +699,7 @@ function canFallbackArtifactGeneration(error: unknown) {
     "MODEL_PROVIDER_NOT_FOUND",
     "MODEL_CONFIG_NOT_FOUND",
     "MODEL_CALL_TIMEOUT",
+    "MODEL_CALL_FAILED",
     "MODEL_JSON_PARSE_FAILED",
   ].includes(error.code);
 }
