@@ -51,12 +51,14 @@ services:
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
+        NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-http://8.130.160.177:3001}
     container_name: ai-product-workbench-web
     restart: unless-stopped
     depends_on:
       - api
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
+      NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-http://8.130.160.177:3001}
     ports:
       - "3000:3000"
 

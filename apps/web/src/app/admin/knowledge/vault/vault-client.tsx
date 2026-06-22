@@ -1,12 +1,15 @@
 "use client";
 
-import { BookOpen, CheckCircle2, FolderOpen, RefreshCw, Server, Sparkles } from "lucide-react";
+import { BookOpen, CheckCircle2, ExternalLink, FolderOpen, RefreshCw, Server, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { AdminShell } from "@/components/admin-shell";
 import { AdminPanel, AdminStatusBadge, EmptyRow, LoadingRows } from "@/components/admin-ui";
 import { Button, InlineError } from "@/components/ui";
 import { apiRequest } from "@/lib/api";
 import type { KnowledgeVaultEntry, KnowledgeVaultStatus } from "@/lib/types";
+
+const KNOWLEDGE_APP_URL =
+  process.env.NEXT_PUBLIC_KNOWLEDGE_APP_URL ?? "http://8.130.160.177:3001";
 
 export function AdminKnowledgeVaultClient() {
   const [status, setStatus] = useState<KnowledgeVaultStatus | null>(null);
@@ -54,6 +57,15 @@ export function AdminKnowledgeVaultClient() {
       title="Obsidian 知识库"
       actions={
         <div className="flex items-center gap-2">
+          <a
+            href={KNOWLEDGE_APP_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-gray-950 px-4 text-sm font-medium text-white transition hover:bg-gray-800"
+          >
+            <ExternalLink className="h-4 w-4" />
+            进入知识库系统
+          </a>
           <Button type="button" variant="secondary" onClick={() => void loadStatus()} disabled={loading}>
             <RefreshCw className="h-4 w-4" />
             刷新
@@ -66,8 +78,8 @@ export function AdminKnowledgeVaultClient() {
       }
     >
       <div className="mb-5">
-        <h2 className="text-xl font-semibold text-gray-950">Obsidian 兼容知识库</h2>
-        <p className="mt-2 text-sm text-gray-500">用 Markdown Vault 维护知识，后续接入约束系统、决策系统和进化系统。</p>
+        <h2 className="text-xl font-semibold text-gray-950">开源知识库前端</h2>
+        <p className="mt-2 text-sm text-gray-500">SilverBullet 已挂载同一个 Markdown Vault，可直接进入系统维护和查看知识库。</p>
       </div>
 
       {notice ? <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
@@ -81,6 +93,13 @@ export function AdminKnowledgeVaultClient() {
       </div>
 
       <AdminPanel className="mt-4 p-4">
+        <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-200 pb-4">
+          <div>
+            <div className="text-sm font-medium text-gray-950">知识库前端地址</div>
+            <div className="mt-1 break-all font-mono text-xs text-gray-500">{KNOWLEDGE_APP_URL}</div>
+          </div>
+          <AdminStatusBadge label="已部署" tone="green" />
+        </div>
         <div className="text-sm font-medium text-gray-950">Vault 路径</div>
         <div className="mt-2 break-all rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700">
           {status?.vaultRoot ?? "-"}

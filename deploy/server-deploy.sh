@@ -11,6 +11,10 @@ DEFAULT_MODEL_PROVIDER_NAME="${DEFAULT_MODEL_PROVIDER_NAME:-}"
 DEFAULT_MODEL_BASE_URL="${DEFAULT_MODEL_BASE_URL:-}"
 DEFAULT_MODEL_API_KEY="${DEFAULT_MODEL_API_KEY:-}"
 DEFAULT_MODEL_NAME="${DEFAULT_MODEL_NAME:-}"
+KNOWLEDGE_APP_PORT="${KNOWLEDGE_APP_PORT:-3001}"
+SILVERBULLET_IMAGE="${SILVERBULLET_IMAGE:-ghcr.io/silverbulletmd/silverbullet:v2}"
+SILVERBULLET_USER="${SILVERBULLET_USER:-}"
+SILVERBULLET_PASSWORD="${SILVERBULLET_PASSWORD:-}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
 NODE_IMAGE="${NODE_IMAGE:-node:22-bookworm-slim}"
 
@@ -71,6 +75,7 @@ docker build \
 docker build \
   --build-arg NODE_IMAGE="$NODE_IMAGE" \
   --build-arg NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
+  --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL="http://${APP_HOST}:${KNOWLEDGE_APP_PORT}" \
   -f apps/web/Dockerfile \
   -t ai-product-workbench-web:latest .
 
@@ -100,11 +105,32 @@ docker run -d \
   --network ai-product-workbench \
   -p 3000:3000 \
   -e NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
+  -e NEXT_PUBLIC_KNOWLEDGE_APP_URL="http://${APP_HOST}:${KNOWLEDGE_APP_PORT}" \
   ai-product-workbench-web:latest
+
+STORAGE_MOUNT="$(docker volume inspect ai-product-workbench-storage -f '{{ .Mountpoint }}')"
+mkdir -p "${STORAGE_MOUNT}/knowledge-vault"
+
+docker rm -f ai-product-knowledge >/dev/null 2>&1 || true
+SILVERBULLET_ENV_ARGS=()
+if [ -n "$SILVERBULLET_USER" ] && [ -n "$SILVERBULLET_PASSWORD" ]; then
+  SILVERBULLET_ENV_ARGS=(-e "SB_USER=${SILVERBULLET_USER}:${SILVERBULLET_PASSWORD}")
+fi
+
+docker run -d \
+  --name ai-product-knowledge \
+  --restart unless-stopped \
+  --network ai-product-workbench \
+  -p "${KNOWLEDGE_APP_PORT}:3000" \
+  "${SILVERBULLET_ENV_ARGS[@]}" \
+  -v "${STORAGE_MOUNT}/knowledge-vault:/space" \
+  "$SILVERBULLET_IMAGE"
 
 wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
 wait_for_http "http://127.0.0.1:3000/login" "Web"
+wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/" "Knowledge app"
 
 echo "Deployed:"
 echo "  Web: http://${APP_HOST}:3000/login"
 echo "  API: http://${APP_HOST}:4000/api/system/health"
+echo "  Knowledge: http://${APP_HOST}:${KNOWLEDGE_APP_PORT}"
