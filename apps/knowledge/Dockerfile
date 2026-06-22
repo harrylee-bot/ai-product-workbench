@@ -7,7 +7,11 @@ ARG QUARTZ_REF
 
 WORKDIR /opt/quartz
 
-RUN apt-get update \
+RUN sed -i \
+    -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
+    -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
+    /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git nginx tini \
   && rm -f /etc/nginx/sites-enabled/default \
   && rm -rf /var/lib/apt/lists/*
