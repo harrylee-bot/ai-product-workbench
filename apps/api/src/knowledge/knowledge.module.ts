@@ -5,6 +5,7 @@ import { KnowledgeAdminController } from "./knowledge-admin.controller";
 import { KnowledgeCandidateService } from "./knowledge-candidate.service";
 import { KnowledgeItemService } from "./knowledge-item.service";
 import { KnowledgeRetrievalService } from "./knowledge-retrieval.service";
+import { ObsidianVaultService } from "./obsidian-vault.service";
 
 @Module({
   imports: [AdminModule, PrismaModule],
@@ -13,6 +14,7 @@ import { KnowledgeRetrievalService } from "./knowledge-retrieval.service";
     KnowledgeItemService,
     KnowledgeCandidateService,
     KnowledgeRetrievalService,
+    ObsidianVaultService,
   ],
   exports: [KnowledgeCandidateService, KnowledgeRetrievalService],
 })

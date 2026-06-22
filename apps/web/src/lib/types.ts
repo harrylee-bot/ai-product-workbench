@@ -145,3 +145,21 @@ export type KnowledgeCandidate = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type KnowledgeVaultEntry = {
+  name: string;
+  path: string;
+  type: "directory" | "markdown" | "file";
+  size?: number;
+  updatedAt?: string;
+};
+
+export type KnowledgeVaultStatus = {
+  initialized: boolean;
+  rootExists: boolean;
+  vaultRoot: string;
+  folderCount: number;
+  markdownCount: number;
+  folders: KnowledgeVaultEntry[];
+  recentFiles: KnowledgeVaultEntry[];
+};

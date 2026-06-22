@@ -18,6 +18,7 @@ import {
   UpdateKnowledgeItemDto,
 } from "./knowledge.dto";
 import { KnowledgeItemService } from "./knowledge-item.service";
+import { ObsidianVaultService } from "./obsidian-vault.service";
 
 @Controller("admin/knowledge")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -26,7 +27,18 @@ export class KnowledgeAdminController {
   constructor(
     private readonly items: KnowledgeItemService,
     private readonly candidates: KnowledgeCandidateService,
+    private readonly vault: ObsidianVaultService,
   ) {}
+
+  @Get("vault")
+  getVaultStatus() {
+    return this.vault.getStatus();
+  }
+
+  @Post("vault/init")
+  initializeVault() {
+    return this.vault.initialize();
+  }
 
   @Post("items")
   createItem(

@@ -61,7 +61,7 @@ export function AdminDashboardClient() {
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
         {[
           { title: "模型管理", href: "/admin/model-providers", text: "供应商、模型配置、任务映射" },
-          { title: "知识审核", href: "/admin/knowledge/candidates", text: "候选知识通过、拒绝、合并" },
+          { title: "知识库", href: "/admin/knowledge/vault", text: "Obsidian Vault、知识条目、候选审核" },
           { title: "日志中心", href: "/admin/logs/agent-runs", text: "Agent、模型、文件、Patch、QA" },
         ].map((item) => (
           <Link key={item.href} href={item.href}>

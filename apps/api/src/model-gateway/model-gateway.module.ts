@@ -4,6 +4,7 @@ import { PrismaModule } from "../prisma/prisma.module";
 import { ApiKeyEncryptionService } from "./api-key-encryption.service";
 import { ModelGatewayAdminController } from "./model-gateway-admin.controller";
 import { ModelGatewayAdminService } from "./model-gateway-admin.service";
+import { ModelGatewayDefaultsService } from "./model-gateway-defaults.service";
 import { ModelGatewayService } from "./model-gateway.service";
 import { OpenAICompatibleAdapter } from "./openai-compatible.adapter";
 
@@ -15,6 +16,7 @@ import { OpenAICompatibleAdapter } from "./openai-compatible.adapter";
     OpenAICompatibleAdapter,
     ModelGatewayService,
     ModelGatewayAdminService,
+    ModelGatewayDefaultsService,
   ],
   exports: [ModelGatewayService],
 })

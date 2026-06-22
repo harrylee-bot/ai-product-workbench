@@ -10,6 +10,12 @@ export class SystemController {
       phase: "triple-system-fusion-ai-product-os",
       modules: [
         "auth",
+        "admin-dashboard",
+        "admin-users",
+        "admin-audit",
+        "knowledge-base",
+        "obsidian-vault",
+        "model-gateway",
         "projects",
         "conversations",
         "messages",
