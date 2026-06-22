@@ -62,6 +62,11 @@ export class ListAgentRunsQueryDto extends AdminPaginationQueryDto {
 
   @IsOptional()
   @Transform(emptyToUndefined)
+  @IsString()
+  conversationId?: string;
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
   @IsEnum(AgentRunStatus, { message: "运行状态不正确" })
   status?: AgentRunStatus;
 

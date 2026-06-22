@@ -258,6 +258,7 @@ export class AdminService {
     const where: Prisma.AgentRunLogWhereInput = {
       projectId: query.projectId,
       userId: query.userId,
+      conversationId: query.conversationId,
       status: query.status,
       traceId: query.traceId,
       ...(query.agentName ? { steps: { some: { agentName: query.agentName } } } : {}),
