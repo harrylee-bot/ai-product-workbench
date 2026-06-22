@@ -1,6 +1,8 @@
 import { KnowledgeType, ProjectStatus, QAReportStatus, QAReportTrigger, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProductDesignState } from "../src/ai/ai-vibe.types";
+import { renderPrdFromState } from "../src/ai/agents/prd-writer-agent.service";
+import { renderPrototypeSpecFromState } from "../src/ai/agents/prototype-designer-agent.service";
+import type { ProductDesignState, RequirementDocument } from "../src/ai/ai-vibe.types";
 import { QaRuleCheckService } from "../src/ai/qa-rule-check.service";
 import { QaService } from "../src/ai/qa.service";
 
@@ -125,6 +127,124 @@ describe("Module 13 QA services", () => {
       }),
     });
   });
+
+  it("runs QA from ProductDesignState snapshots instead of stale project pointers", async () => {
+    const now = new Date("2026-06-21T09:00:00Z");
+    const prisma = {
+      project: {
+        findUnique: vi.fn(),
+        update: vi.fn(),
+      },
+      productDesignState: {
+        findFirst: vi.fn(),
+      },
+      requirementDocument: {
+        findFirst: vi.fn(),
+      },
+      prototypeArtifact: {
+        findFirst: vi.fn(),
+      },
+      prototypeSpecRecord: {
+        findUnique: vi.fn(),
+      },
+      qAReport: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
+        count: vi.fn(),
+      },
+      knowledgeRetrievalLog: {
+        create: vi.fn(),
+      },
+      knowledgeItem: {
+        findMany: vi.fn(),
+      },
+      $transaction: vi.fn(),
+    };
+    const ruleCheck = new QaRuleCheckService();
+    const qaAgent = {
+      run: vi.fn().mockResolvedValue({
+        data: { status: "passed", summary: "模型检查通过", issues: [] },
+      }),
+    };
+    const knowledgeRetrieval = {
+      search: vi.fn().mockResolvedValue({ results: [], references: [] }),
+    };
+    const service = new QaService(
+      prisma as never,
+      ruleCheck,
+      qaAgent as never,
+      knowledgeRetrieval as never,
+    );
+    const state = baseState();
+    const prdDocument = toRequirementDocument(state, "prd-state");
+    const prototypeSpec = renderPrototypeSpecFromState(state, "both", "run-state");
+
+    prisma.project.findUnique.mockResolvedValue({
+      id: "project-1",
+      ownerId: "user-1",
+      status: ProjectStatus.prototype_ready,
+      deletedAt: null,
+      currentPrdDocumentId: "prd-stale",
+      currentPrototypeArtifactId: "artifact-stale",
+    });
+    prisma.productDesignState.findFirst.mockResolvedValue(stateRecord({
+      ...state,
+      prdDocument,
+      prototypeSpec,
+    }));
+    prisma.prototypeArtifact.findFirst.mockResolvedValue({
+      id: "artifact-stale",
+      projectId: "project-1",
+      prototypeSpecId: "spec-stale",
+      productDesignStateId: "state-1",
+      productDesignStateVersion: state.version,
+      title: "旧原型",
+      status: "ready",
+      htmlContent: "<!doctype html>",
+      entryFilePath: "index.html",
+      previewUrl: null,
+      targetDevice: "both",
+      pageCount: 1,
+      generatedByRunId: null,
+      errorMessage: null,
+      createdBy: "user-1",
+      updatedBy: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    prisma.qAReport.create.mockImplementation(async ({ data }) => ({
+      id: "qa-state",
+      ...data,
+      status: data.status as QAReportStatus,
+      trigger: data.trigger as QAReportTrigger,
+      prdDocumentId: data.prdDocumentId ?? null,
+      prototypeArtifactId: data.prototypeArtifactId ?? null,
+      prototypeSpecId: data.prototypeSpecId ?? null,
+      generatedByRunId: data.generatedByRunId ?? null,
+      relatedPatchId: data.relatedPatchId ?? null,
+      relatedRollbackId: data.relatedRollbackId ?? null,
+      createdAt: now,
+      updatedAt: now,
+    }));
+
+    const report = await service.runForProject("project-1", "user-1", {
+      trigger: "manual",
+      runId: "run-state",
+    });
+
+    expect(prisma.requirementDocument.findFirst).not.toHaveBeenCalled();
+    expect(report.prdDocumentId).toBe("prd-state");
+    expect(report.prototypeSpecId).toBe(prototypeSpec.id);
+    expect(report.prototypeArtifactId).toBeUndefined();
+    expect(qaAgent.run).toHaveBeenCalledWith(expect.objectContaining({
+      input: expect.objectContaining({
+        prdDocument: expect.objectContaining({ id: "prd-state" }),
+        prototypeSpec: expect.objectContaining({ id: prototypeSpec.id }),
+      }),
+    }));
+  });
 });
 
 function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignState {
@@ -185,5 +305,27 @@ function emptyKnowledgeContext() {
     conflicts: [],
     unknownAreas: [],
     summary: "无知识命中",
+  };
+}
+
+function toRequirementDocument(state: ProductDesignState, id: string): RequirementDocument {
+  const draft = renderPrdFromState(state);
+  return {
+    id,
+    projectId: state.projectId,
+    productDesignStateId: state.id,
+    productDesignStateVersion: state.version,
+    title: draft.title,
+    status: "ready",
+    sections: draft.sections,
+    assumptions: draft.assumptions,
+    knowledgeRefs: draft.knowledgeRefs,
+    pendingQuestions: draft.pendingQuestions,
+    validationNotes: draft.validationNotes,
+    generatedByRunId: "run-state",
+    createdBy: "user-1",
+    updatedBy: "user-1",
+    createdAt: "2026-06-21T08:00:00.000Z",
+    updatedAt: "2026-06-21T08:00:00.000Z",
   };
 }

@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import {
   KnowledgeCandidateSource,
+  ProductDesignStateStatus,
   ProjectStatus,
   PrototypeArtifactStatus,
   PrototypeTargetDevice,
@@ -123,11 +124,19 @@ export class PrototypeService {
       },
     });
 
-    return this.saveGeneratedPrototype(state, spec.data, draft.data, {
+    const saved = await this.saveGeneratedPrototype(state, spec.data, draft.data, {
       userId: user.id,
       runId,
       reason: "手动生成 HTML 原型",
     });
+    const productDesignState = await this.stateService.attachGeneratedArtifacts(state.id, {
+      prototypeSpec: saved.prototypeSpec,
+      status: ProductDesignStateStatus.prototype_ready,
+      userId: user.id,
+      runId,
+      reason: "手动生成 HTML 原型后同步 ProductDesignState",
+    });
+    return { ...saved, productDesignState };
   }
 
   async saveGeneratedPrototype(
@@ -199,16 +208,15 @@ export class PrototypeService {
 
   async getCurrentForUser(user: AuthenticatedUser, projectId: string) {
     const project = await this.assertProjectAccess(user, projectId, { allowArchived: true });
-    const artifact = project.currentPrototypeArtifactId
-      ? await this.prisma.prototypeArtifact.findFirst({
-          where: { id: project.currentPrototypeArtifactId, projectId },
-        })
-      : await this.prisma.prototypeArtifact.findFirst({
-          where: { projectId },
-          orderBy: { updatedAt: "desc" },
-        });
+    const state = await this.stateService.getCurrentState(projectId);
+    const artifact = await this.getCurrentPrototypeArtifactForState(
+      projectId,
+      project.currentPrototypeArtifactId,
+      state,
+    );
     return {
       artifact: artifact ? this.toArtifactItem(artifact as PrototypeArtifactRecord) : null,
+      productDesignState: state ?? null,
     };
   }
 
@@ -217,18 +225,16 @@ export class PrototypeService {
     input: { projectId: string; artifactId?: string },
   ) {
     const project = await this.assertProjectAccess(user, input.projectId, { allowArchived: true });
+    const state = input.artifactId ? undefined : await this.stateService.getCurrentState(input.projectId);
     const artifact = input.artifactId
       ? await this.prisma.prototypeArtifact.findFirst({
           where: { id: input.artifactId, projectId: input.projectId },
         })
-      : project.currentPrototypeArtifactId
-        ? await this.prisma.prototypeArtifact.findFirst({
-            where: { id: project.currentPrototypeArtifactId, projectId: input.projectId },
-          })
-        : await this.prisma.prototypeArtifact.findFirst({
-            where: { projectId: input.projectId },
-            orderBy: { updatedAt: "desc" },
-          });
+      : await this.getCurrentPrototypeArtifactForState(
+          input.projectId,
+          project.currentPrototypeArtifactId,
+          state,
+        );
 
     if (!artifact) return { prototypeState: null };
     const specRecord = await this.prisma.prototypeSpecRecord.findUnique({
@@ -257,6 +263,7 @@ export class PrototypeService {
       },
       prototypeSpec: spec,
       artifact: artifactItem,
+      productDesignState: state ?? null,
     };
   }
 
@@ -369,6 +376,25 @@ export class PrototypeService {
     return this.toVersionItem(version);
   }
 
+  private async getCurrentPrototypeArtifactForState(
+    projectId: string,
+    currentPrototypeArtifactId: string | null | undefined,
+    state?: ProductDesignState,
+  ) {
+    const artifact = currentPrototypeArtifactId
+      ? await this.prisma.prototypeArtifact.findFirst({
+          where: { id: currentPrototypeArtifactId, projectId },
+        })
+      : await this.prisma.prototypeArtifact.findFirst({
+          where: { projectId },
+          orderBy: { updatedAt: "desc" },
+        });
+
+    if (!artifact || !state) return artifact;
+    if (isArtifactFromCurrentState(artifact as PrototypeArtifactRecord, state)) return artifact;
+    return null;
+  }
+
   private async assertProjectAccess(
     user: AuthenticatedUser,
     projectId: string,
@@ -476,6 +502,12 @@ export class PrototypeService {
       createdAt: version.createdAt.toISOString(),
     };
   }
+}
+
+function isArtifactFromCurrentState(artifact: PrototypeArtifactRecord, state: ProductDesignState) {
+  if (artifact.productDesignStateId !== state.id) return false;
+  if (state.prototypeSpec?.id) return artifact.prototypeSpecId === state.prototypeSpec.id;
+  return artifact.productDesignStateVersion === state.version;
 }
 
 function prototypeStateRoot(

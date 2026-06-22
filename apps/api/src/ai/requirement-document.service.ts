@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   KnowledgeCandidateSource,
+  ProductDesignStateStatus,
   ProjectStatus,
   RequirementDocumentStatus,
   UserRole,
@@ -74,7 +75,15 @@ export class RequirementDocumentService {
       userId: user.id,
       reason: "手动生成 PRD",
     });
-    return { document };
+    const productDesignState = await this.stateService.attachGeneratedArtifacts(state.id, {
+      prdDocument: document,
+      status: state.prototypeSpec
+        ? ProductDesignStateStatus.prototype_ready
+        : ProductDesignStateStatus.prd_ready,
+      userId: user.id,
+      reason: "手动生成 PRD 后同步 ProductDesignState",
+    });
+    return { document, productDesignState };
   }
 
   async saveGeneratedDocument(
@@ -111,6 +120,11 @@ export class RequirementDocumentService {
 
   async getCurrentForUser(user: AuthenticatedUser, projectId: string) {
     const project = await this.assertProjectAccess(user, projectId, { allowArchived: true });
+    const state = await this.stateService.getCurrentState(projectId);
+    if (state?.prdDocument) {
+      return { document: state.prdDocument, productDesignState: state };
+    }
+
     const document = project.currentPrdDocumentId
       ? await this.prisma.requirementDocument.findFirst({
           where: { id: project.currentPrdDocumentId, projectId },
@@ -119,7 +133,11 @@ export class RequirementDocumentService {
           where: { projectId },
           orderBy: { updatedAt: "desc" },
         });
-    return { document: document ? this.toDocumentItem(document as RequirementDocumentRecord) : null };
+    const item = document ? this.toDocumentItem(document as RequirementDocumentRecord) : null;
+    if (state && item && !isDocumentFromCurrentState(item, state)) {
+      return { document: null, productDesignState: state };
+    }
+    return { document: item, productDesignState: state ?? null };
   }
 
   async getDocumentForUser(user: AuthenticatedUser, documentId: string) {
@@ -289,4 +307,8 @@ export class RequirementDocumentService {
       updatedAt: document.updatedAt.toISOString(),
     };
   }
+}
+
+function isDocumentFromCurrentState(document: RequirementDocument, state: ProductDesignState) {
+  return document.productDesignStateId === state.id && document.productDesignStateVersion === state.version;
 }

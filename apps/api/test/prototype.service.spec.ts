@@ -38,6 +38,7 @@ describe("HTML prototype artifact module", () => {
   const stateService = {
     getCurrentState: vi.fn(),
     getStateByIdForProject: vi.fn(),
+    attachGeneratedArtifacts: vi.fn(),
   };
   const prototypeDesignerAgent = { run: vi.fn() };
   const prototypeCodeAgent = { run: vi.fn() };
@@ -66,6 +67,25 @@ describe("HTML prototype artifact module", () => {
       reason: data.reason ?? null,
       createdAt: now,
     }));
+    const state = baseState();
+    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
+    stateService.attachGeneratedArtifacts.mockImplementation(async (_stateId, input) => ({
+      ...state,
+      version: 4,
+      status: input.status,
+      prototypeSpec: input.prototypeSpec,
+    }));
+    prototypeDesignerAgent.run.mockResolvedValue({ data: spec });
+    prototypeCodeAgent.run.mockResolvedValue({
+      data: {
+        projectId: state.projectId,
+        prototypeSpecId: spec.id,
+        htmlContent: renderHtmlFromPrototypeSpec(spec),
+        entryFilePath: "index.html",
+        targetDevice: "both",
+        pageCount: 1,
+      },
+    });
   });
 
   it("renders PrototypeSpec from ProductDesignState with source refs and state version", () => {
@@ -192,6 +212,52 @@ describe("HTML prototype artifact module", () => {
       ok: false,
       reason: "PROTOTYPE_HTML_PARENT_ACCESS",
     });
+  });
+
+  it("syncs manual prototype generation back into ProductDesignState", async () => {
+    const state = baseState();
+    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
+    stateService.getCurrentState.mockResolvedValue(state);
+    prototypeDesignerAgent.run.mockResolvedValue({ data: spec });
+    prototypeCodeAgent.run.mockResolvedValue({
+      data: {
+        projectId: state.projectId,
+        prototypeSpecId: spec.id,
+        htmlContent: renderHtmlFromPrototypeSpec(spec),
+        entryFilePath: "index.html",
+        targetDevice: "both",
+        pageCount: 1,
+      },
+    });
+    prisma.prototypeSpecRecord.create.mockImplementation(async ({ data }) => specRecord(data));
+    prisma.prototypeArtifact.create.mockImplementation(async ({ data }) => artifactRecord({ id: "artifact-manual", ...data }));
+
+    const result = await service.generateForUser(user, "project-1", { targetDevice: "both" });
+
+    expect(result.artifact.id).toBe("artifact-manual");
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
+      prototypeSpec: expect.objectContaining({ id: spec.id }),
+      status: "prototype_ready",
+      reason: "手动生成 HTML 原型后同步 ProductDesignState",
+    }));
+    expect(result.productDesignState.prototypeSpec.id).toBe(spec.id);
+  });
+
+  it("hides a stale current prototype artifact when it no longer matches ProductDesignState", async () => {
+    const state = baseState();
+    const currentSpec = renderPrototypeSpecFromState(state, "both", "run-current");
+    stateService.getCurrentState.mockResolvedValue(baseState({ prototypeSpec: currentSpec }));
+    prisma.project.findUnique.mockResolvedValue(baseProject({ currentPrototypeArtifactId: "artifact-stale" }));
+    prisma.prototypeArtifact.findFirst.mockResolvedValue(artifactRecord({
+      id: "artifact-stale",
+      prototypeSpecId: "spec-stale",
+      productDesignStateId: state.id,
+      productDesignStateVersion: state.version,
+    }));
+
+    const result = await service.getCurrentForUser(user, "project-1");
+
+    expect(result.artifact).toBeNull();
   });
 });
 

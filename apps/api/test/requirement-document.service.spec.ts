@@ -26,6 +26,7 @@ describe("PRD requirement document module", () => {
   const stateService = {
     getCurrentState: vi.fn(),
     getStateByIdForProject: vi.fn(),
+    attachGeneratedArtifacts: vi.fn(),
   };
   const prdWriterAgent = {
     run: vi.fn(),
@@ -54,6 +55,13 @@ describe("PRD requirement document module", () => {
       reason: data.reason ?? null,
       createdAt: now,
     }));
+    stateService.attachGeneratedArtifacts.mockImplementation(async (_stateId, input) => ({
+      ...baseState(),
+      version: 4,
+      status: input.status,
+      prdDocument: input.prdDocument,
+    }));
+    prdWriterAgent.run.mockResolvedValue({ data: renderPrdFromState(baseState()) });
   });
 
   it("renders a structured 16-section PRD from ProductDesignState", () => {
@@ -133,6 +141,51 @@ describe("PRD requirement document module", () => {
       where: { id: "prd-current", projectId: "project-1" },
     });
     expect(result.document?.id).toBe("prd-current");
+  });
+
+  it("syncs manual PRD generation back into ProductDesignState", async () => {
+    const state = baseState();
+    const draft = renderPrdFromState(state);
+    stateService.getCurrentState.mockResolvedValue(state);
+    prdWriterAgent.run.mockResolvedValue({ data: draft });
+    prisma.requirementDocument.create.mockImplementation(async ({ data }) =>
+      documentRecord({
+        id: "prd-manual",
+        ...data,
+      }),
+    );
+
+    const result = await service.generateForUser(user, "project-1", { mode: "draft" });
+
+    expect(result.document.id).toBe("prd-manual");
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
+      prdDocument: expect.objectContaining({ id: "prd-manual" }),
+      status: "prd_ready",
+      reason: "手动生成 PRD 后同步 ProductDesignState",
+    }));
+    expect(result.productDesignState.prdDocument.id).toBe("prd-manual");
+  });
+
+  it("prefers the PRD embedded in ProductDesignState over a stale project pointer", async () => {
+    const statePrd = documentRecord({
+      id: "prd-state",
+      ...renderPrdFromState(baseState()),
+    });
+    stateService.getCurrentState.mockResolvedValue(baseState({
+      version: 4,
+      prdDocument: {
+        ...statePrd,
+        status: "ready",
+        createdAt: statePrd.createdAt.toISOString(),
+        updatedAt: statePrd.updatedAt.toISOString(),
+      },
+    }));
+    prisma.project.findUnique.mockResolvedValue(baseProject({ currentPrdDocumentId: "prd-stale" }));
+
+    const result = await service.getCurrentForUser(user, "project-1");
+
+    expect(result.document?.id).toBe("prd-state");
+    expect(prisma.requirementDocument.findFirst).not.toHaveBeenCalled();
   });
 });
 

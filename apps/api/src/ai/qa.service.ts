@@ -183,11 +183,14 @@ export class QaService {
     }
 
     const state = await this.getCurrentState(projectId);
-    const prdDocument = options.prdDocument ?? await this.getCurrentPrd(projectId, project.currentPrdDocumentId);
+    const prdDocument = options.prdDocument
+      ?? state?.prdDocument
+      ?? await this.getCurrentPrdForState(projectId, project.currentPrdDocumentId, state);
     const currentArtifact = options.prototypeArtifact
-      ?? await this.getCurrentPrototypeArtifact(projectId, project.currentPrototypeArtifactId);
+      ?? await this.getCurrentPrototypeArtifactForState(projectId, project.currentPrototypeArtifactId, state);
     const prototypeSpec = options.prototypeSpec
-      ?? (currentArtifact ? await this.getPrototypeSpec(currentArtifact.prototypeSpecId) : state?.prototypeSpec);
+      ?? state?.prototypeSpec
+      ?? (currentArtifact ? await this.getPrototypeSpec(currentArtifact.prototypeSpecId) : undefined);
 
     const checkTypes = options.checkTypes?.length ? options.checkTypes : DEFAULT_CHECK_TYPES;
     const knowledgeContext = await this.getKnowledgeContext(projectId, state, options);
@@ -338,18 +341,36 @@ export class QaService {
     return row ? toStateItem(row as ProductDesignStateRecord) : null;
   }
 
-  private async getCurrentPrd(projectId: string, currentPrdDocumentId?: string | null) {
+  private async getCurrentPrdForState(
+    projectId: string,
+    currentPrdDocumentId: string | null | undefined,
+    state: ProductDesignState | null,
+  ) {
     const row = currentPrdDocumentId
       ? await this.prisma.requirementDocument.findFirst({ where: { id: currentPrdDocumentId, projectId } })
       : await this.prisma.requirementDocument.findFirst({ where: { projectId }, orderBy: { updatedAt: "desc" } });
-    return row ? toRequirementDocument(row as RequirementDocumentRecord) : null;
+    const document = row ? toRequirementDocument(row as RequirementDocumentRecord) : null;
+    if (!document || !state) return document;
+    return document.productDesignStateId === state.id && document.productDesignStateVersion === state.version
+      ? document
+      : null;
   }
 
-  private async getCurrentPrototypeArtifact(projectId: string, currentPrototypeArtifactId?: string | null) {
+  private async getCurrentPrototypeArtifactForState(
+    projectId: string,
+    currentPrototypeArtifactId: string | null | undefined,
+    state: ProductDesignState | null,
+  ) {
     const row = currentPrototypeArtifactId
       ? await this.prisma.prototypeArtifact.findFirst({ where: { id: currentPrototypeArtifactId, projectId } })
       : await this.prisma.prototypeArtifact.findFirst({ where: { projectId }, orderBy: { updatedAt: "desc" } });
-    return row ? toPrototypeArtifact(row as PrototypeArtifactRecord) : null;
+    const artifact = row ? toPrototypeArtifact(row as PrototypeArtifactRecord) : null;
+    if (!artifact || !state) return artifact;
+    if (artifact.productDesignStateId !== state.id) return null;
+    if (state.prototypeSpec?.id) {
+      return artifact.prototypeSpecId === state.prototypeSpec.id ? artifact : null;
+    }
+    return artifact.productDesignStateVersion === state.version ? artifact : null;
   }
 
   private async getPrototypeSpec(prototypeSpecId: string) {
