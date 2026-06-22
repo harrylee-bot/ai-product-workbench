@@ -424,6 +424,7 @@ function Phase1WorkspaceInner() {
       <PreviewPanel
         prdPreview={prdPreview}
         prototypePreview={prototypePreview}
+        decision={decision}
       />
     </main>
   );
