@@ -393,6 +393,7 @@ export class PatchService {
       runId: run.id,
       status: "completed",
       patchRecord: result.patchRecord,
+      patchPreview: result.patchPreview,
       result: result.result,
     };
   }
@@ -523,18 +524,17 @@ export class PatchService {
         content: "进化计划补丁已创建",
       });
 
-      const result = await this.applyPatchPlan(executionInput, patchRecord, plan, state);
-      await this.prisma.patchPreview.update({
-        where: { id: preview.id },
-        data: {
-          status: "applied",
-          afterProductDesignStateVersion: result.patchRecord.afterProductDesignStateVersion,
-          message: "进化计划补丁预览已应用并生成新版本。",
-        },
-      });
+      const result = await this.applyPatchPlan(
+        executionInput,
+        patchRecord,
+        plan,
+        state,
+        undefined,
+        patchPreview,
+      );
       return {
         ...result,
-        patchPreview: this.toPatchPreview(patchPreview, result.patchRecord),
+        patchPreview: result.patchPreview,
         userMessage,
         runId: run.id,
         conversationId,
@@ -796,15 +796,7 @@ export class PatchService {
         content: "局部修改计划已确认，准备应用补丁预览",
       });
 
-      const result = await this.applyPatchPlan(input, patchRecord, plan, state);
-      await this.prisma.patchPreview.update({
-        where: { id: preview.id },
-        data: {
-          status: "applied",
-          afterProductDesignStateVersion: result.patchRecord.afterProductDesignStateVersion,
-          message: "补丁预览已应用并生成新版本。",
-        },
-      });
+      const result = await this.applyPatchPlan(input, patchRecord, plan, state, undefined, patchPreview);
       return result;
     } catch (error) {
       if (patchPreview) {
@@ -827,6 +819,7 @@ export class PatchService {
     plan: PatchPlan,
     beforeState: ProductDesignState,
     knowledgeContext?: KnowledgeContext,
+    activePatchPreview?: PatchPreviewRow,
   ) {
     let statePatchApplied = false;
     const projectSnapshot = await this.prisma.project.findUnique({
@@ -981,6 +974,19 @@ export class PatchService {
         },
       });
       patchRecord = this.toPatchRecord(finalRecord as PatchRecordRow);
+      const completedPatchPreview = activePatchPreview
+        ? this.toPatchPreview(
+            await this.prisma.patchPreview.update({
+              where: { id: activePatchPreview.id },
+              data: {
+                status: "applied",
+                afterProductDesignStateVersion: stateWithArtifacts.version,
+                message: "补丁预览已应用并生成新版本。",
+              },
+            }) as PatchPreviewRow,
+            patchRecord,
+          )
+        : undefined;
 
       const message = qa.data.passed
         ? "局部修改已应用，需求文档、网页原型和质检结果已同步更新。"
@@ -993,6 +999,7 @@ export class PatchService {
         qaReport: qa.data,
         patchRecord,
         patchPlan: plan,
+        patchPreview: completedPatchPreview,
       };
       const assistantMessage = await this.messageService.createAssistantMessage({
         projectId: input.projectId,
@@ -1009,7 +1016,7 @@ export class PatchService {
         projectId: input.projectId,
         type: "patch_completed",
         step: "qa_check",
-        data: { patchRecord, result },
+        data: { patchRecord, patchPreview: completedPatchPreview, result },
         content: message,
       });
       await this.runLog.completeRun(input.runId, result, message);
@@ -1017,7 +1024,7 @@ export class PatchService {
         where: { id: input.projectId },
         data: { status: qa.data.passed ? ProjectStatus.prototype_ready : ProjectStatus.qa_failed },
       });
-      return { patchRecord, assistantMessage, result };
+      return { patchRecord, patchPreview: completedPatchPreview, assistantMessage, result };
     } catch (error) {
       if (statePatchApplied) {
         const rollback = await this.stateService.restoreStateAfterPatchFailure(input.projectId, beforeState, {
