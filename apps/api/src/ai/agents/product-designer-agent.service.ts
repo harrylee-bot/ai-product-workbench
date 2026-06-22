@@ -3,6 +3,7 @@ import { AgentName, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import { firstSentence, stableId } from "../ai-vibe.helpers";
 import { agentSystemPrompt } from "../agent-charter";
+import { agentSkillSystemPrompt, collectKnowledgeReferences } from "../agent-skill-instructions";
 import type {
   KnowledgeContext,
   ProductBuildPlan,
@@ -36,10 +37,13 @@ export class ProductDesignerAgentService extends BaseAgentService<
     return [
       {
         role: "system" as const,
-        content: agentSystemPrompt(
-          this.agentName,
-          "你是 Product Designer Agent。优先执行 ProductBuildPlan，把正式需求落到 ProductDesignDraft JSON，必须标记 assumptions。",
-        ),
+        content: [
+          agentSystemPrompt(
+            this.agentName,
+            "你是 Product Designer Agent。优先执行 ProductBuildPlan，把正式需求落到 ProductDesignDraft JSON，必须标记 assumptions。",
+          ),
+          agentSkillSystemPrompt(this.agentName, this.taskType, input.knowledgeContext),
+        ].filter(Boolean).join("\n\n"),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];
@@ -249,15 +253,7 @@ export class ProductDesignerAgentService extends BaseAgentService<
           createdAt: new Date().toISOString(),
         })),
       ],
-      knowledgeRefs: [
-        ...input.knowledgeContext.strongRules,
-        ...input.knowledgeContext.defaultRules,
-        ...input.knowledgeContext.referenceCases,
-        ...input.knowledgeContext.designPatterns,
-        ...input.knowledgeContext.prdWritingRules,
-        ...input.knowledgeContext.prototypeRules,
-        ...input.knowledgeContext.businessConcepts,
-      ],
+      knowledgeRefs: collectKnowledgeReferences(input.knowledgeContext),
       pendingQuestions: input.requirementAnalysis.clarificationQuestions,
       confirmedFacts: [],
       createdBy: "system",

@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { AgentName, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import { agentSystemPrompt } from "../agent-charter";
+import { agentSkillSystemPrompt } from "../agent-skill-instructions";
 import { BaseAgentService } from "./base-agent.service";
 import type {
   ConversationMessage,
@@ -33,10 +34,13 @@ export class RequirementAnalystAgentService extends BaseAgentService<
     return [
       {
         role: "system" as const,
-        content: agentSystemPrompt(
-          this.agentName,
-          "你是 Requirement Analyst Agent。分析需求完整度，不生成 PRD。只输出 RequirementAnalysis JSON。",
-        ),
+        content: [
+          agentSystemPrompt(
+            this.agentName,
+            "你是 Requirement Analyst Agent。分析需求完整度，不生成 PRD。只输出 RequirementAnalysis JSON。",
+          ),
+          agentSkillSystemPrompt(this.agentName, this.taskType, input.knowledgeContext),
+        ].filter(Boolean).join("\n\n"),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];

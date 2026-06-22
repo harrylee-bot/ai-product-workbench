@@ -3,6 +3,7 @@ import { AgentName, ModelTaskType, UserIntent } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import { firstSentence, stableId } from "../ai-vibe.helpers";
 import { agentSystemPrompt } from "../agent-charter";
+import { agentSkillSystemPrompt, collectKnowledgeReferences } from "../agent-skill-instructions";
 import type {
   KnowledgeContext,
   ProductBuildPlan,
@@ -37,10 +38,13 @@ export class ProductPlannerAgentService extends BaseAgentService<
     return [
       {
         role: "system" as const,
-        content: agentSystemPrompt(
-          this.agentName,
-          "你是 Product Planner Agent。为正式需求规划执行方案，只输出 ProductBuildPlan JSON。不得生成 PRD、HTML，也不得直接修改 ProductDesignState。",
-        ),
+        content: [
+          agentSystemPrompt(
+            this.agentName,
+            "你是 Product Planner Agent。为正式需求规划执行方案，只输出 ProductBuildPlan JSON。不得生成 PRD、HTML，也不得直接修改 ProductDesignState。",
+          ),
+          agentSkillSystemPrompt(this.agentName, this.taskType, input.knowledgeContext),
+        ].filter(Boolean).join("\n\n"),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];
@@ -58,9 +62,12 @@ export class ProductPlannerAgentService extends BaseAgentService<
       ...input.requirementAnalysis.knownFromKnowledge,
       ...knowledgeReferences(input.knowledgeContext).map((item) => item.title),
     ]);
+    const skillNames = input.knowledgeContext.agentSkills?.map((skill) => skill.name) ?? [];
+    const skillInputs = skillNames.length ? ["VibeCodingSkillInstructions"] : [];
     const assumptions = unique([
       ...input.requirementAnalysis.inferredByAI,
       "正式需求先落 ProductBuildPlan，再落 ProductDesignState，PRD、原型和 QA 均从同一 State 再生成。",
+      skillNames.length ? `本轮需按 Vibe Coding Skills 执行：${skillNames.join("、")}` : "",
     ]);
     const openQuestions = unique([
       ...input.requirementAnalysis.missingCritical,
@@ -101,49 +108,49 @@ export class ProductPlannerAgentService extends BaseAgentService<
         {
           agentName: AgentName.product_planner_agent,
           step: ModelTaskType.product_planning,
-          input: ["IntentResult", "RequirementAnalysis", "KnowledgeContext", "existing ProductDesignState"],
+          input: stepInputs(skillInputs, "IntentResult", "RequirementAnalysis", "KnowledgeContext", "existing ProductDesignState"),
           output: "ProductBuildPlan",
           gate: "计划必须只描述执行方案，不直接写 PRD/HTML/State。",
         },
         {
           agentName: AgentName.product_designer_agent,
           step: ModelTaskType.product_design,
-          input: ["ProductBuildPlan", "RequirementAnalysis", "KnowledgeContext"],
+          input: stepInputs(skillInputs, "ProductBuildPlan", "RequirementAnalysis", "KnowledgeContext"),
           output: "ProductDesignDraft",
           gate: "所有业务修改必须先落到 ProductDesignState。",
         },
         {
           agentName: AgentName.prd_writer_agent,
           step: ModelTaskType.prd_generation,
-          input: ["ProductDesignState"],
+          input: stepInputs(skillInputs, "ProductDesignState"),
           output: "RequirementDocumentDraft",
           gate: "只允许从 ProductDesignState 渲染 PRD。",
         },
         {
           agentName: AgentName.prototype_designer_agent,
           step: ModelTaskType.prototype_design,
-          input: ["ProductDesignState"],
+          input: stepInputs(skillInputs, "ProductDesignState"),
           output: "PrototypeSpec",
           gate: "只允许从 ProductDesignState 生成原型结构。",
         },
         {
           agentName: AgentName.prototype_code_agent,
           step: ModelTaskType.prototype_code_generation,
-          input: ["PrototypeSpec"],
+          input: stepInputs(skillInputs, "PrototypeSpec"),
           output: "PrototypeArtifactDraft",
           gate: "只允许从 PrototypeSpec 生成离线 HTML 评审原型。",
         },
         {
           agentName: AgentName.qa_agent,
           step: ModelTaskType.qa_check,
-          input: ["ProductDesignState", "RequirementDocument", "PrototypeSpec", "PrototypeArtifact"],
+          input: stepInputs(skillInputs, "ProductDesignState", "RequirementDocument", "PrototypeSpec", "PrototypeArtifact"),
           output: "QAReport",
           gate: "QA 只能检查，不能修改任何产物。",
         },
         {
           agentName: AgentName.knowledge_extractor_agent,
           step: ModelTaskType.knowledge_extraction,
-          input: ["ProductDesignState", "RequirementDocument", "PrototypeSpec", "PatchPlan"],
+          input: stepInputs(skillInputs, "ProductDesignState", "RequirementDocument", "PrototypeSpec", "PatchPlan"),
           output: "KnowledgeCandidateDraft[]",
           gate: "只生成候选知识，正式入库必须审核。",
         },
@@ -364,15 +371,11 @@ function requirementModeFromIntent(intent: UserIntent): ProductBuildPlan["requir
 }
 
 function knowledgeReferences(context: KnowledgeContext) {
-  return [
-    ...context.strongRules,
-    ...context.defaultRules,
-    ...context.referenceCases,
-    ...context.designPatterns,
-    ...context.prdWritingRules,
-    ...context.prototypeRules,
-    ...context.businessConcepts,
-  ];
+  return collectKnowledgeReferences(context);
+}
+
+function stepInputs(skillInputs: string[], ...items: string[]) {
+  return [...items, ...skillInputs];
 }
 
 function unique(values: Array<string | undefined | null>) {

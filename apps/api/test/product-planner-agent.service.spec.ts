@@ -47,6 +47,17 @@ describe("ProductPlannerAgentService", () => {
           prdWritingRules: [],
           prototypeRules: [],
           businessConcepts: [],
+          agentSkills: [
+            {
+              id: "agent-skill:obsidian-bases",
+              name: "obsidian-bases",
+              description: "Create structured Obsidian Bases.",
+              sourcePath: "/skills/obsidian-bases/SKILL.md",
+              contentPreview: "Use views, filters, formulas, and summaries.",
+              capabilities: ["Views", "Filters"],
+              triggerHints: ["database", "table"],
+            },
+          ],
           conflicts: [],
           unknownAreas: [],
           summary: "命中默认规则",
@@ -60,7 +71,11 @@ describe("ProductPlannerAgentService", () => {
         taskType: ModelTaskType.product_planning,
       }),
     );
+    const modelCall = modelGateway.generateJson.mock.calls[0][0];
+    expect(modelCall.messages[0].content).toContain("Vibe Coding Skill 融合规则");
+    expect(modelCall.messages[0].content).toContain("obsidian-bases");
     expect(result.data.requirementMode).toBe("formal_requirement");
+    expect(result.data.sourceSummary.assumptions).toContain("本轮需按 Vibe Coding Skills 执行：obsidian-bases");
     expect(result.data.deliverables).toEqual({
       productDesignState: true,
       prd: true,
@@ -88,5 +103,6 @@ describe("ProductPlannerAgentService", () => {
         output: "ProductDesignDraft",
       }),
     );
+    expect(result.data.agentSequence[0].input).toContain("VibeCodingSkillInstructions");
   });
 });
