@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import type { QAReport } from "./ai-vibe.types";
 
 export function summarizeText(text: string, maxLength = 2000) {
   const compact = text.replace(/\s+/g, " ").trim();
@@ -25,4 +26,12 @@ export function stableId(prefix: string, input: string) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 24);
   return suffix ? `${prefix}_${suffix}` : `${prefix}_${Date.now().toString(36)}`;
+}
+
+export function qaCompletedPayload(qaReport: QAReport) {
+  return {
+    ...qaReport,
+    qaReport,
+    qaGate: qaReport.gate,
+  };
 }

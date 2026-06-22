@@ -506,6 +506,19 @@ describe("PatchService", () => {
     expect(emittedTypes.indexOf("prd_updated")).toBeLessThan(emittedTypes.indexOf("prototype_updated"));
     expect(emittedTypes.indexOf("prototype_updated")).toBeLessThan(emittedTypes.indexOf("qa_completed"));
     expect(emittedTypes.indexOf("qa_completed")).toBeLessThan(emittedTypes.indexOf("patch_completed"));
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "qa_completed",
+      step: "qa_check",
+      data: expect.objectContaining({
+        id: "qa-1",
+        qaReport: expect.objectContaining({ id: "qa-1", relatedPatchId: "patch-1" }),
+        qaGate: expect.objectContaining({
+          status: "open",
+          allowExportOrPublish: true,
+          allowPersistKnowledge: true,
+        }),
+      }),
+    }));
     expect(runLog.completeRun).toHaveBeenCalledWith(
       "run-1",
       expect.objectContaining({
@@ -911,5 +924,18 @@ function baseQaReport() {
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
     passed: true,
+    gate: {
+      status: "open",
+      allowConfirmArtifacts: true,
+      allowPersistKnowledge: true,
+      allowExportOrPublish: true,
+      shouldReturnToPatch: false,
+      reportId: "qa-1",
+      reportStatus: "passed",
+      blockingReasons: [],
+      warnings: [],
+      requiredActions: [],
+      evaluatedAt: "2026-06-20T08:00:00.000Z",
+    },
   };
 }

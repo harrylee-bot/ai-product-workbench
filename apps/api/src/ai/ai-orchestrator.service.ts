@@ -11,7 +11,7 @@ import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { fallbackStepOutput } from "./agent-fallback-policy";
-import { toInputJson } from "./ai-vibe.helpers";
+import { qaCompletedPayload, toInputJson } from "./ai-vibe.helpers";
 import { isCasualGeneralInput } from "./intent-classifier.helpers";
 import type {
   AgentRunContext,
@@ -376,7 +376,7 @@ export class AiOrchestratorService {
         projectId: context.projectId,
         type: "qa_completed",
         step: "qa_check",
-        data: qa.data,
+        data: qaCompletedPayload(qa.data),
       });
 
       const knowledgeCandidates = await this.runAgentStep(

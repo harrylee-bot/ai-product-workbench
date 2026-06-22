@@ -247,6 +247,20 @@ describe("AiOrchestrator main vibe chain", () => {
         prototypeArtifact: expect.objectContaining({ id: "artifact-1" }),
       }),
     }));
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "qa_completed",
+      step: "qa_check",
+      data: expect.objectContaining({
+        id: "qa-1",
+        issues: [],
+        qaReport: expect.objectContaining({ id: "qa-1" }),
+        qaGate: expect.objectContaining({
+          status: "open",
+          allowExportOrPublish: true,
+          allowPersistKnowledge: true,
+        }),
+      }),
+    }));
     expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({
       content: "已完成产品设计状态、PRD 草案、HTML 原型和 QA 校验。",
       relatedRunId: "run-1",
@@ -626,5 +640,18 @@ function baseQaReport(): QAReport {
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
     passed: true,
+    gate: {
+      status: "open",
+      allowConfirmArtifacts: true,
+      allowPersistKnowledge: true,
+      allowExportOrPublish: true,
+      shouldReturnToPatch: false,
+      reportId: "qa-1",
+      reportStatus: "passed",
+      blockingReasons: [],
+      warnings: [],
+      requiredActions: [],
+      evaluatedAt: "2026-06-20T08:00:00.000Z",
+    },
   };
 }

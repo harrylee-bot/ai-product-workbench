@@ -40,6 +40,8 @@ export type VibeRunView = {
   steps: VibeRunStepView[];
   knowledgeHitCount?: number;
   qaIssueCount?: number;
+  qaGateStatus?: "open" | "warning" | "blocked";
+  qaGateSummary?: string;
   exportFileName?: string;
   patchId?: string;
   patchPreviewMessage?: string;
@@ -229,10 +231,11 @@ function ExecutionPathCard({
               })}
             </div>
           </div>
-          {runState.knowledgeHitCount || runState.qaIssueCount !== undefined || runState.exportFileName || runState.patchId ? (
+          {runState.knowledgeHitCount || runState.qaIssueCount !== undefined || runState.qaGateSummary || runState.exportFileName || runState.patchId ? (
             <div className="mt-2 text-xs leading-5 text-gray-500">
               {runState.knowledgeHitCount ? `本轮知识库命中 ${runState.knowledgeHitCount} 条。` : null}
               {runState.qaIssueCount !== undefined ? `QA 发现 ${runState.qaIssueCount} 个问题。` : null}
+              {runState.qaGateSummary ? `QA 闸门：${runState.qaGateSummary}` : null}
               {runState.exportFileName ? `导出文件：${runState.exportFileName}` : null}
               {runState.patchId ? `Patch 候选：${runState.patchId}。${runState.patchPreviewMessage ?? ""}` : null}
             </div>

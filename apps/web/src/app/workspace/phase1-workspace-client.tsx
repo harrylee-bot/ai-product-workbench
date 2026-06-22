@@ -656,8 +656,15 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
   }
 
   if (eventType === "qa_completed" && payload) {
+    const qaReport = asRecord(payload.qaReport) ?? payload;
+    const qaGate = asRecord(payload.qaGate) ?? asRecord(qaReport.gate);
     next = updateStep(next, "qa_check", "done", "QA 校验完成");
-    next.qaIssueCount = readArrayLength(payload.issues);
+    next.qaIssueCount = readArrayLength(qaReport.issues);
+    const gateStatus = asQaGateStatus(qaGate?.status);
+    if (gateStatus) {
+      next.qaGateStatus = gateStatus;
+      next.qaGateSummary = qaGateSummary(qaGate);
+    }
   }
 
   if (eventType === "export_ready" && payload) {
@@ -742,6 +749,21 @@ function updateStep(
 
 function readArrayLength(value: unknown) {
   return Array.isArray(value) ? value.length : 0;
+}
+
+function asQaGateStatus(value: unknown): "open" | "warning" | "blocked" | undefined {
+  return value === "open" || value === "warning" || value === "blocked" ? value : undefined;
+}
+
+function qaGateSummary(gate: Record<string, unknown> | null | undefined) {
+  if (!gate) return undefined;
+  const status = asQaGateStatus(gate.status);
+  const parts = [
+    status === "blocked" ? "阻止确认/导出，需回到 Patch" : status === "warning" ? "可确认，需复核风险" : "通过",
+    gate.allowPersistKnowledge === false ? "暂不沉淀知识" : "可沉淀知识",
+    gate.allowExportOrPublish === false ? "禁止导出/发布" : "可导出/发布",
+  ];
+  return parts.join("；");
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
