@@ -14,11 +14,11 @@ export class AgentFactory {
   createFlowOptimizationAgent(reason: string): DynamicAgent {
     return {
       id: "agent_flow_optimization",
-      name: "Flow Optimization Agent",
-      role: "Find workflow bottlenecks and suggest safer pipeline changes.",
+      name: "流程优化智能体",
+      role: "发现工作流瓶颈，并提出更安全的流程变更建议。",
       prompt:
-        "Analyze DecisionTrace, PatchPreview, QA, and feedback signals. " +
-        "Return only structured observations and never mutate system state directly.",
+        "分析决策追踪、补丁预览、质检和反馈信号。" +
+        "只返回结构化观察，不得直接修改系统状态。",
       inputSchema: {
         type: "object",
         required: ["decisionTrace", "systemGraph"],

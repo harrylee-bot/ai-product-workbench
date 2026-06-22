@@ -27,7 +27,7 @@ describe("Triple system fusion", () => {
     });
 
     expect(context.mustFollow.length).toBeGreaterThanOrEqual(2);
-    expect(context.avoid[0]?.effect).toContain("direct database mutation");
+    expect(context.avoid[0]?.effect).toContain("直接修改数据库");
     expect(context.warn.length).toBe(1);
   });
 
@@ -52,8 +52,8 @@ describe("Triple system fusion", () => {
             id: "c1",
             rule: "must_follow",
             scope: "patch",
-            condition: "patch change",
-            effect: "Route through Patch Preview before apply.",
+            condition: "补丁变更",
+            effect: "执行前必须进入补丁预览。",
             weight: 1,
             sourceKnowledgeId: "k1",
           },
@@ -64,8 +64,8 @@ describe("Triple system fusion", () => {
             id: "c2",
             rule: "avoid",
             scope: "patch",
-            condition: "direct mutation",
-            effect: "Avoid direct database mutation and protected module edits.",
+            condition: "直接修改",
+            effect: "避免直接修改数据库和受保护模块。",
             weight: 0.95,
             sourceKnowledgeId: "k2",
           },
@@ -75,8 +75,8 @@ describe("Triple system fusion", () => {
             id: "c3",
             rule: "warn",
             scope: "decision",
-            condition: "rewrite",
-            effect: "High-impact strategies require stronger risk penalty.",
+            condition: "重写",
+            effect: "高影响策略需要更强的风险惩罚。",
             weight: 0.8,
             sourceKnowledgeId: "k3",
           },
@@ -87,7 +87,7 @@ describe("Triple system fusion", () => {
 
     expect(result.decisionPlan.strategies).toHaveLength(4);
     expect(result.decisionPlan.selectedStrategyId).not.toContain("full");
-    expect(result.decisionPlan.reasoning.join(" ")).toContain("must_follow");
+    expect(result.decisionPlan.reasoning.join(" ")).toContain("必须遵守");
     expect(result.decisionPlan.scores[result.selectedStrategy.id].weightedScore).toBeGreaterThan(0);
     expect(prisma.strategy.createMany).toHaveBeenCalledOnce();
   });

@@ -77,7 +77,7 @@ export class SelfGenerationEngine {
             to: agent.id,
             relation: "feeds",
           },
-          reason: "Register new agent as a post-evolution observer.",
+          reason: "将新智能体注册为进化后的观察节点。",
           riskLevel: "medium",
         },
       ],
@@ -88,22 +88,22 @@ export class SelfGenerationEngine {
   private inspect(outcome: "success" | "failure" | "partial", riskLevel?: string): SystemInsight {
     if (outcome === "failure") {
       return {
-        bottleneck: "Repeated execution failure after decision selection.",
-        weakness: "Current graph lacks a flow-specific diagnostic agent.",
-        opportunity: "Add an experimental Flow Optimization Agent behind Evolution Engine.",
+        bottleneck: "策略选择后反复出现执行失败。",
+        weakness: "当前系统图缺少面向流程的诊断智能体。",
+        opportunity: "在进化引擎之后新增实验性的流程优化智能体。",
       };
     }
     if (riskLevel === "medium" || outcome === "partial") {
       return {
-        bottleneck: "Patch Preview needs an additional dependency checker.",
-        weakness: "Pipeline can surface risks but has limited graph-level checking.",
-        opportunity: "Insert a low-risk graph checker step for future proposals.",
+        bottleneck: "补丁预览需要额外的依赖检查器。",
+        weakness: "流程可以暴露风险，但系统图层面的检查仍有限。",
+        opportunity: "为后续提案插入一个低风险系统图检查步骤。",
       };
     }
     return {
-      bottleneck: "No critical bottleneck detected.",
-      weakness: "Graph observability can be improved.",
-      opportunity: "Register a low-risk self-generation observer node.",
+      bottleneck: "未发现关键瓶颈。",
+      weakness: "系统图可观测性仍可提升。",
+      opportunity: "注册低风险自生成观察节点。",
     };
   }
 
@@ -130,11 +130,11 @@ export class SelfGenerationEngine {
         payload: {
           id: "agent_self_generation_observer",
           type: "agent",
-          name: "Self-Generation Observer",
+          name: "自生成观察智能体",
           status: "experimental",
           config: {
-            role: "Observe graph health and recommend mutation previews only.",
-            prompt: "Never apply mutations directly. Return structured SystemMutation proposals.",
+            role: "观察系统图健康度，只推荐变更预览。",
+            prompt: "不得直接应用变更，只返回结构化系统变更提案。",
           },
         },
         reason: insight.opportunity,
@@ -149,7 +149,7 @@ export class SelfGenerationEngine {
           to: "agent_self_generation_observer",
           relation: "feeds",
         },
-        reason: "Feed policy changes into self-generation observation.",
+        reason: "将策略变化输入自生成观察环节。",
         riskLevel: "low",
       },
     ];

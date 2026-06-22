@@ -30,7 +30,7 @@ describe("Phase2 decision system", () => {
     const selection = selector.select(plan.strategies, board);
     const selected = plan.strategies.find((strategy) => strategy.id === selection.selectedStrategyId);
     expect(selected).toBeDefined();
-    expect(selection.reason).toContain("weightedScore");
+    expect(selection.reason).toContain("加权得分");
 
     const draft = patchBuilder.build(selected!);
     expect(draft.strategyId).toBe(selected!.id);

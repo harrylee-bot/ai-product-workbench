@@ -33,7 +33,7 @@ export function ProjectList({
   return (
     <aside className="flex min-h-0 flex-col border-r border-gray-200 bg-white">
       <div className="border-b border-gray-200 px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">Projects</div>
+        <div className="text-sm font-semibold text-gray-950">项目</div>
         <div className="mt-3 space-y-2">
           <TextInput
             value={newProjectTitle}
@@ -43,7 +43,7 @@ export function ProjectList({
           />
           <Button type="button" className="h-9 w-full" disabled={creating} onClick={onCreateProject}>
             <Plus className="h-4 w-4" />
-            {creating ? "创建中" : "Create Project"}
+            {creating ? "创建中" : "创建项目"}
           </Button>
         </div>
       </div>
@@ -63,9 +63,9 @@ export function ProjectList({
                   : "text-gray-700 hover:bg-gray-100",
               ].join(" ")}
             >
-              <div className="truncate text-sm font-medium">{project.title}</div>
+              <div className="truncate text-sm font-medium">{projectTitleLabel(project.title)}</div>
               <div className={selectedProjectId === project.id ? "mt-1 text-xs text-gray-300" : "mt-1 text-xs text-gray-400"}>
-                {project.status}
+                {projectStatusLabel(project.status)}
               </div>
             </button>
           ))
@@ -77,4 +77,26 @@ export function ProjectList({
       </div>
     </aside>
   );
+}
+
+function projectTitleLabel(title: string) {
+  return title.replace(/Triple System/g, "三系统融合").replace(/AI Product Workbench/g, "智能产品工作台");
+}
+
+function projectStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    draft: "草稿",
+    clarifying: "澄清中",
+    designing: "设计中",
+    generating: "生成中",
+    waiting: "等待中",
+    prd_ready: "需求文档已就绪",
+    prototype_ready: "原型已就绪",
+    qa_failed: "质检未通过",
+    done: "已完成",
+    completed: "已完成",
+    archived: "已归档",
+    deleted: "已删除",
+  };
+  return labels[status] ?? status;
 }

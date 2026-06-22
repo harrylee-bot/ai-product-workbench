@@ -19,7 +19,7 @@ export class EvolutionDepartmentService {
               },
             ],
           },
-          reason: "Feed company runtime outcomes back into Evolution Engine.",
+          reason: "将公司运行时结果反馈给进化引擎。",
           riskLevel: "medium",
         },
       ],
@@ -28,10 +28,10 @@ export class EvolutionDepartmentService {
           op: "add",
           departmentType: "evolution",
           value: {
-            name: "Organization Evolution Agent",
-            capabilities: ["department balancing", "agent distribution", "runtime learning"],
+            name: "组织进化智能体",
+            capabilities: ["部门平衡", "智能体分布", "运行时学习"],
           },
-          reason: "Track department bottlenecks and recommend future organization changes.",
+          reason: "追踪部门瓶颈，并为后续组织变化提出建议。",
         },
       ],
     };

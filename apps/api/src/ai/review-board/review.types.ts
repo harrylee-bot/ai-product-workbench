@@ -19,9 +19,9 @@ export type ReviewBoardResult = {
 };
 
 export const REVIEW_AGENTS = [
-  "Product Strategist",
-  "UX Expert",
-  "Tech Architect",
-  "Risk Controller",
-  "Growth Analyst",
+  "产品策略官",
+  "体验专家",
+  "技术架构师",
+  "风险控制官",
+  "增长分析师",
 ] as const;

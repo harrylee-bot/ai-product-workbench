@@ -237,7 +237,7 @@ function buildSignal(
       strategyId,
       signalType: "promote",
       weightDelta: 0.12,
-      reason: "QA passed and user satisfaction was strong.",
+      reason: "质检通过，用户满意度较高。",
     };
   }
   if (outcome === "failure") {
@@ -245,14 +245,14 @@ function buildSignal(
       strategyId,
       signalType: "demote",
       weightDelta: recentFailures >= 2 ? -0.2 : -0.12,
-      reason: "QA failed; strategy should be less preferred until constraints or implementation improve.",
+      reason: "质检失败；在约束或实现改善前降低该策略优先级。",
     };
   }
   return {
     strategyId,
     signalType: "neutral",
     weightDelta: metrics.userSatisfaction >= 0.55 ? 0.02 : -0.02,
-    reason: "Outcome was partial; policy receives a small adjustment.",
+    reason: "结果为部分成功，系统策略进行小幅调整。",
   };
 }
 

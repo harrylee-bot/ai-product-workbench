@@ -7,12 +7,12 @@ export class ProductDepartmentService {
     const initiative = input.ceoPlan.initiatives[0];
     return {
       ...initiative,
-      goal: `${initiative.goal} Product department converts it into PRD-ready feature modules.`,
+      goal: `${initiative.goal} 产品部门会将其拆解为可进入需求文档的功能模块。`,
       features: [
         ...initiative.features,
-        "Workspace company dashboard",
-        "Department lifecycle trace",
-        "Resource allocation ledger",
+        "工作台公司看板",
+        "部门生命周期追踪",
+        "资源分配台账",
       ],
     };
   }

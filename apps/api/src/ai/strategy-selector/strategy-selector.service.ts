@@ -46,8 +46,22 @@ export class StrategySelectorService {
     return {
       selectedStrategyId: selected.strategy.id,
       reason:
-        `按 weightedScore = usability*0.25 + feasibility*0.25 + businessValue*0.3 - risk*0.2 计算，` +
-        `${selected.strategy.name} 得分 ${selected.score.toFixed(2)}，在已评审策略中最优。`,
+        "按加权得分 = 易用性*0.25 + 可行性*0.25 + 业务价值*0.3 - 风险*0.2 计算，" +
+        `${strategyLabel(selected.strategy.name)} 得分 ${selected.score.toFixed(2)}，在已评审策略中最优。`,
     };
   }
+}
+
+function strategyLabel(name: Strategy["name"]) {
+  const labels: Record<Strategy["name"], string> = {
+    conservative_fix: "保守修正",
+    ux_improve: "体验优化",
+    structure_rewrite: "结构重写",
+    full_regenerate: "完整重建",
+    conservative: "保守策略",
+    balanced: "平衡策略",
+    aggressive: "进取策略",
+    full_rewrite: "完整重写策略",
+  };
+  return labels[name];
 }

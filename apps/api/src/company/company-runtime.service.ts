@@ -34,63 +34,63 @@ const DEPARTMENTS: Array<{
     type: "ceo",
     ratio: 0.08,
     agent: {
-      name: "CEO Agent",
-      role: "Strategic approval, product prioritization, and budget control.",
-      capabilities: ["strategy", "approval", "budget_allocation"],
+      name: "首席决策智能体",
+      role: "负责战略审批、产品优先级和预算控制。",
+      capabilities: ["战略", "审批", "预算分配"],
     },
   },
   {
     type: "product",
     ratio: 0.2,
     agent: {
-      name: "Product Department Agent",
-      role: "Define PRD-ready initiatives and feature modules.",
-      capabilities: ["prd", "feature_breakdown", "scope_control"],
+      name: "产品部门智能体",
+      role: "定义可进入需求文档的产品计划和功能模块。",
+      capabilities: ["需求文档", "功能拆解", "范围控制"],
     },
   },
   {
     type: "engineering",
     ratio: 0.27,
     agent: {
-      name: "Engineering Department Agent",
-      role: "Plan modules, APIs, orchestration, and system changes.",
-      capabilities: ["api_design", "module_planning", "system_mutation"],
+      name: "工程部门智能体",
+      role: "规划系统模块、接口、编排和系统变更。",
+      capabilities: ["接口设计", "模块规划", "系统变更"],
     },
   },
   {
     type: "design",
     ratio: 0.15,
     agent: {
-      name: "Design Department Agent",
-      role: "Shape workspace UI, UX flows, and prototype structure.",
-      capabilities: ["ui_layout", "ux_flow", "prototype_structure"],
+      name: "设计部门智能体",
+      role: "设计工作台界面、体验流程和原型结构。",
+      capabilities: ["界面布局", "体验流程", "原型结构"],
     },
   },
   {
     type: "qa",
     ratio: 0.1,
     agent: {
-      name: "QA Department Agent",
-      role: "Check lifecycle consistency and delivery risk.",
-      capabilities: ["test_planning", "consistency_check", "risk_detection"],
+      name: "质检部门智能体",
+      role: "检查生命周期一致性和交付风险。",
+      capabilities: ["测试规划", "一致性检查", "风险识别"],
     },
   },
   {
     type: "growth",
     ratio: 0.12,
     agent: {
-      name: "Growth Department Agent",
-      role: "Find activation and conversion improvements.",
-      capabilities: ["growth_strategy", "experimentation", "conversion"],
+      name: "增长部门智能体",
+      role: "寻找激活和转化提升机会。",
+      capabilities: ["增长策略", "实验设计", "转化优化"],
     },
   },
   {
     type: "evolution",
     ratio: 0.08,
     agent: {
-      name: "Evolution Department Agent",
-      role: "Optimize organization structure and collaboration loops.",
-      capabilities: ["organization_design", "agent_distribution", "policy_feedback"],
+      name: "进化部门智能体",
+      role: "优化组织结构和协作循环。",
+      capabilities: ["组织设计", "智能体分布", "策略反馈"],
     },
   },
 ];
@@ -311,9 +311,9 @@ export class CompanyRuntimeService {
     const company = await this.prisma.company.create({
       data: {
         projectId,
-        name: "AI Product Company",
+        name: "智能产品公司",
         budget: COMPANY_BUDGET,
-        strategy: "Build approved product initiatives through department-owned execution.",
+        strategy: "通过部门负责制交付已批准的产品计划。",
         createdBy,
       },
     });

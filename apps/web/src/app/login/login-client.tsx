@@ -46,7 +46,7 @@ export function LoginClient() {
     <main className="flex min-h-screen items-center justify-center bg-[#F6F7F9] px-4 py-10">
       <section className="w-full max-w-[400px] rounded-[16px] border border-gray-200 bg-white p-8 shadow-[0_18px_45px_rgba(17,24,39,0.08)]">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold text-gray-950">AI产品工作台</h1>
+          <h1 className="text-2xl font-semibold text-gray-950">智能产品工作台</h1>
           <div className="mt-4 inline-flex h-8 items-center rounded-[10px] bg-gray-100 px-3 text-[13px] font-medium text-gray-600">
             内测版
           </div>

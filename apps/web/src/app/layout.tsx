@@ -4,8 +4,8 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 
 export const metadata: Metadata = {
-  title: "AI产品工作台（内测）",
-  description: "AI产品工作台内测认证与权限模块",
+  title: "智能产品工作台（内测）",
+  description: "智能产品工作台内测认证与权限模块",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

@@ -6,10 +6,10 @@ export class EngineeringDepartmentService {
   build(input: { initiative: ProductInitiativeView }): EngineeringPlanView {
     return {
       modules: [
-        "company-runtime",
-        "ceo-layer",
-        "department-services",
-        "company-dashboard-api",
+        "公司运行时",
+        "首席决策层",
+        "部门服务",
+        "公司看板接口",
       ],
       apis: [
         "POST /company/ceo/decide",
@@ -30,7 +30,7 @@ export class EngineeringDepartmentService {
             to: "company_runtime",
             relation: "feeds",
           },
-          reason: "Route approved product-company outcomes into the existing system graph.",
+          reason: "将已批准的产品公司运行结果接入现有系统图。",
           riskLevel: "medium",
         },
       ],

@@ -35,7 +35,7 @@ export function ChatPanel({
   return (
     <section className="flex min-h-0 flex-col border-r border-gray-200 bg-[#F8FAFC]">
       <div className="border-b border-gray-200 bg-white px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">Chat</div>
+        <div className="text-sm font-semibold text-gray-950">对话</div>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {messages.length ? (
@@ -54,7 +54,7 @@ export function ChatPanel({
           ))
         ) : (
           <div className="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500">
-            输入产品需求后，系统会先进入 Constraint、Decision、Evolution 三系统，再进入 Orchestrator 和 Patch Preview。
+            输入产品需求后，系统会先经过约束系统、决策系统和进化系统，再进入统一编排与零维补丁预览。
           </div>
         )}
       </div>
@@ -69,7 +69,7 @@ export function ChatPanel({
         <div className="mt-2 flex justify-end">
           <Button type="submit" disabled={disabled || sending || !draft.trim()}>
             <Sparkles className="h-4 w-4" />
-            {sending ? "决策中" : "AI优化"}
+            {sending ? "决策中" : "智能优化"}
           </Button>
         </div>
       </form>

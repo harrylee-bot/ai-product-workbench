@@ -106,15 +106,15 @@ export class SystemGraphService {
 
 export function baselineGraph(): Omit<SystemGraphSnapshot, "version" | "id"> {
   const nodes: SystemNode[] = [
-    node("orchestrator", "orchestrator", "Orchestrator", "active"),
-    node("intent_agent", "agent", "Intent Agent", "active"),
-    node("decision_engine", "tool", "Decision Engine", "active"),
-    node("review_board", "tool", "Review Board", "active"),
-    node("strategy_selector", "tool", "Strategy Selector", "active"),
-    node("patch_builder", "tool", "Patch Builder", "active"),
-    node("patch_preview", "tool", "Patch Preview", "active"),
-    node("evolution_engine", "tool", "Evolution Engine", "active"),
-    node("system_policy", "policy", "System Policy", "active"),
+    node("orchestrator", "orchestrator", "统一编排器", "active"),
+    node("intent_agent", "agent", "意图识别智能体", "active"),
+    node("decision_engine", "tool", "决策引擎", "active"),
+    node("review_board", "tool", "评审委员会", "active"),
+    node("strategy_selector", "tool", "策略选择器", "active"),
+    node("patch_builder", "tool", "补丁构建器", "active"),
+    node("patch_preview", "tool", "补丁预览", "active"),
+    node("evolution_engine", "tool", "进化引擎", "active"),
+    node("system_policy", "policy", "系统策略", "active"),
   ];
   const edges: SystemEdge[] = [
     edge("orchestrator", "intent_agent"),

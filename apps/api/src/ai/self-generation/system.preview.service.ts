@@ -69,11 +69,11 @@ function maxRisk(mutations: SystemMutation[]): "low" | "medium" | "high" {
 function buildImpactAnalysis(mutations: SystemMutation[]) {
   return mutations.flatMap((mutation) => {
     if (mutation.type === "add_agent") {
-      return [`新增 Agent: ${mutation.target}`, "影响 Orchestrator graph execution plan", "需要进入 System Preview"];
+      return [`新增智能体：${mutation.target}`, "影响统一编排的系统图执行计划", "需要进入系统预览"];
     }
     if (mutation.type === "add_step" || mutation.type === "modify_pipeline") {
-      return [`Pipeline 变化: ${mutation.target}`, "影响节点执行顺序", "需要校验依赖关系"];
+      return [`流程变化：${mutation.target}`, "影响节点执行顺序", "需要校验依赖关系"];
     }
-    return [`系统结构变化: ${mutation.type} ${mutation.target}`];
+    return [`系统结构变化：${mutation.type} ${mutation.target}`];
   });
 }

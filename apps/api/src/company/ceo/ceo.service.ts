@@ -28,12 +28,12 @@ export class CEOLayerService {
         {
           id: initiativeId,
           name: inferProductName(input.marketSignal),
-          goal: `Turn "${input.marketSignal}" into an approved product initiative with measurable delivery scope.`,
+          goal: `将「${input.marketSignal}」转化为已批准、范围可衡量的产品计划。`,
           features: [
-            "CEO-approved product charter",
-            "Department-owned delivery plans",
-            "Budgeted execution path",
-            "QA and growth feedback loop",
+            "首席决策批准的产品章程",
+            "部门负责制交付计划",
+            "已分配预算的执行路径",
+            "质检与增长反馈循环",
           ],
         },
       ],
@@ -45,7 +45,7 @@ export class CEOLayerService {
 
 function inferProductName(input: string) {
   const text = input.trim().replace(/\s+/g, " ");
-  return text.length > 28 ? `${text.slice(0, 28)} Product` : `${text || "AI Product"} Runtime`;
+  return text.length > 28 ? `${text.slice(0, 28)}产品` : `${text || "智能产品"}运行时`;
 }
 
 function slug(value: string) {

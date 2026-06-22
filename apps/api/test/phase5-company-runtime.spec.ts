@@ -16,9 +16,9 @@ describe("Phase5 company runtime", () => {
       marketSignal: "Create a product company dashboard",
       company: {
         id: "company_1",
-        name: "AI Product Company",
+        name: "智能产品公司",
         budget: 100000,
-        strategy: "Ship approved product initiatives",
+        strategy: "交付已批准的产品计划",
         departments: [],
       },
     });
@@ -50,9 +50,9 @@ describe("Phase5 company runtime", () => {
       marketSignal: "Launch AI PM runtime",
       company: {
         id: "company_1",
-        name: "AI Product Company",
+        name: "智能产品公司",
         budget: 100000,
-        strategy: "Department-owned execution",
+        strategy: "部门负责制执行",
         departments: [],
       },
     });
@@ -65,7 +65,7 @@ describe("Phase5 company runtime", () => {
 
     expect(initiative.features.length).toBeGreaterThanOrEqual(4);
     expect(engineeringPlan.apis).toContain("POST /company/ceo/decide");
-    expect(designPlan.layouts[0]).toContain("Company Dashboard");
+    expect(designPlan.layouts[0]).toContain("公司看板");
     expect(qaReport.riskLevel).toBe("low");
     expect(growthPlan.experiments.length).toBeGreaterThan(0);
     expect(evolutionPlan.structuralChanges[0].type).toBe("modify_pipeline");
@@ -91,15 +91,15 @@ describe("Phase5 company runtime", () => {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({
           id: "company_1",
-          name: "AI Product Company",
+          name: "智能产品公司",
           budget: 100000,
-          strategy: "Department-owned execution",
+          strategy: "部门负责制执行",
         }),
         findUnique: vi.fn().mockResolvedValue({
           id: "company_1",
-          name: "AI Product Company",
+          name: "智能产品公司",
           budget: 100000,
-          strategy: "Department-owned execution",
+          strategy: "部门负责制执行",
           departments,
         }),
       },

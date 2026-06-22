@@ -19,7 +19,7 @@ export class PatchPreviewController {
       projectId: dto.projectId ?? "",
       conversationId: dto.conversationId ?? "",
       draft,
-      userInstruction: "Manual Patch Preview request",
+      userInstruction: "手动补丁预览请求",
     });
   }
 }

@@ -102,7 +102,7 @@ export class PatchPreviewService {
             source: "phase2_decision_system",
             targetDomains: input.draft.targetDomains,
           } as Prisma.InputJsonValue,
-          userInstruction: input.userInstruction ?? "Phase2 decision patch draft",
+          userInstruction: input.userInstruction ?? "第二阶段决策补丁草稿",
           patchPlan: patchPlan as Prisma.InputJsonValue,
           operations: input.draft.operations as Prisma.InputJsonValue,
           status: PatchRecordStatus.needs_confirmation,
@@ -123,7 +123,7 @@ export class PatchPreviewService {
           riskPanel: riskPanel as Prisma.InputJsonValue,
           patchPlan: patchPlan as Prisma.InputJsonValue,
           operations: input.draft.operations as Prisma.InputJsonValue,
-          message: "Patch Preview 已生成，等待用户确认后才能执行。",
+          message: "补丁预览已生成，等待用户确认后才能执行。",
           createdBy: input.user.id,
         },
       });
@@ -141,7 +141,7 @@ export class PatchPreviewService {
       riskPanel,
       operations: input.draft.operations,
       targetDomains: input.draft.targetDomains,
-      message: preview.message ?? "Patch Preview 已生成。",
+      message: preview.message ?? "补丁预览已生成。",
       createdAt: preview.createdAt.toISOString(),
     };
   }
@@ -174,17 +174,23 @@ function buildAfterSnapshot(beforeSnapshot: unknown, operations: PatchOperation[
     ...(isRecord(beforeSnapshot) ? beforeSnapshot : {}),
     previewOnly: true,
     pendingOperations: operations,
-    note: "Preview projection only. ProductDesignState is not modified in Phase2 preview.",
+    note: "仅用于预览投影。第二阶段预览不会修改产品设计状态。",
   };
 }
 
 function buildPreviewDiff(draft: PatchDraft, beforeSnapshot: unknown, afterSnapshot: unknown) {
   return {
-    summary: `PatchDraft ${draft.id} will affect ${draft.targetDomains.join(", ")}.`,
+    summary: `补丁草稿 ${draft.id} 将影响 ${draft.targetDomains.map(domainLabel).join("、")}。`,
     operations: draft.operations,
     beforeVersion: isRecord(beforeSnapshot) ? beforeSnapshot.version : 0,
     afterPreviewOnly: isRecord(afterSnapshot) ? afterSnapshot.previewOnly === true : true,
   };
+}
+
+function domainLabel(domain: "prd" | "prototype" | "state") {
+  if (domain === "prd") return "需求文档";
+  if (domain === "prototype") return "原型";
+  return "产品状态";
 }
 
 function buildRiskPanel(draft: PatchDraft) {

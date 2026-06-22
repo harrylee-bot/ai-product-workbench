@@ -111,23 +111,23 @@ function generateStrategies(intent: string, content: string): FusionStrategy[] {
     ]),
     strategy(`strategy_${hash}_balanced`, "balanced", "平衡方案：同时增强 PRD、原型和状态表达，兼顾收益与可行性。", "medium", [
       { op: "add", path: "/prd/acceptanceCriteria/-", value: "用户可看到 Constraint、Decision、Evolution 的完整链路。" },
-      { op: "add", path: "/prototype/pages/-", value: { name: "Triple System View", purpose: "展示三系统融合结果。" } },
+      { op: "add", path: "/prototype/pages/-", value: { name: "三系统融合视图", purpose: "展示三系统融合结果。" } },
     ]),
     strategy(`strategy_${hash}_aggressive`, "aggressive", "进取方案：扩大产品结构和交互范围，提升业务价值但引入更高风险。", "medium", [
-      { op: "add", path: "/state/pages/-", value: { name: "Constraint View", responsibility: "展示知识约束上下文。" } },
-      { op: "add", path: "/state/pages/-", value: { name: "Decision View", responsibility: "展示多策略评分和选择理由。" } },
-      { op: "add", path: "/state/pages/-", value: { name: "Evolution View", responsibility: "展示策略权重和进化影响。" } },
+      { op: "add", path: "/state/pages/-", value: { name: "约束视图", responsibility: "展示知识约束上下文。" } },
+      { op: "add", path: "/state/pages/-", value: { name: "决策视图", responsibility: "展示多策略评分和选择理由。" } },
+      { op: "add", path: "/state/pages/-", value: { name: "进化视图", responsibility: "展示策略权重和进化影响。" } },
     ]),
     strategy(`strategy_${hash}_full`, "full_rewrite", "完整重写方案：重建产品状态骨架，只在约束允许且收益明显时选择。", "high", [
       { op: "replace", path: "/state/title", value: title },
-      { op: "replace", path: "/state/businessGoal", value: `以「${title}」重建 AI Product OS 三系统融合链路。` },
+      { op: "replace", path: "/state/businessGoal", value: `以「${title}」重建智能产品操作系统三系统融合链路。` },
       {
         op: "replace",
         path: "/state/rules",
         value: [
-          { type: "must_follow", content: "Constraint System must run before every decision." },
-          { type: "must_follow", content: "Decision System must produce and score multiple strategies." },
-          { type: "must_follow", content: "Evolution System must record every outcome." },
+          { type: "must_follow", content: "每次决策前必须先运行约束系统。" },
+          { type: "must_follow", content: "决策系统必须生成并评分多个策略。" },
+          { type: "must_follow", content: "进化系统必须记录每次执行结果。" },
         ],
       },
     ]),
@@ -152,13 +152,13 @@ function scoreStrategy(strategy: FusionStrategy, context: ConstraintContext): St
   let constraintPenalty = 0;
 
   const avoidHighRisk = context.avoid.some((constraint) =>
-    `${constraint.condition} ${constraint.effect}`.toLowerCase().includes("direct"),
+    /direct|直接修改/i.test(`${constraint.condition} ${constraint.effect}`),
   );
   const preferLowRisk = context.prefer.some((constraint) =>
-    constraint.effect.toLowerCase().includes("lower-risk"),
+    /lower-risk|低风险/i.test(constraint.effect),
   );
   const warnsRewrite = context.warn.some((constraint) =>
-    constraint.effect.toLowerCase().includes("risk penalty"),
+    /risk penalty|风险惩罚/i.test(constraint.effect),
   );
 
   if (avoidHighRisk && strategy.impact === "high") {
@@ -217,10 +217,20 @@ function selectBest(strategies: FusionStrategy[], scores: Record<string, Strateg
 
 function buildReasoning(strategy: FusionStrategy, score: StrategyScore, context: ConstraintContext) {
   return [
-    `score = usability*0.25 + feasibility*0.25 + businessValue*0.3 - risk*0.2，${strategy.name} 得分 ${score.weightedScore.toFixed(2)}。`,
-    `已应用 ${context.mustFollow.length} must_follow、${context.prefer.length} prefer、${context.avoid.length} avoid、${context.warn.length} warn 约束。`,
-    `选择 ${strategy.name}，因为它在当前约束下的收益、可行性和风险最平衡。`,
+    `加权得分 = 易用性*0.25 + 可行性*0.25 + 业务价值*0.3 - 风险*0.2，${strategyLabel(strategy.name)} 得分 ${score.weightedScore.toFixed(2)}。`,
+    `已应用 ${context.mustFollow.length} 条必须遵守、${context.prefer.length} 条优先考虑、${context.avoid.length} 条避免、${context.warn.length} 条提醒约束。`,
+    `选择 ${strategyLabel(strategy.name)}，因为它在当前约束下的收益、可行性和风险最平衡。`,
   ];
+}
+
+function strategyLabel(name: FusionStrategyName) {
+  const labels: Record<FusionStrategyName, string> = {
+    conservative: "保守策略",
+    balanced: "平衡策略",
+    aggressive: "进取策略",
+    full_rewrite: "完整重写策略",
+  };
+  return labels[name];
 }
 
 function impactRank(impact: FusionStrategy["impact"]) {
@@ -239,6 +249,6 @@ function hasAnyConstraint(context: ConstraintContext) {
 
 function deriveTitle(content: string) {
   const compact = content.replace(/\s+/g, " ").trim();
-  if (!compact) return "AI Product Operating System";
+  if (!compact) return "智能产品操作系统";
   return compact.length > 24 ? `${compact.slice(0, 24)}...` : compact;
 }

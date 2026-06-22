@@ -213,8 +213,8 @@ function Phase1WorkspaceInner() {
     <main className="flex h-screen min-h-0 flex-col bg-[#F6F7F9]">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4">
         <div>
-          <div className="text-sm font-semibold text-gray-950">AI Product Workbench</div>
-          <div className="text-xs text-gray-500">Triple system fusion AI product OS</div>
+          <div className="text-sm font-semibold text-gray-950">智能产品工作台</div>
+          <div className="text-xs text-gray-500">三系统融合智能产品操作系统</div>
         </div>
         <UserMenu />
       </header>
@@ -227,7 +227,7 @@ function Phase1WorkspaceInner() {
           loading={projectsQuery.isLoading}
           creating={createProject.isPending}
           onNewProjectTitleChange={setNewProjectTitle}
-          onCreateProject={() => createProject.mutate(newProjectTitle.trim() || "未命名 Triple System 项目")}
+          onCreateProject={() => createProject.mutate(newProjectTitle.trim() || "未命名三系统项目")}
           onSelectProject={(project) =>
             setSelectedProject(project.id, project.currentConversationId ?? project.defaultConversationId ?? "")
           }

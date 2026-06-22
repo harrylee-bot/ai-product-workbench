@@ -52,7 +52,7 @@ async function main() {
   const existingProject = await prisma.project.findFirst({
     where: {
       ownerId: user.id,
-      title: "Triple System 默认项目",
+      title: { in: ["Triple System 默认项目", "三系统融合默认项目"] },
       deletedAt: null,
     },
     include: { conversations: true },
@@ -62,8 +62,8 @@ async function main() {
     const project = await prisma.project.create({
       data: {
         ownerId: user.id,
-        title: "Triple System 默认项目",
-        description: "Seeded project for the AI Product Workbench evolution loop.",
+        title: "三系统融合默认项目",
+        description: "智能产品工作台进化闭环的默认项目。",
         status: ProjectStatus.draft,
       },
     });
@@ -78,7 +78,17 @@ async function main() {
       where: { id: project.id },
       data: { currentConversationId: conversation.id },
     });
-  } else if (!existingProject.currentConversationId) {
+  } else {
+    await prisma.project.update({
+      where: { id: existingProject.id },
+      data: {
+        title: "三系统融合默认项目",
+        description: "智能产品工作台进化闭环的默认项目。",
+      },
+    });
+  }
+
+  if (existingProject && !existingProject.currentConversationId) {
     const conversation = existingProject.conversations[0] ?? (await prisma.conversation.create({
       data: {
         projectId: existingProject.id,
@@ -92,7 +102,7 @@ async function main() {
     });
   }
 
-  console.log("Seed complete: admin/Admin123456, zhangsan/User123456, Triple System 默认项目");
+  console.log("初始化完成：admin/Admin123456，zhangsan/User123456，三系统融合默认项目");
 }
 
 main()

@@ -38,14 +38,14 @@ export class StrategyGenerator {
             op: "add",
             path: "/prototype/pages/-",
             value: {
-              name: "Decision Workspace",
+              name: "决策工作台",
               purpose: "展示策略、评审和预览确认状态。",
             },
           },
           {
             op: "add",
             path: "/prd/acceptanceCriteria/-",
-            value: "用户可以看到至少三个策略及 Review Board 评分后再进入 Patch Preview。",
+            value: "用户可以看到至少三个策略及评审委员会评分后再进入补丁预览。",
           },
         ],
       },
@@ -60,16 +60,16 @@ export class StrategyGenerator {
             path: "/state/pages",
             value: [
               {
-                name: "Projects",
+                name: "项目",
                 responsibility: "项目选择和上下文定位。",
               },
               {
-                name: "Decision Chat",
+                name: "决策对话",
                 responsibility: "输入需求并展示决策链路。",
               },
               {
-                name: "Patch Preview",
-                responsibility: "展示 before/after、diff 和风险。",
+                name: "补丁预览",
+                responsibility: "展示变更前后、差异和风险。",
               },
             ],
           },
@@ -78,7 +78,7 @@ export class StrategyGenerator {
             path: "/state/rules/-",
             value: {
               type: "review_required",
-              content: "所有策略必须经过 Review Board 后才能选择。",
+              content: "所有策略必须经过评审委员会后才能选择。",
             },
           },
         ],
@@ -86,7 +86,7 @@ export class StrategyGenerator {
       {
         id: `strategy_${hash}_full`,
         name: "full_regenerate",
-        description: "高影响重生成方案，重建状态骨架并为后续 PRD/Prototype 派生做准备。",
+        description: "高影响重生成方案，重建状态骨架并为后续需求文档和原型派生做准备。",
         impact: "high",
         patchOperations: [
           {
@@ -109,7 +109,7 @@ export class StrategyGenerator {
               },
               {
                 type: "preview_gate",
-                content: "Patch 必须先生成 Preview，确认后才允许执行。",
+                content: "补丁必须先生成预览，确认后才允许执行。",
               },
             ],
           },
@@ -121,6 +121,6 @@ export class StrategyGenerator {
 
 function deriveTitle(content: string) {
   const compact = content.replace(/\s+/g, " ").trim();
-  if (!compact) return "AI Product Workbench";
+  if (!compact) return "智能产品工作台";
   return compact.length > 24 ? `${compact.slice(0, 24)}...` : compact;
 }
