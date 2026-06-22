@@ -1,15 +1,16 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
-import { AdminModule } from "./admin/admin.module";
-import { AdminUsersModule } from "./admin-users/admin-users.module";
-import { AiModule } from "./ai/ai.module";
-import { AuthModule } from "./auth/auth.module";
-import { FileModule } from "./files/file.module";
-import { KnowledgeModule } from "./knowledge/knowledge.module";
-import { ModelGatewayModule } from "./model-gateway/model-gateway.module";
+import { CompanyModule } from "./company/company.module";
+import { ConstraintModule } from "./constraint/constraint.module";
+import { FusionDecisionModule } from "./decision/decision.module";
+import { FusionEvolutionModule } from "./evolution/evolution.module";
+import { AiModule } from "./modules/ai/ai.module";
+import { AuthModule } from "./modules/auth/auth.module";
+import { ConversationModule } from "./modules/conversation/conversation.module";
+import { MessageModule } from "./modules/message/message.module";
+import { ProjectModule } from "./modules/project/project.module";
+import { SystemModule } from "./modules/system/system.module";
 import { PrismaModule } from "./prisma/prisma.module";
-import { ProjectModule } from "./projects/project.module";
-import { SystemModule } from "./system/system.module";
 
 @Module({
   imports: [
@@ -19,12 +20,13 @@ import { SystemModule } from "./system/system.module";
     }),
     PrismaModule,
     AuthModule,
-    AdminModule,
-    AdminUsersModule,
     ProjectModule,
-    FileModule,
-    KnowledgeModule,
-    ModelGatewayModule,
+    ConversationModule,
+    MessageModule,
+    ConstraintModule,
+    FusionDecisionModule,
+    FusionEvolutionModule,
+    CompanyModule,
     AiModule,
     SystemModule,
   ],

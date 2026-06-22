@@ -3,6 +3,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import {
+  ApplyPatchDto,
   ConfirmPatchDto,
   CreatePatchDraftDto,
   CreatePatchDto,
@@ -63,6 +64,11 @@ export class PatchDraftController {
   @Post("preview")
   preview(@CurrentUser() user: AuthenticatedUser, @Body() dto: PreviewPatchDto) {
     return this.patchService.previewForUser(user, dto.patchId);
+  }
+
+  @Post("preview/apply")
+  apply(@CurrentUser() user: AuthenticatedUser, @Body() dto: ApplyPatchDto) {
+    return this.patchService.confirmForUser(user, dto.patchId, dto.userConfirmation);
   }
 }
 

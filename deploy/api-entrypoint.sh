@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ -n "${DATABASE_URL:-}" ]; then
-  npx prisma migrate deploy --schema /app/packages/database/prisma/schema.prisma
+  npx prisma migrate deploy --schema /app/packages/db/prisma/schema.prisma
   npm run db:seed --prefix /app
 fi
 

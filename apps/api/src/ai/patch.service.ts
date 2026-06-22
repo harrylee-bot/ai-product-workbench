@@ -99,6 +99,25 @@ type PatchRecordRow = {
   updatedAt: Date;
 };
 
+type PatchPreviewRow = {
+  id: string;
+  projectId: string;
+  patchRecordId: string;
+  status: string;
+  beforeProductDesignStateVersion: number;
+  afterProductDesignStateVersion: number | null;
+  beforeSnapshot: unknown;
+  afterSnapshot: unknown;
+  diff: unknown;
+  riskPanel: unknown;
+  patchPlan: unknown;
+  operations: unknown;
+  message: string | null;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 @Injectable()
 export class PatchService {
   constructor(
@@ -159,12 +178,7 @@ export class PatchService {
       selectedRegion.type === "prototype" ? UserIntent.patch_prototype : UserIntent.patch_document,
     );
 
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { status: ProjectStatus.designing, lastActivityAt: new Date() },
-    });
-
-    const result = await this.executePatch({
+    const result = await this.createCandidatePatch({
       projectId,
       conversationId: input.conversationId,
       userId: user.id,
@@ -182,8 +196,9 @@ export class PatchService {
       userMessage,
       assistantMessage: result.assistantMessage,
       runId: run.id,
-      status: "completed",
+      status: "candidate_created",
       patchRecord: result.patchRecord,
+      patchPreview: result.patchPreview,
       result: result.result,
     };
   }
@@ -305,27 +320,9 @@ export class PatchService {
   async previewForUser(user: AuthenticatedUser, patchId: string) {
     const row = await this.getAccessiblePatch(user, patchId);
     const patchRecord = this.toPatchRecord(row as PatchRecordRow);
-    const plan = patchRecord.patchPlan;
+    const preview = await this.ensurePatchPreview(row as PatchRecordRow, patchRecord.patchPlan);
     return {
-      patchPreview: {
-        patchId: patchRecord.id,
-        status: patchRecord.status,
-        selectedRegion: patchRecord.selectedRegion,
-        patchPlan: plan,
-        operations: patchRecord.operations,
-        targetNodes: plan.targetNodes ?? [],
-        impactScope: plan.impactScope ?? [],
-        risks: plan.risks ?? [],
-        regenerationPlan: plan.regenerationPlan,
-        beforeProductDesignStateVersion: patchRecord.beforeProductDesignStateVersion,
-        afterProductDesignStateVersion: patchRecord.afterProductDesignStateVersion,
-        previewOnly: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
-        requiresConfirmation: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
-        message:
-          patchRecord.status === PrismaPatchRecordStatus.needs_confirmation
-            ? "Patch 候选已生成，确认后才会应用到 ProductDesignState。"
-            : "Patch 预览已生成。",
-      },
+      patchPreview: this.toPatchPreview(preview as PatchPreviewRow, patchRecord),
     };
   }
 
@@ -454,6 +451,7 @@ export class PatchService {
       instructionMessageId: userMessage.id,
     };
     let patchRecord: PatchRecord | undefined;
+    let patchPreview: PatchPreviewRow | undefined;
     try {
       await this.stream.emit({
         runId: run.id,
@@ -502,24 +500,56 @@ export class PatchService {
         },
       });
       patchRecord = this.toPatchRecord(createdRecord as PatchRecordRow);
+      const preview = await this.ensurePatchPreview(createdRecord as PatchRecordRow, patchRecord.patchPlan);
+      patchPreview = preview as PatchPreviewRow;
+      await this.prisma.patchPreview.update({
+        where: { id: preview.id },
+        data: {
+          status: "applying",
+          message: "EvolutionPlan Patch Preview 已生成，正在应用同一份计划。",
+        },
+      });
       await this.stream.emit({
         runId: run.id,
         projectId,
         type: "patch_plan_created",
         step: "patch_planning",
-        data: { patchId: patchRecord.id, patchPlan: plan, evolutionPlanId: input.evolutionPlanId },
+        data: {
+          patchId: patchRecord.id,
+          patchPreview: this.toPatchPreview(patchPreview, patchRecord),
+          patchPlan: plan,
+          evolutionPlanId: input.evolutionPlanId,
+        },
         content: "EvolutionPlan Patch 已创建",
       });
 
       const result = await this.applyPatchPlan(executionInput, patchRecord, plan, state);
+      await this.prisma.patchPreview.update({
+        where: { id: preview.id },
+        data: {
+          status: "applied",
+          afterProductDesignStateVersion: result.patchRecord.afterProductDesignStateVersion,
+          message: "EvolutionPlan Patch Preview 已应用并生成新版本。",
+        },
+      });
       return {
         ...result,
+        patchPreview: this.toPatchPreview(patchPreview, result.patchRecord),
         userMessage,
         runId: run.id,
         conversationId,
         projectId,
       };
     } catch (error) {
+      if (patchPreview) {
+        await this.prisma.patchPreview.update({
+          where: { id: patchPreview.id },
+          data: {
+            status: "failed",
+            message: error instanceof Error ? error.message : "EVOLUTION_PATCH_PREVIEW_APPLY_FAILED",
+          },
+        });
+      }
       await this.handlePatchFailure(executionInput, patchRecord, error);
       throw error;
     }
@@ -582,12 +612,14 @@ export class PatchService {
         },
       });
       patchRecord = this.toPatchRecord(createdRecord as PatchRecordRow);
+      const preview = await this.ensurePatchPreview(createdRecord as PatchRecordRow, patchRecord.patchPlan);
+      const patchPreview = this.toPatchPreview(preview as PatchPreviewRow, patchRecord);
       await this.stream.emit({
         runId: input.runId,
         projectId: input.projectId,
         type: "patch_plan_created",
         step: "patch_planning",
-        data: { patchId: patchRecord.id, patchPlan: plan, candidateOnly: true },
+        data: { patchId: patchRecord.id, patchPlan: plan, patchPreview, candidateOnly: true },
         content: "Patch 候选已生成，等待用户确认",
       });
 
@@ -597,16 +629,16 @@ export class PatchService {
         conversationId: input.conversationId,
         content: message,
         type: MessageType.agent_summary,
-        metadata: toInputJson({ patchRecord, patchPlan: plan, candidateOnly: true }),
+        metadata: toInputJson({ patchRecord, patchPlan: plan, patchPreview, candidateOnly: true }),
         relatedRunId: input.runId,
       });
-      const result = patchConfirmationResult(patchRecord, plan);
-      await this.runLog.completeRun(input.runId, { patchRecord, patchPlan: plan, candidateOnly: true }, message);
+      const result = patchConfirmationResult(patchRecord, plan, patchPreview);
+      await this.runLog.completeRun(input.runId, { patchRecord, patchPlan: plan, patchPreview, candidateOnly: true }, message);
       await this.prisma.project.update({
         where: { id: input.projectId },
         data: { status: ProjectStatus.clarifying, lastActivityAt: new Date() },
       });
-      return { patchRecord, assistantMessage, result };
+      return { patchRecord, patchPreview, assistantMessage, result };
     } catch (error) {
       await this.handlePatchFailure(input, patchRecord, error);
       throw error;
@@ -676,24 +708,27 @@ export class PatchService {
       });
 
       if (initialStatus === PrismaPatchRecordStatus.needs_confirmation) {
+        const preview = await this.ensurePatchPreview(createdRecord as PatchRecordRow, patchRecord.patchPlan);
+        const patchPreview = this.toPatchPreview(preview as PatchPreviewRow, patchRecord);
         const message = "局部修改需要进一步确认后再应用。";
         const assistantMessage = await this.messageService.createAssistantMessage({
           projectId: input.projectId,
           conversationId: input.conversationId,
           content: message,
           type: MessageType.agent_summary,
-          metadata: toInputJson({ patchRecord, patchPlan: plan }),
+          metadata: toInputJson({ patchRecord, patchPlan: plan, patchPreview }),
           relatedRunId: input.runId,
         });
-        await this.runLog.completeRun(input.runId, { patchRecord, patchPlan: plan }, message);
+        await this.runLog.completeRun(input.runId, { patchRecord, patchPlan: plan, patchPreview }, message);
         await this.prisma.project.update({
           where: { id: input.projectId },
           data: { status: ProjectStatus.clarifying },
         });
         return {
           patchRecord,
+          patchPreview,
           assistantMessage,
-          result: patchConfirmationResult(patchRecord, plan),
+          result: patchConfirmationResult(patchRecord, plan, patchPreview),
         };
       }
 
@@ -710,6 +745,7 @@ export class PatchService {
     confirmation: string,
   ) {
     let patchRecord: PatchRecord | undefined = this.toPatchRecord(row);
+    let patchPreview: PatchPreviewRow | undefined;
     try {
       await this.stream.emit({
         runId: input.runId,
@@ -723,79 +759,63 @@ export class PatchService {
       if (state.version !== row.beforeProductDesignStateVersion) {
         throw new BadRequestException("PATCH_STATE_VERSION_CHANGED");
       }
-      const knowledgeContext = await this.getPatchKnowledgeContext(input);
-
-      const patch = await this.runAgentStep(
-        input,
-        AgentName.patch_agent,
-        "patch_planning",
-        () => this.patchAgent.run({
-          runId: input.runId,
-          projectId: input.projectId,
-          traceId: input.traceId,
-          userId: input.userId,
-          input: {
-            userInput: input.userInstruction,
-            selectedRegion: input.selectedRegion,
-            productDesignState: state,
-            prdDocument: state.prdDocument,
-            prototypeSpec: state.prototypeSpec,
-            knowledgeContext,
-          },
-        }),
-      );
+      const preview = await this.ensurePatchPreview(row, patchRecord.patchPlan);
+      patchPreview = preview as PatchPreviewRow;
       const plan: PatchPlan = {
-        ...patch.data,
-        needUserConfirm: Boolean(patch.data.needUserConfirm || patch.data.needsUserConfirmation),
-        needsUserConfirmation: Boolean(patch.data.needUserConfirm || patch.data.needsUserConfirmation),
+        ...patchRecord.patchPlan,
+        needUserConfirm: false,
+        needsUserConfirmation: false,
       };
-      const needsConfirmation = plan.needUserConfirm || plan.needsUserConfirmation;
       const updatedRecord = await this.prisma.patchRecord.update({
         where: { id: row.id },
         data: {
           patchPlan: toInputJson({
             ...plan,
             userConfirmation: confirmation,
+            appliedPreviewId: preview.id,
           }),
           operations: toInputJson(plan.operations),
-          status: needsConfirmation ? PrismaPatchRecordStatus.needs_confirmation : PrismaPatchRecordStatus.planned,
+          status: PrismaPatchRecordStatus.planned,
           generatedByRunId: input.runId,
         },
       });
       patchRecord = this.toPatchRecord(updatedRecord as PatchRecordRow);
+      await this.prisma.patchPreview.update({
+        where: { id: preview.id },
+        data: {
+          status: "applying",
+          message: "用户已确认，正在应用同一份 Patch Preview。",
+        },
+      });
       await this.stream.emit({
         runId: input.runId,
         projectId: input.projectId,
         type: "patch_plan_created",
         step: "patch_planning",
-        data: { patchId: patchRecord.id, patchPlan: plan },
-        content: "局部修改计划已根据确认更新",
+        data: { patchId: patchRecord.id, patchPreviewId: preview.id, patchPlan: plan },
+        content: "局部修改计划已确认，准备应用 Patch Preview",
       });
 
-      if (needsConfirmation) {
-        const message = "局部修改仍需要进一步确认后再应用。";
-        const assistantMessage = await this.messageService.createAssistantMessage({
-          projectId: input.projectId,
-          conversationId: input.conversationId,
-          content: message,
-          type: MessageType.agent_summary,
-          metadata: toInputJson({ patchRecord, patchPlan: plan }),
-          relatedRunId: input.runId,
-        });
-        await this.runLog.completeRun(input.runId, { patchRecord, patchPlan: plan }, message);
-        await this.prisma.project.update({
-          where: { id: input.projectId },
-          data: { status: ProjectStatus.clarifying },
-        });
-        return {
-          patchRecord,
-          assistantMessage,
-          result: patchConfirmationResult(patchRecord, plan),
-        };
-      }
-
-      return await this.applyPatchPlan(input, patchRecord, plan, state, knowledgeContext);
+      const result = await this.applyPatchPlan(input, patchRecord, plan, state);
+      await this.prisma.patchPreview.update({
+        where: { id: preview.id },
+        data: {
+          status: "applied",
+          afterProductDesignStateVersion: result.patchRecord.afterProductDesignStateVersion,
+          message: "Patch Preview 已应用并生成新版本。",
+        },
+      });
+      return result;
     } catch (error) {
+      if (patchPreview) {
+        await this.prisma.patchPreview.update({
+          where: { id: patchPreview.id },
+          data: {
+            status: "failed",
+            message: error instanceof Error ? error.message : "PATCH_PREVIEW_APPLY_FAILED",
+          },
+        });
+      }
       await this.handlePatchFailure(input, patchRecord, error);
       throw error;
     }
@@ -1118,6 +1138,42 @@ export class PatchService {
     });
   }
 
+  private async ensurePatchPreview(row: PatchRecordRow, plan: PatchPlan) {
+    const existing = await this.prisma.patchPreview.findUnique({
+      where: { patchRecordId: row.id },
+    });
+    if (existing) return existing;
+
+    const operations = Array.isArray(row.operations)
+      ? row.operations as PatchPlan["operations"]
+      : plan.operations ?? [];
+    return this.prisma.patchPreview.create({
+      data: {
+        projectId: row.projectId,
+        patchRecordId: row.id,
+        status: "ready",
+        beforeProductDesignStateVersion: row.beforeProductDesignStateVersion,
+        afterProductDesignStateVersion: row.afterProductDesignStateVersion,
+        beforeSnapshot: toInputJson({
+          productDesignStateVersion: row.beforeProductDesignStateVersion,
+          immutable: true,
+        }),
+        afterSnapshot: toInputJson({
+          productDesignStateVersion: row.afterProductDesignStateVersion,
+          projectedOperations: operations,
+          requiresApply: true,
+        }),
+        diff: toInputJson(buildPatchPreviewDiff(plan, operations)),
+        riskPanel: toInputJson(buildPatchPreviewRiskPanel(plan)),
+        patchPlan: toInputJson(plan),
+        operations: toInputJson(operations),
+        message:
+          "Patch Preview 已生成。确认前不会修改 ProductDesignState、PRD 或 Prototype。",
+        createdBy: row.createdBy,
+      },
+    });
+  }
+
   private async getPatchKnowledgeContext(input: PatchExecutionInput): Promise<KnowledgeContext> {
     const search = await this.knowledgeRetrieval.search({
       projectId: input.projectId,
@@ -1282,6 +1338,41 @@ export class PatchService {
       updatedAt: row.updatedAt.toISOString(),
     };
   }
+
+  private toPatchPreview(row: PatchPreviewRow, patchRecord: PatchRecord) {
+    const plan = row.patchPlan as PatchPlan;
+    const operations = Array.isArray(row.operations)
+      ? row.operations as PatchPlan["operations"]
+      : patchRecord.operations;
+    return {
+      id: row.id,
+      patchId: row.patchRecordId,
+      status: patchRecord.status,
+      previewStatus: row.status,
+      selectedRegion: patchRecord.selectedRegion,
+      patchPlan: plan,
+      operations,
+      targetNodes: plan.targetNodes ?? [],
+      impactScope: plan.impactScope ?? [],
+      risks: plan.risks ?? [],
+      regenerationPlan: plan.regenerationPlan,
+      diff: row.diff,
+      before: row.beforeSnapshot,
+      after: row.afterSnapshot,
+      riskPanel: row.riskPanel,
+      beforeProductDesignStateVersion: row.beforeProductDesignStateVersion,
+      afterProductDesignStateVersion: row.afterProductDesignStateVersion ?? undefined,
+      previewOnly: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
+      requiresConfirmation: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
+      message: row.message ?? (
+        patchRecord.status === PrismaPatchRecordStatus.needs_confirmation
+          ? "Patch 候选已生成，确认后才会应用到 ProductDesignState。"
+          : "Patch Preview 已生成。"
+      ),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
 }
 
 function normalizeSelectedRegion(value: Record<string, unknown>): SelectedRegion {
@@ -1314,9 +1405,14 @@ function recordFromJson(value: unknown) {
   return value as Record<string, unknown>;
 }
 
-function patchConfirmationResult(patchRecord: PatchRecord, plan: PatchPlan) {
+function patchConfirmationResult(
+  patchRecord: PatchRecord,
+  plan: PatchPlan,
+  patchPreview?: unknown,
+) {
   return {
     patchRecord,
+    patchPreview,
     patchPlan: plan,
     nextAction: {
       type: "confirm_patch",
@@ -1335,6 +1431,55 @@ function normalizeBox(value: unknown) {
   const height = Number(record.height);
   if ([x, y, width, height].some((number) => !Number.isFinite(number))) return undefined;
   return { x, y, width, height };
+}
+
+function buildPatchPreviewDiff(plan: PatchPlan, operations: PatchPlan["operations"]) {
+  return {
+    mode: "product_design_state",
+    summary: plan.summary,
+    reason: plan.reason,
+    operations: operations.map((operation) => ({
+      op: operation.op,
+      path: operation.path,
+      before: null,
+      after: operation.value ?? null,
+      reason: operation.reason,
+    })),
+    impacted: {
+      targetNodes: plan.targetNodes ?? [],
+      impactScope: plan.impactScope ?? [],
+      affectedStatePaths: plan.impactAnalysis?.affectedStatePaths ?? operations.map((operation) => operation.path),
+      affectedPrdSectionIds: plan.impactAnalysis?.affectedPrdSectionIds ?? [],
+      affectedPrototypePageIds: plan.impactAnalysis?.affectedPrototypePageIds ?? [],
+      affectedPrototypeComponentIds: plan.impactAnalysis?.affectedPrototypeComponentIds ?? [],
+    },
+  };
+}
+
+function buildPatchPreviewRiskPanel(plan: PatchPlan) {
+  const risks = plan.risks ?? [];
+  const regenerationPlan = plan.regenerationPlan;
+  const touchesPrototype = regenerationPlan?.prototypeSpec !== "none" || regenerationPlan?.htmlPrototype !== "none";
+  const touchesPrd = regenerationPlan?.prd !== "none";
+  const level = risks.some((risk) => risk.level === "high")
+    ? "high"
+    : risks.some((risk) => risk.level === "medium")
+      ? "medium"
+      : touchesPrototype && touchesPrd
+        ? "medium"
+        : "low";
+  return {
+    level,
+    requiresConfirmation: true,
+    versionedApply: true,
+    items: risks,
+    checks: {
+      stateOnlyOperations: true,
+      requiresPrdRegeneration: touchesPrd,
+      requiresPrototypeRegeneration: touchesPrototype,
+      requiresQaCheck: regenerationPlan?.qa !== "none",
+    },
+  };
 }
 
 function text(value: unknown) {

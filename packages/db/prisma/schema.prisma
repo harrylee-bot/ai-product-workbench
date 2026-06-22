@@ -342,22 +342,22 @@ model LoginAuditLog {
 }
 
 model Project {
-  id                          String         @id @default(cuid())
-  ownerId                     String         @map("owner_id")
+  id                          String                       @id @default(cuid())
+  ownerId                     String                       @map("owner_id")
   title                       String
   description                 String?
-  status                      ProjectStatus  @default(draft)
-  currentConversationId       String?        @map("current_conversation_id")
-  currentProductDesignStateId String?        @map("current_product_design_state_id")
-  currentPrdDocumentId        String?        @map("current_prd_document_id")
-  currentPrototypeArtifactId  String?        @map("current_prototype_artifact_id")
-  latestQaReportId            String?        @map("latest_qa_report_id")
-  lastActivityAt              DateTime       @default(now()) @map("last_activity_at")
-  archivedAt                  DateTime?      @map("archived_at")
-  deletedAt                   DateTime?      @map("deleted_at")
-  createdAt                   DateTime       @default(now()) @map("created_at")
-  updatedAt                   DateTime       @updatedAt @map("updated_at")
-  owner                       User           @relation(fields: [ownerId], references: [id])
+  status                      ProjectStatus                @default(draft)
+  currentConversationId       String?                      @map("current_conversation_id")
+  currentProductDesignStateId String?                      @map("current_product_design_state_id")
+  currentPrdDocumentId        String?                      @map("current_prd_document_id")
+  currentPrototypeArtifactId  String?                      @map("current_prototype_artifact_id")
+  latestQaReportId            String?                      @map("latest_qa_report_id")
+  lastActivityAt              DateTime                     @default(now()) @map("last_activity_at")
+  archivedAt                  DateTime?                    @map("archived_at")
+  deletedAt                   DateTime?                    @map("deleted_at")
+  createdAt                   DateTime                     @default(now()) @map("created_at")
+  updatedAt                   DateTime                     @updatedAt @map("updated_at")
+  owner                       User                         @relation(fields: [ownerId], references: [id])
   conversations               Conversation[]
   messages                    Message[]
   fileAssets                  FileAsset[]
@@ -370,6 +370,7 @@ model Project {
   prototypeArtifacts          PrototypeArtifact[]
   prototypeVersions           PrototypeVersion[]
   patchRecords                PatchRecord[]
+  patchPreviews               PatchPreview[]
   qaReports                   QAReport[]
   rollbackRecords             RollbackRecord[]
   knowledgeCandidates         KnowledgeCandidate[]
@@ -382,6 +383,26 @@ model Project {
   evolutionPatchExecutions    EvolutionPatchExecution[]
   productMemories             ProductMemory[]
   orchestrationRuns           OrchestrationRun[]
+  decisionTraces              DecisionTrace[]
+  systemGraphs                SystemGraph[]
+  systemPolicies              SystemPolicy[]
+  systemNodes                 SystemNode[]
+  systemEdges                 SystemEdge[]
+  systemMutationLogs          SystemMutationLog[]
+  systemChangeProposals       SystemChangeProposal[]
+  companies                   Company[]
+  departments                 Department[]
+  agents                      Agent[]
+  productInitiatives          ProductInitiative[]
+  engineeringPlans            EngineeringPlan[]
+  designPlans                 DesignPlan[]
+  companyQaReports            CompanyQAReport[]
+  growthPlans                 GrowthPlan[]
+  companyEvolutionPlans       CompanyEvolutionPlan[]
+  companyRuntimeRuns          CompanyRuntimeRun[]
+  constraintRules             ConstraintRule[]
+  strategies                   Strategy[]
+  evolutionSignals            EvolutionSignal[]
 
   @@index([ownerId])
   @@index([status])
@@ -480,25 +501,25 @@ model FileAsset {
 }
 
 model FileParseResult {
-  id              String            @id @default(uuid())
-  fileAssetId     String            @unique @map("file_asset_id")
-  projectId       String            @map("project_id")
-  status          ParseResultStatus
-  parserType      FileParserType    @map("parser_type")
-  title           String?
-  summary         String?
-  extractedText   String?           @map("extracted_text")
-  wordCount       Int?              @map("word_count")
-  sections        Json?
-  pages           Json?
-  images          Json?
-  visualContexts  Json?             @map("visual_contexts")
-  axureInfo       Json?             @map("axure_info")
-  errorMessage    String?           @map("error_message")
-  warnings        Json?
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
-  fileAsset       FileAsset         @relation(fields: [fileAssetId], references: [id])
+  id             String            @id @default(uuid())
+  fileAssetId    String            @unique @map("file_asset_id")
+  projectId      String            @map("project_id")
+  status         ParseResultStatus
+  parserType     FileParserType    @map("parser_type")
+  title          String?
+  summary        String?
+  extractedText  String?           @map("extracted_text")
+  wordCount      Int?              @map("word_count")
+  sections       Json?
+  pages          Json?
+  images         Json?
+  visualContexts Json?             @map("visual_contexts")
+  axureInfo      Json?             @map("axure_info")
+  errorMessage   String?           @map("error_message")
+  warnings       Json?
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  fileAsset      FileAsset         @relation(fields: [fileAssetId], references: [id])
 
   @@index([projectId])
   @@index([status])
@@ -507,16 +528,16 @@ model FileParseResult {
 }
 
 model FileChunk {
-  id             String              @id @default(uuid())
-  fileAssetId    String              @map("file_asset_id")
-  projectId      String              @map("project_id")
-  chunkIndex     Int                 @map("chunk_index")
-  content        String
-  tokenEstimate  Int?                @map("token_estimate")
-  sourceType     FileChunkSourceType @map("source_type")
-  sourceRef      String?             @map("source_ref")
-  createdAt      DateTime            @default(now()) @map("created_at")
-  fileAsset      FileAsset           @relation(fields: [fileAssetId], references: [id])
+  id            String              @id @default(uuid())
+  fileAssetId   String              @map("file_asset_id")
+  projectId     String              @map("project_id")
+  chunkIndex    Int                 @map("chunk_index")
+  content       String
+  tokenEstimate Int?                @map("token_estimate")
+  sourceType    FileChunkSourceType @map("source_type")
+  sourceRef     String?             @map("source_ref")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  fileAsset     FileAsset           @relation(fields: [fileAssetId], references: [id])
 
   @@index([fileAssetId])
   @@index([projectId])
@@ -621,41 +642,41 @@ model ModelCallLog {
 }
 
 model ProductDesignState {
-  id                  String                   @id @default(uuid())
-  projectId           String                   @map("project_id")
-  version             Int
-  title               String
-  summary             String?
-  businessGoal        String                   @map("business_goal")
-  background          String?
-  targetUsers         Json                     @map("target_users")
-  userScenarios       Json                     @map("user_scenarios")
-  pages               Json
-  features            Json
-  backendConfigs      Json                     @map("backend_configs")
-  frontendRules       Json                     @map("frontend_rules")
-  businessRules       Json                     @map("business_rules")
-  stateRules          Json                     @map("state_rules")
-  exceptionScenarios  Json                     @map("exception_scenarios")
-  acceptanceCriteria  Json                     @map("acceptance_criteria")
-  prototypeOutline    Json?                    @map("prototype_outline")
-  assumptions         Json
-  knowledgeRefs       Json                     @map("knowledge_refs")
-  pendingQuestions    Json                     @map("pending_questions")
-  confirmedFacts      Json                     @map("confirmed_facts")
-  prototypeSpec       Json?                    @map("prototype_spec")
-  prdDocument         Json?                    @map("prd_document")
-  status              ProductDesignStateStatus @default(draft)
-  createdBy           String                   @map("created_by")
-  updatedBy           String?                  @map("updated_by")
-  createdAt           DateTime                 @default(now()) @map("created_at")
-  updatedAt           DateTime                 @updatedAt @map("updated_at")
-  project             Project                  @relation(fields: [projectId], references: [id])
-  versions            ProductDesignVersion[]
-  changeLogs          ProductDesignChangeLog[]
+  id                   String                   @id @default(uuid())
+  projectId            String                   @map("project_id")
+  version              Int
+  title                String
+  summary              String?
+  businessGoal         String                   @map("business_goal")
+  background           String?
+  targetUsers          Json                     @map("target_users")
+  userScenarios        Json                     @map("user_scenarios")
+  pages                Json
+  features             Json
+  backendConfigs       Json                     @map("backend_configs")
+  frontendRules        Json                     @map("frontend_rules")
+  businessRules        Json                     @map("business_rules")
+  stateRules           Json                     @map("state_rules")
+  exceptionScenarios   Json                     @map("exception_scenarios")
+  acceptanceCriteria   Json                     @map("acceptance_criteria")
+  prototypeOutline     Json?                    @map("prototype_outline")
+  assumptions          Json
+  knowledgeRefs        Json                     @map("knowledge_refs")
+  pendingQuestions     Json                     @map("pending_questions")
+  confirmedFacts       Json                     @map("confirmed_facts")
+  prototypeSpec        Json?                    @map("prototype_spec")
+  prdDocument          Json?                    @map("prd_document")
+  status               ProductDesignStateStatus @default(draft)
+  createdBy            String                   @map("created_by")
+  updatedBy            String?                  @map("updated_by")
+  createdAt            DateTime                 @default(now()) @map("created_at")
+  updatedAt            DateTime                 @updatedAt @map("updated_at")
+  project              Project                  @relation(fields: [projectId], references: [id])
+  versions             ProductDesignVersion[]
+  changeLogs           ProductDesignChangeLog[]
   requirementDocuments RequirementDocument[]
-  prototypeSpecs      PrototypeSpecRecord[]
-  prototypeArtifacts  PrototypeArtifact[]
+  prototypeSpecs       PrototypeSpecRecord[]
+  prototypeArtifacts   PrototypeArtifact[]
 
   @@unique([projectId, version])
   @@index([projectId])
@@ -664,15 +685,15 @@ model ProductDesignState {
 }
 
 model ProductDesignVersion {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  stateId   String   @map("state_id")
+  id        String             @id @default(uuid())
+  projectId String             @map("project_id")
+  stateId   String             @map("state_id")
   version   Int
   snapshot  Json
   reason    String?
-  createdBy String   @map("created_by")
-  createdAt DateTime @default(now()) @map("created_at")
-  project   Project  @relation(fields: [projectId], references: [id])
+  createdBy String             @map("created_by")
+  createdAt DateTime           @default(now()) @map("created_at")
+  project   Project            @relation(fields: [projectId], references: [id])
   state     ProductDesignState @relation(fields: [stateId], references: [id])
 
   @@index([projectId])
@@ -705,24 +726,24 @@ model ProductDesignChangeLog {
 }
 
 model RequirementDocument {
-  id                        String                    @id @default(uuid())
-  projectId                 String                    @map("project_id")
-  productDesignStateId      String                    @map("product_design_state_id")
-  productDesignStateVersion Int                       @map("product_design_state_version")
+  id                        String                       @id @default(uuid())
+  projectId                 String                       @map("project_id")
+  productDesignStateId      String                       @map("product_design_state_id")
+  productDesignStateVersion Int                          @map("product_design_state_version")
   title                     String
-  status                    RequirementDocumentStatus @default(draft)
+  status                    RequirementDocumentStatus    @default(draft)
   sections                  Json
   assumptions               Json?
-  knowledgeRefs             Json?                     @map("knowledge_refs")
-  pendingQuestions          Json?                     @map("pending_questions")
-  validationNotes           Json?                     @map("validation_notes")
-  generatedByRunId          String?                   @map("generated_by_run_id")
-  createdBy                 String                    @map("created_by")
-  updatedBy                 String?                   @map("updated_by")
-  createdAt                 DateTime                  @default(now()) @map("created_at")
-  updatedAt                 DateTime                  @updatedAt @map("updated_at")
-  project                   Project                   @relation(fields: [projectId], references: [id])
-  productDesignState        ProductDesignState        @relation(fields: [productDesignStateId], references: [id])
+  knowledgeRefs             Json?                        @map("knowledge_refs")
+  pendingQuestions          Json?                        @map("pending_questions")
+  validationNotes           Json?                        @map("validation_notes")
+  generatedByRunId          String?                      @map("generated_by_run_id")
+  createdBy                 String                       @map("created_by")
+  updatedBy                 String?                      @map("updated_by")
+  createdAt                 DateTime                     @default(now()) @map("created_at")
+  updatedAt                 DateTime                     @updatedAt @map("updated_at")
+  project                   Project                      @relation(fields: [projectId], references: [id])
+  productDesignState        ProductDesignState           @relation(fields: [productDesignStateId], references: [id])
   versions                  RequirementDocumentVersion[]
 
   @@index([projectId])
@@ -733,16 +754,16 @@ model RequirementDocument {
 }
 
 model RequirementDocumentVersion {
-  id        String              @id @default(uuid())
-  documentId String             @map("document_id")
-  projectId String              @map("project_id")
-  version   Int
-  snapshot  Json
-  reason    String?
-  createdBy String              @map("created_by")
-  createdAt DateTime            @default(now()) @map("created_at")
-  document  RequirementDocument @relation(fields: [documentId], references: [id])
-  project   Project             @relation(fields: [projectId], references: [id])
+  id         String              @id @default(uuid())
+  documentId String              @map("document_id")
+  projectId  String              @map("project_id")
+  version    Int
+  snapshot   Json
+  reason     String?
+  createdBy  String              @map("created_by")
+  createdAt  DateTime            @default(now()) @map("created_at")
+  document   RequirementDocument @relation(fields: [documentId], references: [id])
+  project    Project             @relation(fields: [projectId], references: [id])
 
   @@index([documentId])
   @@index([projectId])
@@ -849,6 +870,7 @@ model PatchRecord {
   updatedAt                       DateTime          @updatedAt @map("updated_at")
   project                         Project           @relation(fields: [projectId], references: [id])
   conversation                    Conversation      @relation(fields: [conversationId], references: [id])
+  patchPreview                    PatchPreview?
 
   @@index([projectId])
   @@index([conversationId])
@@ -856,6 +878,33 @@ model PatchRecord {
   @@index([generatedByRunId])
   @@index([createdAt])
   @@map("patch_records")
+}
+
+model PatchPreview {
+  id                              String      @id @default(uuid())
+  projectId                       String      @map("project_id")
+  patchRecordId                   String      @unique @map("patch_record_id")
+  status                          String      @default("ready")
+  beforeProductDesignStateVersion Int         @map("before_product_design_state_version")
+  afterProductDesignStateVersion  Int?        @map("after_product_design_state_version")
+  beforeSnapshot                  Json        @map("before_snapshot")
+  afterSnapshot                   Json        @map("after_snapshot")
+  diff                            Json
+  riskPanel                       Json        @map("risk_panel")
+  patchPlan                       Json        @map("patch_plan")
+  operations                      Json
+  message                         String?
+  createdBy                       String      @map("created_by")
+  createdAt                       DateTime    @default(now()) @map("created_at")
+  updatedAt                       DateTime    @updatedAt @map("updated_at")
+  project                         Project     @relation(fields: [projectId], references: [id])
+  patchRecord                     PatchRecord @relation(fields: [patchRecordId], references: [id])
+
+  @@index([projectId])
+  @@index([patchRecordId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("patch_previews")
 }
 
 model QAReport {
@@ -978,20 +1027,20 @@ model ProductReviewReport {
 }
 
 model EvolutionPlan {
-  id               String   @id @default(uuid())
-  projectId        String   @map("project_id")
+  id               String                    @id @default(uuid())
+  projectId        String                    @map("project_id")
   reason           String
   priority         String
-  patchOperations  Json     @map("patch_operations")
-  prdChanges       Json     @map("prd_changes")
-  prototypeChanges Json     @map("prototype_changes")
-  impactedAreas    Json     @map("impacted_areas")
-  sourceInsightIds Json     @map("source_insight_ids")
-  sourceReviewId   String?  @map("source_review_id")
-  generatedBy      String   @map("generated_by")
-  executedAt       DateTime? @map("executed_at")
-  createdAt        DateTime @default(now()) @map("created_at")
-  project          Project  @relation(fields: [projectId], references: [id])
+  patchOperations  Json                      @map("patch_operations")
+  prdChanges       Json                      @map("prd_changes")
+  prototypeChanges Json                      @map("prototype_changes")
+  impactedAreas    Json                      @map("impacted_areas")
+  sourceInsightIds Json                      @map("source_insight_ids")
+  sourceReviewId   String?                   @map("source_review_id")
+  generatedBy      String                    @map("generated_by")
+  executedAt       DateTime?                 @map("executed_at")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  project          Project                   @relation(fields: [projectId], references: [id])
   patchExecutions  EvolutionPatchExecution[]
 
   @@index([projectId])
@@ -1001,18 +1050,18 @@ model EvolutionPlan {
 }
 
 model EvolutionPatchExecution {
-  id                String   @id @default(uuid())
-  projectId         String   @map("project_id")
-  evolutionPlanId   String   @map("evolution_plan_id")
-  patchRecordId     String?  @map("patch_record_id")
+  id                String        @id @default(uuid())
+  projectId         String        @map("project_id")
+  evolutionPlanId   String        @map("evolution_plan_id")
+  patchRecordId     String?       @map("patch_record_id")
   result            String
-  appliedOperations Json     @map("applied_operations")
-  newStateVersion   Int?     @map("new_state_version")
-  rollbackId        String?  @map("rollback_id")
-  errorMessage      String?  @map("error_message")
-  createdBy         String   @map("created_by")
-  createdAt         DateTime @default(now()) @map("created_at")
-  project           Project  @relation(fields: [projectId], references: [id])
+  appliedOperations Json          @map("applied_operations")
+  newStateVersion   Int?          @map("new_state_version")
+  rollbackId        String?       @map("rollback_id")
+  errorMessage      String?       @map("error_message")
+  createdBy         String        @map("created_by")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  project           Project       @relation(fields: [projectId], references: [id])
   evolutionPlan     EvolutionPlan @relation(fields: [evolutionPlanId], references: [id])
 
   @@index([projectId])
@@ -1053,17 +1102,17 @@ model ProductMemory {
 }
 
 model OrchestrationRun {
-  id           String   @id @default(uuid())
-  projectId    String   @map("project_id")
+  id           String    @id @default(uuid())
+  projectId    String    @map("project_id")
   status       String
-  triggerType  String   @map("trigger_type")
-  moduleStates Json     @map("module_states")
+  triggerType  String    @map("trigger_type")
+  moduleStates Json      @map("module_states")
   result       Json
-  createdBy    String   @map("created_by")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdBy    String    @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
   completedAt  DateTime? @map("completed_at")
-  project      Project  @relation(fields: [projectId], references: [id])
+  project      Project   @relation(fields: [projectId], references: [id])
 
   @@index([projectId])
   @@index([status])
@@ -1072,26 +1121,503 @@ model OrchestrationRun {
   @@map("orchestration_runs")
 }
 
+model DecisionTrace {
+  id                 String   @id @default(uuid())
+  projectId          String   @map("project_id")
+  sourceType         String   @map("source_type")
+  sourceId           String?  @map("source_id")
+  intent             String?
+  strategies         Json?
+  selectedStrategy   String?  @map("selected_strategy")
+  selectedStrategyId String?  @map("selected_strategy_id")
+  reviewResult       Json?    @map("review_result")
+  finalOutcome       String?  @map("final_outcome")
+  metrics            Json?
+  scores             Json
+  objections         Json
+  input              Json
+  output             Json
+  generatedByRunId   String?  @map("generated_by_run_id")
+  createdBy          String   @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  project            Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([sourceType])
+  @@index([sourceId])
+  @@index([selectedStrategy])
+  @@index([selectedStrategyId])
+  @@index([finalOutcome])
+  @@index([generatedByRunId])
+  @@index([createdAt])
+  @@map("decision_traces")
+}
+
+model SystemPolicy {
+  id                 String   @id @default(uuid())
+  projectId          String   @map("project_id")
+  version            Int
+  strategyWeights    Json     @map("strategy_weights")
+  agentWeights       Json     @map("agent_weights")
+  decisionBias       Json     @map("decision_bias")
+  sourceTraceId      String?  @map("source_trace_id")
+  signal             Json
+  previousPolicy     Json?    @map("previous_policy")
+  rollbackOfPolicyId String?  @map("rollback_of_policy_id")
+  createdBy          String   @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  project            Project  @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, version])
+  @@index([projectId])
+  @@index([sourceTraceId])
+  @@index([rollbackOfPolicyId])
+  @@index([createdAt])
+  @@map("system_policies")
+}
+
+model ConstraintRule {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  rule              String
+  scope             String
+  condition         String
+  effect            String
+  weight            Float
+  sourceKnowledgeId String   @map("source_knowledge_id")
+  sourceInput       String?  @map("source_input")
+  createdBy         String   @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+  project           Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([rule])
+  @@index([scope])
+  @@index([sourceKnowledgeId])
+  @@index([createdAt])
+  @@map("constraint_rules")
+}
+
+model Strategy {
+  id                 String   @id @default(uuid())
+  projectId          String   @map("project_id")
+  strategyKey        String   @map("strategy_key")
+  name               String
+  description        String
+  patchOperations    Json     @map("patch_operations")
+  impact             String
+  score              Float
+  scoreBreakdown     Json     @map("score_breakdown")
+  constraintSnapshot Json     @map("constraint_snapshot")
+  selected           Boolean  @default(false)
+  sourceInput        String   @map("source_input")
+  createdBy          String   @map("created_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  project            Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([strategyKey])
+  @@index([name])
+  @@index([impact])
+  @@index([selected])
+  @@index([createdAt])
+  @@map("strategies")
+}
+
+model EvolutionSignal {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  traceId     String?  @map("trace_id")
+  strategyId  String   @map("strategy_id")
+  signalType  String   @map("signal_type")
+  weightDelta Float    @map("weight_delta")
+  reason      String
+  createdBy   String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  project     Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([traceId])
+  @@index([strategyId])
+  @@index([signalType])
+  @@index([createdAt])
+  @@map("evolution_signals")
+}
+
+model SystemGraph {
+  id               String   @id @default(uuid())
+  projectId        String   @map("project_id")
+  version          Int
+  status           String   @default("draft")
+  nodes            Json
+  edges            Json
+  previewPatchId   String?  @map("preview_patch_id")
+  generatedByRunId String?  @map("generated_by_run_id")
+  createdBy        String   @map("created_by")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  project          Project  @relation(fields: [projectId], references: [id])
+  nodeRecords      SystemNode[]
+  edgeRecords      SystemEdge[]
+  mutationLogs     SystemMutationLog[]
+
+  @@index([projectId])
+  @@index([version])
+  @@index([status])
+  @@index([previewPatchId])
+  @@index([generatedByRunId])
+  @@index([createdAt])
+  @@map("system_graphs")
+}
+
+model SystemNode {
+  id        String      @id @default(uuid())
+  projectId String      @map("project_id")
+  graphId   String      @map("graph_id")
+  nodeKey   String      @map("node_key")
+  type      String
+  name      String
+  config    Json
+  status    String      @default("active")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  project   Project     @relation(fields: [projectId], references: [id])
+  graph     SystemGraph @relation(fields: [graphId], references: [id])
+
+  @@unique([graphId, nodeKey])
+  @@index([projectId])
+  @@index([graphId])
+  @@index([type])
+  @@index([status])
+  @@map("system_nodes")
+}
+
+model SystemEdge {
+  id        String      @id @default(uuid())
+  projectId String      @map("project_id")
+  graphId   String      @map("graph_id")
+  edgeKey   String      @map("edge_key")
+  fromNode  String      @map("from_node")
+  toNode    String      @map("to_node")
+  relation  String
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  project   Project     @relation(fields: [projectId], references: [id])
+  graph     SystemGraph @relation(fields: [graphId], references: [id])
+
+  @@unique([graphId, edgeKey])
+  @@index([projectId])
+  @@index([graphId])
+  @@index([fromNode])
+  @@index([toNode])
+  @@map("system_edges")
+}
+
+model SystemChangeProposal {
+  id             String    @id @default(uuid())
+  projectId      String    @map("project_id")
+  sourceTraceId  String?   @map("source_trace_id")
+  status         String    @default("preview")
+  mutations      Json
+  impactAnalysis Json      @map("impact_analysis")
+  riskLevel      String    @map("risk_level")
+  previewGraph   Json      @map("preview_graph")
+  createdBy      String    @map("created_by")
+  appliedGraphId String?   @map("applied_graph_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  appliedAt      DateTime? @map("applied_at")
+  project        Project   @relation(fields: [projectId], references: [id])
+  mutationLogs   SystemMutationLog[]
+
+  @@index([projectId])
+  @@index([sourceTraceId])
+  @@index([status])
+  @@index([riskLevel])
+  @@index([createdAt])
+  @@map("system_change_proposals")
+}
+
+model SystemMutationLog {
+  id             String                @id @default(uuid())
+  projectId      String                @map("project_id")
+  proposalId     String?               @map("proposal_id")
+  graphId        String?               @map("graph_id")
+  mutation       Json
+  status         String
+  rollbackData   Json?                 @map("rollback_data")
+  result         Json?
+  createdBy      String                @map("created_by")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  project        Project               @relation(fields: [projectId], references: [id])
+  proposal       SystemChangeProposal? @relation(fields: [proposalId], references: [id])
+  graph          SystemGraph?          @relation(fields: [graphId], references: [id])
+
+  @@index([projectId])
+  @@index([proposalId])
+  @@index([graphId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("system_mutation_logs")
+}
+
+model Company {
+  id                 String                @id @default(uuid())
+  projectId          String                @map("project_id")
+  name               String
+  budget             Float
+  strategy           String
+  status             String                @default("active")
+  createdBy          String                @map("created_by")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+  project            Project               @relation(fields: [projectId], references: [id])
+  departments        Department[]
+  agents             Agent[]
+  initiatives        ProductInitiative[]
+  engineeringPlans   EngineeringPlan[]
+  designPlans        DesignPlan[]
+  qaReports          CompanyQAReport[]
+  growthPlans        GrowthPlan[]
+  evolutionPlans     CompanyEvolutionPlan[]
+  companyRuntimeRuns CompanyRuntimeRun[]
+
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("companies")
+}
+
+model Department {
+  id               String   @id @default(uuid())
+  projectId        String   @map("project_id")
+  companyId        String   @map("company_id")
+  type             String
+  budgetAllocation Float    @map("budget_allocation")
+  status           String   @default("active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  project          Project  @relation(fields: [projectId], references: [id])
+  company          Company  @relation(fields: [companyId], references: [id])
+  agents           Agent[]
+
+  @@unique([companyId, type])
+  @@index([projectId])
+  @@index([companyId])
+  @@index([type])
+  @@index([status])
+  @@map("departments")
+}
+
+model Agent {
+  id           String     @id @default(uuid())
+  projectId    String     @map("project_id")
+  companyId    String     @map("company_id")
+  departmentId String     @map("department_id")
+  name         String
+  role         String
+  capabilities Json
+  status       String     @default("active")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  project      Project    @relation(fields: [projectId], references: [id])
+  company      Company    @relation(fields: [companyId], references: [id])
+  department   Department @relation(fields: [departmentId], references: [id])
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([departmentId])
+  @@index([status])
+  @@map("agents")
+}
+
+model ProductInitiative {
+  id               String                   @id @default(uuid())
+  projectId        String                   @map("project_id")
+  companyId        String                   @map("company_id")
+  sourceInput      String                   @map("source_input")
+  name             String
+  goal             String
+  features         Json
+  ceoApproved      Boolean                  @default(false) @map("ceo_approved")
+  priority         String
+  allocatedBudget  Float                    @map("allocated_budget")
+  createdBy        String                   @map("created_by")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  project          Project                  @relation(fields: [projectId], references: [id])
+  company          Company                  @relation(fields: [companyId], references: [id])
+  engineeringPlans EngineeringPlan[]
+  designPlans      DesignPlan[]
+  qaReports        CompanyQAReport[]
+  growthPlans      GrowthPlan[]
+  evolutionPlans   CompanyEvolutionPlan[]
+  runtimeRuns      CompanyRuntimeRun[]
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([ceoApproved])
+  @@index([priority])
+  @@index([createdAt])
+  @@map("product_initiatives")
+}
+
+model EngineeringPlan {
+  id             String            @id @default(uuid())
+  projectId      String            @map("project_id")
+  companyId      String            @map("company_id")
+  initiativeId   String            @map("initiative_id")
+  modules        Json
+  apis           Json
+  systemChanges  Json              @map("system_changes")
+  createdBy      String            @map("created_by")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  project        Project           @relation(fields: [projectId], references: [id])
+  company        Company           @relation(fields: [companyId], references: [id])
+  initiative     ProductInitiative @relation(fields: [initiativeId], references: [id])
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([initiativeId])
+  @@index([createdAt])
+  @@map("engineering_plans")
+}
+
+model DesignPlan {
+  id           String            @id @default(uuid())
+  projectId    String            @map("project_id")
+  companyId    String            @map("company_id")
+  initiativeId String            @map("initiative_id")
+  layouts      Json
+  uxFlows      Json              @map("ux_flows")
+  createdBy    String            @map("created_by")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  project      Project           @relation(fields: [projectId], references: [id])
+  company      Company           @relation(fields: [companyId], references: [id])
+  initiative   ProductInitiative @relation(fields: [initiativeId], references: [id])
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([initiativeId])
+  @@index([createdAt])
+  @@map("design_plans")
+}
+
+model CompanyQAReport {
+  id              String            @id @default(uuid())
+  projectId       String            @map("project_id")
+  companyId       String            @map("company_id")
+  initiativeId    String            @map("initiative_id")
+  issues          Json
+  riskLevel       String            @map("risk_level")
+  recommendations Json
+  createdBy       String            @map("created_by")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  project         Project           @relation(fields: [projectId], references: [id])
+  company         Company           @relation(fields: [companyId], references: [id])
+  initiative      ProductInitiative @relation(fields: [initiativeId], references: [id])
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([initiativeId])
+  @@index([riskLevel])
+  @@index([createdAt])
+  @@map("company_qa_reports")
+}
+
+model GrowthPlan {
+  id             String            @id @default(uuid())
+  projectId      String            @map("project_id")
+  companyId      String            @map("company_id")
+  initiativeId   String            @map("initiative_id")
+  optimizations  Json
+  experiments    Json
+  createdBy      String            @map("created_by")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  project        Project           @relation(fields: [projectId], references: [id])
+  company        Company           @relation(fields: [companyId], references: [id])
+  initiative     ProductInitiative @relation(fields: [initiativeId], references: [id])
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([initiativeId])
+  @@index([createdAt])
+  @@map("growth_plans")
+}
+
+model CompanyEvolutionPlan {
+  id                String            @id @default(uuid())
+  projectId         String            @map("project_id")
+  companyId         String            @map("company_id")
+  initiativeId      String            @map("initiative_id")
+  structuralChanges Json              @map("structural_changes")
+  agentChanges      Json              @map("agent_changes")
+  createdBy         String            @map("created_by")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  project           Project           @relation(fields: [projectId], references: [id])
+  company           Company           @relation(fields: [companyId], references: [id])
+  initiative        ProductInitiative @relation(fields: [initiativeId], references: [id])
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([initiativeId])
+  @@index([createdAt])
+  @@map("company_evolution_plans")
+}
+
+model CompanyRuntimeRun {
+  id                     String             @id @default(uuid())
+  projectId              String             @map("project_id")
+  companyId              String             @map("company_id")
+  initiativeId           String             @map("initiative_id")
+  sourceType             String             @map("source_type")
+  sourceId               String?            @map("source_id")
+  input                  String
+  ceoPlan                Json               @map("ceo_plan")
+  productInitiative      Json               @map("product_initiative")
+  engineeringPlan        Json               @map("engineering_plan")
+  designPlan             Json               @map("design_plan")
+  qaReport               Json               @map("qa_report")
+  growthPlan             Json               @map("growth_plan")
+  evolutionPlan          Json               @map("evolution_plan")
+  budgetAllocation       Json               @map("budget_allocation")
+  status                 String             @default("completed")
+  createdBy              String             @map("created_by")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  project                Project            @relation(fields: [projectId], references: [id])
+  company                Company            @relation(fields: [companyId], references: [id])
+  initiative             ProductInitiative  @relation(fields: [initiativeId], references: [id])
+
+  @@index([projectId])
+  @@index([companyId])
+  @@index([initiativeId])
+  @@index([sourceType])
+  @@index([sourceId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("company_runtime_runs")
+}
+
 model KnowledgeItem {
-  id                        String            @id @default(uuid())
+  id                        String             @id @default(uuid())
   title                     String
   content                   String
   summary                   String?
   type                      KnowledgeType
-  status                    KnowledgeStatus   @default(draft)
-  scope                     KnowledgeScope    @default(global)
-  categoryId                String?           @map("category_id")
+  status                    KnowledgeStatus    @default(draft)
+  scope                     KnowledgeScope     @default(global)
+  categoryId                String?            @map("category_id")
   tags                      Json?
-  priority                  KnowledgePriority @default(medium)
+  priority                  KnowledgePriority  @default(medium)
   source                    KnowledgeSource
-  sourceProjectId           String?           @map("source_project_id")
-  sourceFileId              String?           @map("source_file_id")
-  sourcePrdDocumentId       String?           @map("source_prd_document_id")
-  sourcePrototypeArtifactId String?           @map("source_prototype_artifact_id")
-  createdBy                 String            @map("created_by")
-  updatedBy                 String?           @map("updated_by")
-  createdAt                 DateTime          @default(now()) @map("created_at")
-  updatedAt                 DateTime          @updatedAt @map("updated_at")
+  sourceProjectId           String?            @map("source_project_id")
+  sourceFileId              String?            @map("source_file_id")
+  sourcePrdDocumentId       String?            @map("source_prd_document_id")
+  sourcePrototypeArtifactId String?            @map("source_prototype_artifact_id")
+  createdBy                 String             @map("created_by")
+  updatedBy                 String?            @map("updated_by")
+  createdAt                 DateTime           @default(now()) @map("created_at")
+  updatedAt                 DateTime           @updatedAt @map("updated_at")
   category                  KnowledgeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   versions                  KnowledgeVersion[]
 
@@ -1104,14 +1630,14 @@ model KnowledgeItem {
 }
 
 model KnowledgeCategory {
-  id          String          @id @default(uuid())
+  id          String              @id @default(uuid())
   name        String
   description String?
-  parentId    String?         @map("parent_id")
-  order       Int             @default(0)
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
-  parent      KnowledgeCategory? @relation("KnowledgeCategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  parentId    String?             @map("parent_id")
+  order       Int                 @default(0)
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  parent      KnowledgeCategory?  @relation("KnowledgeCategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    KnowledgeCategory[] @relation("KnowledgeCategoryTree")
   items       KnowledgeItem[]
 
@@ -1214,23 +1740,23 @@ model AdminAuditLog {
 }
 
 model AgentRunLog {
-  id             String          @id @default(uuid())
-  projectId      String          @map("project_id")
-  conversationId String          @map("conversation_id")
-  userId         String          @map("user_id")
+  id             String               @id @default(uuid())
+  projectId      String               @map("project_id")
+  conversationId String               @map("conversation_id")
+  userId         String               @map("user_id")
   intent         UserIntent?
-  status         AgentRunStatus  @default(running)
-  inputSummary   String          @map("input_summary")
-  outputSummary  String?         @map("output_summary")
+  status         AgentRunStatus       @default(running)
+  inputSummary   String               @map("input_summary")
+  outputSummary  String?              @map("output_summary")
   result         Json?
-  errorMessage   String?         @map("error_message")
-  traceId        String          @map("trace_id")
-  startedAt      DateTime        @default(now()) @map("started_at")
-  endedAt        DateTime?       @map("ended_at")
-  durationMs     Int?            @map("duration_ms")
-  project        Project         @relation(fields: [projectId], references: [id])
-  conversation   Conversation    @relation(fields: [conversationId], references: [id])
-  user           User            @relation(fields: [userId], references: [id])
+  errorMessage   String?              @map("error_message")
+  traceId        String               @map("trace_id")
+  startedAt      DateTime             @default(now()) @map("started_at")
+  endedAt        DateTime?            @map("ended_at")
+  durationMs     Int?                 @map("duration_ms")
+  project        Project              @relation(fields: [projectId], references: [id])
+  conversation   Conversation         @relation(fields: [conversationId], references: [id])
+  user           User                 @relation(fields: [userId], references: [id])
   steps          AgentStepLog[]
   streamEvents   VibeStreamEventLog[]
 

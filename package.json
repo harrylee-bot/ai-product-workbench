@@ -13,9 +13,9 @@
     "build": "npm --workspace @ai-product-workbench/api run build && npm --workspace @ai-product-workbench/web run build",
     "typecheck": "npm --workspace @ai-product-workbench/api run typecheck && npm --workspace @ai-product-workbench/web run typecheck",
     "test": "npm --workspace @ai-product-workbench/api run test",
-    "db:generate": "prisma generate --schema packages/database/prisma/schema.prisma",
-    "db:migrate": "prisma migrate dev --schema packages/database/prisma/schema.prisma",
-    "db:seed": "npm --workspace @ai-product-workbench/database run seed"
+    "db:generate": "prisma generate --schema packages/db/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema packages/db/prisma/schema.prisma",
+    "db:seed": "npm --workspace @ai-product-workbench/db run seed"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

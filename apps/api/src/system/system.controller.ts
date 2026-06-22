@@ -7,6 +7,7 @@ export class SystemController {
     return {
       ok: true,
       service: "ai-product-workbench-api",
+      phase: "triple-system-fusion-ai-product-os",
       modules: [
         "auth",
         "admin-users",
@@ -35,6 +36,9 @@ export class SystemController {
         "patch-execution-engine",
         "product-memory",
         "evolution-orchestrator",
+        "constraint-system",
+        "fusion-decision-system",
+        "fusion-evolution-system",
       ],
     };
   }

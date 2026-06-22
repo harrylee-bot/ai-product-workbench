@@ -653,8 +653,10 @@ type PrototypeStateResponse = {
 };
 
 type PatchPreviewItem = {
+  id?: string;
   patchId: string;
   status: PatchRecordStatus;
+  previewStatus?: string;
   selectedRegion?: SelectedRegion;
   patchPlan?: unknown;
   operations?: Array<{ op?: string; path?: string; reason?: string; value?: unknown }>;
@@ -662,6 +664,10 @@ type PatchPreviewItem = {
   impactScope?: string[];
   risks?: Array<{ level?: string; message?: string; relatedPaths?: string[] }>;
   regenerationPlan?: unknown;
+  diff?: unknown;
+  before?: unknown;
+  after?: unknown;
+  riskPanel?: unknown;
   beforeProductDesignStateVersion?: number;
   afterProductDesignStateVersion?: number;
   previewOnly?: boolean;
@@ -5400,6 +5406,14 @@ function PatchPreviewModal({
 }) {
   const operations = preview.operations ?? [];
   const risks = preview.risks ?? [];
+  const diff = asRecord(preview.diff);
+  const impacted = asRecord(diff?.impacted);
+  const riskPanel = asRecord(preview.riskPanel);
+  const checks = asRecord(riskPanel?.checks);
+  const diffOperations = Array.isArray(diff?.operations)
+    ? diff.operations as Array<{ op?: string; path?: string; reason?: string; before?: unknown; after?: unknown }>
+    : operations;
+  const riskLevel = asText(riskPanel?.level) || "low";
   return (
     <Modal
       open
@@ -5423,18 +5437,59 @@ function PatchPreviewModal({
             <span className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500">
               {preview.patchId}
             </span>
+            {preview.id ? (
+              <span className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500">
+                Preview {preview.id.slice(0, 8)}
+              </span>
+            ) : null}
             <span className={clsx("rounded-md border px-2 py-1 text-xs font-medium", PATCH_STATUS_META[preview.status]?.className)}>
               {PATCH_STATUS_META[preview.status]?.label ?? preview.status}
+            </span>
+            <span className="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500">
+              Risk {riskLevel}
             </span>
           </div>
           <div className="mt-2 text-sm leading-6 text-gray-700">
             {preview.message ?? "Patch 预览已生成。"}
           </div>
         </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+            <FieldLabel>Before</FieldLabel>
+            <div className="mt-2 text-sm font-semibold text-gray-950">
+              ProductDesignState v{preview.beforeProductDesignStateVersion ?? "-"}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-gray-500">当前确认基线，版本变化会阻止应用。</div>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+            <FieldLabel>After</FieldLabel>
+            <div className="mt-2 text-sm font-semibold text-gray-950">
+              {preview.afterProductDesignStateVersion ? `ProductDesignState v${preview.afterProductDesignStateVersion}` : "Preview projection"}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-gray-500">确认后才会生成新版本、PRD、Prototype 与 QA。</div>
+          </div>
+        </div>
+        {diff ? (
+          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+            <FieldLabel>Diff Summary</FieldLabel>
+            <div className="mt-2 text-sm leading-6 text-gray-700">
+              {asText(diff.summary) || asText(diff.reason) || "结构化差异已生成。"}
+            </div>
+            {Array.isArray(impacted?.impactScope) ? (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {(impacted.impactScope as string[]).slice(0, 8).map((item) => (
+                  <span key={item} className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
+                    {item}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div>
           <FieldLabel>Operations</FieldLabel>
           <div className="mt-2 space-y-2">
-            {operations.length ? operations.map((operation, index) => (
+            {diffOperations.length ? diffOperations.map((operation, index) => (
               <div key={`${operation.path}-${index}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
                 <div className="flex items-center justify-between gap-3 text-xs">
                   <span className="font-medium text-gray-950">{operation.op ?? "update"}</span>
@@ -5451,6 +5506,17 @@ function PatchPreviewModal({
             )}
           </div>
         </div>
+        {riskPanel ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            <FieldLabel>Risk Panel</FieldLabel>
+            <div className="mt-2 grid gap-2 text-xs leading-5 text-amber-800 md:grid-cols-2">
+              <div>确认必需：{riskPanel.requiresConfirmation ? "是" : "否"}</div>
+              <div>版本化应用：{riskPanel.versionedApply ? "是" : "否"}</div>
+              <div>重生成 PRD：{checks?.requiresPrdRegeneration ? "是" : "否"}</div>
+              <div>重生成原型：{checks?.requiresPrototypeRegeneration ? "是" : "否"}</div>
+            </div>
+          </div>
+        ) : null}
         {risks.length ? (
           <div>
             <FieldLabel>Risks</FieldLabel>

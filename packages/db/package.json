@@ -1,5 +1,5 @@
 {
-  "name": "@ai-product-workbench/database",
+  "name": "@ai-product-workbench/db",
   "version": "0.1.0",
   "private": true,
   "scripts": {

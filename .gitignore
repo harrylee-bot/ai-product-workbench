@@ -3,6 +3,7 @@ storage
 .next
 dist
 coverage
+output
 .env
 .env.local
 .DS_Store

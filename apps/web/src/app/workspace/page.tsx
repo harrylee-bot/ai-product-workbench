@@ -1,5 +1,5 @@
-import { WorkspaceClient } from "./workspace-client";
+import { Phase1WorkspaceClient } from "./phase1-workspace-client";
 
 export default function WorkspacePage() {
-  return <WorkspaceClient />;
+  return <Phase1WorkspaceClient />;
 }

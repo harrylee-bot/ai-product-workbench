@@ -133,6 +133,12 @@ export class ConfirmPatchDto {
   userConfirmation!: string;
 }
 
+export class ApplyPatchDto extends ConfirmPatchDto {
+  @IsString({ message: "patchId 不能为空" })
+  @IsNotEmpty({ message: "patchId 不能为空" })
+  patchId!: string;
+}
+
 export class PreviewPatchDto {
   @IsString({ message: "patchId 不能为空" })
   @IsNotEmpty({ message: "patchId 不能为空" })

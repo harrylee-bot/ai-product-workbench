@@ -36,6 +36,11 @@ describe("PatchService", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    patchPreview: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
     productInteractionEvent: {
       create: vi.fn(),
     },
@@ -127,6 +132,11 @@ describe("PatchService", () => {
     prisma.conversation.findFirst.mockResolvedValue({ id: "conversation-1", projectId: "project-1" });
     prisma.patchRecord.create.mockImplementation(async ({ data }) => patchRecordRow({ id: "patch-1", ...data }));
     prisma.patchRecord.update.mockImplementation(async ({ data }) => patchRecordRow({ id: "patch-1", ...data }));
+    prisma.patchPreview.findUnique.mockResolvedValue(null);
+    prisma.patchPreview.create.mockImplementation(async ({ data }) => patchPreviewRow({ id: "preview-1", ...data }));
+    prisma.patchPreview.update.mockImplementation(async ({ data, where }) =>
+      patchPreviewRow({ id: where.id, status: data.status, message: data.message }),
+    );
     prisma.productInteractionEvent.create.mockResolvedValue({});
     messageService.createUserMessage.mockResolvedValue({
       id: "message-user-1",
@@ -161,38 +171,10 @@ describe("PatchService", () => {
     });
   });
 
-  it("creates a PatchRecord, applies ProductDesignState operations, regenerates artifacts, and completes QA", async () => {
+  it("creates a PatchRecord preview candidate without mutating ProductDesignState", async () => {
     const beforeState = baseState();
-    const patchedState = baseState({
-      version: 2,
-      status: "patching",
-      frontendRules: [
-        ...beforeState.frontendRules,
-        { id: "patch_button_copy", title: "按钮文案", description: "按钮文案改为立即签到" },
-      ],
-      prdDocument: undefined,
-      prototypeSpec: undefined,
-    });
-    const stateWithArtifacts = baseState({
-      ...patchedState,
-      version: 3,
-      status: "prototype_ready",
-      prdDocument: basePrd(),
-      prototypeSpec: basePrototypeSpec(),
-    });
     stateService.getCurrentState.mockResolvedValue(beforeState);
-    stateService.applyPatch.mockResolvedValue(patchedState);
-    stateService.attachGeneratedArtifacts.mockResolvedValue(stateWithArtifacts);
     patchAgent.run.mockResolvedValue({ data: basePatchPlan() });
-    prdWriterAgent.run.mockResolvedValue({ data: basePrdDraft(), modelCallLogId: "model-prd" });
-    documentService.saveGeneratedDocument.mockResolvedValue(basePrd());
-    prototypeDesignerAgent.run.mockResolvedValue({ data: basePrototypeSpec(), modelCallLogId: "model-spec" });
-    prototypeCodeAgent.run.mockResolvedValue({ data: basePrototypeDraft(), modelCallLogId: "model-html" });
-    prototypeService.saveGeneratedPrototype.mockResolvedValue({
-      prototypeSpec: basePrototypeSpec(),
-      artifact: baseArtifact(),
-    });
-    qaService.runForProject.mockResolvedValue(baseQaReport());
 
     const result = await service.createPatchForUser(user, "project-1", {
       conversationId: "conversation-1",
@@ -208,41 +190,42 @@ describe("PatchService", () => {
       userInstruction: "这个按钮文案改成立即签到。",
     });
 
-    expect(result.patchRecord.status).toBe(PatchRecordStatus.applied);
-    expect(result.result.productDesignState.version).toBe(3);
+    expect(result.status).toBe("candidate_created");
+    expect(result.patchRecord.status).toBe(PatchRecordStatus.needs_confirmation);
+    expect(result.patchPreview).toEqual(
+      expect.objectContaining({
+        patchId: "patch-1",
+        requiresConfirmation: true,
+        diff: expect.objectContaining({
+          mode: "product_design_state",
+        }),
+      }),
+    );
     expect(prisma.patchRecord.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         selectedRegion: expect.objectContaining({ type: "prototype", targetId: "artifact-1" }),
-        status: PatchRecordStatus.planned,
+        status: PatchRecordStatus.needs_confirmation,
         beforeProductDesignStateVersion: 1,
       }),
     });
-    expect(stateService.applyPatch).toHaveBeenCalledWith(
-      "project-1",
-      beforeState,
-      expect.objectContaining({ operations: basePatchPlan().operations }),
-      expect.objectContaining({ userId: "user-1", runId: "run-1" }),
-    );
-    expect(documentService.saveGeneratedDocument).toHaveBeenCalledWith(
-      patchedState,
-      expect.any(Object),
-      expect.objectContaining({ reason: "Patch 后重新生成 PRD" }),
-    );
-    expect(prototypeService.saveGeneratedPrototype).toHaveBeenCalledWith(
-      patchedState,
-      expect.any(Object),
-      expect.any(Object),
-      expect.objectContaining({ reason: "Patch 后重新生成 HTML 原型" }),
-    );
-    expect(qaService.runForProject).toHaveBeenCalledWith(
-      "project-1",
-      "user-1",
-      expect.objectContaining({
-        trigger: "patch",
-        runId: "run-1",
-        relatedPatchId: "patch-1",
+    expect(prisma.patchPreview.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: "project-1",
+        patchRecordId: "patch-1",
+        beforeProductDesignStateVersion: 1,
+        diff: expect.objectContaining({
+          operations: expect.any(Array),
+        }),
+        riskPanel: expect.objectContaining({
+          requiresConfirmation: true,
+          versionedApply: true,
+        }),
       }),
-    );
+    });
+    expect(stateService.applyPatch).not.toHaveBeenCalled();
+    expect(documentService.saveGeneratedDocument).not.toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+    expect(qaService.runForProject).not.toHaveBeenCalled();
     expect(knowledgeRetrieval.search).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: "project-1",
@@ -251,11 +234,9 @@ describe("PatchService", () => {
     );
     expect(stream.emit).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "patch_completed",
+        type: "patch_plan_created",
         data: expect.objectContaining({
-          result: expect.objectContaining({
-            patchPlan: expect.objectContaining({ id: "patch-plan-1" }),
-          }),
+          patchPreview: expect.objectContaining({ patchId: "patch-1" }),
         }),
       }),
     );
@@ -362,42 +343,81 @@ describe("PatchService", () => {
         previewOnly: true,
         requiresConfirmation: true,
         operations: basePatchPlan().operations,
+        diff: expect.objectContaining({
+          mode: "product_design_state",
+        }),
       }),
     );
+    expect(prisma.patchPreview.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        patchRecordId: "patch-preview-1",
+        riskPanel: expect.objectContaining({
+          requiresConfirmation: true,
+        }),
+      }),
+    });
     expect(stateService.applyPatch).not.toHaveBeenCalled();
     expect(documentService.saveGeneratedDocument).not.toHaveBeenCalled();
     expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
     expect(qaService.runForProject).not.toHaveBeenCalled();
   });
 
-  it("rolls ProductDesignState back when regeneration fails after patch application", async () => {
+  it("applies a confirmed Patch Preview and rolls ProductDesignState back when regeneration fails", async () => {
     const beforeState = baseState({ version: 7 });
     const patchedState = baseState({ version: 8, status: "patching", prdDocument: undefined, prototypeSpec: undefined });
     const rollbackState = baseState({ version: 9, status: "prototype_ready" });
+    prisma.patchRecord.findUnique.mockResolvedValue({
+      ...patchRecordRow({
+        id: "patch-1",
+        status: PatchRecordStatus.needs_confirmation,
+        beforeProductDesignStateVersion: 7,
+      }),
+      project: baseProject(),
+    });
+    prisma.patchPreview.findUnique.mockResolvedValue(patchPreviewRow({
+      id: "preview-1",
+      patchRecordId: "patch-1",
+      beforeProductDesignStateVersion: 7,
+    }));
     stateService.getCurrentState.mockResolvedValue(beforeState);
     stateService.applyPatch.mockResolvedValue(patchedState);
     stateService.restoreStateAfterPatchFailure.mockResolvedValue({
       state: rollbackState,
       version: { id: "version-9", version: 9 },
     });
-    patchAgent.run.mockResolvedValue({ data: basePatchPlan() });
     prdWriterAgent.run.mockRejectedValue(new Error("PRD_REGENERATION_FAILED"));
 
     await expect(
-      service.createPatchForUser(user, "project-1", {
-        conversationId: "conversation-1",
-        selectedRegion: {
-          type: "document",
-          targetId: "prd-1",
-          documentId: "prd-1",
-          sectionId: "frontend_rules",
-          label: "前端展示规则",
-          sourcePaths: ["frontendRules"],
-        },
-        userInstruction: "补充按钮置灰说明。",
-      }),
+      service.confirmForUser(user, "patch-1", "确认应用预览"),
     ).rejects.toThrow("PRD_REGENERATION_FAILED");
 
+    expect(patchAgent.run).not.toHaveBeenCalled();
+    expect(prisma.patchPreview.update).toHaveBeenCalledWith({
+      where: { id: "preview-1" },
+      data: expect.objectContaining({
+        status: "applying",
+      }),
+    });
+    expect(prisma.patchPreview.update).toHaveBeenCalledWith({
+      where: { id: "preview-1" },
+      data: expect.objectContaining({
+        status: "failed",
+        message: "PRD_REGENERATION_FAILED",
+      }),
+    });
+    expect(stateService.applyPatch).toHaveBeenCalledWith(
+      "project-1",
+      beforeState,
+      expect.objectContaining({
+        id: "patch-plan-1",
+        needUserConfirm: false,
+        needsUserConfirmation: false,
+      }),
+      expect.objectContaining({
+        userId: "user-1",
+        runId: "run-1",
+      }),
+    );
     expect(stateService.restoreStateAfterPatchFailure).toHaveBeenCalledWith(
       "project-1",
       beforeState,
@@ -670,6 +690,42 @@ function patchRecordRow(input: Record<string, unknown>) {
     relatedQaReportId: input.relatedQaReportId ? String(input.relatedQaReportId) : null,
     generatedByRunId: input.generatedByRunId ? String(input.generatedByRunId) : "run-1",
     errorMessage: input.errorMessage ? String(input.errorMessage) : null,
+    createdBy: String(input.createdBy ?? "user-1"),
+    createdAt: input.createdAt instanceof Date ? input.createdAt : new Date("2026-06-20T08:00:00Z"),
+    updatedAt: input.updatedAt instanceof Date ? input.updatedAt : new Date("2026-06-20T08:00:00Z"),
+  };
+}
+
+function patchPreviewRow(input: Record<string, unknown>) {
+  const plan = input.patchPlan ?? basePatchPlan();
+  const operations = input.operations ?? basePatchPlan().operations;
+  return {
+    id: String(input.id ?? "preview-1"),
+    projectId: String(input.projectId ?? "project-1"),
+    patchRecordId: String(input.patchRecordId ?? "patch-1"),
+    status: String(input.status ?? "ready"),
+    beforeProductDesignStateVersion: Number(input.beforeProductDesignStateVersion ?? 1),
+    afterProductDesignStateVersion:
+      typeof input.afterProductDesignStateVersion === "number" ? input.afterProductDesignStateVersion : null,
+    beforeSnapshot: input.beforeSnapshot ?? {
+      productDesignStateVersion: Number(input.beforeProductDesignStateVersion ?? 1),
+    },
+    afterSnapshot: input.afterSnapshot ?? {
+      productDesignStateVersion: null,
+      projectedOperations: operations,
+    },
+    diff: input.diff ?? {
+      mode: "product_design_state",
+      operations,
+    },
+    riskPanel: input.riskPanel ?? {
+      level: "low",
+      requiresConfirmation: true,
+      versionedApply: true,
+    },
+    patchPlan: plan,
+    operations,
+    message: input.message ? String(input.message) : "Patch Preview 已生成。",
     createdBy: String(input.createdBy ?? "user-1"),
     createdAt: input.createdAt instanceof Date ? input.createdAt : new Date("2026-06-20T08:00:00Z"),
     updatedAt: input.updatedAt instanceof Date ? input.updatedAt : new Date("2026-06-20T08:00:00Z"),
