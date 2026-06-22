@@ -115,6 +115,15 @@ plugins:
         grow: true
   - source: github:quartz-community/graph
     enabled: true
+    options:
+      localGraph:
+        depth: 2
+        showTags: false
+        removeTags: []
+      globalGraph:
+        depth: -1
+        showTags: false
+        removeTags: []
     layout:
       position: right
       priority: 10
