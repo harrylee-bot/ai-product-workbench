@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { AgentName, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import { firstSentence, stableId } from "../ai-vibe.helpers";
+import { agentSystemPrompt } from "../agent-charter";
 import type {
   KnowledgeContext,
   ProductDesignDraft,
@@ -33,8 +34,10 @@ export class ProductDesignerAgentService extends BaseAgentService<
     return [
       {
         role: "system" as const,
-        content:
+        content: agentSystemPrompt(
+          this.agentName,
           "你是 Product Designer Agent。基于需求、知识和分析结果生成 ProductDesignDraft JSON，必须标记 assumptions。",
+        ),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];

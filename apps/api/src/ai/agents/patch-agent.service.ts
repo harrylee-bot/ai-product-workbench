@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AgentName, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
+import { agentSystemPrompt } from "../agent-charter";
 import type {
   KnowledgeContext,
   PatchPlan,
@@ -33,8 +34,10 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
     return [
       {
         role: "system" as const,
-        content:
+        content: agentSystemPrompt(
+          this.agentName,
           "你是 Patch Agent。只能输出 PatchPlan JSON，不能直接输出 PRD 或 HTML。必须先判断修改意图、影响范围和风险，operations 只能作用于 ProductDesignState 路径。",
+        ),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];

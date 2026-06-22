@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AgentName, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
+import { agentSystemPrompt } from "../agent-charter";
 import type {
   AssumptionReference,
   ClarificationQuestionReference,
@@ -40,8 +41,10 @@ export class PrdWriterAgentService extends BaseAgentService<PrdWriterInput, Requ
     return [
       {
         role: "system" as const,
-        content:
+        content: agentSystemPrompt(
+          this.agentName,
           "你是 PRD Writer Agent。只能基于 ProductDesignState 输出结构化 PRD JSON。不得编造 ProductDesignState 中不存在的业务规则；不得输出接口 URL、请求参数、数据库、SQL、代码、技术架构、部署或前后端实现细节。每个 section 必须包含 id、title、type、level、order、content、sourcePaths、tags。",
+        ),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];

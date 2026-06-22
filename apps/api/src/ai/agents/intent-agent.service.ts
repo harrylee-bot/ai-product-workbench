@@ -3,6 +3,7 @@ import { AgentName, ModelTaskType, UserIntent } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import { BaseAgentService } from "./base-agent.service";
 import type { ConversationMessage, IntentResult, SelectedRegion } from "../ai-vibe.types";
+import { agentSystemPrompt } from "../agent-charter";
 import { isCasualGeneralInput } from "../intent-classifier.helpers";
 
 type IntentInput = {
@@ -26,8 +27,10 @@ export class IntentAgentService extends BaseAgentService<IntentInput, IntentResu
     return [
       {
         role: "system" as const,
-        content:
+        content: agentSystemPrompt(
+          this.agentName,
           "你是 Intent Agent。只输出 JSON，识别用户在 AI 产品工作台中的意图。纯问候、寒暄、致谢或确认在线状态的短消息必须识别为 general_question，不要识别为 new_requirement；如果问候后面包含具体产品、页面、PRD、原型或修改诉求，再按真实诉求识别。",
+        ),
       },
       {
         role: "user" as const,

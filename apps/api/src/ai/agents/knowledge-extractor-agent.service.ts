@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AgentName, KnowledgeCandidateSource, KnowledgeType, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
+import { agentSystemPrompt } from "../agent-charter";
 import type {
   KnowledgeExtractorOutput,
   PatchPlan,
@@ -38,8 +39,10 @@ export class KnowledgeExtractorAgentService extends BaseAgentService<
     return [
       {
         role: "system" as const,
-        content:
+        content: agentSystemPrompt(
+          this.agentName,
           "你是 Knowledge Extractor Agent。只从用户确认后的稳定内容抽取可复用知识候选。不要抽取隐私、一次性项目描述或未确认 assumption。只输出 { candidates: KnowledgeCandidateDraft[] } JSON。",
+        ),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];

@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AgentName, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
+import { agentSystemPrompt } from "../agent-charter";
 import type {
   KnowledgeContext,
   PatchPlan,
@@ -33,8 +34,10 @@ export class QaAgentService extends BaseAgentService<QaAgentInput, QAAgentOutput
     return [
       {
         role: "system" as const,
-        content:
+        content: agentSystemPrompt(
+          this.agentName,
           "你是 QA Agent。校验 ProductDesignState、PRD、PrototypeSpec、HTML 原型和知识库规则一致性。只能输出 QAAgentOutput JSON，不得重写 PRD、HTML 或 ProductDesignState。issue 必须包含 id、checkType、severity、title、description、status；severity 只能是 blocking、major、minor、info；checkType 只能是 state_schema、prd_completeness、prototype_completeness、state_prd_consistency、state_prototype_consistency、prd_prototype_consistency、knowledge_rule_compliance、assumption_risk、patch_regression。",
+        ),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];

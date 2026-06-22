@@ -4,6 +4,7 @@ import { KnowledgeRetrievalService } from "../../knowledge/knowledge-retrieval.s
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
 import { AgentSkillRegistryService } from "../agent-skill-registry.service";
+import { agentSystemPrompt } from "../agent-charter";
 import { BaseAgentService } from "./base-agent.service";
 import type { KnowledgeContext, ProductDesignState } from "../ai-vibe.types";
 
@@ -67,8 +68,10 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
     return [
       {
         role: "system" as const,
-        content:
+        content: agentSystemPrompt(
+          this.agentName,
           "你是 Knowledge Agent。根据用户需求和附件摘要，分类可复用知识。只输出 KnowledgeContext JSON。",
+        ),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];

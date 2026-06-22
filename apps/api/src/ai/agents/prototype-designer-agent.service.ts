@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { AgentName, ModelTaskType } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
+import { agentSystemPrompt } from "../agent-charter";
 import type {
   AssumptionReference,
   ProductDesignState,
@@ -38,8 +39,10 @@ export class PrototypeDesignerAgentService extends BaseAgentService<
     return [
       {
         role: "system" as const,
-        content:
+        content: agentSystemPrompt(
+          this.agentName,
           "你是 Prototype Designer Agent。只能从 ProductDesignState 输出 PrototypeSpec JSON，不直接输出 HTML。每个 page/component 必须有稳定 id、sourcePaths；不得新增 ProductDesignState 中不存在的核心业务规则。",
+        ),
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];
