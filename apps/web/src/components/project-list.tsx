@@ -2,6 +2,7 @@
 
 import { Loader2, MessageCircle, MoreVertical, PanelLeftClose, PanelLeftOpen, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Button, EmptyState, IconButton, LoadingState } from "@/components/ui";
 import { UserMenu } from "@/components/user-menu";
 
 export type Phase1Project = {
@@ -68,7 +69,7 @@ export function ProjectList({
         <button
           type="button"
           onClick={onToggleCollapsed}
-          className="mt-7 inline-flex h-10 w-10 items-center justify-center rounded-xl text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
+          className="mt-7 inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
           aria-label="展开最近对话"
         >
           <PanelLeftOpen className="h-5 w-5" />
@@ -78,7 +79,7 @@ export function ProjectList({
             type="button"
             onClick={onCreateConversation}
             disabled={creatingConversation}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100 text-gray-900 transition hover:bg-gray-200 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] bg-gray-100 text-gray-900 transition hover:bg-gray-200 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="新建对话"
           >
             <Plus className="h-5 w-5" />
@@ -86,7 +87,7 @@ export function ProjectList({
           <button
             type="button"
             onClick={onToggleCollapsed}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
             aria-label="查看最近对话"
           >
             <MessageCircle className="h-5 w-5" />
@@ -94,7 +95,7 @@ export function ProjectList({
           <button
             type="button"
             onClick={onToggleCollapsed}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] text-gray-700 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
             aria-label="搜索最近对话"
           >
             <Search className="h-5 w-5" />
@@ -115,33 +116,27 @@ export function ProjectList({
             <div className="truncate text-xl font-semibold text-gray-950">智能产品工作台</div>
             <div className="mt-1 truncate text-xs leading-5 text-gray-500">说出目标，系统自动决策与生成</div>
           </div>
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-gray-500 transition hover:bg-gray-100 hover:text-gray-950 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
-            aria-label="收起最近对话"
-          >
+          <IconButton label="收起最近对话" onClick={onToggleCollapsed} className="shrink-0">
             <PanelLeftClose className="h-5 w-5" />
-          </button>
+          </IconButton>
         </div>
         <div className="mt-8 text-sm font-semibold text-gray-950">最近对话</div>
         <div className="mt-1 text-xs leading-5 text-gray-500">删除仅隐藏历史，系统内容保留用于知识库</div>
-        <button
-          type="button"
+        <Button
           onClick={onCreateConversation}
           disabled={creatingConversation}
-          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] px-3 text-sm font-semibold text-white shadow-[var(--shadow-control)] transition hover:bg-[var(--color-primary-hover)] focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-4 w-full"
         >
           {creatingConversation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           {creatingConversation ? "创建中..." : "新对话"}
-        </button>
+        </Button>
       </div>
       <div className="workbench-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <div className="px-3 pb-2 text-xs text-gray-400">
           {currentProject ? projectTitleLabel(currentProject.title) : "尚未选择项目"}
         </div>
         {loading ? (
-          <div className="mx-1 rounded-xl border border-gray-200 bg-white px-3 py-4 text-sm text-gray-500 shadow-[var(--shadow-control)]">加载对话中...</div>
+          <LoadingState label="加载对话中..." className="mx-1" />
         ) : conversations?.length ? (
           conversations.map((conversation) => (
             <ConversationRow
@@ -154,9 +149,7 @@ export function ProjectList({
             />
           ))
         ) : (
-          <div className="rounded-xl border border-dashed border-gray-200 bg-white/70 px-3 py-8 text-center text-sm leading-6 text-gray-500">
-            当前项目暂无对话，点击“新对话”开始。
-          </div>
+          <EmptyState title="暂无对话" description="点击“新对话”开始。" className="mx-1 bg-white/80 py-8" icon={<MessageCircle className="h-5 w-5" />} />
         )}
 
         <div className="mt-7 flex items-center justify-between px-3">
@@ -186,9 +179,7 @@ export function ProjectList({
               />
             ))
           ) : (
-            <div className="rounded-xl border border-dashed border-gray-200 bg-white/70 px-3 py-8 text-center text-sm leading-6 text-gray-500">
-              暂无项目。直接在中间输入需求，系统会自动创建工作空间。
-            </div>
+            <EmptyState title="暂无项目" description="直接在中间输入需求，系统会自动创建工作空间。" className="mx-1 bg-white/80 py-8" icon={<Sparkles className="h-5 w-5" />} />
           )}
         </div>
       </div>

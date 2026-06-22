@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
+import { LoadingState } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
 export function ProtectedRoute({
@@ -35,10 +36,8 @@ export function ProtectedRoute({
 
 export function RouteLoading() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#F6F7F9] px-4">
-      <div className="rounded-[16px] border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500 shadow-sm">
-        加载中...
-      </div>
+    <main className="flex min-h-screen items-center justify-center bg-[var(--color-app-bg)] px-4">
+      <LoadingState label="加载中..." />
     </main>
   );
 }

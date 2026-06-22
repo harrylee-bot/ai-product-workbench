@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Bot, CheckCircle2, ChevronDown, Circle, GitBranch, LoaderCircle, Sparkles } from "lucide-react";
 import type { Phase2DecisionView } from "@/components/preview-panel";
-import { Button, TextArea } from "@/components/ui";
+import { Badge, Button, EmptyState, TextArea } from "@/components/ui";
 
 export type Phase1Message = {
   id: string;
@@ -74,15 +74,11 @@ export function ChatPanel({
             </div>
           ))
         ) : (
-          <div className="rounded-[16px] border border-dashed border-gray-200 bg-white px-5 py-10 text-center shadow-[var(--shadow-control)]">
-            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div className="mt-4 text-sm font-semibold text-gray-950">从一句目标开始</div>
-            <p className="mx-auto mt-2 max-w-[360px] text-sm leading-6 text-gray-500">
-              系统会自动经过约束、决策、进化与统一编排，并生成需求结果、设计结果和执行路径。
-            </p>
-          </div>
+          <EmptyState
+            title="从一句目标开始"
+            description="系统会自动经过约束、决策、进化与统一编排，并生成需求结果、设计结果和执行路径。"
+            icon={<Sparkles className="h-5 w-5" />}
+          />
         )}
         {(sending || decision) ? (
           <ExecutionPathCard decision={decision} running={Boolean(sending)} runningStep={runningStep} />
@@ -167,14 +163,7 @@ function ExecutionPathCard({
             {running ? `正在执行：${currentStep?.title ?? "智能编排"}` : completedSubtitle}
           </span>
         </span>
-        <span
-          className={[
-            "rounded-md border px-2 py-0.5 text-xs",
-            completed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700",
-          ].join(" ")}
-        >
-          {completed ? "已完成" : "运行中"}
-        </span>
+        <Badge tone={completed ? "success" : "warning"}>{completed ? "已完成" : "运行中"}</Badge>
         <ChevronDown className={["h-4 w-4 text-gray-400 transition", open ? "rotate-180" : ""].join(" ")} />
       </button>
 

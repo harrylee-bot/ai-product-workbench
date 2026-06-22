@@ -12,6 +12,7 @@ import {
 } from "@/components/preview-panel";
 import { ProjectList, type Phase1Conversation, type Phase1Project } from "@/components/project-list";
 import { ProtectedRoute } from "@/components/protected-route";
+import { ErrorState } from "@/components/ui";
 import { apiRequest } from "@/lib/api";
 
 type ProjectsResponse = {
@@ -345,11 +346,15 @@ function Phase1WorkspaceInner() {
   }
 
   const sidebarWidth = sidebarCollapsed ? 72 : 300;
+  const queryError =
+    errorMessage(projectsQuery.error)
+    ?? errorMessage(detailQuery.error)
+    ?? errorMessage(messagesQuery.error);
 
   return (
     <main
       className={[
-        "workbench-scrollbar grid h-screen min-h-0 overflow-x-auto overflow-y-hidden bg-[var(--color-app-bg)] text-gray-950",
+        "workbench-scrollbar relative grid h-screen min-h-0 overflow-x-auto overflow-y-hidden bg-[var(--color-app-bg)] text-gray-950",
         resizingPreview ? "cursor-col-resize select-none" : "",
       ].join(" ")}
       style={{
@@ -357,6 +362,11 @@ function Phase1WorkspaceInner() {
       }}
     >
       {resizingPreview ? <div className="fixed inset-0 z-50 cursor-col-resize bg-transparent" /> : null}
+      {queryError ? (
+        <div className="pointer-events-none fixed left-1/2 top-4 z-40 w-[420px] max-w-[calc(100vw-32px)] -translate-x-1/2">
+          <ErrorState title="工作台数据加载失败" description={queryError} className="pointer-events-auto shadow-[var(--shadow-float)]" />
+        </div>
+      ) : null}
       <ProjectList
         projects={projectsQuery.data?.items ?? []}
         conversations={detailQuery.data?.conversations ?? []}
@@ -430,6 +440,11 @@ function normalizePrdPreview(value: unknown): Phase1PrdPreview | null {
     title: asText(record.title) || "需求文档",
     sections,
   };
+}
+
+function errorMessage(error: unknown) {
+  if (!error) return null;
+  return error instanceof Error ? error.message : "请稍后重试";
 }
 
 function deriveProjectTitle(content: string) {

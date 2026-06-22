@@ -3,7 +3,7 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { Button, FieldLabel, InlineError, TextInput } from "@/components/ui";
+import { Badge, Button, FieldLabel, InlineError, TextInput } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 
 export function LoginClient() {
@@ -47,9 +47,7 @@ export function LoginClient() {
       <section className="w-full max-w-[400px] rounded-[18px] border border-gray-200 bg-white p-8 shadow-[var(--shadow-panel)]">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold text-gray-950">智能产品工作台</h1>
-          <div className="mt-4 inline-flex h-8 items-center rounded-[10px] bg-gray-100 px-3 text-[13px] font-medium text-gray-600">
-            内测版
-          </div>
+          <div className="mt-4"><Badge tone="neutral">内测版</Badge></div>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-5">

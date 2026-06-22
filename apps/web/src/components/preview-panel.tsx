@@ -19,6 +19,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { Badge, Button, EmptyState, IconButton, SegmentedControl } from "@/components/ui";
 
 export type PatchOperation = {
   op: "add" | "update" | "delete" | "replace";
@@ -452,28 +453,15 @@ export function PreviewPanel({
           <div className="text-sm font-semibold text-gray-950">结果预览</div>
           <div className="truncate text-xs text-gray-500">需求文档与网页原型</div>
         </div>
-        <div className="inline-flex rounded-full bg-gray-100 p-1 shadow-inner">
-          <button
-            type="button"
-            onClick={() => setMode("prd")}
-            className={[
-              "h-8 rounded-full px-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
-              mode === "prd" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900",
-            ].join(" ")}
-          >
-            需求
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("prototype")}
-            className={[
-              "h-8 rounded-full px-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
-              mode === "prototype" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900",
-            ].join(" ")}
-          >
-            预览
-          </button>
-        </div>
+        <SegmentedControl
+          value={mode}
+          onChange={setMode}
+          ariaLabel="结果预览切换"
+          options={[
+            { value: "prd", label: "需求" },
+            { value: "prototype", label: "预览" },
+          ]}
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {mode === "prd" ? (
@@ -513,14 +501,9 @@ function ResultSection({
             <div className="mt-0.5 text-xs leading-5 text-gray-500">{description}</div>
           </div>
         </div>
-        <span
-          className={[
-            "shrink-0 rounded-md border px-2 py-0.5 text-xs",
-            ready ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-white text-gray-500",
-          ].join(" ")}
-        >
+        <Badge tone={ready ? "success" : "neutral"} className={!ready ? "bg-white" : undefined}>
           {ready ? "已生成" : "等待输入"}
-        </span>
+        </Badge>
       </div>
       {children}
     </section>
@@ -671,33 +654,17 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <div className="inline-flex rounded-full bg-blue-50 p-1 shadow-inner">
-            <button
-              type="button"
-              onClick={() => setCanvasMode("browse")}
-              className={[
-                "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-blue-900/10",
-                canvasMode === "browse" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-900",
-              ].join(" ")}
-            >
-              <MousePointer2 className="h-3.5 w-3.5" />
-              浏览
-            </button>
-            <button
-              type="button"
-              onClick={() => setCanvasMode("select")}
-              className={[
-                "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-blue-900/10",
-                canvasMode === "select" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-900",
-              ].join(" ")}
-            >
-              <Crop className="h-3.5 w-3.5" />
-              选择
-            </button>
-          </div>
-          <div className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-[var(--shadow-control)]">
-            已生成
-          </div>
+          <SegmentedControl
+            value={canvasMode}
+            onChange={setCanvasMode}
+            ariaLabel="原型画布模式"
+            className="bg-blue-50"
+            options={[
+              { value: "browse", label: "浏览", icon: <MousePointer2 className="h-3.5 w-3.5" /> },
+              { value: "select", label: "选择", icon: <Crop className="h-3.5 w-3.5" /> },
+            ]}
+          />
+          <Badge tone="accent" className="bg-white">已生成</Badge>
         </div>
       </div>
       <div className="min-h-0 flex-1 p-2.5">
@@ -708,10 +675,10 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
             <span className="ml-2 truncate text-xs text-gray-500">{prototypePreview.entryFilePath ?? "index.html"}</span>
             {generation ? (
-              <span className="ml-auto inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+              <Badge tone="success" className="ml-auto gap-1">
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 局部草稿
-              </span>
+              </Badge>
             ) : null}
           </div>
           <div ref={canvasRef} className="relative h-[calc(100%-40px)] min-h-[680px] bg-white">
@@ -745,22 +712,13 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
                     }}
                     onPointerDown={(event) => event.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      onClick={() => setDialogOpen(true)}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--color-primary)] px-3 text-xs font-semibold text-white transition hover:bg-[var(--color-primary-hover)] focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
-                    >
+                    <Button type="button" size="sm" onClick={() => setDialogOpen(true)} className="h-8 rounded-full px-3 text-xs">
                       <Sparkles className="h-3.5 w-3.5" />
                       局部生成
-                    </button>
-                    <button
-                      type="button"
-                      onClick={clearSelection}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
-                      title="清除选区"
-                    >
+                    </Button>
+                    <IconButton label="清除选区" onClick={clearSelection} className="h-8 w-8 rounded-full">
                       <X className="h-3.5 w-3.5" />
-                    </button>
+                    </IconButton>
                   </div>
                 ) : null}
               </div>
@@ -853,18 +811,13 @@ function PrototypeLocalEditDialog({
           </div>
           <div className="mt-1 truncate text-xs text-gray-500">{selection.label}</div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
-          title="关闭"
-        >
+        <IconButton label="关闭" onClick={onClose} className="h-8 w-8 shrink-0 rounded-full">
           <X className="h-4 w-4" />
-        </button>
+        </IconButton>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-3 px-4 py-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="局部生成动作">
           {LOCAL_ACTIONS.map((item) => {
             const Icon = item.icon;
             return (
@@ -915,21 +868,13 @@ function PrototypeLocalEditDialog({
         ) : null}
 
         <div className="flex items-center justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-9 items-center rounded-[10px] border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
-          >
+          <Button type="button" size="sm" variant="secondary" onClick={onClose}>
             收起
-          </button>
-          <button
-            type="submit"
-            disabled={!instruction.trim() || generating}
-            className="inline-flex h-9 items-center gap-1.5 rounded-[10px] bg-[var(--color-primary)] px-3 text-sm font-semibold text-white transition hover:bg-[var(--color-primary-hover)] focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:bg-gray-300"
-          >
+          </Button>
+          <Button type="submit" size="sm" disabled={!instruction.trim() || generating}>
             {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {generating ? "生成中" : "生成局部草稿"}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -1031,13 +976,7 @@ function clamp(value: number, min: number, max: number) {
 
 function EmptyPreview({ title, description }: { title: string; description: string }) {
   return (
-    <div className="rounded-[16px] border border-dashed border-gray-200 bg-white px-4 py-12 text-center shadow-[var(--shadow-control)]">
-      <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50 text-gray-400">
-        <FileText className="h-5 w-5" />
-      </div>
-      <div className="text-sm font-semibold text-gray-950">{title}</div>
-      <p className="mx-auto mt-2 max-w-[300px] text-sm leading-6 text-gray-500">{description}</p>
-    </div>
+    <EmptyState title={title} description={description} icon={<FileText className="h-5 w-5" />} />
   );
 }
 
