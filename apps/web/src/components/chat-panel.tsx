@@ -34,13 +34,15 @@ export type VibeRunStepView = {
 
 export type VibeRunView = {
   runId?: string;
-  status: "idle" | "running" | "completed" | "failed";
+  status: "idle" | "running" | "waiting_confirmation" | "completed" | "failed";
   currentLabel?: string;
   summary?: string;
   steps: VibeRunStepView[];
   knowledgeHitCount?: number;
   qaIssueCount?: number;
   exportFileName?: string;
+  patchId?: string;
+  patchPreviewMessage?: string;
   errorMessage?: string;
 };
 
@@ -118,17 +120,20 @@ function ExecutionPathCard({
 }) {
   const [open, setOpen] = useState(false);
   const completed = runState.status === "completed";
+  const waitingForConfirmation = runState.status === "waiting_confirmation";
   const failed = runState.status === "failed";
   const activeStep = runState.steps.find((step) => step.status === "running")
     ?? lastActiveStep(runState.steps)
     ?? runState.steps[0];
   const doneCount = runState.steps.filter((step) => step.status === "done").length;
-  const progress = completed
+  const progress = completed || waitingForConfirmation
     ? 100
     : Math.max(4, Math.round((doneCount / Math.max(runState.steps.length, 1)) * 100));
   const subtitle = failed
     ? runState.errorMessage ?? "运行失败，请查看失败步骤"
-    : running
+    : waitingForConfirmation
+      ? runState.summary ?? "Patch 候选已生成，等待确认"
+      : running
       ? runState.currentLabel ?? `正在执行：${activeStep?.title ?? "Vibe 智能编排"}`
       : runState.summary ?? "运行已完成";
 
@@ -149,7 +154,7 @@ function ExecutionPathCard({
           </span>
         </span>
         <Badge tone={failed ? "danger" : completed ? "success" : "warning"}>
-          {failed ? "失败" : completed ? "已完成" : `${doneCount + 1}/${runState.steps.length}`}
+          {failed ? "失败" : waitingForConfirmation ? "待确认" : completed ? "已完成" : `${doneCount + 1}/${runState.steps.length}`}
         </Badge>
         <ChevronDown className={["h-4 w-4 text-gray-400 transition", open ? "rotate-180" : ""].join(" ")} />
       </button>
@@ -171,7 +176,7 @@ function ExecutionPathCard({
                 <Bot className="h-3.5 w-3.5" />
                 Vibe Coding 主链路
               </span>
-              <span>{failed ? "失败" : completed ? "成功" : "处理中"}</span>
+              <span>{failed ? "失败" : waitingForConfirmation ? "待确认" : completed ? "成功" : "处理中"}</span>
             </div>
             <div className="space-y-2">
               {runState.steps.map((step) => {
@@ -191,11 +196,12 @@ function ExecutionPathCard({
               })}
             </div>
           </div>
-          {runState.knowledgeHitCount || runState.qaIssueCount !== undefined || runState.exportFileName ? (
+          {runState.knowledgeHitCount || runState.qaIssueCount !== undefined || runState.exportFileName || runState.patchId ? (
             <div className="mt-2 text-xs leading-5 text-gray-500">
               {runState.knowledgeHitCount ? `本轮知识库命中 ${runState.knowledgeHitCount} 条。` : null}
               {runState.qaIssueCount !== undefined ? `QA 发现 ${runState.qaIssueCount} 个问题。` : null}
               {runState.exportFileName ? `导出文件：${runState.exportFileName}` : null}
+              {runState.patchId ? `Patch 候选：${runState.patchId}。${runState.patchPreviewMessage ?? ""}` : null}
             </div>
           ) : null}
         </div>

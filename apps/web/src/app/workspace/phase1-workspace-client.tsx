@@ -591,6 +591,10 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
 
   if (eventType === "patch_plan_created") {
     next = updateStep(next, "patch_planning", "done", "局部修改计划已生成，等待用户确认");
+    const patchPreview = asRecord(payload?.patchPreview);
+    next.patchId = asText(payload?.patchId) || asText(patchPreview?.patchId) || next.patchId;
+    next.patchPreviewMessage = asText(patchPreview?.message) || event.content || next.patchPreviewMessage;
+    next.summary = "局部修改候选已生成，等待确认后再应用";
   }
 
   if (eventType === "patch_applying") {
@@ -634,8 +638,18 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
   }
 
   if (eventType === "run_completed") {
-    next.status = "completed";
-    next.summary = event.content ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
+    const nextAction = asRecord(payload?.nextAction);
+    const patchRecord = asRecord(payload?.patchRecord);
+    const patchPreview = asRecord(payload?.patchPreview);
+    if (asText(nextAction?.type) === "confirm_patch") {
+      next.status = "waiting_confirmation";
+      next.patchId = asText(patchRecord?.id) || asText(patchPreview?.patchId) || next.patchId;
+      next.patchPreviewMessage = asText(patchPreview?.message) || next.patchPreviewMessage;
+      next.summary = event.content ?? asText(payload?.message) ?? "Patch 候选已生成，等待确认后再应用";
+    } else {
+      next.status = "completed";
+      next.summary = event.content ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
+    }
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step);
   }
 
