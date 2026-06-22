@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=./quartz/plugins/quartz-plugins.schema.json
 configuration:
-  pageTitle: AI Product OS 知识库
+  pageTitle: 业务需求知识库
   pageTitleSuffix: ""
   enableSPA: true
   enablePopovers: true
@@ -163,8 +163,8 @@ plugins:
     enabled: true
     options:
       links:
-        工作台: http://8.130.160.177:3000/workspace
-        管理后台: http://8.130.160.177:3000/admin/knowledge/vault
+        业务系统: http://8.130.160.177:3000/workspace
+        知识维护: http://8.130.160.177:3000/admin/knowledge/vault
   - source: github:quartz-community/spacer
     enabled: true
     options: {}
