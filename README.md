@@ -5,7 +5,7 @@
 ## 已实现能力
 
 - 模块 1：登录、JWT 鉴权、角色权限、用户管理、前端权限路由。
-- 模块 2：用户端工作台三栏布局、项目侧栏、需求对话、PRD/原型/QA 预览、底部吸附输入框、加号扩展菜单。
+- 模块 2：用户端工作台三栏布局、项目侧栏、需求对话、PRD/原型/QA 预览、底部可视区吸附输入框、加号扩展菜单。
 - 模块 3：Project / Conversation / Message 数据模型，项目创建、列表、搜索、打开、重命名、归档、软删除，默认会话与消息落库。
 - 模块 4：FileAsset / FileParseResult / FileChunk 数据模型，项目文件上传、解析状态管理、txt/md/docx/pdf/image/zip/rp 一期解析、附件 chips、消息附件摘要落库。
 - 模块 5：ModelProvider / ModelConfig / ModelTaskProfile / ModelCallLog 数据模型，OpenAI-compatible 模型网关、文本生成、JSON 生成、流式输出、超时重试、token usage、调用日志、admin 配置 API、API Key 加密存储与脱敏返回。
