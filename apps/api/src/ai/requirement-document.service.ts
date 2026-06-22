@@ -124,7 +124,15 @@ export class RequirementDocumentService {
   }
 
   async getCurrentForUser(user: AuthenticatedUser, projectId: string) {
-    const project = await this.assertProjectAccess(user, projectId, { allowArchived: true });
+    await this.assertProjectAccess(user, projectId, { allowArchived: true });
+    return this.getCurrentForProject(projectId);
+  }
+
+  async getCurrentForProject(projectId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
+      throw new NotFoundException("项目不存在");
+    }
     const state = await this.stateService.getCurrentState(projectId);
     if (state?.prdDocument) {
       return { document: state.prdDocument, productDesignState: state };

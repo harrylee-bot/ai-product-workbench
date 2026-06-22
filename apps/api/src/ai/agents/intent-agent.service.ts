@@ -97,6 +97,8 @@ export class IntentAgentService extends BaseAgentService<IntentInput, IntentResu
     if (intent === UserIntent.patch_document) return "用户正在对 PRD 文档进行局部修改。";
     if (intent === UserIntent.generate_prd) return "用户希望生成或刷新 PRD。";
     if (intent === UserIntent.generate_prototype) return "用户希望生成或刷新原型。";
+    if (intent === UserIntent.export_word) return "用户希望导出当前 PRD Word 文档。";
+    if (intent === UserIntent.export_html) return "用户希望导出当前 HTML 原型包。";
     if (intent === UserIntent.clarification_answer) return "用户正在回答上一轮澄清问题。";
     if (intent === UserIntent.general_question) return "用户只是问候、闲聊或提出一般问题，不应触发需求生成链路。";
     if (hasSelection) return "用户带有选区信息，需要结合选区理解。";

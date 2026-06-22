@@ -135,6 +135,50 @@ export async function streamApiEvents<T>(
   }
 }
 
+export async function downloadApiFile(path: string) {
+  const session = readSession();
+  const headers = new Headers();
+
+  if (session?.accessToken) {
+    headers.set("Authorization", `Bearer ${session.accessToken}`);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { headers });
+  } catch {
+    throw new ApiError("无法连接 API 服务，请确认后端已启动并可访问", 503);
+  }
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const message =
+      typeof payload?.message === "string" ? payload.message : "文件导出失败，请稍后重试";
+
+    if ((response.status === 401 || message.includes("禁用")) && typeof window !== "undefined") {
+      clearSession();
+      window.dispatchEvent(
+        new CustomEvent("auth:expired", {
+          detail: { message },
+        }),
+      );
+    }
+
+    throw new ApiError(message, response.status);
+  }
+
+  const blob = await response.blob();
+  const fileName = fileNameFromDisposition(response.headers.get("Content-Disposition")) ?? "export";
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 function parseSseBlock<T>(
   block: string,
   onEvent: (event: T, meta: { type?: string }) => void,
@@ -170,6 +214,14 @@ export function toQueryString(params: Record<string, string | number | undefined
   });
   const serialized = query.toString();
   return serialized ? `?${serialized}` : "";
+}
+
+function fileNameFromDisposition(value: string | null) {
+  if (!value) return null;
+  const encoded = value.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) return decodeURIComponent(encoded);
+  const fallback = value.match(/filename="([^"]+)"/i)?.[1];
+  return fallback ?? null;
 }
 
 export async function assertWorkbenchApiAvailable() {

@@ -16,6 +16,7 @@ import { isCasualGeneralInput } from "./intent-classifier.helpers";
 import type {
   AgentRunContext,
   AgentOutput,
+  ExportArtifactSummary,
   AttachmentSummary,
   IntentResult,
   KnowledgeCandidate,
@@ -45,6 +46,7 @@ import { PrototypeService } from "./prototype.service";
 import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
+import { ExportService } from "./export.service";
 
 type OrchestratorInput = {
   context: AgentRunContext;
@@ -65,8 +67,9 @@ export type OrchestratorResult = {
   productBuildPlan?: ProductBuildPlan;
   patchPlan?: PatchPlan;
   knowledgeCandidates?: Array<KnowledgeCandidate | KnowledgeCandidateDraft>;
+  exportArtifact?: ExportArtifactSummary;
   nextAction?: {
-    type: "ask_clarification" | "review_prd" | "review_prototype" | "review_qa" | "answer";
+    type: "ask_clarification" | "review_prd" | "review_prototype" | "review_qa" | "answer" | "download_export";
     questions?: ProductDesignState["pendingQuestions"];
   };
 };
@@ -79,6 +82,7 @@ export class AiOrchestratorService {
     private readonly stateService: ProductDesignStateService,
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
+    private readonly exportService: ExportService,
     private readonly qaService: QaService,
     private readonly messageService: MessageService,
     private readonly prisma: PrismaService,
@@ -112,7 +116,7 @@ export class AiOrchestratorService {
             input: {
               userInput: context.userInput,
               selectedRegion: context.selectedRegion,
-              currentProjectStatus: undefined,
+              currentProjectStatus: context.currentProjectStatus,
               previewMode: context.previewMode,
               recentMessages: context.recentMessages,
             },
@@ -123,6 +127,10 @@ export class AiOrchestratorService {
 
       if (intent.data.intent === UserIntent.general_question) {
         return this.finishGeneralAnswer(context, intent.data);
+      }
+
+      if (intent.data.intent === UserIntent.export_word || intent.data.intent === UserIntent.export_html) {
+        return this.finishExport(context, intent.data);
       }
 
       await this.emit(context, "message_delta", "正在检索知识库和附件上下文...");
@@ -570,6 +578,7 @@ export class AiOrchestratorService {
         qaReport: result.qaReport,
         productBuildPlan: result.productBuildPlan,
         patchPlan: result.patchPlan,
+        exportArtifact: result.exportArtifact,
         knowledgeCandidates: result.knowledgeCandidates,
       }),
       relatedRunId: context.runId,
@@ -591,6 +600,37 @@ export class AiOrchestratorService {
       where: { id: projectId },
       data: { status, lastActivityAt: new Date() },
     });
+  }
+
+  private async finishExport(context: AgentRunContext, intent: IntentResult) {
+    await this.emit(context, "message_delta", "正在准备导出产物...");
+    const artifact = intent.intent === UserIntent.export_word
+      ? await this.exportService.createPrdWordExport(context.projectId)
+      : await this.exportService.createPrototypeHtmlExport(context.projectId);
+    const { buffer: _buffer, ...summary } = artifact;
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "export_ready",
+      content: "导出产物已准备好",
+      data: summary,
+    });
+
+    const result: OrchestratorResult = {
+      runId: context.runId,
+      projectId: context.projectId,
+      intent,
+      message: `已准备好导出文件：${summary.fileName}`,
+      productDesignState: context.productDesignState,
+      exportArtifact: summary,
+      nextAction: { type: "download_export" },
+    };
+    await this.finishRun(
+      context,
+      result,
+      context.currentProjectStatus ?? projectStatusFromState(context.productDesignState),
+    );
+    return result;
   }
 
   private async emit(context: AgentRunContext, type: "message_delta", content: string) {
@@ -641,4 +681,11 @@ function stateSummary(state: ProductDesignState) {
     },
     updatedAt: state.updatedAt,
   };
+}
+
+function projectStatusFromState(state: ProductDesignState | undefined): ProjectStatus {
+  if (state?.status === ProductDesignStateStatus.prototype_ready) return ProjectStatus.prototype_ready;
+  if (state?.status === ProductDesignStateStatus.prd_ready) return ProjectStatus.prd_ready;
+  if (state?.status === ProductDesignStateStatus.qa_failed) return ProjectStatus.qa_failed;
+  return ProjectStatus.draft;
 }

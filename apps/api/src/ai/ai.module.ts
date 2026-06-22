@@ -10,6 +10,8 @@ import { AgentSkillRegistryService } from "./agent-skill-registry.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
 import { EvolutionEngineService } from "./evolution-engine.service";
 import { EvolutionOrchestratorService } from "./evolution-orchestrator.service";
+import { ProjectExportController } from "./export.controller";
+import { ExportService } from "./export.service";
 import { FeedbackAnalysisService } from "./feedback-analysis.service";
 import { InteractionCaptureService } from "./interaction-capture.service";
 import { MultiAgentReviewService } from "./multi-agent-review.service";
@@ -106,6 +108,7 @@ import { SystemPreviewService } from "./self-generation/system.preview.service";
     ProjectPrototypeController,
     PrototypeStateController,
     PrototypeArtifactController,
+    ProjectExportController,
     ProjectQaController,
     ProjectQaReportsController,
     QaReportController,
@@ -142,6 +145,7 @@ import { SystemPreviewService } from "./self-generation/system.preview.service";
     PatchPreviewService,
     RequirementDocumentService,
     PrototypeService,
+    ExportService,
     QaRuleCheckService,
     QaService,
     VersionHistoryService,

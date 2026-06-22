@@ -422,6 +422,7 @@ function Phase1WorkspaceInner() {
         <span className="h-12 w-1 rounded-full bg-gray-300 transition group-hover:bg-[var(--color-accent)]" />
       </div>
       <PreviewPanel
+        projectId={selectedProjectId}
         prdPreview={prdPreview}
         prototypePreview={prototypePreview}
         decision={decision}

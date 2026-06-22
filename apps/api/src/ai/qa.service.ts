@@ -284,8 +284,33 @@ export class QaService {
     return { qaGate: this.evaluateGate(qaReport), qaReport };
   }
 
+  async getGateForProject(projectId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
+      throw new NotFoundException("项目不存在");
+    }
+    const report = project.latestQaReportId
+      ? await this.prisma.qAReport.findFirst({ where: { id: project.latestQaReportId, projectId } })
+      : await this.prisma.qAReport.findFirst({ where: { projectId }, orderBy: { createdAt: "desc" } });
+    const qaReport = report ? this.toQaReport(report as QAReportRecord) : null;
+    return { qaGate: this.evaluateGate(qaReport), qaReport };
+  }
+
   async assertGateAllows(user: AuthenticatedUser, projectId: string, action: QAGateAction) {
     const { qaGate } = await this.getGateForUser(user, projectId);
+    if (!this.isActionAllowed(qaGate, action)) {
+      throw new ForbiddenException({
+        code: "QA_GATE_BLOCKED",
+        message: "QA_GATE_BLOCKED",
+        action,
+        qaGate,
+      });
+    }
+    return qaGate;
+  }
+
+  async assertGateAllowsForProject(projectId: string, action: QAGateAction) {
+    const { qaGate } = await this.getGateForProject(projectId);
     if (!this.isActionAllowed(qaGate, action)) {
       throw new ForbiddenException({
         code: "QA_GATE_BLOCKED",

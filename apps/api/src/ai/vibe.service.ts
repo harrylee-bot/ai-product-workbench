@@ -114,6 +114,7 @@ export class VibeService {
           recentMessages,
           attachments: attachmentSummaries,
           productDesignState,
+          currentProjectStatus: project.status,
           traceId: run.traceId,
         },
       })

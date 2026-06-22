@@ -5,6 +5,7 @@ import type {
   KnowledgePriority,
   KnowledgeType,
   ModelTaskType,
+  ProjectStatus,
   UserIntent,
 } from "@prisma/client";
 import type { AgentFallbackMetadata } from "./agent-fallback-policy";
@@ -510,6 +511,24 @@ export type PrototypeArtifactDraft = {
   assets?: Array<{ name: string; path: string; type: string }>;
 };
 
+export type ExportArtifactFormat = "prd_word" | "prototype_html";
+
+export type ExportArtifactSummary = {
+  format: ExportArtifactFormat;
+  projectId: string;
+  title: string;
+  sourceType: "requirement_document" | "prototype_artifact";
+  sourceId: string;
+  productDesignStateId: string;
+  productDesignStateVersion: number;
+  fileName: string;
+  contentType: string;
+  downloadPath: string;
+  sizeBytes: number;
+  qaGate?: QAGateDecision;
+  generatedAt: string;
+};
+
 export type PrototypeVersion = {
   id: string;
   projectId: string;
@@ -786,6 +805,7 @@ export type VibeStreamEventType =
   | "rollback_failed"
   | "knowledge_candidate_created"
   | "fallback_used"
+  | "export_ready"
   | "run_completed"
   | "run_failed";
 
@@ -810,7 +830,8 @@ export type VibeStreamEventCategory =
   | "patch"
   | "qa"
   | "rollback"
-  | "knowledge";
+  | "knowledge"
+  | "export";
 
 export type VibeStreamEventPhase =
   | "started"
@@ -873,6 +894,7 @@ export type AgentRunContext = {
   recentMessages: ConversationMessage[];
   attachments: AttachmentSummary[];
   productDesignState?: ProductDesignState;
+  currentProjectStatus?: ProjectStatus;
   knowledgeContext?: KnowledgeContext;
   intentResult?: IntentResult;
   requirementAnalysis?: RequirementAnalysis;
