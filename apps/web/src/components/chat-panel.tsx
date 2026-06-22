@@ -53,18 +53,20 @@ export function ChatPanel({
   }, [sending]);
 
   return (
-    <section className="flex min-h-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel-bg)]">
-      <div className="border-b border-[var(--color-border)] bg-white px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">智能输入</div>
-        <div className="mt-1 text-xs text-gray-500">只需要说出目标，系统自动完成决策与生成</div>
+    <section className="flex min-h-0 min-w-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel-bg)]">
+      <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-white px-4">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-gray-950">智能输入</div>
+          <div className="truncate text-xs text-gray-500">说出目标，系统自动决策与生成</div>
+        </div>
       </div>
-      <div className="workbench-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div className="workbench-scrollbar min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
         {messages.length ? (
           messages.map((message) => (
             <div
               key={message.id}
               className={[
-                "w-fit max-w-[min(82%,_780px)] rounded-[14px] px-3.5 py-2.5 text-sm leading-6 shadow-[var(--shadow-control)]",
+                "w-fit max-w-[min(86%,_720px)] rounded-[12px] px-3 py-2 text-sm leading-6 shadow-[var(--shadow-control)]",
                 message.role === "user"
                   ? "ml-auto bg-[var(--color-primary)] text-white"
                   : "mr-auto border border-gray-200 bg-white text-gray-700",
@@ -84,7 +86,7 @@ export function ChatPanel({
           <ExecutionPathCard decision={decision} running={Boolean(sending)} runningStep={runningStep} />
         ) : null}
       </div>
-      <form onSubmit={submit} className="border-t border-[var(--color-border)] bg-white px-3 py-3 shadow-[0_-10px_26px_rgba(15,23,42,0.04)]">
+      <form onSubmit={submit} className="shrink-0 border-t border-[var(--color-border)] bg-white px-3 py-2.5 shadow-[0_-10px_26px_rgba(15,23,42,0.04)]">
         <TextArea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -97,11 +99,11 @@ export function ChatPanel({
               void submitDraft();
             }
           }}
-          className="min-h-[64px] max-h-[132px] resize-none border-gray-200 bg-gray-50 py-2.5 shadow-none focus:bg-white"
+          className="min-h-[56px] max-h-[112px] resize-none border-gray-200 bg-gray-50 py-2 shadow-none focus:bg-white"
         />
         <div className="mt-2 flex items-center justify-between gap-3">
-          <div className="truncate text-xs text-gray-400">Enter 发送，Shift + Enter 换行</div>
-          <Button type="submit" disabled={disabled || sending || !draft.trim()} className="h-9 px-3">
+          <div className="min-w-0 truncate text-xs text-gray-400">Enter 发送，Shift + Enter 换行</div>
+          <Button type="submit" size="sm" disabled={disabled || sending || !draft.trim()}>
             <Sparkles className="h-4 w-4" />
             {sending ? "生成中" : "发送意图"}
           </Button>
@@ -148,13 +150,13 @@ function ExecutionPathCard({
     : `已完成：${strategy}`;
 
   return (
-    <div className="mr-auto max-w-[92%] overflow-hidden rounded-[16px] border border-gray-200 bg-white shadow-[var(--shadow-control)]">
+    <div className="mr-auto max-w-[96%] overflow-hidden rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-control)]">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-gray-50 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-gray-50 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
       >
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
           <GitBranch className="h-4 w-4" />
         </span>
         <span className="min-w-0 flex-1">
@@ -168,7 +170,7 @@ function ExecutionPathCard({
       </button>
 
       {open ? (
-        <div className="border-t border-gray-200 bg-gray-50 px-3 py-3">
+        <div className="border-t border-gray-200 bg-gray-50 px-3 py-2.5">
           <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-[var(--shadow-control)]">
             <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
               <span className="inline-flex items-center gap-1">
