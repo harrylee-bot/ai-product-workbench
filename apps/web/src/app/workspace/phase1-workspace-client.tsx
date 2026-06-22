@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type PointerEvent } from "react";
 import { create } from "zustand";
 import { ChatPanel, type Phase1Message } from "@/components/chat-panel";
 import {
@@ -45,6 +45,7 @@ type MessageResponse = {
   selfGeneration?: Phase2DecisionView["selfGeneration"];
   executionPlan?: Phase2DecisionView["executionPlan"];
   companyRuntime?: Phase2DecisionView["companyRuntime"];
+  knowledgeSearch?: Phase2DecisionView["knowledgeSearch"];
   constraintContext?: Phase2DecisionView["constraintContext"];
   agentInput?: Phase2DecisionView["agentInput"];
   prdPreview?: Phase1PrdPreview;
@@ -117,6 +118,8 @@ export function Phase1WorkspaceClient() {
 function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [previewWidth, setPreviewWidth] = useState(1040);
+  const [resizingPreview, setResizingPreview] = useState(false);
   const {
     selectedProjectId,
     selectedConversationId,
@@ -210,6 +213,7 @@ function Phase1WorkspaceInner() {
         selfGeneration: response.selfGeneration,
         executionPlan: response.executionPlan,
         companyRuntime: response.companyRuntime,
+        knowledgeSearch: response.knowledgeSearch,
         constraintContext: response.constraintContext,
         agentInput: response.agentInput,
       });
@@ -310,15 +314,49 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  useEffect(() => {
+    const handleResize = () => {
+      setPreviewWidth((width) => clampPreviewWidth(width, sidebarCollapsed));
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [sidebarCollapsed]);
+
+  function startPreviewResize(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setResizingPreview(true);
+
+    const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
+      const nextWidth = window.innerWidth - moveEvent.clientX;
+      setPreviewWidth(clampPreviewWidth(nextWidth, sidebarCollapsed));
+    };
+    const stopResize = () => {
+      setResizingPreview(false);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  }
+
+  const sidebarWidth = sidebarCollapsed ? 72 : 300;
+
   return (
     <main
-      className="grid h-screen min-h-0 overflow-hidden bg-[#F6F7F9]"
+      className={[
+        "grid h-screen min-h-0 overflow-hidden bg-[#F6F7F9]",
+        resizingPreview ? "cursor-col-resize select-none" : "",
+      ].join(" ")}
       style={{
-        gridTemplateColumns: sidebarCollapsed
-          ? "72px minmax(420px, 1fr) minmax(560px, 48vw)"
-          : "300px minmax(420px, 1fr) minmax(560px, 48vw)",
+        gridTemplateColumns: `${sidebarWidth}px minmax(360px, 1fr) 10px ${previewWidth}px`,
       }}
     >
+      {resizingPreview ? <div className="fixed inset-0 z-50 cursor-col-resize bg-transparent" /> : null}
       <ProjectList
         projects={projectsQuery.data?.items ?? []}
         conversations={detailQuery.data?.conversations ?? []}
@@ -353,6 +391,16 @@ function Phase1WorkspaceInner() {
           await sendMessage.mutateAsync(content);
         }}
       />
+      <div
+        role="separator"
+        aria-label="拖动调整预览宽度"
+        aria-orientation="vertical"
+        onPointerDown={startPreviewResize}
+        className="group relative flex cursor-col-resize items-center justify-center border-l border-r border-gray-200 bg-[#F6F7F9] transition hover:bg-blue-50"
+        title="拖动调整预览宽度"
+      >
+        <span className="h-14 w-1 rounded-full bg-gray-300 transition group-hover:bg-blue-400" />
+      </div>
       <PreviewPanel
         prdPreview={prdPreview}
         prototypePreview={prototypePreview}
@@ -409,4 +457,17 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asText(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function clampPreviewWidth(width: number, sidebarCollapsed: boolean) {
+  if (typeof window === "undefined") return width;
+  const sidebarWidth = sidebarCollapsed ? 72 : 300;
+  const minChatWidth = 360;
+  const resizerWidth = 10;
+  const minPreviewWidth = 560;
+  const maxPreviewWidth = Math.max(
+    minPreviewWidth,
+    window.innerWidth - sidebarWidth - minChatWidth - resizerWidth,
+  );
+  return Math.min(Math.max(width, minPreviewWidth), maxPreviewWidth);
 }

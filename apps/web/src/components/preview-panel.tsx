@@ -276,11 +276,31 @@ export type Phase2DecisionView = {
   selfGeneration?: SelfGenerationView;
   executionPlan?: SystemGraphSnapshot;
   companyRuntime?: CompanyRuntimeView;
+  knowledgeSearch?: {
+    summary: string;
+    results: Array<{
+      itemId?: string;
+      title: string;
+      type: string;
+      score: number;
+      reason: string;
+    }>;
+    references: Array<{
+      id: string;
+      knowledgeId?: string;
+      title: string;
+      snippet?: string;
+      content?: string;
+      type?: string;
+    }>;
+  };
   constraintContext?: ConstraintContext;
   agentInput?: {
     userInput: string;
     constraintContext: ConstraintContext;
     decisionContext: Phase2DecisionView["decisionPlan"];
+    knowledgeReferences?: NonNullable<Phase2DecisionView["knowledgeSearch"]>["references"];
+    knowledgeSummary?: string;
   };
 };
 
@@ -412,7 +432,7 @@ export function PreviewPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {mode === "prd" ? (
-          <div className="h-full overflow-y-auto p-4">
+          <div className="h-full overflow-y-auto p-3">
             <PrdPreviewView prdPreview={prdPreview} />
           </div>
         ) : (
@@ -520,13 +540,13 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
           已生成
         </div>
       </div>
-      <div className="min-h-0 flex-1 p-4">
-        <div className="h-full overflow-hidden rounded-xl border border-blue-100 bg-white shadow-sm">
+      <div className="min-h-0 flex-1 p-2.5">
+        <div className="h-full overflow-hidden rounded-lg border border-blue-100 bg-white shadow-sm">
         <iframe
           title="原型预览"
           srcDoc={prototypePreview.html}
           sandbox="allow-scripts"
-            className="h-full min-h-[680px] w-full border-0 bg-white"
+            className="h-full min-h-[720px] w-full border-0 bg-white"
         />
         </div>
       </div>

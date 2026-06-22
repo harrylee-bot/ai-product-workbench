@@ -54,13 +54,13 @@ export function ChatPanel({
         <div className="text-sm font-semibold text-gray-950">智能输入</div>
         <div className="mt-1 text-xs text-gray-500">只需要说出目标，系统自动完成决策与生成</div>
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {messages.length ? (
           messages.map((message) => (
             <div
               key={message.id}
               className={[
-                "max-w-[88%] rounded-lg px-3 py-2 text-sm leading-6 shadow-sm",
+                "w-fit max-w-[min(78%,_780px)] rounded-lg px-3 py-2 text-sm leading-6 shadow-sm",
                 message.role === "user"
                   ? "ml-auto bg-gray-950 text-white"
                   : "mr-auto border border-gray-200 bg-white text-gray-700",
@@ -78,16 +78,17 @@ export function ChatPanel({
           <ExecutionPathCard decision={decision} running={Boolean(sending)} runningStep={runningStep} />
         ) : null}
       </div>
-      <form onSubmit={submit} className="border-t border-gray-200 bg-white p-3">
+      <form onSubmit={submit} className="border-t border-gray-200 bg-white px-3 py-2.5">
         <TextArea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           disabled={disabled || sending}
           placeholder={sending ? "系统正在处理..." : "输入你的需求..."}
-          className="min-h-[88px]"
+          rows={2}
+          className="min-h-[58px] max-h-[120px] resize-none py-2"
         />
         <div className="mt-2 flex justify-end">
-          <Button type="submit" disabled={disabled || sending || !draft.trim()}>
+          <Button type="submit" disabled={disabled || sending || !draft.trim()} className="h-9 px-3">
             <Sparkles className="h-4 w-4" />
             {sending ? "生成中" : "发送意图"}
           </Button>
@@ -127,6 +128,11 @@ function ExecutionPathCard({
   const completed = Boolean(decision) && !running;
   const currentStep = running ? EXECUTION_STEPS[runningStep] : EXECUTION_STEPS.at(-1);
   const strategy = decision?.selectedStrategy ? strategyLabel(decision.selectedStrategy.name) : "等待策略结果";
+  const knowledgeCount = decision?.knowledgeSearch?.results.length ?? 0;
+  const knowledgeSummary = decision?.knowledgeSearch?.summary;
+  const completedSubtitle = knowledgeCount
+    ? `已完成：${strategy}，命中 ${knowledgeCount} 条知识`
+    : `已完成：${strategy}`;
 
   return (
     <div className="mr-auto max-w-[92%] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -141,7 +147,7 @@ function ExecutionPathCard({
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold text-gray-950">执行路径</span>
           <span className="block truncate text-xs text-gray-500">
-            {running ? `正在执行：${currentStep?.title ?? "智能编排"}` : `已完成：${strategy}`}
+            {running ? `正在执行：${currentStep?.title ?? "智能编排"}` : completedSubtitle}
           </span>
         </span>
         <span
@@ -168,6 +174,7 @@ function ExecutionPathCard({
             <div className="space-y-2">
               {EXECUTION_STEPS.map((step, index) => {
                 const status = completed ? "done" : index < runningStep ? "done" : index === runningStep ? "running" : "pending";
+                const detail = step.title === "应用约束" && knowledgeSummary ? knowledgeSummary : step.detail;
                 return (
                   <div key={step.title} className="flex gap-2 rounded-md bg-white/55 px-2 py-2 text-xs">
                     <StepIcon status={status} />
@@ -176,7 +183,7 @@ function ExecutionPathCard({
                         <span className="font-semibold text-gray-900">{step.title}</span>
                         <span className="shrink-0 text-gray-500">{step.agent}</span>
                       </div>
-                      <div className="mt-1 leading-5 text-gray-500">{step.detail}</div>
+                      <div className="mt-1 leading-5 text-gray-500">{detail}</div>
                     </div>
                   </div>
                 );
@@ -186,7 +193,7 @@ function ExecutionPathCard({
           {decision ? (
             <div className="mt-2 text-xs leading-5 text-gray-500">
               已选择「{strategy}」，共生成 {decision.decisionPlan.strategies.length} 个策略，评审智能体{" "}
-              {decision.reviewBoard.reviews.length} 位。
+              {decision.reviewBoard.reviews.length} 位。{knowledgeCount ? `本轮知识库命中 ${knowledgeCount} 条。` : "本轮未命中正式知识库。"}
             </div>
           ) : null}
         </div>
