@@ -486,6 +486,7 @@ type AgentStepName =
   | "intent_detection"
   | "knowledge_retrieval"
   | "requirement_analysis"
+  | "product_planning"
   | "product_design"
   | "prd_generation"
   | "prototype_design"
@@ -495,7 +496,10 @@ type AgentStepName =
   | "knowledge_extraction";
 
 type VibeRunEvent = {
+  protocol?: "vibe.v1";
+  eventId?: string;
   runId: string;
+  projectId?: string;
   type:
     | "step_started"
     | "step_completed"
@@ -517,8 +521,21 @@ type VibeRunEvent = {
     | "knowledge_candidate_created"
     | "run_completed"
     | "run_failed";
+  eventType?: VibeRunEvent["type"];
+  legacyEventType?:
+    | "agent_started"
+    | "agent_completed"
+    | "state_updated"
+    | "state_version_created"
+    | "prd_generated"
+    | "prototype_generated"
+    | "patch_applied"
+    | "qa_completed";
+  category?: "agent" | "run" | "state" | "prd" | "prototype" | "patch" | "qa" | "rollback" | "knowledge";
+  phase?: "started" | "progress" | "completed" | "failed" | "created" | "updated" | "applying";
   step?: AgentStepName;
   content?: string;
+  payload?: unknown;
   data?: unknown;
   createdAt: string;
 };
@@ -852,6 +869,7 @@ const STEP_KEY_BY_EVENT_STEP: Record<AgentStepName, string> = {
   intent_detection: "intent",
   knowledge_retrieval: "knowledge",
   requirement_analysis: "analyst",
+  product_planning: "analyst",
   product_design: "designer",
   prd_generation: "prd",
   prototype_design: "prototypeDesigner",
@@ -1085,6 +1103,10 @@ function extractPreviewFromPayload(payload: unknown) {
     patch.latestQaReport = mapQaReportSummary(data.qaReport);
   }
   return patch;
+}
+
+function getVibeRunEventData(event: VibeRunEvent) {
+  return event.payload ?? event.data;
 }
 
 function mapProductDesignStateSummary(value: unknown): ProductDesignStateSummary | null {
@@ -2535,6 +2557,7 @@ export function WorkspaceClient() {
     controller: AbortController,
   ) => {
     if (!event || event.runId !== runId) return;
+    const eventData = getVibeRunEventData(event);
 
     if (event.type === "message_delta") {
       updateProject(targetProjectId, (project) => ({
@@ -2567,7 +2590,7 @@ export function WorkspaceClient() {
     }
 
     if (event.type === "state_updated") {
-      const stateSummary = mapProductDesignStateSummary(event.data);
+      const stateSummary = mapProductDesignStateSummary(eventData);
       if (!stateSummary) return;
       updateProject(targetProjectId, (project) => ({
         ...project,
@@ -2594,8 +2617,8 @@ export function WorkspaceClient() {
     }
 
     if (event.type === "prd_updated") {
-      const prdSections = mapPrdSections(event.data);
-      const prdDocument = asRecord(event.data);
+      const prdSections = mapPrdSections(eventData);
+      const prdDocument = asRecord(eventData);
       if (!prdSections.length) return;
       updateProject(targetProjectId, (project) => ({
         ...project,
@@ -2610,9 +2633,9 @@ export function WorkspaceClient() {
     }
 
     if (event.type === "prototype_updated") {
-      const prototypeHtml = extractPrototypeHtml(event.data);
+      const prototypeHtml = extractPrototypeHtml(eventData);
       if (!prototypeHtml) return;
-      const artifact = extractPrototypeArtifact(event.data);
+      const artifact = extractPrototypeArtifact(eventData);
       updateProject(targetProjectId, (project) => ({
         ...project,
         status: "prototype_ready",
@@ -2620,7 +2643,7 @@ export function WorkspaceClient() {
         prototypeState: "ready",
         prototypeArtifactId: artifact?.id ?? project.prototypeArtifactId,
         prototypeEntryFilePath: artifact?.entryFilePath ?? project.prototypeEntryFilePath,
-        prototypeSpec: extractPrototypeSpec(event.data) ?? project.prototypeSpec,
+        prototypeSpec: extractPrototypeSpec(eventData) ?? project.prototypeSpec,
         prototypeHtml,
       }));
       setPreviewTab("prototype");
@@ -2628,7 +2651,7 @@ export function WorkspaceClient() {
     }
 
     if (event.type === "qa_completed") {
-      const qa = mapQaReport(event.data);
+      const qa = mapQaReport(eventData);
       if (!qa) return;
       updateProject(targetProjectId, (project) => ({
         ...project,
@@ -2642,7 +2665,7 @@ export function WorkspaceClient() {
     }
 
     if (event.type === "patch_completed") {
-      const data = asRecord(event.data);
+      const data = asRecord(eventData);
       const result = asRecord(data?.result);
       const previewPatch = extractPreviewFromPayload(result);
       const qa = mapQaReport(result?.qaReport);
@@ -2680,7 +2703,7 @@ export function WorkspaceClient() {
     }
 
     if (event.type === "run_completed") {
-      const result = asRecord(event.data);
+      const result = asRecord(eventData);
       const messageContent = asText(result?.message) || event.content || "Agent 协作已完成。";
       const qa = mapQaReport(result?.qaReport);
       const previewPatch = extractPreviewFromPayload(result);

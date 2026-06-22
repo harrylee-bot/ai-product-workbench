@@ -787,13 +787,63 @@ export type VibeStreamEventType =
   | "run_completed"
   | "run_failed";
 
+export type VibeStreamLegacyEventType =
+  | "agent_started"
+  | "agent_completed"
+  | "state_updated"
+  | "state_version_created"
+  | "prd_generated"
+  | "prototype_generated"
+  | "patch_applied"
+  | "qa_completed";
+
+export type VibeStreamEventProtocol = "vibe.v1";
+
+export type VibeStreamEventCategory =
+  | "agent"
+  | "run"
+  | "state"
+  | "prd"
+  | "prototype"
+  | "patch"
+  | "qa"
+  | "rollback"
+  | "knowledge";
+
+export type VibeStreamEventPhase =
+  | "started"
+  | "progress"
+  | "completed"
+  | "failed"
+  | "created"
+  | "updated"
+  | "applying";
+
 export type VibeStreamEvent = {
+  protocol?: VibeStreamEventProtocol;
+  eventId?: string;
   runId: string;
+  projectId?: string;
   type: VibeStreamEventType;
+  eventType?: VibeStreamEventType;
+  legacyEventType?: VibeStreamLegacyEventType;
+  category?: VibeStreamEventCategory;
+  phase?: VibeStreamEventPhase;
   step?: AgentStepName;
   content?: string;
+  payload?: unknown;
   data?: unknown;
   createdAt: string;
+};
+
+export type VibeStreamEventEnvelope = VibeStreamEvent & {
+  protocol: VibeStreamEventProtocol;
+  eventId: string;
+  projectId: string;
+  eventType: VibeStreamEventType;
+  legacyEventType: VibeStreamLegacyEventType;
+  category: VibeStreamEventCategory;
+  phase: VibeStreamEventPhase;
 };
 
 export type AgentStepName =

@@ -672,10 +672,10 @@ function normalizeEvent(event: StreamEvent): NormalizedEvent {
   const payload = asRecord(outer?.payload) ?? outer;
   return {
     id: event.id,
-    type: toText(payload?.type ?? outer?.eventType ?? event.eventType, event.eventType),
+    type: toText(payload?.eventType ?? payload?.type ?? outer?.eventType ?? event.eventType, event.eventType),
     step: toOptionalText(payload?.step),
     content: toOptionalText(payload?.content),
-    data: payload?.data,
+    data: payload?.payload ?? payload?.data,
     raw: event.payload,
     createdAt: toText(payload?.createdAt ?? event.createdAt, event.createdAt),
   };
