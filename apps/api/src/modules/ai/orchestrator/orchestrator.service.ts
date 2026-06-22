@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import {
   AgentName,
   ConversationStatus,
+  KnowledgeType,
   Message,
   MessageRole,
   MessageType,
@@ -19,6 +20,7 @@ import { SystemGraphService } from "../../../ai/self-generation/system.graph.ser
 import { ConstraintService } from "../../../constraint/constraint.service";
 import { FusionDecisionService } from "../../../decision/decision.service";
 import { FusionEvolutionService } from "../../../evolution/evolution.service";
+import { KnowledgeRetrievalService } from "../../../knowledge/knowledge-retrieval.service";
 import { ModelGatewayError } from "../../../model-gateway/model-gateway.error";
 import { ModelGatewayService } from "../../../model-gateway/model-gateway.service";
 import { PrismaService } from "../../../prisma/prisma.service";
@@ -42,6 +44,8 @@ type PreviewArtifactContext = {
     warn: Array<{ effect: string; scope: string }>;
   };
   agentSkills: AgentSkillDefinition[];
+  knowledgeReferences: KnowledgeReference[];
+  knowledgeSummary: string;
   skillReferences: KnowledgeReference[];
   companyRuntime: {
     productInitiative: {
@@ -84,6 +88,7 @@ export class OrchestratorService {
     private readonly selfGeneration: SelfGenerationEngine,
     private readonly systemGraph: SystemGraphService,
     private readonly companyRuntime: CompanyRuntimeService,
+    private readonly knowledgeRetrieval: KnowledgeRetrievalService,
     private readonly constraints: ConstraintService,
     private readonly decisions: FusionDecisionService,
     private readonly evolutionSystem: FusionEvolutionService,
@@ -115,10 +120,32 @@ export class OrchestratorService {
       content,
     });
 
+    const knowledgeSearch = await this.knowledgeRetrieval.search({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: userMessage.id,
+      agentName: AgentName.knowledge_agent,
+      query: content,
+      taskType: ModelTaskType.product_design,
+      preferredTypes: [
+        KnowledgeType.strong_rule,
+        KnowledgeType.default_rule,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+        KnowledgeType.design_pattern,
+        KnowledgeType.business_concept,
+        KnowledgeType.reference_case,
+      ],
+      limit: 8,
+    });
+    const knowledgeReferences = knowledgeSearch.references as KnowledgeReference[];
+    const knowledgeSummary = buildKnowledgeSummary(knowledgeSearch.results);
+
     const constraintContext = await this.constraints.build({
       projectId: conversation.projectId,
       userInput: content,
       createdBy: input.user.id,
+      knowledgeReferences,
     });
     const decisionResult = await this.decisions.generate({
       projectId: conversation.projectId,
@@ -133,6 +160,8 @@ export class OrchestratorService {
       userInput: content,
       constraintContext,
       decisionContext: decisionResult.decisionPlan,
+      knowledgeReferences,
+      knowledgeSummary,
       agentSkills,
       skillReferences,
     };
@@ -186,6 +215,8 @@ export class OrchestratorService {
       decisionPlan,
       constraintContext,
       agentSkills,
+      knowledgeReferences,
+      knowledgeSummary,
       skillReferences,
       companyRuntime,
       previewSession,
@@ -227,6 +258,11 @@ export class OrchestratorService {
         intent,
         constraintContext,
         agentInput,
+        knowledgeSearch: {
+          summary: knowledgeSummary,
+          results: knowledgeSearch.results,
+          references: knowledgeReferences,
+        },
         agentSkills,
         skillReferences,
         decisionTraceId: evolution.traceId,
@@ -257,6 +293,12 @@ export class OrchestratorService {
       intent,
       constraintContext,
       agentInput,
+      knowledgeSearch: {
+        summary: knowledgeSummary,
+        results: knowledgeSearch.results,
+        references: knowledgeReferences,
+      },
+      knowledgeReferences,
       agentSkills,
       skillReferences,
       decisionPlan,
@@ -333,6 +375,9 @@ export class OrchestratorService {
               rules: [
                 "必须围绕用户输入生成具体业务方案，不能写 mock、示例、占位内容。",
                 "必须保留约束系统、决策系统、进化系统已经给出的策略和限制。",
+                "context.knowledgeReferences 是正式知识库命中内容，优先级高于通用经验；如果存在命中，PRD 和原型必须显式体现这些知识，不得与知识库强规则冲突。",
+                "如果知识库命中内容与用户输入冲突，必须按知识库调整方案，并在 PRD 中用「知识库依据」说明调整原因。",
+                "PRD 至少包含一节「知识库依据」，列出本次采用的知识标题和它影响了哪些页面、规则或验收标准。",
                 "如果 context.agentSkills 有内容，必须把这些 Obsidian Agent Skills 当作 Vibe Coding 的可用知识库能力，并在 PRD 或原型设计中体现其约束。",
                 "prototype.html 必须是完整 HTML 页面，包含 <!doctype html>、<html lang=\"zh-CN\">、<head> 和 <body>。",
                 "原型必须像真实产品页面，不要只输出说明文字。",
@@ -460,10 +505,16 @@ export function toMessage(message: Message) {
 function buildPreviewArtifacts(input: PreviewArtifactContext): PreviewArtifacts {
   const title = derivePreviewTitle(input.projectTitle, input.userInput, input.companyRuntime.productInitiative.name);
   const goal = input.companyRuntime.productInitiative.goal || `围绕「${input.userInput}」形成可评审的产品方案。`;
+  const knowledgeRules = input.knowledgeReferences.map((reference) => ({
+    type: "知识库",
+    content: `${reference.title}：${reference.snippet || reference.content.slice(0, 120)}`,
+    scope: "knowledge",
+  }));
   const rules = [
     ...input.constraintContext.mustFollow.map((constraint) => ({ type: "必须遵守", content: constraint.effect, scope: constraint.scope })),
     ...input.constraintContext.prefer.map((constraint) => ({ type: "优先考虑", content: constraint.effect, scope: constraint.scope })),
     ...input.constraintContext.avoid.map((constraint) => ({ type: "避免", content: constraint.effect, scope: constraint.scope })),
+    ...knowledgeRules,
   ];
   const pages = [
     {
@@ -492,9 +543,22 @@ function buildPreviewArtifacts(input: PreviewArtifactContext): PreviewArtifacts 
       content: `当前选中策略：${strategyName(input.selectedStrategy.name)}。${input.selectedStrategy.description} 关键约束：${rules.map((rule) => rule.content).slice(0, 4).join("；") || "所有输出必须经过三系统融合流程。"}`,
     },
     {
+      title: "知识库依据",
+      content: input.knowledgeReferences.length
+        ? `本次命中 ${input.knowledgeReferences.length} 条正式知识：${input.knowledgeReferences.map((reference) => `《${reference.title}》`).join("、")}。这些知识已转为约束并参与策略评分、需求文档和原型生成。`
+        : "本次未命中正式知识库内容，系统仅使用内置约束和通用产品方法生成，建议先在知识库补充强规则、写作规则或原型规则。",
+    },
+    {
       title: "知识库与技能",
-      content: input.agentSkills.length
-        ? `本次 Vibe Coding 已加载 ${input.agentSkills.map((skill) => skill.name).join("、")}，用于维护 Obsidian Markdown 知识、Bases 视图、Canvas 结构和网页资料提取等知识库能力。`
+      content: input.knowledgeReferences.length || input.agentSkills.length
+        ? [
+            input.knowledgeReferences.length
+              ? `本次命中正式知识：${input.knowledgeReferences.map((reference) => `《${reference.title}》`).join("、")}。`
+              : "",
+            input.agentSkills.length
+              ? `已加载 ${input.agentSkills.map((skill) => skill.name).join("、")}，用于维护 Obsidian Markdown 知识、Bases 视图、Canvas 结构和网页资料提取等知识库能力。`
+              : "",
+          ].filter(Boolean).join("")
         : "当前未检测到可用的 Obsidian Agent Skills，系统将仅使用内置知识库上下文生成方案。",
     },
     {
@@ -527,6 +591,7 @@ function buildPreviewArtifacts(input: PreviewArtifactContext): PreviewArtifacts 
         riskLevel: input.companyRuntime.qaReport.riskLevel,
         recommendations: input.companyRuntime.qaReport.recommendations,
         reasoning: input.decisionPlan.reasoning ?? [],
+        knowledgeReferences: input.knowledgeReferences,
       }),
     },
   };
@@ -655,6 +720,30 @@ function strategyName(name: string) {
   return labels[name] ?? name;
 }
 
+function buildKnowledgeSummary(
+  results: Array<{ title: string; score: number; reason: string; type: string }>,
+) {
+  if (!results.length) {
+    return "未命中正式知识库，系统将只使用内置约束和通用产品方法。";
+  }
+  return `命中 ${results.length} 条知识：${results
+    .map((result) => `${result.title}（${knowledgeTypeName(result.type)}，匹配度 ${result.score}）`)
+    .join("；")}`;
+}
+
+function knowledgeTypeName(type: string) {
+  const labels: Record<string, string> = {
+    strong_rule: "强规则",
+    default_rule: "默认规则",
+    reference_case: "参考案例",
+    design_pattern: "设计模式",
+    prd_writing_rule: "需求写作规则",
+    prototype_rule: "原型规则",
+    business_concept: "业务概念",
+  };
+  return labels[type] ?? type;
+}
+
 function renderPreviewHtml(input: {
   title: string;
   goal: string;
@@ -665,9 +754,11 @@ function renderPreviewHtml(input: {
   riskLevel: string;
   recommendations: string[];
   reasoning: string[];
+  knowledgeReferences: KnowledgeReference[];
 }) {
   const features = input.features.length ? input.features : ["需求梳理", "策略评审", "原型预览"];
   const recommendations = input.recommendations.length ? input.recommendations : ["保持补丁预览门禁", "持续记录决策链路"];
+  const knowledgeItems = input.knowledgeReferences.slice(0, 4);
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -733,6 +824,14 @@ function renderPreviewHtml(input: {
       <section class="card">
         <h3>决策依据</h3>
         <p>${escapeHtml(input.reasoning[0] ?? "系统已按加权评分选择当前策略。")}</p>
+      </section>
+      <section class="card">
+        <h3>知识库依据</h3>
+        ${
+          knowledgeItems.length
+            ? `<ul>${knowledgeItems.map((reference) => `<li>${escapeHtml(reference.title)}：${escapeHtml(reference.snippet || reference.content.slice(0, 120))}</li>`).join("")}</ul>`
+            : "<p>本次未命中正式知识库，建议补充强规则、需求写作规则或原型规则后再次生成。</p>"
+        }
       </section>
     </main>
   </div>

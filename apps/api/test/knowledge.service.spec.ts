@@ -151,6 +151,38 @@ describe("Knowledge module services", () => {
     });
   });
 
+  it("retrieves Chinese knowledge from natural-language long input", async () => {
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "crm-strong-rule",
+        title: "企业客户线索强规则",
+        content: "线索必须包含来源渠道、客户联系人、跟进状态和下一步动作。",
+        type: KnowledgeType.strong_rule,
+        status: KnowledgeStatus.active,
+        priority: KnowledgePriority.high,
+        tags: ["客户", "线索", "企业"],
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      projectId: "project-1",
+      runId: "run-1",
+      agentName: "knowledge_agent",
+      query: "帮我生成一个企业客户线索管理系统，包含需求文档和原型",
+      preferredTypes: [KnowledgeType.strong_rule],
+      limit: 5,
+    });
+
+    expect(result.results[0]).toEqual(
+      expect.objectContaining({
+        itemId: "crm-strong-rule",
+        title: "企业客户线索强规则",
+      }),
+    );
+    expect(result.references[0]?.content).toContain("线索必须包含来源渠道");
+  });
+
   it("approves candidates into active knowledge items and blocks double review", async () => {
     const candidate = candidateRow();
     prisma.knowledgeCandidate.findUnique.mockResolvedValue(candidate);

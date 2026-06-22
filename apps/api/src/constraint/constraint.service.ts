@@ -3,6 +3,14 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import type { Constraint, ConstraintContext, ConstraintRule, ConstraintScope } from "./constraint.types";
 
+type KnowledgeConstraintSource = {
+  knowledgeId?: string;
+  title: string;
+  snippet?: string;
+  content: string;
+  type?: string;
+};
+
 @Injectable()
 export class ConstraintService {
   constructor(private readonly prisma: PrismaService) {}
@@ -11,8 +19,12 @@ export class ConstraintService {
     projectId: string;
     userInput: string;
     createdBy: string;
+    knowledgeReferences?: KnowledgeConstraintSource[];
   }): Promise<ConstraintContext> {
-    const constraints = buildDefaultConstraints(input.userInput);
+    const constraints = [
+      ...buildDefaultConstraints(input.userInput),
+      ...buildKnowledgeConstraints(input.knowledgeReferences ?? []),
+    ];
     const rows = await this.prisma.constraintRule.createManyAndReturn({
       data: constraints.map((constraint) => ({
         projectId: input.projectId,
@@ -106,6 +118,73 @@ function groupConstraints(constraints: Constraint[]): ConstraintContext {
     avoid: constraints.filter((constraint) => constraint.rule === "avoid"),
     warn: constraints.filter((constraint) => constraint.rule === "warn"),
   };
+}
+
+function buildKnowledgeConstraints(references: KnowledgeConstraintSource[]): Array<Omit<Constraint, "id">> {
+  return uniqueKnowledgeReferences(references)
+    .slice(0, 10)
+    .map((reference) => {
+      const sourceText = cleanConstraintText(reference.content || reference.snippet || reference.title);
+      const effect = knowledgeEffect(reference, sourceText);
+      return {
+        rule: knowledgeRule(reference.type),
+        scope: knowledgeScope(reference, sourceText),
+        condition: `命中知识库「${reference.title}」。`,
+        effect,
+        weight: knowledgeWeight(reference.type),
+        sourceKnowledgeId: reference.knowledgeId || `knowledge:${reference.title}`,
+      };
+    });
+}
+
+function uniqueKnowledgeReferences(references: KnowledgeConstraintSource[]) {
+  const seen = new Set<string>();
+  return references.filter((reference) => {
+    const key = reference.knowledgeId || reference.title;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function knowledgeRule(type?: string): ConstraintRule {
+  if (type === "strong_rule" || type === "prd_writing_rule" || type === "prototype_rule") {
+    return "must_follow";
+  }
+  if (type === "reference_case" || type === "business_concept" || type === "design_pattern") {
+    return "prefer";
+  }
+  return "prefer";
+}
+
+function knowledgeScope(reference: KnowledgeConstraintSource, text: string): ConstraintScope {
+  const haystack = `${reference.title} ${reference.type ?? ""} ${text}`;
+  if (/补丁|patch|执行|变更|preview|预览门禁/i.test(haystack)) return "patch";
+  if (/质检|验收|测试|风险|qa/i.test(haystack)) return "qa";
+  if (/原型|界面|交互|体验|UI|UX|组件|页面/i.test(haystack)) return "agent";
+  return "decision";
+}
+
+function knowledgeWeight(type?: string) {
+  if (type === "strong_rule") return 1;
+  if (type === "prd_writing_rule" || type === "prototype_rule") return 0.9;
+  if (type === "default_rule") return 0.78;
+  return 0.68;
+}
+
+function knowledgeEffect(reference: KnowledgeConstraintSource, text: string) {
+  const prefix = reference.type === "strong_rule"
+    ? "必须遵守知识库强规则"
+    : reference.type === "prd_writing_rule"
+      ? "需求文档必须遵守知识库写作规则"
+      : reference.type === "prototype_rule"
+        ? "原型必须遵守知识库原型规则"
+        : "优先参考知识库内容";
+  return `${prefix}：${reference.title} - ${text}`;
+}
+
+function cleanConstraintText(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 320);
 }
 
 function toConstraint(row: {

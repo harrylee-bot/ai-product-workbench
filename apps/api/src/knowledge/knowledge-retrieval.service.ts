@@ -154,15 +154,71 @@ function toReference(
 }
 
 function tokenize(query: string) {
-  return normalizeText(query)
-    .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
-    .map((item) => item.trim())
-    .filter((item) => item.length >= 2)
-    .slice(0, 16);
+  const normalized = normalizeText(query);
+  const segments = normalized.match(/[a-z0-9]{2,}|[\u4e00-\u9fa5]{2,}/gi) ?? [];
+  const tokens: string[] = [];
+
+  for (const segment of segments) {
+    if (/^[a-z0-9]+$/i.test(segment)) {
+      tokens.push(segment);
+      continue;
+    }
+
+    tokens.push(...extractChineseTerms(segment));
+  }
+
+  return [...new Set(tokens.map((item) => item.trim()).filter((item) => item.length >= 2))]
+    .slice(0, 28);
 }
 
 function normalizeText(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function extractChineseTerms(segment: string) {
+  const terms: string[] = [];
+  if (segment.length <= 10) terms.push(segment);
+
+  const domainTerms = [
+    "产品",
+    "需求",
+    "原型",
+    "规则",
+    "约束",
+    "知识库",
+    "客户",
+    "线索",
+    "销售",
+    "商机",
+    "合同",
+    "订单",
+    "活动",
+    "签到",
+    "企业",
+    "官网",
+    "品牌",
+    "营销",
+    "后台",
+    "权限",
+    "管理员",
+    "登录",
+    "移动端",
+    "页面",
+    "流程",
+    "验收",
+  ];
+  for (const term of domainTerms) {
+    if (segment.includes(term)) terms.push(term);
+  }
+
+  for (let index = 0; index < segment.length - 1 && terms.length < 24; index += 1) {
+    terms.push(segment.slice(index, index + 2));
+  }
+  for (let index = 0; index < segment.length - 2 && terms.length < 28; index += 1) {
+    terms.push(segment.slice(index, index + 3));
+  }
+
+  return terms;
 }
 
 function priorityWeight(priority: KnowledgeRetrievalResult["priority"]) {

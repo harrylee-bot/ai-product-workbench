@@ -24,9 +24,18 @@ describe("Triple system fusion", () => {
       projectId: "project_1",
       userInput: "重构工作台但必须安全",
       createdBy: "user_1",
+      knowledgeReferences: [
+        {
+          knowledgeId: "knowledge_prd_rule_1",
+          title: "中文需求写作规则",
+          content: "需求文档必须包含知识库依据，并说明采用了哪些业务规则。",
+          type: "prd_writing_rule",
+        },
+      ],
     });
 
-    expect(context.mustFollow.length).toBeGreaterThanOrEqual(2);
+    expect(context.mustFollow.length).toBeGreaterThanOrEqual(3);
+    expect(context.mustFollow.map((constraint) => constraint.sourceKnowledgeId)).toContain("knowledge_prd_rule_1");
     expect(context.avoid[0]?.effect).toContain("直接修改数据库");
     expect(context.warn.length).toBe(1);
   });
