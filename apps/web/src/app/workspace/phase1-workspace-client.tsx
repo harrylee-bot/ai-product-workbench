@@ -4,7 +4,12 @@ import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient
 import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
 import { ChatPanel, type Phase1Message } from "@/components/chat-panel";
-import { PreviewPanel, type Phase2DecisionView } from "@/components/preview-panel";
+import {
+  PreviewPanel,
+  type Phase1PrdPreview,
+  type Phase1PrototypePreview,
+  type Phase2DecisionView,
+} from "@/components/preview-panel";
 import { ProjectList, type Phase1Project } from "@/components/project-list";
 import { ProtectedRoute } from "@/components/protected-route";
 import { UserMenu } from "@/components/user-menu";
@@ -17,6 +22,8 @@ type ProjectsResponse = {
 type ProjectDetailResponse = {
   project: Phase1Project;
   conversations: Array<{ id: string; projectId: string; title: string }>;
+  prd?: unknown;
+  prototype?: unknown;
 };
 
 type MessagesResponse = {
@@ -37,6 +44,8 @@ type MessageResponse = {
   companyRuntime?: Phase2DecisionView["companyRuntime"];
   constraintContext?: Phase2DecisionView["constraintContext"];
   agentInput?: Phase2DecisionView["agentInput"];
+  prdPreview?: Phase1PrdPreview;
+  prototypePreview?: Phase1PrototypePreview;
 };
 
 type ApplySystemMutationResponse = {
@@ -50,21 +59,36 @@ type Phase1WorkspaceState = {
   selectedProjectId: string;
   selectedConversationId: string;
   decision: Phase2DecisionView | null;
+  prdPreview: Phase1PrdPreview | null;
+  prototypePreview: Phase1PrototypePreview | null;
   setSelectedProject: (projectId: string, conversationId: string) => void;
   setDecision: (decision: Phase2DecisionView | null) => void;
+  setArtifactPreview: (preview: {
+    prdPreview?: Phase1PrdPreview | null;
+    prototypePreview?: Phase1PrototypePreview | null;
+  }) => void;
 };
 
 const usePhase1Workspace = create<Phase1WorkspaceState>((set) => ({
   selectedProjectId: "",
   selectedConversationId: "",
   decision: null,
+  prdPreview: null,
+  prototypePreview: null,
   setSelectedProject: (projectId, conversationId) =>
     set({
       selectedProjectId: projectId,
       selectedConversationId: conversationId,
       decision: null,
+      prdPreview: null,
+      prototypePreview: null,
     }),
   setDecision: (decision) => set({ decision }),
+  setArtifactPreview: (preview) =>
+    set((state) => ({
+      prdPreview: preview.prdPreview === undefined ? state.prdPreview : preview.prdPreview,
+      prototypePreview: preview.prototypePreview === undefined ? state.prototypePreview : preview.prototypePreview,
+    })),
 }));
 
 export function Phase1WorkspaceClient() {
@@ -86,8 +110,11 @@ function Phase1WorkspaceInner() {
     selectedProjectId,
     selectedConversationId,
     decision,
+    prdPreview,
+    prototypePreview,
     setSelectedProject,
     setDecision,
+    setArtifactPreview,
   } = usePhase1Workspace();
 
   const projectsQuery = useQuery({
@@ -120,7 +147,11 @@ function Phase1WorkspaceInner() {
     if (conversationId && conversationId !== selectedConversationId) {
       setSelectedProject(detail.project.id, conversationId);
     }
-  }, [detailQuery.data, selectedConversationId, setSelectedProject]);
+    setArtifactPreview({
+      prdPreview: normalizePrdPreview(detail.prd),
+      prototypePreview: normalizePrototypePreview(detail.prototype),
+    });
+  }, [detailQuery.data, selectedConversationId, setArtifactPreview, setSelectedProject]);
 
   const messagesQuery = useQuery({
     queryKey: ["phase1-messages", selectedConversationId],
@@ -165,6 +196,10 @@ function Phase1WorkspaceInner() {
         companyRuntime: response.companyRuntime,
         constraintContext: response.constraintContext,
         agentInput: response.agentInput,
+      });
+      setArtifactPreview({
+        prdPreview: response.prdPreview ?? null,
+        prototypePreview: response.prototypePreview ?? null,
       });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["phase1-messages", selectedConversationId] }),
@@ -242,10 +277,56 @@ function Phase1WorkspaceInner() {
         />
         <PreviewPanel
           decision={decision}
+          prdPreview={prdPreview}
+          prototypePreview={prototypePreview}
           applyingProposal={applySystemMutation.isPending}
           onApplyProposal={(proposalId) => applySystemMutation.mutate(proposalId)}
         />
       </div>
     </main>
   );
+}
+
+function normalizePrdPreview(value: unknown): Phase1PrdPreview | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const sectionsValue = Array.isArray(record.sections) ? record.sections : [];
+  const sections = sectionsValue.flatMap((item) => {
+    const section = asRecord(item);
+    if (!section) return [];
+    const title = asText(section.title);
+    const content = asText(section.content) || asText(section.body) || asText(section.description);
+    if (!title && !content) return [];
+    return [{
+      title: title || "未命名章节",
+      content: content || "暂无内容",
+    }];
+  });
+  if (!sections.length) return null;
+  return {
+    id: asText(record.id) || undefined,
+    title: asText(record.title) || "需求文档",
+    sections,
+  };
+}
+
+function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const html = asText(record.html) || asText(record.htmlContent);
+  if (!html) return null;
+  return {
+    id: asText(record.id) || undefined,
+    title: asText(record.title) || "原型预览",
+    html,
+    entryFilePath: asText(record.entryFilePath) || "index.html",
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function asText(value: unknown) {
+  return typeof value === "string" ? value : "";
 }

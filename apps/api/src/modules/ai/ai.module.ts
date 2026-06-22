@@ -20,12 +20,13 @@ import { SystemMutationController } from "../../ai/self-generation/system-mutati
 import { SystemPreviewService } from "../../ai/self-generation/system.preview.service";
 import { StrategySelectorService } from "../../ai/strategy-selector/strategy-selector.service";
 import { PrismaModule } from "../../prisma/prisma.module";
+import { StateModule } from "../state/state.module";
 import { IntentAgent } from "./agents/intent/intent.agent";
 import { OrchestratorController } from "./orchestrator/orchestrator.controller";
 import { OrchestratorService } from "./orchestrator/orchestrator.service";
 
 @Module({
-  imports: [PrismaModule, CompanyModule, ConstraintModule, FusionDecisionModule, FusionEvolutionModule],
+  imports: [PrismaModule, CompanyModule, ConstraintModule, FusionDecisionModule, FusionEvolutionModule, StateModule],
   controllers: [OrchestratorController, PatchPreviewController, SystemMutationController],
   providers: [
     OrchestratorService,

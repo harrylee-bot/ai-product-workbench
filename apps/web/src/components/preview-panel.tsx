@@ -1,6 +1,7 @@
 "use client";
 
-import { Activity, Building2, Check, CircleDollarSign, GitBranch, Scale, ShieldAlert } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Activity, Building2, Check, CircleDollarSign, Code2, FileText, GitBranch, Scale, ShieldAlert } from "lucide-react";
 
 export type PatchOperation = {
   op: "add" | "update" | "delete" | "replace";
@@ -283,6 +284,24 @@ export type Phase2DecisionView = {
   };
 };
 
+export type Phase1PrdPreview = {
+  id?: string;
+  title: string;
+  sections: Array<{
+    title: string;
+    content: string;
+  }>;
+};
+
+export type Phase1PrototypePreview = {
+  id?: string;
+  title: string;
+  html: string;
+  entryFilePath?: string;
+};
+
+type PreviewTab = "prd" | "prototype" | "decision";
+
 const STRATEGY_LABELS: Record<Phase2Strategy["name"], string> = {
   conservative_fix: "保守修正",
   ux_improve: "体验优化",
@@ -344,13 +363,18 @@ const MUTATION_LABELS: Record<SystemMutation["type"], string> = {
 
 export function PreviewPanel({
   decision,
+  prdPreview,
+  prototypePreview,
   applyingProposal,
   onApplyProposal,
 }: {
   decision?: Phase2DecisionView | null;
+  prdPreview?: Phase1PrdPreview | null;
+  prototypePreview?: Phase1PrototypePreview | null;
   applyingProposal?: boolean;
   onApplyProposal?: (proposalId: string) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<PreviewTab>(prdPreview ? "prd" : prototypePreview ? "prototype" : "decision");
   const strategies = decision?.decisionPlan.strategies ?? [];
   const selectedId = decision?.selection.selectedStrategyId ?? "";
   const companyRuntime = decision?.companyRuntime;
@@ -363,15 +387,59 @@ export function PreviewPanel({
     null;
   const agents = graph?.nodes.filter((node) => node.type === "agent") ?? [];
   const edges = graph?.edges ?? [];
+  const tabs: Array<{ key: PreviewTab; label: string; icon: typeof FileText; ready: boolean }> = [
+    { key: "prd", label: "需求文档", icon: FileText, ready: Boolean(prdPreview) },
+    { key: "prototype", label: "原型", icon: Code2, ready: Boolean(prototypePreview?.html) },
+    { key: "decision", label: "决策链路", icon: GitBranch, ready: Boolean(decision) },
+  ];
+
+  useEffect(() => {
+    if (prdPreview) {
+      setActiveTab("prd");
+      return;
+    }
+    if (prototypePreview?.html) {
+      setActiveTab("prototype");
+      return;
+    }
+    setActiveTab("decision");
+  }, [prdPreview?.id, prototypePreview?.id, prototypePreview?.html]);
 
   return (
     <aside className="flex min-h-0 flex-col bg-white">
       <div className="border-b border-gray-200 px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">智能产品操作系统</div>
-        <div className="text-xs text-gray-500">约束 / 决策 / 进化 / 公司</div>
+        <div className="text-sm font-semibold text-gray-950">预览中心</div>
+        <div className="text-xs text-gray-500">需求文档 / 原型 / 决策链路</div>
+      </div>
+      <div className="border-b border-gray-200 bg-white px-3 py-2">
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={[
+                  "inline-flex h-8 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold transition",
+                  active ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-800",
+                ].join(" ")}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{tab.label}</span>
+                {tab.ready ? <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {!decision ? (
+        {activeTab === "prd" ? (
+          <PrdPreviewView prdPreview={prdPreview} />
+        ) : activeTab === "prototype" ? (
+          <PrototypePreviewView prototypePreview={prototypePreview} />
+        ) : !decision ? (
           <div className="rounded-lg border border-dashed border-gray-200 px-3 py-10 text-center text-sm leading-6 text-gray-500">
             发送需求后，这里会展示不少于 3 个策略、5 个评审智能体的评分、零维补丁预览和系统预览。
           </div>
@@ -757,6 +825,88 @@ export function PreviewPanel({
         )}
       </div>
     </aside>
+  );
+}
+
+function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview | null }) {
+  if (!prdPreview) {
+    return (
+      <EmptyPreview
+        title="暂无需求文档"
+        description="发送需求后，系统会在完成约束、决策、进化流程后生成一份可预览需求文档。"
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-sky-700">
+          <FileText className="h-4 w-4" />
+          需求文档
+        </div>
+        <h2 className="mt-2 text-lg font-semibold leading-tight text-gray-950">{toChineseText(prdPreview.title)}</h2>
+        <div className="mt-1 text-xs text-gray-500">{prdPreview.sections.length} 个章节</div>
+      </div>
+      {prdPreview.sections.map((section, index) => (
+        <section key={`${section.title}-${index}`} className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gray-950 text-xs font-semibold text-white">
+              {index + 1}
+            </span>
+            <h3 className="text-sm font-semibold text-gray-950">{toChineseText(section.title)}</h3>
+          </div>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-gray-600">{toChineseText(section.content)}</p>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1PrototypePreview | null }) {
+  if (!prototypePreview?.html) {
+    return (
+      <EmptyPreview
+        title="暂无原型"
+        description="发送需求后，系统会生成一份 HTML 原型，并在这里直接预览。"
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700">
+          <Code2 className="h-4 w-4" />
+          原型预览
+        </div>
+        <h2 className="mt-2 truncate text-lg font-semibold leading-tight text-gray-950">{toChineseText(prototypePreview.title)}</h2>
+        <div className="mt-1 text-xs text-gray-500">{prototypePreview.entryFilePath ?? "index.html"}</div>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="flex h-8 items-center gap-2 border-b border-gray-200 bg-gray-50 px-3">
+          <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+          <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+          <span className="ml-2 truncate text-xs text-gray-500">网页原型</span>
+        </div>
+        <iframe
+          title="原型预览"
+          srcDoc={prototypePreview.html}
+          sandbox="allow-scripts"
+          className="h-[620px] w-full border-0 bg-white"
+        />
+      </div>
+    </div>
+  );
+}
+
+function EmptyPreview({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-12 text-center">
+      <div className="text-sm font-semibold text-gray-950">{title}</div>
+      <p className="mx-auto mt-2 max-w-[300px] text-sm leading-6 text-gray-500">{description}</p>
+    </div>
   );
 }
 
