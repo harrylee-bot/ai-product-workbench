@@ -349,7 +349,7 @@ function Phase1WorkspaceInner() {
   return (
     <main
       className={[
-        "grid h-screen min-h-0 overflow-hidden bg-[#F6F7F9]",
+        "workbench-scrollbar grid h-screen min-h-0 overflow-x-auto overflow-y-hidden bg-[var(--color-app-bg)] text-gray-950",
         resizingPreview ? "cursor-col-resize select-none" : "",
       ].join(" ")}
       style={{
@@ -396,10 +396,10 @@ function Phase1WorkspaceInner() {
         aria-label="拖动调整预览宽度"
         aria-orientation="vertical"
         onPointerDown={startPreviewResize}
-        className="group relative flex cursor-col-resize items-center justify-center border-l border-r border-gray-200 bg-[#F6F7F9] transition hover:bg-blue-50"
+        className="group relative flex cursor-col-resize items-center justify-center border-l border-r border-[var(--color-border)] bg-[var(--color-app-bg)] transition hover:bg-[var(--color-accent-soft)]"
         title="拖动调整预览宽度"
       >
-        <span className="h-14 w-1 rounded-full bg-gray-300 transition group-hover:bg-blue-400" />
+        <span className="h-14 w-1 rounded-full bg-gray-300 transition group-hover:bg-[var(--color-accent)]" />
       </div>
       <PreviewPanel
         prdPreview={prdPreview}

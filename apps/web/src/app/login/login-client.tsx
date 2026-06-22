@@ -43,8 +43,8 @@ export function LoginClient() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#F6F7F9] px-4 py-10">
-      <section className="w-full max-w-[400px] rounded-[16px] border border-gray-200 bg-white p-8 shadow-[0_18px_45px_rgba(17,24,39,0.08)]">
+    <main className="flex min-h-screen items-center justify-center bg-[var(--color-app-bg)] px-4 py-10">
+      <section className="w-full max-w-[400px] rounded-[18px] border border-gray-200 bg-white p-8 shadow-[var(--shadow-panel)]">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold text-gray-950">智能产品工作台</h1>
           <div className="mt-4 inline-flex h-8 items-center rounded-[10px] bg-gray-100 px-3 text-[13px] font-medium text-gray-600">
@@ -80,7 +80,7 @@ export function LoginClient() {
                 type="button"
                 onClick={() => setShowPassword((value) => !value)}
                 disabled={submitting}
-                className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:opacity-60"
                 aria-label={showPassword ? "隐藏密码" : "显示密码"}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

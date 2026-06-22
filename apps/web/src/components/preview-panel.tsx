@@ -401,18 +401,18 @@ export function PreviewPanel({
   }, [prdPreview?.id, prototypePreview?.id, prototypePreview?.html]);
 
   return (
-    <aside className="flex min-h-0 flex-col bg-[#F7F8FA]">
-      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-4">
+    <aside className="flex min-h-0 flex-col bg-[var(--color-panel-bg)]">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-white px-4">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-gray-950">结果预览</div>
           <div className="truncate text-xs text-gray-500">需求文档与网页原型</div>
         </div>
-        <div className="inline-flex rounded-full bg-gray-100 p-1">
+        <div className="inline-flex rounded-full bg-gray-100 p-1 shadow-inner">
           <button
             type="button"
             onClick={() => setMode("prd")}
             className={[
-              "h-8 rounded-full px-3 text-sm font-medium transition",
+              "h-8 rounded-full px-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
               mode === "prd" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900",
             ].join(" ")}
           >
@@ -422,7 +422,7 @@ export function PreviewPanel({
             type="button"
             onClick={() => setMode("prototype")}
             className={[
-              "h-8 rounded-full px-3 text-sm font-medium transition",
+              "h-8 rounded-full px-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
               mode === "prototype" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900",
             ].join(" ")}
           >
@@ -432,7 +432,7 @@ export function PreviewPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {mode === "prd" ? (
-          <div className="h-full overflow-y-auto p-3">
+          <div className="workbench-scrollbar h-full overflow-y-auto p-3">
             <PrdPreviewView prdPreview={prdPreview} />
           </div>
         ) : (
@@ -457,10 +457,10 @@ function ResultSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+    <section className="rounded-[14px] border border-gray-200 bg-gray-50 p-3">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2">
-          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-gray-700 shadow-sm">
+          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-gray-700 shadow-[var(--shadow-control)]">
             <Icon className="h-4 w-4" />
           </span>
           <div className="min-w-0">
@@ -494,7 +494,7 @@ function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview | null }
 
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+      <div className="rounded-[14px] border border-gray-200 bg-white px-4 py-3 shadow-[var(--shadow-control)]">
         <div className="flex items-center gap-2 text-xs font-semibold text-sky-700">
           <FileText className="h-4 w-4" />
           需求文档
@@ -503,7 +503,7 @@ function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview | null }
         <div className="mt-1 text-xs text-gray-500">{prdPreview.sections.length} 个章节</div>
       </div>
       {prdPreview.sections.map((section, index) => (
-        <section key={`${section.title}-${index}`} className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+        <section key={`${section.title}-${index}`} className="rounded-[14px] border border-gray-200 bg-white px-4 py-3 shadow-[var(--shadow-control)]">
           <div className="flex items-center gap-2">
             <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gray-950 text-xs font-semibold text-white">
               {index + 1}
@@ -530,24 +530,24 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#EEF4FF]">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-blue-100 bg-white/75 px-4">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--color-accent-soft)]">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-blue-100 bg-white/80 px-4 backdrop-blur">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-gray-950">{toChineseText(prototypePreview.title)}</div>
           <div className="text-xs text-gray-500">网页原型预览</div>
         </div>
-        <div className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-medium text-blue-700">
+        <div className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-[var(--shadow-control)]">
           已生成
         </div>
       </div>
       <div className="min-h-0 flex-1 p-2.5">
-        <div className="h-full overflow-hidden rounded-lg border border-blue-100 bg-white shadow-sm">
-        <iframe
-          title="原型预览"
-          srcDoc={prototypePreview.html}
-          sandbox="allow-scripts"
+        <div className="h-full overflow-hidden rounded-[14px] border border-blue-100 bg-white shadow-[var(--shadow-panel)]">
+          <iframe
+            title="原型预览"
+            srcDoc={prototypePreview.html}
+            sandbox="allow-scripts"
             className="h-full min-h-[720px] w-full border-0 bg-white"
-        />
+          />
         </div>
       </div>
     </div>
@@ -556,7 +556,10 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
 
 function EmptyPreview({ title, description }: { title: string; description: string }) {
   return (
-    <div className="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-12 text-center">
+    <div className="rounded-[16px] border border-dashed border-gray-200 bg-white px-4 py-12 text-center shadow-[var(--shadow-control)]">
+      <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50 text-gray-400">
+        <FileText className="h-5 w-5" />
+      </div>
       <div className="text-sm font-semibold text-gray-950">{title}</div>
       <p className="mx-auto mt-2 max-w-[300px] text-sm leading-6 text-gray-500">{description}</p>
     </div>

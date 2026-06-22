@@ -28,12 +28,16 @@ export function ChatPanel({
   const [draft, setDraft] = useState("");
   const [runningStep, setRunningStep] = useState(0);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitDraft() {
     const content = draft.trim();
     if (!content || disabled || sending) return;
     await onSend(content);
     setDraft("");
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitDraft();
   }
 
   useEffect(() => {
@@ -49,20 +53,20 @@ export function ChatPanel({
   }, [sending]);
 
   return (
-    <section className="flex min-h-0 flex-col border-r border-gray-200 bg-[#F8FAFC]">
-      <div className="border-b border-gray-200 bg-white px-4 py-3">
+    <section className="flex min-h-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel-bg)]">
+      <div className="border-b border-[var(--color-border)] bg-white px-4 py-3">
         <div className="text-sm font-semibold text-gray-950">智能输入</div>
         <div className="mt-1 text-xs text-gray-500">只需要说出目标，系统自动完成决策与生成</div>
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div className="workbench-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {messages.length ? (
           messages.map((message) => (
             <div
               key={message.id}
               className={[
-                "w-fit max-w-[min(78%,_780px)] rounded-lg px-3 py-2 text-sm leading-6 shadow-sm",
+                "w-fit max-w-[min(82%,_780px)] rounded-[14px] px-3.5 py-2.5 text-sm leading-6 shadow-[var(--shadow-control)]",
                 message.role === "user"
-                  ? "ml-auto bg-gray-950 text-white"
+                  ? "ml-auto bg-[var(--color-primary)] text-white"
                   : "mr-auto border border-gray-200 bg-white text-gray-700",
               ].join(" ")}
             >
@@ -70,24 +74,37 @@ export function ChatPanel({
             </div>
           ))
         ) : (
-          <div className="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500">
-            输入一句产品目标，系统会自动经过约束、决策、进化与统一编排，并生成需求结果、设计结果和执行路径。
+          <div className="rounded-[16px] border border-dashed border-gray-200 bg-white px-5 py-10 text-center shadow-[var(--shadow-control)]">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div className="mt-4 text-sm font-semibold text-gray-950">从一句目标开始</div>
+            <p className="mx-auto mt-2 max-w-[360px] text-sm leading-6 text-gray-500">
+              系统会自动经过约束、决策、进化与统一编排，并生成需求结果、设计结果和执行路径。
+            </p>
           </div>
         )}
         {(sending || decision) ? (
           <ExecutionPathCard decision={decision} running={Boolean(sending)} runningStep={runningStep} />
         ) : null}
       </div>
-      <form onSubmit={submit} className="border-t border-gray-200 bg-white px-3 py-2.5">
+      <form onSubmit={submit} className="border-t border-[var(--color-border)] bg-white px-3 py-3 shadow-[0_-10px_26px_rgba(15,23,42,0.04)]">
         <TextArea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           disabled={disabled || sending}
           placeholder={sending ? "系统正在处理..." : "输入你的需求..."}
           rows={2}
-          className="min-h-[58px] max-h-[120px] resize-none py-2"
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              void submitDraft();
+            }
+          }}
+          className="min-h-[64px] max-h-[132px] resize-none border-gray-200 bg-gray-50 py-2.5 shadow-none focus:bg-white"
         />
-        <div className="mt-2 flex justify-end">
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <div className="truncate text-xs text-gray-400">Enter 发送，Shift + Enter 换行</div>
           <Button type="submit" disabled={disabled || sending || !draft.trim()} className="h-9 px-3">
             <Sparkles className="h-4 w-4" />
             {sending ? "生成中" : "发送意图"}
@@ -135,13 +152,13 @@ function ExecutionPathCard({
     : `已完成：${strategy}`;
 
   return (
-    <div className="mr-auto max-w-[92%] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+    <div className="mr-auto max-w-[92%] overflow-hidden rounded-[16px] border border-gray-200 bg-white shadow-[var(--shadow-control)]">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-3 px-3 py-2.5 text-left"
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-gray-50 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
       >
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gray-50 text-gray-700">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
           <GitBranch className="h-4 w-4" />
         </span>
         <span className="min-w-0 flex-1">
@@ -163,7 +180,7 @@ function ExecutionPathCard({
 
       {open ? (
         <div className="border-t border-gray-200 bg-gray-50 px-3 py-3">
-          <div className="rounded-lg bg-[#ECECEC] px-3 py-2">
+          <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-[var(--shadow-control)]">
             <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
               <span className="inline-flex items-center gap-1">
                 <Bot className="h-3.5 w-3.5" />
@@ -176,7 +193,7 @@ function ExecutionPathCard({
                 const status = completed ? "done" : index < runningStep ? "done" : index === runningStep ? "running" : "pending";
                 const detail = step.title === "应用约束" && knowledgeSummary ? knowledgeSummary : step.detail;
                 return (
-                  <div key={step.title} className="flex gap-2 rounded-md bg-white/55 px-2 py-2 text-xs">
+                  <div key={step.title} className="flex gap-2 rounded-lg bg-gray-50 px-2 py-2 text-xs">
                     <StepIcon status={status} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
