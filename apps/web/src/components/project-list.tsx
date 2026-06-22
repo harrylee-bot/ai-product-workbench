@@ -117,7 +117,7 @@ export function ProjectList({
             </span>
             <div className="min-w-0">
               <div className="truncate text-xl font-semibold text-gray-950">智能产品工作台</div>
-              <div className="mt-1 text-xs leading-5 text-gray-500">说出目标，系统自动决策与生成</div>
+              <div className="mt-1 truncate text-xs leading-5 text-gray-500">说出目标，系统自动决策与生成</div>
             </div>
           </div>
           <button
@@ -289,7 +289,7 @@ function ProjectRow({
         disabled={deleting}
         className={[
           "mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-white hover:text-gray-950 disabled:cursor-not-allowed disabled:opacity-50",
-          menuOpen ? "bg-white opacity-100 shadow-sm" : "opacity-0 group-hover:opacity-100",
+          menuOpen || selected ? "bg-white opacity-100 shadow-sm" : "opacity-0 group-hover:opacity-100",
         ].join(" ")}
         aria-label="打开项目操作"
         title="项目操作"
