@@ -1,6 +1,18 @@
 import { Injectable } from "@nestjs/common";
-import { access, mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  KnowledgePriority,
+  KnowledgeSource,
+  KnowledgeStatus,
+  KnowledgeType,
+  Prisma,
+} from "@prisma/client";
+import { toInputJson } from "../ai/ai-vibe.helpers";
+import type { AuthenticatedUser } from "../auth/auth.types";
+import { PrismaService } from "../prisma/prisma.service";
+import { jsonArray } from "./knowledge-item.service";
 
 type VaultSeedFile = {
   path: string;
@@ -13,6 +25,24 @@ type VaultEntry = {
   type: "directory" | "markdown" | "file";
   size?: number;
   updatedAt?: string;
+};
+
+type MarkdownChunk = {
+  id: string;
+  filePath: string;
+  title: string;
+  content: string;
+  summary: string;
+  tags: string[];
+  type: KnowledgeType;
+  priority: KnowledgePriority;
+  categoryName: string;
+};
+
+type MarkdownMetadata = {
+  title?: string;
+  tags: string[];
+  body: string;
 };
 
 const VAULT_FOLDERS = [
@@ -183,6 +213,8 @@ const SEED_FILES: VaultSeedFile[] = [
 
 @Injectable()
 export class ObsidianVaultService {
+  constructor(private readonly prisma: PrismaService) {}
+
   private readonly root = path.resolve(
     process.env.KNOWLEDGE_VAULT_ROOT?.trim() || path.join(process.cwd(), "storage", "knowledge-vault"),
   );
@@ -217,6 +249,92 @@ export class ObsidianVaultService {
     }
 
     return this.getStatus();
+  }
+
+  async syncToKnowledgeBase(user: AuthenticatedUser) {
+    await this.initialize();
+
+    const files = (await this.collectMarkdownFiles(this.root)).filter((file) => shouldIndexMarkdown(file.path));
+    const categories = await this.ensureCategories(files);
+    const chunks = await this.buildChunks(files);
+    const activeIds = new Set(chunks.map((chunk) => chunk.id));
+
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+    let archived = 0;
+
+    for (const chunk of chunks) {
+      const existing = await this.prisma.knowledgeItem.findUnique({ where: { id: chunk.id } });
+      const categoryId = categories.get(chunk.categoryName)?.id;
+      const data = {
+        title: chunk.title,
+        content: chunk.content,
+        summary: chunk.summary,
+        type: chunk.type,
+        status: KnowledgeStatus.active,
+        scope: "global" as const,
+        categoryId,
+        tags: toInputJson(chunk.tags),
+        priority: chunk.priority,
+        source: KnowledgeSource.file_extraction,
+        sourceFileId: chunk.filePath,
+        updatedBy: user.id,
+      };
+
+      if (!existing) {
+        const item = await this.prisma.knowledgeItem.create({
+          data: {
+            id: chunk.id,
+            ...data,
+            createdBy: user.id,
+          },
+        });
+        await this.createVersionSnapshot(item, user.id, "从知识库 Markdown 导入");
+        created += 1;
+        continue;
+      }
+
+      if (hasKnowledgeChanged(existing, data)) {
+        const item = await this.prisma.knowledgeItem.update({
+          where: { id: existing.id },
+          data,
+        });
+        await this.createVersionSnapshot(item, user.id, "同步知识库 Markdown 更新");
+        updated += 1;
+      } else {
+        unchanged += 1;
+      }
+    }
+
+    const previousItems = await this.prisma.knowledgeItem.findMany({
+      where: { source: KnowledgeSource.file_extraction },
+    });
+    for (const item of previousItems) {
+      const tags = jsonArray(item.tags);
+      if (!tags.includes("vault-sync") || activeIds.has(item.id) || item.status === KnowledgeStatus.archived) {
+        continue;
+      }
+      const archivedItem = await this.prisma.knowledgeItem.update({
+        where: { id: item.id },
+        data: {
+          status: KnowledgeStatus.archived,
+          updatedBy: user.id,
+        },
+      });
+      await this.createVersionSnapshot(archivedItem, user.id, "知识库 Markdown 已移除，归档切片");
+      archived += 1;
+    }
+
+    return {
+      markdownFiles: files.length,
+      chunks: chunks.length,
+      created,
+      updated,
+      unchanged,
+      archived,
+      categories: [...new Set(chunks.map((chunk) => chunk.categoryName))],
+    };
   }
 
   private async listRootFolders(): Promise<VaultEntry[]> {
@@ -281,6 +399,109 @@ export class ObsidianVaultService {
     return (await this.collectMarkdownFiles(directory)).length;
   }
 
+  private async buildChunks(files: VaultEntry[]): Promise<MarkdownChunk[]> {
+    const chunks: MarkdownChunk[] = [];
+
+    for (const file of files) {
+      const fullPath = path.join(this.root, file.path);
+      const raw = await readFile(fullPath, "utf8");
+      const metadata = parseMarkdown(raw);
+      const title = normalizeTitle(metadata.title ?? path.basename(file.path, ".md"));
+      const type = inferKnowledgeType(file.path, title, metadata.tags);
+      const priority = inferPriority(file.path, title, type);
+      const categoryName = inferCategoryName(file.path);
+      const tags = normalizeTags([
+        "vault-sync",
+        "knowledge-vault",
+        ...metadata.tags,
+        categoryName,
+        type,
+      ]);
+      const fileChunks = splitMarkdownBody(metadata.body);
+
+      for (const [index, body] of fileChunks.entries()) {
+        const totalTitle = fileChunks.length > 1 ? `${title} #${index + 1}` : title;
+        const chunkContent = [
+          `来源文件：${file.path}`,
+          `切片序号：${index + 1}`,
+          "",
+          body.trim(),
+        ].join("\n");
+
+        chunks.push({
+          id: stableKnowledgeId(file.path, index),
+          filePath: file.path,
+          title: truncate(totalTitle, 110),
+          content: chunkContent,
+          summary: buildSummary(body),
+          tags,
+          type,
+          priority,
+          categoryName,
+        });
+      }
+    }
+
+    return chunks;
+  }
+
+  private async ensureCategories(files: VaultEntry[]) {
+    const names = [...new Set(files.map((file) => inferCategoryName(file.path)))];
+    const result = new Map<string, Prisma.KnowledgeCategoryGetPayload<Record<string, never>>>();
+
+    for (const [index, name] of names.entries()) {
+      const existing = await this.prisma.knowledgeCategory.findFirst({ where: { name } });
+      if (existing) {
+        result.set(name, existing);
+        continue;
+      }
+      const created = await this.prisma.knowledgeCategory.create({
+        data: {
+          name,
+          description: `由 Obsidian/SilverBullet 知识库目录 ${name} 自动同步`,
+          order: index + 100,
+        },
+      });
+      result.set(name, created);
+    }
+
+    return result;
+  }
+
+  private async createVersionSnapshot(
+    item: Prisma.KnowledgeItemGetPayload<Record<string, never>>,
+    userId: string,
+    changeSummary: string,
+  ) {
+    const latest = await this.prisma.knowledgeVersion.findFirst({
+      where: { knowledgeItemId: item.id },
+      orderBy: { version: "desc" },
+    });
+
+    await this.prisma.knowledgeVersion.create({
+      data: {
+        knowledgeItemId: item.id,
+        version: (latest?.version ?? 0) + 1,
+        snapshot: toInputJson({
+          id: item.id,
+          title: item.title,
+          content: item.content,
+          summary: item.summary,
+          type: item.type,
+          status: item.status,
+          scope: item.scope,
+          categoryId: item.categoryId,
+          tags: jsonArray(item.tags),
+          priority: item.priority,
+          source: item.source,
+          sourceFileId: item.sourceFileId,
+        }),
+        changeSummary,
+        createdBy: userId,
+      },
+    });
+  }
+
   private async exists(target: string) {
     try {
       await access(target);
@@ -289,4 +510,143 @@ export class ObsidianVaultService {
       return false;
     }
   }
+}
+
+function shouldIndexMarkdown(relativePath: string) {
+  return !relativePath.startsWith("_templates/") && !relativePath.includes("/_templates/");
+}
+
+function parseMarkdown(raw: string): MarkdownMetadata {
+  const frontmatter = raw.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!frontmatter) return { tags: [], body: raw.trim() };
+
+  const metadata = frontmatter[1];
+  const title = metadata.match(/^title:\s*(.+)$/m)?.[1]?.trim();
+  const tags: string[] = [];
+  const tagBlock = metadata.match(/^tags:\s*\n((?:\s+-\s*.+\n?)+)/m)?.[1];
+  if (tagBlock) {
+    for (const line of tagBlock.split("\n")) {
+      const tag = line.match(/^\s+-\s*(.+)$/)?.[1]?.trim();
+      if (tag) tags.push(tag);
+    }
+  }
+
+  return {
+    title,
+    tags,
+    body: raw.slice(frontmatter[0].length).trim(),
+  };
+}
+
+function splitMarkdownBody(body: string) {
+  const normalized = body.trim();
+  if (!normalized) return ["空白知识条目"];
+
+  const sections = normalized
+    .split(/\n(?=#{1,3}\s+)/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const candidates = sections.length ? sections : [normalized];
+  const chunks: string[] = [];
+
+  for (const section of candidates) {
+    if (section.length <= 2600) {
+      chunks.push(section);
+      continue;
+    }
+
+    const paragraphs = section.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+    let current = "";
+    for (const paragraph of paragraphs) {
+      if ((current + "\n\n" + paragraph).trim().length > 2600 && current) {
+        chunks.push(current.trim());
+        current = paragraph;
+      } else {
+        current = (current ? `${current}\n\n${paragraph}` : paragraph).trim();
+      }
+    }
+    if (current) chunks.push(current.trim());
+  }
+
+  return chunks.length ? chunks : [normalized.slice(0, 2600)];
+}
+
+function inferKnowledgeType(relativePath: string, title: string, tags: string[]) {
+  const text = `${relativePath} ${title} ${tags.join(" ")}`;
+  if (/规则约束|约束|资损|安全|必须遵守|Constraint/i.test(text)) return KnowledgeType.strong_rule;
+  if (/案例库|案例/.test(text)) return KnowledgeType.reference_case;
+  if (/原型模式|页面|后台模式|配置化|交互|Prototype/i.test(text)) return KnowledgeType.design_pattern;
+  if (/Agent|智能体|需求分析/.test(text)) return KnowledgeType.default_rule;
+  if (/PRD|需求文档|写作/.test(text)) return KnowledgeType.prd_writing_rule;
+  return KnowledgeType.business_concept;
+}
+
+function inferPriority(relativePath: string, title: string, type: KnowledgeType) {
+  const text = `${relativePath} ${title}`;
+  if (type === KnowledgeType.strong_rule) return KnowledgePriority.high;
+  if (/Agent|AI营销助手|Dify|配置化页面|通用约束|资损/.test(text)) return KnowledgePriority.high;
+  if (/清单|README|索引/.test(text)) return KnowledgePriority.low;
+  return KnowledgePriority.medium;
+}
+
+function inferCategoryName(relativePath: string) {
+  const [root] = relativePath.split("/");
+  if (!root || root === "README.md") return "知识库总览";
+  return root.replace(/^\d+-/, "");
+}
+
+function stableKnowledgeId(relativePath: string, chunkIndex: number) {
+  return `vault_${createHash("sha1").update(`${relativePath}::${chunkIndex}`).digest("hex").slice(0, 32)}`;
+}
+
+function normalizeTitle(value: string) {
+  return value.replace(/^#+\s*/, "").replace(/\s+/g, " ").trim();
+}
+
+function buildSummary(value: string) {
+  const firstMeaningfulLine =
+    value
+      .split("\n")
+      .map((line) => line.replace(/^#+\s*/, "").replace(/^\s*[-*]\s*/, "").trim())
+      .find((line) => line && !line.startsWith("---")) ?? value.trim();
+  return truncate(firstMeaningfulLine.replace(/\s+/g, " "), 300);
+}
+
+function normalizeTags(tags: string[]) {
+  return [...new Set(tags.map((item) => item.trim()).filter(Boolean))];
+}
+
+function truncate(value: string, length: number) {
+  return value.length > length ? `${value.slice(0, length - 1)}…` : value;
+}
+
+function hasKnowledgeChanged(
+  existing: Prisma.KnowledgeItemGetPayload<Record<string, never>>,
+  data: {
+    title: string;
+    content: string;
+    summary: string;
+    type: KnowledgeType;
+    status: KnowledgeStatus;
+    scope: "global";
+    categoryId?: string;
+    tags: Prisma.InputJsonValue;
+    priority: KnowledgePriority;
+    source: KnowledgeSource;
+    sourceFileId: string;
+  },
+) {
+  return (
+    existing.title !== data.title ||
+    existing.content !== data.content ||
+    existing.summary !== data.summary ||
+    existing.type !== data.type ||
+    existing.status !== data.status ||
+    existing.scope !== data.scope ||
+    (existing.categoryId ?? undefined) !== data.categoryId ||
+    JSON.stringify(jsonArray(existing.tags)) !== JSON.stringify(jsonArray(data.tags)) ||
+    existing.priority !== data.priority ||
+    existing.source !== data.source ||
+    existing.sourceFileId !== data.sourceFileId
+  );
 }

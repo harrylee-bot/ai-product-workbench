@@ -15,6 +15,7 @@ export class SystemController {
         "admin-audit",
         "knowledge-base",
         "obsidian-vault",
+        "obsidian-agent-skills",
         "model-gateway",
         "projects",
         "conversations",

@@ -32,7 +32,31 @@ describe("KnowledgeAgentService", () => {
         ],
       }),
     };
-    const service = new KnowledgeAgentService(modelGateway as never, retrieval as never);
+    const skillRegistry = {
+      getVibeCodingSkills: vi.fn().mockResolvedValue([
+        {
+          id: "agent-skill:obsidian-markdown",
+          name: "obsidian-markdown",
+          description: "Create and edit Obsidian Flavored Markdown.",
+          sourcePath: "/skills/obsidian-markdown/SKILL.md",
+          contentPreview: "Use wikilinks and callouts.",
+          capabilities: ["Internal Links"],
+          triggerHints: ["wikilinks"],
+        },
+      ]),
+      toKnowledgeReferences: vi.fn().mockReturnValue([
+        {
+          id: "agent_skill_obsidian-markdown",
+          knowledgeId: "agent-skill:obsidian-markdown",
+          title: "Vibe Coding 可用技能：obsidian-markdown",
+          content: "Use wikilinks and callouts.",
+          type: KnowledgeType.prototype_rule,
+          sourceType: "knowledge_base",
+          sourceId: "agent-skill:obsidian-markdown",
+        },
+      ]),
+    };
+    const service = new KnowledgeAgentService(modelGateway as never, retrieval as never, skillRegistry as never);
 
     const result = await service.run({
       runId: "run-1",
@@ -56,6 +80,9 @@ describe("KnowledgeAgentService", () => {
     );
     expect(result.data.strongRules[0].knowledgeId).toBe("knowledge-1");
     expect(result.data.prototypeRules[0].knowledgeId).toBe("knowledge-2");
+    expect(result.data.prototypeRules[1].knowledgeId).toBe("agent-skill:obsidian-markdown");
+    expect(result.data.agentSkills?.[0].name).toBe("obsidian-markdown");
     expect(result.data.summary).toContain("命中 2 条");
+    expect(result.data.summary).toContain("已加载 1 个");
   });
 });

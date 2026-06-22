@@ -12,6 +12,7 @@ import type { SelectedRegion } from "./ai-vibe.types";
 import type { HandleVibeMessageDto } from "./dto";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { VibeStreamService } from "./vibe-stream.service";
+import { AgentSkillRegistryService } from "./agent-skill-registry.service";
 
 @Injectable()
 export class VibeService {
@@ -23,6 +24,7 @@ export class VibeService {
     private readonly stateService: ProductDesignStateService,
     private readonly orchestrator: AiOrchestratorService,
     private readonly streamService: VibeStreamService,
+    private readonly skillRegistry: AgentSkillRegistryService,
   ) {}
 
   async handleMessage(user: AuthenticatedUser, dto: HandleVibeMessageDto) {
@@ -134,6 +136,15 @@ export class VibeService {
 
   streamRun(runId: string): Observable<MessageEvent> {
     return this.streamService.stream(runId);
+  }
+
+  async listSkills() {
+    const skills = await this.skillRegistry.listSkills();
+    return {
+      items: skills,
+      count: skills.length,
+      source: "kepano/obsidian-skills",
+    };
   }
 
   async assertRunAccess(user: AuthenticatedUser, runId: string) {

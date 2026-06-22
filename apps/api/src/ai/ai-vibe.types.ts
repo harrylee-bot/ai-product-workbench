@@ -55,6 +55,16 @@ export type KnowledgeReference = {
   sourceId?: string;
 };
 
+export type AgentSkillReference = {
+  id: string;
+  name: string;
+  description: string;
+  sourcePath: string;
+  contentPreview: string;
+  capabilities: string[];
+  triggerHints: string[];
+};
+
 export type KnowledgeConflict = {
   id: string;
   description: string;
@@ -70,6 +80,7 @@ export type KnowledgeContext = {
   prdWritingRules: KnowledgeReference[];
   prototypeRules: KnowledgeReference[];
   businessConcepts: KnowledgeReference[];
+  agentSkills?: AgentSkillReference[];
   conflicts: KnowledgeConflict[];
   unknownAreas: string[];
   summary: string;

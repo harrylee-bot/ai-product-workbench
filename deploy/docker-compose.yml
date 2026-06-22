@@ -34,6 +34,7 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:-http://8.130.160.177:3000}
       FILE_UPLOAD_ROOT: /app/apps/api/storage/uploads
       KNOWLEDGE_VAULT_ROOT: /app/apps/api/storage/knowledge-vault
+      AGENT_SKILLS_ROOT: /app/agent-skills/obsidian-skills/skills:/root/.codex/skills
       MODEL_GATEWAY_ENCRYPTION_KEY: ${MODEL_GATEWAY_ENCRYPTION_KEY:-}
       DEFAULT_MODEL_PROVIDER_NAME: ${DEFAULT_MODEL_PROVIDER_NAME:-}
       DEFAULT_MODEL_BASE_URL: ${DEFAULT_MODEL_BASE_URL:-}
@@ -42,6 +43,7 @@ services:
     ports:
       - "4000:4000"
     volumes:
+      - ../agent-skills:/app/agent-skills:ro
       - api-storage:/app/apps/api/storage
 
   web:

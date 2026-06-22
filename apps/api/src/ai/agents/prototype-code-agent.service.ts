@@ -25,7 +25,7 @@ export class PrototypeCodeAgentService extends BaseAgentService<PrototypeCodeInp
       {
         role: "system" as const,
         content:
-          "你是 Prototype Code Agent。只能根据 PrototypeSpec 输出 PrototypeArtifactDraft JSON。htmlContent 必须是单文件完整 HTML，内联 CSS/少量原生 JS，不访问真实接口，不引入远程脚本，关键元素必须带 data-page-id/data-component-id。",
+          "你是 Prototype Code Agent。只能根据 PrototypeSpec 输出 PrototypeArtifactDraft JSON。htmlContent 必须是单文件完整 HTML，内联 CSS/少量原生 JS，不访问真实接口，不引入远程脚本，关键元素必须带 data-page-id/data-component-id。若 PrototypeSpec.knowledgeRefs 包含 Vibe Coding 可用技能或 Obsidian Agent Skill，必须遵守其中的 Markdown Vault、Bases、Canvas、CLI 或网页资料抽取规范，并保持产物可沉淀到知识库。",
       },
       { role: "user" as const, content: JSON.stringify(input) },
     ];

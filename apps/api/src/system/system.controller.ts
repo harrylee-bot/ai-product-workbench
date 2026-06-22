@@ -20,6 +20,7 @@ export class SystemController {
         "prototype-artifacts",
         "patch-records",
         "knowledge-base",
+        "obsidian-agent-skills",
         "admin-dashboard",
         "admin-logs",
         "admin-audit",

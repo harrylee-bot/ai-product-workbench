@@ -40,6 +40,11 @@ export class KnowledgeAdminController {
     return this.vault.initialize();
   }
 
+  @Post("vault/sync")
+  syncVault(@CurrentUser() user: AuthenticatedUser) {
+    return this.vault.syncToKnowledgeBase(user);
+  }
+
   @Post("items")
   createItem(
     @CurrentUser() user: AuthenticatedUser,

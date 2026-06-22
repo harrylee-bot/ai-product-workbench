@@ -5,6 +5,7 @@ import { ModelGatewayModule } from "../model-gateway/model-gateway.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { ProjectModule } from "../projects/project.module";
 import { AgentRunLogService } from "./agent-run-log.service";
+import { AgentSkillRegistryService } from "./agent-skill-registry.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
 import { EvolutionEngineService } from "./evolution-engine.service";
 import { EvolutionOrchestratorService } from "./evolution-orchestrator.service";
@@ -121,6 +122,7 @@ import {
   providers: [
     VibeService,
     AiOrchestratorService,
+    AgentSkillRegistryService,
     AgentRunLogService,
     VibeStreamService,
     ProductDesignStateService,

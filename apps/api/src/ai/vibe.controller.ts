@@ -17,6 +17,11 @@ export class VibeController {
     return this.vibeService.handleMessage(user, dto);
   }
 
+  @Get("skills")
+  listSkills() {
+    return this.vibeService.listSkills();
+  }
+
   @Get("runs/:runId")
   getRun(@CurrentUser() user: AuthenticatedUser, @Param("runId") runId: string) {
     return this.vibeService.getRun(user, runId);

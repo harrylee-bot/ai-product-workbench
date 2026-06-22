@@ -3,6 +3,7 @@ import { AgentName, KnowledgeType, ModelTaskType, UserIntent } from "@prisma/cli
 import { KnowledgeRetrievalService } from "../../knowledge/knowledge-retrieval.service";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
+import { AgentSkillRegistryService } from "../agent-skill-registry.service";
 import { BaseAgentService } from "./base-agent.service";
 import type { KnowledgeContext, ProductDesignState } from "../ai-vibe.types";
 
@@ -23,6 +24,7 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
   constructor(
     modelGateway: ModelGatewayService,
     private readonly retrieval: KnowledgeRetrievalService,
+    private readonly skillRegistry: AgentSkillRegistryService,
   ) {
     super(modelGateway);
   }
@@ -40,12 +42,22 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
       preferredTypes,
       limit: 8,
     });
+    const grouped = groupReferences(output.references, fallback, invocation.input.userInput);
+    const agentSkills = await this.skillRegistry.getVibeCodingSkills(invocation.input.userInput);
+    const skillReferences = this.skillRegistry.toKnowledgeReferences(agentSkills);
+    const summaryParts = [
+      output.references.length ? `命中 ${output.references.length} 条正式知识库规则` : "",
+      agentSkills.length ? `已加载 ${agentSkills.length} 个 Obsidian/Vibe Coding 技能` : "",
+    ].filter(Boolean);
+
     return {
       data: {
         ...fallback,
-        ...groupReferences(output.references, fallback, invocation.input.userInput),
-        summary: output.references.length
-          ? `命中 ${output.references.length} 条正式知识库规则，已按类型提供给后续 Agent。`
+        ...grouped,
+        prototypeRules: [...grouped.prototypeRules, ...skillReferences],
+        agentSkills,
+        summary: summaryParts.length
+          ? `${summaryParts.join("，")}，已按类型提供给后续 Agent。`
           : fallback.summary,
       },
     };
@@ -90,6 +102,7 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
       prdWritingRules: [],
       prototypeRules: [],
       businessConcepts: [],
+      agentSkills: [],
       conflicts: [],
       unknownAreas: ["业务专属强规则", "已有系统约束", "历史活动差异"],
       summary: attachmentRefs.length

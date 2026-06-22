@@ -163,3 +163,13 @@ export type KnowledgeVaultStatus = {
   folders: KnowledgeVaultEntry[];
   recentFiles: KnowledgeVaultEntry[];
 };
+
+export type KnowledgeVaultSyncResult = {
+  markdownFiles: number;
+  chunks: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  archived: number;
+  categories: string[];
+};
