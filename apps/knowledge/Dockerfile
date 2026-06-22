@@ -1,5 +1,5 @@
 ARG NODE_IMAGE=node:22-bookworm-slim
-ARG QUARTZ_REF=v5.0.0
+ARG QUARTZ_REF=v5
 
 FROM ${NODE_IMAGE}
 
