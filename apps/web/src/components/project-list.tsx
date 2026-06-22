@@ -1,6 +1,7 @@
 "use client";
 
-import { MessageCircle, PanelLeftClose, PanelLeftOpen, Plus, Search, Trash2 } from "lucide-react";
+import { Loader2, MessageCircle, MoreVertical, PanelLeftClose, PanelLeftOpen, Plus, Search, Sparkles, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { UserMenu } from "@/components/user-menu";
 
 export type Phase1Project = {
@@ -31,11 +32,13 @@ export function ProjectList({
   collapsed,
   creatingConversation,
   deletingConversationId,
+  deletingProjectId,
   onToggleCollapsed,
   onSelectProject,
   onSelectConversation,
   onCreateConversation,
   onDeleteConversation,
+  onDeleteProject,
 }: {
   projects: Phase1Project[];
   conversations?: Phase1Conversation[];
@@ -45,31 +48,37 @@ export function ProjectList({
   collapsed?: boolean;
   creatingConversation?: boolean;
   deletingConversationId?: string;
+  deletingProjectId?: string;
   onToggleCollapsed: () => void;
   onSelectProject: (project: Phase1Project) => void;
   onSelectConversation: (conversation: Phase1Conversation) => void;
   onCreateConversation: () => void;
   onDeleteConversation: (conversation: Phase1Conversation) => void;
+  onDeleteProject: (project: Phase1Project) => void;
 }) {
   const currentProject = projects.find((project) => project.id === selectedProjectId);
+  const [openProjectMenuId, setOpenProjectMenuId] = useState<string | null>(null);
 
   if (collapsed) {
     return (
-      <aside className="flex min-h-0 flex-col items-center border-r border-gray-200 bg-white py-4">
+      <aside className="flex min-h-0 flex-col items-center border-r border-gray-200 bg-[#FBFBFB] py-4">
+        <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-200">
+          <Sparkles className="h-5 w-5 text-blue-600" />
+        </div>
         <button
           type="button"
           onClick={onToggleCollapsed}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-gray-700 hover:bg-gray-100"
+          className="mt-7 inline-flex h-10 w-10 items-center justify-center rounded-xl text-gray-800 hover:bg-gray-100"
           aria-label="展开最近对话"
         >
           <PanelLeftOpen className="h-5 w-5" />
         </button>
-        <div className="mt-8 flex flex-col gap-4">
+        <div className="mt-4 flex flex-col gap-3">
           <button
             type="button"
             onClick={onCreateConversation}
             disabled={creatingConversation}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100 text-gray-900 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="新建对话"
           >
             <Plus className="h-5 w-5" />
@@ -99,17 +108,22 @@ export function ProjectList({
   }
 
   return (
-    <aside className="flex min-h-0 flex-col border-r border-gray-200 bg-white">
+    <aside className="flex min-h-0 flex-col border-r border-gray-200 bg-[#FBFBFB]">
       <div className="px-5 pb-4 pt-5">
         <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xl font-semibold tracking-[-0.01em] text-gray-950">智能产品工作台</div>
-            <div className="mt-1 text-xs leading-5 text-gray-500">说出目标，系统自动决策与生成</div>
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-200">
+              <Sparkles className="h-5 w-5 text-blue-600" />
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-xl font-semibold text-gray-950">智能产品工作台</div>
+              <div className="mt-1 text-xs leading-5 text-gray-500">说出目标，系统自动决策与生成</div>
+            </div>
           </div>
           <button
             type="button"
             onClick={onToggleCollapsed}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-gray-500 hover:bg-gray-100 hover:text-gray-900"
             aria-label="收起最近对话"
           >
             <PanelLeftClose className="h-5 w-5" />
@@ -121,9 +135,9 @@ export function ProjectList({
           type="button"
           onClick={onCreateConversation}
           disabled={creatingConversation}
-          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-gray-950 px-3 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#030712] px-3 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <Plus className="h-4 w-4" />
+          {creatingConversation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           {creatingConversation ? "创建中..." : "新对话"}
         </button>
       </div>
@@ -150,26 +164,31 @@ export function ProjectList({
           </div>
         )}
 
-        <div className="mt-5 px-3 text-xs font-semibold uppercase tracking-wide text-gray-400">项目</div>
+        <div className="mt-7 flex items-center justify-between px-3">
+          <div>
+            <div className="text-sm font-semibold text-gray-950">项目</div>
+            <div className="mt-1 text-xs text-gray-500">系统根据输入自动创建与更新</div>
+          </div>
+        </div>
         <div className="mt-2">
           {loading ? null : projects.length ? (
             projects.map((project) => (
-              <button
+              <ProjectRow
                 key={project.id}
-                type="button"
-                onClick={() => onSelectProject(project)}
-                className={[
-                  "mb-1 w-full rounded-xl px-3 py-2.5 text-left transition",
-                  selectedProjectId === project.id
-                    ? "bg-gray-100 text-gray-950"
-                    : "text-gray-700 hover:bg-gray-100",
-                ].join(" ")}
-              >
-                <div className="truncate text-sm font-medium">{projectTitleLabel(project.title)}</div>
-                <div className="mt-1 text-xs text-gray-400">
-                  {projectStatusLabel(project.status)}
-                </div>
-              </button>
+                project={project}
+                selected={selectedProjectId === project.id}
+                deleting={deletingProjectId === project.id}
+                menuOpen={openProjectMenuId === project.id}
+                onSelect={(item) => {
+                  setOpenProjectMenuId(null);
+                  onSelectProject(item);
+                }}
+                onToggleMenu={(projectId) => setOpenProjectMenuId((value) => value === projectId ? null : projectId)}
+                onDelete={(item) => {
+                  setOpenProjectMenuId(null);
+                  onDeleteProject(item);
+                }}
+              />
             ))
           ) : (
             <div className="rounded-lg border border-dashed border-gray-200 px-3 py-8 text-center text-sm text-gray-500">
@@ -202,7 +221,7 @@ function ConversationRow({
     <div
       className={[
         "group mb-1 flex items-center gap-1 rounded-xl transition",
-        selected ? "bg-gray-100 text-gray-950" : "text-gray-700 hover:bg-gray-100",
+        selected ? "bg-[#F1F3F4] text-gray-950" : "text-gray-800 hover:bg-[#F1F3F4]",
       ].join(" ")}
     >
       <button
@@ -225,6 +244,74 @@ function ConversationRow({
       >
         <Trash2 className="h-4 w-4" />
       </button>
+    </div>
+  );
+}
+
+function ProjectRow({
+  project,
+  selected,
+  deleting,
+  menuOpen,
+  onSelect,
+  onToggleMenu,
+  onDelete,
+}: {
+  project: Phase1Project;
+  selected: boolean;
+  deleting?: boolean;
+  menuOpen?: boolean;
+  onSelect: (project: Phase1Project) => void;
+  onToggleMenu: (projectId: string) => void;
+  onDelete: (project: Phase1Project) => void;
+}) {
+  return (
+    <div
+      className={[
+        "group relative mb-1 flex items-center gap-1 rounded-xl transition",
+        selected ? "bg-[#F1F3F4] text-gray-950" : "text-gray-800 hover:bg-[#F1F3F4]",
+      ].join(" ")}
+    >
+      <button
+        type="button"
+        onClick={() => onSelect(project)}
+        className="min-w-0 flex-1 px-3 py-2.5 text-left"
+      >
+        <div className="truncate text-sm font-medium">{projectTitleLabel(project.title)}</div>
+        <div className="mt-1 truncate text-xs text-gray-400">{projectStatusLabel(project.status)}</div>
+      </button>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggleMenu(project.id);
+        }}
+        disabled={deleting}
+        className={[
+          "mr-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-white hover:text-gray-950 disabled:cursor-not-allowed disabled:opacity-50",
+          menuOpen ? "bg-white opacity-100 shadow-sm" : "opacity-0 group-hover:opacity-100",
+        ].join(" ")}
+        aria-label="打开项目操作"
+        title="项目操作"
+      >
+        {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreVertical className="h-4 w-4" />}
+      </button>
+      {menuOpen ? (
+        <div className="absolute right-2 top-10 z-20 w-36 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(project);
+            }}
+            disabled={deleting}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            删除项目
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -105,6 +105,37 @@ export class ProjectService {
     };
   }
 
+  async delete(user: Phase1User, projectId: string) {
+    const project = await this.getAccessibleProject(user, projectId);
+    const now = new Date();
+
+    await this.prisma.project.update({
+      where: { id: project.id },
+      data: {
+        status: ProjectStatus.deleted,
+        deletedAt: now,
+        currentConversationId: null,
+        conversations: {
+          updateMany: {
+            where: {
+              deletedAt: null,
+              status: { not: ConversationStatus.deleted },
+            },
+            data: {
+              status: ConversationStatus.deleted,
+              deletedAt: now,
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      deletedProjectId: project.id,
+    };
+  }
+
   async getAccessibleProject(user: Phase1User, projectId: string) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {

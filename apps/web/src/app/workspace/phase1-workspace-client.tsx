@@ -61,6 +61,11 @@ type DeleteConversationResponse = {
   nextConversation: Phase1Conversation;
 };
 
+type DeleteProjectResponse = {
+  success: boolean;
+  deletedProjectId: string;
+};
+
 type Phase1WorkspaceState = {
   selectedProjectId: string;
   selectedConversationId: string;
@@ -277,6 +282,34 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  const deleteProject = useMutation({
+    mutationFn: async (project: Phase1Project) => {
+      const response = await apiRequest<DeleteProjectResponse>(`/projects/${project.id}`, {
+        method: "DELETE",
+      });
+      return { deleted: project, response };
+    },
+    onSuccess: async ({ deleted, response }) => {
+      const projects = queryClient.getQueryData<ProjectsResponse>(["phase1-projects"])?.items ?? [];
+      const nextProject = projects.find((project) => project.id !== response.deletedProjectId);
+
+      if (deleted.id === selectedProjectId) {
+        setSelectedProject(nextProject?.id ?? "", nextProject?.currentConversationId ?? nextProject?.defaultConversationId ?? "");
+        setDecision(null);
+        setArtifactPreview({ prdPreview: null, prototypePreview: null });
+      }
+
+      queryClient.removeQueries({ queryKey: ["phase1-project", response.deletedProjectId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+        nextProject ? queryClient.invalidateQueries({ queryKey: ["phase1-project", nextProject.id] }) : Promise.resolve(),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "删除项目失败");
+    },
+  });
+
   return (
     <main
       className="grid h-screen min-h-0 overflow-hidden bg-[#F6F7F9]"
@@ -295,6 +328,7 @@ function Phase1WorkspaceInner() {
         collapsed={sidebarCollapsed}
         creatingConversation={createConversation.isPending}
         deletingConversationId={deleteConversation.variables?.id}
+        deletingProjectId={deleteProject.variables?.id}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
         onSelectProject={(project) =>
           setSelectedProject(project.id, project.currentConversationId ?? project.defaultConversationId ?? "")
@@ -304,6 +338,10 @@ function Phase1WorkspaceInner() {
         onDeleteConversation={(conversation) => {
           const confirmed = window.confirm("删除后仅从历史对话中隐藏，消息和系统内容会保留用于后续知识库。确认删除吗？");
           if (confirmed) deleteConversation.mutate(conversation);
+        }}
+        onDeleteProject={(project) => {
+          const confirmed = window.confirm(`确认删除“${project.title}”？项目会从列表隐藏，消息、需求文档和原型会保留用于后续知识库。`);
+          if (confirmed) deleteProject.mutate(project);
         }}
       />
       <ChatPanel
