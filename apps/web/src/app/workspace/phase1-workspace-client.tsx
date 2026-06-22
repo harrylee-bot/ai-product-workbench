@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { ChatPanel, type Phase1Message } from "@/components/chat-panel";
 import {
@@ -31,6 +31,10 @@ type MessagesResponse = {
 };
 
 type MessageResponse = {
+  userMessage?: Phase1Message & {
+    projectId?: string;
+    conversationId?: string;
+  };
   assistantMessage: Phase1Message;
   decisionPlan: Phase2DecisionView["decisionPlan"];
   reviewBoard: Phase2DecisionView["reviewBoard"];
@@ -46,13 +50,6 @@ type MessageResponse = {
   agentInput?: Phase2DecisionView["agentInput"];
   prdPreview?: Phase1PrdPreview;
   prototypePreview?: Phase1PrototypePreview;
-};
-
-type ApplySystemMutationResponse = {
-  status: string;
-  proposalId: string;
-  graph?: NonNullable<Phase2DecisionView["executionPlan"]>;
-  mutations?: NonNullable<Phase2DecisionView["selfGeneration"]>["proposal"]["mutations"];
 };
 
 type Phase1WorkspaceState = {
@@ -105,7 +102,6 @@ export function Phase1WorkspaceClient() {
 
 function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
-  const [newProjectTitle, setNewProjectTitle] = useState("");
   const {
     selectedProjectId,
     selectedConversationId,
@@ -121,11 +117,6 @@ function Phase1WorkspaceInner() {
     queryKey: ["phase1-projects"],
     queryFn: () => apiRequest<ProjectsResponse>("/projects"),
   });
-
-  const selectedProject = useMemo(
-    () => projectsQuery.data?.items.find((project) => project.id === selectedProjectId) ?? null,
-    [projectsQuery.data?.items, selectedProjectId],
-  );
 
   useEffect(() => {
     const first = projectsQuery.data?.items[0];
@@ -159,30 +150,34 @@ function Phase1WorkspaceInner() {
     queryFn: () => apiRequest<MessagesResponse>(`/conversations/${selectedConversationId}/messages`),
   });
 
-  const createProject = useMutation({
-    mutationFn: (title: string) =>
-      apiRequest<{ project: Phase1Project; defaultConversation: { id: string } }>("/projects", {
-        method: "POST",
-        body: JSON.stringify({ title }),
-      }),
-    onSuccess: async (response) => {
-      setNewProjectTitle("");
-      setSelectedProject(response.project.id, response.defaultConversation.id);
-      await queryClient.invalidateQueries({ queryKey: ["phase1-projects"] });
-    },
-  });
-
   const sendMessage = useMutation({
-    mutationFn: (content: string) =>
-      apiRequest<MessageResponse>("/messages", {
+    mutationFn: async (content: string) => {
+      let projectId = selectedProjectId;
+      let conversationId = selectedConversationId;
+
+      if (!projectId || !conversationId) {
+        const response = await apiRequest<{ project: Phase1Project; defaultConversation: { id: string } }>("/projects", {
+          method: "POST",
+          body: JSON.stringify({ title: deriveProjectTitle(content) }),
+        });
+        projectId = response.project.id;
+        conversationId = response.defaultConversation.id;
+        setSelectedProject(projectId, conversationId);
+      }
+
+      return apiRequest<MessageResponse>("/messages", {
         method: "POST",
         body: JSON.stringify({
-          projectId: selectedProjectId,
-          conversationId: selectedConversationId,
+          projectId,
+          conversationId,
           content,
         }),
-    }),
+      });
+    },
     onSuccess: async (response) => {
+      const responseProjectId = response.userMessage?.projectId ?? selectedProjectId;
+      const responseConversationId = response.userMessage?.conversationId ?? selectedConversationId;
+
       setDecision({
         decisionPlan: response.decisionPlan,
         reviewBoard: response.reviewBoard,
@@ -202,45 +197,12 @@ function Phase1WorkspaceInner() {
         prototypePreview: response.prototypePreview ?? null,
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["phase1-messages", selectedConversationId] }),
-        queryClient.invalidateQueries({ queryKey: ["phase1-project", selectedProjectId] }),
+        responseConversationId
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", responseConversationId] })
+          : Promise.resolve(),
+        responseProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", responseProjectId] }) : Promise.resolve(),
         queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
       ]);
-    },
-  });
-
-  const applySystemMutation = useMutation({
-    mutationFn: (proposalId: string) =>
-      apiRequest<ApplySystemMutationResponse>("/system/mutation/apply", {
-        method: "POST",
-        body: JSON.stringify({
-          projectId: selectedProjectId,
-          proposalId,
-          confirm: true,
-        }),
-      }),
-    onSuccess: async (response) => {
-      const current = usePhase1Workspace.getState().decision;
-      if (current?.selfGeneration && response.graph) {
-        setDecision({
-          ...current,
-          selfGeneration: {
-            ...current.selfGeneration,
-            applied: {
-              status: response.status,
-              graph: response.graph,
-              mutations: response.mutations,
-            },
-            proposal: {
-              ...current.selfGeneration.proposal,
-              status: response.status === "applied" ? "applied" : current.selfGeneration.proposal.status,
-            },
-            executionPlan: response.graph,
-          },
-          executionPlan: response.graph,
-        });
-      }
-      await queryClient.invalidateQueries({ queryKey: ["phase1-project", selectedProjectId] });
     },
   });
 
@@ -258,18 +220,14 @@ function Phase1WorkspaceInner() {
         <ProjectList
           projects={projectsQuery.data?.items ?? []}
           selectedProjectId={selectedProjectId}
-          newProjectTitle={newProjectTitle}
           loading={projectsQuery.isLoading}
-          creating={createProject.isPending}
-          onNewProjectTitleChange={setNewProjectTitle}
-          onCreateProject={() => createProject.mutate(newProjectTitle.trim() || "未命名三系统项目")}
           onSelectProject={(project) =>
             setSelectedProject(project.id, project.currentConversationId ?? project.defaultConversationId ?? "")
           }
         />
         <ChatPanel
           messages={messagesQuery.data?.items ?? []}
-          disabled={!selectedProject || !selectedConversationId}
+          disabled={projectsQuery.isLoading}
           sending={sendMessage.isPending}
           onSend={async (content) => {
             await sendMessage.mutateAsync(content);
@@ -279,8 +237,6 @@ function Phase1WorkspaceInner() {
           decision={decision}
           prdPreview={prdPreview}
           prototypePreview={prototypePreview}
-          applyingProposal={applySystemMutation.isPending}
-          onApplyProposal={(proposalId) => applySystemMutation.mutate(proposalId)}
         />
       </div>
     </main>
@@ -308,6 +264,12 @@ function normalizePrdPreview(value: unknown): Phase1PrdPreview | null {
     title: asText(record.title) || "需求文档",
     sections,
   };
+}
+
+function deriveProjectTitle(content: string) {
+  const normalized = content.replace(/\s+/g, " ").replace(/[，。！？,.!?]/g, "").trim();
+  if (!normalized) return "智能产品项目";
+  return normalized.length > 18 ? `${normalized.slice(0, 18)}项目` : `${normalized}项目`;
 }
 
 function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | null {

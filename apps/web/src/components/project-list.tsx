@@ -1,8 +1,5 @@
 "use client";
 
-import { Plus } from "lucide-react";
-import { Button, TextInput } from "@/components/ui";
-
 export type Phase1Project = {
   id: string;
   title: string;
@@ -14,38 +11,19 @@ export type Phase1Project = {
 export function ProjectList({
   projects,
   selectedProjectId,
-  newProjectTitle,
   loading,
-  creating,
-  onNewProjectTitleChange,
-  onCreateProject,
   onSelectProject,
 }: {
   projects: Phase1Project[];
   selectedProjectId?: string;
-  newProjectTitle: string;
   loading?: boolean;
-  creating?: boolean;
-  onNewProjectTitleChange: (value: string) => void;
-  onCreateProject: () => void;
   onSelectProject: (project: Phase1Project) => void;
 }) {
   return (
     <aside className="flex min-h-0 flex-col border-r border-gray-200 bg-white">
       <div className="border-b border-gray-200 px-4 py-3">
         <div className="text-sm font-semibold text-gray-950">项目</div>
-        <div className="mt-3 space-y-2">
-          <TextInput
-            value={newProjectTitle}
-            onChange={(event) => onNewProjectTitleChange(event.target.value)}
-            placeholder="新项目标题"
-            className="h-9"
-          />
-          <Button type="button" className="h-9 w-full" disabled={creating} onClick={onCreateProject}>
-            <Plus className="h-4 w-4" />
-            {creating ? "创建中" : "创建项目"}
-          </Button>
-        </div>
+        <div className="mt-1 text-xs leading-5 text-gray-500">系统根据输入自动创建与更新项目</div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {loading ? (
@@ -71,7 +49,7 @@ export function ProjectList({
           ))
         ) : (
           <div className="rounded-lg border border-dashed border-gray-200 px-3 py-8 text-center text-sm text-gray-500">
-            暂无项目，先创建一个。
+            暂无项目。直接在中间输入需求，系统会自动创建工作空间。
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Activity, Building2, Check, CircleDollarSign, Code2, FileText, GitBranch, Scale, ShieldAlert } from "lucide-react";
 
 export type PatchOperation = {
@@ -300,8 +300,6 @@ export type Phase1PrototypePreview = {
   entryFilePath?: string;
 };
 
-type PreviewTab = "prd" | "prototype" | "decision";
-
 const STRATEGY_LABELS: Record<Phase2Strategy["name"], string> = {
   conservative_fix: "保守修正",
   ux_improve: "体验优化",
@@ -365,16 +363,11 @@ export function PreviewPanel({
   decision,
   prdPreview,
   prototypePreview,
-  applyingProposal,
-  onApplyProposal,
 }: {
   decision?: Phase2DecisionView | null;
   prdPreview?: Phase1PrdPreview | null;
   prototypePreview?: Phase1PrototypePreview | null;
-  applyingProposal?: boolean;
-  onApplyProposal?: (proposalId: string) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<PreviewTab>(prdPreview ? "prd" : prototypePreview ? "prototype" : "decision");
   const strategies = decision?.decisionPlan.strategies ?? [];
   const selectedId = decision?.selection.selectedStrategyId ?? "";
   const companyRuntime = decision?.companyRuntime;
@@ -387,63 +380,43 @@ export function PreviewPanel({
     null;
   const agents = graph?.nodes.filter((node) => node.type === "agent") ?? [];
   const edges = graph?.edges ?? [];
-  const tabs: Array<{ key: PreviewTab; label: string; icon: typeof FileText; ready: boolean }> = [
-    { key: "prd", label: "需求文档", icon: FileText, ready: Boolean(prdPreview) },
-    { key: "prototype", label: "原型", icon: Code2, ready: Boolean(prototypePreview?.html) },
-    { key: "decision", label: "决策链路", icon: GitBranch, ready: Boolean(decision) },
-  ];
-
-  useEffect(() => {
-    if (prdPreview) {
-      setActiveTab("prd");
-      return;
-    }
-    if (prototypePreview?.html) {
-      setActiveTab("prototype");
-      return;
-    }
-    setActiveTab("decision");
-  }, [prdPreview?.id, prototypePreview?.id, prototypePreview?.html]);
 
   return (
     <aside className="flex min-h-0 flex-col bg-white">
       <div className="border-b border-gray-200 px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">预览中心</div>
-        <div className="text-xs text-gray-500">需求文档 / 原型 / 决策链路</div>
+        <div className="text-sm font-semibold text-gray-950">AI 结果中心</div>
+        <div className="text-xs text-gray-500">需求结果 / 设计结果 / 执行路径</div>
       </div>
-      <div className="border-b border-gray-200 bg-white px-3 py-2">
-        <div className="grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setActiveTab(tab.key)}
-                className={[
-                  "inline-flex h-8 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold transition",
-                  active ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-800",
-                ].join(" ")}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                <span>{tab.label}</span>
-                {tab.ready ? <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {activeTab === "prd" ? (
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <ResultSection
+          title="需求结果"
+          description="需求文档与产品设计状态由系统自动沉淀"
+          icon={FileText}
+          ready={Boolean(prdPreview)}
+        >
           <PrdPreviewView prdPreview={prdPreview} />
-        ) : activeTab === "prototype" ? (
+        </ResultSection>
+
+        <ResultSection
+          title="设计结果"
+          description="原型结构与可运行 HTML 自动生成"
+          icon={Code2}
+          ready={Boolean(prototypePreview?.html)}
+        >
           <PrototypePreviewView prototypePreview={prototypePreview} />
-        ) : !decision ? (
-          <div className="rounded-lg border border-dashed border-gray-200 px-3 py-10 text-center text-sm leading-6 text-gray-500">
-            发送需求后，这里会展示不少于 3 个策略、5 个评审智能体的评分、零维补丁预览和系统预览。
-          </div>
-        ) : (
+        </ResultSection>
+
+        <ResultSection
+          title="执行路径"
+          description="约束、决策、评审、补丁预览与进化记录统一展示"
+          icon={GitBranch}
+          ready={Boolean(decision)}
+        >
+          {!decision ? (
+            <div className="rounded-lg border border-dashed border-gray-200 px-3 py-10 text-center text-sm leading-6 text-gray-500">
+              发送需求后，这里会展示不少于 3 个策略、5 个评审智能体的评分、零维补丁预览和系统预览。
+            </div>
+          ) : (
           <div className="space-y-5">
             <section className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
@@ -802,17 +775,9 @@ export function PreviewPanel({
                         </>
                       )}
                     </div>
-                    {decision.selfGeneration.proposal.status === "preview" &&
-                    decision.selfGeneration.proposal.riskLevel === "medium" ? (
-                      <button
-                        type="button"
-                        disabled={applyingProposal}
-                        onClick={() => onApplyProposal?.(decision.selfGeneration!.proposal.id)}
-                        className="rounded-md bg-gray-950 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-                      >
-                        {applyingProposal ? "应用中" : "应用"}
-                      </button>
-                    ) : null}
+                    <span className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-xs text-sky-700">
+                      自动排队
+                    </span>
                   </div>
                 </>
               ) : (
@@ -822,9 +787,49 @@ export function PreviewPanel({
               )}
             </section>
           </div>
-        )}
+          )}
+        </ResultSection>
       </div>
     </aside>
+  );
+}
+
+function ResultSection({
+  title,
+  description,
+  icon: Icon,
+  ready,
+  children,
+}: {
+  title: string;
+  description: string;
+  icon: typeof FileText;
+  ready: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-gray-700 shadow-sm">
+            <Icon className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-gray-950">{title}</div>
+            <div className="mt-0.5 text-xs leading-5 text-gray-500">{description}</div>
+          </div>
+        </div>
+        <span
+          className={[
+            "shrink-0 rounded-md border px-2 py-0.5 text-xs",
+            ready ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-white text-gray-500",
+          ].join(" ")}
+        >
+          {ready ? "已生成" : "等待输入"}
+        </span>
+      </div>
+      {children}
+    </section>
   );
 }
 

@@ -35,7 +35,8 @@ export function ChatPanel({
   return (
     <section className="flex min-h-0 flex-col border-r border-gray-200 bg-[#F8FAFC]">
       <div className="border-b border-gray-200 bg-white px-4 py-3">
-        <div className="text-sm font-semibold text-gray-950">对话</div>
+        <div className="text-sm font-semibold text-gray-950">AI 输入</div>
+        <div className="mt-1 text-xs text-gray-500">只需要说出目标，系统自动完成决策与生成</div>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {messages.length ? (
@@ -54,7 +55,7 @@ export function ChatPanel({
           ))
         ) : (
           <div className="rounded-lg border border-dashed border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500">
-            输入产品需求后，系统会先经过约束系统、决策系统和进化系统，再进入统一编排与零维补丁预览。
+            输入一句产品目标，系统会自动经过约束、决策、进化与统一编排，并生成需求结果、设计结果和执行路径。
           </div>
         )}
       </div>
@@ -63,13 +64,13 @@ export function ChatPanel({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           disabled={disabled || sending}
-          placeholder={disabled ? "请先选择项目" : "输入需求或优化目标..."}
+          placeholder={sending ? "系统正在处理..." : "输入你的需求..."}
           className="min-h-[88px]"
         />
         <div className="mt-2 flex justify-end">
           <Button type="submit" disabled={disabled || sending || !draft.trim()}>
             <Sparkles className="h-4 w-4" />
-            {sending ? "决策中" : "智能优化"}
+            {sending ? "生成中" : "发送意图"}
           </Button>
         </div>
       </form>
