@@ -1,9 +1,10 @@
 import { Module } from "@nestjs/common";
+import { ConstraintModule } from "../constraint/constraint.module";
 import { FileModule } from "../files/file.module";
 import { KnowledgeModule } from "../knowledge/knowledge.module";
 import { ModelGatewayModule } from "../model-gateway/model-gateway.module";
 import { PrismaModule } from "../prisma/prisma.module";
-import { ProjectModule } from "../projects/project.module";
+import { MessageService } from "../projects/message.service";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { AgentSkillRegistryService } from "./agent-skill-registry.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
@@ -34,6 +35,8 @@ import {
   PatchResourceController,
   ProjectPatchController,
 } from "./patch.controller";
+import { PatchPreviewController } from "./patch-builder/patch-preview.controller";
+import { PatchPreviewService } from "./patch-builder/patch-preview.service";
 import { PatchService } from "./patch.service";
 import {
   PrdDocumentController,
@@ -81,9 +84,15 @@ import {
   ProjectReviewController,
   ProductMemoryController,
 } from "./product-evolution.controller";
+import { AgentFactory } from "./self-generation/agent.factory";
+import { MutationEngine } from "./self-generation/mutation.engine";
+import { SelfGenerationEngine } from "./self-generation/self-generation.engine";
+import { SystemGraphService } from "./self-generation/system.graph.service";
+import { SystemMutationController } from "./self-generation/system-mutation.controller";
+import { SystemPreviewService } from "./self-generation/system.preview.service";
 
 @Module({
-  imports: [PrismaModule, ProjectModule, FileModule, KnowledgeModule, ModelGatewayModule],
+  imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule, ModelGatewayModule],
   controllers: [
     VibeController,
     ProjectProductDesignStateController,
@@ -118,6 +127,8 @@ import {
     ProjectPatchExecutionController,
     ProductMemoryController,
     ProjectMemoryController,
+    PatchPreviewController,
+    SystemMutationController,
   ],
   providers: [
     VibeService,
@@ -127,6 +138,7 @@ import {
     VibeStreamService,
     ProductDesignStateService,
     PatchService,
+    PatchPreviewService,
     RequirementDocumentService,
     PrototypeService,
     QaRuleCheckService,
@@ -150,6 +162,13 @@ import {
     PatchAgentService,
     QaAgentService,
     KnowledgeExtractorAgentService,
+    MessageService,
+    AgentFactory,
+    SelfGenerationEngine,
+    SystemGraphService,
+    MutationEngine,
+    SystemPreviewService,
   ],
+  exports: [VibeService],
 })
 export class AiModule {}

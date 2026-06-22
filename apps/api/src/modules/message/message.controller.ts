@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/co
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { Phase1User } from "../auth/auth.types";
-import { OrchestratorService } from "../ai/orchestrator/orchestrator.service";
+import { VibeService } from "../../ai/vibe.service";
 import { CreateMessageDto, ListMessagesQueryDto } from "./dto";
 import { MessageService } from "./message.service";
 
@@ -10,17 +10,16 @@ import { MessageService } from "./message.service";
 @UseGuards(JwtAuthGuard)
 export class MessageController {
   constructor(
-    private readonly orchestrator: OrchestratorService,
+    private readonly vibe: VibeService,
     private readonly messages: MessageService,
   ) {}
 
   @Post("messages")
   create(@CurrentUser() user: Phase1User, @Body() dto: CreateMessageDto) {
-    return this.orchestrator.handleUserMessage({
-      user,
+    return this.vibe.handleMessage(user, {
       projectId: dto.projectId,
       conversationId: dto.conversationId,
-      content: dto.content,
+      message: dto.content,
     });
   }
 

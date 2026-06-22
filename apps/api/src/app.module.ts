@@ -8,8 +8,7 @@ import { FusionDecisionModule } from "./decision/decision.module";
 import { FusionEvolutionModule } from "./evolution/evolution.module";
 import { KnowledgeModule } from "./knowledge/knowledge.module";
 import { ModelGatewayModule } from "./model-gateway/model-gateway.module";
-import { VibeRuntimeModule } from "./ai/vibe-runtime.module";
-import { AiModule as LegacyAiModule } from "./modules/ai/ai.module";
+import { AiModule } from "./ai/ai.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { ConversationModule } from "./modules/conversation/conversation.module";
 import { MessageModule } from "./modules/message/message.module";
@@ -36,8 +35,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     FusionDecisionModule,
     FusionEvolutionModule,
     CompanyModule,
-    LegacyAiModule,
-    VibeRuntimeModule,
+    AiModule,
     SystemModule,
   ],
 })

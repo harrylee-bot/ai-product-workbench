@@ -1,8 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { ConversationStatus, ProjectStatus, UserRole } from "@prisma/client";
+import { ConversationStatus, Message, ProjectStatus, UserRole } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { Phase1User } from "../auth/auth.types";
-import { toMessage } from "../ai/orchestrator/orchestrator.service";
 
 @Injectable()
 export class MessageService {
@@ -30,4 +29,23 @@ export class MessageService {
     });
     return { items: messages.map(toMessage) };
   }
+}
+
+function toMessage(message: Message) {
+  return {
+    id: message.id,
+    projectId: message.projectId,
+    conversationId: message.conversationId,
+    userId: message.userId ?? undefined,
+    role: message.role,
+    type: message.type,
+    content: message.content,
+    attachments: message.attachments,
+    metadata: message.metadata,
+    relatedRunId: message.relatedRunId ?? undefined,
+    relatedPrdDocumentId: message.relatedPrdDocumentId ?? undefined,
+    relatedPrototypeArtifactId: message.relatedPrototypeArtifactId ?? undefined,
+    relatedQaReportId: message.relatedQaReportId ?? undefined,
+    createdAt: message.createdAt.toISOString(),
+  };
 }
