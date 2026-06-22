@@ -27,7 +27,6 @@ import { StateModule } from "../state/state.module";
 import { IntentAgent } from "./agents/intent/intent.agent";
 import { OrchestratorController } from "./orchestrator/orchestrator.controller";
 import { OrchestratorService } from "./orchestrator/orchestrator.service";
-import { VibeSkillsController } from "./vibe-skills.controller";
 
 @Module({
   imports: [
@@ -40,7 +39,7 @@ import { VibeSkillsController } from "./vibe-skills.controller";
     StateModule,
     ModelGatewayModule,
   ],
-  controllers: [OrchestratorController, VibeSkillsController, PatchPreviewController, SystemMutationController],
+  controllers: [OrchestratorController, PatchPreviewController, SystemMutationController],
   providers: [
     OrchestratorService,
     IntentAgent,
