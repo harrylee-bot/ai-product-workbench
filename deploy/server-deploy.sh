@@ -14,11 +14,11 @@ DEFAULT_MODEL_NAME="${DEFAULT_MODEL_NAME:-gpt-5.5}"
 AI_AGENT_FALLBACK_MODE="${AI_AGENT_FALLBACK_MODE:-config_only}"
 KNOWLEDGE_APP_PORT="${KNOWLEDGE_APP_PORT:-3001}"
 KNOWLEDGE_APP_PUBLIC_URL="${KNOWLEDGE_APP_PUBLIC_URL:-http://${APP_HOST}:${KNOWLEDGE_APP_PORT}}"
-SILVERBULLET_IMAGE="${SILVERBULLET_IMAGE:-ghcr.io/silverbulletmd/silverbullet:v2}"
-SILVERBULLET_USER="${SILVERBULLET_USER:-}"
-SILVERBULLET_PASSWORD="${SILVERBULLET_PASSWORD:-}"
+QUARTZ_REF="${QUARTZ_REF:-v5.0.0}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
 NODE_IMAGE="${NODE_IMAGE:-node:22-bookworm-slim}"
+QUARTZ_BASE_URL="${KNOWLEDGE_APP_PUBLIC_URL#http://}"
+QUARTZ_BASE_URL="${QUARTZ_BASE_URL#https://}"
 
 cd "$APP_DIR"
 
@@ -38,7 +38,7 @@ docker network create ai-product-workbench >/dev/null 2>&1 || true
 docker volume create ai-product-workbench-postgres >/dev/null
 docker volume create ai-product-workbench-storage >/dev/null
 
-docker rm -f ai-product-workbench-web ai-product-workbench-api >/dev/null 2>&1 || true
+docker rm -f ai-product-workbench-web ai-product-workbench-api ai-product-knowledge >/dev/null 2>&1 || true
 
 if ! docker ps -a --format '{{.Names}}' | grep -qx ai-product-workbench-postgres; then
   docker run -d \
@@ -84,6 +84,11 @@ docker build \
   --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
   -f apps/web/Dockerfile \
   -t ai-product-workbench-web:latest .
+docker build \
+  --build-arg NODE_IMAGE="$NODE_IMAGE" \
+  --build-arg QUARTZ_REF="$QUARTZ_REF" \
+  -f apps/knowledge/Dockerfile \
+  -t ai-product-knowledge:latest .
 
 docker run -d \
   --name ai-product-workbench-api \
@@ -120,24 +125,20 @@ docker run -d \
 STORAGE_MOUNT="$(docker volume inspect ai-product-workbench-storage -f '{{ .Mountpoint }}')"
 mkdir -p "${STORAGE_MOUNT}/knowledge-vault"
 
-docker rm -f ai-product-knowledge >/dev/null 2>&1 || true
-SILVERBULLET_ENV_ARGS=()
-if [ -n "$SILVERBULLET_USER" ] && [ -n "$SILVERBULLET_PASSWORD" ]; then
-  SILVERBULLET_ENV_ARGS=(-e "SB_USER=${SILVERBULLET_USER}:${SILVERBULLET_PASSWORD}")
-fi
-
 docker run -d \
   --name ai-product-knowledge \
   --restart unless-stopped \
   --network ai-product-workbench \
   -p "${KNOWLEDGE_APP_PORT}:3000" \
-  "${SILVERBULLET_ENV_ARGS[@]}" \
-  -v "${STORAGE_MOUNT}/knowledge-vault:/space" \
-  "$SILVERBULLET_IMAGE"
+  -e QUARTZ_BASE_URL="$QUARTZ_BASE_URL" \
+  -e QUARTZ_CONTENT_DIR=/storage/knowledge-vault \
+  -e QUARTZ_CONCURRENCY="${QUARTZ_CONCURRENCY:-2}" \
+  -v ai-product-workbench-storage:/storage \
+  ai-product-knowledge:latest
 
 wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
 wait_for_http "http://127.0.0.1:3000/login" "Web"
-wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/" "Knowledge app"
+wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
 
 echo "Deployed:"
 echo "  Web: http://${APP_HOST}:3000/login"

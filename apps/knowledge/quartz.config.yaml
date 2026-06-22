@@ -1,0 +1,190 @@
+# yaml-language-server: $schema=./quartz/plugins/quartz-plugins.schema.json
+configuration:
+  pageTitle: AI Product OS 知识库
+  pageTitleSuffix: ""
+  enableSPA: true
+  enablePopovers: true
+  analytics: null
+  locale: zh-CN
+  baseUrl: 8.130.160.177:3001
+  ignorePatterns:
+    - private
+    - templates
+    - .obsidian
+    - .trash
+  theme:
+    fontOrigin: local
+    cdnCaching: false
+    typography:
+      header: system-ui
+      body: system-ui
+      code: ui-monospace
+    colors:
+      lightMode:
+        light: "#fbfbfc"
+        lightgray: "#e5e7eb"
+        gray: "#9ca3af"
+        darkgray: "#4b5563"
+        dark: "#111827"
+        secondary: "#2563eb"
+        tertiary: "#059669"
+        highlight: rgba(37, 99, 235, 0.12)
+        textHighlight: "#fef08a88"
+      darkMode:
+        light: "#111827"
+        lightgray: "#374151"
+        gray: "#6b7280"
+        darkgray: "#d1d5db"
+        dark: "#f9fafb"
+        secondary: "#60a5fa"
+        tertiary: "#34d399"
+        highlight: rgba(96, 165, 250, 0.16)
+        textHighlight: "#854d0e88"
+plugins:
+  - source: github:quartz-community/created-modified-date
+    enabled: true
+    options:
+      defaultDateType: modified
+      priority:
+        - frontmatter
+        - filesystem
+    order: 10
+  - source: github:quartz-community/obsidian-flavored-markdown
+    enabled: true
+    options:
+      comments: true
+      highlight: true
+      wikilinks: true
+      callouts: true
+      mermaid: true
+      parseTags: true
+      parseArrows: true
+      parseBlockReferences: true
+      enableInHtmlEmbed: false
+      enableYouTubeEmbed: false
+      enableVideoEmbed: true
+      enableCheckbox: true
+    order: 30
+  - source: github:quartz-community/github-flavored-markdown
+    enabled: true
+    order: 40
+  - source: github:quartz-community/table-of-contents
+    enabled: true
+    order: 50
+    layout:
+      position: right
+      priority: 30
+  - source: github:quartz-community/crawl-links
+    enabled: true
+    options:
+      markdownLinkResolution: shortest
+    order: 60
+  - source: github:quartz-community/description
+    enabled: true
+    order: 70
+  - source: github:quartz-community/hard-line-breaks
+    enabled: true
+    order: 90
+  - source: github:quartz-community/remove-draft
+    enabled: true
+  - source: github:quartz-community/alias-redirects
+    enabled: true
+  - source: github:quartz-community/content-index
+    enabled: true
+    options:
+      enableSiteMap: true
+      enableRSS: false
+  - source: github:quartz-community/content-page
+    enabled: true
+  - source: github:quartz-community/folder-page
+    enabled: true
+  - source: github:quartz-community/tag-page
+    enabled: true
+  - source: github:quartz-community/explorer
+    enabled: true
+    layout:
+      position: left
+      priority: 50
+  - source: github:quartz-community/search
+    enabled: true
+    layout:
+      position: left
+      priority: 20
+      group: toolbar
+      groupOptions:
+        grow: true
+  - source: github:quartz-community/graph
+    enabled: true
+    layout:
+      position: right
+      priority: 10
+  - source: github:quartz-community/backlinks
+    enabled: true
+    layout:
+      position: right
+      priority: 50
+  - source: github:quartz-community/article-title
+    enabled: true
+    layout:
+      position: beforeBody
+      priority: 10
+  - source: github:quartz-community/content-meta
+    enabled: true
+    layout:
+      position: beforeBody
+      priority: 20
+  - source: github:quartz-community/page-title
+    enabled: true
+    layout:
+      position: left
+      priority: 10
+  - source: github:quartz-community/darkmode
+    enabled: true
+    layout:
+      position: left
+      priority: 30
+      group: toolbar
+  - source: github:quartz-community/breadcrumbs
+    enabled: true
+    layout:
+      position: beforeBody
+      priority: 5
+      condition: not-index
+  - source: github:quartz-community/footer
+    enabled: true
+    options:
+      links:
+        工作台: http://8.130.160.177:3000/workspace
+        管理后台: http://8.130.160.177:3000/admin/knowledge/vault
+  - source: github:quartz-community/spacer
+    enabled: true
+    options: {}
+    order: 25
+    layout:
+      position: left
+      priority: 25
+      display: mobile-only
+  - source: github:quartz-community/note-properties
+    enabled: true
+    options:
+      includeAll: false
+      includedProperties:
+        - description
+        - tags
+        - aliases
+      excludedProperties: []
+      hidePropertiesView: false
+      delimiters: "---"
+      language: yaml
+    order: 5
+    layout:
+      position: beforeBody
+      priority: 15
+      display: all
+  - source: github:quartz-community/og-image
+    enabled: false
+layout:
+  groups:
+    toolbar:
+      priority: 35
+      direction: row

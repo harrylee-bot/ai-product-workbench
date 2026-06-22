@@ -56,7 +56,7 @@ const navItems: NavItem[] = [
     title: "知识库",
     icon: BookOpen,
     children: [
-      { title: "Obsidian 知识库", href: "/admin/knowledge/vault", icon: FolderOpen },
+      { title: "Quartz 知识库", href: "/admin/knowledge/vault", icon: FolderOpen },
       { title: "知识条目", href: "/admin/knowledge/items", icon: DatabaseZap },
       { title: "知识候选", href: "/admin/knowledge/candidates", icon: ClipboardCheck },
     ],

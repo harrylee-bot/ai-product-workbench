@@ -458,7 +458,7 @@ export class ObsidianVaultService {
       const created = await this.prisma.knowledgeCategory.create({
         data: {
           name,
-          description: `由 Obsidian/SilverBullet 知识库目录 ${name} 自动同步`,
+          description: `由 Markdown Vault 知识库目录 ${name} 自动同步`,
           order: index + 100,
         },
       });

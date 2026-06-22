@@ -65,6 +65,24 @@ services:
     ports:
       - "3000:3000"
 
+  knowledge:
+    build:
+      context: ..
+      dockerfile: apps/knowledge/Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        QUARTZ_REF: ${QUARTZ_REF:-v5.0.0}
+    container_name: ai-product-knowledge
+    restart: unless-stopped
+    environment:
+      QUARTZ_BASE_URL: ${QUARTZ_BASE_URL:-8.130.160.177:3001}
+      QUARTZ_CONTENT_DIR: /storage/knowledge-vault
+      QUARTZ_CONCURRENCY: ${QUARTZ_CONCURRENCY:-2}
+    ports:
+      - "${KNOWLEDGE_APP_PORT:-3001}:3000"
+    volumes:
+      - api-storage:/storage
+
 volumes:
   postgres-data:
   api-storage:

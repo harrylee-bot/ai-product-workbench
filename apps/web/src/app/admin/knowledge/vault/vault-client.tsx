@@ -47,7 +47,7 @@ export function AdminKnowledgeVaultClient() {
         method: "POST",
       });
       setStatus(result);
-      setNotice("Obsidian 兼容知识库已初始化");
+      setNotice("Markdown Vault 已初始化，Quartz 会在部署时发布为知识库站点");
     } catch (initError) {
       setError(initError instanceof Error ? initError.message : "知识库初始化失败");
     } finally {
@@ -76,7 +76,7 @@ export function AdminKnowledgeVaultClient() {
 
   return (
     <AdminShell
-      title="Obsidian 知识库"
+      title="Quartz 知识库"
       actions={
         <div className="flex items-center gap-2">
           <a
@@ -86,7 +86,7 @@ export function AdminKnowledgeVaultClient() {
             className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-gray-950 px-4 text-sm font-medium text-white transition hover:bg-gray-800"
           >
             <ExternalLink className="h-4 w-4" />
-            进入知识库系统
+            进入 Quartz 知识库
           </a>
           <Button type="button" variant="secondary" onClick={() => void loadStatus()} disabled={loading}>
             <RefreshCw className="h-4 w-4" />
@@ -98,14 +98,14 @@ export function AdminKnowledgeVaultClient() {
           </Button>
           <Button type="button" onClick={() => void initializeVault()} disabled={initializing}>
             <Sparkles className="h-4 w-4" />
-            初始化知识库
+            初始化 Markdown Vault
           </Button>
         </div>
       }
     >
       <div className="mb-5">
-        <h2 className="text-xl font-semibold text-gray-950">开源知识库前端</h2>
-        <p className="mt-2 text-sm text-gray-500">SilverBullet 已挂载同一个 Markdown Vault，可直接进入系统维护和查看知识库。</p>
+        <h2 className="text-xl font-semibold text-gray-950">Quartz 5 知识库前端</h2>
+        <p className="mt-2 text-sm text-gray-500">Markdown Vault 由 Quartz 发布为中文知识库站点，主系统后续可读取同一份知识内容。</p>
       </div>
 
       {notice ? <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
@@ -142,7 +142,7 @@ export function AdminKnowledgeVaultClient() {
       <AdminPanel className="mt-4 p-4">
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-200 pb-4">
           <div>
-            <div className="text-sm font-medium text-gray-950">知识库前端地址</div>
+            <div className="text-sm font-medium text-gray-950">Quartz 前端地址</div>
             <div className="mt-1 break-all font-mono text-xs text-gray-500">{KNOWLEDGE_APP_URL}</div>
           </div>
           <AdminStatusBadge label="已部署" tone="green" />
@@ -152,7 +152,7 @@ export function AdminKnowledgeVaultClient() {
           {status?.vaultRoot ?? "-"}
         </div>
         <p className="mt-3 text-sm leading-6 text-gray-500">
-          本地仓库也包含一份 <span className="font-mono">knowledge-vault</span> 模板，可以直接用 Obsidian 打开维护；线上 Vault 用于服务器运行环境。
+          本地仓库和服务器都使用同一套 <span className="font-mono">knowledge-vault</span> 结构；可用 Obsidian 或任意 Markdown 编辑器维护，Quartz 负责线上浏览。
         </p>
       </AdminPanel>
 

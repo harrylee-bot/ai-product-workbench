@@ -113,6 +113,7 @@ npm run dev
 
 - Web: http://localhost:3000
 - API: http://localhost:4000/api
+- Quartz 知识库: http://localhost:3001
 
 ## 默认账号
 
@@ -130,6 +131,7 @@ npm run dev
   - 左侧: Projects
   - 中间: Chat，唯一入口为 `AI优化`
   - 右侧: Constraint View + Decision View + Evolution View + Company Dashboard + System Dashboard
+- `/admin/knowledge/vault`: Quartz 知识库入口、Markdown Vault 状态和同步到系统知识库
 
 ## Triple System 规则
 
@@ -170,3 +172,11 @@ npm run dev
 8. Patch Preview 的 PatchPlan 携带 constraints 和 strategyId。
 9. Self-Generation Engine 生成 SystemMutation 并进入 System Preview。
 10. 右侧展示 Constraint View、Decision View、Evolution View 和后续 Company/System 面板。
+
+## Quartz 知识库
+
+- 内容源：`knowledge-vault`
+- 线上前端：Quartz 5 静态知识库，默认发布到 `http://8.130.160.177:3001`
+- 后台入口：`/admin/knowledge/vault`
+- 系统融合：后台“同步到系统知识库”会把 Markdown 文件切片写入 KnowledgeItem，供后续约束系统、决策系统和 Agent 检索
+- 部署方式：`deploy/server-deploy.sh` 会构建 `ai-product-knowledge` 镜像，挂载同一个 `ai-product-workbench-storage` 卷下的 `knowledge-vault`，并用 Quartz 生成可浏览站点
