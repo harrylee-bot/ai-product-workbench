@@ -9,7 +9,7 @@
 - 模块 3：Project / Conversation / Message 数据模型，项目创建、列表、搜索、打开、重命名、归档、软删除，默认会话与消息落库。
 - 模块 4：FileAsset / FileParseResult / FileChunk 数据模型，项目文件上传、解析状态管理、txt/md/docx/pdf/image/zip/rp 一期解析、附件 chips、消息附件摘要落库。
 - 模块 5：ModelProvider / ModelConfig / ModelTaskProfile / ModelCallLog 数据模型，OpenAI-compatible 模型网关、文本生成、JSON 生成、流式输出、超时重试、token usage、调用日志、admin 配置 API、API Key 加密存储与脱敏返回。
-- 模块 6：AI Orchestrator 串行调度 Intent、Knowledge、Requirement Analyst、Product Designer、PRD Writer、Prototype Designer、Prototype Code、Patch、QA、Knowledge Extractor；所有 Agent 通过 Model Gateway 调用模型，未配置模型时使用结构化兜底输出；工作台通过 run stream 实时展示 Agent 时间线、PRD、HTML 原型和 QA 结果。
+- 模块 6：AI Orchestrator 串行调度 Intent、Knowledge、Requirement Analyst、Product Designer、PRD Writer、Prototype Designer、Prototype Code、Patch、QA、Knowledge Extractor；Intent Agent 将纯问候、寒暄和致谢识别为 `general_question`，不触发需求澄清、PRD 或原型生成链路；所有 Agent 通过 Model Gateway 调用模型，未配置模型时使用结构化兜底输出；工作台通过 run stream 实时展示 Agent 时间线、PRD、HTML 原型和 QA 结果。
 - 模块 7：ProductDesignState / ProductDesignVersion / ProductDesignChangeLog 数据模型，状态创建、查询、更新、PatchOperation、版本快照、回滚、AI 推断确认/否定、澄清问题回答；工作台右侧新增“状态”Tab 展示版本、规则数量、AI 推断和待确认问题。
 - 模块 8：RequirementDocument / RequirementDocumentVersion 数据模型，PRD Writer 从 ProductDesignState 渲染 16 个结构化章节，保存 sections / blocks / sourcePaths / tags，支持当前 PRD 查询、详情、预览、确认、版本列表；工作台 PRD 预览展示来源路径、AI 推断、知识库、已确认和待确认标签，并支持段落级定位入口。
 - 模块 9：PrototypeSpecRecord / PrototypeArtifact / PrototypeVersion 数据模型，Prototype Designer 从 ProductDesignState 生成 PrototypeSpec，Prototype Code 生成单文件 HTML，保存 artifact 与版本，支持当前原型、详情、text/html 预览、确认、版本列表；工作台原型 Tab 使用 sandbox iframe 预览，支持桌面/移动模式和基于 artifact/page/component 的局部修改选区。

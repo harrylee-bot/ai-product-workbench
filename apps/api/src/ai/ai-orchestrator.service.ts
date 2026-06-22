@@ -11,6 +11,7 @@ import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { toInputJson } from "./ai-vibe.helpers";
+import { isCasualGeneralInput } from "./intent-classifier.helpers";
 import type {
   AgentRunContext,
   AttachmentSummary,
@@ -473,11 +474,14 @@ export class AiOrchestratorService {
   }
 
   private async finishGeneralAnswer(context: AgentRunContext, intent: IntentResult) {
+    const isCasual = isCasualGeneralInput(context.userInput);
     const result: OrchestratorResult = {
       runId: context.runId,
       projectId: context.projectId,
       intent,
-      message: "我会围绕当前项目状态回答问题。模块 6 已接入多 Agent 编排，复杂生成请直接描述目标需求。",
+      message: isCasual
+        ? "你好，我在。你可以直接描述想做的产品、页面、PRD、原型或要修改的地方；有了具体目标后，我再进入生成流程。"
+        : "我会围绕当前项目状态回答问题。复杂生成请直接描述目标需求。",
       nextAction: { type: "answer" },
     };
     await this.finishRun(context, result, ProjectStatus.draft);
