@@ -447,8 +447,8 @@ export function PreviewPanel({
   }, [prdPreview?.id, prototypePreview?.id, prototypePreview?.html]);
 
   return (
-    <aside className="flex min-h-0 flex-col bg-[var(--color-panel-bg)]">
-      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-white px-4">
+    <aside className="flex min-h-0 min-w-0 flex-col bg-[var(--color-panel-bg)]">
+      <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-white px-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-gray-950">结果预览</div>
           <div className="truncate text-xs text-gray-500">需求文档与网页原型</div>
@@ -465,7 +465,7 @@ export function PreviewPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {mode === "prd" ? (
-          <div className="workbench-scrollbar h-full overflow-y-auto p-3">
+          <div className="workbench-scrollbar h-full overflow-y-auto p-2.5">
             <PrdPreviewView prdPreview={prdPreview} />
           </div>
         ) : (
@@ -646,10 +646,10 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-[var(--color-accent-soft)]">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-blue-100 bg-white/80 px-4 backdrop-blur">
+      <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-blue-100 bg-white/80 px-3 backdrop-blur">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-gray-950">{toChineseText(prototypePreview.title)}</div>
-          <div className="text-xs text-gray-500">
+          <div className="truncate text-xs text-gray-500">
             {selection ? selection.label : canvasMode === "select" ? "画布选择" : "网页原型预览"}
           </div>
         </div>
@@ -667,9 +667,9 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
           <Badge tone="accent" className="bg-white">已生成</Badge>
         </div>
       </div>
-      <div className="min-h-0 flex-1 p-2.5">
-        <div className="h-full overflow-hidden rounded-[14px] border border-blue-100 bg-white shadow-[var(--shadow-panel)]">
-          <div className="flex h-10 items-center gap-2 border-b border-blue-100 bg-gray-50 px-3">
+      <div className="min-h-0 flex-1 p-2">
+        <div className="h-full overflow-hidden rounded-[var(--radius-control)] border border-blue-100 bg-white shadow-[var(--shadow-panel)]">
+          <div className="flex h-9 items-center gap-2 border-b border-blue-100 bg-gray-50 px-3">
             <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
             <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
@@ -681,13 +681,13 @@ function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1P
               </Badge>
             ) : null}
           </div>
-          <div ref={canvasRef} className="relative h-[calc(100%-40px)] min-h-[680px] bg-white">
+          <div ref={canvasRef} className="relative h-[calc(100%-36px)] min-h-[600px] bg-white">
             <iframe
               title="原型预览"
               srcDoc={prototypePreview.html}
               sandbox="allow-scripts"
               className={[
-                "h-full min-h-[680px] w-full border-0 bg-white",
+                "h-full min-h-[600px] w-full border-0 bg-white",
                 canvasMode === "select" ? "pointer-events-none select-none" : "",
               ].join(" ")}
             />
@@ -800,10 +800,10 @@ function PrototypeLocalEditDialog({
       role="dialog"
       aria-modal="false"
       aria-label="局部生成"
-      className="absolute right-4 top-16 z-30 w-[380px] max-w-[calc(100%-32px)] overflow-hidden rounded-[16px] border border-gray-200 bg-white shadow-[var(--shadow-float)]"
+      className="absolute right-3 top-14 z-30 w-[360px] max-w-[calc(100%-24px)] overflow-hidden rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-float)]"
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-4 py-3">
+      <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-3 py-2.5">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
             <Sparkles className="h-4 w-4 text-blue-600" />
@@ -816,7 +816,7 @@ function PrototypeLocalEditDialog({
         </IconButton>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-3 px-4 py-3">
+      <form onSubmit={onSubmit} className="space-y-2.5 px-3 py-2.5">
         <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="局部生成动作">
           {LOCAL_ACTIONS.map((item) => {
             const Icon = item.icon;
@@ -844,7 +844,7 @@ function PrototypeLocalEditDialog({
           onChange={(event) => onInstructionChange(event.target.value)}
           placeholder="描述这个局部区域要生成或调整的内容"
           rows={4}
-          className="block max-h-[150px] min-h-[104px] w-full resize-none rounded-[12px] border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm leading-6 text-gray-900 shadow-none outline-none transition placeholder:text-gray-400 focus:border-gray-950 focus:bg-white focus:ring-3 focus:ring-gray-950/10"
+          className="block max-h-[140px] min-h-[96px] w-full resize-none rounded-[12px] border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-6 text-gray-900 shadow-none outline-none transition placeholder:text-gray-400 focus:border-gray-950 focus:bg-white focus:ring-3 focus:ring-gray-950/10"
         />
 
         <div className="rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
