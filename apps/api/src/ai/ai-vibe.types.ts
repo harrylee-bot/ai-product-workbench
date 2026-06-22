@@ -119,6 +119,74 @@ export type RequirementAnalysis = {
   clarificationQuestions: ClarificationQuestion[];
 };
 
+export type ProductBuildPlanPriority = "must" | "should" | "could";
+
+export type ProductBuildPlanStateCoverage =
+  | "default"
+  | "loading"
+  | "success"
+  | "empty"
+  | "disabled"
+  | "error";
+
+export type ProductBuildPlan = {
+  id: string;
+  projectId: string;
+  title: string;
+  goal: string;
+  summary: string;
+  requirementMode: "formal_requirement" | "requirement_completion" | "prd_generation" | "prototype_generation";
+  sourceSummary: {
+    userFacts: string[];
+    knowledgeFacts: string[];
+    assumptions: string[];
+    openQuestions: string[];
+  };
+  scope: {
+    inScope: string[];
+    outOfScope: string[];
+    targetUsers: string[];
+    coreScenarios: string[];
+  };
+  pagePlan: Array<{
+    id: string;
+    name: string;
+    purpose: string;
+    priority: ProductBuildPlanPriority;
+    sourcePaths: string[];
+  }>;
+  statePlan: Array<{
+    id: string;
+    name: string;
+    coverage: ProductBuildPlanStateCoverage;
+    required: boolean;
+    sourcePaths: string[];
+  }>;
+  deliverables: {
+    productDesignState: boolean;
+    prd: boolean;
+    prototypeSpec: boolean;
+    htmlPrototype: boolean;
+    qa: boolean;
+    knowledgeCandidates: boolean;
+  };
+  agentSequence: Array<{
+    agentName: AgentName;
+    step: ModelTaskType;
+    input: string[];
+    output: string;
+    gate?: string;
+  }>;
+  qaFocus: string[];
+  risks: Array<{
+    id: string;
+    level: "low" | "medium" | "high";
+    description: string;
+    mitigation: string;
+  }>;
+  assumptions: string[];
+};
+
 export type ProductDesignState = {
   id: string;
   projectId: string;
@@ -710,6 +778,7 @@ export type AgentStepName =
   | "intent_detection"
   | "knowledge_retrieval"
   | "requirement_analysis"
+  | "product_planning"
   | "product_design"
   | "prd_generation"
   | "prototype_design"
@@ -733,6 +802,7 @@ export type AgentRunContext = {
   knowledgeContext?: KnowledgeContext;
   intentResult?: IntentResult;
   requirementAnalysis?: RequirementAnalysis;
+  productBuildPlan?: ProductBuildPlan;
   traceId: string;
 };
 

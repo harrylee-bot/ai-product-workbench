@@ -1,4 +1,4 @@
-import { AgentName, KnowledgeType, UserIntent } from "@prisma/client";
+import { AgentName, KnowledgeType, ModelTaskType, UserIntent } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { KnowledgeAgentService } from "../src/ai/agents/knowledge-agent.service";
 
@@ -84,5 +84,40 @@ describe("KnowledgeAgentService", () => {
     expect(result.data.agentSkills?.[0].name).toBe("obsidian-markdown");
     expect(result.data.summary).toContain("命中 2 条");
     expect(result.data.summary).toContain("已加载 1 个");
+  });
+
+  it("uses product planning knowledge profile for formal requirements", async () => {
+    const modelGateway = { generateJson: vi.fn() };
+    const retrieval = {
+      search: vi.fn().mockResolvedValue({ results: [], references: [] }),
+    };
+    const skillRegistry = {
+      getVibeCodingSkills: vi.fn().mockResolvedValue([]),
+      toKnowledgeReferences: vi.fn().mockReturnValue([]),
+    };
+    const service = new KnowledgeAgentService(modelGateway as never, retrieval as never, skillRegistry as never);
+
+    await service.run({
+      runId: "run-1",
+      projectId: "project-1",
+      traceId: "trace-1",
+      userId: "user-1",
+      input: {
+        userInput: "帮我做一个会员活动正式需求",
+        intent: UserIntent.new_requirement,
+        attachments: [],
+      },
+    });
+
+    expect(retrieval.search).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskType: ModelTaskType.product_planning,
+        preferredTypes: expect.arrayContaining([
+          KnowledgeType.strong_rule,
+          KnowledgeType.prd_writing_rule,
+          KnowledgeType.prototype_rule,
+        ]),
+      }),
+    );
   });
 });

@@ -21,6 +21,7 @@ import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-age
 import { PatchAgentService } from "./agents/patch-agent.service";
 import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
 import { ProductDesignerAgentService } from "./agents/product-designer-agent.service";
+import { ProductPlannerAgentService } from "./agents/product-planner-agent.service";
 import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service";
 import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
 import { QaAgentService } from "./agents/qa-agent.service";
@@ -155,6 +156,7 @@ import { SystemPreviewService } from "./self-generation/system.preview.service";
     IntentAgentService,
     KnowledgeAgentService,
     RequirementAnalystAgentService,
+    ProductPlannerAgentService,
     ProductDesignerAgentService,
     PrdWriterAgentService,
     PrototypeDesignerAgentService,

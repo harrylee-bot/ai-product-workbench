@@ -19,6 +19,7 @@ import type {
   KnowledgeCandidate,
   KnowledgeCandidateDraft,
   PatchPlan,
+  ProductBuildPlan,
   ProductDesignState,
   PrototypeArtifact,
   PrototypeSpec,
@@ -31,6 +32,7 @@ import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
 import { PatchAgentService } from "./agents/patch-agent.service";
 import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
 import { ProductDesignerAgentService } from "./agents/product-designer-agent.service";
+import { ProductPlannerAgentService } from "./agents/product-planner-agent.service";
 import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service";
 import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
 import { QaAgentService } from "./agents/qa-agent.service";
@@ -58,6 +60,7 @@ export type OrchestratorResult = {
   prototypeSpec?: PrototypeSpec;
   prototypeArtifact?: PrototypeArtifact;
   qaReport?: QAReport;
+  productBuildPlan?: ProductBuildPlan;
   patchPlan?: PatchPlan;
   knowledgeCandidates?: Array<KnowledgeCandidate | KnowledgeCandidateDraft>;
   nextAction?: {
@@ -80,6 +83,7 @@ export class AiOrchestratorService {
     private readonly intentAgent: IntentAgentService,
     private readonly knowledgeAgent: KnowledgeAgentService,
     private readonly requirementAnalystAgent: RequirementAnalystAgentService,
+    private readonly productPlannerAgent: ProductPlannerAgentService,
     private readonly productDesignerAgent: ProductDesignerAgentService,
     private readonly prdWriterAgent: PrdWriterAgentService,
     private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
@@ -173,6 +177,7 @@ export class AiOrchestratorService {
       const isPatch =
         intent.data.intent === UserIntent.patch_document || intent.data.intent === UserIntent.patch_prototype;
       let patchPlan: PatchPlan | undefined;
+      let productBuildPlan: ProductBuildPlan | undefined;
       let state = context.productDesignState;
 
       if (isPatch && context.selectedRegion && state) {
@@ -211,7 +216,30 @@ export class AiOrchestratorService {
           data: stateSummary(state),
         });
       } else {
-        await this.emit(context, "message_delta", "正在生成结构化产品设计状态...");
+        await this.emit(context, "message_delta", "正在规划正式需求执行方案...");
+        const plan = await this.runAgentStep(
+          context,
+          AgentName.product_planner_agent,
+          "product_planning",
+          () =>
+            this.productPlannerAgent.run({
+              runId: context.runId,
+              projectId: context.projectId,
+              traceId: context.traceId,
+              userId: context.userId,
+              input: {
+                userInput: context.userInput,
+                intent: intent.data.intent,
+                requirementAnalysis: requirement.data,
+                knowledgeContext: knowledge.data,
+                existingState: context.productDesignState,
+              },
+            }),
+        );
+        productBuildPlan = plan.data;
+        context.productBuildPlan = productBuildPlan;
+
+        await this.emit(context, "message_delta", "正在把产品计划落到 ProductDesignState...");
         const design = await this.runAgentStep(
           context,
           AgentName.product_designer_agent,
@@ -226,6 +254,7 @@ export class AiOrchestratorService {
                 userInput: context.userInput,
                 requirementAnalysis: requirement.data,
                 knowledgeContext: knowledge.data,
+                productBuildPlan,
                 existingState: context.productDesignState,
               },
             }),
@@ -403,6 +432,7 @@ export class AiOrchestratorService {
         prototypeSpec: prototypeSpec.data,
         prototypeArtifact: savedPrototype.artifact,
         qaReport: qa.data,
+        productBuildPlan,
         patchPlan,
         knowledgeCandidates: knowledgeCandidates.data.candidates,
         nextAction: {
@@ -526,6 +556,7 @@ export class AiOrchestratorService {
         prototypeSpec: result.prototypeSpec,
         prototypeArtifact: result.prototypeArtifact,
         qaReport: result.qaReport,
+        productBuildPlan: result.productBuildPlan,
         patchPlan: result.patchPlan,
         knowledgeCandidates: result.knowledgeCandidates,
       }),
@@ -565,6 +596,7 @@ function stepCopy(step: string, status: "started" | "completed") {
     intent_detection: ["正在理解你的需求...", "已识别用户意图"],
     knowledge_retrieval: ["正在检索知识库...", "知识上下文已整理"],
     requirement_analysis: ["正在分析需求完整度...", "需求完整度分析完成"],
+    product_planning: ["正在规划正式需求执行方案...", "正式需求执行计划已完成"],
     product_design: ["正在生成产品设计方案...", "产品设计状态已生成"],
     prd_generation: ["正在生成 PRD 草案...", "PRD 草案已完成"],
     prototype_design: ["正在生成原型规格...", "原型规格已完成"],

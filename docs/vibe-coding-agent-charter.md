@@ -2,9 +2,9 @@
 
 ## 总原则
 
-Vibe Coding 的主链路只保留一套新版 agent。所有产物围绕 `ProductDesignState` 这个唯一事实源流转：先理解用户输入，再查知识，再分析需求完整度，再生成产品状态，之后由 PRD、原型结构、HTML、QA、知识沉淀各自负责自己的边界。
+Vibe Coding 的主链路只保留一套新版 agent。所有产物围绕 `ProductDesignState` 这个唯一事实源流转：先理解用户输入，再查知识，再分析需求完整度，再规划正式需求执行方案，再生成产品状态，之后由 PRD、原型结构、HTML、QA、知识沉淀各自负责自己的边界。
 
-任何 agent 都不能越权替下游生成产物，也不能把 AI 推断伪装成用户确认。需要修改产品内容时，必须通过 `ProductDesignState` 或 `PatchPlan` 进入版本化流程。
+任何 agent 都不能越权替下游生成产物，也不能把 AI 推断伪装成用户确认。正式需求先生成 `ProductBuildPlan`，再落到 `ProductDesignState`；局部修改先生成 `PatchPlan`，再进入 State 版本化流程。
 
 ## 职责矩阵
 
@@ -13,7 +13,8 @@ Vibe Coding 的主链路只保留一套新版 agent。所有产物围绕 `Produc
 | 谁负责理解需求 | Intent Agent | `IntentResult` | 只判断用户意图、是否闲聊、是否需要选区和是否进入生成链路 |
 | 谁负责查知识 | Knowledge Agent | `KnowledgeContext` | 只读正式知识库、附件摘要和 Vibe Coding skills，不直接写知识 |
 | 谁负责分析需求完整度 | Requirement Analyst Agent | `RequirementAnalysis` | 只拆已知事实、缺失项、冲突、AI 推断和澄清问题，不生成产品状态 |
-| 谁负责生成产品状态 | Product Designer Agent | `ProductDesignDraft` | 负责唯一事实源草稿，必须标记 assumptions、knowledgeRefs、pendingQuestions |
+| 谁负责规划正式需求 | Product Planner Agent | `ProductBuildPlan` | 只规划范围、页面、状态、agentSequence、QA 焦点和风险，不直接生成 State/PRD/HTML |
+| 谁负责生成产品状态 | Product Designer Agent | `ProductDesignDraft` | 按 ProductBuildPlan 生成唯一事实源草稿，必须标记 assumptions、knowledgeRefs、pendingQuestions |
 | 谁负责写 PRD | PRD Writer Agent | `RequirementDocumentDraft` | 只能从 ProductDesignState 渲染 PRD，不写接口、SQL、数据库、部署或代码实现 |
 | 谁负责原型结构 | Prototype Designer Agent | `PrototypeSpec` | 只能设计页面、组件、状态、导航和交互结构，不输出 HTML |
 | 谁负责 HTML | Prototype Code Agent | `PrototypeArtifactDraft` | 只能从 PrototypeSpec 生成单文件 HTML，不调用真实接口、不引入远程脚本 |
@@ -41,9 +42,15 @@ Vibe Coding 的主链路只保留一套新版 agent。所有产物围绕 `Produc
 
 禁止：生成 ProductDesignState、写 PRD、画原型、修改知识库、替用户确认假设。
 
+### Product Planner Agent
+
+负责规划正式需求执行方案。它把用户需求、需求完整度、知识上下文和已有状态整理成 `ProductBuildPlan`，明确 inScope/outOfScope、页面计划、状态覆盖、下游 agentSequence、QA 焦点和风险。
+
+禁止：直接生成 ProductDesignState、写 PRD、输出 PrototypeSpec 或 HTML、执行 Patch、替用户确认假设。
+
 ### Product Designer Agent
 
-负责生成产品状态。它把需求分析和知识上下文转为 `ProductDesignDraft`，覆盖页面、功能、后台配置、前端规则、业务规则、状态规则、异常场景、验收标准、assumptions、knowledgeRefs 和 pendingQuestions。
+负责生成产品状态。它把 `ProductBuildPlan`、需求分析和知识上下文转为 `ProductDesignDraft`，覆盖页面、功能、后台配置、前端规则、业务规则、状态规则、异常场景、验收标准、assumptions、knowledgeRefs 和 pendingQuestions。
 
 禁止：直接写 PRD 正文、直接生成 PrototypeSpec 或 HTML、跳过知识引用、把 AI 推断标成用户确认。
 
@@ -90,6 +97,7 @@ User Message
   -> Intent Agent
   -> Knowledge Agent
   -> Requirement Analyst Agent
+  -> Product Planner Agent
   -> Product Designer Agent
   -> PRD Writer Agent
   -> Prototype Designer Agent

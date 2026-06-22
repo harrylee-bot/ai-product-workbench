@@ -101,6 +101,7 @@ enum ModelTaskType {
   intent_detection
   knowledge_classification
   requirement_analysis
+  product_planning
   product_design
   prd_generation
   prototype_design
@@ -279,6 +280,7 @@ enum AgentName {
   intent_agent
   knowledge_agent
   requirement_analyst_agent
+  product_planner_agent
   product_designer_agent
   prd_writer_agent
   prototype_designer_agent

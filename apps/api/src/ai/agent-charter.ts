@@ -4,6 +4,7 @@ export const VIBE_CODING_AGENT_NAMES = [
   AgentName.intent_agent,
   AgentName.knowledge_agent,
   AgentName.requirement_analyst_agent,
+  AgentName.product_planner_agent,
   AgentName.product_designer_agent,
   AgentName.prd_writer_agent,
   AgentName.prototype_designer_agent,
@@ -18,6 +19,7 @@ export type VibeCodingAgentName = (typeof VIBE_CODING_AGENT_NAMES)[number];
 export type VibeAgentMutationAuthority =
   | "read_only"
   | "analysis_only"
+  | "plan_draft"
   | "state_draft"
   | "document_draft"
   | "prototype_spec_draft"
@@ -79,8 +81,22 @@ export const VIBE_CODING_AGENT_CHARTERS: Record<VibeCodingAgentName, VibeAgentCh
     primaryOutputs: ["RequirementAnalysis"],
     allowedActions: ["列出 knownFromUser", "列出 knownFromKnowledge", "列出 inferredByAI", "生成澄清问题"],
     forbiddenActions: ["生成 ProductDesignState", "写 PRD", "画原型", "修改知识库", "替用户确认假设"],
-    handoffTo: [AgentName.product_designer_agent],
+    handoffTo: [AgentName.product_planner_agent],
     mutationAuthority: "analysis_only",
+  },
+  [AgentName.product_planner_agent]: {
+    agentName: AgentName.product_planner_agent,
+    displayName: "Product Planner Agent",
+    taskType: ModelTaskType.product_planning,
+    owns: "规划正式需求执行方案",
+    responsibility:
+      "把用户需求、需求完整度、知识上下文和已有状态整理成 ProductBuildPlan，明确范围、页面计划、状态覆盖、下游 agent 顺序、QA 焦点和风险。",
+    primaryInputs: ["userInput", "IntentResult", "RequirementAnalysis", "KnowledgeContext", "existingState"],
+    primaryOutputs: ["ProductBuildPlan"],
+    allowedActions: ["规划 inScope/outOfScope", "规划页面和状态覆盖", "定义 agentSequence", "定义 QA 焦点和风险"],
+    forbiddenActions: ["直接生成 ProductDesignState", "写 PRD", "输出 PrototypeSpec 或 HTML", "执行 Patch", "替用户确认假设"],
+    handoffTo: [AgentName.product_designer_agent],
+    mutationAuthority: "plan_draft",
   },
   [AgentName.product_designer_agent]: {
     agentName: AgentName.product_designer_agent,
@@ -88,8 +104,8 @@ export const VIBE_CODING_AGENT_CHARTERS: Record<VibeCodingAgentName, VibeAgentCh
     taskType: ModelTaskType.product_design,
     owns: "生成产品状态",
     responsibility:
-      "把需求分析和知识上下文沉淀为唯一事实源 ProductDesignDraft，包括页面、功能、业务规则、状态规则、异常、验收标准、假设和待确认问题。",
-    primaryInputs: ["userInput", "RequirementAnalysis", "KnowledgeContext", "existingState"],
+      "把 ProductBuildPlan、需求分析和知识上下文沉淀为唯一事实源 ProductDesignDraft，包括页面、功能、业务规则、状态规则、异常、验收标准、假设和待确认问题。",
+    primaryInputs: ["userInput", "ProductBuildPlan", "RequirementAnalysis", "KnowledgeContext", "existingState"],
     primaryOutputs: ["ProductDesignDraft"],
     allowedActions: ["创建或补全 ProductDesignState 草稿", "标记 assumptions", "引用 knowledgeRefs", "保留 pendingQuestions"],
     forbiddenActions: ["直接生成 PRD 正文", "直接生成 PrototypeSpec 或 HTML", "跳过知识引用", "把 AI 推断标成用户确认"],

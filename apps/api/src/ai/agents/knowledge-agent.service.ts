@@ -132,10 +132,24 @@ function taskTypeFromIntent(intent: UserIntent): ModelTaskType {
   if (intent === UserIntent.patch_document || intent === UserIntent.patch_prototype) {
     return ModelTaskType.patch_planning;
   }
+  if (intent === UserIntent.new_requirement || intent === UserIntent.complete_requirement) {
+    return ModelTaskType.product_planning;
+  }
   return ModelTaskType.product_design;
 }
 
 export function preferredTypesForTask(taskType: ModelTaskType): KnowledgeType[] {
+  if (taskType === ModelTaskType.product_planning) {
+    return [
+      KnowledgeType.strong_rule,
+      KnowledgeType.default_rule,
+      KnowledgeType.business_concept,
+      KnowledgeType.reference_case,
+      KnowledgeType.design_pattern,
+      KnowledgeType.prd_writing_rule,
+      KnowledgeType.prototype_rule,
+    ];
+  }
   if (taskType === ModelTaskType.requirement_analysis) {
     return [
       KnowledgeType.strong_rule,
