@@ -213,6 +213,139 @@ describe("Knowledge module services", () => {
       reviewComment: "重复审核",
     })).rejects.toBeInstanceOf(BadRequestException);
   });
+
+  it("skips duplicate candidates from the same confirmed artifact", async () => {
+    prisma.knowledgeCandidate.findMany.mockResolvedValue([
+      candidateRow({
+        id: "candidate-existing",
+        title: "每日签到规则候选",
+        content: "用户每日只能签到一次。",
+        source: KnowledgeCandidateSource.prd,
+        sourceRefId: "prd-1",
+        sourcePath: "businessRules",
+      }),
+    ]);
+
+    const result = await candidateService.createMany(
+      "project-1",
+      [
+        {
+          title: "每日签到规则候选",
+          content: "用户每日只能签到一次。",
+          suggestedType: KnowledgeType.strong_rule,
+          suggestedTags: ["签到"],
+          confidence: 0.9,
+          sourcePath: "businessRules",
+          reason: "从确认 PRD 中抽取。",
+        },
+        {
+          title: "每日签到规则候选",
+          content: "用户每日只能签到一次。",
+          suggestedType: KnowledgeType.strong_rule,
+          suggestedTags: ["签到"],
+          confidence: 0.9,
+          sourcePath: "businessRules",
+          reason: "重复候选。",
+        },
+      ],
+      { source: KnowledgeCandidateSource.prd, sourceRefId: "prd-1", runId: "run-1" },
+    );
+
+    expect(result).toEqual({ items: [], skippedDuplicates: 1 });
+    expect(prisma.knowledgeCandidate.create).not.toHaveBeenCalled();
+  });
+
+  it("closes the loop from confirmed artifact candidate to next retrieval hit", async () => {
+    prisma.knowledgeCandidate.findMany.mockResolvedValueOnce([]);
+    prisma.knowledgeCandidate.create.mockImplementation(async ({ data }) =>
+      candidateRow({ id: "candidate-closed-loop", ...data }),
+    );
+
+    const created = await candidateService.createMany(
+      "project-1",
+      [{
+        title: "每日签到强规则",
+        content: "用户每日只能签到一次。",
+        suggestedType: KnowledgeType.strong_rule,
+        suggestedTags: ["签到", "活动"],
+        confidence: 0.95,
+        sourcePath: "businessRules[0]",
+        reason: "从用户确认后的 PRD 抽取为可复用强规则。",
+      }],
+      { source: KnowledgeCandidateSource.prd, sourceRefId: "prd-1", runId: "run-1" },
+    );
+    expect(created.items[0]).toEqual(expect.objectContaining({
+      id: "candidate-closed-loop",
+      source: KnowledgeCandidateSource.prd,
+      sourceRefId: "prd-1",
+    }));
+
+    const candidate = candidateRow({
+      id: "candidate-closed-loop",
+      title: "每日签到强规则",
+      content: "用户每日只能签到一次。",
+      source: KnowledgeCandidateSource.prd,
+      sourceRefId: "prd-1",
+      sourcePath: "businessRules[0]",
+      suggestedType: KnowledgeType.strong_rule,
+      suggestedTags: ["签到", "活动"],
+    });
+    prisma.knowledgeCandidate.findUnique.mockResolvedValue(candidate);
+    prisma.knowledgeItem.create.mockImplementation(async ({ data }) => itemRow({ id: "knowledge-closed-loop", ...data }));
+    prisma.knowledgeCandidate.update.mockImplementation(async ({ data }) => ({
+      ...candidate,
+      ...data,
+      updatedAt: now,
+    }));
+
+    const approved = await candidateService.approveCandidate(user, "candidate-closed-loop", {
+      priority: KnowledgePriority.high,
+    });
+    expect(approved.item).toEqual(expect.objectContaining({
+      id: "knowledge-closed-loop",
+      status: KnowledgeStatus.active,
+      source: KnowledgeSource.prd_confirmation,
+      sourceProjectId: "project-1",
+      sourcePrdDocumentId: "prd-1",
+    }));
+
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "knowledge-closed-loop",
+        title: approved.item.title,
+        content: approved.item.content,
+        type: KnowledgeType.strong_rule,
+        status: KnowledgeStatus.active,
+        priority: KnowledgePriority.high,
+        tags: approved.item.tags,
+        source: KnowledgeSource.prd_confirmation,
+        sourceProjectId: "project-1",
+        sourcePrdDocumentId: "prd-1",
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const nextHit = await retrievalService.search({
+      projectId: "project-1",
+      runId: "run-next",
+      agentName: "knowledge_agent",
+      query: "做一个每日签到活动",
+      preferredTypes: [KnowledgeType.strong_rule],
+      limit: 5,
+    });
+
+    expect(nextHit.references[0]).toEqual(expect.objectContaining({
+      knowledgeId: "knowledge-closed-loop",
+      title: "每日签到强规则",
+      sourceType: "knowledge_base",
+    }));
+    expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: "run-next",
+        selectedKnowledgeIds: ["knowledge-closed-loop"],
+      }),
+    });
+  });
 });
 
 function itemRow(input: Record<string, unknown>) {

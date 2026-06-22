@@ -44,11 +44,43 @@ export class KnowledgeCandidateService {
       runId?: string;
     } = {},
   ) {
-    const normalized = drafts.map((draft) => this.normalizeDraft(draft, options));
+    const normalized = uniqueCandidateDrafts(drafts.map((draft) => this.normalizeDraft(draft, options)));
     if (!normalized.length) return { items: [] };
 
+    const existing = await this.prisma.knowledgeCandidate.findMany({
+      where: {
+        projectId,
+        status: {
+          in: [
+            KnowledgeCandidateStatus.pending,
+            KnowledgeCandidateStatus.approved,
+            KnowledgeCandidateStatus.merged,
+          ],
+        },
+        OR: normalized.map((draft) => ({
+          source: draft.source ?? options.source ?? KnowledgeCandidateSource.product_design_state,
+          sourceRefId: draft.sourceRefId ?? null,
+          sourcePath: draft.sourcePath ?? null,
+          title: draft.title,
+          content: draft.content,
+        })),
+      },
+    });
+    const existingKeys = new Set(existing.map(candidateDedupeKey));
+    const toCreate = normalized.filter((draft) => !existingKeys.has(candidateDedupeKey({
+      projectId,
+      source: draft.source ?? options.source ?? KnowledgeCandidateSource.product_design_state,
+      sourceRefId: draft.sourceRefId ?? null,
+      sourcePath: draft.sourcePath ?? null,
+      title: draft.title,
+      content: draft.content,
+    })));
+    if (!toCreate.length) {
+      return { items: [], skippedDuplicates: normalized.length };
+    }
+
     const rows = await this.prisma.$transaction(
-      normalized.map((draft) =>
+      toCreate.map((draft) =>
         this.prisma.knowledgeCandidate.create({
           data: {
             projectId,
@@ -69,7 +101,10 @@ export class KnowledgeCandidateService {
       ),
     );
 
-    return { items: rows.map((row) => this.toCandidate(row)) };
+    return {
+      items: rows.map((row) => this.toCandidate(row)),
+      skippedDuplicates: normalized.length - toCreate.length,
+    };
   }
 
   async listCandidates(query: ListKnowledgeCandidatesQueryDto) {
@@ -312,6 +347,41 @@ function sourceFromCandidate(source: KnowledgeCandidateSource) {
 function appendCandidateContent(current: string, candidate: string) {
   if (current.includes(candidate)) return current;
   return `${current.trim()}\n\n${candidate.trim()}`.trim();
+}
+
+function uniqueCandidateDrafts(drafts: KnowledgeCandidateDraft[]) {
+  const seen = new Set<string>();
+  return drafts.filter((draft) => {
+    const key = candidateDedupeKey({
+      projectId: "",
+      source: draft.source ?? KnowledgeCandidateSource.product_design_state,
+      sourceRefId: draft.sourceRefId ?? null,
+      sourcePath: draft.sourcePath ?? null,
+      title: draft.title,
+      content: draft.content,
+    });
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function candidateDedupeKey(input: {
+  projectId: string;
+  source: KnowledgeCandidateSource;
+  sourceRefId?: string | null;
+  sourcePath?: string | null;
+  title: string;
+  content: string;
+}) {
+  return [
+    input.projectId,
+    input.source,
+    input.sourceRefId ?? "",
+    input.sourcePath ?? "",
+    input.title.trim().toLowerCase(),
+    input.content.trim().toLowerCase(),
+  ].join("\u0001");
 }
 
 function clamp(value: number, min: number, max: number) {
