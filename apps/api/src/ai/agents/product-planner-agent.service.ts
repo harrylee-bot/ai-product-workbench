@@ -41,7 +41,7 @@ export class ProductPlannerAgentService extends BaseAgentService<
         content: [
           agentSystemPrompt(
             this.agentName,
-            "你是 Product Planner Agent。为正式需求规划执行方案，只输出 ProductBuildPlan JSON。不得生成 PRD、HTML，也不得直接修改 ProductDesignState。",
+            "你是 Product Planner Agent。你是正式需求唯一 plan agent，只为正式需求输出 ProductBuildPlan JSON。局部修改的计划属于 Patch Agent 的 PatchPlan；你不得生成 PRD、HTML，也不得直接修改 ProductDesignState。",
           ),
           agentSkillSystemPrompt(this.agentName, this.taskType, input.knowledgeContext),
         ].filter(Boolean).join("\n\n"),
@@ -80,7 +80,7 @@ export class ProductPlannerAgentService extends BaseAgentService<
       projectId: input.existingState?.projectId ?? "",
       title,
       goal: input.existingState?.businessGoal || inferGoal(input),
-      summary: "正式需求先规划执行范围、页面与状态覆盖，再由 Product Designer 写入 ProductDesignState。",
+      summary: "正式需求由 Product Planner 先规划执行范围、页面与状态覆盖，再由 Product Designer 写入 ProductDesignState；局部修改另走 PatchPlan。",
       requirementMode: requirementModeFromIntent(input.intent),
       sourceSummary: {
         userFacts,
@@ -110,7 +110,7 @@ export class ProductPlannerAgentService extends BaseAgentService<
           step: ModelTaskType.product_planning,
           input: stepInputs(skillInputs, "IntentResult", "RequirementAnalysis", "KnowledgeContext", "existing ProductDesignState"),
           output: "ProductBuildPlan",
-          gate: "计划必须只描述执行方案，不直接写 PRD/HTML/State。",
+          gate: "正式需求计划必须只描述执行方案，不直接写 PRD/HTML/State，也不规划局部 PatchPlan。",
         },
         {
           agentName: AgentName.product_designer_agent,

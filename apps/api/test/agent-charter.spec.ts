@@ -27,7 +27,7 @@ describe("Vibe Coding agent charter", () => {
   it("keeps the core ownership boundaries explicit", () => {
     expect(VIBE_CODING_AGENT_CHARTERS[AgentName.intent_agent].owns).toContain("理解");
     expect(VIBE_CODING_AGENT_CHARTERS[AgentName.knowledge_agent].owns).toContain("查知识");
-    expect(VIBE_CODING_AGENT_CHARTERS[AgentName.product_planner_agent].owns).toContain("正式需求执行方案");
+    expect(VIBE_CODING_AGENT_CHARTERS[AgentName.product_planner_agent].owns).toContain("唯一规划正式需求执行方案");
     expect(VIBE_CODING_AGENT_CHARTERS[AgentName.product_designer_agent].owns).toContain("产品状态");
     expect(VIBE_CODING_AGENT_CHARTERS[AgentName.prd_writer_agent].owns).toContain("PRD");
     expect(VIBE_CODING_AGENT_CHARTERS[AgentName.prototype_designer_agent].owns).toContain("原型结构");
@@ -42,6 +42,8 @@ describe("Vibe Coding agent charter", () => {
     expect(planner.mutationAuthority).toBe("plan_draft");
     expect(planner.primaryOutputs).toContain("ProductBuildPlan");
     expect(planner.forbiddenActions.join(" ")).toContain("直接生成 ProductDesignState");
+    expect(planner.forbiddenActions.join(" ")).toContain("规划局部 PatchPlan");
+    expect(planner.responsibility).toContain("局部修改不走它");
 
     const qa = VIBE_CODING_AGENT_CHARTERS[AgentName.qa_agent];
     expect(qa.taskType).toBe(ModelTaskType.qa_check);

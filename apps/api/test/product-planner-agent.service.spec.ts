@@ -72,9 +72,12 @@ describe("ProductPlannerAgentService", () => {
       }),
     );
     const modelCall = modelGateway.generateJson.mock.calls[0][0];
+    expect(modelCall.messages[0].content).toContain("正式需求唯一 plan agent");
+    expect(modelCall.messages[0].content).toContain("局部修改的计划属于 Patch Agent");
     expect(modelCall.messages[0].content).toContain("Vibe Coding Skill 融合规则");
     expect(modelCall.messages[0].content).toContain("obsidian-bases");
     expect(result.data.requirementMode).toBe("formal_requirement");
+    expect(result.data.summary).toContain("局部修改另走 PatchPlan");
     expect(result.data.sourceSummary.assumptions).toContain("本轮需按 Vibe Coding Skills 执行：obsidian-bases");
     expect(result.data.deliverables).toEqual({
       productDesignState: true,
@@ -104,5 +107,6 @@ describe("ProductPlannerAgentService", () => {
       }),
     );
     expect(result.data.agentSequence[0].input).toContain("VibeCodingSkillInstructions");
+    expect(result.data.agentSequence[0].gate).toContain("不规划局部 PatchPlan");
   });
 });

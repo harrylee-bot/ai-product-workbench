@@ -572,7 +572,7 @@ const VIBE_RUN_STEPS = [
   { step: "intent_detection", title: "理解意图", agent: "Intent Agent", detail: "识别用户目标、选区和是否进入生成链路" },
   { step: "knowledge_retrieval", title: "检索知识", agent: "Knowledge Agent", detail: "加载知识库、附件和 Vibe Coding skills" },
   { step: "requirement_analysis", title: "分析需求", agent: "Requirement Analyst", detail: "判断需求完整度、缺口、冲突和澄清问题" },
-  { step: "product_planning", title: "规划方案", agent: "Product Planner", detail: "生成正式需求执行计划和下游 agent 顺序" },
+  { step: "product_planning", title: "规划方案", agent: "Product Planner", detail: "正式需求唯一 plan agent，生成 ProductBuildPlan 和下游 agent 顺序" },
   { step: "product_design", title: "生成产品状态", agent: "Product Designer", detail: "把计划落到 ProductDesignState 唯一事实源" },
   { step: "prd_generation", title: "生成 PRD", agent: "PRD Writer", detail: "只基于 ProductDesignState 输出结构化 PRD" },
   { step: "prototype_design", title: "设计原型结构", agent: "Prototype Designer", detail: "只基于 ProductDesignState 输出 PrototypeSpec" },
