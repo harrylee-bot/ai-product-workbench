@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import {
   KnowledgeCandidateSource,
   ProductDesignStateStatus,
@@ -18,6 +18,7 @@ import type {
 import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
 import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
+import { QaService } from "./qa.service";
 
 type RequirementDocumentRecord = {
   id: string;
@@ -44,8 +45,12 @@ export class RequirementDocumentService {
     private readonly prisma: PrismaService,
     private readonly stateService: ProductDesignStateService,
     private readonly prdWriterAgent: PrdWriterAgentService,
+    @Optional()
     private readonly knowledgeExtractorAgent?: KnowledgeExtractorAgentService,
+    @Optional()
     private readonly knowledgeCandidateService?: KnowledgeCandidateService,
+    @Optional()
+    private readonly qaService?: QaService,
   ) {}
 
   async generateForUser(
@@ -165,6 +170,9 @@ export class RequirementDocumentService {
   async confirmForUser(user: AuthenticatedUser, documentId: string, reason?: string) {
     const current = await this.getAccessibleDocument(user, documentId);
     this.assertOwnerMutation(user, current.project.ownerId);
+    const qaGate = this.qaService
+      ? await this.qaService.assertGateAllows(user, current.projectId, "confirm_artifacts")
+      : undefined;
     const updated = await this.prisma.requirementDocument.update({
       where: { id: documentId },
       data: {
@@ -174,8 +182,10 @@ export class RequirementDocumentService {
     });
     const document = this.toDocumentItem(updated as RequirementDocumentRecord);
     const version = await this.createVersion(document, user.id, reason ?? "用户确认 PRD");
-    const knowledgeCandidates = await this.extractKnowledgeCandidatesAfterConfirm(user.id, document);
-    return { document, version, knowledgeCandidates };
+    const knowledgeCandidates = qaGate && !qaGate.allowPersistKnowledge
+      ? { items: [], qaGate }
+      : await this.extractKnowledgeCandidatesAfterConfirm(user.id, document);
+    return { document, version, knowledgeCandidates, qaGate };
   }
 
   private async extractKnowledgeCandidatesAfterConfirm(userId: string, document: RequirementDocument) {

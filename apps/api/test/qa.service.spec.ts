@@ -2,7 +2,7 @@ import { KnowledgeType, ProjectStatus, QAReportStatus, QAReportTrigger, UserRole
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderPrdFromState } from "../src/ai/agents/prd-writer-agent.service";
 import { renderPrototypeSpecFromState } from "../src/ai/agents/prototype-designer-agent.service";
-import type { ProductDesignState, RequirementDocument } from "../src/ai/ai-vibe.types";
+import type { ProductDesignState, QAReport, RequirementDocument } from "../src/ai/ai-vibe.types";
 import { QaRuleCheckService } from "../src/ai/qa-rule-check.service";
 import { QaService } from "../src/ai/qa.service";
 
@@ -111,6 +111,16 @@ describe("Module 13 QA services", () => {
     expect(report.status).toBe("failed");
     expect(report.blockingCount).toBeGreaterThanOrEqual(3);
     expect(report.passed).toBe(false);
+    expect(report.gate).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        allowConfirmArtifacts: false,
+        allowPersistKnowledge: false,
+        allowExportOrPublish: false,
+        shouldReturnToPatch: true,
+        requiredActions: ["return_to_patch", "run_qa"],
+      }),
+    );
     expect(prisma.qAReport.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         projectId: "project-1",
@@ -245,6 +255,72 @@ describe("Module 13 QA services", () => {
       }),
     }));
   });
+
+  it("evaluates QA gate decisions for passed, warning, failed, and missing reports", () => {
+    const service = new QaService({} as never, new QaRuleCheckService(), {} as never, {} as never);
+
+    expect(service.evaluateGate(qaReport({ status: "passed" }))).toEqual(
+      expect.objectContaining({
+        status: "open",
+        allowConfirmArtifacts: true,
+        allowPersistKnowledge: true,
+        allowExportOrPublish: true,
+        shouldReturnToPatch: false,
+      }),
+    );
+
+    expect(service.evaluateGate(qaReport({
+      status: "warning",
+      minorCount: 1,
+      issues: [{
+        id: "minor-1",
+        checkType: "prd_completeness",
+        severity: "minor",
+        title: "文案待优化",
+        description: "局部文案需要后续调整。",
+        status: "open",
+      }],
+    }))).toEqual(
+      expect.objectContaining({
+        status: "warning",
+        allowConfirmArtifacts: true,
+        allowPersistKnowledge: false,
+        allowExportOrPublish: false,
+        shouldReturnToPatch: false,
+        requiredActions: ["run_qa"],
+      }),
+    );
+
+    expect(service.evaluateGate(qaReport({
+      status: "failed",
+      blockingCount: 1,
+      issues: [{
+        id: "blocking-1",
+        checkType: "state_prd_consistency",
+        severity: "blocking",
+        title: "PRD 与 State 不一致",
+        description: "PRD 缺少核心规则。",
+        status: "open",
+      }],
+    }))).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        allowConfirmArtifacts: false,
+        allowPersistKnowledge: false,
+        allowExportOrPublish: false,
+        shouldReturnToPatch: true,
+        requiredActions: ["return_to_patch", "run_qa"],
+      }),
+    );
+
+    expect(service.evaluateGate(null)).toEqual(
+      expect.objectContaining({
+        status: "blocked",
+        allowConfirmArtifacts: false,
+        requiredActions: ["run_qa"],
+      }),
+    );
+  });
 });
 
 function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignState {
@@ -327,5 +403,41 @@ function toRequirementDocument(state: ProductDesignState, id: string): Requireme
     updatedBy: "user-1",
     createdAt: "2026-06-21T08:00:00.000Z",
     updatedAt: "2026-06-21T08:00:00.000Z",
+  };
+}
+
+function qaReport(overrides: Partial<QAReport> = {}): QAReport {
+  return {
+    id: "qa-1",
+    projectId: "project-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 2,
+    status: "passed",
+    trigger: "manual",
+    checkTypes: ["state_schema"],
+    summary: "QA 通过",
+    issues: [],
+    blockingCount: 0,
+    majorCount: 0,
+    minorCount: 0,
+    infoCount: 0,
+    createdBy: "user-1",
+    createdAt: "2026-06-21T08:00:00.000Z",
+    updatedAt: "2026-06-21T08:00:00.000Z",
+    passed: true,
+    gate: {
+      status: "open",
+      allowConfirmArtifacts: true,
+      allowPersistKnowledge: true,
+      allowExportOrPublish: true,
+      shouldReturnToPatch: false,
+      reportId: "qa-1",
+      reportStatus: "passed",
+      blockingReasons: [],
+      warnings: [],
+      requiredActions: [],
+      evaluatedAt: "2026-06-21T08:00:00.000Z",
+    },
+    ...overrides,
   };
 }

@@ -629,6 +629,27 @@ export type QAIssueSeverity = "blocking" | "major" | "minor" | "info";
 export type QAReportStatus = "running" | "passed" | "failed" | "warning";
 export type QAReportTrigger = "initial_generation" | "patch" | "manual" | "rollback" | "pre_confirm";
 export type QAIssueStatus = "open" | "resolved" | "ignored";
+export type QAGateStatus = "open" | "warning" | "blocked";
+export type QAGateAction =
+  | "confirm_artifacts"
+  | "persist_knowledge"
+  | "return_to_patch"
+  | "export_or_publish"
+  | "run_qa";
+
+export type QAGateDecision = {
+  status: QAGateStatus;
+  allowConfirmArtifacts: boolean;
+  allowPersistKnowledge: boolean;
+  allowExportOrPublish: boolean;
+  shouldReturnToPatch: boolean;
+  reportId?: string;
+  reportStatus?: QAReportStatus;
+  blockingReasons: string[];
+  warnings: string[];
+  requiredActions: QAGateAction[];
+  evaluatedAt: string;
+};
 
 export type QAIssue = {
   id: string;
@@ -672,6 +693,7 @@ export type QAReport = {
   createdAt: string;
   updatedAt: string;
   passed: boolean;
+  gate: QAGateDecision;
 };
 
 export type QAAgentOutput = {

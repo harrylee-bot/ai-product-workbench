@@ -42,11 +42,15 @@ describe("HTML prototype artifact module", () => {
   };
   const prototypeDesignerAgent = { run: vi.fn() };
   const prototypeCodeAgent = { run: vi.fn() };
+  const qaService = { assertGateAllows: vi.fn() };
   const service = new PrototypeService(
     prisma as never,
     stateService as never,
     prototypeDesignerAgent as never,
     prototypeCodeAgent as never,
+    undefined,
+    undefined,
+    qaService as never,
   );
   const user = {
     id: "user-1",
@@ -258,6 +262,25 @@ describe("HTML prototype artifact module", () => {
     const result = await service.getCurrentForUser(user, "project-1");
 
     expect(result.artifact).toBeNull();
+  });
+
+  it("blocks prototype confirmation when QA gate does not allow artifact confirmation", async () => {
+    qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));
+    prisma.prototypeArtifact.findUnique.mockResolvedValue({
+      ...artifactRecord({
+        id: "artifact-1",
+        prototypeSpecId: "spec-1",
+        htmlContent: "<!doctype html>",
+      }),
+      project: baseProject({ status: ProjectStatus.qa_failed }),
+    });
+
+    await expect(service.confirmForUser(user, "artifact-1", "确认原型")).rejects.toThrow("QA_GATE_BLOCKED");
+
+    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "project-1", "confirm_artifacts");
+    expect(prisma.prototypeSpecRecord.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(prisma.prototypeArtifact.update).not.toHaveBeenCalled();
+    expect(prisma.prototypeVersion.create).not.toHaveBeenCalled();
   });
 });
 

@@ -31,10 +31,16 @@ describe("PRD requirement document module", () => {
   const prdWriterAgent = {
     run: vi.fn(),
   };
+  const qaService = {
+    assertGateAllows: vi.fn(),
+  };
   const service = new RequirementDocumentService(
     prisma as never,
     stateService as never,
     prdWriterAgent as never,
+    undefined,
+    undefined,
+    qaService as never,
   );
   const user = {
     id: "user-1",
@@ -186,6 +192,23 @@ describe("PRD requirement document module", () => {
 
     expect(result.document?.id).toBe("prd-state");
     expect(prisma.requirementDocument.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("blocks PRD confirmation when QA gate does not allow artifact confirmation", async () => {
+    qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));
+    prisma.requirementDocument.findUnique.mockResolvedValue({
+      ...documentRecord({
+        id: "prd-1",
+        ...renderPrdFromState(baseState()),
+      }),
+      project: baseProject({ status: ProjectStatus.qa_failed }),
+    });
+
+    await expect(service.confirmForUser(user, "prd-1", "确认 PRD")).rejects.toThrow("QA_GATE_BLOCKED");
+
+    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "project-1", "confirm_artifacts");
+    expect(prisma.requirementDocument.update).not.toHaveBeenCalled();
+    expect(prisma.requirementDocumentVersion.create).not.toHaveBeenCalled();
   });
 });
 

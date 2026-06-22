@@ -25,6 +25,11 @@ export class ProjectQaController {
   latest(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
     return this.qaService.getLatestForUser(user, projectId);
   }
+
+  @Get("gate")
+  gate(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
+    return this.qaService.getGateForUser(user, projectId);
+  }
 }
 
 @Controller("projects/:projectId/qa-reports")

@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import {
   KnowledgeCandidateSource,
@@ -29,6 +30,7 @@ import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service
 import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
 import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
+import { QaService } from "./qa.service";
 
 type PrototypeSpecRecord = {
   id: string;
@@ -84,8 +86,12 @@ export class PrototypeService {
     private readonly stateService: ProductDesignStateService,
     private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
     private readonly prototypeCodeAgent: PrototypeCodeAgentService,
+    @Optional()
     private readonly knowledgeExtractorAgent?: KnowledgeExtractorAgentService,
+    @Optional()
     private readonly knowledgeCandidateService?: KnowledgeCandidateService,
+    @Optional()
+    private readonly qaService?: QaService,
   ) {}
 
   async generateForUser(
@@ -304,6 +310,9 @@ export class PrototypeService {
   async confirmForUser(user: AuthenticatedUser, artifactId: string, reason?: string) {
     const current = await this.getAccessibleArtifact(user, artifactId);
     this.assertOwnerMutation(user, current.project.ownerId);
+    const qaGate = this.qaService
+      ? await this.qaService.assertGateAllows(user, current.projectId, "confirm_artifacts")
+      : undefined;
     const specRecord = await this.prisma.prototypeSpecRecord.findUniqueOrThrow({
       where: { id: current.prototypeSpecId },
     });
@@ -314,8 +323,10 @@ export class PrototypeService {
     const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
     const artifact = this.toArtifactItem(updated as PrototypeArtifactRecord);
     const version = await this.createVersion(spec, artifact, user.id, reason ?? "用户确认原型");
-    const knowledgeCandidates = await this.extractKnowledgeCandidatesAfterConfirm(user.id, spec, artifact);
-    return { artifact, version, knowledgeCandidates };
+    const knowledgeCandidates = qaGate && !qaGate.allowPersistKnowledge
+      ? { items: [], qaGate }
+      : await this.extractKnowledgeCandidatesAfterConfirm(user.id, spec, artifact);
+    return { artifact, version, knowledgeCandidates, qaGate };
   }
 
   private async extractKnowledgeCandidatesAfterConfirm(
