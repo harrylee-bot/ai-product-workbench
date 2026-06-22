@@ -42,6 +42,18 @@ type VibeHandleMessageResponse = {
   status: "running";
 };
 
+type PatchApplyResponse = {
+  projectId: string;
+  conversationId: string;
+  userMessage?: Phase1Message & {
+    projectId?: string;
+    conversationId?: string;
+  };
+  assistantMessage?: Phase1Message | null;
+  runId: string;
+  status: "completed";
+};
+
 type VibeStreamEvent = {
   type: string;
   eventType?: string;
@@ -285,6 +297,34 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  const confirmPatch = useMutation({
+    mutationFn: (patchId: string) =>
+      apiRequest<PatchApplyResponse>("/patch/preview/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          patchId,
+          userConfirmation: "用户在工作台确认应用 Patch 候选",
+        }),
+      }),
+    onSuccess: async (response) => {
+      const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
+      const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
+
+      setDecision(null);
+      watchVibeRun(response.runId, responseProjectId, responseConversationId);
+      await Promise.all([
+        responseConversationId
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", responseConversationId] })
+          : Promise.resolve(),
+        responseProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", responseProjectId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "Patch 应用失败");
+    },
+  });
+
   const createConversation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId) {
@@ -453,6 +493,10 @@ function Phase1WorkspaceInner() {
         runState={runState}
         disabled={projectsQuery.isLoading}
         sending={sendMessage.isPending || Boolean(activeRunId)}
+        confirmingPatchId={confirmPatch.isPending ? confirmPatch.variables : undefined}
+        onConfirmPatch={async (patchId) => {
+          await confirmPatch.mutateAsync(patchId);
+        }}
         onSend={async (content) => {
           await sendMessage.mutateAsync(content);
         }}

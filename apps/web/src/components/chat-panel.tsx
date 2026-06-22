@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { Phase2DecisionView } from "@/components/preview-panel";
-import { Badge, EmptyState } from "@/components/ui";
+import { Badge, Button, EmptyState } from "@/components/ui";
 import { ChatComposer } from "./workspace-chat/chat-composer";
 
 export type Phase1Message = {
@@ -52,6 +52,8 @@ export function ChatPanel({
   runState,
   disabled,
   sending,
+  confirmingPatchId,
+  onConfirmPatch,
   onSend,
 }: {
   messages: Phase1Message[];
@@ -59,6 +61,8 @@ export function ChatPanel({
   runState?: VibeRunView | null;
   disabled?: boolean;
   sending?: boolean;
+  confirmingPatchId?: string;
+  onConfirmPatch?: (patchId: string) => Promise<void> | void;
   onSend: (content: string) => Promise<void> | void;
 }) {
   const displayRun = runState ?? (decision ? legacyRunStateFromDecision(decision) : null);
@@ -103,7 +107,12 @@ export function ChatPanel({
           />
         )}
         {displayRun ? (
-          <ExecutionPathCard runState={displayRun} running={Boolean(running)} />
+          <ExecutionPathCard
+            runState={displayRun}
+            running={Boolean(running)}
+            confirmingPatchId={confirmingPatchId}
+            onConfirmPatch={onConfirmPatch}
+          />
         ) : null}
       </div>
       <ChatComposer disabled={disabled} sending={sending} onSend={onSend} />
@@ -114,14 +123,20 @@ export function ChatPanel({
 function ExecutionPathCard({
   runState,
   running,
+  confirmingPatchId,
+  onConfirmPatch,
 }: {
   runState: VibeRunView;
   running: boolean;
+  confirmingPatchId?: string;
+  onConfirmPatch?: (patchId: string) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
   const completed = runState.status === "completed";
   const waitingForConfirmation = runState.status === "waiting_confirmation";
   const failed = runState.status === "failed";
+  const canConfirmPatch = waitingForConfirmation && Boolean(runState.patchId && onConfirmPatch);
+  const confirmingPatch = Boolean(runState.patchId && confirmingPatchId === runState.patchId);
   const activeStep = runState.steps.find((step) => step.status === "running")
     ?? lastActiveStep(runState.steps)
     ?? runState.steps[0];
@@ -167,6 +182,24 @@ function ExecutionPathCard({
           style={{ width: `${progress}%` }}
         />
       </div>
+
+      {canConfirmPatch ? (
+        <div className="flex items-center justify-between gap-3 border-t border-amber-100 bg-amber-50 px-3 py-2">
+          <span className="min-w-0 truncate text-xs text-amber-900">
+            {runState.patchPreviewMessage ?? "确认后将应用 Patch 并重新生成 PRD、原型和 QA。"}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            disabled={confirmingPatch}
+            onClick={() => runState.patchId ? void onConfirmPatch?.(runState.patchId) : undefined}
+            title="确认应用 Patch"
+          >
+            {confirmingPatch ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            {confirmingPatch ? "应用中" : "应用 Patch"}
+          </Button>
+        </div>
+      ) : null}
 
       {open ? (
         <div className="border-t border-gray-200 bg-gray-50 px-3 py-2.5">
