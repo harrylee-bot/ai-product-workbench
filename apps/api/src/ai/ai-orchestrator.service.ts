@@ -49,6 +49,10 @@ import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { ExportService } from "./export.service";
 import { PatchService } from "./patch.service";
+import {
+  projectStatusForCompletedArtifacts,
+  projectStatusFromProductDesignState,
+} from "./workspace-state-machine";
 
 type OrchestratorInput = {
   context: AgentRunContext;
@@ -420,7 +424,11 @@ export class AiOrchestratorService {
         },
       };
 
-      await this.finishRun(context, result, qa.data.passed ? ProjectStatus.prototype_ready : ProjectStatus.qa_failed);
+      await this.finishRun(
+        context,
+        result,
+        projectStatusForCompletedArtifacts({ productDesignState: state, qaReport: qa.data }),
+      );
       return result;
     } catch (error) {
       await this.runLog.failRun(context.runId, error);
@@ -638,7 +646,7 @@ export class AiOrchestratorService {
     await this.finishRun(
       context,
       result,
-      context.currentProjectStatus ?? projectStatusFromState(context.productDesignState),
+      context.currentProjectStatus ?? projectStatusFromProductDesignState(context.productDesignState),
     );
     return result;
   }
@@ -691,11 +699,4 @@ function stateSummary(state: ProductDesignState) {
     },
     updatedAt: state.updatedAt,
   };
-}
-
-function projectStatusFromState(state: ProductDesignState | undefined): ProjectStatus {
-  if (state?.status === ProductDesignStateStatus.prototype_ready) return ProjectStatus.prototype_ready;
-  if (state?.status === ProductDesignStateStatus.prd_ready) return ProjectStatus.prd_ready;
-  if (state?.status === ProductDesignStateStatus.qa_failed) return ProjectStatus.qa_failed;
-  return ProjectStatus.draft;
 }

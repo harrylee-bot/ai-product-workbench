@@ -22,6 +22,7 @@ import type {
   ProductDesignState,
   PrototypeSpec,
 } from "./ai-vibe.types";
+import { projectStatusFromProductDesignState } from "./workspace-state-machine";
 
 type StateArrayKey =
   | "targetUsers"
@@ -618,6 +619,14 @@ export class ProductDesignStateService {
     });
 
     const after = this.toStateItem(updated as ProductDesignStateRecord);
+    await this.prisma.project.update({
+      where: { id: after.projectId },
+      data: {
+        currentProductDesignStateId: after.id,
+        status: projectStatusFromProductDesignState(after),
+        lastActivityAt: new Date(),
+      },
+    });
     await this.writeChangeLog({
       projectId: after.projectId,
       stateId: after.id,

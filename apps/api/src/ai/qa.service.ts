@@ -32,6 +32,7 @@ import type {
 import { QaAgentService } from "./agents/qa-agent.service";
 import { evaluateQaGate, isQaGateActionAllowed } from "./qa-gate.helpers";
 import { DEFAULT_CHECK_TYPES, QaRuleCheckService } from "./qa-rule-check.service";
+import { projectStatusAfterQa } from "./workspace-state-machine";
 
 type RunQaOptions = {
   trigger: QAReportTrigger;
@@ -259,7 +260,11 @@ export class QaService {
       where: { id: projectId },
       data: {
         latestQaReportId: report.id,
-        status: status === "failed" ? ProjectStatus.qa_failed : project.status === ProjectStatus.qa_failed ? ProjectStatus.prototype_ready : project.status,
+        status: projectStatusAfterQa({
+          qaStatus: status,
+          currentProjectStatus: project.status,
+          productDesignState: state,
+        }),
         lastActivityAt: new Date(),
       },
     });

@@ -47,6 +47,7 @@ import { PrototypeService } from "./prototype.service";
 import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
+import { projectStatusForCompletedArtifacts } from "./workspace-state-machine";
 
 type CreatePatchInput = {
   conversationId: string;
@@ -959,7 +960,12 @@ export class PatchService {
       await this.runLog.completeRun(input.runId, result, message);
       await this.prisma.project.update({
         where: { id: input.projectId },
-        data: { status: qa.data.passed ? ProjectStatus.prototype_ready : ProjectStatus.qa_failed },
+        data: {
+          status: projectStatusForCompletedArtifacts({
+            productDesignState: stateWithArtifacts,
+            qaReport: qa.data,
+          }),
+        },
       });
       return { patchRecord, patchPreview: completedPatchPreview, assistantMessage, result };
     } catch (error) {
