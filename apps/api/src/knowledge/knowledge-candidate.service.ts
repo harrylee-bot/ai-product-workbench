@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   AdminAuditTargetType,
   KnowledgeCandidateSource,
@@ -6,10 +6,13 @@ import {
   KnowledgeSource,
   KnowledgeStatus,
   Prisma,
+  ProjectStatus,
 } from "@prisma/client";
 import { AdminAuditService } from "../admin/admin-audit.service";
 import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
 import { toInputJson } from "../ai/ai-vibe.helpers";
+import type { QAIssue, QAReportStatus } from "../ai/ai-vibe.types";
+import { evaluateQaGate, isQaGateActionAllowed } from "../ai/qa-gate.helpers";
 import { PrismaService } from "../prisma/prisma.service";
 import type {
   ApproveKnowledgeCandidateDto,
@@ -140,6 +143,7 @@ export class KnowledgeCandidateService {
     meta?: RequestMeta,
   ) {
     const candidate = await this.getPendingCandidate(candidateId);
+    await this.assertQaAllowsPersistKnowledge(candidate);
     if (dto.categoryId) await this.assertCategory(dto.categoryId);
 
     const { item, reviewed } = await this.prisma.$transaction(async (tx) => {
@@ -218,6 +222,7 @@ export class KnowledgeCandidateService {
     meta?: RequestMeta,
   ) {
     const candidate = await this.getPendingCandidate(candidateId);
+    await this.assertQaAllowsPersistKnowledge(candidate);
     const target = await this.prisma.knowledgeItem.findUnique({
       where: { id: dto.targetKnowledgeItemId },
     });
@@ -312,6 +317,37 @@ export class KnowledgeCandidateService {
       throw new BadRequestException("KNOWLEDGE_CANDIDATE_ALREADY_REVIEWED");
     }
     return candidate;
+  }
+
+  private async assertQaAllowsPersistKnowledge(candidate: KnowledgeCandidateRow) {
+    const project = await this.prisma.project.findUnique({ where: { id: candidate.projectId } });
+    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
+      throw new NotFoundException("PROJECT_NOT_FOUND");
+    }
+    const report = project.latestQaReportId
+      ? await this.prisma.qAReport.findFirst({ where: { id: project.latestQaReportId, projectId: candidate.projectId } })
+      : await this.prisma.qAReport.findFirst({ where: { projectId: candidate.projectId }, orderBy: { createdAt: "desc" } });
+    const qaGate = evaluateQaGate(report
+      ? {
+        id: report.id,
+        status: report.status as QAReportStatus,
+        blockingCount: report.blockingCount,
+        majorCount: report.majorCount,
+        minorCount: report.minorCount,
+        infoCount: report.infoCount,
+        issues: Array.isArray(report.issues) ? report.issues as QAIssue[] : [],
+      }
+      : null);
+    if (!isQaGateActionAllowed(qaGate, "persist_knowledge")) {
+      throw new ForbiddenException({
+        code: "QA_GATE_BLOCKED",
+        message: "QA_GATE_BLOCKED",
+        action: "persist_knowledge",
+        candidateId: candidate.id,
+        qaGate,
+      });
+    }
+    return qaGate;
   }
 
   private async assertCategory(categoryId: string) {

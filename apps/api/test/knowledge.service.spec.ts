@@ -6,10 +6,12 @@ import {
   KnowledgeSource,
   KnowledgeStatus,
   KnowledgeType,
+  ProjectStatus,
+  QAReportStatus,
   UserRole,
   UserStatus,
 } from "@prisma/client";
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeCandidateService } from "../src/knowledge/knowledge-candidate.service";
 import { KnowledgeItemService } from "../src/knowledge/knowledge-item.service";
@@ -43,6 +45,12 @@ describe("Knowledge module services", () => {
     knowledgeRetrievalLog: {
       create: vi.fn(),
     },
+    project: {
+      findUnique: vi.fn(),
+    },
+    qAReport: {
+      findFirst: vi.fn(),
+    },
     $transaction: vi.fn(),
   };
   const user = {
@@ -64,6 +72,13 @@ describe("Knowledge module services", () => {
       ...data,
       createdAt: now,
     }));
+    prisma.project.findUnique.mockResolvedValue({
+      id: "project-1",
+      status: ProjectStatus.prototype_ready,
+      deletedAt: null,
+      latestQaReportId: "qa-pass",
+    });
+    prisma.qAReport.findFirst.mockResolvedValue(qaReportRow());
     prisma.$transaction.mockImplementation(async (input) => {
       if (typeof input === "function") return input(prisma);
       return Promise.all(input);
@@ -212,6 +227,33 @@ describe("Knowledge module services", () => {
     await expect(candidateService.rejectCandidate(user, "candidate-1", {
       reviewComment: "重复审核",
     })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("blocks knowledge persistence when the latest QA gate rejects persist_knowledge", async () => {
+    const candidate = candidateRow();
+    prisma.knowledgeCandidate.findUnique.mockResolvedValue(candidate);
+    prisma.qAReport.findFirst.mockResolvedValue(qaReportRow({
+      status: QAReportStatus.failed,
+      majorCount: 1,
+      issues: [{
+        id: "qa-major",
+        checkType: "knowledge_rule_compliance",
+        severity: "major",
+        title: "知识规则未体现",
+        description: "ProductDesignState 未体现强规则。",
+        status: "open",
+      }],
+    }));
+
+    await expect(candidateService.approveCandidate(user, "candidate-1", {
+      priority: KnowledgePriority.high,
+    })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.knowledgeItem.create).not.toHaveBeenCalled();
+
+    await expect(candidateService.mergeCandidate(user, "candidate-1", {
+      targetKnowledgeItemId: "knowledge-target",
+    })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.knowledgeItem.findUnique).not.toHaveBeenCalled();
   });
 
   it("skips duplicate candidates from the same confirmed artifact", async () => {
@@ -395,5 +437,19 @@ function candidateRow(input: Record<string, unknown> = {}) {
     createdByRunId: input.createdByRunId ? String(input.createdByRunId) : "run-1",
     createdAt: input.createdAt instanceof Date ? input.createdAt : new Date("2026-06-21T08:00:00Z"),
     updatedAt: input.updatedAt instanceof Date ? input.updatedAt : new Date("2026-06-21T08:00:00Z"),
+  };
+}
+
+function qaReportRow(input: Record<string, unknown> = {}) {
+  return {
+    id: String(input.id ?? "qa-pass"),
+    projectId: String(input.projectId ?? "project-1"),
+    status: input.status ?? QAReportStatus.passed,
+    blockingCount: Number(input.blockingCount ?? 0),
+    majorCount: Number(input.majorCount ?? 0),
+    minorCount: Number(input.minorCount ?? 0),
+    infoCount: Number(input.infoCount ?? 0),
+    issues: input.issues ?? [],
+    createdAt: input.createdAt instanceof Date ? input.createdAt : new Date("2026-06-21T08:00:00Z"),
   };
 }
