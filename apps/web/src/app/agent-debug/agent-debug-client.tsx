@@ -381,7 +381,7 @@ function AgentDebugContent() {
 
 function AgentRunDetailView({ run }: { run: AgentRunDetail }) {
   const normalizedEvents = useMemo(() => run.events.map(normalizeEvent), [run.events]);
-  const debugArtifacts = useMemo(() => buildDebugArtifacts(normalizedEvents), [normalizedEvents]);
+  const debugArtifacts = useMemo(() => buildDebugArtifacts(normalizedEvents, run.steps), [normalizedEvents, run.steps]);
 
   return (
     <div className="mx-auto flex max-w-[1280px] flex-col gap-4 p-5">
@@ -449,21 +449,28 @@ function AgentRunDetailView({ run }: { run: AgentRunDetail }) {
 
 type DebugArtifacts = {
   knowledgeHits: Array<Record<string, unknown>>;
+  qaGates: Array<Record<string, unknown>>;
   qaIssues: Array<Record<string, unknown>>;
+  fallbackEvents: Array<Record<string, unknown>>;
   patchEvents: Array<Record<string, unknown>>;
 };
 
 function DebugArtifactsPanel({ artifacts }: { artifacts: DebugArtifacts }) {
-  const hasAny = artifacts.knowledgeHits.length || artifacts.qaIssues.length || artifacts.patchEvents.length;
+  const hasAny =
+    artifacts.knowledgeHits.length ||
+    artifacts.qaGates.length ||
+    artifacts.qaIssues.length ||
+    artifacts.fallbackEvents.length ||
+    artifacts.patchEvents.length;
   return (
     <section className="border border-gray-200 bg-white">
       <SectionTitle
         icon={<Braces className="h-4 w-4" />}
         title="调试摘要"
-        subtitle="从事件流自动提取知识命中、QA 问题和 Patch 预览"
+        subtitle="从步骤和事件流自动提取知识命中、QA Gate、Fallback 原因、QA 问题和 Patch Diff"
       />
       {hasAny ? (
-        <div className="grid gap-px bg-gray-200 xl:grid-cols-3">
+        <div className="grid gap-px bg-gray-200 xl:grid-cols-2 2xl:grid-cols-5">
           <DebugArtifactColumn
             title="知识命中"
             empty="未记录知识命中"
@@ -473,6 +480,26 @@ function DebugArtifactsPanel({ artifacts }: { artifacts: DebugArtifacts }) {
                 <div className="truncate text-sm font-semibold text-gray-950">{toText(item.title, "未命名知识")}</div>
                 <div className="mt-1 truncate text-xs text-gray-500">
                   {toText(item.type, "knowledge")} · {toText(item.knowledgeId ?? item.sourceId, toText(item.id, "-"))}
+                </div>
+              </>
+            )}
+          />
+          <DebugArtifactColumn
+            title="QA Gate"
+            empty="未记录 QA 闸门"
+            items={artifacts.qaGates}
+            renderItem={(item) => (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className={clsx("h-2 w-2 rounded-full", qaGateClass(toText(item.status, "blocked")))} />
+                  <div className="truncate text-sm font-semibold text-gray-950">{qaGateLabel(toText(item.status, "blocked"))}</div>
+                </div>
+                <div className="mt-1 text-xs leading-5 text-gray-500">
+                  {truthLabel(item.allowConfirmArtifacts, "确认")}
+                  {" / "}
+                  {truthLabel(item.allowPersistKnowledge, "知识")}
+                  {" / "}
+                  {truthLabel(item.allowExportOrPublish, "导出")}
                 </div>
               </>
             )}
@@ -496,25 +523,64 @@ function DebugArtifactsPanel({ artifacts }: { artifacts: DebugArtifacts }) {
             )}
           />
           <DebugArtifactColumn
-            title="Patch Diff / Preview"
-            empty="未记录 Patch 预览"
-            items={artifacts.patchEvents}
+            title="Fallback 原因"
+            empty="未记录 Fallback"
+            items={artifacts.fallbackEvents}
             renderItem={(item) => (
               <>
-                <div className="truncate text-sm font-semibold text-gray-950">
-                  {toText(item.title, "Patch 事件")}
+                <div className="flex items-center gap-2">
+                  <FallbackLevelPill level={toText(item.level, "degraded_preview")} />
+                  <div className="min-w-0 truncate text-sm font-semibold text-gray-950">{agentLabel(toText(item.agentName, "agent"))}</div>
                 </div>
-                <div className="mt-1 truncate text-xs text-gray-500">
-                  {toText(item.status, "unknown")} · operations {toText(item.operationCount, "0")}
+                <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">
+                  {toText(item.reason, toText(item.userMessage, "该步骤使用降级结果"))}
                 </div>
               </>
             )}
+          />
+          <DebugArtifactColumn
+            title="Patch Diff / Preview"
+            empty="未记录 Patch 预览"
+            items={artifacts.patchEvents}
+            renderItem={(item) => <PatchDebugItem item={item} />}
           />
         </div>
       ) : (
         <div className="px-5 py-8 text-sm text-gray-500">事件流里暂无可提取的调试摘要。</div>
       )}
     </section>
+  );
+}
+
+function PatchDebugItem({ item }: { item: Record<string, unknown> }) {
+  const [open, setOpen] = useState(false);
+  const detail = asRecord(item.detail);
+  return (
+    <>
+      <div className="truncate text-sm font-semibold text-gray-950">
+        {toText(item.title, "Patch 事件")}
+      </div>
+      <div className="mt-1 truncate text-xs text-gray-500">
+        {toText(item.status, "unknown")} · operations {toText(item.operationCount, "0")}
+      </div>
+      {detail ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen((current) => !current)}
+            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-950"
+          >
+            {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            查看 Diff
+          </button>
+          {open ? (
+            <div className="mt-2 max-h-72 overflow-auto rounded-md border border-gray-200 bg-white p-2">
+              <JsonViewer value={detail} />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -874,9 +940,11 @@ function normalizeEvent(event: StreamEvent): NormalizedEvent {
   };
 }
 
-function buildDebugArtifacts(events: NormalizedEvent[]): DebugArtifacts {
+function buildDebugArtifacts(events: NormalizedEvent[], steps: AgentStep[]): DebugArtifacts {
   const knowledgeHits: Array<Record<string, unknown>> = [];
+  const qaGates: Array<Record<string, unknown>> = [];
   const qaIssues: Array<Record<string, unknown>> = [];
+  const fallbackEvents: Array<Record<string, unknown>> = [];
   const patchEvents: Array<Record<string, unknown>> = [];
 
   for (const event of events) {
@@ -888,7 +956,13 @@ function buildDebugArtifacts(events: NormalizedEvent[]): DebugArtifacts {
     }
 
     if (event.type === "qa_completed" || event.step === "qa_check") {
+      const qaGate = extractQaGate(data);
+      if (qaGate) qaGates.push(qaGate);
       qaIssues.push(...extractQaIssues(data));
+    }
+
+    if (event.type === "fallback_used") {
+      fallbackEvents.push(extractFallbackEvent(event, data));
     }
 
     if (event.type === "patch_plan_created" || event.type === "patch_completed") {
@@ -896,9 +970,22 @@ function buildDebugArtifacts(events: NormalizedEvent[]): DebugArtifacts {
     }
   }
 
+  for (const step of steps) {
+    const fallback = extractFallbackFromSummary(step.outputSummary);
+    if (fallback) {
+      fallbackEvents.push({
+        id: step.id,
+        agentName: step.agentName,
+        ...fallback,
+      });
+    }
+  }
+
   return {
     knowledgeHits: uniqueRecords(knowledgeHits, "knowledgeId", "sourceId", "id", "title"),
+    qaGates: uniqueRecords(qaGates, "reportId", "status"),
     qaIssues: uniqueRecords(qaIssues, "id", "title"),
+    fallbackEvents: uniqueRecords(fallbackEvents, "id", "agentName", "errorCode", "reason"),
     patchEvents,
   };
 }
@@ -931,17 +1018,44 @@ function extractQaIssues(data: Record<string, unknown>) {
   return qaReport ? arrayOfRecords(qaReport.issues) : [];
 }
 
+function extractQaGate(data: Record<string, unknown>) {
+  return asRecord(data.qaGate) ?? asRecord(asRecord(data.qaReport)?.gate) ?? asRecord(asRecord(data.report)?.gate);
+}
+
+function extractFallbackEvent(event: NormalizedEvent, data: Record<string, unknown>) {
+  return {
+    id: event.id,
+    agentName: data.agentName ?? event.step,
+    level: data.level,
+    action: data.action,
+    errorCode: data.errorCode,
+    reason: data.reason,
+    userMessage: data.userMessage ?? event.content,
+  };
+}
+
 function extractPatchEvent(event: NormalizedEvent, data: Record<string, unknown>) {
   const result = asRecord(data.result);
   const patchPreview = asRecord(data.patchPreview) ?? asRecord(result?.patchPreview);
   const patchPlan = asRecord(data.patchPlan) ?? asRecord(result?.patchPlan);
-  const operations = arrayOfRecords(patchPlan?.operations);
+  const operations = arrayOfRecords(patchPlan?.operations).length
+    ? arrayOfRecords(patchPlan?.operations)
+    : arrayOfRecords(patchPreview?.operations);
+  const diff = asRecord(patchPreview?.diff);
+  const riskPanel = asRecord(patchPreview?.riskPanel);
   return {
     id: toText(data.patchId ?? data.patchRecordId ?? patchPreview?.id ?? event.id, event.id),
     title: toText(patchPreview?.title ?? patchPlan?.summary ?? event.content, eventLabel(event.type)),
     status: toText(patchPreview?.status ?? data.status ?? "recorded", "recorded"),
     operationCount: String(operations.length),
     eventType: event.type,
+    detail: {
+      operations,
+      diff,
+      riskPanel,
+      regenerationPlan: patchPlan?.regenerationPlan,
+      risks: patchPlan?.risks,
+    },
   };
 }
 
@@ -1081,6 +1195,22 @@ function qaSeverityClass(severity: string) {
   if (severity === "major") return "bg-orange-500";
   if (severity === "minor" || severity === "warning") return "bg-amber-500";
   return "bg-emerald-500";
+}
+
+function qaGateClass(status: string) {
+  if (status === "blocked") return "bg-red-500";
+  if (status === "warning") return "bg-amber-500";
+  return "bg-emerald-500";
+}
+
+function qaGateLabel(status: string) {
+  if (status === "blocked") return "阻断";
+  if (status === "warning") return "警告";
+  return "通过";
+}
+
+function truthLabel(value: unknown, label: string) {
+  return `${label}${value === false ? "禁止" : "允许"}`;
 }
 
 function formatDate(value?: string) {
