@@ -163,8 +163,41 @@ describe("Admin module services", () => {
         {
           id: "event-1",
           eventType: "qa_completed",
-          payload: { eventType: "qa_completed", payload: { data: { passed: true } } },
+          payload: {
+            eventType: "qa_completed",
+            payload: {
+              data: {
+                qaReport: {
+                  gate: { status: "warning", reportId: "qa-1" },
+                  issues: [
+                    {
+                      id: "issue-1",
+                      title: "需要复核",
+                      severity: "minor",
+                      status: "open",
+                    },
+                  ],
+                },
+              },
+            },
+          },
           createdAt: new Date("2026-06-21T08:00:04Z"),
+        },
+        {
+          id: "event-2",
+          eventType: "fallback_used",
+          payload: {
+            eventType: "fallback_used",
+            payload: {
+              data: {
+                agentName: "qa_agent",
+                level: "degraded_preview",
+                reason: "模型配置不可用，使用降级预览。",
+                errorCode: "MODEL_CONFIG_NOT_FOUND",
+              },
+            },
+          },
+          createdAt: new Date("2026-06-21T08:00:05Z"),
         },
       ],
     });
@@ -192,7 +225,22 @@ describe("Admin module services", () => {
         {
           eventType: "qa_completed",
         },
+        {
+          eventType: "fallback_used",
+        },
       ],
+      debugSummary: expect.objectContaining({
+        riskLevel: "warning",
+        stepCount: 1,
+        eventCount: 2,
+        modelCallCount: 1,
+        fallbackCount: 1,
+        fallbackLevels: ["degraded_preview"],
+        qaGateStatus: "warning",
+        qaIssueCount: 1,
+        minorIssueCount: 1,
+        lastEventType: "fallback_used",
+      }),
     });
   });
 });

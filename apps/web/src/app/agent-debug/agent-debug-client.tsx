@@ -66,8 +66,27 @@ type StreamEvent = {
   createdAt: string;
 };
 
+type AgentDebugSummary = {
+  riskLevel: "healthy" | "warning" | "blocked";
+  stepCount: number;
+  eventCount: number;
+  modelCallCount: number;
+  failedStepCount: number;
+  fallbackCount: number;
+  fallbackLevels: string[];
+  qaGateStatus?: string;
+  qaIssueCount: number;
+  blockingIssueCount: number;
+  majorIssueCount: number;
+  minorIssueCount: number;
+  knowledgeHitCount: number;
+  patchEventCount: number;
+  lastEventType?: string;
+};
+
 type AgentRunDetail = AgentRunItem & {
   result?: unknown;
+  debugSummary?: AgentDebugSummary;
   steps: AgentStep[];
   events: StreamEvent[];
 };
@@ -382,6 +401,7 @@ function AgentDebugContent() {
 function AgentRunDetailView({ run }: { run: AgentRunDetail }) {
   const normalizedEvents = useMemo(() => run.events.map(normalizeEvent), [run.events]);
   const debugArtifacts = useMemo(() => buildDebugArtifacts(normalizedEvents, run.steps), [normalizedEvents, run.steps]);
+  const summary = run.debugSummary;
 
   return (
     <div className="mx-auto flex max-w-[1280px] flex-col gap-4 p-5">
@@ -403,6 +423,10 @@ function AgentRunDetailView({ run }: { run: AgentRunDetail }) {
           <Metric label="Conversation ID" value={run.conversationId} mono />
           <Metric label="Trace ID" value={run.traceId} mono />
           <Metric label="耗时" value={formatDuration(run.durationMs)} />
+          <Metric label="QA Gate" value={summary?.qaGateStatus ? qaGateLabel(summary.qaGateStatus) : "-"} />
+          <Metric label="Fallback" value={summary ? String(summary.fallbackCount) : "-"} />
+          <Metric label="QA Issues" value={summary ? String(summary.qaIssueCount) : "-"} />
+          <Metric label="Model Calls" value={summary ? String(summary.modelCallCount) : "-"} />
         </div>
       </section>
 

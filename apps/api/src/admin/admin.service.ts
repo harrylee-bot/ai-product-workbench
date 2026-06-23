@@ -18,6 +18,33 @@ import {
 } from "./admin.dto";
 import { normalizePagination } from "./admin-audit.service";
 
+type AgentDebugStep = {
+  id: string;
+  agentName: string;
+  status: string;
+  outputSummary?: string;
+  modelCallLogId?: string;
+  modelCall?: unknown;
+  errorMessage?: string;
+};
+
+type AgentDebugEvent = {
+  id: string;
+  eventType: string;
+  payload: unknown;
+  createdAt: string;
+};
+
+type NormalizedAgentDebugEvent = {
+  id: string;
+  type: string;
+  step?: string;
+  content?: string;
+  data?: unknown;
+  raw?: unknown;
+  createdAt: string;
+};
+
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
@@ -331,6 +358,40 @@ export class AdminService {
       },
     });
     if (!run) throw new NotFoundException("ADMIN_LOG_NOT_FOUND");
+    const steps = run.steps.map((step) => ({
+      id: step.id,
+      agentName: step.agentName,
+      status: step.status,
+      inputSummary: step.inputSummary,
+      outputSummary: step.outputSummary ?? undefined,
+      modelCallLogId: step.modelCallLogId ?? undefined,
+      modelCall: step.modelCallLog
+        ? {
+            ...this.toModelCallItem(step.modelCallLog),
+            inputSummary: step.modelCallLog.inputSummary ?? undefined,
+            outputSummary: step.modelCallLog.outputSummary ?? undefined,
+          }
+        : undefined,
+      modelProviderId: step.modelProviderId ?? undefined,
+      modelName: step.modelName ?? undefined,
+      tokenUsage: step.tokenUsage ?? undefined,
+      startedAt: step.startedAt?.toISOString(),
+      endedAt: step.endedAt?.toISOString(),
+      durationMs: step.durationMs ?? undefined,
+      errorMessage: step.errorMessage ?? undefined,
+    }));
+    const events = run.streamEvents.map((event) => ({
+      id: event.id,
+      eventType: event.eventType,
+      payload: event.payload,
+      createdAt: event.createdAt.toISOString(),
+    }));
+    const debugSummary = buildAgentRunDebugSummary({
+      status: run.status,
+      result: run.result,
+      steps,
+      events,
+    });
 
     return {
       id: run.id,
@@ -351,34 +412,9 @@ export class AdminService {
       startedAt: run.startedAt.toISOString(),
       endedAt: run.endedAt?.toISOString(),
       durationMs: run.durationMs ?? undefined,
-      steps: run.steps.map((step) => ({
-        id: step.id,
-        agentName: step.agentName,
-        status: step.status,
-        inputSummary: step.inputSummary,
-        outputSummary: step.outputSummary ?? undefined,
-        modelCallLogId: step.modelCallLogId ?? undefined,
-        modelCall: step.modelCallLog
-          ? {
-              ...this.toModelCallItem(step.modelCallLog),
-              inputSummary: step.modelCallLog.inputSummary ?? undefined,
-              outputSummary: step.modelCallLog.outputSummary ?? undefined,
-            }
-          : undefined,
-        modelProviderId: step.modelProviderId ?? undefined,
-        modelName: step.modelName ?? undefined,
-        tokenUsage: step.tokenUsage ?? undefined,
-        startedAt: step.startedAt?.toISOString(),
-        endedAt: step.endedAt?.toISOString(),
-        durationMs: step.durationMs ?? undefined,
-        errorMessage: step.errorMessage ?? undefined,
-      })),
-      events: run.streamEvents.map((event) => ({
-        id: event.id,
-        eventType: event.eventType,
-        payload: event.payload,
-        createdAt: event.createdAt.toISOString(),
-      })),
+      debugSummary,
+      steps,
+      events,
     };
   }
 
@@ -758,6 +794,226 @@ function startOfToday() {
   const value = new Date();
   value.setHours(0, 0, 0, 0);
   return value;
+}
+
+function buildAgentRunDebugSummary(input: {
+  status: string;
+  result: unknown;
+  steps: AgentDebugStep[];
+  events: AgentDebugEvent[];
+}) {
+  const normalizedEvents = input.events.map(normalizeAgentDebugEvent);
+  const knowledgeHits: Record<string, unknown>[] = [];
+  const qaGates: Record<string, unknown>[] = [];
+  const qaIssues: Record<string, unknown>[] = [];
+  const fallbackEvents: Record<string, unknown>[] = [];
+  const patchEvents: Record<string, unknown>[] = [];
+
+  for (const event of normalizedEvents) {
+    const data = asRecord(event.data);
+    if (!data) continue;
+
+    if (event.step === "knowledge_retrieval" || event.type === "knowledge_candidate_created") {
+      knowledgeHits.push(...extractKnowledgeHits(data));
+    }
+
+    if (event.type === "qa_completed" || event.step === "qa_check") {
+      const qaGate = extractQaGate(data);
+      if (qaGate) qaGates.push(qaGate);
+      qaIssues.push(...extractQaIssues(data));
+    }
+
+    if (event.type === "fallback_used") {
+      fallbackEvents.push({
+        id: event.id,
+        agentName: data.agentName ?? event.step,
+        level: data.level,
+        action: data.action,
+        errorCode: data.errorCode,
+        reason: data.reason,
+        userMessage: data.userMessage ?? event.content,
+      });
+    }
+
+    if (event.type === "patch_plan_created" || event.type === "patch_completed" || event.type === "patch_failed") {
+      patchEvents.push({ id: event.id, type: event.type });
+    }
+  }
+
+  for (const step of input.steps) {
+    const fallback = extractFallbackFromSummary(step.outputSummary);
+    if (fallback) {
+      fallbackEvents.push({
+        id: step.id,
+        agentName: step.agentName,
+        ...fallback,
+      });
+    }
+  }
+
+  const result = asRecord(input.result);
+  if (result) {
+    const resultQaGate = extractQaGate(result);
+    if (resultQaGate) qaGates.push(resultQaGate);
+    qaIssues.push(...extractQaIssues(result));
+    fallbackEvents.push(...arrayOfRecords(result.fallbackEvents));
+    knowledgeHits.push(...arrayOfRecords(result.knowledgeCandidates));
+    if (asRecord(result.patchRecord) || asRecord(result.patchPlan) || asRecord(result.patchPreview)) {
+      patchEvents.push({ id: text(asRecord(result.patchRecord)?.id ?? "result_patch"), type: "result_patch" });
+    }
+  }
+
+  const uniqueFallbacks = uniqueRecords(fallbackEvents, "id", "agentName", "errorCode", "reason");
+  const uniqueQaGates = uniqueRecords(qaGates, "reportId", "status");
+  const uniqueQaIssues = uniqueRecords(qaIssues, "id", "title");
+  const uniqueKnowledgeHits = uniqueRecords(knowledgeHits, "knowledgeId", "sourceId", "id", "title");
+  const fallbackLevels = [...new Set(uniqueFallbacks.map((item) => text(item.level)).filter(Boolean))];
+  const latestQaGate = uniqueQaGates.at(-1);
+  const qaGateStatus = latestQaGate ? text(latestQaGate.status) || undefined : undefined;
+  const blockingIssueCount = uniqueQaIssues.filter((issue) => text(issue.severity) === "blocking").length;
+  const majorIssueCount = uniqueQaIssues.filter((issue) => text(issue.severity) === "major").length;
+  const minorIssueCount = uniqueQaIssues.filter((issue) => text(issue.severity) === "minor").length;
+  const riskLevel = resolveDebugRiskLevel({
+    runStatus: input.status,
+    qaGateStatus,
+    fallbackLevels,
+    blockingIssueCount,
+    majorIssueCount,
+    minorIssueCount,
+    fallbackCount: uniqueFallbacks.length,
+  });
+
+  return {
+    riskLevel,
+    stepCount: input.steps.length,
+    eventCount: input.events.length,
+    modelCallCount: input.steps.filter((step) => step.modelCallLogId || step.modelCall).length,
+    failedStepCount: input.steps.filter((step) => step.status === "failed").length,
+    fallbackCount: uniqueFallbacks.length,
+    fallbackLevels,
+    qaGateStatus,
+    qaIssueCount: uniqueQaIssues.length,
+    blockingIssueCount,
+    majorIssueCount,
+    minorIssueCount,
+    knowledgeHitCount: uniqueKnowledgeHits.length,
+    patchEventCount: uniqueRecords(patchEvents, "id", "type").length,
+    lastEventType: normalizedEvents.at(-1)?.type,
+  };
+}
+
+function normalizeAgentDebugEvent(event: AgentDebugEvent): NormalizedAgentDebugEvent {
+  const outer = asRecord(event.payload);
+  const payload = asRecord(outer?.payload) ?? outer;
+  return {
+    id: event.id,
+    type: text(payload?.eventType ?? payload?.type ?? outer?.eventType ?? event.eventType, event.eventType),
+    step: optionalText(payload?.step),
+    content: optionalText(payload?.content),
+    data: payload?.payload ?? payload?.data,
+    raw: event.payload,
+    createdAt: text(payload?.createdAt ?? event.createdAt, event.createdAt),
+  };
+}
+
+function extractKnowledgeHits(data: Record<string, unknown>) {
+  const buckets = [
+    "strongRules",
+    "defaultRules",
+    "referenceCases",
+    "designPatterns",
+    "prdWritingRules",
+    "prototypeRules",
+    "businessConcepts",
+  ];
+  const refs = buckets.flatMap((key) => arrayOfRecords(data[key]));
+  const skills = arrayOfRecords(data.agentSkills).map((skill) => ({
+    id: skill.id,
+    knowledgeId: `agent-skill:${text(skill.name, "unknown")}`,
+    title: `Vibe Coding Skill：${text(skill.name, "unknown")}`,
+    type: "agent_skill",
+    sourceId: skill.id,
+  }));
+  return [...refs, ...skills];
+}
+
+function extractQaIssues(data: Record<string, unknown>) {
+  const direct = arrayOfRecords(data.issues);
+  if (direct.length) return direct;
+  const qaReport = asRecord(data.qaReport) ?? asRecord(data.report);
+  return qaReport ? arrayOfRecords(qaReport.issues) : [];
+}
+
+function extractQaGate(data: Record<string, unknown>) {
+  return asRecord(data.qaGate) ?? asRecord(asRecord(data.qaReport)?.gate) ?? asRecord(asRecord(data.report)?.gate);
+}
+
+function extractFallbackFromSummary(value?: string) {
+  if (!value?.includes('"fallback"')) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return asRecord(parsed?.fallback);
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveDebugRiskLevel(input: {
+  runStatus: string;
+  qaGateStatus?: string;
+  fallbackLevels: string[];
+  blockingIssueCount: number;
+  majorIssueCount: number;
+  minorIssueCount: number;
+  fallbackCount: number;
+}) {
+  if (
+    input.runStatus === "failed"
+    || input.qaGateStatus === "blocked"
+    || input.blockingIssueCount > 0
+    || input.majorIssueCount > 0
+    || input.fallbackLevels.includes("model_unavailable")
+  ) {
+    return "blocked";
+  }
+  if (
+    input.qaGateStatus === "warning"
+    || input.minorIssueCount > 0
+    || input.fallbackCount > 0
+  ) {
+    return "warning";
+  }
+  return "healthy";
+}
+
+function uniqueRecords(items: Array<Record<string, unknown>>, ...keys: string[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keys.map((name) => text(item[name])).find(Boolean) ?? JSON.stringify(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function arrayOfRecords(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(asRecord(item)))
+    : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function text(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function optionalText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function countJsonArray(value: unknown) {
