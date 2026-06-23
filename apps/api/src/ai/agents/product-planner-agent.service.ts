@@ -62,12 +62,25 @@ export class ProductPlannerAgentService extends BaseAgentService<
       ...input.requirementAnalysis.knownFromKnowledge,
       ...knowledgeReferences(input.knowledgeContext).map((item) => item.title),
     ]);
-    const skillNames = input.knowledgeContext.agentSkills?.map((skill) => skill.name) ?? [];
-    const skillInputs = skillNames.length ? ["VibeCodingSkillInstructions"] : [];
+    const skillNames = unique([
+      ...(input.knowledgeContext.agentSkills?.map((skill) => skill.name) ?? []),
+      ...(input.knowledgeContext.skillRouting?.map((route) => route.skillName) ?? []),
+    ]);
+    const routedAgents = unique(
+      input.knowledgeContext.skillRouting?.flatMap((route) =>
+        route.appliesTo.map((target) => target.agentName)
+      ) ?? [],
+    );
+    const skillInputs = skillNames.length
+      ? input.knowledgeContext.skillRouting?.length
+        ? ["VibeCodingSkillInstructions", "KnowledgeContext.skillRouting"]
+        : ["VibeCodingSkillInstructions"]
+      : [];
     const assumptions = unique([
       ...input.requirementAnalysis.inferredByAI,
       "正式需求先落 ProductBuildPlan，再落 ProductDesignState，PRD、原型和 QA 均从同一 State 再生成。",
       skillNames.length ? `本轮需按 Vibe Coding Skills 执行：${skillNames.join("、")}` : "",
+      routedAgents.length ? `Skill 路由覆盖 Agent：${routedAgents.join("、")}` : "",
     ]);
     const openQuestions = unique([
       ...input.requirementAnalysis.missingCritical,
@@ -159,7 +172,8 @@ export class ProductPlannerAgentService extends BaseAgentService<
         "ProductDesignState、PRD、PrototypeSpec 和 HTML 是否围绕同一页面与状态范围",
         "用户明确事实、知识库规则和 AI 推断是否被正确标记",
         "默认态、成功态、禁用态和异常态是否都有验收标准",
-      ],
+        skillNames.length ? `Vibe Coding Skills 是否保留 sourcePath/knowledgeId 并进入 QA 检查：${skillNames.join("、")}` : "",
+      ].filter(Boolean),
       risks: inferRisks(input),
       assumptions,
     };

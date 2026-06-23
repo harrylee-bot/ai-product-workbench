@@ -82,8 +82,25 @@ describe("KnowledgeAgentService", () => {
     expect(result.data.prototypeRules[0].knowledgeId).toBe("knowledge-2");
     expect(result.data.prototypeRules[1].knowledgeId).toBe("agent-skill:obsidian-markdown");
     expect(result.data.agentSkills?.[0].name).toBe("obsidian-markdown");
+    expect(result.data.skillRouting?.[0]).toEqual(
+      expect.objectContaining({
+        skillName: "obsidian-markdown",
+        sourcePath: "/skills/obsidian-markdown/SKILL.md",
+        appliesTo: expect.arrayContaining([
+          expect.objectContaining({
+            agentName: AgentName.prd_writer_agent,
+            handoffField: expect.stringContaining("RequirementDocument.sections"),
+          }),
+          expect.objectContaining({
+            agentName: AgentName.qa_agent,
+            handoffField: expect.stringContaining("QAAgentOutput.issues"),
+          }),
+        ]),
+      }),
+    );
     expect(result.data.summary).toContain("命中 2 条");
     expect(result.data.summary).toContain("已加载 1 个");
+    expect(result.data.summary).toContain("skill 路由");
   });
 
   it("uses product planning knowledge profile for formal requirements", async () => {

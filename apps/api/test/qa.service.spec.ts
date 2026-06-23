@@ -27,6 +27,57 @@ describe("Module 13 QA services", () => {
     );
   });
 
+  it("flags Vibe Coding skills that were not preserved in ProductDesignState knowledgeRefs", () => {
+    const service = new QaRuleCheckService();
+    const knowledgeContext = {
+      ...emptyKnowledgeContext(),
+      agentSkills: [
+        {
+          id: "agent-skill:obsidian-markdown",
+          name: "obsidian-markdown",
+          description: "Create and edit Obsidian Flavored Markdown.",
+          sourcePath: "/skills/obsidian-markdown/SKILL.md",
+          contentPreview: "Use wikilinks.",
+          capabilities: ["Internal Links"],
+          triggerHints: ["wikilinks"],
+        },
+      ],
+    };
+
+    const missing = service.run({
+      productDesignState: baseState({ knowledgeRefs: [] }),
+      knowledgeContext,
+      checkTypes: ["knowledge_rule_compliance"],
+    });
+
+    expect(missing).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "qa_skill_reference_missing_obsidian-markdown",
+          severity: "major",
+          relatedStatePaths: ["knowledgeRefs"],
+          relatedKnowledgeIds: ["agent-skill:obsidian-markdown"],
+        }),
+      ]),
+    );
+
+    const preserved = service.run({
+      productDesignState: baseState({
+        knowledgeRefs: [
+          {
+            knowledgeId: "agent-skill:obsidian-markdown",
+            title: "Vibe Coding 可用技能：obsidian-markdown",
+            relatedPath: "/skills/obsidian-markdown/SKILL.md",
+          },
+        ],
+      }),
+      knowledgeContext,
+      checkTypes: ["knowledge_rule_compliance"],
+    });
+
+    expect(preserved.find((issue) => issue.id === "qa_skill_reference_missing_obsidian-markdown")).toBeUndefined();
+  });
+
   it("persists QAReport with issue counts and updates latestQaReportId", async () => {
     const now = new Date("2026-06-21T09:00:00Z");
     const prisma = {

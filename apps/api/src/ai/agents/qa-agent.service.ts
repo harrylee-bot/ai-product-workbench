@@ -109,6 +109,21 @@ export class QaAgentService extends BaseAgentService<QaAgentInput, QAAgentOutput
         });
       }
     }
+    for (const skill of input.knowledgeContext?.agentSkills ?? []) {
+      if (isSkillReferencedByState(skill, input.productDesignState)) continue;
+      issues.push({
+        id: `qa_agent_missing_skill_ref_${safeId(skill.name)}`,
+        checkType: "knowledge_rule_compliance",
+        severity: "major",
+        title: `Vibe Coding Skill 未落入 ProductDesignState：${skill.name}`,
+        description: "Knowledge Agent 已加载该 skill，但 ProductDesignState.knowledgeRefs 未保留对应 knowledgeId、sourcePath 或名称，后续 PRD、原型和调试链路无法追踪该执行约束。",
+        relatedStatePaths: ["knowledgeRefs"],
+        relatedKnowledgeIds: [skill.id || `agent-skill:${skill.name}`],
+        suggestion: "先把该 skill 作为 knowledgeRef 写入 ProductDesignState，再重新生成 PRD、PrototypeSpec 和 QA。",
+        autoFixable: false,
+        status: "open",
+      });
+    }
 
     return {
       status: issues.some((issue) => issue.severity === "blocking" || issue.severity === "major")
@@ -196,4 +211,18 @@ function text(value: unknown) {
 
 function arrayOfText(value: unknown) {
   return Array.isArray(value) ? value.map(text).filter(Boolean) : undefined;
+}
+
+function isSkillReferencedByState(
+  skill: NonNullable<KnowledgeContext["agentSkills"]>[number],
+  state: ProductDesignState,
+) {
+  const haystack = JSON.stringify(state.knowledgeRefs ?? []);
+  return [skill.id, `agent-skill:${skill.name}`, skill.name, skill.sourcePath]
+    .filter(Boolean)
+    .some((token) => haystack.includes(token));
+}
+
+function safeId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "_");
 }

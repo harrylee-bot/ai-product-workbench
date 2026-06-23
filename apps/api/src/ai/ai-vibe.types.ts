@@ -67,6 +67,18 @@ export type AgentSkillReference = {
   triggerHints: string[];
 };
 
+export type AgentSkillRoute = {
+  skillId: string;
+  skillName: string;
+  sourcePath: string;
+  appliesTo: Array<{
+    agentName: AgentName;
+    taskType: ModelTaskType;
+    handoffField: string;
+    usage: string;
+  }>;
+};
+
 export type KnowledgeConflict = {
   id: string;
   description: string;
@@ -83,6 +95,7 @@ export type KnowledgeContext = {
   prototypeRules: KnowledgeReference[];
   businessConcepts: KnowledgeReference[];
   agentSkills?: AgentSkillReference[];
+  skillRouting?: AgentSkillRoute[];
   conflicts: KnowledgeConflict[];
   unknownAreas: string[];
   summary: string;

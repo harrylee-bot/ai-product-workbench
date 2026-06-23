@@ -1,5 +1,5 @@
 import { AgentName, KnowledgeType, ModelTaskType } from "@prisma/client";
-import type { KnowledgeContext, KnowledgeReference } from "./ai-vibe.types";
+import type { AgentSkillReference, AgentSkillRoute, KnowledgeContext, KnowledgeReference } from "./ai-vibe.types";
 
 type SkillInstruction = {
   name: string;
@@ -11,6 +11,59 @@ type SkillInstruction = {
 };
 
 type KnowledgeRefRecord = Partial<KnowledgeReference> & Record<string, unknown>;
+
+const SKILL_ROUTE_TARGETS = [
+  {
+    agentName: AgentName.knowledge_agent,
+    taskType: ModelTaskType.knowledge_classification,
+    handoffField: "KnowledgeContext.agentSkills / KnowledgeContext.prototypeRules / KnowledgeContext.skillRouting",
+  },
+  {
+    agentName: AgentName.requirement_analyst_agent,
+    taskType: ModelTaskType.requirement_analysis,
+    handoffField: "RequirementAnalysis.knownFromKnowledge / missingOptional / conflicts",
+  },
+  {
+    agentName: AgentName.product_planner_agent,
+    taskType: ModelTaskType.product_planning,
+    handoffField: "ProductBuildPlan.agentSequence / qaFocus / risks / sourceSummary.assumptions",
+  },
+  {
+    agentName: AgentName.product_designer_agent,
+    taskType: ModelTaskType.product_design,
+    handoffField: "ProductDesignState.knowledgeRefs / sourcePaths / assumptions",
+  },
+  {
+    agentName: AgentName.prd_writer_agent,
+    taskType: ModelTaskType.prd_generation,
+    handoffField: "RequirementDocument.sections[type=knowledge_refs] / sourcePaths",
+  },
+  {
+    agentName: AgentName.prototype_designer_agent,
+    taskType: ModelTaskType.prototype_design,
+    handoffField: "PrototypeSpec.pages / components / interactions / sourcePaths",
+  },
+  {
+    agentName: AgentName.prototype_code_agent,
+    taskType: ModelTaskType.prototype_code_generation,
+    handoffField: "PrototypeArtifact.html data-page-id / data-component-id",
+  },
+  {
+    agentName: AgentName.patch_agent,
+    taskType: ModelTaskType.patch_planning,
+    handoffField: "PatchPlan.operations / impact / risks / regenerate",
+  },
+  {
+    agentName: AgentName.qa_agent,
+    taskType: ModelTaskType.qa_check,
+    handoffField: "QAAgentOutput.issues / relatedKnowledgeIds / relatedStatePaths",
+  },
+  {
+    agentName: AgentName.knowledge_extractor_agent,
+    taskType: ModelTaskType.knowledge_extraction,
+    handoffField: "KnowledgeCandidateDraft.sourcePath / tags / confidence",
+  },
+] as const;
 
 export function agentSkillSystemPrompt(
   agentName: AgentName,
@@ -61,6 +114,24 @@ export function agentSkillKnowledgeReferences(context?: KnowledgeContext): Knowl
     usedByAgent: "vibe_coding",
     sourceType: "knowledge_base",
     sourceId: `agent-skill:${skill.name}`,
+  }));
+}
+
+export function buildAgentSkillRoutes(skills: AgentSkillReference[] = []): AgentSkillRoute[] {
+  return skills.map((skill) => ({
+    skillId: skill.id,
+    skillName: skill.name,
+    sourcePath: skill.sourcePath,
+    appliesTo: SKILL_ROUTE_TARGETS
+      .filter((target) =>
+        target.agentName === AgentName.knowledge_agent || isApplicableSkill(skill.name, target.taskType)
+      )
+      .map((target) => ({
+        agentName: target.agentName,
+        taskType: target.taskType,
+        handoffField: target.handoffField,
+        usage: `${taskGuidance(target.taskType)} ${skillGuidance(skill.name, target.taskType)}`,
+      })),
   }));
 }
 

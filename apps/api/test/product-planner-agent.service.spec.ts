@@ -58,6 +58,21 @@ describe("ProductPlannerAgentService", () => {
               triggerHints: ["database", "table"],
             },
           ],
+          skillRouting: [
+            {
+              skillId: "agent-skill:obsidian-bases",
+              skillName: "obsidian-bases",
+              sourcePath: "/skills/obsidian-bases/SKILL.md",
+              appliesTo: [
+                {
+                  agentName: AgentName.product_designer_agent,
+                  taskType: ModelTaskType.product_design,
+                  handoffField: "ProductDesignState.knowledgeRefs",
+                  usage: "把字段、状态、筛选条件写入 ProductDesignState。",
+                },
+              ],
+            },
+          ],
           conflicts: [],
           unknownAreas: [],
           summary: "命中默认规则",
@@ -79,6 +94,7 @@ describe("ProductPlannerAgentService", () => {
     expect(result.data.requirementMode).toBe("formal_requirement");
     expect(result.data.summary).toContain("局部修改另走 PatchPlan");
     expect(result.data.sourceSummary.assumptions).toContain("本轮需按 Vibe Coding Skills 执行：obsidian-bases");
+    expect(result.data.sourceSummary.assumptions).toContain("Skill 路由覆盖 Agent：product_designer_agent");
     expect(result.data.deliverables).toEqual({
       productDesignState: true,
       prd: true,
@@ -107,6 +123,12 @@ describe("ProductPlannerAgentService", () => {
       }),
     );
     expect(result.data.agentSequence[0].input).toContain("VibeCodingSkillInstructions");
+    expect(result.data.agentSequence[0].input).toContain("KnowledgeContext.skillRouting");
+    expect(result.data.qaFocus).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Vibe Coding Skills 是否保留 sourcePath/knowledgeId"),
+      ]),
+    );
     expect(result.data.agentSequence[0].gate).toContain("不规划局部 PatchPlan");
   });
 });

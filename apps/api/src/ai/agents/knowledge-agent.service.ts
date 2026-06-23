@@ -5,6 +5,7 @@ import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
 import { AgentSkillRegistryService } from "../agent-skill-registry.service";
 import { agentSystemPrompt } from "../agent-charter";
+import { buildAgentSkillRoutes } from "../agent-skill-instructions";
 import { BaseAgentService } from "./base-agent.service";
 import type { KnowledgeContext, ProductDesignState } from "../ai-vibe.types";
 
@@ -46,9 +47,12 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
     const grouped = groupReferences(output.references, fallback, invocation.input.userInput);
     const agentSkills = await this.skillRegistry.getVibeCodingSkills(invocation.input.userInput);
     const skillReferences = this.skillRegistry.toKnowledgeReferences(agentSkills);
+    const skillRouting = buildAgentSkillRoutes(agentSkills);
+    const routedAgentCount = routedAgentNames(skillRouting).length;
     const summaryParts = [
       output.references.length ? `命中 ${output.references.length} 条正式知识库规则` : "",
       agentSkills.length ? `已加载 ${agentSkills.length} 个 Obsidian/Vibe Coding 技能` : "",
+      skillRouting.length ? `已生成 ${skillRouting.length} 条 skill 路由，覆盖 ${routedAgentCount} 个 Agent` : "",
     ].filter(Boolean);
 
     return {
@@ -57,6 +61,7 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
         ...grouped,
         prototypeRules: [...grouped.prototypeRules, ...skillReferences],
         agentSkills,
+        skillRouting,
         summary: summaryParts.length
           ? `${summaryParts.join("，")}，已按类型提供给后续 Agent。`
           : fallback.summary,
@@ -70,7 +75,7 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
         role: "system" as const,
         content: agentSystemPrompt(
           this.agentName,
-          "你是 Knowledge Agent。根据用户需求和附件摘要，分类可复用知识。只输出 KnowledgeContext JSON。",
+          "你是 Knowledge Agent。根据用户需求、附件摘要和已有产品状态检索正式知识，并加载 Vibe Coding skills；你还要把 skill 路由成后续 Agent 可执行的约束。只输出 KnowledgeContext JSON。",
         ),
       },
       { role: "user" as const, content: JSON.stringify(input) },
@@ -113,6 +118,14 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
         : "暂无正式知识库命中，本轮将基于通用产品最佳实践补全，并标记为 AI 推断。",
     };
   }
+}
+
+function routedAgentNames(routes: NonNullable<KnowledgeContext["skillRouting"]>) {
+  return [
+    ...new Set(
+      routes.flatMap((route) => route.appliesTo.map((target) => target.agentName)),
+    ),
+  ];
 }
 
 function buildSearchQuery(input: KnowledgeInput) {

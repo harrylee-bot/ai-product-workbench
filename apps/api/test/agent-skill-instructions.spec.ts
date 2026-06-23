@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentSkillSystemPrompt,
   agentSkillSystemPromptFromKnowledgeRefs,
+  buildAgentSkillRoutes,
   collectKnowledgeReferences,
 } from "../src/ai/agent-skill-instructions";
 import type { KnowledgeContext } from "../src/ai/ai-vibe.types";
@@ -96,6 +97,41 @@ describe("agent skill instructions", () => {
       "agent-skill:obsidian-markdown",
       "agent-skill:json-canvas",
     ]);
+  });
+
+  it("routes skills to downstream agents with handoff fields", () => {
+    const routes = buildAgentSkillRoutes([
+      {
+        id: "agent-skill:json-canvas",
+        name: "json-canvas",
+        description: "Create JSON Canvas diagrams.",
+        sourcePath: "/skills/json-canvas/SKILL.md",
+        contentPreview: "Use nodes and edges.",
+        capabilities: ["Nodes", "Edges"],
+        triggerHints: ["canvas"],
+      },
+    ]);
+
+    expect(routes[0]).toMatchObject({
+      skillId: "agent-skill:json-canvas",
+      skillName: "json-canvas",
+      sourcePath: "/skills/json-canvas/SKILL.md",
+    });
+    expect(routes[0].appliesTo).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agentName: AgentName.product_planner_agent,
+          taskType: ModelTaskType.product_planning,
+          handoffField: expect.stringContaining("ProductBuildPlan.agentSequence"),
+          usage: expect.stringContaining("节点、边"),
+        }),
+        expect.objectContaining({
+          agentName: AgentName.qa_agent,
+          taskType: ModelTaskType.qa_check,
+          handoffField: expect.stringContaining("QAAgentOutput.issues"),
+        }),
+      ]),
+    );
   });
 });
 
