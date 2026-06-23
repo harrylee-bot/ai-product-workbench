@@ -26,3 +26,13 @@ export class HandleVibeMessageDto {
   @IsString({ each: true, message: "fileIds 格式不正确" })
   fileIds?: string[];
 }
+
+export class ConfirmPrdDto {
+  @IsString({ message: "projectId 不能为空" })
+  @IsNotEmpty({ message: "projectId 不能为空" })
+  projectId!: string;
+
+  @IsString({ message: "conversationId 不能为空" })
+  @IsNotEmpty({ message: "conversationId 不能为空" })
+  conversationId!: string;
+}

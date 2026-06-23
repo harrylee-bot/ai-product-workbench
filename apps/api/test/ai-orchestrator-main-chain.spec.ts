@@ -129,12 +129,12 @@ describe("AiOrchestrator main vibe chain", () => {
       artifact: prototypeArtifact,
       version: { id: "prototype-version-1" },
     });
-    stateService.attachGeneratedArtifacts.mockResolvedValue({
+    stateService.attachGeneratedArtifacts.mockImplementation(async (_stateId: string, input: { status?: string }) => ({
       ...state,
-      status: "prototype_ready",
+      status: input?.status ?? "prototype_ready",
       prdDocument,
       prototypeSpec,
-    });
+    }));
     qaService.runForProject.mockResolvedValue(qaReport);
     knowledgeExtractorAgent.run.mockResolvedValue({
       data: {
@@ -162,7 +162,7 @@ describe("AiOrchestrator main vibe chain", () => {
     });
   });
 
-  it("runs formal requirements through state, PRD, prototype, QA and canonical stream events", async () => {
+  it("生成 PRD 后停在确认门 A（review_prd），不连跑原型/QA", async () => {
     const result = await service.run({
       userMessageId: "message-1",
       attachments: [],
@@ -181,15 +181,12 @@ describe("AiOrchestrator main vibe chain", () => {
     expect(result).toEqual(expect.objectContaining({
       runId: "run-1",
       projectId: "project-1",
-      message: "已完成产品设计状态、PRD 草案、HTML 原型和 QA 校验。",
-      productDesignState: expect.objectContaining({ id: "state-1", status: "prototype_ready" }),
+      message: "已生成 PRD 草案，请确认无误后我再继续生成原型。",
       prdDocument: expect.objectContaining({ id: "prd-1" }),
-      prototypeSpec: expect.objectContaining({ id: "prototype-spec-1" }),
-      prototypeArtifact: expect.objectContaining({ id: "artifact-1" }),
-      qaReport: expect.objectContaining({ id: "qa-1", passed: true }),
       productBuildPlan: expect.objectContaining({ id: "plan-1" }),
-      nextAction: { type: "review_prototype" },
+      nextAction: { type: "review_prd", wantsPrototype: true },
     }));
+    // 确认门 A 之前：PRD 已落库（prd_ready），但不生成原型、不跑 QA、不抽知识
     expect(stateService.createDraft).toHaveBeenCalledWith("project-1", expect.any(Object), expect.objectContaining({
       userId: "user-1",
       runId: "run-1",
@@ -200,75 +197,142 @@ describe("AiOrchestrator main vibe chain", () => {
       expect.objectContaining({ title: "每日签到活动 PRD" }),
       expect.objectContaining({ runId: "run-1" }),
     );
-    expect(prototypeService.saveGeneratedPrototype).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "state-1" }),
-      expect.objectContaining({ id: "prototype-spec-1" }),
-      expect.objectContaining({ htmlContent: expect.stringContaining("<!doctype html>") }),
-      expect.objectContaining({ runId: "run-1" }),
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith(
+      "state-1",
+      expect.objectContaining({ status: "prd_ready" }),
     );
-    expect(qaService.runForProject).toHaveBeenCalledWith("project-1", "user-1", expect.objectContaining({
-      trigger: "initial_generation",
-      runId: "run-1",
-      prdDocument: expect.objectContaining({ id: "prd-1" }),
+    expect(prototypeDesignerAgent.run).not.toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+    expect(qaService.runForProject).not.toHaveBeenCalled();
+    expect(knowledgeExtractorAgent.run).not.toHaveBeenCalled();
+
+    const eventTypes = stream.emit.mock.calls.map(([input]) => input.type);
+    expect(eventTypes).toEqual(expect.arrayContaining(["state_updated", "prd_updated", "run_completed"]));
+    expect(eventTypes).not.toContain("prototype_updated");
+    expect(eventTypes).not.toContain("qa_completed");
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: expect.objectContaining({ status: ProjectStatus.prd_ready }),
+    });
+  });
+
+  it("generate_prd 意图只生成文档，wantsPrototype 为 false", async () => {
+    intentAgent.run.mockResolvedValueOnce({
+      data: {
+        intent: UserIntent.generate_prd,
+        confidence: 0.95,
+        reason: "用户只想要需求文档。",
+        requiresSelection: false,
+        isAmbiguous: false,
+      },
+    });
+
+    const result = await service.run({
+      userMessageId: "message-1",
+      attachments: [],
+      context: {
+        runId: "run-1",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "只帮我写需求文档",
+        recentMessages: [],
+        attachments: [],
+        traceId: "trace-1",
+      },
+    });
+
+    expect(result.nextAction).toEqual({ type: "review_prd", wantsPrototype: false });
+    expect(prototypeDesignerAgent.run).not.toHaveBeenCalled();
+  });
+
+  it("确认门 A 之后 confirmPrdAndContinue 生成原型、QA 并停在 review_prototype", async () => {
+    const confirmedState = {
+      ...baseState(),
+      status: "prd_ready",
+      prdDocument: basePrdDocument(),
+    };
+    const result = await service.confirmPrdAndContinue({
+      userMessageId: "message-2",
+      attachments: [],
+      context: {
+        runId: "run-2",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "确认 PRD，继续生成原型。",
+        recentMessages: [],
+        attachments: [],
+        productDesignState: confirmedState,
+        traceId: "trace-2",
+      },
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      runId: "run-2",
+      projectId: "project-1",
+      message: "已完成产品设计状态、PRD 草案、HTML 原型和 QA 校验。",
       prototypeSpec: expect.objectContaining({ id: "prototype-spec-1" }),
       prototypeArtifact: expect.objectContaining({ id: "artifact-1" }),
+      qaReport: expect.objectContaining({ id: "qa-1", passed: true }),
+      nextAction: { type: "review_prototype" },
+    }));
+    expect(prototypeService.saveGeneratedPrototype).toHaveBeenCalled();
+    expect(qaService.runForProject).toHaveBeenCalledWith("project-1", "user-1", expect.objectContaining({
+      trigger: "initial_generation",
+      runId: "run-2",
     }));
     expect(knowledgeExtractorAgent.run).toHaveBeenCalledWith(expect.objectContaining({
-      input: expect.objectContaining({
-        confirmedByUser: false,
-        prdDocument: expect.objectContaining({ id: "prd-1" }),
-        prototypeSpec: expect.objectContaining({ id: "prototype-spec-1" }),
-      }),
+      input: expect.objectContaining({ confirmedByUser: false }),
     }));
 
     const eventTypes = stream.emit.mock.calls.map(([input]) => input.type);
-    expect(eventTypes).toEqual(expect.arrayContaining([
-      "state_updated",
-      "state_version_created",
-      "prd_updated",
-      "prototype_updated",
-      "qa_completed",
-      "run_completed",
-    ]));
-    expect(eventTypes.indexOf("state_updated")).toBeLessThan(eventTypes.indexOf("prd_updated"));
-    expect(eventTypes.indexOf("prd_updated")).toBeLessThan(eventTypes.indexOf("prototype_updated"));
     expect(eventTypes.indexOf("prototype_updated")).toBeLessThan(eventTypes.indexOf("qa_completed"));
     expect(eventTypes.indexOf("qa_completed")).toBeLessThan(eventTypes.indexOf("run_completed"));
-    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
-      type: "prd_updated",
-      step: "prd_generation",
-      data: expect.objectContaining({ id: "prd-1" }),
-    }));
-    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
-      type: "prototype_updated",
-      step: "prototype_code_generation",
-      data: expect.objectContaining({
-        prototypeSpec: expect.objectContaining({ id: "prototype-spec-1" }),
-        prototypeArtifact: expect.objectContaining({ id: "artifact-1" }),
-      }),
-    }));
-    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
-      type: "qa_completed",
-      step: "qa_check",
-      data: expect.objectContaining({
-        id: "qa-1",
-        issues: [],
-        qaReport: expect.objectContaining({ id: "qa-1" }),
-        qaGate: expect.objectContaining({
-          status: "open",
-          allowExportOrPublish: true,
-          allowPersistKnowledge: true,
-        }),
-      }),
-    }));
-    expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({
-      content: "已完成产品设计状态、PRD 草案、HTML 原型和 QA 校验。",
-      relatedRunId: "run-1",
-    }));
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: "project-1" },
       data: expect.objectContaining({ status: ProjectStatus.prototype_ready }),
     });
+  });
+
+  it("已有已确认文档时，generate_prototype 意图直接进入原型阶段（FR-2.2）", async () => {
+    intentAgent.run.mockResolvedValueOnce({
+      data: {
+        intent: UserIntent.generate_prototype,
+        confidence: 0.95,
+        reason: "用户已有文档，要求生成原型。",
+        requiresSelection: false,
+        isAmbiguous: false,
+      },
+    });
+    const stateWithPrd = {
+      ...baseState(),
+      status: "prd_ready",
+      prdDocument: basePrdDocument(),
+    };
+
+    const result = await service.run({
+      userMessageId: "message-1",
+      attachments: [],
+      context: {
+        runId: "run-1",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "根据文档生成原型",
+        recentMessages: [],
+        attachments: [],
+        productDesignState: stateWithPrd,
+        traceId: "trace-1",
+      },
+    });
+
+    // 直接进入原型阶段，不重新生成文档（不调用文档/规划/设计链路）
+    expect(knowledgeAgent.run).not.toHaveBeenCalled();
+    expect(productPlannerAgent.run).not.toHaveBeenCalled();
+    expect(documentService.saveGeneratedDocument).not.toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).toHaveBeenCalled();
+    expect(result.nextAction).toEqual({ type: "review_prototype" });
   });
 
   it("ends the main flow and shows the upstream agent error when an agent fails", async () => {

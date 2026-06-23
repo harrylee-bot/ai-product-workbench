@@ -53,7 +53,6 @@ import {
   projectStatusForCompletedArtifacts,
   projectStatusFromProductDesignState,
 } from "./workspace-state-machine";
-
 type OrchestratorInput = {
   context: AgentRunContext;
   userMessageId: string;
@@ -80,6 +79,8 @@ export type OrchestratorResult = {
     type: "ask_clarification" | "review_prd" | "review_prototype" | "review_qa" | "answer" | "download_export" | "confirm_patch";
     questions?: ProductDesignState["pendingQuestions"];
     risks?: PatchPlan["risks"];
+    /** 确认门 A：用户确认 PRD 后是否应继续生成原型（FR-1.3） */
+    wantsPrototype?: boolean;
   };
 };
 
@@ -140,6 +141,21 @@ export class AiOrchestratorService {
 
       if (intent.data.intent === UserIntent.export_word || intent.data.intent === UserIntent.export_html) {
         return this.finishExport(context, intent.data);
+      }
+
+      // FR-2.2 意图路由：已存在 PRD 文档且用户要求生成原型时，直接从原型阶段进入，
+      // 跳过需求理解与文档生成（propose-then-commit 的"从指定阶段恢复"）。
+      if (
+        intent.data.intent === UserIntent.generate_prototype &&
+        context.productDesignState?.prdDocument
+      ) {
+        await this.emit(context, "message_delta", "检测到已确认的需求文档，正在直接生成原型...");
+        return this.generatePrototypeForState(
+          context,
+          input,
+          intent.data,
+          context.productDesignState,
+        );
       }
 
       await this.emit(context, "message_delta", "正在检索知识库和附件上下文...");
@@ -296,166 +312,254 @@ export class AiOrchestratorService {
         data: prdDocument,
       });
 
-      await this.emit(context, "message_delta", "正在生成原型规格...");
-      const prototypeSpec = await this.runAgentStep(
-        context,
-        AgentName.prototype_designer_agent,
-        "prototype_design",
-        () =>
-          this.prototypeDesignerAgent.run({
-            runId: context.runId,
-            projectId: context.projectId,
-            traceId: context.traceId,
-            userId: context.userId,
-            input: {
-              productDesignState: state!,
-              targetView: "both",
-            },
-          }),
-      );
-
-      await this.emit(context, "message_delta", "正在生成 HTML 原型...");
-      const prototypeArtifact = await this.runAgentStep(
-        context,
-        AgentName.prototype_code_agent,
-        "prototype_code_generation",
-        () =>
-          this.prototypeCodeAgent.run({
-            runId: context.runId,
-            projectId: context.projectId,
-            traceId: context.traceId,
-            userId: context.userId,
-            input: {
-              prototypeSpec: prototypeSpec.data,
-              mode: "single_html",
-            },
-          }),
-      );
-
-      const savedPrototype = await this.prototypeService.saveGeneratedPrototype(
-        state,
-        prototypeSpec.data,
-        prototypeArtifact.data,
-        {
-          userId: context.userId,
-          runId: context.runId,
-          reason: "Prototype Designer 与 Code Agent 生成 HTML 原型",
-        },
-      );
-      await this.stream.emit({
-        runId: context.runId,
-        projectId: context.projectId,
-        type: "prototype_updated",
-        step: "prototype_code_generation",
-        data: {
-          prototypeSpec: savedPrototype.prototypeSpec,
-          prototypeArtifact: savedPrototype.artifact,
-        },
-      });
-
+      // 确认门 A（FR-1.2）：PRD 生成后将其落到 ProductDesignState 并暂停于 prd_ready 状态，
+      // 等待用户确认。此处不再连跑原型——把"提案"持久化，由 confirm 接口触发"提交"。
       state = await this.stateService.attachGeneratedArtifacts(state.id, {
         prdDocument,
-        prototypeSpec: prototypeSpec.data,
-        status: ProductDesignStateStatus.prototype_ready,
+        status: ProductDesignStateStatus.prd_ready,
         userId: context.userId,
         runId: context.runId,
         messageId: input.userMessageId,
-        reason: "PRD 与 PrototypeSpec 生成完成",
+        reason: "PRD 生成完成，等待用户确认（确认门 A）",
       });
 
-      await this.emit(context, "message_delta", "正在进行一致性 QA 校验...");
-      const qa = await this.runAgentStep(context, AgentName.qa_agent, "qa_check", async () => ({
-        data: await this.qaService.runForProject(context.projectId, context.userId, {
-          trigger: "initial_generation",
-          runId: context.runId,
-          traceId: context.traceId,
-          prdDocument,
-          prototypeSpec: prototypeSpec.data,
-          prototypeArtifact: savedPrototype.artifact,
-          fallbacks: context.fallbackEvents,
-        }),
-      }),
-      );
-      await this.stream.emit({
-        runId: context.runId,
-        projectId: context.projectId,
-        type: "qa_completed",
-        step: "qa_check",
-        data: qaCompletedPayload(qa.data),
-      });
-
-      const knowledgeCandidates = await this.runAgentStep(
-        context,
-        AgentName.knowledge_extractor_agent,
-        "knowledge_extraction",
-        () =>
-          this.knowledgeExtractorAgent.run({
-            runId: context.runId,
-            projectId: context.projectId,
-            traceId: context.traceId,
-            userId: context.userId,
-            input: {
-              productDesignState: state!,
-              prdDocument,
-              prototypeSpec: prototypeSpec.data,
-              confirmedByUser: false,
-            },
-          }),
-      );
-
-      const finalMessage = qa.data.passed
-        ? "已完成产品设计状态、PRD 草案、HTML 原型和 QA 校验。"
-        : `已生成 PRD 与原型，QA 发现 ${qa.data.issues.length} 个待确认问题。`;
+      // 是否预约生成原型：generate_prd 仅要文档；其余（new_requirement / complete_requirement /
+      // generate_prototype 一次性请求）默认接着要原型，但总体交互不变——仍先停在确认门 A。
+      const wantsPrototype = intent.data.intent !== UserIntent.generate_prd;
+      const gateMessage = wantsPrototype
+        ? "已生成 PRD 草案，请确认无误后我再继续生成原型。"
+        : "已生成 PRD 草案，请确认无误。确认后你可以选择是否继续生成原型。";
 
       const result: OrchestratorResult = {
         runId: context.runId,
         projectId: context.projectId,
         intent: intent.data,
-        message: finalMessage,
+        message: gateMessage,
         productDesignState: state,
         prdDocument,
-        prototypeSpec: prototypeSpec.data,
-        prototypeArtifact: savedPrototype.artifact,
-        qaReport: qa.data,
         productBuildPlan,
-        knowledgeCandidates: knowledgeCandidates.data.candidates,
         nextAction: {
-          type: qa.data.passed ? "review_prototype" : "review_qa",
+          type: "review_prd",
+          wantsPrototype,
         },
       };
 
       await this.finishRun(
         context,
         result,
-        projectStatusForCompletedArtifacts({ productDesignState: state, qaReport: qa.data }),
+        projectStatusFromProductDesignState(state, ProjectStatus.prd_ready),
       );
       return result;
     } catch (error) {
-      const message = errorMessage(error, "AI 执行失败");
-      await this.runLog.failRun(context.runId, error);
-      await Promise.allSettled([
-        this.messageService.createAssistantMessage({
-          projectId: context.projectId,
-          conversationId: context.conversationId,
-          content: message,
-          type: MessageType.error,
-          metadata: toInputJson({
-            runId: context.runId,
-            errorMessage: message,
-          }),
-          relatedRunId: context.runId,
-        }),
-        this.updateProjectStatus(context.projectId, ProjectStatus.qa_failed),
-      ]);
-      await this.stream.emit({
-        runId: context.runId,
-        projectId: context.projectId,
-        type: "run_failed",
-        content: message,
-        data: { message, errorMessage: message, runId: context.runId, projectId: context.projectId },
-      });
+      await this.handleRunFailure(context, error);
       throw error;
     }
+  }
+
+  /**
+   * 确认门 A 之后的"提交"入口（FR-1.3）：用户确认 PRD 后，从原型阶段继续。
+   * 由 confirm 接口在一个新的 run 上调用——暂停状态已持久化于 ProductDesignState，
+   * 不依赖原 run 的进程常驻（propose-then-commit / 可恢复）。
+   */
+  async confirmPrdAndContinue(input: OrchestratorInput): Promise<OrchestratorResult> {
+    const { context } = input;
+    const state = context.productDesignState;
+    if (!state) {
+      throw new Error("找不到待确认的 ProductDesignState，无法继续生成原型");
+    }
+    if (!state.prdDocument) {
+      throw new Error("当前 ProductDesignState 尚无 PRD 文档，无法进入原型阶段");
+    }
+    const intent: IntentResult =
+      context.intentResult ?? {
+        intent: UserIntent.generate_prototype,
+        confidence: 1,
+        reason: "用户确认 PRD 后继续生成原型。",
+        requiresSelection: false,
+        isAmbiguous: false,
+      };
+    try {
+      await this.runLog.markRunIntent(context.runId, intent.intent);
+      return await this.generatePrototypeForState(context, input, intent, state);
+    } catch (error) {
+      await this.handleRunFailure(context, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Phase B：基于已确认 PRD 的 ProductDesignState 生成原型规格、HTML 原型，跑 QA 与知识抽取，
+   * 最终停在确认门 B（prototype_ready / review_prototype）。
+   * 既用于"确认 PRD 后继续"，也用于"已有文档直接出原型"（FR-2.2）。
+   */
+  private async generatePrototypeForState(
+    context: AgentRunContext,
+    input: OrchestratorInput,
+    intent: IntentResult,
+    initialState: ProductDesignState,
+  ): Promise<OrchestratorResult> {
+    let state = initialState;
+    const prdDocument = state.prdDocument!;
+
+    await this.emit(context, "message_delta", "正在生成原型规格...");
+    const prototypeSpec = await this.runAgentStep(
+      context,
+      AgentName.prototype_designer_agent,
+      "prototype_design",
+      () =>
+        this.prototypeDesignerAgent.run({
+          runId: context.runId,
+          projectId: context.projectId,
+          traceId: context.traceId,
+          userId: context.userId,
+          input: {
+            productDesignState: state,
+            targetView: "both",
+          },
+        }),
+    );
+
+    await this.emit(context, "message_delta", "正在生成 HTML 原型...");
+    const prototypeArtifact = await this.runAgentStep(
+      context,
+      AgentName.prototype_code_agent,
+      "prototype_code_generation",
+      () =>
+        this.prototypeCodeAgent.run({
+          runId: context.runId,
+          projectId: context.projectId,
+          traceId: context.traceId,
+          userId: context.userId,
+          input: {
+            prototypeSpec: prototypeSpec.data,
+            mode: "single_html",
+          },
+        }),
+    );
+
+    const savedPrototype = await this.prototypeService.saveGeneratedPrototype(
+      state,
+      prototypeSpec.data,
+      prototypeArtifact.data,
+      {
+        userId: context.userId,
+        runId: context.runId,
+        reason: "Prototype Designer 与 Code Agent 生成 HTML 原型",
+      },
+    );
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "prototype_updated",
+      step: "prototype_code_generation",
+      data: {
+        prototypeSpec: savedPrototype.prototypeSpec,
+        prototypeArtifact: savedPrototype.artifact,
+      },
+    });
+
+    state = await this.stateService.attachGeneratedArtifacts(state.id, {
+      prdDocument,
+      prototypeSpec: prototypeSpec.data,
+      status: ProductDesignStateStatus.prototype_ready,
+      userId: context.userId,
+      runId: context.runId,
+      messageId: input.userMessageId,
+      reason: "PRD 与 PrototypeSpec 生成完成",
+    });
+
+    await this.emit(context, "message_delta", "正在进行一致性 QA 校验...");
+    const qa = await this.runAgentStep(context, AgentName.qa_agent, "qa_check", async () => ({
+      data: await this.qaService.runForProject(context.projectId, context.userId, {
+        trigger: "initial_generation",
+        runId: context.runId,
+        traceId: context.traceId,
+        prdDocument,
+        prototypeSpec: prototypeSpec.data,
+        prototypeArtifact: savedPrototype.artifact,
+        fallbacks: context.fallbackEvents,
+      }),
+    }));
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "qa_completed",
+      step: "qa_check",
+      data: qaCompletedPayload(qa.data),
+    });
+
+    const knowledgeCandidates = await this.runAgentStep(
+      context,
+      AgentName.knowledge_extractor_agent,
+      "knowledge_extraction",
+      () =>
+        this.knowledgeExtractorAgent.run({
+          runId: context.runId,
+          projectId: context.projectId,
+          traceId: context.traceId,
+          userId: context.userId,
+          input: {
+            productDesignState: state,
+            prdDocument,
+            prototypeSpec: prototypeSpec.data,
+            confirmedByUser: false,
+          },
+        }),
+    );
+
+    const finalMessage = qa.data.passed
+      ? "已完成产品设计状态、PRD 草案、HTML 原型和 QA 校验。"
+      : `已生成 PRD 与原型，QA 发现 ${qa.data.issues.length} 个待确认问题。`;
+
+    const result: OrchestratorResult = {
+      runId: context.runId,
+      projectId: context.projectId,
+      intent,
+      message: finalMessage,
+      productDesignState: state,
+      prdDocument,
+      prototypeSpec: prototypeSpec.data,
+      prototypeArtifact: savedPrototype.artifact,
+      qaReport: qa.data,
+      productBuildPlan: context.productBuildPlan,
+      knowledgeCandidates: knowledgeCandidates.data.candidates,
+      nextAction: {
+        type: qa.data.passed ? "review_prototype" : "review_qa",
+      },
+    };
+
+    await this.finishRun(
+      context,
+      result,
+      projectStatusForCompletedArtifacts({ productDesignState: state, qaReport: qa.data }),
+    );
+    return result;
+  }
+
+  private async handleRunFailure(context: AgentRunContext, error: unknown) {
+    const message = errorMessage(error, "AI 执行失败");
+    await this.runLog.failRun(context.runId, error);
+    await Promise.allSettled([
+      this.messageService.createAssistantMessage({
+        projectId: context.projectId,
+        conversationId: context.conversationId,
+        content: message,
+        type: MessageType.error,
+        metadata: toInputJson({
+          runId: context.runId,
+          errorMessage: message,
+        }),
+        relatedRunId: context.runId,
+      }),
+      this.updateProjectStatus(context.projectId, ProjectStatus.qa_failed),
+    ]);
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "run_failed",
+      content: message,
+      data: { message, errorMessage: message, runId: context.runId, projectId: context.projectId },
+    });
   }
 
   private async runAgentStep<T>(

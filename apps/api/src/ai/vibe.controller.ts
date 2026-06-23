@@ -4,7 +4,7 @@ import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
-import { HandleVibeMessageDto } from "./dto";
+import { HandleVibeMessageDto, ConfirmPrdDto } from "./dto";
 import { VibeService } from "./vibe.service";
 
 @Controller("ai/vibe")
@@ -15,6 +15,11 @@ export class VibeController {
   @Post("handle-message")
   handleMessage(@CurrentUser() user: AuthenticatedUser, @Body() dto: HandleVibeMessageDto) {
     return this.vibeService.handleMessage(user, dto);
+  }
+
+  @Post("confirm-prd")
+  confirmPrd(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConfirmPrdDto) {
+    return this.vibeService.confirmPrd(user, dto);
   }
 
   @Get("skills")
