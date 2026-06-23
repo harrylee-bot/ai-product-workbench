@@ -431,13 +431,28 @@ export class AiOrchestratorService {
       );
       return result;
     } catch (error) {
+      const message = errorMessage(error, "AI 执行失败");
       await this.runLog.failRun(context.runId, error);
+      await Promise.allSettled([
+        this.messageService.createAssistantMessage({
+          projectId: context.projectId,
+          conversationId: context.conversationId,
+          content: message,
+          type: MessageType.error,
+          metadata: toInputJson({
+            runId: context.runId,
+            errorMessage: message,
+          }),
+          relatedRunId: context.runId,
+        }),
+        this.updateProjectStatus(context.projectId, ProjectStatus.qa_failed),
+      ]);
       await this.stream.emit({
         runId: context.runId,
         projectId: context.projectId,
         type: "run_failed",
-        content: error instanceof Error ? error.message : "AI 执行失败",
-        data: { message: error instanceof Error ? error.message : "AI 执行失败" },
+        content: message,
+        data: { message, errorMessage: message, runId: context.runId, projectId: context.projectId },
       });
       throw error;
     }
@@ -699,4 +714,17 @@ function stateSummary(state: ProductDesignState) {
     },
     updatedAt: state.updatedAt,
   };
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
 }

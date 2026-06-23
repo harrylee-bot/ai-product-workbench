@@ -40,7 +40,7 @@ describe("IntentAgentService", () => {
     expect(result.data.reason).toContain("不应触发需求生成链路");
   });
 
-  it("does not block a greeting that includes a concrete product request", async () => {
+  it("propagates upstream errors after five retries instead of inferring a fallback intent", async () => {
     const modelGateway = {
       generateJson: vi.fn().mockRejectedValue(
         new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
@@ -48,7 +48,7 @@ describe("IntentAgentService", () => {
     };
     const service = new IntentAgentService(modelGateway as never);
 
-    const result = await service.run({
+    await expect(service.run({
       runId: "run-1",
       projectId: "project-1",
       traceId: "trace-1",
@@ -57,17 +57,8 @@ describe("IntentAgentService", () => {
         userInput: "你好，帮我做一个签到活动页面",
         recentMessages: [],
       },
-    });
+    })).rejects.toThrow("no model configured");
 
-    expect(result.data.intent).toBe(UserIntent.generate_prototype);
-    expect(result.data.reason).toBe("用户希望生成或刷新原型。");
-    expect(result.fallback).toEqual(
-      expect.objectContaining({
-        level: "degraded_preview",
-        action: "review_required",
-        agentName: AgentName.intent_agent,
-        taskType: ModelTaskType.intent_detection,
-      }),
-    );
+    expect(modelGateway.generateJson).toHaveBeenCalledTimes(6);
   });
 });

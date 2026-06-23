@@ -1,8 +1,9 @@
 import { AgentName, ModelTaskType } from "@prisma/client";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import type { ModelMessage } from "../../model-gateway/model-gateway.types";
-import { decideAgentFallback } from "../agent-fallback-policy";
 import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
+
+const AGENT_RETRY_COUNT = 5;
 
 export abstract class BaseAgentService<TInput, TOutput> {
   abstract readonly agentName: AgentName;
@@ -12,7 +13,7 @@ export abstract class BaseAgentService<TInput, TOutput> {
 
   async run(invocation: AgentInvocation<TInput, TOutput>): Promise<AgentOutput<TOutput>> {
     const messages = this.buildMessages(invocation.input);
-    try {
+    return this.runWithRetries(async () => {
       const result = await this.modelGateway.generateJson<TOutput>({
         taskType: this.taskType,
         agentName: this.agentName,
@@ -27,17 +28,7 @@ export abstract class BaseAgentService<TInput, TOutput> {
         data: this.normalize(result.data, invocation.input),
         modelCallLogId: result.modelCallLogId,
       };
-    } catch (error) {
-      const fallbackDecision = this.fallbackDecision(error);
-      if (fallbackDecision.allowed && fallbackDecision.metadata) {
-        return {
-          data: this.fallback(invocation.input),
-          fallback: fallbackDecision.metadata,
-        };
-      }
-
-      throw error;
-    }
+    });
   }
 
   protected abstract buildMessages(input: TInput): ModelMessage[];
@@ -52,12 +43,16 @@ export abstract class BaseAgentService<TInput, TOutput> {
     return {};
   }
 
-  private fallbackDecision(error: unknown) {
-    return decideAgentFallback({
-      agentName: this.agentName,
-      taskType: this.taskType,
-      error,
-      fallbackMode: process.env.AI_AGENT_FALLBACK_MODE,
-    });
+  private async runWithRetries(runOnce: () => Promise<AgentOutput<TOutput>>) {
+    let lastError: unknown;
+    for (let retry = 0; retry <= AGENT_RETRY_COUNT; retry += 1) {
+      try {
+        return await runOnce();
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError ?? new Error("Agent 执行失败");
   }
 }

@@ -611,8 +611,16 @@ describe("PatchService", () => {
       expect.objectContaining({
         type: "patch_failed",
         data: expect.objectContaining({ errorMessage: "PRD_REGENERATION_FAILED" }),
+        content: "PRD_REGENERATION_FAILED",
       }),
     );
+    expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      content: "PRD_REGENERATION_FAILED",
+      type: MessageType.error,
+      relatedRunId: "run-1",
+    }));
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: "project-1" },
       data: { status: ProjectStatus.qa_failed },

@@ -1,4 +1,4 @@
-import { AgentName, ProjectStatus, UserIntent } from "@prisma/client";
+import { AgentName, MessageType, ProjectStatus, UserIntent } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AiOrchestratorService } from "../src/ai/ai-orchestrator.service";
 import type {
@@ -269,6 +269,49 @@ describe("AiOrchestrator main vibe chain", () => {
       where: { id: "project-1" },
       data: expect.objectContaining({ status: ProjectStatus.prototype_ready }),
     });
+  });
+
+  it("ends the main flow and shows the upstream agent error when an agent fails", async () => {
+    intentAgent.run.mockRejectedValueOnce(new Error("upstream agent unavailable"));
+
+    await expect(service.run({
+      userMessageId: "message-1",
+      attachments: [],
+      context: {
+        runId: "run-1",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "做一个每日签到活动",
+        recentMessages: [],
+        attachments: [],
+        traceId: "trace-1",
+      },
+    })).rejects.toThrow("upstream agent unavailable");
+
+    expect(runLog.failRun).toHaveBeenCalledWith("run-1", expect.any(Error));
+    expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      content: "upstream agent unavailable",
+      type: MessageType.error,
+      relatedRunId: "run-1",
+    }));
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: expect.objectContaining({ status: ProjectStatus.qa_failed }),
+    });
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "run_failed",
+      content: "upstream agent unavailable",
+      data: expect.objectContaining({
+        errorMessage: "upstream agent unavailable",
+        runId: "run-1",
+        projectId: "project-1",
+      }),
+    }));
+    expect(stateService.createDraft).not.toHaveBeenCalled();
+    expect(runLog.completeRun).not.toHaveBeenCalled();
   });
 
   it("routes selected-region patches to confirmation without applying or regenerating artifacts", async () => {

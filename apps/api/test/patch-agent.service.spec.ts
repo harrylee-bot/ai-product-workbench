@@ -5,7 +5,7 @@ import { PatchAgentService } from "../src/ai/agents/patch-agent.service";
 import type { ProductDesignState } from "../src/ai/ai-vibe.types";
 
 describe("PatchAgentService", () => {
-  it("falls back to a module-10 PatchPlan that only targets ProductDesignState", async () => {
+  it("propagates upstream errors after five retries instead of synthesizing a PatchPlan", async () => {
     const modelGateway = {
       generateJson: vi.fn().mockRejectedValue(
         new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
@@ -13,7 +13,7 @@ describe("PatchAgentService", () => {
     };
     const service = new PatchAgentService(modelGateway as never);
 
-    const result = await service.run({
+    await expect(service.run({
       runId: "run-1",
       projectId: "project-1",
       traceId: "trace-1",
@@ -31,7 +31,7 @@ describe("PatchAgentService", () => {
         },
         productDesignState: baseState(),
       },
-    });
+    })).rejects.toThrow("no model configured");
 
     expect(modelGateway.generateJson).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -39,49 +39,12 @@ describe("PatchAgentService", () => {
         taskType: ModelTaskType.patch_planning,
       }),
     );
-    expect(result.data).toEqual(
-      expect.objectContaining({
-        projectId: "project-1",
-        intent: "copy_change",
-        impactAnalysis: expect.objectContaining({
-          affectedStatePaths: ["frontendRules", "stateRules"],
-          requiresPrdRegeneration: true,
-          requiresPrototypeRegeneration: true,
-          requiresQaCheck: true,
-        }),
-        regenerationPlan: {
-          prd: "full",
-          prototypeSpec: "full",
-          htmlPrototype: "full",
-          qa: "basic",
-        },
-        needsUserConfirmation: false,
-      }),
-    );
-    expect(result.data.operations).toHaveLength(1);
-    expect(result.data.operations[0]).toEqual(
-      expect.objectContaining({
-        op: "add",
-        path: "frontendRules",
-      }),
-    );
-    expect(result.data.operations[0].path).not.toMatch(/prd|html|prototypeSpec/i);
-    expect(result.fallback).toEqual(
-      expect.objectContaining({
-        level: "degraded_preview",
-        action: "review_required",
-        allowsConfirmation: false,
-        agentName: AgentName.patch_agent,
-        taskType: ModelTaskType.patch_planning,
-      }),
-    );
+    expect(modelGateway.generateJson).toHaveBeenCalledTimes(6);
   });
 
-  it("marks a high-risk confirmation when the request conflicts with strong_rule knowledge", async () => {
+  it("normalizes model output into a high-risk confirmation when the request conflicts with strong_rule knowledge", async () => {
     const modelGateway = {
-      generateJson: vi.fn().mockRejectedValue(
-        new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
-      ),
+      generateJson: vi.fn().mockResolvedValue({ data: {}, modelCallLogId: "call-1" }),
     };
     const service = new PatchAgentService(modelGateway as never);
 
@@ -128,6 +91,7 @@ describe("PatchAgentService", () => {
     });
 
     expect(result.data.needsUserConfirmation).toBe(true);
+    expect(result.fallback).toBeUndefined();
     expect(result.data.risks?.[0]).toEqual(
       expect.objectContaining({
         level: "high",

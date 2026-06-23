@@ -1006,17 +1006,18 @@ export class PatchService {
   }
 
   private async handlePatchFailure(
-    input: Pick<PatchExecutionInput, "runId" | "projectId">,
+    input: Pick<PatchExecutionInput, "runId" | "projectId" | "conversationId">,
     patchRecord: PatchRecord | undefined,
     error: unknown,
   ) {
+    const message = errorMessage(error, "PATCH_FAILED");
     let failedRecord = patchRecord;
     if (patchRecord) {
       const failed = await this.prisma.patchRecord.update({
         where: { id: patchRecord.id },
         data: {
           status: PrismaPatchRecordStatus.failed,
-          errorMessage: error instanceof Error ? error.message : "PATCH_FAILED",
+          errorMessage: message,
         },
       });
       failedRecord = this.toPatchRecord(failed as PatchRecordRow);
@@ -1026,15 +1027,29 @@ export class PatchService {
       where: { id: input.projectId },
       data: { status: ProjectStatus.qa_failed },
     });
+    await Promise.allSettled([
+      this.messageService.createAssistantMessage({
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        content: message,
+        type: MessageType.error,
+        metadata: toInputJson({
+          runId: input.runId,
+          patchId: failedRecord?.id,
+          errorMessage: message,
+        }),
+        relatedRunId: input.runId,
+      }),
+    ]);
     await this.stream.emit({
       runId: input.runId,
       projectId: input.projectId,
       type: "patch_failed",
       data: {
         patchId: failedRecord?.id,
-        errorMessage: error instanceof Error ? error.message : "PATCH_FAILED",
+        errorMessage: message,
       },
-      content: error instanceof Error ? error.message : "PATCH_FAILED",
+      content: message,
     });
   }
 
@@ -1473,6 +1488,19 @@ function stateSummary(state: ProductDesignState, patchId: string) {
     },
     updatedAt: state.updatedAt,
   };
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object") {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
 }
 
 function stepCopy(step: string, status: "started" | "completed") {

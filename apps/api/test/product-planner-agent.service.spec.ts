@@ -1,14 +1,11 @@
 import { AgentName, ModelTaskType, UserIntent } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { ProductPlannerAgentService } from "../src/ai/agents/product-planner-agent.service";
-import { ModelGatewayError } from "../src/model-gateway/model-gateway.error";
 
 describe("ProductPlannerAgentService", () => {
-  it("falls back to a formal ProductBuildPlan before ProductDesignState generation", async () => {
+  it("normalizes a formal ProductBuildPlan before ProductDesignState generation", async () => {
     const modelGateway = {
-      generateJson: vi.fn().mockRejectedValue(
-        new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
-      ),
+      generateJson: vi.fn().mockResolvedValue({ data: {}, modelCallLogId: "call-1" }),
     };
     const service = new ProductPlannerAgentService(modelGateway as never);
 
@@ -91,6 +88,7 @@ describe("ProductPlannerAgentService", () => {
     expect(modelCall.messages[0].content).toContain("局部修改的计划属于 Patch Agent");
     expect(modelCall.messages[0].content).toContain("Vibe Coding Skill 融合规则");
     expect(modelCall.messages[0].content).toContain("obsidian-bases");
+    expect(result.fallback).toBeUndefined();
     expect(result.data.requirementMode).toBe("formal_requirement");
     expect(result.data.summary).toContain("局部修改另走 PatchPlan");
     expect(result.data.sourceSummary.assumptions).toContain("本轮需按 Vibe Coding Skills 执行：obsidian-bases");
