@@ -49,6 +49,7 @@ describe("Vibe export module", () => {
     expect(artifact.contentType).toContain("application/msword");
     expect(artifact.downloadPath).toBe("/api/projects/project-1/export/word");
     expect(artifact.productDesignStateId).toBe("state-1");
+    expect(artifact.qaGate).toEqual(expect.objectContaining({ status: "open" }));
     expect(html).toContain("签到活动 PRD");
     expect(html).toContain("ProductDesignState");
     expect(html).toContain("每日签到");
@@ -66,6 +67,26 @@ describe("Vibe export module", () => {
     expect(artifact.format).toBe("prototype_html");
     expect(artifact.fileName).toBe("签到活动原型.html");
     expect(artifact.buffer.toString("utf8")).toContain('data-page-id="page_home"');
+  });
+
+  it("rejects stale PRD exports that do not match the current ProductDesignState", async () => {
+    documentService.getCurrentForUser.mockResolvedValue({
+      document: baseDocument({ productDesignStateVersion: 2 }),
+      productDesignState: baseState(),
+    });
+
+    await expect(service.exportPrdWordForUser(user, "project-1")).rejects.toThrow("PRD_EXPORT_STATE_MISMATCH");
+    expect(qaService.assertGateAllows).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale HTML exports that do not match the current ProductDesignState", async () => {
+    prototypeService.getCurrentForUser.mockResolvedValue({
+      artifact: baseArtifact({ productDesignStateId: "state-old" }),
+      productDesignState: baseState(),
+    });
+
+    await expect(service.exportPrototypeHtmlForUser(user, "project-1")).rejects.toThrow("HTML_EXPORT_STATE_MISMATCH");
+    expect(qaService.assertGateAllows).not.toHaveBeenCalled();
   });
 
   it("uses the project-level QA gate for orchestrator export intents", async () => {
@@ -136,7 +157,7 @@ function baseState(): ProductDesignState {
   };
 }
 
-function baseDocument(): RequirementDocument {
+function baseDocument(overrides: Partial<RequirementDocument> = {}): RequirementDocument {
   return {
     id: "prd-1",
     projectId: "project-1",
@@ -163,10 +184,11 @@ function baseDocument(): RequirementDocument {
     updatedBy: "user-1",
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
+    ...overrides,
   };
 }
 
-function baseArtifact(): PrototypeArtifact {
+function baseArtifact(overrides: Partial<PrototypeArtifact> = {}): PrototypeArtifact {
   return {
     id: "artifact-1",
     projectId: "project-1",
@@ -184,5 +206,6 @@ function baseArtifact(): PrototypeArtifact {
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
     assets: [],
+    ...overrides,
   };
 }

@@ -27,6 +27,7 @@ export class ExportService {
   async exportPrdWordForUser(user: AuthenticatedUser, projectId: string) {
     const current = await this.documentService.getCurrentForUser(user, projectId);
     if (!current.document) throw new NotFoundException("PRD_EXPORT_NOT_FOUND");
+    assertDocumentMatchesState(current.document, current.productDesignState ?? undefined);
     const qaGate = await this.qaService.assertGateAllows(user, projectId, "export_or_publish");
     return this.buildPrdWordExport(current.document, current.productDesignState ?? undefined, qaGate);
   }
@@ -34,6 +35,7 @@ export class ExportService {
   async exportPrototypeHtmlForUser(user: AuthenticatedUser, projectId: string) {
     const current = await this.prototypeService.getCurrentForUser(user, projectId);
     if (!current.artifact) throw new NotFoundException("HTML_EXPORT_NOT_FOUND");
+    assertArtifactMatchesState(current.artifact, current.productDesignState ?? undefined);
     const qaGate = await this.qaService.assertGateAllows(user, projectId, "export_or_publish");
     return this.buildPrototypeHtmlExport(current.artifact, qaGate);
   }
@@ -41,6 +43,7 @@ export class ExportService {
   async createPrdWordExport(projectId: string) {
     const current = await this.documentService.getCurrentForProject(projectId);
     if (!current.document) throw new NotFoundException("PRD_EXPORT_NOT_FOUND");
+    assertDocumentMatchesState(current.document, current.productDesignState ?? undefined);
     const qaGate = await this.qaService.assertGateAllowsForProject(projectId, "export_or_publish");
     return this.buildPrdWordExport(current.document, current.productDesignState ?? undefined, qaGate);
   }
@@ -48,6 +51,7 @@ export class ExportService {
   async createPrototypeHtmlExport(projectId: string) {
     const current = await this.prototypeService.getCurrentForProject(projectId);
     if (!current.artifact) throw new NotFoundException("HTML_EXPORT_NOT_FOUND");
+    assertArtifactMatchesState(current.artifact, current.productDesignState ?? undefined);
     const qaGate = await this.qaService.assertGateAllowsForProject(projectId, "export_or_publish");
     return this.buildPrototypeHtmlExport(current.artifact, qaGate);
   }
@@ -107,6 +111,18 @@ export class ExportService {
       buffer,
     };
   }
+}
+
+function assertDocumentMatchesState(document: RequirementDocument, state?: ProductDesignState) {
+  if (!state) return;
+  if (document.productDesignStateId === state.id && document.productDesignStateVersion === state.version) return;
+  throw new BadRequestException("PRD_EXPORT_STATE_MISMATCH");
+}
+
+function assertArtifactMatchesState(artifact: PrototypeArtifact, state?: ProductDesignState) {
+  if (!state) return;
+  if (artifact.productDesignStateId === state.id && artifact.productDesignStateVersion === state.version) return;
+  throw new BadRequestException("HTML_EXPORT_STATE_MISMATCH");
 }
 
 export function renderRequirementDocumentAsWordHtml(
