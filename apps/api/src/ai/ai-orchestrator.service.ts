@@ -368,6 +368,7 @@ export class AiOrchestratorService {
           prdDocument,
           prototypeSpec: prototypeSpec.data,
           prototypeArtifact: savedPrototype.artifact,
+          fallbacks: context.fallbackEvents,
         }),
       }),
       );
@@ -461,6 +462,7 @@ export class AiOrchestratorService {
         modelCallLogId: result.modelCallLogId,
       });
       if (result.fallback) {
+        context.fallbackEvents = [...(context.fallbackEvents ?? []), result.fallback];
         await this.stream.emit({
           runId: context.runId,
           projectId: context.projectId,

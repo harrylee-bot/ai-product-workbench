@@ -941,6 +941,7 @@ export type AgentRunContext = {
   intentResult?: IntentResult;
   requirementAnalysis?: RequirementAnalysis;
   productBuildPlan?: ProductBuildPlan;
+  fallbackEvents?: AgentFallbackMetadata[];
   traceId: string;
 };
 

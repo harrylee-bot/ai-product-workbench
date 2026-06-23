@@ -17,6 +17,7 @@ import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { fallbackStepOutput } from "./agent-fallback-policy";
+import type { AgentFallbackMetadata } from "./agent-fallback-policy";
 import { qaCompletedPayload, toInputJson } from "./ai-vibe.helpers";
 import type {
   AgentOutput,
@@ -78,6 +79,7 @@ type PatchExecutionInput = {
   traceId: string;
   instructionMessageId: string;
   knowledgeContext?: KnowledgeContext;
+  fallbackEvents?: AgentFallbackMetadata[];
 };
 
 type CreatePatchCandidateFromRunInput = Omit<PatchExecutionInput, "selectedRegion" | "userInstruction"> & {
@@ -886,6 +888,7 @@ export class PatchService {
           prdDocument,
           prototypeSpec: prototypeSpec.data,
           prototypeArtifact: savedPrototype.artifact,
+          fallbacks: input.fallbackEvents,
         }),
       }),
       );
@@ -1148,7 +1151,7 @@ export class PatchService {
   }
 
   private async runAgentStep<T>(
-    input: { runId: string; projectId: string; userInstruction: string },
+    input: Pick<PatchExecutionInput, "runId" | "projectId" | "userInstruction" | "fallbackEvents">,
     agentName: AgentName,
     step: NonNullable<Parameters<VibeStreamService["emit"]>[0]["step"]>,
     handler: () => Promise<AgentOutput<T>>,
@@ -1173,6 +1176,7 @@ export class PatchService {
         modelCallLogId: result.modelCallLogId,
       });
       if (result.fallback) {
+        input.fallbackEvents = [...(input.fallbackEvents ?? []), result.fallback];
         await this.stream.emit({
           runId: input.runId,
           projectId: input.projectId,
