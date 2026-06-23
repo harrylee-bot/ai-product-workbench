@@ -16,6 +16,7 @@ import {
   Loader2,
   MousePointer2,
   PencilLine,
+  Save,
   Sparkles,
   Wand2,
   X,
@@ -54,6 +55,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
   const [generating, setGenerating] = useState(false);
   const [generation, setGeneration] = useState<PrototypeLocalGeneration | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  const [draftSaved, setDraftSaved] = useState(false);
 
   useEffect(() => {
     setCanvasMode("select");
@@ -66,6 +68,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setGenerating(false);
     setGeneration(null);
     setGenerationError(null);
+    setDraftSaved(false);
   }, [prototypePreview?.id, prototypePreview?.html]);
 
   useEffect(() => {
@@ -127,6 +130,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setSelection(null);
     setGeneration(null);
     setGenerationError(null);
+    setDraftSaved(false);
   };
 
   const updateSelection = (event: PointerEvent<HTMLDivElement>) => {
@@ -157,6 +161,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setInstruction("");
     setLocalAction("copy_generate");
     setGenerationError(null);
+    setDraftSaved(false);
   };
 
   const cancelSelectionDrag = () => {
@@ -170,6 +175,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setInstruction("");
     setGeneration(null);
     setGenerationError(null);
+    setDraftSaved(false);
   };
 
   const createKeyboardSelection = () => {
@@ -195,6 +201,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setLocalAction("copy_generate");
     setGeneration(null);
     setGenerationError(null);
+    setDraftSaved(false);
   };
 
   const handleCanvasKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -219,6 +226,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setGenerating(true);
     setGeneration(null);
     setGenerationError(null);
+    setDraftSaved(false);
 
     try {
       await new Promise((resolve) => window.setTimeout(resolve, 480));
@@ -228,6 +236,11 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     } finally {
       setGenerating(false);
     }
+  };
+
+  const saveLocalDraft = () => {
+    if (!selection || !generation) return;
+    setDraftSaved(true);
   };
 
   return (
@@ -356,20 +369,24 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
           generating={generating}
           generation={generation}
           generationError={generationError}
+          draftSaved={draftSaved && Boolean(generation)}
           dialogRef={localDialogRef}
           instructionRef={localInstructionRef}
           onActionChange={(value) => {
             setLocalAction(value);
             setGeneration(null);
             setGenerationError(null);
+            setDraftSaved(false);
           }}
           onInstructionChange={(value) => {
             setInstruction(value);
             setGeneration(null);
             setGenerationError(null);
+            setDraftSaved(false);
           }}
           onClose={() => setDialogOpen(false)}
           onSubmit={generateLocalDraft}
+          onSaveDraft={saveLocalDraft}
         />
       ) : null}
     </div>
@@ -407,12 +424,14 @@ function PrototypeLocalEditDialog({
   generating,
   generation,
   generationError,
+  draftSaved,
   dialogRef,
   instructionRef,
   onActionChange,
   onInstructionChange,
   onClose,
   onSubmit,
+  onSaveDraft,
 }: {
   selection: PrototypeCanvasSelection;
   action: PrototypeLocalAction;
@@ -420,13 +439,24 @@ function PrototypeLocalEditDialog({
   generating: boolean;
   generation: PrototypeLocalGeneration | null;
   generationError: string | null;
+  draftSaved: boolean;
   dialogRef: RefObject<HTMLDivElement | null>;
   instructionRef: RefObject<HTMLTextAreaElement | null>;
   onActionChange: (value: PrototypeLocalAction) => void;
   onInstructionChange: (value: string) => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSaveDraft: () => void;
 }) {
+  const submitTitle = generating
+    ? "正在生成局部草稿"
+    : !instruction.trim()
+      ? "请输入局部生成指令"
+      : generation
+        ? "重新生成局部草稿"
+        : "生成局部草稿";
+  const submitLabel = generating ? "生成中" : generation ? "重新生成" : "生成局部草稿";
+
   return (
     <div
       ref={dialogRef}
@@ -503,6 +533,7 @@ function PrototypeLocalEditDialog({
             <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
               <CheckCircle2 className="h-4 w-4" />
               {generation.title}
+              {draftSaved ? <Badge tone="success" className="ml-auto bg-white">已保存</Badge> : null}
             </div>
             <div className="mt-2 space-y-1.5">
               {generation.changes.map((change) => (
@@ -514,18 +545,38 @@ function PrototypeLocalEditDialog({
           </div>
         ) : null}
 
-        <div className="flex items-center justify-end gap-2 pt-1">
+        {draftSaved ? (
+          <div role="status" className="rounded-[12px] border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-emerald-800">
+            局部草稿已保存。
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
           <Button type="button" size="sm" variant="secondary" onClick={onClose} title="收起局部生成编辑器">
             收起
           </Button>
+          {generation ? (
+            <Button
+              type="button"
+              size="sm"
+              variant={draftSaved ? "secondary" : "primary"}
+              onClick={onSaveDraft}
+              disabled={draftSaved}
+              title={draftSaved ? "局部草稿已保存" : "保存当前局部草稿"}
+            >
+              {draftSaved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+              {draftSaved ? "已保存" : "保存草稿"}
+            </Button>
+          ) : null}
           <Button
             type="submit"
             size="sm"
+            variant={generation ? "secondary" : "primary"}
             disabled={!instruction.trim() || generating}
-            title={generating ? "正在生成局部草稿" : instruction.trim() ? "生成局部草稿" : "请输入局部生成指令"}
+            title={submitTitle}
           >
             {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {generating ? "生成中" : "生成局部草稿"}
+            {submitLabel}
           </Button>
         </div>
       </form>
