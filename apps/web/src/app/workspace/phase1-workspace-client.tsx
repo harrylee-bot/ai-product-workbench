@@ -55,13 +55,32 @@ type PatchApplyResponse = {
 };
 
 type VibeStreamEvent = {
+  protocol?: string;
+  eventId?: string;
   type: string;
   eventType?: string;
+  legacyEventType?: string;
+  category?: string;
+  phase?: string;
   step?: string;
   content?: string;
+  payloadMeta?: VibeStreamPayloadMeta;
   payload?: unknown;
   data?: unknown;
   createdAt?: string;
+};
+
+type VibeStreamPayloadMeta = {
+  schema?: string;
+  kind?: string;
+  primaryId?: string;
+  secondaryId?: string;
+  status?: string;
+  title?: string;
+  summary?: string;
+  action?: string;
+  counts?: Record<string, number>;
+  refs?: Record<string, string>;
 };
 
 type CreateConversationResponse = {
@@ -594,9 +613,11 @@ function createInitialRunState(runId: string): VibeRunView {
 function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunView {
   const eventType = event.eventType ?? event.type;
   const payload = payloadRecord(event);
+  const payloadMeta = payloadMetaRecord(event);
+  const metaSummary = asText(payloadMeta?.summary);
   let next: VibeRunView = {
     ...current,
-    currentLabel: event.content ?? current.currentLabel,
+    currentLabel: event.content ?? metaSummary ?? current.currentLabel,
     steps: current.steps.map((step) => ({ ...step })),
   };
 
@@ -636,17 +657,17 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
   if (eventType === "patch_plan_created") {
     next = updateStep(next, "patch_planning", "done", "局部修改计划已生成，等待用户确认");
     const patchPreview = asRecord(payload?.patchPreview);
-    next.patchId = asText(payload?.patchId) || asText(patchPreview?.patchId) || next.patchId;
-    next.patchPreviewMessage = asText(patchPreview?.message) || event.content || next.patchPreviewMessage;
+    next.patchId = asText(payload?.patchId) || asText(patchPreview?.patchId) || asText(payloadMeta?.primaryId) || next.patchId;
+    next.patchPreviewMessage = asText(patchPreview?.message) || event.content || metaSummary || next.patchPreviewMessage;
     next.summary = "局部修改候选已生成，等待确认后再应用";
   }
 
   if (eventType === "patch_applying") {
-    next.currentLabel = event.content ?? "正在应用已确认的局部修改";
+    next.currentLabel = event.content ?? metaSummary ?? "正在应用已确认的局部修改";
   }
 
   if (eventType === "patch_completed") {
-    next.currentLabel = event.content ?? "局部修改已完成并重新生成产物";
+    next.currentLabel = event.content ?? metaSummary ?? "局部修改已完成并重新生成产物";
   }
 
   if (eventType === "patch_failed") {
@@ -659,17 +680,17 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     const qaReport = asRecord(payload.qaReport) ?? payload;
     const qaGate = asRecord(payload.qaGate) ?? asRecord(qaReport.gate);
     next = updateStep(next, "qa_check", "done", "QA 校验完成");
-    next.qaIssueCount = readArrayLength(qaReport.issues);
-    const gateStatus = asQaGateStatus(qaGate?.status);
+    next.qaIssueCount = readArrayLength(qaReport.issues) || numberFromRecord(payloadMeta?.counts, "issues");
+    const gateStatus = asQaGateStatus(qaGate?.status ?? payloadMeta?.status);
     if (gateStatus) {
       next.qaGateStatus = gateStatus;
-      next.qaGateSummary = qaGateSummary(qaGate);
+      next.qaGateSummary = qaGateSummary(qaGate) ?? metaSummary;
     }
   }
 
-  if (eventType === "export_ready" && payload) {
-    next.exportFileName = asText(payload.fileName);
-    next.summary = next.exportFileName ? `已准备导出文件：${next.exportFileName}` : "导出文件已准备好";
+  if (eventType === "export_ready") {
+    next.exportFileName = asText(payload?.fileName) || asText(payloadMeta?.title);
+    next.summary = event.content ?? metaSummary ?? (next.exportFileName ? `已准备导出文件：${next.exportFileName}` : "导出文件已准备好");
   }
 
   if (eventType === "knowledge_candidate_created") {
@@ -694,19 +715,19 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     const patchPreview = asRecord(payload?.patchPreview);
     if (asText(nextAction?.type) === "confirm_patch") {
       next.status = "waiting_confirmation";
-      next.patchId = asText(patchRecord?.id) || asText(patchPreview?.patchId) || next.patchId;
-      next.patchPreviewMessage = asText(patchPreview?.message) || next.patchPreviewMessage;
-      next.summary = event.content ?? asText(payload?.message) ?? "Patch 候选已生成，等待确认后再应用";
+      next.patchId = asText(patchRecord?.id) || asText(patchPreview?.patchId) || asText(payloadMeta?.primaryId) || next.patchId;
+      next.patchPreviewMessage = asText(patchPreview?.message) || metaSummary || next.patchPreviewMessage;
+      next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Patch 候选已生成，等待确认后再应用";
     } else {
       next.status = "completed";
-      next.summary = event.content ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
+      next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
     }
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step);
   }
 
   if (eventType === "run_failed") {
     next.status = "failed";
-    next.errorMessage = event.content ?? asText(payload?.message) ?? "Vibe Coding 主链路执行失败";
+    next.errorMessage = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路执行失败";
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "failed" } : step);
   }
 
@@ -774,8 +795,17 @@ function payloadRecord(event: VibeStreamEvent) {
   return asRecord(event.payload) ?? asRecord(event.data);
 }
 
+function payloadMetaRecord(event: VibeStreamEvent) {
+  return event.payloadMeta?.schema === "vibe.stream.payload.v1" ? event.payloadMeta : undefined;
+}
+
 function asText(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function numberFromRecord(record: Record<string, number> | undefined, key: string) {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function clampPreviewWidth(width: number, sidebarCollapsed: boolean) {

@@ -855,6 +855,33 @@ export type VibeStreamEventPhase =
   | "updated"
   | "applying";
 
+export type VibeStreamPayloadKind =
+  | "agent_step"
+  | "progress"
+  | "state"
+  | "prd"
+  | "prototype"
+  | "patch"
+  | "qa"
+  | "rollback"
+  | "knowledge"
+  | "export"
+  | "run"
+  | "fallback";
+
+export type VibeStreamPayloadMeta = {
+  schema: "vibe.stream.payload.v1";
+  kind: VibeStreamPayloadKind;
+  primaryId?: string;
+  secondaryId?: string;
+  status?: string;
+  title?: string;
+  summary?: string;
+  action?: string;
+  counts?: Record<string, number>;
+  refs?: Record<string, string>;
+};
+
 export type VibeStreamEvent = {
   protocol?: VibeStreamEventProtocol;
   eventId?: string;
@@ -867,6 +894,7 @@ export type VibeStreamEvent = {
   phase?: VibeStreamEventPhase;
   step?: AgentStepName;
   content?: string;
+  payloadMeta?: VibeStreamPayloadMeta;
   payload?: unknown;
   data?: unknown;
   createdAt: string;
@@ -880,6 +908,7 @@ export type VibeStreamEventEnvelope = VibeStreamEvent & {
   legacyEventType: VibeStreamLegacyEventType;
   category: VibeStreamEventCategory;
   phase: VibeStreamEventPhase;
+  payloadMeta: VibeStreamPayloadMeta;
 };
 
 export type AgentStepName =

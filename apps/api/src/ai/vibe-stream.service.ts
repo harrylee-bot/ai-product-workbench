@@ -8,6 +8,8 @@ import type {
   VibeStreamEventCategory,
   VibeStreamEventEnvelope,
   VibeStreamEventPhase,
+  VibeStreamPayloadKind,
+  VibeStreamPayloadMeta,
   VibeStreamEventType,
   VibeStreamLegacyEventType,
 } from "./ai-vibe.types";
@@ -131,6 +133,7 @@ function buildStreamEvent(input: {
     phase,
     step: input.step,
     content: input.content,
+    payloadMeta: buildPayloadMeta(input.type, input.step, input.data, input.content),
     payload: input.data,
     data: input.data,
     createdAt,
@@ -241,6 +244,7 @@ function normalizeStreamEvent(
   const step = toOptionalString(payload.step) as AgentStepName | undefined;
   const { category, phase } = classifyStreamEvent(eventType);
   const data = payload.payload ?? payload.data;
+  const content = toOptionalString(payload.content);
   return {
     protocol: "vibe.v1",
     eventId:
@@ -264,11 +268,156 @@ function normalizeStreamEvent(
       ?? (toOptionalString(outer?.phase) as VibeStreamEventPhase | undefined)
       ?? phase,
     step,
-    content: toOptionalString(payload.content),
+    content,
+    payloadMeta: normalizePayloadMeta(payload.payloadMeta)
+      ?? normalizePayloadMeta(outer?.payloadMeta)
+      ?? buildPayloadMeta(eventType, step, data, content),
     payload: data,
     data,
     createdAt,
   };
+}
+
+function buildPayloadMeta(
+  type: VibeStreamEventType,
+  step?: AgentStepName,
+  data?: unknown,
+  content?: string,
+): VibeStreamPayloadMeta {
+  const record = asRecord(data);
+  const qaReport = asRecord(record?.qaReport) ?? (type === "qa_completed" ? record : undefined);
+  const qaGate = asRecord(record?.qaGate) ?? asRecord(qaReport?.gate);
+  const patchRecord = asRecord(record?.patchRecord) ?? asRecord(asRecord(record?.result)?.patchRecord);
+  const patchPreview = asRecord(record?.patchPreview) ?? asRecord(asRecord(record?.result)?.patchPreview);
+  const prototypeArtifact = asRecord(record?.prototypeArtifact) ?? (type === "prototype_updated" ? record : undefined);
+  const prototypeSpec = asRecord(record?.prototypeSpec);
+  const nextAction = asRecord(record?.nextAction);
+
+  return stripUndefined({
+    schema: "vibe.stream.payload.v1",
+    kind: payloadKindForType(type),
+    primaryId:
+      text(record?.patchId)
+      ?? text(patchRecord?.id)
+      ?? text(patchPreview?.patchId)
+      ?? text(qaReport?.id)
+      ?? text(record?.id)
+      ?? text(record?.sourceId),
+    secondaryId:
+      text(prototypeSpec?.id)
+      ?? text(record?.prototypeSpecId)
+      ?? text(prototypeArtifact?.prototypeSpecId)
+      ?? text(patchPreview?.id),
+    status:
+      text(qaGate?.status)
+      ?? text(qaReport?.status)
+      ?? text(record?.status)
+      ?? text(record?.level)
+      ?? text(patchRecord?.status)
+      ?? (type === "run_failed" ? "failed" : type === "run_completed" ? "completed" : undefined),
+    title:
+      text(record?.title)
+      ?? text(record?.fileName)
+      ?? text(prototypeArtifact?.title)
+      ?? text(patchPreview?.title),
+    summary:
+      content
+      ?? text(record?.message)
+      ?? text(record?.summary)
+      ?? text(qaReport?.summary)
+      ?? text(patchPreview?.message),
+    action: text(nextAction?.type) ?? text(record?.action),
+    counts: payloadCounts(type, record, qaReport),
+    refs: payloadRefs(type, record, qaReport, prototypeArtifact),
+  });
+}
+
+function payloadKindForType(type: VibeStreamEventType): VibeStreamPayloadKind {
+  if (type === "step_started" || type === "step_completed" || type === "step_failed") return "agent_step";
+  if (type === "message_delta") return "progress";
+  if (type === "fallback_used") return "fallback";
+  if (type === "state_updated" || type === "state_version_created") return "state";
+  if (type === "prd_updated") return "prd";
+  if (type === "prototype_updated") return "prototype";
+  if (type.startsWith("patch_")) return "patch";
+  if (type === "qa_completed") return "qa";
+  if (type.startsWith("rollback_")) return "rollback";
+  if (type === "knowledge_candidate_created") return "knowledge";
+  if (type === "export_ready") return "export";
+  return "run";
+}
+
+function payloadCounts(
+  type: VibeStreamEventType,
+  record?: Record<string, unknown>,
+  qaReport?: Record<string, unknown>,
+) {
+  if (type === "qa_completed") {
+    return stripNumberRecord({
+      blocking: numberValue(qaReport?.blockingCount),
+      major: numberValue(qaReport?.majorCount),
+      minor: numberValue(qaReport?.minorCount),
+      info: numberValue(qaReport?.infoCount),
+      issues: Array.isArray(qaReport?.issues) ? qaReport.issues.length : undefined,
+    });
+  }
+  const counts = asRecord(record?.counts);
+  if (counts) return stripNumberRecord(counts);
+  if (type === "knowledge_candidate_created") {
+    return stripNumberRecord({ candidates: Array.isArray(record?.items) ? record.items.length : undefined });
+  }
+  return undefined;
+}
+
+function payloadRefs(
+  type: VibeStreamEventType,
+  record?: Record<string, unknown>,
+  qaReport?: Record<string, unknown>,
+  prototypeArtifact?: Record<string, unknown>,
+) {
+  const refs = stripStringRecord({
+    stateId:
+      text(record?.stateId)
+      ?? text(record?.productDesignStateId)
+      ?? text(qaReport?.productDesignStateId)
+      ?? text(prototypeArtifact?.productDesignStateId),
+    prdDocumentId: text(record?.prdDocumentId) ?? text(qaReport?.prdDocumentId),
+    prototypeArtifactId:
+      text(record?.prototypeArtifactId)
+      ?? text(qaReport?.prototypeArtifactId)
+      ?? text(prototypeArtifact?.id),
+    patchId: text(record?.patchId) ?? text(qaReport?.relatedPatchId),
+    qaReportId: text(qaReport?.id),
+  });
+  return Object.keys(refs).length ? refs : undefined;
+}
+
+function normalizePayloadMeta(value: unknown): VibeStreamPayloadMeta | undefined {
+  const record = asRecord(value);
+  if (!record || record.schema !== "vibe.stream.payload.v1") return undefined;
+  const kind = text(record.kind) as VibeStreamPayloadKind | undefined;
+  if (!kind) return undefined;
+  const meta: VibeStreamPayloadMeta = {
+    schema: "vibe.stream.payload.v1",
+    kind,
+  };
+  const primaryId = text(record.primaryId);
+  const secondaryId = text(record.secondaryId);
+  const status = text(record.status);
+  const title = text(record.title);
+  const summary = text(record.summary);
+  const action = text(record.action);
+  const counts = stripNumberRecord(asRecord(record.counts));
+  const refs = stripStringRecord(asRecord(record.refs));
+  if (primaryId) meta.primaryId = primaryId;
+  if (secondaryId) meta.secondaryId = secondaryId;
+  if (status) meta.status = status;
+  if (title) meta.title = title;
+  if (summary) meta.summary = summary;
+  if (action) meta.action = action;
+  if (counts) meta.counts = counts;
+  if (Object.keys(refs).length) meta.refs = refs;
+  return meta;
 }
 
 function createEventId(runId: string, type: VibeStreamEventType, step?: AgentStepName) {
@@ -285,4 +434,36 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function toOptionalString(value: unknown) {
   return typeof value === "string" && value ? value : undefined;
+}
+
+function text(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stripUndefined<T extends Record<string, unknown>>(record: T) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== undefined),
+  ) as T;
+}
+
+function stripNumberRecord(record?: Record<string, unknown>) {
+  if (!record) return undefined;
+  const result = Object.fromEntries(
+    Object.entries(record)
+      .filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])),
+  );
+  return Object.keys(result).length ? result : undefined;
+}
+
+function stripStringRecord(record?: Record<string, unknown>) {
+  if (!record) return {};
+  return Object.fromEntries(
+    Object.entries(record)
+      .map(([key, value]) => [key, text(value)] as const)
+      .filter((entry): entry is [string, string] => Boolean(entry[1])),
+  );
 }
