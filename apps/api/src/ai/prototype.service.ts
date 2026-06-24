@@ -318,6 +318,9 @@ export class PrototypeService {
   async confirmForUser(user: AuthenticatedUser, artifactId: string, reason?: string) {
     const current = await this.getAccessibleArtifact(user, artifactId);
     this.assertOwnerMutation(user, current.project.ownerId);
+    if (current.status !== PrototypeArtifactStatus.ready || !current.htmlContent) {
+      throw new BadRequestException("PROTOTYPE_CONFIRM_NOT_READY");
+    }
     const qaGate = this.qaService
       ? await this.qaService.assertGateAllows(user, current.projectId, "confirm_artifacts")
       : undefined;
@@ -331,10 +334,16 @@ export class PrototypeService {
     const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
     const artifact = this.toArtifactItem(updated as PrototypeArtifactRecord);
     const version = await this.createVersion(spec, artifact, user.id, reason ?? "用户确认原型");
+    const productDesignState = await this.stateService.attachGeneratedArtifacts(artifact.productDesignStateId, {
+      prototypeSpec: spec,
+      status: ProductDesignStateStatus.confirmed,
+      userId: user.id,
+      reason: `${reason ?? "用户确认原型"}，同步原型确认状态到 ProductDesignState`,
+    });
     const knowledgeCandidates = qaGate && !qaGate.allowPersistKnowledge
       ? { items: [], qaGate }
       : await this.extractKnowledgeCandidatesAfterConfirm(user.id, spec, artifact);
-    return { artifact, version, knowledgeCandidates, qaGate };
+    return { artifact, version, productDesignState, knowledgeCandidates, qaGate };
   }
 
   private async extractKnowledgeCandidatesAfterConfirm(

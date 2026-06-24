@@ -67,6 +67,11 @@ type PatchApplyResponse = {
   status: "completed";
 };
 
+type ConfirmPrototypeResponse = {
+  artifact?: unknown;
+  productDesignState?: unknown;
+};
+
 type VibeStreamEvent = {
   protocol?: string;
   eventId?: string;
@@ -385,6 +390,33 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  const confirmPrototype = useMutation({
+    mutationFn: (artifactId: string) =>
+      apiRequest<ConfirmPrototypeResponse>(`/prototype-artifacts/${encodeURIComponent(artifactId)}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "用户确认原型，可创建分享链接" }),
+      }),
+    onSuccess: async (response) => {
+      if (response.artifact) {
+        setArtifactPreview({ prototypePreview: normalizePrototypePreview(response.artifact) });
+      }
+      setRunState((current) => current
+        ? {
+            ...current,
+            status: "completed",
+            summary: "原型已确认，可以创建只读分享链接。",
+          }
+        : current);
+      await Promise.all([
+        selectedProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", selectedProjectId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "确认原型失败");
+    },
+  });
+
   const updatePrdSection = useMutation({
     mutationFn: (input: { documentId: string; sectionId: string; content: string }) =>
       apiRequest<UpdatePrdSectionResponse>(
@@ -674,6 +706,10 @@ function Phase1WorkspaceInner() {
         onConfirmPrd={async () => {
           await confirmPrd.mutateAsync();
         }}
+        confirmingPrototypeId={confirmPrototype.isPending ? confirmPrototype.variables : undefined}
+        onConfirmPrototype={async (artifactId) => {
+          await confirmPrototype.mutateAsync(artifactId);
+        }}
         onSend={async (content) => {
           await sendMessage.mutateAsync(content);
         }}
@@ -956,6 +992,12 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
       next.status = "waiting_prd_confirm";
       next.wantsPrototype = nextAction?.wantsPrototype !== false;
       next.summary = asText(payload?.message) ?? event.content ?? metaSummary ?? "PRD 已生成，请确认无误";
+    } else if (nextActionType === "review_prototype") {
+      const prototypeArtifact = asRecord(payload?.prototypeArtifact);
+      const refs = asRecord(payloadMeta?.refs);
+      next.status = "waiting_prototype_confirm";
+      next.prototypeArtifactId = asText(prototypeArtifact?.id) ?? asText(refs?.prototypeArtifactId) ?? next.prototypeArtifactId;
+      next.summary = asText(payload?.message) ?? event.content ?? metaSummary ?? "原型已生成，请确认无误";
     } else {
       next.status = "completed";
       next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";

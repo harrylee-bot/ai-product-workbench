@@ -44,8 +44,8 @@ describe("ShareService", () => {
       status: ProjectStatus.prototype_ready,
       deletedAt: null,
     });
-    stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动" });
-    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1" } });
+    stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "confirmed" });
+    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
     prototypeService.getCurrentForProject.mockResolvedValue({
       artifact: { id: "artifact-1", status: PrototypeArtifactStatus.ready },
     });
@@ -79,6 +79,45 @@ describe("ShareService", () => {
     });
   });
 
+  it("refuses to share an unconfirmed PRD", async () => {
+    prisma.project.findUnique.mockResolvedValue({
+      id: "project-1",
+      ownerId: "user-1",
+      title: "签到活动",
+      status: ProjectStatus.prd_ready,
+      deletedAt: null,
+    });
+    stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "doc_ready" });
+    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1", status: "ready" } });
+
+    await expect(
+      service.createForUser(user, { projectId: "project-1", scope: ShareScope.prd }),
+    ).rejects.toThrow("SHARE_PRD_NOT_CONFIRMED");
+
+    expect(prisma.shareLink.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses to share an unconfirmed prototype", async () => {
+    prisma.project.findUnique.mockResolvedValue({
+      id: "project-1",
+      ownerId: "user-1",
+      title: "签到活动",
+      status: ProjectStatus.prototype_ready,
+      deletedAt: null,
+    });
+    stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "prototype_ready" });
+    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
+    prototypeService.getCurrentForProject.mockResolvedValue({
+      artifact: { id: "artifact-1", status: PrototypeArtifactStatus.ready },
+    });
+
+    await expect(
+      service.createForUser(user, { projectId: "project-1", scope: ShareScope.prototype }),
+    ).rejects.toThrow("SHARE_PROTOTYPE_NOT_CONFIRMED");
+
+    expect(prisma.shareLink.create).not.toHaveBeenCalled();
+  });
+
   it("refuses to share a prototype that is not ready", async () => {
     prisma.project.findUnique.mockResolvedValue({
       id: "project-1",
@@ -87,8 +126,8 @@ describe("ShareService", () => {
       status: ProjectStatus.prd_ready,
       deletedAt: null,
     });
-    stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动" });
-    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1" } });
+    stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "doc_confirmed" });
+    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
     prototypeService.getCurrentForProject.mockResolvedValue({ artifact: null });
 
     await expect(

@@ -295,6 +295,39 @@ describe("AiOrchestrator main vibe chain", () => {
     });
   });
 
+  it("keeps the project at the PRD gate status when prototype generation fails after PRD confirmation", async () => {
+    const confirmedState = {
+      ...baseState(),
+      status: "doc_confirmed",
+      prdDocument: { ...basePrdDocument(), status: "confirmed" },
+    };
+    prototypeDesignerAgent.run.mockRejectedValueOnce(new Error("prototype agent unavailable"));
+
+    await expect(service.confirmPrdAndContinue({
+      userMessageId: "message-2",
+      attachments: [],
+      context: {
+        runId: "run-2",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "确认 PRD，继续生成原型。",
+        recentMessages: [],
+        attachments: [],
+        productDesignState: confirmedState,
+        currentProjectStatus: ProjectStatus.prd_ready,
+        traceId: "trace-2",
+      },
+    })).rejects.toThrow("prototype agent unavailable");
+
+    expect(runLog.failRun).toHaveBeenCalledWith("run-2", expect.any(Error));
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: expect.objectContaining({ status: ProjectStatus.prd_ready }),
+    });
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+  });
+
   it("已有已确认文档时，generate_prototype 意图直接进入原型阶段（FR-2.2）", async () => {
     intentAgent.run.mockResolvedValueOnce({
       data: {

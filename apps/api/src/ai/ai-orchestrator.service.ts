@@ -547,6 +547,9 @@ export class AiOrchestratorService {
 
   private async handleRunFailure(context: AgentRunContext, error: unknown) {
     const message = errorMessage(error, "AI 执行失败");
+    const projectStatus = context.productDesignState
+      ? projectStatusFromProductDesignState(context.productDesignState, context.currentProjectStatus)
+      : ProjectStatus.qa_failed;
     await this.runLog.failRun(context.runId, error);
     await Promise.allSettled([
       this.messageService.createAssistantMessage({
@@ -560,7 +563,7 @@ export class AiOrchestratorService {
         }),
         relatedRunId: context.runId,
       }),
-      this.updateProjectStatus(context.projectId, ProjectStatus.qa_failed),
+      this.updateProjectStatus(context.projectId, projectStatus),
     ]);
     await this.stream.emit({
       runId: context.runId,

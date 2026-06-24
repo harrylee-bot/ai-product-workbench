@@ -11,7 +11,7 @@ import {
   Share2,
   ShieldAlert,
 } from "lucide-react";
-import { IconButton, SegmentedControl } from "@/components/ui";
+import { IconButton, SegmentedControl, Select } from "@/components/ui";
 import { apiRequest, downloadApiFile } from "@/lib/api";
 import { FeedbackWorkflowView } from "./feedback-workflow-view";
 import { PrdPreviewView } from "./prd-preview-view";
@@ -32,6 +32,8 @@ const PREVIEW_TABS: Array<{ value: PreviewMode; label: string; icon: typeof File
   { value: "state", label: "状态", icon: Activity, description: "指标、推断与版本" },
   { value: "feedback", label: "反馈", icon: MessageSquare, description: "反馈闭环工作流" },
 ];
+
+type ShareScope = "prd" | "prototype" | "both";
 
 export function PreviewPanel({
   projectId,
@@ -76,7 +78,19 @@ export function PreviewPanel({
   const activeTab = PREVIEW_TABS.find((tab) => tab.value === mode) ?? PREVIEW_TABS[1];
   const canExportPrd = Boolean(projectId && prdPreview?.id);
   const canExportHtml = Boolean(projectId && prototypePreview?.html);
-  const canShare = Boolean(projectId && (prdPreview?.id || prototypePreview?.html));
+  const hasShareablePrd = Boolean(prdPreview?.id);
+  const hasShareablePrototype = Boolean(prototypePreview?.html);
+  const canShare = Boolean(projectId && (hasShareablePrd || hasShareablePrototype));
+  const availableShareScopes = shareScopeOptions(hasShareablePrd, hasShareablePrototype);
+  const defaultShareScope = deriveShareScope(hasShareablePrd, hasShareablePrototype);
+  const [shareScope, setShareScope] = useState<ShareScope>(defaultShareScope);
+  const effectiveShareScope = availableShareScopes.some((option) => option.value === shareScope)
+    ? shareScope
+    : defaultShareScope;
+
+  useEffect(() => {
+    setShareScope(defaultShareScope);
+  }, [defaultShareScope]);
 
   useEffect(() => {
     if (prototypePreview?.html) {
@@ -105,10 +119,9 @@ export function PreviewPanel({
     setSharing(true);
     setShareCopied(false);
     try {
-      const scope = deriveShareScope(Boolean(prdPreview?.id), Boolean(prototypePreview?.html));
       const response = await apiRequest<{ share: { url: string } }>("/share-links", {
         method: "POST",
-        body: JSON.stringify({ projectId, scope }),
+        body: JSON.stringify({ projectId, scope: effectiveShareScope }),
       });
       const shareUrl = absoluteShareUrl(response.share.url);
       await copyText(shareUrl);
@@ -130,6 +143,19 @@ export function PreviewPanel({
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           <div className="flex shrink-0 items-center gap-1">
+            {availableShareScopes.length > 1 ? (
+              <Select
+                aria-label="分享范围"
+                value={effectiveShareScope}
+                onChange={(event) => setShareScope(event.target.value as ShareScope)}
+                className="h-9 max-w-[116px] px-2 text-xs"
+                disabled={sharing}
+              >
+                {availableShareScopes.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </Select>
+            ) : null}
             <IconButton
               label="导出 PRD Word"
               variant="secondary"
@@ -200,7 +226,20 @@ export function PreviewPanel({
   );
 }
 
-function deriveShareScope(hasPrd: boolean, hasPrototype: boolean) {
+function shareScopeOptions(hasPrd: boolean, hasPrototype: boolean): Array<{ value: ShareScope; label: string }> {
+  if (hasPrd && hasPrototype) {
+    return [
+      { value: "both", label: "两者" },
+      { value: "prd", label: "PRD" },
+      { value: "prototype", label: "原型" },
+    ];
+  }
+  if (hasPrd) return [{ value: "prd", label: "PRD" }];
+  if (hasPrototype) return [{ value: "prototype", label: "原型" }];
+  return [{ value: "both", label: "两者" }];
+}
+
+function deriveShareScope(hasPrd: boolean, hasPrototype: boolean): ShareScope {
   if (hasPrd && hasPrototype) return "both";
   if (hasPrd) return "prd";
   return "prototype";

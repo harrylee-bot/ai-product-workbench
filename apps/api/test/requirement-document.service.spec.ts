@@ -200,6 +200,7 @@ describe("PRD requirement document module", () => {
       ...documentRecord({
         id: "prd-1",
         ...draft,
+        status: "confirmed",
       }),
       project: baseProject(),
     });
@@ -207,6 +208,7 @@ describe("PRD requirement document module", () => {
       documentRecord({
         id: "prd-1",
         ...draft,
+        status: data.status,
         sections: data.sections,
         updatedBy: data.updatedBy,
       }),
@@ -217,6 +219,7 @@ describe("PRD requirement document module", () => {
     });
 
     const section = result.document.sections.find((item) => item.id === "business_goal");
+    expect(result.document.status).toBe("ready");
     expect(section?.content).toBe("提升签到转化率，并让运营能清楚追踪连续签到效果。");
     expect(section?.blocks?.[0]).toEqual(expect.objectContaining({
       id: "business_goal_body",
@@ -229,7 +232,8 @@ describe("PRD requirement document module", () => {
       }),
     });
     expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
-      prdDocument: expect.objectContaining({ id: "prd-1" }),
+      prdDocument: expect.objectContaining({ id: "prd-1", status: "ready" }),
+      status: "doc_ready",
       reason: "PRD 段落 business_goal 已回流到 ProductDesignState",
     }));
   });

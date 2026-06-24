@@ -34,7 +34,7 @@ export type VibeRunStepView = {
 
 export type VibeRunView = {
   runId?: string;
-  status: "idle" | "running" | "waiting_confirmation" | "waiting_prd_confirm" | "completed" | "failed";
+  status: "idle" | "running" | "waiting_confirmation" | "waiting_prd_confirm" | "waiting_prototype_confirm" | "completed" | "failed";
   currentLabel?: string;
   summary?: string;
   steps: VibeRunStepView[];
@@ -45,6 +45,7 @@ export type VibeRunView = {
   exportFileName?: string;
   patchId?: string;
   patchPreviewMessage?: string;
+  prototypeArtifactId?: string;
   /** 确认门 A：用户确认 PRD 后是否应继续生成原型（FR-1.3） */
   wantsPrototype?: boolean;
   errorMessage?: string;
@@ -60,6 +61,8 @@ export function ChatPanel({
   onConfirmPatch,
   confirmingPrd,
   onConfirmPrd,
+  confirmingPrototypeId,
+  onConfirmPrototype,
   onSend,
 }: {
   messages: Phase1Message[];
@@ -71,6 +74,8 @@ export function ChatPanel({
   onConfirmPatch?: (patchId: string) => Promise<void> | void;
   confirmingPrd?: boolean;
   onConfirmPrd?: (wantsPrototype: boolean) => Promise<void> | void;
+  confirmingPrototypeId?: string;
+  onConfirmPrototype?: (artifactId: string) => Promise<void> | void;
   onSend: (content: string) => Promise<void> | void;
 }) {
   const displayRun = runState ?? (decision ? legacyRunStateFromDecision(decision) : null);
@@ -122,6 +127,8 @@ export function ChatPanel({
             onConfirmPatch={onConfirmPatch}
             confirmingPrd={confirmingPrd}
             onConfirmPrd={onConfirmPrd}
+            confirmingPrototypeId={confirmingPrototypeId}
+            onConfirmPrototype={onConfirmPrototype}
           />
         ) : null}
       </div>
@@ -137,6 +144,8 @@ function ExecutionPathCard({
   onConfirmPatch,
   confirmingPrd,
   onConfirmPrd,
+  confirmingPrototypeId,
+  onConfirmPrototype,
 }: {
   runState: VibeRunView;
   running: boolean;
@@ -144,20 +153,25 @@ function ExecutionPathCard({
   onConfirmPatch?: (patchId: string) => Promise<void> | void;
   confirmingPrd?: boolean;
   onConfirmPrd?: (wantsPrototype: boolean) => Promise<void> | void;
+  confirmingPrototypeId?: string;
+  onConfirmPrototype?: (artifactId: string) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
   const completed = runState.status === "completed";
   const waitingForConfirmation = runState.status === "waiting_confirmation";
   const waitingForPrdConfirm = runState.status === "waiting_prd_confirm";
+  const waitingForPrototypeConfirm = runState.status === "waiting_prototype_confirm";
   const failed = runState.status === "failed";
   const canConfirmPatch = waitingForConfirmation && Boolean(runState.patchId && onConfirmPatch);
   const confirmingPatch = Boolean(runState.patchId && confirmingPatchId === runState.patchId);
   const canConfirmPrd = waitingForPrdConfirm && Boolean(onConfirmPrd);
+  const canConfirmPrototype = waitingForPrototypeConfirm && Boolean(runState.prototypeArtifactId && onConfirmPrototype);
+  const confirmingPrototype = Boolean(runState.prototypeArtifactId && confirmingPrototypeId === runState.prototypeArtifactId);
   const activeStep = runState.steps.find((step) => step.status === "running")
     ?? lastActiveStep(runState.steps)
     ?? runState.steps[0];
   const doneCount = runState.steps.filter((step) => step.status === "done").length;
-  const settledLike = completed || waitingForConfirmation || waitingForPrdConfirm;
+  const settledLike = completed || waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm;
   const progress = settledLike
     ? 100
     : Math.max(4, Math.round((doneCount / Math.max(runState.steps.length, 1)) * 100));
@@ -165,12 +179,14 @@ function ExecutionPathCard({
     ? runState.errorMessage ?? "运行失败，请查看失败步骤"
     : waitingForPrdConfirm
       ? runState.summary ?? "PRD 已生成，请确认无误"
+    : waitingForPrototypeConfirm
+      ? runState.summary ?? "原型已生成，请确认无误"
     : waitingForConfirmation
       ? runState.summary ?? "Patch 候选已生成，等待确认"
       : running
       ? runState.currentLabel ?? `正在执行：${activeStep?.title ?? "Vibe 智能编排"}`
       : runState.summary ?? "运行已完成";
-  const waitingLabel = waitingForPrdConfirm ? "待确认 PRD" : "待确认";
+  const waitingLabel = waitingForPrdConfirm ? "待确认 PRD" : waitingForPrototypeConfirm ? "待确认原型" : "待确认";
 
   return (
     <div className="mr-auto max-w-[96%] overflow-hidden rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-control)]">
@@ -189,7 +205,7 @@ function ExecutionPathCard({
           </span>
         </span>
         <Badge tone={failed ? "danger" : completed ? "success" : "warning"}>
-          {failed ? "失败" : waitingForPrdConfirm ? waitingLabel : waitingForConfirmation ? "待确认" : completed ? "已完成" : `${doneCount + 1}/${runState.steps.length}`}
+          {failed ? "失败" : waitingForPrdConfirm || waitingForPrototypeConfirm ? waitingLabel : waitingForConfirmation ? "待确认" : completed ? "已完成" : `${doneCount + 1}/${runState.steps.length}`}
         </Badge>
         <ChevronDown className={["h-4 w-4 text-gray-400 transition", open ? "rotate-180" : ""].join(" ")} />
       </button>
@@ -223,6 +239,24 @@ function ExecutionPathCard({
         </div>
       ) : null}
 
+      {canConfirmPrototype ? (
+        <div className="flex items-center justify-between gap-3 border-t border-emerald-100 bg-emerald-50 px-3 py-2">
+          <span className="min-w-0 truncate text-xs text-emerald-900">
+            {runState.summary ?? "原型确认后即可创建只读分享链接；如需修改可先在预览中选区编辑。"}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            disabled={confirmingPrototype}
+            onClick={() => runState.prototypeArtifactId ? void onConfirmPrototype?.(runState.prototypeArtifactId) : undefined}
+            title="确认原型"
+          >
+            {confirmingPrototype ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            {confirmingPrototype ? "确认中" : "确认原型"}
+          </Button>
+        </div>
+      ) : null}
+
       {canConfirmPatch ? (
         <div className="flex items-center justify-between gap-3 border-t border-amber-100 bg-amber-50 px-3 py-2">
           <span className="min-w-0 truncate text-xs text-amber-900">
@@ -249,7 +283,7 @@ function ExecutionPathCard({
                 <Bot className="h-3.5 w-3.5" />
                 Vibe Coding 主链路
               </span>
-              <span>{failed ? "失败" : waitingForConfirmation ? "待确认" : completed ? "成功" : "处理中"}</span>
+              <span>{failed ? "失败" : waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm ? "待确认" : completed ? "成功" : "处理中"}</span>
             </div>
             <div className="space-y-2">
               {runState.steps.map((step) => {

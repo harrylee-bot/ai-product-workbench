@@ -264,6 +264,62 @@ describe("HTML prototype artifact module", () => {
     expect(result.artifact).toBeNull();
   });
 
+  it("confirms a ready prototype and syncs confirmed status into ProductDesignState", async () => {
+    const state = baseState();
+    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
+    prisma.prototypeArtifact.findUnique.mockResolvedValue({
+      ...artifactRecord({
+        id: "artifact-1",
+        prototypeSpecId: spec.id,
+        productDesignStateId: state.id,
+        htmlContent: renderHtmlFromPrototypeSpec(spec),
+      }),
+      project: baseProject({ status: ProjectStatus.prototype_ready }),
+    });
+    prisma.prototypeSpecRecord.findUniqueOrThrow.mockResolvedValue(specRecord(spec as unknown as Record<string, unknown>));
+    prisma.prototypeArtifact.update.mockImplementation(async ({ data }) =>
+      artifactRecord({
+        id: "artifact-1",
+        prototypeSpecId: spec.id,
+        productDesignStateId: state.id,
+        htmlContent: renderHtmlFromPrototypeSpec(spec),
+        updatedBy: data.updatedBy,
+      }),
+    );
+
+    const result = await service.confirmForUser(user, "artifact-1", "确认原型");
+
+    expect(result.productDesignState.status).toBe("confirmed");
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
+      prototypeSpec: expect.objectContaining({ id: spec.id }),
+      status: "confirmed",
+      reason: "确认原型，同步原型确认状态到 ProductDesignState",
+    }));
+    expect(prisma.prototypeVersion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        artifactId: "artifact-1",
+        reason: "确认原型",
+      }),
+    });
+  });
+
+  it("blocks prototype confirmation when the artifact is not ready", async () => {
+    prisma.prototypeArtifact.findUnique.mockResolvedValue({
+      ...artifactRecord({
+        id: "artifact-1",
+        prototypeSpecId: "spec-1",
+        status: PrototypeArtifactStatus.failed,
+        htmlContent: null,
+      }),
+      project: baseProject({ status: ProjectStatus.prototype_ready }),
+    });
+
+    await expect(service.confirmForUser(user, "artifact-1", "确认原型")).rejects.toThrow("PROTOTYPE_CONFIRM_NOT_READY");
+
+    expect(qaService.assertGateAllows).not.toHaveBeenCalled();
+    expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
+  });
+
   it("blocks prototype confirmation when QA gate does not allow artifact confirmation", async () => {
     qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));
     prisma.prototypeArtifact.findUnique.mockResolvedValue({

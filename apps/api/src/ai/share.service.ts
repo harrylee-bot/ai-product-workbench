@@ -5,8 +5,10 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
+  ProductDesignStateStatus,
   ProjectStatus,
   PrototypeArtifactStatus,
+  RequirementDocumentStatus,
   ShareLinkStatus,
   ShareScope,
   UserRole,
@@ -76,6 +78,9 @@ export class ShareService {
     if (needsPrd && !prdDocument) {
       throw new BadRequestException("SHARE_PRD_NOT_READY");
     }
+    if (needsPrd && prdDocument?.status !== RequirementDocumentStatus.confirmed) {
+      throw new BadRequestException("SHARE_PRD_NOT_CONFIRMED");
+    }
 
     const prototype = needsPrototype
       ? await this.prototypeService.getCurrentForProject(input.projectId).catch(() => null)
@@ -83,6 +88,9 @@ export class ShareService {
     const prototypeArtifact = prototype?.artifact ?? null;
     if (needsPrototype && (!prototypeArtifact || prototypeArtifact.status !== PrototypeArtifactStatus.ready)) {
       throw new BadRequestException("SHARE_PROTOTYPE_NOT_READY");
+    }
+    if (needsPrototype && state.status !== ProductDesignStateStatus.confirmed) {
+      throw new BadRequestException("SHARE_PROTOTYPE_NOT_CONFIRMED");
     }
 
     const expiresAt = input.expiresInDays && input.expiresInDays > 0
