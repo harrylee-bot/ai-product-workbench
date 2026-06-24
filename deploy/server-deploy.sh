@@ -2,6 +2,14 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/ai-product-workbench}"
+
+if [ -f "${APP_DIR}/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "${APP_DIR}/.env"
+  set +a
+fi
+
 APP_HOST="${APP_HOST:-8.130.160.177}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-ai_workbench}"
 JWT_SECRET="${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}"
