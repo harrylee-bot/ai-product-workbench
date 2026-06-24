@@ -1,6 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import { AgentName, ModelTaskType, UserIntent } from "@prisma/client";
+import { ModelGatewayError } from "../../model-gateway/model-gateway.error";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
+import type { ModelGatewayErrorCode } from "../../model-gateway/model-gateway.types";
+import type { AgentFallbackMetadata } from "../agent-fallback-policy";
 import { firstSentence, stableId } from "../ai-vibe.helpers";
 import { agentSystemPrompt } from "../agent-charter";
 import { agentSkillSystemPrompt, collectKnowledgeReferences } from "../agent-skill-instructions";
@@ -21,6 +24,10 @@ type ProductPlannerInput = {
   knowledgeContext: KnowledgeContext;
   existingState?: ProductDesignState;
 };
+
+const PRODUCT_PLANNER_TIMEOUT_MS = 18_000;
+const PRODUCT_PLANNER_MAX_TOKENS = 3_000;
+const PRODUCT_PLANNER_FALLBACK_MODE = "deterministic_product_build_plan";
 
 @Injectable()
 export class ProductPlannerAgentService extends BaseAgentService<
@@ -46,8 +53,44 @@ export class ProductPlannerAgentService extends BaseAgentService<
           agentSkillSystemPrompt(this.agentName, this.taskType, input.knowledgeContext),
         ].filter(Boolean).join("\n\n"),
       },
-      { role: "user" as const, content: JSON.stringify(input) },
+      { role: "user" as const, content: JSON.stringify(toPlannerPromptInput(input)) },
     ];
+  }
+
+  protected modelTimeoutMs() {
+    return PRODUCT_PLANNER_TIMEOUT_MS;
+  }
+
+  protected modelRetryCount() {
+    return 0;
+  }
+
+  protected jsonParseRetryCount() {
+    return 0;
+  }
+
+  protected modelMaxTokens() {
+    return PRODUCT_PLANNER_MAX_TOKENS;
+  }
+
+  protected fallbackOnError(error: unknown): AgentFallbackMetadata {
+    return {
+      used: true,
+      level: "acceptable_result",
+      action: "continue",
+      agentName: this.agentName,
+      taskType: this.taskType,
+      fallbackMode: PRODUCT_PLANNER_FALLBACK_MODE,
+      errorCode: modelErrorCode(error),
+      errorMessage: errorText(error),
+      reason: "Product Planner 模型调用未及时返回或输出不可用，已使用确定性规则生成 ProductBuildPlan，避免正式需求链路卡死。",
+      userMessage: "Product Planner 模型规划未及时完成，已使用规则兜底生成执行计划并继续后续链路。",
+      canContinue: true,
+      allowsConfirmation: true,
+      allowsKnowledgeExtraction: true,
+      allowsExport: true,
+      occurredAt: new Date().toISOString(),
+    };
   }
 
   protected fallback(input: ProductPlannerInput): ProductBuildPlan {
@@ -230,6 +273,98 @@ export class ProductPlannerAgentService extends BaseAgentService<
   }
 }
 
+function toPlannerPromptInput(input: ProductPlannerInput) {
+  return {
+    userInput: input.userInput,
+    intent: input.intent,
+    requirementAnalysis: {
+      completenessScore: input.requirementAnalysis.completenessScore,
+      knownFromUser: capStrings(input.requirementAnalysis.knownFromUser, 8),
+      knownFromKnowledge: capStrings(input.requirementAnalysis.knownFromKnowledge, 8),
+      inferredByAI: capStrings(input.requirementAnalysis.inferredByAI, 8),
+      missingCritical: capStrings(input.requirementAnalysis.missingCritical, 8),
+      missingOptional: capStrings(input.requirementAnalysis.missingOptional, 8),
+      conflicts: capStrings(input.requirementAnalysis.conflicts, 6),
+      shouldAskUser: input.requirementAnalysis.shouldAskUser,
+      clarificationQuestions: input.requirementAnalysis.clarificationQuestions.slice(0, 6).map((item) => ({
+        id: item.id,
+        title: clip(item.title, 120),
+        reason: clip(item.reason, 180),
+      })),
+    },
+    knowledgeContext: {
+      query: input.knowledgeContext.query,
+      summary: clip(input.knowledgeContext.summary, 400),
+      strongRules: compactKnowledgeItems(input.knowledgeContext.strongRules),
+      defaultRules: compactKnowledgeItems(input.knowledgeContext.defaultRules),
+      referenceCases: compactKnowledgeItems(input.knowledgeContext.referenceCases),
+      designPatterns: compactKnowledgeItems(input.knowledgeContext.designPatterns),
+      prdWritingRules: compactKnowledgeItems(input.knowledgeContext.prdWritingRules),
+      prototypeRules: compactKnowledgeItems(input.knowledgeContext.prototypeRules),
+      businessConcepts: compactKnowledgeItems(input.knowledgeContext.businessConcepts),
+      conflicts: input.knowledgeContext.conflicts.slice(0, 6).map((item) => ({
+        id: item.id,
+        description: clip(item.description, 180),
+        references: item.references.slice(0, 6),
+      })),
+      unknownAreas: capStrings(input.knowledgeContext.unknownAreas, 8),
+      agentSkills: (input.knowledgeContext.agentSkills ?? []).slice(0, 8).map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        sourcePath: skill.sourcePath,
+        capabilities: capStrings(skill.capabilities, 8),
+        triggerHints: capStrings(skill.triggerHints, 8),
+      })),
+      skillRouting: (input.knowledgeContext.skillRouting ?? []).slice(0, 8).map((route) => ({
+        skillName: route.skillName,
+        sourcePath: route.sourcePath,
+        appliesTo: route.appliesTo.map((target) => ({
+          agentName: target.agentName,
+          taskType: target.taskType,
+          handoffField: target.handoffField,
+          usage: clip(target.usage, 180),
+        })),
+      })),
+    },
+    existingState: compactExistingState(input.existingState),
+  };
+}
+
+function compactExistingState(state?: ProductDesignState) {
+  if (!state) return undefined;
+  return {
+    projectId: state.projectId,
+    id: state.id,
+    version: state.version,
+    status: state.status,
+    title: state.title,
+    businessGoal: clip(state.businessGoal, 240),
+    counts: {
+      pages: state.pages.length,
+      targetUsers: state.targetUsers.length,
+      userScenarios: state.userScenarios.length,
+      backendConfigs: state.backendConfigs.length,
+      frontendRules: state.frontendRules.length,
+      businessRules: state.businessRules.length,
+      stateRules: state.stateRules.length,
+      exceptionScenarios: state.exceptionScenarios.length,
+      acceptanceCriteria: state.acceptanceCriteria.length,
+      assumptions: state.assumptions.length,
+      pendingQuestions: state.pendingQuestions.length,
+      confirmedFacts: state.confirmedFacts.length,
+    },
+    pages: state.pages.slice(0, 10).map((page) => compactRecord(page, ["id", "name", "purpose"], 220)),
+    targetUsers: state.targetUsers.slice(0, 8).map((user) => compactRecord(user, ["id", "name", "description"], 180)),
+    businessRules: state.businessRules.slice(0, 10).map((rule) => compactRecord(rule, ["id", "title", "description"], 240)),
+    stateRules: state.stateRules.slice(0, 10).map((rule) => compactRecord(rule, ["id", "name", "description"], 240)),
+    frontendRules: state.frontendRules.slice(0, 10).map((rule) => compactRecord(rule, ["id", "title", "description"], 240)),
+    exceptionScenarios: state.exceptionScenarios.slice(0, 8).map((item) => compactRecord(item, ["id", "title", "handling"], 240)),
+    acceptanceCriteria: state.acceptanceCriteria.slice(0, 8).map((item) => compactRecord(item, ["id", "description"], 240)),
+    assumptions: state.assumptions.slice(0, 8).map((item) => compactRecord(item, ["id", "content", "reason"], 200)),
+    pendingQuestions: state.pendingQuestions.slice(0, 8).map((item) => compactRecord(item, ["id", "question", "reason"], 200)),
+  };
+}
+
 function normalizeTitle(input: ProductPlannerInput) {
   return firstSentence(input.userInput, input.existingState?.title ?? "产品需求方案")
     .replace(/^帮我|^请|需求和原型/g, "")
@@ -394,6 +529,43 @@ function stepInputs(skillInputs: string[], ...items: string[]) {
 
 function unique(values: Array<string | undefined | null>) {
   return [...new Set(values.map((item) => item?.trim()).filter((item): item is string => Boolean(item)))];
+}
+
+function capStrings(values: string[] | undefined, limit: number) {
+  return unique((values ?? []).slice(0, limit).map((item) => clip(item, 220)));
+}
+
+function compactKnowledgeItems(items: Array<{ id?: string; knowledgeId?: string; title?: string; content?: string; snippet?: string; sourceType?: string }> = []) {
+  return items.slice(0, 8).map((item) => ({
+    id: item.id,
+    knowledgeId: item.knowledgeId,
+    title: clip(item.title, 120),
+    sourceType: item.sourceType,
+    summary: clip(item.snippet || item.content, 260),
+  }));
+}
+
+function compactRecord(record: Record<string, unknown>, keys: string[], maxLength: number) {
+  return Object.fromEntries(
+    keys
+      .map((key) => [key, clip(record[key], maxLength)] as const)
+      .filter(([, value]) => Boolean(value)),
+  );
+}
+
+function clip(value: unknown, maxLength: number) {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function modelErrorCode(error: unknown): ModelGatewayErrorCode {
+  return error instanceof ModelGatewayError ? error.code : "MODEL_CALL_FAILED";
+}
+
+function errorText(error: unknown) {
+  const message = error instanceof Error ? error.message : "模型调用失败";
+  return clip(message, 500) || "模型调用失败";
 }
 
 function text(value: unknown, fallback: string) {

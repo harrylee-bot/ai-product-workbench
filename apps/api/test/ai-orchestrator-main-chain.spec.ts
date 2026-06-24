@@ -1,4 +1,4 @@
-import { AgentName, MessageType, ProjectStatus, UserIntent } from "@prisma/client";
+import { AgentName, MessageType, ModelTaskType, ProjectStatus, UserIntent } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AiOrchestratorService } from "../src/ai/ai-orchestrator.service";
 import type {
@@ -236,6 +236,60 @@ describe("AiOrchestrator main vibe chain", () => {
       where: { id: "project-1" },
       data: expect.objectContaining({ status: ProjectStatus.prd_ready }),
     });
+  });
+
+  it("continues the main flow when Product Planner falls back", async () => {
+    const plannerFallback = {
+      used: true,
+      level: "acceptable_result" as const,
+      action: "continue" as const,
+      agentName: AgentName.product_planner_agent,
+      taskType: ModelTaskType.product_planning,
+      fallbackMode: "deterministic_product_build_plan",
+      errorCode: "MODEL_CALL_TIMEOUT" as const,
+      errorMessage: "模型调用超时",
+      reason: "Product Planner 模型调用超时，使用确定性规划。",
+      userMessage: "Product Planner 模型规划未及时完成，已使用规则兜底生成执行计划并继续后续链路。",
+      canContinue: true,
+      allowsConfirmation: true,
+      allowsKnowledgeExtraction: true,
+      allowsExport: true,
+      occurredAt: "2026-06-24T00:00:00.000Z",
+    };
+    productPlannerAgent.run.mockResolvedValueOnce({
+      data: baseBuildPlan(),
+      fallback: plannerFallback,
+    });
+
+    const result = await service.run({
+      userMessageId: "message-1",
+      attachments: [],
+      context: {
+        runId: "run-fallback",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "做一个每日签到活动",
+        recentMessages: [],
+        attachments: [],
+        traceId: "trace-fallback",
+      },
+    });
+
+    expect(result.nextAction).toEqual({ type: "review_prd", wantsPrototype: true });
+    expect(stateService.createDraft).toHaveBeenCalled();
+    expect(documentService.saveGeneratedDocument).toHaveBeenCalled();
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "fallback_used",
+      step: "product_planning",
+      content: plannerFallback.userMessage,
+      data: plannerFallback,
+    }));
+    expect(runLog.completeRun).toHaveBeenCalledWith(
+      "run-fallback",
+      expect.objectContaining({ productBuildPlan: expect.objectContaining({ id: "plan-1" }) }),
+      "已生成 PRD 草案，请确认无误后我再继续生成原型。",
+    );
   });
 
   it("generate_prd 意图只生成文档，wantsPrototype 为 false", async () => {

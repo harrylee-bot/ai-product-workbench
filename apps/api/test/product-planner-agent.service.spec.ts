@@ -1,6 +1,7 @@
 import { AgentName, ModelTaskType, UserIntent } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { ProductPlannerAgentService } from "../src/ai/agents/product-planner-agent.service";
+import { ModelGatewayError } from "../src/model-gateway/model-gateway.error";
 
 describe("ProductPlannerAgentService", () => {
   it("normalizes a formal ProductBuildPlan before ProductDesignState generation", async () => {
@@ -81,6 +82,10 @@ describe("ProductPlannerAgentService", () => {
       expect.objectContaining({
         agentName: AgentName.product_planner_agent,
         taskType: ModelTaskType.product_planning,
+        timeoutMs: 18_000,
+        retryCount: 0,
+        jsonParseRetryCount: 0,
+        maxTokens: 3_000,
       }),
     );
     const modelCall = modelGateway.generateJson.mock.calls[0][0];
@@ -128,5 +133,59 @@ describe("ProductPlannerAgentService", () => {
       ]),
     );
     expect(result.data.agentSequence[0].gate).toContain("不规划局部 PatchPlan");
+  });
+
+  it("uses deterministic fallback when planner model times out", async () => {
+    const modelGateway = {
+      generateJson: vi.fn().mockRejectedValue(new ModelGatewayError("MODEL_CALL_TIMEOUT", "模型调用超时")),
+    };
+    const service = new ProductPlannerAgentService(modelGateway as never);
+
+    const result = await service.run({
+      runId: "run-2",
+      projectId: "project-1",
+      traceId: "trace-2",
+      userId: "user-1",
+      input: {
+        userInput: "帮我做一个邀请返利活动页面，要有成功态和异常态。",
+        intent: UserIntent.new_requirement,
+        requirementAnalysis: {
+          completenessScore: 0.72,
+          knownFromUser: ["邀请返利活动页面"],
+          knownFromKnowledge: [],
+          inferredByAI: ["需要返利成功反馈"],
+          missingCritical: [],
+          missingOptional: [],
+          conflicts: [],
+          shouldAskUser: false,
+          clarificationQuestions: [],
+        },
+        knowledgeContext: {
+          query: "邀请返利活动页面",
+          strongRules: [],
+          defaultRules: [],
+          referenceCases: [],
+          designPatterns: [],
+          prdWritingRules: [],
+          prototypeRules: [],
+          businessConcepts: [],
+          conflicts: [],
+          unknownAreas: [],
+          summary: "未命中知识",
+        },
+      },
+    });
+
+    expect(modelGateway.generateJson).toHaveBeenCalledTimes(1);
+    expect(result.fallback).toEqual(expect.objectContaining({
+      used: true,
+      agentName: AgentName.product_planner_agent,
+      taskType: ModelTaskType.product_planning,
+      fallbackMode: "deterministic_product_build_plan",
+      errorCode: "MODEL_CALL_TIMEOUT",
+      canContinue: true,
+    }));
+    expect(result.data.title).toContain("做一个邀请返利活动页面");
+    expect(result.data.agentSequence[0].agentName).toBe(AgentName.product_planner_agent);
   });
 });

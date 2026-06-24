@@ -34,6 +34,7 @@ export type GenerateTextInput = {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  retryCount?: number;
 };
 
 export type GenerateTextResult = {
@@ -44,6 +45,7 @@ export type GenerateTextResult = {
 
 export type GenerateJsonInput<TSchema = unknown> = GenerateTextInput & {
   jsonSchema?: TSchema;
+  jsonParseRetryCount?: number;
 };
 
 export type GenerateJsonResult<T = unknown> = {

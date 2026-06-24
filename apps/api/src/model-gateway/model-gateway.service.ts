@@ -72,7 +72,7 @@ export class ModelGatewayService {
     });
     const log = await this.createRunningLog(input, route);
     const startedAt = Date.now();
-    const parseRetryCount = 1;
+    const parseRetryCount = Math.max(input.jsonParseRetryCount ?? 1, 0);
     let lastRawContent = "";
     let lastUsage: TokenUsage | undefined;
 
@@ -205,7 +205,7 @@ export class ModelGatewayService {
       defaultMaxTokens: modelConfig.defaultMaxTokens ?? undefined,
       taskType: profile.taskType,
       responseFormat: profile.responseFormat,
-      retryCount: Math.max(profile.retryCount, 0),
+      retryCount: Math.max(input.retryCount ?? profile.retryCount, 0),
       timeoutMs: input.timeoutMs ?? profile.timeoutMs ?? provider.timeoutMs,
       temperature: input.temperature ?? profile.temperature ?? modelConfig.defaultTemperature,
       maxTokens: input.maxTokens ?? profile.maxTokens ?? modelConfig.defaultMaxTokens ?? undefined,

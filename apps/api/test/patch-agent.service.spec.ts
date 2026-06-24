@@ -5,7 +5,7 @@ import { PatchAgentService } from "../src/ai/agents/patch-agent.service";
 import type { ProductDesignState } from "../src/ai/ai-vibe.types";
 
 describe("PatchAgentService", () => {
-  it("propagates upstream errors after five retries instead of synthesizing a PatchPlan", async () => {
+  it("propagates upstream errors without agent-level retry amplification", async () => {
     const modelGateway = {
       generateJson: vi.fn().mockRejectedValue(
         new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
@@ -39,7 +39,7 @@ describe("PatchAgentService", () => {
         taskType: ModelTaskType.patch_planning,
       }),
     );
-    expect(modelGateway.generateJson).toHaveBeenCalledTimes(6);
+    expect(modelGateway.generateJson).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes model output into a high-risk confirmation when the request conflicts with strong_rule knowledge", async () => {

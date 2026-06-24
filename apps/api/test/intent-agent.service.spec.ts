@@ -40,7 +40,7 @@ describe("IntentAgentService", () => {
     expect(result.data.reason).toContain("不应触发需求生成链路");
   });
 
-  it("propagates upstream errors after five retries instead of inferring a fallback intent", async () => {
+  it("propagates upstream errors without agent-level retry amplification", async () => {
     const modelGateway = {
       generateJson: vi.fn().mockRejectedValue(
         new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
@@ -59,6 +59,6 @@ describe("IntentAgentService", () => {
       },
     })).rejects.toThrow("no model configured");
 
-    expect(modelGateway.generateJson).toHaveBeenCalledTimes(6);
+    expect(modelGateway.generateJson).toHaveBeenCalledTimes(1);
   });
 });
