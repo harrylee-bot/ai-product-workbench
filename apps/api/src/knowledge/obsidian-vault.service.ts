@@ -12,6 +12,7 @@ import {
 import { toInputJson } from "../ai/ai-vibe.helpers";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
+import { KnowledgeEmbeddingService, type EmbeddingSyncStats } from "./knowledge-embedding.service";
 import { jsonArray } from "./knowledge-item.service";
 
 type VaultSeedFile = {
@@ -46,12 +47,14 @@ type MarkdownMetadata = {
 };
 
 const VAULT_FOLDERS = [
-  "00-系统说明",
-  "01-产品知识",
-  "02-规则约束",
-  "03-案例库",
-  "04-原型模式",
-  "05-Agent知识",
+  "00-知识库使用规范",
+  "01-产品架构",
+  "02-业务域知识",
+  "03-产品进化规划",
+  "04-产品文档规范",
+  "05-原型设计规范",
+  "06-历史案例库",
+  "07-来源资产索引",
   "99-收件箱",
   "_templates",
 ];
@@ -59,73 +62,84 @@ const VAULT_FOLDERS = [
 const SEED_FILES: VaultSeedFile[] = [
   {
     path: "README.md",
-    content: `# AI Product Workbench 知识库
+    content: `# 策划宝产品知识库
 
-这是 AI Product Workbench 的 Obsidian 兼容知识库。
+这是面向 AI 理解产品架构、业务逻辑、产品进化、PRD 写作和原型生成的统一知识库。
 
 ## 维护原则
 
-- 用中文维护所有知识。
-- 一条知识只表达一个清晰规则、案例或模式。
-- 重要约束优先放入 \`02-规则约束\`。
-- 待整理内容先放入 \`99-收件箱\`。
+- 主知识必须面向 AI 推理，不只保存资产清单。
+- 历史业务增量先继承原有对象、流程和状态，再表达新增能力。
+- 新产品创新必须放回产品能力框架，说明复用和扩展关系。
+- PRD 与原型共用同一套业务域知识、状态流转和数据口径。
+- 待整理资料先进入 \`99-收件箱\`，整理完成后再进入主知识目录。
 
 ## 目录
 
-- \`01-产品知识\`：业务、产品、行业和用户知识。
-- \`02-规则约束\`：必须遵守、偏好、避免、警告类规则。
-- \`03-案例库\`：可复用案例、参考方案和失败教训。
-- \`04-原型模式\`：页面结构、交互模式和组件模式。
-- \`05-Agent知识\`：Agent 角色、输入输出和协作规则。
+- \`00-知识库使用规范\`：AI 如何选择知识和避免误召回。
+- \`01-产品架构\`：角色、能力层、核心对象、状态流转和横切能力。
+- \`02-业务域知识\`：每个业务域的产品逻辑、流程、字段、风险和验收。
+- \`03-产品进化规划\`：历史业务增量和新产品创新的判断规则。
+- \`04-产品文档规范\`：PRD、需求说明书、验收标准和风险评审写法。
+- \`05-原型设计规范\`：PrototypeSpec、HTML 原型和 OpenPencil 原型规则。
+- \`06-历史案例库\`：历史案例、复用策略和失败教训。
+- \`07-来源资产索引\`：原始导入资料、旧版整理和资产来源。
 `,
   },
   {
-    path: "00-系统说明/README.md",
-    content: `# 系统说明
+    path: "00-知识库使用规范/README.md",
+    content: `# 知识库使用规范
 
-记录系统目标、架构边界、阶段计划和运行约束。
+规定 AI 在理解产品、写 PRD、生成原型、优化历史业务和设计新产品时的知识调用顺序。
 `,
   },
   {
-    path: "01-产品知识/README.md",
-    content: `# 产品知识
+    path: "01-产品架构/README.md",
+    content: `# 产品架构
 
-沉淀业务目标、用户画像、场景、产品策略和行业知识。
+沉淀策划宝/云溪营销活动平台的能力层、核心对象、端到端流程、权限和风险模型。
 `,
   },
   {
-    path: "02-规则约束/README.md",
-    content: `# 规则约束
+    path: "02-业务域知识/README.md",
+    content: `# 业务域知识
 
-用于维护约束系统可参考的规则知识。
-
-建议按以下类型记录：
-
-- 必须遵守
-- 优先偏好
-- 避免事项
-- 风险警告
+按活动发布、素材库、奖品券、号卡 OAO、数据报表、AI 助手、权限审核等业务域沉淀产品逻辑。
 `,
   },
   {
-    path: "03-案例库/README.md",
-    content: `# 案例库
+    path: "03-产品进化规划/README.md",
+    content: `# 产品进化规划
 
-沉淀优秀案例、反例、复盘结论和可复用策略。
+判断需求属于历史业务增量、平台化抽象、风险治理补齐还是新产品创新。
 `,
   },
   {
-    path: "04-原型模式/README.md",
-    content: `# 原型模式
+    path: "04-产品文档规范/README.md",
+    content: `# 产品文档规范
 
-记录页面布局、交互模式、信息架构和视觉规范。
+规定 PRD、需求说明书、验收标准和风险清单的结构与写法。
 `,
   },
   {
-    path: "05-Agent知识/README.md",
-    content: `# Agent 知识
+    path: "05-原型设计规范/README.md",
+    content: `# 原型设计规范
 
-记录 Agent 角色职责、协作流程、输入输出格式和评审规则。
+规定前后台页面框架、字段接口状态表达、历史业务增量原型和新产品创新原型规则。
+`,
+  },
+  {
+    path: "06-历史案例库/README.md",
+    content: `# 历史案例库
+
+按业务域沉淀历史案例、可复用产品逻辑、风险经验和原型复用依据。
+`,
+  },
+  {
+    path: "07-来源资产索引/README.md",
+    content: `# 来源资产索引
+
+保存原始导入资料、旧版整理、操作手册、需求清单和原型资产线索，不作为 AI 生成的第一召回层。
 `,
   },
   {
@@ -213,7 +227,10 @@ const SEED_FILES: VaultSeedFile[] = [
 
 @Injectable()
 export class ObsidianVaultService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly embeddings?: KnowledgeEmbeddingService,
+  ) {}
 
   private readonly root = path.resolve(
     process.env.KNOWLEDGE_VAULT_ROOT?.trim() || path.join(process.cwd(), "storage", "knowledge-vault"),
@@ -263,6 +280,7 @@ export class ObsidianVaultService {
     let updated = 0;
     let unchanged = 0;
     let archived = 0;
+    const embeddingStats = this.embeddings?.emptyStats() ?? emptyEmbeddingStats();
 
     for (const chunk of chunks) {
       const existing = await this.prisma.knowledgeItem.findUnique({ where: { id: chunk.id } });
@@ -291,6 +309,7 @@ export class ObsidianVaultService {
           },
         });
         await this.createVersionSnapshot(item, user.id, "从知识库 Markdown 导入");
+        if (this.embeddings) mergeEmbeddingStats(embeddingStats, await this.embeddings.syncItem(item));
         created += 1;
         continue;
       }
@@ -301,8 +320,10 @@ export class ObsidianVaultService {
           data,
         });
         await this.createVersionSnapshot(item, user.id, "同步知识库 Markdown 更新");
+        if (this.embeddings) mergeEmbeddingStats(embeddingStats, await this.embeddings.syncItem(item));
         updated += 1;
       } else {
+        if (this.embeddings) mergeEmbeddingStats(embeddingStats, await this.embeddings.syncItem(existing));
         unchanged += 1;
       }
     }
@@ -334,6 +355,7 @@ export class ObsidianVaultService {
       unchanged,
       archived,
       categories: [...new Set(chunks.map((chunk) => chunk.categoryName))],
+      embeddings: embeddingStats,
     };
   }
 
@@ -573,18 +595,26 @@ function splitMarkdownBody(body: string) {
 
 function inferKnowledgeType(relativePath: string, title: string, tags: string[]) {
   const text = `${relativePath} ${title} ${tags.join(" ")}`;
+  if (/^05-原型设计规范\//.test(relativePath)) return KnowledgeType.prototype_rule;
+  if (/^04-产品文档规范\//.test(relativePath)) return KnowledgeType.prd_writing_rule;
+  if (/^06-历史案例库\//.test(relativePath)) return KnowledgeType.reference_case;
+  if (/^02-业务域知识\//.test(relativePath)) return KnowledgeType.business_concept;
+  if (/^(00-知识库使用规范|01-产品架构|03-产品进化规划)\//.test(relativePath)) return KnowledgeType.default_rule;
+  if (/05-原型设计规范|原型规则|前后端设计框架|前台页面设计框架|后台管理设计框架|字段与接口|RP资产|PrototypeSpec|OpenPencil|HTML 原型/i.test(text)) return KnowledgeType.prototype_rule;
+  if (/04-产品文档规范|产品文档规范|PRD|需求文档|写作/.test(text)) return KnowledgeType.prd_writing_rule;
+  if (/06-历史案例库|案例库|案例/.test(text)) return KnowledgeType.reference_case;
+  if (/00-知识库使用规范|01-产品架构|03-产品进化规划|知识库使用规范|产品架构|能力地图|核心对象|产品进化|新产品创新|历史业务增量|Agent|智能体|需求分析/.test(text)) return KnowledgeType.default_rule;
   if (/规则约束|约束|资损|安全|必须遵守|Constraint/i.test(text)) return KnowledgeType.strong_rule;
-  if (/案例库|案例/.test(text)) return KnowledgeType.reference_case;
   if (/原型模式|页面|后台模式|配置化|交互|Prototype/i.test(text)) return KnowledgeType.design_pattern;
-  if (/Agent|智能体|需求分析/.test(text)) return KnowledgeType.default_rule;
-  if (/PRD|需求文档|写作/.test(text)) return KnowledgeType.prd_writing_rule;
   return KnowledgeType.business_concept;
 }
 
 function inferPriority(relativePath: string, title: string, type: KnowledgeType) {
   const text = `${relativePath} ${title}`;
+  if (/07-来源资产索引|99-收件箱|旧版整理/.test(text)) return KnowledgePriority.low;
+  if (/00-知识库使用规范|01-产品架构|02-业务域知识|03-产品进化规划|04-产品文档规范|05-原型设计规范|06-历史案例库/.test(text)) return KnowledgePriority.high;
   if (type === KnowledgeType.strong_rule) return KnowledgePriority.high;
-  if (/Agent|AI营销助手|Dify|配置化页面|通用约束|资损/.test(text)) return KnowledgePriority.high;
+  if (/知识库使用规范|产品架构|能力地图|产品进化|产品逻辑|产品文档规范|原型设计规范|历史业务增量|新产品创新|Agent|AI营销助手|Dify|配置化页面|通用约束|资损/.test(text)) return KnowledgePriority.high;
   if (/清单|README|索引/.test(text)) return KnowledgePriority.low;
   return KnowledgePriority.medium;
 }
@@ -649,4 +679,23 @@ function hasKnowledgeChanged(
     existing.source !== data.source ||
     existing.sourceFileId !== data.sourceFileId
   );
+}
+
+function emptyEmbeddingStats(): EmbeddingSyncStats {
+  return {
+    enabled: false,
+    created: 0,
+    updated: 0,
+    unchanged: 0,
+    skipped: 0,
+    failed: 0,
+  };
+}
+
+function mergeEmbeddingStats(target: EmbeddingSyncStats, source: EmbeddingSyncStats) {
+  target.created += source.created;
+  target.updated += source.updated;
+  target.unchanged += source.unchanged;
+  target.skipped += source.skipped;
+  target.failed += source.failed;
 }

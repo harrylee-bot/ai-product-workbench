@@ -192,8 +192,31 @@ describe("AiOrchestrator main vibe chain", () => {
       message: "已生成 PRD 草案，请确认无误后我再继续生成原型。",
       prdDocument: expect.objectContaining({ id: "prd-1" }),
       productBuildPlan: expect.objectContaining({ id: "plan-1" }),
+      requirementIntakeGraph: expect.objectContaining({
+        schema: "requirement.intake.graph.v1",
+        requirementPackageId: expect.stringMatching(/^requirement_package_/),
+        productBuildPlanId: "plan-1",
+        gateAction: "continue",
+      }),
       nextAction: { type: "review_prd", wantsPrototype: true },
     }));
+    expect(result.requirementIntakeGraph?.nodes.map((node) => node.name)).toEqual([
+      "intent",
+      "knowledge",
+      "context_fetch",
+      "requirement",
+      "planner",
+      "validator",
+      "safety",
+      "gate",
+    ]);
+    expect(result.requirementIntakeGraph?.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: "intent", to: "knowledge", mode: "async" }),
+      expect.objectContaining({ from: "intent", to: "context_fetch", mode: "async" }),
+      expect.objectContaining({ from: "requirement", to: "planner", mode: "shared_input" }),
+      expect.objectContaining({ from: "requirement", to: "validator", mode: "shared_input" }),
+      expect.objectContaining({ from: "requirement", to: "safety", mode: "shared_input" }),
+    ]));
     // 确认门 A 之前：PRD 已落库（doc_ready），但不生成原型、不跑 QA、不抽知识
     expect(stateService.createDraft).toHaveBeenCalledWith("project-1", expect.any(Object), expect.objectContaining({
       userId: "user-1",
@@ -232,6 +255,24 @@ describe("AiOrchestrator main vibe chain", () => {
     expect(eventTypes).toEqual(expect.arrayContaining(["state_updated", "prd_updated", "run_completed"]));
     expect(eventTypes).not.toContain("prototype_updated");
     expect(eventTypes).not.toContain("qa_completed");
+    const completedSteps = stream.emit.mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.type === "step_completed")
+      .map((input) => input.step);
+    expect(completedSteps.indexOf("knowledge_retrieval")).toBeLessThan(completedSteps.indexOf("requirement_analysis"));
+    expect(completedSteps.indexOf("context_fetch")).toBeLessThan(completedSteps.indexOf("requirement_analysis"));
+    expect(completedSteps.indexOf("requirement_packaging")).toBeLessThan(completedSteps.indexOf("product_planning"));
+    expect(completedSteps.indexOf("product_planning")).toBeLessThan(completedSteps.indexOf("requirement_validation"));
+    expect(completedSteps.indexOf("product_planning")).toBeLessThan(completedSteps.indexOf("safety_check"));
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "message_delta",
+      data: expect.objectContaining({
+        requirementIntakeGraph: expect.objectContaining({
+          schema: "requirement.intake.graph.v1",
+          gateAction: "continue",
+        }),
+      }),
+    }));
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: "project-1" },
       data: expect.objectContaining({ status: ProjectStatus.prd_ready }),

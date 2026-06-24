@@ -78,7 +78,7 @@ describe("ModelGatewayService", () => {
   });
 
   it("strips markdown fences and parses JSON output", async () => {
-    adapter.chat.mockResolvedValue({
+    adapter.stream.mockResolvedValue({
       content: "```json\n{\"intent\":\"create_prd\"}\n```",
       usage: { totalTokens: 9 },
     });
@@ -89,11 +89,11 @@ describe("ModelGatewayService", () => {
     });
 
     expect(result.data.intent).toBe("create_prd");
-    expect(adapter.chat).toHaveBeenCalledTimes(1);
+    expect(adapter.stream).toHaveBeenCalledTimes(1);
   });
 
   it("retries invalid JSON once and fails with MODEL_JSON_PARSE_FAILED", async () => {
-    adapter.chat.mockResolvedValueOnce({ content: "不是 JSON" }).mockResolvedValueOnce({
+    adapter.stream.mockResolvedValueOnce({ content: "不是 JSON" }).mockResolvedValueOnce({
       content: "仍然不是 JSON",
     });
 
@@ -106,7 +106,7 @@ describe("ModelGatewayService", () => {
       code: "MODEL_JSON_PARSE_FAILED",
     });
 
-    expect(adapter.chat).toHaveBeenCalledTimes(2);
+    expect(adapter.stream).toHaveBeenCalledTimes(2);
     expect(prisma.modelCallLog.update).toHaveBeenCalledWith({
       where: { id: "log-1" },
       data: expect.objectContaining({

@@ -1382,6 +1382,11 @@ function debugEventBody(
     lines.push(`当前节点：${stepLabel(event.step)}。`);
   }
 
+  const intakeGraph = findRequirementIntakeGraph(payload);
+  if (intakeGraph) {
+    lines.push(...formatRequirementIntakeGraph(intakeGraph));
+  }
+
   if (eventType === "step_started" && event.step) {
     lines.push(`执行思路：${stepThinkingText(event.step)}`);
     lines.push(`下一步：等待该节点产出结果，再决定是否继续、澄清或阻断。`);
@@ -1470,6 +1475,46 @@ function formatDecisionTrace(trace: Record<string, unknown>) {
   if (decision) lines.push(`最终决策：${normalizeTimelineText(decision)}`);
   appendTraceList(lines, "风险", trace.risks);
   if (nextStep) lines.push(`下一步：${normalizeTimelineText(nextStep)}`);
+  return lines;
+}
+
+function findRequirementIntakeGraph(payload: Record<string, unknown> | null) {
+  const direct = asRecord(payload?.requirementIntakeGraph);
+  if (direct) return direct;
+  const gate = asRecord(payload?.requirementGate);
+  return asRecord(gate?.intakeGraph);
+}
+
+function formatRequirementIntakeGraph(graph: Record<string, unknown>) {
+  const lines: string[] = [];
+  const summary = asText(graph.summary);
+  const gateAction = asText(graph.gateAction);
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes.map((item) => asRecord(item)).filter(Boolean) : [];
+  const edges = Array.isArray(graph.edges) ? graph.edges.map((item) => asRecord(item)).filter(Boolean) : [];
+
+  lines.push("执行链路：Intent -> Knowledge / Context Fetch -> Requirement -> Planner / Validator / Safety Check。");
+  if (summary) lines.push(`链路摘要：${normalizeTimelineText(summary)}`);
+  if (gateAction) lines.push(`最终 Gate：${gateAction}。`);
+
+  if (nodes.length) {
+    lines.push("节点结果：");
+    for (const node of nodes.slice(0, 8)) {
+      const title = asText(node?.title) || asText(node?.name) || "节点";
+      const status = asText(node?.status) || "unknown";
+      const nodeSummary = asText(node?.summary);
+      lines.push(`- ${title}：${status}${nodeSummary ? `，${normalizeTimelineText(nodeSummary)}` : ""}`);
+    }
+  }
+
+  const sharedEdges = edges
+    .filter((edge) => edge?.mode === "shared_input")
+    .map((edge) => asText(edge?.summary))
+    .filter(Boolean);
+  if (sharedEdges.length) {
+    lines.push("共享输入关系：");
+    lines.push(...sharedEdges.slice(0, 4).map((item) => `- ${normalizeTimelineText(item)}`));
+  }
+
   return lines;
 }
 

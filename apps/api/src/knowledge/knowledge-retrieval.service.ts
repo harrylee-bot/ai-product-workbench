@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { KnowledgeStatus, KnowledgeType, Prisma } from "@prisma/client";
 import { toInputJson } from "../ai/ai-vibe.helpers";
 import { PrismaService } from "../prisma/prisma.service";
+import { KnowledgeEmbeddingService } from "./knowledge-embedding.service";
 import { jsonArray } from "./knowledge-item.service";
 import type {
   KnowledgeReference,
@@ -16,7 +17,10 @@ type KnowledgeItemRow = Prisma.KnowledgeItemGetPayload<{
 
 @Injectable()
 export class KnowledgeRetrievalService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly embeddings?: KnowledgeEmbeddingService,
+  ) {}
 
   async search(input: KnowledgeSearchInput): Promise<KnowledgeSearchOutput> {
     const query = input.query.trim();
@@ -41,8 +45,11 @@ export class KnowledgeRetrievalService {
       orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
     });
 
+    const semanticScores = this.embeddings
+      ? await this.embeddings.scoreItems(query, items)
+      : new Map<string, number>();
     const scored = items
-      .map((item) => scoreItem(item, query, preferredTypes))
+      .map((item) => scoreItem(item, query, preferredTypes, semanticScores.get(item.id)))
       .filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority))
       .slice(0, limit);
@@ -71,6 +78,7 @@ function scoreItem(
   item: KnowledgeItemRow,
   query: string,
   preferredTypes?: KnowledgeType[],
+  semanticScore?: number,
 ): KnowledgeRetrievalResult {
   const tokens = tokenize(query);
   const tags = jsonArray(item.tags);
@@ -84,45 +92,53 @@ function scoreItem(
   };
 
   const reasons: string[] = [];
-  let score = 0;
+  let keywordScore = 0;
   if (!tokens.length) {
-    score += 0.1;
+    keywordScore += 0.1;
     reasons.push("无关键词时按最近活跃知识兜底");
   }
 
   for (const token of tokens) {
     if (fields.title.includes(token)) {
-      score += fields.title === token ? 0.6 : 0.34;
+      keywordScore += fields.title === token ? 0.6 : 0.34;
       reasons.push(`标题匹配 ${token}`);
     }
     if (fields.tags.includes(token)) {
-      score += 0.28;
+      keywordScore += 0.28;
       reasons.push(`标签匹配 ${token}`);
     }
     if (fields.summary.includes(token)) {
-      score += 0.2;
+      keywordScore += 0.2;
       reasons.push(`摘要匹配 ${token}`);
     }
     if (fields.content.includes(token)) {
-      score += 0.14;
+      keywordScore += 0.14;
       reasons.push(`正文匹配 ${token}`);
     }
     if (fields.category.includes(token)) {
-      score += 0.12;
+      keywordScore += 0.12;
       reasons.push(`分类匹配 ${token}`);
     }
     if (fields.type.includes(token)) {
-      score += 0.08;
+      keywordScore += 0.08;
       reasons.push(`类型匹配 ${token}`);
     }
   }
 
   if (preferredTypes?.includes(item.type)) {
-    score += 0.16;
+    keywordScore += 0.16;
     reasons.push("符合 Agent 偏好类型");
   }
-  score += priorityWeight(item.priority);
+  keywordScore += priorityWeight(item.priority);
   if (item.priority === "high") reasons.push("高优先级知识");
+  if (semanticScore !== undefined && semanticScore >= 0.18) {
+    reasons.push(`语义相似度 ${semanticScore.toFixed(2)}`);
+  }
+
+  const normalizedKeywordScore = Math.min(keywordScore, 1);
+  const score = semanticScore === undefined
+    ? normalizedKeywordScore
+    : Math.min(1, normalizedKeywordScore * 0.62 + semanticScore * 0.48);
 
   return {
     itemId: item.id,
@@ -131,7 +147,9 @@ function scoreItem(
     summary: item.summary ?? undefined,
     type: item.type,
     priority: item.priority,
-    score: Number(Math.min(score, 1).toFixed(3)),
+    score: Number(score.toFixed(3)),
+    keywordScore: Number(normalizedKeywordScore.toFixed(3)),
+    semanticScore,
     reason: [...new Set(reasons)].slice(0, 5).join("；") || "按知识优先级命中",
   };
 }
@@ -182,11 +200,26 @@ function extractChineseTerms(segment: string) {
 
   const domainTerms = [
     "产品",
+    "架构",
+    "能力",
+    "能力地图",
     "需求",
+    "prd",
     "原型",
+    "prototypespec",
+    "openpencil",
     "规则",
     "约束",
     "知识库",
+    "业务域",
+    "产品逻辑",
+    "进化",
+    "路线图",
+    "历史业务",
+    "增量",
+    "创新",
+    "验收",
+    "风险",
     "客户",
     "线索",
     "销售",
@@ -194,19 +227,45 @@ function extractChineseTerms(segment: string) {
     "合同",
     "订单",
     "活动",
+    "活动发布",
+    "模板",
+    "素材",
+    "素材库",
+    "奖品",
+    "券",
+    "核销",
+    "库存",
+    "资损",
+    "渠道",
+    "归因",
+    "报表",
+    "数据",
+    "oao",
+    "号卡",
+    "ai助手",
+    "案例",
     "签到",
     "企业",
     "官网",
     "品牌",
     "营销",
     "后台",
+    "前台",
+    "前后台",
+    "字段",
+    "接口",
+    "状态",
+    "审核",
+    "发布",
+    "回滚",
+    "导出",
+    "日志",
     "权限",
     "管理员",
     "登录",
     "移动端",
     "页面",
     "流程",
-    "验收",
   ];
   for (const term of domainTerms) {
     if (segment.includes(term)) terms.push(term);
