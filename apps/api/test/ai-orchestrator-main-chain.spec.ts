@@ -249,8 +249,8 @@ describe("AiOrchestrator main vibe chain", () => {
   it("确认门 A 之后 confirmPrdAndContinue 生成原型、QA 并停在 review_prototype", async () => {
     const confirmedState = {
       ...baseState(),
-      status: "prd_ready",
-      prdDocument: basePrdDocument(),
+      status: "doc_confirmed",
+      prdDocument: { ...basePrdDocument(), status: "confirmed" },
     };
     const result = await service.confirmPrdAndContinue({
       userMessageId: "message-2",
@@ -307,8 +307,8 @@ describe("AiOrchestrator main vibe chain", () => {
     });
     const stateWithPrd = {
       ...baseState(),
-      status: "prd_ready",
-      prdDocument: basePrdDocument(),
+      status: "doc_confirmed",
+      prdDocument: { ...basePrdDocument(), status: "confirmed" },
     };
 
     const result = await service.run({
@@ -333,6 +333,80 @@ describe("AiOrchestrator main vibe chain", () => {
     expect(documentService.saveGeneratedDocument).not.toHaveBeenCalled();
     expect(prototypeService.saveGeneratedPrototype).toHaveBeenCalled();
     expect(result.nextAction).toEqual({ type: "review_prototype" });
+  });
+
+  it("does not bypass confirmation gate for an unconfirmed doc_ready PRD", async () => {
+    intentAgent.run.mockResolvedValueOnce({
+      data: {
+        intent: UserIntent.generate_prototype,
+        confidence: 0.95,
+        reason: "用户要求生成原型，但 PRD 尚未确认。",
+        requiresSelection: false,
+        isAmbiguous: false,
+      },
+    });
+    const unconfirmedState = {
+      ...baseState(),
+      status: "doc_ready",
+      prdDocument: basePrdDocument(),
+    };
+
+    await service.run({
+      userMessageId: "message-1",
+      attachments: [],
+      context: {
+        runId: "run-1",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "根据文档生成原型",
+        recentMessages: [],
+        attachments: [],
+        productDesignState: unconfirmedState,
+        traceId: "trace-1",
+      },
+    });
+
+    expect(knowledgeAgent.run).toHaveBeenCalled();
+    expect(documentService.saveGeneratedDocument).toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+  });
+
+  it("does not bypass confirmation gate when doc_confirmed is out of sync with the PRD status", async () => {
+    intentAgent.run.mockResolvedValueOnce({
+      data: {
+        intent: UserIntent.generate_prototype,
+        confidence: 0.95,
+        reason: "用户要求生成原型，但 PRD 记录尚未确认。",
+        requiresSelection: false,
+        isAmbiguous: false,
+      },
+    });
+    const outOfSyncState = {
+      ...baseState(),
+      status: "doc_confirmed",
+      prdDocument: basePrdDocument(),
+    };
+
+    await service.run({
+      userMessageId: "message-1",
+      attachments: [],
+      context: {
+        runId: "run-1",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "根据文档生成原型",
+        recentMessages: [],
+        attachments: [],
+        productDesignState: outOfSyncState,
+        traceId: "trace-1",
+      },
+    });
+
+    expect(knowledgeAgent.run).toHaveBeenCalled();
+    expect(documentService.saveGeneratedDocument).toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
   });
 
   it("ends the main flow and shows the upstream agent error when an agent fails", async () => {

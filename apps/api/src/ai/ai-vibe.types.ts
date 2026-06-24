@@ -236,6 +236,7 @@ export type ProductDesignState = {
     | "clarifying"
     | "design_ready"
     | "doc_ready"
+    | "doc_confirmed"
     | "prd_ready"
     | "prototype_ready"
     | "patching"

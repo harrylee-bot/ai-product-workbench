@@ -234,6 +234,41 @@ describe("PRD requirement document module", () => {
     }));
   });
 
+  it("confirms a PRD for the prototype gate and syncs doc_confirmed into ProductDesignState", async () => {
+    const draft = renderPrdFromState(baseState());
+    prisma.requirementDocument.findUnique.mockResolvedValue({
+      ...documentRecord({
+        id: "prd-1",
+        ...draft,
+      }),
+      project: baseProject(),
+    });
+    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
+      documentRecord({
+        id: "prd-1",
+        ...draft,
+        status: data.status,
+        updatedBy: data.updatedBy,
+      }),
+    );
+    stateService.getStateByIdForProject.mockResolvedValue(baseState({ status: "doc_ready" }));
+
+    const result = await service.confirmForPrototypeGate(user, "prd-1");
+
+    expect(result.document.status).toBe("confirmed");
+    expect(prisma.requirementDocumentVersion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        documentId: "prd-1",
+        reason: "用户确认 PRD，继续生成原型",
+      }),
+    });
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
+      prdDocument: expect.objectContaining({ id: "prd-1", status: "confirmed" }),
+      status: "doc_confirmed",
+      reason: "用户确认 PRD，继续生成原型，同步 PRD 确认状态到 ProductDesignState",
+    }));
+  });
+
   it("blocks PRD confirmation when QA gate does not allow artifact confirmation", async () => {
     qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));
     prisma.requirementDocument.findUnique.mockResolvedValue({

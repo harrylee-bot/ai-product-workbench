@@ -30,12 +30,16 @@ describe("VibeService main entry", () => {
   };
   const orchestrator = {
     run: vi.fn(),
+    confirmPrdAndContinue: vi.fn(),
   };
   const streamService = {
     stream: vi.fn(),
   };
   const skillRegistry = {
     listSkills: vi.fn(),
+  };
+  const documentService = {
+    confirmForPrototypeGate: vi.fn(),
   };
   const service = new VibeService(
     prisma as never,
@@ -46,6 +50,7 @@ describe("VibeService main entry", () => {
     orchestrator as never,
     streamService as never,
     skillRegistry as never,
+    documentService as never,
   );
   const user = {
     id: "user-1",
@@ -73,6 +78,14 @@ describe("VibeService main entry", () => {
     runLogService.createRun.mockResolvedValue({ id: "run-1", traceId: "trace-1" });
     stateService.getCurrentState.mockResolvedValue(baseState());
     orchestrator.run.mockResolvedValue({ runId: "run-1" });
+    orchestrator.confirmPrdAndContinue.mockResolvedValue({ runId: "run-1" });
+    documentService.confirmForPrototypeGate.mockResolvedValue({
+      document: basePrdDocument({ status: "confirmed" }),
+      productDesignState: baseState({
+        status: "doc_confirmed",
+        prdDocument: basePrdDocument({ status: "confirmed" }),
+      }),
+    });
   });
 
   it("dispatches /ai/vibe/handle-message payloads into the new orchestrator context", async () => {
@@ -134,6 +147,49 @@ describe("VibeService main entry", () => {
     expect(runLogService.createRun).not.toHaveBeenCalled();
     expect(orchestrator.run).not.toHaveBeenCalled();
   });
+
+  it("confirms a doc_ready PRD before continuing to prototype generation", async () => {
+    stateService.getCurrentState.mockResolvedValue(baseState({
+      status: "doc_ready",
+      prdDocument: basePrdDocument({ status: "ready" }),
+    }));
+
+    const result = await service.confirmPrd(user, {
+      projectId: "project-1",
+      conversationId: "conversation-1",
+    });
+
+    expect(documentService.confirmForPrototypeGate).toHaveBeenCalledWith(
+      user,
+      "prd-1",
+      "用户确认 PRD，继续生成原型",
+    );
+    expect(orchestrator.confirmPrdAndContinue).toHaveBeenCalledWith(expect.objectContaining({
+      context: expect.objectContaining({
+        productDesignState: expect.objectContaining({
+          status: "doc_confirmed",
+          prdDocument: expect.objectContaining({ status: "confirmed" }),
+        }),
+      }),
+    }));
+    expect(result).toEqual(expect.objectContaining({ runId: "run-1", status: "running" }));
+  });
+
+  it("rejects PRD confirmation outside the document gate", async () => {
+    stateService.getCurrentState.mockResolvedValue(baseState({
+      status: "prototype_ready",
+      prdDocument: basePrdDocument({ status: "confirmed" }),
+      prototypeSpec: { pages: [], components: [], flows: [], styleGuide: {}, targetDevice: "desktop" },
+    } as never));
+
+    await expect(service.confirmPrd(user, {
+      projectId: "project-1",
+      conversationId: "conversation-1",
+    })).rejects.toThrow("当前项目已生成原型，不能重复触发 PRD 确认门");
+
+    expect(documentService.confirmForPrototypeGate).not.toHaveBeenCalled();
+    expect(orchestrator.confirmPrdAndContinue).not.toHaveBeenCalled();
+  });
 });
 
 function baseProject() {
@@ -146,7 +202,7 @@ function baseProject() {
   };
 }
 
-function baseState(): ProductDesignState {
+function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignState {
   return {
     id: "state-1",
     projectId: "project-1",
@@ -174,5 +230,26 @@ function baseState(): ProductDesignState {
     updatedBy: "user-1",
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
+    ...overrides,
   };
+}
+
+function basePrdDocument(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "prd-1",
+    projectId: "project-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 3,
+    title: "签到活动 PRD",
+    status: "ready",
+    sections: [],
+    assumptions: [],
+    knowledgeRefs: [],
+    pendingQuestions: [],
+    validationNotes: [],
+    createdBy: "user-1",
+    createdAt: "2026-06-20T08:00:00.000Z",
+    updatedAt: "2026-06-20T08:00:00.000Z",
+    ...overrides,
+  } as ProductDesignState["prdDocument"];
 }

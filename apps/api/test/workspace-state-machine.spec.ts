@@ -14,6 +14,7 @@ describe("workspace state machine", () => {
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.scoring)).toBe(ProjectStatus.designing);
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.optimizing)).toBe(ProjectStatus.designing);
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.doc_ready)).toBe(ProjectStatus.prd_ready);
+    expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.doc_confirmed)).toBe(ProjectStatus.prd_ready);
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.prd_ready)).toBe(ProjectStatus.prd_ready);
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.prototype_ready)).toBe(ProjectStatus.prototype_ready);
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.patching)).toBe(ProjectStatus.designing);

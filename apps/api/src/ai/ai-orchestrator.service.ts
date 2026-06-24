@@ -5,6 +5,7 @@ import {
   MessageType,
   ProductDesignStateStatus,
   ProjectStatus,
+  RequirementDocumentStatus,
   UserIntent,
 } from "@prisma/client";
 import { MessageService } from "../projects/message.service";
@@ -145,16 +146,18 @@ export class AiOrchestratorService {
 
       // FR-2.2 意图路由：已存在 PRD 文档且用户要求生成原型时，直接从原型阶段进入，
       // 跳过需求理解与文档生成（propose-then-commit 的"从指定阶段恢复"）。
+      const productDesignState = context.productDesignState;
       if (
         intent.data.intent === UserIntent.generate_prototype &&
-        context.productDesignState?.prdDocument
+        productDesignState &&
+        hasConfirmedPrdForPrototype(productDesignState)
       ) {
         await this.emit(context, "message_delta", "检测到已确认的需求文档，正在直接生成原型...");
         return this.generatePrototypeForState(
           context,
           input,
           intent.data,
-          context.productDesignState,
+          productDesignState,
         );
       }
 
@@ -369,6 +372,12 @@ export class AiOrchestratorService {
     }
     if (!state.prdDocument) {
       throw new Error("当前 ProductDesignState 尚无 PRD 文档，无法进入原型阶段");
+    }
+    if (!hasConfirmedPrdForPrototype(state)) {
+      throw new Error("当前 PRD 尚未确认，不能生成原型");
+    }
+    if (state.prototypeSpec) {
+      throw new Error("当前项目已生成原型，不能重复触发 PRD 确认门");
     }
     const intent: IntentResult =
       context.intentResult ?? {
@@ -818,6 +827,15 @@ function stateSummary(state: ProductDesignState) {
     },
     updatedAt: state.updatedAt,
   };
+}
+
+function hasConfirmedPrdForPrototype(state: ProductDesignState | undefined) {
+  if (!state?.prdDocument) return false;
+  if (state.prdDocument.status !== RequirementDocumentStatus.confirmed) return false;
+  return state.status === ProductDesignStateStatus.doc_confirmed ||
+    state.status === ProductDesignStateStatus.prd_ready ||
+    state.status === ProductDesignStateStatus.prototype_ready ||
+    state.status === ProductDesignStateStatus.confirmed;
 }
 
 function errorMessage(error: unknown, fallback: string) {

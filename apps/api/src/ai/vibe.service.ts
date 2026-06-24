@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { ProjectStatus, UserRole } from "@prisma/client";
+import { ProductDesignStateStatus, ProjectStatus, UserRole } from "@prisma/client";
 import type { MessageEvent } from "@nestjs/common";
 import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -11,6 +11,7 @@ import { AiOrchestratorService } from "./ai-orchestrator.service";
 import type { SelectedRegion } from "./ai-vibe.types";
 import type { HandleVibeMessageDto, ConfirmPrdDto } from "./dto";
 import { ProductDesignStateService } from "./product-design-state.service";
+import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { AgentSkillRegistryService } from "./agent-skill-registry.service";
 
@@ -25,6 +26,7 @@ export class VibeService {
     private readonly orchestrator: AiOrchestratorService,
     private readonly streamService: VibeStreamService,
     private readonly skillRegistry: AgentSkillRegistryService,
+    private readonly documentService: RequirementDocumentService,
   ) {}
 
   async handleMessage(user: AuthenticatedUser, dto: HandleVibeMessageDto) {
@@ -167,6 +169,23 @@ export class VibeService {
     if (!productDesignState.prdDocument) {
       throw new ForbiddenException("当前还没有可确认的 PRD 文档");
     }
+    if (productDesignState.prototypeSpec) {
+      throw new ForbiddenException("当前项目已生成原型，不能重复触发 PRD 确认门");
+    }
+    if (
+      productDesignState.status !== ProductDesignStateStatus.doc_ready &&
+      productDesignState.status !== ProductDesignStateStatus.doc_confirmed
+    ) {
+      throw new ForbiddenException("当前 PRD 不在待确认状态，不能继续生成原型");
+    }
+    const confirmedState = productDesignState.status === ProductDesignStateStatus.doc_confirmed &&
+      productDesignState.prdDocument.status === "confirmed"
+      ? productDesignState
+      : (await this.documentService.confirmForPrototypeGate(
+          user,
+          productDesignState.prdDocument.id,
+          "用户确认 PRD，继续生成原型",
+        )).productDesignState;
 
     const confirmMessage = await this.messageService.createUserMessage({
       projectId: project.id,
@@ -201,7 +220,7 @@ export class VibeService {
           userInput: "确认 PRD，继续生成原型。",
           recentMessages,
           attachments: [],
-          productDesignState,
+          productDesignState: confirmedState,
           currentProjectStatus: project.status,
           traceId: run.traceId,
         },

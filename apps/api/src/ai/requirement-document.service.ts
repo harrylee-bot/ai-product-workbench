@@ -216,19 +216,25 @@ export class RequirementDocumentService {
     const qaGate = this.qaService
       ? await this.qaService.assertGateAllows(user, current.projectId, "confirm_artifacts")
       : undefined;
-    const updated = await this.prisma.requirementDocument.update({
-      where: { id: documentId },
-      data: {
-        status: RequirementDocumentStatus.confirmed,
-        updatedBy: user.id,
-      },
-    });
-    const document = this.toDocumentItem(updated as RequirementDocumentRecord);
-    const version = await this.createVersion(document, user.id, reason ?? "用户确认 PRD");
+    const { document, version } = await this.confirmDocumentAndSyncState(
+      current as RequirementDocumentRecord,
+      user.id,
+      reason ?? "用户确认 PRD",
+    );
     const knowledgeCandidates = qaGate && !qaGate.allowPersistKnowledge
       ? { items: [], qaGate }
       : await this.extractKnowledgeCandidatesAfterConfirm(user.id, document);
     return { document, version, knowledgeCandidates, qaGate };
+  }
+
+  async confirmForPrototypeGate(user: AuthenticatedUser, documentId: string, reason?: string) {
+    const current = await this.getAccessibleDocument(user, documentId);
+    this.assertOwnerMutation(user, current.project.ownerId);
+    return this.confirmDocumentAndSyncState(
+      current as RequirementDocumentRecord,
+      user.id,
+      reason ?? "用户确认 PRD，继续生成原型",
+    );
   }
 
   private async extractKnowledgeCandidatesAfterConfirm(userId: string, document: RequirementDocument) {
@@ -259,6 +265,38 @@ export class RequirementDocumentService {
       sourceRefId: document.id,
       runId,
     });
+  }
+
+  private async confirmDocumentAndSyncState(
+    current: RequirementDocumentRecord,
+    userId: string,
+    reason: string,
+  ) {
+    const updated = current.status === RequirementDocumentStatus.confirmed
+      ? current
+      : await this.prisma.requirementDocument.update({
+          where: { id: current.id },
+          data: {
+            status: RequirementDocumentStatus.confirmed,
+            updatedBy: userId,
+          },
+        });
+    const document = this.toDocumentItem(updated as RequirementDocumentRecord);
+    const version = await this.createVersion(document, userId, reason);
+    const state = await this.stateService.getStateByIdForProject(
+      document.productDesignStateId,
+      document.projectId,
+    );
+    const status = state?.prototypeSpec
+      ? ProductDesignStateStatus.prototype_ready
+      : ProductDesignStateStatus.doc_confirmed;
+    const productDesignState = await this.stateService.attachGeneratedArtifacts(document.productDesignStateId, {
+      prdDocument: document,
+      status,
+      userId,
+      reason: `${reason}，同步 PRD 确认状态到 ProductDesignState`,
+    });
+    return { document, version, productDesignState };
   }
 
   async listVersionsForUser(user: AuthenticatedUser, documentId: string) {

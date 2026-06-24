@@ -21,6 +21,7 @@ export function projectStatusFromProductDesignStateStatus(
   if (status === ProductDesignStateStatus.optimizing) return ProjectStatus.designing;
   if (status === ProductDesignStateStatus.clarifying) return ProjectStatus.clarifying;
   if (status === ProductDesignStateStatus.doc_ready) return ProjectStatus.prd_ready;
+  if (status === ProductDesignStateStatus.doc_confirmed) return ProjectStatus.prd_ready;
   if (status === ProductDesignStateStatus.prd_ready) return ProjectStatus.prd_ready;
   if (status === ProductDesignStateStatus.prototype_ready) return ProjectStatus.prototype_ready;
   if (status === ProductDesignStateStatus.patching) return ProjectStatus.designing;
