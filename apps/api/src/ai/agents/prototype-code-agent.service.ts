@@ -58,6 +58,14 @@ export class PrototypeCodeAgentService extends BaseAgentService<PrototypeCodeInp
     };
   }
 
+  protected fallbackMode() {
+    return "spec_rendered_single_html";
+  }
+
+  protected fallbackUserMessage() {
+    return "Prototype Code 模型暂时不可用，已直接从 PrototypeSpec 渲染单文件 HTML。";
+  }
+
   protected normalize(output: PrototypeArtifactDraft, input: PrototypeCodeInput): PrototypeArtifactDraft {
     const fallback = this.fallback(input);
     const html = safeText(output.htmlContent) || safeText(output.html) || fallback.htmlContent;

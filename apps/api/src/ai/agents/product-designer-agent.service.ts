@@ -261,6 +261,14 @@ export class ProductDesignerAgentService extends BaseAgentService<
       projectId: "",
     };
   }
+
+  protected fallbackMode() {
+    return "deterministic_product_design_draft";
+  }
+
+  protected fallbackUserMessage() {
+    return "Product Designer 模型暂时不可用，已按 ProductBuildPlan 生成规则兜底产品状态。";
+  }
 }
 
 function planToTargetUsers(plan?: ProductBuildPlan) {

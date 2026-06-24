@@ -60,6 +60,14 @@ export class PrototypeDesignerAgentService extends BaseAgentService<
     return renderPrototypeSpecFromState(input.productDesignState, input.targetDevice ?? input.targetView ?? "both", input.generatedByRunId);
   }
 
+  protected fallbackMode() {
+    return "state_rendered_prototype_spec";
+  }
+
+  protected fallbackUserMessage() {
+    return "Prototype Designer 模型暂时不可用，已直接从 ProductDesignState 渲染原型规格。";
+  }
+
   protected normalize(output: PrototypeSpec, input: PrototypeDesignerInput): PrototypeSpec {
     const fallback = this.fallback(input);
     const pages = Array.isArray(output.pages) && output.pages.length

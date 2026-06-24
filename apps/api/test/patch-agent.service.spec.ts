@@ -5,7 +5,7 @@ import { PatchAgentService } from "../src/ai/agents/patch-agent.service";
 import type { ProductDesignState } from "../src/ai/ai-vibe.types";
 
 describe("PatchAgentService", () => {
-  it("propagates upstream errors without agent-level retry amplification", async () => {
+  it("falls back to a reviewable PatchPlan without agent-level retry amplification", async () => {
     const modelGateway = {
       generateJson: vi.fn().mockRejectedValue(
         new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
@@ -13,7 +13,7 @@ describe("PatchAgentService", () => {
     };
     const service = new PatchAgentService(modelGateway as never);
 
-    await expect(service.run({
+    const result = await service.run({
       runId: "run-1",
       projectId: "project-1",
       traceId: "trace-1",
@@ -31,7 +31,7 @@ describe("PatchAgentService", () => {
         },
         productDesignState: baseState(),
       },
-    })).rejects.toThrow("no model configured");
+    });
 
     expect(modelGateway.generateJson).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -40,6 +40,16 @@ describe("PatchAgentService", () => {
       }),
     );
     expect(modelGateway.generateJson).toHaveBeenCalledTimes(1);
+    expect(result.data.patchType).toBe("prototype");
+    expect(result.data.operations[0].path).toBe("frontendRules");
+    expect(result.fallback).toEqual(expect.objectContaining({
+      used: true,
+      agentName: AgentName.patch_agent,
+      taskType: ModelTaskType.patch_planning,
+      fallbackMode: "deterministic_patch_plan",
+      errorCode: "MODEL_PROVIDER_NOT_FOUND",
+      canContinue: true,
+    }));
   });
 
   it("normalizes model output into a high-risk confirmation when the request conflicts with strong_rule knowledge", async () => {

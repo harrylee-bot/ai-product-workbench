@@ -1,7 +1,8 @@
 import { AgentName, ModelTaskType } from "@prisma/client";
+import { ModelGatewayError } from "../../model-gateway/model-gateway.error";
 import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
-import type { ModelMessage } from "../../model-gateway/model-gateway.types";
-import type { AgentFallbackMetadata } from "../agent-fallback-policy";
+import type { ModelGatewayErrorCode, ModelMessage } from "../../model-gateway/model-gateway.types";
+import type { AgentFallbackAction, AgentFallbackLevel, AgentFallbackMetadata } from "../agent-fallback-policy";
 import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
 
 const DEFAULT_AGENT_RETRY_COUNT = 0;
@@ -85,8 +86,59 @@ export abstract class BaseAgentService<TInput, TOutput> {
     return undefined;
   }
 
-  protected fallbackOnError(_error: unknown, _input: TInput): AgentFallbackMetadata | undefined {
+  protected fallbackOnError(error: unknown, input: TInput): AgentFallbackMetadata | undefined {
+    const fallbackMode = this.fallbackMode(input);
+    if (!fallbackMode) return undefined;
+
+    return {
+      used: true,
+      level: this.fallbackLevel(input),
+      action: this.fallbackAction(input),
+      agentName: this.agentName,
+      taskType: this.taskType,
+      fallbackMode,
+      errorCode: modelErrorCode(error),
+      errorMessage: errorText(error),
+      reason: this.fallbackReason(error, input),
+      userMessage: this.fallbackUserMessage(error, input),
+      canContinue: true,
+      allowsConfirmation: this.fallbackAllowsConfirmation(input),
+      allowsKnowledgeExtraction: this.fallbackAllowsKnowledgeExtraction(input),
+      allowsExport: this.fallbackAllowsExport(input),
+      occurredAt: new Date().toISOString(),
+    };
+  }
+
+  protected fallbackMode(_input: TInput): string | undefined {
     return undefined;
+  }
+
+  protected fallbackLevel(_input: TInput): AgentFallbackLevel {
+    return "degraded_preview";
+  }
+
+  protected fallbackAction(_input: TInput): AgentFallbackAction {
+    return "review_required";
+  }
+
+  protected fallbackReason(error: unknown, _input: TInput) {
+    return `${this.agentName} 模型调用不可用，已使用确定性规则兜底。原始错误：${errorText(error)}`;
+  }
+
+  protected fallbackUserMessage(_error: unknown, _input: TInput) {
+    return `${this.agentName} 暂时无法使用模型，已使用规则兜底并继续执行。`;
+  }
+
+  protected fallbackAllowsConfirmation(_input: TInput) {
+    return true;
+  }
+
+  protected fallbackAllowsKnowledgeExtraction(_input: TInput) {
+    return false;
+  }
+
+  protected fallbackAllowsExport(_input: TInput) {
+    return true;
   }
 
   private async runWithRetries(
@@ -104,4 +156,14 @@ export abstract class BaseAgentService<TInput, TOutput> {
 
     throw lastError ?? new Error("Agent 执行失败");
   }
+}
+
+function modelErrorCode(error: unknown): ModelGatewayErrorCode {
+  return error instanceof ModelGatewayError ? error.code : "MODEL_CALL_FAILED";
+}
+
+function errorText(error: unknown) {
+  const message = error instanceof Error ? error.message : "模型调用失败";
+  const compact = message.replace(/\s+/g, " ").trim();
+  return compact.length > 500 ? `${compact.slice(0, 500)}...` : compact || "模型调用失败";
 }

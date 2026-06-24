@@ -527,8 +527,8 @@ function stepInputs(skillInputs: string[], ...items: string[]) {
   return [...items, ...skillInputs];
 }
 
-function unique(values: Array<string | undefined | null>) {
-  return [...new Set(values.map((item) => item?.trim()).filter((item): item is string => Boolean(item)))];
+function unique(values: Array<unknown>) {
+  return [...new Set(values.map(toCleanString).filter((item): item is string => Boolean(item)))];
 }
 
 function capStrings(values: string[] | undefined, limit: number) {
@@ -566,6 +566,17 @@ function modelErrorCode(error: unknown): ModelGatewayErrorCode {
 function errorText(error: unknown) {
   const message = error instanceof Error ? error.message : "模型调用失败";
   return clip(message, 500) || "模型调用失败";
+}
+
+function toCleanString(value: unknown) {
+  if (typeof value === "string") return value.trim();
+  if (value === undefined || value === null) return "";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return clip(record.title ?? record.name ?? record.content ?? record.description ?? record.reason ?? JSON.stringify(value), 240);
+  }
+  return "";
 }
 
 function text(value: unknown, fallback: string) {

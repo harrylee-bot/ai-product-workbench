@@ -70,6 +70,22 @@ export class IntentAgentService extends BaseAgentService<IntentInput, IntentResu
     };
   }
 
+  protected fallbackMode() {
+    return "heuristic_intent_detection";
+  }
+
+  protected fallbackLevel() {
+    return "acceptable_result" as const;
+  }
+
+  protected fallbackAction() {
+    return "continue" as const;
+  }
+
+  protected fallbackUserMessage() {
+    return "Intent Agent 模型暂时不可用，已使用本地规则识别意图并继续。";
+  }
+
   protected normalize(output: IntentResult, input: IntentInput): IntentResult {
     if (isCasualGeneralInput(input.userInput)) return this.fallback(input);
     if (!Object.values(UserIntent).includes(output.intent)) return this.fallback(input);

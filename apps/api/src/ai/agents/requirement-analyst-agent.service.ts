@@ -87,4 +87,77 @@ export class RequirementAnalystAgentService extends BaseAgentService<
         : [],
     };
   }
+
+  protected normalize(output: RequirementAnalysis, input: RequirementAnalystInput): RequirementAnalysis {
+    const fallback = this.fallback(input);
+    const shouldAskUser = typeof output.shouldAskUser === "boolean"
+      ? output.shouldAskUser
+      : fallback.shouldAskUser;
+
+    return {
+      completenessScore: numberValue(output.completenessScore, fallback.completenessScore),
+      knownFromUser: stringArray(output.knownFromUser, fallback.knownFromUser),
+      knownFromKnowledge: stringArray(output.knownFromKnowledge, fallback.knownFromKnowledge),
+      inferredByAI: stringArray(output.inferredByAI, fallback.inferredByAI),
+      missingCritical: stringArray(output.missingCritical, fallback.missingCritical),
+      missingOptional: stringArray(output.missingOptional, fallback.missingOptional),
+      conflicts: stringArray(output.conflicts, fallback.conflicts),
+      shouldAskUser,
+      clarificationQuestions: normalizeClarificationQuestions(
+        output.clarificationQuestions,
+        shouldAskUser ? fallback.clarificationQuestions : [],
+      ),
+    };
+  }
+
+  protected fallbackMode() {
+    return "heuristic_requirement_analysis";
+  }
+
+  protected fallbackUserMessage() {
+    return "Requirement Analyst 模型暂时不可用，已使用规则分析需求完整度并继续。";
+  }
+}
+
+function numberValue(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function stringArray(value: unknown, fallback: string[]) {
+  if (!Array.isArray(value)) return fallback;
+  const normalized = value
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") {
+        const record = item as Record<string, unknown>;
+        return String(record.title ?? record.content ?? record.description ?? record.reason ?? "").trim();
+      }
+      return String(item ?? "").trim();
+    })
+    .filter(Boolean);
+  return normalized.length ? [...new Set(normalized)] : fallback;
+}
+
+function normalizeClarificationQuestions(value: unknown, fallback: RequirementAnalysis["clarificationQuestions"]) {
+  if (!Array.isArray(value)) return fallback;
+  const questions = value
+    .map((item, index) => {
+      const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      const title = text(record.title) || text(record.question) || `请确认问题 ${index + 1}`;
+      const reason = text(record.reason) || "该问题会影响 PRD 和原型范围。";
+      return {
+        id: text(record.id) || `clarify_${index + 1}`,
+        title,
+        question: text(record.question) || title,
+        reason,
+        options: stringArray(record.options, ["按常规最佳实践先生成", "我补充具体规则", "暂不纳入一期"]),
+        recommendedOption: text(record.recommendedOption),
+      };
+    })
+    .filter((item) => item.title);
+  return questions.length ? questions : fallback;
+}
+
+function text(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }

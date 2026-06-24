@@ -148,6 +148,14 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
     };
   }
 
+  protected fallbackMode() {
+    return "deterministic_patch_plan";
+  }
+
+  protected fallbackUserMessage() {
+    return "Patch Agent 模型暂时不可用，已使用规则生成待确认 PatchPlan。";
+  }
+
   protected normalize(output: PatchPlan, input: PatchAgentInput): PatchPlan {
     const fallback = this.fallback(input);
     const operations = Array.isArray(output.operations) && output.operations.length

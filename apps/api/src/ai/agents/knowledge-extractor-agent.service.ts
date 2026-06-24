@@ -76,6 +76,18 @@ export class KnowledgeExtractorAgentService extends BaseAgentService<
     };
   }
 
+  protected fallbackMode() {
+    return "deterministic_knowledge_extraction";
+  }
+
+  protected fallbackUserMessage() {
+    return "Knowledge Extractor 模型暂时不可用，已按确认状态使用规则抽取知识候选。";
+  }
+
+  protected fallbackAllowsKnowledgeExtraction(input: KnowledgeExtractorInput) {
+    return Boolean(input.confirmedByUser);
+  }
+
   protected normalize(output: KnowledgeExtractorOutput, input: KnowledgeExtractorInput): KnowledgeExtractorOutput {
     const fallback = this.fallback(input);
     if (!input.confirmedByUser) return { candidates: [] };

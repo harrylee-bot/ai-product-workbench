@@ -40,7 +40,7 @@ describe("IntentAgentService", () => {
     expect(result.data.reason).toContain("不应触发需求生成链路");
   });
 
-  it("propagates upstream errors without agent-level retry amplification", async () => {
+  it("falls back to local intent detection without agent-level retry amplification", async () => {
     const modelGateway = {
       generateJson: vi.fn().mockRejectedValue(
         new ModelGatewayError("MODEL_PROVIDER_NOT_FOUND", "no model configured"),
@@ -48,7 +48,7 @@ describe("IntentAgentService", () => {
     };
     const service = new IntentAgentService(modelGateway as never);
 
-    await expect(service.run({
+    const result = await service.run({
       runId: "run-1",
       projectId: "project-1",
       traceId: "trace-1",
@@ -57,8 +57,17 @@ describe("IntentAgentService", () => {
         userInput: "你好，帮我做一个签到活动页面",
         recentMessages: [],
       },
-    })).rejects.toThrow("no model configured");
+    });
 
     expect(modelGateway.generateJson).toHaveBeenCalledTimes(1);
+    expect(result.data.intent).toBe(UserIntent.generate_prototype);
+    expect(result.fallback).toEqual(expect.objectContaining({
+      used: true,
+      agentName: AgentName.intent_agent,
+      taskType: ModelTaskType.intent_detection,
+      fallbackMode: "heuristic_intent_detection",
+      errorCode: "MODEL_PROVIDER_NOT_FOUND",
+      canContinue: true,
+    }));
   });
 });

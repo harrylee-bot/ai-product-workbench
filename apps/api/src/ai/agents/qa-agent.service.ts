@@ -136,6 +136,14 @@ export class QaAgentService extends BaseAgentService<QaAgentInput, QAAgentOutput
     };
   }
 
+  protected fallbackMode() {
+    return "deterministic_qa_check";
+  }
+
+  protected fallbackUserMessage() {
+    return "QA Agent 模型暂时不可用，已使用规则检查生成 QA 风险。";
+  }
+
   protected normalize(output: QAAgentOutput, input: QaAgentInput): QAAgentOutput {
     const fallback = this.fallback(input);
     const rawIssues = Array.isArray(output.issues) ? output.issues : [];

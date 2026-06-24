@@ -62,6 +62,14 @@ export class PrdWriterAgentService extends BaseAgentService<PrdWriterInput, Requ
     return renderPrdFromState(input.productDesignState);
   }
 
+  protected fallbackMode() {
+    return "state_rendered_prd";
+  }
+
+  protected fallbackUserMessage() {
+    return "PRD Writer 模型暂时不可用，已直接从 ProductDesignState 渲染 PRD。";
+  }
+
   protected normalize(output: RequirementDocumentDraft, input: PrdWriterInput): RequirementDocumentDraft {
     const fallback = this.fallback(input);
     const sections = Array.isArray(output.sections) ? output.sections : fallback.sections;
