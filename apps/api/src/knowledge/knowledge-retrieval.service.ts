@@ -24,11 +24,12 @@ export class KnowledgeRetrievalService {
     const preferredTypes = input.preferredTypes?.length
       ? [...new Set(input.preferredTypes)]
       : undefined;
+    const strictPreferredTypes = Boolean(input.strictPreferredTypes && preferredTypes?.length);
 
     const items = await this.prisma.knowledgeItem.findMany({
       where: {
         status: KnowledgeStatus.active,
-        ...(preferredTypes ? { type: { in: preferredTypes } } : {}),
+        ...(strictPreferredTypes ? { type: { in: preferredTypes } } : {}),
         OR: [
           { scope: "global" },
           ...(input.projectId

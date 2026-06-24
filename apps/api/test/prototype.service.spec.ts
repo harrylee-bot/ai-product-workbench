@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHtmlFromPrototypeSpec } from "../src/ai/agents/prototype-code-agent.service";
 import { renderPrototypeSpecFromState } from "../src/ai/agents/prototype-designer-agent.service";
 import type { ProductDesignState, PrototypeArtifactDraft } from "../src/ai/ai-vibe.types";
-import { PrototypeService, validateHtmlSafety } from "../src/ai/prototype.service";
+import { PrototypeService, replacePrototypeComponentHtml, validateHtmlSafety } from "../src/ai/prototype.service";
 
 describe("HTML prototype artifact module", () => {
   const now = new Date("2026-06-20T08:00:00Z");
@@ -215,6 +215,64 @@ describe("HTML prototype artifact module", () => {
     expect(validateHtmlSafety("<script>window.parent.postMessage('x','*')</script>")).toEqual({
       ok: false,
       reason: "PROTOTYPE_HTML_PARENT_ACCESS",
+    });
+  });
+
+  it("replaces only the targeted component html by data-component-id", () => {
+    const html = '<!doctype html><main><article data-component-id="keep"><strong>保留</strong></article><button data-component-id="target"><span>旧文案</span></button></main>';
+    const next = replacePrototypeComponentHtml(
+      html,
+      "target",
+      '<button data-component-id="target">新文案</button>',
+    );
+
+    expect(next).toContain('<article data-component-id="keep"><strong>保留</strong></article>');
+    expect(next).toContain('<button data-component-id="target">新文案</button>');
+    expect(next).not.toContain("旧文案");
+  });
+
+  it("creates a new artifact by locally regenerating the selected prototype component", async () => {
+    const state = baseState();
+    const spec = renderPrototypeSpecFromState(state, "both", "run-local");
+    const action = spec.pages[0].components.find((component) => component.id === "page_home_primary_action");
+    if (action) action.content = "立即签到";
+    const beforeHtml = '<!doctype html><main><article data-component-id="page_home_goal_card"><strong>保留目标卡片</strong></article><button data-component-id="page_home_primary_action">旧按钮</button></main>';
+    prisma.prototypeArtifact.findFirst.mockResolvedValue(artifactRecord({
+      id: "artifact-before",
+      prototypeSpecId: "spec-before",
+      productDesignStateId: state.id,
+      productDesignStateVersion: state.version,
+      htmlContent: beforeHtml,
+    }));
+    prisma.prototypeSpecRecord.create.mockImplementation(async ({ data }) => specRecord(data));
+    prisma.prototypeArtifact.create.mockImplementation(async ({ data }) => artifactRecord({ id: "artifact-local", ...data }));
+
+    const result = await service.trySaveLocalizedGeneratedPrototype(state, spec, {
+      userId: "user-1",
+      runId: "run-local",
+      sourceArtifactId: "artifact-before",
+      selectedRegion: {
+        type: "prototype",
+        targetId: "artifact-before",
+        artifactId: "artifact-before",
+        pageId: "page_home",
+        componentId: "page_home_primary_action",
+      },
+    });
+
+    expect(result?.artifact.id).toBe("artifact-local");
+    expect(result?.artifact.htmlContent).toContain("保留目标卡片");
+    expect(result?.artifact.htmlContent).toContain("立即签到");
+    expect(result?.artifact.htmlContent).not.toContain("旧按钮");
+    expect(result?.localPatch).toEqual(expect.objectContaining({
+      mode: "component",
+      componentId: "page_home_primary_action",
+      sourceArtifactId: "artifact-before",
+    }));
+    expect(prototypeCodeAgent.run).not.toHaveBeenCalled();
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: { currentPrototypeArtifactId: "artifact-local" },
     });
   });
 

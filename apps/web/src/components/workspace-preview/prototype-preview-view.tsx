@@ -49,6 +49,8 @@ export function PrototypePreviewView({
   aiEditingSelectionId?: string;
   onAiEditSelection?: (input: {
     selectionId: string;
+    componentId?: string;
+    pageId?: string;
     action: string;
     instruction: string;
     bbox: { x: number; y: number; width: number; height: number };
@@ -56,6 +58,7 @@ export function PrototypePreviewView({
   }) => Promise<void> | void;
 }) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const canvasOverlayRef = useRef<HTMLDivElement | null>(null);
   const localDialogRef = useRef<HTMLDivElement | null>(null);
   const localInstructionRef = useRef<HTMLTextAreaElement | null>(null);
@@ -160,11 +163,15 @@ export function PrototypePreviewView({
     const rawRect = rectFromPoints(dragStart, point);
     const isBox = rawRect.width >= 18 && rawRect.height >= 18;
     const nextRect = isBox ? rawRect : pointSelectionRect(point, canvasBounds.width, canvasBounds.height);
+    const hit = findPrototypeComponentHit(iframeRef.current, rectCenter(nextRect));
     const nextSelection: PrototypeCanvasSelection = {
       ...nextRect,
       id: `prototype-selection-${Date.now()}`,
       kind: isBox ? "box" : "point",
-      label: selectionLabel(nextRect, isBox ? "box" : "point"),
+      label: hit?.label ?? selectionLabel(nextRect, isBox ? "box" : "point"),
+      componentId: hit?.componentId,
+      pageId: hit?.pageId,
+      componentName: hit?.componentName,
       createdAt: Date.now(),
     };
 
@@ -246,6 +253,8 @@ export function PrototypePreviewView({
       if (onAiEditSelection) {
         await onAiEditSelection({
           selectionId: selection.id,
+          componentId: selection.componentId,
+          pageId: selection.pageId,
           action: prototypePatchAction(localAction),
           instruction: instruction.trim(),
           bbox: {
@@ -321,9 +330,10 @@ export function PrototypePreviewView({
           </div>
           <div ref={canvasRef} className="relative h-[calc(100%-36px)] min-h-[600px] bg-white">
             <iframe
+              ref={iframeRef}
               title="原型预览"
               srcDoc={prototypePreview.html}
-              sandbox="allow-scripts"
+              sandbox="allow-scripts allow-same-origin"
               className={[
                 "h-full min-h-[600px] w-full border-0 bg-white",
                 canvasMode === "select" ? "pointer-events-none select-none" : "",
@@ -667,6 +677,39 @@ function pointSelectionRect(point: { x: number; y: number }, canvasWidth: number
     width,
     height,
   };
+}
+
+function rectCenter(rect: CanvasRect) {
+  return {
+    x: rect.x + rect.width / 2,
+    y: rect.y + rect.height / 2,
+  };
+}
+
+function findPrototypeComponentHit(iframe: HTMLIFrameElement | null, point: { x: number; y: number }) {
+  const doc = iframe?.contentDocument;
+  if (!doc) return null;
+  const element = doc.elementFromPoint(point.x, point.y);
+  if (!element) return null;
+  const component = element.closest("[data-component-id]");
+  if (!component) return null;
+  const componentId = component.getAttribute("data-component-id");
+  if (!componentId) return null;
+  const page = component.closest("[data-page-id]");
+  const pageId = page?.getAttribute("data-page-id") ?? component.getAttribute("data-page-id") ?? undefined;
+  const componentName = readableComponentName(component);
+  return {
+    componentId,
+    pageId,
+    componentName,
+    label: componentName ? `组件：${componentName}` : `组件：${componentId}`,
+  };
+}
+
+function readableComponentName(element: Element) {
+  const heading = element.querySelector("strong,h1,h2,h3,button");
+  const text = (heading?.textContent || element.getAttribute("aria-label") || element.textContent || "").trim();
+  return text.replace(/\s+/g, " ").slice(0, 32);
 }
 
 function selectionLabel(box: CanvasRect, kind: "point" | "box") {

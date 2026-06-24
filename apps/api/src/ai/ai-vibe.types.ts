@@ -553,7 +553,7 @@ export type PrototypeArtifactDraft = {
   assets?: Array<{ name: string; path: string; type: string }>;
 };
 
-export type ExportArtifactFormat = "prd_word" | "prototype_html";
+export type ExportArtifactFormat = "prd_word" | "prototype_html" | "prd_canvas";
 
 export type ExportArtifactSummary = {
   format: ExportArtifactFormat;

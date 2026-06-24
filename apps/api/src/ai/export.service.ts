@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { DocumentCanvasService } from "./document-canvas.service";
 import type {
   ExportArtifactSummary,
   ProductDesignState,
@@ -22,6 +23,7 @@ export class ExportService {
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
     private readonly qaService: QaService,
+    private readonly documentCanvasService: DocumentCanvasService,
   ) {}
 
   async exportPrdWordForUser(user: AuthenticatedUser, projectId: string) {
@@ -40,6 +42,12 @@ export class ExportService {
     return this.buildPrototypeHtmlExport(current.artifact, qaGate);
   }
 
+  async exportPrdCanvasForUser(user: AuthenticatedUser, projectId: string) {
+    const qaGate = await this.qaService.assertGateAllows(user, projectId, "export_or_publish");
+    const artifact = await this.documentCanvasService.createCanvasExportForUser(user, projectId);
+    return { ...artifact, qaGate };
+  }
+
   async createPrdWordExport(projectId: string) {
     const current = await this.documentService.getCurrentForProject(projectId);
     if (!current.document) throw new NotFoundException("PRD_EXPORT_NOT_FOUND");
@@ -54,6 +62,12 @@ export class ExportService {
     assertArtifactMatchesState(current.artifact, current.productDesignState ?? undefined);
     const qaGate = await this.qaService.assertGateAllowsForProject(projectId, "export_or_publish");
     return this.buildPrototypeHtmlExport(current.artifact, qaGate);
+  }
+
+  async createPrdCanvasExport(projectId: string) {
+    const qaGate = await this.qaService.assertGateAllowsForProject(projectId, "export_or_publish");
+    const artifact = await this.documentCanvasService.createCanvasExportForProject(projectId);
+    return { ...artifact, qaGate };
   }
 
   private buildPrdWordExport(

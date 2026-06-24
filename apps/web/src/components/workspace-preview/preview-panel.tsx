@@ -7,12 +7,14 @@ import {
   Crop,
   FileDown,
   FileText,
+  GitBranch,
   MessageSquare,
   Share2,
   ShieldAlert,
 } from "lucide-react";
 import { IconButton, SegmentedControl, Select } from "@/components/ui";
 import { apiRequest, downloadApiFile } from "@/lib/api";
+import { CanvasPreviewView } from "./canvas-preview-view";
 import { FeedbackWorkflowView } from "./feedback-workflow-view";
 import { PrdPreviewView } from "./prd-preview-view";
 import { PrototypePreviewView } from "./prototype-preview-view";
@@ -22,11 +24,13 @@ import type {
   Phase1PrdPreview,
   Phase1PrototypePreview,
   Phase2DecisionView,
+  DocumentCanvasPreview,
   PreviewMode,
 } from "./types";
 
 const PREVIEW_TABS: Array<{ value: PreviewMode; label: string; icon: typeof FileText; description: string }> = [
   { value: "prd", label: "PRD", icon: FileText, description: "文档阅读与段落编辑" },
+  { value: "canvas", label: "Canvas", icon: GitBranch, description: "文档结构画布" },
   { value: "prototype", label: "原型", icon: Crop, description: "画布选区与局部补丁" },
   { value: "qa", label: "QA", icon: ShieldAlert, description: "问题严重程度与回归" },
   { value: "state", label: "状态", icon: Activity, description: "指标、推断与版本" },
@@ -65,6 +69,8 @@ export function PreviewPanel({
   }) => Promise<void> | void;
   onAiEditPrototypeSelection?: (input: {
     selectionId: string;
+    componentId?: string;
+    pageId?: string;
     action: string;
     instruction: string;
     bbox: { x: number; y: number; width: number; height: number };
@@ -72,11 +78,15 @@ export function PreviewPanel({
   }) => Promise<void> | void;
 }) {
   const [mode, setMode] = useState<PreviewMode>("prototype");
-  const [exporting, setExporting] = useState<"word" | "html" | null>(null);
+  const [exporting, setExporting] = useState<"word" | "html" | "canvas" | null>(null);
+  const [canvasPreview, setCanvasPreview] = useState<DocumentCanvasPreview | null>(null);
+  const [canvasLoading, setCanvasLoading] = useState(false);
+  const [canvasError, setCanvasError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const activeTab = PREVIEW_TABS.find((tab) => tab.value === mode) ?? PREVIEW_TABS[1];
   const canExportPrd = Boolean(projectId && prdPreview?.id);
+  const canExportCanvas = Boolean(projectId && prdPreview?.id);
   const canExportHtml = Boolean(projectId && prototypePreview?.html);
   const hasShareablePrd = Boolean(prdPreview?.id);
   const hasShareablePrototype = Boolean(prototypePreview?.html);
@@ -102,7 +112,32 @@ export function PreviewPanel({
     }
   }, [prdPreview?.id, prototypePreview?.id, prototypePreview?.html]);
 
-  const handleExport = async (format: "word" | "html") => {
+  useEffect(() => {
+    setCanvasPreview(null);
+    setCanvasError(null);
+  }, [prdPreview?.id]);
+
+  useEffect(() => {
+    if (mode !== "canvas" || !prdPreview?.id || canvasPreview || canvasLoading || canvasError) return;
+    let active = true;
+    setCanvasLoading(true);
+    setCanvasError(null);
+    apiRequest<DocumentCanvasPreview>(`/prd-documents/${encodeURIComponent(prdPreview.id)}/canvas`)
+      .then((response) => {
+        if (active) setCanvasPreview(response);
+      })
+      .catch((error) => {
+        if (active) setCanvasError(error instanceof Error ? error.message : "Canvas 生成失败");
+      })
+      .finally(() => {
+        if (active) setCanvasLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canvasError, canvasLoading, canvasPreview, mode, prdPreview?.id]);
+
+  const handleExport = async (format: "word" | "html" | "canvas") => {
     if (!projectId || exporting) return;
     setExporting(format);
     try {
@@ -173,6 +208,14 @@ export function PreviewPanel({
               <Code2 className="h-4 w-4" />
             </IconButton>
             <IconButton
+              label="导出 PRD Canvas"
+              variant="secondary"
+              disabled={!canExportCanvas || exporting !== null}
+              onClick={() => handleExport("canvas")}
+            >
+              <GitBranch className="h-4 w-4" />
+            </IconButton>
+            <IconButton
               label={shareCopied ? "分享链接已复制" : "创建只读分享链接"}
               variant="secondary"
               disabled={!canShare || sharing}
@@ -208,6 +251,13 @@ export function PreviewPanel({
               onAiEditSection={onAiEditPrdSection}
             />
           </div>
+        ) : mode === "canvas" ? (
+          <CanvasPreviewView
+            prdPreview={prdPreview}
+            canvasPreview={canvasPreview}
+            loading={canvasLoading}
+            error={canvasError}
+          />
         ) : mode === "prototype" ? (
           <PrototypePreviewView
             prototypePreview={prototypePreview}

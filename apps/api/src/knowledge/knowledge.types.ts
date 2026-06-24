@@ -14,6 +14,7 @@ export type KnowledgeSearchInput = {
   query: string;
   taskType?: ModelTaskType | string;
   preferredTypes?: KnowledgeType[];
+  strictPreferredTypes?: boolean;
   limit?: number;
 };
 

@@ -190,6 +190,8 @@ export function preferredTypesForTask(taskType: ModelTaskType): KnowledgeType[] 
       KnowledgeType.strong_rule,
       KnowledgeType.default_rule,
       KnowledgeType.business_concept,
+      KnowledgeType.prototype_rule,
+      KnowledgeType.design_pattern,
     ];
   }
   if (taskType === ModelTaskType.qa_check) {

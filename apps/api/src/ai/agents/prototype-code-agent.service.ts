@@ -177,11 +177,29 @@ function renderPage(page: PrototypePageSpec, firstPageId: string) {
 function renderPrimaryButton(page: PrototypePageSpec) {
   const action = page.components.find((component) => component.type === "button");
   if (!action) return "";
-  return `<button class="primary-action" type="button" data-action="show-toast" data-page-id="${escapeHtml(page.id)}" data-component-id="${escapeHtml(action.id)}" data-result="${escapeHtml(action.content ?? "操作成功，页面状态已更新。")}">${escapeHtml(action.content ?? action.name)}</button>`;
+  return renderPrototypeComponentFragment(page, action);
 }
 
 function renderComponent(pageId: string, component: PrototypeComponentSpec) {
   if (component.type === "button") return "";
+  return renderPrototypeComponentFragment({ id: pageId } as PrototypePageSpec, component);
+}
+
+export function renderPrototypeComponentFragment(page: PrototypePageSpec, component: PrototypeComponentSpec): string {
+  const pageId = page.id;
+  if (component.type === "header") {
+    const primaryAction = page.components.find((item) => item.type === "button");
+    return `<div class="page-header" data-page-id="${escapeHtml(pageId)}" data-component-id="${escapeHtml(component.id)}">
+      <div>
+        <h1>${escapeHtml(component.content ?? component.name ?? page.name)}</h1>
+        <p>${escapeHtml(component.description ?? page.description ?? "用于产品评审的 HTML 原型页面。")}</p>
+      </div>
+      ${primaryAction ? renderPrototypeComponentFragment(page, primaryAction) : ""}
+    </div>`;
+  }
+  if (component.type === "button") {
+    return `<button class="primary-action" type="button" data-action="show-toast" data-page-id="${escapeHtml(pageId)}" data-component-id="${escapeHtml(component.id)}" data-result="${escapeHtml(component.content ?? "操作成功，页面状态已更新。")}">${escapeHtml(component.content ?? component.name)}</button>`;
+  }
   const content = component.content || component.description || "待补充内容";
   if (component.type === "list") {
     const items = content.split(/\/|,|，|\n/).map((item) => item.trim()).filter(Boolean);

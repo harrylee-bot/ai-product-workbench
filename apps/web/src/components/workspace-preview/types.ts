@@ -329,7 +329,49 @@ export type Phase1PrototypePreview = {
   entryFilePath?: string;
 };
 
-export type PreviewMode = "prd" | "prototype" | "qa" | "state" | "feedback";
+export type JsonCanvasNode = {
+  id: string;
+  type: "text" | "group" | "file" | "link";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text?: string;
+  label?: string;
+  color?: string;
+};
+
+export type JsonCanvasEdge = {
+  id: string;
+  fromNode: string;
+  fromSide?: "top" | "right" | "bottom" | "left";
+  toNode: string;
+  toSide?: "top" | "right" | "bottom" | "left";
+  toEnd?: "none" | "arrow";
+  label?: string;
+  color?: string;
+};
+
+export type DocumentCanvasPreview = {
+  documentId: string;
+  projectId: string;
+  title: string;
+  productDesignStateId: string;
+  productDesignStateVersion: number;
+  canvas: {
+    nodes: JsonCanvasNode[];
+    edges: JsonCanvasEdge[];
+  };
+  stats: {
+    sectionCount: number;
+    blockCount: number;
+    nodeCount: number;
+    edgeCount: number;
+  };
+  generatedAt: string;
+};
+
+export type PreviewMode = "prd" | "canvas" | "prototype" | "qa" | "state" | "feedback";
 export type PrototypeCanvasMode = "browse" | "select";
 export type PrototypeLocalAction = "copy_generate" | "visual_refine" | "layout_adjust" | "interaction_fill";
 export type QaSeverity = "critical" | "warning" | "passed";
@@ -346,6 +388,9 @@ export type PrototypeCanvasSelection = CanvasRect & {
   id: string;
   kind: "point" | "box";
   label: string;
+  componentId?: string;
+  pageId?: string;
+  componentName?: string;
   createdAt: number;
 };
 

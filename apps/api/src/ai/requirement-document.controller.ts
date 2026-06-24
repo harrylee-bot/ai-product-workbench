@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/co
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
+import { DocumentCanvasService } from "./document-canvas.service";
 import { ConfirmPrdDto, GeneratePrdDto, UpdatePrdSectionDto } from "./requirement-document.dto";
 import { RequirementDocumentService } from "./requirement-document.service";
 
@@ -28,7 +29,10 @@ export class ProjectPrdController {
 @Controller("prd-documents")
 @UseGuards(JwtAuthGuard)
 export class PrdDocumentController {
-  constructor(private readonly documentService: RequirementDocumentService) {}
+  constructor(
+    private readonly documentService: RequirementDocumentService,
+    private readonly canvasService: DocumentCanvasService,
+  ) {}
 
   @Get(":documentId")
   getDocument(@CurrentUser() user: AuthenticatedUser, @Param("documentId") documentId: string) {
@@ -38,6 +42,11 @@ export class PrdDocumentController {
   @Get(":documentId/preview")
   getPreview(@CurrentUser() user: AuthenticatedUser, @Param("documentId") documentId: string) {
     return this.documentService.getPreviewForUser(user, documentId);
+  }
+
+  @Get(":documentId/canvas")
+  getCanvas(@CurrentUser() user: AuthenticatedUser, @Param("documentId") documentId: string) {
+    return this.canvasService.getCanvasForUser(user, documentId);
   }
 
   @Post(":documentId/confirm")

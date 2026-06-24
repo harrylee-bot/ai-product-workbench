@@ -16,10 +16,15 @@ describe("Vibe export module", () => {
     assertGateAllows: vi.fn(),
     assertGateAllowsForProject: vi.fn(),
   };
+  const documentCanvasService = {
+    createCanvasExportForUser: vi.fn(),
+    createCanvasExportForProject: vi.fn(),
+  };
   const service = new ExportService(
     documentService as never,
     prototypeService as never,
     qaService as never,
+    documentCanvasService as never,
   );
   const user = {
     id: "user-1",
@@ -33,6 +38,8 @@ describe("Vibe export module", () => {
     vi.clearAllMocks();
     qaService.assertGateAllows.mockResolvedValue(openGate());
     qaService.assertGateAllowsForProject.mockResolvedValue(openGate());
+    documentCanvasService.createCanvasExportForUser.mockResolvedValue(baseCanvasExport());
+    documentCanvasService.createCanvasExportForProject.mockResolvedValue(baseCanvasExport());
   });
 
   it("exports the current ProductDesignState PRD as a Word-readable document", async () => {
@@ -67,6 +74,19 @@ describe("Vibe export module", () => {
     expect(artifact.format).toBe("prototype_html");
     expect(artifact.fileName).toBe("签到活动原型.html");
     expect(artifact.buffer.toString("utf8")).toContain('data-page-id="page_home"');
+  });
+
+  it("exports the current PRD as a JSON Canvas file", async () => {
+    const artifact = await service.exportPrdCanvasForUser(user, "project-1");
+
+    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "project-1", "export_or_publish");
+    expect(documentCanvasService.createCanvasExportForUser).toHaveBeenCalledWith(user, "project-1");
+    expect(artifact.format).toBe("prd_canvas");
+    expect(artifact.fileName).toBe("签到活动-PRD.canvas");
+    expect(JSON.parse(artifact.buffer.toString("utf8"))).toEqual(expect.objectContaining({
+      nodes: expect.any(Array),
+      edges: expect.any(Array),
+    }));
   });
 
   it("rejects stale PRD exports that do not match the current ProductDesignState", async () => {
@@ -207,5 +227,28 @@ function baseArtifact(overrides: Partial<PrototypeArtifact> = {}): PrototypeArti
     updatedAt: "2026-06-20T08:00:00.000Z",
     assets: [],
     ...overrides,
+  };
+}
+
+function baseCanvasExport() {
+  const canvas = {
+    nodes: [{ id: "aaaaaaaaaaaaaaaa", type: "text", x: 0, y: 0, width: 320, height: 160, text: "# 签到活动 PRD" }],
+    edges: [],
+  };
+  const buffer = Buffer.from(JSON.stringify(canvas), "utf8");
+  return {
+    format: "prd_canvas" as const,
+    projectId: "project-1",
+    title: "签到活动 PRD",
+    sourceType: "requirement_document" as const,
+    sourceId: "prd-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 3,
+    fileName: "签到活动-PRD.canvas",
+    contentType: "application/json; charset=utf-8",
+    downloadPath: "/api/projects/project-1/export/canvas",
+    sizeBytes: buffer.byteLength,
+    generatedAt: "2026-06-20T08:00:00.000Z",
+    buffer,
   };
 }

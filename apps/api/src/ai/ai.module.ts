@@ -8,6 +8,7 @@ import { MessageService } from "../projects/message.service";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { AgentSkillRegistryService } from "./agent-skill-registry.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
+import { DocumentCanvasService } from "./document-canvas.service";
 import { EvolutionEngineService } from "./evolution-engine.service";
 import { EvolutionOrchestratorService } from "./evolution-orchestrator.service";
 import { ProjectExportController } from "./export.controller";
@@ -147,6 +148,7 @@ import { SystemPreviewService } from "./self-generation/system.preview.service";
     ProductDesignStateService,
     PatchService,
     PatchPreviewService,
+    DocumentCanvasService,
     RequirementDocumentService,
     PrototypeService,
     ExportService,

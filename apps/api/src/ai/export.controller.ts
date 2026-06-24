@@ -32,6 +32,17 @@ export class ProjectExportController {
     setDownloadHeaders(response, artifact);
     return artifact.buffer;
   }
+
+  @Get("canvas")
+  async exportCanvas(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const artifact = await this.exportService.exportPrdCanvasForUser(user, projectId);
+    setDownloadHeaders(response, artifact);
+    return artifact.buffer;
+  }
 }
 
 function setDownloadHeaders(response: Response, artifact: ExportArtifact) {

@@ -55,6 +55,7 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
     const pageId = input.selectedRegion.pageId;
     const intent = inferPatchIntent(input.userInput);
     const operationPath = affectedStatePaths[0] ?? (patchType === "prototype" ? "frontendRules" : "businessRules");
+    const componentLocalPrototype = patchType === "prototype" && Boolean(componentId);
 
     const conflict = detectStrongRuleConflict(input);
     return {
@@ -71,7 +72,9 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
       ],
       impactScope:
         patchType === "prototype"
-          ? ["frontendRules", "stateRules", "acceptanceCriteria", "prototypeSpec"]
+          ? componentLocalPrototype
+            ? ["frontendRules", "prototypeSpec", "htmlPrototype"]
+            : ["frontendRules", "stateRules", "acceptanceCriteria", "prototypeSpec"]
           : ["businessRules", "acceptanceCriteria", "prdDocument"],
       operations: [
         {
@@ -106,12 +109,14 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
         requiresPrdRegeneration: true,
         requiresPrototypeRegeneration: true,
         requiresQaCheck: true,
-        reason: "局部修改通过 ProductDesignState 更新后，需要重新渲染 PRD、PrototypeSpec 和 HTML 原型。",
+        reason: componentLocalPrototype
+          ? "局部修改通过 ProductDesignState 更新后，只需要重算受影响页面规格，并替换目标 HTML 组件。"
+          : "局部修改通过 ProductDesignState 更新后，需要重新渲染 PRD、PrototypeSpec 和 HTML 原型。",
       },
       regenerationPlan: {
-        prd: "full",
-        prototypeSpec: "full",
-        htmlPrototype: "full",
+        prd: componentLocalPrototype ? "affected_sections" : "full",
+        prototypeSpec: componentLocalPrototype ? "affected_pages" : "full",
+        htmlPrototype: componentLocalPrototype ? "affected_pages" : "full",
         qa: "basic",
       },
       risks: [
@@ -119,7 +124,9 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
           level: conflict ? "high" : "low",
           message: conflict
             ? `修改可能与强规则冲突：${conflict.title}`
-            : "一期 Patch 会整体重新生成 PRD 与 HTML 原型，确保状态一致。",
+            : componentLocalPrototype
+              ? "组件级局部再生成将只替换命中的 HTML 组件，若组件无法定位会回退完整生成。"
+              : "Patch 会整体重新生成 PRD 与 HTML 原型，确保状态一致。",
           relatedPaths: affectedStatePaths,
         },
       ],
@@ -171,6 +178,11 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
       conflict,
     );
 
+    const regenerationPlan = localizePrototypeRegenerationPlan(
+      normalizeRegenerationPlan(output.regenerationPlan) ?? fallback.regenerationPlan,
+      input.selectedRegion,
+    );
+
     return {
       id: typeof output.id === "string" && output.id ? output.id : fallback.id,
       projectId: input.productDesignState.projectId,
@@ -181,7 +193,7 @@ export class PatchAgentService extends BaseAgentService<PatchAgentInput, PatchPl
       impactScope: Array.isArray(output.impactScope) ? output.impactScope.map(String) : fallback.impactScope,
       operations,
       impactAnalysis,
-      regenerationPlan: normalizeRegenerationPlan(output.regenerationPlan) ?? fallback.regenerationPlan,
+      regenerationPlan,
       risks: nextRisks,
       needUserConfirm: needsConfirmation,
       needsUserConfirmation: needsConfirmation,
@@ -352,6 +364,19 @@ function normalizeRegenerationPlan(value: unknown): PatchPlan["regenerationPlan"
         ? record.htmlPrototype
         : "full",
     qa: record.qa === "none" || record.qa === "basic" || record.qa === "full" ? record.qa : "basic",
+  };
+}
+
+function localizePrototypeRegenerationPlan(
+  plan: PatchPlan["regenerationPlan"],
+  selectedRegion: SelectedRegion,
+): PatchPlan["regenerationPlan"] {
+  if (selectedRegion.type !== "prototype" || !selectedRegion.componentId || !plan) return plan;
+  return {
+    ...plan,
+    prd: plan.prd === "full" ? "affected_sections" : plan.prd,
+    prototypeSpec: plan.prototypeSpec === "full" ? "affected_pages" : plan.prototypeSpec,
+    htmlPrototype: plan.htmlPrototype === "full" ? "affected_pages" : plan.htmlPrototype,
   };
 }
 

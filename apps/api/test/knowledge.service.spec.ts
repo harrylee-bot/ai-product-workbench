@@ -152,10 +152,10 @@ describe("Knowledge module services", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           status: KnowledgeStatus.active,
-          type: { in: [KnowledgeType.strong_rule] },
         }),
       }),
     );
+    expect(prisma.knowledgeItem.findMany.mock.calls.at(-1)?.[0].where.type).toBeUndefined();
     expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         projectId: "project-1",
@@ -196,6 +196,59 @@ describe("Knowledge module services", () => {
       }),
     );
     expect(result.references[0]?.content).toContain("线索必须包含来源渠道");
+  });
+
+  it("keeps preferredTypes as ranking hints unless strict filtering is requested", async () => {
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "design-pattern",
+        title: "工作台画布设计模式",
+        content: "复杂需求可用画布表达章节、状态和验收关系。",
+        type: KnowledgeType.design_pattern,
+        status: KnowledgeStatus.active,
+        priority: KnowledgePriority.medium,
+        tags: ["画布", "工作台"],
+      }),
+      itemRow({
+        id: "safety-rule",
+        title: "补丁安全强规则",
+        content: "所有高影响变更必须先经过补丁预览。",
+        type: KnowledgeType.strong_rule,
+        status: KnowledgeStatus.active,
+        priority: KnowledgePriority.high,
+        tags: ["补丁", "安全"],
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const broad = await retrievalService.search({
+      projectId: "project-1",
+      runId: "run-2",
+      agentName: "knowledge_agent",
+      query: "工作台画布补丁安全",
+      preferredTypes: [KnowledgeType.design_pattern],
+      limit: 5,
+    });
+
+    expect(broad.results.map((item) => item.itemId)).toEqual(expect.arrayContaining([
+      "design-pattern",
+      "safety-rule",
+    ]));
+    expect(prisma.knowledgeItem.findMany.mock.calls.at(-1)?.[0].where.type).toBeUndefined();
+
+    await retrievalService.search({
+      projectId: "project-1",
+      runId: "run-3",
+      agentName: "knowledge_agent",
+      query: "工作台画布补丁安全",
+      preferredTypes: [KnowledgeType.design_pattern],
+      strictPreferredTypes: true,
+      limit: 5,
+    });
+
+    expect(prisma.knowledgeItem.findMany.mock.calls.at(-1)?.[0].where.type).toEqual({
+      in: [KnowledgeType.design_pattern],
+    });
   });
 
   it("approves candidates into active knowledge items and blocks double review", async () => {

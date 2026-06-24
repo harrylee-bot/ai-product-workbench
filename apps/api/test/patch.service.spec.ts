@@ -81,6 +81,7 @@ describe("PatchService", () => {
   };
   const prototypeService = {
     saveGeneratedPrototype: vi.fn(),
+    trySaveLocalizedGeneratedPrototype: vi.fn(),
   };
   const qaService = {
     runForProject: vi.fn(),
@@ -174,6 +175,7 @@ describe("PatchService", () => {
       results: [],
       references: [],
     });
+    prototypeService.trySaveLocalizedGeneratedPrototype.mockResolvedValue(null);
   });
 
   it("creates a PatchRecord preview candidate without mutating ProductDesignState", async () => {
@@ -530,6 +532,83 @@ describe("PatchService", () => {
     );
   });
 
+  it("applies a confirmed prototype component Patch by locally regenerating the selected component", async () => {
+    const beforeState = baseState({ version: 1 });
+    const patchedState = baseState({ version: 2, status: "patching", prdDocument: undefined, prototypeSpec: undefined });
+    const stateWithArtifacts = baseState({ version: 2, status: "prototype_ready" });
+    const prdDocument = basePrd();
+    const prototypeSpec = basePrototypeSpec();
+    const artifact = baseArtifact({
+      id: "artifact-local",
+      htmlContent: "<!doctype html><button data-component-id=\"page_home_primary_action\">立即签到</button>",
+    });
+    const qaReport = baseQaReport();
+    const plan = baseComponentPatchPlan();
+    prisma.patchRecord.findUnique.mockResolvedValue({
+      ...patchRecordRow({
+        id: "patch-local",
+        status: PatchRecordStatus.needs_confirmation,
+        beforeProductDesignStateVersion: 1,
+        patchPlan: plan,
+        operations: plan.operations,
+        selectedRegion: plan.selectedRegion,
+      }),
+      project: baseProject(),
+    });
+    prisma.patchPreview.findUnique.mockResolvedValue(patchPreviewRow({
+      id: "preview-local",
+      patchRecordId: "patch-local",
+      beforeProductDesignStateVersion: 1,
+      patchPlan: plan,
+      operations: plan.operations,
+    }));
+    stateService.getCurrentState.mockResolvedValue(beforeState);
+    stateService.applyPatch.mockResolvedValue(patchedState);
+    prdWriterAgent.run.mockResolvedValue({ data: basePrdDraft() });
+    documentService.saveGeneratedDocument.mockResolvedValue(prdDocument);
+    prototypeDesignerAgent.run.mockResolvedValue({ data: prototypeSpec });
+    prototypeService.trySaveLocalizedGeneratedPrototype.mockResolvedValue({
+      prototypeSpec,
+      artifact,
+      version: { id: "prototype-version-local", version: 2 },
+      localPatch: {
+        mode: "component",
+        componentId: "page_home_primary_action",
+      },
+    });
+    stateService.attachGeneratedArtifacts.mockResolvedValue(stateWithArtifacts);
+    qaService.runForProject.mockResolvedValue(qaReport);
+
+    const result = await service.confirmForUser(user, "patch-local", "确认应用局部组件预览");
+
+    expect(result.result.prototypeRegenerationMode).toBe("component_patch");
+    expect(result.result.localPatch).toEqual(expect.objectContaining({
+      mode: "component",
+      componentId: "page_home_primary_action",
+    }));
+    expect(prototypeService.trySaveLocalizedGeneratedPrototype).toHaveBeenCalledWith(
+      patchedState,
+      prototypeSpec,
+      expect.objectContaining({
+        selectedRegion: expect.objectContaining({
+          type: "prototype",
+          componentId: "page_home_primary_action",
+          artifactId: "artifact-1",
+        }),
+        sourceArtifactId: "artifact-1",
+      }),
+    );
+    expect(prototypeCodeAgent.run).not.toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "prototype_updated",
+      data: expect.objectContaining({
+        regenerationMode: "component_patch",
+        localPatch: expect.objectContaining({ componentId: "page_home_primary_action" }),
+      }),
+    }));
+  });
+
   it("applies a confirmed Patch Preview and rolls ProductDesignState back when regeneration fails", async () => {
     const beforeState = baseState({ version: 7 });
     const patchedState = baseState({ version: 8, status: "patching", prdDocument: undefined, prototypeSpec: undefined });
@@ -731,6 +810,19 @@ function basePatchPlan(): PatchPlan {
   };
 }
 
+function baseComponentPatchPlan(): PatchPlan {
+  return {
+    ...basePatchPlan(),
+    regenerationPlan: {
+      prd: "affected_sections",
+      prototypeSpec: "affected_pages",
+      htmlPrototype: "affected_pages",
+      qa: "basic",
+    },
+    impactScope: ["frontendRules", "prototypeSpec", "htmlPrototype"],
+  };
+}
+
 function basePrd(): RequirementDocument {
   return {
     id: "prd-1",
@@ -822,7 +914,7 @@ function basePrototypeDraft() {
   };
 }
 
-function baseArtifact(): PrototypeArtifact {
+function baseArtifact(overrides: Partial<PrototypeArtifact> = {}): PrototypeArtifact {
   return {
     id: "artifact-1",
     projectId: "project-1",
@@ -839,6 +931,7 @@ function baseArtifact(): PrototypeArtifact {
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
     assets: [],
+    ...overrides,
   };
 }
 

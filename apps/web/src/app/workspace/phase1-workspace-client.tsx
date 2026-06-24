@@ -488,6 +488,8 @@ function Phase1WorkspaceInner() {
   const aiEditPrototypeSelection = useMutation({
     mutationFn: (input: {
       selectionId: string;
+      componentId?: string;
+      pageId?: string;
       action: string;
       instruction: string;
       bbox: { x: number; y: number; width: number; height: number };
@@ -505,7 +507,8 @@ function Phase1WorkspaceInner() {
             type: "prototype",
             targetId: prototypePreview.id,
             artifactId: prototypePreview.id,
-            componentId: input.selectionId,
+            pageId: input.pageId,
+            componentId: input.componentId,
             label: input.label,
             bbox: input.bbox,
           },

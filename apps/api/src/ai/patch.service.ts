@@ -27,6 +27,7 @@ import type {
   PatchRecord,
   ProductDesignState,
   PrototypeArtifact,
+  PrototypeArtifactDraft,
   PrototypeSpec,
   QAReport,
   RequirementDocument,
@@ -128,6 +129,24 @@ type PatchPreviewRow = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+type SavedPrototypeBundle = {
+  prototypeSpec: PrototypeSpec;
+  artifact: PrototypeArtifact;
+  version?: unknown;
+  localPatch?: Record<string, unknown>;
+};
+
+type PrototypeCodeStepResult =
+  | {
+      mode: "component_patch";
+      savedPrototype: SavedPrototypeBundle;
+    }
+  | {
+      mode: "full_regenerate";
+      draft: PrototypeArtifactDraft;
+      skippedLocalPatchReason?: string;
+    };
 
 @Injectable()
 export class PatchService {
@@ -837,28 +856,66 @@ export class PatchService {
           input: { productDesignState: patchedState, targetView: "both" },
         }),
       );
-      const prototypeDraft = await this.runAgentStep(
+      const prototypeCode = await this.runAgentStep<PrototypeCodeStepResult>(
         input,
         AgentName.prototype_code_agent,
         "prototype_code_generation",
-        () => this.prototypeCodeAgent.run({
-          runId: input.runId,
-          projectId: input.projectId,
-          traceId: input.traceId,
-          userId: input.userId,
-          input: { prototypeSpec: prototypeSpec.data, mode: "single_html" },
-        }),
-      );
-      const savedPrototype = await this.prototypeService.saveGeneratedPrototype(
-        patchedState,
-        prototypeSpec.data,
-        prototypeDraft.data,
-        {
-          userId: input.userId,
-          runId: input.runId,
-          reason: "补丁应用后重新生成网页原型",
+        async () => {
+          const localPatchTarget = shouldUseComponentPrototypePatch(input.selectedRegion, plan);
+          if (localPatchTarget) {
+            const savedPrototype = await this.prototypeService.trySaveLocalizedGeneratedPrototype(
+              patchedState,
+              prototypeSpec.data,
+              {
+                userId: input.userId,
+                runId: input.runId,
+                selectedRegion: input.selectedRegion,
+                sourceArtifactId: input.selectedRegion.artifactId ?? input.selectedRegion.targetId,
+                reason: `补丁应用后局部再生成原型组件 ${localPatchTarget}`,
+              },
+            );
+            if (savedPrototype) {
+              return {
+                data: {
+                  mode: "component_patch",
+                  savedPrototype,
+                },
+              };
+            }
+          }
+          const draft = await this.prototypeCodeAgent.run({
+            runId: input.runId,
+            projectId: input.projectId,
+            traceId: input.traceId,
+            userId: input.userId,
+            input: { prototypeSpec: prototypeSpec.data, mode: "single_html" },
+          });
+          return {
+            ...draft,
+            data: {
+              mode: "full_regenerate",
+              draft: draft.data,
+              skippedLocalPatchReason: localPatchTarget
+                ? "COMPONENT_LOCAL_PATCH_NOT_APPLICABLE"
+                : undefined,
+            },
+          };
         },
       );
+      const savedPrototype: SavedPrototypeBundle = prototypeCode.data.mode === "component_patch"
+        ? prototypeCode.data.savedPrototype
+        : await this.prototypeService.saveGeneratedPrototype(
+            patchedState,
+            prototypeSpec.data,
+            prototypeCode.data.draft,
+            {
+              userId: input.userId,
+              runId: input.runId,
+              reason: prototypeCode.data.skippedLocalPatchReason
+                ? "组件级局部更新不可用，回退为补丁应用后重新生成网页原型"
+                : "补丁应用后重新生成网页原型",
+            },
+          );
       await this.stream.emit({
         runId: input.runId,
         projectId: input.projectId,
@@ -867,6 +924,8 @@ export class PatchService {
         data: {
           prototypeSpec: savedPrototype.prototypeSpec,
           prototypeArtifact: savedPrototype.artifact,
+          regenerationMode: prototypeCode.data.mode,
+          localPatch: prototypeCode.data.mode === "component_patch" ? savedPrototype.localPatch : undefined,
         },
       });
 
@@ -938,6 +997,8 @@ export class PatchService {
         patchRecord,
         patchPlan: plan,
         patchPreview: completedPatchPreview,
+        prototypeRegenerationMode: prototypeCode.data.mode,
+        localPatch: prototypeCode.data.mode === "component_patch" ? savedPrototype.localPatch : undefined,
       };
       const assistantMessage = await this.messageService.createAssistantMessage({
         projectId: input.projectId,
@@ -1456,6 +1517,15 @@ function buildPatchPreviewRiskPanel(plan: PatchPlan) {
       requiresQaCheck: regenerationPlan?.qa !== "none",
     },
   };
+}
+
+function shouldUseComponentPrototypePatch(selectedRegion: SelectedRegion, plan: PatchPlan) {
+  if (selectedRegion.type !== "prototype") return undefined;
+  const componentId = selectedRegion.componentId?.trim();
+  if (!componentId) return undefined;
+  if (plan.patchType !== "prototype") return undefined;
+  if (plan.regenerationPlan?.htmlPrototype === "full") return undefined;
+  return componentId;
 }
 
 function text(value: unknown) {
