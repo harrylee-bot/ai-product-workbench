@@ -64,6 +64,8 @@ import { QaService } from "./qa.service";
 import { RollbackService } from "./rollback.service";
 import { VersionHistoryService } from "./version-history.service";
 import { VibeController } from "./vibe.controller";
+import { ShareLinkController, PublicShareController } from "./share.controller";
+import { ShareService } from "./share.service";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import {
@@ -133,6 +135,8 @@ import { SystemPreviewService } from "./self-generation/system.preview.service";
     ProjectMemoryController,
     PatchPreviewController,
     SystemMutationController,
+    ShareLinkController,
+    PublicShareController,
   ],
   providers: [
     VibeService,
@@ -174,6 +178,7 @@ import { SystemPreviewService } from "./self-generation/system.preview.service";
     SystemGraphService,
     MutationEngine,
     SystemPreviewService,
+    ShareService,
   ],
   exports: [VibeService],
 })

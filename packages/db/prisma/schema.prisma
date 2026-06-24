@@ -198,6 +198,17 @@ enum RollbackRecordStatus {
   failed
 }
 
+enum ShareScope {
+  prd
+  prototype
+  both
+}
+
+enum ShareLinkStatus {
+  active
+  revoked
+}
+
 enum KnowledgeType {
   strong_rule
   default_rule
@@ -405,6 +416,7 @@ model Project {
   constraintRules             ConstraintRule[]
   strategies                   Strategy[]
   evolutionSignals            EvolutionSignal[]
+  shareLinks                  ShareLink[]
 
   @@index([ownerId])
   @@index([status])
@@ -969,6 +981,31 @@ model RollbackRecord {
   @@index([status])
   @@index([createdAt])
   @@map("rollback_records")
+}
+
+model ShareLink {
+  id                   String          @id @default(uuid())
+  token                String          @unique
+  projectId            String          @map("project_id")
+  scope                ShareScope      @default(both)
+  status               ShareLinkStatus @default(active)
+  title                String?
+  prdDocumentId        String?         @map("prd_document_id")
+  prototypeArtifactId  String?         @map("prototype_artifact_id")
+  productDesignStateId String?         @map("product_design_state_id")
+  expiresAt            DateTime?       @map("expires_at")
+  viewCount            Int             @default(0) @map("view_count")
+  lastViewedAt         DateTime?       @map("last_viewed_at")
+  revokedAt            DateTime?       @map("revoked_at")
+  createdBy            String          @map("created_by")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+  project              Project         @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("share_links")
 }
 
 model ProductInteractionEvent {
