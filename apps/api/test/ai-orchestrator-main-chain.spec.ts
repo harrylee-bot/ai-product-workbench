@@ -186,7 +186,7 @@ describe("AiOrchestrator main vibe chain", () => {
       productBuildPlan: expect.objectContaining({ id: "plan-1" }),
       nextAction: { type: "review_prd", wantsPrototype: true },
     }));
-    // 确认门 A 之前：PRD 已落库（prd_ready），但不生成原型、不跑 QA、不抽知识
+    // 确认门 A 之前：PRD 已落库（doc_ready），但不生成原型、不跑 QA、不抽知识
     expect(stateService.createDraft).toHaveBeenCalledWith("project-1", expect.any(Object), expect.objectContaining({
       userId: "user-1",
       runId: "run-1",
@@ -199,7 +199,7 @@ describe("AiOrchestrator main vibe chain", () => {
     );
     expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith(
       "state-1",
-      expect.objectContaining({ status: "prd_ready" }),
+      expect.objectContaining({ status: "doc_ready" }),
     );
     expect(prototypeDesignerAgent.run).not.toHaveBeenCalled();
     expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();

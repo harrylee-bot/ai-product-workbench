@@ -9,6 +9,11 @@ import {
 describe("workspace state machine", () => {
   it("derives visible project status from ProductDesignState status", () => {
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.clarifying)).toBe(ProjectStatus.clarifying);
+    expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.intake)).toBe(ProjectStatus.designing);
+    expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.format_check)).toBe(ProjectStatus.designing);
+    expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.scoring)).toBe(ProjectStatus.designing);
+    expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.optimizing)).toBe(ProjectStatus.designing);
+    expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.doc_ready)).toBe(ProjectStatus.prd_ready);
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.prd_ready)).toBe(ProjectStatus.prd_ready);
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.prototype_ready)).toBe(ProjectStatus.prototype_ready);
     expect(projectStatusFromProductDesignStateStatus(ProductDesignStateStatus.patching)).toBe(ProjectStatus.designing);
@@ -28,7 +33,7 @@ describe("workspace state machine", () => {
     expect(projectStatusAfterQa({
       qaStatus: "passed",
       currentProjectStatus: ProjectStatus.qa_failed,
-      productDesignState: { status: "prd_ready" },
+      productDesignState: { status: "doc_ready" },
     })).toBe(ProjectStatus.prd_ready);
 
     expect(projectStatusAfterQa({

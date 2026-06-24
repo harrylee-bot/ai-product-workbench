@@ -15,7 +15,12 @@ export function projectStatusFromProductDesignStateStatus(
   fallback: ProjectStatus = ProjectStatus.draft,
 ): ProjectStatus {
   if (!status) return fallback;
+  if (status === ProductDesignStateStatus.intake) return ProjectStatus.designing;
+  if (status === ProductDesignStateStatus.format_check) return ProjectStatus.designing;
+  if (status === ProductDesignStateStatus.scoring) return ProjectStatus.designing;
+  if (status === ProductDesignStateStatus.optimizing) return ProjectStatus.designing;
   if (status === ProductDesignStateStatus.clarifying) return ProjectStatus.clarifying;
+  if (status === ProductDesignStateStatus.doc_ready) return ProjectStatus.prd_ready;
   if (status === ProductDesignStateStatus.prd_ready) return ProjectStatus.prd_ready;
   if (status === ProductDesignStateStatus.prototype_ready) return ProjectStatus.prototype_ready;
   if (status === ProductDesignStateStatus.patching) return ProjectStatus.designing;

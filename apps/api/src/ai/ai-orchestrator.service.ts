@@ -312,11 +312,11 @@ export class AiOrchestratorService {
         data: prdDocument,
       });
 
-      // 确认门 A（FR-1.2）：PRD 生成后将其落到 ProductDesignState 并暂停于 prd_ready 状态，
+      // 确认门 A（FR-1.2）：PRD 生成后将其落到 ProductDesignState 并暂停于 doc_ready 状态，
       // 等待用户确认。此处不再连跑原型——把"提案"持久化，由 confirm 接口触发"提交"。
       state = await this.stateService.attachGeneratedArtifacts(state.id, {
         prdDocument,
-        status: ProductDesignStateStatus.prd_ready,
+        status: ProductDesignStateStatus.doc_ready,
         userId: context.userId,
         runId: context.runId,
         messageId: input.userMessageId,

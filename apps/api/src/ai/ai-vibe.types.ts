@@ -229,8 +229,13 @@ export type ProductDesignState = {
   prdDocument?: RequirementDocument;
   status:
     | "draft"
+    | "intake"
+    | "format_check"
+    | "scoring"
+    | "optimizing"
     | "clarifying"
     | "design_ready"
+    | "doc_ready"
     | "prd_ready"
     | "prototype_ready"
     | "patching"
