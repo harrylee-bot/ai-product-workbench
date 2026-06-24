@@ -344,6 +344,34 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  const confirmPrd = useMutation({
+    mutationFn: () =>
+      apiRequest<VibeHandleMessageResponse>("/ai/vibe/confirm-prd", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          conversationId: selectedConversationId,
+        }),
+      }),
+    onSuccess: async (response) => {
+      const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
+      const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
+
+      setDecision(null);
+      watchVibeRun(response.runId, responseProjectId, responseConversationId);
+      await Promise.all([
+        responseConversationId
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", responseConversationId] })
+          : Promise.resolve(),
+        responseProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", responseProjectId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "确认 PRD 失败");
+    },
+  });
+
   const createConversation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId) {
@@ -515,6 +543,10 @@ function Phase1WorkspaceInner() {
         confirmingPatchId={confirmPatch.isPending ? confirmPatch.variables : undefined}
         onConfirmPatch={async (patchId) => {
           await confirmPatch.mutateAsync(patchId);
+        }}
+        confirmingPrd={confirmPrd.isPending}
+        onConfirmPrd={async () => {
+          await confirmPrd.mutateAsync();
         }}
         onSend={async (content) => {
           await sendMessage.mutateAsync(content);
@@ -713,11 +745,17 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     const nextAction = asRecord(payload?.nextAction);
     const patchRecord = asRecord(payload?.patchRecord);
     const patchPreview = asRecord(payload?.patchPreview);
-    if (asText(nextAction?.type) === "confirm_patch") {
+    const nextActionType = asText(nextAction?.type);
+    if (nextActionType === "confirm_patch") {
       next.status = "waiting_confirmation";
       next.patchId = asText(patchRecord?.id) || asText(patchPreview?.patchId) || asText(payloadMeta?.primaryId) || next.patchId;
       next.patchPreviewMessage = asText(patchPreview?.message) || metaSummary || next.patchPreviewMessage;
       next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Patch 候选已生成，等待确认后再应用";
+    } else if (nextActionType === "review_prd") {
+      // 确认门 A（FR-1.2）：PRD 已生成，停下等待用户确认
+      next.status = "waiting_prd_confirm";
+      next.wantsPrototype = nextAction?.wantsPrototype !== false;
+      next.summary = asText(payload?.message) ?? event.content ?? metaSummary ?? "PRD 已生成，请确认无误";
     } else {
       next.status = "completed";
       next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
