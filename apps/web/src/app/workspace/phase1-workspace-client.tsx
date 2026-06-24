@@ -453,6 +453,51 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  const aiEditPrototypeSelection = useMutation({
+    mutationFn: (input: {
+      selectionId: string;
+      action: string;
+      instruction: string;
+      bbox: { x: number; y: number; width: number; height: number };
+      label: string;
+    }) => {
+      if (!selectedProjectId || !selectedConversationId || !prototypePreview?.id) {
+        throw new Error("请先选择项目和对话，并生成原型后再进行局部编辑");
+      }
+      return apiRequest<InlineEditResponse>("/prototype/edit", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          conversationId: selectedConversationId,
+          selectedRegion: {
+            type: "prototype",
+            targetId: prototypePreview.id,
+            artifactId: prototypePreview.id,
+            componentId: input.selectionId,
+            label: input.label,
+            bbox: input.bbox,
+          },
+          selectedText: input.label,
+          instruction: input.instruction,
+          action: input.action,
+        }),
+      });
+    },
+    onSuccess: async (response) => {
+      watchVibeRun(response.runId, response.projectId || selectedProjectId, response.conversationId || selectedConversationId);
+      await Promise.all([
+        response.conversationId
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", response.conversationId] })
+          : Promise.resolve(),
+        response.projectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", response.projectId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "原型局部编辑失败");
+    },
+  });
+
   const createConversation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId) {
@@ -650,6 +695,7 @@ function Phase1WorkspaceInner() {
         decision={decision}
         savingPrdSectionId={updatePrdSection.isPending ? updatePrdSection.variables?.sectionId : undefined}
         aiEditingPrdSectionId={aiEditPrdSection.isPending ? aiEditPrdSection.variables?.sectionId : undefined}
+        aiEditingPrototypeSelectionId={aiEditPrototypeSelection.isPending ? aiEditPrototypeSelection.variables?.selectionId : undefined}
         onSavePrdSection={async (input) => {
           if (!prdPreview?.id) return;
           await updatePrdSection.mutateAsync({
@@ -660,6 +706,9 @@ function Phase1WorkspaceInner() {
         }}
         onAiEditPrdSection={async (input) => {
           await aiEditPrdSection.mutateAsync(input);
+        }}
+        onAiEditPrototypeSelection={async (input) => {
+          await aiEditPrototypeSelection.mutateAsync(input);
         }}
       />
     </main>

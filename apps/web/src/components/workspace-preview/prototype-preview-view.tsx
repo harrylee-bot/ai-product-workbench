@@ -40,7 +40,21 @@ const LOCAL_ACTIONS: Array<{ id: PrototypeLocalAction; label: string; icon: Luci
   { id: "interaction_fill", label: "交互补齐", icon: MousePointer2 },
 ];
 
-export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: Phase1PrototypePreview | null }) {
+export function PrototypePreviewView({
+  prototypePreview,
+  aiEditingSelectionId,
+  onAiEditSelection,
+}: {
+  prototypePreview?: Phase1PrototypePreview | null;
+  aiEditingSelectionId?: string;
+  onAiEditSelection?: (input: {
+    selectionId: string;
+    action: string;
+    instruction: string;
+    bbox: { x: number; y: number; width: number; height: number };
+    label: string;
+  }) => Promise<void> | void;
+}) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const canvasOverlayRef = useRef<HTMLDivElement | null>(null);
   const localDialogRef = useRef<HTMLDivElement | null>(null);
@@ -229,10 +243,29 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
     setDraftSaved(false);
 
     try {
-      await new Promise((resolve) => window.setTimeout(resolve, 480));
-      setGeneration(buildLocalGeneration(selection, localAction, instruction));
+      if (onAiEditSelection) {
+        await onAiEditSelection({
+          selectionId: selection.id,
+          action: prototypePatchAction(localAction),
+          instruction: instruction.trim(),
+          bbox: {
+            x: selection.x,
+            y: selection.y,
+            width: selection.width,
+            height: selection.height,
+          },
+          label: selection.label,
+        });
+        setGeneration({
+          title: "Patch 候选已生成",
+          changes: ["候选补丁已进入确认流程，确认后才会应用到原型与产品设计状态。"],
+        });
+      } else {
+        await new Promise((resolve) => window.setTimeout(resolve, 480));
+        setGeneration(buildLocalGeneration(selection, localAction, instruction));
+      }
     } catch {
-      setGenerationError("局部草稿生成失败，请保留选区后重试。");
+      setGenerationError("局部候选生成失败，请保留选区后重试。");
     } finally {
       setGenerating(false);
     }
@@ -367,6 +400,7 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
           action={localAction}
           instruction={instruction}
           generating={generating}
+          remoteGenerating={aiEditingSelectionId === selection.id}
           generation={generation}
           generationError={generationError}
           draftSaved={draftSaved && Boolean(generation)}
@@ -391,6 +425,13 @@ export function PrototypePreviewView({ prototypePreview }: { prototypePreview?: 
       ) : null}
     </div>
   );
+}
+
+function prototypePatchAction(action: PrototypeLocalAction) {
+  if (action === "layout_adjust") return "layout_edit";
+  if (action === "interaction_fill") return "flow_update";
+  if (action === "visual_refine") return "redesign";
+  return "component_edit";
 }
 
 function PrototypeSelectionBox({ box, selected }: { box: CanvasRect; selected: boolean }) {
@@ -422,6 +463,7 @@ function PrototypeLocalEditDialog({
   action,
   instruction,
   generating,
+  remoteGenerating,
   generation,
   generationError,
   draftSaved,
@@ -437,6 +479,7 @@ function PrototypeLocalEditDialog({
   action: PrototypeLocalAction;
   instruction: string;
   generating: boolean;
+  remoteGenerating: boolean;
   generation: PrototypeLocalGeneration | null;
   generationError: string | null;
   draftSaved: boolean;
@@ -448,14 +491,15 @@ function PrototypeLocalEditDialog({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onSaveDraft: () => void;
 }) {
-  const submitTitle = generating
+  const busy = generating || remoteGenerating;
+  const submitTitle = busy
     ? "正在生成局部草稿"
     : !instruction.trim()
       ? "请输入局部生成指令"
       : generation
         ? "重新生成局部草稿"
         : "生成局部草稿";
-  const submitLabel = generating ? "生成中" : generation ? "重新生成" : "生成局部草稿";
+  const submitLabel = busy ? "生成中" : generation ? "重新生成" : "生成局部草稿";
 
   return (
     <div
@@ -520,7 +564,7 @@ function PrototypeLocalEditDialog({
           当前输出会作为局部补丁草稿保留，不覆盖完整原型。
         </div>
 
-        {generating ? <PrototypeLocalSkeleton /> : null}
+        {busy ? <PrototypeLocalSkeleton /> : null}
 
         {generationError ? (
           <div role="alert" className="rounded-[12px] border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
@@ -572,10 +616,10 @@ function PrototypeLocalEditDialog({
             type="submit"
             size="sm"
             variant={generation ? "secondary" : "primary"}
-            disabled={!instruction.trim() || generating}
+            disabled={!instruction.trim() || busy}
             title={submitTitle}
           >
-            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {submitLabel}
           </Button>
         </div>

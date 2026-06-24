@@ -40,8 +40,10 @@ export function PreviewPanel({
   decision,
   savingPrdSectionId,
   aiEditingPrdSectionId,
+  aiEditingPrototypeSelectionId,
   onSavePrdSection,
   onAiEditPrdSection,
+  onAiEditPrototypeSelection,
 }: {
   projectId?: string;
   prdPreview?: Phase1PrdPreview | null;
@@ -49,6 +51,7 @@ export function PreviewPanel({
   decision?: Phase2DecisionView | null;
   savingPrdSectionId?: string;
   aiEditingPrdSectionId?: string;
+  aiEditingPrototypeSelectionId?: string;
   onSavePrdSection?: (input: { sectionId: string; content: string }) => Promise<void> | void;
   onAiEditPrdSection?: (input: {
     sectionId: string;
@@ -57,6 +60,13 @@ export function PreviewPanel({
     content: string;
     sourcePaths?: string[];
     instruction: string;
+  }) => Promise<void> | void;
+  onAiEditPrototypeSelection?: (input: {
+    selectionId: string;
+    action: string;
+    instruction: string;
+    bbox: { x: number; y: number; width: number; height: number };
+    label: string;
   }) => Promise<void> | void;
 }) {
   const [mode, setMode] = useState<PreviewMode>("prototype");
@@ -173,7 +183,11 @@ export function PreviewPanel({
             />
           </div>
         ) : mode === "prototype" ? (
-          <PrototypePreviewView prototypePreview={prototypePreview} />
+          <PrototypePreviewView
+            prototypePreview={prototypePreview}
+            aiEditingSelectionId={aiEditingPrototypeSelectionId}
+            onAiEditSelection={onAiEditPrototypeSelection}
+          />
         ) : mode === "qa" ? (
           <QaPreviewView decision={decision} />
         ) : mode === "state" ? (
