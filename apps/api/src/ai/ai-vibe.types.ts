@@ -169,6 +169,116 @@ export type RequirementAnalysis = {
   clarificationQuestions: ClarificationQuestion[];
 };
 
+export type ContextFetchResult = {
+  project: {
+    id: string;
+    status?: ProjectStatus;
+    currentProductDesignStateId?: string;
+    currentProductDesignStateVersion?: number;
+  };
+  conversation: {
+    id: string;
+    summary?: string;
+    recentMessages: ConversationMessage[];
+    userMessageCount: number;
+    assistantMessageCount: number;
+  };
+  existingState?: {
+    id: string;
+    version: number;
+    title: string;
+    status: ProductDesignState["status"];
+    summary?: string;
+    businessGoal?: string;
+    counts: Record<string, number>;
+    prd?: {
+      id: string;
+      title: string;
+      status: RequirementDocument["status"];
+      sectionCount: number;
+    };
+    prototype?: {
+      id: string;
+      title: string;
+      pageCount: number;
+    };
+    pendingQuestions: Array<Record<string, unknown>>;
+    assumptions: Array<Record<string, unknown>>;
+  };
+  selectedRegion?: SelectedRegion;
+  attachments: AttachmentSummary[];
+  traceRefs: string[];
+  retrievedAt: string;
+  summary: string;
+};
+
+export type RequirementFlowType =
+  | "formal_requirement"
+  | "requirement_completion"
+  | "prd_generation"
+  | "prototype_generation"
+  | "patch"
+  | "question"
+  | "export";
+
+export type RequirementPackage = {
+  id: string;
+  intent: UserIntent;
+  flowType: RequirementFlowType;
+  userInput: string;
+  userFacts: string[];
+  knowledgeFacts: string[];
+  contextFacts: string[];
+  assumptions: string[];
+  missingRequiredInfo: string[];
+  missingOptionalInfo: string[];
+  conflicts: string[];
+  constraints: string[];
+  requiredArtifacts: ProductBuildPlan["deliverables"];
+  sourcePaths: string[];
+  traceRefs: string[];
+  selectedRegionContext?: SelectedRegion;
+  contextSnapshot: ContextFetchResult;
+  knowledgeSummary: string;
+  requirementAnalysis: RequirementAnalysis;
+  readiness: "ready" | "needs_clarification" | "blocked";
+  summary: string;
+};
+
+export type RequirementValidationResult = {
+  status: "pass" | "warn" | "block";
+  missingFields: string[];
+  conflicts: string[];
+  invalidOperations: string[];
+  requiredClarifications: ClarificationQuestion[];
+  canAutoContinue: boolean;
+  userMessage: string;
+  summary: string;
+};
+
+export type RequirementSafetyCheckResult = {
+  status: "pass" | "warn" | "block";
+  riskTypes: Array<"prompt_injection" | "secret_leak" | "privacy" | "permission" | "real_world_action" | "strong_rule_conflict">;
+  blockedReasons: string[];
+  warnings: string[];
+  safeAlternative?: string;
+  userMessage: string;
+  summary: string;
+};
+
+export type RequirementGateDecision = {
+  action: "continue" | "degraded_continue" | "ask_clarification" | "blocked" | "failed";
+  reasons: string[];
+  visibleMessage: string;
+  canGenerateArtifacts: boolean;
+  canApplyPatch: boolean;
+  fallbackUsed: boolean;
+  questions: ClarificationQuestion[];
+  requirementPackage: RequirementPackage;
+  validation: RequirementValidationResult;
+  safety: RequirementSafetyCheckResult;
+};
+
 export type ProductBuildPlanPriority = "must" | "should" | "could";
 
 export type ProductBuildPlanStateCoverage =
@@ -955,8 +1065,12 @@ export type VibeStreamEventEnvelope = VibeStreamEvent & {
 export type AgentStepName =
   | "intent_detection"
   | "knowledge_retrieval"
+  | "context_fetch"
   | "requirement_analysis"
+  | "requirement_packaging"
   | "product_planning"
+  | "requirement_validation"
+  | "safety_check"
   | "product_design"
   | "prd_generation"
   | "prototype_design"
@@ -979,9 +1093,14 @@ export type AgentRunContext = {
   productDesignState?: ProductDesignState;
   currentProjectStatus?: ProjectStatus;
   knowledgeContext?: KnowledgeContext;
+  contextFetch?: ContextFetchResult;
   inputQuality?: InputQualityAssessment;
   intentResult?: IntentResult;
   requirementAnalysis?: RequirementAnalysis;
+  requirementPackage?: RequirementPackage;
+  requirementValidation?: RequirementValidationResult;
+  requirementSafety?: RequirementSafetyCheckResult;
+  requirementGateDecision?: RequirementGateDecision;
   productBuildPlan?: ProductBuildPlan;
   fallbackEvents?: AgentFallbackMetadata[];
   traceId: string;

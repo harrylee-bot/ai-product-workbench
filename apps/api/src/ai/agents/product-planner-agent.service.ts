@@ -14,6 +14,7 @@ import type {
   ProductBuildPlanStateCoverage,
   ProductDesignState,
   RequirementAnalysis,
+  RequirementPackage,
 } from "../ai-vibe.types";
 import { BaseAgentService } from "./base-agent.service";
 
@@ -21,6 +22,7 @@ type ProductPlannerInput = {
   userInput: string;
   intent: UserIntent;
   requirementAnalysis: RequirementAnalysis;
+  requirementPackage?: RequirementPackage;
   knowledgeContext: KnowledgeContext;
   existingState?: ProductDesignState;
 };
@@ -139,10 +141,12 @@ export class ProductPlannerAgentService extends BaseAgentService<
       summary: "正式需求由 Product Planner 先规划执行范围、页面与状态覆盖，再由 Product Designer 写入 ProductDesignState；局部修改另走 PatchPlan。",
       requirementMode: requirementModeFromIntent(input.intent),
       sourceSummary: {
-        userFacts,
-        knowledgeFacts,
-        assumptions,
-        openQuestions,
+        userFacts: input.requirementPackage?.userFacts.length ? input.requirementPackage.userFacts : userFacts,
+        knowledgeFacts: input.requirementPackage?.knowledgeFacts.length ? input.requirementPackage.knowledgeFacts : knowledgeFacts,
+        assumptions: input.requirementPackage?.assumptions.length ? input.requirementPackage.assumptions : assumptions,
+        openQuestions: input.requirementPackage
+          ? unique([...input.requirementPackage.missingRequiredInfo, ...input.requirementPackage.missingOptionalInfo])
+          : openQuestions,
       },
       scope: {
         inScope: inferInScope(input, pagePlan),
@@ -277,6 +281,9 @@ function toPlannerPromptInput(input: ProductPlannerInput) {
   return {
     userInput: input.userInput,
     intent: input.intent,
+    requirementPackage: input.requirementPackage
+      ? compactRequirementPackage(input.requirementPackage)
+      : undefined,
     requirementAnalysis: {
       completenessScore: input.requirementAnalysis.completenessScore,
       knownFromUser: capStrings(input.requirementAnalysis.knownFromUser, 8),
@@ -327,6 +334,26 @@ function toPlannerPromptInput(input: ProductPlannerInput) {
       })),
     },
     existingState: compactExistingState(input.existingState),
+  };
+}
+
+function compactRequirementPackage(requirementPackage: RequirementPackage) {
+  return {
+    id: requirementPackage.id,
+    flowType: requirementPackage.flowType,
+    readiness: requirementPackage.readiness,
+    summary: clip(requirementPackage.summary, 400),
+    userFacts: capStrings(requirementPackage.userFacts, 10),
+    knowledgeFacts: capStrings(requirementPackage.knowledgeFacts, 10),
+    contextFacts: capStrings(requirementPackage.contextFacts, 8),
+    assumptions: capStrings(requirementPackage.assumptions, 8),
+    missingRequiredInfo: capStrings(requirementPackage.missingRequiredInfo, 8),
+    missingOptionalInfo: capStrings(requirementPackage.missingOptionalInfo, 8),
+    conflicts: capStrings(requirementPackage.conflicts, 6),
+    constraints: capStrings(requirementPackage.constraints, 10),
+    requiredArtifacts: requirementPackage.requiredArtifacts,
+    sourcePaths: capStrings(requirementPackage.sourcePaths, 12),
+    traceRefs: capStrings(requirementPackage.traceRefs, 12),
   };
 }
 

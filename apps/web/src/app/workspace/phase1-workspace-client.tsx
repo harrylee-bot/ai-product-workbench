@@ -869,8 +869,12 @@ function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | nul
 const VIBE_RUN_STEPS = [
   { step: "intent_detection", title: "理解意图", agent: "Intent Agent", detail: "识别用户目标、选区和是否进入生成链路" },
   { step: "knowledge_retrieval", title: "检索知识", agent: "Knowledge Agent", detail: "加载知识库、附件和 Vibe Coding skills" },
+  { step: "context_fetch", title: "抓取上下文", agent: "Context Fetch", detail: "读取项目状态、历史消息、选区、附件和既有产物" },
   { step: "requirement_analysis", title: "分析需求", agent: "Requirement Analyst", detail: "判断需求完整度、缺口、冲突和澄清问题" },
-  { step: "product_planning", title: "规划方案", agent: "Product Planner", detail: "正式需求唯一 plan agent，生成 ProductBuildPlan 和下游 agent 顺序" },
+  { step: "requirement_packaging", title: "整理需求包", agent: "Requirement Merge", detail: "合并用户事实、知识事实、上下文、假设和溯源" },
+  { step: "product_planning", title: "规划方案", agent: "Product Planner", detail: "消费同一份 RequirementPackage，生成 ProductBuildPlan 和下游 agent 顺序" },
+  { step: "requirement_validation", title: "结构校验", agent: "Validator", detail: "生成前检查需求包、计划、选区和版本条件是否可执行" },
+  { step: "safety_check", title: "安全检查", agent: "Safety Check", detail: "生成前检查提示注入、密钥泄漏、越权、隐私和真实外部动作风险" },
   { step: "product_design", title: "生成产品状态", agent: "Product Designer", detail: "把计划落到 ProductDesignState 唯一事实源" },
   { step: "prd_generation", title: "生成 PRD", agent: "PRD Writer", detail: "只基于 ProductDesignState 输出结构化 PRD" },
   { step: "prototype_design", title: "设计原型结构", agent: "Prototype Designer", detail: "只基于 ProductDesignState 输出 PrototypeSpec" },
@@ -1323,6 +1327,14 @@ function debugEventBody(
     lines.push(`用户可见说明：${asText(fallback?.userMessage) || "系统已使用规则兜底继续执行。"}`);
   }
 
+  if (eventType === "message_delta") {
+    const requirementGate = asRecord(payload?.requirementGate);
+    const gateTrace = asRecord(requirementGate?.decisionTrace);
+    const gateAction = asText(requirementGate?.action);
+    if (gateAction) lines.push(`生成前 Gate 动作：${gateAction}。`);
+    if (gateTrace) lines.push(...formatDecisionTrace(gateTrace));
+  }
+
   if (eventType === "run_completed") {
     const nextActionType = asText(asRecord(payload?.nextAction)?.type);
     lines.push(`终态动作：${nextActionLabel(nextActionType)}。`);
@@ -1471,8 +1483,12 @@ function stepStartedText(step: string, title?: string) {
   const labels: Record<string, string> = {
     intent_detection: "执行思路：先判断这是新需求、继续生成、导出、问答还是局部修改；如果带选区，会优先识别选区意图。",
     knowledge_retrieval: "执行思路：按意图检索强规则、默认规则、案例和可用 skills，后续生成必须参考这些依据。",
+    context_fetch: "执行思路：只读取项目状态、历史消息、PRD、原型、选区和附件，不做业务判断。",
     requirement_analysis: "执行思路：把用户明确事实、知识库事实和 AI 假设分开，检查是否缺少必须澄清的信息。",
-    product_planning: "执行思路：把需求包拆成页面、功能、状态、范围和风险，决定本轮要生成或修改什么。",
+    requirement_packaging: "执行思路：把用户事实、知识事实、上下文事实、AI 假设、冲突和 trace refs 合成同一份需求包。",
+    product_planning: "执行思路：消费同一份需求包，把它拆成页面、功能、状态、范围和风险，决定本轮要生成或修改什么。",
+    requirement_validation: "执行思路：检查需求包、计划、选区和版本条件是否完整一致，决定能否进入生成。",
+    safety_check: "执行思路：检查提示注入、密钥泄漏、隐私、越权、真实外部动作和强规则冲突。",
     product_design: "执行思路：把方案写入产品状态，后续 PRD 和原型都从这个唯一事实源派生。",
     prd_generation: "执行思路：只根据产品状态渲染 PRD，不临时编造状态里没有的业务规则。",
     prototype_design: "执行思路：把产品状态转成页面、组件、导航和交互结构，还不生成 HTML。",
@@ -1488,8 +1504,12 @@ function stepThinkingText(step: string) {
   const labels: Record<string, string> = {
     intent_detection: "识别用户动作、目标产物、是否依赖选区，以及是否应该进入生成链路。",
     knowledge_retrieval: "查找会约束本轮输出的知识、规则、案例和技能路由。",
+    context_fetch: "读取产品状态、最近对话、附件摘要、选区和已有 PRD/原型，不在这里做业务判断。",
     requirement_analysis: "区分已确认事实、系统上下文、假设、冲突和缺失项。",
-    product_planning: "规划范围、页面、状态覆盖、下游执行顺序、QA 关注点和风险。",
+    requirement_packaging: "生成 Planner、Validator、Safety Check 共同消费的 RequirementPackage。",
+    product_planning: "基于 RequirementPackage 规划范围、页面、状态覆盖、下游执行顺序、QA 关注点和风险。",
+    requirement_validation: "校验需求包和计划是否具备进入状态写入、PRD、原型或局部修改的条件。",
+    safety_check: "识别不能进入生成的安全风险，并给出可继续的安全替代方向。",
     product_design: "把计划落到产品状态，保留 assumptions、knowledgeRefs、pendingQuestions 和 sourcePaths。",
     prd_generation: "从产品状态渲染结构化 PRD，避免写接口、SQL、数据库或实现细节。",
     prototype_design: "从产品状态设计原型结构，定义页面、组件、状态和交互。",
@@ -1516,8 +1536,12 @@ function stepCompletedText(step: string, title: string | undefined, payload: Rec
   }
   const labels: Record<string, string> = {
     intent_detection: "意图识别完成，已确定本轮执行方向。",
+    context_fetch: "项目上下文读取完成，后续节点会复用同一份上下文。",
     requirement_analysis: "需求分析完成，已整理出可继续处理的需求包。",
+    requirement_packaging: "需求包整理完成，Planner、Validator 和 Safety Check 会消费同一份输入。",
     product_planning: "方案规划完成，已确定本轮要生成或修改的范围。",
+    requirement_validation: "生成前结构校验完成。",
+    safety_check: "生成前安全检查完成。",
     product_design: "产品状态已生成，后续文档和原型会从这里派生。",
     prd_generation: "PRD 生成完成。",
     prototype_design: "原型结构设计完成。",

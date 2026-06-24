@@ -18,6 +18,7 @@ import { isCasualGeneralInput } from "./intent-classifier.helpers";
 import type {
   AgentRunContext,
   AgentOutput,
+  ContextFetchResult,
   ExportArtifactSummary,
   AttachmentSummary,
   InputQualityAssessment,
@@ -33,9 +34,19 @@ import type {
   PrototypeSpec,
   QAReport,
   RequirementAnalysis,
+  RequirementGateDecision,
+  RequirementPackage,
   RequirementDocument,
 } from "./ai-vibe.types";
 import { assessInputQuality } from "./input-quality-gate";
+import {
+  buildContextFetchResult,
+  buildRequirementPackage,
+  checkRequirementSafety,
+  decideRequirementGate,
+  gateDecisionTrace,
+  validateRequirementPackage,
+} from "./requirement-intake-pipeline";
 import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
 import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
@@ -83,6 +94,8 @@ export type OrchestratorResult = {
   qaReport?: QAReport;
   inputQuality?: InputQualityAssessment;
   productBuildPlan?: ProductBuildPlan;
+  contextFetch?: ContextFetchResult;
+  requirementGate?: RequirementGateDecision;
   decisionCards?: DecisionCardSummary[];
   patchPlan?: PatchPlan;
   patchRecord?: PatchRecord;
@@ -182,26 +195,32 @@ export class AiOrchestratorService {
         );
       }
 
-      await this.emit(context, "message_delta", "正在检索知识库和附件上下文...");
-      const knowledge = await this.runAgentStep(
-        context,
-        AgentName.knowledge_agent,
-        "knowledge_retrieval",
-        () =>
-          this.knowledgeAgent.run({
-            runId: context.runId,
-            projectId: context.projectId,
-            traceId: context.traceId,
-            userId: context.userId,
-            input: {
-              userInput: context.userInput,
-              productDesignState: context.productDesignState,
-              intent: intent.data.intent,
-              attachments: input.attachments,
-            },
-          }),
-      );
+      await this.emit(context, "message_delta", "正在并行检索知识库和项目上下文...");
+      const [knowledge, contextFetch] = await Promise.all([
+        this.runAgentStep(
+          context,
+          AgentName.knowledge_agent,
+          "knowledge_retrieval",
+          () =>
+            this.knowledgeAgent.run({
+              runId: context.runId,
+              projectId: context.projectId,
+              traceId: context.traceId,
+              userId: context.userId,
+              input: {
+                userInput: context.userInput,
+                productDesignState: context.productDesignState,
+                intent: intent.data.intent,
+                attachments: input.attachments,
+              },
+            }),
+        ),
+        this.runAgentStep(context, AgentName.requirement_analyst_agent, "context_fetch", async () => ({
+          data: buildContextFetchResult({ context, attachments: input.attachments }),
+        })),
+      ]);
       context.knowledgeContext = knowledge.data;
+      context.contextFetch = contextFetch.data;
 
       await this.emit(context, "message_delta", "正在分析需求完整度...");
       const requirement = await this.runAgentStep(
@@ -224,21 +243,33 @@ export class AiOrchestratorService {
       );
       context.requirementAnalysis = requirement.data;
 
-      if (
-        requirement.data.shouldAskUser &&
-        intent.data.intent !== UserIntent.clarification_answer &&
-        intent.data.intent !== UserIntent.patch_document &&
-        intent.data.intent !== UserIntent.patch_prototype
-      ) {
-        return this.finishClarification(context, intent.data, requirement.data);
-      }
+      await this.emit(context, "message_delta", "正在合并用户事实、知识和项目上下文...");
+      const requirementPackage = await this.runAgentStep(
+        context,
+        AgentName.requirement_analyst_agent,
+        "requirement_packaging",
+        async () => ({
+          data: buildRequirementPackage({
+            context,
+            intent: intent.data.intent,
+            knowledgeContext: knowledge.data,
+            contextFetch: contextFetch.data,
+            requirementAnalysis: requirement.data,
+          }),
+        }),
+      );
+      context.requirementPackage = requirementPackage.data;
 
       const isPatch =
         intent.data.intent === UserIntent.patch_document || intent.data.intent === UserIntent.patch_prototype;
       let productBuildPlan: ProductBuildPlan | undefined;
       let state = context.productDesignState;
 
-      if (isPatch && context.selectedRegion && state) {
+      if (isPatch) {
+        const gate = await this.runRequirementGate(context, requirementPackage.data);
+        if (gate.action === "blocked" || gate.action === "ask_clarification" || !gate.canApplyPatch) {
+          return this.finishRequirementGateStop(context, intent.data, gate);
+        }
         return this.finishPatchCandidate(context, input, intent.data, knowledge.data);
       } else {
         await this.emit(context, "message_delta", "正在规划正式需求执行方案...");
@@ -256,6 +287,7 @@ export class AiOrchestratorService {
                 userInput: context.userInput,
                 intent: intent.data.intent,
                 requirementAnalysis: requirement.data,
+                requirementPackage: requirementPackage.data,
                 knowledgeContext: knowledge.data,
                 existingState: context.productDesignState,
               },
@@ -263,6 +295,11 @@ export class AiOrchestratorService {
         );
         productBuildPlan = plan.data;
         context.productBuildPlan = productBuildPlan;
+
+        const gate = await this.runRequirementGate(context, requirementPackage.data, productBuildPlan);
+        if (gate.action === "blocked" || gate.action === "ask_clarification" || !gate.canGenerateArtifacts) {
+          return this.finishRequirementGateStop(context, intent.data, gate, productBuildPlan);
+        }
 
         await this.emit(context, "message_delta", "正在把产品计划落到 ProductDesignState...");
         const design = await this.runAgentStep(
@@ -383,6 +420,8 @@ export class AiOrchestratorService {
         prdDocument,
         inputQuality: context.inputQuality,
         productBuildPlan,
+        contextFetch: context.contextFetch,
+        requirementGate: context.requirementGateDecision,
         decisionCards: [prdDecisionCard],
         nextAction: {
           type: "review_prd",
@@ -594,6 +633,8 @@ export class AiOrchestratorService {
       qaReport: qa.data,
       inputQuality: context.inputQuality,
       productBuildPlan: context.productBuildPlan,
+      contextFetch: context.contextFetch,
+      requirementGate: context.requirementGateDecision,
       decisionCards: [prototypeDecisionCard],
       knowledgeCandidates: knowledgeCandidates.data.candidates,
       nextAction: {
@@ -701,6 +742,71 @@ export class AiOrchestratorService {
       });
       throw error;
     }
+  }
+
+  private async runRequirementGate(
+    context: AgentRunContext,
+    requirementPackage: RequirementPackage,
+    productBuildPlan?: ProductBuildPlan,
+  ) {
+    await this.emit(context, "message_delta", "正在进行生成前结构校验和安全检查...");
+    const [validation, safety] = await Promise.all([
+      this.runAgentStep(context, AgentName.qa_agent, "requirement_validation", async () => ({
+        data: validateRequirementPackage({ requirementPackage, productBuildPlan }),
+      })),
+      this.runAgentStep(context, AgentName.qa_agent, "safety_check", async () => ({
+        data: checkRequirementSafety({ requirementPackage, productBuildPlan }),
+      })),
+    ]);
+    context.requirementValidation = validation.data;
+    context.requirementSafety = safety.data;
+    const gate = decideRequirementGate({
+      requirementPackage,
+      validation: validation.data,
+      safety: safety.data,
+      productBuildPlan,
+      fallbackUsed: Boolean(context.fallbackEvents?.length),
+    });
+    context.requirementGateDecision = gate;
+    await this.emit(context, "message_delta", gate.visibleMessage, {
+      requirementGate: {
+        ...gate,
+        decisionTrace: gateDecisionTrace(gate),
+      },
+    });
+    return gate;
+  }
+
+  private async finishRequirementGateStop(
+    context: AgentRunContext,
+    intent: IntentResult,
+    gate: RequirementGateDecision,
+    productBuildPlan?: ProductBuildPlan,
+  ) {
+    const asksClarification = gate.action === "ask_clarification" || gate.questions.length > 0;
+    const result: OrchestratorResult = {
+      runId: context.runId,
+      projectId: context.projectId,
+      intent,
+      message: gate.visibleMessage,
+      productDesignState: context.productDesignState,
+      inputQuality: context.inputQuality,
+      productBuildPlan,
+      contextFetch: context.contextFetch,
+      requirementGate: gate,
+      nextAction: asksClarification
+        ? {
+            type: "ask_clarification",
+            questions: gate.questions,
+          }
+        : { type: "answer" },
+    };
+    await this.finishRun(
+      context,
+      result,
+      asksClarification ? ProjectStatus.clarifying : context.currentProjectStatus ?? ProjectStatus.draft,
+    );
+    return result;
   }
 
   private async finishGeneralAnswer(context: AgentRunContext, intent: IntentResult) {
@@ -824,6 +930,9 @@ export class AiOrchestratorService {
         qaReport: result.qaReport,
         inputQuality: result.inputQuality,
         productBuildPlan: result.productBuildPlan,
+        contextFetch: result.contextFetch ?? context.contextFetch,
+        requirementPackage: context.requirementPackage,
+        requirementGate: result.requirementGate ?? context.requirementGateDecision,
         decisionCards: result.decisionCards,
         patchPlan: result.patchPlan,
         patchRecord: result.patchRecord,
@@ -965,8 +1074,12 @@ function stepCopy(step: string, status: "started" | "completed") {
   const text: Record<string, [string, string]> = {
     intent_detection: ["正在理解你的需求...", "已识别用户意图"],
     knowledge_retrieval: ["正在检索知识库...", "知识上下文已整理"],
+    context_fetch: ["正在读取项目上下文...", "项目上下文已读取"],
     requirement_analysis: ["正在分析需求完整度...", "需求完整度分析完成"],
+    requirement_packaging: ["正在合并需求包...", "需求包已整理完成"],
     product_planning: ["正在规划正式需求执行方案...", "正式需求执行计划已完成"],
+    requirement_validation: ["正在做生成前结构校验...", "生成前结构校验完成"],
+    safety_check: ["正在做生成前安全检查...", "生成前安全检查完成"],
     product_design: ["正在生成产品设计方案...", "产品设计状态已生成"],
     prd_generation: ["正在生成 PRD 草案...", "PRD 草案已完成"],
     prototype_design: ["正在生成原型规格...", "原型规格已完成"],
