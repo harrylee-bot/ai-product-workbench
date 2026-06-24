@@ -32,12 +32,21 @@ export type VibeRunStepView = {
   message?: string;
 };
 
+export type VibeRunTimelineItem = {
+  id: string;
+  text: string;
+  status: "info" | "running" | "done" | "failed" | "warning";
+  step?: string;
+  createdAt?: string;
+};
+
 export type VibeRunView = {
   runId?: string;
   status: "idle" | "running" | "waiting_confirmation" | "waiting_prd_confirm" | "waiting_prototype_confirm" | "completed" | "failed";
   currentLabel?: string;
   summary?: string;
   steps: VibeRunStepView[];
+  timeline?: VibeRunTimelineItem[];
   knowledgeHitCount?: number;
   qaIssueCount?: number;
   qaGateStatus?: "open" | "warning" | "blocked";
@@ -170,6 +179,7 @@ function ExecutionPathCard({
   const activeStep = runState.steps.find((step) => step.status === "running")
     ?? lastActiveStep(runState.steps)
     ?? runState.steps[0];
+  const timeline = runState.timeline ?? [];
   const doneCount = runState.steps.filter((step) => step.status === "done").length;
   const settledLike = completed || waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm;
   const progress = settledLike
@@ -218,6 +228,26 @@ function ExecutionPathCard({
           style={{ width: `${progress}%` }}
         />
       </div>
+
+      {timeline.length ? (
+        <div className="border-t border-gray-100 bg-white px-3 py-2.5">
+          <div className="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
+            <span className="inline-flex items-center gap-1">
+              <Bot className="h-3.5 w-3.5" />
+              过程播报
+            </span>
+            <span>{timeline.length} 条更新</span>
+          </div>
+          <div className="space-y-2">
+            {timeline.map((item) => (
+              <div key={item.id} className="flex gap-2 text-xs leading-5">
+                <TimelineIcon item={item} />
+                <span className="min-w-0 flex-1 text-gray-700">{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {canConfirmPrd ? (
         <div className="flex items-center justify-between gap-3 border-t border-sky-100 bg-sky-50 px-3 py-2">
@@ -277,11 +307,11 @@ function ExecutionPathCard({
 
       {open ? (
         <div className="border-t border-gray-200 bg-gray-50 px-3 py-2.5">
-          <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 shadow-[var(--shadow-control)]">
+          <div className="px-1 py-1">
             <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
               <span className="inline-flex items-center gap-1">
                 <Bot className="h-3.5 w-3.5" />
-                Vibe Coding 主链路
+                详细步骤
               </span>
               <span>{failed ? "失败" : waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm ? "待确认" : completed ? "成功" : "处理中"}</span>
             </div>
@@ -323,6 +353,14 @@ function StepIcon({ status }: { status: VibeRunStepStatus }) {
   if (status === "running") return <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-amber-600" />;
   if (status === "failed") return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
   return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />;
+}
+
+function TimelineIcon({ item }: { item: VibeRunTimelineItem }) {
+  if (item.status === "done") return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />;
+  if (item.status === "running") return <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-amber-600" />;
+  if (item.status === "failed") return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
+  if (item.status === "warning") return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />;
+  return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" />;
 }
 
 function lastActiveStep(steps: VibeRunStepView[]) {

@@ -3,7 +3,13 @@
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { create } from "zustand";
-import { ChatPanel, type Phase1Message, type VibeRunStepStatus, type VibeRunView } from "@/components/chat-panel";
+import {
+  ChatPanel,
+  type Phase1Message,
+  type VibeRunStepStatus,
+  type VibeRunTimelineItem,
+  type VibeRunView,
+} from "@/components/chat-panel";
 import {
   PreviewPanel,
   type Phase1PrdPreview,
@@ -878,6 +884,13 @@ function createInitialRunState(runId: string): VibeRunView {
     status: "running",
     currentLabel: "正在连接 Vibe Coding 主链路...",
     steps: VIBE_RUN_STEPS.map((step) => ({ ...step, status: "pending" })),
+    timeline: [
+      {
+        id: `${runId}:stream-connected`,
+        text: "我已收到你的请求，正在连接执行流。",
+        status: "running",
+      },
+    ],
   };
 }
 
@@ -890,6 +903,7 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     ...current,
     currentLabel: event.content ?? metaSummary ?? current.currentLabel,
     steps: current.steps.map((step) => ({ ...step })),
+    timeline: current.timeline ? [...current.timeline] : [],
   };
 
   if (event.step) {
@@ -1014,7 +1028,7 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "failed" } : step);
   }
 
-  return next;
+  return appendTimelineItem(next, buildTimelineItem(event, next));
 }
 
 function updateStep(
@@ -1049,6 +1063,231 @@ function updateStep(
     ...state,
     steps,
   };
+}
+
+function appendTimelineItem(state: VibeRunView, item: VibeRunTimelineItem | null): VibeRunView {
+  if (!item) return state;
+  const timeline = state.timeline ?? [];
+  if (timeline.some((existing) => existing.id === item.id)) return state;
+  return {
+    ...state,
+    timeline: [...timeline, item],
+  };
+}
+
+function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunTimelineItem | null {
+  const eventType = event.eventType ?? event.type;
+  const payload = payloadRecord(event);
+  const payloadMeta = payloadMetaRecord(event);
+  const id = event.eventId ?? `${eventType}:${event.step ?? "run"}:${event.createdAt ?? state.timeline?.length ?? 0}`;
+  const step = event.step;
+  const stepTitle = step ? stepLabel(step) : undefined;
+
+  if (eventType === "step_started" && step) {
+    return timelineItem(id, step, "running", stepStartedText(step, stepTitle));
+  }
+
+  if (eventType === "step_completed" && step) {
+    return timelineItem(id, step, "done", stepCompletedText(step, stepTitle, payload));
+  }
+
+  if (eventType === "step_failed" && step) {
+    return timelineItem(id, step, "failed", `${stepTitle ?? "这一步"}没有完成：${safeEventText(event, payloadMeta, "请稍后重试或查看调试信息。")}`);
+  }
+
+  if (eventType === "fallback_used") {
+    const fallback = asRecord(payload);
+    const userMessage = asText(fallback?.userMessage);
+    return timelineItem(
+      id,
+      step,
+      "warning",
+      userMessage || `${stepTitle ?? "某个步骤"}没有拿到理想模型结果，已用规则兜底继续执行。`,
+    );
+  }
+
+  if (eventType === "message_delta") {
+    const text = safeEventText(event, payloadMeta, "");
+    return text ? timelineItem(id, step, "info", text) : null;
+  }
+
+  if (eventType === "state_updated") {
+    return timelineItem(id, step, "done", "产品状态已经更新，后续 PRD 和原型会继续从这份状态生成。");
+  }
+
+  if (eventType === "state_version_created") {
+    return timelineItem(id, step, "done", "已保存一个新的产品状态版本，方便后续追踪和回滚。");
+  }
+
+  if (eventType === "prd_updated") {
+    return timelineItem(id, "prd_generation", "done", "PRD 已生成并更新到右侧预览区。");
+  }
+
+  if (eventType === "prototype_updated") {
+    return timelineItem(id, "prototype_code_generation", "done", "HTML 原型已生成并更新到右侧预览区。");
+  }
+
+  if (eventType === "patch_started") {
+    return timelineItem(id, "patch_planning", "running", "开始理解你的局部修改要求，正在准备 Patch 候选。");
+  }
+
+  if (eventType === "patch_plan_created") {
+    return timelineItem(id, "patch_planning", "done", "局部修改方案已准备好，等你确认后再真正应用。");
+  }
+
+  if (eventType === "patch_applying") {
+    return timelineItem(id, "patch_planning", "running", "正在应用已确认的局部修改，并同步重算相关产物。");
+  }
+
+  if (eventType === "patch_completed") {
+    return timelineItem(id, "patch_planning", "done", "局部修改已应用完成，PRD、原型和 QA 已同步刷新。");
+  }
+
+  if (eventType === "patch_failed") {
+    return timelineItem(id, "patch_planning", "failed", `局部修改没有应用成功：${safeEventText(event, payloadMeta, "系统已保留原有版本。")}`);
+  }
+
+  if (eventType === "qa_completed") {
+    const issueText = state.qaIssueCount === undefined
+      ? ""
+      : state.qaIssueCount > 0
+        ? `，发现 ${state.qaIssueCount} 个需要关注的问题`
+        : "，没有发现阻断问题";
+    return timelineItem(id, "qa_check", state.qaGateStatus === "blocked" ? "warning" : "done", `QA 检查完成${issueText}。`);
+  }
+
+  if (eventType === "knowledge_candidate_created") {
+    return timelineItem(id, "knowledge_extraction", "done", "已抽取可复用知识候选，后续可审核沉淀。");
+  }
+
+  if (eventType === "export_ready") {
+    return timelineItem(id, step, "done", state.exportFileName ? `导出文件已准备好：${state.exportFileName}。` : "导出文件已准备好。");
+  }
+
+  if (eventType === "run_completed") {
+    const nextActionType = asText(asRecord(payload?.nextAction)?.type);
+    if (nextActionType === "confirm_patch") {
+      return timelineItem(id, step, "done", "本轮已停在 Patch 确认门。确认后，我会继续应用修改。");
+    }
+    if (nextActionType === "review_prd") {
+      return timelineItem(id, step, "done", "PRD 已生成，本轮先停在确认门。你确认后我再继续生成原型。");
+    }
+    if (nextActionType === "review_prototype") {
+      return timelineItem(id, step, "done", "原型和检查已完成，请先确认原型是否符合预期。");
+    }
+    if (nextActionType === "download_export") {
+      return timelineItem(id, step, "done", "导出任务已完成，可以下载文件。");
+    }
+    if (nextActionType === "ask_clarification") {
+      return timelineItem(id, step, "warning", "我还需要你补充几个关键信息，才能继续生成。");
+    }
+    return timelineItem(id, step, "done", state.summary ?? "本轮执行已完成。");
+  }
+
+  if (eventType === "run_failed") {
+    return timelineItem(id, step, "failed", state.errorMessage ?? "本轮执行失败，请查看失败原因后重试。");
+  }
+
+  return null;
+}
+
+function timelineItem(
+  id: string,
+  step: string | undefined,
+  status: VibeRunTimelineItem["status"],
+  text: string,
+): VibeRunTimelineItem {
+  return {
+    id,
+    step,
+    status,
+    text: normalizeTimelineText(text),
+  };
+}
+
+function safeEventText(
+  event: VibeStreamEvent,
+  payloadMeta: VibeStreamPayloadMeta | undefined,
+  fallback: string,
+) {
+  const text = event.content || payloadMeta?.summary || fallback;
+  if (!text) return fallback;
+  return looksLikeStructuredData(text) ? fallback : normalizeTimelineText(text);
+}
+
+function looksLikeStructuredData(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("{") || trimmed.startsWith("[") || trimmed.startsWith("<")) return true;
+  return /"[^"]+"\s*:/.test(trimmed) || /```(?:json|ts|tsx|js|jsx)?/i.test(trimmed);
+}
+
+function normalizeTimelineText(text: string) {
+  return toChineseProcessText(text).replace(/\s+/g, " ").trim();
+}
+
+function toChineseProcessText(text: string) {
+  return text
+    .replace(/ProductDesignState/g, "产品状态")
+    .replace(/ProductBuildPlan/g, "产品方案")
+    .replace(/PrototypeSpec/g, "原型结构")
+    .replace(/PatchPlan/g, "局部修改方案")
+    .replace(/Patch/g, "局部修改")
+    .replace(/PRD/g, "PRD")
+    .replace(/HTML/g, "HTML")
+    .replace(/QA/g, "QA")
+    .replace(/fallback/gi, "规则兜底")
+    .replace(/run/gi, "任务")
+    .replace(/agent/gi, "智能体");
+}
+
+function stepStartedText(step: string, title?: string) {
+  const labels: Record<string, string> = {
+    intent_detection: "开始理解你的目标，判断这次应该走哪条链路。",
+    knowledge_retrieval: "开始检索知识库和规则，给后面的判断补上下文。",
+    requirement_analysis: "开始整理需求事实、缺失信息和可能的冲突。",
+    product_planning: "开始规划正式方案，确定页面、状态和执行范围。",
+    product_design: "开始把方案落到产品状态，作为后续产物的唯一来源。",
+    prd_generation: "开始生成 PRD 文档。",
+    prototype_design: "开始设计原型结构和交互关系。",
+    prototype_code_generation: "开始生成可预览的 HTML 原型。",
+    patch_planning: "开始规划局部修改方案。",
+    qa_check: "开始做 QA 检查，确认 PRD、原型和状态是否一致。",
+    knowledge_extraction: "开始抽取可复用知识候选。",
+  };
+  return labels[step] ?? `开始执行：${title ?? step}。`;
+}
+
+function stepCompletedText(step: string, title: string | undefined, payload: Record<string, unknown> | null) {
+  if (step === "knowledge_retrieval") {
+    const count = [
+      readArrayLength(payload?.strongRules),
+      readArrayLength(payload?.defaultRules),
+      readArrayLength(payload?.referenceCases),
+      readArrayLength(payload?.designPatterns),
+      readArrayLength(payload?.prdWritingRules),
+      readArrayLength(payload?.prototypeRules),
+      readArrayLength(payload?.businessConcepts),
+    ].reduce((sum, value) => sum + value, 0);
+    return count ? `知识检索完成，命中 ${count} 条可参考规则和案例。` : "知识检索完成，没有发现必须引用的规则。";
+  }
+  const labels: Record<string, string> = {
+    intent_detection: "意图识别完成，已确定本轮执行方向。",
+    requirement_analysis: "需求分析完成，已整理出可继续处理的需求包。",
+    product_planning: "方案规划完成，已确定本轮要生成或修改的范围。",
+    product_design: "产品状态已生成，后续文档和原型会从这里派生。",
+    prd_generation: "PRD 生成完成。",
+    prototype_design: "原型结构设计完成。",
+    prototype_code_generation: "HTML 原型生成完成。",
+    patch_planning: "局部修改方案生成完成。",
+    qa_check: "QA 检查完成。",
+    knowledge_extraction: "知识候选抽取完成。",
+  };
+  return labels[step] ?? `${title ?? "这一步"}完成。`;
+}
+
+function stepLabel(step: string) {
+  return VIBE_RUN_STEPS.find((item) => item.step === step)?.title ?? step;
 }
 
 function readArrayLength(value: unknown) {
