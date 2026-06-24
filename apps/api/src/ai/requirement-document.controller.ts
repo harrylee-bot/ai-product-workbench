@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
-import { ConfirmPrdDto, GeneratePrdDto } from "./requirement-document.dto";
+import { ConfirmPrdDto, GeneratePrdDto, UpdatePrdSectionDto } from "./requirement-document.dto";
 import { RequirementDocumentService } from "./requirement-document.service";
 
 @Controller("projects/:projectId/prd")
@@ -47,6 +47,16 @@ export class PrdDocumentController {
     @Body() dto: ConfirmPrdDto,
   ) {
     return this.documentService.confirmForUser(user, documentId, dto.reason);
+  }
+
+  @Patch(":documentId/sections/:sectionId")
+  updateSection(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("documentId") documentId: string,
+    @Param("sectionId") sectionId: string,
+    @Body() dto: UpdatePrdSectionDto,
+  ) {
+    return this.documentService.updateSectionForUser(user, documentId, sectionId, dto);
   }
 
   @Get(":documentId/versions")

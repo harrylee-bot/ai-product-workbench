@@ -12,6 +12,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
   ProductDesignState,
+  RequirementDocSection,
   RequirementDocument,
   RequirementDocumentDraft,
 } from "./ai-vibe.types";
@@ -175,6 +176,40 @@ export class RequirementDocumentService {
     };
   }
 
+  async updateSectionForUser(
+    user: AuthenticatedUser,
+    documentId: string,
+    sectionId: string,
+    input: { content: string; title?: string },
+  ) {
+    const current = await this.getAccessibleDocument(user, documentId);
+    this.assertOwnerMutation(user, current.project.ownerId);
+    const document = this.toDocumentItem(current as RequirementDocumentRecord);
+    let matched = false;
+    const sections = document.sections.map((section) => {
+      if (section.id !== sectionId) return section;
+      matched = true;
+      return applySectionContentEdit(section, input);
+    });
+    if (!matched) throw new NotFoundException("PRD_SECTION_NOT_FOUND");
+
+    const updated = await this.prisma.requirementDocument.update({
+      where: { id: documentId },
+      data: {
+        sections: toInputJson(sections),
+        updatedBy: user.id,
+      },
+    });
+    const updatedDocument = this.toDocumentItem(updated as RequirementDocumentRecord);
+    const version = await this.createVersion(updatedDocument, user.id, `局部编辑 PRD 段落：${sectionId}`);
+    await this.stateService.attachGeneratedArtifacts(updatedDocument.productDesignStateId, {
+      prdDocument: updatedDocument,
+      userId: user.id,
+      reason: `PRD 段落 ${sectionId} 已回流到 ProductDesignState`,
+    });
+    return { document: updatedDocument, version };
+  }
+
   async confirmForUser(user: AuthenticatedUser, documentId: string, reason?: string) {
     const current = await this.getAccessibleDocument(user, documentId);
     this.assertOwnerMutation(user, current.project.ownerId);
@@ -329,4 +364,37 @@ export class RequirementDocumentService {
 
 function isDocumentFromCurrentState(document: RequirementDocument, state: ProductDesignState) {
   return document.productDesignStateId === state.id && document.productDesignStateVersion === state.version;
+}
+
+function applySectionContentEdit(
+  section: RequirementDocSection,
+  input: { content: string; title?: string },
+): RequirementDocSection {
+  const content = input.content.trim();
+  const sourcePaths = section.sourcePaths?.length
+    ? section.sourcePaths
+    : section.sourceStatePaths ?? [];
+  const block = section.blocks?.length === 1
+    ? {
+        ...section.blocks[0],
+        content,
+        sourcePaths: section.blocks[0].sourcePaths?.length ? section.blocks[0].sourcePaths : sourcePaths,
+        tags: section.blocks[0].tags?.length ? section.blocks[0].tags : section.tags,
+      }
+    : {
+        id: `${section.id}_body`,
+        type: "paragraph" as const,
+        content,
+        sourcePaths,
+        tags: section.tags,
+      };
+
+  return {
+    ...section,
+    title: input.title?.trim() || section.title,
+    content,
+    blocks: [block],
+    sourcePaths,
+    updatedAt: new Date().toISOString(),
+  };
 }

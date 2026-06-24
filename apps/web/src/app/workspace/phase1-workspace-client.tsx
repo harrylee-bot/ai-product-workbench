@@ -42,6 +42,10 @@ type VibeHandleMessageResponse = {
   status: "running";
 };
 
+type UpdatePrdSectionResponse = {
+  document: unknown;
+};
+
 type PatchApplyResponse = {
   projectId: string;
   conversationId: string;
@@ -372,6 +376,27 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  const updatePrdSection = useMutation({
+    mutationFn: (input: { documentId: string; sectionId: string; content: string }) =>
+      apiRequest<UpdatePrdSectionResponse>(
+        `/prd-documents/${encodeURIComponent(input.documentId)}/sections/${encodeURIComponent(input.sectionId)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ content: input.content }),
+        },
+      ),
+    onSuccess: async (response) => {
+      setArtifactPreview({ prdPreview: normalizePrdPreview(response.document) });
+      await Promise.all([
+        selectedProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", selectedProjectId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "PRD 段落保存失败");
+    },
+  });
+
   const createConversation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId) {
@@ -567,6 +592,15 @@ function Phase1WorkspaceInner() {
         prdPreview={prdPreview}
         prototypePreview={prototypePreview}
         decision={decision}
+        savingPrdSectionId={updatePrdSection.isPending ? updatePrdSection.variables?.sectionId : undefined}
+        onSavePrdSection={async (input) => {
+          if (!prdPreview?.id) return;
+          await updatePrdSection.mutateAsync({
+            documentId: prdPreview.id,
+            sectionId: input.sectionId,
+            content: input.content,
+          });
+        }}
       />
     </main>
   );

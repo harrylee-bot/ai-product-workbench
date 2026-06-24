@@ -194,6 +194,46 @@ describe("PRD requirement document module", () => {
     expect(prisma.requirementDocument.findFirst).not.toHaveBeenCalled();
   });
 
+  it("updates a section, creates a version, and syncs the PRD back into ProductDesignState", async () => {
+    const draft = renderPrdFromState(baseState());
+    prisma.requirementDocument.findUnique.mockResolvedValue({
+      ...documentRecord({
+        id: "prd-1",
+        ...draft,
+      }),
+      project: baseProject(),
+    });
+    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
+      documentRecord({
+        id: "prd-1",
+        ...draft,
+        sections: data.sections,
+        updatedBy: data.updatedBy,
+      }),
+    );
+
+    const result = await service.updateSectionForUser(user, "prd-1", "business_goal", {
+      content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
+    });
+
+    const section = result.document.sections.find((item) => item.id === "business_goal");
+    expect(section?.content).toBe("提升签到转化率，并让运营能清楚追踪连续签到效果。");
+    expect(section?.blocks?.[0]).toEqual(expect.objectContaining({
+      id: "business_goal_body",
+      content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
+    }));
+    expect(prisma.requirementDocumentVersion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        documentId: "prd-1",
+        reason: "局部编辑 PRD 段落：business_goal",
+      }),
+    });
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
+      prdDocument: expect.objectContaining({ id: "prd-1" }),
+      reason: "PRD 段落 business_goal 已回流到 ProductDesignState",
+    }));
+  });
+
   it("blocks PRD confirmation when QA gate does not allow artifact confirmation", async () => {
     qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));
     prisma.requirementDocument.findUnique.mockResolvedValue({

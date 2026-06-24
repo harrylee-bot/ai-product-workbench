@@ -38,11 +38,15 @@ export function PreviewPanel({
   prdPreview,
   prototypePreview,
   decision,
+  savingPrdSectionId,
+  onSavePrdSection,
 }: {
   projectId?: string;
   prdPreview?: Phase1PrdPreview | null;
   prototypePreview?: Phase1PrototypePreview | null;
   decision?: Phase2DecisionView | null;
+  savingPrdSectionId?: string;
+  onSavePrdSection?: (input: { sectionId: string; content: string }) => Promise<void> | void;
 }) {
   const [mode, setMode] = useState<PreviewMode>("prototype");
   const [exporting, setExporting] = useState<"word" | "html" | null>(null);
@@ -149,7 +153,11 @@ export function PreviewPanel({
       <div className="min-h-0 flex-1 overflow-hidden">
         {mode === "prd" ? (
           <div className="workbench-scrollbar h-full overflow-y-auto p-2.5">
-            <PrdPreviewView prdPreview={prdPreview} />
+            <PrdPreviewView
+              prdPreview={prdPreview}
+              savingSectionId={savingPrdSectionId}
+              onSaveSection={onSavePrdSection}
+            />
           </div>
         ) : mode === "prototype" ? (
           <PrototypePreviewView prototypePreview={prototypePreview} />

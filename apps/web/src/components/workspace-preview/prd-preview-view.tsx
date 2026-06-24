@@ -12,7 +12,15 @@ import {
 } from "./helpers";
 import type { Phase1PrdPreview } from "./types";
 
-export function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview | null }) {
+export function PrdPreviewView({
+  prdPreview,
+  savingSectionId,
+  onSaveSection,
+}: {
+  prdPreview?: Phase1PrdPreview | null;
+  savingSectionId?: string;
+  onSaveSection?: (input: { sectionId: string; content: string }) => Promise<void> | void;
+}) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [sectionEdits, setSectionEdits] = useState<Record<string, string>>({});
@@ -78,11 +86,17 @@ export function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview |
     setDraftText(section.content);
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (editingIndex === null) return;
+    const section = sections[editingIndex];
+    if (!section) return;
+    const content = draftText.trim() || section.content || "";
+    if (onSaveSection) {
+      await onSaveSection({ sectionId: section.id, content });
+    }
     setSectionEdits((current) => ({
       ...current,
-      [sectionEditKey(documentKey, sections[editingIndex]?.id ?? String(editingIndex))]: draftText.trim() || sections[editingIndex]?.content || "",
+      [sectionEditKey(documentKey, section.id)]: content,
     }));
     setEditingIndex(null);
   };
@@ -237,9 +251,15 @@ export function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview |
                 <Button type="button" size="sm" variant="secondary" onClick={cancelEdit} title="取消编辑">
                   取消
                 </Button>
-                <Button type="button" size="sm" onClick={saveEdit} disabled={!draftText.trim()} title={draftText.trim() ? "保存段落草稿" : "请输入段落内容"}>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void saveEdit()}
+                  disabled={!draftText.trim() || savingSectionId === sections[editingIndex]?.id}
+                  title={draftText.trim() ? "保存段落" : "请输入段落内容"}
+                >
                   <Check className="h-4 w-4" />
-                  保存草稿
+                  {savingSectionId === sections[editingIndex]?.id ? "保存中" : "保存"}
                 </Button>
               </div>
             </div>
