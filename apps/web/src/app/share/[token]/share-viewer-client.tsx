@@ -7,6 +7,11 @@ type ShareSection = {
   id?: string;
   title?: string;
   content?: string;
+  blocks?: Array<{
+    id?: string;
+    type?: string;
+    content?: string;
+  }>;
 };
 
 type SharePayload = {
@@ -109,11 +114,18 @@ export function ShareViewerClient({ token }: { token: string }) {
                       {section.title}
                     </h2>
                   ) : null}
-                  {section.content ? (
-                    <div className="whitespace-pre-wrap text-sm leading-7 text-gray-700">
-                      {section.content}
-                    </div>
-                  ) : null}
+                  <div className="space-y-3">
+                    {sectionBlocks(section).map((block, blockIndex) => (
+                      <div
+                        key={block.id ?? `${section.id ?? index}-${blockIndex}`}
+                        data-block-id={block.id}
+                        data-block-type={block.type}
+                        className="whitespace-pre-wrap text-sm leading-7 text-gray-700"
+                      >
+                        {block.content}
+                      </div>
+                    ))}
+                  </div>
                 </section>
               ))}
             </div>
@@ -132,6 +144,17 @@ export function ShareViewerClient({ token }: { token: string }) {
       </main>
     </div>
   );
+}
+
+function sectionBlocks(section: ShareSection) {
+  const blocks = Array.isArray(section.blocks)
+    ? section.blocks.filter((block) => block.content)
+    : [];
+  return blocks.length
+    ? blocks
+    : section.content
+      ? [{ id: section.id ? `${section.id}:body` : undefined, type: "paragraph", content: section.content }]
+      : [];
 }
 
 function TabButton({

@@ -18,8 +18,8 @@ export const OUTCOME_LABELS: Record<Phase2DecisionView["evolution"]["finalOutcom
   partial: "部分成功",
 };
 
-export function sectionEditKey(documentKey: string, index: number) {
-  return `${documentKey}:${index}`;
+export function sectionEditKey(documentKey: string, sectionId: string) {
+  return `${documentKey}:${sectionId}`;
 }
 
 export function splitParagraphs(content: string) {

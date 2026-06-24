@@ -576,15 +576,26 @@ function normalizePrdPreview(value: unknown): Phase1PrdPreview | null {
   const record = asRecord(value);
   if (!record) return null;
   const sectionsValue = Array.isArray(record.sections) ? record.sections : [];
-  const sections = sectionsValue.flatMap((item) => {
+  const sections = sectionsValue.flatMap((item, index) => {
     const section = asRecord(item);
     if (!section) return [];
     const title = asText(section.title);
     const content = asText(section.content) || asText(section.body) || asText(section.description);
-    if (!title && !content) return [];
+    const blocks = normalizePrdBlocks(section.blocks);
+    const blockContent = blocks.map((block) => block.content).filter(Boolean).join("\n\n");
+    const resolvedContent = content || blockContent;
+    if (!title && !resolvedContent) return [];
     return [{
+      id: asText(section.id) || `section-${index + 1}`,
       title: title || "未命名章节",
-      content: content || "暂无内容",
+      content: resolvedContent || "暂无内容",
+      type: asText(section.type) || undefined,
+      level: normalizePrdLevel(section.level),
+      order: normalizeNumber(section.order) ?? index + 1,
+      sourcePaths: normalizeTextArray(section.sourcePaths),
+      sourceStatePaths: normalizeTextArray(section.sourceStatePaths),
+      tags: normalizeTextArray(section.tags),
+      blocks,
     }];
   });
   if (!sections.length) return null;
@@ -593,6 +604,52 @@ function normalizePrdPreview(value: unknown): Phase1PrdPreview | null {
     title: asText(record.title) || "需求文档",
     sections,
   };
+}
+
+function normalizePrdBlocks(value: unknown): NonNullable<Phase1PrdPreview["sections"][number]["blocks"]> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    const block = asRecord(item);
+    if (!block) return [];
+    const content = asText(block.content);
+    if (!content) return [];
+    return [{
+      id: asText(block.id) || `block-${index + 1}`,
+      type: normalizePrdBlockType(block.type),
+      content,
+      sourcePaths: normalizeTextArray(block.sourcePaths),
+      tags: normalizeTextArray(block.tags),
+    }];
+  });
+}
+
+function normalizePrdBlockType(value: unknown) {
+  const text = asText(value);
+  if (
+    text === "paragraph" ||
+    text === "bullet_list" ||
+    text === "table" ||
+    text === "quote" ||
+    text === "warning" ||
+    text === "info"
+  ) {
+    return text;
+  }
+  return "paragraph";
+}
+
+function normalizePrdLevel(value: unknown): 1 | 2 | 3 | undefined {
+  const level = normalizeNumber(value);
+  return level === 1 || level === 2 || level === 3 ? level : undefined;
+}
+
+function normalizeTextArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.flatMap((item) => {
+        const text = asText(item);
+        return text ? [text] : [];
+      })
+    : undefined;
 }
 
 function errorMessage(error: unknown) {
@@ -839,6 +896,10 @@ function payloadMetaRecord(event: VibeStreamEvent) {
 
 function asText(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function normalizeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function numberFromRecord(record: Record<string, number> | undefined, key: string) {

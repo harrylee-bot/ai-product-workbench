@@ -303,8 +303,22 @@ export type Phase1PrdPreview = {
   id?: string;
   title: string;
   sections: Array<{
+    id: string;
     title: string;
     content: string;
+    type?: string;
+    level?: 1 | 2 | 3;
+    order?: number;
+    sourcePaths?: string[];
+    sourceStatePaths?: string[];
+    tags?: string[];
+    blocks?: Array<{
+      id: string;
+      type: "paragraph" | "bullet_list" | "table" | "quote" | "warning" | "info";
+      content: string;
+      sourcePaths?: string[];
+      tags?: string[];
+    }>;
   }>;
 };
 

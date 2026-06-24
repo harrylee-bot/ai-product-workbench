@@ -47,11 +47,15 @@ export function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview |
   }
 
   const documentKey = prdPreview.id ?? prdPreview.title;
-  const sections = prdPreview.sections.map((section, index) => ({
-    ...section,
-    title: toChineseText(section.title),
-    content: toChineseText(sectionEdits[sectionEditKey(documentKey, index)] ?? section.content),
-  }));
+  const sections = prdPreview.sections.map((section, index) => {
+    const stableSectionId = section.id || `section-${index + 1}`;
+    return {
+      ...section,
+      id: stableSectionId,
+      title: toChineseText(section.title),
+      content: toChineseText(sectionEdits[sectionEditKey(documentKey, stableSectionId)] ?? section.content),
+    };
+  });
   const safeSelectedIndex = Math.min(selectedIndex, Math.max(0, sections.length - 1));
   const selectedSection = sections[safeSelectedIndex] ?? sections[0];
   const totalCharacters = sections.reduce((sum, section) => sum + section.content.replace(/\s+/g, "").length, 0);
@@ -78,7 +82,7 @@ export function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview |
     if (editingIndex === null) return;
     setSectionEdits((current) => ({
       ...current,
-      [sectionEditKey(documentKey, editingIndex)]: draftText.trim() || sections[editingIndex]?.content || "",
+      [sectionEditKey(documentKey, sections[editingIndex]?.id ?? String(editingIndex))]: draftText.trim() || sections[editingIndex]?.content || "",
     }));
     setEditingIndex(null);
   };
@@ -128,7 +132,9 @@ export function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview |
             const selected = index === safeSelectedIndex;
             return (
               <article
-                key={`${section.title}-${index}`}
+                key={section.id}
+                data-section-id={section.id}
+                data-section-type={section.type}
                 ref={selected ? selectedSectionRef : null}
                 tabIndex={0}
                 aria-current={selected ? "true" : undefined}
@@ -182,13 +188,23 @@ export function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview |
                 </div>
 
                 <div className="mt-3 space-y-3">
-                  {splitParagraphs(section.content).map((paragraph, paragraphIndex) => (
-                    <p
-                      key={`${index}-${paragraphIndex}`}
-                      className="break-words whitespace-pre-wrap rounded-[12px] border border-transparent px-3 py-2 text-sm leading-7 text-gray-600 hover:border-blue-100 hover:bg-blue-50/40"
-                    >
-                      {paragraph}
-                    </p>
+                  {sectionContentBlocks(section).map((block, paragraphIndex) => (
+                    <div key={block.id} data-block-id={block.id} data-block-type={block.type}>
+                      {splitParagraphs(block.content).map((paragraph, splitIndex) => (
+                        <p
+                          key={`${block.id}-${splitIndex}`}
+                          className={[
+                            "break-words whitespace-pre-wrap rounded-[12px] border border-transparent px-3 py-2 text-sm leading-7 text-gray-600 hover:border-blue-100 hover:bg-blue-50/40",
+                            block.type === "warning" ? "border-amber-100 bg-amber-50 text-amber-800" : "",
+                            block.type === "info" ? "border-sky-100 bg-sky-50 text-sky-800" : "",
+                            block.type === "quote" ? "border-l-4 border-l-gray-300 bg-gray-50" : "",
+                            paragraphIndex > 0 || splitIndex > 0 ? "" : "",
+                          ].join(" ")}
+                        >
+                          {paragraph}
+                        </p>
+                      ))}
+                    </div>
                   ))}
                 </div>
               </article>
@@ -247,6 +263,26 @@ export function PrdPreviewView({ prdPreview }: { prdPreview?: Phase1PrdPreview |
       </section>
     </div>
   );
+}
+
+function sectionContentBlocks(section: Phase1PrdPreview["sections"][number]) {
+  const editedContent = section.content;
+  if (!section.blocks?.length) {
+    return [{
+      id: `${section.id}:body`,
+      type: "paragraph" as const,
+      content: editedContent,
+    }];
+  }
+  const originalBlockContent = section.blocks.map((block) => block.content).join("\n\n");
+  if (editedContent && editedContent !== originalBlockContent) {
+    return [{
+      id: `${section.id}:draft`,
+      type: "paragraph" as const,
+      content: editedContent,
+    }];
+  }
+  return section.blocks;
 }
 
 function Metric({ label, value }: { label: string; value: number | string }) {
