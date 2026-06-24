@@ -254,52 +254,85 @@ function Phase1WorkspaceInner() {
 
   const watchVibeRun = (runId: string, projectId: string, conversationId: string) => {
     runStreamAbortRef.current?.abort();
-    const controller = new AbortController();
-    runStreamAbortRef.current = controller;
+    let terminalEventSeen = false;
     setActiveRunId(runId);
     setRunState(createInitialRunState(runId));
 
-    void streamApiEvents<VibeStreamEvent>(
-      `/ai/vibe/runs/${runId}/stream`,
-      (event) => {
-        const eventType = event.eventType ?? event.type;
-        const payload = payloadRecord(event);
-        setRunState((current) => reduceRunState(current ?? createInitialRunState(runId), event));
+    const connectStream = (attempt: number) => {
+      const controller = new AbortController();
+      runStreamAbortRef.current = controller;
 
-        if (eventType === "prd_updated" && payload) {
-          setArtifactPreview({ prdPreview: normalizePrdPreview(payload) });
-        }
+      void streamApiEvents<VibeStreamEvent>(
+        `/ai/vibe/runs/${runId}/stream`,
+        (event) => {
+          const eventType = event.eventType ?? event.type;
+          const payload = payloadRecord(event);
+          setRunState((current) => reduceRunState(current ?? createInitialRunState(runId), event));
 
-        if (eventType === "prototype_updated" && payload) {
-          const artifactPayload = asRecord(payload.prototypeArtifact) ?? payload;
-          setArtifactPreview({ prototypePreview: normalizePrototypePreview(artifactPayload) });
-        }
-
-        if (eventType === "run_completed" || eventType === "run_failed") {
-          const result = payload;
-          const prdPayload = asRecord(result?.prdDocument);
-          const prototypePayload = asRecord(result?.prototypeArtifact);
-          if (prdPayload || prototypePayload) {
-            setArtifactPreview({
-              prdPreview: prdPayload ? normalizePrdPreview(prdPayload) : undefined,
-              prototypePreview: prototypePayload ? normalizePrototypePreview(prototypePayload) : undefined,
-            });
+          if (eventType === "prd_updated" && payload) {
+            setArtifactPreview({ prdPreview: normalizePrdPreview(payload) });
           }
-          setActiveRunId(null);
-          controller.abort();
-          void Promise.all([
-            queryClient.invalidateQueries({ queryKey: ["phase1-messages", conversationId] }),
-            queryClient.invalidateQueries({ queryKey: ["phase1-project", projectId] }),
-            queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
-          ]);
+
+          if (eventType === "prototype_updated" && payload) {
+            const artifactPayload = asRecord(payload.prototypeArtifact) ?? payload;
+            setArtifactPreview({ prototypePreview: normalizePrototypePreview(artifactPayload) });
+          }
+
+          if (eventType === "run_completed" || eventType === "run_failed") {
+            terminalEventSeen = true;
+            const result = payload;
+            const prdPayload = asRecord(result?.prdDocument);
+            const prototypePayload = asRecord(result?.prototypeArtifact);
+            if (prdPayload || prototypePayload) {
+              setArtifactPreview({
+                prdPreview: prdPayload ? normalizePrdPreview(prdPayload) : undefined,
+                prototypePreview: prototypePayload ? normalizePrototypePreview(prototypePayload) : undefined,
+              });
+            }
+            setActiveRunId(null);
+            controller.abort();
+            void Promise.all([
+              queryClient.invalidateQueries({ queryKey: ["phase1-messages", conversationId] }),
+              queryClient.invalidateQueries({ queryKey: ["phase1-project", projectId] }),
+              queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+            ]);
+          }
+        },
+        { signal: controller.signal },
+      ).catch((error) => {
+        if (controller.signal.aborted || runStreamAbortRef.current !== controller || terminalEventSeen) return;
+
+        const nextAttempt = attempt + 1;
+        if (nextAttempt <= 5) {
+          setRunState((current) =>
+            appendRunConnectionNotice(
+              current ?? createInitialRunState(runId),
+              runId,
+              `执行流连接短暂中断，正在第 ${nextAttempt} 次自动重连...`,
+              "warning",
+            )
+          );
+          window.setTimeout(() => {
+            if (!controller.signal.aborted && runStreamAbortRef.current === controller && !terminalEventSeen) {
+              connectStream(nextAttempt);
+            }
+          }, streamReconnectDelayMs(nextAttempt));
+          return;
         }
-      },
-      { signal: controller.signal },
-    ).catch((error) => {
-      if (controller.signal.aborted) return;
-      setActiveRunId(null);
-      window.alert(error instanceof Error ? error.message : "运行流连接失败");
-    });
+
+        setActiveRunId(null);
+        setRunState((current) =>
+          appendRunConnectionNotice(
+            current ?? createInitialRunState(runId),
+            runId,
+            `执行流连接中断，后端任务可能仍在继续。请稍后刷新项目查看最新结果。${formatErrorMessage(error)}`,
+            "failed",
+          )
+        );
+      });
+    };
+
+    connectStream(0);
   };
 
   const sendMessage = useMutation({
@@ -883,6 +916,49 @@ const VIBE_RUN_STEPS = [
   { step: "qa_check", title: "QA 闸门", agent: "QA Agent", detail: "检查一致性并决定确认、知识、发布和导出闸门" },
   { step: "knowledge_extraction", title: "抽取知识候选", agent: "Knowledge Extractor", detail: "从稳定产物中沉淀待审核知识候选" },
 ];
+
+function streamReconnectDelayMs(attempt: number) {
+  return Math.min(800 + attempt * 700, 5_000);
+}
+
+function formatErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (!message) return "";
+  if (/load failed|failed to fetch|networkerror/i.test(message)) {
+    return " 原因：浏览器网络流连接中断。";
+  }
+  return ` 原因：${message}`;
+}
+
+function appendRunConnectionNotice(
+  state: VibeRunView,
+  runId: string,
+  text: string,
+  status: VibeRunTimelineItem["status"],
+): VibeRunView {
+  const id = `${runId}:stream-connection:${status}:${Date.now()}`;
+  const next = {
+    ...state,
+    currentLabel: text,
+    status: status === "failed" ? state.status : "running",
+  };
+  return appendDebugEvent(
+    appendTimelineItem(next, {
+      id,
+      text,
+      status,
+    }),
+    {
+      id: `${id}:debug`,
+      title: status === "failed" ? "执行流连接中断" : "执行流自动重连",
+      body: status === "failed"
+        ? "浏览器到后端的事件流连接多次中断。后端任务可能仍在继续，刷新项目后可读取已落库的最新事件和结果。"
+        : "浏览器事件流连接短暂中断，前端正在自动重连。重连后后端会回放已落库事件，避免丢失执行进度。",
+      status,
+      type: "stream_reconnect",
+    },
+  );
+}
 
 function createInitialRunState(runId: string): VibeRunView {
   return {

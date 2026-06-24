@@ -127,7 +127,7 @@ export async function streamApiEvents<T>(
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return;
-    throw error;
+    throw new ApiError("流式连接中断，正在尝试恢复执行进度", 503);
   }
 
   if (buffer.trim()) {
