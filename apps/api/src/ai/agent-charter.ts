@@ -1,4 +1,5 @@
 import { AgentName, ModelTaskType } from "@prisma/client";
+import { DECISION_TRACE_OUTPUT_INSTRUCTION } from "./agent-decision-trace";
 
 export const VIBE_CODING_AGENT_NAMES = [
   AgentName.intent_agent,
@@ -215,5 +216,7 @@ export function agentSystemPrompt(agentName: VibeCodingAgentName, instruction: s
     `- 可做：${charter.allowedActions.join("；")}`,
     `- 禁止：${charter.forbiddenActions.join("；")}`,
     `- 写入权限：${charter.mutationAuthority}`,
+    "",
+    DECISION_TRACE_OUTPUT_INSTRUCTION,
   ].join("\n");
 }

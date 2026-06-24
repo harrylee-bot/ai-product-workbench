@@ -40,6 +40,17 @@ export type VibeRunTimelineItem = {
   createdAt?: string;
 };
 
+export type VibeRunDebugEvent = {
+  id: string;
+  title: string;
+  body: string;
+  raw?: string;
+  status: "info" | "running" | "done" | "failed" | "warning";
+  type: string;
+  step?: string;
+  createdAt?: string;
+};
+
 export type VibeRunView = {
   runId?: string;
   status: "idle" | "running" | "waiting_confirmation" | "waiting_prd_confirm" | "waiting_prototype_confirm" | "completed" | "failed";
@@ -47,6 +58,7 @@ export type VibeRunView = {
   summary?: string;
   steps: VibeRunStepView[];
   timeline?: VibeRunTimelineItem[];
+  debugEvents?: VibeRunDebugEvent[];
   knowledgeHitCount?: number;
   qaIssueCount?: number;
   qaGateStatus?: "open" | "warning" | "blocked";
@@ -100,7 +112,7 @@ export function ChatPanel({
         <Badge tone={sending ? "warning" : "neutral"} className="bg-white">
           {sending ? (
             <span className="inline-flex items-center gap-1">
-              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              <Circle className="h-3.5 w-3.5 fill-amber-100 text-amber-600" />
               运行中
             </span>
           ) : "可输入"}
@@ -333,6 +345,41 @@ function ExecutionPathCard({
               })}
             </div>
           </div>
+          {runState.debugEvents?.length ? (
+            <div className="mt-3 border-t border-gray-200 pt-3">
+              <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
+                <span className="inline-flex items-center gap-1">
+                  <Bot className="h-3.5 w-3.5" />
+                  调试详情
+                </span>
+                <span>{runState.debugEvents.length} 个事件</span>
+              </div>
+              <div className="space-y-2">
+                {runState.debugEvents.map((event) => (
+                  <div key={event.id} className="rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-xs">
+                    <div className="flex items-start gap-2">
+                      <TimelineIcon item={event} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-semibold text-gray-900">{event.title}</span>
+                          <span className="text-gray-400">{event.type}</span>
+                        </div>
+                        <div className="mt-1 whitespace-pre-wrap leading-5 text-gray-600">{event.body}</div>
+                        {event.raw ? (
+                          <details className="mt-2">
+                            <summary className="cursor-pointer text-gray-500 hover:text-gray-900">原始事件</summary>
+                            <pre className="mt-2 max-h-56 overflow-auto rounded-md bg-gray-950 px-2 py-2 text-[11px] leading-4 text-gray-100">
+                              {event.raw}
+                            </pre>
+                          </details>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {runState.knowledgeHitCount || runState.qaIssueCount !== undefined || runState.qaGateSummary || runState.exportFileName || runState.patchId ? (
             <div className="mt-2 text-xs leading-5 text-gray-500">
               {runState.knowledgeHitCount ? `本轮知识库命中 ${runState.knowledgeHitCount} 条。` : null}
@@ -350,17 +397,17 @@ function ExecutionPathCard({
 
 function StepIcon({ status }: { status: VibeRunStepStatus }) {
   if (status === "done") return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />;
-  if (status === "running") return <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-amber-600" />;
+  if (status === "running") return <Circle className="mt-0.5 h-4 w-4 shrink-0 fill-amber-100 text-amber-600" />;
   if (status === "failed") return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
   return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />;
 }
 
-function TimelineIcon({ item }: { item: VibeRunTimelineItem }) {
+function TimelineIcon({ item }: { item: { status: VibeRunTimelineItem["status"] } }) {
   if (item.status === "done") return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />;
-  if (item.status === "running") return <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-amber-600" />;
+  if (item.status === "running") return <Circle className="mt-0.5 h-4 w-4 shrink-0 fill-amber-100 text-amber-600" />;
   if (item.status === "failed") return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />;
-  if (item.status === "warning") return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />;
-  return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" />;
+  if (item.status === "warning") return <Circle className="mt-0.5 h-4 w-4 shrink-0 fill-amber-50 text-amber-500" />;
+  return <Circle className="mt-0.5 h-4 w-4 shrink-0 fill-sky-50 text-sky-500" />;
 }
 
 function lastActiveStep(steps: VibeRunStepView[]) {

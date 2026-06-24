@@ -6,6 +6,7 @@ import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
 import { AgentSkillRegistryService } from "../agent-skill-registry.service";
 import { agentSystemPrompt } from "../agent-charter";
 import { buildAgentSkillRoutes } from "../agent-skill-instructions";
+import { buildAgentDecisionTrace } from "../agent-decision-trace";
 import { BaseAgentService } from "./base-agent.service";
 import type { KnowledgeContext, ProductDesignState } from "../ai-vibe.types";
 
@@ -55,17 +56,25 @@ export class KnowledgeAgentService extends BaseAgentService<KnowledgeInput, Know
       skillRouting.length ? `已生成 ${skillRouting.length} 条 skill 路由，覆盖 ${routedAgentCount} 个 Agent` : "",
     ].filter(Boolean);
 
+    const data = {
+      ...fallback,
+      ...grouped,
+      prototypeRules: [...grouped.prototypeRules, ...skillReferences],
+      agentSkills,
+      skillRouting,
+      summary: summaryParts.length
+        ? `${summaryParts.join("，")}，已按类型提供给后续 Agent。`
+        : fallback.summary,
+    };
+
     return {
-      data: {
-        ...fallback,
-        ...grouped,
-        prototypeRules: [...grouped.prototypeRules, ...skillReferences],
-        agentSkills,
-        skillRouting,
-        summary: summaryParts.length
-          ? `${summaryParts.join("，")}，已按类型提供给后续 Agent。`
-          : fallback.summary,
-      },
+      data,
+      decisionTrace: buildAgentDecisionTrace({
+        agentName: this.agentName,
+        taskType: this.taskType,
+        input: invocation.input,
+        output: data,
+      }),
     };
   }
 

@@ -108,6 +108,18 @@ export type KnowledgeConflict = {
   references: string[];
 };
 
+export type AgentDecisionTrace = {
+  summary: string;
+  inputSignals: string[];
+  constraints: string[];
+  assumptions: string[];
+  alternativesConsidered: string[];
+  decision: string;
+  risks: string[];
+  nextStep: string;
+  generatedBy: "model" | "deterministic";
+};
+
 export type KnowledgeContext = {
   query: string;
   strongRules: KnowledgeReference[];
@@ -987,6 +999,7 @@ export type AgentOutput<T> = {
   data: T;
   modelCallLogId?: string;
   fallback?: AgentFallbackMetadata;
+  decisionTrace?: AgentDecisionTrace;
 };
 
 export type ModelBackedAgent = {

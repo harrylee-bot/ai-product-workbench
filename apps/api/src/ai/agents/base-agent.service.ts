@@ -4,6 +4,7 @@ import { ModelGatewayService } from "../../model-gateway/model-gateway.service";
 import type { ModelGatewayErrorCode, ModelMessage } from "../../model-gateway/model-gateway.types";
 import type { AgentFallbackAction, AgentFallbackLevel, AgentFallbackMetadata } from "../agent-fallback-policy";
 import type { AgentInvocation, AgentOutput } from "../ai-vibe.types";
+import { buildAgentDecisionTrace, readModelDecisionTrace } from "../agent-decision-trace";
 
 const DEFAULT_AGENT_RETRY_COUNT = 0;
 
@@ -32,17 +33,34 @@ export abstract class BaseAgentService<TInput, TOutput> {
           maxTokens: this.modelMaxTokens(invocation.input),
         });
 
+        const data = this.normalize(result.data, invocation.input);
+
         return {
-          data: this.normalize(result.data, invocation.input),
+          data,
           modelCallLogId: result.modelCallLogId,
+          decisionTrace: buildAgentDecisionTrace({
+            agentName: this.agentName,
+            taskType: this.taskType,
+            input: invocation.input,
+            output: data,
+            modelTrace: readModelDecisionTrace(result.data),
+          }),
         };
       }, this.agentRetryCount(invocation.input));
     } catch (error) {
       const fallback = this.fallbackOnError(error, invocation.input);
       if (fallback) {
+        const data = this.normalize(this.fallback(invocation.input), invocation.input);
         return {
-          data: this.normalize(this.fallback(invocation.input), invocation.input),
+          data,
           fallback,
+          decisionTrace: buildAgentDecisionTrace({
+            agentName: this.agentName,
+            taskType: this.taskType,
+            input: invocation.input,
+            output: data,
+            fallback,
+          }),
         };
       }
 

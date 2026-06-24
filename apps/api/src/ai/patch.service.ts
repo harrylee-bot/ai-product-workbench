@@ -18,6 +18,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
 import { fallbackStepOutput } from "./agent-fallback-policy";
 import type { AgentFallbackMetadata } from "./agent-fallback-policy";
+import { attachDecisionTraceToStepData, buildAgentDecisionTrace } from "./agent-decision-trace";
 import { qaCompletedPayload, toInputJson } from "./ai-vibe.helpers";
 import type {
   AgentOutput,
@@ -1254,6 +1255,12 @@ export class PatchService {
     });
     try {
       const result = await handler();
+      const decisionTrace = result.decisionTrace ?? buildAgentDecisionTrace({
+        agentName,
+        input: { userInput: input.userInstruction },
+        output: result.data,
+        fallback: result.fallback,
+      });
       await this.runLog.completeStep(stepLog.id, fallbackStepOutput(result.data, result.fallback), {
         modelCallLogId: result.modelCallLogId,
       });
@@ -1274,9 +1281,9 @@ export class PatchService {
         type: "step_completed",
         step,
         content: stepCopy(step, "completed"),
-        data: result.data,
+        data: attachDecisionTraceToStepData(result.data, decisionTrace),
       });
-      return result;
+      return { ...result, decisionTrace };
     } catch (error) {
       await this.runLog.failStep(stepLog.id, error);
       await this.stream.emit({

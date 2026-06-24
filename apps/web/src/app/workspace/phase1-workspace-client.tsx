@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { create } from "zustand";
 import {
   ChatPanel,
+  type VibeRunDebugEvent,
   type Phase1Message,
   type VibeRunStepStatus,
   type VibeRunTimelineItem,
@@ -887,8 +888,17 @@ function createInitialRunState(runId: string): VibeRunView {
     timeline: [
       {
         id: `${runId}:stream-connected`,
-        text: "我已收到你的请求，正在连接执行流。",
+        text: "我已收到你的请求，接下来会按执行事件逐步播报判断过程。",
         status: "running",
+      },
+    ],
+    debugEvents: [
+      {
+        id: `${runId}:stream-connected:debug`,
+        title: "执行流连接",
+        body: "前端已经拿到 runId，正在连接后端事件流。后续每个事件都会记录在这里。",
+        status: "running",
+        type: "stream_connected",
       },
     ],
   };
@@ -904,6 +914,7 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     currentLabel: event.content ?? metaSummary ?? current.currentLabel,
     steps: current.steps.map((step) => ({ ...step })),
     timeline: current.timeline ? [...current.timeline] : [],
+    debugEvents: current.debugEvents ? [...current.debugEvents] : [],
   };
 
   if (event.step) {
@@ -1028,7 +1039,10 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "failed" } : step);
   }
 
-  return appendTimelineItem(next, buildTimelineItem(event, next));
+  return appendDebugEvent(
+    appendTimelineItem(next, buildTimelineItem(event, next)),
+    buildDebugEvent(event, next),
+  );
 }
 
 function updateStep(
@@ -1075,6 +1089,16 @@ function appendTimelineItem(state: VibeRunView, item: VibeRunTimelineItem | null
   };
 }
 
+function appendDebugEvent(state: VibeRunView, item: VibeRunDebugEvent | null): VibeRunView {
+  if (!item) return state;
+  const debugEvents = state.debugEvents ?? [];
+  if (debugEvents.some((existing) => existing.id === item.id)) return state;
+  return {
+    ...state,
+    debugEvents: [...debugEvents, item],
+  };
+}
+
 function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunTimelineItem | null {
   const eventType = event.eventType ?? event.type;
   const payload = payloadRecord(event);
@@ -1088,6 +1112,8 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
   }
 
   if (eventType === "step_completed" && step) {
+    const traceText = decisionTraceTimelineText(payload);
+    if (traceText) return timelineItem(id, step, "done", traceText);
     return timelineItem(id, step, "done", stepCompletedText(step, stepTitle, payload));
   }
 
@@ -1191,6 +1217,191 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
   return null;
 }
 
+function buildDebugEvent(event: VibeStreamEvent, state: VibeRunView): VibeRunDebugEvent {
+  const eventType = event.eventType ?? event.type;
+  const payload = payloadRecord(event);
+  const payloadMeta = payloadMetaRecord(event);
+  const step = event.step;
+  const title = debugEventTitle(eventType, step);
+  const body = debugEventBody(event, payload, payloadMeta, state);
+  return {
+    id: `${event.eventId ?? `${eventType}:${step ?? "run"}:${event.createdAt ?? state.debugEvents?.length ?? 0}`}:debug`,
+    type: eventType,
+    step,
+    title,
+    body,
+    status: debugEventStatus(eventType),
+    createdAt: event.createdAt,
+    raw: serializeDebugEvent(event),
+  };
+}
+
+function debugEventTitle(eventType: string, step?: string) {
+  const stepTitle = step ? stepLabel(step) : undefined;
+  const eventLabels: Record<string, string> = {
+    step_started: "步骤开始",
+    step_completed: "步骤完成",
+    step_failed: "步骤失败",
+    fallback_used: "规则兜底",
+    message_delta: "过程消息",
+    state_updated: "产品状态更新",
+    state_version_created: "状态版本保存",
+    prd_updated: "PRD 更新",
+    prototype_updated: "原型更新",
+    patch_started: "局部修改开始",
+    patch_plan_created: "局部修改候选",
+    patch_applying: "局部修改应用中",
+    patch_completed: "局部修改完成",
+    patch_failed: "局部修改失败",
+    qa_completed: "QA 完成",
+    knowledge_candidate_created: "知识候选生成",
+    export_ready: "导出就绪",
+    run_completed: "本轮结束",
+    run_failed: "本轮失败",
+  };
+  return stepTitle ? `${eventLabels[eventType] ?? eventType}：${stepTitle}` : eventLabels[eventType] ?? eventType;
+}
+
+function debugEventStatus(eventType: string): VibeRunDebugEvent["status"] {
+  if (eventType.endsWith("_failed") || eventType === "run_failed" || eventType === "step_failed") return "failed";
+  if (eventType === "fallback_used") return "warning";
+  if (eventType.endsWith("_started") || eventType === "patch_applying" || eventType === "step_started") return "running";
+  if (eventType.endsWith("_completed") || eventType.endsWith("_updated") || eventType.endsWith("_created") || eventType === "run_completed" || eventType === "export_ready") return "done";
+  return "info";
+}
+
+function debugEventBody(
+  event: VibeStreamEvent,
+  payload: Record<string, unknown> | null,
+  payloadMeta: VibeStreamPayloadMeta | undefined,
+  state: VibeRunView,
+) {
+  const eventType = event.eventType ?? event.type;
+  const lines: string[] = [];
+  const visibleText = event.content || payloadMeta?.summary;
+  if (visibleText && !looksLikeStructuredData(visibleText)) {
+    lines.push(`后端说明：${normalizeTimelineText(visibleText)}`);
+  }
+
+  if (event.step) {
+    lines.push(`当前节点：${stepLabel(event.step)}。`);
+  }
+
+  if (eventType === "step_started" && event.step) {
+    lines.push(`执行思路：${stepThinkingText(event.step)}`);
+    lines.push(`下一步：等待该节点产出结果，再决定是否继续、澄清或阻断。`);
+  }
+
+  if (eventType === "step_completed" && event.step) {
+    const decisionTrace = decisionTraceRecord(payload);
+    if (decisionTrace) {
+      lines.push(...formatDecisionTrace(decisionTrace));
+    } else {
+      lines.push(`结果摘要：${stepCompletedText(event.step, stepLabel(event.step), payload)}`);
+      lines.push("下一步：把这个节点的结果交给后续节点继续处理。");
+    }
+  }
+
+  if (eventType === "fallback_used") {
+    const fallback = asRecord(payload);
+    lines.push(`兜底原因：${asText(fallback?.reason) || asText(fallback?.errorMessage) || "模型结果不可用或超时。"}`);
+    lines.push(`用户可见说明：${asText(fallback?.userMessage) || "系统已使用规则兜底继续执行。"}`);
+  }
+
+  if (eventType === "run_completed") {
+    const nextActionType = asText(asRecord(payload?.nextAction)?.type);
+    lines.push(`终态动作：${nextActionLabel(nextActionType)}。`);
+    lines.push(`当前摘要：${state.summary || "本轮执行已到达业务终态。"}`);
+  }
+
+  if (eventType === "run_failed") {
+    lines.push(`失败原因：${state.errorMessage || "后端返回 run_failed。"}`);
+  }
+
+  const metaParts = [
+    payloadMeta?.status ? `状态=${payloadMeta.status}` : "",
+    payloadMeta?.action ? `动作=${payloadMeta.action}` : "",
+    payloadMeta?.primaryId ? `主对象=${payloadMeta.primaryId}` : "",
+    payloadMeta?.counts ? `计数=${JSON.stringify(payloadMeta.counts)}` : "",
+  ].filter(Boolean);
+  if (metaParts.length) lines.push(`事件元信息：${metaParts.join("；")}。`);
+
+  if (payload) {
+    const keys = Object.keys(payload).slice(0, 12);
+    if (keys.length) lines.push(`原始 payload 字段：${keys.join("、")}。`);
+  }
+
+  return lines.length ? lines.join("\n") : "该事件没有附带额外说明，已记录原始事件供调试查看。";
+}
+
+function decisionTraceRecord(payload: Record<string, unknown> | null) {
+  return asRecord(payload?.decisionTrace);
+}
+
+function decisionTraceTimelineText(payload: Record<string, unknown> | null) {
+  const trace = decisionTraceRecord(payload);
+  if (!trace) return "";
+  const decision = asText(trace.decision);
+  const nextStep = asText(trace.nextStep);
+  const summary = asText(trace.summary);
+  return [
+    summary ? `判断完成：${summary}` : "",
+    decision ? `决策：${decision}` : "",
+    nextStep ? `下一步：${nextStep}` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function formatDecisionTrace(trace: Record<string, unknown>) {
+  const lines: string[] = [];
+  const summary = asText(trace.summary);
+  const decision = asText(trace.decision);
+  const nextStep = asText(trace.nextStep);
+  const generatedBy = trace.generatedBy === "model" ? "模型公开 trace" : "系统兜底 trace";
+
+  lines.push(`判断轨迹来源：${generatedBy}。`);
+  if (summary) lines.push(`判断摘要：${normalizeTimelineText(summary)}`);
+  appendTraceList(lines, "输入信号", trace.inputSignals);
+  appendTraceList(lines, "约束依据", trace.constraints);
+  appendTraceList(lines, "待确认假设", trace.assumptions);
+  appendTraceList(lines, "考虑过的路线", trace.alternativesConsidered);
+  if (decision) lines.push(`最终决策：${normalizeTimelineText(decision)}`);
+  appendTraceList(lines, "风险", trace.risks);
+  if (nextStep) lines.push(`下一步：${normalizeTimelineText(nextStep)}`);
+  return lines;
+}
+
+function appendTraceList(lines: string[], label: string, value: unknown) {
+  const items = Array.isArray(value)
+    ? value.map((item) => normalizeTimelineText(String(item ?? ""))).filter(Boolean).slice(0, 6)
+    : [];
+  if (!items.length) return;
+  lines.push(`${label}：`);
+  lines.push(...items.map((item) => `- ${item}`));
+}
+
+function serializeDebugEvent(event: VibeStreamEvent) {
+  const json = JSON.stringify(event, (_key, value) => {
+    if (typeof value === "string" && value.length > 4000) {
+      return `${value.slice(0, 4000)}...（已截断，完整内容请查后端事件日志）`;
+    }
+    return value;
+  }, 2);
+  return json.length > 12000 ? `${json.slice(0, 12000)}\n...（已截断，完整内容请查后端事件日志）` : json;
+}
+
+function nextActionLabel(value: string) {
+  const labels: Record<string, string> = {
+    confirm_patch: "等待你确认局部修改",
+    review_prd: "等待你确认 PRD",
+    review_prototype: "等待你确认原型",
+    review_qa: "等待你查看 QA",
+    ask_clarification: "等待你补充信息",
+    download_export: "导出文件可下载",
+    answer: "普通问答已回复",
+  };
+  return labels[value] ?? (value || "完成");
+}
+
 function timelineItem(
   id: string,
   step: string | undefined,
@@ -1243,19 +1454,36 @@ function toChineseProcessText(text: string) {
 
 function stepStartedText(step: string, title?: string) {
   const labels: Record<string, string> = {
-    intent_detection: "开始理解你的目标，判断这次应该走哪条链路。",
-    knowledge_retrieval: "开始检索知识库和规则，给后面的判断补上下文。",
-    requirement_analysis: "开始整理需求事实、缺失信息和可能的冲突。",
-    product_planning: "开始规划正式方案，确定页面、状态和执行范围。",
-    product_design: "开始把方案落到产品状态，作为后续产物的唯一来源。",
-    prd_generation: "开始生成 PRD 文档。",
-    prototype_design: "开始设计原型结构和交互关系。",
-    prototype_code_generation: "开始生成可预览的 HTML 原型。",
-    patch_planning: "开始规划局部修改方案。",
-    qa_check: "开始做 QA 检查，确认 PRD、原型和状态是否一致。",
-    knowledge_extraction: "开始抽取可复用知识候选。",
+    intent_detection: "执行思路：先判断这是新需求、继续生成、导出、问答还是局部修改；如果带选区，会优先识别选区意图。",
+    knowledge_retrieval: "执行思路：按意图检索强规则、默认规则、案例和可用 skills，后续生成必须参考这些依据。",
+    requirement_analysis: "执行思路：把用户明确事实、知识库事实和 AI 假设分开，检查是否缺少必须澄清的信息。",
+    product_planning: "执行思路：把需求包拆成页面、功能、状态、范围和风险，决定本轮要生成或修改什么。",
+    product_design: "执行思路：把方案写入产品状态，后续 PRD 和原型都从这个唯一事实源派生。",
+    prd_generation: "执行思路：只根据产品状态渲染 PRD，不临时编造状态里没有的业务规则。",
+    prototype_design: "执行思路：把产品状态转成页面、组件、导航和交互结构，还不生成 HTML。",
+    prototype_code_generation: "执行思路：根据原型结构生成可预览 HTML，保持单文件、无真实接口调用。",
+    patch_planning: "执行思路：先判断局部修改会影响哪些状态路径，再生成需要你确认的修改候选。",
+    qa_check: "执行思路：检查产品状态、PRD、原型和规则是否一致，只报告问题，不直接改产物。",
+    knowledge_extraction: "执行思路：只从稳定产物中抽取可复用知识候选，不直接写入正式知识库。",
   };
   return labels[step] ?? `开始执行：${title ?? step}。`;
+}
+
+function stepThinkingText(step: string) {
+  const labels: Record<string, string> = {
+    intent_detection: "识别用户动作、目标产物、是否依赖选区，以及是否应该进入生成链路。",
+    knowledge_retrieval: "查找会约束本轮输出的知识、规则、案例和技能路由。",
+    requirement_analysis: "区分已确认事实、系统上下文、假设、冲突和缺失项。",
+    product_planning: "规划范围、页面、状态覆盖、下游执行顺序、QA 关注点和风险。",
+    product_design: "把计划落到产品状态，保留 assumptions、knowledgeRefs、pendingQuestions 和 sourcePaths。",
+    prd_generation: "从产品状态渲染结构化 PRD，避免写接口、SQL、数据库或实现细节。",
+    prototype_design: "从产品状态设计原型结构，定义页面、组件、状态和交互。",
+    prototype_code_generation: "从原型结构生成 HTML，避免远程脚本、真实接口和生产承诺。",
+    patch_planning: "把选区修改转成作用于产品状态的 patch plan，并标出影响范围。",
+    qa_check: "检查 state/prd/prototype/html/knowledge 的一致性和阻断风险。",
+    knowledge_extraction: "从确认后的稳定内容里提炼候选知识，等待审核。",
+  };
+  return labels[step] ?? "记录该节点的输入、输出和下一步分支。";
 }
 
 function stepCompletedText(step: string, title: string | undefined, payload: Record<string, unknown> | null) {
