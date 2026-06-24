@@ -11,6 +11,7 @@ import {
   ProjectStatus,
   PrototypeArtifactStatus,
   PrototypeTargetDevice,
+  RequirementDocumentStatus,
   UserRole,
 } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -105,6 +106,7 @@ export class PrototypeService {
       ? await this.stateService.getStateByIdForProject(input.productDesignStateId, projectId)
       : await this.stateService.getCurrentState(projectId);
     if (!state) throw new NotFoundException("PROTOTYPE_STATE_NOT_FOUND");
+    assertPrototypeGenerationGate(state);
 
     const runId = `manual-prototype-${Date.now()}`;
     const spec = await this.prototypeDesignerAgent.run({
@@ -536,6 +538,17 @@ function isArtifactFromCurrentState(artifact: PrototypeArtifactRecord, state: Pr
   if (artifact.productDesignStateId !== state.id) return false;
   if (state.prototypeSpec?.id) return artifact.prototypeSpecId === state.prototypeSpec.id;
   return artifact.productDesignStateVersion === state.version;
+}
+
+function assertPrototypeGenerationGate(state: ProductDesignState) {
+  const statusAllowsPrototype =
+    state.status === ProductDesignStateStatus.doc_confirmed ||
+    state.status === ProductDesignStateStatus.prototype_ready ||
+    state.status === ProductDesignStateStatus.confirmed;
+  const prdConfirmed = state.prdDocument?.status === RequirementDocumentStatus.confirmed;
+  if (!statusAllowsPrototype || !prdConfirmed) {
+    throw new BadRequestException("PROTOTYPE_PRD_NOT_CONFIRMED");
+  }
 }
 
 function prototypeStateRoot(

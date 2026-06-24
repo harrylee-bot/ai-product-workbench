@@ -203,9 +203,9 @@ export class RequirementDocumentService {
     });
     const updatedDocument = this.toDocumentItem(updated as RequirementDocumentRecord);
     const version = await this.createVersion(updatedDocument, user.id, `局部编辑 PRD 段落：${sectionId}`);
-    await this.stateService.attachGeneratedArtifacts(updatedDocument.productDesignStateId, {
-      prdDocument: updatedDocument,
-      status: ProductDesignStateStatus.doc_ready,
+    await this.stateService.syncRequirementDocumentEdit({
+      document: updatedDocument,
+      section: sections.find((section) => section.id === sectionId) ?? updatedDocument.sections.find((section) => section.id === sectionId)!,
       userId: user.id,
       reason: `PRD 段落 ${sectionId} 已回流到 ProductDesignState`,
     });

@@ -241,6 +241,161 @@ describe("ProductDesignStateService", () => {
     expect(result.state.businessGoal).toBe("签到奖励采用积分");
   });
 
+  it("syncs scalar PRD section edits into ProductDesignState and invalidates stale prototype artifacts", async () => {
+    const current = baseState({
+      version: 3,
+      businessGoal: "提升用户活跃",
+      status: "confirmed",
+    });
+    const section = {
+      id: "business_goal",
+      title: "3. 业务目标",
+      type: "business_goal" as const,
+      level: 1 as const,
+      order: 3,
+      content: "提升签到转化率，并让运营能追踪连续签到效果。",
+      blocks: [
+        {
+          id: "business_goal_body",
+          type: "paragraph" as const,
+          content: "提升签到转化率，并让运营能追踪连续签到效果。",
+          sourcePaths: ["businessGoal"],
+        },
+      ],
+      sourcePaths: ["businessGoal"],
+    };
+    const document = {
+      id: "prd-1",
+      projectId: "project-1",
+      productDesignStateId: "state-1",
+      productDesignStateVersion: 3,
+      title: "签到活动 PRD",
+      status: "ready" as const,
+      sections: [section],
+      assumptions: [],
+      knowledgeRefs: [],
+      pendingQuestions: [],
+      validationNotes: [],
+      createdBy: "user-1",
+      updatedBy: "user-1",
+      createdAt: "2026-06-20T08:00:00.000Z",
+      updatedAt: "2026-06-20T09:00:00.000Z",
+    };
+    prisma.productDesignState.findUnique.mockResolvedValue(stateRecord(current));
+    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
+      stateRecord({
+        ...current,
+        ...data,
+        prototypeSpec: undefined,
+        prdDocument: data.prdDocument,
+        createdAt: new Date(current.createdAt),
+        updatedAt: new Date("2026-06-20T09:00:00Z"),
+      }),
+    );
+
+    const result = await service.syncRequirementDocumentEdit({
+      document,
+      section,
+      userId: "user-1",
+    });
+
+    expect(result.version).toBe(4);
+    expect(result.status).toBe(ProductDesignStateStatus.doc_ready);
+    expect(result.businessGoal).toBe("提升签到转化率，并让运营能追踪连续签到效果。");
+    expect(result.prototypeSpec).toBeUndefined();
+    expect(result.prdDocument).toEqual(expect.objectContaining({ id: "prd-1" }));
+    expect(result.confirmedFacts).toEqual([
+      expect.objectContaining({
+        content: "提升签到转化率，并让运营能追踪连续签到效果。",
+        relatedPath: "businessGoal",
+        confirmedBy: "user-1",
+        sourceDocumentId: "prd-1",
+        sourceSectionId: "business_goal",
+      }),
+    ]);
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: expect.objectContaining({
+        currentProductDesignStateId: "state-1",
+        status: ProjectStatus.prd_ready,
+      }),
+    });
+    expect(prisma.productDesignChangeLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        changeType: ProductDesignChangeType.update,
+        path: "prdDocument.sections.business_goal",
+      }),
+    });
+  });
+
+  it("records array PRD section edits as user-confirmed state revisions", async () => {
+    const current = baseState({
+      version: 4,
+      frontendRules: [{ id: "rule_initial", description: "默认可点击" }],
+    });
+    const section = {
+      id: "frontend_rules",
+      title: "9. 前端展示规则",
+      type: "frontend_rules" as const,
+      level: 1 as const,
+      order: 9,
+      content: "按钮文案改为立即签到，已签到后按钮置灰。",
+      sourcePaths: ["frontendRules"],
+    };
+    const document = {
+      id: "prd-1",
+      projectId: "project-1",
+      productDesignStateId: "state-1",
+      productDesignStateVersion: 4,
+      title: "签到活动 PRD",
+      status: "ready" as const,
+      sections: [section],
+      assumptions: [],
+      knowledgeRefs: [],
+      pendingQuestions: [],
+      validationNotes: [],
+      createdBy: "user-1",
+      updatedBy: "user-1",
+      createdAt: "2026-06-20T08:00:00.000Z",
+      updatedAt: "2026-06-20T09:00:00.000Z",
+    };
+    prisma.productDesignState.findUnique.mockResolvedValue(stateRecord(current));
+    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
+      stateRecord({
+        ...current,
+        ...data,
+        prototypeSpec: undefined,
+        prdDocument: data.prdDocument,
+        createdAt: new Date(current.createdAt),
+        updatedAt: new Date("2026-06-20T09:00:00Z"),
+      }),
+    );
+
+    const result = await service.syncRequirementDocumentEdit({
+      document,
+      section,
+      userId: "user-1",
+    });
+
+    expect(result.frontendRules).toEqual([
+      expect.objectContaining({ id: "rule_initial" }),
+      expect.objectContaining({
+        title: "9. 前端展示规则",
+        description: "按钮文案改为立即签到，已签到后按钮置灰。",
+        relatedPath: "frontendRules",
+        source: expect.objectContaining({ type: "user_confirmed", confidence: 1 }),
+      }),
+    ]);
+    expect(result.status).toBe(ProductDesignStateStatus.doc_ready);
+    expect(result.prototypeSpec).toBeUndefined();
+    expect(result.confirmedFacts).toEqual([
+      expect.objectContaining({
+        relatedPath: "frontendRules",
+        sourceSectionId: "frontend_rules",
+      }),
+    ]);
+  });
+
   it("restores ProductDesignState after patch failure with a rollback version", async () => {
     const beforePatch = baseState({
       version: 3,

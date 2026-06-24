@@ -44,6 +44,29 @@ export type AttachmentSummary = {
   extractedTextPreview?: string;
 };
 
+export type InputQualityDimension = {
+  score: number;
+  maxScore: number;
+  passedFloor: boolean;
+  findings: string[];
+};
+
+export type InputQualityAssessment = {
+  score: number;
+  status: "pass" | "suggest_optimize" | "must_optimize";
+  shouldBlock: boolean;
+  hardGateTriggered: boolean;
+  dimensions: {
+    productLogic: InputQualityDimension;
+    interactionDetail: InputQualityDimension;
+    userContext: InputQualityDimension;
+    formatCompleteness: InputQualityDimension;
+  };
+  warnings: string[];
+  suggestions: string[];
+  evaluatedAt: string;
+};
+
 export type KnowledgeReference = {
   id: string;
   knowledgeId?: string;
@@ -944,6 +967,7 @@ export type AgentRunContext = {
   productDesignState?: ProductDesignState;
   currentProjectStatus?: ProjectStatus;
   knowledgeContext?: KnowledgeContext;
+  inputQuality?: InputQualityAssessment;
   intentResult?: IntentResult;
   requirementAnalysis?: RequirementAnalysis;
   productBuildPlan?: ProductBuildPlan;

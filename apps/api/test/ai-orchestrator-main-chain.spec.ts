@@ -50,6 +50,9 @@ describe("AiOrchestrator main vibe chain", () => {
     project: {
       update: vi.fn(),
     },
+    decisionTrace: {
+      create: vi.fn(),
+    },
   };
   const intentAgent = { run: vi.fn() };
   const knowledgeAgent = { run: vi.fn() };
@@ -160,6 +163,11 @@ describe("AiOrchestrator main vibe chain", () => {
         nextAction: { type: "confirm_patch" },
       },
     });
+    prisma.decisionTrace.create.mockImplementation(async ({ data }) => ({
+      id: `decision-${data.sourceType}`,
+      ...data,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+    }));
   });
 
   it("生成 PRD 后停在确认门 A（review_prd），不连跑原型/QA", async () => {
@@ -201,6 +209,20 @@ describe("AiOrchestrator main vibe chain", () => {
       "state-1",
       expect.objectContaining({ status: "doc_ready" }),
     );
+    expect(prisma.decisionTrace.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: "project-1",
+        sourceType: "prd_generation",
+        sourceId: "prd-1",
+        selectedStrategy: "propose_prd_then_wait_for_confirmation",
+        output: expect.objectContaining({
+          decisionCard: expect.objectContaining({
+            title: "PRD 草案生成决策",
+          }),
+          nextGate: "review_prd",
+        }),
+      }),
+    });
     expect(prototypeDesignerAgent.run).not.toHaveBeenCalled();
     expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
     expect(qaService.runForProject).not.toHaveBeenCalled();
@@ -246,6 +268,43 @@ describe("AiOrchestrator main vibe chain", () => {
     expect(prototypeDesignerAgent.run).not.toHaveBeenCalled();
   });
 
+  it("blocks generation when attached requirement material fails the input quality gate", async () => {
+    const result = await service.run({
+      userMessageId: "message-1",
+      attachments: [
+        { fileId: "file-1", fileName: "需求文档模板.docx", fileType: "docx" },
+      ],
+      context: {
+        runId: "run-1",
+        projectId: "project-1",
+        conversationId: "conversation-1",
+        userId: "user-1",
+        userInput: "做一下这个需求",
+        recentMessages: [],
+        attachments: [
+          { fileId: "file-1", fileName: "需求文档模板.docx", fileType: "docx" },
+        ],
+        traceId: "trace-1",
+      },
+    });
+
+    expect(result.inputQuality).toEqual(expect.objectContaining({
+      status: "must_optimize",
+      shouldBlock: true,
+      hardGateTriggered: true,
+    }));
+    expect(result.nextAction?.type).toBe("ask_clarification");
+    expect(result.message).toContain("输入资料评分");
+    expect(knowledgeAgent.run).not.toHaveBeenCalled();
+    expect(productPlannerAgent.run).not.toHaveBeenCalled();
+    expect(prdWriterAgent.run).not.toHaveBeenCalled();
+    expect(prisma.decisionTrace.create).not.toHaveBeenCalled();
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: expect.objectContaining({ status: ProjectStatus.clarifying }),
+    });
+  });
+
   it("确认门 A 之后 confirmPrdAndContinue 生成原型、QA 并停在 review_prototype", async () => {
     const confirmedState = {
       ...baseState(),
@@ -282,6 +341,20 @@ describe("AiOrchestrator main vibe chain", () => {
       trigger: "initial_generation",
       runId: "run-2",
     }));
+    expect(prisma.decisionTrace.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        projectId: "project-1",
+        sourceType: "prototype_generation",
+        sourceId: "artifact-1",
+        selectedStrategy: "confirmed_prd_to_html_prototype",
+        output: expect.objectContaining({
+          decisionCard: expect.objectContaining({
+            title: "原型生成决策",
+          }),
+          nextGate: "review_prototype",
+        }),
+      }),
+    });
     expect(knowledgeExtractorAgent.run).toHaveBeenCalledWith(expect.objectContaining({
       input: expect.objectContaining({ confirmedByUser: false }),
     }));

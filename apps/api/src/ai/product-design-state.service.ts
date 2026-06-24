@@ -18,6 +18,7 @@ import type {
   PatchOperation,
   PatchPlan,
   ProductDesignDraft,
+  RequirementDocSection,
   RequirementDocument,
   ProductDesignState,
   PrototypeSpec,
@@ -655,6 +656,90 @@ export class ProductDesignStateService {
     return after;
   }
 
+  async syncRequirementDocumentEdit(input: {
+    document: RequirementDocument;
+    section: RequirementDocSection;
+    userId: string;
+    reason?: string;
+  }) {
+    const currentRecord = await this.prisma.productDesignState.findUnique({
+      where: { id: input.document.productDesignStateId },
+    });
+    if (!currentRecord) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
+
+    const before = this.toStateItem(currentRecord as ProductDesignStateRecord);
+    const next = this.cloneState(before);
+    const now = new Date().toISOString();
+    const content = prdSectionContent(input.section);
+    const changedPaths = content
+      ? syncPrdSectionContent(next, input.section, content, input.userId, now)
+      : [];
+
+    next.version = before.version + 1;
+    next.status = "doc_ready";
+    next.prdDocument = input.document;
+    next.prototypeSpec = undefined;
+    next.updatedBy = input.userId;
+    for (const path of changedPaths) {
+      next.confirmedFacts.push({
+        id: `confirmed_prd_${input.section.id}_${safeStateFactId(path)}_${Date.now()}`,
+        content,
+        relatedPath: path,
+        confirmedBy: input.userId,
+        confirmedAt: now,
+        sourceDocumentId: input.document.id,
+        sourceSectionId: input.section.id,
+      });
+      this.markSourceConfirmed(next, path);
+    }
+
+    const updated = await this.prisma.productDesignState.update({
+      where: { id: before.id },
+      data: {
+        version: next.version,
+        ...this.toPrismaStateData(next),
+        prdDocument: toInputJson(input.document),
+        prototypeSpec: Prisma.JsonNull,
+        updatedBy: input.userId,
+      },
+    });
+    const after = this.toStateItem(updated as ProductDesignStateRecord);
+    await this.prisma.project.update({
+      where: { id: after.projectId },
+      data: {
+        currentProductDesignStateId: after.id,
+        status: projectStatusFromProductDesignState(after),
+        lastActivityAt: new Date(),
+      },
+    });
+    await this.writeChangeLog({
+      projectId: after.projectId,
+      stateId: after.id,
+      changeType: ProductDesignChangeType.update,
+      path: `prdDocument.sections.${input.section.id}`,
+      before: {
+        prdDocument: before.prdDocument,
+        prototypeSpec: before.prototypeSpec,
+        status: before.status,
+        changedPaths,
+      },
+      after: {
+        prdDocument: after.prdDocument,
+        prototypeSpec: after.prototypeSpec,
+        status: after.status,
+        changedPaths,
+      },
+      reason: input.reason ?? `PRD 段落 ${input.section.id} 已回流到 ProductDesignState`,
+      createdBy: input.userId,
+    });
+    await this.createVersionSnapshot(
+      after,
+      input.userId,
+      input.reason ?? `PRD 段落 ${input.section.id} 已回流到 ProductDesignState`,
+    );
+    return after;
+  }
+
   async applyPatch(
     projectId: string,
     currentState: ProductDesignState,
@@ -1274,6 +1359,130 @@ export class ProductDesignStateService {
   private arrayOf<T>(value: unknown): T[] {
     return Array.isArray(value) ? (value as T[]) : [];
   }
+}
+
+function prdSectionContent(section: RequirementDocSection) {
+  const content = section.content.trim();
+  if (content) return content;
+  return (section.blocks ?? [])
+    .map((block) => block.content.trim())
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+}
+
+function syncPrdSectionContent(
+  state: ProductDesignState,
+  section: RequirementDocSection,
+  content: string,
+  userId: string,
+  now: string,
+) {
+  const paths = uniqueStrings([
+    ...(section.sourcePaths ?? []),
+    ...(section.sourceStatePaths ?? []),
+    ...(section.blocks ?? []).flatMap((block) => block.sourcePaths ?? []),
+  ]);
+  const changedPaths: string[] = [];
+
+  for (const path of paths) {
+    const normalized = normalizeStatePath(path);
+    const root = normalized[0];
+    if (!root || !isAllowedRoot(root)) continue;
+    if (root === "title") continue;
+
+    if (isScalarPrdPath(root)) {
+      (state as Record<string, unknown>)[root] = content;
+      changedPaths.push(root);
+      continue;
+    }
+
+    if (!isArrayPrdPath(root)) continue;
+    const rootItems = (state as Record<string, unknown>)[root];
+    if (!Array.isArray(rootItems)) continue;
+
+    const revision = manualPrdRevision(root, section, content, userId, now);
+    if (normalized.length === 1) {
+      rootItems.push(revision);
+      changedPaths.push(root);
+      continue;
+    }
+
+    const resolved = resolveStatePath(state, path);
+    if (!resolved.valid) continue;
+    if (Array.isArray(resolved.parent)) {
+      const index = Number(resolved.key);
+      if (!Number.isInteger(index) || index < 0 || index >= resolved.parent.length) continue;
+      resolved.parent[index] = mergePatchValue(resolved.parent[index], revision);
+      changedPaths.push(path);
+      continue;
+    }
+    if (resolved.parent && typeof resolved.parent === "object") {
+      const current = resolved.parent[resolved.key];
+      resolved.parent[resolved.key] =
+        current && typeof current === "object" && !Array.isArray(current)
+          ? mergePatchValue(current, revision)
+          : content;
+      changedPaths.push(path);
+    }
+  }
+
+  return uniqueStrings(changedPaths);
+}
+
+function manualPrdRevision(
+  rootPath: string,
+  section: RequirementDocSection,
+  content: string,
+  userId: string,
+  now: string,
+) {
+  return {
+    id: `manual_${rootPath}_${safeStateFactId(section.id)}_${Date.now()}`,
+    title: section.title,
+    description: content,
+    content,
+    relatedSectionId: section.id,
+    relatedPath: rootPath,
+    source: {
+      type: "user_confirmed",
+      confidence: 1,
+      note: "PRD 局部编辑回流",
+    },
+    updatedBy: userId,
+    updatedAt: now,
+  };
+}
+
+function isScalarPrdPath(path: string) {
+  return path === "summary" || path === "businessGoal" || path === "background";
+}
+
+function isArrayPrdPath(path: string) {
+  return [
+    "targetUsers",
+    "userScenarios",
+    "pages",
+    "features",
+    "backendConfigs",
+    "frontendRules",
+    "businessRules",
+    "stateRules",
+    "exceptionScenarios",
+    "acceptanceCriteria",
+    "assumptions",
+    "knowledgeRefs",
+    "pendingQuestions",
+    "confirmedFacts",
+  ].includes(path);
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function safeStateFactId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "path";
 }
 
 function normalizePatchOp(op: PatchOperation["op"] | NormalizedPatchOperation["op"] | string) {

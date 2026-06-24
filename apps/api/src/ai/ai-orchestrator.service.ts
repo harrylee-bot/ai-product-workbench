@@ -19,6 +19,7 @@ import type {
   AgentOutput,
   ExportArtifactSummary,
   AttachmentSummary,
+  InputQualityAssessment,
   IntentResult,
   KnowledgeContext,
   KnowledgeCandidate,
@@ -33,6 +34,7 @@ import type {
   RequirementAnalysis,
   RequirementDocument,
 } from "./ai-vibe.types";
+import { assessInputQuality } from "./input-quality-gate";
 import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
 import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
@@ -60,6 +62,14 @@ type OrchestratorInput = {
   attachments: AttachmentSummary[];
 };
 
+type DecisionCardSummary = {
+  id: string;
+  sourceType: string;
+  sourceId?: string;
+  title: string;
+  reasons: string[];
+};
+
 export type OrchestratorResult = {
   runId: string;
   projectId: string;
@@ -70,7 +80,9 @@ export type OrchestratorResult = {
   prototypeSpec?: PrototypeSpec;
   prototypeArtifact?: PrototypeArtifact;
   qaReport?: QAReport;
+  inputQuality?: InputQualityAssessment;
   productBuildPlan?: ProductBuildPlan;
+  decisionCards?: DecisionCardSummary[];
   patchPlan?: PatchPlan;
   patchRecord?: PatchRecord;
   patchPreview?: unknown;
@@ -142,6 +154,14 @@ export class AiOrchestratorService {
 
       if (intent.data.intent === UserIntent.export_word || intent.data.intent === UserIntent.export_html) {
         return this.finishExport(context, intent.data);
+      }
+
+      context.inputQuality = assessInputQuality(context.userInput, input.attachments);
+      await this.emit(context, "message_delta", `输入质量评分 ${context.inputQuality.score}/100`, {
+        inputQuality: context.inputQuality,
+      });
+      if (context.inputQuality.shouldBlock) {
+        return this.finishInputQualityGate(context, intent.data, context.inputQuality);
       }
 
       // FR-2.2 意图路由：已存在 PRD 文档且用户要求生成原型时，直接从原型阶段进入，
@@ -325,6 +345,26 @@ export class AiOrchestratorService {
         messageId: input.userMessageId,
         reason: "PRD 生成完成，等待用户确认（确认门 A）",
       });
+      const prdDecisionCard = await this.recordDecisionCard(context, {
+        sourceType: "prd_generation",
+        sourceId: prdDocument.id,
+        title: "PRD 草案生成决策",
+        selectedStrategy: "propose_prd_then_wait_for_confirmation",
+        reasons: [
+          "先生成结构化 PRD 草案，等待用户确认后再进入原型阶段。",
+          "PRD 只基于 ProductDesignState 输出，避免直接编造未确认业务规则。",
+          context.inputQuality
+            ? `输入质量评分 ${context.inputQuality.score}/100，状态为 ${context.inputQuality.status}。`
+            : "未触发输入质量评分。",
+        ],
+        objections: requirement.data.conflicts,
+        output: {
+          productDesignStateId: state.id,
+          productDesignStateVersion: state.version,
+          prdDocumentId: prdDocument.id,
+          nextGate: "review_prd",
+        },
+      });
 
       // 是否预约生成原型：generate_prd 仅要文档；其余（new_requirement / complete_requirement /
       // generate_prototype 一次性请求）默认接着要原型，但总体交互不变——仍先停在确认门 A。
@@ -340,7 +380,9 @@ export class AiOrchestratorService {
         message: gateMessage,
         productDesignState: state,
         prdDocument,
+        inputQuality: context.inputQuality,
         productBuildPlan,
+        decisionCards: [prdDecisionCard],
         nextAction: {
           type: "review_prd",
           wantsPrototype,
@@ -476,6 +518,25 @@ export class AiOrchestratorService {
       messageId: input.userMessageId,
       reason: "PRD 与 PrototypeSpec 生成完成",
     });
+    const prototypeDecisionCard = await this.recordDecisionCard(context, {
+      sourceType: "prototype_generation",
+      sourceId: savedPrototype.artifact.id,
+      title: "原型生成决策",
+      selectedStrategy: "confirmed_prd_to_html_prototype",
+      reasons: [
+        "检测到 PRD 已确认，允许从 ProductDesignState 继续生成原型规格。",
+        "Prototype Code Agent 仅基于 PrototypeSpec 输出单文件 HTML，保持原型与事实源可追踪。",
+        "原型生成后停在 review_prototype，由用户确认后才进入最终 confirmed 状态。",
+      ],
+      objections: [],
+      output: {
+        productDesignStateId: state.id,
+        productDesignStateVersion: state.version,
+        prototypeSpecId: prototypeSpec.data.id,
+        prototypeArtifactId: savedPrototype.artifact.id,
+        nextGate: "review_prototype",
+      },
+    });
 
     await this.emit(context, "message_delta", "正在进行一致性 QA 校验...");
     const qa = await this.runAgentStep(context, AgentName.qa_agent, "qa_check", async () => ({
@@ -530,7 +591,9 @@ export class AiOrchestratorService {
       prototypeSpec: prototypeSpec.data,
       prototypeArtifact: savedPrototype.artifact,
       qaReport: qa.data,
+      inputQuality: context.inputQuality,
       productBuildPlan: context.productBuildPlan,
+      decisionCards: [prototypeDecisionCard],
       knowledgeCandidates: knowledgeCandidates.data.candidates,
       nextAction: {
         type: qa.data.passed ? "review_prototype" : "review_qa",
@@ -667,6 +730,34 @@ export class AiOrchestratorService {
     return result;
   }
 
+  private async finishInputQualityGate(
+    context: AgentRunContext,
+    intent: IntentResult,
+    inputQuality: InputQualityAssessment,
+  ) {
+    const result: OrchestratorResult = {
+      runId: context.runId,
+      projectId: context.projectId,
+      intent,
+      message: `输入资料评分 ${inputQuality.score}/100，当前信息不足以稳定生成 PRD。请先补充关键业务规则和交互细节。`,
+      inputQuality,
+      nextAction: {
+        type: "ask_clarification",
+        questions: inputQuality.suggestions.map((suggestion, index) => ({
+          id: `input_quality_${index + 1}`,
+          title: suggestion,
+          reason: inputQuality.warnings[index] ?? "输入质量门禁要求补充后再生成。",
+          options: ["我补充具体内容", "按现有资料先生成草案", "重新上传附件"],
+          recommendedOption: "我补充具体内容",
+          status: "pending",
+          required: index === 0,
+        })),
+      },
+    };
+    await this.finishRun(context, result, ProjectStatus.clarifying);
+    return result;
+  }
+
   private async finishPatchCandidate(
     context: AgentRunContext,
     input: OrchestratorInput,
@@ -723,7 +814,9 @@ export class AiOrchestratorService {
         prototypeSpec: result.prototypeSpec,
         prototypeArtifact: result.prototypeArtifact,
         qaReport: result.qaReport,
+        inputQuality: result.inputQuality,
         productBuildPlan: result.productBuildPlan,
+        decisionCards: result.decisionCards,
         patchPlan: result.patchPlan,
         patchRecord: result.patchRecord,
         patchPreview: result.patchPreview,
@@ -782,12 +875,80 @@ export class AiOrchestratorService {
     return result;
   }
 
-  private async emit(context: AgentRunContext, type: "message_delta", content: string) {
+  private async recordDecisionCard(
+    context: AgentRunContext,
+    input: {
+      sourceType: string;
+      sourceId?: string;
+      title: string;
+      selectedStrategy: string;
+      reasons: string[];
+      objections?: unknown;
+      output: Record<string, unknown>;
+    },
+  ): Promise<DecisionCardSummary> {
+    const created = await this.prisma.decisionTrace.create({
+      data: {
+        projectId: context.projectId,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+        intent: context.intentResult?.intent,
+        strategies: toInputJson([
+          {
+            id: input.selectedStrategy,
+            name: input.title,
+            description: input.reasons.join(" "),
+          },
+        ]),
+        selectedStrategy: input.selectedStrategy,
+        selectedStrategyId: input.selectedStrategy,
+        reviewResult: toInputJson({
+          title: input.title,
+          reasons: input.reasons,
+          generatedAt: new Date().toISOString(),
+        }),
+        finalOutcome: "partial",
+        metrics: toInputJson({
+          qaPassed: false,
+          userFeedbackScore: 0,
+          executionTime: 0,
+        }),
+        scores: toInputJson({
+          inputQuality: context.inputQuality,
+        }),
+        objections: toInputJson(input.objections ?? []),
+        input: toInputJson({
+          userInput: context.userInput,
+          inputQuality: context.inputQuality,
+          productBuildPlanId: context.productBuildPlan?.id,
+        }),
+        output: toInputJson({
+          decisionCard: {
+            title: input.title,
+            reasons: input.reasons,
+          },
+          ...input.output,
+        }),
+        generatedByRunId: context.runId,
+        createdBy: context.userId,
+      },
+    });
+    return {
+      id: created.id,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      title: input.title,
+      reasons: input.reasons,
+    };
+  }
+
+  private async emit(context: AgentRunContext, type: "message_delta", content: string, data?: unknown) {
     await this.stream.emit({
       runId: context.runId,
       projectId: context.projectId,
       type,
       content,
+      data,
     });
   }
 }

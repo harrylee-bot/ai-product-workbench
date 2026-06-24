@@ -219,7 +219,10 @@ describe("HTML prototype artifact module", () => {
   });
 
   it("syncs manual prototype generation back into ProductDesignState", async () => {
-    const state = baseState();
+    const state = baseState({
+      status: "doc_confirmed",
+      prdDocument: basePrd({ status: "confirmed" }),
+    });
     const spec = renderPrototypeSpecFromState(state, "both", "run-1");
     stateService.getCurrentState.mockResolvedValue(state);
     prototypeDesignerAgent.run.mockResolvedValue({ data: spec });
@@ -245,6 +248,22 @@ describe("HTML prototype artifact module", () => {
       reason: "手动生成 HTML 原型后同步 ProductDesignState",
     }));
     expect(result.productDesignState.prototypeSpec.id).toBe(spec.id);
+  });
+
+  it("blocks manual prototype generation before the PRD confirmation gate", async () => {
+    const state = baseState({
+      status: "doc_ready",
+      prdDocument: basePrd({ status: "ready" }),
+    });
+    stateService.getCurrentState.mockResolvedValue(state);
+
+    await expect(
+      service.generateForUser(user, "project-1", { targetDevice: "both" }),
+    ).rejects.toThrow("PROTOTYPE_PRD_NOT_CONFIRMED");
+
+    expect(prototypeDesignerAgent.run).not.toHaveBeenCalled();
+    expect(prototypeCodeAgent.run).not.toHaveBeenCalled();
+    expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
   });
 
   it("hides a stale current prototype artifact when it no longer matches ProductDesignState", async () => {
@@ -377,6 +396,26 @@ function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignSt
     status: "prototype_ready",
     createdBy: "user-1",
     updatedBy: "user-1",
+    createdAt: "2026-06-20T08:00:00.000Z",
+    updatedAt: "2026-06-20T08:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function basePrd(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "prd-1",
+    projectId: "project-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 3,
+    title: "签到活动 PRD",
+    status: "confirmed",
+    sections: [],
+    assumptions: [],
+    knowledgeRefs: [],
+    pendingQuestions: [],
+    validationNotes: [],
+    createdBy: "user-1",
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
     ...overrides,

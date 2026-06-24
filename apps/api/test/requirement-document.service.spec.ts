@@ -27,6 +27,7 @@ describe("PRD requirement document module", () => {
     getCurrentState: vi.fn(),
     getStateByIdForProject: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
+    syncRequirementDocumentEdit: vi.fn(),
   };
   const prdWriterAgent = {
     run: vi.fn(),
@@ -66,6 +67,13 @@ describe("PRD requirement document module", () => {
       version: 4,
       status: input.status,
       prdDocument: input.prdDocument,
+    }));
+    stateService.syncRequirementDocumentEdit.mockImplementation(async (input) => ({
+      ...baseState(),
+      version: 4,
+      status: "doc_ready",
+      prdDocument: input.document,
+      prototypeSpec: undefined,
     }));
     prdWriterAgent.run.mockResolvedValue({ data: renderPrdFromState(baseState()) });
   });
@@ -231,9 +239,13 @@ describe("PRD requirement document module", () => {
         reason: "局部编辑 PRD 段落：business_goal",
       }),
     });
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
-      prdDocument: expect.objectContaining({ id: "prd-1", status: "ready" }),
-      status: "doc_ready",
+    expect(stateService.syncRequirementDocumentEdit).toHaveBeenCalledWith(expect.objectContaining({
+      document: expect.objectContaining({ id: "prd-1", status: "ready" }),
+      section: expect.objectContaining({
+        id: "business_goal",
+        content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
+      }),
+      userId: "user-1",
       reason: "PRD 段落 business_goal 已回流到 ProductDesignState",
     }));
   });
