@@ -51,14 +51,35 @@ export type VibeRunDebugEvent = {
   createdAt?: string;
 };
 
+export type VibeClarificationQuestion = {
+  id: string;
+  title: string;
+  question?: string;
+  reason: string;
+  options: string[];
+  recommendedOption?: string;
+  recommendation?: string;
+  required?: boolean;
+  status?: "pending" | "answered" | "skipped";
+};
+
 export type VibeRunView = {
   runId?: string;
-  status: "idle" | "running" | "waiting_confirmation" | "waiting_prd_confirm" | "waiting_prototype_confirm" | "completed" | "failed";
+  status:
+    | "idle"
+    | "running"
+    | "waiting_clarification"
+    | "waiting_confirmation"
+    | "waiting_prd_confirm"
+    | "waiting_prototype_confirm"
+    | "completed"
+    | "failed";
   currentLabel?: string;
   summary?: string;
   steps: VibeRunStepView[];
   timeline?: VibeRunTimelineItem[];
   debugEvents?: VibeRunDebugEvent[];
+  clarificationQuestions?: VibeClarificationQuestion[];
   knowledgeHitCount?: number;
   qaIssueCount?: number;
   qaGateStatus?: "open" | "warning" | "blocked";
@@ -124,7 +145,7 @@ export function ChatPanel({
             <div
               key={message.id}
               className={[
-                "w-fit max-w-[min(86%,_720px)] rounded-[12px] px-3 py-2 text-sm leading-6 shadow-[var(--shadow-control)]",
+                "w-fit max-w-[min(86%,_720px)] whitespace-pre-wrap rounded-[12px] px-3 py-2 text-sm leading-6 shadow-[var(--shadow-control)]",
                 message.role === "user"
                   ? "ml-auto bg-[var(--color-primary)] text-white"
                   : "mr-auto border border-gray-200 bg-white text-gray-700",
@@ -150,6 +171,7 @@ export function ChatPanel({
             onConfirmPrd={onConfirmPrd}
             confirmingPrototypeId={confirmingPrototypeId}
             onConfirmPrototype={onConfirmPrototype}
+            onSendClarification={onSend}
           />
         ) : null}
       </div>
@@ -167,6 +189,7 @@ function ExecutionPathCard({
   onConfirmPrd,
   confirmingPrototypeId,
   onConfirmPrototype,
+  onSendClarification,
 }: {
   runState: VibeRunView;
   running: boolean;
@@ -176,9 +199,11 @@ function ExecutionPathCard({
   onConfirmPrd?: (wantsPrototype: boolean) => Promise<void> | void;
   confirmingPrototypeId?: string;
   onConfirmPrototype?: (artifactId: string) => Promise<void> | void;
+  onSendClarification?: (content: string) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
   const completed = runState.status === "completed";
+  const waitingForClarification = runState.status === "waiting_clarification";
   const waitingForConfirmation = runState.status === "waiting_confirmation";
   const waitingForPrdConfirm = runState.status === "waiting_prd_confirm";
   const waitingForPrototypeConfirm = runState.status === "waiting_prototype_confirm";
@@ -193,7 +218,7 @@ function ExecutionPathCard({
     ?? runState.steps[0];
   const timeline = runState.timeline ?? [];
   const doneCount = runState.steps.filter((step) => step.status === "done").length;
-  const settledLike = completed || waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm;
+  const settledLike = completed || waitingForClarification || waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm;
   const progress = settledLike
     ? 100
     : Math.max(4, Math.round((doneCount / Math.max(runState.steps.length, 1)) * 100));
@@ -205,10 +230,18 @@ function ExecutionPathCard({
       ? runState.summary ?? "原型已生成，请确认无误"
     : waitingForConfirmation
       ? runState.summary ?? "Patch 候选已生成，等待确认"
+    : waitingForClarification
+      ? runState.summary ?? "需要先确认几个问题"
       : running
       ? runState.currentLabel ?? `正在执行：${activeStep?.title ?? "Vibe 智能编排"}`
       : runState.summary ?? "运行已完成";
-  const waitingLabel = waitingForPrdConfirm ? "待确认 PRD" : waitingForPrototypeConfirm ? "待确认原型" : "待确认";
+  const waitingLabel = waitingForClarification
+    ? "待补充"
+    : waitingForPrdConfirm
+      ? "待确认 PRD"
+      : waitingForPrototypeConfirm
+        ? "待确认原型"
+        : "待确认";
 
   return (
     <div className="mr-auto max-w-[96%] overflow-hidden rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-control)]">
@@ -227,7 +260,7 @@ function ExecutionPathCard({
           </span>
         </span>
         <Badge tone={failed ? "danger" : completed ? "success" : "warning"}>
-          {failed ? "失败" : waitingForPrdConfirm || waitingForPrototypeConfirm ? waitingLabel : waitingForConfirmation ? "待确认" : completed ? "已完成" : `${doneCount + 1}/${runState.steps.length}`}
+          {failed ? "失败" : waitingForClarification || waitingForPrdConfirm || waitingForPrototypeConfirm ? waitingLabel : waitingForConfirmation ? "待确认" : completed ? "已完成" : `${doneCount + 1}/${runState.steps.length}`}
         </Badge>
         <ChevronDown className={["h-4 w-4 text-gray-400 transition", open ? "rotate-180" : ""].join(" ")} />
       </button>
@@ -255,6 +288,49 @@ function ExecutionPathCard({
               <div key={item.id} className="flex gap-2 text-xs leading-5">
                 <TimelineIcon item={item} />
                 <span className="min-w-0 flex-1 text-gray-700">{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {waitingForClarification && runState.clarificationQuestions?.length ? (
+        <div className="border-t border-amber-100 bg-amber-50 px-3 py-2.5">
+          <div className="mb-2 flex items-center justify-between gap-2 text-xs text-amber-900">
+            <span className="font-semibold">需要确认的问题</span>
+            <span>{runState.clarificationQuestions.length} 个</span>
+          </div>
+          <div className="space-y-2">
+            {runState.clarificationQuestions.map((question, index) => (
+              <div key={question.id} className="rounded-lg border border-amber-200 bg-white px-2.5 py-2 text-xs">
+                <div className="font-semibold leading-5 text-gray-950">
+                  {index + 1}. {question.question || question.title}
+                  {question.required ? <span className="ml-1 text-amber-600">必答</span> : null}
+                </div>
+                <div className="mt-1 leading-5 text-gray-600">{question.reason}</div>
+                {question.options.length ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {question.options.map((option) => {
+                      const recommended = option === question.recommendedOption || option === question.recommendation;
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => void onSendClarification?.(`针对「${question.question || question.title}」，我选择：${option}`)}
+                          className={[
+                            "rounded-md border px-2 py-1 text-left text-xs leading-4 transition focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10",
+                            recommended
+                              ? "border-amber-300 bg-amber-100 text-amber-950 hover:bg-amber-200"
+                              : "border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100",
+                          ].join(" ")}
+                        >
+                          {option}
+                          {recommended ? "（推荐）" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -325,7 +401,7 @@ function ExecutionPathCard({
                 <Bot className="h-3.5 w-3.5" />
                 详细步骤
               </span>
-              <span>{failed ? "失败" : waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm ? "待确认" : completed ? "成功" : "处理中"}</span>
+              <span>{failed ? "失败" : waitingForClarification ? "待补充" : waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm ? "待确认" : completed ? "成功" : "处理中"}</span>
             </div>
             <div className="space-y-2">
               {runState.steps.map((step) => {

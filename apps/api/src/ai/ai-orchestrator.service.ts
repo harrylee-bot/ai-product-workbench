@@ -807,10 +807,11 @@ export class AiOrchestratorService {
     result: OrchestratorResult,
     projectStatus: ProjectStatus,
   ) {
+    const assistantContent = formatAssistantRunMessage(result);
     await this.messageService.createAssistantMessage({
       projectId: context.projectId,
       conversationId: context.conversationId,
-      content: result.message,
+      content: assistantContent,
       type: MessageType.agent_summary,
       metadata: toInputJson({
         runId: context.runId,
@@ -998,6 +999,44 @@ function stateSummary(state: ProductDesignState) {
     },
     updatedAt: state.updatedAt,
   };
+}
+
+function formatAssistantRunMessage(result: OrchestratorResult) {
+  if (result.nextAction?.type !== "ask_clarification") return result.message;
+  const questions = result.nextAction.questions ?? [];
+  if (!questions.length) return result.message;
+
+  return [
+    result.message,
+    "",
+    ...questions.map((question, index) => formatClarificationQuestion(question, index)),
+  ].join("\n");
+}
+
+function formatClarificationQuestion(value: unknown, index: number) {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const title = textValue(record.question) || textValue(record.title) || `请确认问题 ${index + 1}`;
+  const reason = textValue(record.reason);
+  const options = Array.isArray(record.options)
+    ? record.options.map((option) => String(option ?? "").trim()).filter(Boolean)
+    : [];
+  const recommended = textValue(record.recommendedOption) || textValue(record.recommendation);
+  const lines = [`${index + 1}. ${title}`];
+  if (reason) lines.push(`原因：${reason}`);
+  if (options.length) {
+    lines.push("选项：");
+    lines.push(...options.map((option, optionIndex) => {
+      const suffix = recommended && option === recommended ? "（推荐）" : "";
+      return `${optionIndex + 1}. ${option}${suffix}`;
+    }));
+  }
+  return lines.join("\n");
+}
+
+function textValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function hasConfirmedPrdForPrototype(state: ProductDesignState | undefined) {

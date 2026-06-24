@@ -6,6 +6,7 @@ import { create } from "zustand";
 import {
   ChatPanel,
   type VibeRunDebugEvent,
+  type VibeClarificationQuestion,
   type Phase1Message,
   type VibeRunStepStatus,
   type VibeRunTimelineItem,
@@ -1026,6 +1027,14 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
       next.status = "waiting_prototype_confirm";
       next.prototypeArtifactId = asText(prototypeArtifact?.id) ?? asText(refs?.prototypeArtifactId) ?? next.prototypeArtifactId;
       next.summary = asText(payload?.message) ?? event.content ?? metaSummary ?? "原型已生成，请确认无误";
+    } else if (nextActionType === "ask_clarification") {
+      const questions = normalizeClarificationQuestions(nextAction?.questions);
+      next.status = "waiting_clarification";
+      next.clarificationQuestions = questions;
+      next.summary = asText(payload?.message)
+        || event.content
+        || metaSummary
+        || (questions.length ? `需要先确认 ${questions.length} 个问题` : "需要先补充关键信息");
     } else {
       next.status = "completed";
       next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
@@ -1205,7 +1214,13 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
       return timelineItem(id, step, "done", "导出任务已完成，可以下载文件。");
     }
     if (nextActionType === "ask_clarification") {
-      return timelineItem(id, step, "warning", "我还需要你补充几个关键信息，才能继续生成。");
+      const questionCount = readArrayLength(asRecord(payload?.nextAction)?.questions);
+      return timelineItem(
+        id,
+        step,
+        "warning",
+        questionCount ? `我还需要你确认 ${questionCount} 个问题，才能继续生成。` : "我还需要你补充几个关键信息，才能继续生成。",
+      );
     }
     return timelineItem(id, step, "done", state.summary ?? "本轮执行已完成。");
   }
@@ -1535,6 +1550,33 @@ function qaGateSummary(gate: Record<string, unknown> | null | undefined) {
     gate.allowExportOrPublish === false ? "禁止导出/发布" : "可导出/发布",
   ];
   return parts.join("；");
+}
+
+function normalizeClarificationQuestions(value: unknown): VibeClarificationQuestion[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      const record = asRecord(item) ?? {};
+      const title = asText(record.title) || asText(record.question) || `请确认问题 ${index + 1}`;
+      const question = asText(record.question) || title;
+      const options = Array.isArray(record.options)
+        ? record.options.map((option) => String(option ?? "").trim()).filter(Boolean)
+        : [];
+      const status: VibeClarificationQuestion["status"] =
+        record.status === "answered" || record.status === "skipped" ? record.status : "pending";
+      return {
+        id: asText(record.id) || `clarify_${index + 1}`,
+        title,
+        question,
+        reason: asText(record.reason) || "该问题会影响 PRD 和原型范围。",
+        options,
+        recommendedOption: asText(record.recommendedOption),
+        recommendation: asText(record.recommendation),
+        required: Boolean(record.required),
+        status,
+      };
+    })
+    .filter((item) => item.title);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
