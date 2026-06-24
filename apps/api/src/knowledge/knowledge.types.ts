@@ -26,6 +26,8 @@ export type KnowledgeRetrievalResult = {
   type: KnowledgeType;
   priority: KnowledgePriority;
   score: number;
+  keywordScore?: number;
+  semanticScore?: number;
   reason: string;
 };
 

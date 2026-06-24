@@ -266,6 +266,47 @@ export type RequirementSafetyCheckResult = {
   summary: string;
 };
 
+export type RequirementIntakeNodeName =
+  | "intent"
+  | "knowledge"
+  | "context_fetch"
+  | "requirement"
+  | "planner"
+  | "validator"
+  | "safety"
+  | "gate";
+
+export type RequirementIntakeNode = {
+  id: string;
+  name: RequirementIntakeNodeName;
+  title: string;
+  agent: string;
+  status: "completed" | "warning" | "blocked";
+  inputRefs: string[];
+  outputRefs: string[];
+  summary: string;
+  decisionTrace?: AgentDecisionTrace;
+};
+
+export type RequirementIntakeEdge = {
+  from: RequirementIntakeNodeName;
+  to: RequirementIntakeNodeName;
+  mode: "sync" | "async" | "shared_input";
+  summary: string;
+};
+
+export type RequirementIntakeGraph = {
+  schema: "requirement.intake.graph.v1";
+  runId: string;
+  projectId: string;
+  requirementPackageId: string;
+  productBuildPlanId?: string;
+  gateAction: RequirementGateDecision["action"];
+  nodes: RequirementIntakeNode[];
+  edges: RequirementIntakeEdge[];
+  summary: string;
+};
+
 export type RequirementGateDecision = {
   action: "continue" | "degraded_continue" | "ask_clarification" | "blocked" | "failed";
   reasons: string[];
@@ -277,6 +318,7 @@ export type RequirementGateDecision = {
   requirementPackage: RequirementPackage;
   validation: RequirementValidationResult;
   safety: RequirementSafetyCheckResult;
+  intakeGraph?: RequirementIntakeGraph;
 };
 
 export type ProductBuildPlanPriority = "must" | "should" | "could";
@@ -1101,6 +1143,7 @@ export type AgentRunContext = {
   requirementValidation?: RequirementValidationResult;
   requirementSafety?: RequirementSafetyCheckResult;
   requirementGateDecision?: RequirementGateDecision;
+  requirementIntakeGraph?: RequirementIntakeGraph;
   productBuildPlan?: ProductBuildPlan;
   fallbackEvents?: AgentFallbackMetadata[];
   traceId: string;

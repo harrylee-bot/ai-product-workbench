@@ -1,7 +1,9 @@
 import { UserIntent } from "@prisma/client";
 import { stableId, summarizeText } from "./ai-vibe.helpers";
 import type {
+  AgentDecisionTrace,
   AgentRunContext,
+  AgentStepName,
   AttachmentSummary,
   ClarificationQuestion,
   ContextFetchResult,
@@ -11,6 +13,9 @@ import type {
   RequirementAnalysis,
   RequirementFlowType,
   RequirementGateDecision,
+  RequirementIntakeGraph,
+  RequirementIntakeNode,
+  RequirementIntakeNodeName,
   RequirementPackage,
   RequirementSafetyCheckResult,
   RequirementValidationResult,
@@ -45,6 +50,15 @@ type DecideGateInput = {
   safety: RequirementSafetyCheckResult;
   productBuildPlan?: ProductBuildPlan;
   fallbackUsed: boolean;
+};
+
+type BuildIntakeGraphInput = {
+  context: AgentRunContext;
+  requirementPackage: RequirementPackage;
+  validation: RequirementValidationResult;
+  safety: RequirementSafetyCheckResult;
+  gate: RequirementGateDecision;
+  productBuildPlan?: ProductBuildPlan;
 };
 
 export function buildContextFetchResult({
@@ -84,6 +98,267 @@ export function buildContextFetchResult({
     traceRefs,
     retrievedAt: new Date().toISOString(),
     summary: summarizeContext(state, recentMessages.length, attachments.length, context.selectedRegion),
+  };
+}
+
+export function buildRequirementIntakeGraph({
+  context,
+  requirementPackage,
+  validation,
+  safety,
+  gate,
+  productBuildPlan,
+}: BuildIntakeGraphInput): RequirementIntakeGraph {
+  const intent = context.intentResult;
+  const knowledge = context.knowledgeContext;
+  const contextFetch = context.contextFetch;
+  const requirement = context.requirementAnalysis;
+  const nodes: RequirementIntakeNode[] = [
+    {
+      id: `${context.runId}:intent`,
+      name: "intent",
+      title: "Intent",
+      agent: "Intent Agent",
+      status: intent?.isAmbiguous ? "warning" : "completed",
+      inputRefs: ["userInput", "selectedRegion", "recentMessages"],
+      outputRefs: ["IntentResult.intent", "IntentResult.requiresSelection"],
+      summary: intent
+        ? `识别为 ${intent.intent}，置信度 ${Math.round(intent.confidence * 100)}%。${intent.reason}`
+        : "尚未记录意图识别结果。",
+      decisionTrace: context.intentResult
+        ? buildPublicTrace({
+            summary: "Intent Agent 完成意图路由。",
+            inputSignals: [
+              context.userInput ? `用户输入：${summarizeText(context.userInput, 140)}` : "",
+              context.selectedRegion ? `存在选区：${context.selectedRegion.label ?? context.selectedRegion.type}` : "无选区",
+            ],
+            constraints: ["Intent 只决定路线，不生成 PRD、原型或 Patch。"],
+            assumptions: [],
+            alternativesConsidered: ["正式需求", "局部修改", "普通问答", "导出"],
+            decision: `进入 ${context.intentResult.intent} 路线。`,
+            risks: context.intentResult.isAmbiguous ? ["意图存在歧义，后续节点需要保留澄清可能。"] : [],
+            nextStep: "并行启动 Knowledge 和 Context Fetch。",
+          })
+        : undefined,
+    },
+    {
+      id: `${context.runId}:knowledge`,
+      name: "knowledge",
+      title: "Knowledge",
+      agent: "Knowledge Agent",
+      status: knowledge?.conflicts.length ? "warning" : "completed",
+      inputRefs: ["userInput", "intent", "attachments", "productDesignState"],
+      outputRefs: ["KnowledgeContext.summary", "KnowledgeContext.references", "KnowledgeContext.skillRouting"],
+      summary: knowledge
+        ? `${knowledge.summary} 命中知识 ${knowledgeItemCount(knowledge)} 条，skill 路由 ${knowledge.skillRouting?.length ?? 0} 条。`
+        : "尚未记录知识检索结果。",
+      decisionTrace: knowledge
+        ? buildPublicTrace({
+            summary: "Knowledge Agent 完成知识、规则、案例和 skills 检索。",
+            inputSignals: [
+              `查询：${knowledge.query}`,
+              `命中知识 ${knowledgeItemCount(knowledge)} 条。`,
+              `unknownAreas ${knowledge.unknownAreas.length} 个。`,
+            ],
+            constraints: knowledge.strongRules.slice(0, 4).map((item) => item.title),
+            assumptions: knowledge.unknownAreas.slice(0, 4),
+            alternativesConsidered: ["使用强规则", "使用默认规则", "使用案例", "无命中时按最佳实践并标记假设"],
+            decision: "将知识上下文交给 Requirement Analyst 和 Planner 共享使用。",
+            risks: knowledge.conflicts.map((item) => item.description).slice(0, 4),
+            nextStep: "等待 Context Fetch 并进入 Requirement。",
+          })
+        : undefined,
+    },
+    {
+      id: `${context.runId}:context_fetch`,
+      name: "context_fetch",
+      title: "Context Fetch",
+      agent: "Context Fetch",
+      status: "completed",
+      inputRefs: ["projectId", "conversationId", "selectedRegion", "attachments"],
+      outputRefs: ["ContextFetchResult.project", "ContextFetchResult.conversation", "ContextFetchResult.existingState"],
+      summary: contextFetch?.summary ?? "尚未记录上下文抓取结果。",
+      decisionTrace: contextFetch
+        ? buildPublicTrace({
+            summary: "Context Fetch 完成项目上下文读取。",
+            inputSignals: [
+              `项目：${contextFetch.project.id}`,
+              `最近对话 ${contextFetch.conversation.recentMessages.length} 条。`,
+              contextFetch.existingState
+                ? `已有状态：${contextFetch.existingState.title} v${contextFetch.existingState.version}`
+                : "当前没有已有产品状态。",
+              contextFetch.selectedRegion ? `选区：${contextFetch.selectedRegion.label ?? contextFetch.selectedRegion.type}` : "",
+            ],
+            constraints: ["Context Fetch 只读取上下文，不做业务判断。"],
+            assumptions: [],
+            alternativesConsidered: ["读取已有状态", "读取对话上下文", "读取附件摘要", "读取选区"],
+            decision: "将上下文事实交给 RequirementPackage。",
+            risks: [],
+            nextStep: "进入 Requirement 分析与需求包整理。",
+          })
+        : undefined,
+    },
+    {
+      id: `${context.runId}:requirement`,
+      name: "requirement",
+      title: "Requirement",
+      agent: "Requirement Analyst",
+      status: requirementPackage.readiness === "blocked"
+        ? "blocked"
+        : requirementPackage.readiness === "needs_clarification"
+          ? "warning"
+          : "completed",
+      inputRefs: ["IntentResult", "KnowledgeContext", "ContextFetchResult", "userInput"],
+      outputRefs: ["RequirementAnalysis", "RequirementPackage"],
+      summary: requirementPackage.summary,
+      decisionTrace: buildPublicTrace({
+        summary: "Requirement 将用户事实、知识事实、上下文事实和 AI 假设合并为同一份需求包。",
+        inputSignals: [
+          `用户事实 ${requirementPackage.userFacts.length} 条。`,
+          `知识事实 ${requirementPackage.knowledgeFacts.length} 条。`,
+          `上下文事实 ${requirementPackage.contextFacts.length} 条。`,
+          `需求完整度 ${requirement?.completenessScore ?? "未知"}。`,
+        ],
+        constraints: requirementPackage.constraints.slice(0, 6),
+        assumptions: requirementPackage.assumptions.slice(0, 6),
+        alternativesConsidered: ["继续规划", "先澄清", "阻断不可执行输入"],
+        decision: `RequirementPackage.readiness=${requirementPackage.readiness}`,
+        risks: requirementPackage.conflicts.slice(0, 6),
+        nextStep: "Planner、Validator 和 Safety Check 消费同一份 RequirementPackage。",
+      }),
+    },
+    {
+      id: `${context.runId}:planner`,
+      name: "planner",
+      title: "Planner",
+      agent: "Product Planner",
+      status: productBuildPlan ? "completed" : requirementPackage.flowType === "patch" ? "completed" : "warning",
+      inputRefs: ["RequirementPackage"],
+      outputRefs: productBuildPlan ? ["ProductBuildPlan"] : ["Patch route does not require ProductBuildPlan"],
+      summary: productBuildPlan?.summary ?? "局部修改路线不生成 ProductBuildPlan，由 Patch Agent 接管。",
+      decisionTrace: buildPublicTrace({
+        summary: productBuildPlan
+          ? "Planner 已把需求包拆成范围、页面、状态覆盖、下游 agent 顺序和风险。"
+          : "Planner 在局部修改路线中让位给 Patch Agent。",
+        inputSignals: [
+          `流程类型：${requirementPackage.flowType}`,
+          `需求包：${requirementPackage.id}`,
+          productBuildPlan ? `页面 ${productBuildPlan.pagePlan.length} 个，状态 ${productBuildPlan.statePlan.length} 个。` : "",
+        ],
+        constraints: requirementPackage.constraints.slice(0, 6),
+        assumptions: (productBuildPlan?.assumptions ?? requirementPackage.assumptions).slice(0, 6),
+        alternativesConsidered: ["正式需求计划", "只生成 PRD", "只进入原型", "局部修改 Patch"],
+        decision: productBuildPlan
+          ? `生成 ProductBuildPlan：${productBuildPlan.title}`
+          : "本轮交给 Patch 候选链路。",
+        risks: productBuildPlan?.risks?.map((risk) => risk.description).slice(0, 6) ?? requirementPackage.conflicts.slice(0, 6),
+        nextStep: "Validator 和 Safety Check 使用同一份需求包与计划进行生成前检查。",
+      }),
+    },
+    {
+      id: `${context.runId}:validator`,
+      name: "validator",
+      title: "Validator",
+      agent: "Requirement Validator",
+      status: validation.status === "block" ? "blocked" : validation.status === "warn" ? "warning" : "completed",
+      inputRefs: ["RequirementPackage", productBuildPlan ? "ProductBuildPlan" : ""].filter(Boolean),
+      outputRefs: ["RequirementValidationResult"],
+      summary: validation.summary,
+      decisionTrace: buildPublicTrace({
+        summary: "Validator 检查需求包、计划、选区和版本条件是否可执行。",
+        inputSignals: [
+          `需求包：${requirementPackage.id}`,
+          productBuildPlan ? `计划：${productBuildPlan.id}` : "无 ProductBuildPlan。",
+          `requiredClarifications=${validation.requiredClarifications.length}`,
+        ],
+        constraints: requirementPackage.constraints.slice(0, 6),
+        assumptions: requirementPackage.assumptions.slice(0, 6),
+        alternativesConsidered: ["通过", "带警告继续", "要求澄清", "阻断"],
+        decision: `RequirementValidationResult.status=${validation.status}`,
+        risks: unique([...validation.conflicts, ...validation.invalidOperations, ...validation.missingFields]).slice(0, 6),
+        nextStep: "与 Safety Check 的结果合并为 GateDecision。",
+      }),
+    },
+    {
+      id: `${context.runId}:safety`,
+      name: "safety",
+      title: "Safety Check",
+      agent: "Safety Check",
+      status: safety.status === "block" ? "blocked" : safety.status === "warn" ? "warning" : "completed",
+      inputRefs: ["RequirementPackage", productBuildPlan ? "ProductBuildPlan" : ""].filter(Boolean),
+      outputRefs: ["RequirementSafetyCheckResult"],
+      summary: safety.summary,
+      decisionTrace: buildPublicTrace({
+        summary: "Safety Check 检查提示注入、密钥泄漏、越权、隐私和真实外部动作风险。",
+        inputSignals: [
+          `riskTypes=${safety.riskTypes.join(", ") || "none"}`,
+          `blockedReasons=${safety.blockedReasons.length}`,
+          `warnings=${safety.warnings.length}`,
+        ],
+        constraints: ["不能泄露密钥、不能绕过确认门、不能执行真实外部动作。"],
+        assumptions: [],
+        alternativesConsidered: ["通过", "带警告继续", "安全替代方案", "阻断"],
+        decision: `RequirementSafetyCheckResult.status=${safety.status}`,
+        risks: unique([...safety.blockedReasons, ...safety.warnings]).slice(0, 6),
+        nextStep: "与 Validator 的结果合并为 GateDecision。",
+      }),
+    },
+    {
+      id: `${context.runId}:gate`,
+      name: "gate",
+      title: "Gate",
+      agent: "Requirement Gate",
+      status: gate.action === "blocked"
+        ? "blocked"
+        : gate.action === "ask_clarification" || gate.action === "degraded_continue"
+          ? "warning"
+          : "completed",
+      inputRefs: ["RequirementValidationResult", "RequirementSafetyCheckResult", "RequirementPackage"],
+      outputRefs: ["RequirementGateDecision"],
+      summary: gate.visibleMessage,
+      decisionTrace: gateDecisionTrace(gate),
+    },
+  ];
+
+  return {
+    schema: "requirement.intake.graph.v1",
+    runId: context.runId,
+    projectId: context.projectId,
+    requirementPackageId: requirementPackage.id,
+    productBuildPlanId: productBuildPlan?.id,
+    gateAction: gate.action,
+    nodes,
+    edges: [
+      { from: "intent", to: "knowledge", mode: "async", summary: "Intent 完成后异步启动 Knowledge。" },
+      { from: "intent", to: "context_fetch", mode: "async", summary: "Intent 完成后异步启动 Context Fetch。" },
+      { from: "knowledge", to: "requirement", mode: "sync", summary: "Knowledge 输出知识事实和规则。" },
+      { from: "context_fetch", to: "requirement", mode: "sync", summary: "Context Fetch 输出项目事实和 trace refs。" },
+      { from: "requirement", to: "planner", mode: "shared_input", summary: "Planner 消费 RequirementPackage。" },
+      { from: "requirement", to: "validator", mode: "shared_input", summary: "Validator 消费同一份 RequirementPackage。" },
+      { from: "requirement", to: "safety", mode: "shared_input", summary: "Safety Check 消费同一份 RequirementPackage。" },
+      { from: "planner", to: "validator", mode: "sync", summary: "Validator 同时检查 ProductBuildPlan。" },
+      { from: "planner", to: "safety", mode: "sync", summary: "Safety Check 同时检查 ProductBuildPlan。" },
+      { from: "validator", to: "gate", mode: "sync", summary: "Validator 决定结构可执行性。" },
+      { from: "safety", to: "gate", mode: "sync", summary: "Safety Check 决定安全边界。" },
+    ],
+    summary: `Intent -> Knowledge/Context -> Requirement -> Planner/Validator/Safety -> Gate 已完成；Gate 动作为 ${gate.action}。`,
+  };
+}
+
+export function buildRequirementNodeTrace(
+  step: AgentStepName,
+  output: unknown,
+  overrides: Partial<AgentDecisionTrace> = {},
+): AgentDecisionTrace {
+  const base = traceForStep(step, output);
+  return {
+    ...base,
+    ...overrides,
+    inputSignals: overrides.inputSignals ?? base.inputSignals,
+    constraints: overrides.constraints ?? base.constraints,
+    assumptions: overrides.assumptions ?? base.assumptions,
+    alternativesConsidered: overrides.alternativesConsidered ?? base.alternativesConsidered,
+    risks: overrides.risks ?? base.risks,
   };
 }
 
@@ -511,6 +786,100 @@ function knowledgeItems(context: KnowledgeContext) {
     ...context.prototypeRules,
     ...context.businessConcepts,
   ];
+}
+
+function knowledgeItemCount(context: KnowledgeContext) {
+  return knowledgeItems(context).length;
+}
+
+function traceForStep(step: AgentStepName, output: unknown): AgentDecisionTrace {
+  const outputRecord = output && typeof output === "object" && !Array.isArray(output)
+    ? output as Record<string, unknown>
+    : {};
+  const summary = typeof outputRecord.summary === "string" ? outputRecord.summary : "";
+  const mapping: Partial<Record<AgentStepName, AgentDecisionTrace>> = {
+    context_fetch: buildPublicTrace({
+      summary: summary || "Context Fetch 已读取项目状态、对话、附件和选区。",
+      inputSignals: ["项目状态", "最近对话", "附件摘要", "选区"],
+      constraints: ["只读取上下文，不做业务决策。"],
+      assumptions: [],
+      alternativesConsidered: ["读取已有状态", "读取对话", "读取附件", "读取选区"],
+      decision: "把上下文事实交给 RequirementPackage。",
+      risks: [],
+      nextStep: "等待 Knowledge 并进入 Requirement。",
+    }),
+    requirement_packaging: buildPublicTrace({
+      summary: summary || "RequirementPackage 已整理完成。",
+      inputSignals: ["用户事实", "知识事实", "上下文事实", "AI 假设", "trace refs"],
+      constraints: ["Planner、Validator、Safety Check 必须消费同一份 RequirementPackage。"],
+      assumptions: textArray(outputRecord.assumptions),
+      alternativesConsidered: ["继续规划", "请求澄清", "阻断"],
+      decision: `RequirementPackage.readiness=${String(outputRecord.readiness ?? "unknown")}`,
+      risks: textArray(outputRecord.conflicts),
+      nextStep: "进入 Planner，并在生成前运行 Validator 与 Safety Check。",
+    }),
+    requirement_validation: buildPublicTrace({
+      summary: summary || "生成前结构校验完成。",
+      inputSignals: ["RequirementPackage", "ProductBuildPlan", "selectedRegion", "existingState"],
+      constraints: ["局部修改必须有选区和可修改状态；正式需求必须有可用计划。"],
+      assumptions: [],
+      alternativesConsidered: ["通过", "警告继续", "要求澄清", "阻断"],
+      decision: `Validation.status=${String(outputRecord.status ?? "unknown")}`,
+      risks: [
+        ...textArray(outputRecord.invalidOperations),
+        ...textArray(outputRecord.missingFields),
+        ...textArray(outputRecord.conflicts),
+      ],
+      nextStep: "等待 Safety Check 后合并 GateDecision。",
+    }),
+    safety_check: buildPublicTrace({
+      summary: summary || "生成前安全检查完成。",
+      inputSignals: ["RequirementPackage.userInput", "RequirementPackage.assumptions", "ProductBuildPlan.summary"],
+      constraints: ["不能泄露密钥、不能越权、不能执行真实外部动作。"],
+      assumptions: [],
+      alternativesConsidered: ["通过", "警告继续", "提供安全替代", "阻断"],
+      decision: `Safety.status=${String(outputRecord.status ?? "unknown")}`,
+      risks: [
+        ...textArray(outputRecord.blockedReasons),
+        ...textArray(outputRecord.warnings),
+      ],
+      nextStep: "等待 Validator 后合并 GateDecision。",
+    }),
+  };
+
+  return mapping[step] ?? buildPublicTrace({
+    summary: summary || `${step} 已完成。`,
+    inputSignals: [],
+    constraints: [],
+    assumptions: [],
+    alternativesConsidered: ["继续", "澄清", "阻断"],
+    decision: `${step} completed`,
+    risks: [],
+    nextStep: "进入下一节点。",
+  });
+}
+
+function buildPublicTrace(input: Omit<AgentDecisionTrace, "generatedBy">): AgentDecisionTrace {
+  return {
+    summary: input.summary,
+    inputSignals: compactTextList(input.inputSignals),
+    constraints: compactTextList(input.constraints),
+    assumptions: compactTextList(input.assumptions),
+    alternativesConsidered: compactTextList(input.alternativesConsidered),
+    decision: input.decision,
+    risks: compactTextList(input.risks),
+    nextStep: input.nextStep,
+    generatedBy: "deterministic",
+  };
+}
+
+function textArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? "").trim()).filter(Boolean).slice(0, 8);
+}
+
+function compactTextList(values: string[]) {
+  return unique(values).slice(0, 8);
 }
 
 function validationUserMessage(

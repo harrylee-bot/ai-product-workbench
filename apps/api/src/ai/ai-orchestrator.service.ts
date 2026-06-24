@@ -35,12 +35,15 @@ import type {
   QAReport,
   RequirementAnalysis,
   RequirementGateDecision,
+  RequirementIntakeGraph,
   RequirementPackage,
   RequirementDocument,
 } from "./ai-vibe.types";
 import { assessInputQuality } from "./input-quality-gate";
 import {
   buildContextFetchResult,
+  buildRequirementIntakeGraph,
+  buildRequirementNodeTrace,
   buildRequirementPackage,
   checkRequirementSafety,
   decideRequirementGate,
@@ -96,6 +99,7 @@ export type OrchestratorResult = {
   productBuildPlan?: ProductBuildPlan;
   contextFetch?: ContextFetchResult;
   requirementGate?: RequirementGateDecision;
+  requirementIntakeGraph?: RequirementIntakeGraph;
   decisionCards?: DecisionCardSummary[];
   patchPlan?: PatchPlan;
   patchRecord?: PatchRecord;
@@ -215,9 +219,13 @@ export class AiOrchestratorService {
               },
             }),
         ),
-        this.runAgentStep(context, AgentName.requirement_analyst_agent, "context_fetch", async () => ({
-          data: buildContextFetchResult({ context, attachments: input.attachments }),
-        })),
+        this.runAgentStep(context, AgentName.orchestrator, "context_fetch", async () => {
+          const data = buildContextFetchResult({ context, attachments: input.attachments });
+          return {
+            data,
+            decisionTrace: buildRequirementNodeTrace("context_fetch", data),
+          };
+        }),
       ]);
       context.knowledgeContext = knowledge.data;
       context.contextFetch = contextFetch.data;
@@ -246,17 +254,21 @@ export class AiOrchestratorService {
       await this.emit(context, "message_delta", "正在合并用户事实、知识和项目上下文...");
       const requirementPackage = await this.runAgentStep(
         context,
-        AgentName.requirement_analyst_agent,
+        AgentName.orchestrator,
         "requirement_packaging",
-        async () => ({
-          data: buildRequirementPackage({
+        async () => {
+          const data = buildRequirementPackage({
             context,
             intent: intent.data.intent,
             knowledgeContext: knowledge.data,
             contextFetch: contextFetch.data,
             requirementAnalysis: requirement.data,
-          }),
-        }),
+          });
+          return {
+            data,
+            decisionTrace: buildRequirementNodeTrace("requirement_packaging", data),
+          };
+        },
       );
       context.requirementPackage = requirementPackage.data;
 
@@ -422,6 +434,7 @@ export class AiOrchestratorService {
         productBuildPlan,
         contextFetch: context.contextFetch,
         requirementGate: context.requirementGateDecision,
+        requirementIntakeGraph: context.requirementIntakeGraph,
         decisionCards: [prdDecisionCard],
         nextAction: {
           type: "review_prd",
@@ -635,6 +648,7 @@ export class AiOrchestratorService {
       productBuildPlan: context.productBuildPlan,
       contextFetch: context.contextFetch,
       requirementGate: context.requirementGateDecision,
+      requirementIntakeGraph: context.requirementIntakeGraph,
       decisionCards: [prototypeDecisionCard],
       knowledgeCandidates: knowledgeCandidates.data.candidates,
       nextAction: {
@@ -751,12 +765,20 @@ export class AiOrchestratorService {
   ) {
     await this.emit(context, "message_delta", "正在进行生成前结构校验和安全检查...");
     const [validation, safety] = await Promise.all([
-      this.runAgentStep(context, AgentName.qa_agent, "requirement_validation", async () => ({
-        data: validateRequirementPackage({ requirementPackage, productBuildPlan }),
-      })),
-      this.runAgentStep(context, AgentName.qa_agent, "safety_check", async () => ({
-        data: checkRequirementSafety({ requirementPackage, productBuildPlan }),
-      })),
+      this.runAgentStep(context, AgentName.orchestrator, "requirement_validation", async () => {
+        const data = validateRequirementPackage({ requirementPackage, productBuildPlan });
+        return {
+          data,
+          decisionTrace: buildRequirementNodeTrace("requirement_validation", data),
+        };
+      }),
+      this.runAgentStep(context, AgentName.orchestrator, "safety_check", async () => {
+        const data = checkRequirementSafety({ requirementPackage, productBuildPlan });
+        return {
+          data,
+          decisionTrace: buildRequirementNodeTrace("safety_check", data),
+        };
+      }),
     ]);
     context.requirementValidation = validation.data;
     context.requirementSafety = safety.data;
@@ -767,12 +789,23 @@ export class AiOrchestratorService {
       productBuildPlan,
       fallbackUsed: Boolean(context.fallbackEvents?.length),
     });
+    const intakeGraph = buildRequirementIntakeGraph({
+      context,
+      requirementPackage,
+      validation: validation.data,
+      safety: safety.data,
+      gate,
+      productBuildPlan,
+    });
+    gate.intakeGraph = intakeGraph;
     context.requirementGateDecision = gate;
+    context.requirementIntakeGraph = intakeGraph;
     await this.emit(context, "message_delta", gate.visibleMessage, {
       requirementGate: {
         ...gate,
         decisionTrace: gateDecisionTrace(gate),
       },
+      requirementIntakeGraph: intakeGraph,
     });
     return gate;
   }
@@ -794,6 +827,7 @@ export class AiOrchestratorService {
       productBuildPlan,
       contextFetch: context.contextFetch,
       requirementGate: gate,
+      requirementIntakeGraph: context.requirementIntakeGraph,
       nextAction: asksClarification
         ? {
             type: "ask_clarification",
@@ -933,6 +967,7 @@ export class AiOrchestratorService {
         contextFetch: result.contextFetch ?? context.contextFetch,
         requirementPackage: context.requirementPackage,
         requirementGate: result.requirementGate ?? context.requirementGateDecision,
+        requirementIntakeGraph: result.requirementIntakeGraph ?? context.requirementIntakeGraph,
         decisionCards: result.decisionCards,
         patchPlan: result.patchPlan,
         patchRecord: result.patchRecord,
