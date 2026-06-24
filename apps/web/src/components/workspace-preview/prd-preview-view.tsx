@@ -15,11 +15,22 @@ import type { Phase1PrdPreview } from "./types";
 export function PrdPreviewView({
   prdPreview,
   savingSectionId,
+  aiEditingSectionId,
   onSaveSection,
+  onAiEditSection,
 }: {
   prdPreview?: Phase1PrdPreview | null;
   savingSectionId?: string;
+  aiEditingSectionId?: string;
   onSaveSection?: (input: { sectionId: string; content: string }) => Promise<void> | void;
+  onAiEditSection?: (input: {
+    sectionId: string;
+    blockId?: string;
+    title: string;
+    content: string;
+    sourcePaths?: string[];
+    instruction: string;
+  }) => Promise<void> | void;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -120,6 +131,23 @@ export function PrdPreviewView({
     ].join("\n"));
   };
 
+  const requestAiEdit = async (index: number) => {
+    const section = sections[index];
+    if (!section || !onAiEditSection) return;
+    const instruction = window.prompt("描述你希望 AI 如何修改这段内容");
+    if (!instruction?.trim()) return;
+    setSelectedIndex(index);
+    cancelEdit();
+    await onAiEditSection({
+      sectionId: section.id,
+      blockId: section.blocks?.[0]?.id,
+      title: section.title,
+      content: section.content,
+      sourcePaths: section.sourcePaths,
+      instruction: instruction.trim(),
+    });
+  };
+
   return (
     <div className="space-y-3">
       <div className="rounded-[var(--radius-panel)] border border-gray-200 bg-white px-4 py-3 shadow-[var(--shadow-control)]">
@@ -162,6 +190,7 @@ export function PrdPreviewView({
                     cancelEdit();
                   }
                 }}
+                onDoubleClick={() => void requestAiEdit(index)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -189,6 +218,7 @@ export function PrdPreviewView({
                     type="button"
                     size="sm"
                     variant="secondary"
+                    disabled={aiEditingSectionId === section.id}
                     onClick={(event) => {
                       event.stopPropagation();
                       beginEdit(index);
@@ -197,7 +227,7 @@ export function PrdPreviewView({
                     className="shrink-0"
                   >
                     <PencilLine className="h-4 w-4" />
-                    编辑段落
+                    {aiEditingSectionId === section.id ? "AI 处理中" : "编辑段落"}
                   </Button>
                 </div>
 

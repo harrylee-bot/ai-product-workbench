@@ -39,14 +39,25 @@ export function PreviewPanel({
   prototypePreview,
   decision,
   savingPrdSectionId,
+  aiEditingPrdSectionId,
   onSavePrdSection,
+  onAiEditPrdSection,
 }: {
   projectId?: string;
   prdPreview?: Phase1PrdPreview | null;
   prototypePreview?: Phase1PrototypePreview | null;
   decision?: Phase2DecisionView | null;
   savingPrdSectionId?: string;
+  aiEditingPrdSectionId?: string;
   onSavePrdSection?: (input: { sectionId: string; content: string }) => Promise<void> | void;
+  onAiEditPrdSection?: (input: {
+    sectionId: string;
+    blockId?: string;
+    title: string;
+    content: string;
+    sourcePaths?: string[];
+    instruction: string;
+  }) => Promise<void> | void;
 }) {
   const [mode, setMode] = useState<PreviewMode>("prototype");
   const [exporting, setExporting] = useState<"word" | "html" | null>(null);
@@ -156,7 +167,9 @@ export function PreviewPanel({
             <PrdPreviewView
               prdPreview={prdPreview}
               savingSectionId={savingPrdSectionId}
+              aiEditingSectionId={aiEditingPrdSectionId}
               onSaveSection={onSavePrdSection}
+              onAiEditSection={onAiEditPrdSection}
             />
           </div>
         ) : mode === "prototype" ? (

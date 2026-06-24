@@ -46,6 +46,15 @@ type UpdatePrdSectionResponse = {
   document: unknown;
 };
 
+type InlineEditResponse = {
+  projectId: string;
+  conversationId: string;
+  userMessage?: Phase1Message;
+  assistantMessage?: Phase1Message | null;
+  runId: string;
+  status: "candidate_created";
+};
+
 type PatchApplyResponse = {
   projectId: string;
   conversationId: string;
@@ -397,6 +406,53 @@ function Phase1WorkspaceInner() {
     },
   });
 
+  const aiEditPrdSection = useMutation({
+    mutationFn: (input: {
+      sectionId: string;
+      blockId?: string;
+      title: string;
+      content: string;
+      sourcePaths?: string[];
+      instruction: string;
+    }) => {
+      if (!selectedProjectId || !selectedConversationId || !prdPreview?.id) {
+        throw new Error("请先选择项目和对话，再进行 AI 局部编辑");
+      }
+      return apiRequest<InlineEditResponse>("/ai/inline-edit", {
+        method: "POST",
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          conversationId: selectedConversationId,
+          selectedRegion: {
+            type: "document",
+            targetId: prdPreview.id,
+            documentId: prdPreview.id,
+            sectionId: input.sectionId,
+            blockId: input.blockId,
+            label: input.title,
+            sourcePaths: input.sourcePaths,
+          },
+          selectedText: input.content,
+          instruction: input.instruction,
+          action: "rewrite",
+        }),
+      });
+    },
+    onSuccess: async (response) => {
+      watchVibeRun(response.runId, response.projectId || selectedProjectId, response.conversationId || selectedConversationId);
+      await Promise.all([
+        response.conversationId
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", response.conversationId] })
+          : Promise.resolve(),
+        response.projectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", response.projectId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+      ]);
+    },
+    onError: (error) => {
+      window.alert(error instanceof Error ? error.message : "AI 局部编辑失败");
+    },
+  });
+
   const createConversation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId) {
@@ -593,6 +649,7 @@ function Phase1WorkspaceInner() {
         prototypePreview={prototypePreview}
         decision={decision}
         savingPrdSectionId={updatePrdSection.isPending ? updatePrdSection.variables?.sectionId : undefined}
+        aiEditingPrdSectionId={aiEditPrdSection.isPending ? aiEditPrdSection.variables?.sectionId : undefined}
         onSavePrdSection={async (input) => {
           if (!prdPreview?.id) return;
           await updatePrdSection.mutateAsync({
@@ -600,6 +657,9 @@ function Phase1WorkspaceInner() {
             sectionId: input.sectionId,
             content: input.content,
           });
+        }}
+        onAiEditPrdSection={async (input) => {
+          await aiEditPrdSection.mutateAsync(input);
         }}
       />
     </main>
