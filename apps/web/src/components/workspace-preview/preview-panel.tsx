@@ -8,10 +8,11 @@ import {
   FileDown,
   FileText,
   MessageSquare,
+  Share2,
   ShieldAlert,
 } from "lucide-react";
 import { IconButton, SegmentedControl } from "@/components/ui";
-import { downloadApiFile } from "@/lib/api";
+import { apiRequest, downloadApiFile } from "@/lib/api";
 import { FeedbackWorkflowView } from "./feedback-workflow-view";
 import { PrdPreviewView } from "./prd-preview-view";
 import { PrototypePreviewView } from "./prototype-preview-view";
@@ -45,9 +46,12 @@ export function PreviewPanel({
 }) {
   const [mode, setMode] = useState<PreviewMode>("prototype");
   const [exporting, setExporting] = useState<"word" | "html" | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const activeTab = PREVIEW_TABS.find((tab) => tab.value === mode) ?? PREVIEW_TABS[1];
   const canExportPrd = Boolean(projectId && prdPreview?.id);
   const canExportHtml = Boolean(projectId && prototypePreview?.html);
+  const canShare = Boolean(projectId && (prdPreview?.id || prototypePreview?.html));
 
   useEffect(() => {
     if (prototypePreview?.html) {
@@ -68,6 +72,27 @@ export function PreviewPanel({
       window.alert(error instanceof Error ? error.message : "文件导出失败");
     } finally {
       setExporting(null);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!projectId || sharing) return;
+    setSharing(true);
+    setShareCopied(false);
+    try {
+      const scope = deriveShareScope(Boolean(prdPreview?.id), Boolean(prototypePreview?.html));
+      const response = await apiRequest<{ share: { url: string } }>("/share-links", {
+        method: "POST",
+        body: JSON.stringify({ projectId, scope }),
+      });
+      const shareUrl = absoluteShareUrl(response.share.url);
+      await copyText(shareUrl);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 2400);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "分享链接创建失败");
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -95,6 +120,14 @@ export function PreviewPanel({
               onClick={() => handleExport("html")}
             >
               <Code2 className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              label={shareCopied ? "分享链接已复制" : "创建只读分享链接"}
+              variant="secondary"
+              disabled={!canShare || sharing}
+              onClick={handleShare}
+            >
+              <Share2 className="h-4 w-4" />
             </IconButton>
           </div>
           <SegmentedControl
@@ -130,4 +163,32 @@ export function PreviewPanel({
       </div>
     </aside>
   );
+}
+
+function deriveShareScope(hasPrd: boolean, hasPrototype: boolean) {
+  if (hasPrd && hasPrototype) return "both";
+  if (hasPrd) return "prd";
+  return "prototype";
+}
+
+function absoluteShareUrl(path: string) {
+  if (/^https?:\/\//i.test(path)) return path;
+  if (typeof window === "undefined") return path;
+  return new URL(path, window.location.origin).toString();
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const element = document.createElement("textarea");
+  element.value = value;
+  element.setAttribute("readonly", "true");
+  element.style.position = "fixed";
+  element.style.left = "-9999px";
+  document.body.appendChild(element);
+  element.select();
+  document.execCommand("copy");
+  document.body.removeChild(element);
 }
