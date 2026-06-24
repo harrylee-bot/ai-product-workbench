@@ -96,6 +96,7 @@ export type AdapterChatResult = {
 export type AdapterStreamInput = {
   route: ResolvedModelRoute;
   messages: ModelMessage[];
+  responseFormat?: ModelResponseFormat;
   onDelta: (delta: string) => Promise<void> | void;
 };
 

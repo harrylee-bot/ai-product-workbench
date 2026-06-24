@@ -83,16 +83,32 @@ export class ModelGatewayService {
             ? this.withJsonInstruction(input.messages, input.jsonSchema)
             : this.withJsonRetryInstruction(input.messages, input.jsonSchema, lastRawContent);
 
+        let partialContent = "";
         const result = await this.withRetry(route.retryCount, () =>
-          this.openAICompatibleAdapter.chat({
-            route: {
-              ...route,
-              responseFormat: ModelResponseFormat.json,
-            },
-            messages,
-            responseFormat: ModelResponseFormat.json,
-          }),
-        );
+          route.supportsStreaming
+            ? this.openAICompatibleAdapter.stream({
+                route: {
+                  ...route,
+                  responseFormat: ModelResponseFormat.json,
+                },
+                messages,
+                responseFormat: ModelResponseFormat.json,
+                onDelta: (delta) => {
+                  partialContent += delta;
+                },
+              })
+            : this.openAICompatibleAdapter.chat({
+                route: {
+                  ...route,
+                  responseFormat: ModelResponseFormat.json,
+                },
+                messages,
+                responseFormat: ModelResponseFormat.json,
+              }),
+        ).catch((error) => {
+          if (partialContent) lastRawContent = partialContent;
+          throw error;
+        });
         lastRawContent = result.content;
         lastUsage = result.usage;
 

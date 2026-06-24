@@ -150,7 +150,7 @@ export function AdminModelProvidersClient() {
       </AdminFilterBar>
       <Feedback notice={notice} error={error} />
       <div className="mt-4">
-        <AdminTable columns={["供应商名称", "类型", "Base URL", "API Key", "默认", "状态", "超时", "创建时间", "操作"]} minWidth={1120}>
+        <AdminTable columns={["供应商名称", "类型", "Base URL", "API Key", "默认", "状态", "空闲超时", "创建时间", "操作"]} minWidth={1120}>
           {loading ? <LoadingRows columns={9} /> : null}
           {!loading && items.length === 0 ? <EmptyRow columns={9} label="暂无供应商" /> : null}
           {!loading ? items.map((provider) => (
@@ -527,7 +527,7 @@ function ProviderModal({
         <FormControl label="供应商名称"><TextInput value={form.name} onChange={(event) => onChange({ ...form, name: event.target.value })} /></FormControl>
         <FormControl label="Base URL"><TextInput value={form.baseUrl} onChange={(event) => onChange({ ...form, baseUrl: event.target.value })} /></FormControl>
         <FormControl label={editing ? "API Key（留空不更新）" : "API Key"}><TextInput type="password" value={form.apiKey} onChange={(event) => onChange({ ...form, apiKey: event.target.value })} /></FormControl>
-        <FormControl label="超时时间 ms"><TextInput value={form.timeoutMs} onChange={(event) => onChange({ ...form, timeoutMs: event.target.value })} /></FormControl>
+        <FormControl label="空闲超时 ms"><TextInput value={form.timeoutMs} onChange={(event) => onChange({ ...form, timeoutMs: event.target.value })} /></FormControl>
         <label className="inline-flex items-center gap-2 text-sm text-gray-700">
           <input type="checkbox" checked={form.isDefault} onChange={(event) => onChange({ ...form, isDefault: event.target.checked })} />
           设为默认供应商
