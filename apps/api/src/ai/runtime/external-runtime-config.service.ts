@@ -40,6 +40,12 @@ export class ExternalRuntimeConfigService {
     return this.config.get<string>("VIBE_CODEX_COMMAND")?.trim() || "codex";
   }
 
+  codexSandbox() {
+    const value = this.config.get<string>("VIBE_CODEX_SANDBOX")?.trim();
+    if (value === "read-only" || value === "workspace-write" || value === "danger-full-access") return value;
+    return "workspace-write";
+  }
+
   codexModelProviderId() {
     return safeProviderId(this.config.get<string>("CODEX_MODEL_PROVIDER_ID")?.trim() || "vibe_openai_compatible");
   }
