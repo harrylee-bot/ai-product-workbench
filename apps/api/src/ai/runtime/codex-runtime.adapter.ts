@@ -58,10 +58,12 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       event(task, "runtime_task_started", "Codex runtime 已创建需求规划任务。"),
     ];
 
-    await writeFile(inputPath, JSON.stringify(task.input, null, 2), "utf8");
+    const runtimeInput = prepareRuntimeInput(task);
+    await writeFile(inputPath, JSON.stringify(runtimeInput.input, null, 2), "utf8");
     await writeFile(promptPath, requirementPrompt(task.input), "utf8");
     events.push(event(task, "runtime_file_changed", `已写入 ${basename(inputPath)} 和 ${basename(promptPath)}。`, {
       files: [inputPath, promptPath],
+      inputCompaction: runtimeInput.meta,
     }));
 
     const rawEvents = await this.runCodex(workspace, promptPath, task, events, {
@@ -355,10 +357,12 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       event(task, "runtime_task_started", `Codex runtime 已创建 ${task.taskType} 任务。`),
     ];
 
-    await writeFile(inputPath, JSON.stringify(task.input, null, 2), "utf8");
+    const runtimeInput = prepareRuntimeInput(task);
+    await writeFile(inputPath, JSON.stringify(runtimeInput.input, null, 2), "utf8");
     await writeFile(promptPath, structuredPrompt(task.taskType), "utf8");
     events.push(event(task, "runtime_file_changed", `已写入 ${basename(inputPath)} 和 ${basename(promptPath)}。`, {
       files: [inputPath, promptPath],
+      inputCompaction: runtimeInput.meta,
     }));
 
     const rawEvents = await this.runCodex(workspace, promptPath, task, events, {
@@ -409,6 +413,499 @@ type CodexCloseResult = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
 };
+
+type RuntimeInputCompactionResult = {
+  input: unknown;
+  meta: {
+    taskType: RuntimeTask["taskType"];
+    originalBytes: number;
+    compactedBytes: number;
+    reducedBytes: number;
+    reductionPercent: number;
+    wasCompacted: boolean;
+    limits: typeof RUNTIME_INPUT_COMPACTION_LIMITS;
+  };
+};
+
+type CompactOptions = {
+  stringChars: number;
+  arrayItems: number;
+  depth: number;
+};
+
+type CompactContext = {
+  selectedRegion?: Record<string, unknown>;
+  embedded?: boolean;
+};
+
+const RUNTIME_INPUT_COMPACTION_LIMITS = {
+  userInputChars: 12_000,
+  recentMessages: 8,
+  recentMessageChars: 1_200,
+  attachmentItems: 8,
+  attachmentTextChars: 1_500,
+  stateArrayItems: 32,
+  stateStringChars: 1_500,
+  knowledgeItems: 6,
+  knowledgeTextChars: 1_200,
+  prdSections: 18,
+  prdSectionChars: 1_800,
+  selectedPrdSectionChars: 7_000,
+  prototypePages: 12,
+  prototypeComponents: 24,
+  prototypeStringChars: 1_200,
+  selectedPrototypeStringChars: 4_000,
+} as const;
+
+const DEFAULT_COMPACT_OPTIONS: CompactOptions = {
+  stringChars: 1_200,
+  arrayItems: 24,
+  depth: 4,
+};
+
+function prepareRuntimeInput(task: RuntimeTask<unknown>): RuntimeInputCompactionResult {
+  const originalText = JSON.stringify(task.input) ?? "null";
+  const compactedInput = compactRuntimeInput(task);
+  const compactedText = JSON.stringify(compactedInput) ?? "null";
+  const originalBytes = Buffer.byteLength(originalText, "utf8");
+  const compactedBytes = Buffer.byteLength(compactedText, "utf8");
+  const reducedBytes = Math.max(0, originalBytes - compactedBytes);
+  return {
+    input: compactedInput,
+    meta: {
+      taskType: task.taskType,
+      originalBytes,
+      compactedBytes,
+      reducedBytes,
+      reductionPercent: originalBytes > 0 ? Math.round((reducedBytes / originalBytes) * 100) : 0,
+      wasCompacted: compactedBytes < originalBytes,
+      limits: RUNTIME_INPUT_COMPACTION_LIMITS,
+    },
+  };
+}
+
+function compactRuntimeInput(task: RuntimeTask<unknown>): unknown {
+  const input = asRecord(task.input);
+  if (!input) return compactUnknown(task.input, DEFAULT_COMPACT_OPTIONS);
+  if (task.taskType === "intake_requirement") return compactRequirementRuntimeInput(input);
+  if (task.taskType === "generate_prototype") return compactPrototypeSpecRuntimeInput(input);
+  if (task.taskType === "patch_prd" || task.taskType === "patch_prototype") return compactPatchRuntimeInput(input);
+  if (task.taskType === "qa_review") return compactQaRuntimeInput(input);
+  return compactPlainObject(input, DEFAULT_COMPACT_OPTIONS);
+}
+
+function compactRequirementRuntimeInput(input: Record<string, unknown>) {
+  const selectedRegion = compactSelectedRegion(input.selectedRegion);
+  return compactRuntimeObject(input, {
+    userInput: compactMaybeString(input.userInput, RUNTIME_INPUT_COMPACTION_LIMITS.userInputChars),
+    recentMessages: compactRecentMessages(input.recentMessages),
+    attachments: compactAttachments(input.attachments),
+    productDesignState: compactProductDesignState(input.productDesignState, { selectedRegion, embedded: true }),
+    selectedRegion,
+  });
+}
+
+function compactPrototypeSpecRuntimeInput(input: Record<string, unknown>) {
+  return compactRuntimeObject(input, {
+    productDesignState: compactProductDesignState(input.productDesignState, { embedded: true }),
+  });
+}
+
+function compactPatchRuntimeInput(input: Record<string, unknown>) {
+  const selectedRegion = compactSelectedRegion(input.selectedRegion);
+  return compactRuntimeObject(input, {
+    userInput: compactMaybeString(input.userInput, RUNTIME_INPUT_COMPACTION_LIMITS.userInputChars),
+    selectedRegion,
+    productDesignState: compactProductDesignState(input.productDesignState, { selectedRegion, embedded: true }),
+    prdDocument: compactRequirementDocument(input.prdDocument, { selectedRegion }),
+    prototypeSpec: compactPrototypeSpec(input.prototypeSpec, { selectedRegion }),
+    knowledgeContext: compactKnowledgeContext(input.knowledgeContext),
+  });
+}
+
+function compactQaRuntimeInput(input: Record<string, unknown>) {
+  return compactRuntimeObject(input, {
+    productDesignState: compactProductDesignState(input.productDesignState, { embedded: true }),
+    prdDocument: compactRequirementDocument(input.prdDocument, {}),
+    prototypeSpec: compactPrototypeSpec(input.prototypeSpec, {}),
+    patchPlan: compactUnknown(input.patchPlan, DEFAULT_COMPACT_OPTIONS),
+    knowledgeContext: compactKnowledgeContext(input.knowledgeContext),
+  });
+}
+
+function compactProductDesignState(value: unknown, context: CompactContext): unknown {
+  const record = asRecord(value);
+  if (!record) return compactUnknown(value, DEFAULT_COMPACT_OPTIONS);
+  const result: Record<string, unknown> = {};
+  for (const key of [
+    "id",
+    "projectId",
+    "version",
+    "title",
+    "summary",
+    "businessGoal",
+    "background",
+    "status",
+    "createdBy",
+    "updatedBy",
+    "createdAt",
+    "updatedAt",
+  ]) {
+    if (key in record) result[key] = compactMaybeString(record[key], RUNTIME_INPUT_COMPACTION_LIMITS.stateStringChars);
+  }
+  for (const key of [
+    "targetUsers",
+    "userScenarios",
+    "pages",
+    "features",
+    "backendConfigs",
+    "frontendRules",
+    "businessRules",
+    "stateRules",
+    "exceptionScenarios",
+    "acceptanceCriteria",
+    "assumptions",
+    "pendingQuestions",
+    "confirmedFacts",
+  ]) {
+    if (key in record) {
+      result[key] = compactRecordArray(record[key], RUNTIME_INPUT_COMPACTION_LIMITS.stateArrayItems, {
+        stringChars: RUNTIME_INPUT_COMPACTION_LIMITS.stateStringChars,
+        arrayItems: 16,
+        depth: 3,
+      });
+    }
+  }
+  if ("prototypeOutline" in record) {
+    result.prototypeOutline = compactUnknown(record.prototypeOutline, {
+      stringChars: RUNTIME_INPUT_COMPACTION_LIMITS.prototypeStringChars,
+      arrayItems: 16,
+      depth: 4,
+    });
+  }
+  if ("knowledgeRefs" in record) result.knowledgeRefs = compactKnowledgeRefs(record.knowledgeRefs);
+  if ("prdDocument" in record) {
+    result.prdDocument = compactRequirementDocument(record.prdDocument, { ...context, embedded: true });
+  }
+  if ("prototypeSpec" in record) {
+    result.prototypeSpec = compactPrototypeSpec(record.prototypeSpec, { ...context, embedded: true });
+  }
+  return result;
+}
+
+function compactRequirementDocument(value: unknown, context: CompactContext): unknown {
+  const record = asRecord(value);
+  if (!record) return compactUnknown(value, DEFAULT_COMPACT_OPTIONS);
+  const result: Record<string, unknown> = {};
+  for (const key of [
+    "id",
+    "projectId",
+    "productDesignStateId",
+    "productDesignStateVersion",
+    "title",
+    "status",
+    "generatedByRunId",
+    "createdBy",
+    "updatedBy",
+    "createdAt",
+    "updatedAt",
+  ]) {
+    if (key in record) result[key] = compactMaybeString(record[key], RUNTIME_INPUT_COMPACTION_LIMITS.stateStringChars);
+  }
+  result.sections = compactRequirementSections(record.sections, context);
+  result.assumptions = compactRecordArray(record.assumptions, 16, DEFAULT_COMPACT_OPTIONS);
+  result.knowledgeRefs = compactKnowledgeRefs(record.knowledgeRefs);
+  result.pendingQuestions = compactRecordArray(record.pendingQuestions, 16, DEFAULT_COMPACT_OPTIONS);
+  result.validationNotes = compactStringArray(record.validationNotes, 12, RUNTIME_INPUT_COMPACTION_LIMITS.stateStringChars);
+  return result;
+}
+
+function compactRequirementSections(value: unknown, context: CompactContext) {
+  const sections = recordArray(value);
+  const selectedSectionId = text(context.selectedRegion?.sectionId) || text(context.selectedRegion?.targetId);
+  const selectedIndex = selectedSectionId
+    ? sections.findIndex((section) => text(section.id) === selectedSectionId)
+    : -1;
+  const indices = selectIndices(sections.length, RUNTIME_INPUT_COMPACTION_LIMITS.prdSections, selectedIndex);
+  return indices.map((index) => compactRequirementSection(sections[index], index === selectedIndex));
+}
+
+function compactRequirementSection(section: Record<string, unknown>, selected: boolean) {
+  const contentChars = selected
+    ? RUNTIME_INPUT_COMPACTION_LIMITS.selectedPrdSectionChars
+    : RUNTIME_INPUT_COMPACTION_LIMITS.prdSectionChars;
+  const result: Record<string, unknown> = {};
+  for (const key of ["id", "title", "type", "level", "order", "createdAt", "updatedAt"]) {
+    if (key in section) result[key] = compactMaybeString(section[key], 800);
+  }
+  result.content = compactMaybeString(section.content, contentChars);
+  result.blocks = compactSectionBlocks(section.blocks, selected);
+  result.sourcePaths = compactStringArray(section.sourcePaths, 12, 400);
+  result.sourceStatePaths = compactStringArray(section.sourceStatePaths, 12, 400);
+  result.tags = compactStringArray(section.tags, 12, 120);
+  return result;
+}
+
+function compactSectionBlocks(value: unknown, selected: boolean) {
+  const blocks = recordArray(value);
+  const maxBlocks = selected ? 10 : 4;
+  return blocks.slice(0, maxBlocks).map((block) => ({
+    ...compactPlainObject(block, {
+      stringChars: selected ? 1_000 : 500,
+      arrayItems: 8,
+      depth: 2,
+    }),
+    content: compactMaybeString(block.content, selected ? 1_000 : 500),
+    sourcePaths: compactStringArray(block.sourcePaths, 8, 300),
+    tags: compactStringArray(block.tags, 8, 120),
+  }));
+}
+
+function compactPrototypeSpec(value: unknown, context: CompactContext): unknown {
+  const record = asRecord(value);
+  if (!record) return compactUnknown(value, DEFAULT_COMPACT_OPTIONS);
+  const result: Record<string, unknown> = {};
+  for (const key of [
+    "id",
+    "projectId",
+    "productDesignStateId",
+    "productDesignStateVersion",
+    "title",
+    "targetDevice",
+    "generatedByRunId",
+    "createdAt",
+    "updatedAt",
+  ]) {
+    if (key in record) result[key] = compactMaybeString(record[key], RUNTIME_INPUT_COMPACTION_LIMITS.prototypeStringChars);
+  }
+  result.styleGuide = compactUnknown(record.styleGuide, {
+    stringChars: 800,
+    arrayItems: 8,
+    depth: 3,
+  });
+  result.pages = compactPrototypePages(record.pages, context);
+  result.navigation = compactRecordArray(record.navigation, 40, DEFAULT_COMPACT_OPTIONS);
+  result.interactions = compactRecordArray(record.interactions, 40, DEFAULT_COMPACT_OPTIONS);
+  result.assumptions = compactRecordArray(record.assumptions, 16, DEFAULT_COMPACT_OPTIONS);
+  result.knowledgeRefs = compactKnowledgeRefs(record.knowledgeRefs);
+  return result;
+}
+
+function compactPrototypePages(value: unknown, context: CompactContext) {
+  const pages = recordArray(value);
+  const selectedPageId = text(context.selectedRegion?.pageId);
+  const selectedIndex = selectedPageId
+    ? pages.findIndex((page) => text(page.id) === selectedPageId)
+    : -1;
+  const indices = selectIndices(pages.length, RUNTIME_INPUT_COMPACTION_LIMITS.prototypePages, selectedIndex);
+  return indices.map((index) => compactPrototypePage(pages[index], {
+    ...context,
+    selectedPage: index === selectedIndex,
+  }));
+}
+
+function compactPrototypePage(page: Record<string, unknown>, context: CompactContext & { selectedPage?: boolean }) {
+  const result: Record<string, unknown> = {};
+  const stringChars = context.selectedPage
+    ? RUNTIME_INPUT_COMPACTION_LIMITS.selectedPrototypeStringChars
+    : RUNTIME_INPUT_COMPACTION_LIMITS.prototypeStringChars;
+  for (const key of ["id", "name", "route", "sourcePageId", "device", "layout", "description", "order"]) {
+    if (key in page) result[key] = compactMaybeString(page[key], stringChars);
+  }
+  result.components = compactPrototypeComponents(page.components, context, 0);
+  result.states = compactRecordArray(page.states, 12, {
+    stringChars,
+    arrayItems: 12,
+    depth: 3,
+  });
+  result.sourcePaths = compactStringArray(page.sourcePaths, 12, 400);
+  return result;
+}
+
+function compactPrototypeComponents(value: unknown, context: CompactContext, depth: number) {
+  const components = recordArray(value);
+  const selectedComponentId = text(context.selectedRegion?.componentId) || text(context.selectedRegion?.targetId);
+  const selectedIndex = selectedComponentId
+    ? components.findIndex((component) => text(component.id) === selectedComponentId)
+    : -1;
+  const maxItems = depth === 0
+    ? RUNTIME_INPUT_COMPACTION_LIMITS.prototypeComponents
+    : Math.max(8, Math.floor(RUNTIME_INPUT_COMPACTION_LIMITS.prototypeComponents / 2));
+  const indices = selectIndices(components.length, maxItems, selectedIndex);
+  return indices.map((index) => compactPrototypeComponent(components[index], context, depth, index === selectedIndex));
+}
+
+function compactPrototypeComponent(
+  component: Record<string, unknown>,
+  context: CompactContext,
+  depth: number,
+  selected: boolean,
+) {
+  const stringChars = selected
+    ? RUNTIME_INPUT_COMPACTION_LIMITS.selectedPrototypeStringChars
+    : RUNTIME_INPUT_COMPACTION_LIMITS.prototypeStringChars;
+  const result: Record<string, unknown> = {};
+  for (const key of ["id", "name", "type", "description", "content"]) {
+    if (key in component) result[key] = compactMaybeString(component[key], stringChars);
+  }
+  result.props = compactUnknown(component.props, {
+    stringChars,
+    arrayItems: 12,
+    depth: 3,
+  });
+  result.states = compactStringArray(component.states, 12, 300);
+  result.interactions = compactStringArray(component.interactions, 12, 300);
+  result.sourcePaths = compactStringArray(component.sourcePaths, 12, 400);
+  if (depth < 4) result.children = compactPrototypeComponents(component.children, context, depth + 1);
+  return result;
+}
+
+function compactKnowledgeContext(value: unknown): unknown {
+  const record = asRecord(value);
+  if (!record) return compactUnknown(value, DEFAULT_COMPACT_OPTIONS);
+  return {
+    query: compactMaybeString(record.query, RUNTIME_INPUT_COMPACTION_LIMITS.knowledgeTextChars),
+    summary: compactMaybeString(record.summary, 2_500),
+    strongRules: compactKnowledgeRefs(record.strongRules),
+    defaultRules: compactKnowledgeRefs(record.defaultRules),
+    referenceCases: compactKnowledgeRefs(record.referenceCases),
+    designPatterns: compactKnowledgeRefs(record.designPatterns),
+    prdWritingRules: compactKnowledgeRefs(record.prdWritingRules),
+    prototypeRules: compactKnowledgeRefs(record.prototypeRules),
+    businessConcepts: compactKnowledgeRefs(record.businessConcepts),
+    runtimeSkills: compactRecordArray(record.runtimeSkills, 8, {
+      stringChars: 900,
+      arrayItems: 8,
+      depth: 3,
+    }),
+    skillRouting: compactRecordArray(record.skillRouting, 8, DEFAULT_COMPACT_OPTIONS),
+    conflicts: compactRecordArray(record.conflicts, 8, DEFAULT_COMPACT_OPTIONS),
+    unknownAreas: compactStringArray(record.unknownAreas, 12, 500),
+  };
+}
+
+function compactKnowledgeRefs(value: unknown) {
+  return recordArray(value)
+    .slice(0, RUNTIME_INPUT_COMPACTION_LIMITS.knowledgeItems)
+    .map((reference) => ({
+      ...compactPlainObject(reference, {
+        stringChars: RUNTIME_INPUT_COMPACTION_LIMITS.knowledgeTextChars,
+        arrayItems: 8,
+        depth: 3,
+      }),
+      snippet: compactMaybeString(reference.snippet, 800),
+      content: compactMaybeString(reference.content, RUNTIME_INPUT_COMPACTION_LIMITS.knowledgeTextChars),
+    }));
+}
+
+function compactRecentMessages(value: unknown) {
+  return recordArray(value)
+    .slice(-RUNTIME_INPUT_COMPACTION_LIMITS.recentMessages)
+    .map((message) => ({
+      id: compactMaybeString(message.id, 160),
+      role: message.role,
+      content: compactMaybeString(message.content, RUNTIME_INPUT_COMPACTION_LIMITS.recentMessageChars),
+      createdAt: message.createdAt,
+    }));
+}
+
+function compactAttachments(value: unknown) {
+  return recordArray(value)
+    .slice(0, RUNTIME_INPUT_COMPACTION_LIMITS.attachmentItems)
+    .map((attachment) => ({
+      fileId: compactMaybeString(attachment.fileId, 160),
+      fileName: compactMaybeString(attachment.fileName, 240),
+      fileType: compactMaybeString(attachment.fileType, 160),
+      summary: compactMaybeString(attachment.summary, RUNTIME_INPUT_COMPACTION_LIMITS.attachmentTextChars),
+      extractedTextPreview: compactMaybeString(
+        attachment.extractedTextPreview,
+        RUNTIME_INPUT_COMPACTION_LIMITS.attachmentTextChars,
+      ),
+    }));
+}
+
+function compactSelectedRegion(value: unknown): Record<string, unknown> | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return compactPlainObject(record, {
+    stringChars: 4_000,
+    arrayItems: 12,
+    depth: 3,
+  });
+}
+
+function compactRuntimeObject(input: Record<string, unknown>, overrides: Record<string, unknown>) {
+  const result = compactPlainObject(input, DEFAULT_COMPACT_OPTIONS);
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete result[key];
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function compactRecordArray(value: unknown, maxItems: number, options: CompactOptions) {
+  return recordArray(value).slice(0, maxItems).map((record) => compactPlainObject(record, options));
+}
+
+function compactStringArray(value: unknown, maxItems: number, maxChars: number) {
+  return asArray(value)
+    .slice(0, maxItems)
+    .map((item) => compactMaybeString(item, maxChars))
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+function compactPlainObject(value: Record<string, unknown>, options: CompactOptions, depth = 0): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) continue;
+    result[key] = compactUnknown(item, options, depth + 1);
+  }
+  return result;
+}
+
+function compactUnknown(value: unknown, options: CompactOptions, depth = 0): unknown {
+  if (typeof value === "string") return truncateString(value, options.stringChars);
+  if (Array.isArray(value)) {
+    return value.slice(0, options.arrayItems).map((item) => compactUnknown(item, options, depth + 1));
+  }
+  const record = asRecord(value);
+  if (record) {
+    if (depth >= options.depth) return compactLeafObject(record, options.stringChars);
+    return compactPlainObject(record, options, depth);
+  }
+  return value;
+}
+
+function compactLeafObject(value: Record<string, unknown>, stringChars: number) {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean" || item === null) {
+      result[key] = compactMaybeString(item, stringChars);
+    }
+  }
+  return result;
+}
+
+function compactMaybeString(value: unknown, maxChars: number): unknown {
+  return typeof value === "string" ? truncateString(value, maxChars) : value;
+}
+
+function truncateString(value: string, maxChars: number) {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n...[已截断 ${value.length - maxChars} 字符]`;
+}
+
+function selectIndices(total: number, maxItems: number, selectedIndex: number) {
+  const indices = new Set<number>();
+  if (selectedIndex >= 0 && selectedIndex < total) indices.add(selectedIndex);
+  for (let index = 0; index < total && indices.size < maxItems; index += 1) {
+    indices.add(index);
+  }
+  return Array.from(indices).sort((left, right) => left - right);
+}
 
 function prototypePrompt(spec: PrototypeSpec) {
   return [

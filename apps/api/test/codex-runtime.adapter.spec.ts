@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -91,6 +91,96 @@ describe("CodexRuntimeAdapter", () => {
       .toThrow("Codex runtime 空闲超时");
     expect(spawnedChildren[0]?.kill).toHaveBeenCalledWith("SIGTERM");
   });
+
+  it("compacts large structured runtime inputs while preserving selected PRD context", async () => {
+    let capturedInput: Record<string, any> | undefined;
+    spawnMock.mockImplementation((_command: string, _args: string[], options: { cwd: string }) => {
+      const child = new MockChildProcess();
+      spawnedChildren.push(child);
+      setTimeout(async () => {
+        capturedInput = JSON.parse(await readFile(join(options.cwd, "runtime-input.json"), "utf8"));
+        await writeFile(join(options.cwd, "runtime-output.json"), JSON.stringify({
+          patchType: "document",
+          targetNodes: [],
+          impactScope: {
+            affectedStatePaths: [],
+            affectedPrdSectionIds: ["section-25"],
+            affectedPrototypePageIds: [],
+            affectedPrototypeComponentIds: [],
+            affectedAcceptanceCriteriaIds: [],
+            requiresPrdRegeneration: true,
+            requiresPrototypeRegeneration: false,
+            requiresQaCheck: true,
+            reason: "测试",
+          },
+          operations: [],
+          regenerationPlan: {
+            prd: "affected_sections",
+            prototypeSpec: "none",
+            htmlPrototype: "none",
+            qa: "basic",
+          },
+          risks: [],
+          needUserConfirm: false,
+          needsUserConfirmation: false,
+          reason: "测试",
+          summary: "测试",
+        }), "utf8");
+        child.exitCode = 0;
+        child.stdout.end();
+        child.stderr.end();
+        child.emit("close", 0, null);
+      }, 5);
+      return child;
+    });
+
+    const adapter = new CodexRuntimeAdapter(config(workspaceRoot) as never);
+    const result = await adapter.runTask(longPatchTask());
+    const fileEvent = result.events.find((item) => item.type === "runtime_file_changed");
+    const compaction = (fileEvent?.payload as any)?.inputCompaction;
+
+    expect(compaction.wasCompacted).toBe(true);
+    expect(compaction.compactedBytes).toBeLessThan(compaction.originalBytes);
+    expect(capturedInput?.prdDocument.sections).toHaveLength(18);
+    expect(capturedInput?.prdDocument.sections.map((section: any) => section.id)).toContain("section-25");
+    const selectedContent = capturedInput?.prdDocument.sections.find((section: any) => section.id === "section-25").content;
+    expect(selectedContent).toContain("已截断");
+    expect(selectedContent.length).toBeGreaterThan(6_500);
+    expect(selectedContent.length).toBeLessThan(7_200);
+    expect(capturedInput?.knowledgeContext.strongRules).toHaveLength(6);
+    expect(capturedInput?.knowledgeContext.strongRules[0].content.length).toBeLessThan(1_400);
+  });
+
+  it("keeps only recent compacted messages for requirement intake", async () => {
+    let capturedInput: Record<string, any> | undefined;
+    spawnMock.mockImplementation((_command: string, _args: string[], options: { cwd: string }) => {
+      const child = new MockChildProcess();
+      spawnedChildren.push(child);
+      setTimeout(async () => {
+        capturedInput = JSON.parse(await readFile(join(options.cwd, "runtime-input.json"), "utf8"));
+        await writeFile(join(options.cwd, "runtime-output.json"), JSON.stringify(requirementOutput("消息裁剪")), "utf8");
+        child.exitCode = 0;
+        child.stdout.end();
+        child.stderr.end();
+        child.emit("close", 0, null);
+      }, 5);
+      return child;
+    });
+
+    const adapter = new CodexRuntimeAdapter(config(workspaceRoot) as never);
+    await adapter.runTask<RequirementRuntimeInput, RequirementRuntimeOutput>(requirementTask({
+      recentMessages: Array.from({ length: 20 }, (_, index) => ({
+        id: `message-${index + 1}`,
+        role: index % 2 === 0 ? "user" as const : "assistant" as const,
+        content: `第 ${index + 1} 条消息：${"很长的上下文".repeat(500)}`,
+        createdAt: new Date(2026, 5, index + 1).toISOString(),
+      })),
+    }));
+
+    expect(capturedInput?.recentMessages).toHaveLength(8);
+    expect(capturedInput?.recentMessages[0].id).toBe("message-13");
+    expect(capturedInput?.recentMessages[0].content).toContain("已截断");
+  });
 });
 
 function config(workspaceRoot: string, overrides: Partial<CodexTestConfig> = {}): CodexTestConfig {
@@ -124,7 +214,7 @@ type CodexTestConfig = {
   codexApiKey: () => string;
 };
 
-function requirementTask() {
+function requirementTask(inputOverrides: Partial<RequirementRuntimeInput> = {}) {
   return {
     id: "runtime-task-1",
     provider: "codex" as const,
@@ -137,7 +227,112 @@ function requirementTask() {
       conversationId: "conversation-1",
       recentMessages: [],
       attachments: [],
+      ...inputOverrides,
     },
+  };
+}
+
+function longPatchTask() {
+  return {
+    id: "runtime-task-2",
+    provider: "codex" as const,
+    taskType: "patch_prd" as const,
+    runId: "run-2",
+    projectId: "project-1",
+    userId: "user-1",
+    input: {
+      userInput: "请修改第 25 节的只读测试备注字段规则。",
+      selectedRegion: {
+        type: "document" as const,
+        sectionId: "section-25",
+        targetId: "section-25",
+        selectedText: "只读测试备注字段",
+      },
+      productDesignState: {
+        id: "state-1",
+        projectId: "project-1",
+        version: 3,
+        title: "大型需求",
+        summary: "用于测试大输入瘦身。",
+        businessGoal: "降低 Codex runtime 输入体积。",
+        targetUsers: [],
+        userScenarios: [],
+        pages: [],
+        features: Array.from({ length: 40 }, (_, index) => ({
+          id: `feature-${index + 1}`,
+          name: `功能 ${index + 1}`,
+          description: "非常长的功能描述".repeat(200),
+        })),
+        backendConfigs: [],
+        frontendRules: [],
+        businessRules: [],
+        stateRules: [],
+        exceptionScenarios: [],
+        acceptanceCriteria: [],
+        assumptions: [],
+        knowledgeRefs: [],
+        pendingQuestions: [],
+        confirmedFacts: [],
+        status: "doc_ready",
+        createdBy: "user-1",
+        createdAt: "2026-06-26T00:00:00.000Z",
+        updatedAt: "2026-06-26T00:00:00.000Z",
+      },
+      prdDocument: longRequirementDocument(),
+      knowledgeContext: {
+        query: "测试",
+        summary: "知识上下文摘要",
+        strongRules: Array.from({ length: 10 }, (_, index) => ({
+          id: `rule-${index + 1}`,
+          title: `规则 ${index + 1}`,
+          content: "需要遵循的超长规则正文".repeat(500),
+          sourceType: "knowledge_base",
+        })),
+        defaultRules: [],
+        referenceCases: [],
+        designPatterns: [],
+        prdWritingRules: [],
+        prototypeRules: [],
+        businessConcepts: [],
+        conflicts: [],
+        unknownAreas: [],
+      },
+    },
+  };
+}
+
+function longRequirementDocument() {
+  return {
+    id: "prd-1",
+    projectId: "project-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 3,
+    title: "大型 PRD",
+    status: "ready",
+    sections: Array.from({ length: 30 }, (_, index) => ({
+      id: `section-${index + 1}`,
+      title: `章节 ${index + 1}`,
+      type: "business_rules",
+      level: 1,
+      order: index + 1,
+      content: `第 ${index + 1} 节内容。${"这是一段非常长的 PRD 正文。".repeat(600)}`,
+      blocks: [
+        {
+          id: `block-${index + 1}`,
+          type: "paragraph",
+          content: "长段落".repeat(600),
+          sourcePaths: ["businessRules"],
+        },
+      ],
+      sourcePaths: ["businessRules"],
+    })),
+    assumptions: [],
+    knowledgeRefs: [],
+    pendingQuestions: [],
+    validationNotes: [],
+    createdBy: "user-1",
+    createdAt: "2026-06-26T00:00:00.000Z",
+    updatedAt: "2026-06-26T00:00:00.000Z",
   };
 }
 
