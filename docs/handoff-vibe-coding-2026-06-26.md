@@ -40,27 +40,31 @@
 
 2026-06-26 11:34 更正并复测：线上服务器是 `8.130.160.177`，不是 `45.207.206.76`。本轮已把部署默认地址、前端知识库默认地址和 Quartz 配置改回 `8.130.160.177`。此前针对 `45.207.206.76` 的 SSH/HTTP 探测属于误测，不代表真实线上状态。
 
-正确服务器当前探测结果：
+正确服务器部署前探测结果：
 
 - SSH：`root@8.130.160.177` 可连接。
 - Web：`http://8.130.160.177:3000/login` 返回 200。
-- API health：`http://8.130.160.177:4000/api/system/health` 返回 200，但模块列表仍包含旧的 `intent-agent`、`decision-engine`、`company-runtime` 等，说明线上仍是部署前旧版本。
+- API health：`http://8.130.160.177:4000/api/system/health` 返回 200，但模块列表仍包含旧的 `intent-agent`、`decision-engine`、`company-runtime` 等，说明当时线上仍是部署前旧版本。
 - Knowledge：`http://8.130.160.177:3001/__health` 返回 `ok`。
+
+2026-06-26 11:46 已完成线上部署并复测：
+
+- Web：`http://8.130.160.177:3000/login` 返回 200。
+- API health：`http://8.130.160.177:4000/api/system/health` 返回 200，`phase` 为 `vibe-runtime-adapter`，模块列表已变为 `runtime-orchestrator`、`runtime-adapters`、`codex-runtime-adapter`、`deerflow-runtime-adapter`、`product-runtime-service` 等。
+- Knowledge：`http://8.130.160.177:3001/__health` 返回 `ok`。
+- API 容器内 `codex --version` 返回 `codex-cli 0.142.2`。
+- 运行中的容器：`ai-product-workbench-api`、`ai-product-workbench-web`、`ai-product-knowledge`、`ai-product-workbench-postgres`。
 
 本地验证通过：
 
 - `npm run build`
 - `npm run test`：28 个测试文件、114 个测试全部通过。
 
-线上部署尚未完成，需要使用正确服务器 `8.130.160.177` 执行：
+部署方式备注：
 
-```bash
-ssh root@8.130.160.177
-cd /opt/ai-product-workbench
-bash deploy/server-deploy.sh
-```
+服务器当前不能匿名拉取 GitHub 私有仓库，`git ls-remote https://github.com/harrylee-bot/ai-product-workbench.git main` 会提示需要用户名。因此这次部署使用本机 `rsync` 同步当前代码到 `/opt/ai-product-workbench`，保留服务器 `.env`、`agent-skills`、`knowledge-vault`，然后在服务器执行 `SKIP_GIT_PULL=1 bash deploy/server-deploy.sh`。
 
-脚本会拉取 `origin/main`。
+服务器 `.env` 已设置 `NODE_IMAGE=docker.1ms.run/library/node:22-bookworm-slim`，用于绕开 Docker Hub 拉取 `node:22-bookworm-slim` 超时。
 
 截至 2026-06-26 09:10 左右，公网 API 可用：
 
