@@ -92,6 +92,31 @@ describe("CodexRuntimeAdapter", () => {
     expect(spawnedChildren[0]?.kill).toHaveBeenCalledWith("SIGTERM");
   });
 
+  it("finishes on Codex turn/completed instead of waiting for idle timeout", async () => {
+    spawnMock.mockImplementation((_command: string, _args: string[], options: { cwd: string }) => {
+      const child = new MockChildProcess();
+      spawnedChildren.push(child);
+      setTimeout(async () => {
+        await writeFile(join(options.cwd, "runtime-output.json"), JSON.stringify(requirementOutput("终态事件")), "utf8");
+        child.stdout.write(JSON.stringify({ method: "turn/completed", params: { completedAt: "2026-06-26T00:00:00.000Z" } }) + "\n");
+      }, 5);
+      return child;
+    });
+
+    const adapter = new CodexRuntimeAdapter(config(workspaceRoot, {
+      codexIdleTimeoutMs: () => 10_000,
+      codexIdlePollMs: () => 20,
+    }) as never);
+    const startedAt = Date.now();
+
+    const result = await adapter.runTask<RequirementRuntimeInput, RequirementRuntimeOutput>(requirementTask());
+
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(result.output?.productDesignDraft.title).toBe("终态事件");
+    expect(spawnedChildren[0]?.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(result.events.map((item) => item.content).join("\n")).toContain("turn/completed");
+  });
+
   it("compacts large structured runtime inputs while preserving selected PRD context", async () => {
     let capturedInput: Record<string, any> | undefined;
     spawnMock.mockImplementation((_command: string, _args: string[], options: { cwd: string }) => {

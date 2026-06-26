@@ -189,12 +189,21 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       lastActivityAt = Date.now();
     };
     const stdout = createInterface({ input: child.stdout });
+    let resolveCompletion: ((completion: CodexCompletionResult) => void) | undefined;
+    const completionPromise = new Promise<CodexCompletionResult>((resolve) => {
+      resolveCompletion = resolve;
+    });
     stdout.on("line", (line) => {
       touch();
       const parsed = parseJsonLine(line);
       rawEvents.push(parsed ?? line);
       if (parsed) {
         events.push(event(task, eventTypeFromCodex(parsed), summaryFromCodex(parsed), parsed));
+        const completionStatus = codexCompletionStatus(parsed);
+        if (completionStatus) {
+          resolveCompletion?.({ status: completionStatus, event: parsed });
+          resolveCompletion = undefined;
+        }
       }
     });
     child.stderr.on("data", (chunk) => {
@@ -223,9 +232,30 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
 
     const result = await Promise.race([
       closePromise.then((closeResult) => ({ type: "closed" as const, closeResult })),
+      completionPromise.then((completion) => ({ type: "completed_event" as const, completion })),
       idlePromise.then(() => ({ type: "idle_timeout" as const })),
     ]);
     finished = true;
+
+    if (result.type === "completed_event") {
+      if (result.completion.status === "failed") {
+        await this.stopCodexChild(child, closePromise);
+        throw new Error(`Codex runtime 返回失败终态：${summaryFromCodex(result.completion.event)}`);
+      }
+      const outputReady = options?.expectedOutputPath
+        ? await this.waitForExpectedOutput(options, 3_000)
+        : undefined;
+      if (options?.expectedOutputPath && !outputReady?.ready) {
+        await this.stopCodexChild(child, closePromise);
+        throw new Error("Codex runtime 已完成，但未生成可用的预期产物。");
+      }
+      events.push(event(task, "runtime_task_completed", "Codex runtime 已收到 turn/completed，开始读取预期产物。", {
+        codexEvent: result.completion.event,
+        output: outputReady,
+      }));
+      await this.stopCodexChild(child, closePromise);
+      return rawEvents;
+    }
 
     if (result.type === "idle_timeout") {
       const outputReady = options?.expectedOutputPath ? await this.inspectExpectedOutput(options) : undefined;
@@ -294,6 +324,16 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     } catch {
       return undefined;
     }
+  }
+
+  private async waitForExpectedOutput(options: CodexRunOptions, timeoutMs: number) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt <= timeoutMs) {
+      const outputReady = await this.inspectExpectedOutput(options);
+      if (outputReady?.ready) return outputReady;
+      await sleep(200);
+    }
+    return undefined;
   }
 
   private async stopCodexChild(
@@ -412,6 +452,13 @@ type CodexOutputReady = {
 type CodexCloseResult = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
+};
+
+type CodexCompletionStatus = "completed" | "failed";
+
+type CodexCompletionResult = {
+  status: CodexCompletionStatus;
+  event: Record<string, unknown>;
 };
 
 type RuntimeInputCompactionResult = {
@@ -1281,7 +1328,8 @@ function tomlString(value: string) {
 }
 
 function eventTypeFromCodex(value: Record<string, unknown>): RuntimeEvent["type"] {
-  const type = typeof value.type === "string" ? value.type : "";
+  const type = codexEventName(value);
+  if (codexCompletionStatus(value) === "completed") return "runtime_task_completed";
   if (type.includes("command") || type.includes("tool")) return "runtime_tool_called";
   if (type.includes("completed")) return "runtime_step_started";
   if (type.includes("failed") || type === "error") return "runtime_warning";
@@ -1289,8 +1337,35 @@ function eventTypeFromCodex(value: Record<string, unknown>): RuntimeEvent["type"
 }
 
 function summaryFromCodex(value: Record<string, unknown>) {
-  const type = typeof value.type === "string" ? value.type : "codex_event";
+  const type = codexEventName(value) || "codex_event";
   const item = value.item && typeof value.item === "object" ? value.item as Record<string, unknown> : undefined;
-  const text = typeof item?.text === "string" ? item.text : undefined;
+  const params = value.params && typeof value.params === "object" ? value.params as Record<string, unknown> : undefined;
+  const text = typeof item?.text === "string"
+    ? item.text
+    : typeof params?.message === "string"
+      ? params.message
+      : undefined;
   return text ? text.slice(0, 500) : `Codex event: ${type}`;
+}
+
+function codexCompletionStatus(value: Record<string, unknown>): CodexCompletionStatus | undefined {
+  const eventName = codexEventName(value).replace(/\./g, "/");
+  if (eventName === "turn/completed") return "completed";
+  if (
+    eventName === "turn/failed" ||
+    eventName === "turn/aborted" ||
+    eventName === "turn/cancelled" ||
+    eventName === "turn/canceled"
+  ) {
+    return "failed";
+  }
+  return undefined;
+}
+
+function codexEventName(value: Record<string, unknown>) {
+  return typeof value.method === "string"
+    ? value.method
+    : typeof value.type === "string"
+      ? value.type
+      : "";
 }
