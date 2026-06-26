@@ -29,6 +29,8 @@ import type {
 import { ExportService } from "./export.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
+import { PrototypeService } from "./prototype.service";
+import { QaService } from "./qa.service";
 import { ExternalRuntimeConfigService } from "./runtime/external-runtime-config.service";
 import { ExternalRuntimeService } from "./runtime/external-runtime.service";
 import type {
@@ -38,6 +40,7 @@ import type {
   RequirementRuntimeOutput,
 } from "./runtime/external-runtime.types";
 import { renderPrdFromState } from "./runtime/local-protocol-renderers";
+import { ProductRuntimeService } from "./runtime/product-runtime.service";
 import { projectStatusFromProductDesignState } from "./workspace-state-machine";
 import { VibeStreamService } from "./vibe-stream.service";
 
@@ -115,6 +118,12 @@ export class AiOrchestratorService {
     private readonly stateService?: ProductDesignStateService,
     @Optional()
     private readonly documentService?: RequirementDocumentService,
+    @Optional()
+    private readonly productRuntime?: ProductRuntimeService,
+    @Optional()
+    private readonly prototypeService?: PrototypeService,
+    @Optional()
+    private readonly qaService?: QaService,
   ) {}
 
   async run(input: OrchestratorInput): Promise<OrchestratorResult> {
@@ -176,13 +185,17 @@ export class AiOrchestratorService {
     const intent: IntentResult = {
       intent: UserIntent.generate_prototype,
       confidence: 1,
-      reason: "用户确认 PRD 后继续生成原型，但原型 runtime adapter 尚未配置。",
+      reason: "用户确认 PRD 后继续生成原型。",
       requiresSelection: false,
       isAmbiguous: false,
     };
 
     try {
       await this.runLog.markRunIntent(context.runId, intent.intent);
+      if (this.productRuntime && this.prototypeService && this.stateService) {
+        return await this.finishPrototypeRuntime(input, intent);
+      }
+
       const result: OrchestratorResult = {
         runId: context.runId,
         projectId: context.projectId,
@@ -205,6 +218,139 @@ export class AiOrchestratorService {
       await this.handleRunFailure(context, error);
       throw error;
     }
+  }
+
+  private async finishPrototypeRuntime(
+    input: OrchestratorInput,
+    intent: IntentResult,
+  ): Promise<OrchestratorResult> {
+    const { context } = input;
+    if (!this.productRuntime || !this.prototypeService || !this.stateService) {
+      throw new Error("Prototype runtime 未就绪：缺少 ProductRuntimeService、PrototypeService 或 ProductDesignStateService");
+    }
+    const sourceState = context.productDesignState;
+    if (!sourceState) {
+      throw new Error("Prototype runtime 未就绪：缺少已确认的 ProductDesignState");
+    }
+
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "step_started",
+      step: "prototype_code_generation",
+      content: "正在根据已确认 PRD 生成原型规格。",
+    });
+    const prototypeSpec = await this.productRuntime.generatePrototypeSpec({
+      runId: context.runId,
+      projectId: context.projectId,
+      traceId: context.traceId,
+      userId: context.userId,
+      productDesignState: sourceState,
+      targetDevice: "both",
+    });
+
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "step_started",
+      step: "prototype_code_generation",
+      content: "正在生成 HTML 原型。",
+    });
+    const prototypeDraft = await this.productRuntime.generatePrototypeHtml({
+      runId: context.runId,
+      projectId: context.projectId,
+      traceId: context.traceId,
+      userId: context.userId,
+      prototypeSpec: prototypeSpec.data,
+      mode: "single_html",
+    });
+
+    const savedPrototype = await this.prototypeService.saveGeneratedPrototype(
+      sourceState,
+      prototypeSpec.data,
+      prototypeDraft.data,
+      {
+        userId: context.userId,
+        runId: context.runId,
+        reason: "用户确认 PRD 后生成 HTML 原型",
+      },
+    );
+
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "prototype_updated",
+      step: "prototype_code_generation",
+      content: "HTML 原型已生成。",
+      data: {
+        prototypeSpec: savedPrototype.prototypeSpec,
+        prototypeArtifact: savedPrototype.artifact,
+      },
+    });
+
+    let productDesignState = await this.stateService.attachGeneratedArtifacts(sourceState.id, {
+      prdDocument: sourceState.prdDocument,
+      prototypeSpec: prototypeSpec.data,
+      status: ProductDesignStateStatus.prototype_ready,
+      userId: context.userId,
+      runId: context.runId,
+      messageId: input.userMessageId,
+      reason: "用户确认 PRD 后同步 PrototypeSpec",
+    });
+
+    let qaReport: QAReport | undefined;
+    if (this.qaService) {
+      await this.stream.emit({
+        runId: context.runId,
+        projectId: context.projectId,
+        type: "step_started",
+        step: "qa_check",
+        content: "正在执行 PRD 与原型一致性 QA。",
+      });
+      qaReport = await this.qaService.runForProject(context.projectId, context.userId, {
+        trigger: "initial_generation",
+        runId: context.runId,
+        traceId: context.traceId,
+        prdDocument: sourceState.prdDocument,
+        prototypeSpec: prototypeSpec.data,
+        prototypeArtifact: savedPrototype.artifact,
+      });
+      await this.stream.emit({
+        runId: context.runId,
+        projectId: context.projectId,
+        type: "qa_completed",
+        step: "qa_check",
+        content: "QA 已完成。",
+        data: qaReport,
+      });
+    }
+
+    productDesignState = {
+      ...productDesignState,
+      prototypeSpec: savedPrototype.prototypeSpec,
+    };
+
+    const result: OrchestratorResult = {
+      runId: context.runId,
+      projectId: context.projectId,
+      intent,
+      message: qaReport
+        ? "已根据确认后的 PRD 生成 HTML 原型并完成 QA，请查看 QA 结果。"
+        : "已根据确认后的 PRD 生成 HTML 原型，请查看原型。",
+      productDesignState,
+      prdDocument: sourceState.prdDocument,
+      prototypeSpec: savedPrototype.prototypeSpec,
+      prototypeArtifact: savedPrototype.artifact,
+      qaReport,
+      runtimeAdapter: {
+        status: "completed",
+        provider: this.runtimeConfig?.prototypeCodeProvider() === "deerflow" ? "deerflow" : "codex",
+      },
+      nextAction: qaReport ? { type: "review_qa" } : { type: "review_prototype" },
+    };
+
+    await this.finishRun(context, result, projectStatusFromProductDesignState(productDesignState));
+    return result;
   }
 
   private async finishExport(context: RuntimeRunContext, intent: IntentResult) {

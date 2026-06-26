@@ -255,6 +255,94 @@ describe("runtime-only Vibe orchestrator", () => {
       data: expect.objectContaining({ status: ProjectStatus.prd_ready }),
     });
   });
+
+  it("continues from confirmed PRD to prototype and QA", async () => {
+    const confirmedPrd = { ...prdDocument(), status: "confirmed" as const };
+    const sourceState = baseState({
+      status: "doc_confirmed",
+      prdDocument: confirmedPrd,
+    });
+    const productRuntime = {
+      generatePrototypeSpec: vi.fn().mockResolvedValue({
+        data: prototypeSpec(),
+      }),
+      generatePrototypeHtml: vi.fn().mockResolvedValue({
+        data: {
+          id: "artifact-draft-1",
+          projectId: "project-1",
+          prototypeSpecId: "prototype-spec-1",
+          productDesignStateId: "state-1",
+          productDesignStateVersion: 3,
+          title: "签到活动 HTML 原型",
+          htmlContent: "<!doctype html><html><body><main data-page-id=\"page_main\">签到活动</main></body></html>",
+          entryFilePath: "index.html",
+          targetDevice: "both",
+          pageCount: 1,
+          generatedByRunId: "run-1",
+          assets: [],
+        },
+      }),
+    };
+    const prototypeService = {
+      saveGeneratedPrototype: vi.fn().mockResolvedValue({
+        prototypeSpec: prototypeSpec(),
+        artifact: prototypeArtifact(),
+        version: {},
+      }),
+    };
+    const stateService = {
+      attachGeneratedArtifacts: vi.fn().mockResolvedValue(baseState({
+        status: "prototype_ready",
+        prdDocument: confirmedPrd,
+        prototypeSpec: prototypeSpec(),
+      })),
+    };
+    const qaService = {
+      runForProject: vi.fn().mockResolvedValue(qaReport()),
+    };
+    const serviceWithRuntime = new AiOrchestratorService(
+      runLog as never,
+      stream as never,
+      messageService as never,
+      prisma as never,
+      exportService as never,
+      { prototypeCodeProvider: () => "codex" } as never,
+      undefined,
+      stateService as never,
+      undefined,
+      productRuntime as never,
+      prototypeService as never,
+      qaService as never,
+    );
+
+    const result = await serviceWithRuntime.confirmPrdAndContinue({
+      ...baseInput("确认 PRD，继续生成原型。"),
+      context: {
+        ...baseInput("确认 PRD，继续生成原型。").context,
+        productDesignState: sourceState,
+        currentProjectStatus: ProjectStatus.prd_ready,
+      },
+    });
+
+    expect(productRuntime.generatePrototypeSpec).toHaveBeenCalledWith(expect.objectContaining({
+      productDesignState: sourceState,
+      targetDevice: "both",
+    }));
+    expect(productRuntime.generatePrototypeHtml).toHaveBeenCalledWith(expect.objectContaining({
+      prototypeSpec: expect.objectContaining({ id: "prototype-spec-1" }),
+    }));
+    expect(prototypeService.saveGeneratedPrototype).toHaveBeenCalled();
+    expect(qaService.runForProject).toHaveBeenCalledWith(
+      "project-1",
+      "user-1",
+      expect.objectContaining({ trigger: "initial_generation" }),
+    );
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({ type: "prototype_updated" }));
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({ type: "qa_completed" }));
+    expect(result.nextAction?.type).toBe("review_qa");
+    expect(result.prototypeArtifact?.id).toBe("artifact-1");
+    expect(result.qaReport?.id).toBe("qa-1");
+  });
 });
 
 function baseInput(userInput: string) {
@@ -346,6 +434,71 @@ function prdDocument() {
     generatedByRunId: "run-1",
     createdBy: "user-1",
     updatedBy: "user-1",
+    createdAt: "2026-06-20T08:00:00.000Z",
+    updatedAt: "2026-06-20T08:00:00.000Z",
+  };
+}
+
+function prototypeSpec() {
+  return {
+    id: "prototype-spec-1",
+    projectId: "project-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 3,
+    title: "签到活动 HTML 原型",
+    targetDevice: "both" as const,
+    styleGuide: {
+      tone: "clean" as const,
+      layoutDensity: "comfortable" as const,
+      borderRadius: "small" as const,
+    },
+    pages: [],
+    navigation: [],
+    interactions: [],
+    assumptions: [],
+    knowledgeRefs: [],
+    generatedByRunId: "run-1",
+  };
+}
+
+function prototypeArtifact() {
+  return {
+    id: "artifact-1",
+    projectId: "project-1",
+    prototypeSpecId: "prototype-spec-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 3,
+    title: "签到活动 HTML 原型",
+    status: "ready" as const,
+    htmlContent: "<!doctype html><html><body>签到活动</body></html>",
+    entryFilePath: "index.html",
+    targetDevice: "both" as const,
+    pageCount: 1,
+    generatedByRunId: "run-1",
+    createdBy: "user-1",
+    updatedBy: "user-1",
+    createdAt: "2026-06-20T08:00:00.000Z",
+    updatedAt: "2026-06-20T08:00:00.000Z",
+  };
+}
+
+function qaReport() {
+  return {
+    id: "qa-1",
+    projectId: "project-1",
+    productDesignStateId: "state-1",
+    productDesignStateVersion: 3,
+    status: "passed" as const,
+    trigger: "initial_generation" as const,
+    checkTypes: [],
+    summary: "QA 通过。",
+    issues: [],
+    blockingCount: 0,
+    majorCount: 0,
+    minorCount: 0,
+    infoCount: 0,
+    generatedByRunId: "run-1",
+    createdBy: "user-1",
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
   };
