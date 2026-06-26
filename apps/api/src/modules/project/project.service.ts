@@ -42,7 +42,7 @@ export class ProjectService {
     const keyword = query.keyword?.trim();
     const projects = await this.prisma.project.findMany({
       where: {
-        ...(user.role === UserRole.admin ? {} : { ownerId: user.id }),
+        ownerId: user.id,
         deletedAt: null,
         status: { notIn: [ProjectStatus.deleted, ProjectStatus.archived] },
         ...(keyword

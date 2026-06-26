@@ -16,7 +16,7 @@ export class ModelGatewayDefaultsService implements OnModuleInit {
     const baseUrl = process.env.DEFAULT_MODEL_BASE_URL?.trim();
     const apiKey = process.env.DEFAULT_MODEL_API_KEY?.trim();
     const modelName = process.env.DEFAULT_MODEL_NAME?.trim();
-    const providerName = process.env.DEFAULT_MODEL_PROVIDER_NAME?.trim() || "XXTF OpenAI";
+    const providerName = process.env.DEFAULT_MODEL_PROVIDER_NAME?.trim() || "datatoken";
 
     if (!baseUrl || !apiKey || !modelName) return;
 
@@ -89,6 +89,17 @@ export class ModelGatewayDefaultsService implements OnModuleInit {
           },
         });
       }
+
+      if (this.keepOnlyDefaultProvider()) {
+        await tx.modelConfig.updateMany({
+          where: { providerId: { not: provider.id } },
+          data: { isEnabled: false },
+        });
+        await tx.modelProvider.updateMany({
+          where: { id: { not: provider.id } },
+          data: { isDefault: false, isEnabled: false },
+        });
+      }
     });
 
     this.logger.log(`默认模型配置已就绪：${providerName} / ${modelName}`);
@@ -122,5 +133,10 @@ export class ModelGatewayDefaultsService implements OnModuleInit {
     if (taskType === ModelTaskType.prototype_code_generation) return 8192;
     if (taskType === ModelTaskType.prd_generation) return 6000;
     return 4096;
+  }
+
+  private keepOnlyDefaultProvider() {
+    const value = process.env.MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER?.trim().toLowerCase();
+    return ["1", "true", "yes", "on"].includes(value ?? "");
   }
 }

@@ -3,6 +3,13 @@ ARG CODEX_CLI_VERSION=0.142.2
 
 FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
+RUN sed -i \
+    -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
+    -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
+    /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/db/package.json packages/db/package.json
@@ -18,6 +25,13 @@ FROM ${NODE_IMAGE} AS runner
 ARG CODEX_CLI_VERSION=0.142.2
 WORKDIR /app
 ENV NODE_ENV=production
+RUN sed -i \
+    -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
+    -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
+    /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/db/package.json packages/db/package.json

@@ -38,6 +38,28 @@ describe("Phase1 ProjectService", () => {
     vi.clearAllMocks();
   });
 
+  it("lists only the current user's projects in the workspace", async () => {
+    prisma.project.findMany.mockResolvedValue([]);
+
+    await service.list(
+      {
+        id: "admin-1",
+        username: "admin",
+        displayName: "管理员",
+        role: UserRole.admin,
+      },
+      {},
+    );
+
+    expect(prisma.project.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          ownerId: "admin-1",
+        }),
+      }),
+    );
+  });
+
   it("soft deletes a project and its visible conversations", async () => {
     prisma.project.findUnique.mockResolvedValue({
       id: "project-1",
