@@ -7,14 +7,8 @@ import {
 } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RuntimeRunLogService } from "./runtime-run-log.service";
-import type { ProductDesignState, RollbackRecord } from "./ai-vibe.types";
+import type { RollbackRecord } from "./ai-vibe.types";
 import { ProductDesignStateService } from "./product-design-state.service";
-import { PrototypeService } from "./prototype.service";
-import { QaService } from "./qa.service";
-import { RequirementDocumentService } from "./requirement-document.service";
-import { ProductRuntimeService } from "./runtime/product-runtime.service";
-import { VibeStreamService } from "./vibe-stream.service";
 
 type RollbackRecordRow = {
   id: string;
@@ -40,12 +34,6 @@ export class RollbackService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stateService: ProductDesignStateService,
-    private readonly documentService: RequirementDocumentService,
-    private readonly prototypeService: PrototypeService,
-    private readonly qaService: QaService,
-    private readonly productRuntime: ProductRuntimeService,
-    private readonly runLog: RuntimeRunLogService,
-    private readonly stream: VibeStreamService,
   ) {}
 
   async rollbackProductDesignStateForUser(
@@ -62,190 +50,7 @@ export class RollbackService {
       throw new BadRequestException("ROLLBACK_TARGET_VERSION_INVALID");
     }
 
-    const conversationId = project.currentConversationId ?? await this.ensureConversationId(projectId, project.ownerId);
-    const run = await this.runLog.createRun({
-      projectId,
-      conversationId,
-      userId: user.id,
-      userInput: `回滚 ProductDesignState 到 v${input.targetVersion}`,
-    });
-
-    const record = await this.prisma.rollbackRecord.create({
-      data: {
-        projectId,
-        rollbackType: RollbackType.product_design_state,
-        fromProductDesignStateVersion: currentState.version,
-        toProductDesignStateVersion: currentState.version + 1,
-        beforePrdDocumentId: project.currentPrdDocumentId,
-        beforePrototypeArtifactId: project.currentPrototypeArtifactId,
-        reason: input.reason,
-        status: RollbackRecordStatus.running,
-        generatedByRunId: run.id,
-        createdBy: user.id,
-      },
-    });
-
-    await this.stream.emit({
-      runId: run.id,
-      projectId,
-      type: "rollback_started",
-      data: { rollbackRecordId: record.id, targetVersion: input.targetVersion },
-      content: "正在回滚 ProductDesignState...",
-    });
-
-    try {
-      const restored = await this.stateService.restoreVersionSnapshotForProject(projectId, input.targetVersion, {
-        userId: user.id,
-        runId: run.id,
-        reason: input.reason ?? `回滚到 ProductDesignState v${input.targetVersion}`,
-      });
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "state_updated",
-        step: "product_design",
-        data: stateSummary(restored.state),
-        content: `已恢复为 ProductDesignState v${restored.state.version}`,
-      });
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "state_version_created",
-        step: "product_design",
-        data: { stateId: restored.state.id, version: restored.state.version },
-      });
-
-      const prdDraft = await this.productRuntime.generatePrd({
-        runId: run.id,
-        projectId,
-        traceId: run.traceId,
-        userId: user.id,
-        productDesignState: restored.state,
-        mode: "draft",
-      });
-      const prdDocument = await this.documentService.saveGeneratedDocument(restored.state, prdDraft.data, {
-        userId: user.id,
-        runId: run.id,
-        reason: "回滚后重新生成 PRD",
-      });
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "prd_updated",
-        step: "prd_generation",
-        data: prdDocument,
-      });
-
-      const prototypeSpec = await this.productRuntime.generatePrototypeSpec({
-        runId: run.id,
-        projectId,
-        traceId: run.traceId,
-        userId: user.id,
-        productDesignState: restored.state,
-        targetView: "both",
-      });
-      const prototypeDraft = await this.productRuntime.generatePrototypeHtml({
-        runId: run.id,
-        projectId,
-        traceId: run.traceId,
-        userId: user.id,
-        prototypeSpec: prototypeSpec.data,
-        mode: "single_html",
-      });
-      const savedPrototype = await this.prototypeService.saveGeneratedPrototype(
-        restored.state,
-        prototypeSpec.data,
-        prototypeDraft.data,
-        {
-          userId: user.id,
-          runId: run.id,
-          reason: "回滚后重新生成 HTML 原型",
-        },
-      );
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "prototype_updated",
-        step: "prototype_code_generation",
-        data: {
-          prototypeSpec: savedPrototype.prototypeSpec,
-          prototypeArtifact: savedPrototype.artifact,
-        },
-      });
-
-      const stateWithArtifacts = await this.stateService.attachGeneratedArtifacts(restored.state.id, {
-        prdDocument,
-        prototypeSpec: prototypeSpec.data,
-        status: "prototype_ready",
-        userId: user.id,
-        runId: run.id,
-        reason: "回滚后同步 PRD 与 PrototypeSpec",
-      });
-
-      const qaReport = await this.qaService.runForProject(projectId, user.id, {
-        trigger: "rollback",
-        runId: run.id,
-        traceId: run.traceId,
-        relatedRollbackId: record.id,
-        prdDocument,
-        prototypeSpec: prototypeSpec.data,
-        prototypeArtifact: savedPrototype.artifact,
-      });
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "qa_completed",
-        step: "qa_check",
-        data: qaReport,
-      });
-
-      const completed = await this.prisma.rollbackRecord.update({
-        where: { id: record.id },
-        data: {
-          status: RollbackRecordStatus.completed,
-          toProductDesignStateVersion: stateWithArtifacts.version,
-          afterPrdDocumentId: prdDocument.id,
-          afterPrototypeArtifactId: savedPrototype.artifact.id,
-        },
-      });
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "rollback_completed",
-        data: { rollbackRecordId: completed.id },
-        content: "回滚、重新生成和 QA 已完成。",
-      });
-
-      const result = {
-        rollbackRecord: this.toRollbackRecord(completed as RollbackRecordRow),
-        productDesignState: stateWithArtifacts,
-        prdDocument,
-        prototypeArtifact: savedPrototype.artifact,
-        qaReport,
-      };
-      await this.runLog.completeRun(run.id, result, "回滚、重新生成和 QA 已完成。");
-      return result;
-    } catch (error) {
-      const failed = await this.prisma.rollbackRecord.update({
-        where: { id: record.id },
-        data: {
-          status: RollbackRecordStatus.failed,
-          errorMessage: error instanceof Error ? error.message : "ROLLBACK_FAILED",
-        },
-      });
-      await this.runLog.failRun(run.id, error);
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "rollback_failed",
-        data: {
-          rollbackRecordId: failed.id,
-          errorMessage: error instanceof Error ? error.message : "ROLLBACK_FAILED",
-        },
-        content: error instanceof Error ? error.message : "ROLLBACK_FAILED",
-      });
-      throw error;
-    }
+    throw new BadRequestException("ROLLBACK_REGEN_DISABLED_DEERFLOW_FIRST");
   }
 
   async listProjectRollbackRecords(user: AuthenticatedUser, projectId: string) {
@@ -279,22 +84,6 @@ export class RollbackService {
     };
   }
 
-  private async ensureConversationId(projectId: string, ownerId: string) {
-    const existing = await this.prisma.conversation.findFirst({
-      where: { projectId, deletedAt: null, status: "active" },
-      orderBy: { createdAt: "asc" },
-    });
-    if (existing) return existing.id;
-    const created = await this.prisma.conversation.create({
-      data: { projectId, ownerId, title: "默认会话" },
-    });
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { currentConversationId: created.id },
-    });
-    return created.id;
-  }
-
   private async assertProjectAccess(
     user: AuthenticatedUser,
     projectId: string,
@@ -318,27 +107,4 @@ export class RollbackService {
       throw new ForbiddenException("管理员不可直接回滚用户项目");
     }
   }
-}
-
-function stateSummary(state: ProductDesignState) {
-  return {
-    id: state.id,
-    projectId: state.projectId,
-    version: state.version,
-    title: state.title,
-    status: state.status,
-    counts: {
-      pages: state.pages.length,
-      backendConfigs: state.backendConfigs.length,
-      frontendRules: state.frontendRules.length,
-      businessRules: state.businessRules.length,
-      stateRules: state.stateRules.length,
-      exceptionScenarios: state.exceptionScenarios.length,
-      acceptanceCriteria: state.acceptanceCriteria.length,
-      assumptions: state.assumptions.length,
-      pendingQuestions: state.pendingQuestions.length,
-      confirmedFacts: state.confirmedFacts.length,
-    },
-    updatedAt: state.updatedAt,
-  };
 }

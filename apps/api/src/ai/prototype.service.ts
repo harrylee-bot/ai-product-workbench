@@ -25,12 +25,9 @@ import type {
   PrototypePageSpec,
   PrototypeSpec,
   PrototypeVersion,
-  SelectedRegion,
 } from "./ai-vibe.types";
-import { renderPrototypeComponentFragment } from "./runtime/local-protocol-renderers";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { QaService } from "./qa.service";
-import { ProductRuntimeService } from "./runtime/product-runtime.service";
 
 type PrototypeSpecRecord = {
   id: string;
@@ -84,7 +81,6 @@ export class PrototypeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stateService: ProductDesignStateService,
-    private readonly productRuntime: ProductRuntimeService,
     @Optional()
     private readonly knowledgeCandidateService?: KnowledgeCandidateService,
     @Optional()
@@ -104,37 +100,7 @@ export class PrototypeService {
     if (!state) throw new NotFoundException("PROTOTYPE_STATE_NOT_FOUND");
     assertPrototypeGenerationGate(state);
 
-    const runId = `manual-prototype-${Date.now()}`;
-    const spec = await this.productRuntime.generatePrototypeSpec({
-      runId,
-      projectId,
-      traceId: runId,
-      userId: user.id,
-      productDesignState: state,
-      targetDevice: input.targetDevice ?? "both",
-    });
-    const draft = await this.productRuntime.generatePrototypeHtml({
-      runId,
-      projectId,
-      traceId: runId,
-      userId: user.id,
-      prototypeSpec: spec.data,
-      mode: "single_html",
-    });
-
-    const saved = await this.saveGeneratedPrototype(state, spec.data, draft.data, {
-      userId: user.id,
-      runId,
-      reason: "手动生成 HTML 原型",
-    });
-    const productDesignState = await this.stateService.attachGeneratedArtifacts(state.id, {
-      prototypeSpec: saved.prototypeSpec,
-      status: ProductDesignStateStatus.prototype_ready,
-      userId: user.id,
-      runId,
-      reason: "手动生成 HTML 原型后同步 ProductDesignState",
-    });
-    return { ...saved, productDesignState };
+    throw new BadRequestException("PROTOTYPE_GENERATION_DISABLED_DEERFLOW_FIRST");
   }
 
   async saveGeneratedPrototype(
@@ -202,102 +168,6 @@ export class PrototypeService {
       options.reason ?? "HTML 原型生成完成",
     );
     return { prototypeSpec: spec, artifact, version };
-  }
-
-  async trySaveLocalizedGeneratedPrototype(
-    state: ProductDesignState,
-    prototypeSpec: PrototypeSpec,
-    options: {
-      userId: string;
-      runId?: string;
-      reason?: string;
-      selectedRegion: SelectedRegion;
-      sourceArtifactId?: string;
-    },
-  ) {
-    const componentId = options.selectedRegion.componentId?.trim();
-    if (!componentId) return null;
-
-    const sourceArtifact = await this.findLocalizedSourceArtifact(
-      state.projectId,
-      options.sourceArtifactId ?? options.selectedRegion.artifactId ?? options.selectedRegion.targetId,
-    );
-    if (!sourceArtifact || sourceArtifact.status !== PrototypeArtifactStatus.ready || !sourceArtifact.htmlContent) {
-      return null;
-    }
-
-    const target = findPrototypeComponent(prototypeSpec, componentId, options.selectedRegion.pageId);
-    if (!target) return null;
-    const fragment = renderPrototypeComponentFragment(target.page, target.component);
-    if (!fragment.trim()) return null;
-
-    const htmlContent = replacePrototypeComponentHtml(sourceArtifact.htmlContent, componentId, fragment);
-    if (!htmlContent || htmlContent === sourceArtifact.htmlContent) return null;
-    const safety = validateHtmlSafety(htmlContent);
-    if (!safety.ok) throw new BadRequestException(safety.reason);
-
-    const specRecord = await this.prisma.prototypeSpecRecord.create({
-      data: {
-        id: prototypeSpec.id,
-        projectId: state.projectId,
-        productDesignStateId: state.id,
-        productDesignStateVersion: state.version,
-        title: prototypeSpec.title,
-        targetDevice: toPrismaTargetDevice(prototypeSpec.targetDevice),
-        styleGuide: toInputJson(prototypeSpec.styleGuide),
-        pages: toInputJson(prototypeSpec.pages),
-        navigation: toInputJson(prototypeSpec.navigation),
-        interactions: toInputJson(prototypeSpec.interactions),
-        assumptions: toInputJson(prototypeSpec.assumptions),
-        knowledgeRefs: toInputJson(prototypeSpec.knowledgeRefs),
-        generatedByRunId: options.runId ?? prototypeSpec.generatedByRunId,
-      },
-    });
-
-    const artifactRecord = await this.prisma.prototypeArtifact.create({
-      data: {
-        projectId: state.projectId,
-        prototypeSpecId: specRecord.id,
-        productDesignStateId: state.id,
-        productDesignStateVersion: state.version,
-        title: prototypeSpec.title,
-        status: PrototypeArtifactStatus.ready,
-        htmlContent,
-        entryFilePath: sourceArtifact.entryFilePath ?? "index.html",
-        previewUrl: sourceArtifact.previewUrl,
-        targetDevice: toPrismaTargetDevice(prototypeSpec.targetDevice),
-        pageCount: prototypeSpec.pages.length || sourceArtifact.pageCount || 1,
-        generatedByRunId: options.runId,
-        errorMessage: null,
-        createdBy: options.userId,
-        updatedBy: options.userId,
-      },
-    });
-
-    const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
-    const artifact = this.toArtifactItem(artifactRecord as PrototypeArtifactRecord);
-    await this.prisma.project.update({
-      where: { id: state.projectId },
-      data: { currentPrototypeArtifactId: artifact.id },
-    });
-    const version = await this.createVersion(
-      spec,
-      artifact,
-      options.userId,
-      options.reason ?? `组件级局部更新：${componentId}`,
-    );
-    return {
-      prototypeSpec: spec,
-      artifact,
-      version,
-      localPatch: {
-        mode: "component",
-        componentId,
-        pageId: target.page.id,
-        sourceArtifactId: sourceArtifact.id,
-        replacementBytes: fragment.length,
-      },
-    };
   }
 
   async getCurrentForUser(user: AuthenticatedUser, projectId: string) {
@@ -488,27 +358,6 @@ export class PrototypeService {
     return null;
   }
 
-  private async findLocalizedSourceArtifact(projectId: string, artifactId?: string) {
-    if (artifactId) {
-      const artifact = await this.prisma.prototypeArtifact.findFirst({
-        where: { id: artifactId, projectId },
-      });
-      if (artifact) return artifact as PrototypeArtifactRecord;
-    }
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (project?.currentPrototypeArtifactId) {
-      const current = await this.prisma.prototypeArtifact.findFirst({
-        where: { id: project.currentPrototypeArtifactId, projectId },
-      });
-      if (current) return current as PrototypeArtifactRecord;
-    }
-    const latest = await this.prisma.prototypeArtifact.findFirst({
-      where: { projectId, status: PrototypeArtifactStatus.ready },
-      orderBy: { updatedAt: "desc" },
-    });
-    return latest ? latest as PrototypeArtifactRecord : null;
-  }
-
   private async assertProjectAccess(
     user: AuthenticatedUser,
     projectId: string,
@@ -693,123 +542,6 @@ function prototypeComponentNode(component: PrototypeComponentSpec): PrototypeSta
     layout: {},
     children: (component.children ?? []).map(prototypeComponentNode),
   };
-}
-
-export function replacePrototypeComponentHtml(
-  html: string,
-  componentId: string,
-  replacementHtml: string,
-) {
-  const range = findComponentElementRange(html, componentId);
-  if (!range) return null;
-  return `${html.slice(0, range.start)}${replacementHtml}${html.slice(range.end)}`;
-}
-
-function findPrototypeComponent(
-  spec: PrototypeSpec,
-  componentId: string,
-  pageId?: string,
-): { page: PrototypePageSpec; component: PrototypeComponentSpec } | null {
-  const pages = pageId ? spec.pages.filter((page) => page.id === pageId) : spec.pages;
-  for (const page of pages.length ? pages : spec.pages) {
-    const component = findComponentRecursive(page.components, componentId);
-    if (component) return { page, component };
-  }
-  return null;
-}
-
-function findComponentRecursive(
-  components: PrototypeComponentSpec[],
-  componentId: string,
-): PrototypeComponentSpec | null {
-  for (const component of components) {
-    if (component.id === componentId) return component;
-    const child = findComponentRecursive(component.children ?? [], componentId);
-    if (child) return child;
-  }
-  return null;
-}
-
-function findComponentElementRange(html: string, componentId: string) {
-  const attrMatch = new RegExp(
-    `\\sdata-component-id\\s*=\\s*(["'])${escapeRegExp(componentId)}\\1`,
-    "i",
-  ).exec(html);
-  if (!attrMatch || attrMatch.index < 0) return null;
-  const start = html.lastIndexOf("<", attrMatch.index);
-  if (start < 0 || /^<\s*[!/]/.test(html.slice(start, start + 4)) || /^<\s*\//.test(html.slice(start, start + 4))) {
-    return null;
-  }
-  const tagNameMatch = /^<\s*([a-zA-Z][\w:-]*)/.exec(html.slice(start));
-  if (!tagNameMatch) return null;
-  const tagName = tagNameMatch[1];
-  const openingEnd = findTagEnd(html, start);
-  if (openingEnd < 0) return null;
-  const openingTag = html.slice(start, openingEnd + 1);
-  if (/\/\s*>$/.test(openingTag) || isVoidHtmlTag(tagName)) {
-    return { start, end: openingEnd + 1 };
-  }
-  const end = findClosingTagEnd(html, tagName, openingEnd + 1);
-  return end ? { start, end } : null;
-}
-
-function findTagEnd(html: string, start: number) {
-  let quote: string | null = null;
-  for (let index = start; index < html.length; index += 1) {
-    const char = html[index];
-    if (quote) {
-      if (char === quote) quote = null;
-      continue;
-    }
-    if (char === "\"" || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === ">") return index;
-  }
-  return -1;
-}
-
-function findClosingTagEnd(html: string, tagName: string, from: number) {
-  const pattern = new RegExp(`<\\s*/?\\s*${escapeRegExp(tagName)}\\b[^>]*>`, "gi");
-  pattern.lastIndex = from;
-  let depth = 1;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(html))) {
-    const tag = match[0];
-    const isClosing = /^<\s*\//.test(tag);
-    const isSelfClosing = /\/\s*>$/.test(tag) || isVoidHtmlTag(tagName);
-    if (isClosing) {
-      depth -= 1;
-    } else if (!isSelfClosing) {
-      depth += 1;
-    }
-    if (depth === 0) return match.index + tag.length;
-  }
-  return null;
-}
-
-function isVoidHtmlTag(tagName: string) {
-  return [
-    "area",
-    "base",
-    "br",
-    "col",
-    "embed",
-    "hr",
-    "img",
-    "input",
-    "link",
-    "meta",
-    "param",
-    "source",
-    "track",
-    "wbr",
-  ].includes(tagName.toLowerCase());
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function validateHtmlSafety(html: string): { ok: true } | { ok: false; reason: string } {

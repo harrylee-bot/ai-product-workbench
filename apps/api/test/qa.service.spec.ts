@@ -1,10 +1,6 @@
 import { KnowledgeType, ProjectStatus, QAReportStatus, QAReportTrigger, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  renderPrdFromState,
-  renderPrototypeSpecFromState,
-} from "../src/ai/runtime/local-protocol-renderers";
-import type { ProductDesignState, QAReport, RequirementDocument } from "../src/ai/ai-vibe.types";
+import type { ProductDesignState, PrototypeSpec, QAReport, RequirementDocument } from "../src/ai/ai-vibe.types";
 import { QaRuleCheckService } from "../src/ai/qa-rule-check.service";
 import { QaService } from "../src/ai/qa.service";
 
@@ -230,7 +226,7 @@ describe("Module 13 QA services", () => {
     );
     const state = baseState();
     const prdDocument = toRequirementDocument(state, "prd-state");
-    const prototypeSpec = renderPrototypeSpecFromState(state, "both", "run-state");
+    const prototypeSpec = toPrototypeSpec(state, "run-state");
 
     prisma.project.findUnique.mockResolvedValue({
       id: "project-1",
@@ -420,24 +416,78 @@ function emptyKnowledgeContext() {
 }
 
 function toRequirementDocument(state: ProductDesignState, id: string): RequirementDocument {
-  const draft = renderPrdFromState(state);
   return {
     id,
     projectId: state.projectId,
     productDesignStateId: state.id,
     productDesignStateVersion: state.version,
-    title: draft.title,
+    title: `${state.title} PRD`,
     status: "ready",
-    sections: draft.sections,
-    assumptions: draft.assumptions,
-    knowledgeRefs: draft.knowledgeRefs,
-    pendingQuestions: draft.pendingQuestions,
-    validationNotes: draft.validationNotes,
+    sections: [
+      {
+        id: "overview",
+        title: "需求概览",
+        type: "overview",
+        level: 1,
+        order: 1,
+        content: state.summary ?? state.title,
+        sourcePaths: ["summary"],
+      },
+    ],
+    assumptions: state.assumptions.map((item) => ({
+      assumptionId: String(item.id ?? "assumption_1"),
+      content: String(item.content ?? ""),
+      relatedSectionIds: ["overview"],
+      status: "pending",
+    })),
+    knowledgeRefs: state.knowledgeRefs,
+    pendingQuestions: [],
+    validationNotes: [],
     generatedByRunId: "run-state",
     createdBy: "user-1",
     updatedBy: "user-1",
     createdAt: "2026-06-21T08:00:00.000Z",
     updatedAt: "2026-06-21T08:00:00.000Z",
+  };
+}
+
+function toPrototypeSpec(state: ProductDesignState, runId: string): PrototypeSpec {
+  return {
+    id: `spec-${runId}`,
+    projectId: state.projectId,
+    productDesignStateId: state.id,
+    productDesignStateVersion: state.version,
+    title: `${state.title} HTML 原型`,
+    targetDevice: "both",
+    styleGuide: {
+      tone: "clean",
+      layoutDensity: "comfortable",
+      borderRadius: "small",
+    },
+    pages: [
+      {
+        id: "page_home",
+        name: "签到页",
+        device: "responsive",
+        layout: "dashboard",
+        components: [
+          {
+            id: "page_home_primary_action",
+            name: "签到按钮",
+            type: "button",
+            content: "立即签到",
+            sourcePaths: ["frontendRules"],
+          },
+        ],
+        sourcePaths: ["pages[0]"],
+        order: 1,
+      },
+    ],
+    navigation: [],
+    interactions: [],
+    assumptions: [],
+    knowledgeRefs: state.knowledgeRefs,
+    generatedByRunId: runId,
   };
 }
 

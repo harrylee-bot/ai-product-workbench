@@ -861,12 +861,6 @@ export type QAReport = {
   gate: QAGateDecision;
 };
 
-export type QAProtocolOutput = {
-  status: QAReportStatus;
-  summary: string;
-  issues: QAIssue[];
-};
-
 export type RollbackRecord = {
   id: string;
   projectId: string;
@@ -1026,8 +1020,3 @@ export type RuntimeStreamStepName =
   | "patch_planning"
   | "qa_check"
   | "knowledge_extraction";
-
-export type RuntimeOutput<T> = {
-  data: T;
-  modelCallLogId?: string;
-};

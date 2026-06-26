@@ -1,6 +1,5 @@
 import { ProjectStatus, RequirementDocumentStatus, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderPrdFromState } from "../src/ai/runtime/local-protocol-renderers";
 import type { ProductDesignState, RequirementDocumentDraft } from "../src/ai/ai-vibe.types";
 import { RequirementDocumentService } from "../src/ai/requirement-document.service";
 
@@ -29,16 +28,12 @@ describe("PRD requirement document module", () => {
     attachGeneratedArtifacts: vi.fn(),
     syncRequirementDocumentEdit: vi.fn(),
   };
-  const productRuntime = {
-    generatePrd: vi.fn(),
-  };
   const qaService = {
     assertGateAllows: vi.fn(),
   };
   const service = new RequirementDocumentService(
     prisma as never,
     stateService as never,
-    productRuntime as never,
     undefined,
     qaService as never,
   );
@@ -74,40 +69,21 @@ describe("PRD requirement document module", () => {
       prdDocument: input.document,
       prototypeSpec: undefined,
     }));
-    productRuntime.generatePrd.mockResolvedValue({ data: renderPrdFromState(baseState()) });
   });
 
-  it("renders a structured 16-section PRD from ProductDesignState", () => {
-    const draft = renderPrdFromState(baseState());
+  it("keeps manual PRD generation disabled until the DeerFlow-first runtime is wired", async () => {
+    stateService.getCurrentState.mockResolvedValue(baseState());
 
-    expect(draft.sections).toHaveLength(16);
-    expect(draft.sections[0]).toEqual(
-      expect.objectContaining({
-        id: "overview",
-        type: "overview",
-        level: 1,
-        order: 1,
-        sourcePaths: ["title", "summary"],
-      }),
-    );
-    expect(draft.sections.at(-1)).toEqual(
-      expect.objectContaining({
-        id: "pending_questions",
-        tags: ["pending_question"],
-      }),
-    );
-    expect(draft.assumptions[0]).toEqual(
-      expect.objectContaining({
-        assumptionId: "assumption_reward",
-        status: "pending",
-      }),
-    );
-    expect(JSON.stringify(draft.sections)).not.toMatch(/GET\s+\/api|CREATE TABLE|```/i);
+    await expect(service.generateForUser(user, "project-1", { mode: "draft" }))
+      .rejects.toThrow("PRD_GENERATION_DISABLED_DEERFLOW_FIRST");
+
+    expect(prisma.requirementDocument.create).not.toHaveBeenCalled();
+    expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
   });
 
   it("saves generated documents, creates a version, and updates the project pointer", async () => {
     const state = baseState();
-    const draft = renderPrdFromState(state);
+    const draft = prdDraft(state);
     prisma.requirementDocument.create.mockImplementation(async ({ data }) =>
       documentRecord({
         id: "prd-1",
@@ -118,13 +94,13 @@ describe("PRD requirement document module", () => {
     const document = await service.saveGeneratedDocument(state, draft, {
       userId: "user-1",
       runId: "run-1",
-      reason: "Runtime 生成 PRD",
+      reason: "DeerFlow 生成 PRD",
     });
 
     expect(document.id).toBe("prd-1");
     expect(document.productDesignStateId).toBe("state-1");
     expect(document.productDesignStateVersion).toBe(3);
-    expect(document.sections).toHaveLength(16);
+    expect(document.sections).toHaveLength(2);
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: "project-1" },
       data: { currentPrdDocumentId: "prd-1" },
@@ -139,7 +115,7 @@ describe("PRD requirement document module", () => {
   });
 
   it("loads the current PRD through Project.currentPrdDocumentId", async () => {
-    const draft = renderPrdFromState(baseState());
+    const draft = prdDraft(baseState());
     prisma.project.findUnique.mockResolvedValue(baseProject({ currentPrdDocumentId: "prd-current" }));
     prisma.requirementDocument.findFirst.mockResolvedValueOnce(
       documentRecord({
@@ -156,33 +132,10 @@ describe("PRD requirement document module", () => {
     expect(result.document?.id).toBe("prd-current");
   });
 
-  it("syncs manual PRD generation back into ProductDesignState", async () => {
-    const state = baseState();
-    const draft = renderPrdFromState(state);
-    stateService.getCurrentState.mockResolvedValue(state);
-    productRuntime.generatePrd.mockResolvedValue({ data: draft });
-    prisma.requirementDocument.create.mockImplementation(async ({ data }) =>
-      documentRecord({
-        id: "prd-manual",
-        ...data,
-      }),
-    );
-
-    const result = await service.generateForUser(user, "project-1", { mode: "draft" });
-
-    expect(result.document.id).toBe("prd-manual");
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
-      prdDocument: expect.objectContaining({ id: "prd-manual" }),
-      status: "prd_ready",
-      reason: "手动生成 PRD 后同步 ProductDesignState",
-    }));
-    expect(result.productDesignState.prdDocument.id).toBe("prd-manual");
-  });
-
   it("prefers the PRD embedded in ProductDesignState over a stale project pointer", async () => {
     const statePrd = documentRecord({
       id: "prd-state",
-      ...renderPrdFromState(baseState()),
+      ...prdDraft(baseState()),
     });
     stateService.getCurrentState.mockResolvedValue(baseState({
       version: 4,
@@ -202,7 +155,7 @@ describe("PRD requirement document module", () => {
   });
 
   it("updates a section, creates a version, and syncs the PRD back into ProductDesignState", async () => {
-    const draft = renderPrdFromState(baseState());
+    const draft = prdDraft(baseState());
     prisma.requirementDocument.findUnique.mockResolvedValue({
       ...documentRecord({
         id: "prd-1",
@@ -232,25 +185,15 @@ describe("PRD requirement document module", () => {
       id: "business_goal_body",
       content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
     }));
-    expect(prisma.requirementDocumentVersion.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        documentId: "prd-1",
-        reason: "局部编辑 PRD 段落：business_goal",
-      }),
-    });
     expect(stateService.syncRequirementDocumentEdit).toHaveBeenCalledWith(expect.objectContaining({
       document: expect.objectContaining({ id: "prd-1", status: "ready" }),
-      section: expect.objectContaining({
-        id: "business_goal",
-        content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
-      }),
+      section: expect.objectContaining({ id: "business_goal" }),
       userId: "user-1",
-      reason: "PRD 段落 business_goal 已回流到 ProductDesignState",
     }));
   });
 
   it("confirms a PRD for the prototype gate and syncs doc_confirmed into ProductDesignState", async () => {
-    const draft = renderPrdFromState(baseState());
+    const draft = prdDraft(baseState());
     prisma.requirementDocument.findUnique.mockResolvedValue({
       ...documentRecord({
         id: "prd-1",
@@ -271,16 +214,9 @@ describe("PRD requirement document module", () => {
     const result = await service.confirmForPrototypeGate(user, "prd-1");
 
     expect(result.document.status).toBe("confirmed");
-    expect(prisma.requirementDocumentVersion.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        documentId: "prd-1",
-        reason: "用户确认 PRD，继续生成原型",
-      }),
-    });
     expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
       prdDocument: expect.objectContaining({ id: "prd-1", status: "confirmed" }),
       status: "doc_confirmed",
-      reason: "用户确认 PRD，继续生成原型，同步 PRD 确认状态到 ProductDesignState",
     }));
   });
 
@@ -289,7 +225,7 @@ describe("PRD requirement document module", () => {
     prisma.requirementDocument.findUnique.mockResolvedValue({
       ...documentRecord({
         id: "prd-1",
-        ...renderPrdFromState(baseState()),
+        ...prdDraft(baseState()),
       }),
       project: baseProject({ status: ProjectStatus.qa_failed }),
     });
@@ -342,6 +278,48 @@ function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignSt
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
     ...overrides,
+  };
+}
+
+function prdDraft(state: ProductDesignState): RequirementDocumentDraft {
+  return {
+    projectId: state.projectId,
+    title: `${state.title} PRD`,
+    sections: [
+      {
+        id: "overview",
+        title: "需求概览",
+        type: "overview",
+        level: 1,
+        order: 1,
+        content: state.summary ?? state.title,
+        sourcePaths: ["title", "summary"],
+      },
+      {
+        id: "business_goal",
+        title: "业务目标",
+        type: "business_goal",
+        level: 1,
+        order: 2,
+        content: state.businessGoal,
+        sourcePaths: ["businessGoal"],
+      },
+    ],
+    assumptions: state.assumptions.map((item) => ({
+      assumptionId: String(item.id ?? "assumption_1"),
+      content: String(item.content ?? ""),
+      relatedSectionIds: ["overview"],
+      status: "pending",
+    })),
+    knowledgeRefs: state.knowledgeRefs,
+    pendingQuestions: state.pendingQuestions.map((item) => ({
+      questionId: String(item.id ?? "question_1"),
+      question: String(item.question ?? ""),
+      reason: "待用户确认",
+      relatedSectionIds: ["overview"],
+      status: "pending",
+    })),
+    validationNotes: [],
   };
 }
 

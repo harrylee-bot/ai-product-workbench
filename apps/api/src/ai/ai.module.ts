@@ -2,7 +2,6 @@ import { Module } from "@nestjs/common";
 import { ConstraintModule } from "../constraint/constraint.module";
 import { FileModule } from "../files/file.module";
 import { KnowledgeModule } from "../knowledge/knowledge.module";
-import { ModelGatewayModule } from "../model-gateway/model-gateway.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { MessageService } from "../projects/message.service";
 import { RuntimeRunLogService } from "./runtime-run-log.service";
@@ -55,14 +54,9 @@ import {
   PrdEditingController,
   PrototypeEditingController,
 } from "./editing.controller";
-import { ExternalRuntimeConfigService } from "./runtime/external-runtime-config.service";
-import { ExternalRuntimeService } from "./runtime/external-runtime.service";
-import { CodexRuntimeAdapter } from "./runtime/codex-runtime.adapter";
-import { DeerFlowRuntimeAdapter } from "./runtime/deerflow-runtime.adapter";
-import { ProductRuntimeService } from "./runtime/product-runtime.service";
 
 @Module({
-  imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule, ModelGatewayModule],
+  imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule],
   controllers: [
     VibeController,
     ProjectProductDesignStateController,
@@ -104,11 +98,6 @@ import { ProductRuntimeService } from "./runtime/product-runtime.service";
     QaService,
     VersionHistoryService,
     RollbackService,
-    ExternalRuntimeConfigService,
-    ExternalRuntimeService,
-    CodexRuntimeAdapter,
-    DeerFlowRuntimeAdapter,
-    ProductRuntimeService,
     MessageService,
     ShareService,
   ],

@@ -1,4 +1,10 @@
-import { ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from "@nestjs/common";
 import {
   ProductDesignStateStatus,
   ProjectStatus,
@@ -17,7 +23,6 @@ import type {
 } from "./ai-vibe.types";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { QaService } from "./qa.service";
-import { ProductRuntimeService } from "./runtime/product-runtime.service";
 
 type RequirementDocumentRecord = {
   id: string;
@@ -43,7 +48,6 @@ export class RequirementDocumentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stateService: ProductDesignStateService,
-    private readonly productRuntime: ProductRuntimeService,
     @Optional()
     private readonly knowledgeCandidateService?: KnowledgeCandidateService,
     @Optional()
@@ -62,29 +66,7 @@ export class RequirementDocumentService {
       : await this.stateService.getCurrentState(projectId);
     if (!state) throw new NotFoundException("PRD_STATE_NOT_FOUND");
 
-    const runId = `manual-prd-${Date.now()}`;
-    const prd = await this.productRuntime.generatePrd({
-      runId,
-      projectId,
-      traceId: runId,
-      userId: user.id,
-      productDesignState: state,
-      mode: input.mode ?? "draft",
-    });
-
-    const document = await this.saveGeneratedDocument(state, prd.data, {
-      userId: user.id,
-      reason: "手动生成 PRD",
-    });
-    const productDesignState = await this.stateService.attachGeneratedArtifacts(state.id, {
-      prdDocument: document,
-      status: state.prototypeSpec
-        ? ProductDesignStateStatus.prototype_ready
-        : ProductDesignStateStatus.prd_ready,
-      userId: user.id,
-      reason: "手动生成 PRD 后同步 ProductDesignState",
-    });
-    return { document, productDesignState };
+    throw new BadRequestException("PRD_GENERATION_DISABLED_DEERFLOW_FIRST");
   }
 
   async saveGeneratedDocument(

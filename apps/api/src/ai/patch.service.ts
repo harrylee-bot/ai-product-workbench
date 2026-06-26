@@ -1,41 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
-  KnowledgeType,
-  MessageType,
   PatchRecordStatus as PrismaPatchRecordStatus,
-  ProductDesignStateStatus,
   ProjectStatus,
-  UserIntent,
   UserRole,
 } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
-import { FileAssetService } from "../files/file-asset.service";
-import { KnowledgeRetrievalService } from "../knowledge/knowledge-retrieval.service";
-import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
-import { RuntimeRunLogService } from "./runtime-run-log.service";
-import { qaCompletedPayload, toInputJson } from "./ai-vibe.helpers";
-import type {
-  AttachmentSummary,
-  KnowledgeContext,
-  PatchPlan,
-  PatchRecord,
-  ProductDesignState,
-  PrototypeArtifact,
-  PrototypeArtifactDraft,
-  PrototypeSpec,
-  QAReport,
-  RequirementDocument,
-  RuntimeOutput,
-  SelectedRegion,
-} from "./ai-vibe.types";
-import { ProductDesignStateService } from "./product-design-state.service";
-import { PrototypeService } from "./prototype.service";
-import { QaService } from "./qa.service";
-import { RequirementDocumentService } from "./requirement-document.service";
-import { ProductRuntimeService } from "./runtime/product-runtime.service";
-import { VibeStreamService } from "./vibe-stream.service";
-import { projectStatusForCompletedArtifacts } from "./workspace-state-machine";
+import { toInputJson } from "./ai-vibe.helpers";
+import type { PatchPlan, PatchRecord, SelectedRegion } from "./ai-vibe.types";
 
 type CreatePatchInput = {
   conversationId: string;
@@ -49,22 +21,16 @@ type CreatePatchCandidateInput = CreatePatchInput & {
   interactionEvent?: Record<string, unknown>;
 };
 
-type PatchExecutionInput = {
+type CreatePatchCandidateFromRunInput = {
   projectId: string;
   conversationId: string;
   userId: string;
   userInstruction: string;
-  selectedRegion: SelectedRegion;
-  attachments: AttachmentSummary[];
+  selectedRegion: SelectedRegion | Record<string, unknown>;
+  attachments: unknown[];
   runId: string;
   traceId: string;
   instructionMessageId: string;
-  knowledgeContext?: KnowledgeContext;
-};
-
-type CreatePatchCandidateFromRunInput = Omit<PatchExecutionInput, "selectedRegion" | "userInstruction"> & {
-  selectedRegion: SelectedRegion | Record<string, unknown>;
-  userInstruction: string;
 };
 
 type PatchRecordRow = {
@@ -108,103 +74,13 @@ type PatchPreviewRow = {
   updatedAt: Date;
 };
 
-type SavedPrototypeBundle = {
-  prototypeSpec: PrototypeSpec;
-  artifact: PrototypeArtifact;
-  version?: unknown;
-  localPatch?: Record<string, unknown>;
-};
-
-type PrototypeCodeStepResult =
-  | {
-      mode: "component_patch";
-      savedPrototype: SavedPrototypeBundle;
-    }
-  | {
-      mode: "full_regenerate";
-      draft: PrototypeArtifactDraft;
-      skippedLocalPatchReason?: string;
-    };
-
 @Injectable()
 export class PatchService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly messageService: MessageService,
-    private readonly fileAssetService: FileAssetService,
-    private readonly runLog: RuntimeRunLogService,
-    private readonly stream: VibeStreamService,
-    private readonly knowledgeRetrieval: KnowledgeRetrievalService,
-    private readonly stateService: ProductDesignStateService,
-    private readonly documentService: RequirementDocumentService,
-    private readonly prototypeService: PrototypeService,
-    private readonly qaService: QaService,
-    private readonly productRuntime: ProductRuntimeService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async createPatchForUser(user: AuthenticatedUser, projectId: string, input: CreatePatchInput) {
-    const project = await this.assertProjectAccess(user, projectId);
-    this.assertOwnerMutation(user, project.ownerId);
-    await this.assertConversation(projectId, input.conversationId);
-    const selectedRegion = normalizeSelectedRegion(input.selectedRegion);
-    const instruction = input.userInstruction.trim();
-    if (!instruction) throw new BadRequestException("PATCH_INSTRUCTION_EMPTY");
-
-    const attachmentFileIds = [...new Set(input.attachmentFileIds ?? [])];
-    const attachments = await this.fileAssetService.getAttachmentSummaries(attachmentFileIds, projectId);
-    if (attachmentFileIds.length !== attachments.length) {
-      throw new ForbiddenException("附件不存在或无权访问");
-    }
-
-    const userMessage = await this.messageService.createUserMessage({
-      projectId,
-      conversationId: input.conversationId,
-      userId: user.id,
-      content: instruction,
-      attachments: attachments.length ? toInputJson(attachments) : undefined,
-      metadata: toInputJson({ selectedRegion, patchMode: true }),
-    });
-    await this.fileAssetService.attachFilesToMessage(
-      attachmentFileIds,
-      userMessage.id,
-      projectId,
-      input.conversationId,
-    );
-
-    const run = await this.runLog.createRun({
-      projectId,
-      conversationId: input.conversationId,
-      userId: user.id,
-      userInput: instruction,
-    });
-    await this.runLog.markRunIntent(
-      run.id,
-      selectedRegion.type === "prototype" ? UserIntent.patch_prototype : UserIntent.patch_document,
-    );
-
-    const result = await this.createCandidatePatch({
-      projectId,
-      conversationId: input.conversationId,
-      userId: user.id,
-      userInstruction: instruction,
-      selectedRegion,
-      attachments,
-      runId: run.id,
-      traceId: run.traceId,
-      instructionMessageId: userMessage.id,
-    });
-
-    return {
-      projectId,
-      conversationId: input.conversationId,
-      userMessage,
-      assistantMessage: result.assistantMessage,
-      runId: run.id,
-      status: "candidate_created",
-      patchRecord: result.patchRecord,
-      patchPreview: result.patchPreview,
-      result: result.result,
-    };
+    await this.assertPatchMutationAllowed(user, projectId, input.conversationId, input.userInstruction);
+    throw deerFlowFirstDisabled("PATCH_RUNTIME_DISABLED_DEERFLOW_FIRST");
   }
 
   async createPatchCandidateForUser(
@@ -212,92 +88,12 @@ export class PatchService {
     projectId: string,
     input: CreatePatchCandidateInput,
   ) {
-    const project = await this.assertProjectAccess(user, projectId);
-    this.assertOwnerMutation(user, project.ownerId);
-    await this.assertConversation(projectId, input.conversationId);
-    const selectedRegion = normalizeSelectedRegion(input.selectedRegion);
-    const instruction = input.userInstruction.trim();
-    if (!instruction) throw new BadRequestException("PATCH_INSTRUCTION_EMPTY");
-
-    const attachmentFileIds = [...new Set(input.attachmentFileIds ?? [])];
-    const attachments = await this.fileAssetService.getAttachmentSummaries(attachmentFileIds, projectId);
-    if (attachmentFileIds.length !== attachments.length) {
-      throw new ForbiddenException("附件不存在或无权访问");
-    }
-
-    const userMessage = await this.messageService.createUserMessage({
-      projectId,
-      conversationId: input.conversationId,
-      userId: user.id,
-      content: instruction,
-      attachments: attachments.length ? toInputJson(attachments) : undefined,
-      metadata: toInputJson({
-        selectedRegion,
-        patchMode: true,
-        patchCandidateOnly: true,
-        source: input.source ?? "inline_edit",
-        interactionEvent: input.interactionEvent,
-      }),
-    });
-    await this.fileAssetService.attachFilesToMessage(
-      attachmentFileIds,
-      userMessage.id,
-      projectId,
-      input.conversationId,
-    );
-
-    const run = await this.runLog.createRun({
-      projectId,
-      conversationId: input.conversationId,
-      userId: user.id,
-      userInput: instruction,
-    });
-    await this.runLog.markRunIntent(
-      run.id,
-      selectedRegion.type === "prototype" ? UserIntent.patch_prototype : UserIntent.patch_document,
-    );
-    await this.recordInteractionEvent(run.id, projectId, input.source ?? "inline_edit", {
-      selectedRegion,
-      instruction,
-      ...input.interactionEvent,
-      userId: user.id,
-    });
-
-    const result = await this.createCandidatePatch({
-      projectId,
-      conversationId: input.conversationId,
-      userId: user.id,
-      userInstruction: instruction,
-      selectedRegion,
-      attachments,
-      runId: run.id,
-      traceId: run.traceId,
-      instructionMessageId: userMessage.id,
-    });
-
-    return {
-      projectId,
-      conversationId: input.conversationId,
-      userMessage,
-      assistantMessage: result.assistantMessage,
-      runId: run.id,
-      status: "candidate_created",
-      patchRecord: result.patchRecord,
-      patchPreview: result.patchPreview,
-      result: result.result,
-    };
+    await this.assertPatchMutationAllowed(user, projectId, input.conversationId, input.userInstruction);
+    throw deerFlowFirstDisabled("PATCH_RUNTIME_DISABLED_DEERFLOW_FIRST");
   }
 
-  async createPatchCandidateFromRun(input: CreatePatchCandidateFromRunInput) {
-    const selectedRegion = normalizeSelectedRegion(input.selectedRegion as Record<string, unknown>);
-    const instruction = input.userInstruction.trim();
-    if (!instruction) throw new BadRequestException("PATCH_INSTRUCTION_EMPTY");
-
-    return this.createCandidatePatch({
-      ...input,
-      userInstruction: instruction,
-      selectedRegion,
-    });
+  async createPatchCandidateFromRun(_input: CreatePatchCandidateFromRunInput) {
+    throw deerFlowFirstDisabled("PATCH_RUNTIME_DISABLED_DEERFLOW_FIRST");
   }
 
   async listForProject(
@@ -356,604 +152,25 @@ export class PatchService {
     return { patchRecord: this.toPatchRecord(updated as PatchRecordRow) };
   }
 
-  async confirmForUser(user: AuthenticatedUser, patchId: string, confirmation: string) {
+  async confirmForUser(user: AuthenticatedUser, patchId: string, _confirmation: string) {
     const row = await this.getAccessiblePatch(user, patchId);
     this.assertOwnerMutation(user, row.project.ownerId);
     if (row.status !== PrismaPatchRecordStatus.needs_confirmation) {
       throw new BadRequestException("PATCH_CONFIRMATION_NOT_REQUIRED");
     }
-    const confirmationText = confirmation.trim() || "用户确认应用 Patch 候选";
-    const selectedRegion = normalizeSelectedRegion(recordFromJson(row.selectedRegion));
-    const userMessage = await this.messageService.createUserMessage({
-      projectId: row.projectId,
-      conversationId: row.conversationId,
-      userId: user.id,
-      content: `确认局部修改：${confirmationText}`,
-      metadata: toInputJson({ patchId, patchConfirmation: true }),
-    });
-    const run = await this.runLog.createRun({
-      projectId: row.projectId,
-      conversationId: row.conversationId,
-      userId: user.id,
-      userInput: `${row.userInstruction}\n\n用户确认：${confirmationText}`,
-    });
-    await this.runLog.markRunIntent(
-      run.id,
-      selectedRegion.type === "prototype" ? UserIntent.patch_prototype : UserIntent.patch_document,
-    );
-    await this.prisma.project.update({
-      where: { id: row.projectId },
-      data: { status: ProjectStatus.designing, lastActivityAt: new Date() },
-    });
-
-    const result = await this.executeConfirmedPatch(
-      {
-        projectId: row.projectId,
-        conversationId: row.conversationId,
-        userId: user.id,
-        userInstruction: `${row.userInstruction}\n\n用户确认：${confirmationText}`,
-        selectedRegion,
-        attachments: [],
-        runId: run.id,
-        traceId: run.traceId,
-        instructionMessageId: userMessage.id,
-      },
-      row as PatchRecordRow,
-      confirmationText,
-    );
-
-    return {
-      projectId: row.projectId,
-      conversationId: row.conversationId,
-      userMessage,
-      assistantMessage: result.assistantMessage,
-      runId: run.id,
-      status: "completed",
-      patchRecord: result.patchRecord,
-      patchPreview: result.patchPreview,
-      result: result.result,
-    };
+    throw deerFlowFirstDisabled("PATCH_APPLY_DISABLED_DEERFLOW_FIRST");
   }
 
-  private async createCandidatePatch(input: PatchExecutionInput) {
-    let patchRecord: PatchRecord | undefined;
-    try {
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "patch_started",
-        content: "正在生成 Patch 候选...",
-      });
-
-      const state = await this.stateService.getCurrentState(input.projectId);
-      if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
-      const knowledgeContext = input.knowledgeContext ?? await this.getPatchKnowledgeContext(input);
-      const patch = await this.runRuntimeStep(
-        input,
-        "patch_planning",
-        () => this.productRuntime.planPatch({
-          runId: input.runId,
-          projectId: input.projectId,
-          traceId: input.traceId,
-          userId: input.userId,
-          userInput: input.userInstruction,
-          selectedRegion: input.selectedRegion,
-          productDesignState: state,
-          prdDocument: state.prdDocument,
-          prototypeSpec: state.prototypeSpec,
-          knowledgeContext,
-        }),
-      );
-      const plan: PatchPlan = {
-        ...patch.data,
-        needUserConfirm: true,
-        needsUserConfirmation: true,
-      };
-      const createdRecord = await this.prisma.patchRecord.create({
-        data: {
-          projectId: input.projectId,
-          conversationId: input.conversationId,
-          instructionMessageId: input.instructionMessageId,
-          selectedRegion: toInputJson(input.selectedRegion),
-          userInstruction: input.userInstruction,
-          patchPlan: toInputJson({
-            ...plan,
-            candidateOnly: true,
-            confirmationRequiredReason: "二期编辑体验要求用户确认后才能执行。",
-          }),
-          operations: toInputJson(plan.operations),
-          status: PrismaPatchRecordStatus.needs_confirmation,
-          beforeProductDesignStateVersion: state.version,
-          generatedByRunId: input.runId,
-          createdBy: input.userId,
-        },
-      });
-      patchRecord = this.toPatchRecord(createdRecord as PatchRecordRow);
-      const preview = await this.ensurePatchPreview(createdRecord as PatchRecordRow, patchRecord.patchPlan);
-      const patchPreview = this.toPatchPreview(preview as PatchPreviewRow, patchRecord);
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "patch_plan_created",
-        step: "patch_planning",
-        data: { patchId: patchRecord.id, patchPlan: plan, patchPreview, candidateOnly: true },
-        content: "Patch 候选已生成，等待用户确认",
-      });
-
-      const message = "已生成 Patch 候选，请在修改历史中确认后再应用。";
-      const assistantMessage = await this.messageService.createAssistantMessage({
-        projectId: input.projectId,
-        conversationId: input.conversationId,
-        content: message,
-        type: MessageType.agent_summary,
-        metadata: toInputJson({ patchRecord, patchPlan: plan, patchPreview, candidateOnly: true }),
-        relatedRunId: input.runId,
-      });
-      const result = patchConfirmationResult(patchRecord, plan, patchPreview);
-      await this.runLog.completeRun(input.runId, { patchRecord, patchPlan: plan, patchPreview, candidateOnly: true }, message);
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "run_completed",
-        content: message,
-        data: { ...result, runId: input.runId, projectId: input.projectId, message },
-      });
-      await this.prisma.project.update({
-        where: { id: input.projectId },
-        data: { status: ProjectStatus.clarifying, lastActivityAt: new Date() },
-      });
-      return { patchRecord, patchPreview, assistantMessage, result };
-    } catch (error) {
-      await this.handlePatchFailure(input, patchRecord, error);
-      throw error;
-    }
-  }
-
-  private async executeConfirmedPatch(
-    input: PatchExecutionInput,
-    row: PatchRecordRow,
-    confirmation: string,
-  ) {
-    let patchRecord: PatchRecord | undefined = this.toPatchRecord(row);
-    let patchPreview: PatchPreviewRow | undefined;
-    try {
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "patch_started",
-        content: "正在根据确认继续局部修改...",
-      });
-
-      const state = await this.stateService.getCurrentState(input.projectId);
-      if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
-      if (state.version !== row.beforeProductDesignStateVersion) {
-        throw new BadRequestException("PATCH_STATE_VERSION_CHANGED");
-      }
-      const preview = await this.ensurePatchPreview(row, patchRecord.patchPlan);
-      patchPreview = preview as PatchPreviewRow;
-      const plan: PatchPlan = {
-        ...patchRecord.patchPlan,
-        needUserConfirm: false,
-        needsUserConfirmation: false,
-      };
-      const updatedRecord = await this.prisma.patchRecord.update({
-        where: { id: row.id },
-        data: {
-          patchPlan: toInputJson({
-            ...plan,
-            userConfirmation: confirmation,
-            appliedPreviewId: preview.id,
-          }),
-          operations: toInputJson(plan.operations),
-          status: PrismaPatchRecordStatus.planned,
-          generatedByRunId: input.runId,
-        },
-      });
-      patchRecord = this.toPatchRecord(updatedRecord as PatchRecordRow);
-      await this.prisma.patchPreview.update({
-        where: { id: preview.id },
-        data: {
-          status: "applying",
-          message: "用户已确认，正在应用同一份补丁预览。",
-        },
-      });
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "patch_plan_created",
-        step: "patch_planning",
-        data: { patchId: patchRecord.id, patchPreviewId: preview.id, patchPlan: plan },
-        content: "局部修改计划已确认，准备应用补丁预览",
-      });
-
-      const result = await this.applyPatchPlan(input, patchRecord, plan, state, undefined, patchPreview);
-      return result;
-    } catch (error) {
-      if (patchPreview) {
-        await this.prisma.patchPreview.update({
-          where: { id: patchPreview.id },
-          data: {
-            status: "failed",
-            message: error instanceof Error ? error.message : "PATCH_PREVIEW_APPLY_FAILED",
-          },
-        });
-      }
-      await this.handlePatchFailure(input, patchRecord, error);
-      throw error;
-    }
-  }
-
-  private async applyPatchPlan(
-    input: PatchExecutionInput,
-    patchRecord: PatchRecord,
-    plan: PatchPlan,
-    beforeState: ProductDesignState,
-    knowledgeContext?: KnowledgeContext,
-    activePatchPreview?: PatchPreviewRow,
-  ) {
-    let statePatchApplied = false;
-    const projectSnapshot = await this.prisma.project.findUnique({
-      where: { id: input.projectId },
-      select: {
-        currentPrdDocumentId: true,
-        currentPrototypeArtifactId: true,
-        latestQaReportId: true,
-      },
-    });
-    try {
-      await this.prisma.patchRecord.update({
-        where: { id: patchRecord.id },
-        data: { status: PrismaPatchRecordStatus.applying },
-      });
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "patch_applying",
-        step: "patch_planning",
-        data: { patchId: patchRecord.id },
-        content: "正在应用产品设计状态补丁...",
-      });
-
-      const patchedState = await this.stateService.applyPatch(input.projectId, beforeState, plan, {
-        userId: input.userId,
-        runId: input.runId,
-        messageId: input.instructionMessageId,
-      });
-      statePatchApplied = true;
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "state_updated",
-        step: "patch_planning",
-        data: stateSummary(patchedState, patchRecord.id),
-        content: `产品设计状态 v${patchedState.version} 已更新`,
-      });
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "state_version_created",
-        step: "patch_planning",
-        data: { patchId: patchRecord.id, stateId: patchedState.id, version: patchedState.version },
-      });
-
-      const prdDraft = await this.runRuntimeStep(input, "prd_generation", () =>
-        this.productRuntime.generatePrd({
-          runId: input.runId,
-          projectId: input.projectId,
-          traceId: input.traceId,
-          userId: input.userId,
-          productDesignState: patchedState,
-          mode: "draft",
-        }),
-      );
-      const prdDocument = await this.documentService.saveGeneratedDocument(patchedState, prdDraft.data, {
-        userId: input.userId,
-        runId: input.runId,
-        reason: "补丁应用后重新生成需求文档",
-      });
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "prd_updated",
-        step: "prd_generation",
-        data: prdDocument,
-      });
-
-      const prototypeSpec = await this.runRuntimeStep(
-        input,
-        "prototype_design",
-        () => this.productRuntime.generatePrototypeSpec({
-          runId: input.runId,
-          projectId: input.projectId,
-          traceId: input.traceId,
-          userId: input.userId,
-          productDesignState: patchedState,
-          targetView: "both",
-        }),
-      );
-      const prototypeCode = await this.runRuntimeStep<PrototypeCodeStepResult>(
-        input,
-        "prototype_code_generation",
-        async () => {
-          const localPatchTarget = shouldUseComponentPrototypePatch(input.selectedRegion, plan);
-          if (localPatchTarget) {
-            const savedPrototype = await this.prototypeService.trySaveLocalizedGeneratedPrototype(
-              patchedState,
-              prototypeSpec.data,
-              {
-                userId: input.userId,
-                runId: input.runId,
-                selectedRegion: input.selectedRegion,
-                sourceArtifactId: input.selectedRegion.artifactId ?? input.selectedRegion.targetId,
-                reason: `补丁应用后局部再生成原型组件 ${localPatchTarget}`,
-              },
-            );
-            if (savedPrototype) {
-              return {
-                data: {
-                  mode: "component_patch",
-                  savedPrototype,
-                },
-              };
-            }
-          }
-          const draft = await this.productRuntime.generatePrototypeHtml({
-            runId: input.runId,
-            projectId: input.projectId,
-            traceId: input.traceId,
-            userId: input.userId,
-            prototypeSpec: prototypeSpec.data,
-            mode: "single_html",
-          });
-          return {
-            ...draft,
-            data: {
-              mode: "full_regenerate",
-              draft: draft.data,
-              skippedLocalPatchReason: localPatchTarget
-                ? "COMPONENT_LOCAL_PATCH_NOT_APPLICABLE"
-                : undefined,
-            },
-          };
-        },
-      );
-      const savedPrototype: SavedPrototypeBundle = prototypeCode.data.mode === "component_patch"
-        ? prototypeCode.data.savedPrototype
-        : await this.prototypeService.saveGeneratedPrototype(
-            patchedState,
-            prototypeSpec.data,
-            prototypeCode.data.draft,
-            {
-              userId: input.userId,
-              runId: input.runId,
-              reason: prototypeCode.data.skippedLocalPatchReason
-                ? "组件级局部更新不可用，回退为补丁应用后重新生成网页原型"
-                : "补丁应用后重新生成网页原型",
-            },
-          );
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "prototype_updated",
-        step: "prototype_code_generation",
-        data: {
-          prototypeSpec: savedPrototype.prototypeSpec,
-          prototypeArtifact: savedPrototype.artifact,
-          regenerationMode: prototypeCode.data.mode,
-          localPatch: prototypeCode.data.mode === "component_patch" ? savedPrototype.localPatch : undefined,
-        },
-      });
-
-      const stateWithArtifacts = await this.stateService.attachGeneratedArtifacts(patchedState.id, {
-        prdDocument,
-        prototypeSpec: prototypeSpec.data,
-        status: ProductDesignStateStatus.prototype_ready,
-        userId: input.userId,
-        runId: input.runId,
-        messageId: input.instructionMessageId,
-        reason: "补丁应用后同步需求文档与原型规格",
-      });
-
-      const qa = await this.runRuntimeStep(input, "qa_check", async () => ({
-        data: await this.qaService.runForProject(input.projectId, input.userId, {
-          trigger: "patch",
-          runId: input.runId,
-          traceId: input.traceId,
-          relatedPatchId: patchRecord.id,
-          prdDocument,
-          prototypeSpec: prototypeSpec.data,
-          prototypeArtifact: savedPrototype.artifact,
-        }),
-      }),
-      );
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "qa_completed",
-        step: "qa_check",
-        data: qaCompletedPayload(qa.data),
-      });
-
-      const finalRecord = await this.prisma.patchRecord.update({
-        where: { id: patchRecord.id },
-        data: {
-          status: PrismaPatchRecordStatus.applied,
-          afterProductDesignStateVersion: stateWithArtifacts.version,
-          affectedPrdDocumentId: prdDocument.id,
-          affectedPrototypeArtifactId: savedPrototype.artifact.id,
-          relatedQaReportId: qa.data.id,
-        },
-      });
-      patchRecord = this.toPatchRecord(finalRecord as PatchRecordRow);
-      const completedPatchPreview = activePatchPreview
-        ? this.toPatchPreview(
-            await this.prisma.patchPreview.update({
-              where: { id: activePatchPreview.id },
-              data: {
-                status: "applied",
-                afterProductDesignStateVersion: stateWithArtifacts.version,
-                message: "补丁预览已应用并生成新版本。",
-              },
-            }) as PatchPreviewRow,
-            patchRecord,
-          )
-        : undefined;
-
-      const message = qa.data.passed
-        ? "局部修改已应用，需求文档、网页原型和质检结果已同步更新。"
-        : `局部修改已应用，质检发现 ${qa.data.issues.length} 个待确认问题。`;
-      const result = {
-        productDesignState: stateWithArtifacts,
-        prdDocument,
-        prototypeSpec: prototypeSpec.data,
-        prototypeArtifact: savedPrototype.artifact,
-        qaReport: qa.data,
-        patchRecord,
-        patchPlan: plan,
-        patchPreview: completedPatchPreview,
-        prototypeRegenerationMode: prototypeCode.data.mode,
-        localPatch: prototypeCode.data.mode === "component_patch" ? savedPrototype.localPatch : undefined,
-      };
-      const assistantMessage = await this.messageService.createAssistantMessage({
-        projectId: input.projectId,
-        conversationId: input.conversationId,
-        content: message,
-        type: MessageType.agent_summary,
-        metadata: toInputJson(result),
-        relatedRunId: input.runId,
-        relatedPrdDocumentId: prdDocument.id,
-        relatedPrototypeArtifactId: savedPrototype.artifact.id,
-      });
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "patch_completed",
-        step: "qa_check",
-        data: { patchRecord, patchPreview: completedPatchPreview, result },
-        content: message,
-      });
-      await this.runLog.completeRun(input.runId, result, message);
-      await this.prisma.project.update({
-        where: { id: input.projectId },
-        data: {
-          status: projectStatusForCompletedArtifacts({
-            productDesignState: stateWithArtifacts,
-            qaReport: qa.data,
-          }),
-        },
-      });
-      return { patchRecord, patchPreview: completedPatchPreview, assistantMessage, result };
-    } catch (error) {
-      if (statePatchApplied) {
-        const rollback = await this.stateService.restoreStateAfterPatchFailure(input.projectId, beforeState, {
-          userId: input.userId,
-          runId: input.runId,
-          messageId: input.instructionMessageId,
-          reason: "Patch 执行失败，恢复到修改前版本",
-        });
-        await this.prisma.patchRecord.update({
-          where: { id: patchRecord.id },
-          data: {
-            afterProductDesignStateVersion: rollback.state.version,
-          },
-        });
-        await this.prisma.project.update({
-          where: { id: input.projectId },
-          data: {
-            currentPrdDocumentId: projectSnapshot?.currentPrdDocumentId ?? null,
-            currentPrototypeArtifactId: projectSnapshot?.currentPrototypeArtifactId ?? null,
-            latestQaReportId: projectSnapshot?.latestQaReportId ?? null,
-          },
-        });
-        await this.stream.emit({
-          runId: input.runId,
-          projectId: input.projectId,
-          type: "state_updated",
-          data: {
-            ...stateSummary(rollback.state, patchRecord.id),
-            rollback: true,
-          },
-          content: `Patch 失败，已恢复到修改前状态 v${beforeState.version}`,
-        });
-      }
-      throw error;
-    }
-  }
-
-  private async handlePatchFailure(
-    input: Pick<PatchExecutionInput, "runId" | "projectId" | "conversationId">,
-    patchRecord: PatchRecord | undefined,
-    error: unknown,
-  ) {
-    const message = errorMessage(error, "PATCH_FAILED");
-    let failedRecord = patchRecord;
-    if (patchRecord) {
-      const failed = await this.prisma.patchRecord.update({
-        where: { id: patchRecord.id },
-        data: {
-          status: PrismaPatchRecordStatus.failed,
-          errorMessage: message,
-        },
-      });
-      failedRecord = this.toPatchRecord(failed as PatchRecordRow);
-    }
-    await this.runLog.failRun(input.runId, error);
-    await this.prisma.project.update({
-      where: { id: input.projectId },
-      data: { status: ProjectStatus.qa_failed },
-    });
-    await Promise.allSettled([
-      this.messageService.createAssistantMessage({
-        projectId: input.projectId,
-        conversationId: input.conversationId,
-        content: message,
-        type: MessageType.error,
-        metadata: toInputJson({
-          runId: input.runId,
-          patchId: failedRecord?.id,
-          errorMessage: message,
-        }),
-        relatedRunId: input.runId,
-      }),
-    ]);
-    await this.stream.emit({
-      runId: input.runId,
-      projectId: input.projectId,
-      type: "patch_failed",
-      data: {
-        patchId: failedRecord?.id,
-        errorMessage: message,
-      },
-      content: message,
-    });
-  }
-
-  private async recordInteractionEvent(
-    runId: string,
+  private async assertPatchMutationAllowed(
+    user: AuthenticatedUser,
     projectId: string,
-    source: NonNullable<CreatePatchCandidateInput["source"]>,
-    payload: Record<string, unknown>,
+    conversationId: string,
+    instruction: string,
   ) {
-    if (!payload.userId) throw new BadRequestException("PATCH_INTERACTION_USER_REQUIRED");
-    const selectedRegion = payload.selectedRegion && typeof payload.selectedRegion === "object" && !Array.isArray(payload.selectedRegion)
-      ? payload.selectedRegion as SelectedRegion
-      : undefined;
-    await this.stream.emit({
-      runId,
-      projectId,
-      type: "patch_plan_created",
-      step: "patch_planning",
-      data: {
-        interactionEvent: {
-          source,
-          action: payload.action ?? "inline_patch_candidate",
-          timestamp: new Date().toISOString(),
-          selectedRegion,
-          payload,
-        },
-      },
-      content: "已记录局部编辑交互事件",
-    });
+    const project = await this.assertProjectAccess(user, projectId);
+    this.assertOwnerMutation(user, project.ownerId);
+    await this.assertConversation(projectId, conversationId);
+    if (!instruction.trim()) throw new BadRequestException("PATCH_INSTRUCTION_EMPTY");
   }
 
   private async ensurePatchPreview(row: PatchRecordRow, plan: PatchPlan) {
@@ -985,78 +202,10 @@ export class PatchService {
         riskPanel: toInputJson(buildPatchPreviewRiskPanel(plan)),
         patchPlan: toInputJson(plan),
         operations: toInputJson(operations),
-        message:
-          "补丁预览已生成。确认前不会修改产品设计状态、需求文档或原型。",
+        message: "补丁预览来自历史记录。新的 Patch 规划将由 DeerFlow 2.0 接管。",
         createdBy: row.createdBy,
       },
     });
-  }
-
-  private async getPatchKnowledgeContext(input: PatchExecutionInput): Promise<KnowledgeContext> {
-    const search = await this.knowledgeRetrieval.search({
-      projectId: input.projectId,
-      conversationId: input.conversationId,
-      runId: input.runId,
-      runtimeName: "runtime_patch",
-      query: input.userInstruction,
-      taskType: "patch_planning",
-      preferredTypes: [
-        KnowledgeType.strong_rule,
-        KnowledgeType.default_rule,
-        KnowledgeType.business_concept,
-      ],
-      limit: 8,
-    });
-    return {
-      query: input.userInstruction,
-      strongRules: search.references.filter((item) => item.type === KnowledgeType.strong_rule),
-      defaultRules: search.references.filter((item) => item.type === KnowledgeType.default_rule),
-      referenceCases: [],
-      designPatterns: [],
-      prdWritingRules: [],
-      prototypeRules: [],
-      businessConcepts: search.references.filter((item) => item.type === KnowledgeType.business_concept),
-      conflicts: [],
-      unknownAreas: [],
-      summary: search.references.length
-        ? `Patch 命中 ${search.references.length} 条知识库规则。`
-        : "Patch 未命中正式知识库规则。",
-    };
-  }
-
-  private async runRuntimeStep<T>(
-    input: Pick<PatchExecutionInput, "runId" | "projectId" | "userInstruction">,
-    step: NonNullable<Parameters<VibeStreamService["emit"]>[0]["step"]>,
-    handler: () => Promise<RuntimeOutput<T>>,
-  ) {
-    await this.stream.emit({
-      runId: input.runId,
-      projectId: input.projectId,
-      type: "step_started",
-      step,
-      content: stepCopy(step, "started"),
-    });
-    try {
-      const result = await handler();
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "step_completed",
-        step,
-        content: stepCopy(step, "completed"),
-        data: result.data,
-      });
-      return result;
-    } catch (error) {
-      await this.stream.emit({
-        runId: input.runId,
-        projectId: input.projectId,
-        type: "step_failed",
-        step,
-        content: error instanceof Error ? error.message : "Runtime task 执行失败",
-      });
-      throw error;
-    }
   }
 
   private async assertProjectAccess(
@@ -1083,22 +232,6 @@ export class PatchService {
     });
     if (!conversation) throw new NotFoundException("PATCH_CONVERSATION_NOT_FOUND");
     return conversation;
-  }
-
-  private async ensureConversationId(projectId: string, ownerId: string) {
-    const existing = await this.prisma.conversation.findFirst({
-      where: { projectId, deletedAt: null, status: "active" },
-      orderBy: { createdAt: "asc" },
-    });
-    if (existing) return existing.id;
-    const created = await this.prisma.conversation.create({
-      data: { projectId, ownerId, title: "默认会话" },
-    });
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { currentConversationId: created.id },
-    });
-    return created.id;
   }
 
   private async getAccessiblePatch(user: AuthenticatedUser, patchId: string) {
@@ -1170,73 +303,11 @@ export class PatchService {
       afterProductDesignStateVersion: row.afterProductDesignStateVersion ?? undefined,
       previewOnly: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
       requiresConfirmation: patchRecord.status === PrismaPatchRecordStatus.needs_confirmation,
-      message: row.message ?? (
-        patchRecord.status === PrismaPatchRecordStatus.needs_confirmation
-          ? "补丁候选已生成，确认后才会应用到产品设计状态。"
-          : "补丁预览已生成。"
-      ),
+      message: row.message ?? "补丁预览来自历史记录。新的 Patch 规划将由 DeerFlow 2.0 接管。",
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
   }
-}
-
-function normalizeSelectedRegion(value: Record<string, unknown>): SelectedRegion {
-  const type = value.type === "prototype" ? "prototype" : "document";
-  const targetId = text(value.targetId) || text(value.documentId) || text(value.artifactId);
-  if (!targetId) throw new BadRequestException("PATCH_SELECTED_REGION_INVALID");
-  return {
-    type,
-    targetId,
-    documentId: text(value.documentId) || (type === "document" ? targetId : undefined),
-    artifactId: text(value.artifactId) || (type === "prototype" ? targetId : undefined),
-    sectionId: text(value.sectionId) || undefined,
-    blockId: text(value.blockId) || undefined,
-    pageId: text(value.pageId) || undefined,
-    componentId: text(value.componentId) || undefined,
-    domSelector: text(value.domSelector) || undefined,
-    label: text(value.label) || undefined,
-    selectedText: text(value.selectedText) || undefined,
-    sourcePaths: arrayOfText(value.sourcePaths),
-    bbox: normalizeBox(value.bbox),
-    boundingBox: normalizeBox(value.boundingBox),
-    screenshotUrl: text(value.screenshotUrl) || undefined,
-  };
-}
-
-function recordFromJson(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new BadRequestException("PATCH_SELECTED_REGION_INVALID");
-  }
-  return value as Record<string, unknown>;
-}
-
-function patchConfirmationResult(
-  patchRecord: PatchRecord,
-  plan: PatchPlan,
-  patchPreview?: unknown,
-) {
-  return {
-    patchRecord,
-    patchPreview,
-    patchPlan: plan,
-    nextAction: {
-      type: "confirm_patch",
-      questions: plan.clarificationQuestions ?? [],
-      risks: plan.risks ?? [],
-    },
-  };
-}
-
-function normalizeBox(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const record = value as Record<string, unknown>;
-  const x = Number(record.x);
-  const y = Number(record.y);
-  const width = Number(record.width);
-  const height = Number(record.height);
-  if ([x, y, width, height].some((number) => !Number.isFinite(number))) return undefined;
-  return { x, y, width, height };
 }
 
 function buildPatchPreviewDiff(plan: PatchPlan, operations: PatchPlan["operations"]) {
@@ -1288,67 +359,9 @@ function buildPatchPreviewRiskPanel(plan: PatchPlan) {
   };
 }
 
-function shouldUseComponentPrototypePatch(selectedRegion: SelectedRegion, plan: PatchPlan) {
-  if (selectedRegion.type !== "prototype") return undefined;
-  const componentId = selectedRegion.componentId?.trim();
-  if (!componentId) return undefined;
-  if (plan.patchType !== "prototype") return undefined;
-  if (plan.regenerationPlan?.htmlPrototype === "full") return undefined;
-  return componentId;
-}
-
-function text(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function arrayOfText(value: unknown) {
-  return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
-}
-
-function stateSummary(state: ProductDesignState, patchId: string) {
-  return {
-    patchId,
-    id: state.id,
-    projectId: state.projectId,
-    version: state.version,
-    title: state.title,
-    status: state.status,
-    counts: {
-      pages: state.pages.length,
-      backendConfigs: state.backendConfigs.length,
-      frontendRules: state.frontendRules.length,
-      businessRules: state.businessRules.length,
-      stateRules: state.stateRules.length,
-      exceptionScenarios: state.exceptionScenarios.length,
-      acceptanceCriteria: state.acceptanceCriteria.length,
-      assumptions: state.assumptions.length,
-      pendingQuestions: state.pendingQuestions.length,
-      confirmedFacts: state.confirmedFacts.length,
-    },
-    updatedAt: state.updatedAt,
-  };
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "string" && error.trim()) return error;
-  if (error && typeof error === "object") {
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return fallback;
-    }
-  }
-  return fallback;
-}
-
-function stepCopy(step: string, status: "started" | "completed") {
-  const textMap: Record<string, [string, string]> = {
-    patch_planning: ["正在分析局部修改...", "局部修改计划已完成"],
-    prd_generation: ["正在重新生成需求文档...", "需求文档已更新"],
-    prototype_design: ["正在重新生成原型规格...", "原型规格已更新"],
-    prototype_code_generation: ["正在重新生成网页原型...", "网页原型已更新"],
-    qa_check: ["正在执行补丁应用后质检...", "质检校验完成"],
-  };
-  return textMap[step]?.[status === "started" ? 0 : 1] ?? step;
+function deerFlowFirstDisabled(message: string) {
+  return new BadRequestException({
+    code: message,
+    message: "旧的后端自研 Patch 生成/应用链路已停用，等待 DeerFlow 2.0 接管。",
+  });
 }

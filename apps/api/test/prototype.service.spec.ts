@@ -6,12 +6,12 @@ import {
   UserStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  renderHtmlFromPrototypeSpec,
-  renderPrototypeSpecFromState,
-} from "../src/ai/runtime/local-protocol-renderers";
-import type { ProductDesignState, PrototypeArtifactDraft } from "../src/ai/ai-vibe.types";
-import { PrototypeService, replacePrototypeComponentHtml, validateHtmlSafety } from "../src/ai/prototype.service";
+import type {
+  ProductDesignState,
+  PrototypeArtifactDraft,
+  PrototypeSpec,
+} from "../src/ai/ai-vibe.types";
+import { PrototypeService, validateHtmlSafety } from "../src/ai/prototype.service";
 
 describe("HTML prototype artifact module", () => {
   const now = new Date("2026-06-20T08:00:00Z");
@@ -42,15 +42,10 @@ describe("HTML prototype artifact module", () => {
     getStateByIdForProject: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
   };
-  const productRuntime = {
-    generatePrototypeSpec: vi.fn(),
-    generatePrototypeHtml: vi.fn(),
-  };
   const qaService = { assertGateAllows: vi.fn() };
   const service = new PrototypeService(
     prisma as never,
     stateService as never,
-    productRuntime as never,
     undefined,
     qaService as never,
   );
@@ -73,65 +68,48 @@ describe("HTML prototype artifact module", () => {
       reason: data.reason ?? null,
       createdAt: now,
     }));
-    const state = baseState();
-    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
     stateService.attachGeneratedArtifacts.mockImplementation(async (_stateId, input) => ({
-      ...state,
+      ...baseState(),
       version: 4,
       status: input.status,
       prototypeSpec: input.prototypeSpec,
     }));
-    productRuntime.generatePrototypeSpec.mockResolvedValue({ data: spec });
-    productRuntime.generatePrototypeHtml.mockResolvedValue({
-      data: {
-        projectId: state.projectId,
-        prototypeSpecId: spec.id,
-        htmlContent: renderHtmlFromPrototypeSpec(spec),
-        entryFilePath: "index.html",
-        targetDevice: "both",
-        pageCount: 1,
-      },
-    });
   });
 
-  it("renders PrototypeSpec from ProductDesignState with source refs and state version", () => {
-    const spec = renderPrototypeSpecFromState(baseState(), "both", "run-1");
+  it("keeps manual prototype generation disabled until the DeerFlow-first runtime is wired", async () => {
+    stateService.getCurrentState.mockResolvedValue(baseState({
+      status: "doc_confirmed",
+      prdDocument: basePrd({ status: "confirmed" }),
+    }));
 
-    expect(spec.productDesignStateId).toBe("state-1");
-    expect(spec.productDesignStateVersion).toBe(3);
-    expect(spec.pages[0]).toEqual(
-      expect.objectContaining({
-        id: "page_home",
-        sourcePaths: ["pages[0]"],
-      }),
-    );
-    expect(spec.pages[0].components[0].sourcePaths).toContain("pages[0]");
-    expect(spec.interactions[0]).toEqual(
-      expect.objectContaining({
-        event: "click",
-        action: "show_toast",
-      }),
-    );
+    await expect(service.generateForUser(user, "project-1", { targetDevice: "both" }))
+      .rejects.toThrow("PROTOTYPE_GENERATION_DISABLED_DEERFLOW_FIRST");
+
+    expect(prisma.prototypeSpecRecord.create).not.toHaveBeenCalled();
+    expect(prisma.prototypeArtifact.create).not.toHaveBeenCalled();
+    expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
   });
 
-  it("renders safe single-file HTML with stable data ids", () => {
-    const spec = renderPrototypeSpecFromState(baseState(), "desktop");
-    const html = renderHtmlFromPrototypeSpec(spec);
+  it("still enforces the PRD confirmation gate before the disabled runtime boundary", async () => {
+    stateService.getCurrentState.mockResolvedValue(baseState({
+      status: "doc_ready",
+      prdDocument: basePrd({ status: "ready" }),
+    }));
 
-    expect(html).toMatch(/^<!doctype html>/i);
-    expect(html).toContain('data-page-id="page_home"');
-    expect(html).toContain('data-component-id="page_home_goal_card"');
-    expect(html).not.toMatch(/\bfetch\s*\(|eval\s*\(|<script[^>]+src=/i);
-    expect(validateHtmlSafety(html)).toEqual({ ok: true });
+    await expect(service.generateForUser(user, "project-1", { targetDevice: "both" }))
+      .rejects.toThrow("PROTOTYPE_PRD_NOT_CONFIRMED");
+
+    expect(prisma.prototypeSpecRecord.create).not.toHaveBeenCalled();
+    expect(prisma.prototypeArtifact.create).not.toHaveBeenCalled();
   });
 
   it("saves generated prototype, creates version, and updates project pointer", async () => {
     const state = baseState();
-    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
+    const spec = prototypeSpec(state);
     const draft: PrototypeArtifactDraft = {
       projectId: state.projectId,
       prototypeSpecId: spec.id,
-      htmlContent: renderHtmlFromPrototypeSpec(spec),
+      htmlContent: prototypeHtml(spec),
       entryFilePath: "index.html",
       targetDevice: "both",
       pageCount: 1,
@@ -142,7 +120,7 @@ describe("HTML prototype artifact module", () => {
     const result = await service.saveGeneratedPrototype(state, spec, draft, {
       userId: "user-1",
       runId: "run-1",
-      reason: "Runtime 生成 HTML 原型",
+      reason: "DeerFlow 生成 HTML 原型",
     });
 
     expect(result.artifact.id).toBe("artifact-1");
@@ -163,14 +141,14 @@ describe("HTML prototype artifact module", () => {
 
   it("derives PrototypeState from current artifact and PrototypeSpec without mutating state", async () => {
     const state = baseState();
-    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
+    const spec = prototypeSpec(state);
     prisma.project.findUnique.mockResolvedValue(baseProject({ currentPrototypeArtifactId: "artifact-1" }));
     prisma.prototypeArtifact.findFirst.mockResolvedValue(artifactRecord({
       id: "artifact-1",
       prototypeSpecId: spec.id,
       productDesignStateId: state.id,
       productDesignStateVersion: state.version,
-      htmlContent: renderHtmlFromPrototypeSpec(spec),
+      htmlContent: prototypeHtml(spec),
     }));
     prisma.prototypeSpecRecord.findUnique.mockResolvedValue(specRecord(spec as unknown as Record<string, unknown>));
 
@@ -197,7 +175,7 @@ describe("HTML prototype artifact module", () => {
 
   it("rejects unsafe HTML before allowing preview", async () => {
     const state = baseState();
-    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
+    const spec = prototypeSpec(state);
     prisma.prototypeSpecRecord.create.mockImplementation(async ({ data }) => specRecord(data));
     prisma.prototypeArtifact.create.mockImplementation(async ({ data }) => artifactRecord({ id: "artifact-unsafe", ...data }));
 
@@ -220,115 +198,9 @@ describe("HTML prototype artifact module", () => {
     });
   });
 
-  it("replaces only the targeted component html by data-component-id", () => {
-    const html = '<!doctype html><main><article data-component-id="keep"><strong>保留</strong></article><button data-component-id="target"><span>旧文案</span></button></main>';
-    const next = replacePrototypeComponentHtml(
-      html,
-      "target",
-      '<button data-component-id="target">新文案</button>',
-    );
-
-    expect(next).toContain('<article data-component-id="keep"><strong>保留</strong></article>');
-    expect(next).toContain('<button data-component-id="target">新文案</button>');
-    expect(next).not.toContain("旧文案");
-  });
-
-  it("creates a new artifact by locally regenerating the selected prototype component", async () => {
-    const state = baseState();
-    const spec = renderPrototypeSpecFromState(state, "both", "run-local");
-    const action = spec.pages[0].components.find((component) => component.id === "page_home_primary_action");
-    if (action) action.content = "立即签到";
-    const beforeHtml = '<!doctype html><main><article data-component-id="page_home_goal_card"><strong>保留目标卡片</strong></article><button data-component-id="page_home_primary_action">旧按钮</button></main>';
-    prisma.prototypeArtifact.findFirst.mockResolvedValue(artifactRecord({
-      id: "artifact-before",
-      prototypeSpecId: "spec-before",
-      productDesignStateId: state.id,
-      productDesignStateVersion: state.version,
-      htmlContent: beforeHtml,
-    }));
-    prisma.prototypeSpecRecord.create.mockImplementation(async ({ data }) => specRecord(data));
-    prisma.prototypeArtifact.create.mockImplementation(async ({ data }) => artifactRecord({ id: "artifact-local", ...data }));
-
-    const result = await service.trySaveLocalizedGeneratedPrototype(state, spec, {
-      userId: "user-1",
-      runId: "run-local",
-      sourceArtifactId: "artifact-before",
-      selectedRegion: {
-        type: "prototype",
-        targetId: "artifact-before",
-        artifactId: "artifact-before",
-        pageId: "page_home",
-        componentId: "page_home_primary_action",
-      },
-    });
-
-    expect(result?.artifact.id).toBe("artifact-local");
-    expect(result?.artifact.htmlContent).toContain("保留目标卡片");
-    expect(result?.artifact.htmlContent).toContain("立即签到");
-    expect(result?.artifact.htmlContent).not.toContain("旧按钮");
-    expect(result?.localPatch).toEqual(expect.objectContaining({
-      mode: "component",
-      componentId: "page_home_primary_action",
-      sourceArtifactId: "artifact-before",
-    }));
-    expect(productRuntime.generatePrototypeHtml).not.toHaveBeenCalled();
-    expect(prisma.project.update).toHaveBeenCalledWith({
-      where: { id: "project-1" },
-      data: { currentPrototypeArtifactId: "artifact-local" },
-    });
-  });
-
-  it("syncs manual prototype generation back into ProductDesignState", async () => {
-    const state = baseState({
-      status: "doc_confirmed",
-      prdDocument: basePrd({ status: "confirmed" }),
-    });
-    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
-    stateService.getCurrentState.mockResolvedValue(state);
-    productRuntime.generatePrototypeSpec.mockResolvedValue({ data: spec });
-    productRuntime.generatePrototypeHtml.mockResolvedValue({
-      data: {
-        projectId: state.projectId,
-        prototypeSpecId: spec.id,
-        htmlContent: renderHtmlFromPrototypeSpec(spec),
-        entryFilePath: "index.html",
-        targetDevice: "both",
-        pageCount: 1,
-      },
-    });
-    prisma.prototypeSpecRecord.create.mockImplementation(async ({ data }) => specRecord(data));
-    prisma.prototypeArtifact.create.mockImplementation(async ({ data }) => artifactRecord({ id: "artifact-manual", ...data }));
-
-    const result = await service.generateForUser(user, "project-1", { targetDevice: "both" });
-
-    expect(result.artifact.id).toBe("artifact-manual");
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
-      prototypeSpec: expect.objectContaining({ id: spec.id }),
-      status: "prototype_ready",
-      reason: "手动生成 HTML 原型后同步 ProductDesignState",
-    }));
-    expect(result.productDesignState.prototypeSpec.id).toBe(spec.id);
-  });
-
-  it("blocks manual prototype generation before the PRD confirmation gate", async () => {
-    const state = baseState({
-      status: "doc_ready",
-      prdDocument: basePrd({ status: "ready" }),
-    });
-    stateService.getCurrentState.mockResolvedValue(state);
-
-    await expect(
-      service.generateForUser(user, "project-1", { targetDevice: "both" }),
-    ).rejects.toThrow("PROTOTYPE_PRD_NOT_CONFIRMED");
-
-    expect(productRuntime.generatePrototypeSpec).not.toHaveBeenCalled();
-    expect(productRuntime.generatePrototypeHtml).not.toHaveBeenCalled();
-    expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
-  });
-
   it("hides a stale current prototype artifact when it no longer matches ProductDesignState", async () => {
     const state = baseState();
-    const currentSpec = renderPrototypeSpecFromState(state, "both", "run-current");
+    const currentSpec = prototypeSpec(state, "run-current");
     stateService.getCurrentState.mockResolvedValue(baseState({ prototypeSpec: currentSpec }));
     prisma.project.findUnique.mockResolvedValue(baseProject({ currentPrototypeArtifactId: "artifact-stale" }));
     prisma.prototypeArtifact.findFirst.mockResolvedValue(artifactRecord({
@@ -345,13 +217,13 @@ describe("HTML prototype artifact module", () => {
 
   it("confirms a ready prototype and syncs confirmed status into ProductDesignState", async () => {
     const state = baseState();
-    const spec = renderPrototypeSpecFromState(state, "both", "run-1");
+    const spec = prototypeSpec(state);
     prisma.prototypeArtifact.findUnique.mockResolvedValue({
       ...artifactRecord({
         id: "artifact-1",
         prototypeSpecId: spec.id,
         productDesignStateId: state.id,
-        htmlContent: renderHtmlFromPrototypeSpec(spec),
+        htmlContent: prototypeHtml(spec),
       }),
       project: baseProject({ status: ProjectStatus.prototype_ready }),
     });
@@ -361,7 +233,7 @@ describe("HTML prototype artifact module", () => {
         id: "artifact-1",
         prototypeSpecId: spec.id,
         productDesignStateId: state.id,
-        htmlContent: renderHtmlFromPrototypeSpec(spec),
+        htmlContent: prototypeHtml(spec),
         updatedBy: data.updatedBy,
       }),
     );
@@ -380,23 +252,6 @@ describe("HTML prototype artifact module", () => {
         reason: "确认原型",
       }),
     });
-  });
-
-  it("blocks prototype confirmation when the artifact is not ready", async () => {
-    prisma.prototypeArtifact.findUnique.mockResolvedValue({
-      ...artifactRecord({
-        id: "artifact-1",
-        prototypeSpecId: "spec-1",
-        status: PrototypeArtifactStatus.failed,
-        htmlContent: null,
-      }),
-      project: baseProject({ status: ProjectStatus.prototype_ready }),
-    });
-
-    await expect(service.confirmForUser(user, "artifact-1", "确认原型")).rejects.toThrow("PROTOTYPE_CONFIRM_NOT_READY");
-
-    expect(qaService.assertGateAllows).not.toHaveBeenCalled();
-    expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
   });
 
   it("blocks prototype confirmation when QA gate does not allow artifact confirmation", async () => {
@@ -480,6 +335,50 @@ function basePrd(overrides: Record<string, unknown> = {}) {
     updatedAt: "2026-06-20T08:00:00.000Z",
     ...overrides,
   };
+}
+
+function prototypeSpec(state: ProductDesignState, runId = "run-1"): PrototypeSpec {
+  return {
+    id: `spec-${runId}`,
+    projectId: state.projectId,
+    productDesignStateId: state.id,
+    productDesignStateVersion: state.version,
+    title: `${state.title} HTML 原型`,
+    targetDevice: "both",
+    styleGuide: {
+      tone: "clean",
+      layoutDensity: "comfortable",
+      borderRadius: "small",
+    },
+    pages: [
+      {
+        id: "page_home",
+        name: "签到页",
+        device: "responsive",
+        layout: "dashboard",
+        components: [
+          {
+            id: "page_home_primary_action",
+            name: "签到按钮",
+            type: "button",
+            content: "立即签到",
+            sourcePaths: ["frontendRules"],
+          },
+        ],
+        sourcePaths: ["pages[0]"],
+        order: 1,
+      },
+    ],
+    navigation: [],
+    interactions: [],
+    assumptions: [],
+    knowledgeRefs: [],
+    generatedByRunId: runId,
+  };
+}
+
+function prototypeHtml(spec: PrototypeSpec) {
+  return `<!doctype html><main data-page-id="${spec.pages[0].id}"><button data-component-id="page_home_primary_action">立即签到</button></main>`;
 }
 
 function specRecord(input: Record<string, unknown>) {
