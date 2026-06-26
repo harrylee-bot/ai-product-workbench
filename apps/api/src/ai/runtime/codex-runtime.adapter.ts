@@ -152,7 +152,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       "exec",
       "--json",
       "--sandbox",
-      "workspace-write",
+      this.config.codexSandbox(),
       "--cd",
       workspace,
       "--skip-git-repo-check",
