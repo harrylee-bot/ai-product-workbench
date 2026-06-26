@@ -1,6 +1,6 @@
 {
   "name": "ai-product-workbench-lead",
-  "description": "Lead agent for AI Product Workbench turns. Decides whether to answer, clarify, draft PRD/state, or delegate prototype/code execution to Codex inside DeerFlow.",
+  "description": "Lead agent for AI Product Workbench turns. Decides whether to answer, clarify, draft PRD/state, or delegate prototype/code execution to DeerFlow.",
   "model": null,
   "tool_groups": null
 }
