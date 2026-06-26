@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { ProductDesignStateStatus, ProjectStatus, UserRole } from "@prisma/client";
+import { MessageType, ProductDesignStateStatus, ProjectStatus, UserIntent, UserRole } from "@prisma/client";
 import type { MessageEvent } from "@nestjs/common";
 import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -7,13 +7,12 @@ import { FileAssetService } from "../files/file-asset.service";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { RuntimeRunLogService } from "./runtime-run-log.service";
-import { AiOrchestratorService } from "./ai-orchestrator.service";
-import type { SelectedRegion } from "./ai-vibe.types";
 import type { HandleVibeMessageDto, ConfirmPrdDto } from "./dto";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { RuntimeSkillRegistryService } from "./runtime-skill-registry.service";
+import { toInputJson } from "./ai-vibe.helpers";
 
 @Injectable()
 export class VibeService {
@@ -23,7 +22,6 @@ export class VibeService {
     private readonly fileAssetService: FileAssetService,
     private readonly runLogService: RuntimeRunLogService,
     private readonly stateService: ProductDesignStateService,
-    private readonly orchestrator: AiOrchestratorService,
     private readonly streamService: VibeStreamService,
     private readonly skillRegistry: RuntimeSkillRegistryService,
     private readonly documentService: RequirementDocumentService,
@@ -90,45 +88,21 @@ export class VibeService {
       userInput: dto.message.trim(),
     });
 
-    await this.prisma.project.update({
-      where: { id: project.id },
-      data: {
-        status: ProjectStatus.designing,
-        lastActivityAt: new Date(),
-      },
+    const assistantMessage = await this.finishPendingDeerFlowTurn({
+      runId: run.id,
+      projectId: project.id,
+      conversationId: conversation.id,
+      intent: UserIntent.general_question,
+      message: "DeerFlow 2.0 流程大脑尚未接入；旧的自研生成链路已停用。本轮已安全结束，不会生成或改写 PRD、原型和产品状态。",
     });
-
-    const recentMessages = await this.messageService.getRecentMessages(conversation.id, 20);
-    const productDesignState = await this.stateService.getCurrentState(project.id);
-
-    void this.orchestrator
-      .run({
-        userMessageId: userMessage.id,
-        attachments: attachmentSummaries,
-        context: {
-          runId: run.id,
-          projectId: project.id,
-          conversationId: conversation.id,
-          userId: user.id,
-          userInput: dto.message.trim(),
-          selectedRegion: dto.selectedRegion as SelectedRegion | undefined,
-          previewMode: dto.previewMode,
-          recentMessages,
-          attachments: attachmentSummaries,
-          productDesignState,
-          currentProjectStatus: project.status,
-          traceId: run.traceId,
-        },
-      })
-      .catch(() => undefined);
 
     return {
       projectId: project.id,
       conversationId: conversation.id,
       userMessage,
-      assistantMessage: null,
+      assistantMessage,
       runId: run.id,
-      status: "running",
+      status: "completed",
     };
   }
 
@@ -201,37 +175,21 @@ export class VibeService {
       userInput: "确认 PRD，继续生成原型。",
     });
 
-    await this.prisma.project.update({
-      where: { id: project.id },
-      data: { status: ProjectStatus.designing, lastActivityAt: new Date() },
+    const assistantMessage = await this.finishPendingDeerFlowTurn({
+      runId: run.id,
+      projectId: project.id,
+      conversationId: conversation.id,
+      intent: UserIntent.generate_prototype,
+      message: "PRD 确认已记录。DeerFlow 2.0 流程大脑接入前，旧的后端自研原型生成链路已停用；本轮不会继续生成原型。",
+      productDesignState: confirmedState,
     });
-
-    const recentMessages = await this.messageService.getRecentMessages(conversation.id, 20);
-
-    void this.orchestrator
-      .confirmPrdAndContinue({
-        userMessageId: confirmMessage.id,
-        attachments: [],
-        context: {
-          runId: run.id,
-          projectId: project.id,
-          conversationId: conversation.id,
-          userId: user.id,
-          userInput: "确认 PRD，继续生成原型。",
-          recentMessages,
-          attachments: [],
-          productDesignState: confirmedState,
-          currentProjectStatus: project.status,
-          traceId: run.traceId,
-        },
-      })
-      .catch(() => undefined);
 
     return {
       projectId: project.id,
       conversationId: conversation.id,
       runId: run.id,
-      status: "running",
+      assistantMessage,
+      status: "completed",
     };
   }
 
@@ -265,5 +223,70 @@ export class VibeService {
     if (user.role !== UserRole.admin && run.project.ownerId !== user.id) {
       throw new ForbiddenException("你无权访问该执行记录");
     }
+  }
+
+  private async finishPendingDeerFlowTurn(input: {
+    runId: string;
+    projectId: string;
+    conversationId: string;
+    intent: UserIntent;
+    message: string;
+    productDesignState?: unknown;
+  }) {
+    const runtimeAdapter = {
+      status: "not_configured",
+      provider: "deerflow",
+      mode: "deerflow_first",
+    };
+
+    await this.runLogService.markRunIntent(input.runId, input.intent);
+    await this.streamService.emit({
+      runId: input.runId,
+      projectId: input.projectId,
+      type: "message_delta",
+      content: input.message,
+      data: { runtimeAdapter },
+    });
+
+    const assistantMessage = await this.messageService.createAssistantMessage({
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      content: input.message,
+      type: MessageType.agent_summary,
+      metadata: toInputJson({
+        runId: input.runId,
+        intent: input.intent,
+        runtimeAdapter,
+        productDesignState: input.productDesignState,
+      }),
+      relatedRunId: input.runId,
+    });
+
+    const result = {
+      runId: input.runId,
+      projectId: input.projectId,
+      intent: {
+        intent: input.intent,
+        confidence: 1,
+        reason: "旧自研编排已停用，等待 DeerFlow 2.0 lead agent 接管 turn decision。",
+        requiresSelection: false,
+        isAmbiguous: false,
+      },
+      message: input.message,
+      runtimeAdapter,
+      productDesignState: input.productDesignState,
+      nextAction: { type: "answer" },
+    };
+
+    await this.runLogService.completeRun(input.runId, result, input.message);
+    await this.streamService.emit({
+      runId: input.runId,
+      projectId: input.projectId,
+      type: "run_completed",
+      content: input.message,
+      data: result,
+    });
+
+    return assistantMessage;
   }
 }

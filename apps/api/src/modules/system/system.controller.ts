@@ -7,7 +7,7 @@ export class SystemController {
     return {
       ok: true,
       service: "ai-product-workbench-api",
-      phase: "vibe-runtime-adapter",
+      phase: "deerflow-first-runtime",
       modules: [
         "auth",
         "admin-dashboard",
@@ -22,7 +22,6 @@ export class SystemController {
         "messages",
         "ai-vibe",
         "ai-vibe-stream",
-        "runtime-orchestrator",
         "runtime-adapters",
         "codex-runtime-adapter",
         "deerflow-runtime-adapter",

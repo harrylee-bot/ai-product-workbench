@@ -7,7 +7,6 @@ import { PrismaModule } from "../prisma/prisma.module";
 import { MessageService } from "../projects/message.service";
 import { RuntimeRunLogService } from "./runtime-run-log.service";
 import { RuntimeSkillRegistryService } from "./runtime-skill-registry.service";
-import { AiOrchestratorService } from "./ai-orchestrator.service";
 import { DocumentCanvasService } from "./document-canvas.service";
 import { ProjectExportController } from "./export.controller";
 import { ExportService } from "./export.service";
@@ -91,7 +90,6 @@ import { ProductRuntimeService } from "./runtime/product-runtime.service";
   ],
   providers: [
     VibeService,
-    AiOrchestratorService,
     RuntimeSkillRegistryService,
     RuntimeRunLogService,
     VibeStreamService,

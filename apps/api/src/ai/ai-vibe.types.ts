@@ -1,7 +1,4 @@
 import type {
-  KnowledgeCandidateSource,
-  KnowledgeCandidateStatus,
-  KnowledgePriority,
   KnowledgeType,
   ProjectStatus,
   UserIntent,
@@ -108,14 +105,6 @@ export type ClarificationQuestion = {
   relatedPath?: string;
   status?: "pending" | "answered" | "skipped";
   required?: boolean;
-};
-
-export type IntentResult = {
-  intent: UserIntent;
-  confidence: number;
-  reason: string;
-  requiresSelection: boolean;
-  isAmbiguous: boolean;
 };
 
 export type RequirementAnalysis = {
@@ -908,35 +897,6 @@ export type ProjectVersionTimelineItem = {
   createdBy?: string;
 };
 
-export type KnowledgeCandidateDraft = {
-  title: string;
-  content: string;
-  summary?: string;
-  suggestedType: KnowledgeType;
-  suggestedCategoryName?: string;
-  suggestedCategoryId?: string;
-  suggestedTags: string[];
-  confidence: number;
-  source?: KnowledgeCandidateSource;
-  sourceRefId?: string;
-  sourcePath?: string;
-  reason: string;
-};
-
-export type KnowledgeCandidate = KnowledgeCandidateDraft & {
-  id: string;
-  projectId: string;
-  source: KnowledgeCandidateSource;
-  status: KnowledgeCandidateStatus;
-  reviewedBy?: string;
-  reviewedAt?: string;
-  reviewComment?: string;
-  createdByRunId?: string;
-  priority?: KnowledgePriority;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type VibeStreamEventType =
   | "step_started"
   | "step_completed"
@@ -1066,32 +1026,6 @@ export type RuntimeStreamStepName =
   | "patch_planning"
   | "qa_check"
   | "knowledge_extraction";
-
-export type RuntimeRunContext = {
-  runId: string;
-  projectId: string;
-  conversationId: string;
-  userId: string;
-  userInput: string;
-  selectedRegion?: SelectedRegion;
-  previewMode?: "prd" | "prototype";
-  conversationSummary?: string;
-  recentMessages: ConversationMessage[];
-  attachments: AttachmentSummary[];
-  productDesignState?: ProductDesignState;
-  currentProjectStatus?: ProjectStatus;
-  knowledgeContext?: KnowledgeContext;
-  contextFetch?: ContextFetchResult;
-  intentResult?: IntentResult;
-  requirementAnalysis?: RequirementAnalysis;
-  requirementPackage?: RequirementPackage;
-  requirementValidation?: RequirementValidationResult;
-  requirementSafety?: RequirementSafetyCheckResult;
-  requirementGateDecision?: RequirementGateDecision;
-  requirementIntakeGraph?: RequirementIntakeGraph;
-  productBuildPlan?: ProductBuildPlan;
-  traceId: string;
-};
 
 export type RuntimeOutput<T> = {
   data: T;

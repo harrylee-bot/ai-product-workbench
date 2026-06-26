@@ -1,4 +1,4 @@
-import { ProjectStatus, UserRole, UserStatus } from "@prisma/client";
+import { MessageType, ProjectStatus, UserIntent, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProductDesignState } from "../src/ai/ai-vibe.types";
 import { VibeService } from "../src/ai/vibe.service";
@@ -15,6 +15,7 @@ describe("VibeService main entry", () => {
   };
   const messageService = {
     createUserMessage: vi.fn(),
+    createAssistantMessage: vi.fn(),
     getRecentMessages: vi.fn(),
   };
   const fileAssetService = {
@@ -23,16 +24,15 @@ describe("VibeService main entry", () => {
   };
   const runLogService = {
     createRun: vi.fn(),
+    markRunIntent: vi.fn(),
+    completeRun: vi.fn(),
     getRun: vi.fn(),
   };
   const stateService = {
     getCurrentState: vi.fn(),
   };
-  const orchestrator = {
-    run: vi.fn(),
-    confirmPrdAndContinue: vi.fn(),
-  };
   const streamService = {
+    emit: vi.fn(),
     stream: vi.fn(),
   };
   const skillRegistry = {
@@ -47,7 +47,6 @@ describe("VibeService main entry", () => {
     fileAssetService as never,
     runLogService as never,
     stateService as never,
-    orchestrator as never,
     streamService as never,
     skillRegistry as never,
     documentService as never,
@@ -70,15 +69,22 @@ describe("VibeService main entry", () => {
       conversationId: "conversation-1",
       content: "生成签到活动",
     });
+    messageService.createAssistantMessage.mockResolvedValue({
+      id: "assistant-message-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      content: "DeerFlow 2.0 流程大脑尚未接入；旧的自研生成链路已停用。本轮已安全结束，不会生成或改写 PRD、原型和产品状态。",
+    });
     messageService.getRecentMessages.mockResolvedValue([{ id: "message-1", role: "user", content: "生成签到活动" }]);
     fileAssetService.getAttachmentSummaries.mockResolvedValue([
       { fileId: "file-1", fileName: "活动规则.md", fileType: "markdown", summary: "活动规则" },
     ]);
     fileAssetService.attachFilesToMessage.mockResolvedValue(undefined);
     runLogService.createRun.mockResolvedValue({ id: "run-1", traceId: "trace-1" });
+    runLogService.markRunIntent.mockResolvedValue(undefined);
+    runLogService.completeRun.mockResolvedValue(undefined);
     stateService.getCurrentState.mockResolvedValue(baseState());
-    orchestrator.run.mockResolvedValue({ runId: "run-1" });
-    orchestrator.confirmPrdAndContinue.mockResolvedValue({ runId: "run-1" });
+    streamService.emit.mockResolvedValue({});
     documentService.confirmForPrototypeGate.mockResolvedValue({
       document: basePrdDocument({ status: "confirmed" }),
       productDesignState: baseState({
@@ -88,7 +94,7 @@ describe("VibeService main entry", () => {
     });
   });
 
-  it("dispatches /ai/vibe/handle-message payloads into the new orchestrator context", async () => {
+  it("records user input and stops at the DeerFlow-first boundary", async () => {
     const result = await service.handleMessage(user, {
       projectId: "project-1",
       conversationId: "conversation-1",
@@ -106,30 +112,38 @@ describe("VibeService main entry", () => {
       content: "生成签到活动",
       metadata: { selectedRegion: { type: "prototype", artifactId: "artifact-1" } },
     }));
-    expect(prisma.project.update).toHaveBeenCalledWith({
-      where: { id: "project-1" },
-      data: expect.objectContaining({ status: ProjectStatus.designing }),
-    });
-    expect(orchestrator.run).toHaveBeenCalledWith({
-      userMessageId: "message-1",
-      attachments: [{ fileId: "file-1", fileName: "活动规则.md", fileType: "markdown", summary: "活动规则" }],
-      context: expect.objectContaining({
+    expect(prisma.project.update).not.toHaveBeenCalled();
+    expect(runLogService.markRunIntent).toHaveBeenCalledWith("run-1", UserIntent.general_question);
+    expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      type: MessageType.agent_summary,
+      content: expect.stringContaining("DeerFlow 2.0"),
+      metadata: expect.objectContaining({
         runId: "run-1",
-        projectId: "project-1",
-        conversationId: "conversation-1",
-        userId: "user-1",
-        userInput: "生成签到活动",
-        previewMode: "prototype",
-        currentProjectStatus: ProjectStatus.prototype_ready,
-        productDesignState: expect.objectContaining({ id: "state-1" }),
-        traceId: "trace-1",
+        intent: UserIntent.general_question,
+        runtimeAdapter: expect.objectContaining({
+          status: "not_configured",
+          provider: "deerflow",
+          mode: "deerflow_first",
+        }),
       }),
-    });
+    }));
+    expect(runLogService.completeRun).toHaveBeenCalledWith(
+      "run-1",
+      expect.objectContaining({ runtimeAdapter: expect.objectContaining({ mode: "deerflow_first" }) }),
+      expect.stringContaining("旧的自研生成链路已停用"),
+    );
+    expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "run_completed",
+      content: expect.stringContaining("旧的自研生成链路已停用"),
+    }));
     expect(result).toEqual(expect.objectContaining({
       projectId: "project-1",
       conversationId: "conversation-1",
       runId: "run-1",
-      status: "running",
+      assistantMessage: expect.objectContaining({ id: "assistant-message-1" }),
+      status: "completed",
     }));
   });
 
@@ -145,10 +159,10 @@ describe("VibeService main entry", () => {
 
     expect(messageService.createUserMessage).not.toHaveBeenCalled();
     expect(runLogService.createRun).not.toHaveBeenCalled();
-    expect(orchestrator.run).not.toHaveBeenCalled();
+    expect(messageService.createAssistantMessage).not.toHaveBeenCalled();
   });
 
-  it("confirms a doc_ready PRD before continuing to prototype generation", async () => {
+  it("confirms a doc_ready PRD and waits for the DeerFlow-first prototype flow", async () => {
     stateService.getCurrentState.mockResolvedValue(baseState({
       status: "doc_ready",
       prdDocument: basePrdDocument({ status: "ready" }),
@@ -164,15 +178,19 @@ describe("VibeService main entry", () => {
       "prd-1",
       "用户确认 PRD，继续生成原型",
     );
-    expect(orchestrator.confirmPrdAndContinue).toHaveBeenCalledWith(expect.objectContaining({
-      context: expect.objectContaining({
+    expect(prisma.project.update).not.toHaveBeenCalled();
+    expect(runLogService.markRunIntent).toHaveBeenCalledWith("run-1", UserIntent.generate_prototype);
+    expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining("PRD 确认已记录"),
+      metadata: expect.objectContaining({
+        intent: UserIntent.generate_prototype,
         productDesignState: expect.objectContaining({
           status: "doc_confirmed",
           prdDocument: expect.objectContaining({ status: "confirmed" }),
         }),
       }),
     }));
-    expect(result).toEqual(expect.objectContaining({ runId: "run-1", status: "running" }));
+    expect(result).toEqual(expect.objectContaining({ runId: "run-1", status: "completed" }));
   });
 
   it("rejects PRD confirmation outside the document gate", async () => {
@@ -188,7 +206,7 @@ describe("VibeService main entry", () => {
     })).rejects.toThrow("当前项目已生成原型，不能重复触发 PRD 确认门");
 
     expect(documentService.confirmForPrototypeGate).not.toHaveBeenCalled();
-    expect(orchestrator.confirmPrdAndContinue).not.toHaveBeenCalled();
+    expect(messageService.createAssistantMessage).not.toHaveBeenCalled();
   });
 });
 

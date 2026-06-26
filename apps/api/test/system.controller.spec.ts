@@ -8,9 +8,9 @@ describe("SystemController", () => {
     expect(result).toMatchObject({
       ok: true,
       service: "ai-product-workbench-api",
+      phase: "deerflow-first-runtime",
     });
     expect(result.modules).toContain("projects");
-    expect(result.modules).toContain("runtime-orchestrator");
     expect(result.modules).toContain("runtime-adapters");
     expect(result.modules).toContain("codex-runtime-adapter");
     expect(result.modules).toContain("deerflow-runtime-adapter");
