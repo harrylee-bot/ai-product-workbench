@@ -26,6 +26,7 @@ describe("VibeService main entry", () => {
     createRun: vi.fn(),
     markRunIntent: vi.fn(),
     completeRun: vi.fn(),
+    failRun: vi.fn(),
     getRun: vi.fn(),
   };
   const stateService = {
@@ -38,6 +39,10 @@ describe("VibeService main entry", () => {
   const documentService = {
     confirmForPrototypeGate: vi.fn(),
   };
+  const deerFlowRuntime = {
+    isEnabled: vi.fn(),
+    runTurn: vi.fn(),
+  };
   const service = new VibeService(
     prisma as never,
     messageService as never,
@@ -46,6 +51,7 @@ describe("VibeService main entry", () => {
     stateService as never,
     streamService as never,
     documentService as never,
+    deerFlowRuntime as never,
   );
   const user = {
     id: "user-1",
@@ -79,6 +85,9 @@ describe("VibeService main entry", () => {
     runLogService.createRun.mockResolvedValue({ id: "run-1", traceId: "trace-1" });
     runLogService.markRunIntent.mockResolvedValue(undefined);
     runLogService.completeRun.mockResolvedValue(undefined);
+    runLogService.failRun.mockResolvedValue(undefined);
+    deerFlowRuntime.isEnabled.mockReturnValue(false);
+    deerFlowRuntime.runTurn.mockResolvedValue(undefined);
     stateService.getCurrentState.mockResolvedValue(baseState());
     streamService.emit.mockResolvedValue({});
     documentService.confirmForPrototypeGate.mockResolvedValue({
@@ -156,6 +165,81 @@ describe("VibeService main entry", () => {
     expect(messageService.createUserMessage).not.toHaveBeenCalled();
     expect(runLogService.createRun).not.toHaveBeenCalled();
     expect(messageService.createAssistantMessage).not.toHaveBeenCalled();
+  });
+
+  it("hands enabled turns to DeerFlow and persists its final action", async () => {
+    deerFlowRuntime.isEnabled.mockReturnValue(true);
+    fileAssetService.getAttachmentSummaries.mockResolvedValue([]);
+    deerFlowRuntime.runTurn.mockImplementation(async (input) => {
+      await input.onEvent?.({
+        event: "messages-tuple",
+        data: [{ content: "正在处理" }],
+        content: "正在处理",
+      });
+      await input.onEvent?.({
+        event: "messages-tuple",
+        data: [{ tool_calls: [{ function: { name: "coding_node" } }] }],
+        toolName: "coding_node",
+      });
+      return {
+        threadId: "deerflow-thread-1",
+        assistantText: "你好，我在。",
+        finalAction: { type: "answer", message: "你好，我在。", intent: "general_question" },
+        rawEvents: [],
+        finalState: { ok: true },
+      };
+    });
+
+    const result = await service.handleMessage(user, {
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      message: "你好",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      runId: "run-1",
+      status: "running",
+      assistantMessage: null,
+    }));
+    expect(deerFlowRuntime.runTurn).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      message: "你好",
+    }));
+
+    await flushAsyncWork();
+
+    expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "message_delta",
+      content: "正在处理",
+    }));
+    expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "message_delta",
+      content: "DeerFlow 正在调用能力：coding_node",
+    }));
+    expect(runLogService.markRunIntent).toHaveBeenCalledWith("run-1", UserIntent.general_question);
+    expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      content: "你好，我在。",
+      metadata: expect.objectContaining({
+        runId: "run-1",
+        provider: "deerflow",
+        threadId: "deerflow-thread-1",
+        finalAction: expect.objectContaining({ type: "answer", message: "你好，我在。" }),
+      }),
+    }));
+    expect(runLogService.completeRun).toHaveBeenCalledWith(
+      "run-1",
+      expect.objectContaining({
+        provider: "deerflow",
+        threadId: "deerflow-thread-1",
+        nextAction: { type: "answer" },
+      }),
+      "你好，我在。",
+    );
   });
 
   it("confirms a doc_ready PRD and waits for the DeerFlow-first prototype flow", async () => {
@@ -266,4 +350,8 @@ function basePrdDocument(overrides: Record<string, unknown> = {}) {
     updatedAt: "2026-06-20T08:00:00.000Z",
     ...overrides,
   } as ProductDesignState["prdDocument"];
+}
+
+async function flushAsyncWork() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }

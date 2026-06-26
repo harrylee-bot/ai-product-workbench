@@ -40,6 +40,7 @@ import { ShareLinkController, PublicShareController } from "./share.controller";
 import { ShareService } from "./share.service";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
+import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
 
 @Module({
   imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule],
@@ -63,6 +64,7 @@ import { VibeStreamService } from "./vibe-stream.service";
   ],
   providers: [
     VibeService,
+    DeerFlowRuntimeService,
     RuntimeRunLogService,
     VibeStreamService,
     ProductDesignStateService,

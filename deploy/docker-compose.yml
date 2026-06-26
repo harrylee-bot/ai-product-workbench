@@ -26,6 +26,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: postgresql://ai_workbench:${POSTGRES_PASSWORD:-ai_workbench}@postgres:5432/ai_product_workbench?schema=public
       JWT_SECRET: ${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}
@@ -41,6 +43,16 @@ services:
       DEFAULT_MODEL_BASE_URL: ${DEFAULT_MODEL_BASE_URL:-https://datatoken.shop}
       DEFAULT_MODEL_API_KEY: ${DEFAULT_MODEL_API_KEY:-}
       DEFAULT_MODEL_NAME: ${DEFAULT_MODEL_NAME:-gpt-5.5}
+      DEERFLOW_ENABLED: ${DEERFLOW_ENABLED:-false}
+      DEERFLOW_LANGGRAPH_URL: ${DEERFLOW_LANGGRAPH_URL:-http://host.docker.internal:2024}
+      DEERFLOW_GATEWAY_URL: ${DEERFLOW_GATEWAY_URL:-http://host.docker.internal:8001}
+      DEERFLOW_ASSISTANT_ID: ${DEERFLOW_ASSISTANT_ID:-lead_agent}
+      DEERFLOW_STREAM_MODE: ${DEERFLOW_STREAM_MODE:-messages-tuple}
+      DEERFLOW_PLAN_MODE: ${DEERFLOW_PLAN_MODE:-true}
+      DEERFLOW_THINKING_ENABLED: ${DEERFLOW_THINKING_ENABLED:-true}
+      DEERFLOW_SUBAGENT_ENABLED: ${DEERFLOW_SUBAGENT_ENABLED:-true}
+      DEERFLOW_MAX_CONCURRENT_SUBAGENTS: ${DEERFLOW_MAX_CONCURRENT_SUBAGENTS:-3}
+      DEERFLOW_TIMEOUT_MS: ${DEERFLOW_TIMEOUT_MS:-600000}
     ports:
       - "4000:4000"
     volumes:

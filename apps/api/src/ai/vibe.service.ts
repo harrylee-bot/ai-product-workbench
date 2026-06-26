@@ -12,6 +12,7 @@ import { ProductDesignStateService } from "./product-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { toInputJson } from "./ai-vibe.helpers";
+import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
 
 @Injectable()
 export class VibeService {
@@ -23,6 +24,7 @@ export class VibeService {
     private readonly stateService: ProductDesignStateService,
     private readonly streamService: VibeStreamService,
     private readonly documentService: RequirementDocumentService,
+    private readonly deerFlowRuntime: DeerFlowRuntimeService,
   ) {}
 
   async handleMessage(user: AuthenticatedUser, dto: HandleVibeMessageDto) {
@@ -85,6 +87,29 @@ export class VibeService {
       userId: user.id,
       userInput: dto.message.trim(),
     });
+
+    if (this.deerFlowRuntime.isEnabled()) {
+      this.executeDeerFlowTurn({
+        runId: run.id,
+        projectId: project.id,
+        conversationId: conversation.id,
+        userId: user.id,
+        message: dto.message.trim(),
+        fallbackIntent: UserIntent.general_question,
+        attachments: attachmentSummaries,
+        selectedRegion: dto.selectedRegion,
+        previewMode: dto.previewMode,
+      });
+
+      return {
+        projectId: project.id,
+        conversationId: conversation.id,
+        userMessage,
+        assistantMessage: null,
+        runId: run.id,
+        status: "running",
+      };
+    }
 
     const assistantMessage = await this.finishPendingDeerFlowTurn({
       runId: run.id,
@@ -172,6 +197,27 @@ export class VibeService {
       userId: user.id,
       userInput: "确认 PRD，继续生成原型。",
     });
+
+    if (this.deerFlowRuntime.isEnabled()) {
+      this.executeDeerFlowTurn({
+        runId: run.id,
+        projectId: project.id,
+        conversationId: conversation.id,
+        userId: user.id,
+        message: "确认 PRD，继续生成原型。",
+        fallbackIntent: UserIntent.generate_prototype,
+        resumeReason: "user_confirmed_prd",
+        productDesignState: confirmedState,
+      });
+
+      return {
+        projectId: project.id,
+        conversationId: conversation.id,
+        runId: run.id,
+        assistantMessage: null,
+        status: "running",
+      };
+    }
 
     const assistantMessage = await this.finishPendingDeerFlowTurn({
       runId: run.id,
@@ -278,4 +324,154 @@ export class VibeService {
 
     return assistantMessage;
   }
+
+  private executeDeerFlowTurn(input: {
+    runId: string;
+    projectId: string;
+    conversationId: string;
+    userId: string;
+    message: string;
+    fallbackIntent: UserIntent;
+    attachments?: unknown[];
+    selectedRegion?: unknown;
+    previewMode?: string;
+    resumeReason?: string;
+    productDesignState?: unknown;
+  }) {
+    void this.runDeerFlowTurn(input).catch(async (error) => {
+      await this.runLogService.failRun(input.runId, error);
+      const message = error instanceof Error ? error.message : "DeerFlow runtime 执行失败";
+      await this.streamService.emit({
+        runId: input.runId,
+        projectId: input.projectId,
+        type: "run_failed",
+        content: message,
+        data: { provider: "deerflow", errorMessage: message },
+      });
+      await this.messageService.createAssistantMessage({
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        content: `DeerFlow 执行失败：${message}`,
+        type: MessageType.agent_summary,
+        metadata: toInputJson({
+          runId: input.runId,
+          provider: "deerflow",
+          errorMessage: message,
+        }),
+        relatedRunId: input.runId,
+      });
+    });
+  }
+
+  private async runDeerFlowTurn(input: {
+    runId: string;
+    projectId: string;
+    conversationId: string;
+    userId: string;
+    message: string;
+    fallbackIntent: UserIntent;
+    attachments?: unknown[];
+    selectedRegion?: unknown;
+    previewMode?: string;
+    resumeReason?: string;
+    productDesignState?: unknown;
+  }) {
+    await this.streamService.emit({
+      runId: input.runId,
+      projectId: input.projectId,
+      type: "step_started",
+      step: "requirement_packaging",
+      content: "正在把请求交给 DeerFlow 2.0 lead agent。",
+      data: { provider: "deerflow" },
+    });
+
+    const result = await this.deerFlowRuntime.runTurn({
+      runId: input.runId,
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      userId: input.userId,
+      message: input.message,
+      attachments: input.attachments,
+      selectedRegion: input.selectedRegion,
+      previewMode: input.previewMode,
+      resumeReason: input.resumeReason,
+      productDesignState: input.productDesignState,
+      onEvent: async (event) => {
+        if (event.toolName) {
+          await this.streamService.emit({
+            runId: input.runId,
+            projectId: input.projectId,
+            type: "message_delta",
+            content: `DeerFlow 正在调用能力：${event.toolName}`,
+            data: event,
+          });
+          return;
+        }
+
+        if (event.content) {
+          await this.streamService.emit({
+            runId: input.runId,
+            projectId: input.projectId,
+            type: "message_delta",
+            content: event.content,
+            data: event,
+          });
+        }
+      },
+    });
+
+    await this.streamService.emit({
+      runId: input.runId,
+      projectId: input.projectId,
+      type: "step_completed",
+      step: "requirement_packaging",
+      content: "DeerFlow lead agent 已完成本轮执行。",
+      data: { provider: "deerflow", threadId: result.threadId },
+    });
+
+    const intent = toUserIntent(result.finalAction.intent) ?? input.fallbackIntent;
+    await this.runLogService.markRunIntent(input.runId, intent);
+
+    const assistantMessage = await this.messageService.createAssistantMessage({
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      content: result.finalAction.message,
+      type: MessageType.agent_summary,
+      metadata: toInputJson({
+        runId: input.runId,
+        provider: "deerflow",
+        threadId: result.threadId,
+        finalAction: result.finalAction,
+        finalState: result.finalState,
+      }),
+      relatedRunId: input.runId,
+    });
+
+    const runResult = {
+      runId: input.runId,
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      provider: "deerflow",
+      threadId: result.threadId,
+      finalAction: result.finalAction,
+      finalState: result.finalState,
+      assistantMessageId: assistantMessage.id,
+      nextAction: { type: result.finalAction.type },
+    };
+
+    await this.runLogService.completeRun(input.runId, runResult, result.finalAction.message);
+    await this.streamService.emit({
+      runId: input.runId,
+      projectId: input.projectId,
+      type: "run_completed",
+      content: result.finalAction.message,
+      data: runResult,
+    });
+  }
+}
+
+function toUserIntent(value: string | undefined): UserIntent | undefined {
+  if (!value) return undefined;
+  if (value in UserIntent) return UserIntent[value as keyof typeof UserIntent];
+  return Object.values(UserIntent).includes(value as UserIntent) ? value as UserIntent : undefined;
 }
