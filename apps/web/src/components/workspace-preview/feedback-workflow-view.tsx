@@ -9,20 +9,20 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
-import { evolutionCopy, toChineseText } from "./helpers";
+import { toChineseText } from "./helpers";
 import type {
   FeedbackWorkflowStep,
-  Phase2DecisionView,
+  RuntimePatchPreview,
   WorkflowStepStatus,
 } from "./types";
 
-export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionView | null }) {
+export function FeedbackWorkflowView({ runtimePreview }: { runtimePreview?: RuntimePatchPreview | null }) {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackItems, setFeedbackItems] = useState<Array<{ id: string; text: string; status: string }>>([]);
   const [suggesting, setSuggesting] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const suggestionTimerRef = useRef<number | null>(null);
-  const workflow = buildFeedbackWorkflow(decision, feedbackItems.length);
+  const workflow = buildFeedbackWorkflow(runtimePreview, feedbackItems.length);
 
   useEffect(() => {
     return () => {
@@ -44,7 +44,7 @@ export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionVi
   };
 
   const generatePatchSuggestion = () => {
-    if (!decision) {
+    if (!runtimePreview) {
       setWorkflowError("需要先完成一次生成结果，才能基于当前补丁上下文生成建议。");
       return;
     }
@@ -56,7 +56,7 @@ export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionVi
     }
 
     suggestionTimerRef.current = window.setTimeout(() => {
-      const operationCount = decision.patchDraft.operations.length;
+      const operationCount = patchOperationCount(runtimePreview);
       setFeedbackItems((items) => [
         {
           id: `feedback-suggestion-${Date.now()}`,
@@ -122,9 +122,9 @@ export function FeedbackWorkflowView({ decision }: { decision?: Phase2DecisionVi
               type="button"
               size="sm"
               variant="secondary"
-              disabled={!decision || suggesting}
+              disabled={!runtimePreview || suggesting}
               onClick={generatePatchSuggestion}
-              title={!decision ? "需要先完成一次生成结果" : suggesting ? "正在生成补丁建议" : "生成补丁建议"}
+              title={!runtimePreview ? "需要先完成一次生成结果" : suggesting ? "正在生成补丁建议" : "生成补丁建议"}
             >
               <Sparkles className={suggesting ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
               {suggesting ? "生成中" : "生成补丁建议"}
@@ -182,7 +182,11 @@ function FeedbackSuggestionSkeleton() {
   );
 }
 
-function buildFeedbackWorkflow(decision?: Phase2DecisionView | null, feedbackCount = 0): FeedbackWorkflowStep[] {
+function buildFeedbackWorkflow(runtimePreview?: RuntimePatchPreview | null, feedbackCount = 0): FeedbackWorkflowStep[] {
+  const operationCount = patchOperationCount(runtimePreview);
+  const qaPassed = runtimePreview?.qaReport?.passed ?? (
+    runtimePreview?.qaReport ? (runtimePreview.qaReport.issues?.length ?? 0) === 0 : false
+  );
   return [
     {
       id: "collect",
@@ -193,28 +197,34 @@ function buildFeedbackWorkflow(decision?: Phase2DecisionView | null, feedbackCou
     {
       id: "attribute",
       title: "语义归因",
-      detail: decision?.knowledgeSearch?.summary ? toChineseText(decision.knowledgeSearch.summary) : "关联知识库与约束",
-      status: decision?.knowledgeSearch ? "done" : feedbackCount ? "active" : "pending",
+      detail: runtimePreview?.knowledgeSearch?.summary ? toChineseText(runtimePreview.knowledgeSearch.summary) : "关联知识库与约束",
+      status: runtimePreview?.knowledgeSearch ? "done" : feedbackCount ? "active" : "pending",
     },
     {
       id: "patch",
       title: "生成补丁",
-      detail: decision ? `${decision.patchDraft.operations.length} 个补丁操作` : "等待决策结果",
-      status: decision?.patchDraft.operations.length ? "done" : "pending",
+      detail: runtimePreview ? `${operationCount} 个补丁操作` : "等待运行结果",
+      status: operationCount ? "done" : "pending",
     },
     {
       id: "regression",
       title: "QA 回归",
-      detail: decision ? `QA ${decision.evolution.metrics.qaPassed ? "通过" : "待处理"}` : "等待补丁",
-      status: decision?.evolution.metrics.qaPassed ? "done" : decision ? "active" : "pending",
+      detail: runtimePreview ? `QA ${qaPassed ? "通过" : "待处理"}` : "等待补丁",
+      status: qaPassed ? "done" : runtimePreview ? "active" : "pending",
     },
     {
-      id: "learn",
-      title: "沉淀进化",
-      detail: decision ? evolutionCopy(decision.evolution.signal.signalType) : "等待闭环完成",
-      status: decision ? "done" : "pending",
+      id: "knowledge",
+      title: "沉淀知识",
+      detail: runtimePreview?.knowledgeSearch ? "可生成知识候选" : "等待闭环完成",
+      status: runtimePreview?.knowledgeSearch ? "done" : "pending",
     },
   ];
+}
+
+function patchOperationCount(runtimePreview?: RuntimePatchPreview | null) {
+  return runtimePreview?.previewSession?.operations?.length
+    ?? runtimePreview?.patchDraft?.operations.length
+    ?? 0;
 }
 
 function workflowStepClass(status: WorkflowStepStatus) {

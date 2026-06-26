@@ -142,7 +142,7 @@ export function ChatComposer({
         {sending ? (
           <div className="mx-2.5 mt-2 flex items-center gap-2 rounded-[var(--radius-control)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" />
-            <span className="min-w-0 truncate">正在执行多智能体流程，当前消息处理完成后可继续输入。</span>
+            <span className="min-w-0 truncate">正在执行 Vibe Coding 主链路，当前消息处理完成后可继续输入。</span>
           </div>
         ) : null}
         <TextArea

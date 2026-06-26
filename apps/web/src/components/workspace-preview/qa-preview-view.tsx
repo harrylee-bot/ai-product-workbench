@@ -17,16 +17,16 @@ import {
   statusLabel,
   toChineseText,
 } from "./helpers";
-import type { Phase2DecisionView, QaIssue, QaSeverity } from "./types";
+import type { QaIssue, QaSeverity, RuntimePatchPreview } from "./types";
 
-export function QaPreviewView({ decision }: { decision?: Phase2DecisionView | null }) {
+export function QaPreviewView({ runtimePreview }: { runtimePreview?: RuntimePatchPreview | null }) {
   const [rerunning, setRerunning] = useState(false);
   const [qaError, setQaError] = useState<string | null>(null);
   const rerunTimerRef = useRef<number | null>(null);
-  const issues = useMemo(() => buildQaIssues(decision), [decision]);
+  const issues = useMemo(() => buildQaIssues(runtimePreview), [runtimePreview]);
   const stats = qaIssueStats(issues);
-  const risk = normalizeRisk(decision?.companyRuntime?.qaReport.riskLevel ?? decision?.previewSession.riskPanel?.level);
-  const recommendations = decision?.companyRuntime?.qaReport.recommendations ?? [];
+  const risk = normalizeRisk(runtimePreview?.qaReport?.riskLevel ?? runtimePreview?.previewSession?.riskPanel?.level);
+  const recommendations = runtimePreview?.qaReport?.recommendations ?? [];
 
   useEffect(() => {
     return () => {
@@ -36,7 +36,7 @@ export function QaPreviewView({ decision }: { decision?: Phase2DecisionView | nu
     };
   }, []);
 
-  if (!decision) {
+  if (!runtimePreview) {
     return (
       <div className="h-full p-4">
         <EmptyPreview
@@ -69,7 +69,7 @@ export function QaPreviewView({ decision }: { decision?: Phase2DecisionView | nu
                 <ShieldAlert className="h-4 w-4 text-amber-600" />
                 QA 扫描
               </div>
-              <div className="mt-1 text-xs text-gray-500">风险等级 {riskLabel(risk)} · {statusLabel(decision.previewSession.status)}</div>
+              <div className="mt-1 text-xs text-gray-500">风险等级 {riskLabel(risk)} · {statusLabel(runtimePreview.previewSession?.status)}</div>
             </div>
             <Button
               type="button"
@@ -165,20 +165,20 @@ function QaRerunSkeleton() {
   );
 }
 
-function buildQaIssues(decision?: Phase2DecisionView | null): QaIssue[] {
-  if (!decision) return [];
-  const report = decision.companyRuntime?.qaReport;
-  const risk = normalizeRisk(report?.riskLevel ?? decision.previewSession.riskPanel?.level);
+function buildQaIssues(runtimePreview?: RuntimePatchPreview | null): QaIssue[] {
+  if (!runtimePreview) return [];
+  const report = runtimePreview.qaReport;
+  const risk = normalizeRisk(report?.riskLevel ?? runtimePreview.previewSession?.riskPanel?.level);
   const reportIssues = report?.issues ?? [];
   const issues: QaIssue[] = reportIssues.map((issue, index) => ({
     id: `qa-report-${index}`,
     title: toChineseText(issue),
-    detail: toChineseText(report?.recommendations[index] ?? "需要在应用前确认影响范围和回归路径。"),
+    detail: toChineseText(report?.recommendations?.[index] ?? "需要在应用前确认影响范围和回归路径。"),
     severity: risk === "high" && index === 0 ? "critical" : "warning",
     source: "QA Report",
   }));
 
-  if (decision.previewSession.riskPanel?.requiresConfirmation) {
+  if (runtimePreview.previewSession?.riskPanel?.requiresConfirmation) {
     issues.unshift({
       id: "qa-confirmation",
       title: "补丁应用需要人工确认",
@@ -188,7 +188,7 @@ function buildQaIssues(decision?: Phase2DecisionView | null): QaIssue[] {
     });
   }
 
-  Object.entries(decision.previewSession.riskPanel?.checks ?? {})
+  Object.entries(runtimePreview.previewSession?.riskPanel?.checks ?? {})
     .filter(([, passed]) => !passed)
     .forEach(([name], index) => {
       issues.push({

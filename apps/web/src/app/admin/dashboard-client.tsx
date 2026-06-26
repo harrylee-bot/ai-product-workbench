@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, AlertTriangle, Bot, DatabaseZap, FileWarning, FolderKanban, Users } from "lucide-react";
+import { Activity, AlertTriangle, DatabaseZap, FileWarning, FolderKanban, Users, Workflow } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/admin-shell";
@@ -12,7 +12,7 @@ import type { AdminDashboardStats } from "@/lib/types";
 const statItems = [
   { key: "userCount", label: "用户数", icon: Users, href: "/admin/users" },
   { key: "projectCount", label: "项目数", icon: FolderKanban, href: "/admin/projects" },
-  { key: "todayAgentRunCount", label: "今日 AI 运行", icon: Bot, href: "/admin/logs/agent-runs" },
+  { key: "todayAgentRunCount", label: "今日 Runtime Run", icon: Workflow, href: "/admin/logs/runtime-runs" },
   { key: "todayModelCallCount", label: "今日模型调用", icon: Activity, href: "/admin/logs/model-calls" },
   { key: "todayFailedModelCallCount", label: "今日失败调用", icon: AlertTriangle, href: "/admin/logs/model-calls" },
   { key: "pendingKnowledgeCandidateCount", label: "待审核知识候选", icon: DatabaseZap, href: "/admin/knowledge/candidates" },
@@ -62,7 +62,7 @@ export function AdminDashboardClient() {
         {[
           { title: "模型管理", href: "/admin/model-providers", text: "供应商、模型配置、任务映射" },
           { title: "知识库", href: "/admin/knowledge/vault", text: "Obsidian Vault、知识条目、候选审核" },
-          { title: "日志中心", href: "/admin/logs/agent-runs", text: "Agent、模型、文件、Patch、QA" },
+          { title: "日志中心", href: "/admin/logs/runtime-runs", text: "Runtime、模型、文件、Patch、QA" },
         ].map((item) => (
           <Link key={item.href} href={item.href}>
             <AdminPanel className="p-4 transition hover:border-gray-300 hover:shadow-md">

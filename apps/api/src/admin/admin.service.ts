@@ -18,7 +18,7 @@ import {
 } from "./admin.dto";
 import { normalizePagination } from "./admin-audit.service";
 
-type AgentDebugStep = {
+type RuntimeDebugStep = {
   id: string;
   agentName: string;
   status: string;
@@ -28,14 +28,14 @@ type AgentDebugStep = {
   errorMessage?: string;
 };
 
-type AgentDebugEvent = {
+type RuntimeDebugEvent = {
   id: string;
   eventType: string;
   payload: unknown;
   createdAt: string;
 };
 
-type NormalizedAgentDebugEvent = {
+type NormalizedRuntimeDebugEvent = {
   id: string;
   type: string;
   step?: string;
@@ -386,7 +386,7 @@ export class AdminService {
       payload: event.payload,
       createdAt: event.createdAt.toISOString(),
     }));
-    const debugSummary = buildAgentRunDebugSummary({
+    const debugSummary = buildRuntimeRunDebugSummary({
       status: run.status,
       result: run.result,
       steps,
@@ -796,13 +796,13 @@ function startOfToday() {
   return value;
 }
 
-function buildAgentRunDebugSummary(input: {
+function buildRuntimeRunDebugSummary(input: {
   status: string;
   result: unknown;
-  steps: AgentDebugStep[];
-  events: AgentDebugEvent[];
+  steps: RuntimeDebugStep[];
+  events: RuntimeDebugEvent[];
 }) {
-  const normalizedEvents = input.events.map(normalizeAgentDebugEvent);
+  const normalizedEvents = input.events.map(normalizeRuntimeDebugEvent);
   const knowledgeHits: Record<string, unknown>[] = [];
   const qaGates: Record<string, unknown>[] = [];
   const qaIssues: Record<string, unknown>[] = [];
@@ -902,7 +902,7 @@ function buildAgentRunDebugSummary(input: {
   };
 }
 
-function normalizeAgentDebugEvent(event: AgentDebugEvent): NormalizedAgentDebugEvent {
+function normalizeRuntimeDebugEvent(event: RuntimeDebugEvent): NormalizedRuntimeDebugEvent {
   const outer = asRecord(event.payload);
   const payload = asRecord(outer?.payload) ?? outer;
   return {

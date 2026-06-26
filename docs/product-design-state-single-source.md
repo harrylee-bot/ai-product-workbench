@@ -32,7 +32,7 @@ Selected Region + User Change
 
 - PRD 生成只读取 `ProductDesignState`，公共生成入口会把生成后的 PRD 快照同步回 State。
 - Prototype 生成只读取 `ProductDesignState`，公共生成入口会把生成后的 PrototypeSpec 快照同步回 State。
-- 正式需求必须先生成 `ProductBuildPlan`，再由 Product Designer Agent 写入 `ProductDesignState`。
+- 正式需求必须先生成可校验的 plan/draft，再由业务服务写入 `ProductDesignState`；外部 runtime 不能直接写库。
 - Patch 只能输出作用于 `ProductDesignState` 路径的 operations，应用后重新生成 PRD、Prototype 和 QA。
 - QA 优先读取 `ProductDesignState.prdDocument` 与 `ProductDesignState.prototypeSpec`，项目指针只作为同源 fallback。
 - 当前 PRD / Prototype 读取会过滤和当前 State 不匹配的旧项目指针，避免展示过期产物。

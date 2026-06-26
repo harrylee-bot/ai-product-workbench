@@ -1,14 +1,11 @@
 import type {
-  AgentName,
   KnowledgeCandidateSource,
   KnowledgeCandidateStatus,
   KnowledgePriority,
   KnowledgeType,
-  ModelTaskType,
   ProjectStatus,
   UserIntent,
 } from "@prisma/client";
-import type { AgentFallbackMetadata } from "./agent-fallback-policy";
 
 export type SelectedRegion = {
   type: "document" | "prototype";
@@ -95,8 +92,7 @@ export type AgentSkillRoute = {
   skillName: string;
   sourcePath: string;
   appliesTo: Array<{
-    agentName: AgentName;
-    taskType: ModelTaskType;
+    runtimeTask: string;
     handoffField: string;
     usage: string;
   }>;
@@ -106,18 +102,6 @@ export type KnowledgeConflict = {
   id: string;
   description: string;
   references: string[];
-};
-
-export type AgentDecisionTrace = {
-  summary: string;
-  inputSignals: string[];
-  constraints: string[];
-  assumptions: string[];
-  alternativesConsidered: string[];
-  decision: string;
-  risks: string[];
-  nextStep: string;
-  generatedBy: "model" | "deterministic";
 };
 
 export type KnowledgeContext = {
@@ -270,7 +254,8 @@ export type RequirementIntakeNodeName =
   | "intent"
   | "knowledge"
   | "context_fetch"
-  | "requirement"
+  | "requirement_intake"
+  | "requirement_merge"
   | "planner"
   | "validator"
   | "safety"
@@ -280,12 +265,12 @@ export type RequirementIntakeNode = {
   id: string;
   name: RequirementIntakeNodeName;
   title: string;
-  agent: string;
+  runtimeTask: string;
   status: "completed" | "warning" | "blocked";
   inputRefs: string[];
   outputRefs: string[];
   summary: string;
-  decisionTrace?: AgentDecisionTrace;
+  runtimeTrace?: Record<string, unknown>;
 };
 
 export type RequirementIntakeEdge = {
@@ -372,9 +357,8 @@ export type ProductBuildPlan = {
     qa: boolean;
     knowledgeCandidates: boolean;
   };
-  agentSequence: Array<{
-    agentName: AgentName;
-    step: ModelTaskType;
+  runtimeTasks: Array<{
+    taskType: string;
     input: string[];
     output: string;
     gate?: string;
@@ -922,7 +906,7 @@ export type QAReport = {
   gate: QAGateDecision;
 };
 
-export type QAAgentOutput = {
+export type QAProtocolOutput = {
   status: QAReportStatus;
   summary: string;
   issues: QAIssue[];
@@ -1145,26 +1129,10 @@ export type AgentRunContext = {
   requirementGateDecision?: RequirementGateDecision;
   requirementIntakeGraph?: RequirementIntakeGraph;
   productBuildPlan?: ProductBuildPlan;
-  fallbackEvents?: AgentFallbackMetadata[];
   traceId: string;
 };
 
-export type AgentInvocation<TInput, TOutput> = {
-  runId: string;
-  projectId: string;
-  traceId: string;
-  userId: string;
-  input: TInput;
-};
-
-export type AgentOutput<T> = {
+export type RuntimeOutput<T> = {
   data: T;
   modelCallLogId?: string;
-  fallback?: AgentFallbackMetadata;
-  decisionTrace?: AgentDecisionTrace;
-};
-
-export type ModelBackedAgent = {
-  agentName: AgentName;
-  taskType: ModelTaskType;
 };

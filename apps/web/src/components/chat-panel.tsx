@@ -10,7 +10,6 @@ import {
   LoaderCircle,
   Sparkles,
 } from "lucide-react";
-import type { Phase2DecisionView } from "@/components/preview-panel";
 import { Badge, Button, EmptyState } from "@/components/ui";
 import { ChatComposer } from "./workspace-chat/chat-composer";
 
@@ -26,7 +25,7 @@ export type VibeRunStepStatus = "pending" | "running" | "done" | "failed";
 export type VibeRunStepView = {
   step: string;
   title: string;
-  agent: string;
+  executor: string;
   detail: string;
   status: VibeRunStepStatus;
   message?: string;
@@ -95,7 +94,6 @@ export type VibeRunView = {
 
 export function ChatPanel({
   messages,
-  decision,
   runState,
   disabled,
   sending,
@@ -108,7 +106,6 @@ export function ChatPanel({
   onSend,
 }: {
   messages: Phase1Message[];
-  decision?: Phase2DecisionView | null;
   runState?: VibeRunView | null;
   disabled?: boolean;
   sending?: boolean;
@@ -120,7 +117,7 @@ export function ChatPanel({
   onConfirmPrototype?: (artifactId: string) => Promise<void> | void;
   onSend: (content: string) => Promise<void> | void;
 }) {
-  const displayRun = runState ?? (decision ? legacyRunStateFromDecision(decision) : null);
+  const displayRun = runState ?? null;
   const running = sending || displayRun?.status === "running";
 
   return (
@@ -157,7 +154,7 @@ export function ChatPanel({
         ) : (
           <EmptyState
             title="从一句目标开始"
-            description="系统会自动经过约束、决策、进化与统一编排，并生成需求结果、设计结果和执行路径。"
+            description="系统会整理需求、生成产品状态、PRD、原型和 QA 路径。"
             icon={<Sparkles className="h-5 w-5" />}
           />
         )}
@@ -233,7 +230,7 @@ function ExecutionPathCard({
     : waitingForClarification
       ? runState.summary ?? "需要先确认几个问题"
       : running
-      ? runState.currentLabel ?? `正在执行：${activeStep?.title ?? "Vibe 智能编排"}`
+      ? runState.currentLabel ?? `正在执行：${activeStep?.title ?? "Vibe Coding 主链路"}`
       : runState.summary ?? "运行已完成";
   const waitingLabel = waitingForClarification
     ? "待补充"
@@ -412,7 +409,7 @@ function ExecutionPathCard({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-gray-900">{step.title}</span>
-                        <span className="shrink-0 text-gray-500">{step.agent}</span>
+                        <span className="shrink-0 text-gray-500">{step.executor}</span>
                       </div>
                       <div className="mt-1 leading-5 text-gray-500">{detail}</div>
                     </div>
@@ -494,50 +491,19 @@ function lastActiveStep(steps: VibeRunStepView[]) {
   return undefined;
 }
 
-function legacyRunStateFromDecision(decision: Phase2DecisionView): VibeRunView {
-  return {
-    status: "completed",
-    summary: `已完成：${strategyLabel(decision.selectedStrategy.name)}`,
-    steps: [
-      {
-        step: "legacy_decision",
-        title: "历史决策结果",
-        agent: "旧链路",
-        detail: `已生成 ${decision.decisionPlan.strategies.length} 个策略，评审智能体 ${decision.reviewBoard.reviews.length} 位。`,
-        status: "done",
-      },
-    ],
-    knowledgeHitCount: decision.knowledgeSearch?.results.length,
-  };
-}
-
-function strategyLabel(name: Phase2DecisionView["selectedStrategy"]["name"]) {
-  const labels: Record<Phase2DecisionView["selectedStrategy"]["name"], string> = {
-    conservative_fix: "保守修正",
-    ux_improve: "体验优化",
-    structure_rewrite: "结构重写",
-    full_regenerate: "完整重建",
-    conservative: "保守策略",
-    balanced: "平衡策略",
-    aggressive: "进取策略",
-    full_rewrite: "完整重写",
-  };
-  return labels[name] ?? name;
-}
-
 function toChineseText(value: string) {
   return value
     .replace(/AI Product Workbench/g, "智能产品工作台")
     .replace(/AI Product OS/g, "智能产品操作系统")
-    .replace(/AI Product Company/g, "智能产品公司")
-    .replace(/Triple System Fusion/g, "三系统融合")
-    .replace(/Triple System/g, "三系统融合")
-    .replace(/Constraint System/g, "约束系统")
-    .replace(/Decision System/g, "决策系统")
-    .replace(/Evolution System/g, "进化系统")
+    .replace(/AI Product Company/g, "智能产品运行时")
+    .replace(/Triple System Fusion/g, "运行时协议")
+    .replace(/Triple System/g, "运行时协议")
+    .replace(/Constraint System/g, "约束协议")
+    .replace(/Decision System/g, "运行时状态")
+    .replace(/Evolution System/g, "运行时状态")
     .replace(/Constraint/g, "约束系统")
-    .replace(/Decision/g, "决策系统")
-    .replace(/Evolution/g, "进化系统")
+    .replace(/Decision/g, "判断")
+    .replace(/Evolution/g, "状态更新")
     .replace(/Patch Preview/g, "补丁预览")
     .replace(/PatchDraft/g, "补丁草稿")
     .replace(/Patch/g, "补丁")

@@ -127,7 +127,7 @@ function scoreItem(
 
   if (preferredTypes?.includes(item.type)) {
     keywordScore += 0.16;
-    reasons.push("符合 Agent 偏好类型");
+    reasons.push("符合调用方偏好类型");
   }
   keywordScore += priorityWeight(item.priority);
   if (item.priority === "high") reasons.push("高优先级知识");

@@ -60,7 +60,7 @@ export function PrdPreviewView({
     return (
       <EmptyPreview
         title="暂无需求文档"
-        description="发送需求后，系统会在完成约束、决策、进化流程后生成一份可预览需求文档。"
+        description="发送需求后，系统会基于产品状态生成一份可预览需求文档。"
       />
     );
   }

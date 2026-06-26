@@ -6,7 +6,6 @@ import {
   Optional,
 } from "@nestjs/common";
 import {
-  KnowledgeCandidateSource,
   ProductDesignStateStatus,
   ProjectStatus,
   PrototypeArtifactStatus,
@@ -28,11 +27,10 @@ import type {
   PrototypeVersion,
   SelectedRegion,
 } from "./ai-vibe.types";
-import { PrototypeCodeAgentService, renderPrototypeComponentFragment } from "./agents/prototype-code-agent.service";
-import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
-import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
+import { renderPrototypeComponentFragment } from "./runtime/local-protocol-renderers";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { QaService } from "./qa.service";
+import { ProductRuntimeService } from "./runtime/product-runtime.service";
 
 type PrototypeSpecRecord = {
   id: string;
@@ -86,10 +84,7 @@ export class PrototypeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stateService: ProductDesignStateService,
-    private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
-    private readonly prototypeCodeAgent: PrototypeCodeAgentService,
-    @Optional()
-    private readonly knowledgeExtractorAgent?: KnowledgeExtractorAgentService,
+    private readonly productRuntime: ProductRuntimeService,
     @Optional()
     private readonly knowledgeCandidateService?: KnowledgeCandidateService,
     @Optional()
@@ -110,27 +105,21 @@ export class PrototypeService {
     assertPrototypeGenerationGate(state);
 
     const runId = `manual-prototype-${Date.now()}`;
-    const spec = await this.prototypeDesignerAgent.run({
+    const spec = await this.productRuntime.generatePrototypeSpec({
       runId,
       projectId,
       traceId: runId,
       userId: user.id,
-      input: {
-        productDesignState: state,
-        targetDevice: input.targetDevice ?? "both",
-        generatedByRunId: runId,
-      },
+      productDesignState: state,
+      targetDevice: input.targetDevice ?? "both",
     });
-    const draft = await this.prototypeCodeAgent.run({
+    const draft = await this.productRuntime.generatePrototypeHtml({
       runId,
       projectId,
       traceId: runId,
       userId: user.id,
-      input: {
-        prototypeSpec: spec.data,
-        mode: "single_html",
-        generatedByRunId: runId,
-      },
+      prototypeSpec: spec.data,
+      mode: "single_html",
     });
 
     const saved = await this.saveGeneratedPrototype(state, spec.data, draft.data, {
@@ -450,33 +439,10 @@ export class PrototypeService {
     spec: PrototypeSpec,
     artifact: PrototypeArtifact,
   ) {
-    if (!this.knowledgeExtractorAgent || !this.knowledgeCandidateService) return { items: [] };
-    const state = await this.stateService.getStateByIdForProject(
-      artifact.productDesignStateId,
-      artifact.projectId,
-    );
-    if (!state) return { items: [] };
-    const runId = `knowledge-prototype-${Date.now()}`;
-    const output = await this.knowledgeExtractorAgent.run({
-      runId,
-      projectId: artifact.projectId,
-      traceId: runId,
-      userId,
-      input: {
-        projectId: artifact.projectId,
-        productDesignState: state,
-        prototypeSpec: spec,
-        confirmedByUser: true,
-        source: KnowledgeCandidateSource.prototype,
-        sourceRefId: artifact.id,
-        runId,
-      },
-    });
-    return this.knowledgeCandidateService.createMany(artifact.projectId, output.data.candidates, {
-      source: KnowledgeCandidateSource.prototype,
-      sourceRefId: artifact.id,
-      runId,
-    });
+    void userId;
+    void spec;
+    void artifact;
+    return { items: [] };
   }
 
   private async createVersion(

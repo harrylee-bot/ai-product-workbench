@@ -31,13 +31,13 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       API_PORT: 4000
-      WEB_ORIGIN: ${WEB_ORIGIN:-http://8.130.160.177:3000}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://45.207.206.76:3000}
       FILE_UPLOAD_ROOT: /app/apps/api/storage/uploads
       KNOWLEDGE_VAULT_ROOT: /app/apps/api/storage/knowledge-vault
       AGENT_SKILLS_ROOT: /app/agent-skills/obsidian-skills/skills:/root/.codex/skills
       MODEL_GATEWAY_ENCRYPTION_KEY: ${MODEL_GATEWAY_ENCRYPTION_KEY:-}
-      DEFAULT_MODEL_PROVIDER_NAME: ${DEFAULT_MODEL_PROVIDER_NAME:-DataToken 默认供应商}
-      DEFAULT_MODEL_BASE_URL: ${DEFAULT_MODEL_BASE_URL:-https://datatoken.shop}
+      DEFAULT_MODEL_PROVIDER_NAME: ${DEFAULT_MODEL_PROVIDER_NAME:-XXTF OpenAI}
+      DEFAULT_MODEL_BASE_URL: ${DEFAULT_MODEL_BASE_URL:-https://xxtf.baby/v1}
       DEFAULT_MODEL_API_KEY: ${DEFAULT_MODEL_API_KEY:-}
       DEFAULT_MODEL_NAME: ${DEFAULT_MODEL_NAME:-gpt-5.5}
       AI_AGENT_FALLBACK_MODE: ${AI_AGENT_FALLBACK_MODE:-config_only}
@@ -53,15 +53,15 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
-        NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-http://8.130.160.177:3001}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://45.207.206.76:4000/api}
+        NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-http://45.207.206.76:3001}
     container_name: ai-product-workbench-web
     restart: unless-stopped
     depends_on:
       - api
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
-      NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-http://8.130.160.177:3001}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://45.207.206.76:4000/api}
+      NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-http://45.207.206.76:3001}
     ports:
       - "3000:3000"
 
@@ -75,7 +75,7 @@ services:
     container_name: ai-product-knowledge
     restart: unless-stopped
     environment:
-      QUARTZ_BASE_URL: ${QUARTZ_BASE_URL:-8.130.160.177:3001}
+      QUARTZ_BASE_URL: ${QUARTZ_BASE_URL:-45.207.206.76:3001}
       QUARTZ_CONTENT_DIR: /storage/knowledge-vault
       QUARTZ_CONCURRENCY: ${QUARTZ_CONCURRENCY:-2}
     ports:

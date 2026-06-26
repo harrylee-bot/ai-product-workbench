@@ -16,7 +16,7 @@ export class ModelGatewayDefaultsService implements OnModuleInit {
     const baseUrl = process.env.DEFAULT_MODEL_BASE_URL?.trim();
     const apiKey = process.env.DEFAULT_MODEL_API_KEY?.trim();
     const modelName = process.env.DEFAULT_MODEL_NAME?.trim();
-    const providerName = process.env.DEFAULT_MODEL_PROVIDER_NAME?.trim() || "DataToken 默认供应商";
+    const providerName = process.env.DEFAULT_MODEL_PROVIDER_NAME?.trim() || "XXTF OpenAI";
 
     if (!baseUrl || !apiKey || !modelName) return;
 

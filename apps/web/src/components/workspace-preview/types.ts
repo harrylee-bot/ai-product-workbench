@@ -4,94 +4,12 @@ export type PatchOperation = {
   value?: unknown;
 };
 
-export type Phase2Strategy = {
-  id: string;
-  name:
-    | "conservative_fix"
-    | "ux_improve"
-    | "structure_rewrite"
-    | "full_regenerate"
-    | "conservative"
-    | "balanced"
-    | "aggressive"
-    | "full_rewrite";
-  description: string;
-  patchOperations: PatchOperation[];
-  impact: "low" | "medium" | "high";
-};
-
-export type Phase2AgentReview = {
-  agentName: string;
-  scores: {
-    usability: number;
-    feasibility: number;
-    risk: number;
-    businessValue: number;
-  };
-  preferredStrategyId: string;
-  objections: string[];
-};
-
-export type SystemNode = {
-  id: string;
-  type: "agent" | "orchestrator" | "tool" | "policy" | "compiler";
-  name: string;
-  config: Record<string, unknown>;
-  status: "active" | "inactive" | "experimental";
-};
-
-export type SystemEdge = {
-  from: string;
-  to: string;
-  relation: "calls" | "depends_on" | "feeds";
-};
-
-export type SystemGraphSnapshot = {
-  id?: string;
-  version: number;
-  nodes: SystemNode[];
-  edges: SystemEdge[];
-};
-
-export type SystemMutation = {
-  id: string;
-  type: "add_agent" | "remove_agent" | "modify_agent" | "modify_pipeline" | "add_step" | "remove_step";
-  target: string;
-  payload: unknown;
-  reason: string;
-  riskLevel: "low" | "medium" | "high";
-};
-
-export type SystemChangeProposalView = {
-  id: string;
-  status: string;
-  mutations: SystemMutation[];
-  impactAnalysis: string[];
-  riskLevel: "low" | "medium" | "high";
-  previewGraph: SystemGraphSnapshot;
-  createdAt: string;
-  sourceTraceId?: string | null;
-};
-
-export type SelfGenerationView = {
-  insight: {
-    bottleneck: string;
-    weakness: string;
-    opportunity: string;
-  };
-  proposal: SystemChangeProposalView;
-  applied: {
-    status: string;
-    graph?: SystemGraphSnapshot;
-    mutations?: SystemMutation[];
-  } | null;
-  executionPlan: SystemGraphSnapshot;
-};
+export type PatchTargetDomain = "prd" | "prototype" | "state";
 
 export type Constraint = {
   id: string;
   rule: "must_follow" | "prefer" | "avoid" | "warn";
-  scope: "agent" | "decision" | "patch" | "qa";
+  scope: "runtime" | "state" | "patch" | "qa";
   condition: string;
   effect: string;
   weight: number;
@@ -105,126 +23,17 @@ export type ConstraintContext = {
   warn: Constraint[];
 };
 
-export type DepartmentType =
-  | "ceo"
-  | "product"
-  | "engineering"
-  | "design"
-  | "qa"
-  | "growth"
-  | "evolution";
-
-export type CompanyRuntimeView = {
-  company: {
-    id: string;
-    name: string;
-    budget: number;
-    strategy: string;
-    departments: Array<{
-      id: string;
-      type: DepartmentType;
-      budgetAllocation: number;
-      agents: Array<{
-        id: string;
-        name: string;
-        role: string;
-        departmentId: string;
-        capabilities: string[];
-      }>;
-    }>;
-  };
-  ceoPlan: {
-    approved: boolean;
-    budgetAllocation: Record<DepartmentType, number>;
-    priority: string[];
-  };
-  productInitiative: {
-    id: string;
-    name: string;
-    goal: string;
-    features: string[];
-    ceoApproved: boolean;
-    priority: string;
-    allocatedBudget: number;
-  };
-  engineeringPlan: {
+export type RuntimePatchPreview = {
+  patchDraft?: {
     id?: string;
-    modules: string[];
-    apis: string[];
-    systemChanges: SystemMutation[];
-  };
-  designPlan: {
-    id?: string;
-    layouts: string[];
-    uxFlows: string[];
-  };
-  qaReport: {
-    id?: string;
-    issues: string[];
-    riskLevel: "low" | "medium" | "high";
-    recommendations: string[];
-  };
-  growthPlan: {
-    id?: string;
-    optimizations: string[];
-    experiments: string[];
-  };
-  evolutionPlan: {
-    id?: string;
-    structuralChanges: SystemMutation[];
-    agentChanges: Array<{
-      op: "add" | "move" | "update" | "disable";
-      departmentType: DepartmentType;
-      reason: string;
-    }>;
-  };
-  runtimeRun: {
-    id: string;
-    status: string;
-    createdAt: string;
-  };
-};
-
-export type Phase2DecisionView = {
-  decisionPlan: {
-    strategies: Phase2Strategy[];
-    selectedStrategyId?: string;
-    reasoning?: string[];
-    scores?: Record<
-      string,
-      {
-        usability: number;
-        feasibility: number;
-        risk: number;
-        businessValue: number;
-        weightedScore: number;
-        constraintPenalty: number;
-      }
-    >;
-    constraintContext?: ConstraintContext;
-  };
-  reviewBoard: {
-    reviews: Phase2AgentReview[];
-    finalDecision: {
-      selectedStrategyId: string;
-      confidence: number;
-    };
-  };
-  selection: {
-    selectedStrategyId: string;
-    reason: string;
-  };
-  selectedStrategy: Phase2Strategy;
-  patchDraft: {
-    id: string;
-    strategyId: string;
     operations: PatchOperation[];
-    targetDomains: Array<"prd" | "prototype" | "state">;
+    targetDomains?: PatchTargetDomain[];
+    rationale?: string;
   };
-  previewSession: {
-    id: string;
-    patchRecordId: string;
-    status: string;
+  previewSession?: {
+    id?: string;
+    patchRecordId?: string;
+    status?: string;
     diff?: {
       summary?: string;
       operations?: PatchOperation[];
@@ -237,40 +46,18 @@ export type Phase2DecisionView = {
       versionedApply?: boolean;
       checks?: Record<string, boolean>;
     };
-    operations: PatchOperation[];
-    targetDomains: Array<"prd" | "prototype" | "state">;
-    message: string;
+    operations?: PatchOperation[];
+    targetDomains?: PatchTargetDomain[];
+    message?: string;
   };
-  evolution: {
-    traceId: string;
-    finalOutcome: "success" | "failure" | "partial";
-    metrics: {
-      qaPassed: boolean;
-      userFeedbackScore: number;
-      executionTime: number;
-    };
-    signal: {
-      strategyId: string;
-      signalType: "promote" | "demote" | "neutral";
-      weightDelta: number;
-      reason: string;
-    };
-    policyVersion: number;
-    strategyDelta: number;
-    agentDeltas: Record<string, number>;
-    policy: {
-      strategyWeights: Record<string, number>;
-      agentWeights: Record<string, number>;
-      decisionBias: {
-        riskAversion: number;
-        innovationBias: number;
-      };
-    };
-    createdAt: string;
+  qaReport?: {
+    id?: string;
+    issues?: string[];
+    riskLevel?: "low" | "medium" | "high";
+    recommendations?: string[];
+    passed?: boolean;
+    createdAt?: string;
   };
-  selfGeneration?: SelfGenerationView;
-  executionPlan?: SystemGraphSnapshot;
-  companyRuntime?: CompanyRuntimeView;
   knowledgeSearch?: {
     summary: string;
     results: Array<{
@@ -290,12 +77,11 @@ export type Phase2DecisionView = {
     }>;
   };
   constraintContext?: ConstraintContext;
-  agentInput?: {
-    userInput: string;
-    constraintContext: ConstraintContext;
-    decisionContext: Phase2DecisionView["decisionPlan"];
-    knowledgeReferences?: NonNullable<Phase2DecisionView["knowledgeSearch"]>["references"];
-    knowledgeSummary?: string;
+  runtimeSummary?: {
+    status?: string;
+    outcome?: "success" | "failure" | "partial";
+    createdAt?: string;
+    message?: string;
   };
 };
 

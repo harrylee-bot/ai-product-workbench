@@ -9,13 +9,11 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
 import type { ProductDesignState, RollbackRecord } from "./ai-vibe.types";
-import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
-import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service";
-import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { PrototypeService } from "./prototype.service";
 import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
+import { ProductRuntimeService } from "./runtime/product-runtime.service";
 import { VibeStreamService } from "./vibe-stream.service";
 
 type RollbackRecordRow = {
@@ -45,9 +43,7 @@ export class RollbackService {
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
     private readonly qaService: QaService,
-    private readonly prdWriterAgent: PrdWriterAgentService,
-    private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
-    private readonly prototypeCodeAgent: PrototypeCodeAgentService,
+    private readonly productRuntime: ProductRuntimeService,
     private readonly runLog: AgentRunLogService,
     private readonly stream: VibeStreamService,
   ) {}
@@ -119,12 +115,13 @@ export class RollbackService {
         data: { stateId: restored.state.id, version: restored.state.version },
       });
 
-      const prdDraft = await this.prdWriterAgent.run({
+      const prdDraft = await this.productRuntime.generatePrd({
         runId: run.id,
         projectId,
         traceId: run.traceId,
         userId: user.id,
-        input: { productDesignState: restored.state, mode: "draft", generatedByRunId: run.id },
+        productDesignState: restored.state,
+        mode: "draft",
       });
       const prdDocument = await this.documentService.saveGeneratedDocument(restored.state, prdDraft.data, {
         userId: user.id,
@@ -139,19 +136,21 @@ export class RollbackService {
         data: prdDocument,
       });
 
-      const prototypeSpec = await this.prototypeDesignerAgent.run({
+      const prototypeSpec = await this.productRuntime.generatePrototypeSpec({
         runId: run.id,
         projectId,
         traceId: run.traceId,
         userId: user.id,
-        input: { productDesignState: restored.state, targetView: "both", generatedByRunId: run.id },
+        productDesignState: restored.state,
+        targetView: "both",
       });
-      const prototypeDraft = await this.prototypeCodeAgent.run({
+      const prototypeDraft = await this.productRuntime.generatePrototypeHtml({
         runId: run.id,
         projectId,
         traceId: run.traceId,
         userId: user.id,
-        input: { prototypeSpec: prototypeSpec.data, mode: "single_html", generatedByRunId: run.id },
+        prototypeSpec: prototypeSpec.data,
+        mode: "single_html",
       });
       const savedPrototype = await this.prototypeService.saveGeneratedPrototype(
         restored.state,

@@ -5,7 +5,6 @@ import {
   Activity,
   ArrowLeft,
   BookOpen,
-  Bot,
   Boxes,
   ClipboardCheck,
   DatabaseZap,
@@ -65,7 +64,7 @@ const navItems: NavItem[] = [
     title: "日志中心",
     icon: Activity,
     children: [
-      { title: "Agent Run 日志", href: "/admin/logs/agent-runs", icon: Bot },
+      { title: "Runtime Run 日志", href: "/admin/logs/runtime-runs", icon: Workflow },
       { title: "模型调用日志", href: "/admin/logs/model-calls", icon: KeyRound },
       { title: "文件解析日志", href: "/admin/logs/file-parses", icon: FileWarning },
       { title: "Patch 日志", href: "/admin/logs/patches", icon: Workflow },
