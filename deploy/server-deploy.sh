@@ -10,6 +10,15 @@ if [ -f "${APP_DIR}/.env" ]; then
   set +a
 fi
 
+DEPLOY_LOCK_FILE="${DEPLOY_LOCK_FILE:-/tmp/ai-product-workbench-deploy.lock}"
+if [ "${DEPLOY_LOCK_DISABLED:-0}" != "1" ] && command -v flock >/dev/null 2>&1; then
+  exec 9>"$DEPLOY_LOCK_FILE"
+  if ! flock -n 9; then
+    echo "Another deployment is already running. Lock: ${DEPLOY_LOCK_FILE}" >&2
+    exit 75
+  fi
+fi
+
 APP_HOST="${APP_HOST:-8.130.160.177}"
 APP_PUBLIC_URL="${APP_PUBLIC_URL:-http://${APP_HOST}:3000}"
 API_PUBLIC_BASE_URL="${API_PUBLIC_BASE_URL:-http://${APP_HOST}:4000/api}"
