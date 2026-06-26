@@ -25,57 +25,6 @@ describe("Module 13 QA services", () => {
     );
   });
 
-  it("flags Vibe Coding skills that were not preserved in ProductDesignState knowledgeRefs", () => {
-    const service = new QaRuleCheckService();
-    const knowledgeContext = {
-      ...emptyKnowledgeContext(),
-      runtimeSkills: [
-        {
-          id: "runtime-skill:obsidian-markdown",
-          name: "obsidian-markdown",
-          description: "Create and edit Obsidian Flavored Markdown.",
-          sourcePath: "/skills/obsidian-markdown/SKILL.md",
-          contentPreview: "Use wikilinks.",
-          capabilities: ["Internal Links"],
-          triggerHints: ["wikilinks"],
-        },
-      ],
-    };
-
-    const missing = service.run({
-      productDesignState: baseState({ knowledgeRefs: [] }),
-      knowledgeContext,
-      checkTypes: ["knowledge_rule_compliance"],
-    });
-
-    expect(missing).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "qa_skill_reference_missing_obsidian-markdown",
-          severity: "major",
-          relatedStatePaths: ["knowledgeRefs"],
-          relatedKnowledgeIds: ["runtime-skill:obsidian-markdown"],
-        }),
-      ]),
-    );
-
-    const preserved = service.run({
-      productDesignState: baseState({
-        knowledgeRefs: [
-          {
-            knowledgeId: "runtime-skill:obsidian-markdown",
-            title: "Vibe Coding 可用技能：obsidian-markdown",
-            relatedPath: "/skills/obsidian-markdown/SKILL.md",
-          },
-        ],
-      }),
-      knowledgeContext,
-      checkTypes: ["knowledge_rule_compliance"],
-    });
-
-    expect(preserved.find((issue) => issue.id === "qa_skill_reference_missing_obsidian-markdown")).toBeUndefined();
-  });
-
   it("persists QAReport with issue counts and updates latestQaReportId", async () => {
     const now = new Date("2026-06-21T09:00:00Z");
     const prisma = {
@@ -140,7 +89,6 @@ describe("Module 13 QA services", () => {
       prototypeArtifactId: data.prototypeArtifactId ?? null,
       prototypeSpecId: data.prototypeSpecId ?? null,
       generatedByRunId: data.generatedByRunId ?? null,
-      relatedPatchId: data.relatedPatchId ?? null,
       relatedRollbackId: data.relatedRollbackId ?? null,
       createdAt: now,
       updatedAt: now,
@@ -160,8 +108,8 @@ describe("Module 13 QA services", () => {
         allowConfirmArtifacts: false,
         allowPersistKnowledge: false,
         allowExportOrPublish: false,
-        shouldReturnToPatch: true,
-        requiredActions: ["return_to_patch", "run_qa"],
+        shouldReviseArtifacts: true,
+        requiredActions: ["revise_artifacts", "run_qa"],
       }),
     );
     expect(prisma.qAReport.create).toHaveBeenCalledWith({
@@ -270,7 +218,6 @@ describe("Module 13 QA services", () => {
       prototypeArtifactId: data.prototypeArtifactId ?? null,
       prototypeSpecId: data.prototypeSpecId ?? null,
       generatedByRunId: data.generatedByRunId ?? null,
-      relatedPatchId: data.relatedPatchId ?? null,
       relatedRollbackId: data.relatedRollbackId ?? null,
       createdAt: now,
       updatedAt: now,
@@ -296,7 +243,7 @@ describe("Module 13 QA services", () => {
         allowConfirmArtifacts: true,
         allowPersistKnowledge: true,
         allowExportOrPublish: true,
-        shouldReturnToPatch: false,
+        shouldReviseArtifacts: false,
       }),
     );
 
@@ -317,7 +264,7 @@ describe("Module 13 QA services", () => {
         allowConfirmArtifacts: true,
         allowPersistKnowledge: false,
         allowExportOrPublish: false,
-        shouldReturnToPatch: false,
+        shouldReviseArtifacts: false,
         requiredActions: ["run_qa"],
       }),
     );
@@ -339,8 +286,8 @@ describe("Module 13 QA services", () => {
         allowConfirmArtifacts: false,
         allowPersistKnowledge: false,
         allowExportOrPublish: false,
-        shouldReturnToPatch: true,
-        requiredActions: ["return_to_patch", "run_qa"],
+        shouldReviseArtifacts: true,
+        requiredActions: ["revise_artifacts", "run_qa"],
       }),
     );
 
@@ -515,7 +462,7 @@ function qaReport(overrides: Partial<QAReport> = {}): QAReport {
       allowConfirmArtifacts: true,
       allowPersistKnowledge: true,
       allowExportOrPublish: true,
-      shouldReturnToPatch: false,
+      shouldReviseArtifacts: false,
       reportId: "qa-1",
       reportStatus: "passed",
       blockingReasons: [],

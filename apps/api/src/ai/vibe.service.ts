@@ -11,7 +11,6 @@ import type { HandleVibeMessageDto, ConfirmPrdDto } from "./dto";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
-import { RuntimeSkillRegistryService } from "./runtime-skill-registry.service";
 import { toInputJson } from "./ai-vibe.helpers";
 
 @Injectable()
@@ -23,7 +22,6 @@ export class VibeService {
     private readonly runLogService: RuntimeRunLogService,
     private readonly stateService: ProductDesignStateService,
     private readonly streamService: VibeStreamService,
-    private readonly skillRegistry: RuntimeSkillRegistryService,
     private readonly documentService: RequirementDocumentService,
   ) {}
 
@@ -199,15 +197,6 @@ export class VibeService {
   }
   streamRun(runId: string): Observable<MessageEvent> {
     return this.streamService.stream(runId);
-  }
-
-  async listSkills() {
-    const skills = await this.skillRegistry.listSkills();
-    return {
-      items: skills,
-      count: skills.length,
-      source: "kepano/obsidian-skills",
-    };
   }
 
   async assertRunAccess(user: AuthenticatedUser, runId: string) {

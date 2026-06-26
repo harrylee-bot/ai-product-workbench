@@ -35,9 +35,6 @@ describe("VibeService main entry", () => {
     emit: vi.fn(),
     stream: vi.fn(),
   };
-  const skillRegistry = {
-    listSkills: vi.fn(),
-  };
   const documentService = {
     confirmForPrototypeGate: vi.fn(),
   };
@@ -48,7 +45,6 @@ describe("VibeService main entry", () => {
     runLogService as never,
     stateService as never,
     streamService as never,
-    skillRegistry as never,
     documentService as never,
   );
   const user = {

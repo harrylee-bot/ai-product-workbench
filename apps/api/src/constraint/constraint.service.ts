@@ -50,22 +50,6 @@ export class ConstraintService {
     return groupConstraints(rows.map(toConstraint));
   }
 
-  validatePatchPlan(context: ConstraintContext, operations: Array<{ path: string }>) {
-    const mustPreview = context.mustFollow.some((constraint) =>
-      /patch preview|补丁预览/i.test(constraint.effect),
-    );
-    const directDbMutation = operations.some((operation) => operation.path.startsWith("/database"));
-    const avoidsDirectDb = context.avoid.some((constraint) =>
-      /direct database mutation|直接修改数据库/i.test(constraint.effect),
-    );
-
-    return {
-      constraintsApplied: true,
-      requiresPatchPreview: mustPreview,
-      blocksDirectDatabaseMutation: avoidsDirectDb && !directDbMutation,
-      hasOperations: operations.length > 0,
-    };
-  }
 }
 
 function buildDefaultConstraints(input: string): Array<Omit<Constraint, "id">> {
@@ -74,23 +58,23 @@ function buildDefaultConstraints(input: string): Array<Omit<Constraint, "id">> {
     {
       rule: "must_follow",
       scope: "runtime",
-      condition: "所有生成、修改和质检请求必须进入 Codex/DeerFlow runtime adapter 边界。",
-      effect: "产品系统只维护协议、状态机和 runtime handoff，不再执行自研 agent 编排。",
+      condition: "所有生成、修改和质检请求必须进入 DeerFlow 2.0 runtime 边界。",
+      effect: "产品系统只维护协议、状态机、线程绑定、事件接收和 final action 落库。",
       weight: 1,
-      sourceKnowledgeId: "vibe:runtime-adapter-required",
+      sourceKnowledgeId: "vibe:deerflow-runtime-required",
     },
     {
       rule: "must_follow",
-      scope: "patch",
+      scope: "runtime",
       condition: "任何操作只要改变产品状态、需求文档、原型或系统图。",
-      effect: "执行前必须进入补丁预览。",
+      effect: "落库前必须由 DeerFlow final action 明确变更内容、风险和复核要求。",
       weight: 1,
-      sourceKnowledgeId: "fusion:patch-preview-required",
+      sourceKnowledgeId: "fusion:final-action-review-required",
     },
     {
       rule: "avoid",
-      scope: "patch",
-      condition: "补丁操作直接指向数据库、鉴权、令牌或核心安全模块。",
+      scope: "runtime",
+      condition: "生成或修改请求直接指向数据库、鉴权、令牌或核心安全模块。",
       effect: "避免直接修改数据库和受保护模块。",
       weight: 0.95,
       sourceKnowledgeId: "fusion:avoid-direct-mutation",
@@ -102,7 +86,7 @@ function buildDefaultConstraints(input: string): Array<Omit<Constraint, "id">> {
         ? "用户要求大范围重构或重建。"
         : "用户意图可以通过渐进方式处理。",
       effect: mentionsRewrite
-        ? "runtime adapter handoff 必须显式列出风险、回滚点和验收方式。"
+        ? "DeerFlow final action 必须显式列出风险、回滚点和验收方式。"
         : "业务价值接近时优先生成低风险、可回滚的状态变更方案。",
       weight: mentionsRewrite ? 0.8 : 0.6,
       sourceKnowledgeId: mentionsRewrite ? "vibe:rewrite-risk-warning" : "vibe:prefer-low-risk",
@@ -158,7 +142,7 @@ function knowledgeRule(type?: string): ConstraintRule {
 
 function knowledgeScope(reference: KnowledgeConstraintSource, text: string): ConstraintScope {
   const haystack = `${reference.title} ${reference.type ?? ""} ${text}`;
-  if (/补丁|patch|执行|变更|preview|预览门禁/i.test(haystack)) return "patch";
+  if (/执行|变更|final action|复核|preview|预览门禁/i.test(haystack)) return "runtime";
   if (/质检|验收|测试|风险|qa/i.test(haystack)) return "qa";
   if (/原型|界面|交互|体验|UI|UX|组件|页面/i.test(haystack)) return "runtime";
   return "state";

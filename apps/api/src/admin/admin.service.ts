@@ -13,7 +13,6 @@ import {
   ListAdminProjectsQueryDto,
   ListRuntimeRunsQueryDto,
   ListFileParsesQueryDto,
-  ListPatchesQueryDto,
   ListQaReportsQueryDto,
 } from "./admin.dto";
 import { normalizePagination } from "./admin-audit.service";
@@ -126,7 +125,7 @@ export class AdminService {
         take: pageSize,
         include: {
           owner: { select: { id: true, username: true, displayName: true, email: true } },
-          _count: { select: { conversations: true, runtimeRuns: true, patchRecords: true, fileAssets: true } },
+          _count: { select: { conversations: true, runtimeRuns: true, fileAssets: true } },
         },
       }),
       this.prisma.project.count({ where }),
@@ -145,7 +144,6 @@ export class AdminService {
         conversationCount: project._count.conversations,
         runtimeRunCount: project._count.runtimeRuns,
         agentRunCount: project._count.runtimeRuns,
-        patchCount: project._count.patchRecords,
         fileCount: project._count.fileAssets,
         currentConversationId: project.currentConversationId ?? undefined,
         currentProductDesignStateId: project.currentProductDesignStateId ?? undefined,
@@ -185,7 +183,7 @@ export class AdminService {
           take: 1,
         },
         _count: {
-          select: { conversations: true, messages: true, runtimeRuns: true, patchRecords: true, fileAssets: true },
+          select: { conversations: true, messages: true, runtimeRuns: true, fileAssets: true },
         },
       },
     });
@@ -267,10 +265,6 @@ export class AdminService {
 
   async listProjectRuns(projectId: string, query: ListRuntimeRunsQueryDto) {
     return this.listRuntimeRuns({ ...query, projectId });
-  }
-
-  async listProjectPatches(projectId: string, query: ListPatchesQueryDto) {
-    return this.listPatches({ ...query, projectId });
   }
 
   async listProjectFiles(projectId: string, query: ListFileParsesQueryDto) {
@@ -595,91 +589,6 @@ export class AdminService {
     };
   }
 
-  async listPatches(query: ListPatchesQueryDto) {
-    const { page, pageSize } = normalizePagination(query);
-    const where: Prisma.PatchRecordWhereInput = {
-      projectId: query.projectId,
-      createdBy: query.createdBy,
-      status: query.status,
-    };
-
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.patchRecord.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          project: { select: { id: true, title: true } },
-          conversation: { select: { id: true, title: true } },
-        },
-      }),
-      this.prisma.patchRecord.count({ where }),
-    ]);
-
-    return {
-      items: items.map((patch) => ({
-        id: patch.id,
-        patchId: patch.id,
-        projectId: patch.projectId,
-        projectTitle: patch.project.title,
-        conversationId: patch.conversationId,
-        conversationTitle: patch.conversation.title,
-        createdBy: patch.createdBy,
-        targetSummary: selectedRegionSummary(patch.selectedRegion),
-        instructionSummary: preview(patch.userInstruction, 120),
-        status: patch.status,
-        beforeProductDesignStateVersion: patch.beforeProductDesignStateVersion,
-        afterProductDesignStateVersion: patch.afterProductDesignStateVersion ?? undefined,
-        affectedPrdDocumentId: patch.affectedPrdDocumentId ?? undefined,
-        affectedPrototypeArtifactId: patch.affectedPrototypeArtifactId ?? undefined,
-        relatedQaReportId: patch.relatedQaReportId ?? undefined,
-        generatedByRunId: patch.generatedByRunId ?? undefined,
-        errorMessage: patch.errorMessage ?? undefined,
-        createdAt: patch.createdAt.toISOString(),
-        updatedAt: patch.updatedAt.toISOString(),
-      })),
-      total,
-      page,
-      pageSize,
-    };
-  }
-
-  async getPatch(patchId: string) {
-    const patch = await this.prisma.patchRecord.findUnique({
-      where: { id: patchId },
-      include: {
-        project: { select: { id: true, title: true } },
-        conversation: { select: { id: true, title: true } },
-      },
-    });
-    if (!patch) throw new NotFoundException("ADMIN_LOG_NOT_FOUND");
-
-    return {
-      id: patch.id,
-      projectId: patch.projectId,
-      projectTitle: patch.project.title,
-      conversationId: patch.conversationId,
-      conversationTitle: patch.conversation.title,
-      instructionMessageId: patch.instructionMessageId ?? undefined,
-      selectedRegion: patch.selectedRegion,
-      userInstruction: patch.userInstruction,
-      patchPlan: patch.patchPlan,
-      operations: patch.operations,
-      status: patch.status,
-      beforeProductDesignStateVersion: patch.beforeProductDesignStateVersion,
-      afterProductDesignStateVersion: patch.afterProductDesignStateVersion ?? undefined,
-      affectedPrdDocumentId: patch.affectedPrdDocumentId ?? undefined,
-      affectedPrototypeArtifactId: patch.affectedPrototypeArtifactId ?? undefined,
-      relatedQaReportId: patch.relatedQaReportId ?? undefined,
-      generatedByRunId: patch.generatedByRunId ?? undefined,
-      errorMessage: patch.errorMessage ?? undefined,
-      createdBy: patch.createdBy,
-      createdAt: patch.createdAt.toISOString(),
-      updatedAt: patch.updatedAt.toISOString(),
-    };
-  }
-
   async listQaReports(query: ListQaReportsQueryDto) {
     const { page, pageSize } = normalizePagination(query);
     const where: Prisma.QAReportWhereInput = {
@@ -751,7 +660,6 @@ export class AdminService {
       summary: report.summary,
       issues: report.issues,
       checkTypes: report.checkTypes,
-      relatedPatchId: report.relatedPatchId ?? undefined,
       relatedRollbackId: report.relatedRollbackId ?? undefined,
       createdBy: report.createdBy,
       createdAt: report.createdAt.toISOString(),
@@ -807,8 +715,6 @@ function buildRuntimeRunDebugSummary(input: {
   const knowledgeHits: Record<string, unknown>[] = [];
   const qaGates: Record<string, unknown>[] = [];
   const qaIssues: Record<string, unknown>[] = [];
-  const fallbackEvents: Record<string, unknown>[] = [];
-  const patchEvents: Record<string, unknown>[] = [];
 
   for (const event of normalizedEvents) {
     const data = asRecord(event.data);
@@ -824,32 +730,6 @@ function buildRuntimeRunDebugSummary(input: {
       qaIssues.push(...extractQaIssues(data));
     }
 
-    if (event.type === "fallback_used") {
-      fallbackEvents.push({
-        id: event.id,
-        runtimeName: data.runtimeName ?? event.step,
-        level: data.level,
-        action: data.action,
-        errorCode: data.errorCode,
-        reason: data.reason,
-        userMessage: data.userMessage ?? event.content,
-      });
-    }
-
-    if (event.type === "patch_plan_created" || event.type === "patch_completed" || event.type === "patch_failed") {
-      patchEvents.push({ id: event.id, type: event.type });
-    }
-  }
-
-  for (const step of input.steps) {
-    const fallback = extractFallbackFromSummary(step.outputSummary);
-    if (fallback) {
-      fallbackEvents.push({
-        id: step.id,
-        runtimeName: step.runtimeName,
-        ...fallback,
-      });
-    }
   }
 
   const result = asRecord(input.result);
@@ -857,18 +737,12 @@ function buildRuntimeRunDebugSummary(input: {
     const resultQaGate = extractQaGate(result);
     if (resultQaGate) qaGates.push(resultQaGate);
     qaIssues.push(...extractQaIssues(result));
-    fallbackEvents.push(...arrayOfRecords(result.fallbackEvents));
     knowledgeHits.push(...arrayOfRecords(result.knowledgeCandidates));
-    if (asRecord(result.patchRecord) || asRecord(result.patchPlan) || asRecord(result.patchPreview)) {
-      patchEvents.push({ id: text(asRecord(result.patchRecord)?.id ?? "result_patch"), type: "result_patch" });
-    }
   }
 
-  const uniqueFallbacks = uniqueRecords(fallbackEvents, "id", "runtimeName", "errorCode", "reason");
   const uniqueQaGates = uniqueRecords(qaGates, "reportId", "status");
   const uniqueQaIssues = uniqueRecords(qaIssues, "id", "title");
   const uniqueKnowledgeHits = uniqueRecords(knowledgeHits, "knowledgeId", "sourceId", "id", "title");
-  const fallbackLevels = [...new Set(uniqueFallbacks.map((item) => text(item.level)).filter(Boolean))];
   const latestQaGate = uniqueQaGates.at(-1);
   const qaGateStatus = latestQaGate ? text(latestQaGate.status) || undefined : undefined;
   const blockingIssueCount = uniqueQaIssues.filter((issue) => text(issue.severity) === "blocking").length;
@@ -877,11 +751,9 @@ function buildRuntimeRunDebugSummary(input: {
   const riskLevel = resolveDebugRiskLevel({
     runStatus: input.status,
     qaGateStatus,
-    fallbackLevels,
     blockingIssueCount,
     majorIssueCount,
     minorIssueCount,
-    fallbackCount: uniqueFallbacks.length,
   });
 
   return {
@@ -890,15 +762,12 @@ function buildRuntimeRunDebugSummary(input: {
     eventCount: input.events.length,
     modelCallCount: input.steps.filter((step) => step.modelCallLogId || step.modelCall).length,
     failedStepCount: input.steps.filter((step) => step.status === "failed").length,
-    fallbackCount: uniqueFallbacks.length,
-    fallbackLevels,
     qaGateStatus,
     qaIssueCount: uniqueQaIssues.length,
     blockingIssueCount,
     majorIssueCount,
     minorIssueCount,
     knowledgeHitCount: uniqueKnowledgeHits.length,
-    patchEventCount: uniqueRecords(patchEvents, "id", "type").length,
     lastEventType: normalizedEvents.at(-1)?.type,
   };
 }
@@ -927,15 +796,7 @@ function extractKnowledgeHits(data: Record<string, unknown>) {
     "prototypeRules",
     "businessConcepts",
   ];
-  const refs = buckets.flatMap((key) => arrayOfRecords(data[key]));
-  const skills = arrayOfRecords(data.runtimeSkills).map((skill) => ({
-    id: skill.id,
-    knowledgeId: `runtime-skill:${text(skill.name, "unknown")}`,
-    title: `Vibe Coding Skill：${text(skill.name, "unknown")}`,
-    type: "runtime_skill",
-    sourceId: skill.id,
-  }));
-  return [...refs, ...skills];
+  return buckets.flatMap((key) => arrayOfRecords(data[key]));
 }
 
 function extractQaIssues(data: Record<string, unknown>) {
@@ -949,38 +810,24 @@ function extractQaGate(data: Record<string, unknown>) {
   return asRecord(data.qaGate) ?? asRecord(asRecord(data.qaReport)?.gate) ?? asRecord(asRecord(data.report)?.gate);
 }
 
-function extractFallbackFromSummary(value?: string) {
-  if (!value?.includes('"fallback"')) return undefined;
-  try {
-    const parsed = JSON.parse(value);
-    return asRecord(parsed?.fallback);
-  } catch {
-    return undefined;
-  }
-}
-
 function resolveDebugRiskLevel(input: {
   runStatus: string;
   qaGateStatus?: string;
-  fallbackLevels: string[];
   blockingIssueCount: number;
   majorIssueCount: number;
   minorIssueCount: number;
-  fallbackCount: number;
 }) {
   if (
     input.runStatus === "failed"
     || input.qaGateStatus === "blocked"
     || input.blockingIssueCount > 0
     || input.majorIssueCount > 0
-    || input.fallbackLevels.includes("model_unavailable")
   ) {
     return "blocked";
   }
   if (
     input.qaGateStatus === "warning"
     || input.minorIssueCount > 0
-    || input.fallbackCount > 0
   ) {
     return "warning";
   }
@@ -1025,10 +872,4 @@ function preview(value: string, maxLength: number) {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength)}...`;
-}
-
-function selectedRegionSummary(value: Prisma.JsonValue) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "ProductDesignState";
-  const record = value as Record<string, unknown>;
-  return String(record.type ?? record.path ?? record.target ?? "ProductDesignState");
 }

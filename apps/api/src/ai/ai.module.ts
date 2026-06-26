@@ -5,7 +5,6 @@ import { KnowledgeModule } from "../knowledge/knowledge.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { MessageService } from "../projects/message.service";
 import { RuntimeRunLogService } from "./runtime-run-log.service";
-import { RuntimeSkillRegistryService } from "./runtime-skill-registry.service";
 import { DocumentCanvasService } from "./document-canvas.service";
 import { ProjectExportController } from "./export.controller";
 import { ExportService } from "./export.service";
@@ -14,14 +13,6 @@ import {
   ProductDesignStateResourceController,
   ProjectProductDesignStateController,
 } from "./product-design-state.controller";
-import {
-  PatchDraftController,
-  PatchResourceController,
-  ProjectPatchController,
-} from "./patch.controller";
-import { PatchPreviewController } from "./patch-builder/patch-preview.controller";
-import { PatchPreviewService } from "./patch-builder/patch-preview.service";
-import { PatchService } from "./patch.service";
 import {
   PrdDocumentController,
   ProjectPrdController,
@@ -49,11 +40,6 @@ import { ShareLinkController, PublicShareController } from "./share.controller";
 import { ShareService } from "./share.service";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
-import {
-  InlineAssistantController,
-  PrdEditingController,
-  PrototypeEditingController,
-} from "./editing.controller";
 
 @Module({
   imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule],
@@ -61,9 +47,6 @@ import {
     VibeController,
     ProjectProductDesignStateController,
     ProductDesignStateResourceController,
-    ProjectPatchController,
-    PatchDraftController,
-    PatchResourceController,
     ProjectPrdController,
     PrdDocumentController,
     ProjectPrototypeController,
@@ -75,21 +58,14 @@ import {
     QaReportController,
     ProjectVersionTimelineController,
     ProjectRollbackController,
-    PrdEditingController,
-    PrototypeEditingController,
-    InlineAssistantController,
-    PatchPreviewController,
     ShareLinkController,
     PublicShareController,
   ],
   providers: [
     VibeService,
-    RuntimeSkillRegistryService,
     RuntimeRunLogService,
     VibeStreamService,
     ProductDesignStateService,
-    PatchService,
-    PatchPreviewService,
     DocumentCanvasService,
     RequirementDocumentService,
     PrototypeService,

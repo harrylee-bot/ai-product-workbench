@@ -128,7 +128,7 @@ describe("Knowledge module services", () => {
     const result = await retrievalService.search({
       projectId: "project-1",
       runId: "run-1",
-      runtimeName: "runtime_adapter",
+      runtimeName: "deerflow_runtime",
       query: "签到 每日一次",
       preferredTypes: [KnowledgeType.strong_rule],
       limit: 5,
@@ -183,7 +183,7 @@ describe("Knowledge module services", () => {
     const result = await retrievalService.search({
       projectId: "project-1",
       runId: "run-1",
-      runtimeName: "runtime_adapter",
+      runtimeName: "deerflow_runtime",
       query: "帮我生成一个企业客户线索管理系统，包含需求文档和原型",
       preferredTypes: [KnowledgeType.strong_rule],
       limit: 5,
@@ -211,12 +211,12 @@ describe("Knowledge module services", () => {
       }),
       itemRow({
         id: "safety-rule",
-        title: "补丁安全强规则",
-        content: "所有高影响变更必须先经过补丁预览。",
+        title: "变更安全强规则",
+        content: "所有高影响变更必须先经过 final action 复核门。",
         type: KnowledgeType.strong_rule,
         status: KnowledgeStatus.active,
         priority: KnowledgePriority.high,
-        tags: ["补丁", "安全"],
+        tags: ["变更", "安全"],
       }),
     ]);
     prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
@@ -224,8 +224,8 @@ describe("Knowledge module services", () => {
     const broad = await retrievalService.search({
       projectId: "project-1",
       runId: "run-2",
-      runtimeName: "runtime_adapter",
-      query: "工作台画布补丁安全",
+      runtimeName: "deerflow_runtime",
+      query: "工作台画布变更安全",
       preferredTypes: [KnowledgeType.design_pattern],
       limit: 5,
     });
@@ -239,8 +239,8 @@ describe("Knowledge module services", () => {
     await retrievalService.search({
       projectId: "project-1",
       runId: "run-3",
-      runtimeName: "runtime_adapter",
-      query: "工作台画布补丁安全",
+      runtimeName: "deerflow_runtime",
+      query: "工作台画布变更安全",
       preferredTypes: [KnowledgeType.design_pattern],
       strictPreferredTypes: true,
       limit: 5,
@@ -423,7 +423,7 @@ describe("Knowledge module services", () => {
     const nextHit = await retrievalService.search({
       projectId: "project-1",
       runId: "run-next",
-      runtimeName: "runtime_adapter",
+      runtimeName: "deerflow_runtime",
       query: "做一个每日签到活动",
       preferredTypes: [KnowledgeType.strong_rule],
       limit: 5,

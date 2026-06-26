@@ -103,53 +103,6 @@ describe("VibeStreamService", () => {
     ]);
   });
 
-  it("persists fallback events as agent progress events", async () => {
-    const prisma = {
-      vibeStreamEventLog: {
-        create: vi.fn(),
-        findMany: vi.fn(),
-      },
-    };
-    const service = new VibeStreamService(prisma as never);
-
-    await service.emit({
-      runId: "run-1",
-      projectId: "project-1",
-      type: "fallback_used",
-      step: "product_design",
-      content: "product_design 当前为降级预览，请在确认前复核。",
-      data: { level: "degraded_preview", action: "review_required" },
-    });
-
-    const createInput = prisma.vibeStreamEventLog.create.mock.calls[0][0];
-    expect(createInput.data.eventType).toBe("fallback_used");
-    expect(createInput.data.payload).toEqual(
-      expect.objectContaining({
-        protocol: "vibe.v1",
-        eventType: "fallback_used",
-        legacyEventType: "agent_started",
-        category: "runtime",
-        phase: "progress",
-        payload: expect.objectContaining({
-          type: "fallback_used",
-          eventType: "fallback_used",
-          legacyEventType: "agent_started",
-          category: "runtime",
-          phase: "progress",
-          step: "product_design",
-          payloadMeta: expect.objectContaining({
-            schema: "vibe.stream.payload.v1",
-            kind: "fallback",
-            status: "degraded_preview",
-            action: "review_required",
-            summary: "product_design 当前为降级预览，请在确认前复核。",
-          }),
-          payload: { level: "degraded_preview", action: "review_required" },
-        }),
-      }),
-    );
-  });
-
   it("adds stable QA gate metadata for timeline and debug consumers", async () => {
     const prisma = {
       vibeStreamEventLog: {

@@ -24,7 +24,7 @@ export function evaluateQaGate(report: QAGateReportRecord | null | undefined): Q
       allowConfirmArtifacts: false,
       allowPersistKnowledge: false,
       allowExportOrPublish: false,
-      shouldReturnToPatch: true,
+      shouldReviseArtifacts: true,
       reportId: report.id,
       reportStatus: report.status,
       blockingReasons: [
@@ -35,7 +35,7 @@ export function evaluateQaGate(report: QAGateReportRecord | null | undefined): Q
         ...minorIssues.map((issue) => `轻微：${issue.title}`),
         ...infoIssues.map((issue) => `提示：${issue.title}`),
       ].slice(0, 8),
-      requiredActions: ["return_to_patch", "run_qa"],
+      requiredActions: ["revise_artifacts", "run_qa"],
       evaluatedAt: new Date().toISOString(),
     };
   }
@@ -47,7 +47,7 @@ export function evaluateQaGate(report: QAGateReportRecord | null | undefined): Q
       allowConfirmArtifacts: true,
       allowPersistKnowledge: hasOnlyInfo,
       allowExportOrPublish: hasOnlyInfo,
-      shouldReturnToPatch: false,
+      shouldReviseArtifacts: false,
       reportId: report.id,
       reportStatus: report.status,
       blockingReasons: [],
@@ -65,7 +65,7 @@ export function evaluateQaGate(report: QAGateReportRecord | null | undefined): Q
     allowConfirmArtifacts: true,
     allowPersistKnowledge: true,
     allowExportOrPublish: true,
-    shouldReturnToPatch: false,
+    shouldReviseArtifacts: false,
     reportId: report.id,
     reportStatus: report.status,
     blockingReasons: [],
@@ -79,7 +79,7 @@ export function isQaGateActionAllowed(gate: QAGateDecision, action: QAGateAction
   if (action === "confirm_artifacts") return gate.allowConfirmArtifacts;
   if (action === "persist_knowledge") return gate.allowPersistKnowledge;
   if (action === "export_or_publish") return gate.allowExportOrPublish;
-  if (action === "return_to_patch") return gate.shouldReturnToPatch;
+  if (action === "revise_artifacts") return gate.shouldReviseArtifacts;
   return gate.status !== "blocked";
 }
 
@@ -89,7 +89,7 @@ function missingQaGate(): QAGateDecision {
     allowConfirmArtifacts: false,
     allowPersistKnowledge: false,
     allowExportOrPublish: false,
-    shouldReturnToPatch: false,
+    shouldReviseArtifacts: false,
     blockingReasons: ["尚未完成 QA，不能确认产物、沉淀知识或导出发布。"],
     warnings: [],
     requiredActions: ["run_qa"],

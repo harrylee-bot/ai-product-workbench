@@ -15,8 +15,6 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
-  PatchOperation,
-  PatchPlan,
   ProductDesignDraft,
   RequirementDocSection,
   RequirementDocument,
@@ -42,14 +40,9 @@ type StateArrayKey =
   | "confirmedFacts";
 
 type StateScalarKey = "title" | "summary" | "businessGoal" | "background" | "status";
-type PatchKey = StateArrayKey | StateScalarKey | "prototypeOutline" | "prototypeSpec" | "prdDocument";
+type StatePathKey = StateArrayKey | StateScalarKey | "prototypeOutline" | "prototypeSpec" | "prdDocument";
 
-type NormalizedPatchOperation = {
-  op: "add" | "replace" | "remove" | "append";
-  path: string;
-  value?: unknown;
-  reason?: string;
-};
+type StatePathOperation = "add" | "replace" | "remove" | "append";
 
 type ChangeLogInput = {
   projectId: string;
@@ -69,20 +62,6 @@ type CreateStateInput = {
   businessGoal?: string;
   initialState?: Partial<ProductDesignState>;
   reason?: string;
-};
-
-type UpdateStateInput = {
-  patch: Partial<ProductDesignState>;
-  reason?: string;
-  createVersion?: boolean;
-};
-
-type ApplyPatchInput = {
-  operations: NormalizedPatchOperation[];
-  reason?: string;
-  runId?: string;
-  messageId?: string;
-  createVersion?: boolean;
 };
 
 type ProductDesignStateRecord = {
@@ -158,33 +137,6 @@ export class ProductDesignStateService {
       reason: input.reason ?? "用户创建 ProductDesignState",
     });
     return { state };
-  }
-
-  async updateStateForUser(user: AuthenticatedUser, stateId: string, input: UpdateStateInput) {
-    const current = await this.getAccessibleState(user, stateId);
-    this.assertOwnerMutation(user, current.project.ownerId);
-
-    const updated = await this.updateState(current.id, input.patch, {
-      userId: user.id,
-      reason: input.reason ?? "用户更新 ProductDesignState",
-      createVersion: input.createVersion ?? true,
-      changeType: ProductDesignChangeType.update,
-    });
-
-    return { state: updated };
-  }
-
-  async applyPatchForUser(user: AuthenticatedUser, stateId: string, input: ApplyPatchInput) {
-    const current = await this.getAccessibleState(user, stateId);
-    this.assertOwnerMutation(user, current.project.ownerId);
-
-    return this.applyPatchOperations(current.id, input.operations, {
-      userId: user.id,
-      reason: input.reason ?? "用户应用 PatchOperation",
-      runId: input.runId,
-      messageId: input.messageId,
-      createVersion: input.createVersion ?? true,
-    });
   }
 
   async createVersionForUser(user: AuthenticatedUser, stateId: string, reason?: string) {
@@ -346,57 +298,6 @@ export class ProductDesignStateService {
       fromVersion: current.version,
       targetSnapshotVersion: targetVersion,
     };
-  }
-
-  async restoreStateAfterPatchFailure(
-    projectId: string,
-    snapshot: ProductDesignState,
-    options: { userId?: string; runId?: string; messageId?: string; reason?: string } = {},
-  ) {
-    const currentRecord = await this.prisma.productDesignState.findFirst({
-      where: { id: snapshot.id, projectId },
-    });
-    if (!currentRecord) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
-    const current = this.toStateItem(currentRecord as ProductDesignStateRecord);
-    const nextVersion = await this.getNextStateVersion(projectId);
-    const restored: ProductDesignState = {
-      ...this.cloneState(snapshot),
-      version: nextVersion,
-      status: snapshot.status,
-      updatedBy: options.userId ?? "system",
-      updatedAt: new Date().toISOString(),
-    };
-
-    const updated = await this.prisma.productDesignState.update({
-      where: { id: snapshot.id },
-      data: {
-        version: restored.version,
-        ...this.toPrismaStateData(restored),
-        prdDocument: restored.prdDocument ? toInputJson(restored.prdDocument) : Prisma.JsonNull,
-        prototypeSpec: restored.prototypeSpec ? toInputJson(restored.prototypeSpec) : Prisma.JsonNull,
-        updatedBy: options.userId ?? "system",
-      },
-    });
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { currentProductDesignStateId: snapshot.id },
-    });
-    const next = this.toStateItem(updated as ProductDesignStateRecord);
-    const reason = options.reason ?? `Patch 失败，回滚到 v${snapshot.version}`;
-    await this.writeChangeLog({
-      projectId,
-      stateId: next.id,
-      changeType: ProductDesignChangeType.rollback,
-      path: "*",
-      before: current,
-      after: next,
-      reason,
-      runId: options.runId,
-      messageId: options.messageId,
-      createdBy: options.userId ?? "system",
-    });
-    const version = await this.createVersionSnapshot(next, options.userId ?? "system", reason);
-    return { state: next, version: this.toVersionItem(version) };
   }
 
   async listChangeLogsForUser(user: AuthenticatedUser, stateId: string) {
@@ -740,35 +641,6 @@ export class ProductDesignStateService {
     return after;
   }
 
-  async applyPatch(
-    projectId: string,
-    currentState: ProductDesignState,
-    patchPlan: PatchPlan,
-    options: { userId?: string; runId?: string; messageId?: string } = {},
-  ) {
-    const result = await this.applyPatchOperations(
-      currentState.id,
-      patchPlan.operations.map((operation) => ({
-        op: normalizePatchOp(operation.op),
-        path: operation.path,
-        value: operation.value,
-        reason: operation.reason,
-      })),
-      {
-        userId: options.userId ?? "system",
-        reason: patchPlan.reason,
-        runId: options.runId,
-        messageId: options.messageId,
-        createVersion: true,
-      },
-    );
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { currentProductDesignStateId: result.state.id },
-    });
-    return result.state;
-  }
-
   private async updateStateFromDraft(
     projectId: string,
     current: ProductDesignState,
@@ -802,120 +674,13 @@ export class ProductDesignStateService {
       path: "*",
       before: current,
       after,
-      reason: options.reason ?? "Runtime adapter 更新 ProductDesignState",
+      reason: options.reason ?? "DeerFlow final action 更新 ProductDesignState",
       runId: options.runId,
       messageId: options.messageId,
       createdBy: options.userId ?? "system",
     });
     await this.createVersionSnapshot(after, options.userId ?? "system", options.reason ?? "完整设计更新");
     return after;
-  }
-
-  private async updateState(
-    stateId: string,
-    patch: Partial<ProductDesignState>,
-    options: {
-      userId: string;
-      reason: string;
-      createVersion: boolean;
-      changeType: ProductDesignChangeType;
-      runId?: string;
-      messageId?: string;
-    },
-  ) {
-    const currentRecord = await this.prisma.productDesignState.findUnique({ where: { id: stateId } });
-    if (!currentRecord) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
-    const current = this.toStateItem(currentRecord as ProductDesignStateRecord);
-    const allowedPatch = this.filterStatePatch(patch);
-    const next: ProductDesignState = {
-      ...current,
-      ...allowedPatch,
-      version: current.version + 1,
-      updatedBy: options.userId,
-    };
-    return this.replaceState(next, {
-      userId: options.userId,
-      changeType: options.changeType,
-      path: "*",
-      before: current,
-      after: next,
-      reason: options.reason,
-      createVersion: options.createVersion,
-      runId: options.runId,
-      messageId: options.messageId,
-    });
-  }
-
-  private async applyPatchOperations(
-    stateId: string,
-    operations: NormalizedPatchOperation[],
-    options: {
-      userId: string;
-      reason: string;
-      createVersion: boolean;
-      runId?: string;
-      messageId?: string;
-    },
-  ) {
-    const currentRecord = await this.prisma.productDesignState.findUnique({ where: { id: stateId } });
-    if (!currentRecord) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
-    const beforeState = this.toStateItem(currentRecord as ProductDesignStateRecord);
-    const next = this.cloneState(beforeState);
-    const changeLogs: Awaited<ReturnType<typeof this.writeChangeLog>>[] = [];
-
-    if (!operations.length) throw new BadRequestException("PRODUCT_DESIGN_STATE_INVALID_PATCH");
-
-    for (const operation of operations) {
-      const normalizedOp = normalizePatchOp(operation.op);
-      const before = this.readValueAtPath(next, operation.path);
-      const changed = this.applyValueAtPath(next, operation.path, operation.value, normalizedOp);
-      const after = this.readValueAtPath(next, operation.path);
-      if (!changed) throw new BadRequestException("INVALID_PATCH_PATH");
-      changeLogs.push(
-        await this.writeChangeLog({
-          projectId: next.projectId,
-          stateId: next.id,
-          changeType: ProductDesignChangeType.patch,
-          path: operation.path,
-          before,
-          after,
-          reason: operation.reason ?? options.reason,
-          runId: options.runId,
-          messageId: options.messageId,
-          createdBy: options.userId,
-        }),
-      );
-    }
-
-    next.version = beforeState.version + 1;
-    next.status = "patching";
-    next.prototypeSpec = undefined;
-    next.prdDocument = undefined;
-    next.updatedBy = options.userId;
-
-    const updated = await this.prisma.productDesignState.update({
-      where: { id: stateId },
-      data: {
-        version: next.version,
-        ...this.toPrismaStateData(next),
-        prototypeSpec: Prisma.JsonNull,
-        prdDocument: Prisma.JsonNull,
-        updatedBy: options.userId,
-      },
-    });
-    await this.prisma.project.update({
-      where: { id: next.projectId },
-      data: { currentProductDesignStateId: stateId },
-    });
-    const state = this.toStateItem(updated as ProductDesignStateRecord);
-    const version = options.createVersion
-      ? await this.createVersionSnapshot(state, options.userId, options.reason)
-      : undefined;
-    return {
-      state,
-      changeLogs: changeLogs.map((item) => this.toChangeLogItem(item)),
-      version: version ? this.toVersionItem(version) : undefined,
-    };
   }
 
   private async replaceState(
@@ -1124,52 +889,15 @@ export class ProductDesignStateService {
     };
   }
 
-  private filterStatePatch(patch: Partial<ProductDesignState>) {
-    const allowed: Partial<ProductDesignState> = {};
-    const keys: PatchKey[] = [
-      "title",
-      "summary",
-      "businessGoal",
-      "background",
-      "targetUsers",
-      "userScenarios",
-      "pages",
-      "features",
-      "backendConfigs",
-      "frontendRules",
-      "businessRules",
-      "stateRules",
-      "exceptionScenarios",
-      "acceptanceCriteria",
-      "prototypeOutline",
-      "assumptions",
-      "knowledgeRefs",
-      "pendingQuestions",
-      "confirmedFacts",
-      "status",
-    ];
-    keys.forEach((key) => {
-      if (patch[key as keyof ProductDesignState] !== undefined) {
-        (allowed as Record<string, unknown>)[key] = patch[key as keyof ProductDesignState];
-      }
-    });
-    return allowed;
-  }
-
   private cloneState(state: ProductDesignState): ProductDesignState {
     return JSON.parse(JSON.stringify(state)) as ProductDesignState;
-  }
-
-  private readValueAtPath(state: ProductDesignState, path: string) {
-    const resolved = resolveStatePath(state, path);
-    return resolved.valid ? resolved.value : undefined;
   }
 
   private applyValueAtPath(
     state: ProductDesignState,
     path: string,
     value: unknown,
-    op: NormalizedPatchOperation["op"],
+    op: StatePathOperation,
   ) {
     const resolved = resolveStatePath(state, path);
     if (!resolved.valid) return false;
@@ -1181,7 +909,7 @@ export class ProductDesignStateService {
       if (Array.isArray(state[key])) {
         const current = state[key] as unknown[];
         if (op === "append" || op === "add") {
-          current.push(normalizePatchValue(value, path, current.length));
+          current.push(normalizeStatePathValue(value, path, current.length));
         } else {
           (state as Record<string, unknown>)[resolved.key] = Array.isArray(value) ? value : [value];
         }
@@ -1201,11 +929,11 @@ export class ProductDesignStateService {
       }
       if (op === "append" || op === "add") {
         if (index > resolved.parent.length) return false;
-        resolved.parent.splice(index, 0, normalizePatchValue(value, path, index));
+        resolved.parent.splice(index, 0, normalizeStatePathValue(value, path, index));
         return true;
       }
       if (index >= resolved.parent.length) return false;
-      resolved.parent[index] = mergePatchValue(resolved.parent[index], value);
+      resolved.parent[index] = mergeStatePathValue(resolved.parent[index], value);
       return true;
     }
 
@@ -1216,10 +944,10 @@ export class ProductDesignStateService {
     if (op === "append") {
       const current = resolved.parent[resolved.key];
       if (!Array.isArray(current)) return false;
-      current.push(normalizePatchValue(value, path, current.length));
+      current.push(normalizeStatePathValue(value, path, current.length));
       return true;
     }
-    resolved.parent[resolved.key] = mergePatchValue(resolved.parent[resolved.key], value);
+    resolved.parent[resolved.key] = mergeStatePathValue(resolved.parent[resolved.key], value);
     return true;
   }
 
@@ -1413,7 +1141,7 @@ function syncPrdSectionContent(
     if (Array.isArray(resolved.parent)) {
       const index = Number(resolved.key);
       if (!Number.isInteger(index) || index < 0 || index >= resolved.parent.length) continue;
-      resolved.parent[index] = mergePatchValue(resolved.parent[index], revision);
+      resolved.parent[index] = mergeStatePathValue(resolved.parent[index], revision);
       changedPaths.push(path);
       continue;
     }
@@ -1421,7 +1149,7 @@ function syncPrdSectionContent(
       const current = resolved.parent[resolved.key];
       resolved.parent[resolved.key] =
         current && typeof current === "object" && !Array.isArray(current)
-          ? mergePatchValue(current, revision)
+          ? mergeStatePathValue(current, revision)
           : content;
       changedPaths.push(path);
     }
@@ -1483,13 +1211,6 @@ function uniqueStrings(values: string[]) {
 
 function safeStateFactId(value: string) {
   return value.replace(/[^a-zA-Z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "path";
-}
-
-function normalizePatchOp(op: PatchOperation["op"] | NormalizedPatchOperation["op"] | string) {
-  if (op === "update" || op === "replace") return "replace";
-  if (op === "delete" || op === "remove") return "remove";
-  if (op === "append") return "append";
-  return "add";
 }
 
 function normalizeSourcedArray(items: unknown[], prefix: string) {
@@ -1694,8 +1415,8 @@ function normalizeStatePath(path: string) {
     .filter(Boolean);
 }
 
-function toStatePathKey(value: string | undefined): PatchKey | undefined {
-  const aliases: Record<string, PatchKey> = {
+function toStatePathKey(value: string | undefined): StatePathKey | undefined {
+  const aliases: Record<string, StatePathKey> = {
     title: "title",
     summary: "summary",
     businessGoal: "businessGoal",
@@ -1767,24 +1488,24 @@ function resolveArrayIndex(items: unknown[], segment: string) {
   });
 }
 
-function normalizePatchValue(value: unknown, path: string, index: number) {
+function normalizeStatePathValue(value: unknown, path: string, index: number) {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
     return {
-      id: typeof record.id === "string" ? record.id : `patch_${Date.now()}_${index + 1}`,
+      id: typeof record.id === "string" ? record.id : `state_path_${Date.now()}_${index + 1}`,
       ...record,
       source: record.source ?? { type: "user_input", confidence: 1 },
     };
   }
   return {
-    id: `patch_${Date.now()}_${index + 1}`,
+    id: `state_path_${Date.now()}_${index + 1}`,
     description: typeof value === "string" ? value : JSON.stringify(value ?? ""),
     source: { type: "user_input", confidence: 1 },
     relatedPath: path,
   };
 }
 
-function mergePatchValue(current: unknown, value: unknown) {
+function mergeStatePathValue(current: unknown, value: unknown) {
   if (
     current &&
     typeof current === "object" &&

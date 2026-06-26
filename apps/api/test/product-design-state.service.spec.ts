@@ -109,56 +109,6 @@ describe("ProductDesignStateService", () => {
     });
   });
 
-  it("applies patch operations, clears generated artifacts, and creates version", async () => {
-    const current = baseState();
-    prisma.productDesignState.findUnique.mockResolvedValue({
-      ...stateRecord(current),
-      project: baseProject(),
-    });
-    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
-      stateRecord({
-        ...current,
-        ...data,
-        prototypeSpec: null,
-        prdDocument: null,
-        createdAt: new Date(current.createdAt),
-        updatedAt: new Date("2026-06-20T09:00:00Z"),
-      }),
-    );
-
-    const result = await service.applyPatchForUser(user, current.id, {
-      operations: [
-        {
-          op: "add",
-          path: "frontendRules",
-          value: {
-            id: "rule_disabled_before_start",
-            title: "未开始置灰",
-            description: "未开始时按钮置灰，文案为活动未开始。",
-          },
-          reason: "补充状态展示",
-        },
-      ],
-      reason: "局部修改按钮状态",
-    });
-
-    expect(result.state.version).toBe(2);
-    expect(result.state.status).toBe(ProductDesignStateStatus.patching);
-    expect(result.state.frontendRules).toEqual([
-      expect.objectContaining({ id: "rule_initial" }),
-      expect.objectContaining({ id: "rule_disabled_before_start" }),
-    ]);
-    expect(result.state.prdDocument).toBeUndefined();
-    expect(result.state.prototypeSpec).toBeUndefined();
-    expect(result.changeLogs[0]).toEqual(
-      expect.objectContaining({
-        changeType: ProductDesignChangeType.patch,
-        path: "frontendRules",
-      }),
-    );
-    expect(result.version).toEqual(expect.objectContaining({ version: 2 }));
-  });
-
   it("confirms assumptions and records confirmed facts", async () => {
     const current = baseState({
       assumptions: [
@@ -396,55 +346,6 @@ describe("ProductDesignStateService", () => {
     ]);
   });
 
-  it("restores ProductDesignState after patch failure with a rollback version", async () => {
-    const beforePatch = baseState({
-      version: 3,
-      frontendRules: [{ id: "rule_initial", description: "默认可点击" }],
-      prdDocument: { id: "prd-before", projectId: "project-1", title: "旧 PRD", sections: [] } as never,
-      prototypeSpec: { id: "spec-before", projectId: "project-1", pages: [], components: [] } as never,
-      status: "prototype_ready",
-    });
-    const current = baseState({
-      version: 4,
-      frontendRules: [
-        { id: "rule_initial", description: "默认可点击" },
-        { id: "rule_patch", description: "错误写入" },
-      ],
-      prdDocument: undefined,
-      prototypeSpec: undefined,
-      status: "patching",
-    });
-    prisma.productDesignState.findFirst.mockResolvedValue(stateRecord(current));
-    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
-      stateRecord({
-        ...beforePatch,
-        ...data,
-        createdAt: new Date(beforePatch.createdAt),
-        updatedAt: new Date("2026-06-20T09:30:00Z"),
-      }),
-    );
-
-    const result = await service.restoreStateAfterPatchFailure("project-1", beforePatch, {
-      userId: "user-1",
-      runId: "run-rollback",
-      messageId: "message-rollback",
-    });
-
-    expect(result.state.version).toBe(5);
-    expect(result.state.status).toBe(ProductDesignStateStatus.prototype_ready);
-    expect(result.state.frontendRules).toEqual([{ id: "rule_initial", description: "默认可点击" }]);
-    expect(result.state.prdDocument).toEqual(expect.objectContaining({ id: "prd-before" }));
-    expect(result.state.prototypeSpec).toEqual(expect.objectContaining({ id: "spec-before" }));
-    expect(result.version).toEqual(expect.objectContaining({ version: 5 }));
-    expect(prisma.productDesignChangeLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        changeType: ProductDesignChangeType.rollback,
-        path: "*",
-        runId: "run-rollback",
-        messageId: "message-rollback",
-      }),
-    });
-  });
 });
 
 function baseProject() {

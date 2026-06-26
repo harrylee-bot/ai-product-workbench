@@ -106,7 +106,6 @@ enum ModelTaskType {
   prd_generation
   prototype_design
   prototype_code_generation
-  patch_planning
   qa_check
   knowledge_extraction
   general_chat
@@ -135,7 +134,6 @@ enum ProductDesignStateStatus {
   doc_confirmed
   prd_ready
   prototype_ready
-  patching
   qa_failed
   confirmed
 }
@@ -143,7 +141,6 @@ enum ProductDesignStateStatus {
 enum ProductDesignChangeType {
   create
   update
-  patch
   rollback
   confirm_assumption
   reject_assumption
@@ -170,15 +167,6 @@ enum PrototypeArtifactStatus {
   failed
 }
 
-enum PatchRecordStatus {
-  planned
-  applying
-  applied
-  failed
-  cancelled
-  needs_confirmation
-}
-
 enum QAReportStatus {
   running
   passed
@@ -188,7 +176,6 @@ enum QAReportStatus {
 
 enum QAReportTrigger {
   initial_generation
-  patch
   manual
   rollback
   pre_confirm
@@ -306,7 +293,6 @@ enum RuntimeStepName {
   prd_writer_agent
   prototype_designer_agent
   prototype_code_agent
-  patch_agent
   qa_agent
   knowledge_extractor_agent
 
@@ -319,9 +305,6 @@ enum UserIntent {
   clarification_answer
   generate_prd
   generate_prototype
-  patch_document
-  patch_prototype
-  global_adjustment
   export_word
   export_html
   knowledge_update
@@ -394,8 +377,6 @@ model Project {
   prototypeSpecs              PrototypeSpecRecord[]
   prototypeArtifacts          PrototypeArtifact[]
   prototypeVersions           PrototypeVersion[]
-  patchRecords                PatchRecord[]
-  patchPreviews               PatchPreview[]
   qaReports                   QAReport[]
   rollbackRecords             RollbackRecord[]
   knowledgeCandidates         KnowledgeCandidate[]
@@ -428,7 +409,6 @@ model Conversation {
   messages      Message[]
   fileAssets    FileAsset[]
   runtimeRuns   RuntimeRunLog[]
-  patchRecords  PatchRecord[]
 
   @@index([projectId])
   @@index([ownerId])
@@ -848,65 +828,6 @@ model PrototypeVersion {
   @@map("prototype_versions")
 }
 
-model PatchRecord {
-  id                              String            @id @default(uuid())
-  projectId                       String            @map("project_id")
-  conversationId                  String            @map("conversation_id")
-  instructionMessageId            String?           @map("instruction_message_id")
-  selectedRegion                  Json              @map("selected_region")
-  userInstruction                 String            @map("user_instruction")
-  patchPlan                       Json              @map("patch_plan")
-  operations                      Json
-  status                          PatchRecordStatus @default(planned)
-  beforeProductDesignStateVersion Int               @map("before_product_design_state_version")
-  afterProductDesignStateVersion  Int?              @map("after_product_design_state_version")
-  affectedPrdDocumentId           String?           @map("affected_prd_document_id")
-  affectedPrototypeArtifactId     String?           @map("affected_prototype_artifact_id")
-  relatedQaReportId               String?           @map("related_qa_report_id")
-  generatedByRunId                String?           @map("generated_by_run_id")
-  errorMessage                    String?           @map("error_message")
-  createdBy                       String            @map("created_by")
-  createdAt                       DateTime          @default(now()) @map("created_at")
-  updatedAt                       DateTime          @updatedAt @map("updated_at")
-  project                         Project           @relation(fields: [projectId], references: [id])
-  conversation                    Conversation      @relation(fields: [conversationId], references: [id])
-  patchPreview                    PatchPreview?
-
-  @@index([projectId])
-  @@index([conversationId])
-  @@index([status])
-  @@index([generatedByRunId])
-  @@index([createdAt])
-  @@map("patch_records")
-}
-
-model PatchPreview {
-  id                              String      @id @default(uuid())
-  projectId                       String      @map("project_id")
-  patchRecordId                   String      @unique @map("patch_record_id")
-  status                          String      @default("ready")
-  beforeProductDesignStateVersion Int         @map("before_product_design_state_version")
-  afterProductDesignStateVersion  Int?        @map("after_product_design_state_version")
-  beforeSnapshot                  Json        @map("before_snapshot")
-  afterSnapshot                   Json        @map("after_snapshot")
-  diff                            Json
-  riskPanel                       Json        @map("risk_panel")
-  patchPlan                       Json        @map("patch_plan")
-  operations                      Json
-  message                         String?
-  createdBy                       String      @map("created_by")
-  createdAt                       DateTime    @default(now()) @map("created_at")
-  updatedAt                       DateTime    @updatedAt @map("updated_at")
-  project                         Project     @relation(fields: [projectId], references: [id])
-  patchRecord                     PatchRecord @relation(fields: [patchRecordId], references: [id])
-
-  @@index([projectId])
-  @@index([patchRecordId])
-  @@index([status])
-  @@index([createdAt])
-  @@map("patch_previews")
-}
-
 model QAReport {
   id                        String          @id @default(uuid())
   projectId                 String          @map("project_id")
@@ -925,7 +846,6 @@ model QAReport {
   minorCount                Int             @default(0) @map("minor_count")
   infoCount                 Int             @default(0) @map("info_count")
   generatedByRunId          String?         @map("generated_by_run_id")
-  relatedPatchId            String?         @map("related_patch_id")
   relatedRollbackId         String?         @map("related_rollback_id")
   createdBy                 String          @map("created_by")
   createdAt                 DateTime        @default(now()) @map("created_at")
@@ -938,7 +858,6 @@ model QAReport {
   @@index([status])
   @@index([trigger])
   @@index([generatedByRunId])
-  @@index([relatedPatchId])
   @@index([relatedRollbackId])
   @@index([createdAt])
   @@map("qa_reports")

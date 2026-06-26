@@ -8,7 +8,6 @@ import {
   FileParserType,
   ModelCallStatus,
   ModelTaskType,
-  PatchRecordStatus,
   ProjectStatus,
   QAReportStatus,
   QAReportTrigger,
@@ -143,23 +142,6 @@ export class ListFileParsesQueryDto extends AdminPaginationQueryDto {
   @Transform(emptyToUndefined)
   @IsString()
   extension?: string;
-}
-
-export class ListPatchesQueryDto extends AdminPaginationQueryDto {
-  @IsOptional()
-  @Transform(emptyToUndefined)
-  @IsString()
-  projectId?: string;
-
-  @IsOptional()
-  @Transform(emptyToUndefined)
-  @IsString()
-  createdBy?: string;
-
-  @IsOptional()
-  @Transform(emptyToUndefined)
-  @IsEnum(PatchRecordStatus, { message: "Patch 状态不正确" })
-  status?: PatchRecordStatus;
 }
 
 export class ListQaReportsQueryDto extends AdminPaginationQueryDto {

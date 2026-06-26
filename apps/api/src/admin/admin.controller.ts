@@ -9,7 +9,6 @@ import {
   ListAdminProjectsQueryDto,
   ListRuntimeRunsQueryDto,
   ListFileParsesQueryDto,
-  ListPatchesQueryDto,
   ListQaReportsQueryDto,
 } from "./admin.dto";
 import { AdminAuditService } from "./admin-audit.service";
@@ -42,11 +41,6 @@ export class AdminController {
   @Get("projects/:projectId/runs")
   listProjectRuns(@Param("projectId") projectId: string, @Query() query: ListRuntimeRunsQueryDto) {
     return this.adminService.listProjectRuns(projectId, query);
-  }
-
-  @Get("projects/:projectId/patches")
-  listProjectPatches(@Param("projectId") projectId: string, @Query() query: ListPatchesQueryDto) {
-    return this.adminService.listProjectPatches(projectId, query);
   }
 
   @Get("projects/:projectId/files")
@@ -90,16 +84,6 @@ export class AdminController {
   @Get("logs/file-parses/:fileId")
   getFileParse(@Param("fileId") fileId: string) {
     return this.adminService.getFileParse(fileId);
-  }
-
-  @Get("logs/patches")
-  listPatches(@Query() query: ListPatchesQueryDto) {
-    return this.adminService.listPatches(query);
-  }
-
-  @Get("logs/patches/:patchId")
-  getPatch(@Param("patchId") patchId: string) {
-    return this.adminService.getPatch(patchId);
   }
 
   @Get("logs/qa-reports")

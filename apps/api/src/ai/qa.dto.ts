@@ -15,7 +15,6 @@ const QA_CHECK_TYPES = [
   "prd_prototype_consistency",
   "knowledge_rule_compliance",
   "assumption_risk",
-  "patch_regression",
 ] as const;
 
 export class RunQaDto {

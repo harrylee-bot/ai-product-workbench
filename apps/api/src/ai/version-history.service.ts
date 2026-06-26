@@ -14,7 +14,7 @@ export class VersionHistoryService {
   }
 
   async listTimeline(projectId: string) {
-    const [stateVersions, prdVersions, prototypeVersions, patches, qaReports, rollbackRecords] =
+    const [stateVersions, prdVersions, prototypeVersions, qaReports, rollbackRecords] =
       await this.prisma.$transaction([
         this.prisma.productDesignVersion.findMany({
           where: { projectId },
@@ -27,11 +27,6 @@ export class VersionHistoryService {
           take: 50,
         }),
         this.prisma.prototypeVersion.findMany({
-          where: { projectId },
-          orderBy: { createdAt: "desc" },
-          take: 50,
-        }),
-        this.prisma.patchRecord.findMany({
           where: { projectId },
           orderBy: { createdAt: "desc" },
           take: 50,
@@ -76,15 +71,6 @@ export class VersionHistoryService {
         title: `HTML 原型 v${item.version}`,
         description: item.reason ?? undefined,
         relatedId: item.artifactId,
-        createdAt: item.createdAt.toISOString(),
-        createdBy: item.createdBy,
-      })),
-      ...patches.map((item) => ({
-        id: item.id,
-        type: "patch" as const,
-        title: `Patch ${item.status}`,
-        description: item.userInstruction,
-        relatedId: item.id,
         createdAt: item.createdAt.toISOString(),
         createdBy: item.createdBy,
       })),

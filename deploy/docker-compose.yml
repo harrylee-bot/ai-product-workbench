@@ -21,7 +21,6 @@ services:
       dockerfile: apps/api/Dockerfile
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
-        CODEX_CLI_VERSION: ${CODEX_CLI_VERSION:-0.142.2}
     container_name: ai-product-workbench-api
     restart: unless-stopped
     depends_on:
@@ -35,7 +34,6 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:-http://8.130.160.177:3000}
       FILE_UPLOAD_ROOT: /app/apps/api/storage/uploads
       KNOWLEDGE_VAULT_ROOT: /app/apps/api/storage/knowledge-vault
-      RUNTIME_SKILLS_ROOT: /app/runtime-skills/obsidian-skills/skills:/root/.codex/skills
       MODEL_GATEWAY_ENCRYPTION_KEY: ${MODEL_GATEWAY_ENCRYPTION_KEY:-}
       MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER: ${MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER:-true}
       MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS: ${MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS:-true}
@@ -43,35 +41,9 @@ services:
       DEFAULT_MODEL_BASE_URL: ${DEFAULT_MODEL_BASE_URL:-https://datatoken.shop}
       DEFAULT_MODEL_API_KEY: ${DEFAULT_MODEL_API_KEY:-}
       DEFAULT_MODEL_NAME: ${DEFAULT_MODEL_NAME:-gpt-5.5}
-      CODEX_MODEL_PROVIDER_ID: ${CODEX_MODEL_PROVIDER_ID:-datatoken}
-      CODEX_MODEL_PROVIDER_NAME: ${CODEX_MODEL_PROVIDER_NAME:-datatoken}
-      CODEX_BASE_URL: ${CODEX_BASE_URL:-https://datatoken.shop}
-      CODEX_MODEL: ${CODEX_MODEL:-gpt-5.5}
-      CODEX_API_KEY: ${CODEX_API_KEY:-}
-      CODEX_SUPPORTS_WEBSOCKETS: ${CODEX_SUPPORTS_WEBSOCKETS:-false}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://datatoken.shop}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.5}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      VIBE_REQUIREMENT_RUNTIME: ${VIBE_REQUIREMENT_RUNTIME:-codex}
-      VIBE_PROTOTYPE_SPEC_RUNTIME: ${VIBE_PROTOTYPE_SPEC_RUNTIME:-codex}
-      VIBE_PROTOTYPE_CODE_RUNTIME: ${VIBE_PROTOTYPE_CODE_RUNTIME:-codex}
-      VIBE_PATCH_PLAN_RUNTIME: ${VIBE_PATCH_PLAN_RUNTIME:-codex}
-      VIBE_QA_RUNTIME: ${VIBE_QA_RUNTIME:-codex}
-      VIBE_RUNTIME_FALLBACK_TO_LOCAL: ${VIBE_RUNTIME_FALLBACK_TO_LOCAL:-true}
-      VIBE_RUNTIME_WORKSPACE_ROOT: ${VIBE_RUNTIME_WORKSPACE_ROOT:-/app/apps/api/storage/runtime-workspaces}
-      VIBE_CODEX_COMMAND: ${VIBE_CODEX_COMMAND:-codex}
-      VIBE_CODEX_SANDBOX: ${VIBE_CODEX_SANDBOX:-danger-full-access}
-      VIBE_CODEX_IDLE_TIMEOUT_MS: ${VIBE_CODEX_IDLE_TIMEOUT_MS:-180000}
-      VIBE_CODEX_IDLE_POLL_MS: ${VIBE_CODEX_IDLE_POLL_MS:-1000}
-      DEERFLOW_GATEWAY_URL: ${DEERFLOW_GATEWAY_URL:-}
-      DEERFLOW_GATEWAY_MODE: ${DEERFLOW_GATEWAY_MODE:-vibe}
-      DEERFLOW_GATEWAY_PATH: ${DEERFLOW_GATEWAY_PATH:-/api/vibe/tasks}
-      DEERFLOW_ASSISTANT_ID: ${DEERFLOW_ASSISTANT_ID:-agent}
-      DEERFLOW_REQUEST_TIMEOUT_MS: ${DEERFLOW_REQUEST_TIMEOUT_MS:-180000}
     ports:
       - "4000:4000"
     volumes:
-      - ../runtime-skills:/app/runtime-skills:ro
       - api-storage:/app/apps/api/storage
 
   web:

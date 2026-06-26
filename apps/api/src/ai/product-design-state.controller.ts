@@ -1,14 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import {
   AnswerClarificationQuestionDto,
-  ApplyStatePatchDto,
   CreateProductDesignStateDto,
   CreateProductDesignVersionDto,
   RollbackProductDesignStateDto,
-  UpdateProductDesignStateDto,
 } from "./product-design-state.dto";
 import { ProductDesignStateService } from "./product-design-state.service";
 import type { ProductDesignState } from "./ai-vibe.types";
@@ -42,42 +40,6 @@ export class ProjectProductDesignStateController {
 @UseGuards(JwtAuthGuard)
 export class ProductDesignStateResourceController {
   constructor(private readonly stateService: ProductDesignStateService) {}
-
-  @Patch(":stateId")
-  update(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("stateId") stateId: string,
-    @Body() dto: UpdateProductDesignStateDto,
-  ) {
-    return this.stateService.updateStateForUser(user, stateId, {
-      patch: (dto.patch ?? {}) as Partial<ProductDesignState>,
-      reason: dto.reason,
-      createVersion: dto.createVersion,
-    });
-  }
-
-  @Post(":stateId/apply-patch")
-  applyPatch(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("stateId") stateId: string,
-    @Body() dto: ApplyStatePatchDto,
-  ) {
-    return this.stateService.applyPatchForUser(user, stateId, {
-      operations: dto.operations.map((operation) => ({
-        ...operation,
-        op:
-          operation.op === "update"
-            ? "replace"
-            : operation.op === "delete"
-              ? "remove"
-              : operation.op,
-      })),
-      reason: dto.reason,
-      runId: dto.runId,
-      messageId: dto.messageId,
-      createVersion: dto.createVersion,
-    });
-  }
 
   @Post(":stateId/versions")
   createVersion(

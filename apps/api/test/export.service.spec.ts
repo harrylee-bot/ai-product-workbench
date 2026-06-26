@@ -138,7 +138,7 @@ function openGate(): QAGateDecision {
     allowConfirmArtifacts: true,
     allowPersistKnowledge: true,
     allowExportOrPublish: true,
-    shouldReturnToPatch: false,
+    shouldReviseArtifacts: false,
     blockingReasons: [],
     warnings: [],
     requiredActions: [],

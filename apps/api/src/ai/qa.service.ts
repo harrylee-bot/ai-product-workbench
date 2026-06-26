@@ -36,7 +36,6 @@ type RunQaOptions = {
   checkTypes?: QACheckType[];
   runId?: string;
   traceId?: string;
-  relatedPatchId?: string;
   relatedRollbackId?: string;
   prdDocument?: RequirementDocument;
   prototypeSpec?: PrototypeSpec;
@@ -151,7 +150,6 @@ type QAReportRecord = {
   minorCount: number;
   infoCount: number;
   generatedByRunId: string | null;
-  relatedPatchId: string | null;
   relatedRollbackId: string | null;
   createdBy: string;
   createdAt: Date;
@@ -226,7 +224,6 @@ export class QaService {
         issues: toInputJson(issues),
         ...counts,
         generatedByRunId: options.runId,
-        relatedPatchId: options.relatedPatchId,
         relatedRollbackId: options.relatedRollbackId,
         createdBy: userId,
       },
@@ -363,7 +360,6 @@ export class QaService {
       minorCount: row.minorCount,
       infoCount: row.infoCount,
       generatedByRunId: row.generatedByRunId ?? undefined,
-      relatedPatchId: row.relatedPatchId ?? undefined,
       relatedRollbackId: row.relatedRollbackId ?? undefined,
       createdBy: row.createdBy,
       createdAt: row.createdAt.toISOString(),

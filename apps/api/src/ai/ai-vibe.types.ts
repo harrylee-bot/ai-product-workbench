@@ -1,42 +1,4 @@
-import type {
-  KnowledgeType,
-  ProjectStatus,
-  UserIntent,
-} from "@prisma/client";
-
-export type SelectedRegion = {
-  type: "document" | "prototype";
-  targetId?: string;
-  documentId?: string;
-  artifactId?: string;
-  pageId?: string;
-  componentId?: string;
-  sectionId?: string;
-  blockId?: string;
-  domSelector?: string;
-  sourcePaths?: string[];
-  selectedText?: string;
-  textRange?: { start: number; end: number };
-  bbox?: { x: number; y: number; width: number; height: number };
-  boundingBox?: { x: number; y: number; width: number; height: number };
-  screenshotUrl?: string;
-  label?: string;
-};
-
-export type ConversationMessage = {
-  id: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  createdAt: string;
-};
-
-export type AttachmentSummary = {
-  fileId: string;
-  fileName: string;
-  fileType: string;
-  summary?: string;
-  extractedTextPreview?: string;
-};
+import type { KnowledgeType } from "@prisma/client";
 
 export type KnowledgeReference = {
   id: string;
@@ -49,27 +11,6 @@ export type KnowledgeReference = {
   usedByRuntime?: string;
   sourceType: "knowledge_base" | "attachment" | "conversation" | "ai_assumption";
   sourceId?: string;
-};
-
-export type RuntimeSkillReference = {
-  id: string;
-  name: string;
-  description: string;
-  sourcePath: string;
-  contentPreview: string;
-  capabilities: string[];
-  triggerHints: string[];
-};
-
-export type RuntimeSkillRoute = {
-  skillId: string;
-  skillName: string;
-  sourcePath: string;
-  appliesTo: Array<{
-    runtimeTask: string;
-    handoffField: string;
-    usage: string;
-  }>;
 };
 
 export type KnowledgeConflict = {
@@ -87,256 +28,9 @@ export type KnowledgeContext = {
   prdWritingRules: KnowledgeReference[];
   prototypeRules: KnowledgeReference[];
   businessConcepts: KnowledgeReference[];
-  runtimeSkills?: RuntimeSkillReference[];
-  skillRouting?: RuntimeSkillRoute[];
   conflicts: KnowledgeConflict[];
   unknownAreas: string[];
   summary: string;
-};
-
-export type ClarificationQuestion = {
-  id: string;
-  title: string;
-  question?: string;
-  reason: string;
-  options: string[];
-  recommendedOption?: string;
-  recommendation?: string;
-  relatedPath?: string;
-  status?: "pending" | "answered" | "skipped";
-  required?: boolean;
-};
-
-export type RequirementAnalysis = {
-  completenessScore: number;
-  knownFromUser: string[];
-  knownFromKnowledge: string[];
-  inferredByAI: string[];
-  missingCritical: string[];
-  missingOptional: string[];
-  conflicts: string[];
-  shouldAskUser: boolean;
-  clarificationQuestions: ClarificationQuestion[];
-};
-
-export type ContextFetchResult = {
-  project: {
-    id: string;
-    status?: ProjectStatus;
-    currentProductDesignStateId?: string;
-    currentProductDesignStateVersion?: number;
-  };
-  conversation: {
-    id: string;
-    summary?: string;
-    recentMessages: ConversationMessage[];
-    userMessageCount: number;
-    assistantMessageCount: number;
-  };
-  existingState?: {
-    id: string;
-    version: number;
-    title: string;
-    status: ProductDesignState["status"];
-    summary?: string;
-    businessGoal?: string;
-    counts: Record<string, number>;
-    prd?: {
-      id: string;
-      title: string;
-      status: RequirementDocument["status"];
-      sectionCount: number;
-    };
-    prototype?: {
-      id: string;
-      title: string;
-      pageCount: number;
-    };
-    pendingQuestions: Array<Record<string, unknown>>;
-    assumptions: Array<Record<string, unknown>>;
-  };
-  selectedRegion?: SelectedRegion;
-  attachments: AttachmentSummary[];
-  traceRefs: string[];
-  retrievedAt: string;
-  summary: string;
-};
-
-export type RequirementFlowType =
-  | "formal_requirement"
-  | "requirement_completion"
-  | "prd_generation"
-  | "prototype_generation"
-  | "patch"
-  | "question"
-  | "export";
-
-export type RequirementPackage = {
-  id: string;
-  intent: UserIntent;
-  flowType: RequirementFlowType;
-  userInput: string;
-  userFacts: string[];
-  knowledgeFacts: string[];
-  contextFacts: string[];
-  assumptions: string[];
-  missingRequiredInfo: string[];
-  missingOptionalInfo: string[];
-  conflicts: string[];
-  constraints: string[];
-  requiredArtifacts: ProductBuildPlan["deliverables"];
-  sourcePaths: string[];
-  traceRefs: string[];
-  selectedRegionContext?: SelectedRegion;
-  contextSnapshot: ContextFetchResult;
-  knowledgeSummary: string;
-  requirementAnalysis: RequirementAnalysis;
-  readiness: "ready" | "needs_clarification" | "blocked";
-  summary: string;
-};
-
-export type RequirementValidationResult = {
-  status: "pass" | "warn" | "block";
-  missingFields: string[];
-  conflicts: string[];
-  invalidOperations: string[];
-  requiredClarifications: ClarificationQuestion[];
-  canAutoContinue: boolean;
-  userMessage: string;
-  summary: string;
-};
-
-export type RequirementSafetyCheckResult = {
-  status: "pass" | "warn" | "block";
-  riskTypes: Array<"prompt_injection" | "secret_leak" | "privacy" | "permission" | "real_world_action" | "strong_rule_conflict">;
-  blockedReasons: string[];
-  warnings: string[];
-  safeAlternative?: string;
-  userMessage: string;
-  summary: string;
-};
-
-export type RequirementIntakeNodeName =
-  | "intent"
-  | "knowledge"
-  | "context_fetch"
-  | "requirement_intake"
-  | "requirement_merge"
-  | "planner"
-  | "validator"
-  | "safety"
-  | "gate";
-
-export type RequirementIntakeNode = {
-  id: string;
-  name: RequirementIntakeNodeName;
-  title: string;
-  runtimeTask: string;
-  status: "completed" | "warning" | "blocked";
-  inputRefs: string[];
-  outputRefs: string[];
-  summary: string;
-  runtimeTrace?: Record<string, unknown>;
-};
-
-export type RequirementIntakeEdge = {
-  from: RequirementIntakeNodeName;
-  to: RequirementIntakeNodeName;
-  mode: "sync" | "async" | "shared_input";
-  summary: string;
-};
-
-export type RequirementIntakeGraph = {
-  schema: "requirement.intake.graph.v1";
-  runId: string;
-  projectId: string;
-  requirementPackageId: string;
-  productBuildPlanId?: string;
-  gateAction: RequirementGateDecision["action"];
-  nodes: RequirementIntakeNode[];
-  edges: RequirementIntakeEdge[];
-  summary: string;
-};
-
-export type RequirementGateDecision = {
-  action: "continue" | "degraded_continue" | "ask_clarification" | "blocked" | "failed";
-  reasons: string[];
-  visibleMessage: string;
-  canGenerateArtifacts: boolean;
-  canApplyPatch: boolean;
-  fallbackUsed: boolean;
-  questions: ClarificationQuestion[];
-  requirementPackage: RequirementPackage;
-  validation: RequirementValidationResult;
-  safety: RequirementSafetyCheckResult;
-  intakeGraph?: RequirementIntakeGraph;
-};
-
-export type ProductBuildPlanPriority = "must" | "should" | "could";
-
-export type ProductBuildPlanStateCoverage =
-  | "default"
-  | "loading"
-  | "success"
-  | "empty"
-  | "disabled"
-  | "error";
-
-export type ProductBuildPlan = {
-  id: string;
-  projectId: string;
-  title: string;
-  goal: string;
-  summary: string;
-  requirementMode: "formal_requirement" | "requirement_completion" | "prd_generation" | "prototype_generation";
-  sourceSummary: {
-    userFacts: string[];
-    knowledgeFacts: string[];
-    assumptions: string[];
-    openQuestions: string[];
-  };
-  scope: {
-    inScope: string[];
-    outOfScope: string[];
-    targetUsers: string[];
-    coreScenarios: string[];
-  };
-  pagePlan: Array<{
-    id: string;
-    name: string;
-    purpose: string;
-    priority: ProductBuildPlanPriority;
-    sourcePaths: string[];
-  }>;
-  statePlan: Array<{
-    id: string;
-    name: string;
-    coverage: ProductBuildPlanStateCoverage;
-    required: boolean;
-    sourcePaths: string[];
-  }>;
-  deliverables: {
-    productDesignState: boolean;
-    prd: boolean;
-    prototypeSpec: boolean;
-    htmlPrototype: boolean;
-    qa: boolean;
-    knowledgeCandidates: boolean;
-  };
-  runtimeTasks: Array<{
-    taskType: string;
-    input: string[];
-    output: string;
-    gate?: string;
-  }>;
-  qaFocus: string[];
-  risks: Array<{
-    id: string;
-    level: "low" | "medium" | "high";
-    description: string;
-    mitigation: string;
-  }>;
-  assumptions: string[];
 };
 
 export type ProductDesignState = {
@@ -376,7 +70,6 @@ export type ProductDesignState = {
     | "doc_confirmed"
     | "prd_ready"
     | "prototype_ready"
-    | "patching"
     | "qa_failed"
     | "confirmed";
   createdBy: string;
@@ -686,99 +379,6 @@ export type PrototypeVersion = {
   createdAt: string;
 };
 
-export type PatchOperation = {
-  op: "add" | "update" | "delete" | "replace" | "remove" | "append";
-  path: string;
-  value?: unknown;
-  reason: string;
-};
-
-export type PatchIntent =
-  | "copy_change"
-  | "rule_change"
-  | "layout_change"
-  | "state_change"
-  | "config_change"
-  | "flow_change"
-  | "add_requirement"
-  | "remove_requirement"
-  | "clarification"
-  | "unknown";
-
-export type PatchImpactAnalysis = {
-  affectedStatePaths: string[];
-  affectedPrdSectionIds: string[];
-  affectedPrototypePageIds: string[];
-  affectedPrototypeComponentIds: string[];
-  affectedAcceptanceCriteriaIds: string[];
-  requiresPrdRegeneration: boolean;
-  requiresPrototypeRegeneration: boolean;
-  requiresQaCheck: boolean;
-  reason: string;
-};
-
-export type RegenerationPlan = {
-  prd: "none" | "affected_sections" | "full";
-  prototypeSpec: "none" | "affected_pages" | "full";
-  htmlPrototype: "none" | "affected_pages" | "full";
-  qa: "none" | "basic" | "full";
-};
-
-export type PatchRisk = {
-  level: "low" | "medium" | "high";
-  message: string;
-  relatedPaths?: string[];
-};
-
-export type PatchPlan = {
-  id?: string;
-  projectId?: string;
-  intent?: PatchIntent;
-  selectedRegion?: SelectedRegion;
-  impactAnalysis?: PatchImpactAnalysis;
-  patchType: "document" | "prototype" | "state" | "global";
-  targetNodes: string[];
-  impactScope: string[];
-  operations: PatchOperation[];
-  regenerationPlan?: RegenerationPlan;
-  risks?: PatchRisk[];
-  needUserConfirm: boolean;
-  needsUserConfirmation?: boolean;
-  clarificationQuestions?: ClarificationQuestion[];
-  reason: string;
-  summary?: string;
-};
-
-export type PatchRecordStatus =
-  | "planned"
-  | "applying"
-  | "applied"
-  | "failed"
-  | "cancelled"
-  | "needs_confirmation";
-
-export type PatchRecord = {
-  id: string;
-  projectId: string;
-  conversationId: string;
-  instructionMessageId?: string;
-  selectedRegion: SelectedRegion;
-  userInstruction: string;
-  patchPlan: PatchPlan;
-  operations: PatchOperation[];
-  status: PatchRecordStatus;
-  beforeProductDesignStateVersion: number;
-  afterProductDesignStateVersion?: number;
-  affectedPrdDocumentId?: string;
-  affectedPrototypeArtifactId?: string;
-  relatedQaReportId?: string;
-  generatedByRunId?: string;
-  errorMessage?: string;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type QACheckType =
   | "state_schema"
   | "prd_completeness"
@@ -787,18 +387,17 @@ export type QACheckType =
   | "state_prototype_consistency"
   | "prd_prototype_consistency"
   | "knowledge_rule_compliance"
-  | "assumption_risk"
-  | "patch_regression";
+  | "assumption_risk";
 
 export type QAIssueSeverity = "blocking" | "major" | "minor" | "info";
 export type QAReportStatus = "running" | "passed" | "failed" | "warning";
-export type QAReportTrigger = "initial_generation" | "patch" | "manual" | "rollback" | "pre_confirm";
+export type QAReportTrigger = "initial_generation" | "manual" | "rollback" | "pre_confirm";
 export type QAIssueStatus = "open" | "resolved" | "ignored";
 export type QAGateStatus = "open" | "warning" | "blocked";
 export type QAGateAction =
   | "confirm_artifacts"
   | "persist_knowledge"
-  | "return_to_patch"
+  | "revise_artifacts"
   | "export_or_publish"
   | "run_qa";
 
@@ -807,7 +406,7 @@ export type QAGateDecision = {
   allowConfirmArtifacts: boolean;
   allowPersistKnowledge: boolean;
   allowExportOrPublish: boolean;
-  shouldReturnToPatch: boolean;
+  shouldReviseArtifacts: boolean;
   reportId?: string;
   reportStatus?: QAReportStatus;
   blockingReasons: string[];
@@ -852,7 +451,6 @@ export type QAReport = {
   minorCount: number;
   infoCount: number;
   generatedByRunId?: string;
-  relatedPatchId?: string;
   relatedRollbackId?: string;
   createdBy: string;
   createdAt: string;
@@ -882,7 +480,7 @@ export type RollbackRecord = {
 
 export type ProjectVersionTimelineItem = {
   id: string;
-  type: "product_design_state" | "prd" | "prototype" | "patch" | "qa" | "rollback";
+  type: "product_design_state" | "prd" | "prototype" | "qa" | "rollback";
   version?: number;
   title: string;
   description?: string;
@@ -900,17 +498,11 @@ export type VibeStreamEventType =
   | "state_version_created"
   | "prd_updated"
   | "prototype_updated"
-  | "patch_started"
-  | "patch_plan_created"
-  | "patch_applying"
-  | "patch_completed"
-  | "patch_failed"
   | "qa_completed"
   | "rollback_started"
   | "rollback_completed"
   | "rollback_failed"
   | "knowledge_candidate_created"
-  | "fallback_used"
   | "export_ready"
   | "run_completed"
   | "run_failed";
@@ -922,7 +514,6 @@ export type VibeStreamLegacyEventType =
   | "state_version_created"
   | "prd_generated"
   | "prototype_generated"
-  | "patch_applied"
   | "qa_completed";
 
 export type VibeStreamEventProtocol = "vibe.v1";
@@ -933,7 +524,6 @@ export type VibeStreamEventCategory =
   | "state"
   | "prd"
   | "prototype"
-  | "patch"
   | "qa"
   | "rollback"
   | "knowledge"
@@ -954,13 +544,11 @@ export type VibeStreamPayloadKind =
   | "state"
   | "prd"
   | "prototype"
-  | "patch"
   | "qa"
   | "rollback"
   | "knowledge"
   | "export"
-  | "run"
-  | "fallback";
+  | "run";
 
 export type VibeStreamPayloadMeta = {
   schema: "vibe.stream.payload.v1";
@@ -1017,6 +605,5 @@ export type RuntimeStreamStepName =
   | "prd_generation"
   | "prototype_design"
   | "prototype_code_generation"
-  | "patch_planning"
   | "qa_check"
   | "knowledge_extraction";

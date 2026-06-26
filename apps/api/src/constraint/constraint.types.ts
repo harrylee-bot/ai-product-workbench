@@ -1,6 +1,6 @@
 export type ConstraintRule = "must_follow" | "prefer" | "avoid" | "warn";
 
-export type ConstraintScope = "runtime" | "state" | "patch" | "qa";
+export type ConstraintScope = "runtime" | "state" | "qa";
 
 export type Constraint = {
   id: string;

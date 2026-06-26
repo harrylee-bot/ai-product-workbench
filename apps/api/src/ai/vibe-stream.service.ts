@@ -161,16 +161,6 @@ function classifyStreamEvent(type: VibeStreamEventType): {
       return { category: "prd", phase: "updated" };
     case "prototype_updated":
       return { category: "prototype", phase: "updated" };
-    case "patch_started":
-      return { category: "patch", phase: "started" };
-    case "patch_plan_created":
-      return { category: "patch", phase: "created" };
-    case "patch_applying":
-      return { category: "patch", phase: "applying" };
-    case "patch_completed":
-      return { category: "patch", phase: "completed" };
-    case "patch_failed":
-      return { category: "patch", phase: "failed" };
     case "qa_completed":
       return { category: "qa", phase: "completed" };
     case "rollback_started":
@@ -181,8 +171,6 @@ function classifyStreamEvent(type: VibeStreamEventType): {
       return { category: "rollback", phase: "failed" };
     case "knowledge_candidate_created":
       return { category: "knowledge", phase: "created" };
-    case "fallback_used":
-      return { category: "runtime", phase: "progress" };
     case "export_ready":
       return { category: "export", phase: "completed" };
     case "run_completed":
@@ -196,24 +184,13 @@ function toLegacyEventType(
   type: VibeStreamEventType,
   step?: VibeStreamEvent["step"],
 ): VibeStreamLegacyEventType {
-  if (type === "state_updated" && step === "patch_planning") return "patch_applied";
   if (type === "state_updated") return "state_updated";
   if (type === "state_version_created") return "state_version_created";
   if (type === "prd_updated") return "prd_generated";
   if (type === "prototype_updated") return "prototype_generated";
-  if (
-    type === "patch_started" ||
-    type === "patch_plan_created" ||
-    type === "patch_applying" ||
-    type === "patch_completed" ||
-    type === "patch_failed"
-  ) {
-    return "patch_applied";
-  }
   if (type === "qa_completed") return "qa_completed";
   if (type === "knowledge_candidate_created") return "state_updated";
   if (type === "export_ready") return "agent_completed";
-  if (type === "fallback_used") return "agent_started";
   if (type === "step_started" || type === "message_delta") return "agent_started";
   return "agent_completed";
 }
@@ -287,8 +264,6 @@ function buildPayloadMeta(
   const record = asRecord(data);
   const qaReport = asRecord(record?.qaReport) ?? (type === "qa_completed" ? record : undefined);
   const qaGate = asRecord(record?.qaGate) ?? asRecord(qaReport?.gate);
-  const patchRecord = asRecord(record?.patchRecord) ?? asRecord(asRecord(record?.result)?.patchRecord);
-  const patchPreview = asRecord(record?.patchPreview) ?? asRecord(asRecord(record?.result)?.patchPreview);
   const prototypeArtifact = asRecord(record?.prototypeArtifact) ?? (type === "prototype_updated" ? record : undefined);
   const prototypeSpec = asRecord(record?.prototypeSpec);
   const nextAction = asRecord(record?.nextAction);
@@ -297,35 +272,28 @@ function buildPayloadMeta(
     schema: "vibe.stream.payload.v1",
     kind: payloadKindForType(type),
     primaryId:
-      text(record?.patchId)
-      ?? text(patchRecord?.id)
-      ?? text(patchPreview?.patchId)
-      ?? text(qaReport?.id)
+      text(qaReport?.id)
       ?? text(record?.id)
       ?? text(record?.sourceId),
     secondaryId:
       text(prototypeSpec?.id)
       ?? text(record?.prototypeSpecId)
-      ?? text(prototypeArtifact?.prototypeSpecId)
-      ?? text(patchPreview?.id),
+      ?? text(prototypeArtifact?.prototypeSpecId),
     status:
       text(qaGate?.status)
       ?? text(qaReport?.status)
       ?? text(record?.status)
       ?? text(record?.level)
-      ?? text(patchRecord?.status)
       ?? (type === "run_failed" ? "failed" : type === "run_completed" ? "completed" : undefined),
     title:
       text(record?.title)
       ?? text(record?.fileName)
-      ?? text(prototypeArtifact?.title)
-      ?? text(patchPreview?.title),
+      ?? text(prototypeArtifact?.title),
     summary:
       content
       ?? text(record?.message)
       ?? text(record?.summary)
-      ?? text(qaReport?.summary)
-      ?? text(patchPreview?.message),
+      ?? text(qaReport?.summary),
     action: text(nextAction?.type) ?? text(record?.action),
     counts: payloadCounts(type, record, qaReport),
     refs: payloadRefs(type, record, qaReport, prototypeArtifact),
@@ -335,11 +303,9 @@ function buildPayloadMeta(
 function payloadKindForType(type: VibeStreamEventType): VibeStreamPayloadKind {
   if (type === "step_started" || type === "step_completed" || type === "step_failed") return "runtime_step";
   if (type === "message_delta") return "progress";
-  if (type === "fallback_used") return "fallback";
   if (type === "state_updated" || type === "state_version_created") return "state";
   if (type === "prd_updated") return "prd";
   if (type === "prototype_updated") return "prototype";
-  if (type.startsWith("patch_")) return "patch";
   if (type === "qa_completed") return "qa";
   if (type.startsWith("rollback_")) return "rollback";
   if (type === "knowledge_candidate_created") return "knowledge";
@@ -386,7 +352,6 @@ function payloadRefs(
       text(record?.prototypeArtifactId)
       ?? text(qaReport?.prototypeArtifactId)
       ?? text(prototypeArtifact?.id),
-    patchId: text(record?.patchId) ?? text(qaReport?.relatedPatchId),
     qaReportId: text(qaReport?.id),
   });
   return Object.keys(refs).length ? refs : undefined;
