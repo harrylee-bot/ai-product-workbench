@@ -40,6 +40,38 @@ export class ExternalRuntimeConfigService {
     return this.config.get<string>("VIBE_CODEX_COMMAND")?.trim() || "codex";
   }
 
+  codexModelProviderId() {
+    return safeProviderId(this.config.get<string>("CODEX_MODEL_PROVIDER_ID")?.trim() || "vibe_openai_compatible");
+  }
+
+  codexModelProviderName() {
+    return this.config.get<string>("CODEX_MODEL_PROVIDER_NAME")?.trim()
+      || this.config.get<string>("DEFAULT_MODEL_PROVIDER_NAME")?.trim()
+      || "Vibe OpenAI Compatible";
+  }
+
+  codexBaseUrl() {
+    return this.config.get<string>("CODEX_BASE_URL")?.trim()
+      || this.config.get<string>("OPENAI_BASE_URL")?.trim()
+      || this.config.get<string>("DEFAULT_MODEL_BASE_URL")?.trim();
+  }
+
+  codexModel() {
+    return this.config.get<string>("CODEX_MODEL")?.trim()
+      || this.config.get<string>("OPENAI_MODEL")?.trim()
+      || this.config.get<string>("DEFAULT_MODEL_NAME")?.trim();
+  }
+
+  codexApiKey() {
+    return this.config.get<string>("CODEX_API_KEY")?.trim()
+      || this.config.get<string>("OPENAI_API_KEY")?.trim()
+      || this.config.get<string>("DEFAULT_MODEL_API_KEY")?.trim();
+  }
+
+  codexSupportsWebsockets(): boolean {
+    return this.config.get<string>("CODEX_SUPPORTS_WEBSOCKETS")?.trim().toLowerCase() === "true";
+  }
+
   deerFlowGatewayUrl() {
     return this.config.get<string>("DEERFLOW_GATEWAY_URL")?.trim();
   }
@@ -67,4 +99,8 @@ function normalizeProvider(value: string | undefined, fallback: RuntimeProvider)
   const normalized = value?.trim().toLowerCase();
   if (normalized === "local" || normalized === "codex" || normalized === "deerflow") return normalized;
   return fallback;
+}
+
+function safeProviderId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_]/g, "_") || "vibe_openai_compatible";
 }
