@@ -32,8 +32,9 @@
 
 ## 3. 线上当前状态
 
-截至 2026-06-26 11:27 左右，本轮重构已经推送到 GitHub `main`：
+截至 2026-06-26 11:29 左右，本轮重构已经推送到 GitHub `main`：
 
+- 后续补丁：API Docker 镜像安装 `@openai/codex`，`CODEX_CLI_VERSION` 可通过 `.env` / compose / deploy script 控制。
 - `b0371c0 chore: pass runtime config through deploy`
 - `d0c364c feat: switch vibe execution to external runtimes`
 
