@@ -9,6 +9,8 @@ output
 .DS_Store
 *.log
 *.tsbuildinfo
+__pycache__/
+*.pyc
 .turbo
 .vercel
 .playwright-cli

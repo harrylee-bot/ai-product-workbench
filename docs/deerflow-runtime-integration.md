@@ -33,10 +33,13 @@ DEERFLOW_ENABLED=true
 DEERFLOW_LANGGRAPH_URL=http://localhost:2024
 DEERFLOW_GATEWAY_URL=http://localhost:8001
 DEERFLOW_ASSISTANT_ID=lead_agent
+DEERFLOW_AGENT_NAME=ai-product-workbench-lead
 DEERFLOW_STREAM_MODE=messages-tuple
 DEERFLOW_UPLOADS_ENABLED=true
 DEERFLOW_ARTIFACT_MAX_INLINE_BYTES=2000000
 ```
+
+`DEERFLOW_AGENT_NAME` should be enabled after the DeerFlow custom agent has been installed. Leave it empty if the DeerFlow instance does not have the agent yet.
 
 ## Thread Binding
 
@@ -95,6 +98,54 @@ DeerFlow should include generated output paths in the final action:
 
 The backend fetches these paths through `GET /api/threads/{thread_id}/artifacts/{path}` and stores small text/HTML/JSON artifacts inline in the run result. Large or binary artifacts are recorded by URL/path only.
 
+## DeerFlow Assets
+
+This repository ships DeerFlow-side runtime assets under `integrations/deerflow/`:
+
+- `agents/ai-product-workbench-lead`: custom agent config and `SOUL.md`
+- `skills/ai-product-workbench`: Workbench skill, final action contract, Codex execution-node procedure
+- `skills/ai-product-workbench/scripts/run_codex_node.py`: process-exit based Codex execution wrapper
+
+Install or update them on a running DeerFlow instance:
+
+```bash
+npm run deerflow:bootstrap -- --gateway-url http://localhost:8001 --langgraph-url http://localhost:2024
+```
+
+Validate locally without network calls:
+
+```bash
+npm run deerflow:bootstrap -- --dry-run
+```
+
+After installation, set:
+
+```env
+DEERFLOW_AGENT_NAME=ai-product-workbench-lead
+```
+
+## Codex Node
+
+Codex runs inside DeerFlow as a coding/prototype execution node. DeerFlow decides when to use it, normally via a `task()` sub-agent. The bundled script invokes `codex exec` and writes:
+
+- `codex-prompt.md`
+- `codex-stdout.log`
+- `codex-stderr.log`
+- `codex-last-message.md`
+- `codex-node-manifest.json`
+
+The completion signal is the Codex process exit and manifest status. The backend never polls output files to guess whether Codex has finished.
+
+Useful DeerFlow sandbox environment variables:
+
+```env
+CODEX_COMMAND=codex
+CODEX_NODE_MODEL=
+CODEX_NODE_SANDBOX=workspace-write
+CODEX_NODE_APPROVAL_POLICY=never
+CODEX_NODE_COMMAND_TEMPLATE=
+```
+
 ## References
 
 - DeerFlow README: `https://github.com/bytedance/deer-flow`
@@ -103,3 +154,7 @@ The backend fetches these paths through `GET /api/threads/{thread_id}/artifacts/
 - Gateway overview: `https://mintlify.wiki/bytedance/deer-flow/api/gateway/overview.md`
 - Gateway uploads: `https://mintlify.wiki/bytedance/deer-flow/api/gateway/uploads.md`
 - Gateway artifacts: `https://mintlify.wiki/bytedance/deer-flow/api/gateway/artifacts.md`
+- Custom agents: `https://mintlify.wiki/bytedance/deer-flow/api/gateway/agents.md`
+- Skills: `https://mintlify.wiki/bytedance/deer-flow/api/gateway/skills.md`
+- Sub-agents: `https://mintlify.wiki/bytedance/deer-flow/concepts/sub-agents.md`
+- Sandbox tools: `https://mintlify.wiki/bytedance/deer-flow/api/tools/sandbox.md`

@@ -15,7 +15,8 @@
     "test": "npm --workspace @ai-product-workbench/api run test",
     "db:generate": "prisma generate --schema packages/db/prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema packages/db/prisma/schema.prisma",
-    "db:seed": "npm --workspace @ai-product-workbench/db run seed"
+    "db:seed": "npm --workspace @ai-product-workbench/db run seed",
+    "deerflow:bootstrap": "node scripts/deerflow-bootstrap.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
