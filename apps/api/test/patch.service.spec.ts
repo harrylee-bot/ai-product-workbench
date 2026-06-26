@@ -1,6 +1,4 @@
 import {
-  AgentName,
-  AgentStepStatus,
   MessageType,
   PatchRecordStatus,
   ProductDesignStateStatus,
@@ -86,20 +84,11 @@ describe("PatchService", () => {
   const qaService = {
     runForProject: vi.fn(),
   };
-  const patchAgent = {
-    run: vi.fn(),
-  };
-  const prdWriterAgent = {
-    run: vi.fn(),
-  };
-  const prototypeDesignerAgent = {
-    run: vi.fn(),
-  };
-  const prototypeCodeAgent = {
-    run: vi.fn(),
-  };
-  const qaAgent = {
-    run: vi.fn(),
+  const productRuntime = {
+    planPatch: vi.fn(),
+    generatePrd: vi.fn(),
+    generatePrototypeSpec: vi.fn(),
+    generatePrototypeHtml: vi.fn(),
   };
   const service = new PatchService(
     prisma as never,
@@ -112,11 +101,7 @@ describe("PatchService", () => {
     documentService as never,
     prototypeService as never,
     qaService as never,
-    patchAgent as never,
-    prdWriterAgent as never,
-    prototypeDesignerAgent as never,
-    prototypeCodeAgent as never,
-    qaAgent as never,
+    productRuntime as never,
   );
   const user = {
     id: "user-1",
@@ -160,11 +145,6 @@ describe("PatchService", () => {
     fileAssetService.attachFilesToMessage.mockResolvedValue(undefined);
     runLog.createRun.mockResolvedValue({ id: "run-1", traceId: "trace-1", startedAt: now });
     runLog.markRunIntent.mockResolvedValue(undefined);
-    runLog.createStep.mockImplementation(async ({ agentName }) => ({
-      id: `step-${agentName}`,
-      agentName,
-      status: AgentStepStatus.pending,
-    }));
     runLog.startStep.mockResolvedValue(undefined);
     runLog.completeStep.mockResolvedValue(undefined);
     runLog.failStep.mockResolvedValue(undefined);
@@ -181,7 +161,7 @@ describe("PatchService", () => {
   it("creates a PatchRecord preview candidate without mutating ProductDesignState", async () => {
     const beforeState = baseState();
     stateService.getCurrentState.mockResolvedValue(beforeState);
-    patchAgent.run.mockResolvedValue({ data: basePatchPlan() });
+    productRuntime.planPatch.mockResolvedValue({ data: basePatchPlan() });
 
     const result = await service.createPatchForUser(user, "project-1", {
       conversationId: "conversation-1",
@@ -236,7 +216,7 @@ describe("PatchService", () => {
     expect(knowledgeRetrieval.search).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: "project-1",
-        agentName: AgentName.patch_agent,
+        agentName: "runtime_patch",
       }),
     );
     expect(stream.emit).toHaveBeenCalledWith(
@@ -261,7 +241,7 @@ describe("PatchService", () => {
   it("creates an inline editing Patch candidate without mutating ProductDesignState", async () => {
     const beforeState = baseState();
     stateService.getCurrentState.mockResolvedValue(beforeState);
-    patchAgent.run.mockResolvedValue({ data: basePatchPlan() });
+    productRuntime.planPatch.mockResolvedValue({ data: basePatchPlan() });
 
     const result = await service.createPatchCandidateForUser(user, "project-1", {
       conversationId: "conversation-1",
@@ -400,10 +380,10 @@ describe("PatchService", () => {
     }));
     stateService.getCurrentState.mockResolvedValue(beforeState);
     stateService.applyPatch.mockResolvedValue(patchedState);
-    prdWriterAgent.run.mockResolvedValue({ data: basePrdDraft() });
+    productRuntime.generatePrd.mockResolvedValue({ data: basePrdDraft() });
     documentService.saveGeneratedDocument.mockResolvedValue(prdDocument);
-    prototypeDesignerAgent.run.mockResolvedValue({ data: prototypeSpec });
-    prototypeCodeAgent.run.mockResolvedValue({ data: basePrototypeDraft() });
+    productRuntime.generatePrototypeSpec.mockResolvedValue({ data: prototypeSpec });
+    productRuntime.generatePrototypeHtml.mockResolvedValue({ data: basePrototypeDraft() });
     prototypeService.saveGeneratedPrototype.mockResolvedValue({ prototypeSpec, artifact });
     stateService.attachGeneratedArtifacts.mockResolvedValue(stateWithArtifacts);
     qaService.runForProject.mockResolvedValue(qaReport);
@@ -432,7 +412,7 @@ describe("PatchService", () => {
         patchPreview: expect.objectContaining({ previewStatus: "applied" }),
       }),
     );
-    expect(patchAgent.run).not.toHaveBeenCalled();
+    expect(productRuntime.planPatch).not.toHaveBeenCalled();
     expect(stateService.applyPatch).toHaveBeenCalledWith(
       "project-1",
       beforeState,
@@ -564,9 +544,9 @@ describe("PatchService", () => {
     }));
     stateService.getCurrentState.mockResolvedValue(beforeState);
     stateService.applyPatch.mockResolvedValue(patchedState);
-    prdWriterAgent.run.mockResolvedValue({ data: basePrdDraft() });
+    productRuntime.generatePrd.mockResolvedValue({ data: basePrdDraft() });
     documentService.saveGeneratedDocument.mockResolvedValue(prdDocument);
-    prototypeDesignerAgent.run.mockResolvedValue({ data: prototypeSpec });
+    productRuntime.generatePrototypeSpec.mockResolvedValue({ data: prototypeSpec });
     prototypeService.trySaveLocalizedGeneratedPrototype.mockResolvedValue({
       prototypeSpec,
       artifact,
@@ -598,7 +578,7 @@ describe("PatchService", () => {
         sourceArtifactId: "artifact-1",
       }),
     );
-    expect(prototypeCodeAgent.run).not.toHaveBeenCalled();
+    expect(productRuntime.generatePrototypeHtml).not.toHaveBeenCalled();
     expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
     expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
       type: "prototype_updated",
@@ -632,13 +612,13 @@ describe("PatchService", () => {
       state: rollbackState,
       version: { id: "version-9", version: 9 },
     });
-    prdWriterAgent.run.mockRejectedValue(new Error("PRD_REGENERATION_FAILED"));
+    productRuntime.generatePrd.mockRejectedValue(new Error("PRD_REGENERATION_FAILED"));
 
     await expect(
       service.confirmForUser(user, "patch-1", "确认应用预览"),
     ).rejects.toThrow("PRD_REGENERATION_FAILED");
 
-    expect(patchAgent.run).not.toHaveBeenCalled();
+    expect(productRuntime.planPatch).not.toHaveBeenCalled();
     expect(prisma.patchPreview.update).toHaveBeenCalledWith({
       where: { id: "preview-1" },
       data: expect.objectContaining({

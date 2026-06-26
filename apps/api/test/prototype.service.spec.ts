@@ -6,8 +6,10 @@ import {
   UserStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHtmlFromPrototypeSpec } from "../src/ai/agents/prototype-code-agent.service";
-import { renderPrototypeSpecFromState } from "../src/ai/agents/prototype-designer-agent.service";
+import {
+  renderHtmlFromPrototypeSpec,
+  renderPrototypeSpecFromState,
+} from "../src/ai/runtime/local-protocol-renderers";
 import type { ProductDesignState, PrototypeArtifactDraft } from "../src/ai/ai-vibe.types";
 import { PrototypeService, replacePrototypeComponentHtml, validateHtmlSafety } from "../src/ai/prototype.service";
 
@@ -40,15 +42,15 @@ describe("HTML prototype artifact module", () => {
     getStateByIdForProject: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
   };
-  const prototypeDesignerAgent = { run: vi.fn() };
-  const prototypeCodeAgent = { run: vi.fn() };
+  const productRuntime = {
+    generatePrototypeSpec: vi.fn(),
+    generatePrototypeHtml: vi.fn(),
+  };
   const qaService = { assertGateAllows: vi.fn() };
   const service = new PrototypeService(
     prisma as never,
     stateService as never,
-    prototypeDesignerAgent as never,
-    prototypeCodeAgent as never,
-    undefined,
+    productRuntime as never,
     undefined,
     qaService as never,
   );
@@ -79,8 +81,8 @@ describe("HTML prototype artifact module", () => {
       status: input.status,
       prototypeSpec: input.prototypeSpec,
     }));
-    prototypeDesignerAgent.run.mockResolvedValue({ data: spec });
-    prototypeCodeAgent.run.mockResolvedValue({
+    productRuntime.generatePrototypeSpec.mockResolvedValue({ data: spec });
+    productRuntime.generatePrototypeHtml.mockResolvedValue({
       data: {
         projectId: state.projectId,
         prototypeSpecId: spec.id,
@@ -269,7 +271,7 @@ describe("HTML prototype artifact module", () => {
       componentId: "page_home_primary_action",
       sourceArtifactId: "artifact-before",
     }));
-    expect(prototypeCodeAgent.run).not.toHaveBeenCalled();
+    expect(productRuntime.generatePrototypeHtml).not.toHaveBeenCalled();
     expect(prisma.project.update).toHaveBeenCalledWith({
       where: { id: "project-1" },
       data: { currentPrototypeArtifactId: "artifact-local" },
@@ -283,8 +285,8 @@ describe("HTML prototype artifact module", () => {
     });
     const spec = renderPrototypeSpecFromState(state, "both", "run-1");
     stateService.getCurrentState.mockResolvedValue(state);
-    prototypeDesignerAgent.run.mockResolvedValue({ data: spec });
-    prototypeCodeAgent.run.mockResolvedValue({
+    productRuntime.generatePrototypeSpec.mockResolvedValue({ data: spec });
+    productRuntime.generatePrototypeHtml.mockResolvedValue({
       data: {
         projectId: state.projectId,
         prototypeSpecId: spec.id,
@@ -319,8 +321,8 @@ describe("HTML prototype artifact module", () => {
       service.generateForUser(user, "project-1", { targetDevice: "both" }),
     ).rejects.toThrow("PROTOTYPE_PRD_NOT_CONFIRMED");
 
-    expect(prototypeDesignerAgent.run).not.toHaveBeenCalled();
-    expect(prototypeCodeAgent.run).not.toHaveBeenCalled();
+    expect(productRuntime.generatePrototypeSpec).not.toHaveBeenCalled();
+    expect(productRuntime.generatePrototypeHtml).not.toHaveBeenCalled();
     expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
   });
 

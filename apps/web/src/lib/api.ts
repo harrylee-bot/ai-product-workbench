@@ -1,6 +1,20 @@
 import { clearSession, readSession } from "./auth-storage";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000/api";
+const API_BASE_URL_ENV = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+
+function getApiBaseUrl() {
+  if (API_BASE_URL_ENV) {
+    return API_BASE_URL_ENV;
+  }
+
+  if (typeof window === "undefined") {
+    return "http://localhost:4000/api";
+  }
+
+  return `${window.location.protocol}//${window.location.hostname}:4000/api`;
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 type ApiOptions = RequestInit & {
   skipAuth?: boolean;

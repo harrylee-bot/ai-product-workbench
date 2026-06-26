@@ -7,7 +7,7 @@ export class SystemController {
     return {
       ok: true,
       service: "ai-product-workbench-api",
-      phase: "triple-system-fusion-ai-product-os",
+      phase: "vibe-runtime-adapter",
       modules: [
         "auth",
         "admin-users",
@@ -30,16 +30,11 @@ export class SystemController {
         "prd-editing",
         "prototype-editing",
         "inline-assistant",
-        "interaction-capture",
-        "semantic-feedback-analyzer",
-        "multi-agent-review",
-        "evolution-engine",
-        "patch-execution-engine",
-        "product-memory",
-        "evolution-orchestrator",
+        "runtime-adapters",
+        "codex-runtime-adapter",
+        "deerflow-runtime-adapter",
+        "product-runtime-service",
         "constraint-system",
-        "fusion-decision-system",
-        "fusion-evolution-system",
       ],
     };
   }

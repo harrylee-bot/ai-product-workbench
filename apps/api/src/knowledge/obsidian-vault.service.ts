@@ -47,14 +47,10 @@ type MarkdownMetadata = {
 };
 
 const VAULT_FOLDERS = [
-  "00-知识库使用规范",
-  "01-产品架构",
-  "02-业务域知识",
-  "03-产品进化规划",
-  "04-产品文档规范",
-  "05-原型设计规范",
-  "06-历史案例库",
-  "07-来源资产索引",
+  "01-产品知识",
+  "02-规则约束",
+  "03-案例库",
+  "04-原型模式",
   "99-收件箱",
   "_templates",
 ];
@@ -76,70 +72,125 @@ const SEED_FILES: VaultSeedFile[] = [
 
 ## 目录
 
-- \`00-知识库使用规范\`：AI 如何选择知识和避免误召回。
-- \`01-产品架构\`：角色、能力层、核心对象、状态流转和横切能力。
-- \`02-业务域知识\`：每个业务域的产品逻辑、流程、字段、风险和验收。
-- \`03-产品进化规划\`：历史业务增量和新产品创新的判断规则。
-- \`04-产品文档规范\`：PRD、需求说明书、验收标准和风险评审写法。
-- \`05-原型设计规范\`：PrototypeSpec、HTML 原型和 OpenPencil 原型规则。
-- \`06-历史案例库\`：历史案例、复用策略和失败教训。
-- \`07-来源资产索引\`：原始导入资料、旧版整理和资产来源。
+- \`01-产品知识\`：业务域、需求输入分类、历史资产索引与业务语义框架。
+- \`02-规则约束\`：需求文档、PRD、活动与资损、AI 与 Dify 落地约束。
+- \`03-案例库\`：历史案例、复用策略、反例与经验沉淀。
+- \`04-原型模式\`：页面模式、后台配置、预览/发布与复用模板。
+- \`99-收件箱\`：原始导入与待整理内容（后续转入主目录）。
 `,
   },
   {
-    path: "00-知识库使用规范/README.md",
-    content: `# 知识库使用规范
+    path: "01-产品知识/README.md",
+    content: `# 产品知识
 
-规定 AI 在理解产品、写 PRD、生成原型、优化历史业务和设计新产品时的知识调用顺序。
+沉淀可复用的业务语义、需求输入分类、历史需求逻辑和产品增长/进化判断框架。
 `,
   },
   {
-    path: "01-产品架构/README.md",
-    content: `# 产品架构
+    path: "01-产品知识/需求文档知识库/README.md",
+    content: `# 需求文档知识库
 
-沉淀策划宝/云溪营销活动平台的能力层、核心对象、端到端流程、权限和风险模型。
+按历史需求资产整理的业务输入、案例索引与需求结构化入口。
 `,
   },
   {
-    path: "02-业务域知识/README.md",
-    content: `# 业务域知识
+    path: "01-产品知识/产品架构与能力地图.md",
+    content: `# 产品架构与能力地图
 
-按活动发布、素材库、奖品券、号卡 OAO、数据报表、AI 助手、权限审核等业务域沉淀产品逻辑。
+先建立业务能力边界与对象模型，统一历史能力、增量能力和创新能力的映射关系。
 `,
   },
   {
-    path: "03-产品进化规划/README.md",
-    content: `# 产品进化规划
+    path: "01-产品知识/产品进化与创新决策.md",
+    content: `# 产品进化与创新决策
 
-判断需求属于历史业务增量、平台化抽象、风险治理补齐还是新产品创新。
+用于区分历史业务增量、平台化新增和新产品创新，并给出发布闭环与回滚边界。
 `,
   },
   {
-    path: "04-产品文档规范/README.md",
-    content: `# 产品文档规范
+    path: "01-产品知识/业务域产品逻辑映射.md",
+    content: `# 业务域产品逻辑映射
 
-规定 PRD、需求说明书、验收标准和风险清单的结构与写法。
+用于把业务域映射到对象模型、状态链与异常规则。
 `,
   },
   {
-    path: "05-原型设计规范/README.md",
-    content: `# 原型设计规范
+    path: "01-产品知识/业务逻辑与PRD原型映射.md",
+    content: `# 业务逻辑与 PRD 原型映射
 
-规定前后台页面框架、字段接口状态表达、历史业务增量原型和新产品创新原型规则。
+把业务域、对象和状态映射到 PRD 章节与原型页面。
 `,
   },
   {
-    path: "06-历史案例库/README.md",
-    content: `# 历史案例库
+    path: "02-规则约束/README.md",
+    content: `# 规则约束
 
-按业务域沉淀历史案例、可复用产品逻辑、风险经验和原型复用依据。
+沉淀需求分析、需求文档、活动风险、AI 落地与发布前后端约束体系。
 `,
   },
   {
-    path: "07-来源资产索引/README.md",
-    content: `# 来源资产索引
+    path: "02-规则约束/需求文档沉淀/README.md",
+    content: `# 规则沉淀
 
-保存原始导入资料、旧版整理、操作手册、需求清单和原型资产线索，不作为 AI 生成的第一召回层。
+统一归档从需求、案例、评审资料提炼出的规则：强约束、偏好规则和风险提醒。
+`,
+  },
+  {
+    path: "02-规则约束/需求文档沉淀/PRD输出边界与交付规范.md",
+    content: `# PRD 输出边界与交付规范
+
+约束 PRD 的交付范围，明确不应包含执行细节与资损表。
+`,
+  },
+  {
+    path: "03-案例库/README.md",
+    content: `# 案例库
+
+历史需求中的高价值案例、反例和复用经验。
+`,
+  },
+  {
+    path: "03-案例库/需求案例库/README.md",
+    content: `# 需求案例库
+
+案例按业务域归类，支持新需求生成时快速检索可复用流程与字段体系。
+`,
+  },
+  {
+    path: "03-案例库/需求案例库/历史业务增量与创新复用矩阵.md",
+    content: `# 历史业务增量与创新复用矩阵
+
+帮助快速判断历史复用与新增创新路径，减少重复建模。
+`,
+  },
+  {
+    path: "04-原型模式/README.md",
+    content: `# 原型模式
+
+沉淀前后端统一设计、页面模式、配置化流程、预览发布和验收闭环。
+`,
+  },
+  {
+    path: "04-原型模式/前后端设计框架.md",
+    content: `# 前后端设计框架
+
+用于生成原型时的前后端对齐框架：字段、状态、异常、发布闭环统一输出。
+
+## 统一闭环
+
+1. 用户端页面
+2. 配置模型
+3. 预览态
+4. 审核态
+5. 发布态
+6. 统计态
+
+## 设计约束
+
+- 更新字段必须带变更原因。
+- 发布前必须有预览态验证。
+- 审核态/发布态关键字段禁止随意改写。
+- 下线与回滚必须能恢复到最近稳定版本。
 `,
   },
   {
@@ -595,6 +646,12 @@ function splitMarkdownBody(body: string) {
 
 function inferKnowledgeType(relativePath: string, title: string, tags: string[]) {
   const text = `${relativePath} ${title} ${tags.join(" ")}`;
+  if (relativePath === "README.md") return KnowledgeType.default_rule;
+  if (/^99-收件箱\//.test(relativePath)) return KnowledgeType.default_rule;
+  if (/^04-原型模式\//.test(relativePath)) return KnowledgeType.prototype_rule;
+  if (/^03-案例库\//.test(relativePath)) return KnowledgeType.reference_case;
+  if (/^02-规则约束\//.test(relativePath)) return KnowledgeType.strong_rule;
+  if (/^01-产品知识\//.test(relativePath)) return KnowledgeType.business_concept;
   if (/^05-原型设计规范\//.test(relativePath)) return KnowledgeType.prototype_rule;
   if (/^04-产品文档规范\//.test(relativePath)) return KnowledgeType.prd_writing_rule;
   if (/^06-历史案例库\//.test(relativePath)) return KnowledgeType.reference_case;
@@ -611,8 +668,10 @@ function inferKnowledgeType(relativePath: string, title: string, tags: string[])
 
 function inferPriority(relativePath: string, title: string, type: KnowledgeType) {
   const text = `${relativePath} ${title}`;
-  if (/07-来源资产索引|99-收件箱|旧版整理/.test(text)) return KnowledgePriority.low;
-  if (/00-知识库使用规范|01-产品架构|02-业务域知识|03-产品进化规划|04-产品文档规范|05-原型设计规范|06-历史案例库/.test(text)) return KnowledgePriority.high;
+  if (relativePath === "README.md") return KnowledgePriority.high;
+  if (/07-来源资产索引|99-收件箱|旧版整理|需求文档导入记录/.test(text)) return KnowledgePriority.low;
+  if (/01-产品知识|02-规则约束|03-案例库|04-原型模式|05-原型设计规范|06-历史案例库|07-来源资产索引|04-产品文档规范|03-产品进化规划|02-业务域知识|00-知识库使用规范|01-产品架构/.test(text))
+    return KnowledgePriority.high;
   if (type === KnowledgeType.strong_rule) return KnowledgePriority.high;
   if (/知识库使用规范|产品架构|能力地图|产品进化|产品逻辑|产品文档规范|原型设计规范|历史业务增量|新产品创新|Agent|AI营销助手|Dify|配置化页面|通用约束|资损/.test(text)) return KnowledgePriority.high;
   if (/清单|README|索引/.test(text)) return KnowledgePriority.low;

@@ -9,7 +9,7 @@ import { apiRequest } from "@/lib/api";
 import type { KnowledgeVaultEntry, KnowledgeVaultStatus, KnowledgeVaultSyncResult } from "@/lib/types";
 
 const KNOWLEDGE_APP_URL =
-  process.env.NEXT_PUBLIC_KNOWLEDGE_APP_URL ?? "http://8.130.160.177:3001";
+  process.env.NEXT_PUBLIC_KNOWLEDGE_APP_URL ?? "http://45.207.206.76:3001";
 
 export function AdminKnowledgeVaultClient() {
   const [status, setStatus] = useState<KnowledgeVaultStatus | null>(null);

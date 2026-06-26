@@ -1,29 +1,16 @@
-import { Injectable } from "@nestjs/common";
-import {
-  AgentName,
-  AgentStepStatus,
-  MessageType,
-  ProductDesignStateStatus,
-  ProjectStatus,
-  RequirementDocumentStatus,
-  UserIntent,
-} from "@prisma/client";
+import { Injectable, Optional } from "@nestjs/common";
+import { MessageType, ProductDesignStateStatus, ProjectStatus, UserIntent } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
-import { fallbackStepOutput } from "./agent-fallback-policy";
-import { attachDecisionTraceToStepData, buildAgentDecisionTrace } from "./agent-decision-trace";
-import { qaCompletedPayload, toInputJson } from "./ai-vibe.helpers";
-import { isCasualGeneralInput } from "./intent-classifier.helpers";
+import { toInputJson } from "./ai-vibe.helpers";
 import type {
   AgentRunContext,
-  AgentOutput,
-  ContextFetchResult,
-  ExportArtifactSummary,
   AttachmentSummary,
+  ExportArtifactSummary,
   InputQualityAssessment,
   IntentResult,
-  KnowledgeContext,
   KnowledgeCandidate,
   KnowledgeCandidateDraft,
   PatchPlan,
@@ -33,44 +20,20 @@ import type {
   PrototypeArtifact,
   PrototypeSpec,
   QAReport,
-  RequirementAnalysis,
+  RequirementDocument,
   RequirementGateDecision,
   RequirementIntakeGraph,
-  RequirementPackage,
-  RequirementDocument,
+  ContextFetchResult,
 } from "./ai-vibe.types";
-import { assessInputQuality } from "./input-quality-gate";
-import {
-  buildContextFetchResult,
-  buildRequirementIntakeGraph,
-  buildRequirementNodeTrace,
-  buildRequirementPackage,
-  checkRequirementSafety,
-  decideRequirementGate,
-  gateDecisionTrace,
-  validateRequirementPackage,
-} from "./requirement-intake-pipeline";
-import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
-import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
-import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
-import { ProductDesignerAgentService } from "./agents/product-designer-agent.service";
-import { ProductPlannerAgentService } from "./agents/product-planner-agent.service";
-import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service";
-import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
-import { QaAgentService } from "./agents/qa-agent.service";
-import { RequirementAnalystAgentService } from "./agents/requirement-analyst-agent.service";
-import { IntentAgentService } from "./agents/intent-agent.service";
-import { ProductDesignStateService } from "./product-design-state.service";
-import { PrototypeService } from "./prototype.service";
-import { QaService } from "./qa.service";
-import { RequirementDocumentService } from "./requirement-document.service";
-import { VibeStreamService } from "./vibe-stream.service";
 import { ExportService } from "./export.service";
-import { PatchService } from "./patch.service";
-import {
-  projectStatusForCompletedArtifacts,
-  projectStatusFromProductDesignState,
-} from "./workspace-state-machine";
+import { ProductDesignStateService } from "./product-design-state.service";
+import { RequirementDocumentService } from "./requirement-document.service";
+import { ExternalRuntimeConfigService } from "./runtime/external-runtime-config.service";
+import { ExternalRuntimeService } from "./runtime/external-runtime.service";
+import type { RuntimeProvider, RequirementRuntimeInput, RequirementRuntimeOutput } from "./runtime/external-runtime.types";
+import { projectStatusFromProductDesignState } from "./workspace-state-machine";
+import { VibeStreamService } from "./vibe-stream.service";
+
 type OrchestratorInput = {
   context: AgentRunContext;
   userMessageId: string;
@@ -104,348 +67,94 @@ export type OrchestratorResult = {
   patchPlan?: PatchPlan;
   patchRecord?: PatchRecord;
   patchPreview?: unknown;
+  runtimeAdapter?: {
+    status: "not_configured" | "completed";
+    provider?: Exclude<RuntimeProvider, "local">;
+    expectedProviders?: Array<Exclude<RuntimeProvider, "local">>;
+  };
   knowledgeCandidates?: Array<KnowledgeCandidate | KnowledgeCandidateDraft>;
   exportArtifact?: ExportArtifactSummary;
   nextAction?: {
     type: "ask_clarification" | "review_prd" | "review_prototype" | "review_qa" | "answer" | "download_export" | "confirm_patch";
     questions?: ProductDesignState["pendingQuestions"];
     risks?: PatchPlan["risks"];
-    /** 确认门 A：用户确认 PRD 后是否应继续生成原型（FR-1.3） */
     wantsPrototype?: boolean;
   };
 };
 
+/**
+ * Runtime-only orchestrator boundary.
+ *
+ * The previous self-authored Vibe agent chain has intentionally been removed
+ * from the active path. This class now owns only product-system duties:
+ * run lifecycle, assistant message persistence, export passthrough, project
+ * status updates, and stream terminal events. DeerFlow/Codex runtime adapters
+ * will be wired behind this boundary in follow-up slices.
+ */
 @Injectable()
 export class AiOrchestratorService {
   constructor(
     private readonly runLog: AgentRunLogService,
     private readonly stream: VibeStreamService,
-    private readonly stateService: ProductDesignStateService,
-    private readonly documentService: RequirementDocumentService,
-    private readonly prototypeService: PrototypeService,
-    private readonly exportService: ExportService,
-    private readonly patchService: PatchService,
-    private readonly qaService: QaService,
     private readonly messageService: MessageService,
     private readonly prisma: PrismaService,
-    private readonly intentAgent: IntentAgentService,
-    private readonly knowledgeAgent: KnowledgeAgentService,
-    private readonly requirementAnalystAgent: RequirementAnalystAgentService,
-    private readonly productPlannerAgent: ProductPlannerAgentService,
-    private readonly productDesignerAgent: ProductDesignerAgentService,
-    private readonly prdWriterAgent: PrdWriterAgentService,
-    private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
-    private readonly prototypeCodeAgent: PrototypeCodeAgentService,
-    private readonly qaAgent: QaAgentService,
-    private readonly knowledgeExtractorAgent: KnowledgeExtractorAgentService,
+    private readonly exportService: ExportService,
+    @Optional()
+    private readonly runtimeConfig?: ExternalRuntimeConfigService,
+    @Optional()
+    private readonly runtime?: ExternalRuntimeService,
+    @Optional()
+    private readonly stateService?: ProductDesignStateService,
+    @Optional()
+    private readonly documentService?: RequirementDocumentService,
   ) {}
 
   async run(input: OrchestratorInput): Promise<OrchestratorResult> {
     const { context } = input;
+    const intent = detectIntent(context.userInput);
+
     try {
-      await this.emit(context, "message_delta", "正在理解你的需求...");
-      const intent = await this.runAgentStep(
-        context,
-        AgentName.intent_agent,
-        "intent_detection",
-        () =>
-          this.intentAgent.run({
-            runId: context.runId,
-            projectId: context.projectId,
-            traceId: context.traceId,
-            userId: context.userId,
-            input: {
-              userInput: context.userInput,
-              selectedRegion: context.selectedRegion,
-              currentProjectStatus: context.currentProjectStatus,
-              previewMode: context.previewMode,
-              recentMessages: context.recentMessages,
-            },
-          }),
-      );
-      context.intentResult = intent.data;
-      await this.runLog.markRunIntent(context.runId, intent.data.intent);
+      await this.runLog.markRunIntent(context.runId, intent.intent);
 
-      if (intent.data.intent === UserIntent.general_question) {
-        return this.finishGeneralAnswer(context, intent.data);
+      if (intent.intent === UserIntent.export_word || intent.intent === UserIntent.export_html) {
+        return await this.finishExport(context, intent);
       }
 
-      if (intent.data.intent === UserIntent.export_word || intent.data.intent === UserIntent.export_html) {
-        return this.finishExport(context, intent.data);
+      const requirementRuntime = this.requirementRuntimeProvider();
+      if (requirementRuntime) {
+        return await this.finishRequirementRuntime(input, intent, requirementRuntime);
       }
 
-      context.inputQuality = assessInputQuality(context.userInput, input.attachments);
-      await this.emit(context, "message_delta", `输入质量评分 ${context.inputQuality.score}/100`, {
-        inputQuality: context.inputQuality,
-      });
-      if (context.inputQuality.shouldBlock) {
-        return this.finishInputQualityGate(context, intent.data, context.inputQuality);
-      }
-
-      // FR-2.2 意图路由：已存在 PRD 文档且用户要求生成原型时，直接从原型阶段进入，
-      // 跳过需求理解与文档生成（propose-then-commit 的"从指定阶段恢复"）。
-      const productDesignState = context.productDesignState;
-      if (
-        intent.data.intent === UserIntent.generate_prototype &&
-        productDesignState &&
-        hasConfirmedPrdForPrototype(productDesignState)
-      ) {
-        await this.emit(context, "message_delta", "检测到已确认的需求文档，正在直接生成原型...");
-        return this.generatePrototypeForState(
-          context,
-          input,
-          intent.data,
-          productDesignState,
-        );
-      }
-
-      await this.emit(context, "message_delta", "正在并行检索知识库和项目上下文...");
-      const [knowledge, contextFetch] = await Promise.all([
-        this.runAgentStep(
-          context,
-          AgentName.knowledge_agent,
-          "knowledge_retrieval",
-          () =>
-            this.knowledgeAgent.run({
-              runId: context.runId,
-              projectId: context.projectId,
-              traceId: context.traceId,
-              userId: context.userId,
-              input: {
-                userInput: context.userInput,
-                productDesignState: context.productDesignState,
-                intent: intent.data.intent,
-                attachments: input.attachments,
-              },
-            }),
-        ),
-        this.runAgentStep(context, AgentName.orchestrator, "context_fetch", async () => {
-          const data = buildContextFetchResult({ context, attachments: input.attachments });
-          return {
-            data,
-            decisionTrace: buildRequirementNodeTrace("context_fetch", data),
-          };
-        }),
-      ]);
-      context.knowledgeContext = knowledge.data;
-      context.contextFetch = contextFetch.data;
-
-      await this.emit(context, "message_delta", "正在分析需求完整度...");
-      const requirement = await this.runAgentStep(
-        context,
-        AgentName.requirement_analyst_agent,
-        "requirement_analysis",
-        () =>
-          this.requirementAnalystAgent.run({
-            runId: context.runId,
-            projectId: context.projectId,
-            traceId: context.traceId,
-            userId: context.userId,
-            input: {
-              userInput: context.userInput,
-              knowledgeContext: knowledge.data,
-              productDesignState: context.productDesignState,
-              recentMessages: context.recentMessages,
-            },
-          }),
-      );
-      context.requirementAnalysis = requirement.data;
-
-      await this.emit(context, "message_delta", "正在合并用户事实、知识和项目上下文...");
-      const requirementPackage = await this.runAgentStep(
-        context,
-        AgentName.orchestrator,
-        "requirement_packaging",
-        async () => {
-          const data = buildRequirementPackage({
-            context,
-            intent: intent.data.intent,
-            knowledgeContext: knowledge.data,
-            contextFetch: contextFetch.data,
-            requirementAnalysis: requirement.data,
-          });
-          return {
-            data,
-            decisionTrace: buildRequirementNodeTrace("requirement_packaging", data),
-          };
-        },
-      );
-      context.requirementPackage = requirementPackage.data;
-
-      const isPatch =
-        intent.data.intent === UserIntent.patch_document || intent.data.intent === UserIntent.patch_prototype;
-      let productBuildPlan: ProductBuildPlan | undefined;
-      let state = context.productDesignState;
-
-      if (isPatch) {
-        const gate = await this.runRequirementGate(context, requirementPackage.data);
-        if (gate.action === "blocked" || gate.action === "ask_clarification" || !gate.canApplyPatch) {
-          return this.finishRequirementGateStop(context, intent.data, gate);
-        }
-        return this.finishPatchCandidate(context, input, intent.data, knowledge.data);
-      } else {
-        await this.emit(context, "message_delta", "正在规划正式需求执行方案...");
-        const plan = await this.runAgentStep(
-          context,
-          AgentName.product_planner_agent,
-          "product_planning",
-          () =>
-            this.productPlannerAgent.run({
-              runId: context.runId,
-              projectId: context.projectId,
-              traceId: context.traceId,
-              userId: context.userId,
-              input: {
-                userInput: context.userInput,
-                intent: intent.data.intent,
-                requirementAnalysis: requirement.data,
-                requirementPackage: requirementPackage.data,
-                knowledgeContext: knowledge.data,
-                existingState: context.productDesignState,
-              },
-            }),
-        );
-        productBuildPlan = plan.data;
-        context.productBuildPlan = productBuildPlan;
-
-        const gate = await this.runRequirementGate(context, requirementPackage.data, productBuildPlan);
-        if (gate.action === "blocked" || gate.action === "ask_clarification" || !gate.canGenerateArtifacts) {
-          return this.finishRequirementGateStop(context, intent.data, gate, productBuildPlan);
-        }
-
-        await this.emit(context, "message_delta", "正在把产品计划落到 ProductDesignState...");
-        const design = await this.runAgentStep(
-          context,
-          AgentName.product_designer_agent,
-          "product_design",
-          () =>
-            this.productDesignerAgent.run({
-              runId: context.runId,
-              projectId: context.projectId,
-              traceId: context.traceId,
-              userId: context.userId,
-              input: {
-                userInput: context.userInput,
-                requirementAnalysis: requirement.data,
-                knowledgeContext: knowledge.data,
-                productBuildPlan,
-                existingState: context.productDesignState,
-              },
-            }),
-        );
-        state = await this.stateService.createDraft(context.projectId, design.data, {
-          userId: context.userId,
-          runId: context.runId,
-          messageId: input.userMessageId,
-          reason: "Product Designer Agent 完成结构化设计",
-        });
-        await this.stream.emit({
-          runId: context.runId,
-          projectId: context.projectId,
-          type: "state_updated",
-          step: "product_design",
-          data: stateSummary(state),
-        });
-        await this.stream.emit({
-          runId: context.runId,
-          projectId: context.projectId,
-          type: "state_version_created",
-          step: "product_design",
-          data: { stateId: state.id, version: state.version },
-        });
-      }
-
-      if (!state) {
-        throw new Error("ProductDesignState 不存在，无法继续生成 PRD 和原型");
-      }
-
-      await this.emit(context, "message_delta", "正在生成 PRD 草案...");
-      const prdDraft = await this.runAgentStep(context, AgentName.prd_writer_agent, "prd_generation", () =>
-        this.prdWriterAgent.run({
-          runId: context.runId,
-          projectId: context.projectId,
-          traceId: context.traceId,
-          userId: context.userId,
-          input: {
-            productDesignState: state!,
-            mode: "draft",
-          },
-        }),
-      );
-      const prdDocument = await this.documentService.saveGeneratedDocument(state, prdDraft.data, {
-        userId: context.userId,
-        runId: context.runId,
-        reason: "PRD Writer Agent 生成 PRD",
-      });
       await this.stream.emit({
         runId: context.runId,
         projectId: context.projectId,
-        type: "prd_updated",
-        step: "prd_generation",
-        data: prdDocument,
-      });
-
-      // 确认门 A（FR-1.2）：PRD 生成后将其落到 ProductDesignState 并暂停于 doc_ready 状态，
-      // 等待用户确认。此处不再连跑原型——把"提案"持久化，由 confirm 接口触发"提交"。
-      state = await this.stateService.attachGeneratedArtifacts(state.id, {
-        prdDocument,
-        status: ProductDesignStateStatus.doc_ready,
-        userId: context.userId,
-        runId: context.runId,
-        messageId: input.userMessageId,
-        reason: "PRD 生成完成，等待用户确认（确认门 A）",
-      });
-      const prdDecisionCard = await this.recordDecisionCard(context, {
-        sourceType: "prd_generation",
-        sourceId: prdDocument.id,
-        title: "PRD 草案生成决策",
-        selectedStrategy: "propose_prd_then_wait_for_confirmation",
-        reasons: [
-          "先生成结构化 PRD 草案，等待用户确认后再进入原型阶段。",
-          "PRD 只基于 ProductDesignState 输出，避免直接编造未确认业务规则。",
-          context.inputQuality
-            ? `输入质量评分 ${context.inputQuality.score}/100，状态为 ${context.inputQuality.status}。`
-            : "未触发输入质量评分。",
-        ],
-        objections: requirement.data.conflicts,
-        output: {
-          productDesignStateId: state.id,
-          productDesignStateVersion: state.version,
-          prdDocumentId: prdDocument.id,
-          nextGate: "review_prd",
+        type: "message_delta",
+        content: "当前未配置 DeerFlow/Codex runtime adapter。本轮已停在安全终态，未改动产品状态。",
+        data: {
+          runtimeAdapter: {
+            status: "not_configured",
+            expectedProviders: ["deerflow", "codex"],
+          },
         },
       });
-
-      // 是否预约生成原型：generate_prd 仅要文档；其余（new_requirement / complete_requirement /
-      // generate_prototype 一次性请求）默认接着要原型，但总体交互不变——仍先停在确认门 A。
-      const wantsPrototype = intent.data.intent !== UserIntent.generate_prd;
-      const gateMessage = wantsPrototype
-        ? "已生成 PRD 草案，请确认无误后我再继续生成原型。"
-        : "已生成 PRD 草案，请确认无误。确认后你可以选择是否继续生成原型。";
 
       const result: OrchestratorResult = {
         runId: context.runId,
         projectId: context.projectId,
-        intent: intent.data,
-        message: gateMessage,
-        productDesignState: state,
-        prdDocument,
-        inputQuality: context.inputQuality,
-        productBuildPlan,
-        contextFetch: context.contextFetch,
-        requirementGate: context.requirementGateDecision,
-        requirementIntakeGraph: context.requirementIntakeGraph,
-        decisionCards: [prdDecisionCard],
-        nextAction: {
-          type: "review_prd",
-          wantsPrototype,
+        intent,
+        message: "当前未配置 DeerFlow/Codex runtime adapter。请配置 runtime 后再生成需求、PRD、原型和 QA；本轮已安全结束，没有改动产品状态。",
+        productDesignState: context.productDesignState,
+        runtimeAdapter: {
+          status: "not_configured",
+          expectedProviders: ["deerflow", "codex"],
         },
+        nextAction: { type: "answer" },
       };
 
       await this.finishRun(
         context,
         result,
-        projectStatusFromProductDesignState(state, ProjectStatus.prd_ready),
+        context.currentProjectStatus ?? projectStatusFromProductDesignState(context.productDesignState),
       );
       return result;
     } catch (error) {
@@ -454,550 +163,49 @@ export class AiOrchestratorService {
     }
   }
 
-  /**
-   * 确认门 A 之后的"提交"入口（FR-1.3）：用户确认 PRD 后，从原型阶段继续。
-   * 由 confirm 接口在一个新的 run 上调用——暂停状态已持久化于 ProductDesignState，
-   * 不依赖原 run 的进程常驻（propose-then-commit / 可恢复）。
-   */
   async confirmPrdAndContinue(input: OrchestratorInput): Promise<OrchestratorResult> {
     const { context } = input;
-    const state = context.productDesignState;
-    if (!state) {
-      throw new Error("找不到待确认的 ProductDesignState，无法继续生成原型");
-    }
-    if (!state.prdDocument) {
-      throw new Error("当前 ProductDesignState 尚无 PRD 文档，无法进入原型阶段");
-    }
-    if (!hasConfirmedPrdForPrototype(state)) {
-      throw new Error("当前 PRD 尚未确认，不能生成原型");
-    }
-    if (state.prototypeSpec) {
-      throw new Error("当前项目已生成原型，不能重复触发 PRD 确认门");
-    }
-    const intent: IntentResult =
-      context.intentResult ?? {
-        intent: UserIntent.generate_prototype,
-        confidence: 1,
-        reason: "用户确认 PRD 后继续生成原型。",
-        requiresSelection: false,
-        isAmbiguous: false,
-      };
+    const intent: IntentResult = {
+      intent: UserIntent.generate_prototype,
+      confidence: 1,
+      reason: "用户确认 PRD 后继续生成原型，但原型 runtime adapter 尚未配置。",
+      requiresSelection: false,
+      isAmbiguous: false,
+    };
+
     try {
       await this.runLog.markRunIntent(context.runId, intent.intent);
-      return await this.generatePrototypeForState(context, input, intent, state);
+      const result: OrchestratorResult = {
+        runId: context.runId,
+        projectId: context.projectId,
+        intent,
+        message: "确认门已记录。请配置 DeerFlow/Codex runtime adapter 后继续生成原型。",
+        productDesignState: context.productDesignState,
+        runtimeAdapter: {
+          status: "not_configured",
+          expectedProviders: ["deerflow", "codex"],
+        },
+        nextAction: { type: "answer" },
+      };
+      await this.finishRun(
+        context,
+        result,
+        context.currentProjectStatus ?? projectStatusFromProductDesignState(context.productDesignState),
+      );
+      return result;
     } catch (error) {
       await this.handleRunFailure(context, error);
       throw error;
     }
   }
 
-  /**
-   * Phase B：基于已确认 PRD 的 ProductDesignState 生成原型规格、HTML 原型，跑 QA 与知识抽取，
-   * 最终停在确认门 B（prototype_ready / review_prototype）。
-   * 既用于"确认 PRD 后继续"，也用于"已有文档直接出原型"（FR-2.2）。
-   */
-  private async generatePrototypeForState(
-    context: AgentRunContext,
-    input: OrchestratorInput,
-    intent: IntentResult,
-    initialState: ProductDesignState,
-  ): Promise<OrchestratorResult> {
-    let state = initialState;
-    const prdDocument = state.prdDocument!;
-
-    await this.emit(context, "message_delta", "正在生成原型规格...");
-    const prototypeSpec = await this.runAgentStep(
-      context,
-      AgentName.prototype_designer_agent,
-      "prototype_design",
-      () =>
-        this.prototypeDesignerAgent.run({
-          runId: context.runId,
-          projectId: context.projectId,
-          traceId: context.traceId,
-          userId: context.userId,
-          input: {
-            productDesignState: state,
-            targetView: "both",
-          },
-        }),
-    );
-
-    await this.emit(context, "message_delta", "正在生成 HTML 原型...");
-    const prototypeArtifact = await this.runAgentStep(
-      context,
-      AgentName.prototype_code_agent,
-      "prototype_code_generation",
-      () =>
-        this.prototypeCodeAgent.run({
-          runId: context.runId,
-          projectId: context.projectId,
-          traceId: context.traceId,
-          userId: context.userId,
-          input: {
-            prototypeSpec: prototypeSpec.data,
-            mode: "single_html",
-          },
-        }),
-    );
-
-    const savedPrototype = await this.prototypeService.saveGeneratedPrototype(
-      state,
-      prototypeSpec.data,
-      prototypeArtifact.data,
-      {
-        userId: context.userId,
-        runId: context.runId,
-        reason: "Prototype Designer 与 Code Agent 生成 HTML 原型",
-      },
-    );
-    await this.stream.emit({
-      runId: context.runId,
-      projectId: context.projectId,
-      type: "prototype_updated",
-      step: "prototype_code_generation",
-      data: {
-        prototypeSpec: savedPrototype.prototypeSpec,
-        prototypeArtifact: savedPrototype.artifact,
-      },
-    });
-
-    state = await this.stateService.attachGeneratedArtifacts(state.id, {
-      prdDocument,
-      prototypeSpec: prototypeSpec.data,
-      status: ProductDesignStateStatus.prototype_ready,
-      userId: context.userId,
-      runId: context.runId,
-      messageId: input.userMessageId,
-      reason: "PRD 与 PrototypeSpec 生成完成",
-    });
-    const prototypeDecisionCard = await this.recordDecisionCard(context, {
-      sourceType: "prototype_generation",
-      sourceId: savedPrototype.artifact.id,
-      title: "原型生成决策",
-      selectedStrategy: "confirmed_prd_to_html_prototype",
-      reasons: [
-        "检测到 PRD 已确认，允许从 ProductDesignState 继续生成原型规格。",
-        "Prototype Code Agent 仅基于 PrototypeSpec 输出单文件 HTML，保持原型与事实源可追踪。",
-        "原型生成后停在 review_prototype，由用户确认后才进入最终 confirmed 状态。",
-      ],
-      objections: [],
-      output: {
-        productDesignStateId: state.id,
-        productDesignStateVersion: state.version,
-        prototypeSpecId: prototypeSpec.data.id,
-        prototypeArtifactId: savedPrototype.artifact.id,
-        nextGate: "review_prototype",
-      },
-    });
-
-    await this.emit(context, "message_delta", "正在进行一致性 QA 校验...");
-    const qa = await this.runAgentStep(context, AgentName.qa_agent, "qa_check", async () => ({
-      data: await this.qaService.runForProject(context.projectId, context.userId, {
-        trigger: "initial_generation",
-        runId: context.runId,
-        traceId: context.traceId,
-        prdDocument,
-        prototypeSpec: prototypeSpec.data,
-        prototypeArtifact: savedPrototype.artifact,
-        fallbacks: context.fallbackEvents,
-      }),
-    }));
-    await this.stream.emit({
-      runId: context.runId,
-      projectId: context.projectId,
-      type: "qa_completed",
-      step: "qa_check",
-      data: qaCompletedPayload(qa.data),
-    });
-
-    const knowledgeCandidates = await this.runAgentStep(
-      context,
-      AgentName.knowledge_extractor_agent,
-      "knowledge_extraction",
-      () =>
-        this.knowledgeExtractorAgent.run({
-          runId: context.runId,
-          projectId: context.projectId,
-          traceId: context.traceId,
-          userId: context.userId,
-          input: {
-            productDesignState: state,
-            prdDocument,
-            prototypeSpec: prototypeSpec.data,
-            confirmedByUser: false,
-          },
-        }),
-    );
-
-    const finalMessage = qa.data.passed
-      ? "已完成产品设计状态、PRD 草案、HTML 原型和 QA 校验。"
-      : `已生成 PRD 与原型，QA 发现 ${qa.data.issues.length} 个待确认问题。`;
-
-    const result: OrchestratorResult = {
-      runId: context.runId,
-      projectId: context.projectId,
-      intent,
-      message: finalMessage,
-      productDesignState: state,
-      prdDocument,
-      prototypeSpec: prototypeSpec.data,
-      prototypeArtifact: savedPrototype.artifact,
-      qaReport: qa.data,
-      inputQuality: context.inputQuality,
-      productBuildPlan: context.productBuildPlan,
-      contextFetch: context.contextFetch,
-      requirementGate: context.requirementGateDecision,
-      requirementIntakeGraph: context.requirementIntakeGraph,
-      decisionCards: [prototypeDecisionCard],
-      knowledgeCandidates: knowledgeCandidates.data.candidates,
-      nextAction: {
-        type: qa.data.passed ? "review_prototype" : "review_qa",
-      },
-    };
-
-    await this.finishRun(
-      context,
-      result,
-      projectStatusForCompletedArtifacts({ productDesignState: state, qaReport: qa.data }),
-    );
-    return result;
-  }
-
-  private async handleRunFailure(context: AgentRunContext, error: unknown) {
-    const message = errorMessage(error, "AI 执行失败");
-    const projectStatus = context.productDesignState
-      ? projectStatusFromProductDesignState(context.productDesignState, context.currentProjectStatus)
-      : ProjectStatus.qa_failed;
-    await this.runLog.failRun(context.runId, error);
-    await Promise.allSettled([
-      this.messageService.createAssistantMessage({
-        projectId: context.projectId,
-        conversationId: context.conversationId,
-        content: message,
-        type: MessageType.error,
-        metadata: toInputJson({
-          runId: context.runId,
-          errorMessage: message,
-        }),
-        relatedRunId: context.runId,
-      }),
-      this.updateProjectStatus(context.projectId, projectStatus),
-    ]);
-    await this.stream.emit({
-      runId: context.runId,
-      projectId: context.projectId,
-      type: "run_failed",
-      content: message,
-      data: { message, errorMessage: message, runId: context.runId, projectId: context.projectId },
-    });
-  }
-
-  private async runAgentStep<T>(
-    context: AgentRunContext,
-    agentName: AgentName,
-    step: NonNullable<Parameters<VibeStreamService["emit"]>[0]["step"]>,
-    handler: () => Promise<AgentOutput<T>>,
-  ) {
-    const stepLog = await this.runLog.createStep({
-      runId: context.runId,
-      agentName,
-      inputSummary: `${agentName}: ${context.userInput}`,
-      status: AgentStepStatus.pending,
-    });
-    await this.runLog.startStep(stepLog.id);
-    await this.stream.emit({
-      runId: context.runId,
-      projectId: context.projectId,
-      type: "step_started",
-      step,
-      content: stepCopy(step, "started"),
-    });
-
-    try {
-      const result = await handler();
-      const decisionTrace = result.decisionTrace ?? buildAgentDecisionTrace({
-        agentName,
-        input: { userInput: context.userInput, selectedRegion: context.selectedRegion },
-        output: result.data,
-        fallback: result.fallback,
-      });
-      await this.runLog.completeStep(stepLog.id, fallbackStepOutput(result.data, result.fallback), {
-        modelCallLogId: result.modelCallLogId,
-      });
-      if (result.fallback) {
-        context.fallbackEvents = [...(context.fallbackEvents ?? []), result.fallback];
-        await this.stream.emit({
-          runId: context.runId,
-          projectId: context.projectId,
-          type: "fallback_used",
-          step,
-          content: result.fallback.userMessage,
-          data: result.fallback,
-        });
-      }
-      await this.stream.emit({
-        runId: context.runId,
-        projectId: context.projectId,
-        type: "step_completed",
-        step,
-        content: stepCopy(step, "completed"),
-        data: attachDecisionTraceToStepData(result.data, decisionTrace),
-      });
-      return { ...result, decisionTrace };
-    } catch (error) {
-      await this.runLog.failStep(stepLog.id, error);
-      await this.stream.emit({
-        runId: context.runId,
-        projectId: context.projectId,
-        type: "step_failed",
-        step,
-        content: error instanceof Error ? error.message : "Agent 执行失败",
-      });
-      throw error;
-    }
-  }
-
-  private async runRequirementGate(
-    context: AgentRunContext,
-    requirementPackage: RequirementPackage,
-    productBuildPlan?: ProductBuildPlan,
-  ) {
-    await this.emit(context, "message_delta", "正在进行生成前结构校验和安全检查...");
-    const [validation, safety] = await Promise.all([
-      this.runAgentStep(context, AgentName.orchestrator, "requirement_validation", async () => {
-        const data = validateRequirementPackage({ requirementPackage, productBuildPlan });
-        return {
-          data,
-          decisionTrace: buildRequirementNodeTrace("requirement_validation", data),
-        };
-      }),
-      this.runAgentStep(context, AgentName.orchestrator, "safety_check", async () => {
-        const data = checkRequirementSafety({ requirementPackage, productBuildPlan });
-        return {
-          data,
-          decisionTrace: buildRequirementNodeTrace("safety_check", data),
-        };
-      }),
-    ]);
-    context.requirementValidation = validation.data;
-    context.requirementSafety = safety.data;
-    const gate = decideRequirementGate({
-      requirementPackage,
-      validation: validation.data,
-      safety: safety.data,
-      productBuildPlan,
-      fallbackUsed: Boolean(context.fallbackEvents?.length),
-    });
-    const intakeGraph = buildRequirementIntakeGraph({
-      context,
-      requirementPackage,
-      validation: validation.data,
-      safety: safety.data,
-      gate,
-      productBuildPlan,
-    });
-    gate.intakeGraph = intakeGraph;
-    context.requirementGateDecision = gate;
-    context.requirementIntakeGraph = intakeGraph;
-    await this.emit(context, "message_delta", gate.visibleMessage, {
-      requirementGate: {
-        ...gate,
-        decisionTrace: gateDecisionTrace(gate),
-      },
-      requirementIntakeGraph: intakeGraph,
-    });
-    return gate;
-  }
-
-  private async finishRequirementGateStop(
-    context: AgentRunContext,
-    intent: IntentResult,
-    gate: RequirementGateDecision,
-    productBuildPlan?: ProductBuildPlan,
-  ) {
-    const asksClarification = gate.action === "ask_clarification" || gate.questions.length > 0;
-    const result: OrchestratorResult = {
-      runId: context.runId,
-      projectId: context.projectId,
-      intent,
-      message: gate.visibleMessage,
-      productDesignState: context.productDesignState,
-      inputQuality: context.inputQuality,
-      productBuildPlan,
-      contextFetch: context.contextFetch,
-      requirementGate: gate,
-      requirementIntakeGraph: context.requirementIntakeGraph,
-      nextAction: asksClarification
-        ? {
-            type: "ask_clarification",
-            questions: gate.questions,
-          }
-        : { type: "answer" },
-    };
-    await this.finishRun(
-      context,
-      result,
-      asksClarification ? ProjectStatus.clarifying : context.currentProjectStatus ?? ProjectStatus.draft,
-    );
-    return result;
-  }
-
-  private async finishGeneralAnswer(context: AgentRunContext, intent: IntentResult) {
-    const isCasual = isCasualGeneralInput(context.userInput);
-    const result: OrchestratorResult = {
-      runId: context.runId,
-      projectId: context.projectId,
-      intent,
-      message: isCasual
-        ? "你好，我在。你可以直接描述想做的产品、页面、PRD、原型或要修改的地方；有了具体目标后，我再进入生成流程。"
-        : "我会围绕当前项目状态回答问题。复杂生成请直接描述目标需求。",
-      nextAction: { type: "answer" },
-    };
-    await this.finishRun(context, result, ProjectStatus.draft);
-    return result;
-  }
-
-  private async finishClarification(
-    context: AgentRunContext,
-    intent: IntentResult,
-    requirement: RequirementAnalysis,
-  ) {
-    const result: OrchestratorResult = {
-      runId: context.runId,
-      projectId: context.projectId,
-      intent,
-      message: "我需要先确认几个会影响业务方向的问题，再继续生成 PRD 和原型。",
-      nextAction: {
-        type: "ask_clarification",
-        questions: requirement.clarificationQuestions,
-      },
-    };
-    await this.finishRun(context, result, ProjectStatus.clarifying);
-    return result;
-  }
-
-  private async finishInputQualityGate(
-    context: AgentRunContext,
-    intent: IntentResult,
-    inputQuality: InputQualityAssessment,
-  ) {
-    const result: OrchestratorResult = {
-      runId: context.runId,
-      projectId: context.projectId,
-      intent,
-      message: `输入资料评分 ${inputQuality.score}/100，当前信息不足以稳定生成 PRD。请先补充关键业务规则和交互细节。`,
-      inputQuality,
-      nextAction: {
-        type: "ask_clarification",
-        questions: inputQuality.suggestions.map((suggestion, index) => ({
-          id: `input_quality_${index + 1}`,
-          title: suggestion,
-          reason: inputQuality.warnings[index] ?? "输入质量门禁要求补充后再生成。",
-          options: ["我补充具体内容", "按现有资料先生成草案", "重新上传附件"],
-          recommendedOption: "我补充具体内容",
-          status: "pending",
-          required: index === 0,
-        })),
-      },
-    };
-    await this.finishRun(context, result, ProjectStatus.clarifying);
-    return result;
-  }
-
-  private async finishPatchCandidate(
-    context: AgentRunContext,
-    input: OrchestratorInput,
-    intent: IntentResult,
-    knowledgeContext: KnowledgeContext,
-  ) {
-    await this.emit(context, "message_delta", "正在生成局部修改预览，确认前不会改动当前 PRD 或原型...");
-    const candidate = await this.patchService.createPatchCandidateFromRun({
-      projectId: context.projectId,
-      conversationId: context.conversationId,
-      userId: context.userId,
-      userInstruction: context.userInput,
-      selectedRegion: context.selectedRegion!,
-      attachments: input.attachments,
-      runId: context.runId,
-      traceId: context.traceId,
-      instructionMessageId: input.userMessageId,
-      knowledgeContext,
-    });
-    const patchPlan = candidate.patchRecord.patchPlan;
-    return {
-      runId: context.runId,
-      projectId: context.projectId,
-      intent,
-      message: "已生成 Patch 候选，请确认后再应用并重新生成 PRD、原型和 QA。",
-      productDesignState: context.productDesignState,
-      patchPlan,
-      patchRecord: candidate.patchRecord,
-      patchPreview: candidate.patchPreview,
-      nextAction: {
-        type: "confirm_patch",
-        questions: patchPlan.clarificationQuestions ?? [],
-        risks: patchPlan.risks ?? [],
-      },
-    } satisfies OrchestratorResult;
-  }
-
-  private async finishRun(
-    context: AgentRunContext,
-    result: OrchestratorResult,
-    projectStatus: ProjectStatus,
-  ) {
-    const assistantContent = formatAssistantRunMessage(result);
-    await this.messageService.createAssistantMessage({
-      projectId: context.projectId,
-      conversationId: context.conversationId,
-      content: assistantContent,
-      type: MessageType.agent_summary,
-      metadata: toInputJson({
-        runId: context.runId,
-        intent: result.intent,
-        nextAction: result.nextAction,
-        productDesignState: result.productDesignState,
-        prdDocument: result.prdDocument,
-        prototypeSpec: result.prototypeSpec,
-        prototypeArtifact: result.prototypeArtifact,
-        qaReport: result.qaReport,
-        inputQuality: result.inputQuality,
-        productBuildPlan: result.productBuildPlan,
-        contextFetch: result.contextFetch ?? context.contextFetch,
-        requirementPackage: context.requirementPackage,
-        requirementGate: result.requirementGate ?? context.requirementGateDecision,
-        requirementIntakeGraph: result.requirementIntakeGraph ?? context.requirementIntakeGraph,
-        decisionCards: result.decisionCards,
-        patchPlan: result.patchPlan,
-        patchRecord: result.patchRecord,
-        patchPreview: result.patchPreview,
-        exportArtifact: result.exportArtifact,
-        knowledgeCandidates: result.knowledgeCandidates,
-      }),
-      relatedRunId: context.runId,
-    });
-    await this.runLog.completeRun(context.runId, result, result.message);
-    await this.stream.emit({
-      runId: context.runId,
-      projectId: context.projectId,
-      type: "run_completed",
-      content: result.message,
-      data: result,
-    });
-    await this.messageService.updateProjectActivity(context.projectId);
-    await this.updateProjectStatus(context.projectId, projectStatus);
-  }
-
-  private async updateProjectStatus(projectId: string, status: ProjectStatus) {
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { status, lastActivityAt: new Date() },
-    });
-  }
-
   private async finishExport(context: AgentRunContext, intent: IntentResult) {
-    await this.emit(context, "message_delta", "正在准备导出产物...");
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "message_delta",
+      content: "正在准备导出产物...",
+    });
     const artifact = intent.intent === UserIntent.export_word
       ? await this.exportService.createPrdWordExport(context.projectId)
       : await this.exportService.createPrototypeHtmlExport(context.projectId);
@@ -1027,184 +235,250 @@ export class AiOrchestratorService {
     return result;
   }
 
-  private async recordDecisionCard(
-    context: AgentRunContext,
-    input: {
-      sourceType: string;
-      sourceId?: string;
-      title: string;
-      selectedStrategy: string;
-      reasons: string[];
-      objections?: unknown;
-      output: Record<string, unknown>;
-    },
-  ): Promise<DecisionCardSummary> {
-    const created = await this.prisma.decisionTrace.create({
-      data: {
-        projectId: context.projectId,
-        sourceType: input.sourceType,
-        sourceId: input.sourceId,
-        intent: context.intentResult?.intent,
-        strategies: toInputJson([
-          {
-            id: input.selectedStrategy,
-            name: input.title,
-            description: input.reasons.join(" "),
-          },
-        ]),
-        selectedStrategy: input.selectedStrategy,
-        selectedStrategyId: input.selectedStrategy,
-        reviewResult: toInputJson({
-          title: input.title,
-          reasons: input.reasons,
-          generatedAt: new Date().toISOString(),
-        }),
-        finalOutcome: "partial",
-        metrics: toInputJson({
-          qaPassed: false,
-          userFeedbackScore: 0,
-          executionTime: 0,
-        }),
-        scores: toInputJson({
-          inputQuality: context.inputQuality,
-        }),
-        objections: toInputJson(input.objections ?? []),
-        input: toInputJson({
-          userInput: context.userInput,
-          inputQuality: context.inputQuality,
-          productBuildPlanId: context.productBuildPlan?.id,
-        }),
-        output: toInputJson({
-          decisionCard: {
-            title: input.title,
-            reasons: input.reasons,
-          },
-          ...input.output,
-        }),
-        generatedByRunId: context.runId,
-        createdBy: context.userId,
-      },
-    });
-    return {
-      id: created.id,
-      sourceType: input.sourceType,
-      sourceId: input.sourceId,
-      title: input.title,
-      reasons: input.reasons,
-    };
-  }
+  private async finishRequirementRuntime(
+    input: OrchestratorInput,
+    intent: IntentResult,
+    provider: Exclude<RuntimeProvider, "local">,
+  ) {
+    const { context } = input;
+    if (!this.runtime || !this.stateService) {
+      throw new Error("Requirement runtime 未就绪：缺少 runtime 或 ProductDesignStateService");
+    }
 
-  private async emit(context: AgentRunContext, type: "message_delta", content: string, data?: unknown) {
     await this.stream.emit({
       runId: context.runId,
       projectId: context.projectId,
-      type,
-      content,
-      data,
+      type: "step_started",
+      step: "requirement_packaging",
+      content: `正在把需求交给 ${providerLabel(provider)} runtime。`,
+      data: { runtimeProvider: provider, runtimeTaskType: "intake_requirement" },
+    });
+
+    const runtimeResult = await this.runtime.runTask<RequirementRuntimeInput, RequirementRuntimeOutput>(
+      {
+        id: randomUUID(),
+        taskType: "intake_requirement",
+        runId: context.runId,
+        projectId: context.projectId,
+        traceId: context.traceId,
+        userId: context.userId,
+        input: {
+          userInput: context.userInput,
+          conversationId: context.conversationId,
+          recentMessages: context.recentMessages,
+          attachments: input.attachments,
+          productDesignState: context.productDesignState,
+          selectedRegion: context.selectedRegion,
+          previewMode: context.previewMode,
+        },
+        workspaceHint: context.conversationId,
+      },
+      provider,
+    );
+
+    for (const runtimeEvent of runtimeResult.events) {
+      if (!runtimeEvent.content) continue;
+      await this.stream.emit({
+        runId: context.runId,
+        projectId: context.projectId,
+        type: "message_delta",
+        step: "requirement_packaging",
+        content: runtimeEvent.content,
+        data: runtimeEvent,
+      });
+    }
+
+    if (!runtimeResult.output?.productDesignDraft) {
+      throw new Error(`${providerLabel(provider)} runtime 未返回 ProductDesignDraft`);
+    }
+
+    const state = await this.stateService.createDraft(
+      context.projectId,
+      runtimeResult.output.productDesignDraft,
+      {
+        userId: context.userId,
+        runId: context.runId,
+        messageId: input.userMessageId,
+        reason: `${providerLabel(provider)} runtime 生成 ProductDesignState`,
+      },
+    );
+
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "state_updated",
+      step: "requirement_packaging",
+      content: "ProductDesignState 已由 runtime 输出落库。",
+      data: { productDesignState: state, runtimeProvider: provider },
+    });
+
+    let productDesignState = state;
+    let prdDocument: RequirementDocument | undefined;
+    if (runtimeResult.output.requirementDocumentDraft && this.documentService) {
+      prdDocument = await this.documentService.saveGeneratedDocument(
+        state,
+        runtimeResult.output.requirementDocumentDraft,
+        {
+          userId: context.userId,
+          runId: context.runId,
+          reason: `${providerLabel(provider)} runtime 生成 PRD`,
+        },
+      );
+      productDesignState = await this.stateService.attachGeneratedArtifacts(state.id, {
+        prdDocument,
+        status: ProductDesignStateStatus.doc_ready,
+        userId: context.userId,
+        runId: context.runId,
+        messageId: input.userMessageId,
+        reason: "PRD 已生成，等待用户确认后继续原型",
+      });
+      await this.stream.emit({
+        runId: context.runId,
+        projectId: context.projectId,
+        type: "prd_updated",
+        step: "prd_generation",
+        content: "PRD 已生成，等待确认。",
+        data: { prdDocument, productDesignState, runtimeProvider: provider },
+      });
+    }
+
+    const pendingQuestions = productDesignState.pendingQuestions ?? [];
+    const result: OrchestratorResult = {
+      runId: context.runId,
+      projectId: context.projectId,
+      intent,
+      message: runtimeResult.output.message || defaultRequirementRuntimeMessage(provider, {
+        hasPrd: Boolean(prdDocument),
+        pendingQuestionCount: pendingQuestions.length,
+      }),
+      productDesignState,
+      prdDocument,
+      runtimeAdapter: {
+        status: "completed",
+        provider,
+      },
+      nextAction: prdDocument
+        ? { type: "review_prd" }
+        : pendingQuestions.length
+          ? { type: "ask_clarification", questions: pendingQuestions }
+          : { type: "answer" },
+    };
+
+    await this.finishRun(context, result, projectStatusFromProductDesignState(productDesignState));
+    return result;
+  }
+
+  private async finishRun(
+    context: AgentRunContext,
+    result: OrchestratorResult,
+    projectStatus: ProjectStatus,
+  ) {
+    await this.messageService.createAssistantMessage({
+      projectId: context.projectId,
+      conversationId: context.conversationId,
+      content: result.message,
+      type: MessageType.agent_summary,
+      metadata: toInputJson({
+        runId: context.runId,
+        intent: result.intent,
+        nextAction: result.nextAction,
+        runtimeAdapter: result.runtimeAdapter,
+        productDesignState: result.productDesignState,
+        prdDocument: result.prdDocument,
+        prototypeSpec: result.prototypeSpec,
+        prototypeArtifact: result.prototypeArtifact,
+        qaReport: result.qaReport,
+        exportArtifact: result.exportArtifact,
+      }),
+      relatedRunId: context.runId,
+    });
+    await this.runLog.completeRun(context.runId, result, result.message);
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "run_completed",
+      content: result.message,
+      data: result,
+    });
+    await this.messageService.updateProjectActivity(context.projectId);
+    await this.prisma.project.update({
+      where: { id: context.projectId },
+      data: { status: projectStatus, lastActivityAt: new Date() },
     });
   }
+
+  private async handleRunFailure(context: AgentRunContext, error: unknown) {
+    const message = errorMessage(error);
+    await this.runLog.failRun(context.runId, error);
+    await Promise.allSettled([
+      this.messageService.createAssistantMessage({
+        projectId: context.projectId,
+        conversationId: context.conversationId,
+        content: message,
+        type: MessageType.error,
+        metadata: toInputJson({
+          runId: context.runId,
+          errorMessage: message,
+        }),
+        relatedRunId: context.runId,
+      }),
+      this.prisma.project.update({
+        where: { id: context.projectId },
+        data: {
+          status: context.currentProjectStatus ?? projectStatusFromProductDesignState(context.productDesignState),
+          lastActivityAt: new Date(),
+        },
+      }),
+    ]);
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "run_failed",
+      content: message,
+      data: { message, errorMessage: message, runId: context.runId, projectId: context.projectId },
+    });
+  }
+
+  private requirementRuntimeProvider(): Exclude<RuntimeProvider, "local"> | undefined {
+    const provider = this.runtimeConfig?.requirementProvider() ?? "local";
+    if (provider === "codex" || provider === "deerflow") return provider;
+    return undefined;
+  }
 }
 
-function stepCopy(step: string, status: "started" | "completed") {
-  const text: Record<string, [string, string]> = {
-    intent_detection: ["正在理解你的需求...", "已识别用户意图"],
-    knowledge_retrieval: ["正在检索知识库...", "知识上下文已整理"],
-    context_fetch: ["正在读取项目上下文...", "项目上下文已读取"],
-    requirement_analysis: ["正在分析需求完整度...", "需求完整度分析完成"],
-    requirement_packaging: ["正在合并需求包...", "需求包已整理完成"],
-    product_planning: ["正在规划正式需求执行方案...", "正式需求执行计划已完成"],
-    requirement_validation: ["正在做生成前结构校验...", "生成前结构校验完成"],
-    safety_check: ["正在做生成前安全检查...", "生成前安全检查完成"],
-    product_design: ["正在生成产品设计方案...", "产品设计状态已生成"],
-    prd_generation: ["正在生成 PRD 草案...", "PRD 草案已完成"],
-    prototype_design: ["正在生成原型规格...", "原型规格已完成"],
-    prototype_code_generation: ["正在生成 HTML 原型...", "HTML 原型已完成"],
-    patch_planning: ["正在分析局部修改...", "局部修改计划已完成"],
-    qa_check: ["正在进行一致性校验...", "QA 校验完成"],
-    knowledge_extraction: ["正在抽取知识候选...", "知识候选抽取完成"],
-  };
-  return text[step]?.[status === "started" ? 0 : 1] ?? step;
-}
+function detectIntent(userInput: string): IntentResult {
+  const text = userInput.trim();
+  const intent = /导出|下载|export/i.test(text) && /html|原型/i.test(text)
+    ? UserIntent.export_html
+    : /导出|下载|export|word|doc/i.test(text)
+      ? UserIntent.export_word
+      : UserIntent.new_requirement;
 
-function stateSummary(state: ProductDesignState) {
   return {
-    id: state.id,
-    projectId: state.projectId,
-    version: state.version,
-    title: state.title,
-    status: state.status,
-    counts: {
-      pages: state.pages.length,
-      backendConfigs: state.backendConfigs.length,
-      frontendRules: state.frontendRules.length,
-      businessRules: state.businessRules.length,
-      stateRules: state.stateRules.length,
-      exceptionScenarios: state.exceptionScenarios.length,
-      acceptanceCriteria: state.acceptanceCriteria.length,
-      assumptions: state.assumptions.length,
-      pendingQuestions: state.pendingQuestions.length,
-      confirmedFacts: state.confirmedFacts.length,
-    },
-    updatedAt: state.updatedAt,
+    intent,
+    confidence: intent === UserIntent.new_requirement ? 0.5 : 0.82,
+    reason: "当前使用最小确定性路由；生成类任务交由 DeerFlow/Codex runtime adapter 接管。",
+    requiresSelection: false,
+    isAmbiguous: intent === UserIntent.new_requirement,
   };
 }
 
-function formatAssistantRunMessage(result: OrchestratorResult) {
-  if (result.nextAction?.type !== "ask_clarification") return result.message;
-  const questions = result.nextAction.questions ?? [];
-  if (!questions.length) return result.message;
-
-  return [
-    result.message,
-    "",
-    ...questions.map((question, index) => formatClarificationQuestion(question, index)),
-  ].join("\n");
+function errorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  return "Runtime orchestrator 执行失败";
 }
 
-function formatClarificationQuestion(value: unknown, index: number) {
-  const record = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-  const title = textValue(record.question) || textValue(record.title) || `请确认问题 ${index + 1}`;
-  const reason = textValue(record.reason);
-  const options = Array.isArray(record.options)
-    ? record.options.map((option) => String(option ?? "").trim()).filter(Boolean)
-    : [];
-  const recommended = textValue(record.recommendedOption) || textValue(record.recommendation);
-  const lines = [`${index + 1}. ${title}`];
-  if (reason) lines.push(`原因：${reason}`);
-  if (options.length) {
-    lines.push("选项：");
-    lines.push(...options.map((option, optionIndex) => {
-      const suffix = recommended && option === recommended ? "（推荐）" : "";
-      return `${optionIndex + 1}. ${option}${suffix}`;
-    }));
+function providerLabel(provider: Exclude<RuntimeProvider, "local">) {
+  return provider === "deerflow" ? "DeerFlow" : "Codex";
+}
+
+function defaultRequirementRuntimeMessage(
+  provider: Exclude<RuntimeProvider, "local">,
+  input: { hasPrd: boolean; pendingQuestionCount: number },
+) {
+  if (input.hasPrd) return `${providerLabel(provider)} runtime 已生成产品状态和 PRD，请先确认 PRD 后继续生成原型。`;
+  if (input.pendingQuestionCount) {
+    return `${providerLabel(provider)} runtime 已生成产品状态，并提出 ${input.pendingQuestionCount} 个待确认问题。`;
   }
-  return lines.join("\n");
-}
-
-function textValue(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function hasConfirmedPrdForPrototype(state: ProductDesignState | undefined) {
-  if (!state?.prdDocument) return false;
-  if (state.prdDocument.status !== RequirementDocumentStatus.confirmed) return false;
-  return state.status === ProductDesignStateStatus.doc_confirmed ||
-    state.status === ProductDesignStateStatus.prd_ready ||
-    state.status === ProductDesignStateStatus.prototype_ready ||
-    state.status === ProductDesignStateStatus.confirmed;
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "string" && error.trim()) return error;
-  if (error && typeof error === "object") {
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return fallback;
-    }
-  }
-  return fallback;
+  return `${providerLabel(provider)} runtime 已生成产品状态。`;
 }

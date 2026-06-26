@@ -128,7 +128,7 @@ describe("Knowledge module services", () => {
     const result = await retrievalService.search({
       projectId: "project-1",
       runId: "run-1",
-      agentName: "knowledge_agent",
+      agentName: "runtime_adapter",
       query: "签到 每日一次",
       preferredTypes: [KnowledgeType.strong_rule],
       limit: 5,
@@ -183,7 +183,7 @@ describe("Knowledge module services", () => {
     const result = await retrievalService.search({
       projectId: "project-1",
       runId: "run-1",
-      agentName: "knowledge_agent",
+      agentName: "runtime_adapter",
       query: "帮我生成一个企业客户线索管理系统，包含需求文档和原型",
       preferredTypes: [KnowledgeType.strong_rule],
       limit: 5,
@@ -224,7 +224,7 @@ describe("Knowledge module services", () => {
     const broad = await retrievalService.search({
       projectId: "project-1",
       runId: "run-2",
-      agentName: "knowledge_agent",
+      agentName: "runtime_adapter",
       query: "工作台画布补丁安全",
       preferredTypes: [KnowledgeType.design_pattern],
       limit: 5,
@@ -239,7 +239,7 @@ describe("Knowledge module services", () => {
     await retrievalService.search({
       projectId: "project-1",
       runId: "run-3",
-      agentName: "knowledge_agent",
+      agentName: "runtime_adapter",
       query: "工作台画布补丁安全",
       preferredTypes: [KnowledgeType.design_pattern],
       strictPreferredTypes: true,
@@ -423,7 +423,7 @@ describe("Knowledge module services", () => {
     const nextHit = await retrievalService.search({
       projectId: "project-1",
       runId: "run-next",
-      agentName: "knowledge_agent",
+      agentName: "runtime_adapter",
       query: "做一个每日签到活动",
       preferredTypes: [KnowledgeType.strong_rule],
       limit: 5,

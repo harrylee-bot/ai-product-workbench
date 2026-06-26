@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { randomUUID } from "crypto";
-import type { PatchOperation, Strategy } from "../decision-engine/decision.types";
 import type { ConstraintContext } from "../../constraint/constraint.types";
 import type { KnowledgeReference } from "../ai-vibe.types";
+import type { PatchOperation, PatchStrategy } from "./patch-builder.types";
 
 export type PatchDraft = {
   id: string;
@@ -21,7 +21,7 @@ export type PatchDraft = {
 @Injectable()
 export class PatchBuilderService {
   build(
-    strategy: Strategy,
+    strategy: PatchStrategy,
     constraints?: ConstraintContext,
     knowledgeReferences: KnowledgeReference[] = [],
   ): PatchDraft {

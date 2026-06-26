@@ -1,7 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
-  AgentName,
-  AgentStepStatus,
   KnowledgeType,
   MessageType,
   PatchRecordStatus as PrismaPatchRecordStatus,
@@ -16,12 +14,8 @@ import { KnowledgeRetrievalService } from "../knowledge/knowledge-retrieval.serv
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { AgentRunLogService } from "./agent-run-log.service";
-import { fallbackStepOutput } from "./agent-fallback-policy";
-import type { AgentFallbackMetadata } from "./agent-fallback-policy";
-import { attachDecisionTraceToStepData, buildAgentDecisionTrace } from "./agent-decision-trace";
 import { qaCompletedPayload, toInputJson } from "./ai-vibe.helpers";
 import type {
-  AgentOutput,
   AttachmentSummary,
   KnowledgeContext,
   PatchPlan,
@@ -32,22 +26,14 @@ import type {
   PrototypeSpec,
   QAReport,
   RequirementDocument,
+  RuntimeOutput,
   SelectedRegion,
 } from "./ai-vibe.types";
-import { PatchAgentService } from "./agents/patch-agent.service";
-import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
-import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service";
-import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
-import { QaAgentService } from "./agents/qa-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
-import {
-  assertStateOnlyPatchOperations,
-  toPatchPlanOperation,
-} from "./product-evolution.helpers";
-import type { EvolutionPatchOperation } from "./product-evolution.types";
 import { PrototypeService } from "./prototype.service";
 import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
+import { ProductRuntimeService } from "./runtime/product-runtime.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { projectStatusForCompletedArtifacts } from "./workspace-state-machine";
 
@@ -63,14 +49,6 @@ type CreatePatchCandidateInput = CreatePatchInput & {
   interactionEvent?: Record<string, unknown>;
 };
 
-type ApplyEvolutionPlanInput = {
-  evolutionPlanId: string;
-  conversationId?: string;
-  reason: string;
-  operations: EvolutionPatchOperation[];
-  impactedAreas?: string[];
-};
-
 type PatchExecutionInput = {
   projectId: string;
   conversationId: string;
@@ -82,7 +60,6 @@ type PatchExecutionInput = {
   traceId: string;
   instructionMessageId: string;
   knowledgeContext?: KnowledgeContext;
-  fallbackEvents?: AgentFallbackMetadata[];
 };
 
 type CreatePatchCandidateFromRunInput = Omit<PatchExecutionInput, "selectedRegion" | "userInstruction"> & {
@@ -162,11 +139,7 @@ export class PatchService {
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
     private readonly qaService: QaService,
-    private readonly patchAgent: PatchAgentService,
-    private readonly prdWriterAgent: PrdWriterAgentService,
-    private readonly prototypeDesignerAgent: PrototypeDesignerAgentService,
-    private readonly prototypeCodeAgent: PrototypeCodeAgentService,
-    private readonly qaAgent: QaAgentService,
+    private readonly productRuntime: ProductRuntimeService,
   ) {}
 
   async createPatchForUser(user: AuthenticatedUser, projectId: string, input: CreatePatchInput) {
@@ -442,163 +415,6 @@ export class PatchService {
     };
   }
 
-  async applyEvolutionPlanForUser(
-    user: AuthenticatedUser,
-    projectId: string,
-    input: ApplyEvolutionPlanInput,
-  ) {
-    const project = await this.assertProjectAccess(user, projectId);
-    this.assertOwnerMutation(user, project.ownerId);
-    assertStateOnlyPatchOperations(input.operations);
-    const conversationId = input.conversationId
-      ? (await this.assertConversation(projectId, input.conversationId)).id
-      : await this.ensureConversationId(projectId, project.ownerId);
-    const userInstruction = input.reason.trim() || "执行进化方案";
-    const selectedRegion: SelectedRegion = {
-      type: "document",
-      targetId: input.evolutionPlanId,
-      label: "进化方案",
-      sourcePaths: input.operations.map((operation) => operation.targetPath),
-    };
-
-    const userMessage = await this.messageService.createUserMessage({
-      projectId,
-      conversationId,
-      userId: user.id,
-      content: `执行进化方案：${userInstruction}`,
-      metadata: toInputJson({
-        patchExecutionEngine: true,
-        evolutionPlanId: input.evolutionPlanId,
-        selectedRegion,
-      }),
-    });
-    const run = await this.runLog.createRun({
-      projectId,
-      conversationId,
-      userId: user.id,
-      userInput: userInstruction,
-    });
-    await this.runLog.markRunIntent(run.id, UserIntent.global_adjustment);
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { status: ProjectStatus.designing, lastActivityAt: new Date() },
-    });
-
-    const executionInput: PatchExecutionInput = {
-      projectId,
-      conversationId,
-      userId: user.id,
-      userInstruction,
-      selectedRegion,
-      attachments: [],
-      runId: run.id,
-      traceId: run.traceId,
-      instructionMessageId: userMessage.id,
-    };
-    let patchRecord: PatchRecord | undefined;
-    let patchPreview: PatchPreviewRow | undefined;
-    try {
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "patch_started",
-        content: "正在执行进化方案补丁...",
-      });
-      const state = await this.stateService.getCurrentState(projectId);
-      if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
-      const plan: PatchPlan = {
-        id: input.evolutionPlanId,
-        projectId,
-        patchType: "state",
-        targetNodes: input.operations.map((operation) => operation.targetPath),
-        impactScope: input.impactedAreas?.length ? input.impactedAreas : input.operations.map((operation) => operation.targetPath),
-        operations: input.operations.map(toPatchPlanOperation),
-        regenerationPlan: {
-          prd: "full",
-          prototypeSpec: "full",
-          htmlPrototype: "full",
-          qa: "full",
-        },
-        risks: [],
-        needUserConfirm: false,
-        needsUserConfirmation: false,
-        reason: userInstruction,
-        summary: "补丁执行引擎执行进化方案",
-      };
-      const createdRecord = await this.prisma.patchRecord.create({
-        data: {
-          projectId,
-          conversationId,
-          instructionMessageId: userMessage.id,
-          selectedRegion: toInputJson(selectedRegion),
-          userInstruction,
-          patchPlan: toInputJson({
-            ...plan,
-            source: "evolution_plan",
-            evolutionPlanId: input.evolutionPlanId,
-          }),
-          operations: toInputJson(plan.operations),
-          status: PrismaPatchRecordStatus.planned,
-          beforeProductDesignStateVersion: state.version,
-          generatedByRunId: run.id,
-          createdBy: user.id,
-        },
-      });
-      patchRecord = this.toPatchRecord(createdRecord as PatchRecordRow);
-      const preview = await this.ensurePatchPreview(createdRecord as PatchRecordRow, patchRecord.patchPlan);
-      patchPreview = preview as PatchPreviewRow;
-      await this.prisma.patchPreview.update({
-        where: { id: preview.id },
-        data: {
-          status: "applying",
-          message: "进化计划补丁预览已生成，正在应用同一份计划。",
-        },
-      });
-      await this.stream.emit({
-        runId: run.id,
-        projectId,
-        type: "patch_plan_created",
-        step: "patch_planning",
-        data: {
-          patchId: patchRecord.id,
-          patchPreview: this.toPatchPreview(patchPreview, patchRecord),
-          patchPlan: plan,
-          evolutionPlanId: input.evolutionPlanId,
-        },
-        content: "进化计划补丁已创建",
-      });
-
-      const result = await this.applyPatchPlan(
-        executionInput,
-        patchRecord,
-        plan,
-        state,
-        undefined,
-        patchPreview,
-      );
-      return {
-        ...result,
-        patchPreview: result.patchPreview,
-        userMessage,
-        runId: run.id,
-        conversationId,
-        projectId,
-      };
-    } catch (error) {
-      if (patchPreview) {
-        await this.prisma.patchPreview.update({
-          where: { id: patchPreview.id },
-          data: {
-            status: "failed",
-            message: error instanceof Error ? error.message : "EVOLUTION_PATCH_PREVIEW_APPLY_FAILED",
-          },
-        });
-      }
-      await this.handlePatchFailure(executionInput, patchRecord, error);
-      throw error;
-    }
-  }
-
   private async createCandidatePatch(input: PatchExecutionInput) {
     let patchRecord: PatchRecord | undefined;
     try {
@@ -612,23 +428,20 @@ export class PatchService {
       const state = await this.stateService.getCurrentState(input.projectId);
       if (!state) throw new NotFoundException("PATCH_STATE_NOT_FOUND");
       const knowledgeContext = input.knowledgeContext ?? await this.getPatchKnowledgeContext(input);
-      const patch = await this.runAgentStep(
+      const patch = await this.runRuntimeStep(
         input,
-        AgentName.patch_agent,
         "patch_planning",
-        () => this.patchAgent.run({
+        () => this.productRuntime.planPatch({
           runId: input.runId,
           projectId: input.projectId,
           traceId: input.traceId,
           userId: input.userId,
-          input: {
-            userInput: input.userInstruction,
-            selectedRegion: input.selectedRegion,
-            productDesignState: state,
-            prdDocument: state.prdDocument,
-            prototypeSpec: state.prototypeSpec,
-            knowledgeContext,
-          },
+          userInput: input.userInstruction,
+          selectedRegion: input.selectedRegion,
+          productDesignState: state,
+          prdDocument: state.prdDocument,
+          prototypeSpec: state.prototypeSpec,
+          knowledgeContext,
         }),
       );
       const plan: PatchPlan = {
@@ -823,13 +636,14 @@ export class PatchService {
         data: { patchId: patchRecord.id, stateId: patchedState.id, version: patchedState.version },
       });
 
-      const prdDraft = await this.runAgentStep(input, AgentName.prd_writer_agent, "prd_generation", () =>
-        this.prdWriterAgent.run({
+      const prdDraft = await this.runRuntimeStep(input, "prd_generation", () =>
+        this.productRuntime.generatePrd({
           runId: input.runId,
           projectId: input.projectId,
           traceId: input.traceId,
           userId: input.userId,
-          input: { productDesignState: patchedState, mode: "draft" },
+          productDesignState: patchedState,
+          mode: "draft",
         }),
       );
       const prdDocument = await this.documentService.saveGeneratedDocument(patchedState, prdDraft.data, {
@@ -845,21 +659,20 @@ export class PatchService {
         data: prdDocument,
       });
 
-      const prototypeSpec = await this.runAgentStep(
+      const prototypeSpec = await this.runRuntimeStep(
         input,
-        AgentName.prototype_designer_agent,
         "prototype_design",
-        () => this.prototypeDesignerAgent.run({
+        () => this.productRuntime.generatePrototypeSpec({
           runId: input.runId,
           projectId: input.projectId,
           traceId: input.traceId,
           userId: input.userId,
-          input: { productDesignState: patchedState, targetView: "both" },
+          productDesignState: patchedState,
+          targetView: "both",
         }),
       );
-      const prototypeCode = await this.runAgentStep<PrototypeCodeStepResult>(
+      const prototypeCode = await this.runRuntimeStep<PrototypeCodeStepResult>(
         input,
-        AgentName.prototype_code_agent,
         "prototype_code_generation",
         async () => {
           const localPatchTarget = shouldUseComponentPrototypePatch(input.selectedRegion, plan);
@@ -884,12 +697,13 @@ export class PatchService {
               };
             }
           }
-          const draft = await this.prototypeCodeAgent.run({
+          const draft = await this.productRuntime.generatePrototypeHtml({
             runId: input.runId,
             projectId: input.projectId,
             traceId: input.traceId,
             userId: input.userId,
-            input: { prototypeSpec: prototypeSpec.data, mode: "single_html" },
+            prototypeSpec: prototypeSpec.data,
+            mode: "single_html",
           });
           return {
             ...draft,
@@ -940,7 +754,7 @@ export class PatchService {
         reason: "补丁应用后同步需求文档与原型规格",
       });
 
-      const qa = await this.runAgentStep(input, AgentName.qa_agent, "qa_check", async () => ({
+      const qa = await this.runRuntimeStep(input, "qa_check", async () => ({
         data: await this.qaService.runForProject(input.projectId, input.userId, {
           trigger: "patch",
           runId: input.runId,
@@ -949,7 +763,6 @@ export class PatchService {
           prdDocument,
           prototypeSpec: prototypeSpec.data,
           prototypeArtifact: savedPrototype.artifact,
-          fallbacks: input.fallbackEvents,
         }),
       }),
       );
@@ -1206,7 +1019,7 @@ export class PatchService {
       projectId: input.projectId,
       conversationId: input.conversationId,
       runId: input.runId,
-      agentName: AgentName.patch_agent,
+      agentName: "runtime_patch",
       query: input.userInstruction,
       taskType: "patch_planning",
       preferredTypes: [
@@ -1233,19 +1046,11 @@ export class PatchService {
     };
   }
 
-  private async runAgentStep<T>(
-    input: Pick<PatchExecutionInput, "runId" | "projectId" | "userInstruction" | "fallbackEvents">,
-    agentName: AgentName,
+  private async runRuntimeStep<T>(
+    input: Pick<PatchExecutionInput, "runId" | "projectId" | "userInstruction">,
     step: NonNullable<Parameters<VibeStreamService["emit"]>[0]["step"]>,
-    handler: () => Promise<AgentOutput<T>>,
+    handler: () => Promise<RuntimeOutput<T>>,
   ) {
-    const stepLog = await this.runLog.createStep({
-      runId: input.runId,
-      agentName,
-      inputSummary: `${agentName}: ${input.userInstruction}`,
-      status: AgentStepStatus.pending,
-    });
-    await this.runLog.startStep(stepLog.id);
     await this.stream.emit({
       runId: input.runId,
       projectId: input.projectId,
@@ -1255,43 +1060,22 @@ export class PatchService {
     });
     try {
       const result = await handler();
-      const decisionTrace = result.decisionTrace ?? buildAgentDecisionTrace({
-        agentName,
-        input: { userInput: input.userInstruction },
-        output: result.data,
-        fallback: result.fallback,
-      });
-      await this.runLog.completeStep(stepLog.id, fallbackStepOutput(result.data, result.fallback), {
-        modelCallLogId: result.modelCallLogId,
-      });
-      if (result.fallback) {
-        input.fallbackEvents = [...(input.fallbackEvents ?? []), result.fallback];
-        await this.stream.emit({
-          runId: input.runId,
-          projectId: input.projectId,
-          type: "fallback_used",
-          step,
-          content: result.fallback.userMessage,
-          data: result.fallback,
-        });
-      }
       await this.stream.emit({
         runId: input.runId,
         projectId: input.projectId,
         type: "step_completed",
         step,
         content: stepCopy(step, "completed"),
-        data: attachDecisionTraceToStepData(result.data, decisionTrace),
+        data: result.data,
       });
-      return { ...result, decisionTrace };
+      return result;
     } catch (error) {
-      await this.runLog.failStep(stepLog.id, error);
       await this.stream.emit({
         runId: input.runId,
         projectId: input.projectId,
         type: "step_failed",
         step,
-        content: error instanceof Error ? error.message : "Agent 执行失败",
+        content: error instanceof Error ? error.message : "Runtime task 执行失败",
       });
       throw error;
     }

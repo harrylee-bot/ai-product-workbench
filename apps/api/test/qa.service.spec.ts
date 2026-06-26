@@ -1,11 +1,12 @@
-import { AgentName, KnowledgeType, ModelTaskType, ProjectStatus, QAReportStatus, QAReportTrigger, UserRole, UserStatus } from "@prisma/client";
+import { KnowledgeType, ProjectStatus, QAReportStatus, QAReportTrigger, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderPrdFromState } from "../src/ai/agents/prd-writer-agent.service";
-import { renderPrototypeSpecFromState } from "../src/ai/agents/prototype-designer-agent.service";
+import {
+  renderPrdFromState,
+  renderPrototypeSpecFromState,
+} from "../src/ai/runtime/local-protocol-renderers";
 import type { ProductDesignState, QAReport, RequirementDocument } from "../src/ai/ai-vibe.types";
-import type { AgentFallbackLevel, AgentFallbackMetadata } from "../src/ai/agent-fallback-policy";
 import { QaRuleCheckService } from "../src/ai/qa-rule-check.service";
-import { fallbackIssuesFromMetadata, QaService } from "../src/ai/qa.service";
+import { QaService } from "../src/ai/qa.service";
 
 describe("Module 13 QA services", () => {
   it("creates blocking issues for missing pages, PRD, and prototype", () => {
@@ -114,18 +115,12 @@ describe("Module 13 QA services", () => {
       $transaction: vi.fn(),
     };
     const ruleCheck = new QaRuleCheckService();
-    const qaAgent = {
-      run: vi.fn().mockResolvedValue({
-        data: { status: "passed", summary: "模型检查通过", issues: [] },
-      }),
-    };
     const knowledgeRetrieval = {
       search: vi.fn().mockResolvedValue({ results: [], references: [] }),
     };
     const service = new QaService(
       prisma as never,
       ruleCheck,
-      qaAgent as never,
       knowledgeRetrieval as never,
     );
 
@@ -190,165 +185,6 @@ describe("Module 13 QA services", () => {
     });
   });
 
-  it("maps fallback levels into QA issues with product gate severity", () => {
-    const issues = fallbackIssuesFromMetadata([
-      fallbackMetadata("acceptable_result", ModelTaskType.prd_generation),
-      fallbackMetadata("degraded_preview", ModelTaskType.intent_detection),
-      fallbackMetadata("model_unavailable", ModelTaskType.prototype_code_generation),
-    ]);
-
-    expect(issues).toEqual([
-      expect.objectContaining({
-        id: "qa_fallback_prd_writer_agent_prd_generation_acceptable_result",
-        checkType: "assumption_risk",
-        severity: "info",
-        title: "Fallback 可接受结果：prd_writer_agent",
-      }),
-      expect.objectContaining({
-        id: "qa_fallback_prd_writer_agent_intent_detection_degraded_preview",
-        checkType: "assumption_risk",
-        severity: "minor",
-        title: "Fallback 降级预览需复核：prd_writer_agent",
-      }),
-      expect.objectContaining({
-        id: "qa_fallback_prd_writer_agent_prototype_code_generation_model_unavailable",
-        checkType: "assumption_risk",
-        severity: "major",
-        title: "模型不可用：prd_writer_agent",
-      }),
-    ]);
-  });
-
-  it("includes degraded fallback events in QA gate decisions", async () => {
-    const now = new Date("2026-06-21T09:00:00Z");
-    const prisma = {
-      project: {
-        findUnique: vi.fn(),
-        update: vi.fn(),
-      },
-      productDesignState: {
-        findFirst: vi.fn(),
-      },
-      requirementDocument: {
-        findFirst: vi.fn(),
-      },
-      prototypeArtifact: {
-        findFirst: vi.fn(),
-      },
-      prototypeSpecRecord: {
-        findUnique: vi.fn(),
-      },
-      qAReport: {
-        create: vi.fn(),
-        findFirst: vi.fn(),
-        findUnique: vi.fn(),
-        findMany: vi.fn(),
-        count: vi.fn(),
-      },
-      knowledgeRetrievalLog: {
-        create: vi.fn(),
-      },
-      knowledgeItem: {
-        findMany: vi.fn(),
-      },
-      $transaction: vi.fn(),
-    };
-    const ruleCheck = {
-      run: vi.fn().mockReturnValue([]),
-    };
-    const qaAgent = {
-      run: vi.fn().mockResolvedValue({
-        data: { status: "passed", summary: "模型检查通过", issues: [] },
-      }),
-    };
-    const knowledgeRetrieval = {
-      search: vi.fn().mockResolvedValue({ results: [], references: [] }),
-    };
-    const service = new QaService(
-      prisma as never,
-      ruleCheck as never,
-      qaAgent as never,
-      knowledgeRetrieval as never,
-    );
-    const state = baseState();
-    const prdDocument = toRequirementDocument(state, "prd-1");
-    const prototypeSpec = renderPrototypeSpecFromState(state, "both", "run-1");
-    const prototypeArtifact = {
-      id: "artifact-1",
-      projectId: "project-1",
-      prototypeSpecId: prototypeSpec.id,
-      productDesignStateId: state.id,
-      productDesignStateVersion: state.version,
-      title: "签到页原型",
-      status: "ready",
-      htmlContent: "<!doctype html>",
-      entryFilePath: "index.html",
-      targetDevice: "both",
-      pageCount: 1,
-      generatedByRunId: "run-1",
-      createdBy: "user-1",
-      updatedBy: "user-1",
-      createdAt: "2026-06-21T08:00:00.000Z",
-      updatedAt: "2026-06-21T08:00:00.000Z",
-    };
-
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
-      ownerId: "user-1",
-      status: ProjectStatus.prototype_ready,
-      deletedAt: null,
-      currentPrdDocumentId: prdDocument.id,
-      currentPrototypeArtifactId: prototypeArtifact.id,
-    });
-    prisma.productDesignState.findFirst.mockResolvedValue(stateRecord({
-      ...state,
-      prdDocument,
-      prototypeSpec,
-    }));
-    prisma.qAReport.create.mockImplementation(async ({ data }) => ({
-      id: "qa-fallback",
-      ...data,
-      status: data.status as QAReportStatus,
-      trigger: data.trigger as QAReportTrigger,
-      prdDocumentId: data.prdDocumentId ?? null,
-      prototypeArtifactId: data.prototypeArtifactId ?? null,
-      prototypeSpecId: data.prototypeSpecId ?? null,
-      generatedByRunId: data.generatedByRunId ?? null,
-      relatedPatchId: data.relatedPatchId ?? null,
-      relatedRollbackId: data.relatedRollbackId ?? null,
-      createdAt: now,
-      updatedAt: now,
-    }));
-
-    const report = await service.runForProject("project-1", "user-1", {
-      trigger: "initial_generation",
-      runId: "run-1",
-      prdDocument,
-      prototypeSpec,
-      prototypeArtifact,
-      fallbacks: [fallbackMetadata("degraded_preview", ModelTaskType.intent_detection)],
-    });
-
-    expect(report.status).toBe("warning");
-    expect(report.minorCount).toBe(1);
-    expect(report.issues).toEqual([
-      expect.objectContaining({
-        id: "qa_fallback_prd_writer_agent_intent_detection_degraded_preview",
-        severity: "minor",
-      }),
-    ]);
-    expect(report.gate).toEqual(
-      expect.objectContaining({
-        status: "warning",
-        allowConfirmArtifacts: true,
-        allowPersistKnowledge: false,
-        allowExportOrPublish: false,
-        shouldReturnToPatch: false,
-        requiredActions: ["run_qa"],
-      }),
-    );
-  });
-
   it("runs QA from ProductDesignState snapshots instead of stale project pointers", async () => {
     const now = new Date("2026-06-21T09:00:00Z");
     const prisma = {
@@ -384,18 +220,12 @@ describe("Module 13 QA services", () => {
       $transaction: vi.fn(),
     };
     const ruleCheck = new QaRuleCheckService();
-    const qaAgent = {
-      run: vi.fn().mockResolvedValue({
-        data: { status: "passed", summary: "模型检查通过", issues: [] },
-      }),
-    };
     const knowledgeRetrieval = {
       search: vi.fn().mockResolvedValue({ results: [], references: [] }),
     };
     const service = new QaService(
       prisma as never,
       ruleCheck,
-      qaAgent as never,
       knowledgeRetrieval as never,
     );
     const state = baseState();
@@ -459,16 +289,10 @@ describe("Module 13 QA services", () => {
     expect(report.prdDocumentId).toBe("prd-state");
     expect(report.prototypeSpecId).toBe(prototypeSpec.id);
     expect(report.prototypeArtifactId).toBeUndefined();
-    expect(qaAgent.run).toHaveBeenCalledWith(expect.objectContaining({
-      input: expect.objectContaining({
-        prdDocument: expect.objectContaining({ id: "prd-state" }),
-        prototypeSpec: expect.objectContaining({ id: prototypeSpec.id }),
-      }),
-    }));
   });
 
   it("evaluates QA gate decisions for passed, warning, failed, and missing reports", () => {
-    const service = new QaService({} as never, new QaRuleCheckService(), {} as never, {} as never);
+    const service = new QaService({} as never, new QaRuleCheckService(), {} as never);
 
     expect(service.evaluateGate(qaReport({ status: "passed" }))).toEqual(
       expect.objectContaining({
@@ -614,26 +438,6 @@ function toRequirementDocument(state: ProductDesignState, id: string): Requireme
     updatedBy: "user-1",
     createdAt: "2026-06-21T08:00:00.000Z",
     updatedAt: "2026-06-21T08:00:00.000Z",
-  };
-}
-
-function fallbackMetadata(level: AgentFallbackLevel, taskType: ModelTaskType): AgentFallbackMetadata {
-  return {
-    used: true,
-    level,
-    action: level === "acceptable_result" ? "continue" : level === "degraded_preview" ? "review_required" : "notify_user",
-    agentName: AgentName.prd_writer_agent,
-    taskType,
-    fallbackMode: "config_only",
-    errorCode: level === "model_unavailable" ? "MODEL_CALL_FAILED" : "MODEL_CONFIG_NOT_FOUND",
-    errorMessage: "模型配置不可用",
-    reason: `${taskType} fallback ${level}`,
-    userMessage: `${taskType} fallback`,
-    canContinue: true,
-    allowsConfirmation: level === "acceptable_result",
-    allowsKnowledgeExtraction: level === "acceptable_result",
-    allowsExport: level === "acceptable_result",
-    occurredAt: "2026-06-21T08:00:00.000Z",
   };
 }
 

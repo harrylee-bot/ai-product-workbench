@@ -1,12 +1,12 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  CircleDollarSign,
   Clock3,
   Code2,
   FileText,
   GitBranch,
   Layers,
   Scale,
+  ShieldCheck,
   Sparkles,
   Target,
 } from "lucide-react";
@@ -15,41 +15,42 @@ import { EmptyPreview } from "./empty-preview";
 import {
   compactNumber,
   constraintCount,
-  decisionConstraintContext,
   derivePrototypeComponents,
   firstConstraints,
   formatShortDate,
-  OUTCOME_LABELS,
+  normalizeRisk,
   RULE_LABELS,
+  riskLabel,
+  runtimeConstraintContext,
   statusLabel,
   toChineseText,
 } from "./helpers";
 import type {
   Phase1PrdPreview,
   Phase1PrototypePreview,
-  Phase2DecisionView,
+  RuntimePatchPreview,
 } from "./types";
 
 export function StatePreviewView({
-  decision,
+  runtimePreview,
   prdPreview,
   prototypePreview,
 }: {
-  decision?: Phase2DecisionView | null;
+  runtimePreview?: RuntimePatchPreview | null;
   prdPreview?: Phase1PrdPreview | null;
   prototypePreview?: Phase1PrototypePreview | null;
 }) {
-  const context = decisionConstraintContext(decision);
-  const pendingItems = buildPendingConfirmations(decision);
-  const timeline = buildVersionTimeline(decision, prdPreview, prototypePreview);
-  const company = decision?.companyRuntime?.company;
+  const context = runtimeConstraintContext(runtimePreview);
+  const pendingItems = buildPendingConfirmations(runtimePreview);
+  const timeline = buildVersionTimeline(runtimePreview, prdPreview, prototypePreview);
+  const qaIssueCount = runtimePreview?.qaReport?.issues?.length ?? 0;
 
-  if (!decision && !prdPreview && !prototypePreview) {
+  if (!runtimePreview && !prdPreview && !prototypePreview) {
     return (
       <div className="h-full p-4">
         <EmptyPreview
           title="暂无状态"
-          description="生成结果后，这里会汇总指标、AI 推断、待确认问题和版本时间线。"
+          description="生成结果后，这里会汇总产品指标、运行时摘要、待确认问题和版本时间线。"
         />
       </div>
     );
@@ -62,23 +63,23 @@ export function StatePreviewView({
           <StateMetric icon={FileText} label="PRD 章节" value={prdPreview?.sections.length ?? 0} />
           <StateMetric icon={Layers} label="原型组件" value={derivePrototypeComponents(prototypePreview?.html ?? "").length} />
           <StateMetric icon={Scale} label="约束" value={constraintCount(context)} />
-          <StateMetric icon={CircleDollarSign} label="预算" value={company ? compactNumber(company.budget) : "-"} />
+          <StateMetric icon={ShieldCheck} label="QA 问题" value={compactNumber(qaIssueCount)} />
         </div>
 
         <div className="rounded-[var(--radius-panel)] border border-gray-200 bg-white p-3 shadow-[var(--shadow-control)]">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
               <Sparkles className="h-4 w-4 text-blue-600" />
-              AI 推断
+              Runtime 摘要
             </div>
-            <Badge tone={decision?.selfGeneration ? "accent" : "neutral"} className="bg-white">
-              {decision?.selfGeneration ? "已推断" : "基础状态"}
+            <Badge tone={runtimePreview ? "accent" : "neutral"} className="bg-white">
+              {runtimePreview ? "有运行结果" : "基础状态"}
             </Badge>
           </div>
           <div className="mt-3 grid gap-2">
-            <InferenceRow label="瓶颈" value={decision?.selfGeneration?.insight.bottleneck ?? "等待更多运行样本"} />
-            <InferenceRow label="弱点" value={decision?.selfGeneration?.insight.weakness ?? "暂无明确弱点"} />
-            <InferenceRow label="机会" value={decision?.selfGeneration?.insight.opportunity ?? "可继续沉淀用户反馈"} />
+            <InferenceRow label="状态" value={runtimeStatus(runtimePreview)} />
+            <InferenceRow label="补丁范围" value={runtimePatchScope(runtimePreview)} />
+            <InferenceRow label="QA 风险" value={runtimeRisk(runtimePreview)} />
           </div>
         </div>
 
@@ -149,23 +150,26 @@ function InferenceRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function buildPendingConfirmations(decision?: Phase2DecisionView | null) {
-  if (!decision) return ["等待生成结果后确认业务约束、补丁范围和 QA 回归。"];
+function buildPendingConfirmations(runtimePreview?: RuntimePatchPreview | null) {
+  if (!runtimePreview) return ["等待生成结果后确认业务约束、补丁范围和 QA 回归。"];
   const items: string[] = [];
-  if (decision.previewSession.riskPanel?.requiresConfirmation) {
+  if (runtimePreview.previewSession?.riskPanel?.requiresConfirmation) {
     items.push("补丁预览需要人工确认后才能进入应用。");
   }
-  firstConstraints(decisionConstraintContext(decision)).forEach((constraint) => {
+  firstConstraints(runtimeConstraintContext(runtimePreview)).forEach((constraint) => {
     items.push(`${RULE_LABELS[constraint.rule]}：${toChineseText(constraint.condition)}`);
   });
-  if (!decision.evolution.metrics.qaPassed) {
-    items.push("进化结果显示 QA 未完全通过，需要重新 QA 或降低策略风险。");
+  const qaPassed = runtimePreview.qaReport?.passed ?? (
+    runtimePreview.qaReport ? (runtimePreview.qaReport.issues?.length ?? 0) === 0 : true
+  );
+  if (!qaPassed) {
+    items.push("QA 仍有需要处理的问题，建议重新检查或缩小补丁范围。");
   }
   return items.length ? items.slice(0, 5) : ["暂无阻断确认项，可继续收集反馈。"];
 }
 
 function buildVersionTimeline(
-  decision?: Phase2DecisionView | null,
+  runtimePreview?: RuntimePatchPreview | null,
   prdPreview?: Phase1PrdPreview | null,
   prototypePreview?: Phase1PrototypePreview | null,
 ) {
@@ -194,18 +198,27 @@ function buildVersionTimeline(
       icon: Layers,
     });
   }
-  if (decision) {
+  if (runtimePreview?.previewSession) {
+    const operations = runtimePreview.previewSession.operations
+      ?? runtimePreview.patchDraft?.operations
+      ?? [];
     items.push({
       id: "timeline-preview-session",
       title: "补丁预览会话",
-      meta: `${statusLabel(decision.previewSession.status)} · ${decision.previewSession.operations.length} 个操作`,
+      meta: `${statusLabel(runtimePreview.previewSession.status)} · ${operations.length} 个操作`,
       status: "active",
       icon: Code2,
     });
+  }
+  if (runtimePreview?.qaReport) {
+    const issueCount = runtimePreview.qaReport.issues?.length ?? 0;
     items.push({
-      id: "timeline-evolution",
-      title: `策略进化 ${OUTCOME_LABELS[decision.evolution.finalOutcome]}`,
-      meta: `${formatShortDate(decision.evolution.createdAt)} · policy v${decision.evolution.policyVersion}`,
+      id: "timeline-qa",
+      title: runtimePreview.qaReport.passed === false ? "QA 待处理" : "QA 已完成",
+      meta: [
+        `${issueCount} 个问题`,
+        runtimePreview.qaReport.createdAt ? formatShortDate(runtimePreview.qaReport.createdAt) : "",
+      ].filter(Boolean).join(" · "),
       status: "done",
       icon: GitBranch,
     });
@@ -217,4 +230,22 @@ function buildVersionTimeline(
     status: "active" as const,
     icon: Clock3,
   }];
+}
+
+function runtimeStatus(runtimePreview?: RuntimePatchPreview | null) {
+  const status = runtimePreview?.previewSession?.status ?? runtimePreview?.runtimeSummary?.status;
+  return status ? statusLabel(status) : "等待运行结果";
+}
+
+function runtimePatchScope(runtimePreview?: RuntimePatchPreview | null) {
+  const operations = runtimePreview?.previewSession?.operations
+    ?? runtimePreview?.patchDraft?.operations
+    ?? [];
+  if (!operations.length) return "暂无补丁候选";
+  return `${operations.length} 个状态路径操作`;
+}
+
+function runtimeRisk(runtimePreview?: RuntimePatchPreview | null) {
+  const risk = normalizeRisk(runtimePreview?.qaReport?.riskLevel ?? runtimePreview?.previewSession?.riskPanel?.level);
+  return riskLabel(risk);
 }

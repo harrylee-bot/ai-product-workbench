@@ -1,6 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import {
-  KnowledgeCandidateSource,
   ProductDesignStateStatus,
   ProjectStatus,
   RequirementDocumentStatus,
@@ -16,10 +15,9 @@ import type {
   RequirementDocument,
   RequirementDocumentDraft,
 } from "./ai-vibe.types";
-import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
-import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { QaService } from "./qa.service";
+import { ProductRuntimeService } from "./runtime/product-runtime.service";
 
 type RequirementDocumentRecord = {
   id: string;
@@ -45,9 +43,7 @@ export class RequirementDocumentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stateService: ProductDesignStateService,
-    private readonly prdWriterAgent: PrdWriterAgentService,
-    @Optional()
-    private readonly knowledgeExtractorAgent?: KnowledgeExtractorAgentService,
+    private readonly productRuntime: ProductRuntimeService,
     @Optional()
     private readonly knowledgeCandidateService?: KnowledgeCandidateService,
     @Optional()
@@ -66,15 +62,14 @@ export class RequirementDocumentService {
       : await this.stateService.getCurrentState(projectId);
     if (!state) throw new NotFoundException("PRD_STATE_NOT_FOUND");
 
-    const prd = await this.prdWriterAgent.run({
-      runId: `manual-prd-${Date.now()}`,
+    const runId = `manual-prd-${Date.now()}`;
+    const prd = await this.productRuntime.generatePrd({
+      runId,
       projectId,
-      traceId: `manual-prd-${Date.now()}`,
+      traceId: runId,
       userId: user.id,
-      input: {
-        productDesignState: state,
-        mode: input.mode ?? "draft",
-      },
+      productDesignState: state,
+      mode: input.mode ?? "draft",
     });
 
     const document = await this.saveGeneratedDocument(state, prd.data, {
@@ -240,33 +235,9 @@ export class RequirementDocumentService {
   }
 
   private async extractKnowledgeCandidatesAfterConfirm(userId: string, document: RequirementDocument) {
-    if (!this.knowledgeExtractorAgent || !this.knowledgeCandidateService) return { items: [] };
-    const state = await this.stateService.getStateByIdForProject(
-      document.productDesignStateId,
-      document.projectId,
-    );
-    if (!state) return { items: [] };
-    const runId = `knowledge-prd-${Date.now()}`;
-    const output = await this.knowledgeExtractorAgent.run({
-      runId,
-      projectId: document.projectId,
-      traceId: runId,
-      userId,
-      input: {
-        projectId: document.projectId,
-        productDesignState: state,
-        prdDocument: document,
-        confirmedByUser: true,
-        source: KnowledgeCandidateSource.prd,
-        sourceRefId: document.id,
-        runId,
-      },
-    });
-    return this.knowledgeCandidateService.createMany(document.projectId, output.data.candidates, {
-      source: KnowledgeCandidateSource.prd,
-      sourceRefId: document.id,
-      runId,
-    });
+    void userId;
+    void document;
+    return { items: [] };
   }
 
   private async confirmDocumentAndSyncState(

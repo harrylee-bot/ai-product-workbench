@@ -16,7 +16,7 @@ import {
   PreviewPanel,
   type Phase1PrdPreview,
   type Phase1PrototypePreview,
-  type Phase2DecisionView,
+  type RuntimePatchPreview,
 } from "@/components/preview-panel";
 import { ProjectList, type Phase1Conversation, type Phase1Project } from "@/components/project-list";
 import { ProtectedRoute } from "@/components/protected-route";
@@ -127,11 +127,11 @@ type DeleteProjectResponse = {
 type Phase1WorkspaceState = {
   selectedProjectId: string;
   selectedConversationId: string;
-  decision: Phase2DecisionView | null;
+  runtimePreview: RuntimePatchPreview | null;
   prdPreview: Phase1PrdPreview | null;
   prototypePreview: Phase1PrototypePreview | null;
   setSelectedProject: (projectId: string, conversationId: string) => void;
-  setDecision: (decision: Phase2DecisionView | null) => void;
+  setRuntimePreview: (runtimePreview: RuntimePatchPreview | null) => void;
   setArtifactPreview: (preview: {
     prdPreview?: Phase1PrdPreview | null;
     prototypePreview?: Phase1PrototypePreview | null;
@@ -149,18 +149,18 @@ const WORKSPACE_PREVIEW_MAX_WIDTH = 980;
 const usePhase1Workspace = create<Phase1WorkspaceState>((set) => ({
   selectedProjectId: "",
   selectedConversationId: "",
-  decision: null,
+  runtimePreview: null,
   prdPreview: null,
   prototypePreview: null,
   setSelectedProject: (projectId, conversationId) =>
     set({
       selectedProjectId: projectId,
       selectedConversationId: conversationId,
-      decision: null,
+      runtimePreview: null,
       prdPreview: null,
       prototypePreview: null,
     }),
-  setDecision: (decision) => set({ decision }),
+  setRuntimePreview: (runtimePreview) => set({ runtimePreview }),
   setArtifactPreview: (preview) =>
     set((state) => ({
       prdPreview: preview.prdPreview === undefined ? state.prdPreview : preview.prdPreview,
@@ -191,11 +191,11 @@ function Phase1WorkspaceInner() {
   const {
     selectedProjectId,
     selectedConversationId,
-    decision,
+    runtimePreview,
     prdPreview,
     prototypePreview,
     setSelectedProject,
-    setDecision,
+    setRuntimePreview,
     setArtifactPreview,
   } = usePhase1Workspace();
 
@@ -363,7 +363,7 @@ function Phase1WorkspaceInner() {
       const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
       const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
 
-      setDecision(null);
+      setRuntimePreview(null);
       watchVibeRun(response.runId, responseProjectId, responseConversationId);
       await Promise.all([
         responseConversationId
@@ -388,7 +388,7 @@ function Phase1WorkspaceInner() {
       const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
       const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
 
-      setDecision(null);
+      setRuntimePreview(null);
       watchVibeRun(response.runId, responseProjectId, responseConversationId);
       await Promise.all([
         responseConversationId
@@ -416,7 +416,7 @@ function Phase1WorkspaceInner() {
       const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
       const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
 
-      setDecision(null);
+      setRuntimePreview(null);
       watchVibeRun(response.runId, responseProjectId, responseConversationId);
       await Promise.all([
         responseConversationId
@@ -642,7 +642,7 @@ function Phase1WorkspaceInner() {
 
       if (deleted.id === selectedProjectId) {
         setSelectedProject(nextProject?.id ?? "", nextProject?.currentConversationId ?? nextProject?.defaultConversationId ?? "");
-        setDecision(null);
+        setRuntimePreview(null);
         setArtifactPreview({ prdPreview: null, prototypePreview: null });
       }
 
@@ -738,7 +738,6 @@ function Phase1WorkspaceInner() {
       />
       <ChatPanel
         messages={messagesQuery.data?.items ?? []}
-        decision={decision}
         runState={runState}
         disabled={projectsQuery.isLoading}
         sending={sendMessage.isPending || Boolean(activeRunId)}
@@ -772,7 +771,7 @@ function Phase1WorkspaceInner() {
         projectId={selectedProjectId}
         prdPreview={prdPreview}
         prototypePreview={prototypePreview}
-        decision={decision}
+        runtimePreview={runtimePreview}
         savingPrdSectionId={updatePrdSection.isPending ? updatePrdSection.variables?.sectionId : undefined}
         aiEditingPrdSectionId={aiEditPrdSection.isPending ? aiEditPrdSection.variables?.sectionId : undefined}
         aiEditingPrototypeSelectionId={aiEditPrototypeSelection.isPending ? aiEditPrototypeSelection.variables?.selectionId : undefined}
@@ -900,21 +899,13 @@ function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | nul
 }
 
 const VIBE_RUN_STEPS = [
-  { step: "intent_detection", title: "理解意图", agent: "Intent Agent", detail: "识别用户目标、选区和是否进入生成链路" },
-  { step: "knowledge_retrieval", title: "检索知识", agent: "Knowledge Agent", detail: "加载知识库、附件和 Vibe Coding skills" },
-  { step: "context_fetch", title: "抓取上下文", agent: "Context Fetch", detail: "读取项目状态、历史消息、选区、附件和既有产物" },
-  { step: "requirement_analysis", title: "分析需求", agent: "Requirement Analyst", detail: "判断需求完整度、缺口、冲突和澄清问题" },
-  { step: "requirement_packaging", title: "整理需求包", agent: "Requirement Merge", detail: "合并用户事实、知识事实、上下文、假设和溯源" },
-  { step: "product_planning", title: "规划方案", agent: "Product Planner", detail: "消费同一份 RequirementPackage，生成 ProductBuildPlan 和下游 agent 顺序" },
-  { step: "requirement_validation", title: "结构校验", agent: "Validator", detail: "生成前检查需求包、计划、选区和版本条件是否可执行" },
-  { step: "safety_check", title: "安全检查", agent: "Safety Check", detail: "生成前检查提示注入、密钥泄漏、越权、隐私和真实外部动作风险" },
-  { step: "product_design", title: "生成产品状态", agent: "Product Designer", detail: "把计划落到 ProductDesignState 唯一事实源" },
-  { step: "prd_generation", title: "生成 PRD", agent: "PRD Writer", detail: "只基于 ProductDesignState 输出结构化 PRD" },
-  { step: "prototype_design", title: "设计原型结构", agent: "Prototype Designer", detail: "只基于 ProductDesignState 输出 PrototypeSpec" },
-  { step: "prototype_code_generation", title: "生成 HTML", agent: "Prototype Code", detail: "只基于 PrototypeSpec 输出单文件 HTML 原型" },
-  { step: "patch_planning", title: "规划局部修改", agent: "Patch Agent", detail: "输出只作用于 ProductDesignState 的 PatchPlan" },
-  { step: "qa_check", title: "QA 闸门", agent: "QA Agent", detail: "检查一致性并决定确认、知识、发布和导出闸门" },
-  { step: "knowledge_extraction", title: "抽取知识候选", agent: "Knowledge Extractor", detail: "从稳定产物中沉淀待审核知识候选" },
+  { step: "requirement_packaging", title: "整理需求包", executor: "Runtime", detail: "把用户输入、附件、历史上下文整理成 runtime 输入" },
+  { step: "product_design", title: "生成产品状态", executor: "Runtime", detail: "由 DeerFlow/Codex runtime 或协议渲染器产出 ProductDesignState" },
+  { step: "prd_generation", title: "生成 PRD", executor: "ProductRuntime", detail: "只基于 ProductDesignState 输出结构化 PRD" },
+  { step: "prototype_design", title: "生成原型规格", executor: "ProductRuntime", detail: "只基于 ProductDesignState 输出 PrototypeSpec" },
+  { step: "prototype_code_generation", title: "生成 HTML", executor: "Codex Runtime", detail: "由 Codex runtime 或协议渲染器输出单文件 HTML 原型" },
+  { step: "patch_planning", title: "规划局部修改", executor: "ProductRuntime", detail: "输出只作用于 ProductDesignState 的 PatchPlan" },
+  { step: "qa_check", title: "QA 闸门", executor: "Rule Runtime", detail: "检查一致性并决定确认、知识、发布和导出闸门" },
 ];
 
 function streamReconnectDelayMs(attempt: number) {
@@ -1008,7 +999,7 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     if (eventType === "step_failed") {
       next = updateStep(next, event.step, "failed", event.content);
       next.status = "failed";
-      next.errorMessage = event.content ?? "Agent 执行失败";
+      next.errorMessage = event.content ?? "Runtime 执行失败";
     }
     if (eventType === "fallback_used") {
       next = updateStep(next, event.step, undefined, event.content);
@@ -1155,8 +1146,8 @@ function updateStep(
     steps.push({
       step: stepName,
       title: stepName,
-      agent: "Vibe Agent",
-      detail: "后端返回的扩展步骤",
+      executor: "Runtime",
+      detail: "后端返回的 runtime 扩展步骤",
       status: status ?? "running",
       message,
     });
@@ -1492,13 +1483,13 @@ function formatRequirementIntakeGraph(graph: Record<string, unknown>) {
   const nodes = Array.isArray(graph.nodes) ? graph.nodes.map((item) => asRecord(item)).filter(Boolean) : [];
   const edges = Array.isArray(graph.edges) ? graph.edges.map((item) => asRecord(item)).filter(Boolean) : [];
 
-  lines.push("执行链路：Intent -> Knowledge / Context Fetch -> Requirement -> Planner / Validator / Safety Check。");
+  lines.push("执行链路：Intent -> Knowledge / Context Fetch / Requirement Intake -> Requirement Merge -> Planner / Validator / Safety Check。");
   if (summary) lines.push(`链路摘要：${normalizeTimelineText(summary)}`);
   if (gateAction) lines.push(`最终 Gate：${gateAction}。`);
 
   if (nodes.length) {
     lines.push("节点结果：");
-    for (const node of nodes.slice(0, 8)) {
+    for (const node of nodes.slice(0, 10)) {
       const title = asText(node?.title) || asText(node?.name) || "节点";
       const status = asText(node?.status) || "unknown";
       const nodeSummary = asText(node?.summary);
@@ -1597,7 +1588,7 @@ function toChineseProcessText(text: string) {
     .replace(/QA/g, "QA")
     .replace(/fallback/gi, "规则兜底")
     .replace(/run/gi, "任务")
-    .replace(/agent/gi, "智能体");
+    .replace(/agent/gi, "Runtime");
 }
 
 function stepStartedText(step: string, title?: string) {

@@ -25,7 +25,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-      message: "登录失败，请稍后重试",
+      message: "服务器内部错误，请稍后重试",
     });
   }
 

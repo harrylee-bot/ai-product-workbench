@@ -802,7 +802,7 @@ export class ProductDesignStateService {
       path: "*",
       before: current,
       after,
-      reason: options.reason ?? "Product Designer Agent 更新 ProductDesignState",
+      reason: options.reason ?? "Runtime adapter 更新 ProductDesignState",
       runId: options.runId,
       messageId: options.messageId,
       createdBy: options.userId ?? "system",

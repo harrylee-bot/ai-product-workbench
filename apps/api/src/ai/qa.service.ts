@@ -1,6 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
-  AgentName,
   KnowledgeType,
   Prisma,
   ProjectStatus,
@@ -13,7 +12,6 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { KnowledgeRetrievalService } from "../knowledge/knowledge-retrieval.service";
 import { PrismaService } from "../prisma/prisma.service";
-import type { AgentFallbackLevel, AgentFallbackMetadata } from "./agent-fallback-policy";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
   KnowledgeContext,
@@ -29,7 +27,6 @@ import type {
   QAReportTrigger,
   RequirementDocument,
 } from "./ai-vibe.types";
-import { QaAgentService } from "./agents/qa-agent.service";
 import { evaluateQaGate, isQaGateActionAllowed } from "./qa-gate.helpers";
 import { DEFAULT_CHECK_TYPES, QaRuleCheckService } from "./qa-rule-check.service";
 import { projectStatusAfterQa } from "./workspace-state-machine";
@@ -44,7 +41,6 @@ type RunQaOptions = {
   prdDocument?: RequirementDocument;
   prototypeSpec?: PrototypeSpec;
   prototypeArtifact?: PrototypeArtifact;
-  fallbacks?: AgentFallbackMetadata[];
 };
 
 type ProductDesignStateRecord = {
@@ -167,7 +163,6 @@ export class QaService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ruleCheck: QaRuleCheckService,
-    private readonly qaAgent: QaAgentService,
     private readonly knowledgeRetrieval: KnowledgeRetrievalService,
   ) {}
 
@@ -209,31 +204,12 @@ export class QaService {
       checkTypes,
     });
 
-    const agentResult = state
-      ? await this.qaAgent.run({
-          runId: options.runId ?? `qa-${Date.now()}`,
-          projectId,
-          traceId: options.traceId ?? options.runId ?? `qa-${Date.now()}`,
-          userId,
-          input: {
-            productDesignState: state,
-            prdDocument: prdDocument ?? undefined,
-            prototypeSpec: prototypeSpec ?? undefined,
-            knowledgeContext,
-          },
-        })
-      : undefined;
-
-    const issues = dedupeIssues([
-      ...ruleIssues,
-      ...(agentResult?.data.issues ?? []),
-      ...fallbackIssuesFromMetadata(options.fallbacks ?? []),
-    ]);
+    const issues = dedupeIssues(ruleIssues);
     const counts = countIssues(issues);
     const status = resolveStatus(issues);
     const summary = issues.length
       ? `QA 完成：${counts.blockingCount} 个阻塞、${counts.majorCount} 个重要、${counts.minorCount} 个轻微、${counts.infoCount} 个提示。`
-      : agentResult?.data.summary || "QA 完成：未发现阻塞或一致性问题。";
+      : "QA 完成：未发现阻塞或一致性问题。";
 
     const report = await this.prisma.qAReport.create({
       data: {
@@ -467,7 +443,7 @@ export class QaService {
     const search = await this.knowledgeRetrieval.search({
       projectId,
       runId: options.runId,
-      agentName: AgentName.qa_agent,
+      agentName: "runtime_qa",
       query,
       taskType: "qa_check",
       preferredTypes: [
@@ -530,42 +506,6 @@ export class QaService {
       throw new ForbiddenException("管理员不可直接修改用户项目 QA");
     }
   }
-}
-
-export function fallbackIssuesFromMetadata(fallbacks: AgentFallbackMetadata[]): QAIssue[] {
-  return fallbacks.map((fallback) => ({
-    id: `qa_fallback_${safeIssueId(fallback.agentName)}_${safeIssueId(fallback.taskType)}_${safeIssueId(fallback.level)}`,
-    checkType: "assumption_risk",
-    severity: fallbackIssueSeverity(fallback.level),
-    title: fallbackIssueTitle(fallback),
-    description: fallback.reason || fallback.errorMessage,
-    relatedStatePaths: [`fallbacks.${fallback.agentName}.${fallback.taskType}`],
-    suggestion: fallbackIssueSuggestion(fallback.level),
-    autoFixable: false,
-    status: "open",
-  }));
-}
-
-function fallbackIssueSeverity(level: AgentFallbackLevel): QAIssue["severity"] {
-  if (level === "acceptable_result") return "info";
-  if (level === "degraded_preview") return "minor";
-  return "major";
-}
-
-function fallbackIssueTitle(fallback: AgentFallbackMetadata) {
-  if (fallback.level === "acceptable_result") return `Fallback 可接受结果：${fallback.agentName}`;
-  if (fallback.level === "degraded_preview") return `Fallback 降级预览需复核：${fallback.agentName}`;
-  return `模型不可用：${fallback.agentName}`;
-}
-
-function fallbackIssueSuggestion(level: AgentFallbackLevel) {
-  if (level === "acceptable_result") return "继续评审即可；该 fallback 不阻止确认、知识沉淀或导出。";
-  if (level === "degraded_preview") return "确认前复核该步骤输出；重新运行 QA 后才能沉淀知识或导出发布。";
-  return "检查模型配置或重试；不要确认、导出或沉淀知识。";
-}
-
-function safeIssueId(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
 }
 
 function countIssues(issues: QAIssue[]) {

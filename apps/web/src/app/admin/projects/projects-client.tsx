@@ -189,7 +189,7 @@ function ProjectDetailDrawer({ detail, onClose }: { detail: ProjectDetail | null
             <DetailItem label="状态" value={<ProjectStatusBadge status={detail.project.status} />} />
             <DetailItem label="会话数" value={detail.project.counts.conversations} />
             <DetailItem label="消息数" value={detail.project.counts.messages} />
-            <DetailItem label="Agent Run" value={detail.project.counts.agentRuns} />
+            <DetailItem label="Runtime Run" value={detail.project.counts.agentRuns} />
             <DetailItem label="Patch" value={detail.project.counts.patchRecords} />
           </DetailGrid>
           <Section title="ProductDesignState">

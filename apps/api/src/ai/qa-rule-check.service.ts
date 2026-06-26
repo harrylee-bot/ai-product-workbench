@@ -236,7 +236,7 @@ export class QaRuleCheckService {
             checkType: "knowledge_rule_compliance",
             severity: "major",
             title: `Vibe Coding Skill 未落入 ProductDesignState：${skill.name}`,
-            description: "Knowledge Agent 已加载该 skill，但 ProductDesignState.knowledgeRefs 未保留对应 knowledgeId、sourcePath 或名称，PRD、原型和调试链路无法追踪该执行约束。",
+            description: "本轮 runtime context 已加载该 skill，但 ProductDesignState.knowledgeRefs 未保留对应 knowledgeId、sourcePath 或名称，PRD、原型和调试链路无法追踪该执行约束。",
             relatedStatePaths: ["knowledgeRefs"],
             relatedKnowledgeIds: [skill.id || `agent-skill:${skill.name}`],
             suggestion: "先将该 skill 写入 ProductDesignState.knowledgeRefs，再重新生成 PRD、PrototypeSpec 和 QA。",

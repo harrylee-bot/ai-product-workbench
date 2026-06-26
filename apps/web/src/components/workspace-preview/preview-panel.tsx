@@ -23,9 +23,9 @@ import { StatePreviewView } from "./state-preview-view";
 import type {
   Phase1PrdPreview,
   Phase1PrototypePreview,
-  Phase2DecisionView,
   DocumentCanvasPreview,
   PreviewMode,
+  RuntimePatchPreview,
 } from "./types";
 
 const PREVIEW_TABS: Array<{ value: PreviewMode; label: string; icon: typeof FileText; description: string }> = [
@@ -43,7 +43,7 @@ export function PreviewPanel({
   projectId,
   prdPreview,
   prototypePreview,
-  decision,
+  runtimePreview,
   savingPrdSectionId,
   aiEditingPrdSectionId,
   aiEditingPrototypeSelectionId,
@@ -54,7 +54,7 @@ export function PreviewPanel({
   projectId?: string;
   prdPreview?: Phase1PrdPreview | null;
   prototypePreview?: Phase1PrototypePreview | null;
-  decision?: Phase2DecisionView | null;
+  runtimePreview?: RuntimePatchPreview | null;
   savingPrdSectionId?: string;
   aiEditingPrdSectionId?: string;
   aiEditingPrototypeSelectionId?: string;
@@ -265,11 +265,11 @@ export function PreviewPanel({
             onAiEditSelection={onAiEditPrototypeSelection}
           />
         ) : mode === "qa" ? (
-          <QaPreviewView decision={decision} />
+          <QaPreviewView runtimePreview={runtimePreview} />
         ) : mode === "state" ? (
-          <StatePreviewView decision={decision} prdPreview={prdPreview} prototypePreview={prototypePreview} />
+          <StatePreviewView runtimePreview={runtimePreview} prdPreview={prdPreview} prototypePreview={prototypePreview} />
         ) : (
-          <FeedbackWorkflowView decision={decision} />
+          <FeedbackWorkflowView runtimePreview={runtimePreview} />
         )}
       </div>
     </aside>

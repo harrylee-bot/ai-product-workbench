@@ -41,7 +41,7 @@ type LogPageConfig<T extends { id: string }> = {
   minWidth?: number;
 };
 
-type AgentRunItem = {
+type RuntimeRunItem = {
   id: string;
   projectTitle: string;
   userDisplayName: string;
@@ -108,9 +108,9 @@ type QaReportItem = {
   createdAt: string;
 };
 
-const agentRunConfig: LogPageConfig<AgentRunItem> = {
-  title: "Agent Run 日志",
-  subtitle: "Agent 运行、步骤、traceId 与错误摘要",
+const runtimeRunConfig: LogPageConfig<RuntimeRunItem> = {
+  title: "Runtime Run 日志",
+  subtitle: "Runtime 运行、步骤、traceId 与错误摘要",
   path: "/admin/logs/agent-runs",
   detailPath: (id) => `/admin/logs/agent-runs/${id}`,
   minWidth: 1180,
@@ -140,14 +140,14 @@ const modelCallConfig: LogPageConfig<ModelCallItem> = {
   filters: [
     { key: "runId", placeholder: "runId" },
     { key: "traceId", placeholder: "traceId" },
-    { key: "agentName", placeholder: "agentName" },
+    { key: "agentName", placeholder: "runtimeName" },
     { key: "modelName", placeholder: "modelName" },
     { key: "status", placeholder: "状态", type: "select", options: ["running", "succeeded", "failed"] },
   ],
   columns: [
     { label: "调用时间", render: (item) => formatDate(item.createdAt) },
     { label: "任务类型", render: (item) => item.taskType },
-    { label: "Agent", render: (item) => item.agentName ?? "-" },
+    { label: "调用方", render: (item) => item.agentName ?? "-" },
     { label: "模型", render: (item) => item.modelName },
     { label: "供应商", render: (item) => item.providerName },
     { label: "状态", render: (item) => <StatusBadge status={item.status} /> },
@@ -226,8 +226,8 @@ const qaConfig: LogPageConfig<QaReportItem> = {
   ],
 };
 
-export function AgentRunsLogClient() {
-  return <LogPage config={agentRunConfig} />;
+export function RuntimeRunsLogClient() {
+  return <LogPage config={runtimeRunConfig} />;
 }
 
 export function ModelCallsLogClient() {

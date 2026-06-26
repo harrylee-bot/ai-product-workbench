@@ -1,8 +1,8 @@
 import type {
   Constraint,
   ConstraintContext,
-  Phase2DecisionView,
   PrototypeComponentNode,
+  RuntimePatchPreview,
 } from "./types";
 
 export const RULE_LABELS: Record<Constraint["rule"], string> = {
@@ -10,12 +10,6 @@ export const RULE_LABELS: Record<Constraint["rule"], string> = {
   prefer: "优先考虑",
   avoid: "避免",
   warn: "提醒",
-};
-
-export const OUTCOME_LABELS: Record<Phase2DecisionView["evolution"]["finalOutcome"], string> = {
-  success: "成功",
-  failure: "失败",
-  partial: "部分成功",
 };
 
 export function sectionEditKey(documentKey: string, sectionId: string) {
@@ -52,11 +46,8 @@ export function firstConstraints(context: ConstraintContext | null) {
   ].slice(0, 4);
 }
 
-export function decisionConstraintContext(decision?: Phase2DecisionView | null) {
-  return decision?.constraintContext
-    ?? decision?.decisionPlan.constraintContext
-    ?? decision?.agentInput?.constraintContext
-    ?? null;
+export function runtimeConstraintContext(preview?: RuntimePatchPreview | null) {
+  return preview?.constraintContext ?? null;
 }
 
 export function riskLabel(risk?: string) {
@@ -84,12 +75,6 @@ export function statusLabel(status?: string) {
     failed: "失败",
   };
   return status ? labels[status] ?? status : "未知";
-}
-
-export function evolutionCopy(signalType: "promote" | "demote" | "neutral") {
-  if (signalType === "promote") return "策略已提升";
-  if (signalType === "demote") return "策略已降级";
-  return "策略保持中性";
 }
 
 export function formatShortDate(value: string) {
@@ -197,41 +182,30 @@ function trimText(value: string, fallback: string) {
 export function toChineseText(text: string) {
   return text
     .replace(/AI Product Workbench/g, "智能产品工作台")
-    .replace(/AI Product Company/g, "智能产品公司")
     .replace(/AI Product OS/g, "智能产品操作系统")
     .replace(/AI Product/g, "智能产品")
-    .replace(/Triple System Fusion/g, "三系统融合")
-    .replace(/Triple System/g, "三系统融合")
+    .replace(/Triple System Fusion/g, "运行时协议")
+    .replace(/Triple System/g, "运行时协议")
     .replace(/Constraint Context/g, "约束上下文")
-    .replace(/Constraint System/g, "约束系统")
-    .replace(/Decision System/g, "决策系统")
-    .replace(/Evolution System/g, "进化系统")
-    .replace(/Decision Engine/g, "决策引擎")
-    .replace(/Review Board/g, "评审委员会")
-    .replace(/Strategy Selector/g, "策略选择器")
+    .replace(/Constraint System/g, "约束协议")
+    .replace(/Decision System/g, "运行时状态")
+    .replace(/Evolution System/g, "运行时状态")
+    .replace(/Decision Engine/g, "运行时适配器")
+    .replace(/Review Board/g, "历史评审记录")
+    .replace(/Strategy Selector/g, "运行时策略")
     .replace(/Patch Preview/g, "补丁预览")
     .replace(/System Preview/g, "系统预览")
     .replace(/System Policy/g, "系统策略")
     .replace(/ProductDesignState/g, "产品设计状态")
-    .replace(/Product Department/g, "产品部门")
-    .replace(/Engineering Department/g, "工程部门")
-    .replace(/Design Department/g, "设计部门")
-    .replace(/QA Department/g, "质检部门")
-    .replace(/Growth Department/g, "增长部门")
-    .replace(/Evolution Department/g, "进化部门")
-    .replace(/CEO Agent/g, "首席决策智能体")
-    .replace(/Self-Generation Observer/g, "自生成观察智能体")
-    .replace(/Flow Optimization Agent/g, "流程优化智能体")
     .replace(/Generate multiple strategies and select one by weighted score\./g, "生成多个策略，并按加权得分选择最优策略。")
     .replace(/Route through 补丁预览 before apply\./g, "执行前必须进入补丁预览。")
     .replace(/Avoid direct database mutation and protected module edits\./g, "避免直接修改数据库和受保护模块。")
     .replace(/Prefer lower-risk strategies when business value is similar\./g, "业务价值接近时优先选择低风险策略。")
     .replace(/QA passed and user satisfaction was strong\./g, "质检通过，用户满意度较高。")
     .replace(/Pipeline/g, "流程")
-    .replace(/Agent/g, "智能体")
+    .replace(/Agent/g, "Runtime")
     .replace(/Strategy/g, "策略")
     .replace(/Outcome/g, "结果")
-    .replace(/Company/g, "公司")
     .replace(/Dashboard/g, "看板")
     .replace(/Runtime/g, "运行时")
     .replace(/Product/g, "产品");

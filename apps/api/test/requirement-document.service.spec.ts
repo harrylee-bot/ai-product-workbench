@@ -1,6 +1,6 @@
 import { ProjectStatus, RequirementDocumentStatus, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderPrdFromState } from "../src/ai/agents/prd-writer-agent.service";
+import { renderPrdFromState } from "../src/ai/runtime/local-protocol-renderers";
 import type { ProductDesignState, RequirementDocumentDraft } from "../src/ai/ai-vibe.types";
 import { RequirementDocumentService } from "../src/ai/requirement-document.service";
 
@@ -29,8 +29,8 @@ describe("PRD requirement document module", () => {
     attachGeneratedArtifacts: vi.fn(),
     syncRequirementDocumentEdit: vi.fn(),
   };
-  const prdWriterAgent = {
-    run: vi.fn(),
+  const productRuntime = {
+    generatePrd: vi.fn(),
   };
   const qaService = {
     assertGateAllows: vi.fn(),
@@ -38,8 +38,7 @@ describe("PRD requirement document module", () => {
   const service = new RequirementDocumentService(
     prisma as never,
     stateService as never,
-    prdWriterAgent as never,
-    undefined,
+    productRuntime as never,
     undefined,
     qaService as never,
   );
@@ -75,7 +74,7 @@ describe("PRD requirement document module", () => {
       prdDocument: input.document,
       prototypeSpec: undefined,
     }));
-    prdWriterAgent.run.mockResolvedValue({ data: renderPrdFromState(baseState()) });
+    productRuntime.generatePrd.mockResolvedValue({ data: renderPrdFromState(baseState()) });
   });
 
   it("renders a structured 16-section PRD from ProductDesignState", () => {
@@ -161,7 +160,7 @@ describe("PRD requirement document module", () => {
     const state = baseState();
     const draft = renderPrdFromState(state);
     stateService.getCurrentState.mockResolvedValue(state);
-    prdWriterAgent.run.mockResolvedValue({ data: draft });
+    productRuntime.generatePrd.mockResolvedValue({ data: draft });
     prisma.requirementDocument.create.mockImplementation(async ({ data }) =>
       documentRecord({
         id: "prd-manual",

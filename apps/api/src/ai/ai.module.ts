@@ -9,26 +9,8 @@ import { AgentRunLogService } from "./agent-run-log.service";
 import { AgentSkillRegistryService } from "./agent-skill-registry.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
 import { DocumentCanvasService } from "./document-canvas.service";
-import { EvolutionEngineService } from "./evolution-engine.service";
-import { EvolutionOrchestratorService } from "./evolution-orchestrator.service";
 import { ProjectExportController } from "./export.controller";
 import { ExportService } from "./export.service";
-import { FeedbackAnalysisService } from "./feedback-analysis.service";
-import { InteractionCaptureService } from "./interaction-capture.service";
-import { MultiAgentReviewService } from "./multi-agent-review.service";
-import { PatchExecutionEngineService } from "./patch-execution-engine.service";
-import { ProductMemoryService } from "./product-memory.service";
-import { IntentAgentService } from "./agents/intent-agent.service";
-import { KnowledgeAgentService } from "./agents/knowledge-agent.service";
-import { KnowledgeExtractorAgentService } from "./agents/knowledge-extractor-agent.service";
-import { PatchAgentService } from "./agents/patch-agent.service";
-import { PrdWriterAgentService } from "./agents/prd-writer-agent.service";
-import { ProductDesignerAgentService } from "./agents/product-designer-agent.service";
-import { ProductPlannerAgentService } from "./agents/product-planner-agent.service";
-import { PrototypeCodeAgentService } from "./agents/prototype-code-agent.service";
-import { PrototypeDesignerAgentService } from "./agents/prototype-designer-agent.service";
-import { QaAgentService } from "./agents/qa-agent.service";
-import { RequirementAnalystAgentService } from "./agents/requirement-analyst-agent.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 import {
   ProductDesignStateResourceController,
@@ -74,28 +56,11 @@ import {
   PrdEditingController,
   PrototypeEditingController,
 } from "./editing.controller";
-import {
-  AiSuggestionController,
-  EventController,
-  EvolutionController,
-  FeedbackAnalysisController,
-  InteractionController,
-  MultiAgentReviewController,
-  PatchExecutionController,
-  ProjectEvolutionController,
-  ProjectInsightController,
-  ProjectInteractionController,
-  ProjectMemoryController,
-  ProjectPatchExecutionController,
-  ProjectReviewController,
-  ProductMemoryController,
-} from "./product-evolution.controller";
-import { AgentFactory } from "./self-generation/agent.factory";
-import { MutationEngine } from "./self-generation/mutation.engine";
-import { SelfGenerationEngine } from "./self-generation/self-generation.engine";
-import { SystemGraphService } from "./self-generation/system.graph.service";
-import { SystemMutationController } from "./self-generation/system-mutation.controller";
-import { SystemPreviewService } from "./self-generation/system.preview.service";
+import { ExternalRuntimeConfigService } from "./runtime/external-runtime-config.service";
+import { ExternalRuntimeService } from "./runtime/external-runtime.service";
+import { CodexRuntimeAdapter } from "./runtime/codex-runtime.adapter";
+import { DeerFlowRuntimeAdapter } from "./runtime/deerflow-runtime.adapter";
+import { ProductRuntimeService } from "./runtime/product-runtime.service";
 
 @Module({
   imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule, ModelGatewayModule],
@@ -120,22 +85,7 @@ import { SystemPreviewService } from "./self-generation/system.preview.service";
     PrdEditingController,
     PrototypeEditingController,
     InlineAssistantController,
-    InteractionController,
-    ProjectInteractionController,
-    EventController,
-    AiSuggestionController,
-    FeedbackAnalysisController,
-    ProjectInsightController,
-    MultiAgentReviewController,
-    ProjectReviewController,
-    EvolutionController,
-    ProjectEvolutionController,
-    PatchExecutionController,
-    ProjectPatchExecutionController,
-    ProductMemoryController,
-    ProjectMemoryController,
     PatchPreviewController,
-    SystemMutationController,
     ShareLinkController,
     PublicShareController,
   ],
@@ -156,30 +106,12 @@ import { SystemPreviewService } from "./self-generation/system.preview.service";
     QaService,
     VersionHistoryService,
     RollbackService,
-    InteractionCaptureService,
-    FeedbackAnalysisService,
-    MultiAgentReviewService,
-    EvolutionEngineService,
-    EvolutionOrchestratorService,
-    PatchExecutionEngineService,
-    ProductMemoryService,
-    IntentAgentService,
-    KnowledgeAgentService,
-    RequirementAnalystAgentService,
-    ProductPlannerAgentService,
-    ProductDesignerAgentService,
-    PrdWriterAgentService,
-    PrototypeDesignerAgentService,
-    PrototypeCodeAgentService,
-    PatchAgentService,
-    QaAgentService,
-    KnowledgeExtractorAgentService,
+    ExternalRuntimeConfigService,
+    ExternalRuntimeService,
+    CodexRuntimeAdapter,
+    DeerFlowRuntimeAdapter,
+    ProductRuntimeService,
     MessageService,
-    AgentFactory,
-    SelfGenerationEngine,
-    SystemGraphService,
-    MutationEngine,
-    SystemPreviewService,
     ShareService,
   ],
   exports: [VibeService],
