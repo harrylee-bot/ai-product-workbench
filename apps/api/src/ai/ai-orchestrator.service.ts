@@ -3,10 +3,10 @@ import { MessageType, ProductDesignStateStatus, ProjectStatus, UserIntent } from
 import { randomUUID } from "node:crypto";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
-import { AgentRunLogService } from "./agent-run-log.service";
+import { RuntimeRunLogService } from "./runtime-run-log.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
-  AgentRunContext,
+  RuntimeRunContext,
   AttachmentSummary,
   ExportArtifactSummary,
   InputQualityAssessment,
@@ -35,7 +35,7 @@ import { projectStatusFromProductDesignState } from "./workspace-state-machine";
 import { VibeStreamService } from "./vibe-stream.service";
 
 type OrchestratorInput = {
-  context: AgentRunContext;
+  context: RuntimeRunContext;
   userMessageId: string;
   attachments: AttachmentSummary[];
 };
@@ -94,7 +94,7 @@ export type OrchestratorResult = {
 @Injectable()
 export class AiOrchestratorService {
   constructor(
-    private readonly runLog: AgentRunLogService,
+    private readonly runLog: RuntimeRunLogService,
     private readonly stream: VibeStreamService,
     private readonly messageService: MessageService,
     private readonly prisma: PrismaService,
@@ -199,7 +199,7 @@ export class AiOrchestratorService {
     }
   }
 
-  private async finishExport(context: AgentRunContext, intent: IntentResult) {
+  private async finishExport(context: RuntimeRunContext, intent: IntentResult) {
     await this.stream.emit({
       runId: context.runId,
       projectId: context.projectId,
@@ -369,7 +369,7 @@ export class AiOrchestratorService {
   }
 
   private async finishRun(
-    context: AgentRunContext,
+    context: RuntimeRunContext,
     result: OrchestratorResult,
     projectStatus: ProjectStatus,
   ) {
@@ -407,7 +407,7 @@ export class AiOrchestratorService {
     });
   }
 
-  private async handleRunFailure(context: AgentRunContext, error: unknown) {
+  private async handleRunFailure(context: RuntimeRunContext, error: unknown) {
     const message = errorMessage(error);
     await this.runLog.failRun(context.runId, error);
     await Promise.allSettled([

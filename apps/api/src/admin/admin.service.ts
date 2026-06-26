@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import {
-  AgentStepStatus,
+  RuntimeStepStatus,
   FileAssetStatus,
   KnowledgeCandidateStatus,
   ModelCallStatus,
@@ -11,7 +11,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import {
   ListAdminModelCallsQueryDto,
   ListAdminProjectsQueryDto,
-  ListAgentRunsQueryDto,
+  ListRuntimeRunsQueryDto,
   ListFileParsesQueryDto,
   ListPatchesQueryDto,
   ListQaReportsQueryDto,
@@ -20,7 +20,7 @@ import { normalizePagination } from "./admin-audit.service";
 
 type RuntimeDebugStep = {
   id: string;
-  agentName: string;
+  runtimeName: string;
   status: string;
   outputSummary?: string;
   modelCallLogId?: string;
@@ -54,7 +54,7 @@ export class AdminService {
     const [
       userCount,
       projectCount,
-      todayAgentRunCount,
+      todayRuntimeRunCount,
       todayModelCallCount,
       todayFailedModelCallCount,
       pendingKnowledgeCandidateCount,
@@ -63,7 +63,7 @@ export class AdminService {
     ] = await this.prisma.$transaction([
       this.prisma.user.count(),
       this.prisma.project.count({ where: { deletedAt: null } }),
-      this.prisma.agentRunLog.count({ where: { startedAt: { gte: todayStart } } }),
+      this.prisma.runtimeRunLog.count({ where: { startedAt: { gte: todayStart } } }),
       this.prisma.modelCallLog.count({ where: { createdAt: { gte: todayStart } } }),
       this.prisma.modelCallLog.count({
         where: { status: ModelCallStatus.failed, createdAt: { gte: todayStart } },
@@ -82,7 +82,7 @@ export class AdminService {
     return {
       userCount,
       projectCount,
-      todayAgentRunCount,
+      todayRuntimeRunCount,
       todayModelCallCount,
       todayFailedModelCallCount,
       pendingKnowledgeCandidateCount,
@@ -126,7 +126,7 @@ export class AdminService {
         take: pageSize,
         include: {
           owner: { select: { id: true, username: true, displayName: true, email: true } },
-          _count: { select: { conversations: true, agentRuns: true, patchRecords: true, fileAssets: true } },
+          _count: { select: { conversations: true, runtimeRuns: true, patchRecords: true, fileAssets: true } },
         },
       }),
       this.prisma.project.count({ where }),
@@ -143,7 +143,8 @@ export class AdminService {
         ownerDisplayName: project.owner.displayName,
         ownerEmail: project.owner.email ?? undefined,
         conversationCount: project._count.conversations,
-        agentRunCount: project._count.agentRuns,
+        runtimeRunCount: project._count.runtimeRuns,
+        agentRunCount: project._count.runtimeRuns,
         patchCount: project._count.patchRecords,
         fileCount: project._count.fileAssets,
         currentConversationId: project.currentConversationId ?? undefined,
@@ -184,7 +185,7 @@ export class AdminService {
           take: 1,
         },
         _count: {
-          select: { conversations: true, messages: true, agentRuns: true, patchRecords: true, fileAssets: true },
+          select: { conversations: true, messages: true, runtimeRuns: true, patchRecords: true, fileAssets: true },
         },
       },
     });
@@ -264,8 +265,8 @@ export class AdminService {
     };
   }
 
-  async listProjectRuns(projectId: string, query: ListAgentRunsQueryDto) {
-    return this.listAgentRuns({ ...query, projectId });
+  async listProjectRuns(projectId: string, query: ListRuntimeRunsQueryDto) {
+    return this.listRuntimeRuns({ ...query, projectId });
   }
 
   async listProjectPatches(projectId: string, query: ListPatchesQueryDto) {
@@ -280,19 +281,19 @@ export class AdminService {
     return this.listQaReports({ ...query, projectId });
   }
 
-  async listAgentRuns(query: ListAgentRunsQueryDto) {
+  async listRuntimeRuns(query: ListRuntimeRunsQueryDto) {
     const { page, pageSize } = normalizePagination(query);
-    const where: Prisma.AgentRunLogWhereInput = {
+    const where: Prisma.RuntimeRunLogWhereInput = {
       projectId: query.projectId,
       userId: query.userId,
       conversationId: query.conversationId,
       status: query.status,
       traceId: query.traceId,
-      ...(query.agentName ? { steps: { some: { agentName: query.agentName } } } : {}),
+      ...(query.runtimeName ? { steps: { some: { runtimeName: query.runtimeName } } } : {}),
     };
 
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.agentRunLog.findMany({
+      this.prisma.runtimeRunLog.findMany({
         where,
         orderBy: { startedAt: "desc" },
         skip: (page - 1) * pageSize,
@@ -304,7 +305,7 @@ export class AdminService {
           steps: { orderBy: [{ startedAt: "desc" }, { id: "desc" }], take: 1 },
         },
       }),
-      this.prisma.agentRunLog.count({ where }),
+      this.prisma.runtimeRunLog.count({ where }),
     ]);
 
     return {
@@ -320,7 +321,7 @@ export class AdminService {
         userDisplayName: run.user.displayName,
         intent: run.intent ?? undefined,
         status: run.status,
-        currentStep: run.steps[0]?.agentName,
+        currentStep: run.steps[0]?.runtimeName,
         currentStepStatus: run.steps[0]?.status,
         traceId: run.traceId,
         inputSummary: run.inputSummary,
@@ -336,8 +337,8 @@ export class AdminService {
     };
   }
 
-  async getAgentRun(runId: string) {
-    const run = await this.prisma.agentRunLog.findUnique({
+  async getRuntimeRun(runId: string) {
+    const run = await this.prisma.runtimeRunLog.findUnique({
       where: { id: runId },
       include: {
         project: { select: { id: true, title: true } },
@@ -360,7 +361,7 @@ export class AdminService {
     if (!run) throw new NotFoundException("ADMIN_LOG_NOT_FOUND");
     const steps = run.steps.map((step) => ({
       id: step.id,
-      agentName: step.agentName,
+      runtimeName: step.runtimeName,
       status: step.status,
       inputSummary: step.inputSummary,
       outputSummary: step.outputSummary ?? undefined,
@@ -422,7 +423,7 @@ export class AdminService {
     const { page, pageSize } = normalizePagination(query);
     const where: Prisma.ModelCallLogWhereInput = {
       taskType: query.taskType,
-      agentName: query.agentName,
+      runtimeName: query.runtimeName,
       modelName: query.modelName,
       providerId: query.providerId,
       status: query.status,
@@ -458,8 +459,8 @@ export class AdminService {
       include: {
         provider: { select: { id: true, name: true } },
         modelConfig: { select: { id: true, displayName: true } },
-        agentStepLogs: {
-          select: { id: true, runId: true, agentName: true, status: true },
+        runtimeStepLogs: {
+          select: { id: true, runId: true, runtimeName: true, status: true },
           take: 20,
         },
       },
@@ -469,7 +470,7 @@ export class AdminService {
       ...this.toModelCallItem(log),
       inputSummary: log.inputSummary ?? undefined,
       outputSummary: log.outputSummary ?? undefined,
-      agentStepLogs: log.agentStepLogs,
+      runtimeStepLogs: log.runtimeStepLogs,
     };
   }
 
@@ -770,7 +771,7 @@ export class AdminService {
       id: log.id,
       traceId: log.traceId ?? undefined,
       runId: log.runId ?? undefined,
-      agentName: log.agentName ?? undefined,
+      runtimeName: log.runtimeName ?? undefined,
       taskType: log.taskType,
       providerId: log.providerId,
       providerName: log.provider.name,
@@ -826,7 +827,7 @@ function buildRuntimeRunDebugSummary(input: {
     if (event.type === "fallback_used") {
       fallbackEvents.push({
         id: event.id,
-        agentName: data.agentName ?? event.step,
+        runtimeName: data.runtimeName ?? event.step,
         level: data.level,
         action: data.action,
         errorCode: data.errorCode,
@@ -845,7 +846,7 @@ function buildRuntimeRunDebugSummary(input: {
     if (fallback) {
       fallbackEvents.push({
         id: step.id,
-        agentName: step.agentName,
+        runtimeName: step.runtimeName,
         ...fallback,
       });
     }
@@ -863,7 +864,7 @@ function buildRuntimeRunDebugSummary(input: {
     }
   }
 
-  const uniqueFallbacks = uniqueRecords(fallbackEvents, "id", "agentName", "errorCode", "reason");
+  const uniqueFallbacks = uniqueRecords(fallbackEvents, "id", "runtimeName", "errorCode", "reason");
   const uniqueQaGates = uniqueRecords(qaGates, "reportId", "status");
   const uniqueQaIssues = uniqueRecords(qaIssues, "id", "title");
   const uniqueKnowledgeHits = uniqueRecords(knowledgeHits, "knowledgeId", "sourceId", "id", "title");
@@ -927,11 +928,11 @@ function extractKnowledgeHits(data: Record<string, unknown>) {
     "businessConcepts",
   ];
   const refs = buckets.flatMap((key) => arrayOfRecords(data[key]));
-  const skills = arrayOfRecords(data.agentSkills).map((skill) => ({
+  const skills = arrayOfRecords(data.runtimeSkills).map((skill) => ({
     id: skill.id,
-    knowledgeId: `agent-skill:${text(skill.name, "unknown")}`,
+    knowledgeId: `runtime-skill:${text(skill.name, "unknown")}`,
     title: `Vibe Coding Skill：${text(skill.name, "unknown")}`,
-    type: "agent_skill",
+    type: "runtime_skill",
     sourceId: skill.id,
   }));
   return [...refs, ...skills];

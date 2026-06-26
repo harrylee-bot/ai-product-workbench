@@ -59,7 +59,7 @@ export class KnowledgeRetrievalService {
         projectId: input.projectId,
         conversationId: input.conversationId,
         runId: input.runId,
-        agentName: input.agentName,
+        runtimeName: input.runtimeName,
         query,
         taskType: input.taskType ? String(input.taskType) : undefined,
         matchedKnowledgeIds: toInputJson(scored.map((item) => item.itemId)),
@@ -69,7 +69,7 @@ export class KnowledgeRetrievalService {
 
     return {
       results: scored,
-      references: scored.map((item, index) => toReference(item, input.agentName, index)),
+      references: scored.map((item, index) => toReference(item, input.runtimeName, index)),
     };
   }
 }
@@ -156,7 +156,7 @@ function scoreItem(
 
 function toReference(
   result: KnowledgeRetrievalResult,
-  usedByAgent: string | undefined,
+  usedByRuntime: string | undefined,
   index: number,
 ): KnowledgeReference {
   return {
@@ -166,7 +166,7 @@ function toReference(
     snippet: result.summary || result.content.slice(0, 160),
     content: result.content,
     type: result.type,
-    usedByAgent,
+    usedByRuntime,
     sourceType: "knowledge_base",
     sourceId: result.itemId,
   };

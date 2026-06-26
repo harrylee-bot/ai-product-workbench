@@ -443,7 +443,7 @@ export class QaService {
     const search = await this.knowledgeRetrieval.search({
       projectId,
       runId: options.runId,
-      agentName: "runtime_qa",
+      runtimeName: "runtime_qa",
       query,
       taskType: "qa_check",
       preferredTypes: [

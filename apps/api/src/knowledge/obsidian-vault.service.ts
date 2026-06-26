@@ -214,7 +214,7 @@ const SEED_FILES: VaultSeedFile[] = [
 
 ## 适用场景
 
-描述这条知识适用在什么产品、页面、Agent 或决策场景。
+描述这条知识适用在什么产品、页面、runtime 或决策场景。
 
 ## 知识内容
 
@@ -660,7 +660,7 @@ function inferKnowledgeType(relativePath: string, title: string, tags: string[])
   if (/05-原型设计规范|原型规则|前后端设计框架|前台页面设计框架|后台管理设计框架|字段与接口|RP资产|PrototypeSpec|OpenPencil|HTML 原型/i.test(text)) return KnowledgeType.prototype_rule;
   if (/04-产品文档规范|产品文档规范|PRD|需求文档|写作/.test(text)) return KnowledgeType.prd_writing_rule;
   if (/06-历史案例库|案例库|案例/.test(text)) return KnowledgeType.reference_case;
-  if (/00-知识库使用规范|01-产品架构|03-产品进化规划|知识库使用规范|产品架构|能力地图|核心对象|产品进化|新产品创新|历史业务增量|Agent|智能体|需求分析/.test(text)) return KnowledgeType.default_rule;
+  if (/00-知识库使用规范|01-产品架构|03-产品进化规划|知识库使用规范|产品架构|能力地图|核心对象|产品进化|新产品创新|历史业务增量|runtime|智能体|需求分析/.test(text)) return KnowledgeType.default_rule;
   if (/规则约束|约束|资损|安全|必须遵守|Constraint/i.test(text)) return KnowledgeType.strong_rule;
   if (/原型模式|页面|后台模式|配置化|交互|Prototype/i.test(text)) return KnowledgeType.design_pattern;
   return KnowledgeType.business_concept;
@@ -673,7 +673,7 @@ function inferPriority(relativePath: string, title: string, type: KnowledgeType)
   if (/01-产品知识|02-规则约束|03-案例库|04-原型模式|05-原型设计规范|06-历史案例库|07-来源资产索引|04-产品文档规范|03-产品进化规划|02-业务域知识|00-知识库使用规范|01-产品架构/.test(text))
     return KnowledgePriority.high;
   if (type === KnowledgeType.strong_rule) return KnowledgePriority.high;
-  if (/知识库使用规范|产品架构|能力地图|产品进化|产品逻辑|产品文档规范|原型设计规范|历史业务增量|新产品创新|Agent|AI营销助手|Dify|配置化页面|通用约束|资损/.test(text)) return KnowledgePriority.high;
+  if (/知识库使用规范|产品架构|能力地图|产品进化|产品逻辑|产品文档规范|原型设计规范|历史业务增量|新产品创新|runtime|AI营销助手|Dify|配置化页面|通用约束|资损/.test(text)) return KnowledgePriority.high;
   if (/清单|README|索引/.test(text)) return KnowledgePriority.low;
   return KnowledgePriority.medium;
 }

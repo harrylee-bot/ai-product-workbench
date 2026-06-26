@@ -13,7 +13,7 @@ import { FileAssetService } from "../files/file-asset.service";
 import { KnowledgeRetrievalService } from "../knowledge/knowledge-retrieval.service";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
-import { AgentRunLogService } from "./agent-run-log.service";
+import { RuntimeRunLogService } from "./runtime-run-log.service";
 import { qaCompletedPayload, toInputJson } from "./ai-vibe.helpers";
 import type {
   AttachmentSummary,
@@ -132,7 +132,7 @@ export class PatchService {
     private readonly prisma: PrismaService,
     private readonly messageService: MessageService,
     private readonly fileAssetService: FileAssetService,
-    private readonly runLog: AgentRunLogService,
+    private readonly runLog: RuntimeRunLogService,
     private readonly stream: VibeStreamService,
     private readonly knowledgeRetrieval: KnowledgeRetrievalService,
     private readonly stateService: ProductDesignStateService,
@@ -938,29 +938,6 @@ export class PatchService {
     const selectedRegion = payload.selectedRegion && typeof payload.selectedRegion === "object" && !Array.isArray(payload.selectedRegion)
       ? payload.selectedRegion as SelectedRegion
       : undefined;
-    const targetId = selectedRegion?.type === "prototype"
-      ? selectedRegion.targetId || selectedRegion.artifactId
-      : selectedRegion?.targetId || selectedRegion?.documentId;
-    await this.prisma.productInteractionEvent.create({
-      data: {
-        projectId,
-        type: payload.selectedText ? "selection" : "patch",
-        targetType: selectedRegion?.type === "prototype" ? "prototype" : "prd",
-        targetId,
-        content: typeof payload.instruction === "string" ? payload.instruction : undefined,
-        metadata: toInputJson({
-          runId,
-          source,
-          action: payload.action ?? "inline_patch_candidate",
-          selectedRegion,
-          selectedText: payload.selectedText,
-          replacementText: payload.replacementText,
-          diffBaseText: payload.diffBaseText,
-          diffTargetText: payload.diffTargetText,
-        }),
-        createdBy: String(payload.userId),
-      },
-    });
     await this.stream.emit({
       runId,
       projectId,
@@ -971,6 +948,7 @@ export class PatchService {
           source,
           action: payload.action ?? "inline_patch_candidate",
           timestamp: new Date().toISOString(),
+          selectedRegion,
           payload,
         },
       },
@@ -1019,7 +997,7 @@ export class PatchService {
       projectId: input.projectId,
       conversationId: input.conversationId,
       runId: input.runId,
-      agentName: "runtime_patch",
+      runtimeName: "runtime_patch",
       query: input.userInstruction,
       taskType: "patch_planning",
       preferredTypes: [

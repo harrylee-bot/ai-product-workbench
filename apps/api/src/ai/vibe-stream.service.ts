@@ -3,7 +3,7 @@ import { Observable } from "rxjs";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
-  AgentStepName,
+  RuntimeStreamStepName,
   VibeStreamEvent,
   VibeStreamEventCategory,
   VibeStreamEventEnvelope,
@@ -146,13 +146,13 @@ function classifyStreamEvent(type: VibeStreamEventType): {
 } {
   switch (type) {
     case "step_started":
-      return { category: "agent", phase: "started" };
+      return { category: "runtime", phase: "started" };
     case "step_completed":
-      return { category: "agent", phase: "completed" };
+      return { category: "runtime", phase: "completed" };
     case "step_failed":
-      return { category: "agent", phase: "failed" };
+      return { category: "runtime", phase: "failed" };
     case "message_delta":
-      return { category: "agent", phase: "progress" };
+      return { category: "runtime", phase: "progress" };
     case "state_updated":
       return { category: "state", phase: "updated" };
     case "state_version_created":
@@ -182,7 +182,7 @@ function classifyStreamEvent(type: VibeStreamEventType): {
     case "knowledge_candidate_created":
       return { category: "knowledge", phase: "created" };
     case "fallback_used":
-      return { category: "agent", phase: "progress" };
+      return { category: "runtime", phase: "progress" };
     case "export_ready":
       return { category: "export", phase: "completed" };
     case "run_completed":
@@ -241,7 +241,7 @@ function normalizeStreamEvent(
   if (typeof type !== "string" || typeof runId !== "string" || !createdAt) return null;
 
   const eventType = type as VibeStreamEventType;
-  const step = toOptionalString(payload.step) as AgentStepName | undefined;
+  const step = toOptionalString(payload.step) as RuntimeStreamStepName | undefined;
   const { category, phase } = classifyStreamEvent(eventType);
   const data = payload.payload ?? payload.data;
   const content = toOptionalString(payload.content);
@@ -280,7 +280,7 @@ function normalizeStreamEvent(
 
 function buildPayloadMeta(
   type: VibeStreamEventType,
-  step?: AgentStepName,
+  step?: RuntimeStreamStepName,
   data?: unknown,
   content?: string,
 ): VibeStreamPayloadMeta {
@@ -333,7 +333,7 @@ function buildPayloadMeta(
 }
 
 function payloadKindForType(type: VibeStreamEventType): VibeStreamPayloadKind {
-  if (type === "step_started" || type === "step_completed" || type === "step_failed") return "agent_step";
+  if (type === "step_started" || type === "step_completed" || type === "step_failed") return "runtime_step";
   if (type === "message_delta") return "progress";
   if (type === "fallback_used") return "fallback";
   if (type === "state_updated" || type === "state_version_created") return "state";
@@ -420,7 +420,7 @@ function normalizePayloadMeta(value: unknown): VibeStreamPayloadMeta | undefined
   return meta;
 }
 
-function createEventId(runId: string, type: VibeStreamEventType, step?: AgentStepName) {
+function createEventId(runId: string, type: VibeStreamEventType, step?: RuntimeStreamStepName) {
   const stepPart = step ? `:${step}` : "";
   const nonce = Math.random().toString(36).slice(2, 8);
   return `${runId}:${type}${stepPart}:${Date.now().toString(36)}:${nonce}`;

@@ -233,7 +233,7 @@ export class ModelGatewayService {
       data: {
         traceId: input.traceId,
         runId: input.runId,
-        agentName: input.agentName,
+        runtimeName: input.runtimeName,
         taskType: input.taskType,
         providerId: route.providerId,
         modelConfigId: route.modelConfigId,

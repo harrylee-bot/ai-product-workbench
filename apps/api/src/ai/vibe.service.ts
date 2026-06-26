@@ -6,14 +6,14 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { FileAssetService } from "../files/file-asset.service";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
-import { AgentRunLogService } from "./agent-run-log.service";
+import { RuntimeRunLogService } from "./runtime-run-log.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
 import type { SelectedRegion } from "./ai-vibe.types";
 import type { HandleVibeMessageDto, ConfirmPrdDto } from "./dto";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
-import { AgentSkillRegistryService } from "./agent-skill-registry.service";
+import { RuntimeSkillRegistryService } from "./runtime-skill-registry.service";
 
 @Injectable()
 export class VibeService {
@@ -21,11 +21,11 @@ export class VibeService {
     private readonly prisma: PrismaService,
     private readonly messageService: MessageService,
     private readonly fileAssetService: FileAssetService,
-    private readonly runLogService: AgentRunLogService,
+    private readonly runLogService: RuntimeRunLogService,
     private readonly stateService: ProductDesignStateService,
     private readonly orchestrator: AiOrchestratorService,
     private readonly streamService: VibeStreamService,
-    private readonly skillRegistry: AgentSkillRegistryService,
+    private readonly skillRegistry: RuntimeSkillRegistryService,
     private readonly documentService: RequirementDocumentService,
   ) {}
 
@@ -253,7 +253,7 @@ export class VibeService {
   }
 
   async assertRunAccess(user: AuthenticatedUser, runId: string) {
-    const run = await this.prisma.agentRunLog.findUnique({
+    const run = await this.prisma.runtimeRunLog.findUnique({
       where: { id: runId },
       include: { project: true },
     });

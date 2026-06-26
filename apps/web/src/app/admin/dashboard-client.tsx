@@ -12,7 +12,7 @@ import type { AdminDashboardStats } from "@/lib/types";
 const statItems = [
   { key: "userCount", label: "用户数", icon: Users, href: "/admin/users" },
   { key: "projectCount", label: "项目数", icon: FolderKanban, href: "/admin/projects" },
-  { key: "todayAgentRunCount", label: "今日 Runtime Run", icon: Workflow, href: "/admin/logs/runtime-runs" },
+  { key: "todayRuntimeRunCount", label: "今日 Runtime Run", icon: Workflow, href: "/admin/logs/runtime-runs" },
   { key: "todayModelCallCount", label: "今日模型调用", icon: Activity, href: "/admin/logs/model-calls" },
   { key: "todayFailedModelCallCount", label: "今日失败调用", icon: AlertTriangle, href: "/admin/logs/model-calls" },
   { key: "pendingKnowledgeCandidateCount", label: "待审核知识候选", icon: DatabaseZap, href: "/admin/knowledge/candidates" },

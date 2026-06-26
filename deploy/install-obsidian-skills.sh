@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEST="${CODEX_HOME:-/root/.codex}/skills"
-SOURCE_DIR="${SOURCE_DIR:-/opt/ai-product-workbench/agent-skills/obsidian-skills}"
+SOURCE_DIR="${SOURCE_DIR:-/opt/ai-product-workbench/runtime-skills/obsidian-skills}"
 REPO_URL="${OBSIDIAN_SKILLS_REPO:-https://github.com/kepano/obsidian-skills.git}"
 TMP_DIR="$(mktemp -d)"
 

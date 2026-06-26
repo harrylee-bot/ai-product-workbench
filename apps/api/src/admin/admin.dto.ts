@@ -2,8 +2,8 @@ import { Transform, Type } from "class-transformer";
 import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
 import {
   AdminAuditTargetType,
-  AgentName,
-  AgentRunStatus,
+  RuntimeStepName,
+  RuntimeRunStatus,
   FileAssetStatus,
   FileParserType,
   ModelCallStatus,
@@ -49,7 +49,7 @@ export class ListAdminProjectsQueryDto extends AdminPaginationQueryDto {
   status?: ProjectStatus;
 }
 
-export class ListAgentRunsQueryDto extends AdminPaginationQueryDto {
+export class ListRuntimeRunsQueryDto extends AdminPaginationQueryDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
@@ -67,13 +67,13 @@ export class ListAgentRunsQueryDto extends AdminPaginationQueryDto {
 
   @IsOptional()
   @Transform(emptyToUndefined)
-  @IsEnum(AgentRunStatus, { message: "运行状态不正确" })
-  status?: AgentRunStatus;
+  @IsEnum(RuntimeRunStatus, { message: "运行状态不正确" })
+  status?: RuntimeRunStatus;
 
   @IsOptional()
   @Transform(emptyToUndefined)
-  @IsEnum(AgentName, { message: "Agent 名称不正确" })
-  agentName?: AgentName;
+  @IsEnum(RuntimeStepName, { message: "Runtime 名称不正确" })
+  runtimeName?: RuntimeStepName;
 
   @IsOptional()
   @Transform(emptyToUndefined)
@@ -90,7 +90,7 @@ export class ListAdminModelCallsQueryDto extends AdminPaginationQueryDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
-  agentName?: string;
+  runtimeName?: string;
 
   @IsOptional()
   @Transform(emptyToUndefined)

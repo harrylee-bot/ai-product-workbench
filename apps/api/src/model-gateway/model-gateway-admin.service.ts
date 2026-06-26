@@ -272,7 +272,7 @@ export class ModelGatewayAdminService {
     const pageSize = Math.min(Math.max(Number(query.pageSize ?? 20), 1), 100);
     const where: Prisma.ModelCallLogWhereInput = {
       taskType: query.taskType,
-      agentName: query.agentName,
+      runtimeName: query.runtimeName,
       status: query.status,
       runId: query.runId,
       traceId: query.traceId,
@@ -293,7 +293,7 @@ export class ModelGatewayAdminService {
         id: log.id,
         traceId: log.traceId,
         runId: log.runId,
-        agentName: log.agentName,
+        runtimeName: log.runtimeName,
         taskType: log.taskType,
         providerId: log.providerId,
         modelConfigId: log.modelConfigId,

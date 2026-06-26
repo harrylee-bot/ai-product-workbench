@@ -10,7 +10,7 @@ export type KnowledgeSearchInput = {
   projectId?: string;
   conversationId?: string;
   runId?: string;
-  agentName?: string;
+  runtimeName?: string;
   query: string;
   taskType?: ModelTaskType | string;
   preferredTypes?: KnowledgeType[];
@@ -39,7 +39,7 @@ export type KnowledgeReference = {
   content: string;
   type: KnowledgeType;
   relatedPath?: string;
-  usedByAgent?: string;
+  usedByRuntime?: string;
   sourceType: "knowledge_base";
   sourceId?: string;
 };

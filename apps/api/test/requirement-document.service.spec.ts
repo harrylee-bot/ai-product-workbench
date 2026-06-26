@@ -118,7 +118,7 @@ describe("PRD requirement document module", () => {
     const document = await service.saveGeneratedDocument(state, draft, {
       userId: "user-1",
       runId: "run-1",
-      reason: "PRD Writer Agent 生成 PRD",
+      reason: "Runtime 生成 PRD",
     });
 
     expect(document.id).toBe("prd-1");

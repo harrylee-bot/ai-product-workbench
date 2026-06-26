@@ -44,7 +44,7 @@ describe("ModelGatewayService", () => {
 
     const result = await service.generateText({
       taskType: ModelTaskType.general_chat,
-      agentName: "general_agent",
+      runtimeName: "general_runtime",
       messages: [{ role: "user", content: "你好" }],
     });
 

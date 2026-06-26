@@ -58,7 +58,7 @@ type RuntimeRunItem = {
 type ModelCallItem = {
   id: string;
   taskType: string;
-  agentName?: string;
+  runtimeName?: string;
   modelName: string;
   providerName: string;
   status: string;
@@ -111,8 +111,8 @@ type QaReportItem = {
 const runtimeRunConfig: LogPageConfig<RuntimeRunItem> = {
   title: "Runtime Run 日志",
   subtitle: "Runtime 运行、步骤、traceId 与错误摘要",
-  path: "/admin/logs/agent-runs",
-  detailPath: (id) => `/admin/logs/agent-runs/${id}`,
+  path: "/admin/logs/runtime-runs",
+  detailPath: (id) => `/admin/logs/runtime-runs/${id}`,
   minWidth: 1180,
   filters: [
     { key: "projectId", placeholder: "projectId" },
@@ -140,14 +140,14 @@ const modelCallConfig: LogPageConfig<ModelCallItem> = {
   filters: [
     { key: "runId", placeholder: "runId" },
     { key: "traceId", placeholder: "traceId" },
-    { key: "agentName", placeholder: "runtimeName" },
+    { key: "runtimeName", placeholder: "runtimeName" },
     { key: "modelName", placeholder: "modelName" },
     { key: "status", placeholder: "状态", type: "select", options: ["running", "succeeded", "failed"] },
   ],
   columns: [
     { label: "调用时间", render: (item) => formatDate(item.createdAt) },
     { label: "任务类型", render: (item) => item.taskType },
-    { label: "调用方", render: (item) => item.agentName ?? "-" },
+    { label: "调用方", render: (item) => item.runtimeName ?? "-" },
     { label: "模型", render: (item) => item.modelName },
     { label: "供应商", render: (item) => item.providerName },
     { label: "状态", render: (item) => <StatusBadge status={item.status} /> },

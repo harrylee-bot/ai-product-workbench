@@ -27,7 +27,7 @@ export type ModelGatewayErrorCode =
 export type GenerateTextInput = {
   taskType: ModelTaskType;
   messages: ModelMessage[];
-  agentName?: string;
+  runtimeName?: string;
   runId?: string;
   traceId?: string;
   userId?: string;

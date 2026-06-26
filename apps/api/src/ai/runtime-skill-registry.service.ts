@@ -5,7 +5,7 @@ import path from "node:path";
 import { KnowledgeType } from "@prisma/client";
 import type { KnowledgeReference } from "./ai-vibe.types";
 
-export type AgentSkillDefinition = {
+export type RuntimeSkillDefinition = {
   id: string;
   name: string;
   description: string;
@@ -24,10 +24,10 @@ const OBSIDIAN_SKILL_NAMES = [
 ];
 
 @Injectable()
-export class AgentSkillRegistryService {
+export class RuntimeSkillRegistryService {
   private cache?: {
     loadedAt: number;
-    skills: AgentSkillDefinition[];
+    skills: RuntimeSkillDefinition[];
   };
 
   async listSkills() {
@@ -35,7 +35,7 @@ export class AgentSkillRegistryService {
     if (cached && Date.now() - cached.loadedAt < 60_000) return cached.skills;
 
     const roots = this.skillRoots();
-    const skills = new Map<string, AgentSkillDefinition>();
+    const skills = new Map<string, RuntimeSkillDefinition>();
     for (const root of roots) {
       for (const skill of await this.readRoot(root)) {
         if (!skills.has(skill.name)) skills.set(skill.name, skill);
@@ -67,10 +67,10 @@ export class AgentSkillRegistryService {
     return selected.length ? selected : skills;
   }
 
-  toKnowledgeReferences(skills: AgentSkillDefinition[]): KnowledgeReference[] {
+  toKnowledgeReferences(skills: RuntimeSkillDefinition[]): KnowledgeReference[] {
     return skills.map((skill) => ({
-      id: `agent_skill_${skill.name}`,
-      knowledgeId: `agent-skill:${skill.name}`,
+      id: `runtime_skill_${skill.name}`,
+      knowledgeId: `runtime-skill:${skill.name}`,
       title: `Vibe Coding 可用技能：${skill.name}`,
       snippet: skill.description,
       content: [
@@ -81,25 +81,28 @@ export class AgentSkillRegistryService {
       ].filter(Boolean).join("\n"),
       type: KnowledgeType.prototype_rule,
       relatedPath: skill.sourcePath,
-      usedByAgent: "vibe_coding",
+      usedByRuntime: "vibe_coding",
       sourceType: "knowledge_base",
-      sourceId: `agent-skill:${skill.name}`,
+      sourceId: `runtime-skill:${skill.name}`,
     }));
   }
 
   private skillRoots() {
     const repoRoot = path.resolve(process.cwd(), "../..");
-    const envRoots = (process.env.AGENT_SKILLS_ROOT ?? "")
+    const envRoots = [
+      process.env.RUNTIME_SKILLS_ROOT,
+      process.env.CODEX_SKILLS_ROOT,
+    ].filter(Boolean).join(":")
       .split(":")
       .map((item) => item.trim())
       .filter(Boolean);
 
     return unique([
       ...envRoots,
-      path.join(repoRoot, "agent-skills/obsidian-skills/skills"),
-      path.join(repoRoot, "apps/api/storage/agent-skills/obsidian-skills/skills"),
-      "/app/agent-skills/obsidian-skills/skills",
-      "/app/apps/api/storage/agent-skills/obsidian-skills/skills",
+      path.join(repoRoot, "runtime-skills/obsidian-skills/skills"),
+      path.join(repoRoot, "apps/api/storage/runtime-skills/obsidian-skills/skills"),
+      "/app/runtime-skills/obsidian-skills/skills",
+      "/app/apps/api/storage/runtime-skills/obsidian-skills/skills",
       "/root/.codex/skills",
       path.join(process.env.HOME ?? "", ".codex/skills"),
     ]).filter((root) => root && existsSync(root));
@@ -107,7 +110,7 @@ export class AgentSkillRegistryService {
 
   private async readRoot(root: string) {
     const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
-    const skills: AgentSkillDefinition[] = [];
+    const skills: RuntimeSkillDefinition[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       if (!OBSIDIAN_SKILL_NAMES.includes(entry.name)) continue;
@@ -120,14 +123,14 @@ export class AgentSkillRegistryService {
   }
 }
 
-function parseSkill(content: string, sourcePath: string, fallbackName: string): AgentSkillDefinition {
+function parseSkill(content: string, sourcePath: string, fallbackName: string): RuntimeSkillDefinition {
   const frontmatter = /^---\n([\s\S]*?)\n---/.exec(content)?.[1] ?? "";
   const name = frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim() || fallbackName;
   const description = frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim() || firstParagraph(content);
   const body = content.replace(/^---\n[\s\S]*?\n---/, "").trim();
 
   return {
-    id: `agent-skill:${name}`,
+    id: `runtime-skill:${name}`,
     name,
     description,
     sourcePath,
@@ -156,7 +159,7 @@ function firstParagraph(content: string) {
     .replace(/^---\n[\s\S]*?\n---/, "")
     .split(/\n{2,}/)
     .map((item) => item.replace(/^#+\s*/, "").trim())
-    .find(Boolean) ?? "Agent skill";
+    .find(Boolean) ?? "Runtime skill";
 }
 
 function unique(values: string[]) {

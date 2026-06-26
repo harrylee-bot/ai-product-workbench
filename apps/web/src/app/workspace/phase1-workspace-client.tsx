@@ -1192,8 +1192,6 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
   }
 
   if (eventType === "step_completed" && step) {
-    const traceText = decisionTraceTimelineText(payload);
-    if (traceText) return timelineItem(id, step, "done", traceText);
     return timelineItem(id, step, "done", stepCompletedText(step, stepTitle, payload));
   }
 
@@ -1384,13 +1382,8 @@ function debugEventBody(
   }
 
   if (eventType === "step_completed" && event.step) {
-    const decisionTrace = decisionTraceRecord(payload);
-    if (decisionTrace) {
-      lines.push(...formatDecisionTrace(decisionTrace));
-    } else {
-      lines.push(`结果摘要：${stepCompletedText(event.step, stepLabel(event.step), payload)}`);
-      lines.push("下一步：把这个节点的结果交给后续节点继续处理。");
-    }
+    lines.push(`结果摘要：${stepCompletedText(event.step, stepLabel(event.step), payload)}`);
+    lines.push("下一步：把这个节点的结果交给后续节点继续处理。");
   }
 
   if (eventType === "fallback_used") {
@@ -1401,10 +1394,8 @@ function debugEventBody(
 
   if (eventType === "message_delta") {
     const requirementGate = asRecord(payload?.requirementGate);
-    const gateTrace = asRecord(requirementGate?.decisionTrace);
     const gateAction = asText(requirementGate?.action);
     if (gateAction) lines.push(`生成前 Gate 动作：${gateAction}。`);
-    if (gateTrace) lines.push(...formatDecisionTrace(gateTrace));
   }
 
   if (eventType === "run_completed") {
@@ -1431,42 +1422,6 @@ function debugEventBody(
   }
 
   return lines.length ? lines.join("\n") : "该事件没有附带额外说明，已记录原始事件供调试查看。";
-}
-
-function decisionTraceRecord(payload: Record<string, unknown> | null) {
-  return asRecord(payload?.decisionTrace);
-}
-
-function decisionTraceTimelineText(payload: Record<string, unknown> | null) {
-  const trace = decisionTraceRecord(payload);
-  if (!trace) return "";
-  const decision = asText(trace.decision);
-  const nextStep = asText(trace.nextStep);
-  const summary = asText(trace.summary);
-  return [
-    summary ? `判断完成：${summary}` : "",
-    decision ? `决策：${decision}` : "",
-    nextStep ? `下一步：${nextStep}` : "",
-  ].filter(Boolean).join(" ");
-}
-
-function formatDecisionTrace(trace: Record<string, unknown>) {
-  const lines: string[] = [];
-  const summary = asText(trace.summary);
-  const decision = asText(trace.decision);
-  const nextStep = asText(trace.nextStep);
-  const generatedBy = trace.generatedBy === "model" ? "模型公开 trace" : "系统兜底 trace";
-
-  lines.push(`判断轨迹来源：${generatedBy}。`);
-  if (summary) lines.push(`判断摘要：${normalizeTimelineText(summary)}`);
-  appendTraceList(lines, "输入信号", trace.inputSignals);
-  appendTraceList(lines, "约束依据", trace.constraints);
-  appendTraceList(lines, "待确认假设", trace.assumptions);
-  appendTraceList(lines, "考虑过的路线", trace.alternativesConsidered);
-  if (decision) lines.push(`最终决策：${normalizeTimelineText(decision)}`);
-  appendTraceList(lines, "风险", trace.risks);
-  if (nextStep) lines.push(`下一步：${normalizeTimelineText(nextStep)}`);
-  return lines;
 }
 
 function findRequirementIntakeGraph(payload: Record<string, unknown> | null) {
@@ -1507,15 +1462,6 @@ function formatRequirementIntakeGraph(graph: Record<string, unknown>) {
   }
 
   return lines;
-}
-
-function appendTraceList(lines: string[], label: string, value: unknown) {
-  const items = Array.isArray(value)
-    ? value.map((item) => normalizeTimelineText(String(item ?? ""))).filter(Boolean).slice(0, 6)
-    : [];
-  if (!items.length) return;
-  lines.push(`${label}：`);
-  lines.push(...items.map((item) => `- ${item}`));
 }
 
 function serializeDebugEvent(event: VibeStreamEvent) {

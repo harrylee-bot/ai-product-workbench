@@ -1542,7 +1542,7 @@ function normalizeKnowledgeRefs(items: unknown[]) {
       snippet: String(record.snippet ?? record.content ?? ""),
       type: normalizeKnowledgeType(record.type ?? record.sourceType),
       relatedPath: record.relatedPath,
-      usedByAgent: record.usedByAgent,
+      usedByRuntime: record.usedByRuntime,
       ...record,
     };
   });

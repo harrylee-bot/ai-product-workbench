@@ -229,7 +229,7 @@ export class QaRuleCheckService {
         }
       }
       if (state) {
-        for (const skill of input.knowledgeContext?.agentSkills ?? []) {
+        for (const skill of input.knowledgeContext?.runtimeSkills ?? []) {
           if (isSkillReferencedByState(skill, state)) continue;
           issues.push(issue({
             id: `qa_skill_reference_missing_${safeId(skill.name)}`,
@@ -238,7 +238,7 @@ export class QaRuleCheckService {
             title: `Vibe Coding Skill 未落入 ProductDesignState：${skill.name}`,
             description: "本轮 runtime context 已加载该 skill，但 ProductDesignState.knowledgeRefs 未保留对应 knowledgeId、sourcePath 或名称，PRD、原型和调试链路无法追踪该执行约束。",
             relatedStatePaths: ["knowledgeRefs"],
-            relatedKnowledgeIds: [skill.id || `agent-skill:${skill.name}`],
+            relatedKnowledgeIds: [skill.id || `runtime-skill:${skill.name}`],
             suggestion: "先将该 skill 写入 ProductDesignState.knowledgeRefs，再重新生成 PRD、PrototypeSpec 和 QA。",
           }));
         }
@@ -283,11 +283,11 @@ function entityName(value: Record<string, unknown>) {
 }
 
 function isSkillReferencedByState(
-  skill: NonNullable<KnowledgeContext["agentSkills"]>[number],
+  skill: NonNullable<KnowledgeContext["runtimeSkills"]>[number],
   state: ProductDesignState,
 ) {
   const haystack = JSON.stringify(state.knowledgeRefs ?? []);
-  return [skill.id, `agent-skill:${skill.name}`, skill.name, skill.sourcePath]
+  return [skill.id, `runtime-skill:${skill.name}`, skill.name, skill.sourcePath]
     .filter(Boolean)
     .some((token) => haystack.includes(token));
 }
