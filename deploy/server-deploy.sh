@@ -10,7 +10,7 @@ if [ -f "${APP_DIR}/.env" ]; then
   set +a
 fi
 
-APP_HOST="${APP_HOST:-45.207.206.76}"
+APP_HOST="${APP_HOST:-8.130.160.177}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-ai_workbench}"
 JWT_SECRET="${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}"
 JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
