@@ -16,6 +16,7 @@ import type {
   PatchPlan,
   PatchRecord,
   ProductBuildPlan,
+  ProductDesignDraft,
   ProductDesignState,
   PrototypeArtifact,
   PrototypeSpec,
@@ -30,7 +31,13 @@ import { ProductDesignStateService } from "./product-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { ExternalRuntimeConfigService } from "./runtime/external-runtime-config.service";
 import { ExternalRuntimeService } from "./runtime/external-runtime.service";
-import type { RuntimeProvider, RequirementRuntimeInput, RequirementRuntimeOutput } from "./runtime/external-runtime.types";
+import type {
+  RuntimeProvider,
+  RuntimeResult,
+  RequirementRuntimeInput,
+  RequirementRuntimeOutput,
+} from "./runtime/external-runtime.types";
+import { renderPrdFromState } from "./runtime/local-protocol-renderers";
 import { projectStatusFromProductDesignState } from "./workspace-state-machine";
 import { VibeStreamService } from "./vibe-stream.service";
 
@@ -68,9 +75,10 @@ export type OrchestratorResult = {
   patchRecord?: PatchRecord;
   patchPreview?: unknown;
   runtimeAdapter?: {
-    status: "not_configured" | "completed";
+    status: "not_configured" | "completed" | "fallback";
     provider?: Exclude<RuntimeProvider, "local">;
     expectedProviders?: Array<Exclude<RuntimeProvider, "local">>;
+    errorMessage?: string;
   };
   knowledgeCandidates?: Array<KnowledgeCandidate | KnowledgeCandidateDraft>;
   exportArtifact?: ExportArtifactSummary;
@@ -242,7 +250,11 @@ export class AiOrchestratorService {
   ) {
     const { context } = input;
     if (!this.runtime || !this.stateService) {
-      throw new Error("Requirement runtime 未就绪：缺少 runtime 或 ProductDesignStateService");
+      const error = new Error("Requirement runtime 未就绪：缺少 runtime 或 ProductDesignStateService");
+      if (this.runtimeConfig?.runtimeFallbackToLocal() && this.stateService) {
+        return this.finishRequirementFallback(input, intent, provider, error);
+      }
+      throw error;
     }
 
     await this.stream.emit({
@@ -254,27 +266,33 @@ export class AiOrchestratorService {
       data: { runtimeProvider: provider, runtimeTaskType: "intake_requirement" },
     });
 
-    const runtimeResult = await this.runtime.runTask<RequirementRuntimeInput, RequirementRuntimeOutput>(
-      {
-        id: randomUUID(),
-        taskType: "intake_requirement",
-        runId: context.runId,
-        projectId: context.projectId,
-        traceId: context.traceId,
-        userId: context.userId,
-        input: {
-          userInput: context.userInput,
-          conversationId: context.conversationId,
-          recentMessages: context.recentMessages,
-          attachments: input.attachments,
-          productDesignState: context.productDesignState,
-          selectedRegion: context.selectedRegion,
-          previewMode: context.previewMode,
+    let runtimeResult: RuntimeResult<RequirementRuntimeOutput>;
+    try {
+      runtimeResult = await this.runtime.runTask<RequirementRuntimeInput, RequirementRuntimeOutput>(
+        {
+          id: randomUUID(),
+          taskType: "intake_requirement",
+          runId: context.runId,
+          projectId: context.projectId,
+          traceId: context.traceId,
+          userId: context.userId,
+          input: {
+            userInput: context.userInput,
+            conversationId: context.conversationId,
+            recentMessages: context.recentMessages,
+            attachments: input.attachments,
+            productDesignState: context.productDesignState,
+            selectedRegion: context.selectedRegion,
+            previewMode: context.previewMode,
+          },
+          workspaceHint: context.conversationId,
         },
-        workspaceHint: context.conversationId,
-      },
-      provider,
-    );
+        provider,
+      );
+    } catch (error) {
+      if (!this.runtimeConfig?.runtimeFallbackToLocal()) throw error;
+      return this.finishRequirementFallback(input, intent, provider, error);
+    }
 
     for (const runtimeEvent of runtimeResult.events) {
       if (!runtimeEvent.content) continue;
@@ -368,6 +386,103 @@ export class AiOrchestratorService {
     return result;
   }
 
+  private async finishRequirementFallback(
+    input: OrchestratorInput,
+    intent: IntentResult,
+    provider: Exclude<RuntimeProvider, "local">,
+    error: unknown,
+  ) {
+    const { context } = input;
+    if (!this.stateService) {
+      throw new Error("Requirement fallback 未就绪：缺少 ProductDesignStateService");
+    }
+
+    const message = errorMessage(error);
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "fallback_used",
+      step: "requirement_packaging",
+      content: `${providerLabel(provider)} runtime 暂不可用，已使用 Vibe 产品协议 fallback 继续生成可测试状态。`,
+      data: {
+        provider,
+        reason: message,
+        errorMessage: message,
+        userMessage: "外部 runtime 暂不可用，系统已使用规则兜底生成 PRD 草稿，方便先测试产品闭环。",
+      },
+    });
+
+    const state = await this.stateService.createDraft(
+      context.projectId,
+      fallbackProductDesignDraft(context),
+      {
+        userId: context.userId,
+        runId: context.runId,
+        messageId: input.userMessageId,
+        reason: `${providerLabel(provider)} runtime 失败后使用 Vibe 产品协议 fallback`,
+      },
+    );
+
+    await this.stream.emit({
+      runId: context.runId,
+      projectId: context.projectId,
+      type: "state_updated",
+      step: "requirement_packaging",
+      content: "ProductDesignState 已由 fallback 输出落库。",
+      data: { productDesignState: state, runtimeProvider: provider, fallback: true },
+    });
+
+    let productDesignState = state;
+    let prdDocument: RequirementDocument | undefined;
+    if (this.documentService) {
+      prdDocument = await this.documentService.saveGeneratedDocument(
+        state,
+        renderPrdFromState(state),
+        {
+          userId: context.userId,
+          runId: context.runId,
+          reason: "外部 runtime 失败后由 Vibe 产品协议 fallback 生成 PRD",
+        },
+      );
+      productDesignState = await this.stateService.attachGeneratedArtifacts(state.id, {
+        prdDocument,
+        status: ProductDesignStateStatus.doc_ready,
+        userId: context.userId,
+        runId: context.runId,
+        messageId: input.userMessageId,
+        reason: "PRD fallback 已生成，等待用户确认后继续原型",
+      });
+      await this.stream.emit({
+        runId: context.runId,
+        projectId: context.projectId,
+        type: "prd_updated",
+        step: "prd_generation",
+        content: "PRD fallback 已生成，等待确认。",
+        data: { prdDocument, productDesignState, runtimeProvider: provider, fallback: true },
+      });
+    }
+
+    const result: OrchestratorResult = {
+      runId: context.runId,
+      projectId: context.projectId,
+      intent,
+      message: prdDocument
+        ? `${providerLabel(provider)} runtime 暂不可用，已使用 Vibe 产品协议 fallback 生成产品状态和 PRD，请先确认 PRD 后继续生成原型。`
+        : `${providerLabel(provider)} runtime 暂不可用，已使用 Vibe 产品协议 fallback 生成产品状态。`,
+      productDesignState,
+      prdDocument,
+      runtimeAdapter: {
+        status: "fallback",
+        provider,
+        errorMessage: message,
+      },
+      nextAction: prdDocument ? { type: "review_prd" } : { type: "answer" },
+    };
+
+    await this.finishRun(context, result, projectStatusFromProductDesignState(productDesignState));
+    return result;
+  }
+
   private async finishRun(
     context: RuntimeRunContext,
     result: OrchestratorResult,
@@ -446,6 +561,50 @@ export class AiOrchestratorService {
   }
 }
 
+function fallbackProductDesignDraft(context: RuntimeRunContext): ProductDesignDraft {
+  const base = context.productDesignState;
+  const title = titleFromUserInput(context.userInput, base?.title);
+  return {
+    projectId: context.projectId,
+    title,
+    summary: context.userInput.trim() || base?.summary || `围绕“${title}”生成产品需求草稿。`,
+    background: base?.background,
+    businessGoal: base?.businessGoal || "待补充业务目标。",
+    targetUsers: base?.targetUsers ?? [],
+    userScenarios: base?.userScenarios?.length
+      ? base.userScenarios
+      : [{ id: "scenario_1", title: title, description: context.userInput.trim() }],
+    pages: base?.pages?.length
+      ? base.pages
+      : [{ id: "page_main", name: title, description: context.userInput.trim() }],
+    features: base?.features?.length
+      ? base.features
+      : [{ id: "feature_1", name: title, description: context.userInput.trim() }],
+    backendConfigs: base?.backendConfigs ?? [],
+    frontendRules: base?.frontendRules ?? [],
+    businessRules: base?.businessRules ?? [],
+    stateRules: base?.stateRules ?? [],
+    exceptionScenarios: base?.exceptionScenarios ?? [],
+    acceptanceCriteria: base?.acceptanceCriteria?.length
+      ? base.acceptanceCriteria
+      : [{ id: "acceptance_1", content: "用户确认需求和 PRD 后，可以继续生成原型并进行 QA。" }],
+    prototypeOutline: base?.prototypeOutline,
+    assumptions: [
+      ...(base?.assumptions ?? []),
+      {
+        id: "fallback_runtime_unavailable",
+        content: "外部 runtime 暂不可用，本轮使用 Vibe 产品协议 fallback 生成草稿，后续需由用户确认。",
+        status: "pending",
+      },
+    ],
+    knowledgeRefs: base?.knowledgeRefs ?? [],
+    pendingQuestions: base?.pendingQuestions ?? [],
+    confirmedFacts: base?.confirmedFacts ?? [],
+    createdBy: context.userId,
+    updatedBy: context.userId,
+  };
+}
+
 function detectIntent(userInput: string): IntentResult {
   const text = userInput.trim();
   const intent = /导出|下载|export/i.test(text) && /html|原型/i.test(text)
@@ -461,6 +620,12 @@ function detectIntent(userInput: string): IntentResult {
     requiresSelection: false,
     isAmbiguous: intent === UserIntent.new_requirement,
   };
+}
+
+function titleFromUserInput(userInput: string, fallback?: string) {
+  const text = userInput.replace(/\s+/g, " ").trim();
+  if (text) return text.slice(0, 30);
+  return fallback?.trim() || "产品需求方案";
 }
 
 function errorMessage(error: unknown) {

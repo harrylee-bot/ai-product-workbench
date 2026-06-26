@@ -192,6 +192,69 @@ describe("runtime-only Vibe orchestrator", () => {
       data: expect.objectContaining({ status: ProjectStatus.prd_ready }),
     });
   });
+
+  it("uses protocol fallback when configured requirement runtime fails", async () => {
+    const stateService = {
+      createDraft: vi.fn().mockResolvedValue(baseState({
+        status: "design_ready",
+        version: 1,
+      })),
+      attachGeneratedArtifacts: vi.fn().mockResolvedValue(baseState({
+        status: "doc_ready",
+        version: 2,
+        prdDocument: prdDocument(),
+      })),
+    };
+    const documentService = {
+      saveGeneratedDocument: vi.fn().mockResolvedValue(prdDocument()),
+    };
+    const runtime = {
+      runTask: vi.fn().mockRejectedValue(new Error("Codex request failed")),
+    };
+    const serviceWithRuntime = new AiOrchestratorService(
+      runLog as never,
+      stream as never,
+      messageService as never,
+      prisma as never,
+      exportService as never,
+      {
+        requirementProvider: () => "codex",
+        runtimeFallbackToLocal: () => true,
+      } as never,
+      runtime as never,
+      stateService as never,
+      documentService as never,
+    );
+
+    const result = await serviceWithRuntime.run(baseInput("做一个签到活动"));
+
+    expect(runtime.runTask).toHaveBeenCalledWith(
+      expect.objectContaining({ taskType: "intake_requirement" }),
+      "codex",
+    );
+    expect(stream.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "fallback_used",
+      data: expect.objectContaining({
+        provider: "codex",
+        errorMessage: "Codex request failed",
+      }),
+    }));
+    expect(stateService.createDraft).toHaveBeenCalledWith(
+      "project-1",
+      expect.objectContaining({ title: "做一个签到活动" }),
+      expect.objectContaining({ reason: expect.stringContaining("fallback") }),
+    );
+    expect(documentService.saveGeneratedDocument).toHaveBeenCalled();
+    expect(result.runtimeAdapter).toEqual(expect.objectContaining({
+      status: "fallback",
+      provider: "codex",
+    }));
+    expect(result.nextAction?.type).toBe("review_prd");
+    expect(prisma.project.update).toHaveBeenCalledWith({
+      where: { id: "project-1" },
+      data: expect.objectContaining({ status: ProjectStatus.prd_ready }),
+    });
+  });
 });
 
 function baseInput(userInput: string) {
