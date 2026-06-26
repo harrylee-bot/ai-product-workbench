@@ -62,7 +62,7 @@ export function AdminDashboardClient() {
         {[
           { title: "模型管理", href: "/admin/model-providers", text: "供应商、模型配置、任务映射" },
           { title: "知识库", href: "/admin/knowledge/vault", text: "Obsidian Vault、知识条目、候选审核" },
-          { title: "日志中心", href: "/admin/logs/runtime-runs", text: "Runtime、模型、文件、Patch、QA" },
+          { title: "日志中心", href: "/admin/logs/runtime-runs", text: "Runtime、模型、文件、QA" },
         ].map((item) => (
           <Link key={item.href} href={item.href}>
             <AdminPanel className="p-4 transition hover:border-gray-300 hover:shadow-md">

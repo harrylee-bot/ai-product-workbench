@@ -82,19 +82,6 @@ type FileParseItem = {
   createdAt: string;
 };
 
-type PatchItem = {
-  id: string;
-  projectTitle: string;
-  createdBy: string;
-  targetSummary: string;
-  instructionSummary: string;
-  status: string;
-  beforeProductDesignStateVersion: number;
-  afterProductDesignStateVersion?: number;
-  errorMessage?: string;
-  createdAt: string;
-};
-
 type QaReportItem = {
   id: string;
   projectTitle: string;
@@ -180,28 +167,6 @@ const fileParseConfig: LogPageConfig<FileParseItem> = {
   ],
 };
 
-const patchConfig: LogPageConfig<PatchItem> = {
-  title: "Patch 日志",
-  subtitle: "局部修改计划、操作、状态与影响范围",
-  path: "/admin/logs/patches",
-  detailPath: (id) => `/admin/logs/patches/${id}`,
-  minWidth: 1180,
-  filters: [
-    { key: "projectId", placeholder: "projectId" },
-    { key: "createdBy", placeholder: "createdBy" },
-    { key: "status", placeholder: "状态", type: "select", options: ["planned", "applying", "applied", "failed", "cancelled", "needs_confirmation"] },
-  ],
-  columns: [
-    { label: "Patch ID", render: (item) => <Mono>{item.id}</Mono> },
-    { label: "项目", render: (item) => item.projectTitle },
-    { label: "用户", render: (item) => item.createdBy },
-    { label: "修改目标", render: (item) => item.targetSummary },
-    { label: "状态", render: (item) => <StatusBadge status={item.status} /> },
-    { label: "版本", render: (item) => `${item.beforeProductDesignStateVersion} -> ${item.afterProductDesignStateVersion ?? "-"}` },
-    { label: "创建时间", render: (item) => formatDate(item.createdAt) },
-  ],
-};
-
 const qaConfig: LogPageConfig<QaReportItem> = {
   title: "QA 报告",
   subtitle: "QA 校验结果、问题数量与关联 runId",
@@ -211,7 +176,7 @@ const qaConfig: LogPageConfig<QaReportItem> = {
   filters: [
     { key: "projectId", placeholder: "projectId" },
     { key: "status", placeholder: "状态", type: "select", options: ["running", "passed", "failed", "warning"] },
-    { key: "trigger", placeholder: "触发方式", type: "select", options: ["initial_generation", "patch", "manual", "rollback", "pre_confirm"] },
+    { key: "trigger", placeholder: "触发方式", type: "select", options: ["initial_generation", "manual", "rollback", "pre_confirm"] },
   ],
   columns: [
     { label: "QA ID", render: (item) => <Mono>{item.id}</Mono> },
@@ -236,10 +201,6 @@ export function ModelCallsLogClient() {
 
 export function FileParsesLogClient() {
   return <LogPage config={fileParseConfig} />;
-}
-
-export function PatchesLogClient() {
-  return <LogPage config={patchConfig} />;
 }
 
 export function QaReportsLogClient() {

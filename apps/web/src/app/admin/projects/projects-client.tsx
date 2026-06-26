@@ -29,7 +29,6 @@ type AdminProject = {
   ownerEmail?: string;
   conversationCount: number;
   agentRunCount: number;
-  patchCount: number;
   fileCount: number;
   lastActivityAt: string;
   createdAt: string;
@@ -190,7 +189,6 @@ function ProjectDetailDrawer({ detail, onClose }: { detail: ProjectDetail | null
             <DetailItem label="会话数" value={detail.project.counts.conversations} />
             <DetailItem label="消息数" value={detail.project.counts.messages} />
             <DetailItem label="Runtime Run" value={detail.project.counts.agentRuns} />
-            <DetailItem label="Patch" value={detail.project.counts.patchRecords} />
           </DetailGrid>
           <Section title="ProductDesignState">
             {detail.productDesignState ? (

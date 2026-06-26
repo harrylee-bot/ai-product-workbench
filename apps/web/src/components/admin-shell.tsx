@@ -67,7 +67,6 @@ const navItems: NavItem[] = [
       { title: "Runtime Run 日志", href: "/admin/logs/runtime-runs", icon: Workflow },
       { title: "模型调用日志", href: "/admin/logs/model-calls", icon: KeyRound },
       { title: "文件解析日志", href: "/admin/logs/file-parses", icon: FileWarning },
-      { title: "Patch 日志", href: "/admin/logs/patches", icon: Workflow },
       { title: "QA 报告", href: "/admin/logs/qa-reports", icon: ListChecks },
     ],
   },
@@ -96,7 +95,7 @@ export function AdminShell({
     <ProtectedRoute requireAdmin>
       <main
         className={clsx(
-          "grid min-h-screen bg-[#F6F7F9] text-gray-950",
+          "grid min-h-screen bg-[var(--color-app-bg)] text-gray-950",
           collapsed ? "grid-cols-[72px_1fr]" : "grid-cols-[240px_1fr]",
         )}
       >

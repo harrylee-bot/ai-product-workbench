@@ -12,15 +12,15 @@ import {
   type VibeRunTimelineItem,
   type VibeRunView,
 } from "@/components/chat-panel";
+import { PreviewPanel } from "@/components/workspace-preview/preview-panel";
 import {
-  PreviewPanel,
   type Phase1PrdPreview,
   type Phase1PrototypePreview,
-  type RuntimePatchPreview,
-} from "@/components/preview-panel";
+} from "@/components/workspace-preview/types";
+import { Modal } from "@/components/modal";
 import { ProjectList, type Phase1Conversation, type Phase1Project } from "@/components/project-list";
 import { ProtectedRoute } from "@/components/protected-route";
-import { ErrorState } from "@/components/ui";
+import { Button, ErrorState } from "@/components/ui";
 import { apiRequest, streamApiEvents } from "@/lib/api";
 
 type ProjectsResponse = {
@@ -52,27 +52,6 @@ type VibeHandleMessageResponse = {
 
 type UpdatePrdSectionResponse = {
   document: unknown;
-};
-
-type InlineEditResponse = {
-  projectId: string;
-  conversationId: string;
-  userMessage?: Phase1Message;
-  assistantMessage?: Phase1Message | null;
-  runId: string;
-  status: "candidate_created";
-};
-
-type PatchApplyResponse = {
-  projectId: string;
-  conversationId: string;
-  userMessage?: Phase1Message & {
-    projectId?: string;
-    conversationId?: string;
-  };
-  assistantMessage?: Phase1Message | null;
-  runId: string;
-  status: "completed";
 };
 
 type ConfirmPrototypeResponse = {
@@ -127,11 +106,9 @@ type DeleteProjectResponse = {
 type Phase1WorkspaceState = {
   selectedProjectId: string;
   selectedConversationId: string;
-  runtimePreview: RuntimePatchPreview | null;
   prdPreview: Phase1PrdPreview | null;
   prototypePreview: Phase1PrototypePreview | null;
   setSelectedProject: (projectId: string, conversationId: string) => void;
-  setRuntimePreview: (runtimePreview: RuntimePatchPreview | null) => void;
   setArtifactPreview: (preview: {
     prdPreview?: Phase1PrdPreview | null;
     prototypePreview?: Phase1PrototypePreview | null;
@@ -149,18 +126,15 @@ const WORKSPACE_PREVIEW_MAX_WIDTH = 980;
 const usePhase1Workspace = create<Phase1WorkspaceState>((set) => ({
   selectedProjectId: "",
   selectedConversationId: "",
-  runtimePreview: null,
   prdPreview: null,
   prototypePreview: null,
   setSelectedProject: (projectId, conversationId) =>
     set({
       selectedProjectId: projectId,
       selectedConversationId: conversationId,
-      runtimePreview: null,
       prdPreview: null,
       prototypePreview: null,
     }),
-  setRuntimePreview: (runtimePreview) => set({ runtimePreview }),
   setArtifactPreview: (preview) =>
     set((state) => ({
       prdPreview: preview.prdPreview === undefined ? state.prdPreview : preview.prdPreview,
@@ -191,13 +165,22 @@ function Phase1WorkspaceInner() {
   const {
     selectedProjectId,
     selectedConversationId,
-    runtimePreview,
     prdPreview,
     prototypePreview,
     setSelectedProject,
-    setRuntimePreview,
     setArtifactPreview,
   } = usePhase1Workspace();
+  const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const showError = (error: unknown, fallback: string) => {
+    setNotice({ title: "操作失败", message: error instanceof Error ? error.message : fallback });
+  };
 
   const projectsQuery = useQuery({
     queryKey: ["phase1-projects"],
@@ -363,7 +346,6 @@ function Phase1WorkspaceInner() {
       const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
       const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
 
-      setRuntimePreview(null);
       watchVibeRun(response.runId, responseProjectId, responseConversationId);
       await Promise.all([
         responseConversationId
@@ -372,34 +354,6 @@ function Phase1WorkspaceInner() {
         responseProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", responseProjectId] }) : Promise.resolve(),
         queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
       ]);
-    },
-  });
-
-  const confirmPatch = useMutation({
-    mutationFn: (patchId: string) =>
-      apiRequest<PatchApplyResponse>("/patch/preview/apply", {
-        method: "POST",
-        body: JSON.stringify({
-          patchId,
-          userConfirmation: "用户在工作台确认应用 Patch 候选",
-        }),
-      }),
-    onSuccess: async (response) => {
-      const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
-      const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
-
-      setRuntimePreview(null);
-      watchVibeRun(response.runId, responseProjectId, responseConversationId);
-      await Promise.all([
-        responseConversationId
-          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", responseConversationId] })
-          : Promise.resolve(),
-        responseProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", responseProjectId] }) : Promise.resolve(),
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
-      ]);
-    },
-    onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "Patch 应用失败");
     },
   });
 
@@ -416,7 +370,6 @@ function Phase1WorkspaceInner() {
       const responseProjectId = response.projectId || response.userMessage?.projectId || selectedProjectId;
       const responseConversationId = response.conversationId || response.userMessage?.conversationId || selectedConversationId;
 
-      setRuntimePreview(null);
       watchVibeRun(response.runId, responseProjectId, responseConversationId);
       await Promise.all([
         responseConversationId
@@ -427,7 +380,7 @@ function Phase1WorkspaceInner() {
       ]);
     },
     onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "确认 PRD 失败");
+      showError(error, "确认 PRD 失败");
     },
   });
 
@@ -454,7 +407,7 @@ function Phase1WorkspaceInner() {
       ]);
     },
     onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "确认原型失败");
+      showError(error, "确认原型失败");
     },
   });
 
@@ -475,102 +428,7 @@ function Phase1WorkspaceInner() {
       ]);
     },
     onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "PRD 段落保存失败");
-    },
-  });
-
-  const aiEditPrdSection = useMutation({
-    mutationFn: (input: {
-      sectionId: string;
-      blockId?: string;
-      title: string;
-      content: string;
-      sourcePaths?: string[];
-      instruction: string;
-    }) => {
-      if (!selectedProjectId || !selectedConversationId || !prdPreview?.id) {
-        throw new Error("请先选择项目和对话，再进行 AI 局部编辑");
-      }
-      return apiRequest<InlineEditResponse>("/ai/inline-edit", {
-        method: "POST",
-        body: JSON.stringify({
-          projectId: selectedProjectId,
-          conversationId: selectedConversationId,
-          selectedRegion: {
-            type: "document",
-            targetId: prdPreview.id,
-            documentId: prdPreview.id,
-            sectionId: input.sectionId,
-            blockId: input.blockId,
-            label: input.title,
-            sourcePaths: input.sourcePaths,
-          },
-          selectedText: input.content,
-          instruction: input.instruction,
-          action: "rewrite",
-        }),
-      });
-    },
-    onSuccess: async (response) => {
-      watchVibeRun(response.runId, response.projectId || selectedProjectId, response.conversationId || selectedConversationId);
-      await Promise.all([
-        response.conversationId
-          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", response.conversationId] })
-          : Promise.resolve(),
-        response.projectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", response.projectId] }) : Promise.resolve(),
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
-      ]);
-    },
-    onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "AI 局部编辑失败");
-    },
-  });
-
-  const aiEditPrototypeSelection = useMutation({
-    mutationFn: (input: {
-      selectionId: string;
-      componentId?: string;
-      pageId?: string;
-      action: string;
-      instruction: string;
-      bbox: { x: number; y: number; width: number; height: number };
-      label: string;
-    }) => {
-      if (!selectedProjectId || !selectedConversationId || !prototypePreview?.id) {
-        throw new Error("请先选择项目和对话，并生成原型后再进行局部编辑");
-      }
-      return apiRequest<InlineEditResponse>("/prototype/edit", {
-        method: "POST",
-        body: JSON.stringify({
-          projectId: selectedProjectId,
-          conversationId: selectedConversationId,
-          selectedRegion: {
-            type: "prototype",
-            targetId: prototypePreview.id,
-            artifactId: prototypePreview.id,
-            pageId: input.pageId,
-            componentId: input.componentId,
-            label: input.label,
-            bbox: input.bbox,
-          },
-          selectedText: input.label,
-          instruction: input.instruction,
-          action: input.action,
-        }),
-      });
-    },
-    onSuccess: async (response) => {
-      watchVibeRun(response.runId, response.projectId || selectedProjectId, response.conversationId || selectedConversationId);
-      await Promise.all([
-        response.conversationId
-          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", response.conversationId] })
-          : Promise.resolve(),
-        response.projectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", response.projectId] }) : Promise.resolve(),
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
-      ]);
-    },
-    onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "原型局部编辑失败");
+      showError(error, "PRD 段落保存失败");
     },
   });
 
@@ -602,7 +460,7 @@ function Phase1WorkspaceInner() {
       ]);
     },
     onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "新建对话失败");
+      showError(error, "新建对话失败");
     },
   });
 
@@ -625,7 +483,7 @@ function Phase1WorkspaceInner() {
       ]);
     },
     onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "删除对话失败");
+      showError(error, "删除对话失败");
     },
   });
 
@@ -642,7 +500,6 @@ function Phase1WorkspaceInner() {
 
       if (deleted.id === selectedProjectId) {
         setSelectedProject(nextProject?.id ?? "", nextProject?.currentConversationId ?? nextProject?.defaultConversationId ?? "");
-        setRuntimePreview(null);
         setArtifactPreview({ prdPreview: null, prototypePreview: null });
       }
 
@@ -653,7 +510,7 @@ function Phase1WorkspaceInner() {
       ]);
     },
     onError: (error) => {
-      window.alert(error instanceof Error ? error.message : "删除项目失败");
+      showError(error, "删除项目失败");
     },
   });
 
@@ -695,16 +552,17 @@ function Phase1WorkspaceInner() {
     ?? errorMessage(messagesQuery.error);
 
   return (
-    <main
-      className={[
-        "workbench-scrollbar relative grid h-screen min-h-0 overflow-x-auto overflow-y-hidden bg-[var(--color-app-bg)] text-gray-950",
-        resizingPreview ? "cursor-col-resize select-none" : "",
-      ].join(" ")}
-      style={{
-        gridTemplateColumns: `${sidebarWidth}px minmax(${WORKSPACE_CHAT_MIN_WIDTH}px, 1fr) ${WORKSPACE_RESIZER_WIDTH}px minmax(${WORKSPACE_PREVIEW_MIN_WIDTH}px, ${previewWidth}px)`,
-        minWidth: `${shellMinWidth}px`,
-      }}
-    >
+    <>
+      <main
+        className={[
+          "workbench-scrollbar relative grid h-screen min-h-0 overflow-x-auto overflow-y-hidden bg-[var(--color-app-bg)] text-gray-950",
+          resizingPreview ? "cursor-col-resize select-none" : "",
+        ].join(" ")}
+        style={{
+          gridTemplateColumns: `${sidebarWidth}px minmax(${WORKSPACE_CHAT_MIN_WIDTH}px, 1fr) ${WORKSPACE_RESIZER_WIDTH}px minmax(${WORKSPACE_PREVIEW_MIN_WIDTH}px, ${previewWidth}px)`,
+          minWidth: `${shellMinWidth}px`,
+        }}
+      >
       {resizingPreview ? <div className="fixed inset-0 z-50 cursor-col-resize bg-transparent" /> : null}
       {queryError ? (
         <div className="pointer-events-none fixed left-1/2 top-4 z-40 w-[420px] max-w-[calc(100vw-32px)] -translate-x-1/2">
@@ -728,12 +586,20 @@ function Phase1WorkspaceInner() {
         onSelectConversation={(conversation) => setSelectedProject(conversation.projectId, conversation.id)}
         onCreateConversation={() => void createConversation.mutate()}
         onDeleteConversation={(conversation) => {
-          const confirmed = window.confirm("删除后仅从历史对话中隐藏，消息和系统内容会保留用于后续知识库。确认删除吗？");
-          if (confirmed) deleteConversation.mutate(conversation);
+          setConfirmDialog({
+            title: "删除对话",
+            message: "确认删除这条对话吗？删除后会从工作台历史中移除。",
+            confirmLabel: "删除对话",
+            onConfirm: () => deleteConversation.mutate(conversation),
+          });
         }}
         onDeleteProject={(project) => {
-          const confirmed = window.confirm(`确认删除“${project.title}”？项目会从列表隐藏，消息、需求文档和原型会保留用于后续知识库。`);
-          if (confirmed) deleteProject.mutate(project);
+          setConfirmDialog({
+            title: "删除项目",
+            message: `确认删除“${project.title}”？项目会从工作台列表中移除。`,
+            confirmLabel: "删除项目",
+            onConfirm: () => deleteProject.mutate(project),
+          });
         }}
       />
       <ChatPanel
@@ -741,10 +607,6 @@ function Phase1WorkspaceInner() {
         runState={runState}
         disabled={projectsQuery.isLoading}
         sending={sendMessage.isPending || Boolean(activeRunId)}
-        confirmingPatchId={confirmPatch.isPending ? confirmPatch.variables : undefined}
-        onConfirmPatch={async (patchId) => {
-          await confirmPatch.mutateAsync(patchId);
-        }}
         confirmingPrd={confirmPrd.isPending}
         onConfirmPrd={async () => {
           await confirmPrd.mutateAsync();
@@ -771,10 +633,7 @@ function Phase1WorkspaceInner() {
         projectId={selectedProjectId}
         prdPreview={prdPreview}
         prototypePreview={prototypePreview}
-        runtimePreview={runtimePreview}
         savingPrdSectionId={updatePrdSection.isPending ? updatePrdSection.variables?.sectionId : undefined}
-        aiEditingPrdSectionId={aiEditPrdSection.isPending ? aiEditPrdSection.variables?.sectionId : undefined}
-        aiEditingPrototypeSelectionId={aiEditPrototypeSelection.isPending ? aiEditPrototypeSelection.variables?.selectionId : undefined}
         onSavePrdSection={async (input) => {
           if (!prdPreview?.id) return;
           await updatePrdSection.mutateAsync({
@@ -783,14 +642,46 @@ function Phase1WorkspaceInner() {
             content: input.content,
           });
         }}
-        onAiEditPrdSection={async (input) => {
-          await aiEditPrdSection.mutateAsync(input);
-        }}
-        onAiEditPrototypeSelection={async (input) => {
-          await aiEditPrototypeSelection.mutateAsync(input);
-        }}
       />
-    </main>
+      </main>
+      <Modal
+        open={Boolean(notice)}
+        title={notice?.title ?? "操作失败"}
+        onClose={() => setNotice(null)}
+        footer={(
+          <Button type="button" onClick={() => setNotice(null)}>
+            知道了
+          </Button>
+        )}
+      >
+        <p className="text-sm leading-6 text-gray-600">{notice?.message}</p>
+      </Modal>
+      <Modal
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title ?? "确认操作"}
+        onClose={() => setConfirmDialog(null)}
+        footer={(
+          <>
+            <Button type="button" variant="secondary" onClick={() => setConfirmDialog(null)}>
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => {
+                const action = confirmDialog?.onConfirm;
+                setConfirmDialog(null);
+                action?.();
+              }}
+            >
+              {confirmDialog?.confirmLabel ?? "确认"}
+            </Button>
+          </>
+        )}
+      >
+        <p className="text-sm leading-6 text-gray-600">{confirmDialog?.message}</p>
+      </Modal>
+    </>
   );
 }
 
@@ -812,11 +703,8 @@ function normalizePrdPreview(value: unknown): Phase1PrdPreview | null {
       title: title || "未命名章节",
       content: resolvedContent || "暂无内容",
       type: asText(section.type) || undefined,
-      level: normalizePrdLevel(section.level),
-      order: normalizeNumber(section.order) ?? index + 1,
       sourcePaths: normalizeTextArray(section.sourcePaths),
       sourceStatePaths: normalizeTextArray(section.sourceStatePaths),
-      tags: normalizeTextArray(section.tags),
       blocks,
     }];
   });
@@ -840,7 +728,6 @@ function normalizePrdBlocks(value: unknown): NonNullable<Phase1PrdPreview["secti
       type: normalizePrdBlockType(block.type),
       content,
       sourcePaths: normalizeTextArray(block.sourcePaths),
-      tags: normalizeTextArray(block.tags),
     }];
   });
 }
@@ -849,8 +736,6 @@ function normalizePrdBlockType(value: unknown) {
   const text = asText(value);
   if (
     text === "paragraph" ||
-    text === "bullet_list" ||
-    text === "table" ||
     text === "quote" ||
     text === "warning" ||
     text === "info"
@@ -858,11 +743,6 @@ function normalizePrdBlockType(value: unknown) {
     return text;
   }
   return "paragraph";
-}
-
-function normalizePrdLevel(value: unknown): 1 | 2 | 3 | undefined {
-  const level = normalizeNumber(value);
-  return level === 1 || level === 2 || level === 3 ? level : undefined;
 }
 
 function normalizeTextArray(value: unknown) {
@@ -899,13 +779,12 @@ function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | nul
 }
 
 const VIBE_RUN_STEPS = [
-  { step: "requirement_packaging", title: "整理需求包", executor: "Runtime", detail: "把用户输入、附件、历史上下文整理成 runtime 输入" },
-  { step: "product_design", title: "生成产品状态", executor: "Runtime", detail: "由 DeerFlow/Codex runtime 或协议渲染器产出 ProductDesignState" },
-  { step: "prd_generation", title: "生成 PRD", executor: "ProductRuntime", detail: "只基于 ProductDesignState 输出结构化 PRD" },
-  { step: "prototype_design", title: "生成原型规格", executor: "ProductRuntime", detail: "只基于 ProductDesignState 输出 PrototypeSpec" },
-  { step: "prototype_code_generation", title: "生成 HTML", executor: "Codex Runtime", detail: "由 Codex runtime 或协议渲染器输出单文件 HTML 原型" },
-  { step: "patch_planning", title: "规划局部修改", executor: "ProductRuntime", detail: "输出只作用于 ProductDesignState 的 PatchPlan" },
-  { step: "qa_check", title: "QA 闸门", executor: "Rule Runtime", detail: "检查一致性并决定确认、知识、发布和导出闸门" },
+  { step: "requirement_packaging", title: "整理上下文", executor: "DeerFlow Lead", detail: "把用户输入、附件和项目上下文整理成 graph 输入" },
+  { step: "product_design", title: "生成产品状态", executor: "DeerFlow Graph", detail: "产出 ProductDesignState，作为 PRD 和原型的事实源" },
+  { step: "prd_generation", title: "生成 PRD", executor: "DeerFlow Graph", detail: "基于 ProductDesignState 输出结构化 PRD" },
+  { step: "prototype_design", title: "生成原型规格", executor: "DeerFlow Graph", detail: "基于 ProductDesignState 输出 PrototypeSpec" },
+  { step: "prototype_code_generation", title: "生成 HTML", executor: "Codex Node", detail: "Codex 在 DeerFlow coding 节点中产出可预览 HTML" },
+  { step: "qa_check", title: "QA 闸门", executor: "DeerFlow Graph", detail: "检查一致性并决定确认、知识、发布和导出闸门" },
 ];
 
 function streamReconnectDelayMs(attempt: number) {
@@ -1001,9 +880,6 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
       next.status = "failed";
       next.errorMessage = event.content ?? "Runtime 执行失败";
     }
-    if (eventType === "fallback_used") {
-      next = updateStep(next, event.step, undefined, event.content);
-    }
   }
 
   if (eventType === "message_delta" && event.content) {
@@ -1016,32 +892,6 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
 
   if (eventType === "prototype_updated") {
     next = updateStep(next, "prototype_code_generation", "done", "HTML 原型已更新");
-  }
-
-  if (eventType === "patch_started") {
-    next = updateStep(next, "patch_planning", "running", event.content ?? "正在规划局部修改");
-  }
-
-  if (eventType === "patch_plan_created") {
-    next = updateStep(next, "patch_planning", "done", "局部修改计划已生成，等待用户确认");
-    const patchPreview = asRecord(payload?.patchPreview);
-    next.patchId = asText(payload?.patchId) || asText(patchPreview?.patchId) || asText(payloadMeta?.primaryId) || next.patchId;
-    next.patchPreviewMessage = asText(patchPreview?.message) || event.content || metaSummary || next.patchPreviewMessage;
-    next.summary = "局部修改候选已生成，等待确认后再应用";
-  }
-
-  if (eventType === "patch_applying") {
-    next.currentLabel = event.content ?? metaSummary ?? "正在应用已确认的局部修改";
-  }
-
-  if (eventType === "patch_completed") {
-    next.currentLabel = event.content ?? metaSummary ?? "局部修改已完成并重新生成产物";
-  }
-
-  if (eventType === "patch_failed") {
-    next = updateStep(next, "patch_planning", "failed", event.content ?? "局部修改失败");
-    next.status = "failed";
-    next.errorMessage = event.content ?? "局部修改失败";
   }
 
   if (eventType === "qa_completed" && payload) {
@@ -1079,15 +929,8 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
 
   if (eventType === "run_completed") {
     const nextAction = asRecord(payload?.nextAction);
-    const patchRecord = asRecord(payload?.patchRecord);
-    const patchPreview = asRecord(payload?.patchPreview);
     const nextActionType = asText(nextAction?.type);
-    if (nextActionType === "confirm_patch") {
-      next.status = "waiting_confirmation";
-      next.patchId = asText(patchRecord?.id) || asText(patchPreview?.patchId) || asText(payloadMeta?.primaryId) || next.patchId;
-      next.patchPreviewMessage = asText(patchPreview?.message) || metaSummary || next.patchPreviewMessage;
-      next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Patch 候选已生成，等待确认后再应用";
-    } else if (nextActionType === "review_prd") {
+    if (nextActionType === "review_prd") {
       // 确认门 A（FR-1.2）：PRD 已生成，停下等待用户确认
       next.status = "waiting_prd_confirm";
       next.wantsPrototype = nextAction?.wantsPrototype !== false;
@@ -1199,17 +1042,6 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
     return timelineItem(id, step, "failed", `${stepTitle ?? "这一步"}没有完成：${safeEventText(event, payloadMeta, "请稍后重试或查看调试信息。")}`);
   }
 
-  if (eventType === "fallback_used") {
-    const fallback = asRecord(payload);
-    const userMessage = asText(fallback?.userMessage);
-    return timelineItem(
-      id,
-      step,
-      "warning",
-      userMessage || `${stepTitle ?? "某个步骤"}没有拿到理想模型结果，已用规则兜底继续执行。`,
-    );
-  }
-
   if (eventType === "message_delta") {
     const text = safeEventText(event, payloadMeta, "");
     return text ? timelineItem(id, step, "info", text) : null;
@@ -1231,26 +1063,6 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
     return timelineItem(id, "prototype_code_generation", "done", "HTML 原型已生成并更新到右侧预览区。");
   }
 
-  if (eventType === "patch_started") {
-    return timelineItem(id, "patch_planning", "running", "开始理解你的局部修改要求，正在准备 Patch 候选。");
-  }
-
-  if (eventType === "patch_plan_created") {
-    return timelineItem(id, "patch_planning", "done", "局部修改方案已准备好，等你确认后再真正应用。");
-  }
-
-  if (eventType === "patch_applying") {
-    return timelineItem(id, "patch_planning", "running", "正在应用已确认的局部修改，并同步重算相关产物。");
-  }
-
-  if (eventType === "patch_completed") {
-    return timelineItem(id, "patch_planning", "done", "局部修改已应用完成，PRD、原型和 QA 已同步刷新。");
-  }
-
-  if (eventType === "patch_failed") {
-    return timelineItem(id, "patch_planning", "failed", `局部修改没有应用成功：${safeEventText(event, payloadMeta, "系统已保留原有版本。")}`);
-  }
-
   if (eventType === "qa_completed") {
     const issueText = state.qaIssueCount === undefined
       ? ""
@@ -1270,9 +1082,6 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
 
   if (eventType === "run_completed") {
     const nextActionType = asText(asRecord(payload?.nextAction)?.type);
-    if (nextActionType === "confirm_patch") {
-      return timelineItem(id, step, "done", "本轮已停在 Patch 确认门。确认后，我会继续应用修改。");
-    }
     if (nextActionType === "review_prd") {
       return timelineItem(id, step, "done", "PRD 已生成，本轮先停在确认门。你确认后我再继续生成原型。");
     }
@@ -1326,17 +1135,11 @@ function debugEventTitle(eventType: string, step?: string) {
     step_started: "步骤开始",
     step_completed: "步骤完成",
     step_failed: "步骤失败",
-    fallback_used: "规则兜底",
     message_delta: "过程消息",
     state_updated: "产品状态更新",
     state_version_created: "状态版本保存",
     prd_updated: "PRD 更新",
     prototype_updated: "原型更新",
-    patch_started: "局部修改开始",
-    patch_plan_created: "局部修改候选",
-    patch_applying: "局部修改应用中",
-    patch_completed: "局部修改完成",
-    patch_failed: "局部修改失败",
     qa_completed: "QA 完成",
     knowledge_candidate_created: "知识候选生成",
     export_ready: "导出就绪",
@@ -1348,8 +1151,7 @@ function debugEventTitle(eventType: string, step?: string) {
 
 function debugEventStatus(eventType: string): VibeRunDebugEvent["status"] {
   if (eventType.endsWith("_failed") || eventType === "run_failed" || eventType === "step_failed") return "failed";
-  if (eventType === "fallback_used") return "warning";
-  if (eventType.endsWith("_started") || eventType === "patch_applying" || eventType === "step_started") return "running";
+  if (eventType.endsWith("_started") || eventType === "step_started") return "running";
   if (eventType.endsWith("_completed") || eventType.endsWith("_updated") || eventType.endsWith("_created") || eventType === "run_completed" || eventType === "export_ready") return "done";
   return "info";
 }
@@ -1384,12 +1186,6 @@ function debugEventBody(
   if (eventType === "step_completed" && event.step) {
     lines.push(`结果摘要：${stepCompletedText(event.step, stepLabel(event.step), payload)}`);
     lines.push("下一步：把这个节点的结果交给后续节点继续处理。");
-  }
-
-  if (eventType === "fallback_used") {
-    const fallback = asRecord(payload);
-    lines.push(`兜底原因：${asText(fallback?.reason) || asText(fallback?.errorMessage) || "模型结果不可用或超时。"}`);
-    lines.push(`用户可见说明：${asText(fallback?.userMessage) || "系统已使用规则兜底继续执行。"}`);
   }
 
   if (eventType === "message_delta") {
@@ -1476,7 +1272,6 @@ function serializeDebugEvent(event: VibeStreamEvent) {
 
 function nextActionLabel(value: string) {
   const labels: Record<string, string> = {
-    confirm_patch: "等待你确认局部修改",
     review_prd: "等待你确认 PRD",
     review_prototype: "等待你确认原型",
     review_qa: "等待你查看 QA",
@@ -1527,19 +1322,16 @@ function toChineseProcessText(text: string) {
     .replace(/ProductDesignState/g, "产品状态")
     .replace(/ProductBuildPlan/g, "产品方案")
     .replace(/PrototypeSpec/g, "原型结构")
-    .replace(/PatchPlan/g, "局部修改方案")
-    .replace(/Patch/g, "局部修改")
     .replace(/PRD/g, "PRD")
     .replace(/HTML/g, "HTML")
     .replace(/QA/g, "QA")
-    .replace(/fallback/gi, "规则兜底")
     .replace(/run/gi, "任务")
     .replace(/agent/gi, "Runtime");
 }
 
 function stepStartedText(step: string, title?: string) {
   const labels: Record<string, string> = {
-    intent_detection: "执行思路：先判断这是新需求、继续生成、导出、问答还是局部修改；如果带选区，会优先识别选区意图。",
+    intent_detection: "执行思路：先判断这是新需求、继续生成、导出还是普通问答。",
     knowledge_retrieval: "执行思路：按意图检索强规则、默认规则、案例和可用 skills，后续生成必须参考这些依据。",
     context_fetch: "执行思路：只读取项目状态、历史消息、PRD、原型、选区和附件，不做业务判断。",
     requirement_analysis: "执行思路：把用户明确事实、知识库事实和 AI 假设分开，检查是否缺少必须澄清的信息。",
@@ -1551,7 +1343,6 @@ function stepStartedText(step: string, title?: string) {
     prd_generation: "执行思路：只根据产品状态渲染 PRD，不临时编造状态里没有的业务规则。",
     prototype_design: "执行思路：把产品状态转成页面、组件、导航和交互结构，还不生成 HTML。",
     prototype_code_generation: "执行思路：根据原型结构生成可预览 HTML，保持单文件、无真实接口调用。",
-    patch_planning: "执行思路：先判断局部修改会影响哪些状态路径，再生成需要你确认的修改候选。",
     qa_check: "执行思路：检查产品状态、PRD、原型和规则是否一致，只报告问题，不直接改产物。",
     knowledge_extraction: "执行思路：只从稳定产物中抽取可复用知识候选，不直接写入正式知识库。",
   };
@@ -1566,13 +1357,12 @@ function stepThinkingText(step: string) {
     requirement_analysis: "区分已确认事实、系统上下文、假设、冲突和缺失项。",
     requirement_packaging: "生成 Planner、Validator、Safety Check 共同消费的 RequirementPackage。",
     product_planning: "基于 RequirementPackage 规划范围、页面、状态覆盖、下游执行顺序、QA 关注点和风险。",
-    requirement_validation: "校验需求包和计划是否具备进入状态写入、PRD、原型或局部修改的条件。",
+    requirement_validation: "校验需求包和计划是否具备进入状态写入、PRD 或原型生成的条件。",
     safety_check: "识别不能进入生成的安全风险，并给出可继续的安全替代方向。",
     product_design: "把计划落到产品状态，保留 assumptions、knowledgeRefs、pendingQuestions 和 sourcePaths。",
     prd_generation: "从产品状态渲染结构化 PRD，避免写接口、SQL、数据库或实现细节。",
     prototype_design: "从产品状态设计原型结构，定义页面、组件、状态和交互。",
     prototype_code_generation: "从原型结构生成 HTML，避免远程脚本、真实接口和生产承诺。",
-    patch_planning: "把选区修改转成作用于产品状态的 patch plan，并标出影响范围。",
     qa_check: "检查 state/prd/prototype/html/knowledge 的一致性和阻断风险。",
     knowledge_extraction: "从确认后的稳定内容里提炼候选知识，等待审核。",
   };
@@ -1604,7 +1394,6 @@ function stepCompletedText(step: string, title: string | undefined, payload: Rec
     prd_generation: "PRD 生成完成。",
     prototype_design: "原型结构设计完成。",
     prototype_code_generation: "HTML 原型生成完成。",
-    patch_planning: "局部修改方案生成完成。",
     qa_check: "QA 检查完成。",
     knowledge_extraction: "知识候选抽取完成。",
   };
@@ -1627,7 +1416,7 @@ function qaGateSummary(gate: Record<string, unknown> | null | undefined) {
   if (!gate) return undefined;
   const status = asQaGateStatus(gate.status);
   const parts = [
-    status === "blocked" ? "阻止确认/导出，需回到 Patch" : status === "warning" ? "可确认，需复核风险" : "通过",
+    status === "blocked" ? "阻止确认/导出，需回到生成流程" : status === "warning" ? "可确认，需复核风险" : "通过",
     gate.allowPersistKnowledge === false ? "暂不沉淀知识" : "可沉淀知识",
     gate.allowExportOrPublish === false ? "禁止导出/发布" : "可导出/发布",
   ];
@@ -1675,10 +1464,6 @@ function payloadMetaRecord(event: VibeStreamEvent) {
 
 function asText(value: unknown) {
   return typeof value === "string" ? value : "";
-}
-
-function normalizeNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function numberFromRecord(record: Record<string, number> | undefined, key: string) {

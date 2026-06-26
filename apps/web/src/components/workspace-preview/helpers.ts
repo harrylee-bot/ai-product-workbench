@@ -1,16 +1,4 @@
-import type {
-  Constraint,
-  ConstraintContext,
-  PrototypeComponentNode,
-  RuntimePatchPreview,
-} from "./types";
-
-export const RULE_LABELS: Record<Constraint["rule"], string> = {
-  must_follow: "必须遵守",
-  prefer: "优先考虑",
-  avoid: "避免",
-  warn: "提醒",
-};
+import type { PrototypeComponentNode } from "./types";
 
 export function sectionEditKey(documentKey: string, sectionId: string) {
   return `${documentKey}:${sectionId}`;
@@ -29,63 +17,6 @@ export function compactNumber(value: number) {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value);
-}
-
-export function constraintCount(context: ConstraintContext | null) {
-  if (!context) return 0;
-  return context.mustFollow.length + context.prefer.length + context.avoid.length + context.warn.length;
-}
-
-export function firstConstraints(context: ConstraintContext | null) {
-  if (!context) return [];
-  return [
-    ...context.mustFollow,
-    ...context.prefer,
-    ...context.avoid,
-    ...context.warn,
-  ].slice(0, 4);
-}
-
-export function runtimeConstraintContext(preview?: RuntimePatchPreview | null) {
-  return preview?.constraintContext ?? null;
-}
-
-export function riskLabel(risk?: string) {
-  if (risk === "high") return "高";
-  if (risk === "medium") return "中";
-  return "低";
-}
-
-export function normalizeRisk(value?: string): "low" | "medium" | "high" {
-  if (value === "high") return "high";
-  if (value === "medium") return "medium";
-  return "low";
-}
-
-export function statusLabel(status?: string) {
-  const labels: Record<string, string> = {
-    ready: "已生成",
-    preview: "待预览",
-    applied: "已应用",
-    already_applied: "已应用",
-    blocked: "已阻止",
-    completed: "已完成",
-    pending: "待处理",
-    running: "运行中",
-    failed: "失败",
-  };
-  return status ? labels[status] ?? status : "未知";
-}
-
-export function formatShortDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 export function derivePrototypeComponents(html: string): PrototypeComponentNode[] {
@@ -179,29 +110,34 @@ function trimText(value: string, fallback: string) {
   return toChineseText(text.length > 18 ? `${text.slice(0, 18)}...` : text);
 }
 
+/**
+ * 把后端可能产出的英文术语映射成中文展示文案。
+ *
+ * 仅替换「完整术语」（带词边界），不做裸子串替换——否则会误伤正文里
+ * 包含 product/strategy/runtime 等字母序列的普通单词或 URL。
+ * 历史遗留的整句英文也已收录，后端切回中文后这些分支自然匹配不到。
+ */
 export function toChineseText(text: string) {
   return text
     .replace(/AI Product Workbench/g, "智能产品工作台")
     .replace(/AI Product OS/g, "智能产品操作系统")
-    .replace(/AI Product/g, "智能产品")
+    .replace(/\bAI Product\b/g, "智能产品")
     .replace(/Triple System Fusion/g, "运行时协议")
     .replace(/Triple System/g, "运行时协议")
     .replace(/Constraint Context/g, "约束上下文")
     .replace(/Constraint System/g, "约束协议")
     .replace(/Strategy Selector/g, "运行时策略")
-    .replace(/Patch Preview/g, "补丁预览")
     .replace(/System Preview/g, "系统预览")
     .replace(/System Policy/g, "系统策略")
     .replace(/ProductDesignState/g, "产品设计状态")
     .replace(/Generate multiple strategies and select one by weighted score\./g, "生成多个策略，并按加权得分选择最优策略。")
-    .replace(/Route through 补丁预览 before apply\./g, "执行前必须进入补丁预览。")
     .replace(/Avoid direct database mutation and protected module edits\./g, "避免直接修改数据库和受保护模块。")
     .replace(/Prefer lower-risk strategies when business value is similar\./g, "业务价值接近时优先选择低风险策略。")
     .replace(/QA passed and user satisfaction was strong\./g, "质检通过，用户满意度较高。")
-    .replace(/Pipeline/g, "流程")
-    .replace(/Strategy/g, "策略")
-    .replace(/Outcome/g, "结果")
-    .replace(/Dashboard/g, "看板")
-    .replace(/Runtime/g, "运行时")
-    .replace(/Product/g, "产品");
+    .replace(/\bPipeline\b/g, "流程")
+    .replace(/\bStrategy\b/g, "策略")
+    .replace(/\bOutcome\b/g, "结果")
+    .replace(/\bDashboard\b/g, "看板")
+    .replace(/\bRuntime\b/g, "运行时")
+    .replace(/\bProduct\b/g, "产品");
 }

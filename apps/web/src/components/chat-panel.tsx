@@ -11,6 +11,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Badge, Button, EmptyState } from "@/components/ui";
+import { StreamingText } from "@/components/streaming-text";
+import { toChineseText } from "@/components/workspace-preview/helpers";
 import { ChatComposer } from "./workspace-chat/chat-composer";
 
 export type Phase1Message = {
@@ -84,8 +86,6 @@ export type VibeRunView = {
   qaGateStatus?: "open" | "warning" | "blocked";
   qaGateSummary?: string;
   exportFileName?: string;
-  patchId?: string;
-  patchPreviewMessage?: string;
   prototypeArtifactId?: string;
   /** 确认门 A：用户确认 PRD 后是否应继续生成原型（FR-1.3） */
   wantsPrototype?: boolean;
@@ -97,8 +97,6 @@ export function ChatPanel({
   runState,
   disabled,
   sending,
-  confirmingPatchId,
-  onConfirmPatch,
   confirmingPrd,
   onConfirmPrd,
   confirmingPrototypeId,
@@ -109,8 +107,6 @@ export function ChatPanel({
   runState?: VibeRunView | null;
   disabled?: boolean;
   sending?: boolean;
-  confirmingPatchId?: string;
-  onConfirmPatch?: (patchId: string) => Promise<void> | void;
   confirmingPrd?: boolean;
   onConfirmPrd?: (wantsPrototype: boolean) => Promise<void> | void;
   confirmingPrototypeId?: string;
@@ -159,11 +155,16 @@ export function ChatPanel({
           />
         )}
         {displayRun ? (
+          <StreamingNarrationBubble
+            key={displayRun.runId}
+            runState={displayRun}
+            active={running}
+          />
+        ) : null}
+        {displayRun ? (
           <ExecutionPathCard
             runState={displayRun}
             running={Boolean(running)}
-            confirmingPatchId={confirmingPatchId}
-            onConfirmPatch={onConfirmPatch}
             confirmingPrd={confirmingPrd}
             onConfirmPrd={onConfirmPrd}
             confirmingPrototypeId={confirmingPrototypeId}
@@ -177,11 +178,47 @@ export function ChatPanel({
   );
 }
 
+function StreamingNarrationBubble({
+  runState,
+  active,
+}: {
+  runState: VibeRunView;
+  active: boolean;
+}) {
+  // 复用执行事件 timeline 作为思考过程的累加来源：把每条播报拼成一段叙述文本，
+  // 交给打字机逐字渲染。run 进行中→逐字；结束/等待确认→瞬间定格为普通气泡。
+  const timeline = runState.timeline ?? [];
+  const narration = timeline
+    .map((item) => toChineseText(item.text))
+    .filter(Boolean)
+    .join("\n");
+
+  if (!narration) return null;
+
+  return (
+    <div className="mr-auto flex w-fit max-w-[min(86%,_720px)] items-start gap-2">
+      <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+        <Bot className="h-3.5 w-3.5" />
+      </span>
+      <div className="min-w-0 whitespace-pre-wrap rounded-[12px] border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-gray-700 shadow-[var(--shadow-control)]">
+        <StreamingText text={narration} active={active}>
+          {(visible, isStreaming) => (
+            <span>
+              {visible}
+              {isStreaming ? (
+                <span className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-gray-400 align-middle" />
+              ) : null}
+            </span>
+          )}
+        </StreamingText>
+      </div>
+    </div>
+  );
+}
+
 function ExecutionPathCard({
   runState,
   running,
-  confirmingPatchId,
-  onConfirmPatch,
   confirmingPrd,
   onConfirmPrd,
   confirmingPrototypeId,
@@ -190,8 +227,6 @@ function ExecutionPathCard({
 }: {
   runState: VibeRunView;
   running: boolean;
-  confirmingPatchId?: string;
-  onConfirmPatch?: (patchId: string) => Promise<void> | void;
   confirmingPrd?: boolean;
   onConfirmPrd?: (wantsPrototype: boolean) => Promise<void> | void;
   confirmingPrototypeId?: string;
@@ -205,15 +240,12 @@ function ExecutionPathCard({
   const waitingForPrdConfirm = runState.status === "waiting_prd_confirm";
   const waitingForPrototypeConfirm = runState.status === "waiting_prototype_confirm";
   const failed = runState.status === "failed";
-  const canConfirmPatch = waitingForConfirmation && Boolean(runState.patchId && onConfirmPatch);
-  const confirmingPatch = Boolean(runState.patchId && confirmingPatchId === runState.patchId);
   const canConfirmPrd = waitingForPrdConfirm && Boolean(onConfirmPrd);
   const canConfirmPrototype = waitingForPrototypeConfirm && Boolean(runState.prototypeArtifactId && onConfirmPrototype);
   const confirmingPrototype = Boolean(runState.prototypeArtifactId && confirmingPrototypeId === runState.prototypeArtifactId);
   const activeStep = runState.steps.find((step) => step.status === "running")
     ?? lastActiveStep(runState.steps)
     ?? runState.steps[0];
-  const timeline = runState.timeline ?? [];
   const doneCount = runState.steps.filter((step) => step.status === "done").length;
   const settledLike = completed || waitingForClarification || waitingForConfirmation || waitingForPrdConfirm || waitingForPrototypeConfirm;
   const progress = settledLike
@@ -226,7 +258,7 @@ function ExecutionPathCard({
     : waitingForPrototypeConfirm
       ? runState.summary ?? "原型已生成，请确认无误"
     : waitingForConfirmation
-      ? runState.summary ?? "Patch 候选已生成，等待确认"
+      ? runState.summary ?? "等待你确认下一步"
     : waitingForClarification
       ? runState.summary ?? "需要先确认几个问题"
       : running
@@ -270,26 +302,6 @@ function ExecutionPathCard({
           style={{ width: `${progress}%` }}
         />
       </div>
-
-      {timeline.length ? (
-        <div className="border-t border-gray-100 bg-white px-3 py-2.5">
-          <div className="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
-            <span className="inline-flex items-center gap-1">
-              <Bot className="h-3.5 w-3.5" />
-              过程播报
-            </span>
-            <span>{timeline.length} 条更新</span>
-          </div>
-          <div className="space-y-2">
-            {timeline.map((item) => (
-              <div key={item.id} className="flex gap-2 text-xs leading-5">
-                <TimelineIcon item={item} />
-                <span className="min-w-0 flex-1 text-gray-700">{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
 
       {waitingForClarification && runState.clarificationQuestions?.length ? (
         <div className="border-t border-amber-100 bg-amber-50 px-3 py-2.5">
@@ -372,24 +384,6 @@ function ExecutionPathCard({
         </div>
       ) : null}
 
-      {canConfirmPatch ? (
-        <div className="flex items-center justify-between gap-3 border-t border-amber-100 bg-amber-50 px-3 py-2">
-          <span className="min-w-0 truncate text-xs text-amber-900">
-            {runState.patchPreviewMessage ?? "确认后将应用 Patch 并重新生成 PRD、原型和 QA。"}
-          </span>
-          <Button
-            type="button"
-            size="sm"
-            disabled={confirmingPatch}
-            onClick={() => runState.patchId ? void onConfirmPatch?.(runState.patchId) : undefined}
-            title="确认应用 Patch"
-          >
-            {confirmingPatch ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-            {confirmingPatch ? "应用中" : "应用 Patch"}
-          </Button>
-        </div>
-      ) : null}
-
       {open ? (
         <div className="border-t border-gray-200 bg-gray-50 px-3 py-2.5">
           <div className="px-1 py-1">
@@ -453,13 +447,12 @@ function ExecutionPathCard({
               </div>
             </div>
           ) : null}
-          {runState.knowledgeHitCount || runState.qaIssueCount !== undefined || runState.qaGateSummary || runState.exportFileName || runState.patchId ? (
+          {runState.knowledgeHitCount || runState.qaIssueCount !== undefined || runState.qaGateSummary || runState.exportFileName ? (
             <div className="mt-2 text-xs leading-5 text-gray-500">
               {runState.knowledgeHitCount ? `本轮知识库命中 ${runState.knowledgeHitCount} 条。` : null}
               {runState.qaIssueCount !== undefined ? `QA 发现 ${runState.qaIssueCount} 个问题。` : null}
               {runState.qaGateSummary ? `QA 闸门：${runState.qaGateSummary}` : null}
               {runState.exportFileName ? `导出文件：${runState.exportFileName}` : null}
-              {runState.patchId ? `Patch 候选：${runState.patchId}。${runState.patchPreviewMessage ?? ""}` : null}
             </div>
           ) : null}
         </div>
@@ -489,24 +482,4 @@ function lastActiveStep(steps: VibeRunStepView[]) {
     if (step?.status === "done" || step?.status === "failed") return step;
   }
   return undefined;
-}
-
-function toChineseText(value: string) {
-  return value
-    .replace(/AI Product Workbench/g, "智能产品工作台")
-    .replace(/AI Product OS/g, "智能产品操作系统")
-    .replace(/AI Product Company/g, "智能产品运行时")
-    .replace(/Triple System Fusion/g, "运行时协议")
-    .replace(/Triple System/g, "运行时协议")
-    .replace(/Constraint System/g, "约束协议")
-    .replace(/Constraint/g, "约束系统")
-    .replace(/Decision/g, "判断")
-    .replace(/Evolution/g, "状态更新")
-    .replace(/Patch Preview/g, "补丁预览")
-    .replace(/PatchDraft/g, "补丁草稿")
-    .replace(/Patch/g, "补丁")
-    .replace(/Prototype/g, "原型")
-    .replace(/PRD/g, "需求文档")
-    .replace(/QA/g, "质检")
-    .replace(/AI/g, "智能");
 }

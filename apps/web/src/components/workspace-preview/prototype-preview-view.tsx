@@ -42,20 +42,8 @@ const LOCAL_ACTIONS: Array<{ id: PrototypeLocalAction; label: string; icon: Luci
 
 export function PrototypePreviewView({
   prototypePreview,
-  aiEditingSelectionId,
-  onAiEditSelection,
 }: {
   prototypePreview?: Phase1PrototypePreview | null;
-  aiEditingSelectionId?: string;
-  onAiEditSelection?: (input: {
-    selectionId: string;
-    componentId?: string;
-    pageId?: string;
-    action: string;
-    instruction: string;
-    bbox: { x: number; y: number; width: number; height: number };
-    label: string;
-  }) => Promise<void> | void;
 }) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -250,31 +238,10 @@ export function PrototypePreviewView({
     setDraftSaved(false);
 
     try {
-      if (onAiEditSelection) {
-        await onAiEditSelection({
-          selectionId: selection.id,
-          componentId: selection.componentId,
-          pageId: selection.pageId,
-          action: prototypePatchAction(localAction),
-          instruction: instruction.trim(),
-          bbox: {
-            x: selection.x,
-            y: selection.y,
-            width: selection.width,
-            height: selection.height,
-          },
-          label: selection.label,
-        });
-        setGeneration({
-          title: "Patch 候选已生成",
-          changes: ["候选补丁已进入确认流程，确认后才会应用到原型与产品设计状态。"],
-        });
-      } else {
-        await new Promise((resolve) => window.setTimeout(resolve, 480));
-        setGeneration(buildLocalGeneration(selection, localAction, instruction));
-      }
+      await new Promise((resolve) => window.setTimeout(resolve, 480));
+      setGeneration(buildLocalGeneration(selection, localAction, instruction));
     } catch {
-      setGenerationError("局部候选生成失败，请保留选区后重试。");
+      setGenerationError("局部草稿生成失败，请保留选区后重试。");
     } finally {
       setGenerating(false);
     }
@@ -324,7 +291,7 @@ export function PrototypePreviewView({
             {generation ? (
               <Badge tone="success" className={selection ? "gap-1" : "ml-auto gap-1"}>
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                Patch
+                草稿
               </Badge>
             ) : null}
           </div>
@@ -410,7 +377,7 @@ export function PrototypePreviewView({
           action={localAction}
           instruction={instruction}
           generating={generating}
-          remoteGenerating={aiEditingSelectionId === selection.id}
+          remoteGenerating={false}
           generation={generation}
           generationError={generationError}
           draftSaved={draftSaved && Boolean(generation)}
@@ -435,13 +402,6 @@ export function PrototypePreviewView({
       ) : null}
     </div>
   );
-}
-
-function prototypePatchAction(action: PrototypeLocalAction) {
-  if (action === "layout_adjust") return "layout_edit";
-  if (action === "interaction_fill") return "flow_update";
-  if (action === "visual_refine") return "redesign";
-  return "component_edit";
 }
 
 function PrototypeSelectionBox({ box, selected }: { box: CanvasRect; selected: boolean }) {
@@ -571,7 +531,7 @@ function PrototypeLocalEditDialog({
         />
 
         <div id="prototype-local-edit-help" className="rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
-          当前输出会作为局部补丁草稿保留，不覆盖完整原型。
+          当前输出会作为局部修改草稿保留，不覆盖完整原型。
         </div>
 
         {busy ? <PrototypeLocalSkeleton /> : null}
@@ -740,7 +700,7 @@ function localDraftChanges(
   instruction: string,
 ) {
   const scope = `作用范围：${selection.label}`;
-  const guard = "应用方式：生成局部补丁候选，不替换完整 HTML。";
+  const guard = "应用方式：生成局部修改建议，不替换完整 HTML。";
   if (action === "copy_generate") {
     return [
       scope,

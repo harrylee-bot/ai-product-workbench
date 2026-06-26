@@ -41,7 +41,6 @@ const taskTypes = [
   "prd_generation",
   "prototype_design",
   "prototype_code_generation",
-  "patch_planning",
   "qa_check",
   "knowledge_extraction",
   "general_chat",
