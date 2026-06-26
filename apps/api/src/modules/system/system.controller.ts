@@ -22,7 +22,6 @@ export class SystemController {
         "ai-vibe",
         "ai-vibe-stream",
         "constraint-system",
-        "patch-builder",
         "patch-preview",
         "product-design-state",
         "requirement-documents",
