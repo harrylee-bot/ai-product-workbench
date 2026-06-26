@@ -34,6 +34,38 @@ describe("ProjectService", () => {
     vi.clearAllMocks();
   });
 
+  it("lists only the current user's projects in the product workspace", async () => {
+    prisma.project.findMany.mockResolvedValue([]);
+    prisma.project.count.mockResolvedValue(0);
+    prisma.$transaction.mockResolvedValue([[], 0]);
+
+    await service.listProjects(
+      {
+        id: "admin-1",
+        username: "admin",
+        displayName: "管理员",
+        role: UserRole.admin,
+        status: UserStatus.active,
+      },
+      {},
+    );
+
+    expect(prisma.project.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          ownerId: "admin-1",
+        }),
+      }),
+    );
+    expect(prisma.project.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          ownerId: "admin-1",
+        }),
+      }),
+    );
+  });
+
   it("creates a project with a default conversation", async () => {
     const project = {
       id: "project-1",

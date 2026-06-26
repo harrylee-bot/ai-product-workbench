@@ -31,6 +31,7 @@ export class ModelGatewayAdminService {
 
   async listProviders() {
     const items = await this.prisma.modelProvider.findMany({
+      where: this.hideDisabledProviders() ? { isEnabled: true } : undefined,
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     });
 
@@ -134,6 +135,9 @@ export class ModelGatewayAdminService {
 
   async listModelConfigs() {
     const items = await this.prisma.modelConfig.findMany({
+      where: this.hideDisabledProviders()
+        ? { isEnabled: true, provider: { isEnabled: true } }
+        : undefined,
       include: { provider: true },
       orderBy: { createdAt: "desc" },
     });
@@ -439,6 +443,11 @@ export class ModelGatewayAdminService {
 
   private isTaskType(value: string): value is ModelTaskType {
     return Object.values(ModelTaskType).includes(value as ModelTaskType);
+  }
+
+  private hideDisabledProviders() {
+    const value = process.env.MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS?.trim().toLowerCase();
+    return value === undefined || ["1", "true", "yes", "on"].includes(value);
   }
 
   private throwNotFound(error: unknown, message: string) {
