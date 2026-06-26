@@ -11,6 +11,8 @@ if [ -f "${APP_DIR}/.env" ]; then
 fi
 
 APP_HOST="${APP_HOST:-8.130.160.177}"
+APP_PUBLIC_URL="${APP_PUBLIC_URL:-http://${APP_HOST}:3000}"
+API_PUBLIC_BASE_URL="${API_PUBLIC_BASE_URL:-http://${APP_HOST}:4000/api}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-ai_workbench}"
 JWT_SECRET="${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}"
 JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
@@ -44,6 +46,7 @@ DEERFLOW_ASSISTANT_ID="${DEERFLOW_ASSISTANT_ID:-agent}"
 DEERFLOW_REQUEST_TIMEOUT_MS="${DEERFLOW_REQUEST_TIMEOUT_MS:-180000}"
 KNOWLEDGE_APP_PORT="${KNOWLEDGE_APP_PORT:-3001}"
 KNOWLEDGE_APP_PUBLIC_URL="${KNOWLEDGE_APP_PUBLIC_URL:-http://${APP_HOST}:${KNOWLEDGE_APP_PORT}}"
+WEB_ORIGIN="${WEB_ORIGIN:-$APP_PUBLIC_URL}"
 QUARTZ_REF="${QUARTZ_REF:-v5}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
 NODE_IMAGE="${NODE_IMAGE:-node:22-bookworm-slim}"
@@ -116,7 +119,7 @@ docker build \
   -t ai-product-workbench-api:latest .
 docker build \
   --build-arg NODE_IMAGE="$NODE_IMAGE" \
-  --build-arg NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
+  --build-arg NEXT_PUBLIC_API_BASE_URL="$API_PUBLIC_BASE_URL" \
   --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
   -f apps/web/Dockerfile \
   -t ai-product-workbench-web:latest .
@@ -164,7 +167,7 @@ docker run -d \
   -e DEERFLOW_ASSISTANT_ID="$DEERFLOW_ASSISTANT_ID" \
   -e DEERFLOW_REQUEST_TIMEOUT_MS="$DEERFLOW_REQUEST_TIMEOUT_MS" \
   -e API_PORT=4000 \
-  -e WEB_ORIGIN="http://${APP_HOST}:3000" \
+  -e WEB_ORIGIN="$WEB_ORIGIN" \
   -e FILE_UPLOAD_ROOT=/app/apps/api/storage/uploads \
   -v "${APP_DIR}/runtime-skills:/app/runtime-skills:ro" \
   -v ai-product-workbench-storage:/app/apps/api/storage \
@@ -175,7 +178,7 @@ docker run -d \
   --restart unless-stopped \
   --network ai-product-workbench \
   -p 3000:3000 \
-  -e NEXT_PUBLIC_API_BASE_URL="http://${APP_HOST}:4000/api" \
+  -e NEXT_PUBLIC_API_BASE_URL="$API_PUBLIC_BASE_URL" \
   -e NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
   ai-product-workbench-web:latest
 
@@ -198,6 +201,6 @@ wait_for_http "http://127.0.0.1:3000/login" "Web"
 wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
 
 echo "Deployed:"
-echo "  Web: http://${APP_HOST}:3000/login"
-echo "  API: http://${APP_HOST}:4000/api/system/health"
+echo "  Web: ${APP_PUBLIC_URL}/login"
+echo "  API: ${API_PUBLIC_BASE_URL%/}/system/health"
 echo "  Knowledge: ${KNOWLEDGE_APP_PUBLIC_URL}"
