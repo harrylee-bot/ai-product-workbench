@@ -119,7 +119,7 @@ export class DeerFlowRuntimeService {
 
     await this.streamRun(threadId, runInput, async (event) => {
       rawEvents.push(event);
-      if (event.event === "messages-tuple" && event.content) {
+      if (isAssistantTextEvent(event) && event.content) {
         assistantText += event.content;
       }
       if (event.event === "values") {
@@ -132,7 +132,8 @@ export class DeerFlowRuntimeService {
       finalState = await this.getThreadState(threadId).catch(() => undefined);
     }
 
-    const finalAction = extractFinalAction(assistantText, finalState);
+    const visibleAssistantText = assistantText.trim() || extractAssistantTextFromFinalState(finalState);
+    const finalAction = extractFinalAction(visibleAssistantText, finalState);
     const artifacts = await this.resolveArtifacts(threadId, finalAction.artifacts ?? []);
     if (artifacts.length) {
       await input.onEvent?.({
@@ -144,7 +145,7 @@ export class DeerFlowRuntimeService {
 
     return {
       threadId,
-      assistantText: finalAction.message || assistantText.trim(),
+      assistantText: finalAction.message || visibleAssistantText,
       finalAction,
       uploads,
       artifacts,
@@ -415,13 +416,45 @@ function buildUserPrompt(input: DeerFlowRunInput) {
 function normalizeDeerFlowEvent(event: string, data: unknown): DeerFlowRuntimeEvent {
   const payload = primaryPayload(data);
   const record = asRecord(payload);
-  const content = toContentText(payload);
+  const content = shouldExposeEventContent(event, record) ? toContentText(payload) : undefined;
   return {
     event,
     data,
     content,
     toolName: extractToolName(record) ?? extractToolName(asRecord(data)),
   };
+}
+
+function isAssistantTextEvent(event: DeerFlowRuntimeEvent) {
+  return (event.event === "messages" || event.event === "messages-tuple") && Boolean(event.content);
+}
+
+function shouldExposeEventContent(event: string, record: Record<string, unknown> | null) {
+  if (event !== "messages" && event !== "messages-tuple") return false;
+  if (!record) return false;
+  if (asRecord(record.additional_kwargs)?.hide_from_ui === true) return false;
+  if (isAssistantMessageRecord(record)) return true;
+  return event === "messages-tuple" && !record.type && !record.role;
+}
+
+function isAssistantMessageRecord(record: Record<string, unknown> | null) {
+  if (!record) return false;
+  const role = toOptionalString(record.role)?.toLowerCase();
+  if (role === "assistant" || role === "ai") return true;
+  const type = toOptionalString(record.type)?.toLowerCase();
+  return type === "ai" || type === "assistant" || type === "aimessage" || type === "aimessagechunk";
+}
+
+function extractAssistantTextFromFinalState(finalState: unknown) {
+  const messages = asRecord(finalState)?.messages;
+  if (!Array.isArray(messages)) return "";
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const record = asRecord(messages[index]);
+    if (!isAssistantMessageRecord(record)) continue;
+    const content = toContentText(record);
+    if (content) return content;
+  }
+  return "";
 }
 
 function extractToolName(record: Record<string, unknown> | null) {
@@ -601,11 +634,11 @@ function primaryPayload(data: unknown) {
 }
 
 function readStreamMode() {
-  const modes = (process.env.DEERFLOW_STREAM_MODE ?? "messages-tuple")
+  const modes = (process.env.DEERFLOW_STREAM_MODE ?? "messages,values")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-  if (modes.length <= 1) return modes[0] ?? "messages-tuple";
+  if (modes.length <= 1) return modes[0] ?? "messages";
   return modes;
 }
 

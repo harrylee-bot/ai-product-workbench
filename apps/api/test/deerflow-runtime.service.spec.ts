@@ -105,6 +105,92 @@ describe("DeerFlowRuntimeService", () => {
     ]));
   });
 
+  it("parses DeerFlow messages stream chunks while hiding human and memory events", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages",
+          data: [
+            {
+              type: "human",
+              content: "<memory>hidden</memory>",
+              additional_kwargs: { hide_from_ui: true },
+            },
+            { langgraph_node: "DynamicContextMiddleware.before_agent" },
+          ],
+        },
+        {
+          event: "messages",
+          data: [
+            {
+              type: "human",
+              name: "user-input",
+              content: "你好",
+            },
+            { langgraph_node: "DynamicContextMiddleware.before_agent" },
+          ],
+        },
+        {
+          event: "messages",
+          data: [
+            {
+              type: "AIMessageChunk",
+              content: "你好",
+            },
+            { langgraph_node: "model" },
+          ],
+        },
+        {
+          event: "messages",
+          data: [
+            {
+              type: "AIMessageChunk",
+              content: [
+                "，我在。",
+                "\n```ai_product_workbench_final_action\n",
+                "{\"type\":\"answer\",\"message\":\"你好，我在。\",\"intent\":\"general_question\"}",
+                "\n```",
+              ].join(""),
+            },
+            { langgraph_node: "model" },
+          ],
+        },
+        {
+          event: "values",
+          data: {
+            messages: [
+              { type: "human", content: "你好" },
+              { type: "ai", content: "你好，我在。" },
+            ],
+          },
+        },
+      ]));
+
+    const events: Array<{ content?: string }> = [];
+    const service = new DeerFlowRuntimeService(prisma as never);
+    const result = await service.runTurn({
+      runId: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      message: "你好",
+      onEvent: (event) => {
+        events.push({ content: event.content });
+      },
+    });
+
+    expect(result.finalAction).toEqual(expect.objectContaining({
+      type: "answer",
+      message: "你好，我在。",
+      intent: "general_question",
+    }));
+    expect(events.map((event) => event.content).filter(Boolean)).toEqual([
+      "你好",
+      expect.stringContaining("ai_product_workbench_final_action"),
+    ]);
+  });
+
   it("uploads local attachments and fetches final action artifacts through the Gateway", async () => {
     const tmp = await mkdtemp(path.join(tmpdir(), "deerflow-runtime-"));
     const storagePath = path.join(tmp, "brief.md");
