@@ -2,16 +2,13 @@ import { ForbiddenException } from "@nestjs/common";
 import { UserRole, UserStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthService } from "../src/auth/auth.service";
+import { AuthService } from "../src/modules/auth/auth.service";
 
 describe("AuthService", () => {
   const prisma = {
     user: {
       findFirst: vi.fn(),
       update: vi.fn(),
-    },
-    loginAuditLog: {
-      create: vi.fn(),
     },
   };
   const jwtService = {
@@ -44,7 +41,6 @@ describe("AuthService", () => {
 
     const result = await service.login(
       { account: "zhangsan", password: "User123456" },
-      { ip: "127.0.0.1", userAgent: "vitest" },
     );
 
     expect(result.accessToken).toBe("signed-token");
@@ -55,12 +51,6 @@ describe("AuthService", () => {
       status: UserStatus.active,
     });
     expect(result.user).not.toHaveProperty("passwordHash");
-    expect(prisma.loginAuditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        account: "zhangsan",
-        success: true,
-      }),
-    });
   });
 
   it("rejects disabled users with the required message", async () => {
@@ -78,23 +68,15 @@ describe("AuthService", () => {
     });
 
     await expect(
-      service.login({ account: "zhangsan", password: "User123456" }, {}),
+      service.login({ account: "zhangsan", password: "User123456" }),
     ).rejects.toThrow(ForbiddenException);
-
-    expect(prisma.loginAuditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        account: "zhangsan",
-        success: false,
-        failReason: "当前账号已被禁用，请联系管理员",
-      }),
-    });
   });
 
   it("uses one message for missing account and bad password", async () => {
     prisma.user.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.login({ account: "missing", password: "bad" }, {}),
+      service.login({ account: "missing", password: "bad" }),
     ).rejects.toThrow("账号或密码错误");
   });
 });

@@ -41,29 +41,6 @@ export type AttachmentSummary = {
   extractedTextPreview?: string;
 };
 
-export type InputQualityDimension = {
-  score: number;
-  maxScore: number;
-  passedFloor: boolean;
-  findings: string[];
-};
-
-export type InputQualityAssessment = {
-  score: number;
-  status: "pass" | "suggest_optimize" | "must_optimize";
-  shouldBlock: boolean;
-  hardGateTriggered: boolean;
-  dimensions: {
-    productLogic: InputQualityDimension;
-    interactionDetail: InputQualityDimension;
-    userContext: InputQualityDimension;
-    formatCompleteness: InputQualityDimension;
-  };
-  warnings: string[];
-  suggestions: string[];
-  evaluatedAt: string;
-};
-
 export type KnowledgeReference = {
   id: string;
   knowledgeId?: string;
@@ -519,17 +496,6 @@ export type RequirementDocumentDraft = {
   validationNotes: string[];
 };
 
-export type RequirementDocumentVersion = {
-  id: string;
-  documentId: string;
-  projectId: string;
-  version: number;
-  snapshot: RequirementDocument;
-  reason?: string;
-  createdBy: string;
-  createdAt: string;
-};
-
 export type PrototypeTargetDevice = "desktop" | "mobile" | "both";
 export type PrototypeArtifactStatus = "generating" | "ready" | "failed";
 
@@ -957,10 +923,6 @@ export type KnowledgeCandidateDraft = {
   reason: string;
 };
 
-export type KnowledgeExtractorOutput = {
-  candidates: KnowledgeCandidateDraft[];
-};
-
 export type KnowledgeCandidate = KnowledgeCandidateDraft & {
   id: string;
   projectId: string;
@@ -1120,7 +1082,6 @@ export type RuntimeRunContext = {
   currentProjectStatus?: ProjectStatus;
   knowledgeContext?: KnowledgeContext;
   contextFetch?: ContextFetchResult;
-  inputQuality?: InputQualityAssessment;
   intentResult?: IntentResult;
   requirementAnalysis?: RequirementAnalysis;
   requirementPackage?: RequirementPackage;

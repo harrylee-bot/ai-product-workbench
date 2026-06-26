@@ -18,10 +18,3 @@ export type ConstraintContext = {
   avoid: Constraint[];
   warn: Constraint[];
 };
-
-export const EMPTY_CONSTRAINT_CONTEXT: ConstraintContext = {
-  mustFollow: [],
-  prefer: [],
-  avoid: [],
-  warn: [],
-};

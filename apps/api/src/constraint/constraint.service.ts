@@ -1,5 +1,4 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import type { Constraint, ConstraintContext, ConstraintRule, ConstraintScope } from "./constraint.types";
 
@@ -205,8 +204,4 @@ function toConstraint(row: {
     weight: row.weight,
     sourceKnowledgeId: row.sourceKnowledgeId,
   };
-}
-
-export function constraintContextToJson(context: ConstraintContext): Prisma.InputJsonValue {
-  return context as unknown as Prisma.InputJsonValue;
 }

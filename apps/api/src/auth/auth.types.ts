@@ -11,12 +11,6 @@ export type PublicUser = {
 
 export type AuthenticatedUser = PublicUser;
 
-export type JwtPayload = {
-  sub: string;
-  userId: string;
-  role: UserRole;
-};
-
 export type RequestMeta = {
   ip?: string;
   userAgent?: string;

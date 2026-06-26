@@ -1,7 +1,6 @@
 import type {
   KnowledgeCandidateSource,
   KnowledgePriority,
-  KnowledgeStatus,
   KnowledgeType,
   ModelTaskType,
 } from "@prisma/client";
@@ -62,26 +61,4 @@ export type KnowledgeCandidateDraft = {
   sourceRefId?: string;
   sourcePath?: string;
   reason: string;
-};
-
-export type KnowledgeItemView = {
-  id: string;
-  title: string;
-  content: string;
-  summary?: string;
-  type: KnowledgeType;
-  status: KnowledgeStatus;
-  scope: string;
-  categoryId?: string;
-  tags: string[];
-  priority: KnowledgePriority;
-  source: string;
-  sourceProjectId?: string;
-  sourceFileId?: string;
-  sourcePrdDocumentId?: string;
-  sourcePrototypeArtifactId?: string;
-  createdBy: string;
-  updatedBy?: string;
-  createdAt: string;
-  updatedAt: string;
 };

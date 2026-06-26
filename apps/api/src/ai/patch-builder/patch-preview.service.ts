@@ -2,11 +2,10 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { ConversationStatus, PatchRecordStatus, Prisma, ProjectStatus, UserRole } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { Phase1User } from "../../modules/auth/auth.types";
-import type { PatchDraft } from "./patch-builder.service";
 import { ConstraintService } from "../../constraint/constraint.service";
-import type { PatchOperation } from "./patch-builder.types";
+import type { PatchDraft, PatchOperation } from "./patch-builder.types";
 
-export type PreviewSession = {
+type PreviewSession = {
   id: string;
   patchRecordId: string;
   patchDraftId: string;

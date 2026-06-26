@@ -7,11 +7,6 @@ export class CreateProjectDto {
   title!: string;
 }
 
-export class GetProjectParamsDto {
-  @IsString()
-  projectId!: string;
-}
-
 export class ListProjectsQueryDto {
   @IsOptional()
   @IsString()

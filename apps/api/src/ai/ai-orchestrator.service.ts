@@ -9,7 +9,6 @@ import type {
   RuntimeRunContext,
   AttachmentSummary,
   ExportArtifactSummary,
-  InputQualityAssessment,
   IntentResult,
   KnowledgeCandidate,
   KnowledgeCandidateDraft,
@@ -58,7 +57,7 @@ type DecisionCardSummary = {
   reasons: string[];
 };
 
-export type OrchestratorResult = {
+type OrchestratorResult = {
   runId: string;
   projectId: string;
   intent: IntentResult;
@@ -68,7 +67,6 @@ export type OrchestratorResult = {
   prototypeSpec?: PrototypeSpec;
   prototypeArtifact?: PrototypeArtifact;
   qaReport?: QAReport;
-  inputQuality?: InputQualityAssessment;
   productBuildPlan?: ProductBuildPlan;
   contextFetch?: ContextFetchResult;
   requirementGate?: RequirementGateDecision;

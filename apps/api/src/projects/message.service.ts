@@ -6,11 +6,8 @@ import {
   MessageType,
   Prisma,
   ProjectStatus,
-  UserRole,
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import type { AuthenticatedUser } from "../auth/auth.types";
-import type { ListMessagesQueryDto } from "./dto";
 
 type CreateMessageInput = {
   projectId: string;
@@ -29,28 +26,6 @@ type CreateMessageInput = {
 @Injectable()
 export class MessageService {
   constructor(private readonly prisma: PrismaService) {}
-
-  async listMessages(user: AuthenticatedUser, conversationId: string, query: ListMessagesQueryDto) {
-    const conversation = await this.getAccessibleConversation(user, conversationId);
-    const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 100);
-
-    const items = await this.prisma.message.findMany({
-      where: {
-        conversationId: conversation.id,
-        ...(query.before ? { createdAt: { lt: new Date(query.before) } } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit + 1,
-    });
-
-    const hasMore = items.length > limit;
-    const pageItems = items.slice(0, limit).reverse();
-
-    return {
-      items: pageItems.map((message) => this.toMessageItem(message)),
-      hasMore,
-    };
-  }
 
   async createUserMessage(input: CreateMessageInput) {
     return this.createMessage({ ...input, role: MessageRole.user, type: input.type ?? MessageType.text });
@@ -161,27 +136,6 @@ export class MessageService {
     });
 
     return this.toMessageItem(message);
-  }
-
-  private async getAccessibleConversation(user: AuthenticatedUser, conversationId: string) {
-    const conversation = await this.prisma.conversation.findUnique({
-      where: { id: conversationId },
-      include: { project: true },
-    });
-
-    if (!conversation || conversation.status === ConversationStatus.deleted || conversation.deletedAt) {
-      throw new NotFoundException("会话不存在");
-    }
-
-    if (conversation.project.status === ProjectStatus.deleted || conversation.project.deletedAt) {
-      throw new NotFoundException("项目不存在");
-    }
-
-    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
-      throw new ForbiddenException("你无权访问该会话");
-    }
-
-    return conversation;
   }
 
   private toMessageItem(message: Message) {

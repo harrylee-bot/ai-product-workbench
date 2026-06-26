@@ -2,7 +2,7 @@ import { Body, Controller, Post, UseGuards } from "@nestjs/common";
 import { CurrentUser } from "../../modules/auth/current-user.decorator";
 import { JwtAuthGuard } from "../../modules/auth/jwt-auth.guard";
 import type { Phase1User } from "../../modules/auth/auth.types";
-import type { PatchDraft } from "./patch-builder.service";
+import type { PatchDraft } from "./patch-builder.types";
 import { PatchPreviewRequestDto } from "./patch-preview.dto";
 import { PatchPreviewService } from "./patch-preview.service";
 
