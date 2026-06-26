@@ -59,6 +59,11 @@ docker network create ai-product-workbench >/dev/null 2>&1 || true
 docker volume create ai-product-workbench-postgres >/dev/null
 docker volume create ai-product-workbench-storage >/dev/null
 
+if [ "${PRUNE_DOCKER_BEFORE_BUILD:-1}" != "0" ]; then
+  docker container prune -f >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
+fi
+
 docker rm -f ai-product-workbench-web ai-product-workbench-api ai-product-knowledge >/dev/null 2>&1 || true
 
 if ! docker ps -a --format '{{.Names}}' | grep -qx ai-product-workbench-postgres; then
