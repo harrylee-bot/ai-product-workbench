@@ -111,3 +111,12 @@ export type AttachmentSummary = {
   axureInfo?: AxureParseInfo;
   warnings?: string[];
 };
+
+export type RuntimeAttachmentFile = {
+  fileId: string;
+  fileName: string;
+  fileType: string;
+  mimeType: string;
+  size: number;
+  storagePath: string;
+};

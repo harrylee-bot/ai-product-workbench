@@ -123,4 +123,61 @@ describe("FileAssetService", () => {
       extractedTextPreview: "签到活动需求正文",
     });
   });
+
+  it("returns local runtime attachment files in requested order", async () => {
+    prisma.fileAsset.findMany.mockResolvedValue([
+      fileRecord({ id: "file-2", originalName: "rules.pdf", extension: "pdf", storagePath: "/tmp/rules.pdf" }),
+      fileRecord({ id: "file-1", originalName: "brief.md", extension: "md", storagePath: "/tmp/brief.md" }),
+    ]);
+
+    const result = await service.getRuntimeAttachmentFiles(["file-1", "file-2"], "project-1");
+
+    expect(prisma.fileAsset.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["file-1", "file-2"] },
+        projectId: "project-1",
+        deletedAt: null,
+        status: { not: FileAssetStatus.deleted },
+      },
+    });
+    expect(result).toEqual([
+      expect.objectContaining({
+        fileId: "file-1",
+        fileName: "brief.md",
+        fileType: "md",
+        storagePath: "/tmp/brief.md",
+      }),
+      expect.objectContaining({
+        fileId: "file-2",
+        fileName: "rules.pdf",
+        fileType: "pdf",
+        storagePath: "/tmp/rules.pdf",
+      }),
+    ]);
+  });
 });
+
+function fileRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "file-1",
+    projectId: "project-1",
+    conversationId: null,
+    messageId: null,
+    uploadedBy: "user-1",
+    originalName: "brief.md",
+    storedName: "stored.md",
+    mimeType: "text/markdown",
+    extension: "md",
+    size: 128,
+    storageProvider: FileStorageProvider.local,
+    storagePath: "/tmp/stored.md",
+    publicUrl: null,
+    status: FileAssetStatus.parsed,
+    parseResultId: "parse-1",
+    parseError: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    ...overrides,
+  };
+}

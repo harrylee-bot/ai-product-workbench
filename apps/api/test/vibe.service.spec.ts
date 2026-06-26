@@ -20,6 +20,7 @@ describe("VibeService main entry", () => {
   };
   const fileAssetService = {
     getAttachmentSummaries: vi.fn(),
+    getRuntimeAttachmentFiles: vi.fn(),
     attachFilesToMessage: vi.fn(),
   };
   const runLogService = {
@@ -81,6 +82,16 @@ describe("VibeService main entry", () => {
     fileAssetService.getAttachmentSummaries.mockResolvedValue([
       { fileId: "file-1", fileName: "活动规则.md", fileType: "markdown", summary: "活动规则" },
     ]);
+    fileAssetService.getRuntimeAttachmentFiles.mockResolvedValue([
+      {
+        fileId: "file-1",
+        fileName: "活动规则.md",
+        fileType: "md",
+        mimeType: "text/markdown",
+        size: 128,
+        storagePath: "/tmp/file-1.md",
+      },
+    ]);
     fileAssetService.attachFilesToMessage.mockResolvedValue(undefined);
     runLogService.createRun.mockResolvedValue({ id: "run-1", traceId: "trace-1" });
     runLogService.markRunIntent.mockResolvedValue(undefined);
@@ -110,6 +121,7 @@ describe("VibeService main entry", () => {
     });
 
     expect(fileAssetService.getAttachmentSummaries).toHaveBeenCalledWith(["file-1"], "project-1");
+    expect(fileAssetService.getRuntimeAttachmentFiles).toHaveBeenCalledWith(["file-1"], "project-1");
     expect(messageService.createUserMessage).toHaveBeenCalledWith(expect.objectContaining({
       projectId: "project-1",
       conversationId: "conversation-1",
@@ -165,11 +177,13 @@ describe("VibeService main entry", () => {
     expect(messageService.createUserMessage).not.toHaveBeenCalled();
     expect(runLogService.createRun).not.toHaveBeenCalled();
     expect(messageService.createAssistantMessage).not.toHaveBeenCalled();
+    expect(fileAssetService.getRuntimeAttachmentFiles).not.toHaveBeenCalled();
   });
 
   it("hands enabled turns to DeerFlow and persists its final action", async () => {
     deerFlowRuntime.isEnabled.mockReturnValue(true);
     fileAssetService.getAttachmentSummaries.mockResolvedValue([]);
+    fileAssetService.getRuntimeAttachmentFiles.mockResolvedValue([]);
     deerFlowRuntime.runTurn.mockImplementation(async (input) => {
       await input.onEvent?.({
         event: "messages-tuple",
@@ -184,9 +198,11 @@ describe("VibeService main entry", () => {
       return {
         threadId: "deerflow-thread-1",
         assistantText: "你好，我在。",
-        finalAction: { type: "answer", message: "你好，我在。", intent: "general_question" },
-        rawEvents: [],
-        finalState: { ok: true },
+      finalAction: { type: "answer", message: "你好，我在。", intent: "general_question" },
+      uploads: [],
+      artifacts: [],
+      rawEvents: [],
+      finalState: { ok: true },
       };
     });
 
@@ -207,6 +223,7 @@ describe("VibeService main entry", () => {
       conversationId: "conversation-1",
       userId: "user-1",
       message: "你好",
+      attachmentFiles: [],
     }));
 
     await flushAsyncWork();
@@ -229,6 +246,8 @@ describe("VibeService main entry", () => {
         provider: "deerflow",
         threadId: "deerflow-thread-1",
         finalAction: expect.objectContaining({ type: "answer", message: "你好，我在。" }),
+        uploads: [],
+        artifacts: [],
       }),
     }));
     expect(runLogService.completeRun).toHaveBeenCalledWith(

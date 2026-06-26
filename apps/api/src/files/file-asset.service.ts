@@ -24,7 +24,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import type { ListProjectFilesQueryDto, UploadFilesDto } from "./dto";
 import { FileParserService } from "./file-parser.service";
-import type { AttachmentSummary, ParserOutput } from "./file.types";
+import type { AttachmentSummary, ParserOutput, RuntimeAttachmentFile } from "./file.types";
 
 const ALLOWED_EXTENSIONS = new Set(["txt", "md", "docx", "pdf", "png", "jpg", "jpeg", "zip", "rp"]);
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
@@ -231,6 +231,31 @@ export class FileAssetService {
           warnings: this.readJsonArray<string>(parseResult?.warnings),
         };
       });
+  }
+
+  async getRuntimeAttachmentFiles(fileIds: string[], projectId: string): Promise<RuntimeAttachmentFile[]> {
+    if (!fileIds.length) return [];
+
+    const files = await this.prisma.fileAsset.findMany({
+      where: {
+        id: { in: fileIds },
+        projectId,
+        deletedAt: null,
+        status: { not: FileAssetStatus.deleted },
+      },
+    });
+    const order = new Map(fileIds.map((id, index) => [id, index]));
+
+    return files
+      .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+      .map((file) => ({
+        fileId: file.id,
+        fileName: file.originalName,
+        fileType: file.extension,
+        mimeType: file.mimeType,
+        size: file.size,
+        storagePath: file.storagePath,
+      }));
   }
 
   async parseFileNow(fileId: string) {

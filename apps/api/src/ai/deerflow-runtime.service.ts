@@ -1,5 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { readFile } from "node:fs/promises";
+import type { RuntimeAttachmentFile } from "../files/file.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 
@@ -14,13 +16,52 @@ export type DeerFlowFinalAction = {
   type: "answer" | "review_prd" | "review_prototype" | "ask_clarification" | "download_export";
   message: string;
   intent?: string;
+  artifacts?: DeerFlowArtifactReference[];
   raw?: unknown;
+};
+
+export type DeerFlowArtifactReference = {
+  kind?: string;
+  title?: string;
+  path?: string;
+  artifactUrl?: string;
+  contentType?: string;
+  metadata?: unknown;
+};
+
+export type DeerFlowResolvedArtifact = DeerFlowArtifactReference & {
+  path: string;
+  artifactUrl: string;
+  status: "fetched" | "skipped" | "failed";
+  size?: number;
+  text?: string;
+  errorMessage?: string;
+};
+
+export type DeerFlowUploadedFile = {
+  fileId: string;
+  fileName: string;
+  fileType: string;
+  size: number;
+  deerFlowFile: {
+    filename?: string;
+    size?: string;
+    path?: string;
+    virtualPath?: string;
+    artifactUrl?: string;
+    markdownFile?: string;
+    markdownPath?: string;
+    markdownVirtualPath?: string;
+    markdownArtifactUrl?: string;
+  };
 };
 
 export type DeerFlowTurnResult = {
   threadId: string;
   assistantText: string;
   finalAction: DeerFlowFinalAction;
+  uploads: DeerFlowUploadedFile[];
+  artifacts: DeerFlowResolvedArtifact[];
   rawEvents: DeerFlowRuntimeEvent[];
   finalState?: unknown;
 };
@@ -32,6 +73,8 @@ type DeerFlowRunInput = {
   message: string;
   runId: string;
   attachments?: unknown[];
+  attachmentFiles?: RuntimeAttachmentFile[];
+  deerFlowUploads?: DeerFlowUploadedFile[];
   selectedRegion?: unknown;
   previewMode?: string;
   resumeReason?: string;
@@ -44,6 +87,12 @@ type ThreadCreateResponse = {
   threadId?: string;
 };
 
+type UploadFilesResponse = {
+  success?: boolean;
+  files?: unknown[];
+  message?: string;
+};
+
 @Injectable()
 export class DeerFlowRuntimeService {
   constructor(private readonly prisma: PrismaService) {}
@@ -54,11 +103,21 @@ export class DeerFlowRuntimeService {
 
   async runTurn(input: DeerFlowRunInput): Promise<DeerFlowTurnResult> {
     const threadId = await this.ensureThread(input);
+    const uploads = await this.uploadAttachments(threadId, input.attachmentFiles ?? []);
+    const runInput = { ...input, deerFlowUploads: uploads };
     const rawEvents: DeerFlowRuntimeEvent[] = [];
     let assistantText = "";
     let finalState: unknown;
 
-    await this.streamRun(threadId, input, async (event) => {
+    if (uploads.length) {
+      await input.onEvent?.({
+        event: "gateway-upload",
+        data: { uploads },
+        content: `已同步 ${uploads.length} 个附件到 DeerFlow。`,
+      });
+    }
+
+    await this.streamRun(threadId, runInput, async (event) => {
       rawEvents.push(event);
       if (event.event === "messages-tuple" && event.content) {
         assistantText += event.content;
@@ -74,10 +133,21 @@ export class DeerFlowRuntimeService {
     }
 
     const finalAction = extractFinalAction(assistantText, finalState);
+    const artifacts = await this.resolveArtifacts(threadId, finalAction.artifacts ?? []);
+    if (artifacts.length) {
+      await input.onEvent?.({
+        event: "gateway-artifacts",
+        data: { artifacts },
+        content: `已同步 ${artifacts.filter((artifact) => artifact.status === "fetched").length} 个 DeerFlow 产物。`,
+      });
+    }
+
     return {
       threadId,
       assistantText: finalAction.message || assistantText.trim(),
       finalAction,
+      uploads,
+      artifacts,
       rawEvents,
       finalState,
     };
@@ -152,6 +222,104 @@ export class DeerFlowRuntimeService {
     });
   }
 
+  private async uploadAttachments(threadId: string, attachments: RuntimeAttachmentFile[]) {
+    if (!attachments.length) return [];
+    if (!readBooleanEnv("DEERFLOW_UPLOADS_ENABLED", true)) return [];
+
+    const formData = new FormData();
+    for (const attachment of attachments) {
+      const buffer = await readFile(attachment.storagePath);
+      formData.append(
+        "files",
+        new Blob([new Uint8Array(buffer)], { type: attachment.mimeType || "application/octet-stream" }),
+        attachment.fileName,
+      );
+    }
+
+    const response = await fetchWithTimeout(gatewayUrl(uploadPath(threadId)), {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error(`DeerFlow upload 请求失败：${response.status} ${await safeResponseText(response)}`);
+    }
+
+    const payload = await response.json() as UploadFilesResponse;
+    const files = Array.isArray(payload.files) ? payload.files : [];
+    if (!payload.success && !files.length) {
+      throw new Error(`DeerFlow upload 未返回文件信息：${payload.message ?? "unknown error"}`);
+    }
+    if (files.length < attachments.length) {
+      throw new Error(`DeerFlow upload 返回文件数量不完整：${files.length}/${attachments.length}`);
+    }
+
+    return attachments.map((attachment, index) => ({
+      fileId: attachment.fileId,
+      fileName: attachment.fileName,
+      fileType: attachment.fileType,
+      size: attachment.size,
+      deerFlowFile: normalizeUploadedFile(files[index]),
+    }));
+  }
+
+  private async resolveArtifacts(threadId: string, artifacts: DeerFlowArtifactReference[]) {
+    const limit = readNumberEnv("DEERFLOW_ARTIFACT_MAX_INLINE_BYTES", 2_000_000);
+    const resolved: DeerFlowResolvedArtifact[] = [];
+    for (const artifact of artifacts) {
+      const artifactPath = normalizeArtifactPath(artifact.path ?? artifact.artifactUrl);
+      if (!artifactPath) continue;
+      const artifactUrl = artifactUrlFor(threadId, artifactPath);
+      try {
+        const response = await fetchWithTimeout(gatewayUrl(artifactPathFor(threadId, artifactPath)), {
+          method: "GET",
+        });
+        if (!response.ok) {
+          resolved.push({
+            ...artifact,
+            path: artifactPath,
+            artifactUrl,
+            status: "failed",
+            errorMessage: `${response.status} ${await safeResponseText(response)}`,
+          });
+          continue;
+        }
+        const contentType = response.headers.get("content-type") ?? artifact.contentType;
+        const contentLength = readContentLength(response);
+        if (!isInlineTextArtifact(artifactPath, contentType) || (contentLength !== undefined && contentLength > limit)) {
+          await response.body?.cancel().catch(() => undefined);
+          resolved.push({
+            ...artifact,
+            path: artifactPath,
+            artifactUrl,
+            contentType,
+            status: "skipped",
+            size: contentLength,
+          });
+          continue;
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        resolved.push({
+          ...artifact,
+          path: artifactPath,
+          artifactUrl,
+          contentType,
+          status: buffer.byteLength <= limit ? "fetched" : "skipped",
+          size: buffer.byteLength,
+          text: buffer.byteLength <= limit ? buffer.toString("utf8") : undefined,
+        });
+      } catch (error) {
+        resolved.push({
+          ...artifact,
+          path: artifactPath,
+          artifactUrl,
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : "artifact fetch failed",
+        });
+      }
+    }
+    return resolved;
+  }
+
   private async getThreadState(threadId: string) {
     return this.requestJson(threadStatePath(threadId), { method: "GET" });
   }
@@ -205,6 +373,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
     previewMode: input.previewMode,
     selectedRegion: input.selectedRegion,
     attachments: input.attachments ?? [],
+    deerFlowUploads: input.deerFlowUploads ?? [],
     resumeReason: input.resumeReason,
     productDesignState: input.productDesignState,
     finalActionContract: {
@@ -213,10 +382,21 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         type: "answer | review_prd | review_prototype | ask_clarification | download_export",
         message: "user-facing Chinese summary",
         intent: "optional intent label",
+        artifacts: [
+          {
+            kind: "optional artifact kind, for example prototype_html or prd_markdown",
+            title: "optional user-facing artifact title",
+            path: "optional virtual artifact path, for example mnt/user-data/outputs/index.html",
+            artifactUrl: "optional Gateway artifact URL",
+            contentType: "optional MIME type",
+          },
+        ],
       },
       constraints: [
         "Do not mutate the product database directly.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
+        "Use deerFlowUploads virtualPath or markdownVirtualPath when reading uploaded files.",
+        "When you generate files, include their output artifact paths in finalActionContract.artifacts.",
         "Return final action instead of asking NestJS to decide the workflow.",
       ],
     },
@@ -278,8 +458,32 @@ function extractFinalAction(assistantText: string, finalState: unknown): DeerFlo
     type,
     message,
     intent: toOptionalString(parsed?.intent),
+    artifacts: extractArtifactReferences(parsed?.artifacts),
     raw: parsed ?? { finalState },
   };
+}
+
+function extractArtifactReferences(value: unknown): DeerFlowArtifactReference[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const artifacts = value
+    .map((item) => {
+      const record = asRecord(item);
+      if (!record) return null;
+      const artifact: DeerFlowArtifactReference = {
+        kind: toOptionalString(record.kind) ?? toOptionalString(record.type),
+        title: toOptionalString(record.title) ?? toOptionalString(record.name),
+        path: toOptionalString(record.path) ?? toOptionalString(record.virtual_path) ?? toOptionalString(record.virtualPath),
+        artifactUrl:
+          toOptionalString(record.artifactUrl) ??
+          toOptionalString(record.artifact_url) ??
+          toOptionalString(record.url),
+        contentType: toOptionalString(record.contentType) ?? toOptionalString(record.content_type),
+        metadata: record.metadata,
+      };
+      return artifact.path || artifact.artifactUrl ? artifact : null;
+    })
+    .filter((item): item is DeerFlowArtifactReference => Boolean(item));
+  return artifacts.length ? artifacts : undefined;
 }
 
 function normalizeFinalActionType(value: unknown): DeerFlowFinalAction["type"] {
@@ -362,6 +566,35 @@ function parseSseData(value: string) {
   }
 }
 
+function normalizeUploadedFile(value: unknown): DeerFlowUploadedFile["deerFlowFile"] {
+  const record = asRecord(value);
+  if (!record) return {};
+  return {
+    filename: toOptionalString(record.filename),
+    size: toOptionalString(record.size),
+    path: toOptionalString(record.path),
+    virtualPath: toOptionalString(record.virtual_path) ?? toOptionalString(record.virtualPath),
+    artifactUrl: toOptionalString(record.artifact_url) ?? toOptionalString(record.artifactUrl),
+    markdownFile: toOptionalString(record.markdown_file) ?? toOptionalString(record.markdownFile),
+    markdownPath: toOptionalString(record.markdown_path) ?? toOptionalString(record.markdownPath),
+    markdownVirtualPath:
+      toOptionalString(record.markdown_virtual_path) ??
+      toOptionalString(record.markdownVirtualPath),
+    markdownArtifactUrl:
+      toOptionalString(record.markdown_artifact_url) ??
+      toOptionalString(record.markdownArtifactUrl),
+  };
+}
+
+function normalizeArtifactPath(value: string | undefined) {
+  if (!value) return undefined;
+  const withoutQuery = value.split("?")[0];
+  const marker = "/artifacts/";
+  const markerIndex = withoutQuery.indexOf(marker);
+  const rawPath = markerIndex >= 0 ? withoutQuery.slice(markerIndex + marker.length) : withoutQuery;
+  return rawPath.replace(/^\/+/, "");
+}
+
 function primaryPayload(data: unknown) {
   if (Array.isArray(data)) return data[0] ?? data;
   return data;
@@ -380,6 +613,10 @@ function langGraphUrl(path: string) {
   return joinUrl(process.env.DEERFLOW_LANGGRAPH_URL ?? "http://localhost:2024", path);
 }
 
+function gatewayUrl(path: string) {
+  return joinUrl(process.env.DEERFLOW_GATEWAY_URL ?? "http://localhost:8001", path);
+}
+
 function threadCreatePath() {
   return process.env.DEERFLOW_THREAD_CREATE_PATH ?? "/threads";
 }
@@ -392,6 +629,43 @@ function threadStatePath(threadId: string) {
 function runStreamPath(threadId: string) {
   const template = process.env.DEERFLOW_RUN_STREAM_PATH ?? "/threads/{threadId}/runs/stream";
   return template.replace("{threadId}", encodeURIComponent(threadId));
+}
+
+function uploadPath(threadId: string) {
+  const template = process.env.DEERFLOW_UPLOAD_PATH ?? "/api/threads/{threadId}/uploads";
+  return template.replace("{threadId}", encodeURIComponent(threadId));
+}
+
+function artifactPathFor(threadId: string, artifactPath: string) {
+  const template = process.env.DEERFLOW_ARTIFACT_PATH ?? "/api/threads/{threadId}/artifacts/{path}";
+  return template
+    .replace("{threadId}", encodeURIComponent(threadId))
+    .replace("{path}", encodeArtifactPath(artifactPath));
+}
+
+function artifactUrlFor(threadId: string, artifactPath: string) {
+  return gatewayUrl(artifactPathFor(threadId, artifactPath));
+}
+
+function encodeArtifactPath(artifactPath: string) {
+  return artifactPath
+    .replace(/^\/+/, "")
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
+
+function isInlineTextArtifact(artifactPath: string, contentType: string | undefined) {
+  if (contentType?.startsWith("text/")) return true;
+  if (contentType?.includes("json") || contentType?.includes("xml")) return true;
+  return /\.(html?|md|txt|json|csv|css|js|ts|tsx|jsx|xml|svg)$/i.test(artifactPath);
+}
+
+function readContentLength(response: Response) {
+  const value = response.headers.get("content-length");
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function joinUrl(base: string, path: string) {

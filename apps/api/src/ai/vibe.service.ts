@@ -4,6 +4,7 @@ import type { MessageEvent } from "@nestjs/common";
 import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { FileAssetService } from "../files/file-asset.service";
+import type { RuntimeAttachmentFile } from "../files/file.types";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { RuntimeRunLogService } from "./runtime-run-log.service";
@@ -80,6 +81,7 @@ export class VibeService {
       project.id,
       conversation.id,
     );
+    const runtimeAttachmentFiles = await this.fileAssetService.getRuntimeAttachmentFiles(fileIds, project.id);
 
     const run = await this.runLogService.createRun({
       projectId: project.id,
@@ -97,6 +99,7 @@ export class VibeService {
         message: dto.message.trim(),
         fallbackIntent: UserIntent.general_question,
         attachments: attachmentSummaries,
+        attachmentFiles: runtimeAttachmentFiles,
         selectedRegion: dto.selectedRegion,
         previewMode: dto.previewMode,
       });
@@ -333,6 +336,7 @@ export class VibeService {
     message: string;
     fallbackIntent: UserIntent;
     attachments?: unknown[];
+    attachmentFiles?: RuntimeAttachmentFile[];
     selectedRegion?: unknown;
     previewMode?: string;
     resumeReason?: string;
@@ -371,6 +375,7 @@ export class VibeService {
     message: string;
     fallbackIntent: UserIntent;
     attachments?: unknown[];
+    attachmentFiles?: RuntimeAttachmentFile[];
     selectedRegion?: unknown;
     previewMode?: string;
     resumeReason?: string;
@@ -392,6 +397,7 @@ export class VibeService {
       userId: input.userId,
       message: input.message,
       attachments: input.attachments,
+      attachmentFiles: input.attachmentFiles,
       selectedRegion: input.selectedRegion,
       previewMode: input.previewMode,
       resumeReason: input.resumeReason,
@@ -442,6 +448,8 @@ export class VibeService {
         provider: "deerflow",
         threadId: result.threadId,
         finalAction: result.finalAction,
+        uploads: result.uploads,
+        artifacts: result.artifacts,
         finalState: result.finalState,
       }),
       relatedRunId: input.runId,
@@ -454,6 +462,8 @@ export class VibeService {
       provider: "deerflow",
       threadId: result.threadId,
       finalAction: result.finalAction,
+      uploads: result.uploads,
+      artifacts: result.artifacts,
       finalState: result.finalState,
       assistantMessageId: assistantMessage.id,
       nextAction: { type: result.finalAction.type },
