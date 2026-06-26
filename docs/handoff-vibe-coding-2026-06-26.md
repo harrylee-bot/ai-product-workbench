@@ -32,6 +32,25 @@
 
 ## 3. 线上当前状态
 
+截至 2026-06-26 11:27 左右，本轮重构已经推送到 GitHub `main`：
+
+- `b0371c0 chore: pass runtime config through deploy`
+- `d0c364c feat: switch vibe execution to external runtimes`
+
+本地验证通过：
+
+- `npm run build`
+- `npm run test`：28 个测试文件、114 个测试全部通过。
+
+线上部署尚未完成，阻塞点是 SSH：
+
+```text
+Connection timed out during banner exchange
+Connection to 45.207.206.76 port 22 timed out
+```
+
+公网探测显示 `http://45.207.206.76:3000/` 仍在返回旧站内容，`/login` 返回 404，`http://45.207.206.76:4000/api/system/health` 返回 empty reply。SSH 恢复后应在服务器 `/opt/ai-product-workbench` 执行 `bash deploy/server-deploy.sh`，脚本会拉取 `origin/main`。
+
 截至 2026-06-26 09:10 左右，公网 API 可用：
 
 - `/api/system/health` 正常返回。
