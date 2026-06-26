@@ -20,13 +20,13 @@
 
 线上服务器：
 
-`45.207.206.76`
+`8.130.160.177`
 
 线上主要访问：
 
-- Web: `http://45.207.206.76:3000/login`
-- API health: `http://45.207.206.76:4000/api/system/health`
-- Knowledge: `http://45.207.206.76:3001`
+- Web: `http://8.130.160.177:3000/login`
+- API health: `http://8.130.160.177:4000/api/system/health`
+- Knowledge: `http://8.130.160.177:3001`
 
 注意：不要把用户提供过的真实 API Key、服务器密码写进代码或提交到 GitHub。当前 `.env.example` 应保持占位符。
 
@@ -38,19 +38,29 @@
 - `b0371c0 chore: pass runtime config through deploy`
 - `d0c364c feat: switch vibe execution to external runtimes`
 
+2026-06-26 11:34 更正并复测：线上服务器是 `8.130.160.177`，不是 `45.207.206.76`。本轮已把部署默认地址、前端知识库默认地址和 Quartz 配置改回 `8.130.160.177`。此前针对 `45.207.206.76` 的 SSH/HTTP 探测属于误测，不代表真实线上状态。
+
+正确服务器当前探测结果：
+
+- SSH：`root@8.130.160.177` 可连接。
+- Web：`http://8.130.160.177:3000/login` 返回 200。
+- API health：`http://8.130.160.177:4000/api/system/health` 返回 200，但模块列表仍包含旧的 `intent-agent`、`decision-engine`、`company-runtime` 等，说明线上仍是部署前旧版本。
+- Knowledge：`http://8.130.160.177:3001/__health` 返回 `ok`。
+
 本地验证通过：
 
 - `npm run build`
 - `npm run test`：28 个测试文件、114 个测试全部通过。
 
-线上部署尚未完成，阻塞点是 SSH：
+线上部署尚未完成，需要使用正确服务器 `8.130.160.177` 执行：
 
-```text
-Connection timed out during banner exchange
-Connection to 45.207.206.76 port 22 timed out
+```bash
+ssh root@8.130.160.177
+cd /opt/ai-product-workbench
+bash deploy/server-deploy.sh
 ```
 
-公网探测显示 `http://45.207.206.76:3000/` 仍在返回旧站内容，`/login` 返回 404，`http://45.207.206.76:4000/api/system/health` 返回 empty reply。SSH 恢复后应在服务器 `/opt/ai-product-workbench` 执行 `bash deploy/server-deploy.sh`，脚本会拉取 `origin/main`。
+脚本会拉取 `origin/main`。
 
 截至 2026-06-26 09:10 左右，公网 API 可用：
 
@@ -111,7 +121,7 @@ Model: gpt-5.5
 
 ## 5. 重要隐患
 
-SSH 当前不稳定，最后几次连接失败：
+SSH 使用正确服务器 `8.130.160.177` 已确认可连接。此前连接失败是因为误用了 `45.207.206.76`：
 
 ```text
 Connection timed out during banner exchange
@@ -267,7 +277,7 @@ Property 'knowledgeEmbedding' does not exist on PrismaService
 公网 health：
 
 ```bash
-curl -sS http://45.207.206.76:4000/api/system/health
+curl -sS http://8.130.160.177:4000/api/system/health
 ```
 
 登录普通用户：
@@ -276,7 +286,7 @@ curl -sS http://45.207.206.76:4000/api/system/health
 curl -sS \
   -H 'Content-Type: application/json' \
   -d '{"account":"zhangsan","password":"User123456"}' \
-  http://45.207.206.76:4000/api/auth/login
+  http://8.130.160.177:4000/api/auth/login
 ```
 
 测试模型池：
