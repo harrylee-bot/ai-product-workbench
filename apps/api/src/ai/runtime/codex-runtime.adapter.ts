@@ -1,9 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { ExternalRuntimeConfigService } from "./external-runtime-config.service";
 import type {
   RequirementRuntimeInput,
@@ -64,7 +64,10 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       files: [inputPath, promptPath],
     }));
 
-    const rawEvents = await this.runCodex(workspace, promptPath, task, events);
+    const rawEvents = await this.runCodex(workspace, promptPath, task, events, {
+      expectedOutputPath: outputPath,
+      outputKind: "json",
+    });
     const outputText = await readFile(outputPath, "utf8");
     const output = normalizeRequirementRuntimeOutput(parseJsonText(outputText) ?? outputText, task);
     events.push(event(task, "runtime_artifact_created", "Codex 已生成 runtime-output.json。", {
@@ -101,7 +104,10 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       files: [specPath, promptPath],
     }));
 
-    const rawEvents = await this.runCodex(workspace, promptPath, task, events);
+    const rawEvents = await this.runCodex(workspace, promptPath, task, events, {
+      expectedOutputPath: outputPath,
+      outputKind: "html",
+    });
     const htmlContent = await readFile(outputPath, "utf8");
     events.push(event(task, "runtime_artifact_created", "Codex 已生成 index.html。", {
       filePath: outputPath,
@@ -146,6 +152,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     promptPath: string,
     task: RuntimeTask<unknown>,
     events: RuntimeEvent[],
+    options?: CodexRunOptions,
   ) {
     const prompt = await readFile(promptPath, "utf8");
     const args = [
@@ -174,20 +181,68 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
 
     const rawEvents: unknown[] = [];
     const stderrChunks: string[] = [];
+    let lastActivityAt = Date.now();
+    let lastOutputSignature = "";
+    const touch = () => {
+      lastActivityAt = Date.now();
+    };
     const stdout = createInterface({ input: child.stdout });
     stdout.on("line", (line) => {
+      touch();
       const parsed = parseJsonLine(line);
       rawEvents.push(parsed ?? line);
       if (parsed) {
         events.push(event(task, eventTypeFromCodex(parsed), summaryFromCodex(parsed), parsed));
       }
     });
-    child.stderr.on("data", (chunk) => stderrChunks.push(String(chunk)));
-
-    const exitCode = await new Promise<number | null>((resolve, reject) => {
-      child.on("error", reject);
-      child.on("close", resolve);
+    child.stderr.on("data", (chunk) => {
+      touch();
+      stderrChunks.push(String(chunk));
     });
+
+    let finished = false;
+    const closePromise = new Promise<CodexCloseResult>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (exitCode, signal) => resolve({ exitCode, signal }));
+    });
+    const idlePromise = this.waitForIdleTimeout(
+      () => finished,
+      async () => {
+        if (!options?.expectedOutputPath) return;
+        const nextSignature = await this.inspectOutputSignature(options.expectedOutputPath);
+        if (!nextSignature) return;
+        if (nextSignature !== lastOutputSignature) {
+          lastOutputSignature = nextSignature;
+          touch();
+        }
+      },
+      () => lastActivityAt,
+    );
+
+    const result = await Promise.race([
+      closePromise.then((closeResult) => ({ type: "closed" as const, closeResult })),
+      idlePromise.then(() => ({ type: "idle_timeout" as const })),
+    ]);
+    finished = true;
+
+    if (result.type === "idle_timeout") {
+      const outputReady = options?.expectedOutputPath ? await this.inspectExpectedOutput(options) : undefined;
+      if (outputReady?.ready) {
+        const idleTimeoutMs = this.config.codexIdleTimeoutMs();
+        events.push(event(task, "runtime_warning", `Codex runtime 已 ${idleTimeoutMs}ms 无新增输出，预期产物已可用，已结束子进程并继续。`, {
+          filePath: outputReady.path,
+          size: outputReady.size,
+          idleTimeoutMs,
+        }));
+        await this.stopCodexChild(child, closePromise);
+        return rawEvents;
+      }
+      await this.stopCodexChild(child, closePromise);
+      const stderr = stderrChunks.join("").replace(/\s+/g, " ").trim();
+      throw new Error(`Codex runtime 空闲超时（${this.config.codexIdleTimeoutMs()}ms 无新增输出）${stderr ? `：${stderr}` : ""}`);
+    }
+
+    const { exitCode } = result.closeResult;
 
     if (exitCode !== 0) {
       const stderr = stderrChunks.join("").replace(/\s+/g, " ").trim();
@@ -195,6 +250,67 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     }
 
     return rawEvents;
+  }
+
+  private async waitForIdleTimeout(
+    shouldStop: () => boolean,
+    inspectActivity: () => Promise<void>,
+    lastActivityAt: () => number,
+  ) {
+    const idleTimeoutMs = this.config.codexIdleTimeoutMs();
+    const pollMs = this.config.codexIdlePollMs();
+    while (!shouldStop()) {
+      await inspectActivity();
+      if (Date.now() - lastActivityAt() >= idleTimeoutMs) return;
+      await sleep(pollMs);
+    }
+  }
+
+  private async inspectOutputSignature(filePath: string) {
+    try {
+      const fileStat = await stat(filePath);
+      if (!fileStat.isFile() || fileStat.size <= 0) return undefined;
+      return `${fileStat.size}:${fileStat.mtimeMs}`;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async inspectExpectedOutput(options: CodexRunOptions): Promise<CodexOutputReady | undefined> {
+    if (!options.expectedOutputPath) return undefined;
+    try {
+      const fileStat = await stat(options.expectedOutputPath);
+      if (!fileStat.isFile() || fileStat.size <= 0) return undefined;
+      const content = await readFile(options.expectedOutputPath, "utf8");
+      if (!isExpectedOutputReady(content, options.outputKind)) return undefined;
+      return {
+        path: options.expectedOutputPath,
+        size: fileStat.size,
+        mtimeMs: fileStat.mtimeMs,
+        ready: true,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async stopCodexChild(
+    child: ChildProcess,
+    closePromise: Promise<CodexCloseResult>,
+  ) {
+    if (child.exitCode !== null || child.killed) return;
+    child.kill("SIGTERM");
+    const closed = await Promise.race([
+      closePromise.then(() => true),
+      sleep(5_000).then(() => false),
+    ]);
+    if (!closed && child.exitCode === null) {
+      child.kill("SIGKILL");
+      await Promise.race([
+        closePromise,
+        sleep(1_000),
+      ]);
+    }
   }
 
   private codexConfigArgs() {
@@ -245,7 +361,10 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       files: [inputPath, promptPath],
     }));
 
-    const rawEvents = await this.runCodex(workspace, promptPath, task, events);
+    const rawEvents = await this.runCodex(workspace, promptPath, task, events, {
+      expectedOutputPath: outputPath,
+      outputKind: "json",
+    });
     const outputText = await readFile(outputPath, "utf8");
     const output = parseJsonText(outputText);
     if (!output) {
@@ -272,6 +391,23 @@ type PrototypeCodeRuntimeInput = {
   prototypeSpec: PrototypeSpec;
   mode: "single_html";
   generatedByRunId?: string;
+};
+
+type CodexRunOptions = {
+  expectedOutputPath?: string;
+  outputKind: "json" | "html";
+};
+
+type CodexOutputReady = {
+  path: string;
+  size: number;
+  mtimeMs: number;
+  ready: true;
+};
+
+type CodexCloseResult = {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
 };
 
 function prototypePrompt(spec: PrototypeSpec) {
@@ -550,6 +686,14 @@ function parseJsonText(text: string) {
   }
 }
 
+function isExpectedOutputReady(content: string, kind: CodexRunOptions["outputKind"]) {
+  const textValue = content.trim();
+  if (!textValue) return false;
+  if (kind === "json") return Boolean(parseJsonText(textValue));
+  const lower = textValue.slice(0, 500).toLowerCase();
+  return textValue.length >= 200 && (lower.includes("<!doctype html") || lower.includes("<html"));
+}
+
 function firstRecord(...values: unknown[]) {
   for (const value of values) {
     const record = asRecord(value);
@@ -629,6 +773,10 @@ function safeId(value: string) {
 
 function compact(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 function tomlString(value: string) {

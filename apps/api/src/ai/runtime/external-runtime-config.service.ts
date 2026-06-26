@@ -46,6 +46,14 @@ export class ExternalRuntimeConfigService {
     return "workspace-write";
   }
 
+  codexIdleTimeoutMs() {
+    return positiveNumber(this.config.get<string>("VIBE_CODEX_IDLE_TIMEOUT_MS"), 180_000);
+  }
+
+  codexIdlePollMs() {
+    return positiveNumber(this.config.get<string>("VIBE_CODEX_IDLE_POLL_MS"), 1_000);
+  }
+
   codexModelProviderId() {
     return safeProviderId(this.config.get<string>("CODEX_MODEL_PROVIDER_ID")?.trim() || "vibe_openai_compatible");
   }
@@ -109,4 +117,9 @@ function normalizeProvider(value: string | undefined, fallback: RuntimeProvider)
 
 function safeProviderId(value: string) {
   return value.replace(/[^a-zA-Z0-9_]/g, "_") || "vibe_openai_compatible";
+}
+
+function positiveNumber(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
