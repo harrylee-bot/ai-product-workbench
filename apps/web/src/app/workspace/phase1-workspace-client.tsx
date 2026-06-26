@@ -783,7 +783,7 @@ const VIBE_RUN_STEPS = [
   { step: "product_design", title: "生成产品状态", executor: "DeerFlow Graph", detail: "产出 ProductDesignState，作为 PRD 和原型的事实源" },
   { step: "prd_generation", title: "生成 PRD", executor: "DeerFlow Graph", detail: "基于 ProductDesignState 输出结构化 PRD" },
   { step: "prototype_design", title: "生成原型规格", executor: "DeerFlow Graph", detail: "基于 ProductDesignState 输出 PrototypeSpec" },
-  { step: "prototype_code_generation", title: "生成 HTML", executor: "Codex Node", detail: "Codex 在 DeerFlow coding 节点中产出可预览 HTML" },
+  { step: "prototype_code_generation", title: "生成 HTML", executor: "DeerFlow Coding", detail: "DeerFlow coding 节点产出可预览 HTML" },
   { step: "qa_check", title: "QA 闸门", executor: "DeerFlow Graph", detail: "检查一致性并决定确认、知识、发布和导出闸门" },
 ];
 

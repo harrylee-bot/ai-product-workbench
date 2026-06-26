@@ -103,8 +103,7 @@ The backend fetches these paths through `GET /api/threads/{thread_id}/artifacts/
 This repository ships DeerFlow-side runtime assets under `integrations/deerflow/`:
 
 - `agents/ai-product-workbench-lead`: custom agent config and `SOUL.md`
-- `skills/ai-product-workbench`: Workbench skill, final action contract, Codex execution-node procedure
-- `skills/ai-product-workbench/scripts/run_codex_node.py`: process-exit based Codex execution wrapper
+- `skills/ai-product-workbench`: Workbench skill and final action contract
 
 Install or update them on a running DeerFlow instance:
 
@@ -124,27 +123,9 @@ After installation, set:
 DEERFLOW_AGENT_NAME=ai-product-workbench-lead
 ```
 
-## Codex Node
+## Coding/Prototype Execution
 
-Codex runs inside DeerFlow as a coding/prototype execution node. DeerFlow decides when to use it, normally via a `task()` sub-agent. The bundled script invokes `codex exec` and writes:
-
-- `codex-prompt.md`
-- `codex-stdout.log`
-- `codex-stderr.log`
-- `codex-last-message.md`
-- `codex-node-manifest.json`
-
-The completion signal is the Codex process exit and manifest status. The backend never polls output files to guess whether Codex has finished.
-
-Useful DeerFlow sandbox environment variables:
-
-```env
-CODEX_COMMAND=codex
-CODEX_NODE_MODEL=
-CODEX_NODE_SANDBOX=workspace-write
-CODEX_NODE_APPROVAL_POLICY=never
-CODEX_NODE_COMMAND_TEMPLATE=
-```
+Coding and prototype work belongs inside DeerFlow's graph, sandbox, tools, and sub-agent system. The Workbench backend does not ship or invoke a direct Codex adapter. It only streams DeerFlow events and applies the final action returned by DeerFlow.
 
 ## References
 

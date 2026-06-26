@@ -1,6 +1,6 @@
 ---
 name: ai-product-workbench
-description: AI Product Workbench runtime workflow for PRD, ProductDesignState, prototype, Codex coding/prototype execution, QA, exports, and final action JSON. Use when the turn context includes runtimeContract ai-product-workbench.deerflow-runtime.v1, finalActionContract, deerFlowUploads, PRD/prototype generation, product requirements, or Codex execution inside DeerFlow.
+description: AI Product Workbench runtime workflow for PRD, ProductDesignState, prototype generation, QA, exports, and final action JSON. Use when the turn context includes runtimeContract ai-product-workbench.deerflow-runtime.v1, finalActionContract, deerFlowUploads, PRD/prototype generation, product requirements, or DeerFlow runtime execution.
 license: MIT
 allowed-tools:
   - task
@@ -26,7 +26,7 @@ Classify the turn before doing work:
 - Greeting or general chat: return `answer`. Do not call sub-agents or Codex.
 - Missing key facts for a product change: return `ask_clarification`.
 - PRD/state drafting or revision: produce reviewable structured output and return `review_prd`.
-- Prototype/code generation: create or refine specs first, then use the Codex execution node only for concrete coding/prototype work, and return `review_prototype`.
+- Prototype/code generation: create or refine specs first, then use DeerFlow's coding/prototype execution capability for concrete artifact work, and return `review_prototype`.
 - Export request: use existing or generated files and return `download_export`.
 
 ## Runtime Inputs
@@ -52,8 +52,6 @@ Always finish with one fenced block:
 
 For full schema and examples, see `references/final-action-contract.md`.
 
-## Codex Execution Node
+## Prototype Execution
 
-Use Codex only inside DeerFlow for coding/prototype execution. Do not ask Nest to call Codex.
-
-For the Codex node procedure, request JSON shape, and manifest contract, see `references/codex-execution-node.md`.
+Use DeerFlow's own graph, sandbox, tools, and sub-agent capabilities for concrete prototype artifacts. Do not ask NestJS to call Codex or any legacy adapter.
