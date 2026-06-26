@@ -499,8 +499,6 @@ function toChineseText(value: string) {
     .replace(/Triple System Fusion/g, "运行时协议")
     .replace(/Triple System/g, "运行时协议")
     .replace(/Constraint System/g, "约束协议")
-    .replace(/Decision System/g, "运行时状态")
-    .replace(/Evolution System/g, "运行时状态")
     .replace(/Constraint/g, "约束系统")
     .replace(/Decision/g, "判断")
     .replace(/Evolution/g, "状态更新")

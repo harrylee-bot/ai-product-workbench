@@ -142,7 +142,7 @@ describe("HTML prototype artifact module", () => {
     const result = await service.saveGeneratedPrototype(state, spec, draft, {
       userId: "user-1",
       runId: "run-1",
-      reason: "Prototype Code Agent 生成 HTML 原型",
+      reason: "Runtime 生成 HTML 原型",
     });
 
     expect(result.artifact.id).toBe("artifact-1");

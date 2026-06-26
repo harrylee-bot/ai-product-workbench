@@ -7,7 +7,7 @@ import {
   ListAdminAuditLogsQueryDto,
   ListAdminModelCallsQueryDto,
   ListAdminProjectsQueryDto,
-  ListAgentRunsQueryDto,
+  ListRuntimeRunsQueryDto,
   ListFileParsesQueryDto,
   ListPatchesQueryDto,
   ListQaReportsQueryDto,
@@ -40,7 +40,7 @@ export class AdminController {
   }
 
   @Get("projects/:projectId/runs")
-  listProjectRuns(@Param("projectId") projectId: string, @Query() query: ListAgentRunsQueryDto) {
+  listProjectRuns(@Param("projectId") projectId: string, @Query() query: ListRuntimeRunsQueryDto) {
     return this.adminService.listProjectRuns(projectId, query);
   }
 
@@ -62,14 +62,14 @@ export class AdminController {
     return this.adminService.listProjectQaReports(projectId, query);
   }
 
-  @Get("logs/agent-runs")
-  listAgentRuns(@Query() query: ListAgentRunsQueryDto) {
-    return this.adminService.listAgentRuns(query);
+  @Get("logs/runtime-runs")
+  listRuntimeRuns(@Query() query: ListRuntimeRunsQueryDto) {
+    return this.adminService.listRuntimeRuns(query);
   }
 
-  @Get("logs/agent-runs/:runId")
-  getAgentRun(@Param("runId") runId: string) {
-    return this.adminService.getAgentRun(runId);
+  @Get("logs/runtime-runs/:runId")
+  getRuntimeRun(@Param("runId") runId: string) {
+    return this.adminService.getRuntimeRun(runId);
   }
 
   @Get("logs/model-calls")

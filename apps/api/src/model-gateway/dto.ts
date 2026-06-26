@@ -260,7 +260,7 @@ export class ListModelCallLogsQueryDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
-  agentName?: string;
+  runtimeName?: string;
 
   @IsOptional()
   @Transform(emptyToUndefined)

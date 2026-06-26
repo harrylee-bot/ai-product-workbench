@@ -33,9 +33,9 @@ describe("Module 13 QA services", () => {
     const service = new QaRuleCheckService();
     const knowledgeContext = {
       ...emptyKnowledgeContext(),
-      agentSkills: [
+      runtimeSkills: [
         {
-          id: "agent-skill:obsidian-markdown",
+          id: "runtime-skill:obsidian-markdown",
           name: "obsidian-markdown",
           description: "Create and edit Obsidian Flavored Markdown.",
           sourcePath: "/skills/obsidian-markdown/SKILL.md",
@@ -58,7 +58,7 @@ describe("Module 13 QA services", () => {
           id: "qa_skill_reference_missing_obsidian-markdown",
           severity: "major",
           relatedStatePaths: ["knowledgeRefs"],
-          relatedKnowledgeIds: ["agent-skill:obsidian-markdown"],
+          relatedKnowledgeIds: ["runtime-skill:obsidian-markdown"],
         }),
       ]),
     );
@@ -67,7 +67,7 @@ describe("Module 13 QA services", () => {
       productDesignState: baseState({
         knowledgeRefs: [
           {
-            knowledgeId: "agent-skill:obsidian-markdown",
+            knowledgeId: "runtime-skill:obsidian-markdown",
             title: "Vibe Coding 可用技能：obsidian-markdown",
             relatedPath: "/skills/obsidian-markdown/SKILL.md",
           },

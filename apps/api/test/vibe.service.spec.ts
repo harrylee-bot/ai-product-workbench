@@ -9,7 +9,7 @@ describe("VibeService main entry", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
-    agentRunLog: {
+    runtimeRunLog: {
       findUnique: vi.fn(),
     },
   };

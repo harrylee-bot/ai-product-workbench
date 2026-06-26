@@ -52,7 +52,7 @@ else
 fi
 
 if [ "${INSTALL_OBSIDIAN_SKILLS:-1}" != "0" ]; then
-  SOURCE_DIR="${APP_DIR}/agent-skills/obsidian-skills" CODEX_HOME="${CODEX_HOME:-/root/.codex}" bash deploy/install-obsidian-skills.sh
+  SOURCE_DIR="${APP_DIR}/runtime-skills/obsidian-skills" CODEX_HOME="${CODEX_HOME:-/root/.codex}" bash deploy/install-obsidian-skills.sh
 fi
 
 docker network create ai-product-workbench >/dev/null 2>&1 || true
@@ -127,7 +127,7 @@ docker run -d \
   -e JWT_EXPIRES_IN="$JWT_EXPIRES_IN" \
   -e MODEL_GATEWAY_ENCRYPTION_KEY="$MODEL_GATEWAY_ENCRYPTION_KEY" \
   -e KNOWLEDGE_VAULT_ROOT=/app/apps/api/storage/knowledge-vault \
-  -e AGENT_SKILLS_ROOT=/app/agent-skills/obsidian-skills/skills:/root/.codex/skills \
+  -e RUNTIME_SKILLS_ROOT=/app/runtime-skills/obsidian-skills/skills:/root/.codex/skills \
   -e DEFAULT_MODEL_PROVIDER_NAME="$DEFAULT_MODEL_PROVIDER_NAME" \
   -e DEFAULT_MODEL_BASE_URL="$DEFAULT_MODEL_BASE_URL" \
   -e DEFAULT_MODEL_API_KEY="$DEFAULT_MODEL_API_KEY" \
@@ -148,7 +148,7 @@ docker run -d \
   -e API_PORT=4000 \
   -e WEB_ORIGIN="http://${APP_HOST}:3000" \
   -e FILE_UPLOAD_ROOT=/app/apps/api/storage/uploads \
-  -v "${APP_DIR}/agent-skills:/app/agent-skills:ro" \
+  -v "${APP_DIR}/runtime-skills:/app/runtime-skills:ro" \
   -v ai-product-workbench-storage:/app/apps/api/storage \
   ai-product-workbench-api:latest
 

@@ -1,11 +1,11 @@
 import { Injectable } from "@nestjs/common";
-import { AgentName, AgentRunStatus, AgentStepStatus, Prisma, UserIntent } from "@prisma/client";
+import { RuntimeStepName, RuntimeRunStatus, RuntimeStepStatus, Prisma, UserIntent } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { summarizeText, toInputJson } from "./ai-vibe.helpers";
 
 @Injectable()
-export class AgentRunLogService {
+export class RuntimeRunLogService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createRun(input: {
@@ -14,12 +14,12 @@ export class AgentRunLogService {
     userId: string;
     userInput: string;
   }) {
-    return this.prisma.agentRunLog.create({
+    return this.prisma.runtimeRunLog.create({
       data: {
         projectId: input.projectId,
         conversationId: input.conversationId,
         userId: input.userId,
-        status: AgentRunStatus.running,
+        status: RuntimeRunStatus.running,
         inputSummary: summarizeText(input.userInput),
         traceId: randomUUID(),
       },
@@ -27,20 +27,20 @@ export class AgentRunLogService {
   }
 
   async markRunIntent(runId: string, intent: UserIntent) {
-    await this.prisma.agentRunLog.update({
+    await this.prisma.runtimeRunLog.update({
       where: { id: runId },
       data: { intent },
     });
   }
 
   async completeRun(runId: string, result: unknown, outputSummary: string) {
-    const run = await this.prisma.agentRunLog.findUnique({ where: { id: runId } });
+    const run = await this.prisma.runtimeRunLog.findUnique({ where: { id: runId } });
     const endedAt = new Date();
 
-    await this.prisma.agentRunLog.update({
+    await this.prisma.runtimeRunLog.update({
       where: { id: runId },
       data: {
-        status: AgentRunStatus.succeeded,
+        status: RuntimeRunStatus.succeeded,
         outputSummary: summarizeText(outputSummary),
         result: toInputJson(result),
         endedAt,
@@ -50,13 +50,13 @@ export class AgentRunLogService {
   }
 
   async failRun(runId: string, error: unknown) {
-    const run = await this.prisma.agentRunLog.findUnique({ where: { id: runId } });
+    const run = await this.prisma.runtimeRunLog.findUnique({ where: { id: runId } });
     const endedAt = new Date();
 
-    await this.prisma.agentRunLog.update({
+    await this.prisma.runtimeRunLog.update({
       where: { id: runId },
       data: {
-        status: AgentRunStatus.failed,
+        status: RuntimeRunStatus.failed,
         errorMessage: summarizeText(error instanceof Error ? error.message : "AI 执行失败"),
         endedAt,
         durationMs: run ? endedAt.getTime() - run.startedAt.getTime() : undefined,
@@ -66,25 +66,25 @@ export class AgentRunLogService {
 
   async createStep(input: {
     runId: string;
-    agentName: AgentName;
+    runtimeName: RuntimeStepName;
     inputSummary: string;
-    status?: AgentStepStatus;
+    status?: RuntimeStepStatus;
   }) {
-    return this.prisma.agentStepLog.create({
+    return this.prisma.runtimeStepLog.create({
       data: {
         runId: input.runId,
-        agentName: input.agentName,
-        status: input.status ?? AgentStepStatus.pending,
+        runtimeName: input.runtimeName,
+        status: input.status ?? RuntimeStepStatus.pending,
         inputSummary: summarizeText(input.inputSummary),
       },
     });
   }
 
   async startStep(stepId: string) {
-    await this.prisma.agentStepLog.update({
+    await this.prisma.runtimeStepLog.update({
       where: { id: stepId },
       data: {
-        status: AgentStepStatus.running,
+        status: RuntimeStepStatus.running,
         startedAt: new Date(),
       },
     });
@@ -100,13 +100,13 @@ export class AgentRunLogService {
       modelProviderId?: string;
     } = {},
   ) {
-    const step = await this.prisma.agentStepLog.findUnique({ where: { id: stepId } });
+    const step = await this.prisma.runtimeStepLog.findUnique({ where: { id: stepId } });
     const endedAt = new Date();
 
-    await this.prisma.agentStepLog.update({
+    await this.prisma.runtimeStepLog.update({
       where: { id: stepId },
       data: {
-        status: AgentStepStatus.succeeded,
+        status: RuntimeStepStatus.succeeded,
         outputSummary: summarizeText(JSON.stringify(output)),
         modelCallLogId: options.modelCallLogId,
         tokenUsage: options.tokenUsage,
@@ -119,14 +119,14 @@ export class AgentRunLogService {
   }
 
   async failStep(stepId: string, error: unknown) {
-    const step = await this.prisma.agentStepLog.findUnique({ where: { id: stepId } });
+    const step = await this.prisma.runtimeStepLog.findUnique({ where: { id: stepId } });
     const endedAt = new Date();
 
-    await this.prisma.agentStepLog.update({
+    await this.prisma.runtimeStepLog.update({
       where: { id: stepId },
       data: {
-        status: AgentStepStatus.failed,
-        errorMessage: summarizeText(error instanceof Error ? error.message : "Agent 执行失败"),
+        status: RuntimeStepStatus.failed,
+        errorMessage: summarizeText(error instanceof Error ? error.message : "Runtime 执行失败"),
         endedAt,
         durationMs: step?.startedAt ? endedAt.getTime() - step.startedAt.getTime() : undefined,
       },
@@ -134,7 +134,7 @@ export class AgentRunLogService {
   }
 
   async getRun(runId: string) {
-    const run = await this.prisma.agentRunLog.findUnique({
+    const run = await this.prisma.runtimeRunLog.findUnique({
       where: { id: runId },
       include: {
         steps: {
@@ -162,7 +162,7 @@ export class AgentRunLogService {
       durationMs: run.durationMs,
       steps: run.steps.map((step) => ({
         id: step.id,
-        agentName: step.agentName,
+        runtimeName: step.runtimeName,
         status: step.status,
         inputSummary: step.inputSummary,
         outputSummary: step.outputSummary,

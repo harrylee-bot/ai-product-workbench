@@ -5,8 +5,8 @@ import { KnowledgeModule } from "../knowledge/knowledge.module";
 import { ModelGatewayModule } from "../model-gateway/model-gateway.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { MessageService } from "../projects/message.service";
-import { AgentRunLogService } from "./agent-run-log.service";
-import { AgentSkillRegistryService } from "./agent-skill-registry.service";
+import { RuntimeRunLogService } from "./runtime-run-log.service";
+import { RuntimeSkillRegistryService } from "./runtime-skill-registry.service";
 import { AiOrchestratorService } from "./ai-orchestrator.service";
 import { DocumentCanvasService } from "./document-canvas.service";
 import { ProjectExportController } from "./export.controller";
@@ -92,8 +92,8 @@ import { ProductRuntimeService } from "./runtime/product-runtime.service";
   providers: [
     VibeService,
     AiOrchestratorService,
-    AgentSkillRegistryService,
-    AgentRunLogService,
+    RuntimeSkillRegistryService,
+    RuntimeRunLogService,
     VibeStreamService,
     ProductDesignStateService,
     PatchService,

@@ -1,7 +1,7 @@
 import {
   AdminAuditTargetType,
-  AgentRunStatus,
-  AgentStepStatus,
+  RuntimeRunStatus,
+  RuntimeStepStatus,
   KnowledgeCandidateStatus,
   ModelCallStatus,
   ProjectStatus,
@@ -17,7 +17,7 @@ describe("Admin module services", () => {
     $transaction: vi.fn(),
     user: { count: vi.fn() },
     project: { count: vi.fn(), findUnique: vi.fn() },
-    agentRunLog: { count: vi.fn(), findUnique: vi.fn() },
+    runtimeRunLog: { count: vi.fn(), findUnique: vi.fn() },
     modelCallLog: { count: vi.fn() },
     knowledgeCandidate: { count: vi.fn() },
     fileAsset: { count: vi.fn() },
@@ -43,7 +43,7 @@ describe("Admin module services", () => {
     prisma.project.count
       .mockResolvedValueOnce(4)
       .mockResolvedValueOnce(1);
-    prisma.agentRunLog.count.mockResolvedValue(5);
+    prisma.runtimeRunLog.count.mockResolvedValue(5);
     prisma.modelCallLog.count
       .mockResolvedValueOnce(12)
       .mockResolvedValueOnce(3);
@@ -55,7 +55,7 @@ describe("Admin module services", () => {
     expect(result).toMatchObject({
       userCount: 2,
       projectCount: 4,
-      todayAgentRunCount: 5,
+      todayRuntimeRunCount: 5,
       todayModelCallCount: 12,
       todayFailedModelCallCount: 3,
       pendingKnowledgeCandidateCount: 6,
@@ -100,14 +100,14 @@ describe("Admin module services", () => {
     });
   });
 
-  it("returns agent run details with step timeline and contract events", async () => {
-    prisma.agentRunLog.findUnique.mockResolvedValue({
+  it("returns runtime run details with step timeline and contract events", async () => {
+    prisma.runtimeRunLog.findUnique.mockResolvedValue({
       id: "run-1",
       projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       intent: null,
-      status: AgentRunStatus.succeeded,
+      status: RuntimeRunStatus.succeeded,
       inputSummary: "用户需求摘要",
       outputSummary: "输出摘要",
       result: null,
@@ -122,8 +122,8 @@ describe("Admin module services", () => {
       steps: [
         {
           id: "step-1",
-          agentName: "qa_agent",
-          status: AgentStepStatus.succeeded,
+          runtimeName: "qa_agent",
+          status: RuntimeStepStatus.succeeded,
           inputSummary: "检查",
           outputSummary: "通过",
           modelCallLogId: "model-log-1",
@@ -133,7 +133,7 @@ describe("Admin module services", () => {
             id: "model-log-1",
             traceId: "trace-1",
             runId: "run-1",
-            agentName: "qa_agent",
+            runtimeName: "qa_agent",
             taskType: "qa_check",
             providerId: "provider-1",
             modelConfigId: "model-config-1",
@@ -190,7 +190,7 @@ describe("Admin module services", () => {
             eventType: "fallback_used",
             payload: {
               data: {
-                agentName: "qa_agent",
+                runtimeName: "qa_agent",
                 level: "degraded_preview",
                 reason: "模型配置不可用，使用降级预览。",
                 errorCode: "MODEL_CONFIG_NOT_FOUND",
@@ -202,7 +202,7 @@ describe("Admin module services", () => {
       ],
     });
 
-    const result = await service.getAgentRun("run-1");
+    const result = await service.getRuntimeRun("run-1");
 
     expect(result).toMatchObject({
       id: "run-1",
@@ -210,7 +210,7 @@ describe("Admin module services", () => {
       projectTitle: "签到活动",
       steps: [
         {
-          agentName: "qa_agent",
+          runtimeName: "qa_agent",
           modelCallLogId: "model-log-1",
           modelCall: expect.objectContaining({
             id: "model-log-1",

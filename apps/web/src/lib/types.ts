@@ -46,7 +46,7 @@ export type PaginatedResponse<T> = {
 export type AdminDashboardStats = {
   userCount: number;
   projectCount: number;
-  todayAgentRunCount: number;
+  todayRuntimeRunCount: number;
   todayModelCallCount: number;
   todayFailedModelCallCount: number;
   pendingKnowledgeCandidateCount: number;

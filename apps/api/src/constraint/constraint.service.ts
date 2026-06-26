@@ -74,11 +74,11 @@ function buildDefaultConstraints(input: string): Array<Omit<Constraint, "id">> {
   return [
     {
       rule: "must_follow",
-      scope: "decision",
-      condition: "所有用户输入必须进入决策系统。",
-      effect: "生成多个策略，并按加权得分选择最优策略。",
+      scope: "runtime",
+      condition: "所有生成、修改和质检请求必须进入 Codex/DeerFlow runtime adapter 边界。",
+      effect: "产品系统只维护协议、状态机和 runtime handoff，不再执行自研 agent 编排。",
       weight: 1,
-      sourceKnowledgeId: "fusion:decision-required",
+      sourceKnowledgeId: "vibe:runtime-adapter-required",
     },
     {
       rule: "must_follow",
@@ -98,15 +98,15 @@ function buildDefaultConstraints(input: string): Array<Omit<Constraint, "id">> {
     },
     {
       rule: mentionsRewrite ? "warn" : "prefer",
-      scope: "decision",
+      scope: "runtime",
       condition: mentionsRewrite
         ? "用户要求大范围重构或重建。"
         : "用户意图可以通过渐进方式处理。",
       effect: mentionsRewrite
-        ? "高影响策略需要更强的风险惩罚。"
-        : "业务价值接近时优先选择低风险策略。",
+        ? "runtime adapter handoff 必须显式列出风险、回滚点和验收方式。"
+        : "业务价值接近时优先生成低风险、可回滚的状态变更方案。",
       weight: mentionsRewrite ? 0.8 : 0.6,
-      sourceKnowledgeId: mentionsRewrite ? "fusion:rewrite-risk-warning" : "fusion:prefer-low-risk",
+      sourceKnowledgeId: mentionsRewrite ? "vibe:rewrite-risk-warning" : "vibe:prefer-low-risk",
     },
   ];
 }
@@ -161,8 +161,8 @@ function knowledgeScope(reference: KnowledgeConstraintSource, text: string): Con
   const haystack = `${reference.title} ${reference.type ?? ""} ${text}`;
   if (/补丁|patch|执行|变更|preview|预览门禁/i.test(haystack)) return "patch";
   if (/质检|验收|测试|风险|qa/i.test(haystack)) return "qa";
-  if (/原型|界面|交互|体验|UI|UX|组件|页面/i.test(haystack)) return "agent";
-  return "decision";
+  if (/原型|界面|交互|体验|UI|UX|组件|页面/i.test(haystack)) return "runtime";
+  return "state";
 }
 
 function knowledgeWeight(type?: string) {

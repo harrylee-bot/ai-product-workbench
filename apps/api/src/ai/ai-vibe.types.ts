@@ -72,12 +72,12 @@ export type KnowledgeReference = {
   content: string;
   type?: KnowledgeType;
   relatedPath?: string;
-  usedByAgent?: string;
+  usedByRuntime?: string;
   sourceType: "knowledge_base" | "attachment" | "conversation" | "ai_assumption";
   sourceId?: string;
 };
 
-export type AgentSkillReference = {
+export type RuntimeSkillReference = {
   id: string;
   name: string;
   description: string;
@@ -87,7 +87,7 @@ export type AgentSkillReference = {
   triggerHints: string[];
 };
 
-export type AgentSkillRoute = {
+export type RuntimeSkillRoute = {
   skillId: string;
   skillName: string;
   sourcePath: string;
@@ -113,8 +113,8 @@ export type KnowledgeContext = {
   prdWritingRules: KnowledgeReference[];
   prototypeRules: KnowledgeReference[];
   businessConcepts: KnowledgeReference[];
-  agentSkills?: AgentSkillReference[];
-  skillRouting?: AgentSkillRoute[];
+  runtimeSkills?: RuntimeSkillReference[];
+  skillRouting?: RuntimeSkillRoute[];
   conflicts: KnowledgeConflict[];
   unknownAreas: string[];
   summary: string;
@@ -1012,7 +1012,7 @@ export type VibeStreamLegacyEventType =
 export type VibeStreamEventProtocol = "vibe.v1";
 
 export type VibeStreamEventCategory =
-  | "agent"
+  | "runtime"
   | "run"
   | "state"
   | "prd"
@@ -1033,7 +1033,7 @@ export type VibeStreamEventPhase =
   | "applying";
 
 export type VibeStreamPayloadKind =
-  | "agent_step"
+  | "runtime_step"
   | "progress"
   | "state"
   | "prd"
@@ -1069,7 +1069,7 @@ export type VibeStreamEvent = {
   legacyEventType?: VibeStreamLegacyEventType;
   category?: VibeStreamEventCategory;
   phase?: VibeStreamEventPhase;
-  step?: AgentStepName;
+  step?: RuntimeStreamStepName;
   content?: string;
   payloadMeta?: VibeStreamPayloadMeta;
   payload?: unknown;
@@ -1088,7 +1088,7 @@ export type VibeStreamEventEnvelope = VibeStreamEvent & {
   payloadMeta: VibeStreamPayloadMeta;
 };
 
-export type AgentStepName =
+export type RuntimeStreamStepName =
   | "intent_detection"
   | "knowledge_retrieval"
   | "context_fetch"
@@ -1105,7 +1105,7 @@ export type AgentStepName =
   | "qa_check"
   | "knowledge_extraction";
 
-export type AgentRunContext = {
+export type RuntimeRunContext = {
   runId: string;
   projectId: string;
   conversationId: string;

@@ -128,13 +128,13 @@ describe("VibeStreamService", () => {
         protocol: "vibe.v1",
         eventType: "fallback_used",
         legacyEventType: "agent_started",
-        category: "agent",
+        category: "runtime",
         phase: "progress",
         payload: expect.objectContaining({
           type: "fallback_used",
           eventType: "fallback_used",
           legacyEventType: "agent_started",
-          category: "agent",
+          category: "runtime",
           phase: "progress",
           step: "product_design",
           payloadMeta: expect.objectContaining({

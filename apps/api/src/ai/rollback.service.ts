@@ -7,7 +7,7 @@ import {
 } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
-import { AgentRunLogService } from "./agent-run-log.service";
+import { RuntimeRunLogService } from "./runtime-run-log.service";
 import type { ProductDesignState, RollbackRecord } from "./ai-vibe.types";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { PrototypeService } from "./prototype.service";
@@ -44,7 +44,7 @@ export class RollbackService {
     private readonly prototypeService: PrototypeService,
     private readonly qaService: QaService,
     private readonly productRuntime: ProductRuntimeService,
-    private readonly runLog: AgentRunLogService,
+    private readonly runLog: RuntimeRunLogService,
     private readonly stream: VibeStreamService,
   ) {}
 
