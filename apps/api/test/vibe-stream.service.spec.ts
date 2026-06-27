@@ -157,4 +157,39 @@ describe("VibeStreamService", () => {
       }),
     );
   });
+
+  it("emits run_canceled as a terminal run event with debuggable status metadata", async () => {
+    const prisma = {
+      vibeStreamEventLog: {
+        create: vi.fn(),
+        findMany: vi.fn(),
+      },
+    };
+    const service = new VibeStreamService(prisma as never);
+
+    await service.emit({
+      runId: "run-1",
+      projectId: "project-1",
+      type: "run_canceled",
+      content: "执行已停止。",
+      data: { runId: "run-1", status: "cancelled", reason: "user_requested" },
+    });
+
+    const createInput = prisma.vibeStreamEventLog.create.mock.calls[0][0];
+    expect(createInput.data.eventType).toBe("run_canceled");
+    expect(createInput.data.payload.payload).toEqual(expect.objectContaining({
+      type: "run_canceled",
+      eventType: "run_canceled",
+      legacyEventType: "agent_completed",
+      category: "run",
+      phase: "canceled",
+      payloadMeta: expect.objectContaining({
+        schema: "vibe.stream.payload.v1",
+        kind: "run",
+        status: "cancelled",
+        summary: "执行已停止。",
+      }),
+      payload: { runId: "run-1", status: "cancelled", reason: "user_requested" },
+    }));
+  });
 });

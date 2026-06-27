@@ -4,7 +4,7 @@ import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
-import { HandleVibeMessageDto, ConfirmPrdDto } from "./dto";
+import { CancelVibeRunDto, HandleVibeMessageDto, ConfirmPrdDto } from "./dto";
 import { VibeService } from "./vibe.service";
 
 @Controller("ai/vibe")
@@ -25,6 +25,15 @@ export class VibeController {
   @Get("runs/:runId")
   getRun(@CurrentUser() user: AuthenticatedUser, @Param("runId") runId: string) {
     return this.vibeService.getRun(user, runId);
+  }
+
+  @Post("runs/:runId/cancel")
+  cancelRun(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("runId") runId: string,
+    @Body() dto: CancelVibeRunDto = {},
+  ) {
+    return this.vibeService.cancelRun(user, runId, dto.reason);
   }
 
   @Sse("runs/:runId/stream")

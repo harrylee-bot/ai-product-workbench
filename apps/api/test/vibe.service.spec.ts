@@ -1,4 +1,4 @@
-import { MessageType, ProjectStatus, UserIntent, UserRole, UserStatus } from "@prisma/client";
+import { MessageType, ProjectStatus, RuntimeRunStatus, UserIntent, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProductDesignState } from "../src/ai/ai-vibe.types";
 import { VibeService } from "../src/ai/vibe.service";
@@ -28,6 +28,9 @@ describe("VibeService main entry", () => {
     markRunIntent: vi.fn(),
     completeRun: vi.fn(),
     failRun: vi.fn(),
+    cancelRun: vi.fn(),
+    isRunCancelled: vi.fn(),
+    isRunRunning: vi.fn(),
     getRun: vi.fn(),
   };
   const stateService = {
@@ -95,8 +98,15 @@ describe("VibeService main entry", () => {
     fileAssetService.attachFilesToMessage.mockResolvedValue(undefined);
     runLogService.createRun.mockResolvedValue({ id: "run-1", traceId: "trace-1" });
     runLogService.markRunIntent.mockResolvedValue(undefined);
-    runLogService.completeRun.mockResolvedValue(undefined);
-    runLogService.failRun.mockResolvedValue(undefined);
+    runLogService.completeRun.mockResolvedValue(true);
+    runLogService.failRun.mockResolvedValue(true);
+    runLogService.cancelRun.mockResolvedValue({
+      changed: true,
+      run: baseRun({ status: RuntimeRunStatus.cancelled }),
+    });
+    runLogService.isRunCancelled.mockResolvedValue(false);
+    runLogService.isRunRunning.mockResolvedValue(true);
+    prisma.runtimeRunLog.findUnique.mockResolvedValue(baseRun());
     deerFlowRuntime.isEnabled.mockReturnValue(false);
     deerFlowRuntime.runTurn.mockResolvedValue(undefined);
     stateService.getCurrentState.mockResolvedValue(baseState());
@@ -336,6 +346,109 @@ describe("VibeService main entry", () => {
     expect(runLogService.completeRun).not.toHaveBeenCalled();
   });
 
+  it("cancels a running run, records the terminal status, and emits run_canceled", async () => {
+    const result = await service.cancelRun(user, "run-1", " 用户点击停止 ");
+
+    expect(runLogService.cancelRun).toHaveBeenCalledWith({
+      runId: "run-1",
+      canceledBy: "user-1",
+      reason: "用户点击停止",
+    });
+    expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      projectId: "project-1",
+      type: "run_canceled",
+      content: "执行已停止。",
+      data: {
+        runId: "run-1",
+        status: RuntimeRunStatus.cancelled,
+        reason: "用户点击停止",
+        messageStatus: "not_created",
+      },
+    }));
+    expect(result).toEqual({
+      runId: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      status: RuntimeRunStatus.cancelled,
+      reason: "用户点击停止",
+      messageStatus: "not_created",
+      canceled: true,
+    });
+  });
+
+  it("marks the run cancelled before aborting the active DeerFlow request", async () => {
+    const controller = new AbortController();
+    (service as unknown as { activeRunControllers: Map<string, AbortController> }).activeRunControllers.set("run-1", controller);
+    runLogService.cancelRun.mockImplementationOnce(async () => {
+      expect(controller.signal.aborted).toBe(false);
+      return {
+        changed: true,
+        run: baseRun({ status: RuntimeRunStatus.cancelled }),
+      };
+    });
+
+    await service.cancelRun(user, "run-1");
+
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("rejects cancel attempts from another user", async () => {
+    prisma.runtimeRunLog.findUnique.mockResolvedValue(baseRun({
+      userId: "user-2",
+      project: { ...baseProject(), ownerId: "user-2" },
+      conversation: { id: "conversation-1", projectId: "project-1", ownerId: "user-2", deletedAt: null },
+    }));
+
+    await expect(service.cancelRun(user, "run-1")).rejects.toThrow("你无权停止该执行记录");
+
+    expect(runLogService.cancelRun).not.toHaveBeenCalled();
+    expect(streamService.emit).not.toHaveBeenCalledWith(expect.objectContaining({ type: "run_canceled" }));
+  });
+
+  it("does not let a late DeerFlow completion overwrite a canceled run", async () => {
+    deerFlowRuntime.isEnabled.mockReturnValue(true);
+    fileAssetService.getAttachmentSummaries.mockResolvedValue([]);
+    fileAssetService.getRuntimeAttachmentFiles.mockResolvedValue([]);
+    runLogService.isRunRunning.mockResolvedValue(false);
+    deerFlowRuntime.runTurn.mockResolvedValue({
+      threadId: "deerflow-thread-1",
+      assistantText: "已完成。",
+      finalAction: {
+        type: "review_prototype",
+        message: "已完成。",
+        intent: "generate_prototype",
+        raw: { type: "review_prototype", message: "已完成。" },
+      },
+      uploads: [],
+      artifacts: [],
+      rawEvents: [],
+      finalState: { ok: true },
+    });
+
+    await service.handleMessage(user, {
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      message: "生成原型",
+    });
+
+    await flushAsyncWork();
+
+    expect(messageService.createAssistantMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      relatedRunId: "run-1",
+      content: "已完成。",
+    }));
+    expect(runLogService.completeRun).not.toHaveBeenCalledWith(
+      "run-1",
+      expect.objectContaining({ provider: "deerflow" }),
+      "已完成。",
+    );
+    expect(streamService.emit).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "run_completed",
+      content: "已完成。",
+    }));
+  });
+
   it("confirms a doc_ready PRD and waits for the DeerFlow-first prototype flow", async () => {
     stateService.getCurrentState.mockResolvedValue(baseState({
       status: "doc_ready",
@@ -391,6 +504,20 @@ function baseProject() {
     status: ProjectStatus.prototype_ready,
     deletedAt: null,
     conversations: [{ id: "conversation-1", deletedAt: null }],
+  };
+}
+
+function baseRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "run-1",
+    projectId: "project-1",
+    conversationId: "conversation-1",
+    userId: "user-1",
+    status: RuntimeRunStatus.running,
+    startedAt: new Date("2026-06-20T08:00:00.000Z"),
+    project: baseProject(),
+    conversation: { id: "conversation-1", projectId: "project-1", ownerId: "user-1", deletedAt: null },
+    ...overrides,
   };
 }
 

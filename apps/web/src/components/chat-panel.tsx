@@ -30,7 +30,7 @@ export type Phase1Message = {
   createdAt: string;
 };
 
-export type VibeRunStepStatus = "pending" | "running" | "done" | "failed";
+export type VibeRunStepStatus = "pending" | "running" | "done" | "failed" | "canceled";
 
 export type VibeRunStepView = {
   step: string;
@@ -82,6 +82,7 @@ export type VibeRunView = {
     | "waiting_prd_confirm"
     | "waiting_prototype_confirm"
     | "completed"
+    | "canceled"
     | "failed";
   currentLabel?: string;
   summary?: string;
@@ -106,9 +107,11 @@ export function ChatPanel({
   sidebarCollapsed,
   disabled,
   sending,
+  stoppingRun,
   creatingConversation,
   onToggleSidebar,
   onCreateConversation,
+  onStopRun,
   confirmingPrd,
   onConfirmPrd,
   confirmingPrototypeId,
@@ -120,9 +123,11 @@ export function ChatPanel({
   sidebarCollapsed?: boolean;
   disabled?: boolean;
   sending?: boolean;
+  stoppingRun?: boolean;
   creatingConversation?: boolean;
   onToggleSidebar?: () => void;
   onCreateConversation?: () => void;
+  onStopRun?: () => Promise<void> | void;
   confirmingPrd?: boolean;
   onConfirmPrd?: (wantsPrototype: boolean) => Promise<void> | void;
   confirmingPrototypeId?: string;
@@ -164,13 +169,13 @@ export function ChatPanel({
             <div className="truncate text-xs text-gray-500">消息、Agent 过程和工具事件</div>
           </div>
         )}
-        <Badge tone={sending ? "warning" : "neutral"} className="bg-white">
+        <Badge tone={chatHeaderStatusTone(sending, runState)} className="bg-white">
           {sending ? (
             <span className="inline-flex items-center gap-1">
               <Circle className="h-3.5 w-3.5 fill-amber-100 text-amber-600" />
-              运行中
+              {onStopRun ? "正在执行，可停止" : "正在发送"}
             </span>
-          ) : "可输入"}
+          ) : runState?.status === "canceled" ? "已停止" : "可输入"}
         </Badge>
       </div>
       <div className="workbench-scrollbar relative min-h-0 flex-1 overflow-y-auto px-3 py-3">
@@ -196,7 +201,7 @@ export function ChatPanel({
           />
         )}
       </div>
-      <ChatComposer disabled={disabled} sending={sending} onSend={onSend} />
+      <ChatComposer disabled={disabled} sending={sending} stopping={stoppingRun} onStop={onStopRun} onSend={onSend} />
     </section>
   );
 }
@@ -286,7 +291,7 @@ function AgentActivityFeed({
                 <Badge tone={runStatusTone(runState.status)}>{runStatusLabel(runState.status)}</Badge>
               </div>
               <div className="mt-1 break-words text-sm leading-6 text-gray-600">
-                {runState.errorMessage || runState.summary || runState.currentLabel || "正在整理任务上下文和执行路径。"}
+                {runCardSummary(runState)}
               </div>
           </div>
         </div>
@@ -486,7 +491,7 @@ function AgentStepDisclosure({
         <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition group-open:rotate-90" />
         <ListChecks className="h-4 w-4 shrink-0 text-gray-500" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">
-          查看 {steps.length} 个步骤
+          调试：查看 {steps.length} 个执行步骤
         </span>
         <span className="shrink-0 text-xs text-gray-400">实时更新</span>
       </summary>
@@ -507,7 +512,7 @@ function ToolEventDisclosure({ debugEvents }: { debugEvents: VibeRunDebugEvent[]
         <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition group-open:rotate-90" />
         <Wrench className="h-4 w-4 shrink-0 text-gray-500" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">
-          查看 {debugEvents.length} 个工具调用与事件
+          调试：查看 {debugEvents.length} 个工具调用与事件
         </span>
         <span className="shrink-0 text-xs text-gray-400">可展开</span>
       </summary>
@@ -592,13 +597,14 @@ function visibleRunSteps(runState: VibeRunView): VibeRunStepView[] {
   if (activeSteps.length) return activeSteps;
 
   const summary = runState.errorMessage || runState.summary || runState.currentLabel || "本轮回复已生成。";
+  const canceled = runState.status === "canceled";
   return [
     {
       step: "answer",
-      title: runState.status === "running" ? "生成回复" : "完成回复",
+      title: runState.status === "running" ? "生成回复" : canceled ? "已停止" : "完成回复",
       executor: "Workbench",
       detail: summary,
-      status: runState.status === "failed" ? "failed" : runState.status === "running" ? "running" : "done",
+      status: runState.status === "failed" ? "failed" : canceled ? "canceled" : runState.status === "running" ? "running" : "done",
       message: summary,
     },
   ];
@@ -644,6 +650,7 @@ function StepStatusIcon({ status }: { status: VibeRunStepStatus }) {
   if (status === "done") return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />;
   if (status === "failed") return <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-600" />;
   if (status === "running") return <Clock3 className="h-3.5 w-3.5 shrink-0 text-amber-600" />;
+  if (status === "canceled") return <Circle className="h-3.5 w-3.5 shrink-0 fill-gray-100 text-gray-500" />;
   return <Circle className="h-3.5 w-3.5 shrink-0 text-gray-300" />;
 }
 
@@ -657,12 +664,13 @@ function TimelineStatusIcon({ status }: { status: VibeRunTimelineItem["status"] 
 function runStatusLabel(status: VibeRunView["status"]) {
   const labels: Record<VibeRunView["status"], string> = {
     idle: "空闲",
-    running: "运行中",
+    running: "正在执行，可停止",
     waiting_clarification: "待补充",
     waiting_confirmation: "待确认",
     waiting_prd_confirm: "待确认 PRD",
     waiting_prototype_confirm: "待确认原型",
     completed: "已完成",
+    canceled: "已停止",
     failed: "失败",
   };
   return labels[status];
@@ -676,11 +684,31 @@ function runStatusTone(status: VibeRunView["status"]): "neutral" | "info" | "suc
   return "neutral";
 }
 
+function chatHeaderStatusTone(
+  sending?: boolean,
+  runState?: VibeRunView | null,
+): "neutral" | "info" | "success" | "warning" | "danger" {
+  if (sending) return "warning";
+  if (runState?.status === "canceled") return "neutral";
+  return "neutral";
+}
+
+function runCardSummary(runState: VibeRunView) {
+  if (runState.status === "running") {
+    return runState.summary || runState.currentLabel || "正在执行，可停止。步骤、工具调用和事件会持续记录在下方。";
+  }
+  if (runState.status === "canceled") {
+    return runState.summary || "已停止。本轮执行没有被标记为失败，你可以继续输入新的消息。";
+  }
+  return runState.errorMessage || runState.summary || runState.currentLabel || "正在整理对话上下文和执行路径。";
+}
+
 function stepStatusLabel(status: VibeRunStepStatus) {
   const labels: Record<VibeRunStepStatus, string> = {
     pending: "待执行",
     running: "执行中",
     done: "已完成",
+    canceled: "已停止",
     failed: "失败",
   };
   return labels[status];

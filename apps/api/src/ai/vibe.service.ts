@@ -1,5 +1,12 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { MessageType, ProductDesignStateStatus, ProjectStatus, UserIntent, UserRole } from "@prisma/client";
+import {
+  MessageType,
+  ProductDesignStateStatus,
+  ProjectStatus,
+  RuntimeRunStatus,
+  UserIntent,
+  UserRole,
+} from "@prisma/client";
 import type { MessageEvent } from "@nestjs/common";
 import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -17,6 +24,8 @@ import { DeerFlowRuntimeService, type DeerFlowFinalAction } from "./deerflow-run
 
 @Injectable()
 export class VibeService {
+  private readonly activeRunControllers = new Map<string, AbortController>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly messageService: MessageService,
@@ -244,6 +253,47 @@ export class VibeService {
     await this.assertRunAccess(user, runId);
     return this.runLogService.getRun(runId);
   }
+
+  async cancelRun(user: AuthenticatedUser, runId: string, reason?: string) {
+    const run = await this.assertRunCancellationAccess(user, runId);
+    const normalizedReason = normalizeCancelReason(reason);
+
+    const result = await this.runLogService.cancelRun({
+      runId,
+      canceledBy: user.id,
+      reason: normalizedReason,
+    });
+    const currentStatus = result?.run.status ?? run.status;
+    if (result?.changed) {
+      this.activeRunControllers.get(runId)?.abort();
+    }
+
+    if (result?.changed) {
+      await this.streamService.emit({
+        runId,
+        projectId: run.projectId,
+        type: "run_canceled",
+        content: "执行已停止。",
+        data: {
+          runId,
+          status: RuntimeRunStatus.cancelled,
+          reason: normalizedReason,
+          messageStatus: "not_created",
+        },
+      });
+    }
+
+    return {
+      runId,
+      projectId: run.projectId,
+      conversationId: run.conversationId,
+      status: currentStatus,
+      reason: normalizedReason,
+      messageStatus: "not_created",
+      canceled: currentStatus === RuntimeRunStatus.cancelled,
+    };
+  }
+
   streamRun(runId: string): Observable<MessageEvent> {
     return this.streamService.stream(runId);
   }
@@ -261,6 +311,29 @@ export class VibeService {
     if (user.role !== UserRole.admin && run.project.ownerId !== user.id) {
       throw new ForbiddenException("你无权访问该执行记录");
     }
+  }
+
+  private async assertRunCancellationAccess(user: AuthenticatedUser, runId: string) {
+    const run = await this.prisma.runtimeRunLog.findUnique({
+      where: { id: runId },
+      include: { project: true, conversation: true },
+    });
+
+    if (
+      !run ||
+      run.project.deletedAt ||
+      run.project.status === ProjectStatus.deleted ||
+      run.conversation.deletedAt ||
+      run.conversation.projectId !== run.projectId
+    ) {
+      throw new NotFoundException("执行记录不存在");
+    }
+
+    if (run.userId !== user.id || run.project.ownerId !== user.id || run.conversation.ownerId !== user.id) {
+      throw new ForbiddenException("你无权停止该执行记录");
+    }
+
+    return run;
   }
 
   private async finishPendingDeerFlowTurn(input: {
@@ -342,8 +415,12 @@ export class VibeService {
     resumeReason?: string;
     productDesignState?: unknown;
   }) {
+    const controller = new AbortController();
+    this.activeRunControllers.set(input.runId, controller);
     void this.runDeerFlowTurn(input).catch(async (error) => {
-      await this.runLogService.failRun(input.runId, error);
+      if (await this.runLogService.isRunCancelled(input.runId)) return;
+      const changed = await this.runLogService.failRun(input.runId, error);
+      if (!changed) return;
       const message = error instanceof Error ? error.message : "DeerFlow runtime 执行失败";
       await this.streamService.emit({
         runId: input.runId,
@@ -364,6 +441,10 @@ export class VibeService {
         }),
         relatedRunId: input.runId,
       });
+    }).finally(() => {
+      if (this.activeRunControllers.get(input.runId) === controller) {
+        this.activeRunControllers.delete(input.runId);
+      }
     });
   }
 
@@ -381,6 +462,7 @@ export class VibeService {
     resumeReason?: string;
     productDesignState?: unknown;
   }) {
+    const signal = this.activeRunControllers.get(input.runId)?.signal;
     await this.streamService.emit({
       runId: input.runId,
       projectId: input.projectId,
@@ -402,7 +484,9 @@ export class VibeService {
       previewMode: input.previewMode,
       resumeReason: input.resumeReason,
       productDesignState: input.productDesignState,
+      signal,
       onEvent: async (event) => {
+        if (signal?.aborted || !(await this.runLogService.isRunRunning(input.runId))) return;
         if (event.toolName) {
           await this.streamService.emit({
             runId: input.runId,
@@ -426,6 +510,8 @@ export class VibeService {
       },
     });
 
+    if (signal?.aborted || !(await this.runLogService.isRunRunning(input.runId))) return;
+
     await this.streamService.emit({
       runId: input.runId,
       projectId: input.projectId,
@@ -437,6 +523,8 @@ export class VibeService {
 
     const intent = toUserIntent(result.finalAction.intent) ?? input.fallbackIntent;
     await this.runLogService.markRunIntent(input.runId, intent);
+
+    if (signal?.aborted || !(await this.runLogService.isRunRunning(input.runId))) return;
 
     const assistantMessage = await this.messageService.createAssistantMessage({
       projectId: input.projectId,
@@ -469,7 +557,8 @@ export class VibeService {
       nextAction: { type: result.finalAction.type },
     };
 
-    await this.runLogService.completeRun(input.runId, runResult, result.finalAction.message);
+    const completed = await this.runLogService.completeRun(input.runId, runResult, result.finalAction.message);
+    if (!completed) return;
     await this.streamService.emit({
       runId: input.runId,
       projectId: input.projectId,
@@ -478,6 +567,11 @@ export class VibeService {
       data: runResult,
     });
   }
+}
+
+function normalizeCancelReason(reason: string | undefined) {
+  const trimmed = reason?.trim();
+  return trimmed ? trimmed.slice(0, 200) : "user_requested";
 }
 
 function toUserIntent(value: string | undefined): UserIntent | undefined {

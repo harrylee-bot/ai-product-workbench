@@ -36,3 +36,9 @@ export class ConfirmPrdDto {
   @IsNotEmpty({ message: "conversationId 不能为空" })
   conversationId!: string;
 }
+
+export class CancelVibeRunDto {
+  @IsOptional()
+  @IsString({ message: "停止原因格式不正确" })
+  reason?: string;
+}

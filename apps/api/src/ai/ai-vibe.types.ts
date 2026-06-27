@@ -505,6 +505,7 @@ export type VibeStreamEventType =
   | "knowledge_candidate_created"
   | "export_ready"
   | "run_completed"
+  | "run_canceled"
   | "run_failed";
 
 export type VibeStreamLegacyEventType =
@@ -533,6 +534,7 @@ export type VibeStreamEventPhase =
   | "started"
   | "progress"
   | "completed"
+  | "canceled"
   | "failed"
   | "created"
   | "updated"

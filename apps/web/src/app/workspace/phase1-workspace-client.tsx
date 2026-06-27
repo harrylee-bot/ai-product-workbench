@@ -99,6 +99,13 @@ type DeleteConversationResponse = {
   nextConversation?: Phase1Conversation | null;
 };
 
+type CancelRunResponse = {
+  success?: boolean;
+  runId?: string;
+  status?: string;
+  message?: string;
+};
+
 type Phase1WorkspaceState = {
   selectedProjectId: string;
   selectedConversationId: string;
@@ -153,6 +160,7 @@ export function Phase1WorkspaceClient() {
 function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
   const runStreamAbortRef = useRef<AbortController | null>(null);
+  const cancelRequestedRunIdsRef = useRef<Set<string>>(new Set());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewWidth, setPreviewWidth] = useState(WORKSPACE_PREVIEW_DEFAULT_WIDTH);
   const [resizingPreview, setResizingPreview] = useState(false);
@@ -240,23 +248,31 @@ function Phase1WorkspaceInner() {
         (event) => {
           const eventType = event.eventType ?? event.type;
           const payload = payloadRecord(event);
-          setRunState((current) => reduceRunState(current ?? createInitialRunState(runId), event));
+          const cancelRequested = cancelRequestedRunIdsRef.current.has(runId);
+          const canceledEvent = isRunCanceledEvent(eventType);
 
-          if (eventType === "prd_updated" && payload) {
+          if (!cancelRequested || canceledEvent) {
+            setRunState((current) => reduceRunState(current ?? createInitialRunState(runId), event));
+          }
+
+          if (!cancelRequested && eventType === "prd_updated" && payload) {
             setArtifactPreview({ prdPreview: normalizePrdPreview(payload) });
           }
 
-          if (eventType === "prototype_updated" && payload) {
+          if (!cancelRequested && eventType === "prototype_updated" && payload) {
             const artifactPayload = asRecord(payload.prototypeArtifact) ?? payload;
             setArtifactPreview({ prototypePreview: normalizePrototypePreview(artifactPayload) });
           }
 
-          if (eventType === "run_completed" || eventType === "run_failed") {
+          if (eventType === "run_completed" || eventType === "run_failed" || canceledEvent) {
             terminalEventSeen = true;
+            if (canceledEvent) {
+              cancelRequestedRunIdsRef.current.delete(runId);
+            }
             const result = payload;
             const prdPayload = asRecord(result?.prdDocument);
             const prototypePayload = asRecord(result?.prototypeArtifact);
-            if (prdPayload || prototypePayload) {
+            if (!cancelRequested && (prdPayload || prototypePayload)) {
               setArtifactPreview({
                 prdPreview: prdPayload ? normalizePrdPreview(prdPayload) : undefined,
                 prototypePreview: prototypePayload ? normalizePrototypePreview(prototypePayload) : undefined,
@@ -402,6 +418,48 @@ function Phase1WorkspaceInner() {
     },
     onError: (error) => {
       showError(error, "确认原型失败");
+    },
+  });
+
+  const cancelRun = useMutation({
+    mutationFn: async (input: { runId: string; conversationId: string }) => {
+      const response = await apiRequest<CancelRunResponse>(`/ai/vibe/runs/${encodeURIComponent(input.runId)}/cancel`, {
+        method: "POST",
+      });
+      return { ...input, response };
+    },
+    onMutate: ({ runId }) => {
+      cancelRequestedRunIdsRef.current.add(runId);
+      setRunState((current) => current
+        ? {
+            ...current,
+            currentLabel: "正在停止执行...",
+            summary: "正在停止执行。停止后会保留已收到的步骤和工具事件。",
+          }
+        : current);
+    },
+    onSuccess: async ({ runId, conversationId, response }) => {
+      cancelRequestedRunIdsRef.current.delete(runId);
+      runStreamAbortRef.current?.abort();
+      setActiveRunId(null);
+      setRunState((current) => markRunCanceled(
+        current ?? createInitialRunState(runId),
+        runId,
+        asText(response.message) || "已停止。你可以继续输入新的消息。",
+      ));
+      await invalidateConversationQueries(queryClient, conversationId);
+    },
+    onError: (error, { runId }) => {
+      cancelRequestedRunIdsRef.current.delete(runId);
+      setRunState((current) => current
+        ? appendRunConnectionNotice(
+            current,
+            runId,
+            `停止执行失败，当前执行可能仍在继续。${formatErrorMessage(error)}`,
+            "warning",
+          )
+        : current);
+      showError(error, "停止执行失败");
     },
   });
 
@@ -561,9 +619,19 @@ function Phase1WorkspaceInner() {
         sidebarCollapsed={sidebarCollapsed}
         disabled={conversationsQuery.isLoading}
         sending={sendMessage.isPending || Boolean(activeRunId)}
+        stoppingRun={cancelRun.isPending}
         creatingConversation={createConversation.isPending}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         onCreateConversation={() => void createConversation.mutate()}
+        onStopRun={activeRunId
+          ? async () => {
+              if (cancelRun.isPending) return;
+              await cancelRun.mutateAsync({
+                runId: activeRunId,
+                conversationId: selectedConversationId,
+              });
+            }
+          : undefined}
         confirmingPrd={confirmPrd.isPending}
         onConfirmPrd={async () => {
           await confirmPrd.mutateAsync();
@@ -812,6 +880,51 @@ function createInitialRunState(runId: string): VibeRunView {
   };
 }
 
+function isRunCanceledEvent(eventType: string) {
+  return eventType === "run_canceled" || eventType === "run_cancelled";
+}
+
+async function invalidateConversationQueries(queryClient: QueryClient, conversationId: string) {
+  await Promise.all([
+    conversationId
+      ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", conversationId] })
+      : Promise.resolve(),
+    conversationId
+      ? queryClient.invalidateQueries({ queryKey: ["phase1-conversation", conversationId] })
+      : Promise.resolve(),
+    queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
+  ]);
+}
+
+function markRunCanceled(state: VibeRunView, runId: string, message?: string): VibeRunView {
+  const summary = message || "已停止。你可以继续输入新的消息。";
+  const next: VibeRunView = {
+    ...state,
+    status: "canceled",
+    currentLabel: summary,
+    summary,
+    errorMessage: undefined,
+    steps: state.steps.map((step) => step.status === "running" || step.status === "pending"
+      ? { ...step, status: "canceled", message: step.status === "running" ? "已停止" : step.message }
+      : step),
+  };
+  const id = `${runId}:run-canceled`;
+  return appendDebugEvent(
+    appendTimelineItem(next, {
+      id,
+      text: summary,
+      status: "done",
+    }),
+    {
+      id: `${id}:debug`,
+      title: "本轮已停止",
+      body: "用户已停止当前执行。前端会保留已收到的步骤、工具调用和事件，方便继续调试流程。",
+      status: "done",
+      type: "run_canceled",
+    },
+  );
+}
+
 function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunView {
   const eventType = event.eventType ?? event.type;
   const payload = payloadRecord(event);
@@ -911,6 +1024,14 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
       next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
     }
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step);
+  }
+
+  if (isRunCanceledEvent(eventType)) {
+    next = markRunCanceled(
+      next,
+      current.runId ?? "run",
+      event.content ?? metaSummary ?? asText(payload?.message) ?? "已停止。你可以继续输入新的消息。",
+    );
   }
 
   if (eventType === "run_failed") {
@@ -1060,6 +1181,10 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
     return timelineItem(id, step, "done", state.summary ?? "本轮执行已完成。");
   }
 
+  if (isRunCanceledEvent(eventType)) {
+    return timelineItem(id, step, "done", state.summary ?? "已停止。你可以继续输入新的消息。");
+  }
+
   if (eventType === "run_failed") {
     return timelineItem(id, step, "failed", state.errorMessage ?? "本轮执行失败，请查看失败原因后重试。");
   }
@@ -1101,6 +1226,8 @@ function debugEventTitle(eventType: string, step?: string) {
     knowledge_candidate_created: "知识候选生成",
     export_ready: "导出就绪",
     run_completed: "本轮结束",
+    run_canceled: "本轮已停止",
+    run_cancelled: "本轮已停止",
     run_failed: "本轮失败",
   };
   return stepTitle ? `${eventLabels[eventType] ?? eventType}：${stepTitle}` : eventLabels[eventType] ?? eventType;
@@ -1109,7 +1236,7 @@ function debugEventTitle(eventType: string, step?: string) {
 function debugEventStatus(eventType: string): VibeRunDebugEvent["status"] {
   if (eventType.endsWith("_failed") || eventType === "run_failed" || eventType === "step_failed") return "failed";
   if (eventType.endsWith("_started") || eventType === "step_started") return "running";
-  if (eventType.endsWith("_completed") || eventType.endsWith("_updated") || eventType.endsWith("_created") || eventType === "run_completed" || eventType === "export_ready") return "done";
+  if (eventType.endsWith("_completed") || eventType.endsWith("_updated") || eventType.endsWith("_created") || eventType === "run_completed" || eventType === "export_ready" || isRunCanceledEvent(eventType)) return "done";
   return "info";
 }
 
@@ -1155,6 +1282,11 @@ function debugEventBody(
     const nextActionType = asText(asRecord(payload?.nextAction)?.type);
     lines.push(`终态动作：${nextActionLabel(nextActionType)}。`);
     lines.push(`当前摘要：${state.summary || "本轮执行已到达业务终态。"}`);
+  }
+
+  if (isRunCanceledEvent(eventType)) {
+    lines.push(`终态动作：已停止。`);
+    lines.push(`当前摘要：${state.summary || "用户已停止当前执行。"}`);
   }
 
   if (eventType === "run_failed") {

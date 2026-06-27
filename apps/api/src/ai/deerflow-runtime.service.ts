@@ -79,6 +79,7 @@ type DeerFlowRunInput = {
   previewMode?: string;
   resumeReason?: string;
   productDesignState?: unknown;
+  signal?: AbortSignal;
   onEvent?: (event: DeerFlowRuntimeEvent) => Promise<void> | void;
 };
 
@@ -103,7 +104,7 @@ export class DeerFlowRuntimeService {
 
   async runTurn(input: DeerFlowRunInput): Promise<DeerFlowTurnResult> {
     const threadId = await this.ensureThread(input);
-    const uploads = await this.uploadAttachments(threadId, input.attachmentFiles ?? []);
+    const uploads = await this.uploadAttachments(threadId, input.attachmentFiles ?? [], input.signal);
     const runInput = { ...input, deerFlowUploads: uploads };
     const rawEvents: DeerFlowRuntimeEvent[] = [];
     let assistantText = "";
@@ -129,12 +130,12 @@ export class DeerFlowRuntimeService {
     });
 
     if (!finalState) {
-      finalState = await this.getThreadState(threadId).catch(() => undefined);
+      finalState = await this.getThreadState(threadId, input.signal).catch(() => undefined);
     }
 
     const visibleAssistantText = assistantText.trim() || extractAssistantTextFromFinalState(finalState);
     const finalAction = extractFinalAction(visibleAssistantText, finalState);
-    const artifacts = await this.resolveArtifacts(threadId, finalAction.artifacts ?? []);
+    const artifacts = await this.resolveArtifacts(threadId, finalAction.artifacts ?? [], input.signal);
     if (artifacts.length) {
       await input.onEvent?.({
         event: "gateway-artifacts",
@@ -165,7 +166,7 @@ export class DeerFlowRuntimeService {
       aiProductWorkbenchConversationId: input.conversationId,
       aiProductWorkbenchUserId: input.userId,
       source: "ai-product-workbench",
-    });
+    }, input.signal);
 
     try {
       const created = await this.prisma.deerFlowThreadBinding.create({
@@ -189,11 +190,11 @@ export class DeerFlowRuntimeService {
     }
   }
 
-  private async createThread(metadata: Record<string, unknown>) {
+  private async createThread(metadata: Record<string, unknown>, signal?: AbortSignal) {
     const response = await this.requestJson<ThreadCreateResponse>(threadCreatePath(), {
       method: "POST",
       body: JSON.stringify({ metadata }),
-    });
+    }, signal);
     const threadId = response.thread_id ?? response.threadId;
     if (!threadId) {
       throw new Error("DeerFlow thread 创建成功但未返回 thread_id");
@@ -210,7 +211,7 @@ export class DeerFlowRuntimeService {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify(buildRunRequest(input)),
-    });
+    }, input.signal);
     if (!response.ok) {
       throw new Error(`DeerFlow run stream 请求失败：${response.status} ${await safeResponseText(response)}`);
     }
@@ -219,11 +220,12 @@ export class DeerFlowRuntimeService {
     }
 
     await readSse(response.body, async (event) => {
+      if (input.signal?.aborted) return;
       await onEvent(normalizeDeerFlowEvent(event.event, event.data));
     });
   }
 
-  private async uploadAttachments(threadId: string, attachments: RuntimeAttachmentFile[]) {
+  private async uploadAttachments(threadId: string, attachments: RuntimeAttachmentFile[], signal?: AbortSignal) {
     if (!attachments.length) return [];
     if (!readBooleanEnv("DEERFLOW_UPLOADS_ENABLED", true)) return [];
 
@@ -240,7 +242,7 @@ export class DeerFlowRuntimeService {
     const response = await fetchWithTimeout(gatewayUrl(uploadPath(threadId)), {
       method: "POST",
       body: formData,
-    });
+    }, signal);
     if (!response.ok) {
       throw new Error(`DeerFlow upload 请求失败：${response.status} ${await safeResponseText(response)}`);
     }
@@ -263,7 +265,7 @@ export class DeerFlowRuntimeService {
     }));
   }
 
-  private async resolveArtifacts(threadId: string, artifacts: DeerFlowArtifactReference[]) {
+  private async resolveArtifacts(threadId: string, artifacts: DeerFlowArtifactReference[], signal?: AbortSignal) {
     const limit = readNumberEnv("DEERFLOW_ARTIFACT_MAX_INLINE_BYTES", 2_000_000);
     const resolved: DeerFlowResolvedArtifact[] = [];
     for (const artifact of artifacts) {
@@ -273,7 +275,7 @@ export class DeerFlowRuntimeService {
       try {
         const response = await fetchWithTimeout(gatewayUrl(artifactPathFor(threadId, artifactPath)), {
           method: "GET",
-        });
+        }, signal);
         if (!response.ok) {
           resolved.push({
             ...artifact,
@@ -321,18 +323,18 @@ export class DeerFlowRuntimeService {
     return resolved;
   }
 
-  private async getThreadState(threadId: string) {
-    return this.requestJson(threadStatePath(threadId), { method: "GET" });
+  private async getThreadState(threadId: string, signal?: AbortSignal) {
+    return this.requestJson(threadStatePath(threadId), { method: "GET" }, signal);
   }
 
-  private async requestJson<T>(path: string, init: RequestInit): Promise<T> {
+  private async requestJson<T>(path: string, init: RequestInit, signal?: AbortSignal): Promise<T> {
     const response = await fetchWithTimeout(langGraphUrl(path), {
       ...init,
       headers: {
         ...jsonHeaders(),
         ...(init.headers ?? {}),
       },
-    });
+    }, signal);
     if (!response.ok) {
       throw new Error(`DeerFlow 请求失败：${response.status} ${await safeResponseText(response)}`);
     }
@@ -736,16 +738,20 @@ function jsonHeaders() {
   return { "content-type": "application/json", accept: "application/json, text/event-stream" };
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit) {
+async function fetchWithTimeout(url: string, init: RequestInit, signal?: AbortSignal) {
   const timeoutMs = readNumberEnv("DEERFLOW_TIMEOUT_MS", 600_000);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
   try {
     return await fetch(url, {
       ...init,
       signal: controller.signal,
     });
   } finally {
+    signal?.removeEventListener("abort", abort);
     clearTimeout(timer);
   }
 }

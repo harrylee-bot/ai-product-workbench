@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   Paperclip,
   Plus,
+  Square,
   Sparkles,
   X,
 } from "lucide-react";
@@ -28,10 +29,14 @@ type ComposerAttachment = {
 export function ChatComposer({
   disabled,
   sending,
+  stopping,
+  onStop,
   onSend,
 }: {
   disabled?: boolean;
   sending?: boolean;
+  stopping?: boolean;
+  onStop?: () => Promise<void> | void;
   onSend: (content: string) => Promise<void> | void;
 }) {
   const menuId = useId();
@@ -43,9 +48,22 @@ export function ChatComposer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [focused, setFocused] = useState(false);
   const canSend = Boolean(draft.trim() || attachments.length) && !disabled && !sending;
-  const sendTitle = sending ? "生成中，请稍候" : canSend ? "发送消息" : "请输入内容或添加附件";
+  const canStop = Boolean(sending && onStop && !stopping);
+  const sendTitle = sending
+    ? stopping
+      ? "正在停止执行"
+      : canStop
+        ? "停止执行"
+        : "正在提交消息"
+    : canSend
+      ? "发送消息"
+      : "请输入内容或添加附件";
   const disabledNotice = sending
-    ? "正在执行当前对话，当前消息处理完成后可继续输入。"
+    ? stopping
+      ? "正在停止执行。已收到的步骤和工具事件会保留，停止后可继续输入。"
+      : onStop
+        ? "正在执行，可停止。步骤和工具事件会持续更新，停止后可继续输入。"
+        : "正在提交消息，拿到执行编号后会显示步骤和工具事件。"
     : disabled
       ? "正在加载对话，稍后可继续输入。"
       : "";
@@ -207,17 +225,23 @@ export function ChatComposer({
             </span>
           </div>
           <Button
-            type="submit"
+            type={sending ? "button" : "submit"}
             size="icon"
-            disabled={!canSend}
-            aria-label={sending ? "生成中" : "发送"}
+            disabled={sending ? !canStop : !canSend}
+            aria-label={sending ? (canStop ? "停止执行" : "正在提交消息") : "发送"}
             title={sendTitle}
+            onClick={sending ? () => void onStop?.() : undefined}
             className={[
               "h-9 w-9 rounded-full px-0",
-              canSend ? "shadow-[var(--shadow-control)]" : "",
+              canSend || canStop ? "shadow-[var(--shadow-control)]" : "",
+              sending ? "bg-gray-950 text-white hover:bg-gray-800" : "",
             ].join(" ")}
           >
-            {sending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+            {sending ? (
+              stopping || !canStop
+                ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                : <Square className="h-3.5 w-3.5 fill-current" />
+            ) : <ArrowUp className="h-4 w-4" />}
           </Button>
         </div>
       </div>

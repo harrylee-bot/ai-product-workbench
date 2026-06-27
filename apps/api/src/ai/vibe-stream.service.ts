@@ -175,6 +175,8 @@ function classifyStreamEvent(type: VibeStreamEventType): {
       return { category: "export", phase: "completed" };
     case "run_completed":
       return { category: "run", phase: "completed" };
+    case "run_canceled":
+      return { category: "run", phase: "canceled" };
     case "run_failed":
       return { category: "run", phase: "failed" };
   }
@@ -284,7 +286,13 @@ function buildPayloadMeta(
       ?? text(qaReport?.status)
       ?? text(record?.status)
       ?? text(record?.level)
-      ?? (type === "run_failed" ? "failed" : type === "run_completed" ? "completed" : undefined),
+      ?? (type === "run_failed"
+        ? "failed"
+        : type === "run_canceled"
+          ? "cancelled"
+          : type === "run_completed"
+            ? "completed"
+            : undefined),
     title:
       text(record?.title)
       ?? text(record?.fileName)

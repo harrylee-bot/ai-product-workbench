@@ -37,8 +37,8 @@ export class RuntimeRunLogService {
     const run = await this.prisma.runtimeRunLog.findUnique({ where: { id: runId } });
     const endedAt = new Date();
 
-    await this.prisma.runtimeRunLog.update({
-      where: { id: runId },
+    const update = await this.prisma.runtimeRunLog.updateMany({
+      where: { id: runId, status: RuntimeRunStatus.running },
       data: {
         status: RuntimeRunStatus.succeeded,
         outputSummary: summarizeText(outputSummary),
@@ -47,14 +47,15 @@ export class RuntimeRunLogService {
         durationMs: run ? endedAt.getTime() - run.startedAt.getTime() : undefined,
       },
     });
+    return update.count > 0;
   }
 
   async failRun(runId: string, error: unknown) {
     const run = await this.prisma.runtimeRunLog.findUnique({ where: { id: runId } });
     const endedAt = new Date();
 
-    await this.prisma.runtimeRunLog.update({
-      where: { id: runId },
+    const update = await this.prisma.runtimeRunLog.updateMany({
+      where: { id: runId, status: RuntimeRunStatus.running },
       data: {
         status: RuntimeRunStatus.failed,
         errorMessage: summarizeText(error instanceof Error ? error.message : "AI 执行失败"),
@@ -62,6 +63,61 @@ export class RuntimeRunLogService {
         durationMs: run ? endedAt.getTime() - run.startedAt.getTime() : undefined,
       },
     });
+    return update.count > 0;
+  }
+
+  async cancelRun(input: {
+    runId: string;
+    canceledBy: string;
+    reason: string;
+  }) {
+    const run = await this.prisma.runtimeRunLog.findUnique({ where: { id: input.runId } });
+    if (!run) return null;
+
+    if (run.status !== RuntimeRunStatus.running) {
+      return { changed: false, run };
+    }
+
+    const endedAt = new Date();
+    const update = await this.prisma.runtimeRunLog.updateMany({
+      where: { id: input.runId, status: RuntimeRunStatus.running },
+      data: {
+        status: RuntimeRunStatus.cancelled,
+        outputSummary: summarizeText("用户已停止执行"),
+        result: toInputJson({
+          canceled: true,
+          status: RuntimeRunStatus.cancelled,
+          reason: input.reason,
+          canceledBy: input.canceledBy,
+          messageStatus: "not_created",
+        }),
+        errorMessage: null,
+        endedAt,
+        durationMs: endedAt.getTime() - run.startedAt.getTime(),
+      },
+    });
+
+    const current = update.count > 0
+      ? await this.prisma.runtimeRunLog.findUnique({ where: { id: input.runId } })
+      : await this.prisma.runtimeRunLog.findUnique({ where: { id: input.runId } });
+
+    return { changed: update.count > 0, run: current ?? run };
+  }
+
+  async isRunCancelled(runId: string) {
+    const run = await this.prisma.runtimeRunLog.findUnique({
+      where: { id: runId },
+      select: { status: true },
+    });
+    return run?.status === RuntimeRunStatus.cancelled;
+  }
+
+  async isRunRunning(runId: string) {
+    const run = await this.prisma.runtimeRunLog.findUnique({
+      where: { id: runId },
+      select: { status: true },
+    });
+    return run?.status === RuntimeRunStatus.running;
   }
 
   async createStep(input: {
