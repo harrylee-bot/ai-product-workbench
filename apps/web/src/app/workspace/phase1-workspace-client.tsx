@@ -839,7 +839,7 @@ function createInitialRunState(runId: string): VibeRunView {
     timeline: [
       {
         id: `${runId}:stream-connected`,
-        text: "我已收到你的请求，接下来会按执行事件逐步播报判断过程。",
+        text: "我已收到你的请求，接下来会记录节点状态和产物结果。",
         status: "running",
       },
     ],
@@ -1135,7 +1135,7 @@ function debugEventTitle(eventType: string, step?: string) {
     step_started: "步骤开始",
     step_completed: "步骤完成",
     step_failed: "步骤失败",
-    message_delta: "过程消息",
+    message_delta: "状态消息",
     state_updated: "产品状态更新",
     state_version_created: "状态版本保存",
     prd_updated: "PRD 更新",
@@ -1179,8 +1179,8 @@ function debugEventBody(
   }
 
   if (eventType === "step_started" && event.step) {
-    lines.push(`执行思路：${stepThinkingText(event.step)}`);
-    lines.push(`下一步：等待该节点产出结果，再决定是否继续、澄清或阻断。`);
+    lines.push(`节点目标：${stepThinkingText(event.step)}`);
+    lines.push(`下一步：等待该节点产出结果，再更新运行状态。`);
   }
 
   if (eventType === "step_completed" && event.step) {
@@ -1331,20 +1331,20 @@ function toChineseProcessText(text: string) {
 
 function stepStartedText(step: string, title?: string) {
   const labels: Record<string, string> = {
-    intent_detection: "执行思路：先判断这是新需求、继续生成、导出还是普通问答。",
-    knowledge_retrieval: "执行思路：按意图检索强规则、默认规则、案例和可用 skills，后续生成必须参考这些依据。",
-    context_fetch: "执行思路：只读取项目状态、历史消息、PRD、原型、选区和附件，不做业务判断。",
-    requirement_analysis: "执行思路：把用户明确事实、知识库事实和 AI 假设分开，检查是否缺少必须澄清的信息。",
-    requirement_packaging: "执行思路：把用户事实、知识事实、上下文事实、AI 假设、冲突和 trace refs 合成同一份需求包。",
-    product_planning: "执行思路：消费同一份需求包，把它拆成页面、功能、状态、范围和风险，决定本轮要生成或修改什么。",
-    requirement_validation: "执行思路：检查需求包、计划、选区和版本条件是否完整一致，决定能否进入生成。",
-    safety_check: "执行思路：检查提示注入、密钥泄漏、隐私、越权、真实外部动作和强规则冲突。",
-    product_design: "执行思路：把方案写入产品状态，后续 PRD 和原型都从这个唯一事实源派生。",
-    prd_generation: "执行思路：只根据产品状态渲染 PRD，不临时编造状态里没有的业务规则。",
-    prototype_design: "执行思路：把产品状态转成页面、组件、导航和交互结构，还不生成 HTML。",
-    prototype_code_generation: "执行思路：根据原型结构生成可预览 HTML，保持单文件、无真实接口调用。",
-    qa_check: "执行思路：检查产品状态、PRD、原型和规则是否一致，只报告问题，不直接改产物。",
-    knowledge_extraction: "执行思路：只从稳定产物中抽取可复用知识候选，不直接写入正式知识库。",
+    intent_detection: "节点目标：识别这是新需求、继续生成、导出还是普通问答。",
+    knowledge_retrieval: "节点目标：按意图检索强规则、默认规则、案例和可用 skills。",
+    context_fetch: "节点目标：读取项目状态、历史消息、PRD、原型、选区和附件。",
+    requirement_analysis: "节点目标：整理用户事实、知识事实、系统上下文、假设和缺失项。",
+    requirement_packaging: "节点目标：合成 Planner、Validator 和 Safety Check 共同消费的需求包。",
+    product_planning: "节点目标：拆出页面、功能、状态、范围、风险和下游执行顺序。",
+    requirement_validation: "节点目标：检查需求包、计划、选区和版本条件是否完整一致。",
+    safety_check: "节点目标：检查提示注入、密钥泄漏、隐私、越权和强规则冲突。",
+    product_design: "节点目标：把方案写入产品状态，作为 PRD 和原型的事实源。",
+    prd_generation: "节点目标：根据产品状态渲染结构化 PRD。",
+    prototype_design: "节点目标：把产品状态转成页面、组件、导航和交互结构。",
+    prototype_code_generation: "节点目标：根据原型结构生成可预览 HTML。",
+    qa_check: "节点目标：检查产品状态、PRD、原型和规则是否一致。",
+    knowledge_extraction: "节点目标：从稳定产物中抽取可复用知识候选。",
   };
   return labels[step] ?? `开始执行：${title ?? step}。`;
 }
