@@ -305,13 +305,9 @@ function AgentActivityFeed({
 
   const timeline = (runState.timeline ?? []).slice(-12);
   const debugEvents = (runState.debugEvents ?? []).slice(-10);
-  const artifactEvents = timeline.filter((item) =>
-    item.step === "prd_generation" || item.step === "prototype_code_generation" || item.step === "qa_check" || /PRD|原型|HTML|QA|导出/.test(item.text)
-  );
+  const artifactEvents = timeline.filter(isProductChangeEvent);
   const visibleSteps = visibleRunSteps(runState);
-  const productChangeItems = artifactEvents.length
-    ? artifactEvents.slice(-4)
-    : visibleProductChangeItems(runState);
+  const productChangeItems = artifactEvents.slice(-4);
 
   return (
     <div className="mr-auto w-full max-w-[min(96%,_1100px)] space-y-2">
@@ -326,7 +322,7 @@ function AgentActivityFeed({
                 <div className="truncate text-sm font-semibold text-gray-950">深度思考</div>
                 <Badge tone={runStatusTone(runState.status)}>{runStatusLabel(runState.status)}</Badge>
               </div>
-              <div className="mt-1 text-sm leading-6 text-gray-600">
+              <div className="mt-1 break-words text-sm leading-6 text-gray-600">
                 {runState.errorMessage || runState.summary || runState.currentLabel || "正在整理任务上下文和执行路径。"}
               </div>
             </div>
@@ -342,7 +338,6 @@ function AgentActivityFeed({
       </div>
 
       <AgentStepDisclosure
-        runState={runState}
         steps={visibleSteps}
         timeline={timeline}
       />
@@ -364,11 +359,9 @@ function AgentActivityFeed({
 }
 
 function AgentStepDisclosure({
-  runState,
   steps,
   timeline,
 }: {
-  runState: VibeRunView;
   steps: VibeRunStepView[];
   timeline: VibeRunTimelineItem[];
 }) {
@@ -445,7 +438,7 @@ function ActivityRow({ item }: { item: VibeRunTimelineItem }) {
     <div className="flex gap-2 rounded-[var(--radius-control)] border border-gray-200 bg-gray-50 px-3 py-2">
       <TimelineStatusIcon status={item.status} />
       <div className="min-w-0 flex-1">
-        <div className="text-sm leading-5 text-gray-800">{item.text}</div>
+        <div className="break-words text-sm leading-5 text-gray-800">{item.text}</div>
         <div className="mt-1 text-xs text-gray-400">{item.step || "runtime"}</div>
       </div>
     </div>
@@ -460,7 +453,7 @@ function ToolEventRow({ item }: { item: VibeRunDebugEvent }) {
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800">{item.title}</span>
         <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-400">{item.type}</span>
       </summary>
-      <div className="mt-2 whitespace-pre-wrap text-xs leading-5 text-gray-500">{item.body}</div>
+      <div className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-gray-500">{item.body}</div>
     </details>
   );
 }
@@ -470,7 +463,7 @@ function ArtifactEventRow({ item }: { item: VibeRunTimelineItem }) {
   return (
     <div className="flex gap-2 rounded-[var(--radius-control)] border border-gray-200 bg-gray-50 px-3 py-2">
       <Icon className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
-      <div className="min-w-0 flex-1 text-sm leading-5 text-gray-800">{item.text}</div>
+      <div className="min-w-0 flex-1 break-words text-sm leading-5 text-gray-800">{item.text}</div>
     </div>
   );
 }
@@ -496,17 +489,15 @@ function visibleRunSteps(runState: VibeRunView): VibeRunStepView[] {
   ];
 }
 
-function visibleProductChangeItems(runState: VibeRunView): VibeRunTimelineItem[] {
-  const text = runState.errorMessage || runState.summary || runState.currentLabel;
-  if (!text) return [];
-  return [
-    {
-      id: `${runState.runId ?? "run"}:product-change-summary`,
-      text,
-      status: runState.status === "failed" ? "failed" : runState.status === "running" ? "running" : "done",
-      step: "answer",
-    },
-  ];
+function isProductChangeEvent(item: VibeRunTimelineItem) {
+  return (
+    item.step === "product_design" ||
+    item.step === "prd_generation" ||
+    item.step === "prototype_design" ||
+    item.step === "prototype_code_generation" ||
+    item.step === "qa_check" ||
+    item.step === "knowledge_extraction"
+  );
 }
 
 function RunFinalActions({ runState }: { runState: VibeRunView }) {
