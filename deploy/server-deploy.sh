@@ -23,8 +23,8 @@ APP_HOST="${APP_HOST:-8.130.160.177}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 APP_PUBLIC_URL="${APP_PUBLIC_URL:-http://${APP_HOST}:3000}"
 API_PUBLIC_BASE_URL="${API_PUBLIC_BASE_URL:-http://${APP_HOST}:4000/api}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-ai_workbench}"
-JWT_SECRET="${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
+JWT_SECRET="${JWT_SECRET:-}"
 JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
 MODEL_GATEWAY_ENCRYPTION_KEY="${MODEL_GATEWAY_ENCRYPTION_KEY:-}"
 MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER="${MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER:-true}"
@@ -46,7 +46,7 @@ DEERFLOW_LANGGRAPH_URL="${DEERFLOW_LANGGRAPH_URL:-http://host.docker.internal:20
 DEERFLOW_GATEWAY_URL="${DEERFLOW_GATEWAY_URL:-http://host.docker.internal:8001}"
 DEERFLOW_ASSISTANT_ID="${DEERFLOW_ASSISTANT_ID:-lead_agent}"
 DEERFLOW_AGENT_NAME="${DEERFLOW_AGENT_NAME:-}"
-DEERFLOW_STREAM_MODE="${DEERFLOW_STREAM_MODE:-messages-tuple}"
+DEERFLOW_STREAM_MODE="${DEERFLOW_STREAM_MODE:-messages,values}"
 DEERFLOW_PLAN_MODE="${DEERFLOW_PLAN_MODE:-true}"
 DEERFLOW_THINKING_ENABLED="${DEERFLOW_THINKING_ENABLED:-true}"
 DEERFLOW_SUBAGENT_ENABLED="${DEERFLOW_SUBAGENT_ENABLED:-true}"
@@ -54,6 +54,34 @@ DEERFLOW_MAX_CONCURRENT_SUBAGENTS="${DEERFLOW_MAX_CONCURRENT_SUBAGENTS:-3}"
 DEERFLOW_TIMEOUT_MS="${DEERFLOW_TIMEOUT_MS:-600000}"
 DEERFLOW_UPLOADS_ENABLED="${DEERFLOW_UPLOADS_ENABLED:-true}"
 DEERFLOW_ARTIFACT_MAX_INLINE_BYTES="${DEERFLOW_ARTIFACT_MAX_INLINE_BYTES:-2000000}"
+
+# ===== 启动期密钥 fail-fast：拒绝以弱默认/空密钥部署生产 =====
+WEAK_SECRET_MARKERS="replace-with|change-me|change-before-production|dev-ai-product-workbench|ai_workbench"
+
+is_weak_secret() {
+  local value="$1"
+  if [ -z "$value" ]; then return 0; fi
+  if echo "$value" | grep -qiE "$WEAK_SECRET_MARKERS"; then return 0; fi
+  return 1
+}
+
+fail_if_weak() {
+  local name="$1"
+  local value="$2"
+  if is_weak_secret "$value"; then
+    echo "ERROR: ${name} 未设置或为弱默认值。请在 ${APP_DIR}/.env 中配置强随机值后再部署。" >&2
+    echo "  生成 JWT_SECRET / MODEL_GATEWAY_ENCRYPTION_KEY 示例：openssl rand -base64 32" >&2
+    exit 1
+  fi
+}
+
+fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+fail_if_weak "JWT_SECRET" "$JWT_SECRET"
+fail_if_weak "MODEL_GATEWAY_ENCRYPTION_KEY" "$MODEL_GATEWAY_ENCRYPTION_KEY"
+
+if [ "${DEERFLOW_ENABLED}" != "true" ]; then
+  echo "WARNING: DEERFLOW_ENABLED 非 true，自然语言→PRD→原型链路将不可用（仅返回停用文案）。" >&2
+fi
 
 cd "$APP_DIR"
 

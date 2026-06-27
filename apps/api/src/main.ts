@@ -3,14 +3,20 @@ import { BadRequestException, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { HttpExceptionFilter } from "./common/http-exception.filter";
+import { validateSecrets } from "./common/secret-config";
 
-function corsOrigin() {
+function corsOrigin(): string | string[] {
+  // 不再回退 true（允许任意来源）。WEB_ORIGIN 必须显式配置，否则启动失败。
   const origin = process.env.WEB_ORIGIN;
-  if (!origin) return true;
+  if (!origin) {
+    throw new Error("Missing WEB_ORIGIN. Set it to the web app origin(s) in .env (comma-separated).");
+  }
   return origin.split(",").map((item) => item.trim());
 }
 
 async function bootstrap() {
+  validateSecrets();
+
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix("api");

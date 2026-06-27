@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
+import { getModelGatewayEncryptionKey } from "../common/secret-config";
 
 @Injectable()
 export class ApiKeyEncryptionService {
@@ -46,25 +47,9 @@ export class ApiKeyEncryptionService {
   }
 
   private getKey() {
-    const configured = process.env.MODEL_GATEWAY_ENCRYPTION_KEY?.trim();
-    if (configured) {
-      const base64 = this.tryBase64(configured);
-      if (base64?.length === 32) return base64;
-
-      if (configured.length === 64 && /^[a-f0-9]+$/i.test(configured)) {
-        return Buffer.from(configured, "hex");
-      }
-    }
-
-    const secret = configured || process.env.JWT_SECRET || "ai-product-workbench-dev-secret";
-    return crypto.createHash("sha256").update(secret).digest();
-  }
-
-  private tryBase64(value: string) {
-    try {
-      return Buffer.from(value, "base64");
-    } catch {
-      return null;
-    }
+    // 不再回退到 JWT_SECRET 或硬编码 dev secret。
+    // MODEL_GATEWAY_ENCRYPTION_KEY 必须为合法 32 字节 base64 或 64 位 hex，否则启动期 fail-fast。
+    // 密钥派生与 JWT_SECRET 解耦：轮换 JWT_SECRET 不会影响已加密 provider key 的可解密性。
+    return getModelGatewayEncryptionKey();
   }
 }

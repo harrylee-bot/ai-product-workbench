@@ -8,6 +8,11 @@ export class SystemController {
       ok: true,
       service: "ai-product-workbench-api",
       phase: "deerflow-first-runtime",
+      deerflow: {
+        // 使命关键开关：DEERFLOW_ENABLED=false 时自然语言→PRD→原型链路断开。
+        // 部署监控应据此告警。
+        enabled: process.env.DEERFLOW_ENABLED === "true",
+      },
       modules: [
         "auth",
         "admin-dashboard",

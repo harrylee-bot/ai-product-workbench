@@ -6,7 +6,8 @@ services:
     environment:
       POSTGRES_DB: ai_product_workbench
       POSTGRES_USER: ai_workbench
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_workbench}
+      # 必填：deploy/server-deploy.sh 启动期 fail-fast 校验，弱默认/空值拒绝部署。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -29,14 +30,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      DATABASE_URL: postgresql://ai_workbench:${POSTGRES_PASSWORD:-ai_workbench}@postgres:5432/ai_product_workbench?schema=public
-      JWT_SECRET: ${JWT_SECRET:-dev-ai-product-workbench-secret-change-before-production}
+      DATABASE_URL: postgresql://ai_workbench:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ai_product_workbench?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       API_PORT: 4000
-      WEB_ORIGIN: ${WEB_ORIGIN:-http://8.130.160.177:3000}
+      WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN must be set}
       FILE_UPLOAD_ROOT: /app/apps/api/storage/uploads
       KNOWLEDGE_VAULT_ROOT: /app/apps/api/storage/knowledge-vault
-      MODEL_GATEWAY_ENCRYPTION_KEY: ${MODEL_GATEWAY_ENCRYPTION_KEY:-}
+      MODEL_GATEWAY_ENCRYPTION_KEY: ${MODEL_GATEWAY_ENCRYPTION_KEY:?MODEL_GATEWAY_ENCRYPTION_KEY must be set}
       MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER: ${MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER:-true}
       MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS: ${MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS:-true}
       DEFAULT_MODEL_PROVIDER_NAME: ${DEFAULT_MODEL_PROVIDER_NAME:-datatoken}
@@ -48,7 +49,7 @@ services:
       DEERFLOW_GATEWAY_URL: ${DEERFLOW_GATEWAY_URL:-http://host.docker.internal:8001}
       DEERFLOW_ASSISTANT_ID: ${DEERFLOW_ASSISTANT_ID:-lead_agent}
       DEERFLOW_AGENT_NAME: ${DEERFLOW_AGENT_NAME:-}
-      DEERFLOW_STREAM_MODE: ${DEERFLOW_STREAM_MODE:-messages-tuple}
+      DEERFLOW_STREAM_MODE: ${DEERFLOW_STREAM_MODE:-messages,values}
       DEERFLOW_PLAN_MODE: ${DEERFLOW_PLAN_MODE:-true}
       DEERFLOW_THINKING_ENABLED: ${DEERFLOW_THINKING_ENABLED:-true}
       DEERFLOW_SUBAGENT_ENABLED: ${DEERFLOW_SUBAGENT_ENABLED:-true}
