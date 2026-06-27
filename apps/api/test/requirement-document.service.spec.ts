@@ -71,16 +71,6 @@ describe("PRD requirement document module", () => {
     }));
   });
 
-  it("keeps manual PRD generation disabled until the DeerFlow-first runtime is wired", async () => {
-    stateService.getCurrentState.mockResolvedValue(baseState());
-
-    await expect(service.generateForUser(user, "project-1", { mode: "draft" }))
-      .rejects.toThrow("PRD_GENERATION_DISABLED_DEERFLOW_FIRST");
-
-    expect(prisma.requirementDocument.create).not.toHaveBeenCalled();
-    expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
-  });
-
   it("saves generated documents, creates a version, and updates the project pointer", async () => {
     const state = baseState();
     const draft = prdDraft(state);

@@ -2,22 +2,13 @@ import { Body, Controller, Get, Header, Param, Post, UseGuards } from "@nestjs/c
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
-import { ConfirmPrototypeDto, GeneratePrototypeDto, GetPrototypeStateDto } from "./prototype.dto";
+import { ConfirmPrototypeDto, GetPrototypeStateDto } from "./prototype.dto";
 import { PrototypeService } from "./prototype.service";
 
 @Controller("projects/:projectId/prototype")
 @UseGuards(JwtAuthGuard)
 export class ProjectPrototypeController {
   constructor(private readonly prototypeService: PrototypeService) {}
-
-  @Post("generate")
-  generate(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
-    @Body() dto: GeneratePrototypeDto,
-  ) {
-    return this.prototypeService.generateForUser(user, projectId, dto);
-  }
 
   @Get("current")
   getCurrent(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {

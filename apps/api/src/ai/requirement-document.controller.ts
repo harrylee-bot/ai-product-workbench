@@ -3,22 +3,13 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import { DocumentCanvasService } from "./document-canvas.service";
-import { ConfirmPrdDto, GeneratePrdDto, UpdatePrdSectionDto } from "./requirement-document.dto";
+import { ConfirmPrdDto, UpdatePrdSectionDto } from "./requirement-document.dto";
 import { RequirementDocumentService } from "./requirement-document.service";
 
 @Controller("projects/:projectId/prd")
 @UseGuards(JwtAuthGuard)
 export class ProjectPrdController {
   constructor(private readonly documentService: RequirementDocumentService) {}
-
-  @Post("generate")
-  generate(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
-    @Body() dto: GeneratePrdDto,
-  ) {
-    return this.documentService.generateForUser(user, projectId, dto);
-  }
 
   @Get("current")
   getCurrent(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {

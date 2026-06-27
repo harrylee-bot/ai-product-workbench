@@ -18,6 +18,8 @@ export type DeerFlowFinalAction = {
   intent?: string;
   artifacts?: DeerFlowArtifactReference[];
   raw?: unknown;
+  /** 是否成功解析出 final action JSON 块。false 表示 DeerFlow 未产出可识别动作（静默降级为 answer）。 */
+  parsed: boolean;
 };
 
 export type DeerFlowArtifactReference = {
@@ -522,6 +524,8 @@ function extractFinalAction(assistantText: string, finalState: unknown): DeerFlo
     intent: toOptionalString(parsed?.intent),
     artifacts: extractArtifactReferences(parsed?.artifacts),
     raw: parsed ?? { finalState },
+    // parsed 为 true 仅当成功解析出 JSON 块；否则为静默降级（pipe-6：不再无声失败）。
+    parsed: Boolean(parsed),
   };
 }
 

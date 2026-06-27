@@ -87,22 +87,6 @@ export class PrototypeService {
     private readonly qaService?: QaService,
   ) {}
 
-  async generateForUser(
-    user: AuthenticatedUser,
-    projectId: string,
-    input: { productDesignStateId?: string; targetDevice?: PrototypeTargetDevice },
-  ) {
-    const project = await this.assertProjectAccess(user, projectId);
-    this.assertOwnerMutation(user, project.ownerId);
-    const state = input.productDesignStateId
-      ? await this.stateService.getStateByIdForProject(input.productDesignStateId, projectId)
-      : await this.stateService.getCurrentState(projectId);
-    if (!state) throw new NotFoundException("PROTOTYPE_STATE_NOT_FOUND");
-    assertPrototypeGenerationGate(state);
-
-    throw new BadRequestException("PROTOTYPE_GENERATION_DISABLED_DEERFLOW_FIRST");
-  }
-
   async saveGeneratedPrototype(
     state: ProductDesignState,
     prototypeSpec: PrototypeSpec,
@@ -471,17 +455,6 @@ function isArtifactFromCurrentState(artifact: PrototypeArtifactRecord, state: Pr
   if (artifact.productDesignStateId !== state.id) return false;
   if (state.prototypeSpec?.id) return artifact.prototypeSpecId === state.prototypeSpec.id;
   return artifact.productDesignStateVersion === state.version;
-}
-
-function assertPrototypeGenerationGate(state: ProductDesignState) {
-  const statusAllowsPrototype =
-    state.status === ProductDesignStateStatus.doc_confirmed ||
-    state.status === ProductDesignStateStatus.prototype_ready ||
-    state.status === ProductDesignStateStatus.confirmed;
-  const prdConfirmed = state.prdDocument?.status === RequirementDocumentStatus.confirmed;
-  if (!statusAllowsPrototype || !prdConfirmed) {
-    throw new BadRequestException("PROTOTYPE_PRD_NOT_CONFIRMED");
-  }
 }
 
 function prototypeStateRoot(

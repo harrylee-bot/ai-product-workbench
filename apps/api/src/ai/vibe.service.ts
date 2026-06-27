@@ -21,6 +21,7 @@ import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import { DeerFlowRuntimeService, type DeerFlowFinalAction } from "./deerflow-runtime.service";
+import { FinalActionApplierService } from "./final-action-applier.service";
 
 @Injectable()
 export class VibeService {
@@ -35,6 +36,7 @@ export class VibeService {
     private readonly streamService: VibeStreamService,
     private readonly documentService: RequirementDocumentService,
     private readonly deerFlowRuntime: DeerFlowRuntimeService,
+    private readonly finalActionApplier: FinalActionApplierService,
   ) {}
 
   async handleMessage(user: AuthenticatedUser, dto: HandleVibeMessageDto) {
@@ -517,6 +519,19 @@ export class VibeService {
 
     if (signal?.aborted || !(await this.runLogService.isRunRunning(input.runId))) return;
 
+    // pipe-6：finalAction 未解析时不再静默降级。若 DeerFlow 产出了 artifact 但动作块未识别，
+    // emit step_failed 告警，避免「本轮已完成」却无产物、无确认门的静默失败。
+    if (!result.finalAction.parsed && result.artifacts.length > 0) {
+      await this.streamService.emit({
+        runId: input.runId,
+        projectId: input.projectId,
+        type: "step_failed",
+        step: "requirement_packaging",
+        content: "未识别到 DeerFlow 的最终动作（final action 解析失败），本轮无确认门。",
+        data: { provider: "deerflow", finalActionParsed: false, artifactCount: result.artifacts.length },
+      });
+    }
+
     const assistantMessage = await this.messageService.createAssistantMessage({
       projectId: input.projectId,
       conversationId: input.conversationId,
@@ -534,6 +549,51 @@ export class VibeService {
       relatedRunId: input.runId,
     });
 
+    // 落库桥接（审计 P0 根因修复）：把 DeerFlow 产物写入 RequirementDocument /
+    // PrototypeArtifact / ProductDesignState，并 emit prd_updated / prototype_updated。
+    let applied: { prdDocument?: unknown; prototypeArtifact?: unknown; state?: unknown } = {};
+    try {
+      applied = await this.finalActionApplier.apply({
+        projectId: input.projectId,
+        userId: input.userId,
+        runId: input.runId,
+        finalAction: result.finalAction,
+        artifacts: result.artifacts,
+      });
+    } catch (applyError) {
+      // 落库失败不阻断 run 完成，但需可观测：emit step_failed 并记录。
+      const applyErrorMessage = applyError instanceof Error ? applyError.message : "DeerFlow 产物落库失败";
+      await this.streamService.emit({
+        runId: input.runId,
+        projectId: input.projectId,
+        type: "step_failed",
+        step: result.finalAction.type === "review_prototype" ? "prototype_code_generation" : "prd_generation",
+        content: `产物落库失败：${applyErrorMessage}`,
+        data: { provider: "deerflow", errorMessage: applyErrorMessage },
+      });
+    }
+
+    if (applied.prdDocument) {
+      await this.streamService.emit({
+        runId: input.runId,
+        projectId: input.projectId,
+        type: "prd_updated",
+        content: "PRD 已生成并更新到右侧预览区。",
+        // data 直接是 document 对象（前端 normalizePrdPreview 读 record.sections）。
+        data: applied.prdDocument,
+      });
+    }
+    if (applied.prototypeArtifact) {
+      await this.streamService.emit({
+        runId: input.runId,
+        projectId: input.projectId,
+        type: "prototype_updated",
+        content: "原型已生成并更新到右侧预览区。",
+        // data 直接是 artifact 对象（前端 asRecord(payload.prototypeArtifact) ?? payload 兜底）。
+        data: applied.prototypeArtifact,
+      });
+    }
+
     const runResult = {
       runId: input.runId,
       projectId: input.projectId,
@@ -545,6 +605,8 @@ export class VibeService {
       artifacts: result.artifacts,
       finalState: result.finalState,
       assistantMessageId: assistantMessage.id,
+      prdDocument: applied.prdDocument,
+      prototypeArtifact: applied.prototypeArtifact,
       nextAction: { type: result.finalAction.type },
     };
 

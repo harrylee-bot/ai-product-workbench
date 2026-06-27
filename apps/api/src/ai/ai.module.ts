@@ -41,6 +41,7 @@ import { ShareService } from "./share.service";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
+import { FinalActionApplierService } from "./final-action-applier.service";
 
 @Module({
   imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule],
@@ -65,6 +66,7 @@ import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
   providers: [
     VibeService,
     DeerFlowRuntimeService,
+    FinalActionApplierService,
     RuntimeRunLogService,
     VibeStreamService,
     ProductDesignStateService,

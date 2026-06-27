@@ -47,6 +47,9 @@ describe("VibeService main entry", () => {
     isEnabled: vi.fn(),
     runTurn: vi.fn(),
   };
+  const finalActionApplier = {
+    apply: vi.fn().mockResolvedValue({}),
+  };
   const service = new VibeService(
     prisma as never,
     messageService as never,
@@ -56,6 +59,7 @@ describe("VibeService main entry", () => {
     streamService as never,
     documentService as never,
     deerFlowRuntime as never,
+    finalActionApplier as never,
   );
   const user = {
     id: "user-1",

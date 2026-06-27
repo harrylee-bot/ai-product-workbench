@@ -76,33 +76,6 @@ describe("HTML prototype artifact module", () => {
     }));
   });
 
-  it("keeps manual prototype generation disabled until the DeerFlow-first runtime is wired", async () => {
-    stateService.getCurrentState.mockResolvedValue(baseState({
-      status: "doc_confirmed",
-      prdDocument: basePrd({ status: "confirmed" }),
-    }));
-
-    await expect(service.generateForUser(user, "project-1", { targetDevice: "both" }))
-      .rejects.toThrow("PROTOTYPE_GENERATION_DISABLED_DEERFLOW_FIRST");
-
-    expect(prisma.prototypeSpecRecord.create).not.toHaveBeenCalled();
-    expect(prisma.prototypeArtifact.create).not.toHaveBeenCalled();
-    expect(stateService.attachGeneratedArtifacts).not.toHaveBeenCalled();
-  });
-
-  it("still enforces the PRD confirmation gate before the disabled runtime boundary", async () => {
-    stateService.getCurrentState.mockResolvedValue(baseState({
-      status: "doc_ready",
-      prdDocument: basePrd({ status: "ready" }),
-    }));
-
-    await expect(service.generateForUser(user, "project-1", { targetDevice: "both" }))
-      .rejects.toThrow("PROTOTYPE_PRD_NOT_CONFIRMED");
-
-    expect(prisma.prototypeSpecRecord.create).not.toHaveBeenCalled();
-    expect(prisma.prototypeArtifact.create).not.toHaveBeenCalled();
-  });
-
   it("saves generated prototype, creates version, and updates project pointer", async () => {
     const state = baseState();
     const spec = prototypeSpec(state);

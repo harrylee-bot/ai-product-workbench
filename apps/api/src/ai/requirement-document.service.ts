@@ -54,21 +54,6 @@ export class RequirementDocumentService {
     private readonly qaService?: QaService,
   ) {}
 
-  async generateForUser(
-    user: AuthenticatedUser,
-    projectId: string,
-    input: { productDesignStateId?: string; mode?: "draft" | "formal" },
-  ) {
-    const project = await this.assertProjectAccess(user, projectId);
-    this.assertOwnerMutation(user, project.ownerId);
-    const state = input.productDesignStateId
-      ? await this.getStateForProject(input.productDesignStateId, projectId)
-      : await this.stateService.getCurrentState(projectId);
-    if (!state) throw new NotFoundException("PRD_STATE_NOT_FOUND");
-
-    throw new BadRequestException("PRD_GENERATION_DISABLED_DEERFLOW_FIRST");
-  }
-
   async saveGeneratedDocument(
     state: ProductDesignState,
     draft: RequirementDocumentDraft,
@@ -289,10 +274,6 @@ export class RequirementDocumentService {
         createdBy,
       },
     });
-  }
-
-  private async getStateForProject(stateId: string, projectId: string) {
-    return this.stateService.getStateByIdForProject(stateId, projectId);
   }
 
   private async assertProjectAccess(

@@ -1,6 +1,5 @@
 import { Transform } from "class-transformer";
 import {
-  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -9,17 +8,6 @@ import {
 
 const emptyToUndefined = ({ value }: { value: unknown }) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
-
-export class GeneratePrototypeDto {
-  @IsOptional()
-  @Transform(emptyToUndefined)
-  @IsString({ message: "productDesignStateId 格式不正确" })
-  productDesignStateId?: string;
-
-  @IsOptional()
-  @IsIn(["desktop", "mobile", "both"], { message: "targetDevice 不正确" })
-  targetDevice?: "desktop" | "mobile" | "both";
-}
 
 export class GetPrototypeStateDto {
   @IsString({ message: "projectId 不能为空" })
