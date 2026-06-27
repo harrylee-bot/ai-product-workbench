@@ -13,13 +13,17 @@ export class ConversationService {
   ) {}
 
   async create(user: Phase1User, dto: CreateConversationDto) {
-    const project = await this.projects.getAccessibleProject(user, dto.projectId);
+    const title = dto.title?.trim() || "新对话";
+    const projectId = dto.projectId?.trim();
+    if (!projectId) return this.createWithInternalProject(user, title);
+
+    const project = await this.projects.getAccessibleProject(user, projectId);
     const conversation = await this.prisma.$transaction(async (tx) => {
       const created = await tx.conversation.create({
         data: {
           projectId: project.id,
           ownerId: project.ownerId,
-          title: dto.title?.trim() || "新对话",
+          title,
         },
       });
 
@@ -35,6 +39,45 @@ export class ConversationService {
     });
 
     return { conversation: this.projects.toConversation(conversation) };
+  }
+
+  async list(user: Phase1User) {
+    const conversations = await this.prisma.conversation.findMany({
+      where: {
+        ownerId: user.id,
+        deletedAt: null,
+        status: { not: ConversationStatus.deleted },
+        project: {
+          deletedAt: null,
+          status: { notIn: [ProjectStatus.deleted, ProjectStatus.archived] },
+        },
+      },
+      orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+    });
+    return { items: conversations.map((conversation) => this.projects.toConversation(conversation)) };
+  }
+
+  async get(user: Phase1User, conversationId: string) {
+    const conversation = await this.getAccessibleConversation(user, conversationId);
+    const project = conversation.project;
+    const state = await this.prisma.productDesignState.findFirst({
+      where: { projectId: project.id },
+      orderBy: { version: "desc" },
+    });
+    const prd = project.currentPrdDocumentId
+      ? await this.prisma.requirementDocument.findUnique({ where: { id: project.currentPrdDocumentId } })
+      : null;
+    const prototype = project.currentPrototypeArtifactId
+      ? await this.prisma.prototypeArtifact.findUnique({ where: { id: project.currentPrototypeArtifactId } })
+      : null;
+
+    return {
+      conversation: this.projects.toConversation(conversation),
+      project: this.projects.toProject(project),
+      productDesignState: state,
+      prd,
+      prototype,
+    };
   }
 
   async listByProject(user: Phase1User, projectId: string) {
@@ -100,6 +143,35 @@ export class ConversationService {
       deletedConversationId: conversation.id,
       nextConversation: this.projects.toConversation(result),
     };
+  }
+
+  private async createWithInternalProject(user: Phase1User, title: string) {
+    const conversation = await this.prisma.$transaction(async (tx) => {
+      const project = await tx.project.create({
+        data: {
+          ownerId: user.id,
+          title,
+          status: ProjectStatus.draft,
+        },
+      });
+      const created = await tx.conversation.create({
+        data: {
+          projectId: project.id,
+          ownerId: user.id,
+          title,
+        },
+      });
+      await tx.project.update({
+        where: { id: project.id },
+        data: {
+          currentConversationId: created.id,
+          lastActivityAt: new Date(),
+        },
+      });
+      return created;
+    });
+
+    return { conversation: this.projects.toConversation(conversation) };
   }
 
   private async getAccessibleConversation(user: Phase1User, conversationId: string) {

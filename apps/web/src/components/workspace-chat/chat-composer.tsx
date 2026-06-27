@@ -44,6 +44,11 @@ export function ChatComposer({
   const [focused, setFocused] = useState(false);
   const canSend = Boolean(draft.trim() || attachments.length) && !disabled && !sending;
   const sendTitle = sending ? "生成中，请稍候" : canSend ? "发送消息" : "请输入内容或添加附件";
+  const disabledNotice = sending
+    ? "正在执行当前对话，当前消息处理完成后可继续输入。"
+    : disabled
+      ? "正在加载对话，稍后可继续输入。"
+      : "";
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -139,10 +144,10 @@ export function ChatComposer({
             ))}
           </div>
         ) : null}
-        {sending ? (
-          <div className="mx-2.5 mt-2 flex items-center gap-2 rounded-[var(--radius-control)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        {disabledNotice ? (
+          <div className="mx-2.5 mt-2 flex items-start gap-2 rounded-[var(--radius-control)] border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
             <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" />
-            <span className="min-w-0 truncate">正在执行 Vibe Coding 主链路，当前消息处理完成后可继续输入。</span>
+            <span className="min-w-0 flex-1 break-words">{disabledNotice}</span>
           </div>
         ) : null}
         <TextArea
@@ -161,8 +166,8 @@ export function ChatComposer({
           }}
           className="max-h-[148px] min-h-[82px] resize-none border-0 bg-transparent px-3 py-2.5 shadow-none outline-none hover:border-0 focus:bg-transparent focus:ring-0 disabled:bg-transparent"
         />
-        <div className="flex items-center justify-between gap-2 border-t border-gray-100 px-2.5 py-2">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-2.5 py-2">
+          <div className="flex min-w-[180px] flex-1 items-center gap-2">
             <div className="relative">
               <button
                 type="button"
@@ -197,7 +202,7 @@ export function ChatComposer({
                 event.target.value = "";
               }}
             />
-            <span className="truncate text-xs text-gray-400">
+            <span className="min-w-0 flex-1 truncate text-xs text-gray-400">
               {attachments.length ? `${attachments.length} 个附件已加入上下文` : "Enter 发送，Shift + Enter 换行"}
             </span>
           </div>

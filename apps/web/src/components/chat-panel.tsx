@@ -9,10 +9,12 @@ import {
   Copy,
   FileCode2,
   FileText,
+  HelpCircle,
   ListChecks,
   PanelLeftOpen,
   Plus,
   Search,
+  ShieldCheck,
   Sparkles,
   TerminalSquare,
   Wrench,
@@ -143,22 +145,22 @@ export function ChatPanel({
             </button>
             <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-control)] border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400">
               <Search className="h-4 w-4 shrink-0" />
-              <span className="truncate">搜索会话内容...</span>
+              <span className="truncate">搜索对话...</span>
             </div>
             <button
               type="button"
               onClick={onCreateConversation}
               disabled={creatingConversation}
               className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-control)] bg-gray-950 px-3 text-sm font-semibold text-white shadow-[var(--shadow-control)] transition hover:bg-gray-800 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10 disabled:cursor-not-allowed disabled:opacity-60"
-              title={creatingConversation ? "正在创建任务" : "新任务"}
+              title={creatingConversation ? "正在创建对话" : "新对话"}
             >
               <Plus className="h-4 w-4" />
-              <span>新任务</span>
+              <span>新对话</span>
             </button>
           </div>
         ) : (
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-gray-950">任务执行</div>
+            <div className="text-sm font-semibold text-gray-950">对话执行</div>
             <div className="truncate text-xs text-gray-500">消息、Agent 过程和工具事件</div>
           </div>
         )}
@@ -250,44 +252,6 @@ function MessageBubble({ message }: { message: Phase1Message }) {
   );
 }
 
-function RunConfirmationActions({
-  runState,
-  confirmingPrd,
-  onConfirmPrd,
-  confirmingPrototypeId,
-  onConfirmPrototype,
-}: {
-  runState: VibeRunView;
-  confirmingPrd?: boolean;
-  onConfirmPrd?: (wantsPrototype: boolean) => Promise<void> | void;
-  confirmingPrototypeId?: string;
-  onConfirmPrototype?: (artifactId: string) => Promise<void> | void;
-}) {
-  if (runState.status === "waiting_prd_confirm" && onConfirmPrd) {
-    return (
-      <Button type="button" size="sm" disabled={confirmingPrd} onClick={() => onConfirmPrd(true)}>
-        确认 PRD
-      </Button>
-    );
-  }
-
-  if (runState.status === "waiting_prototype_confirm" && runState.prototypeArtifactId && onConfirmPrototype) {
-    const confirming = confirmingPrototypeId === runState.prototypeArtifactId;
-    return (
-      <Button
-        type="button"
-        size="sm"
-        disabled={confirming}
-        onClick={() => onConfirmPrototype(runState.prototypeArtifactId!)}
-      >
-        确认原型
-      </Button>
-    );
-  }
-
-  return null;
-}
-
 function AgentActivityFeed({
   runState,
   confirmingPrd,
@@ -312,31 +276,30 @@ function AgentActivityFeed({
   return (
     <div className="mr-auto w-full max-w-[min(96%,_1100px)] space-y-2">
       <div className="rounded-[14px] border border-gray-200 bg-white p-3 shadow-[var(--shadow-control)]">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 gap-2">
+        <div className="flex items-start gap-2">
             <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600">
               <TerminalSquare className="h-3.5 w-3.5" />
             </span>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <div className="truncate text-sm font-semibold text-gray-950">深度思考</div>
                 <Badge tone={runStatusTone(runState.status)}>{runStatusLabel(runState.status)}</Badge>
               </div>
               <div className="mt-1 break-words text-sm leading-6 text-gray-600">
                 {runState.errorMessage || runState.summary || runState.currentLabel || "正在整理任务上下文和执行路径。"}
               </div>
-            </div>
           </div>
-          <RunConfirmationActions
-            runState={runState}
-            confirmingPrd={confirmingPrd}
-            onConfirmPrd={onConfirmPrd}
-            confirmingPrototypeId={confirmingPrototypeId}
-            onConfirmPrototype={onConfirmPrototype}
-          />
         </div>
       </div>
 
+      <ClarificationCard runState={runState} />
+      <ConfirmationCard
+        runState={runState}
+        confirmingPrd={confirmingPrd}
+        onConfirmPrd={onConfirmPrd}
+        confirmingPrototypeId={confirmingPrototypeId}
+        onConfirmPrototype={onConfirmPrototype}
+      />
       <AgentStepDisclosure
         steps={visibleSteps}
         timeline={timeline}
@@ -356,6 +319,158 @@ function AgentActivityFeed({
       <RunFinalActions runState={runState} />
     </div>
   );
+}
+
+function ClarificationCard({ runState }: { runState: VibeRunView }) {
+  if (runState.status !== "waiting_clarification") return null;
+  const questions = runState.clarificationQuestions ?? [];
+
+  return (
+    <div className="rounded-[14px] border border-amber-200 bg-amber-50 p-3 shadow-[var(--shadow-control)]">
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-amber-700 ring-1 ring-amber-200">
+          <HelpCircle className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="text-sm font-semibold text-amber-950">需要补充信息</div>
+            <Badge tone="warning" className="bg-white">等待回复</Badge>
+          </div>
+          <p className="mt-1 break-words text-sm leading-6 text-amber-900">
+            {runState.summary || "我需要先确认这些信息，再继续生成后续产物。请在下方输入框直接回复。"}
+          </p>
+          <div className="mt-3 space-y-2">
+            {questions.length ? questions.map((question, index) => (
+              <ClarificationQuestionRow key={question.id} question={question} index={index} />
+            )) : (
+              <div className="rounded-[var(--radius-control)] border border-amber-200 bg-white px-3 py-2 text-sm text-amber-900">
+                请补充关键目标、用户范围、页面边界或约束条件。
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ClarificationQuestionRow({
+  question,
+  index,
+}: {
+  question: VibeClarificationQuestion;
+  index: number;
+}) {
+  return (
+    <div className="rounded-[var(--radius-control)] border border-amber-200 bg-white px-3 py-2">
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-100 text-[11px] font-semibold text-amber-800">
+          {index + 1}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="break-words text-sm font-semibold leading-5 text-gray-950">{question.question || question.title}</div>
+          {question.reason ? <div className="mt-1 break-words text-xs leading-5 text-gray-500">{question.reason}</div> : null}
+          {question.options.length ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {question.options.map((option) => (
+                <span
+                  key={option}
+                  className={[
+                    "max-w-full rounded-full border px-2 py-1 text-xs font-medium",
+                    option === question.recommendedOption
+                      ? "border-amber-300 bg-amber-50 text-amber-800"
+                      : "border-gray-200 bg-gray-50 text-gray-600",
+                  ].join(" ")}
+                >
+                  {option}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {question.recommendation ? (
+            <div className="mt-2 break-words text-xs leading-5 text-amber-800">建议：{question.recommendation}</div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmationCard({
+  runState,
+  confirmingPrd,
+  onConfirmPrd,
+  confirmingPrototypeId,
+  onConfirmPrototype,
+}: {
+  runState: VibeRunView;
+  confirmingPrd?: boolean;
+  onConfirmPrd?: (wantsPrototype: boolean) => Promise<void> | void;
+  confirmingPrototypeId?: string;
+  onConfirmPrototype?: (artifactId: string) => Promise<void> | void;
+}) {
+  if (runState.status === "waiting_prd_confirm") {
+    return (
+      <div className="rounded-[14px] border border-blue-200 bg-blue-50 p-3 shadow-[var(--shadow-control)]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 gap-2">
+            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-blue-700 ring-1 ring-blue-200">
+              <ShieldCheck className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-blue-950">需要确认后继续</div>
+              <p className="mt-1 break-words text-sm leading-6 text-blue-900">
+                {runState.summary || "PRD 已生成。确认后我会继续推进后续原型生成。"}
+              </p>
+            </div>
+          </div>
+          {onConfirmPrd ? (
+            <Button type="button" size="sm" disabled={confirmingPrd} onClick={() => onConfirmPrd(true)} className="w-full sm:w-auto">
+              {confirmingPrd ? "确认中..." : "确认并继续"}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (runState.status === "waiting_prototype_confirm") {
+    const artifactId = runState.prototypeArtifactId;
+    const confirming = Boolean(artifactId && confirmingPrototypeId === artifactId);
+    return (
+      <div className="rounded-[14px] border border-blue-200 bg-blue-50 p-3 shadow-[var(--shadow-control)]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 gap-2">
+            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-blue-700 ring-1 ring-blue-200">
+              <ShieldCheck className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-blue-950">需要确认/授权继续</div>
+              <p className="mt-1 break-words text-sm leading-6 text-blue-900">
+                {runState.summary || "原型已生成。确认后会标记为可分享和可发布的稳定版本。"}
+              </p>
+            </div>
+          </div>
+          {artifactId && onConfirmPrototype ? (
+            <Button type="button" size="sm" disabled={confirming} onClick={() => onConfirmPrototype(artifactId)} className="w-full sm:w-auto">
+              {confirming ? "确认中..." : "确认原型"}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (runState.status === "waiting_confirmation") {
+    return (
+      <div className="rounded-[14px] border border-blue-200 bg-blue-50 p-3 text-sm leading-6 text-blue-900 shadow-[var(--shadow-control)]">
+        <div className="font-semibold text-blue-950">需要确认</div>
+        <div className="mt-1 break-words">{runState.summary || "请在下方回复确认信息，我会继续处理。"}</div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function AgentStepDisclosure({
@@ -494,9 +609,7 @@ function isProductChangeEvent(item: VibeRunTimelineItem) {
     item.step === "product_design" ||
     item.step === "prd_generation" ||
     item.step === "prototype_design" ||
-    item.step === "prototype_code_generation" ||
-    item.step === "qa_check" ||
-    item.step === "knowledge_extraction"
+    item.step === "prototype_code_generation"
   );
 }
 

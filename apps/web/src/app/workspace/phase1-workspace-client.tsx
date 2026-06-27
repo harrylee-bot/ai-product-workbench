@@ -23,15 +23,16 @@ import { ProtectedRoute } from "@/components/protected-route";
 import { Button, ErrorState } from "@/components/ui";
 import { apiRequest, streamApiEvents } from "@/lib/api";
 
-type ProjectsResponse = {
-  items: Phase1Project[];
+type ConversationsResponse = {
+  items: Phase1Conversation[];
 };
 
-type ProjectDetailResponse = {
+type ConversationDetailResponse = {
+  conversation: Phase1Conversation;
   project: Phase1Project;
-  conversations: Phase1Conversation[];
   prd?: unknown;
   prototype?: unknown;
+  productDesignState?: unknown;
 };
 
 type MessagesResponse = {
@@ -95,12 +96,7 @@ type CreateConversationResponse = {
 type DeleteConversationResponse = {
   success: boolean;
   deletedConversationId: string;
-  nextConversation: Phase1Conversation;
-};
-
-type DeleteProjectResponse = {
-  success: boolean;
-  deletedProjectId: string;
+  nextConversation?: Phase1Conversation | null;
 };
 
 type Phase1WorkspaceState = {
@@ -182,42 +178,36 @@ function Phase1WorkspaceInner() {
     setNotice({ title: "操作失败", message: error instanceof Error ? error.message : fallback });
   };
 
-  const projectsQuery = useQuery({
-    queryKey: ["phase1-projects"],
-    queryFn: () => apiRequest<ProjectsResponse>("/projects"),
+  const conversationsQuery = useQuery({
+    queryKey: ["phase1-conversations"],
+    queryFn: () => apiRequest<ConversationsResponse>("/conversations"),
   });
 
   useEffect(() => {
-    const first = projectsQuery.data?.items[0];
-    if (!selectedProjectId && first) {
-      setSelectedProject(first.id, first.currentConversationId ?? first.defaultConversationId ?? "");
+    const first = conversationsQuery.data?.items[0];
+    if (!selectedConversationId && first) {
+      setSelectedProject(first.projectId, first.id);
     }
-  }, [projectsQuery.data?.items, selectedProjectId, setSelectedProject]);
+  }, [conversationsQuery.data?.items, selectedConversationId, setSelectedProject]);
 
   const detailQuery = useQuery({
-    queryKey: ["phase1-project", selectedProjectId],
-    enabled: Boolean(selectedProjectId),
-    queryFn: () => apiRequest<ProjectDetailResponse>(`/projects/${selectedProjectId}`),
+    queryKey: ["phase1-conversation", selectedConversationId],
+    enabled: Boolean(selectedConversationId),
+    queryFn: () => apiRequest<ConversationDetailResponse>(`/conversations/${selectedConversationId}`),
   });
 
   useEffect(() => {
     const detail = detailQuery.data;
     if (!detail) return;
-    const activeConversationIds = new Set(detail.conversations.map((conversation) => conversation.id));
-    const currentConversationId = activeConversationIds.has(detail.project.currentConversationId ?? "")
-      ? detail.project.currentConversationId
-      : undefined;
-    const conversationId = activeConversationIds.has(selectedConversationId)
-      ? selectedConversationId
-      : currentConversationId ?? detail.conversations[0]?.id ?? "";
-    if (conversationId && conversationId !== selectedConversationId) {
-      setSelectedProject(detail.project.id, conversationId);
+    const projectId = detail.conversation.projectId || detail.project.id;
+    if (projectId !== selectedProjectId || detail.conversation.id !== selectedConversationId) {
+      setSelectedProject(projectId, detail.conversation.id);
     }
     setArtifactPreview({
       prdPreview: normalizePrdPreview(detail.prd),
       prototypePreview: normalizePrototypePreview(detail.prototype),
     });
-  }, [detailQuery.data, selectedConversationId, setArtifactPreview, setSelectedProject]);
+  }, [detailQuery.data, selectedConversationId, selectedProjectId, setArtifactPreview, setSelectedProject]);
 
   const messagesQuery = useQuery({
     queryKey: ["phase1-messages", selectedConversationId],
@@ -276,8 +266,8 @@ function Phase1WorkspaceInner() {
             controller.abort();
             void Promise.all([
               queryClient.invalidateQueries({ queryKey: ["phase1-messages", conversationId] }),
-              queryClient.invalidateQueries({ queryKey: ["phase1-project", projectId] }),
-              queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+              queryClient.invalidateQueries({ queryKey: ["phase1-conversation", conversationId] }),
+              queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
             ]);
           }
         },
@@ -308,7 +298,7 @@ function Phase1WorkspaceInner() {
           appendRunConnectionNotice(
             current ?? createInitialRunState(runId),
             runId,
-            `执行流连接中断，后端任务可能仍在继续。请稍后刷新项目查看最新结果。${formatErrorMessage(error)}`,
+            `执行流连接中断，后端仍可能继续处理。请稍后刷新对话查看最新结果。${formatErrorMessage(error)}`,
             "failed",
           )
         );
@@ -324,12 +314,12 @@ function Phase1WorkspaceInner() {
       let conversationId = selectedConversationId;
 
       if (!projectId || !conversationId) {
-        const response = await apiRequest<{ project: Phase1Project; defaultConversation: { id: string } }>("/projects", {
+        const response = await apiRequest<CreateConversationResponse>("/conversations", {
           method: "POST",
-          body: JSON.stringify({ title: deriveProjectTitle(content) }),
+          body: JSON.stringify({ title: deriveConversationTitle(content) }),
         });
-        projectId = response.project.id;
-        conversationId = response.defaultConversation.id;
+        projectId = response.conversation.projectId;
+        conversationId = response.conversation.id;
         setSelectedProject(projectId, conversationId);
       }
 
@@ -351,8 +341,10 @@ function Phase1WorkspaceInner() {
         responseConversationId
           ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", responseConversationId] })
           : Promise.resolve(),
-        responseProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", responseProjectId] }) : Promise.resolve(),
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+        responseConversationId
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-conversation", responseConversationId] })
+          : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
       ]);
     },
   });
@@ -375,8 +367,10 @@ function Phase1WorkspaceInner() {
         responseConversationId
           ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", responseConversationId] })
           : Promise.resolve(),
-        responseProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", responseProjectId] }) : Promise.resolve(),
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+        responseConversationId
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-conversation", responseConversationId] })
+          : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
       ]);
     },
     onError: (error) => {
@@ -402,8 +396,8 @@ function Phase1WorkspaceInner() {
           }
         : current);
       await Promise.all([
-        selectedProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", selectedProjectId] }) : Promise.resolve(),
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+        selectedConversationId ? queryClient.invalidateQueries({ queryKey: ["phase1-conversation", selectedConversationId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
       ]);
     },
     onError: (error) => {
@@ -423,8 +417,8 @@ function Phase1WorkspaceInner() {
     onSuccess: async (response) => {
       setArtifactPreview({ prdPreview: normalizePrdPreview(response.document) });
       await Promise.all([
-        selectedProjectId ? queryClient.invalidateQueries({ queryKey: ["phase1-project", selectedProjectId] }) : Promise.resolve(),
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
+        selectedConversationId ? queryClient.invalidateQueries({ queryKey: ["phase1-conversation", selectedConversationId] }) : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
       ]);
     },
     onError: (error) => {
@@ -433,29 +427,19 @@ function Phase1WorkspaceInner() {
   });
 
   const createConversation = useMutation({
-    mutationFn: async () => {
-      if (!selectedProjectId) {
-        const response = await apiRequest<{ project: Phase1Project; defaultConversation: Phase1Conversation }>("/projects", {
-          method: "POST",
-          body: JSON.stringify({ title: "智能产品项目" }),
-        });
-        return { conversation: response.defaultConversation };
-      }
-
-      return apiRequest<CreateConversationResponse>("/conversations", {
+    mutationFn: () =>
+      apiRequest<CreateConversationResponse>("/conversations", {
         method: "POST",
         body: JSON.stringify({
-          projectId: selectedProjectId,
           title: "新对话",
         }),
-      });
-    },
+      }),
     onSuccess: async (response) => {
       const conversation = response.conversation;
       setSelectedProject(conversation.projectId, conversation.id);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
-        queryClient.invalidateQueries({ queryKey: ["phase1-project", conversation.projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["phase1-conversation", conversation.id] }),
         queryClient.invalidateQueries({ queryKey: ["phase1-messages", conversation.id] }),
       ]);
     },
@@ -473,44 +457,27 @@ function Phase1WorkspaceInner() {
     },
     onSuccess: async ({ deleted, response }) => {
       if (deleted.id === selectedConversationId) {
-        setSelectedProject(response.nextConversation.projectId, response.nextConversation.id);
+        if (response.nextConversation) {
+          setSelectedProject(response.nextConversation.projectId, response.nextConversation.id);
+        } else {
+          setSelectedProject("", "");
+          setArtifactPreview({ prdPreview: null, prototypePreview: null });
+        }
       }
       queryClient.removeQueries({ queryKey: ["phase1-messages", response.deletedConversationId] });
+      queryClient.removeQueries({ queryKey: ["phase1-conversation", response.deletedConversationId] });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
-        queryClient.invalidateQueries({ queryKey: ["phase1-project", response.nextConversation.projectId] }),
-        queryClient.invalidateQueries({ queryKey: ["phase1-messages", response.nextConversation.id] }),
+        queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
+        response.nextConversation
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-conversation", response.nextConversation.id] })
+          : Promise.resolve(),
+        response.nextConversation
+          ? queryClient.invalidateQueries({ queryKey: ["phase1-messages", response.nextConversation.id] })
+          : Promise.resolve(),
       ]);
     },
     onError: (error) => {
       showError(error, "删除对话失败");
-    },
-  });
-
-  const deleteProject = useMutation({
-    mutationFn: async (project: Phase1Project) => {
-      const response = await apiRequest<DeleteProjectResponse>(`/projects/${project.id}`, {
-        method: "DELETE",
-      });
-      return { deleted: project, response };
-    },
-    onSuccess: async ({ deleted, response }) => {
-      const projects = queryClient.getQueryData<ProjectsResponse>(["phase1-projects"])?.items ?? [];
-      const nextProject = projects.find((project) => project.id !== response.deletedProjectId);
-
-      if (deleted.id === selectedProjectId) {
-        setSelectedProject(nextProject?.id ?? "", nextProject?.currentConversationId ?? nextProject?.defaultConversationId ?? "");
-        setArtifactPreview({ prdPreview: null, prototypePreview: null });
-      }
-
-      queryClient.removeQueries({ queryKey: ["phase1-project", response.deletedProjectId] });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["phase1-projects"] }),
-        nextProject ? queryClient.invalidateQueries({ queryKey: ["phase1-project", nextProject.id] }) : Promise.resolve(),
-      ]);
-    },
-    onError: (error) => {
-      showError(error, "删除项目失败");
     },
   });
 
@@ -547,7 +514,7 @@ function Phase1WorkspaceInner() {
   const sidebarWidth = sidebarCollapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : WORKSPACE_SIDEBAR_WIDTH;
   const shellMinWidth = sidebarWidth + WORKSPACE_CHAT_MIN_WIDTH + WORKSPACE_RESIZER_WIDTH + WORKSPACE_PREVIEW_MIN_WIDTH;
   const queryError =
-    errorMessage(projectsQuery.error)
+    errorMessage(conversationsQuery.error)
     ?? errorMessage(detailQuery.error)
     ?? errorMessage(messagesQuery.error);
 
@@ -570,19 +537,13 @@ function Phase1WorkspaceInner() {
         </div>
       ) : null}
       <ProjectList
-        projects={projectsQuery.data?.items ?? []}
-        conversations={detailQuery.data?.conversations ?? []}
-        selectedProjectId={selectedProjectId}
+        conversations={conversationsQuery.data?.items ?? []}
         selectedConversationId={selectedConversationId}
-        loading={projectsQuery.isLoading}
+        loading={conversationsQuery.isLoading}
         collapsed={sidebarCollapsed}
         creatingConversation={createConversation.isPending}
         deletingConversationId={deleteConversation.variables?.id}
-        deletingProjectId={deleteProject.variables?.id}
         onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
-        onSelectProject={(project) =>
-          setSelectedProject(project.id, project.currentConversationId ?? project.defaultConversationId ?? "")
-        }
         onSelectConversation={(conversation) => setSelectedProject(conversation.projectId, conversation.id)}
         onCreateConversation={() => void createConversation.mutate()}
         onDeleteConversation={(conversation) => {
@@ -593,20 +554,12 @@ function Phase1WorkspaceInner() {
             onConfirm: () => deleteConversation.mutate(conversation),
           });
         }}
-        onDeleteProject={(project) => {
-          setConfirmDialog({
-            title: "删除项目",
-            message: `确认删除“${project.title}”？项目会从工作台列表中移除。`,
-            confirmLabel: "删除项目",
-            onConfirm: () => deleteProject.mutate(project),
-          });
-        }}
       />
       <ChatPanel
         messages={messagesQuery.data?.items ?? []}
         runState={runState}
         sidebarCollapsed={sidebarCollapsed}
-        disabled={projectsQuery.isLoading}
+        disabled={conversationsQuery.isLoading}
         sending={sendMessage.isPending || Boolean(activeRunId)}
         creatingConversation={createConversation.isPending}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
@@ -763,10 +716,10 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "请稍后重试";
 }
 
-function deriveProjectTitle(content: string) {
+function deriveConversationTitle(content: string) {
   const normalized = content.replace(/\s+/g, " ").replace(/[，。！？,.!?]/g, "").trim();
-  if (!normalized) return "智能产品项目";
-  return normalized.length > 18 ? `${normalized.slice(0, 18)}项目` : `${normalized}项目`;
+  if (!normalized) return "新对话";
+  return normalized.length > 18 ? normalized.slice(0, 18) : normalized;
 }
 
 function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | null {
@@ -783,7 +736,7 @@ function normalizePrototypePreview(value: unknown): Phase1PrototypePreview | nul
 }
 
 const VIBE_RUN_STEPS = [
-  { step: "requirement_packaging", title: "整理上下文", executor: "DeerFlow Lead", detail: "把用户输入、附件和项目上下文整理成 graph 输入" },
+  { step: "requirement_packaging", title: "整理上下文", executor: "DeerFlow Lead", detail: "把用户输入、附件和对话上下文整理成 graph 输入" },
   { step: "product_design", title: "生成产品状态", executor: "DeerFlow Graph", detail: "产出 ProductDesignState，作为 PRD 和原型的事实源" },
   { step: "prd_generation", title: "生成 PRD", executor: "DeerFlow Graph", detail: "基于 ProductDesignState 输出结构化 PRD" },
   { step: "prototype_design", title: "生成原型规格", executor: "DeerFlow Graph", detail: "基于 ProductDesignState 输出 PrototypeSpec" },
@@ -826,7 +779,7 @@ function appendRunConnectionNotice(
       id: `${id}:debug`,
       title: status === "failed" ? "执行流连接中断" : "执行流自动重连",
       body: status === "failed"
-        ? "浏览器到后端的事件流连接多次中断。后端任务可能仍在继续，刷新项目后可读取已落库的最新事件和结果。"
+        ? "浏览器到后端的事件流连接多次中断。后端仍可能继续处理，刷新对话后可读取已落库的最新事件和结果。"
         : "浏览器事件流连接短暂中断，前端正在自动重连。重连后后端会回放已落库事件，避免丢失执行进度。",
       status,
       type: "stream_reconnect",
@@ -1337,7 +1290,7 @@ function stepStartedText(step: string, title?: string) {
   const labels: Record<string, string> = {
     intent_detection: "节点目标：识别这是新需求、继续生成、导出还是普通问答。",
     knowledge_retrieval: "节点目标：按意图检索强规则、默认规则、案例和可用 skills。",
-    context_fetch: "节点目标：读取项目状态、历史消息、PRD、原型、选区和附件。",
+    context_fetch: "节点目标：读取对话状态、历史消息、PRD、原型、选区和附件。",
     requirement_analysis: "节点目标：整理用户事实、知识事实、系统上下文、假设和缺失项。",
     requirement_packaging: "节点目标：合成 Planner、Validator 和 Safety Check 共同消费的需求包。",
     product_planning: "节点目标：拆出页面、功能、状态、范围、风险和下游执行顺序。",
@@ -1388,7 +1341,7 @@ function stepCompletedText(step: string, title: string | undefined, payload: Rec
   }
   const labels: Record<string, string> = {
     intent_detection: "意图识别完成，已确定本轮执行方向。",
-    context_fetch: "项目上下文读取完成，后续节点会复用同一份上下文。",
+    context_fetch: "对话上下文读取完成，后续节点会复用同一份上下文。",
     requirement_analysis: "需求分析完成，已整理出可继续处理的需求包。",
     requirement_packaging: "需求包整理完成，Planner、Validator 和 Safety Check 会消费同一份输入。",
     product_planning: "方案规划完成，已确定本轮要生成或修改的范围。",

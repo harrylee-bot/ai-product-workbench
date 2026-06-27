@@ -15,6 +15,16 @@ export class ConversationController {
     return this.conversations.create(user, dto);
   }
 
+  @Get("conversations")
+  list(@CurrentUser() user: Phase1User) {
+    return this.conversations.list(user);
+  }
+
+  @Get("conversations/:conversationId")
+  get(@CurrentUser() user: Phase1User, @Param("conversationId") conversationId: string) {
+    return this.conversations.get(user, conversationId);
+  }
+
   @Get("projects/:projectId/conversations")
   listByProject(@CurrentUser() user: Phase1User, @Param("projectId") projectId: string) {
     return this.conversations.listByProject(user, projectId);

@@ -1,9 +1,10 @@
 import { IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 
 export class CreateConversationDto {
-  @IsString({ message: "projectId 不能为空" })
+  @IsOptional()
+  @IsString({ message: "projectId 格式不正确" })
   @IsNotEmpty({ message: "projectId 不能为空" })
-  projectId!: string;
+  projectId?: string;
 
   @IsOptional()
   @IsString({ message: "title 格式不正确" })
