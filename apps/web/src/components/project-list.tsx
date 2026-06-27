@@ -1,10 +1,6 @@
 "use client";
 
 import {
-  Bot,
-  Boxes,
-  Cable,
-  CalendarClock,
   Loader2,
   MessageCircle,
   MoreVertical,
@@ -107,15 +103,6 @@ export function ProjectList({
     );
   }
 
-  const utilityItems = [
-    { label: "扩展", icon: Boxes },
-    { label: "专家套件", icon: Sparkles },
-    { label: "技能", icon: Bot },
-    { label: "连接器", icon: Cable },
-    { label: "定时任务", icon: CalendarClock },
-    { label: "IM 频道", icon: MessageCircle },
-  ];
-
   return (
     <aside className="flex min-h-0 min-w-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-sidebar-bg)]">
       <div className="border-b border-[var(--color-border)] px-3 py-3">
@@ -143,46 +130,6 @@ export function ProjectList({
           {creatingConversation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           <span className="truncate">{creatingConversation ? "创建中..." : "新任务"}</span>
         </button>
-      </div>
-
-      <nav className="border-b border-[var(--color-border)] px-2 py-2" aria-label="工作台导航">
-        <div className="space-y-0.5">
-          {utilityItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.label}
-                type="button"
-                disabled
-                className="flex h-8 w-full cursor-default items-center gap-2 rounded-[var(--radius-control)] px-2.5 text-sm text-gray-400"
-                title={`${item.label}后续接入`}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-
-      <div className="border-b border-[var(--color-border)] px-3 py-2">
-        <div className="grid grid-cols-2 rounded-[var(--radius-control)] bg-gray-100 p-1 text-sm font-semibold">
-          <button
-            type="button"
-            className="h-8 rounded-[calc(var(--radius-control)-2px)] bg-white text-gray-950 shadow-sm focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10"
-            aria-pressed="true"
-          >
-            任务
-          </button>
-          <button
-            type="button"
-            disabled
-            className="h-8 cursor-default rounded-[calc(var(--radius-control)-2px)] text-gray-400"
-            aria-pressed="false"
-          >
-            频道
-          </button>
-        </div>
         <div className="mt-2 flex h-9 items-center gap-2 rounded-[var(--radius-control)] border border-gray-200 bg-white px-3 text-sm text-gray-400 shadow-[var(--shadow-control)]">
           <Search className="h-4 w-4 shrink-0" />
           <span className="truncate">搜索会话内容...</span>
