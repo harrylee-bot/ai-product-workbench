@@ -308,10 +308,13 @@ function AgentActivityFeed({
   const artifactEvents = timeline.filter((item) =>
     item.step === "prd_generation" || item.step === "prototype_code_generation" || item.step === "qa_check" || /PRD|原型|HTML|QA|导出/.test(item.text)
   );
-  const activeStepCount = runState.steps.filter((step) => step.status !== "pending").length || runState.steps.length;
+  const visibleSteps = visibleRunSteps(runState);
+  const productChangeItems = artifactEvents.length
+    ? artifactEvents.slice(-4)
+    : visibleProductChangeItems(runState);
 
   return (
-    <div className="mr-auto w-full max-w-[min(92%,_780px)] space-y-2">
+    <div className="mr-auto w-full max-w-[min(96%,_1100px)] space-y-2">
       <div className="rounded-[14px] border border-gray-200 bg-white p-3 shadow-[var(--shadow-control)]">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 gap-2">
@@ -340,18 +343,18 @@ function AgentActivityFeed({
 
       <AgentStepDisclosure
         runState={runState}
+        steps={visibleSteps}
         timeline={timeline}
-        activeStepCount={activeStepCount}
       />
       <ToolEventDisclosure debugEvents={debugEvents} />
-      {artifactEvents.length ? (
+      {productChangeItems.length ? (
         <div className="rounded-[14px] border border-gray-200 bg-white p-3 shadow-[var(--shadow-control)]">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-500">
             <FileCode2 className="h-3.5 w-3.5" />
             产物变化
           </div>
           <div className="space-y-2">
-            {artifactEvents.slice(-4).map((item) => <ArtifactEventRow key={`${item.id}:artifact`} item={item} />)}
+            {productChangeItems.map((item) => <ArtifactEventRow key={`${item.id}:artifact`} item={item} />)}
           </div>
         </div>
       ) : null}
@@ -362,30 +365,25 @@ function AgentActivityFeed({
 
 function AgentStepDisclosure({
   runState,
+  steps,
   timeline,
-  activeStepCount,
 }: {
   runState: VibeRunView;
+  steps: VibeRunStepView[];
   timeline: VibeRunTimelineItem[];
-  activeStepCount: number;
 }) {
   return (
-    <details
-      className="group rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-control)]"
-      open={runState.status === "running"}
-    >
+    <details className="group rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-control)]">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5">
         <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition group-open:rotate-90" />
         <ListChecks className="h-4 w-4 shrink-0 text-gray-500" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">
-          查看 {activeStepCount} 个步骤
+          查看 {steps.length} 个步骤
         </span>
-        <span className="shrink-0 text-xs text-gray-400">
-          {runState.currentLabel ? "实时更新" : "执行清单"}
-        </span>
+        <span className="shrink-0 text-xs text-gray-400">实时更新</span>
       </summary>
       <div className="space-y-3 border-t border-gray-100 px-3 py-3">
-        <AgentPlanChecklist runState={runState} />
+        <AgentPlanChecklist steps={steps} />
         <div className="space-y-2">
           {timeline.length ? timeline.map((item) => <ActivityRow key={item.id} item={item} />) : <ActivityEmpty text="暂无执行事件。" />}
         </div>
@@ -412,8 +410,8 @@ function ToolEventDisclosure({ debugEvents }: { debugEvents: VibeRunDebugEvent[]
   );
 }
 
-function AgentPlanChecklist({ runState }: { runState: VibeRunView }) {
-  const completed = runState.steps.filter((step) => step.status === "done").length;
+function AgentPlanChecklist({ steps }: { steps: VibeRunStepView[] }) {
+  const completed = steps.filter((step) => step.status === "done").length;
 
   return (
     <div className="rounded-[var(--radius-control)] border border-gray-200 bg-gray-50 px-3 py-2">
@@ -422,10 +420,10 @@ function AgentPlanChecklist({ runState }: { runState: VibeRunView }) {
           <ListChecks className="h-4 w-4 shrink-0 text-gray-500" />
           <span className="truncate">执行清单</span>
         </div>
-        <span className="shrink-0 text-xs font-semibold text-gray-500">第 {Math.min(completed + 1, runState.steps.length)}/{runState.steps.length} 步</span>
+        <span className="shrink-0 text-xs font-semibold text-gray-500">第 {Math.min(completed + 1, steps.length)}/{steps.length} 步</span>
       </div>
       <div className="space-y-1.5">
-        {runState.steps.map((step) => (
+        {steps.map((step) => (
           <div key={step.step} className="flex min-w-0 items-start gap-2 text-sm leading-5 text-gray-700">
             <StepStatusIcon status={step.status} />
             <div className="min-w-0 flex-1">
@@ -479,6 +477,36 @@ function ArtifactEventRow({ item }: { item: VibeRunTimelineItem }) {
 
 function ActivityEmpty({ text }: { text: string }) {
   return <div className="rounded-[var(--radius-control)] border border-dashed border-gray-200 bg-gray-50 px-3 py-3 text-center text-xs text-gray-500">{text}</div>;
+}
+
+function visibleRunSteps(runState: VibeRunView): VibeRunStepView[] {
+  const activeSteps = runState.steps.filter((step) => step.status !== "pending");
+  if (activeSteps.length) return activeSteps;
+
+  const summary = runState.errorMessage || runState.summary || runState.currentLabel || "本轮回复已生成。";
+  return [
+    {
+      step: "answer",
+      title: runState.status === "running" ? "生成回复" : "完成回复",
+      executor: "Workbench",
+      detail: summary,
+      status: runState.status === "failed" ? "failed" : runState.status === "running" ? "running" : "done",
+      message: summary,
+    },
+  ];
+}
+
+function visibleProductChangeItems(runState: VibeRunView): VibeRunTimelineItem[] {
+  const text = runState.errorMessage || runState.summary || runState.currentLabel;
+  if (!text) return [];
+  return [
+    {
+      id: `${runState.runId ?? "run"}:product-change-summary`,
+      text,
+      status: runState.status === "failed" ? "failed" : runState.status === "running" ? "running" : "done",
+      step: "answer",
+    },
+  ];
 }
 
 function RunFinalActions({ runState }: { runState: VibeRunView }) {
@@ -566,7 +594,7 @@ function formatMessageTime(value?: string) {
 
 function formatRunSummary(runState: VibeRunView, format: "text" | "markdown") {
   const summary = runState.errorMessage || runState.summary || runState.currentLabel || "本轮执行已完成。";
-  const steps = runState.steps.map((step) => `${stepStatusLabel(step.status)}：${step.title}`).join("\n");
+  const steps = visibleRunSteps(runState).map((step) => `${stepStatusLabel(step.status)}：${step.title}`).join("\n");
 
   if (format === "markdown") {
     return [
