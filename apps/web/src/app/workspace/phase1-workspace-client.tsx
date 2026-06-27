@@ -930,9 +930,10 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
   const payload = payloadRecord(event);
   const payloadMeta = payloadMetaRecord(event);
   const metaSummary = asText(payloadMeta?.summary);
+  const useEventContentAsLabel = eventType !== "message_delta" || isInspectableMessageDelta(event);
   let next: VibeRunView = {
     ...current,
-    currentLabel: event.content ?? metaSummary ?? current.currentLabel,
+    currentLabel: useEventContentAsLabel ? event.content ?? metaSummary ?? current.currentLabel : current.currentLabel,
     steps: current.steps.map((step) => ({ ...step })),
     timeline: current.timeline ? [...current.timeline] : [],
     debugEvents: current.debugEvents ? [...current.debugEvents] : [],
@@ -952,7 +953,7 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     }
   }
 
-  if (eventType === "message_delta" && event.content) {
+  if (eventType === "message_delta" && event.content && isInspectableMessageDelta(event)) {
     next.currentLabel = event.content;
   }
 
@@ -1121,6 +1122,7 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
   }
 
   if (eventType === "message_delta") {
+    if (!isInspectableMessageDelta(event)) return null;
     const text = safeEventText(event, payloadMeta, "");
     return text ? timelineItem(id, step, "info", text) : null;
   }
@@ -1192,8 +1194,9 @@ function buildTimelineItem(event: VibeStreamEvent, state: VibeRunView): VibeRunT
   return null;
 }
 
-function buildDebugEvent(event: VibeStreamEvent, state: VibeRunView): VibeRunDebugEvent {
+function buildDebugEvent(event: VibeStreamEvent, state: VibeRunView): VibeRunDebugEvent | null {
   const eventType = event.eventType ?? event.type;
+  if (eventType === "message_delta" && !isInspectableMessageDelta(event)) return null;
   const payload = payloadRecord(event);
   const payloadMeta = payloadMetaRecord(event);
   const step = event.step;
@@ -1357,6 +1360,19 @@ function serializeDebugEvent(event: VibeStreamEvent) {
     return value;
   }, 2);
   return json.length > 12000 ? `${json.slice(0, 12000)}\n...（已截断，完整内容请查后端事件日志）` : json;
+}
+
+function isInspectableMessageDelta(event: VibeStreamEvent) {
+  const eventType = event.eventType ?? event.type;
+  if (eventType !== "message_delta") return false;
+  if (event.step) return true;
+  const payload = payloadRecord(event);
+  const runtimeEvent = asText(payload?.event);
+  return Boolean(
+    asText(payload?.toolName) ||
+    runtimeEvent.startsWith("gateway-") ||
+    asRecord(payload?.runtimeAdapter),
+  );
 }
 
 function nextActionLabel(value: string) {
