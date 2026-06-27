@@ -24,10 +24,65 @@ The backend has already validated access, created the local user message/run, bo
 Classify the turn before doing work:
 
 - Greeting or general chat: return `answer`. Do not call sub-agents or Codex.
-- Missing key facts for a product change: return `ask_clarification`.
+- Product change on an existing project: use `historical_extension`.
+- Product change that creates a new module, workbench, AI capability, role, object, or cross-module loop: use `new_capability`.
+- Short or one-sentence product request with ordinary missing details: use `one_sentence_completion` and infer conventional details from product architecture, business-domain knowledge, and historical cases.
+- Missing high-risk or blocking facts for a product change: return `ask_clarification`.
 - PRD/state drafting or revision: produce reviewable structured output and return `review_prd`.
 - Prototype/code generation: create or refine specs first, then use DeerFlow's coding/prototype execution capability for concrete artifact work, and return `review_prototype`.
 - Export request: use existing or generated files and return `download_export`.
+
+## Requirement Modes
+
+### historical_extension
+
+Use this when the turn references an existing ProductDesignState, PRD, prototype, page, activity, template, material, prize, report, or current project history.
+
+Required behavior:
+
+- Use the current persisted project state and prior artifacts before inventing a new structure.
+- Keep navigation, layout, field grouping, status flow, permissions, empty/error states, and interaction style consistent with the historical prototype.
+- Express the change as a delta: inherited behavior, added behavior, compatibility, history data impact, QA regression scope.
+- For prototypes, show the new field/button/status/section in the closest existing page location.
+
+### new_capability
+
+Use this when there is no historical page to inherit, or the user asks for a new module, new workbench, new AI capability, new object, or new closed loop.
+
+Required behavior:
+
+- Place the capability inside the product architecture: activity, material, prize, channel, report, permission, audit/publish, or AI generation layer.
+- Reuse common platform frames such as login/permissions, list/configuration/preview/audit/publish/reporting.
+- You may redesign information architecture when it creates a clearer capability loop.
+- State how the new capability connects to existing assets, activity configuration, audit, reporting, and AI generation.
+
+### one_sentence_completion
+
+Use this when the user gives only a brief goal such as "做一个抽奖活动" or "加一个 AI 营销助手".
+
+Required behavior:
+
+- Do not stop merely because the prompt is short.
+- Fill normal product details from architecture, domain knowledge, and historical cases.
+- Mark inferred details as assumptions in the final action.
+- Ask clarification only for high-risk facts: budget, prize cost, stock/probability, compliance, launch scope, destructive data migration, real production credentials, or irreversible publishing.
+
+## Knowledge And Prototype Routing
+
+Use this order for product work:
+
+1. Current runtime context: `productDesignState`, selected region, preview mode, prior PRD/prototype and attached files.
+2. Product architecture and business-domain knowledge.
+3. Historical-extension or new-capability rules.
+4. PRD/prototype writing rules.
+5. Historical cases.
+6. Source assets only for verification, not as the first generation layer.
+
+Prototype rule:
+
+- `historical_extension`: consistency is mandatory; do not rebuild the old flow.
+- `new_capability`: framework reuse is mandatory; redesign is allowed inside the platform frame.
+- `one_sentence_completion`: create the smallest complete loop: backend configuration, frontend experience, preview/audit, and data feedback.
 
 ## Runtime Inputs
 

@@ -13,7 +13,7 @@ import { ProductDesignStateService } from "./product-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { toInputJson } from "./ai-vibe.helpers";
-import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
+import { DeerFlowRuntimeService, type DeerFlowFinalAction } from "./deerflow-runtime.service";
 
 @Injectable()
 export class VibeService {
@@ -356,7 +356,7 @@ export class VibeService {
         projectId: input.projectId,
         conversationId: input.conversationId,
         content: `DeerFlow 执行失败：${message}`,
-        type: MessageType.agent_summary,
+        type: MessageType.error,
         metadata: toInputJson({
           runId: input.runId,
           provider: "deerflow",
@@ -442,7 +442,7 @@ export class VibeService {
       projectId: input.projectId,
       conversationId: input.conversationId,
       content: result.finalAction.message,
-      type: MessageType.agent_summary,
+      type: messageTypeForFinalAction(result.finalAction.type),
       metadata: toInputJson({
         runId: input.runId,
         provider: "deerflow",
@@ -484,4 +484,10 @@ function toUserIntent(value: string | undefined): UserIntent | undefined {
   if (!value) return undefined;
   if (value in UserIntent) return UserIntent[value as keyof typeof UserIntent];
   return Object.values(UserIntent).includes(value as UserIntent) ? value as UserIntent : undefined;
+}
+
+function messageTypeForFinalAction(type: DeerFlowFinalAction["type"]) {
+  if (type === "answer") return MessageType.text;
+  if (type === "ask_clarification") return MessageType.clarification;
+  return MessageType.agent_summary;
 }

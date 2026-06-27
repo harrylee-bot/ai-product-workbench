@@ -198,11 +198,24 @@ describe("VibeService main entry", () => {
       return {
         threadId: "deerflow-thread-1",
         assistantText: "你好，我在。",
-      finalAction: { type: "answer", message: "你好，我在。", intent: "general_question" },
-      uploads: [],
-      artifacts: [],
-      rawEvents: [],
-      finalState: { ok: true },
+        finalAction: {
+          type: "answer",
+          message: "你好，我在。",
+          intent: "general_question",
+          raw: {
+            type: "answer",
+            message: "你好，我在。",
+            intent: "general_question",
+            requirementMode: "one_sentence_completion",
+            knowledgeRefsUsed: ["01-产品架构/产品能力地图"],
+            assumptions: ["普通问候不触发生成流程"],
+            consistencyStrategy: "直接回答。",
+          },
+        },
+        uploads: [],
+        artifacts: [],
+        rawEvents: [],
+        finalState: { ok: true },
       };
     });
 
@@ -241,11 +254,21 @@ describe("VibeService main entry", () => {
       projectId: "project-1",
       conversationId: "conversation-1",
       content: "你好，我在。",
+      type: MessageType.text,
       metadata: expect.objectContaining({
         runId: "run-1",
         provider: "deerflow",
         threadId: "deerflow-thread-1",
-        finalAction: expect.objectContaining({ type: "answer", message: "你好，我在。" }),
+        finalAction: expect.objectContaining({
+          type: "answer",
+          message: "你好，我在。",
+          raw: expect.objectContaining({
+            requirementMode: "one_sentence_completion",
+            knowledgeRefsUsed: ["01-产品架构/产品能力地图"],
+            assumptions: ["普通问候不触发生成流程"],
+            consistencyStrategy: "直接回答。",
+          }),
+        }),
         uploads: [],
         artifacts: [],
       }),
@@ -255,10 +278,62 @@ describe("VibeService main entry", () => {
       expect.objectContaining({
         provider: "deerflow",
         threadId: "deerflow-thread-1",
+        finalAction: expect.objectContaining({
+          raw: expect.objectContaining({
+            requirementMode: "one_sentence_completion",
+            assumptions: ["普通问候不触发生成流程"],
+          }),
+        }),
         nextAction: { type: "answer" },
       }),
       "你好，我在。",
     );
+    expect(documentService.confirmForPrototypeGate).not.toHaveBeenCalled();
+    expect(prisma.project.update).not.toHaveBeenCalled();
+  });
+
+  it("records DeerFlow failures and emits run_failed so the client can stop running", async () => {
+    deerFlowRuntime.isEnabled.mockReturnValue(true);
+    fileAssetService.getAttachmentSummaries.mockResolvedValue([]);
+    fileAssetService.getRuntimeAttachmentFiles.mockResolvedValue([]);
+    deerFlowRuntime.runTurn.mockRejectedValue(new Error("gateway unavailable"));
+
+    const result = await service.handleMessage(user, {
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      message: "你好",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      runId: "run-1",
+      status: "running",
+      assistantMessage: null,
+    }));
+
+    await flushAsyncWork();
+
+    expect(runLogService.failRun).toHaveBeenCalledWith("run-1", expect.any(Error));
+    expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "run_failed",
+      content: "gateway unavailable",
+      data: expect.objectContaining({
+        provider: "deerflow",
+        errorMessage: "gateway unavailable",
+      }),
+    }));
+    expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      content: "DeerFlow 执行失败：gateway unavailable",
+      type: MessageType.error,
+      metadata: expect.objectContaining({
+        runId: "run-1",
+        provider: "deerflow",
+        errorMessage: "gateway unavailable",
+      }),
+      relatedRunId: "run-1",
+    }));
+    expect(runLogService.completeRun).not.toHaveBeenCalled();
   });
 
   it("confirms a doc_ready PRD and waits for the DeerFlow-first prototype flow", async () => {

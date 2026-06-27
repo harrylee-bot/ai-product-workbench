@@ -383,6 +383,10 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         type: "answer | review_prd | review_prototype | ask_clarification | download_export",
         message: "user-facing Chinese summary",
         intent: "optional intent label",
+        requirementMode: "optional: historical_extension | new_capability | one_sentence_completion",
+        knowledgeRefsUsed: "optional array of knowledge paths or titles used for reasoning",
+        assumptions: "optional inferred product facts, especially for one-sentence requirements",
+        consistencyStrategy: "optional PRD/prototype consistency strategy",
         artifacts: [
           {
             kind: "optional artifact kind, for example prototype_html or prd_markdown",
@@ -395,6 +399,10 @@ function buildUserPrompt(input: DeerFlowRunInput) {
       },
       constraints: [
         "Do not mutate the product database directly.",
+        "Classify product turns as historical_extension, new_capability, or one_sentence_completion before drafting.",
+        "For historical_extension, preserve the existing PRD/prototype information architecture, layout, field grouping, state flow, and interaction style unless the user asks for redesign.",
+        "For new_capability, reuse the product architecture and platform page framework while allowing a clearer new information architecture.",
+        "For one_sentence_completion, infer ordinary missing details from product architecture, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
         "Use deerFlowUploads virtualPath or markdownVirtualPath when reading uploaded files.",
         "When you generate files, include their output artifact paths in finalActionContract.artifacts.",
@@ -432,7 +440,7 @@ function isAssistantTextEvent(event: DeerFlowRuntimeEvent) {
 function shouldExposeEventContent(event: string, record: Record<string, unknown> | null) {
   if (event !== "messages" && event !== "messages-tuple") return false;
   if (!record) return false;
-  if (asRecord(record.additional_kwargs)?.hide_from_ui === true) return false;
+  if (isHiddenRuntimeMessage(record)) return false;
   if (isAssistantMessageRecord(record)) return true;
   return event === "messages-tuple" && !record.type && !record.role;
 }
@@ -443,6 +451,25 @@ function isAssistantMessageRecord(record: Record<string, unknown> | null) {
   if (role === "assistant" || role === "ai") return true;
   const type = toOptionalString(record.type)?.toLowerCase();
   return type === "ai" || type === "assistant" || type === "aimessage" || type === "aimessagechunk";
+}
+
+function isHiddenRuntimeMessage(record: Record<string, unknown>) {
+  if (asRecord(record.additional_kwargs)?.hide_from_ui === true) return true;
+  const role = toOptionalString(record.role)?.toLowerCase();
+  const type = toOptionalString(record.type)?.toLowerCase();
+  const name = toOptionalString(record.name)?.toLowerCase();
+  const content = toContentText(record)?.trim().toLowerCase();
+  return [role, type, name].some((value) =>
+    Boolean(value && (
+      value === "human" ||
+      value === "humanmessage" ||
+      value === "user" ||
+      value === "system" ||
+      value === "systemmessage" ||
+      value === "memory" ||
+      value.includes("memory")
+    )),
+  ) || Boolean(content && (content.startsWith("<memory") || content.includes("<memory>")));
 }
 
 function extractAssistantTextFromFinalState(finalState: unknown) {

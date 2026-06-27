@@ -33,6 +33,16 @@ describe("DeerFlowRuntimeService", () => {
   });
 
   it("creates a bound thread and parses LangGraph messages-tuple final action", async () => {
+    const finalActionPayload = {
+      type: "answer",
+      message: "你好，我在。",
+      intent: "general_question",
+      requirementMode: "one_sentence_completion",
+      knowledgeRefsUsed: ["01-产品架构/产品能力地图"],
+      assumptions: ["普通问候不进入生成流程"],
+      consistencyStrategy: "直接回答，不触发 PRD 或原型等待态。",
+    };
+
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
       .mockResolvedValueOnce(sseResponse([
@@ -46,7 +56,7 @@ describe("DeerFlowRuntimeService", () => {
             {
               content: [
                 "\n```ai_product_workbench_final_action\n",
-                "{\"type\":\"answer\",\"message\":\"你好，我在。\",\"intent\":\"general_question\"}",
+                JSON.stringify(finalActionPayload),
                 "\n```",
               ].join(""),
             },
@@ -96,6 +106,12 @@ describe("DeerFlowRuntimeService", () => {
         type: "answer",
         message: "你好，我在。",
         intent: "general_question",
+        raw: expect.objectContaining({
+          requirementMode: "one_sentence_completion",
+          knowledgeRefsUsed: ["01-产品架构/产品能力地图"],
+          assumptions: ["普通问候不进入生成流程"],
+          consistencyStrategy: "直接回答，不触发 PRD 或原型等待态。",
+        }),
       }),
       finalState: { done: true },
     }));
@@ -129,6 +145,26 @@ describe("DeerFlowRuntimeService", () => {
               content: "你好",
             },
             { langgraph_node: "DynamicContextMiddleware.before_agent" },
+          ],
+        },
+        {
+          event: "messages",
+          data: [
+            {
+              type: "system",
+              content: "hidden system prompt",
+            },
+            { langgraph_node: "system" },
+          ],
+        },
+        {
+          event: "messages-tuple",
+          data: [
+            {
+              role: "assistant",
+              content: "<memory>hidden memory</memory>",
+            },
+            { langgraph_node: "memory" },
           ],
         },
         {
@@ -189,6 +225,60 @@ describe("DeerFlowRuntimeService", () => {
       "你好",
       expect.stringContaining("ai_product_workbench_final_action"),
     ]);
+  });
+
+  it("falls back to values final state and ignores non-assistant messages", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "values",
+          data: {
+            messages: [
+              { type: "human", content: "生成签到活动" },
+              { type: "system", content: "hidden system prompt" },
+              { type: "memory", content: "<memory>hidden</memory>" },
+              {
+                type: "ai",
+                content: [
+                  "已整理需求。",
+                  "\n```ai_product_workbench_final_action\n",
+                  JSON.stringify({
+                    type: "review_prd",
+                    message: "已整理签到活动 PRD，请确认。",
+                    intent: "generate_prd",
+                    requirementMode: "one_sentence_completion",
+                  }),
+                  "\n```",
+                ].join(""),
+              },
+            ],
+          },
+        },
+      ]));
+
+    const events: Array<{ content?: string }> = [];
+    const service = new DeerFlowRuntimeService(prisma as never);
+    const result = await service.runTurn({
+      runId: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      message: "生成签到活动",
+      onEvent: (event) => {
+        events.push({ content: event.content });
+      },
+    });
+
+    expect(events.map((event) => event.content).filter(Boolean)).toEqual([]);
+    expect(result.finalAction).toEqual(expect.objectContaining({
+      type: "review_prd",
+      message: "已整理签到活动 PRD，请确认。",
+      intent: "generate_prd",
+      raw: expect.objectContaining({
+        requirementMode: "one_sentence_completion",
+      }),
+    }));
   });
 
   it("uploads local attachments and fetches final action artifacts through the Gateway", async () => {

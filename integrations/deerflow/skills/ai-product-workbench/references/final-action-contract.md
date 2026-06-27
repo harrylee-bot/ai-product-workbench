@@ -9,6 +9,10 @@ The final action is the only instruction AI Product Workbench will persist from 
   "type": "answer | review_prd | review_prototype | ask_clarification | download_export",
   "message": "Chinese user-facing summary",
   "intent": "optional UserIntent-compatible label",
+  "requirementMode": "historical_extension | new_capability | one_sentence_completion",
+  "knowledgeRefsUsed": ["optional knowledge paths or titles used for reasoning"],
+  "assumptions": ["optional inferred product facts, especially for one-sentence requirements"],
+  "consistencyStrategy": "optional prototype/PRD consistency strategy",
   "artifacts": []
 }
 ```
@@ -48,6 +52,9 @@ Use when a requirement or PRD should be reviewed before prototype work.
   "type": "review_prd",
   "message": "已整理签到活动 PRD，请先确认需求范围。",
   "intent": "generate_prd",
+  "requirementMode": "one_sentence_completion",
+  "knowledgeRefsUsed": ["01-产品架构/产品能力地图", "02-业务域知识/活动发布与模板配置"],
+  "assumptions": ["默认使用活动发布后台、前台活动页、预览审核和活动报表闭环"],
   "productDesignStateDraft": {
     "title": "签到活动",
     "summary": "通过每日签到提升活跃和留存"
@@ -68,6 +75,8 @@ Use when generated artifacts should be shown to the user.
   "type": "review_prototype",
   "message": "已生成签到活动原型，请查看页面和交互。",
   "intent": "generate_prototype",
+  "requirementMode": "historical_extension",
+  "consistencyStrategy": "沿用历史活动配置页导航、字段分组和预览审核流程，只新增签到规则配置区和前台签到反馈态。",
   "prototypeSpec": {
     "title": "签到活动原型",
     "targetDevice": "mobile"
