@@ -116,7 +116,7 @@ type Phase1WorkspaceState = {
 };
 
 const WORKSPACE_SIDEBAR_WIDTH = 284;
-const WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 64;
+const WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 0;
 const WORKSPACE_RESIZER_WIDTH = 8;
 const WORKSPACE_CHAT_MIN_WIDTH = 432;
 const WORKSPACE_PREVIEW_MIN_WIDTH = 520;
@@ -605,8 +605,12 @@ function Phase1WorkspaceInner() {
       <ChatPanel
         messages={messagesQuery.data?.items ?? []}
         runState={runState}
+        sidebarCollapsed={sidebarCollapsed}
         disabled={projectsQuery.isLoading}
         sending={sendMessage.isPending || Boolean(activeRunId)}
+        creatingConversation={createConversation.isPending}
+        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+        onCreateConversation={() => void createConversation.mutate()}
         confirmingPrd={confirmPrd.isPending}
         onConfirmPrd={async () => {
           await confirmPrd.mutateAsync();
