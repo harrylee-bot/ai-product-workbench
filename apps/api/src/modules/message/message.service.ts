@@ -22,12 +22,38 @@ export class MessageService {
       throw new ForbiddenException("无权访问该会话");
     }
 
-    const messages = await this.prisma.message.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: "asc" },
-      take: 100,
-    });
-    return { items: messages.map(toMessage) };
+    const [messages, latestRun] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: "asc" },
+        take: 100,
+      }),
+      this.prisma.runtimeRunLog.findFirst({
+        where: { conversationId },
+        orderBy: { startedAt: "desc" },
+        select: {
+          id: true,
+          projectId: true,
+          conversationId: true,
+          status: true,
+          startedAt: true,
+          endedAt: true,
+        },
+      }),
+    ]);
+    return {
+      items: messages.map(toMessage),
+      latestRun: latestRun
+        ? {
+            runId: latestRun.id,
+            projectId: latestRun.projectId,
+            conversationId: latestRun.conversationId,
+            status: latestRun.status,
+            startedAt: latestRun.startedAt.toISOString(),
+            endedAt: latestRun.endedAt?.toISOString(),
+          }
+        : null,
+    };
   }
 }
 

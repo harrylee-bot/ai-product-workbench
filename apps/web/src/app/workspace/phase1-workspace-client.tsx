@@ -37,6 +37,14 @@ type ConversationDetailResponse = {
 
 type MessagesResponse = {
   items: Phase1Message[];
+  latestRun?: {
+    runId: string;
+    projectId: string;
+    conversationId: string;
+    status: string;
+    startedAt?: string;
+    endedAt?: string;
+  } | null;
 };
 
 type VibeHandleMessageResponse = {
@@ -161,6 +169,7 @@ function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
   const runStreamAbortRef = useRef<AbortController | null>(null);
   const cancelRequestedRunIdsRef = useRef<Set<string>>(new Set());
+  const hydratedRunRef = useRef<{ conversationId: string; runId: string } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [previewWidth, setPreviewWidth] = useState(WORKSPACE_PREVIEW_DEFAULT_WIDTH);
   const [resizingPreview, setResizingPreview] = useState(false);
@@ -231,12 +240,18 @@ function Phase1WorkspaceInner() {
     runStreamAbortRef.current?.abort();
     setActiveRunId(null);
     setRunState(null);
+    hydratedRunRef.current = null;
   }, [selectedProjectId, selectedConversationId]);
 
-  const watchVibeRun = (runId: string, projectId: string, conversationId: string) => {
+  const watchVibeRun = (
+    runId: string,
+    projectId: string,
+    conversationId: string,
+    options: { activate?: boolean } = {},
+  ) => {
     runStreamAbortRef.current?.abort();
     let terminalEventSeen = false;
-    setActiveRunId(runId);
+    setActiveRunId(options.activate === false ? null : runId);
     setRunState(createInitialRunState(runId));
 
     const connectStream = (attempt: number) => {
@@ -323,6 +338,31 @@ function Phase1WorkspaceInner() {
 
     connectStream(0);
   };
+
+  useEffect(() => {
+    const restored = latestRecoverableRun(messagesQuery.data);
+    if (!restored || !selectedConversationId) return;
+    if (activeRunId === restored.runId || runState?.runId === restored.runId) {
+      hydratedRunRef.current = { conversationId: selectedConversationId, runId: restored.runId };
+      return;
+    }
+    if (
+      hydratedRunRef.current?.conversationId === selectedConversationId &&
+      hydratedRunRef.current.runId === restored.runId
+    ) {
+      return;
+    }
+    hydratedRunRef.current = { conversationId: selectedConversationId, runId: restored.runId };
+    watchVibeRun(restored.runId, restored.projectId || selectedProjectId, selectedConversationId, {
+      activate: isActiveRuntimeRunStatus(restored.status),
+    });
+  }, [
+    activeRunId,
+    messagesQuery.data,
+    runState?.runId,
+    selectedConversationId,
+    selectedProjectId,
+  ]);
 
   const sendMessage = useMutation({
     mutationFn: async (content: string) => {
@@ -894,6 +934,23 @@ async function invalidateConversationQueries(queryClient: QueryClient, conversat
       : Promise.resolve(),
     queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
   ]);
+}
+
+function latestRecoverableRun(response?: MessagesResponse) {
+  if (!response) return null;
+  if (response.latestRun?.runId) return response.latestRun;
+  const messageWithRun = [...response.items].reverse().find((message) => message.relatedRunId);
+  if (!messageWithRun?.relatedRunId) return null;
+  return {
+    runId: messageWithRun.relatedRunId,
+    projectId: messageWithRun.projectId ?? "",
+    conversationId: messageWithRun.conversationId ?? "",
+    status: "",
+  };
+}
+
+function isActiveRuntimeRunStatus(status?: string) {
+  return status?.toLowerCase() === "running";
 }
 
 function markRunCanceled(state: VibeRunView, runId: string, message?: string): VibeRunView {

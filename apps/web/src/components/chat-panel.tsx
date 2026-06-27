@@ -25,8 +25,11 @@ import { ChatComposer } from "./workspace-chat/chat-composer";
 
 export type Phase1Message = {
   id: string;
+  projectId?: string;
+  conversationId?: string;
   role: "user" | "assistant" | "system";
   content: string;
+  relatedRunId?: string;
   createdAt: string;
 };
 

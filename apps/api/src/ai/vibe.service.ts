@@ -75,6 +75,13 @@ export class VibeService {
       throw new ForbiddenException("附件不存在或无权访问");
     }
 
+    const run = await this.runLogService.createRun({
+      projectId: project.id,
+      conversationId: conversation.id,
+      userId: user.id,
+      userInput: dto.message.trim(),
+    });
+
     const userMessage = await this.messageService.createUserMessage({
       projectId: project.id,
       conversationId: conversation.id,
@@ -82,6 +89,7 @@ export class VibeService {
       content: dto.message.trim(),
       attachments: attachmentSummaries.length ? attachmentSummaries : undefined,
       metadata: dto.selectedRegion ? { selectedRegion: dto.selectedRegion } : undefined,
+      relatedRunId: run.id,
     });
 
     await this.fileAssetService.attachFilesToMessage(
@@ -91,13 +99,6 @@ export class VibeService {
       conversation.id,
     );
     const runtimeAttachmentFiles = await this.fileAssetService.getRuntimeAttachmentFiles(fileIds, project.id);
-
-    const run = await this.runLogService.createRun({
-      projectId: project.id,
-      conversationId: conversation.id,
-      userId: user.id,
-      userInput: dto.message.trim(),
-    });
 
     if (this.deerFlowRuntime.isEnabled()) {
       this.executeDeerFlowTurn({
@@ -196,18 +197,19 @@ export class VibeService {
           "用户确认 PRD，继续生成原型",
         )).productDesignState;
 
-    const confirmMessage = await this.messageService.createUserMessage({
-      projectId: project.id,
-      conversationId: conversation.id,
-      userId: user.id,
-      content: "确认 PRD，继续生成原型。",
-    });
-
     const run = await this.runLogService.createRun({
       projectId: project.id,
       conversationId: conversation.id,
       userId: user.id,
       userInput: "确认 PRD，继续生成原型。",
+    });
+
+    const confirmMessage = await this.messageService.createUserMessage({
+      projectId: project.id,
+      conversationId: conversation.id,
+      userId: user.id,
+      content: "确认 PRD，继续生成原型。",
+      relatedRunId: run.id,
     });
 
     if (this.deerFlowRuntime.isEnabled()) {
