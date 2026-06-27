@@ -8,6 +8,7 @@ import {
   type VibeRunDebugEvent,
   type VibeClarificationQuestion,
   type Phase1Message,
+  type VibeRunStepView,
   type VibeRunStepStatus,
   type VibeRunTimelineItem,
   type VibeRunView,
@@ -45,6 +46,35 @@ type MessagesResponse = {
     startedAt?: string;
     endedAt?: string;
   } | null;
+};
+
+type RecoverableRun = NonNullable<MessagesResponse["latestRun"]> & {
+  outputSummary?: string | null;
+  errorMessage?: string | null;
+  result?: unknown;
+  steps?: RuntimeRunStepSnapshot[];
+};
+
+type VibeRunDetailResponse = {
+  id: string;
+  projectId: string;
+  conversationId: string;
+  status: string;
+  outputSummary?: string | null;
+  errorMessage?: string | null;
+  result?: unknown;
+  steps?: RuntimeRunStepSnapshot[];
+};
+
+type RuntimeRunStepSnapshot = {
+  id?: string;
+  runtimeName?: string;
+  status?: string;
+  inputSummary?: string | null;
+  outputSummary?: string | null;
+  errorMessage?: string | null;
+  startedAt?: string;
+  endedAt?: string;
 };
 
 type VibeHandleMessageResponse = {
@@ -250,8 +280,12 @@ function Phase1WorkspaceInner() {
     options: { activate?: boolean } = {},
   ) => {
     runStreamAbortRef.current?.abort();
+    if (options.activate === false) {
+      setActiveRunId(null);
+      return;
+    }
     let terminalEventSeen = false;
-    setActiveRunId(options.activate === false ? null : runId);
+    setActiveRunId(runId);
     setRunState(createInitialRunState(runId));
 
     const connectStream = (attempt: number) => {
@@ -353,9 +387,42 @@ function Phase1WorkspaceInner() {
       return;
     }
     hydratedRunRef.current = { conversationId: selectedConversationId, runId: restored.runId };
-    watchVibeRun(restored.runId, restored.projectId || selectedProjectId, selectedConversationId, {
-      activate: isActiveRuntimeRunStatus(restored.status),
-    });
+    if (isActiveRuntimeRunStatus(restored.status)) {
+      watchVibeRun(restored.runId, restored.projectId || selectedProjectId, selectedConversationId);
+      return;
+    }
+
+    runStreamAbortRef.current?.abort();
+    setActiveRunId(null);
+    setRunState(createStaticRunState(restored, messagesQuery.data));
+
+    void apiRequest<VibeRunDetailResponse | null>(`/ai/vibe/runs/${encodeURIComponent(restored.runId)}`)
+      .then((run) => {
+        if (
+          !run ||
+          hydratedRunRef.current?.conversationId !== selectedConversationId ||
+          hydratedRunRef.current.runId !== restored.runId
+        ) {
+          return;
+        }
+        if (isActiveRuntimeRunStatus(run.status)) {
+          watchVibeRun(run.id, run.projectId || restored.projectId || selectedProjectId, selectedConversationId);
+          return;
+        }
+        setRunState(createStaticRunState({
+          runId: run.id,
+          projectId: run.projectId || restored.projectId,
+          conversationId: run.conversationId || restored.conversationId,
+          status: run.status,
+          startedAt: restored.startedAt,
+          endedAt: restored.endedAt,
+          outputSummary: run.outputSummary,
+          errorMessage: run.errorMessage,
+          result: run.result,
+          steps: run.steps,
+        }, messagesQuery.data));
+      })
+      .catch(() => undefined);
   }, [
     activeRunId,
     messagesQuery.data,
@@ -920,6 +987,41 @@ function createInitialRunState(runId: string): VibeRunView {
   };
 }
 
+function createStaticRunState(run: RecoverableRun, response?: MessagesResponse): VibeRunView {
+  const status = runtimeRunViewStatus(run.status);
+  const assistantMessage = latestAssistantMessageForRun(response, run.runId);
+  const result = asRecord(run.result);
+  const finalAction = asRecord(result?.finalAction);
+  const summary =
+    status === "failed"
+      ? asText(run.errorMessage) || asText(result?.errorMessage) || asText(run.outputSummary) || "本轮执行失败，请查看后端日志或稍后重试。"
+      : asText(run.outputSummary)
+        || asText(finalAction?.message)
+        || asText(result?.message)
+        || assistantMessage?.content
+        || (status === "canceled" ? "本轮执行已停止。你可以继续输入新的消息。" : "本轮执行已完成。");
+  const timelineStatus: VibeRunTimelineItem["status"] =
+    status === "failed" ? "failed" : status === "canceled" ? "warning" : "done";
+
+  return {
+    runId: run.runId,
+    status,
+    currentLabel: summary,
+    summary,
+    errorMessage: status === "failed" ? summary : undefined,
+    steps: normalizeStaticRunSteps(run.steps, status),
+    timeline: [
+      {
+        id: `${run.runId}:static-summary`,
+        text: summary,
+        status: timelineStatus,
+        createdAt: run.endedAt ?? run.startedAt,
+      },
+    ],
+    debugEvents: [],
+  };
+}
+
 function isRunCanceledEvent(eventType: string) {
   return eventType === "run_canceled" || eventType === "run_cancelled";
 }
@@ -951,6 +1053,61 @@ function latestRecoverableRun(response?: MessagesResponse) {
 
 function isActiveRuntimeRunStatus(status?: string) {
   return status?.toLowerCase() === "running";
+}
+
+function runtimeRunViewStatus(status?: string): Extract<VibeRunView["status"], "completed" | "failed" | "canceled"> {
+  const normalized = status?.toLowerCase();
+  if (normalized === "failed" || normalized === "error") return "failed";
+  if (normalized === "cancelled" || normalized === "canceled" || normalized === "stopped") return "canceled";
+  return "completed";
+}
+
+function latestAssistantMessageForRun(response: MessagesResponse | undefined, runId: string) {
+  return [...(response?.items ?? [])]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.relatedRunId === runId);
+}
+
+function normalizeStaticRunSteps(
+  steps: RuntimeRunStepSnapshot[] | undefined,
+  runStatus: Extract<VibeRunView["status"], "completed" | "failed" | "canceled">,
+): VibeRunStepView[] {
+  if (!steps?.length) return [];
+  return steps.flatMap((step, index) => {
+    const stepStatus = staticStepStatus(step.status, runStatus);
+    if (!stepStatus) return [];
+    const stepName = normalizeRuntimeStepName(step.runtimeName) || `runtime_step_${index + 1}`;
+    const summary = asText(step.outputSummary) || asText(step.errorMessage) || asText(step.inputSummary);
+    return [{
+      step: stepName,
+      title: stepLabel(stepName),
+      executor: "Runtime",
+      detail: summary || "已从历史执行记录恢复。",
+      status: stepStatus,
+      message: summary || undefined,
+    }];
+  });
+}
+
+function staticStepStatus(
+  status: string | undefined,
+  runStatus: Extract<VibeRunView["status"], "completed" | "failed" | "canceled">,
+): VibeRunStepStatus | null {
+  const normalized = status?.toLowerCase();
+  if (normalized === "succeeded" || normalized === "success" || normalized === "completed" || normalized === "done") return "done";
+  if (normalized === "failed" || normalized === "error") return "failed";
+  if (normalized === "cancelled" || normalized === "canceled" || normalized === "stopped") return "canceled";
+  if (normalized === "running") {
+    if (runStatus === "failed") return "failed";
+    if (runStatus === "canceled") return "canceled";
+    return "done";
+  }
+  if (normalized === "pending") return null;
+  return runStatus === "failed" ? "failed" : runStatus === "canceled" ? "canceled" : "done";
+}
+
+function normalizeRuntimeStepName(value: unknown) {
+  return asText(value).trim().toLowerCase();
 }
 
 function markRunCanceled(state: VibeRunView, runId: string, message?: string): VibeRunView {
@@ -1422,7 +1579,6 @@ function serializeDebugEvent(event: VibeStreamEvent) {
 function isInspectableMessageDelta(event: VibeStreamEvent) {
   const eventType = event.eventType ?? event.type;
   if (eventType !== "message_delta") return false;
-  if (event.step) return true;
   const payload = payloadRecord(event);
   const runtimeEvent = asText(payload?.event);
   return Boolean(

@@ -489,26 +489,15 @@ export class VibeService {
       signal,
       onEvent: async (event) => {
         if (signal?.aborted || !(await this.runLogService.isRunRunning(input.runId))) return;
-        if (event.toolName) {
-          await this.streamService.emit({
-            runId: input.runId,
-            projectId: input.projectId,
-            type: "message_delta",
-            content: `DeerFlow 正在调用能力：${event.toolName}`,
-            data: event,
-          });
-          return;
-        }
-
-        if (event.content) {
-          await this.streamService.emit({
-            runId: input.runId,
-            projectId: input.projectId,
-            type: "message_delta",
-            content: event.content,
-            data: event,
-          });
-        }
+        const runtimeStatus = deerFlowRuntimeStatusMessage(event);
+        if (!runtimeStatus) return;
+        await this.streamService.emit({
+          runId: input.runId,
+          projectId: input.projectId,
+          type: "message_delta",
+          content: runtimeStatus,
+          data: event,
+        });
       },
     });
 
@@ -586,4 +575,14 @@ function messageTypeForFinalAction(type: DeerFlowFinalAction["type"]) {
   if (type === "answer") return MessageType.text;
   if (type === "ask_clarification") return MessageType.clarification;
   return MessageType.agent_summary;
+}
+
+function deerFlowRuntimeStatusMessage(event: { event: string; content?: string; toolName?: string }) {
+  if (event.toolName) return `DeerFlow 正在调用能力：${event.toolName}`;
+  if (event.event.startsWith("gateway-")) return event.content;
+  if (event.event === "status" || event.event === "runtime-status" || event.event === "authorization") {
+    return event.content;
+  }
+  if (event.event === "error") return event.content ?? "DeerFlow runtime 返回错误事件。";
+  return undefined;
 }

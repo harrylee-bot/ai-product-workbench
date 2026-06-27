@@ -190,7 +190,7 @@ describe("VibeService main entry", () => {
     expect(fileAssetService.getRuntimeAttachmentFiles).not.toHaveBeenCalled();
   });
 
-  it("hands enabled turns to DeerFlow and persists its final action", async () => {
+  it("hands enabled turns to DeerFlow, suppresses token chunks, and emits debuggable runtime events", async () => {
     deerFlowRuntime.isEnabled.mockReturnValue(true);
     fileAssetService.getAttachmentSummaries.mockResolvedValue([]);
     fileAssetService.getRuntimeAttachmentFiles.mockResolvedValue([]);
@@ -204,6 +204,11 @@ describe("VibeService main entry", () => {
         event: "messages-tuple",
         data: [{ tool_calls: [{ function: { name: "coding_node" } }] }],
         toolName: "coding_node",
+      });
+      await input.onEvent?.({
+        event: "gateway-artifacts",
+        data: { artifacts: [] },
+        content: "已同步 0 个 DeerFlow 产物。",
       });
       return {
         threadId: "deerflow-thread-1",
@@ -251,13 +256,21 @@ describe("VibeService main entry", () => {
 
     await flushAsyncWork();
 
-    expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
-      type: "message_delta",
-      content: "正在处理",
-    }));
+    const emittedEvents = streamService.emit.mock.calls.map(([event]) => event);
+    expect(emittedEvents).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "message_delta",
+        content: "正在处理",
+      }),
+    ]));
     expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
       type: "message_delta",
       content: "DeerFlow 正在调用能力：coding_node",
+    }));
+    expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "message_delta",
+      content: "已同步 0 个 DeerFlow 产物。",
+      data: expect.objectContaining({ event: "gateway-artifacts" }),
     }));
     expect(runLogService.markRunIntent).toHaveBeenCalledWith("run-1", UserIntent.general_question);
     expect(messageService.createAssistantMessage).toHaveBeenCalledWith(expect.objectContaining({

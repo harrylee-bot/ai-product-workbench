@@ -84,30 +84,46 @@ export class VibeStreamService {
   stream(runId: string) {
     return new Observable<MessageEvent>((subscriber) => {
       let active = true;
+      const runListeners = this.listeners.get(runId) ?? new Set<Listener>();
       const listener: Listener = (event) => {
         if (!active) return;
         subscriber.next({
           type: event.type,
           data: event,
         });
+        if (isTerminalRunEvent(event)) {
+          subscriber.complete();
+          cleanup();
+        }
       };
-
-      void this.getEvents(runId).then((events) => {
-        if (!active) return;
-        events.forEach(listener);
-      });
-
-      const runListeners = this.listeners.get(runId) ?? new Set<Listener>();
-      runListeners.add(listener);
-      this.listeners.set(runId, runListeners);
-
-      return () => {
+      const cleanup = () => {
         active = false;
         runListeners.delete(listener);
         if (!runListeners.size) this.listeners.delete(runId);
       };
+
+      void this.getEvents(runId).then((events) => {
+        if (!active) return;
+        for (const event of events) {
+          listener(event);
+          if (!active) return;
+        }
+      }).catch((error) => {
+        if (!active) return;
+        subscriber.error(error);
+        cleanup();
+      });
+
+      runListeners.add(listener);
+      this.listeners.set(runId, runListeners);
+
+      return cleanup;
     });
   }
+}
+
+function isTerminalRunEvent(event: VibeStreamEvent) {
+  return event.type === "run_completed" || event.type === "run_failed" || event.type === "run_canceled";
 }
 
 function buildStreamEvent(input: {
