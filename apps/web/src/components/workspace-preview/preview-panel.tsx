@@ -34,12 +34,14 @@ export function PreviewPanel({
   projectId,
   prdPreview,
   prototypePreview,
+  previewStatusLabel,
   savingPrdSectionId,
   onSavePrdSection,
 }: {
   projectId?: string;
   prdPreview?: Phase1PrdPreview | null;
   prototypePreview?: Phase1PrototypePreview | null;
+  previewStatusLabel?: string;
   savingPrdSectionId?: string;
   onSavePrdSection?: (input: { sectionId: string; content: string }) => Promise<void> | void;
 }) {
@@ -152,7 +154,14 @@ export function PreviewPanel({
         <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-white px-3">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-gray-950">结果预览</div>
-            <div className="truncate text-xs text-gray-500">{activeTab.description}</div>
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="truncate text-xs text-gray-500">{activeTab.description}</div>
+              {previewStatusLabel ? (
+                <span className="inline-flex shrink-0 items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                  {previewStatusLabel}
+                </span>
+              ) : null}
+            </div>
           </div>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
             <div className="flex shrink-0 items-center gap-1">

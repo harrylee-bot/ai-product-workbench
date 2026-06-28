@@ -693,6 +693,7 @@ function Phase1WorkspaceInner() {
     errorMessage(conversationsQuery.error)
     ?? errorMessage(detailQuery.error)
     ?? errorMessage(messagesQuery.error);
+  const previewStatusLabel = derivePreviewStatusLabel(runState);
 
   return (
     <>
@@ -776,6 +777,7 @@ function Phase1WorkspaceInner() {
         projectId={selectedProjectId}
         prdPreview={prdPreview}
         prototypePreview={prototypePreview}
+        previewStatusLabel={previewStatusLabel}
         savingPrdSectionId={updatePrdSection.isPending ? updatePrdSection.variables?.sectionId : undefined}
         onSavePrdSection={async (input) => {
           if (!prdPreview?.id) return;
@@ -1129,6 +1131,15 @@ function latestAssistantMessageForRun(response: MessagesResponse | undefined, ru
   return [...(response?.items ?? [])]
     .reverse()
     .find((message) => message.role === "assistant" && message.relatedRunId === runId);
+}
+
+function derivePreviewStatusLabel(runState: VibeRunView | null) {
+  if (!runState || runState.status !== "running") return undefined;
+  const runningSteps = runState.steps.filter((step) => step.status === "running").map((step) => step.step);
+  if (runningSteps.includes("prd_generation")) return "PRD 正在更新";
+  if (runningSteps.includes("prototype_code_generation") || runningSteps.includes("prototype_design")) return "原型正在更新";
+  if (runningSteps.includes("qa_check")) return "正在检查产物";
+  return undefined;
 }
 
 function normalizeStaticRunSteps(
