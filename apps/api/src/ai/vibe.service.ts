@@ -216,6 +216,25 @@ export class VibeService {
       relatedRunId: run.id,
     });
 
+    // FR-1.3：wantsPrototype=false 表示仅确认 PRD，不继续生成原型。
+    if (dto.wantsPrototype === false) {
+      const assistantMessage = await this.finishPendingDeerFlowTurn({
+        runId: run.id,
+        projectId: project.id,
+        conversationId: conversation.id,
+        intent: UserIntent.generate_prototype,
+        message: "PRD 已确认。本轮不生成原型，你可稍后再继续。",
+        productDesignState: confirmedState,
+      });
+      return {
+        projectId: project.id,
+        conversationId: conversation.id,
+        runId: run.id,
+        assistantMessage,
+        status: "completed",
+      };
+    }
+
     if (this.deerFlowRuntime.isEnabled()) {
       this.executeDeerFlowTurn({
         runId: run.id,

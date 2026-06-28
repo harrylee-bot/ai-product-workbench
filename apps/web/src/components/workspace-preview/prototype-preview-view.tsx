@@ -559,6 +559,10 @@ function PrototypeLocalEditDialog({
                 </div>
               ))}
             </div>
+            {/* gate-edit-1：当前局部生成为前端演示草稿，未调用后端真实生成接口。需重新生成才生效。 */}
+            <div className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] leading-5 text-amber-800">
+              演示草稿：此内容为本地预览，未真正改写原型。请在对话框描述修改后重新生成以生效。
+            </div>
           </div>
         ) : null}
 

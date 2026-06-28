@@ -471,15 +471,17 @@ function Phase1WorkspaceInner() {
         queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
       ]);
     },
+    onError: (error) => showError(error, "发送消息失败"),
   });
 
   const confirmPrd = useMutation({
-    mutationFn: () =>
+    mutationFn: (wantsPrototype: boolean) =>
       apiRequest<VibeHandleMessageResponse>("/ai/vibe/confirm-prd", {
         method: "POST",
         body: JSON.stringify({
           projectId: selectedProjectId,
           conversationId: selectedConversationId,
+          wantsPrototype,
         }),
       }),
     onSuccess: async (response) => {
@@ -741,8 +743,8 @@ function Phase1WorkspaceInner() {
             }
           : undefined}
         confirmingPrd={confirmPrd.isPending}
-        onConfirmPrd={async () => {
-          await confirmPrd.mutateAsync();
+        onConfirmPrd={async (wantsPrototype) => {
+          await confirmPrd.mutateAsync(wantsPrototype);
         }}
         confirmingPrototypeId={confirmPrototype.isPending ? confirmPrototype.variables : undefined}
         onConfirmPrototype={async (artifactId) => {

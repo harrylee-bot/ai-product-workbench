@@ -35,6 +35,10 @@ export class ConfirmPrdDto {
   @IsString({ message: "conversationId 不能为空" })
   @IsNotEmpty({ message: "conversationId 不能为空" })
   conversationId!: string;
+
+  /** FR-1.3：确认 PRD 后是否继续生成原型。默认 true（确认并继续）。false 表示仅确认 PRD，不生成原型。 */
+  @IsOptional()
+  wantsPrototype?: boolean;
 }
 
 export class CancelVibeRunDto {

@@ -513,9 +513,21 @@ function ConfirmationCard({
             </div>
           </div>
           {onConfirmPrd ? (
-            <Button type="button" size="sm" disabled={confirmingPrd} onClick={() => onConfirmPrd(true)} className="w-full sm:w-auto">
-              {confirmingPrd ? "确认中..." : "确认并继续"}
-            </Button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <Button type="button" size="sm" disabled={confirmingPrd} onClick={() => onConfirmPrd(true)} className="w-full sm:w-auto">
+                {confirmingPrd ? "确认中..." : "确认并生成原型"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={confirmingPrd}
+                onClick={() => onConfirmPrd(false)}
+                className="w-full sm:w-auto"
+              >
+                仅确认 PRD
+              </Button>
+            </div>
           ) : null}
         </div>
       </div>
