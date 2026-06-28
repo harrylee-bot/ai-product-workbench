@@ -12,6 +12,7 @@ import {
   type VibeRunStepStatus,
   type VibeRunTimelineItem,
   type VibeRunView,
+  type VibeToolCallView,
 } from "@/components/chat-panel";
 import { PreviewPanel } from "@/components/workspace-preview/preview-panel";
 import {
@@ -1118,6 +1119,7 @@ function markRunCanceled(state: VibeRunView, runId: string, message?: string): V
     currentLabel: summary,
     summary,
     errorMessage: undefined,
+    streamingText: undefined,
     steps: state.steps.map((step) => step.status === "running" || step.status === "pending"
       ? { ...step, status: "canceled", message: step.status === "running" ? "已停止" : step.message }
       : step),
@@ -1169,6 +1171,33 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
 
   if (eventType === "message_delta" && event.content && isInspectableMessageDelta(event)) {
     next.currentLabel = event.content;
+  }
+
+  // Phase 2 透明化：assistant 逐字流式文本（此前被 isInspectableMessageDelta 丢弃）
+  if (eventType === "message_delta" && payload?.chunk) {
+    next.streamingText = (next.streamingText ?? "") + asText(payload.chunk);
+  }
+
+  // Phase 2 透明化：工具调用开始
+  if (eventType === "tool_call_started") {
+    const toolCallId = asText(payload?.toolCallId) ?? asText(payload?.toolName) ?? `tool-${next.toolCalls?.length ?? 0}`;
+    const toolName = asText(payload?.toolName) ?? "工具";
+    const toolCalls = [...(next.toolCalls ?? [])];
+    const existingIndex = toolCalls.findIndex((tc) => tc.id === toolCallId);
+    const entry: VibeToolCallView = { id: toolCallId, toolName, status: "running", args: payload?.args };
+    if (existingIndex >= 0) toolCalls[existingIndex] = entry;
+    else toolCalls.push(entry);
+    next.toolCalls = toolCalls;
+  }
+
+  // Phase 2 透明化：工具返回
+  if (eventType === "tool_call_completed") {
+    const toolCallId = asText(payload?.toolCallId) ?? "";
+    next.toolCalls = (next.toolCalls ?? []).map((tc) =>
+      tc.id === toolCallId
+        ? { ...tc, status: "done" as const, result: asText(payload?.result) ?? tc.result }
+        : tc,
+    );
   }
 
   if (eventType === "prd_updated") {
@@ -1239,6 +1268,8 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
       next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
     }
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step);
+    // 终态：流式文本已落库为助手消息，清空避免重复展示
+    next.streamingText = undefined;
   }
 
   if (isRunCanceledEvent(eventType)) {
@@ -1253,6 +1284,7 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     next.status = "failed";
     next.errorMessage = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路执行失败";
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "failed" } : step);
+    next.streamingText = undefined;
   }
 
   return appendDebugEvent(

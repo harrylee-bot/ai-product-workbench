@@ -5,11 +5,25 @@ import type { RuntimeAttachmentFile } from "../files/file.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 
+export type DeerFlowToolCall = {
+  id: string;
+  name: string;
+  args?: unknown;
+};
+
 export type DeerFlowRuntimeEvent = {
   event: string;
   data: unknown;
   content?: string;
   toolName?: string;
+  /** Phase 2 透明化：结构化工具调用（全部，不只首个）、工具返回、消息角色、增量文本、节点。 */
+  toolCalls?: DeerFlowToolCall[];
+  toolCallId?: string;
+  toolResult?: string;
+  messageRole?: "assistant" | "tool" | "system" | "human" | "unknown";
+  chunk?: string;
+  nodeId?: string;
+  nodeName?: string;
 };
 
 export type DeerFlowFinalAction = {
@@ -429,12 +443,60 @@ function normalizeDeerFlowEvent(event: string, data: unknown): DeerFlowRuntimeEv
   const payload = primaryPayload(data);
   const record = asRecord(payload);
   const content = shouldExposeEventContent(event, record) ? toContentText(payload) : undefined;
+  const toolCalls = extractToolCalls(record) ?? extractToolCalls(asRecord(data));
+  const messageRole = detectMessageRole(record);
+  const isToolMessage = messageRole === "tool";
+  const toolCallId = isToolMessage ? toOptionalString(record?.tool_call_id) ?? toOptionalString(record?.toolCallId) : undefined;
+  const toolResult = isToolMessage ? toContentText(payload) : undefined;
+  const nodeId = toOptionalString(asRecord(data)?.node) ?? toOptionalString(asRecord(data)?.node_id);
   return {
     event,
     data,
     content,
     toolName: extractToolName(record) ?? extractToolName(asRecord(data)),
+    toolCalls: toolCalls.length ? toolCalls : undefined,
+    toolCallId,
+    toolResult,
+    messageRole,
+    // assistant 增量文本：用于前端逐字流式渲染（Phase 2）。
+    chunk: messageRole === "assistant" ? content : undefined,
+    nodeId,
+    nodeName: nodeId ?? undefined,
   };
+}
+
+function detectMessageRole(record: Record<string, unknown> | null): DeerFlowRuntimeEvent["messageRole"] {
+  if (!record) return "unknown";
+  const role = toOptionalString(record.role)?.toLowerCase();
+  const type = toOptionalString(record.type)?.toLowerCase();
+  if (role === "assistant" || role === "ai" || type === "ai" || type === "assistant" || type === "aimessage" || type === "aimessagechunk") {
+    return "assistant";
+  }
+  if (role === "tool" || type === "tool" || type === "toolmessage") return "tool";
+  if (role === "system" || type === "system" || type === "systemmessage") return "system";
+  if (role === "human" || role === "user" || type === "human" || type === "humanmessage") return "human";
+  return "unknown";
+}
+
+function extractToolCalls(record: Record<string, unknown> | null): DeerFlowToolCall[] {
+  if (!record) return [];
+  const raw = record.tool_calls ?? asRecord(record.additional_kwargs)?.tool_calls;
+  if (!Array.isArray(raw)) return [];
+  const calls: DeerFlowToolCall[] = [];
+  for (const item of raw) {
+    const entry = asRecord(item);
+    const fn = asRecord(entry?.function);
+    const id = toOptionalString(entry?.id) ?? toOptionalString(fn?.id) ?? `tool_call_${Math.random().toString(36).slice(2)}`;
+    const name = toOptionalString(fn?.name) ?? toOptionalString(entry?.name);
+    if (!name) continue;
+    const argsRaw = fn?.arguments ?? entry?.args ?? entry?.input;
+    let args: unknown = argsRaw;
+    if (typeof argsRaw === "string") {
+      try { args = JSON.parse(argsRaw); } catch { args = argsRaw; }
+    }
+    calls.push({ id, name, args });
+  }
+  return calls;
 }
 
 function isAssistantTextEvent(event: DeerFlowRuntimeEvent) {

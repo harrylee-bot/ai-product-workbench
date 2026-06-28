@@ -169,6 +169,10 @@ function classifyStreamEvent(type: VibeStreamEventType): {
       return { category: "runtime", phase: "failed" };
     case "message_delta":
       return { category: "runtime", phase: "progress" };
+    case "tool_call_started":
+      return { category: "runtime", phase: "started" };
+    case "tool_call_completed":
+      return { category: "runtime", phase: "completed" };
     case "state_updated":
       return { category: "state", phase: "updated" };
     case "state_version_created":
@@ -209,7 +213,8 @@ function toLegacyEventType(
   if (type === "qa_completed") return "qa_completed";
   if (type === "knowledge_candidate_created") return "state_updated";
   if (type === "export_ready") return "agent_completed";
-  if (type === "step_started" || type === "message_delta") return "agent_started";
+  if (type === "step_started" || type === "message_delta" || type === "tool_call_started") return "agent_started";
+  if (type === "tool_call_completed") return "agent_completed";
   return "agent_completed";
 }
 

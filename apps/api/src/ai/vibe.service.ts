@@ -491,15 +491,70 @@ export class VibeService {
       signal,
       onEvent: async (event) => {
         if (signal?.aborted || !(await this.runLogService.isRunRunning(input.runId))) return;
-        const runtimeStatus = deerFlowRuntimeStatusMessage(event);
-        if (!runtimeStatus) return;
-        await this.streamService.emit({
-          runId: input.runId,
-          projectId: input.projectId,
-          type: "message_delta",
-          content: runtimeStatus,
-          data: event,
-        });
+
+        // Phase 2 透明化：把 DeerFlow 的执行过程结构化下发，前端可像 Claude Code 一样
+        // 实时看到思考文本、工具调用与返回，而非一句降维文案。
+
+        // 1. assistant 增量文本 → 逐字流式（此前被丢弃，前端只能等 run 结束拿全文）
+        if (event.messageRole === "assistant" && event.chunk) {
+          await this.streamService.emit({
+            runId: input.runId,
+            projectId: input.projectId,
+            type: "message_delta",
+            content: event.chunk,
+            data: { chunk: event.chunk, role: "assistant" },
+          });
+        }
+
+        // 2. 工具调用开始（全部 tool_calls，不只首个）
+        const toolCalls = event.toolCalls ?? [];
+        for (const call of toolCalls) {
+          await this.streamService.emit({
+            runId: input.runId,
+            projectId: input.projectId,
+            type: "tool_call_started",
+            content: `调用工具：${call.name}`,
+            data: { toolCallId: call.id, toolName: call.name, args: call.args },
+          });
+        }
+        // 兜底：仅有 toolName（无结构化 tool_calls）时也下发一个 tool_call_started。
+        if (!toolCalls.length && event.toolName) {
+          await this.streamService.emit({
+            runId: input.runId,
+            projectId: input.projectId,
+            type: "tool_call_started",
+            content: `调用工具：${event.toolName}`,
+            data: { toolCallId: event.toolName, toolName: event.toolName },
+          });
+        }
+
+        // 3. 工具返回（ToolMessage）
+        if (event.messageRole === "tool" && event.toolCallId) {
+          await this.streamService.emit({
+            runId: input.runId,
+            projectId: input.projectId,
+            type: "tool_call_completed",
+            content: `工具返回：${event.toolName ?? event.toolCallId}`,
+            data: {
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              result: event.toolResult,
+              status: "done",
+            },
+          });
+        }
+
+        // 4. gateway / status / error 状态消息（保留，作为运行时进度提示）
+        const statusMsg = deerFlowRuntimeStatusMessage(event);
+        if (statusMsg) {
+          await this.streamService.emit({
+            runId: input.runId,
+            projectId: input.projectId,
+            type: "message_delta",
+            content: statusMsg,
+            data: event,
+          });
+        }
       },
     });
 
@@ -639,8 +694,16 @@ function messageTypeForFinalAction(type: DeerFlowFinalAction["type"]) {
   return MessageType.agent_summary;
 }
 
-function deerFlowRuntimeStatusMessage(event: { event: string; content?: string; toolName?: string }) {
-  if (event.toolName) return `DeerFlow 正在调用能力：${event.toolName}`;
+function deerFlowRuntimeStatusMessage(event: {
+  event: string;
+  content?: string;
+  toolName?: string;
+  messageRole?: string;
+}) {
+  // 工具调用与 assistant 文本已由 tool_call_started / message_delta(chunk) 单独下发，
+  // 这里只处理运行时状态/错误类消息，避免重复。
+  if (event.messageRole === "assistant" || event.messageRole === "tool") return undefined;
+  if (event.toolName) return undefined;
   if (event.event.startsWith("gateway-")) return event.content;
   if (event.event === "status" || event.event === "runtime-status" || event.event === "authorization") {
     return event.content;

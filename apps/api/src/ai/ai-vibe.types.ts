@@ -494,6 +494,8 @@ export type VibeStreamEventType =
   | "step_completed"
   | "step_failed"
   | "message_delta"
+  | "tool_call_started"
+  | "tool_call_completed"
   | "state_updated"
   | "state_version_created"
   | "prd_updated"

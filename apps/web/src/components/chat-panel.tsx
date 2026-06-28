@@ -63,6 +63,14 @@ export type VibeRunDebugEvent = {
   createdAt?: string;
 };
 
+export type VibeToolCallView = {
+  id: string;
+  toolName: string;
+  status: "running" | "done" | "failed";
+  args?: unknown;
+  result?: string;
+};
+
 export type VibeClarificationQuestion = {
   id: string;
   title: string;
@@ -92,6 +100,9 @@ export type VibeRunView = {
   steps: VibeRunStepView[];
   timeline?: VibeRunTimelineItem[];
   debugEvents?: VibeRunDebugEvent[];
+  /** Phase 2 透明化：assistant 逐字流式文本 + 结构化工具调用 */
+  streamingText?: string;
+  toolCalls?: VibeToolCallView[];
   clarificationQuestions?: VibeClarificationQuestion[];
   knowledgeHitCount?: number;
   qaIssueCount?: number;
@@ -288,9 +299,9 @@ function AgentActivityFeed({
             <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600">
               <TerminalSquare className="h-3.5 w-3.5" />
             </span>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <div className="truncate text-sm font-semibold text-gray-950">深度思考</div>
+                <div className="truncate text-sm font-semibold text-gray-950">执行过程</div>
                 <Badge tone={runStatusTone(runState.status)}>{runStatusLabel(runState.status)}</Badge>
               </div>
               <div className="mt-1 break-words text-sm leading-6 text-gray-600">
@@ -300,6 +311,37 @@ function AgentActivityFeed({
         </div>
       </div>
 
+      {/* Phase 2 透明化：assistant 逐字流式思考文本，像真人对话一样实时显示在干什么 */}
+      {runState.streamingText ? (
+        <div className="mr-auto max-w-[min(88%,_760px)]">
+          <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold text-gray-400">
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Workbench</span>
+            <span className="inline-flex items-center gap-1 text-amber-600">
+              <Clock3 className="h-3 w-3" />
+              正在思考
+            </span>
+          </div>
+          <div className="whitespace-pre-wrap rounded-[14px] border border-gray-200 bg-white px-3.5 py-2.5 text-sm leading-6 text-gray-700 shadow-[var(--shadow-control)]">
+            {runState.streamingText}
+            <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-gray-400 align-middle" aria-hidden="true" />
+          </div>
+        </div>
+      ) : null}
+
+      {/* Phase 2 透明化：工具调用平铺展示（名称 + 状态 + 可展开入参/返回） */}
+      {runState.toolCalls?.length ? (
+        <div className="rounded-[14px] border border-gray-200 bg-white p-3 shadow-[var(--shadow-control)]">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-500">
+            <Wrench className="h-3.5 w-3.5" />
+            工具调用
+          </div>
+          <div className="space-y-1.5">
+            {runState.toolCalls.map((call) => <ToolCallRow key={call.id} call={call} />)}
+          </div>
+        </div>
+      ) : null}
+
       <ClarificationCard runState={runState} />
       <ConfirmationCard
         runState={runState}
@@ -308,10 +350,7 @@ function AgentActivityFeed({
         confirmingPrototypeId={confirmingPrototypeId}
         onConfirmPrototype={onConfirmPrototype}
       />
-      <AgentStepDisclosure
-        steps={visibleSteps}
-        timeline={timeline}
-      />
+      <AgentStepDisclosure steps={visibleSteps} timeline={timeline} />
       <ToolEventDisclosure debugEvents={debugEvents} />
       {productChangeItems.length ? (
         <div className="rounded-[14px] border border-gray-200 bg-white p-3 shadow-[var(--shadow-control)]">
@@ -327,6 +366,47 @@ function AgentActivityFeed({
       <RunFinalActions runState={runState} />
     </div>
   );
+}
+
+function ToolCallRow({ call }: { call: VibeToolCallView }) {
+  const statusIcon = call.status === "done"
+    ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+    : call.status === "failed"
+      ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+      : <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />;
+  const statusLabel = call.status === "done" ? "已完成" : call.status === "failed" ? "失败" : "执行中";
+  const hasDetail = call.args !== undefined || Boolean(call.result);
+
+  return (
+    <details className="rounded-[var(--radius-control)] border border-gray-200 bg-gray-50 px-3 py-2">
+      <summary className="flex cursor-pointer list-none items-center gap-2">
+        {statusIcon}
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800">{call.toolName}</span>
+        <span className="shrink-0 text-[11px] text-gray-400">{statusLabel}</span>
+      </summary>
+      {hasDetail ? (
+        <div className="mt-2 space-y-1.5 text-xs leading-5 text-gray-500">
+          {call.args !== undefined ? (
+            <div>
+              <div className="font-semibold text-gray-600">入参</div>
+              <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-white p-2 text-[11px] text-gray-600">{formatToolDetail(call.args)}</pre>
+            </div>
+          ) : null}
+          {call.result ? (
+            <div>
+              <div className="font-semibold text-gray-600">返回</div>
+              <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-white p-2 text-[11px] text-gray-600">{call.result}</pre>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+function formatToolDetail(value: unknown): string {
+  if (typeof value === "string") return value;
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
 }
 
 function ClarificationCard({ runState }: { runState: VibeRunView }) {
@@ -489,12 +569,12 @@ function AgentStepDisclosure({
   timeline: VibeRunTimelineItem[];
 }) {
   return (
-    <details className="group rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-control)]">
+    <details open className="group rounded-[14px] border border-gray-200 bg-white shadow-[var(--shadow-control)]">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5">
         <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition group-open:rotate-90" />
         <ListChecks className="h-4 w-4 shrink-0 text-gray-500" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">
-          调试：查看 {steps.length} 个执行步骤
+          执行步骤（{steps.length}）
         </span>
         <span className="shrink-0 text-xs text-gray-400">实时更新</span>
       </summary>
@@ -515,7 +595,7 @@ function ToolEventDisclosure({ debugEvents }: { debugEvents: VibeRunDebugEvent[]
         <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition group-open:rotate-90" />
         <Wrench className="h-4 w-4 shrink-0 text-gray-500" />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900">
-          调试：查看 {debugEvents.length} 个工具调用与事件
+          原始事件流（{debugEvents.length}）
         </span>
         <span className="shrink-0 text-xs text-gray-400">可展开</span>
       </summary>

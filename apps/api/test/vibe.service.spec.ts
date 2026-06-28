@@ -268,8 +268,8 @@ describe("VibeService main entry", () => {
       }),
     ]));
     expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
-      type: "message_delta",
-      content: "DeerFlow 正在调用能力：coding_node",
+      type: "tool_call_started",
+      content: "调用工具：coding_node",
     }));
     expect(streamService.emit).toHaveBeenCalledWith(expect.objectContaining({
       type: "message_delta",
