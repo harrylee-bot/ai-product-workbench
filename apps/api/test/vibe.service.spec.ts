@@ -50,6 +50,9 @@ describe("VibeService main entry", () => {
   const finalActionApplier = {
     apply: vi.fn().mockResolvedValue({}),
   };
+  const knowledgeRetrieval = {
+    search: vi.fn().mockResolvedValue({ results: [], references: [] }),
+  };
   const service = new VibeService(
     prisma as never,
     messageService as never,
@@ -60,6 +63,7 @@ describe("VibeService main entry", () => {
     documentService as never,
     deerFlowRuntime as never,
     finalActionApplier as never,
+    knowledgeRetrieval as never,
   );
   const user = {
     id: "user-1",
@@ -249,6 +253,9 @@ describe("VibeService main entry", () => {
       status: "running",
       assistantMessage: null,
     }));
+
+    await flushAsyncWork();
+
     expect(deerFlowRuntime.runTurn).toHaveBeenCalledWith(expect.objectContaining({
       runId: "run-1",
       projectId: "project-1",
@@ -257,8 +264,6 @@ describe("VibeService main entry", () => {
       message: "你好",
       attachmentFiles: [],
     }));
-
-    await flushAsyncWork();
 
     const emittedEvents = streamService.emit.mock.calls.map(([event]) => event);
     expect(emittedEvents).not.toEqual(expect.arrayContaining([

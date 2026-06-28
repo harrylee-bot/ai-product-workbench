@@ -12,6 +12,7 @@ import type { Observable } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { FileAssetService } from "../files/file-asset.service";
 import type { RuntimeAttachmentFile } from "../files/file.types";
+import { KnowledgeRetrievalService } from "../knowledge/knowledge-retrieval.service";
 import { MessageService } from "../projects/message.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { RuntimeRunLogService } from "./runtime-run-log.service";
@@ -37,6 +38,7 @@ export class VibeService {
     private readonly documentService: RequirementDocumentService,
     private readonly deerFlowRuntime: DeerFlowRuntimeService,
     private readonly finalActionApplier: FinalActionApplierService,
+    private readonly knowledgeRetrieval: KnowledgeRetrievalService,
   ) {}
 
   async handleMessage(user: AuthenticatedUser, dto: HandleVibeMessageDto) {
@@ -471,6 +473,50 @@ export class VibeService {
       runId: input.runId,
       projectId: input.projectId,
       type: "step_started",
+      step: "knowledge_retrieval",
+      content: "正在检索知识库，为生成提供规则与案例基线。",
+      data: { provider: "deerflow" },
+    });
+
+    // knowledge-core-2：生成路径接入知识检索（此前仅事后 QA 调用，生成阶段拿不到知识）。
+    // 召回强规则/PRD 写作规则/原型规则/业务概念/历史案例，注入 DeerFlow 上下文。
+    let knowledgeContext: { id: string; title: string; snippet?: string; content: string; type?: string }[] = [];
+    try {
+      const retrieval = await this.knowledgeRetrieval.search({
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        runtimeName: "runtime_generation",
+        query: input.message,
+        limit: 6,
+        preferredTypes: ["strong_rule", "prd_writing_rule", "prototype_rule", "business_concept", "reference_case"],
+      });
+      knowledgeContext = retrieval.references.map((ref) => ({
+        id: ref.id,
+        title: ref.title,
+        snippet: ref.snippet,
+        content: ref.content,
+        type: ref.type,
+      }));
+    } catch {
+      // 知识检索失败不阻断生成（降级为无知识基线）。
+    }
+
+    await this.streamService.emit({
+      runId: input.runId,
+      projectId: input.projectId,
+      type: "step_completed",
+      step: "knowledge_retrieval",
+      content: knowledgeContext.length
+        ? `已召回 ${knowledgeContext.length} 条相关知识。`
+        : "未召回相关知识，按通用经验生成。",
+      data: { provider: "deerflow", knowledgeHitCount: knowledgeContext.length },
+    });
+
+    await this.streamService.emit({
+      runId: input.runId,
+      projectId: input.projectId,
+      type: "step_started",
       step: "requirement_packaging",
       content: "正在把请求交给 DeerFlow 2.0 lead agent。",
       data: { provider: "deerflow" },
@@ -488,6 +534,7 @@ export class VibeService {
       previewMode: input.previewMode,
       resumeReason: input.resumeReason,
       productDesignState: input.productDesignState,
+      knowledgeContext,
       signal,
       onEvent: async (event) => {
         if (signal?.aborted || !(await this.runLogService.isRunRunning(input.runId))) return;

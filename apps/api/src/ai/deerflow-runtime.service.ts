@@ -95,8 +95,20 @@ type DeerFlowRunInput = {
   previewMode?: string;
   resumeReason?: string;
   productDesignState?: unknown;
+  /** knowledge-core-2：生成路径注入的知识库召回（标题/摘要/内容/类型），让 DeerFlow 按知识基线产出 */
+  knowledgeContext?: DeerFlowKnowledgeReference[];
   signal?: AbortSignal;
   onEvent?: (event: DeerFlowRuntimeEvent) => Promise<void> | void;
+};
+
+/** 注入 DeerFlow 上下文的知识引用（与 knowledge.types 的 KnowledgeReference 对齐的最小子集）。 */
+export type DeerFlowKnowledgeReference = {
+  id: string;
+  title: string;
+  snippet?: string;
+  content: string;
+  type?: string;
+  relatedPath?: string;
 };
 
 type ThreadCreateResponse = {
@@ -395,6 +407,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
     deerFlowUploads: input.deerFlowUploads ?? [],
     resumeReason: input.resumeReason,
     productDesignState: input.productDesignState,
+    knowledgeContext: input.knowledgeContext ?? [],
     finalActionContract: {
       instruction: "At the end, include one fenced block named ai_product_workbench_final_action with JSON.",
       schema: {

@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
-import type { KnowledgeItem, Prisma } from "@prisma/client";
+import { Injectable, Logger } from "@nestjs/common";
+import type { KnowledgeItem } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
 
 export type EmbeddingSyncStats = {
   enabled: boolean;
@@ -10,13 +11,34 @@ export type EmbeddingSyncStats = {
   failed: number;
 };
 
-type ScorableKnowledgeItem = Pick<KnowledgeItem, "id" | "title" | "summary" | "content" | "tags">;
+type ScorableKnowledgeItem = Pick<KnowledgeItem, "id" | "title" | "summary" | "content" | "tags" | "embedding">;
 
+/**
+ * 真实向量嵌入（knowledge-core-3，已定决策）。
+ *
+ * 通过 OpenAI 兼容的 /embeddings 接口（EMBEDDING_API_BASE_URL / EMBEDDING_API_KEY /
+ * EMBEDDING_MODEL）生成向量，存入 knowledge_items.embedding（Json 数组），检索时对查询向量
+ * 与各知识向量做余弦相似度。
+ *
+ * 未配置 embedding 端点时 enabled=false，syncItem 跳过、scoreItems 返回空（检索降级为字面匹配），
+ * 不再伪装 enabled:true。此前实现是本地字面 token 余弦，名实不符。
+ */
 @Injectable()
 export class KnowledgeEmbeddingService {
+  private readonly logger = new Logger(KnowledgeEmbeddingService.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  private get config() {
+    const baseUrl = process.env.EMBEDDING_API_BASE_URL?.trim();
+    const apiKey = process.env.EMBEDDING_API_KEY?.trim();
+    const model = process.env.EMBEDDING_MODEL?.trim();
+    return { baseUrl, apiKey, model, enabled: Boolean(baseUrl && apiKey && model) };
+  }
+
   emptyStats(): EmbeddingSyncStats {
     return {
-      enabled: true,
+      enabled: this.config.enabled,
       created: 0,
       updated: 0,
       unchanged: 0,
@@ -25,90 +47,90 @@ export class KnowledgeEmbeddingService {
     };
   }
 
-  async syncItem(_item: ScorableKnowledgeItem): Promise<EmbeddingSyncStats> {
-    return {
-      ...this.emptyStats(),
-      skipped: 1,
-    };
+  isEnabled(): boolean {
+    return this.config.enabled;
+  }
+
+  /** 调用 embedding 接口把文本转向量。失败返回 null。 */
+  async embedText(text: string): Promise<number[] | null> {
+    const { baseUrl, apiKey, model, enabled } = this.config;
+    if (!enabled || !baseUrl || !apiKey || !model) return null;
+    const input = text.trim().slice(0, 8000);
+    if (!input) return null;
+    try {
+      const response = await fetch(`${baseUrl.replace(/\/$/, "")}/embeddings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ model, input }),
+      });
+      if (!response.ok) {
+        this.logger.warn(`embedding 请求失败：${response.status} ${response.statusText}`);
+        return null;
+      }
+      const data = (await response.json()) as { data?: Array<{ embedding?: number[] }> };
+      const vector = data.data?.[0]?.embedding;
+      return Array.isArray(vector) ? vector : null;
+    } catch (error) {
+      this.logger.warn(`embedding 调用异常：${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  async syncItem(item: ScorableKnowledgeItem): Promise<EmbeddingSyncStats> {
+    const stats = this.emptyStats();
+    if (!this.config.enabled) {
+      stats.skipped = 1;
+      return stats;
+    }
+    const text = [item.title, item.summary ?? "", item.content].filter(Boolean).join("\n\n");
+    const vector = await this.embedText(text);
+    if (!vector) {
+      stats.failed = 1;
+      return stats;
+    }
+    await this.prisma.knowledgeItem.update({
+      where: { id: item.id },
+      data: { embedding: vector as unknown as never },
+    });
+    stats.updated = 1;
+    return stats;
   }
 
   async scoreItems(query: string, items: ScorableKnowledgeItem[]): Promise<Map<string, number>> {
-    const queryVector = buildWeightedVector(query);
     const scores = new Map<string, number>();
-
-    if (!queryVector.size) return scores;
+    if (!this.config.enabled) return scores;
+    const queryVector = await this.embedText(query);
+    if (!queryVector || !queryVector.length) return scores;
 
     for (const item of items) {
-      const itemVector = mergeVectors(
-        buildWeightedVector(item.title, 2.4),
-        buildWeightedVector(item.summary ?? "", 1.8),
-        buildWeightedVector(tagsToText(item.tags), 1.5),
-        buildWeightedVector(item.content, 1),
-      );
+      const itemVector = toNumberArray(item.embedding);
+      if (!itemVector.length) continue; // 未生成嵌入的知识项跳过（降级为字面匹配）
       const score = cosineSimilarity(queryVector, itemVector);
       if (score > 0) scores.set(item.id, Number(score.toFixed(3)));
     }
-
     return scores;
   }
 }
 
-function buildWeightedVector(text: string, weight = 1) {
-  const vector = new Map<string, number>();
-  for (const token of tokenize(text)) {
-    vector.set(token, (vector.get(token) ?? 0) + weight);
-  }
-  return vector;
+function toNumberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
 }
 
-function mergeVectors(...vectors: Map<string, number>[]) {
-  const merged = new Map<string, number>();
-  for (const vector of vectors) {
-    for (const [token, value] of vector.entries()) {
-      merged.set(token, (merged.get(token) ?? 0) + value);
-    }
-  }
-  return merged;
-}
-
-function cosineSimilarity(left: Map<string, number>, right: Map<string, number>) {
-  if (!left.size || !right.size) return 0;
-
+function cosineSimilarity(left: number[], right: number[]): number {
+  const len = Math.min(left.length, right.length);
+  if (!len) return 0;
   let dot = 0;
   let leftNorm = 0;
   let rightNorm = 0;
-
-  for (const value of left.values()) leftNorm += value * value;
-  for (const value of right.values()) rightNorm += value * value;
-  for (const [token, value] of left.entries()) dot += value * (right.get(token) ?? 0);
-
+  for (let i = 0; i < len; i += 1) {
+    dot += left[i] * right[i];
+    leftNorm += left[i] * left[i];
+    rightNorm += right[i] * right[i];
+  }
   if (!leftNorm || !rightNorm) return 0;
   return dot / Math.sqrt(leftNorm * rightNorm);
-}
-
-function tokenize(text: string) {
-  const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
-  const rawTokens = normalized.match(/[a-z0-9]{2,}|[\u4e00-\u9fa5]{2,}/gi) ?? [];
-  const tokens: string[] = [];
-
-  for (const token of rawTokens) {
-    if (/^[a-z0-9]+$/i.test(token)) {
-      tokens.push(token);
-      continue;
-    }
-    tokens.push(token);
-    for (let index = 0; index < token.length - 1; index += 1) {
-      tokens.push(token.slice(index, index + 2));
-    }
-    for (let index = 0; index < token.length - 2 && index < 24; index += 1) {
-      tokens.push(token.slice(index, index + 3));
-    }
-  }
-
-  return [...new Set(tokens.filter((token) => token.length >= 2))].slice(0, 160);
-}
-
-function tagsToText(value: Prisma.JsonValue | null) {
-  if (!Array.isArray(value)) return "";
-  return value.filter((item): item is string => typeof item === "string").join(" ");
 }

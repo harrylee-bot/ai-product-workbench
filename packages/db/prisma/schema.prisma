@@ -948,6 +948,7 @@ model KnowledgeItem {
   scope                     KnowledgeScope     @default(global)
   categoryId                String?            @map("category_id")
   tags                      Json?
+  embedding                 Json?
   priority                  KnowledgePriority  @default(medium)
   source                    KnowledgeSource
   sourceProjectId           String?            @map("source_project_id")
