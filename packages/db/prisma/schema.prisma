@@ -462,7 +462,6 @@ model FileAsset {
   storagePath     String              @map("storage_path")
   publicUrl       String?             @map("public_url")
   status          FileAssetStatus     @default(uploaded)
-  parseResultId   String?             @map("parse_result_id")
   parseError      String?             @map("parse_error")
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
@@ -985,16 +984,6 @@ model KnowledgeCategory {
   @@index([parentId])
   @@index([order])
   @@map("knowledge_categories")
-}
-
-model KnowledgeTag {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  @@map("knowledge_tags")
 }
 
 model KnowledgeVersion {

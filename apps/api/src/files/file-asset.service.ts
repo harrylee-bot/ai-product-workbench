@@ -414,7 +414,6 @@ export class FileAssetService {
         where: { id: file.id },
         data: {
           status,
-          parseResultId: saved.id,
           parseError: output.errorMessage,
         },
       });
@@ -535,7 +534,6 @@ export class FileAssetService {
       storagePath: file.storagePath,
       publicUrl: file.publicUrl ?? undefined,
       status: file.status,
-      parseResultId: file.parseResultId ?? undefined,
       parseError: file.parseError ?? undefined,
       createdAt: file.createdAt.toISOString(),
       updatedAt: file.updatedAt.toISOString(),
