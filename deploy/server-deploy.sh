@@ -138,7 +138,7 @@ wait_for_http() {
   local attempt
 
   for attempt in $(seq 1 60); do
-    if curl --fail --silent "$url" >/dev/null; then
+    if curl --fail --silent -H "x-forwarded-proto: https" "$url" >/dev/null; then
       return 0
     fi
     sleep 2
