@@ -209,37 +209,43 @@ export class QaService {
       ? `QA 完成：${counts.blockingCount} 个阻塞、${counts.majorCount} 个重要、${counts.minorCount} 个轻微、${counts.infoCount} 个提示。`
       : "QA 完成：未发现阻塞或一致性问题。";
 
-    const report = await this.prisma.qAReport.create({
-      data: {
-        projectId,
-        productDesignStateId: state?.id ?? "missing",
-        productDesignStateVersion: state?.version ?? 0,
-        prdDocumentId: prdDocument?.id,
-        prototypeArtifactId: currentArtifact?.id,
-        prototypeSpecId: prototypeSpec?.id,
-        status,
-        trigger: options.trigger,
-        checkTypes: toInputJson(checkTypes),
-        summary,
-        issues: toInputJson(issues),
-        ...counts,
-        generatedByRunId: options.runId,
-        relatedRollbackId: options.relatedRollbackId,
-        createdBy: userId,
-      },
-    });
+    const report = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.qAReport.create({
+        data: {
+          projectId,
+          productDesignStateId: state?.id ?? "missing",
+          productDesignStateVersion: state?.version ?? 0,
+          prdDocumentId: prdDocument?.id,
+          prototypeArtifactId: currentArtifact?.id,
+          prototypeSpecId: prototypeSpec?.id,
+          status,
+          trigger: options.trigger,
+          checkTypes: toInputJson(checkTypes),
+          summary,
+          issues: toInputJson(issues),
+          ...counts,
+          generatedByRunId: options.runId,
+          relatedRollbackId: options.relatedRollbackId,
+          createdBy: userId,
+        },
+      });
 
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: {
-        latestQaReportId: report.id,
-        status: projectStatusAfterQa({
-          qaStatus: status,
-          currentProjectStatus: project.status,
-          productDesignState: state,
-        }),
-        lastActivityAt: new Date(),
-      },
+      // txn-2：QAReport.create + project.update 原子化，避免 create 成功而 latestQaReportId 更新失败
+      // 留下孤儿报告 + 门禁状态漂移。
+      await tx.project.update({
+        where: { id: projectId },
+        data: {
+          latestQaReportId: created.id,
+          status: projectStatusAfterQa({
+            qaStatus: status,
+            currentProjectStatus: project.status,
+            productDesignState: state,
+          }),
+          lastActivityAt: new Date(),
+        },
+      });
+
+      return created;
     });
 
     return this.toQaReport(report as QAReportRecord);

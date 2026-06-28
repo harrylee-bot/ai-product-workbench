@@ -57,7 +57,7 @@ describe("Module 13 QA services", () => {
       knowledgeItem: {
         findMany: vi.fn(),
       },
-      $transaction: vi.fn(),
+      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
     };
     const ruleCheck = new QaRuleCheckService();
     const knowledgeRetrieval = {
@@ -161,7 +161,7 @@ describe("Module 13 QA services", () => {
       knowledgeItem: {
         findMany: vi.fn(),
       },
-      $transaction: vi.fn(),
+      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
     };
     const ruleCheck = new QaRuleCheckService();
     const knowledgeRetrieval = {
@@ -249,23 +249,23 @@ describe("Module 13 QA services", () => {
 
     expect(service.evaluateGate(qaReport({
       status: "warning",
-      minorCount: 1,
+      majorCount: 1,
       issues: [{
-        id: "minor-1",
-        checkType: "prd_completeness",
-        severity: "minor",
-        title: "文案待优化",
-        description: "局部文案需要后续调整。",
+        id: "major-1",
+        checkType: "assumption_risk",
+        severity: "major",
+        title: "高风险假设未确认",
+        description: "积分奖励规则存在未确认假设，建议修订后重跑 QA。",
         status: "open",
       }],
     }))).toEqual(
       expect.objectContaining({
         status: "warning",
-        allowConfirmArtifacts: true,
+        allowConfirmArtifacts: false,
         allowPersistKnowledge: false,
         allowExportOrPublish: false,
-        shouldReviseArtifacts: false,
-        requiredActions: ["run_qa"],
+        shouldReviseArtifacts: true,
+        requiredActions: ["revise_artifacts", "run_qa"],
       }),
     );
 
