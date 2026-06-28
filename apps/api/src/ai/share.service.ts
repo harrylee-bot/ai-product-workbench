@@ -18,7 +18,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
-import { PrototypeService } from "./prototype.service";
+import { PrototypeService, sanitizePrototypeHtml } from "./prototype.service";
 
 type CreateShareInput = {
   projectId: string;
@@ -145,18 +145,31 @@ export class ShareService {
    * 公开解析（免登录、只读）。返回访客可见的文档/原型只读快照。
    * 不暴露任何编辑/导出能力；原型仅返回经安全校验的 HTML。
    */
-  async resolvePublic(token: string) {
-    const share = await this.prisma.shareLink.findUnique({ where: { token } });
-    if (!share) throw new NotFoundException("SHARE_NOT_FOUND");
-    if (share.status !== ShareLinkStatus.active) throw new NotFoundException("SHARE_REVOKED");
-    if (share.expiresAt && share.expiresAt.getTime() < Date.now()) {
-      throw new NotFoundException("SHARE_EXPIRED");
-    }
+  async resolvePublic(token: string, options: { incrementView?: boolean } = {}) {
+    const incrementView = options.incrementView ?? true;
+    const now = new Date();
+    const { share, project } = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.shareLink.findUnique({ where: { token } });
+      if (!current) throw new NotFoundException("SHARE_NOT_FOUND");
+      if (current.status !== ShareLinkStatus.active) throw new NotFoundException("SHARE_REVOKED");
+      if (current.expiresAt && current.expiresAt.getTime() < now.getTime()) {
+        throw new NotFoundException("SHARE_EXPIRED");
+      }
 
-    const project = await this.prisma.project.findUnique({ where: { id: share.projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("SHARE_PROJECT_UNAVAILABLE");
-    }
+      const currentProject = await tx.project.findUnique({ where: { id: current.projectId } });
+      if (!currentProject || currentProject.deletedAt || currentProject.status === ProjectStatus.deleted) {
+        throw new NotFoundException("SHARE_PROJECT_UNAVAILABLE");
+      }
+
+      const resolvedShare = incrementView
+        ? await tx.shareLink.update({
+            where: { id: current.id },
+            data: { viewCount: { increment: 1 }, lastViewedAt: now },
+          })
+        : current;
+
+      return { share: resolvedShare, project: currentProject };
+    });
 
     const scope = share.scope;
     const wantsPrd = scope === ShareScope.prd || scope === ShareScope.both;
@@ -164,11 +177,6 @@ export class ShareService {
 
     const prd = wantsPrd ? await this.loadPublicPrd(share as ShareLinkRecord) : null;
     const prototype = wantsPrototype ? await this.loadPublicPrototype(share as ShareLinkRecord) : null;
-
-    await this.prisma.shareLink.update({
-      where: { id: share.id },
-      data: { viewCount: { increment: 1 }, lastViewedAt: new Date() },
-    });
 
     return {
       title: share.title ?? project.title,
@@ -183,7 +191,7 @@ export class ShareService {
 
   /** 仅返回原型 HTML（免登录），用于 iframe 预览。 */
   async resolvePublicPrototypeHtml(token: string) {
-    const result = await this.resolvePublic(token);
+    const result = await this.resolvePublic(token, { incrementView: false });
     if (!result.prototype?.html) throw new NotFoundException("SHARE_PROTOTYPE_NOT_AVAILABLE");
     return result.prototype.html;
   }
@@ -214,7 +222,7 @@ export class ShareService {
     }
     return {
       title: artifact.title,
-      html: artifact.htmlContent,
+      html: sanitizePrototypeHtml(artifact.htmlContent),
       pageCount: artifact.pageCount,
       updatedAt: artifact.updatedAt.toISOString(),
     };

@@ -15,6 +15,7 @@ import {
 } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { KnowledgeCandidateService } from "../knowledge/knowledge-candidate.service";
+import DOMPurify from "isomorphic-dompurify";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
@@ -93,8 +94,11 @@ export class PrototypeService {
     draft: PrototypeArtifactDraft,
     options: { userId: string; runId?: string; reason?: string },
   ) {
-    const htmlContent = draft.htmlContent ?? draft.html ?? "";
-    const safety = validateHtmlSafety(htmlContent);
+    // sec-1：用 DOMPurify allowlist 净化后再存储（替换可绕过的正则黑名单）。
+    // 净化后总有内容则 ready；空内容（如仅含被剥离的脚本）才 failed。
+    const rawHtml = draft.htmlContent ?? draft.html ?? "";
+    const htmlContent = sanitizePrototypeHtml(rawHtml);
+    const hasContent = htmlContent.trim().length > 0;
 
     const specRecord = await this.prisma.prototypeSpecRecord.create({
       data: {
@@ -121,14 +125,14 @@ export class PrototypeService {
         productDesignStateId: state.id,
         productDesignStateVersion: state.version,
         title: draft.title ?? prototypeSpec.title,
-        status: safety.ok ? PrototypeArtifactStatus.ready : PrototypeArtifactStatus.failed,
-        htmlContent: safety.ok ? htmlContent : null,
+        status: hasContent ? PrototypeArtifactStatus.ready : PrototypeArtifactStatus.failed,
+        htmlContent: hasContent ? htmlContent : null,
         entryFilePath: draft.entryFilePath ?? draft.entryFile ?? "index.html",
         previewUrl: draft.previewUrl,
         targetDevice: toPrismaTargetDevice(draft.targetDevice ?? prototypeSpec.targetDevice),
         pageCount: draft.pageCount ?? (prototypeSpec.pages.length || 1),
         generatedByRunId: options.runId ?? draft.generatedByRunId,
-        errorMessage: safety.ok ? draft.errorMessage : safety.reason,
+        errorMessage: hasContent ? draft.errorMessage : "PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE",
         createdBy: options.userId,
         updatedBy: options.userId,
       },
@@ -136,9 +140,9 @@ export class PrototypeService {
 
     const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
     const artifact = this.toArtifactItem(artifactRecord as PrototypeArtifactRecord);
-    if (!safety.ok) {
-      await this.createVersion(spec, artifact, options.userId, "原型生成失败：HTML 安全检查未通过");
-      throw new BadRequestException("PROTOTYPE_HTML_UNSAFE");
+    if (!hasContent) {
+      await this.createVersion(spec, artifact, options.userId, "原型生成失败：净化后无 HTML 内容");
+      throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
     }
 
     await this.prisma.project.update({
@@ -241,9 +245,8 @@ export class PrototypeService {
     if (artifact.status !== PrototypeArtifactStatus.ready || !artifact.htmlContent) {
       throw new BadRequestException("PROTOTYPE_PREVIEW_NOT_READY");
     }
-    const safety = validateHtmlSafety(artifact.htmlContent);
-    if (!safety.ok) throw new BadRequestException("PROTOTYPE_HTML_UNSAFE");
-    return artifact.htmlContent;
+    // sec-1：读取时再净化一遍（防御历史未净化数据）。
+    return sanitizePrototypeHtml(artifact.htmlContent);
   }
 
   async listVersionsForUser(user: AuthenticatedUser, artifactId: string) {
@@ -517,20 +520,31 @@ function prototypeComponentNode(component: PrototypeComponentSpec): PrototypeSta
   };
 }
 
-export function validateHtmlSafety(html: string): { ok: true } | { ok: false; reason: string } {
-  const checks: Array<[RegExp, string]> = [
-    [/<script\b[^>]*\bsrc\s*=/i, "PROTOTYPE_HTML_REMOTE_SCRIPT"],
-    [/\beval\s*\(/i, "PROTOTYPE_HTML_EVAL"],
-    [/document\.cookie/i, "PROTOTYPE_HTML_COOKIE_ACCESS"],
-    [/localStorage\.(setItem|removeItem|clear)/i, "PROTOTYPE_HTML_LOCAL_STORAGE_WRITE"],
-    [/localStorage[^"']*(token|password|secret|credential|auth)/i, "PROTOTYPE_HTML_SENSITIVE_STORAGE"],
-    [/(?:window\s*\.\s*)?(?:parent|top)\s*[\.\[]|\bframeElement\b/i, "PROTOTYPE_HTML_PARENT_ACCESS"],
-    [/<iframe\b/i, "PROTOTYPE_HTML_IFRAME"],
-    [/\b(fetch\s*\(|XMLHttpRequest|axios\.)/i, "PROTOTYPE_HTML_NETWORK_CALL"],
-    [/https?:\/\//i, "PROTOTYPE_HTML_REMOTE_URL"],
-  ];
-  const failed = checks.find(([pattern]) => pattern.test(html));
-  return failed ? { ok: false, reason: failed[1] } : { ok: true };
+/**
+ * sec-1：用 DOMPurify allowlist 净化原型 HTML，替换此前可绕过的正则黑名单。
+ * 默认剥离 <script>、on* 事件处理器、javascript:/data: 脚本 URL；allowlist 进一步收紧标签/属性。
+ * 允许 data-component-id/data-page-id（原型选区标记用）。
+ */
+export function sanitizePrototypeHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      "html","head","body","title","meta","link","style",
+      "a","abbr","b","blockquote","br","caption","code","col","colgroup","dd","del","div","dl","dt",
+      "em","figcaption","figure","h1","h2","h3","h4","h5","h6","hr","i","img","ins","kbd","li","mark",
+      "ol","p","pre","q","s","samp","small","span","strong","sub","sup","table","tbody","td","tfoot",
+      "th","thead","time","tr","u","ul","var","wbr","button","label","input","select","option","textarea",
+      "fieldset","legend","nav","header","footer","main","section","article","aside","dialog",
+    ],
+    ALLOWED_ATTR: [
+      "class","id","style","href","src","alt","title","type","name","value","placeholder","for",
+      "colspan","rowspan","target","rel","width","height","disabled","checked","selected","required",
+      "aria-label","aria-hidden","role","data-component-id","data-page-id","data-action",
+    ],
+    ALLOW_DATA_ATTR: false,
+    ADD_ATTR: ["data-component-id","data-page-id","data-action"],
+    FORBID_TAGS: ["script","iframe","object","embed","base","form"],
+    FORBID_ATTR: ["onerror","onclick","onload","onmouseover","onmouseout","onsubmit","onchange","oninput","onfocus","onblur"],
+  });
 }
 
 function asRecord(value: unknown) {

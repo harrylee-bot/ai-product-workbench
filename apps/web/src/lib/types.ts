@@ -11,7 +11,6 @@ export type PublicUser = {
 };
 
 export type Session = {
-  accessToken: string;
   user: PublicUser;
 };
 

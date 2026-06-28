@@ -11,7 +11,7 @@ import type {
   PrototypeArtifactDraft,
   PrototypeSpec,
 } from "../src/ai/ai-vibe.types";
-import { PrototypeService, validateHtmlSafety } from "../src/ai/prototype.service";
+import { PrototypeService, sanitizePrototypeHtml } from "../src/ai/prototype.service";
 
 describe("HTML prototype artifact module", () => {
   const now = new Date("2026-06-20T08:00:00Z");
@@ -146,29 +146,30 @@ describe("HTML prototype artifact module", () => {
     expect(prisma.project.update).not.toHaveBeenCalled();
   });
 
-  it("rejects unsafe HTML before allowing preview", async () => {
+  it("sanitizes unsafe HTML before storing and previewing", async () => {
     const state = baseState();
     const spec = prototypeSpec(state);
     prisma.prototypeSpecRecord.create.mockImplementation(async ({ data }) => specRecord(data));
-    prisma.prototypeArtifact.create.mockImplementation(async ({ data }) => artifactRecord({ id: "artifact-unsafe", ...data }));
+    prisma.prototypeArtifact.create.mockImplementation(async ({ data }) => artifactRecord({ id: "artifact-sanitized", ...data }));
 
-    await expect(
-      service.saveGeneratedPrototype(
-        state,
-        spec,
-        {
-          projectId: state.projectId,
-          prototypeSpecId: spec.id,
-          htmlContent: '<!doctype html><script src="https://example.com/tracker.js"></script>',
-        },
-        { userId: "user-1" },
-      ),
-    ).rejects.toThrow("PROTOTYPE_HTML_UNSAFE");
-    expect(prisma.project.update).not.toHaveBeenCalled();
-    expect(validateHtmlSafety("<script>window.parent.postMessage('x','*')</script>")).toEqual({
-      ok: false,
-      reason: "PROTOTYPE_HTML_PARENT_ACCESS",
-    });
+    const result = await service.saveGeneratedPrototype(
+      state,
+      spec,
+      {
+        projectId: state.projectId,
+        prototypeSpecId: spec.id,
+        htmlContent: '<!doctype html><html><body><button onclick="alert(1)" data-component-id="cta" data-secret="x">提交</button><script src="https://example.com/tracker.js"></script></body></html>',
+      },
+      { userId: "user-1" },
+    );
+
+    expect(result.artifact.status).toBe("ready");
+    expect(result.artifact.htmlContent).toContain('data-component-id="cta"');
+    expect(result.artifact.htmlContent).not.toContain("onclick");
+    expect(result.artifact.htmlContent).not.toContain("data-secret");
+    expect(result.artifact.htmlContent).not.toContain("<script");
+    expect(prisma.project.update).toHaveBeenCalled();
+    expect(sanitizePrototypeHtml("<script>window.parent.postMessage('x','*')</script>")).toBe("");
   });
 
   it("hides a stale current prototype artifact when it no longer matches ProductDesignState", async () => {

@@ -1,10 +1,12 @@
 import { ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PassportStrategy } from "@nestjs/passport";
-import { ExtractJwt, Strategy } from "passport-jwt";
+import type { Request } from "express";
+import { Strategy } from "passport-jwt";
 import { UserStatus } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { getJwtSecret } from "../../common/secret-config";
+import { AUTH_COOKIE_NAME } from "../../common/auth-cookie";
 import type { Phase1JwtPayload, Phase1User } from "./auth.types";
 
 @Injectable()
@@ -16,7 +18,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     @Inject(ConfigService) _configService: ConfigService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: (request: Request) => readJwtCookie(request),
       ignoreExpiration: false,
       secretOrKey: getJwtSecret(),
     });
@@ -42,4 +44,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       status: user.status,
     };
   }
+}
+
+function readJwtCookie(request: Request) {
+  const cookies = request.cookies as Record<string, string | undefined> | undefined;
+  return cookies?.[AUTH_COOKIE_NAME] ?? null;
 }

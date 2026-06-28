@@ -1,5 +1,8 @@
-import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
+import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
+import { AUTH_COOKIE_NAME, authCookieOptions, clearAuthCookieOptions } from "../../common/auth-cookie";
 import { CurrentUser } from "./current-user.decorator";
 import { LoginDto } from "./dto";
 import { JwtAuthGuard } from "./jwt-auth.guard";
@@ -10,8 +13,13 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Post("login")
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto);
+  // sec-3：登录接口严格限流防暴破（10 次/分钟/IP）。
+  @Throttle({ auth: { limit: 10, ttl: 60_000 } })
+  login(@Body() dto: LoginDto, @Res({ passthrough: true }) response: Response) {
+    return this.auth.login(dto).then(({ accessToken, user }) => {
+      response.cookie(AUTH_COOKIE_NAME, accessToken, authCookieOptions());
+      return { user };
+    });
   }
 
   @Get("me")
@@ -22,7 +30,8 @@ export class AuthController {
 
   @Post("logout")
   @UseGuards(JwtAuthGuard)
-  logout() {
+  logout(@Res({ passthrough: true }) response: Response) {
+    response.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
     return this.auth.logout();
   }
 }

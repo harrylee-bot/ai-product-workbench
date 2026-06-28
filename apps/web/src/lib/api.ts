@@ -1,4 +1,4 @@
-import { clearSession, readSession } from "./auth-storage";
+import { clearSession } from "./auth-storage";
 
 const API_BASE_URL_ENV = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
@@ -18,7 +18,7 @@ const API_BASE_URL = getApiBaseUrl();
 
 type ApiOptions = RequestInit & {
   skipAuth?: boolean;
-  tokenOverride?: string;
+  suppressAuthExpiredEvent?: boolean;
 };
 
 type ApiHealthResponse = {
@@ -38,16 +38,10 @@ export class ApiError extends Error {
 }
 
 export async function apiRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const session = readSession();
-  const token = options.tokenOverride ?? session?.accessToken;
   const headers = new Headers(options.headers);
 
   if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
-  }
-
-  if (!options.skipAuth && token) {
-    headers.set("Authorization", `Bearer ${token}`);
   }
 
   let response: Response;
@@ -55,6 +49,7 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       headers,
+      credentials: "include",
     });
   } catch {
     throw new ApiError("无法连接 API 服务，请确认后端已启动并可访问", 503);
@@ -66,7 +61,11 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
     const message =
       typeof payload?.message === "string" ? payload.message : "请求失败，请稍后重试";
 
-    if ((response.status === 401 || message.includes("禁用")) && typeof window !== "undefined") {
+    if (
+      !options.suppressAuthExpiredEvent &&
+      (response.status === 401 || message.includes("禁用")) &&
+      typeof window !== "undefined"
+    ) {
       clearSession();
       window.dispatchEvent(
         new CustomEvent("auth:expired", {
@@ -84,20 +83,16 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
 export async function streamApiEvents<T>(
   path: string,
   onEvent: (event: T, meta: { type?: string }) => void,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; suppressAuthExpiredEvent?: boolean } = {},
 ) {
-  const session = readSession();
   const headers = new Headers();
-
-  if (session?.accessToken) {
-    headers.set("Authorization", `Bearer ${session.accessToken}`);
-  }
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       headers,
       signal: options.signal,
+      credentials: "include",
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return;
@@ -109,7 +104,11 @@ export async function streamApiEvents<T>(
     const message =
       typeof payload?.message === "string" ? payload.message : "流式连接失败，请稍后重试";
 
-    if ((response.status === 401 || message.includes("禁用")) && typeof window !== "undefined") {
+    if (
+      !options.suppressAuthExpiredEvent &&
+      (response.status === 401 || message.includes("禁用")) &&
+      typeof window !== "undefined"
+    ) {
       clearSession();
       window.dispatchEvent(
         new CustomEvent("auth:expired", {
@@ -150,16 +149,11 @@ export async function streamApiEvents<T>(
 }
 
 export async function downloadApiFile(path: string) {
-  const session = readSession();
   const headers = new Headers();
-
-  if (session?.accessToken) {
-    headers.set("Authorization", `Bearer ${session.accessToken}`);
-  }
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, { headers });
+    response = await fetch(`${API_BASE_URL}${path}`, { headers, credentials: "include" });
   } catch {
     throw new ApiError("无法连接 API 服务，请确认后端已启动并可访问", 503);
   }

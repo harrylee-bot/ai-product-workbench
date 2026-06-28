@@ -1,6 +1,10 @@
 import "reflect-metadata";
 import { BadRequestException, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
+import cookieParser from "cookie-parser";
+import type { NextFunction, Request, Response } from "express";
+import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { HttpExceptionFilter } from "./common/http-exception.filter";
 import { validateSecrets } from "./common/secret-config";
@@ -11,19 +15,67 @@ function corsOrigin(): string | string[] {
   if (!origin) {
     throw new Error("Missing WEB_ORIGIN. Set it to the web app origin(s) in .env (comma-separated).");
   }
-  return origin.split(",").map((item) => item.trim());
+  return origin.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function enforceHttpsInProduction(request: Request, response: Response, next: NextFunction) {
+  if (process.env.NODE_ENV !== "production" || process.env.FORCE_HTTPS === "false") {
+    next();
+    return;
+  }
+
+  const forwardedProto = String(request.headers["x-forwarded-proto"] ?? "")
+    .split(",")
+    .at(0)
+    ?.trim()
+    .toLowerCase();
+  if (request.secure || forwardedProto === "https") {
+    next();
+    return;
+  }
+
+  if (request.method === "GET" || request.method === "HEAD") {
+    response.redirect(308, `https://${request.headers.host ?? ""}${request.originalUrl}`);
+    return;
+  }
+
+  response.status(403).json({ statusCode: 403, message: "HTTPS_REQUIRED", error: "Forbidden" });
 }
 
 async function bootstrap() {
   validateSecrets();
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  app.set("trust proxy", 1);
   app.setGlobalPrefix("api");
+  app.use(cookieParser());
+  app.use(enforceHttpsInProduction);
+  // sec-2：安全响应头 + CSP。frame-ancestors 'none' 防点击劫持（原型 iframe 由 srcDoc 嵌入，不受影响）。
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          // API 不提供可执行 HTML；原型 iframe 由 Web 端 srcDoc 承载，不放宽全局 script-src。
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:"],
+          frameAncestors: ["'none'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+        },
+      },
+      crossOriginResourcePolicy: { policy: "same-origin" },
+      hsts: process.env.NODE_ENV === "production"
+        ? { maxAge: 15552000, includeSubDomains: true, preload: true }
+        : false,
+    }),
+  );
   app.enableCors({
     origin: corsOrigin(),
-    credentials: false,
-    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+    allowedHeaders: ["Content-Type"],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
 

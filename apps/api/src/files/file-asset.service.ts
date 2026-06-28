@@ -17,8 +17,9 @@ import {
   ProjectStatus,
   UserRole,
 } from "@prisma/client";
+import { fileTypeFromFile } from "file-type";
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
@@ -28,6 +29,8 @@ import type { AttachmentSummary, ParserOutput, RuntimeAttachmentFile } from "./f
 
 const ALLOWED_EXTENSIONS = new Set(["txt", "md", "docx", "pdf", "png", "jpg", "jpeg", "zip", "rp"]);
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
+const ZIP_CONTAINER_EXTENSIONS = new Set(["docx", "zip", "rp"]);
+const TEXT_EXTENSIONS = new Set(["txt", "md"]);
 const MAX_FILES_PER_UPLOAD = 10;
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
@@ -273,7 +276,7 @@ export class FileAssetService {
     file: Express.Multer.File,
   ) {
     const extension = this.normalizeExtension(file.originalname);
-    this.assertFileAllowed(file, extension);
+    await this.assertFileAllowed(file, extension);
 
     const projectDir = path.join(this.uploadRoot, projectId);
     const storedName = `${randomUUID()}.${extension}`;
@@ -486,17 +489,57 @@ export class FileAssetService {
     if (!message) throw new BadRequestException("消息不属于当前项目");
   }
 
-  private assertFileAllowed(file: Express.Multer.File, extension: string) {
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
-      void rm(file.path, { force: true });
-      throw new BadRequestException("暂不支持该文件类型");
+  private async assertFileAllowed(file: Express.Multer.File, extension: string) {
+    try {
+      if (!ALLOWED_EXTENSIONS.has(extension)) {
+        throw new BadRequestException("暂不支持该文件类型");
+      }
+
+      const maxSize = IMAGE_EXTENSIONS.has(extension) ? MAX_IMAGE_SIZE : MAX_FILE_SIZE;
+      if (file.size > maxSize) {
+        throw new BadRequestException(IMAGE_EXTENSIONS.has(extension) ? "图片不能超过 10MB" : "文件不能超过 50MB");
+      }
+
+      await this.assertFileMagic(file.path, extension);
+    } catch (error) {
+      await rm(file.path, { force: true });
+      throw error;
+    }
+  }
+
+  private async assertFileMagic(filePath: string, extension: string) {
+    const detected = await fileTypeFromFile(filePath);
+
+    if (TEXT_EXTENSIONS.has(extension)) {
+      if (detected) throw new BadRequestException("文件内容与扩展名不匹配");
+      await this.assertTextFile(filePath);
+      return;
     }
 
-    const maxSize = IMAGE_EXTENSIONS.has(extension) ? MAX_IMAGE_SIZE : MAX_FILE_SIZE;
-    if (file.size > maxSize) {
-      void rm(file.path, { force: true });
-      throw new BadRequestException(IMAGE_EXTENSIONS.has(extension) ? "图片不能超过 10MB" : "文件不能超过 50MB");
+    if (extension === "pdf") {
+      if (detected?.mime !== "application/pdf") throw new BadRequestException("文件内容与扩展名不匹配");
+      return;
     }
+
+    if (extension === "png") {
+      if (detected?.mime !== "image/png") throw new BadRequestException("文件内容与扩展名不匹配");
+      return;
+    }
+
+    if (extension === "jpg" || extension === "jpeg") {
+      if (detected?.mime !== "image/jpeg") throw new BadRequestException("文件内容与扩展名不匹配");
+      return;
+    }
+
+    if (ZIP_CONTAINER_EXTENSIONS.has(extension)) {
+      if (detected?.mime !== "application/zip") throw new BadRequestException("文件内容与扩展名不匹配");
+      return;
+    }
+  }
+
+  private async assertTextFile(filePath: string) {
+    const sample = await readFile(filePath, { encoding: "utf8" });
+    if (sample.includes("\0")) throw new BadRequestException("文本文件包含非法二进制内容");
   }
 
   private normalizeExtension(fileName: string) {

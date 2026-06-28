@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, Header, Param, Post, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { ShareScope } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -37,11 +38,14 @@ export class ShareLinkController {
 export class PublicShareController {
   constructor(private readonly shareService: ShareService) {}
 
+  // sec-3：公开分享接口限流防刷量（30 次/分钟/IP）。
+  @Throttle({ public: { limit: 30, ttl: 60_000 } })
   @Get(":token")
   resolve(@Param("token") token: string) {
     return this.shareService.resolvePublic(token);
   }
 
+  @Throttle({ public: { limit: 30, ttl: 60_000 } })
   @Get(":token/prototype")
   @Header("Content-Type", "text/html; charset=utf-8")
   prototypeHtml(@Param("token") token: string) {

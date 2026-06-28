@@ -5,6 +5,7 @@ import { ShareService } from "../src/ai/share.service";
 
 describe("ShareService", () => {
   const prisma = {
+    $transaction: vi.fn(),
     project: { findUnique: vi.fn() },
     shareLink: {
       create: vi.fn(),
@@ -34,6 +35,7 @@ describe("ShareService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
   });
 
   it("creates a share link only when the requested artifacts are ready", async () => {
@@ -136,7 +138,7 @@ describe("ShareService", () => {
   });
 
   it("resolves public payload read-only and increments view count", async () => {
-    prisma.shareLink.findUnique.mockResolvedValue({
+    const shareRecord = {
       id: "share-1",
       token: "tok-abc",
       projectId: "project-1",
@@ -146,7 +148,8 @@ describe("ShareService", () => {
       prdDocumentId: "prd-1",
       prototypeArtifactId: "artifact-1",
       expiresAt: null,
-    });
+    };
+    prisma.shareLink.findUnique.mockResolvedValue(shareRecord);
     prisma.project.findUnique.mockResolvedValue({
       id: "project-1",
       ownerId: "user-1",
@@ -168,7 +171,11 @@ describe("ShareService", () => {
       pageCount: 1,
       updatedAt: new Date("2026-06-24T00:00:00.000Z"),
     });
-    prisma.shareLink.update.mockResolvedValue({});
+    prisma.shareLink.update.mockResolvedValue({
+      ...shareRecord,
+      viewCount: 1,
+      lastViewedAt: new Date("2026-06-24T00:00:01.000Z"),
+    });
 
     const result = await service.resolvePublic("tok-abc");
 
@@ -176,7 +183,7 @@ describe("ShareService", () => {
     expect(result.allowDownload).toBe(false);
     expect(result.allowEdit).toBe(false);
     expect(result.prd?.title).toBe("签到活动 PRD");
-    expect(result.prototype?.html).toContain("<!doctype html>");
+    expect(result.prototype?.html).toContain("签到");
     expect(prisma.shareLink.update).toHaveBeenCalledWith({
       where: { id: "share-1" },
       data: { viewCount: { increment: 1 }, lastViewedAt: expect.any(Date) },

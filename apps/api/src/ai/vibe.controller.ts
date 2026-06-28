@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Sse, UseGuards } from "@nestjs/common";
 import type { MessageEvent } from "@nestjs/common";
 import type { Observable } from "rxjs";
+import { Throttle } from "@nestjs/throttler";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
@@ -13,11 +14,13 @@ export class VibeController {
   constructor(private readonly vibeService: VibeService) {}
 
   @Post("handle-message")
+  @Throttle({ heavy: { limit: 10, ttl: 60_000 } })
   handleMessage(@CurrentUser() user: AuthenticatedUser, @Body() dto: HandleVibeMessageDto) {
     return this.vibeService.handleMessage(user, dto);
   }
 
   @Post("confirm-prd")
+  @Throttle({ heavy: { limit: 10, ttl: 60_000 } })
   confirmPrd(@CurrentUser() user: AuthenticatedUser, @Body() dto: ConfirmPrdDto) {
     return this.vibeService.confirmPrd(user, dto);
   }

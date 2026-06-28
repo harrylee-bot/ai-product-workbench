@@ -11,6 +11,7 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FilesInterceptor } from "@nestjs/platform-express";
+import { Throttle } from "@nestjs/throttler";
 import { diskStorage } from "multer";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -30,6 +31,7 @@ export class FileController {
   constructor(private readonly fileAssetService: FileAssetService) {}
 
   @Post("projects/:projectId/files")
+  @Throttle({ heavy: { limit: 10, ttl: 60_000 } })
   @UseInterceptors(
     FilesInterceptor("files", 10, {
       storage: diskStorage({

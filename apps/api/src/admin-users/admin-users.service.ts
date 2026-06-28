@@ -89,6 +89,7 @@ export class AdminUsersService {
   }
 
   async updateUser(id: string, dto: UpdateUserDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
+    this.assertSelfUpdateAllowed(id, dto, admin);
     try {
       const user = await this.prisma.user.update({
         where: { id },
@@ -117,6 +118,7 @@ export class AdminUsersService {
   }
 
   async disableUser(id: string, admin?: AuthenticatedUser, meta?: RequestMeta) {
+    this.assertNotSelf(id, admin, "不能禁用自己的账号");
     await this.updateStatus(id, UserStatus.disabled);
     if (admin) {
       await this.recordAudit(admin, "user.disable", AdminAuditTargetType.user, id, meta);
@@ -133,6 +135,7 @@ export class AdminUsersService {
   }
 
   async resetPassword(id: string, password: string, admin?: AuthenticatedUser, meta?: RequestMeta) {
+    this.assertNotSelf(id, admin, "请通过个人账号设置修改自己的密码");
     try {
       const passwordHash = await bcrypt.hash(password, 12);
       await this.prisma.user.update({
@@ -159,6 +162,20 @@ export class AdminUsersService {
       this.throwNotFoundError(error);
       throw error;
     }
+  }
+
+  private assertSelfUpdateAllowed(id: string, dto: UpdateUserDto, admin?: AuthenticatedUser) {
+    if (admin?.id !== id) return;
+    if (dto.role && dto.role !== UserRole.admin) {
+      throw new BadRequestException("不能移除自己的管理员角色");
+    }
+    if (dto.status === UserStatus.disabled) {
+      throw new BadRequestException("不能禁用自己的账号");
+    }
+  }
+
+  private assertNotSelf(id: string, admin: AuthenticatedUser | undefined, message: string) {
+    if (admin?.id === id) throw new BadRequestException(message);
   }
 
   private toUserItem(user: User): UserItem {

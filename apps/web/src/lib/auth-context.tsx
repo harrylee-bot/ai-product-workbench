@@ -9,13 +9,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { apiRequest, assertWorkbenchApiAvailable } from "./api";
-import { clearSession, readSession, saveSession } from "./auth-storage";
-import type { LoginResponse, PublicUser, Session } from "./types";
+import { ApiError, apiRequest, assertWorkbenchApiAvailable } from "./api";
+import { clearSession } from "./auth-storage";
+import type { LoginResponse, PublicUser } from "./types";
 
 type AuthContextValue = {
   user: PublicUser | null;
-  accessToken: string | null;
   loading: boolean;
   expiredMessage: string | null;
   login: (account: string, password: string) => Promise<void>;
@@ -27,65 +26,48 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [expiredMessage, setExpiredMessage] = useState<string | null>(null);
 
-  const applySession = useCallback((nextSession: Session | null) => {
-    setSession(nextSession);
-    if (nextSession) {
-      saveSession(nextSession);
-    } else {
-      clearSession();
-    }
+  const applyUser = useCallback((nextUser: PublicUser | null) => {
+    setUser(nextUser);
+    if (!nextUser) clearSession();
   }, []);
 
   const refreshMe = useCallback(async () => {
-    const stored = readSession();
-    if (!stored) {
-      applySession(null);
-      return;
-    }
-
     await assertWorkbenchApiAvailable();
-    const user = await apiRequest<PublicUser>("/auth/me", {
-      tokenOverride: stored.accessToken,
-    });
-    applySession({ accessToken: stored.accessToken, user });
-  }, [applySession]);
+    const nextUser = await apiRequest<PublicUser>("/auth/me");
+    applyUser(nextUser);
+  }, [applyUser]);
 
   useEffect(() => {
-    const stored = readSession();
-    if (!stored) {
-      setLoading(false);
-      return;
-    }
-
-    setSession(stored);
     assertWorkbenchApiAvailable()
-      .then(() => apiRequest<PublicUser>("/auth/me", { tokenOverride: stored.accessToken }))
-      .then((user) => {
-        applySession({ accessToken: stored.accessToken, user });
+      .then(() => apiRequest<PublicUser>("/auth/me", { suppressAuthExpiredEvent: true }))
+      .then((nextUser) => {
+        applyUser(nextUser);
       })
       .catch((error: Error) => {
-        applySession(null);
-        setExpiredMessage(error.message);
+        applyUser(null);
+        if (!(error instanceof ApiError) || error.status !== 401) {
+          setExpiredMessage(error.message);
+        }
       })
       .finally(() => {
         setLoading(false);
       });
-  }, [applySession]);
+  }, [applyUser]);
 
   useEffect(() => {
     const handleExpired = (event: Event) => {
       const detail = (event as CustomEvent<{ message?: string }>).detail;
-      applySession(null);
+      applyUser(null);
       setExpiredMessage(detail?.message ?? "登录状态已失效，请重新登录");
     };
 
     window.addEventListener("auth:expired", handleExpired);
     return () => window.removeEventListener("auth:expired", handleExpired);
-  }, [applySession]);
+  }, [applyUser]);
 
   const login = useCallback(
     async (account: string, password: string) => {
@@ -95,21 +77,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         skipAuth: true,
         body: JSON.stringify({ account, password }),
       });
-      applySession(result);
+      applyUser(result.user);
       setExpiredMessage(null);
     },
-    [applySession],
+    [applyUser],
   );
 
   const logout = useCallback(async () => {
     await apiRequest<{ success: true }>("/auth/logout", { method: "POST" }).catch(() => null);
-    applySession(null);
-  }, [applySession]);
+    applyUser(null);
+  }, [applyUser]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      user: session?.user ?? null,
-      accessToken: session?.accessToken ?? null,
+      user,
       loading,
       expiredMessage,
       login,
@@ -117,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshMe,
       clearExpiredMessage: () => setExpiredMessage(null),
     }),
-    [expiredMessage, loading, login, logout, refreshMe, session],
+    [expiredMessage, loading, login, logout, refreshMe, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

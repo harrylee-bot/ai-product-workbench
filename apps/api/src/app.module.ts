@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { APP_GUARD } from "@nestjs/core";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { AdminUsersModule } from "./admin-users/admin-users.module";
 import { AdminModule } from "./admin/admin.module";
 import { ConstraintModule } from "./constraint/constraint.module";
@@ -19,6 +21,13 @@ import { PrismaModule } from "./prisma/prisma.module";
       isGlobal: true,
       envFilePath: [".env", "../../.env"],
     }),
+    // sec-3：全局限流（默认每分钟 60 次/IP），登录/公开分享接口另设更严格配额。
+    ThrottlerModule.forRoot([
+      { name: "default", ttl: 60_000, limit: 60 },
+      { name: "auth", ttl: 60_000, limit: 10 },
+      { name: "public", ttl: 60_000, limit: 30 },
+      { name: "heavy", ttl: 60_000, limit: 10 },
+    ]),
     PrismaModule,
     AuthModule,
     AdminModule,
@@ -32,5 +41,6 @@ import { PrismaModule } from "./prisma/prisma.module";
     AiModule,
     SystemModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
