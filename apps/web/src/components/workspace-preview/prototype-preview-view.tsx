@@ -300,7 +300,10 @@ export function PrototypePreviewView({
               ref={iframeRef}
               title="原型预览"
               srcDoc={prototypePreview.html}
-              sandbox="allow-scripts allow-same-origin"
+              // 安全：仅 allow-scripts，不加 allow-same-origin（sec-1/sandbox-1）。
+              // 同源+脚本会让注入的脚本读取父域 localStorage 里的 JWT。选区命中改为 contentDocument
+              // 不可用时降级返回 null（局部编辑功能受影响，后续可改 postMessage 协议恢复）。
+              sandbox="allow-scripts"
               className={[
                 "h-full min-h-[600px] w-full border-0 bg-white",
                 canvasMode === "select" ? "pointer-events-none select-none" : "",
