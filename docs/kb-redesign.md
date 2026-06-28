@@ -27,15 +27,15 @@
 **当前知识库是一个"为 Obsidian vault 同步场景设计的、规则类知识检索系统"，与上述需求错位。骨架可复用，但五条核心链路从代码层面是断的。**
 
 - ✅ **可复用的骨架**：类型化枚举（KnowledgeType/Status/Scope/Priority/Source）、自引用分类树 + 一致的 FK 级联策略、全量版本快照、候选→条目入库审批流水线（pending 门禁 + QA 门禁 + 强制拒绝理由 + 审计）、Phase 5 死表死列清理已落地、嵌入禁用时优雅降级。
-- 🔴 **五条断链**（不修则需求不成立）：
-  1. **原型生成不读 KB**——生成原型时完全不检索知识。
-  2. **非 vault 路径不嵌入**——codex/上传导入的主力内容语义检索不可见。
-  3. **无跨产品维度**——"沿用已有产品架构/原型"结构性不可行。
-  4. **联网协同断链**——联网 tool 不存在、置信度信号丢失、无沉淀链路。
-  5. **图片知识进不了 KB**——"沿用之前原型图"无解。
+- 🔴 **四条核心断链**（不修则需求不成立）：
+  1. **非 vault 路径不嵌入**——codex/上传导入的主力内容语义检索不可见。
+  2. **无跨产品维度**——"沿用已有产品架构/原型"结构性不可行。
+  3. **联网协同断链**——联网 tool 不存在、置信度信号丢失、无沉淀链路。
+  4. **图片知识进不了 KB**——"沿用之前原型图"无解。
+- ✅ **已澄清：原型生成会读 KB**。原型与 PRD 共用 `VibeService.runDeerFlowTurn`，生成前会调用 `KnowledgeRetrievalService.search` 并把 `knowledgeContext` 注入 DeerFlow；`PrototypeService` 只是产物落库服务，不是生成入口。
 - ⚠️ **决策规则硬编码在源码**：需求②③④的判断逻辑在 prompt 里，不可版本化/热替换，且判断结果不被代码消费。
 
-> 与原审计的差异：原审计的 critical（非 vault 路径不嵌入）在需求视角下被放大——它不是"人工编辑项漂移"，而是"主力更新方式产出的全部知识语义不可见"。原审计漏掉的三个盲区（原型不读 KB、图片不可入、联网不存在）成为新的 P0。
+> 与原审计的差异：原审计的 critical（非 vault 路径不嵌入）在需求视角下被放大——它不是"人工编辑项漂移"，而是"主力更新方式产出的全部知识语义不可见"。同时，后续代码探查修正了"原型生成不读 KB"这一误判：原型与 PRD 共用同一条 `vibe.service` 生成链路，KB 检索已发生。
 
 ---
 
@@ -46,7 +46,7 @@
 | 环节 | 现状 | 判定 |
 |---|---|---|
 | 读 KB（生成 PRD） | [vibe.service.ts:504](../apps/api/src/ai/vibe.service.ts) 检索后注入 prompt | ⚠️ 能跑，但非 vault 路径知识不嵌入（见需求⑤） |
-| **读 KB（生成原型）** | [prototype.service.ts](../apps/api/src/ai/prototype.service.ts) 未注入 `KnowledgeRetrievalService`，生成原型时完全不检索知识 | 🔴 致命：即便 KB 有 tab 栏规范也喂不进原型 |
+| **读 KB（生成原型）** | 原型与 PRD 共用 [vibe.service.ts](../apps/api/src/ai/vibe.service.ts) 的 `runDeerFlowTurn`；生成前会检索 KB 并注入 `knowledgeContext` | ✅ 已接入；需重点确保产品级知识、UI 样式、原型资产能被召回 |
 | 联网搜索 | 本仓库无任何 web_search tool；[SKILL.md](../integrations/deerflow/skills/ai-product-workbench/SKILL.md) allowed-tools 是封闭文件操作集；编排在外部 DeerFlow | 🔴 不存在 |
 | KB 置信度 → 触发联网 | score 在 [knowledge-retrieval.service.ts:139](../apps/api/src/knowledge/knowledge-retrieval.service.ts) 算出，但 [toReference:157](../apps/api/src/knowledge/knowledge-retrieval.service.ts) 丢弃，agent 拿不到 topScore/matchedCount | 🔴 信号断链 |
 | 联网结果沉淀 | candidate source 枚举只有 prd/prototype/product_design_state/conversation/uploaded_file（[schema.prisma:241](../packages/db/prisma/schema.prisma)），无 web 来源 | 🔴 无沉淀链路 |
@@ -97,10 +97,10 @@
 
 ### P0 — 不修则需求完全不成立
 
-#### P0-1 原型生成接入 KB 检索
-- **问题**：[prototype.service.ts](../apps/api/src/ai/prototype.service.ts) 未注入 `KnowledgeRetrievalService`，生成原型时拿不到任何知识规则/tab 栏规范/已有架构。原审计漏掉的最致命一条。
-- **改动**：给 `PrototypeService` 注入 `KnowledgeRetrievalService`；在生成原型前以 `runtime_prototype` 检索 `preferredTypes: [prototype_rule, design_pattern, ui_style_guide, product_architecture]`，结果注入原型生成 prompt（参照 [vibe.service.ts:504-519](../apps/api/src/ai/vibe.service.ts) 的注入模式）。
-- **验收**：放一条 tab 栏规范进 KB，发起一次原型生成，断言检索日志有命中且 prompt context 含该条目。
+#### P0-1（已澄清）原型生成已接入 KB 检索
+- **澄清**：`PrototypeService` 只是原型产物落库服务，不是生成入口；PRD 与原型生成共用 [vibe.service.ts](../apps/api/src/ai/vibe.service.ts) 的 `runDeerFlowTurn`，生成前已经调用 `KnowledgeRetrievalService.search` 并注入 `knowledgeContext`。
+- **后续重点**：不是“给 PrototypeService 补检索”，而是确保生成前检索能覆盖 `product_architecture` / `page_inventory` / `ui_style_guide` / `prototype_asset_ref`，并把 Product 维度纳入召回。
+- **验收**：发起原型生成时，`knowledge_retrieval` step 有检索事件，prompt context 内包含产品级 UI/原型资产知识。
 
 #### P0-2 接通非 vault 路径嵌入同步（原 critical，范围上调）
 - **问题**：`syncItem` 仅 [obsidian-vault.service.ts:367,378,381](../apps/api/src/knowledge/obsidian-vault.service.ts) 调用。`createItem`（[knowledge-item.service.ts:29](../apps/api/src/knowledge/knowledge-item.service.ts)，连 `KnowledgeEmbeddingService` 都未注入）、`approveCandidate`/`mergeCandidate`（[knowledge-candidate.service.ts:150,236](../apps/api/src/knowledge/knowledge-candidate.service.ts)）全部不嵌入。codex/上传导入的主力内容 `embedding=null`，语义检索永远 0 分。
@@ -206,7 +206,7 @@
 
 ## 5. 推进建议
 
-**建议进入当前迭代的最小集**：P0-1、P0-2、P0-3。这三条不修，需求①④⑤在原型生成、跨产品沿用、主力导入三条主线上均不成立，且 P0-1/P0-2 几乎零 schema 改动即可落地，收益/成本比最高。
+**建议进入当前迭代的最小集**：P0-2、P0-3、P1-1、P1-2。P0-1 已澄清为现有链路能力，不再作为新增实现项；当前最需要优先保障的是主力导入内容可嵌入、跨产品召回可用、设计资产类型可召回，以及置信度信号可供 agent 决策。
 
 **第二个迭代**：P1-1、P1-2（让"判断"真正起作用 + 为联网决策铺信号），P1-4（图片通路，解锁"沿用原型图"）。
 
