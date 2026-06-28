@@ -466,8 +466,12 @@ export class QaService {
       prototypeRules: search.references.filter((item) => item.type === KnowledgeType.prototype_rule),
       businessConcepts: search.references.filter((item) => item.type === KnowledgeType.business_concept),
       conflicts: [],
-      unknownAreas: [],
-      summary: search.references.length ? `QA 命中 ${search.references.length} 条知识规则。` : "QA 未命中知识规则。",
+      unknownAreas: search.retrievalError ? [search.retrievalError] : [],
+      summary: search.retrievalError
+        ? `QA 知识检索失败，按无知识基线检查：${search.retrievalError}`
+        : search.references.length
+          ? `QA 命中 ${search.references.length} 条知识规则。`
+          : "QA 未命中知识规则。",
     };
   }
 

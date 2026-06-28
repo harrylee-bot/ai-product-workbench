@@ -7,6 +7,7 @@ import type {
 
 export type KnowledgeSearchInput = {
   projectId?: string;
+  productId?: string;
   conversationId?: string;
   runId?: string;
   runtimeName?: string;
@@ -37,6 +38,9 @@ export type KnowledgeReference = {
   snippet: string;
   content: string;
   type: KnowledgeType;
+  score?: number;
+  semanticScore?: number;
+  reason?: string;
   relatedPath?: string;
   usedByRuntime?: string;
   sourceType: "knowledge_base";
@@ -46,6 +50,10 @@ export type KnowledgeReference = {
 export type KnowledgeSearchOutput = {
   results: KnowledgeRetrievalResult[];
   references: KnowledgeReference[];
+  topScore?: number;
+  matchedCount: number;
+  selectedCount: number;
+  retrievalError?: string;
 };
 
 export type KnowledgeCandidateDraft = {

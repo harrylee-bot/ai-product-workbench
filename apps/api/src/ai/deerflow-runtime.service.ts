@@ -30,6 +30,8 @@ export type DeerFlowFinalAction = {
   type: "answer" | "review_prd" | "review_prototype" | "ask_clarification" | "download_export";
   message: string;
   intent?: string;
+  requirementMode?: "historical_extension" | "new_capability" | "brand_new_system" | "one_sentence_completion";
+  knowledgeRefsUsed?: string[];
   artifacts?: DeerFlowArtifactReference[];
   raw?: unknown;
   /** 是否成功解析出 final action JSON 块。false 表示 DeerFlow 未产出可识别动作（静默降级为 answer）。 */
@@ -108,6 +110,9 @@ export type DeerFlowKnowledgeReference = {
   snippet?: string;
   content: string;
   type?: string;
+  score?: number;
+  semanticScore?: number;
+  reason?: string;
   relatedPath?: string;
 };
 
@@ -414,7 +419,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         type: "answer | review_prd | review_prototype | ask_clarification | download_export",
         message: "user-facing Chinese summary",
         intent: "optional intent label",
-        requirementMode: "optional: historical_extension | new_capability | one_sentence_completion",
+        requirementMode: "optional: historical_extension | new_capability | brand_new_system | one_sentence_completion",
         knowledgeRefsUsed: "optional array of knowledge paths or titles used for reasoning",
         assumptions: "optional inferred product facts, especially for one-sentence requirements",
         consistencyStrategy: "optional PRD/prototype consistency strategy",
@@ -430,9 +435,11 @@ function buildUserPrompt(input: DeerFlowRunInput) {
       },
       constraints: [
         "Do not mutate the product database directly.",
-        "Classify product turns as historical_extension, new_capability, or one_sentence_completion before drafting.",
-        "For historical_extension, preserve the existing PRD/prototype information architecture, layout, field grouping, state flow, and interaction style unless the user asks for redesign.",
-        "For new_capability, reuse the product architecture and platform page framework while allowing a clearer new information architecture.",
+        "Classify product turns as historical_extension, new_capability, brand_new_system, or one_sentence_completion before drafting.",
+        "historical_extension means adding to or changing an existing product/page: preserve the existing PRD/prototype information architecture, layout, field grouping, state flow, interaction style, tab-bar style, and component conventions unless the user explicitly asks for redesign.",
+        "new_capability means a new capability inside an existing product: reuse product_architecture and the platform page framework, then design a clearer local information architecture for the new capability.",
+        "brand_new_system means a completely new system/page: if a tab bar is present in the target product, follow the retrieved ui_style_guide tab style while allowing the rest of the page style to be redesigned; if no tab bar is present, you may redesign the page style from scratch.",
+        "Use product_architecture/page_inventory/ui_style_guide/prototype_asset_ref knowledge items when available to decide reuse vs redesign; cite them in knowledgeRefsUsed.",
         "For one_sentence_completion, infer ordinary missing details from product architecture, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
         "Use deerFlowUploads virtualPath or markdownVirtualPath when reading uploaded files.",
@@ -597,6 +604,8 @@ function extractFinalAction(assistantText: string, finalState: unknown): DeerFlo
     type,
     message,
     intent: toOptionalString(parsed?.intent),
+    requirementMode: normalizeRequirementMode(parsed?.requirementMode),
+    knowledgeRefsUsed: toStringList(parsed?.knowledgeRefsUsed),
     artifacts: extractArtifactReferences(parsed?.artifacts),
     raw: parsed ?? { finalState },
     // parsed 为 true 仅当成功解析出 JSON 块；否则为静默降级（pipe-6：不再无声失败）。
@@ -625,6 +634,24 @@ function extractArtifactReferences(value: unknown): DeerFlowArtifactReference[] 
     })
     .filter((item): item is DeerFlowArtifactReference => Boolean(item));
   return artifacts.length ? artifacts : undefined;
+}
+
+function normalizeRequirementMode(value: unknown): DeerFlowFinalAction["requirementMode"] {
+  if (
+    value === "historical_extension" ||
+    value === "new_capability" ||
+    value === "brand_new_system" ||
+    value === "one_sentence_completion"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function toStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.map((item) => toOptionalString(item)).filter((item): item is string => Boolean(item));
+  return items.length ? items : undefined;
 }
 
 function normalizeFinalActionType(value: unknown): DeerFlowFinalAction["type"] {

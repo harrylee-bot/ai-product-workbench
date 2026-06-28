@@ -69,6 +69,11 @@ export class CreateKnowledgeItemDto {
   tags?: string[];
 
   @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  sourceProductId?: string;
+
+  @IsOptional()
   @IsEnum(KnowledgePriority, { message: "知识优先级不正确" })
   priority?: KnowledgePriority;
 }
@@ -115,6 +120,11 @@ export class UpdateKnowledgeItemDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  sourceProductId?: string;
 
   @IsOptional()
   @IsEnum(KnowledgePriority, { message: "知识优先级不正确" })

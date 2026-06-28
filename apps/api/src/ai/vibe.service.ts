@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
+  KnowledgeType,
   MessageType,
   ProductDesignStateStatus,
   ProjectStatus,
@@ -499,38 +500,69 @@ export class VibeService {
     });
 
     // knowledge-core-2：生成路径接入知识检索（此前仅事后 QA 调用，生成阶段拿不到知识）。
-    // 召回强规则/PRD 写作规则/原型规则/业务概念/历史案例，注入 DeerFlow 上下文。
-    let knowledgeContext: { id: string; title: string; snippet?: string; content: string; type?: string }[] = [];
-    try {
-      const retrieval = await this.knowledgeRetrieval.search({
-        projectId: input.projectId,
-        conversationId: input.conversationId,
-        runId: input.runId,
-        runtimeName: "runtime_generation",
-        query: input.message,
-        limit: 6,
-        preferredTypes: ["strong_rule", "prd_writing_rule", "prototype_rule", "business_concept", "reference_case"],
-      });
-      knowledgeContext = retrieval.references.map((ref) => ({
-        id: ref.id,
-        title: ref.title,
-        snippet: ref.snippet,
-        content: ref.content,
-        type: ref.type,
-      }));
-    } catch {
-      // 知识检索失败不阻断生成（降级为无知识基线）。
-    }
+    // 召回强规则/PRD 写作规则/原型规则/业务概念/历史案例，以及产品架构/页面清单/UI 样式/原型资产。
+    let knowledgeContext: {
+      id: string;
+      title: string;
+      snippet?: string;
+      content: string;
+      type?: string;
+      score?: number;
+      semanticScore?: number;
+      reason?: string;
+    }[] = [];
+    const retrieval = await this.knowledgeRetrieval.search({
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      runId: input.runId,
+      runtimeName: "runtime_generation",
+      query: input.message,
+      limit: 8,
+      preferredTypes: [
+        KnowledgeType.strong_rule,
+        KnowledgeType.default_rule,
+        KnowledgeType.design_pattern,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+        KnowledgeType.business_concept,
+        KnowledgeType.reference_case,
+        KnowledgeType.product_architecture,
+        KnowledgeType.page_inventory,
+        KnowledgeType.ui_style_guide,
+        KnowledgeType.prototype_asset_ref,
+      ],
+    });
+    knowledgeContext = retrieval.references.map((ref) => ({
+      id: ref.id,
+      title: ref.title,
+      snippet: ref.snippet,
+      content: ref.content,
+      type: ref.type,
+      score: ref.score,
+      semanticScore: ref.semanticScore,
+      reason: ref.reason,
+    }));
+
+    const knowledgeStepContent = retrieval.retrievalError
+      ? `知识库检索失败，已降级为通用经验生成：${retrieval.retrievalError}`
+      : knowledgeContext.length
+        ? `已召回 ${knowledgeContext.length} 条相关知识。`
+        : "未召回相关知识，按通用经验生成。";
 
     await this.streamService.emit({
       runId: input.runId,
       projectId: input.projectId,
       type: "step_completed",
       step: "knowledge_retrieval",
-      content: knowledgeContext.length
-        ? `已召回 ${knowledgeContext.length} 条相关知识。`
-        : "未召回相关知识，按通用经验生成。",
-      data: { provider: "deerflow", knowledgeHitCount: knowledgeContext.length },
+      content: knowledgeStepContent,
+      data: {
+        provider: "deerflow",
+        knowledgeHitCount: knowledgeContext.length,
+        topScore: retrieval.topScore,
+        matchedCount: retrieval.matchedCount,
+        selectedCount: retrieval.selectedCount,
+        retrievalError: retrieval.retrievalError,
+      },
     });
 
     await this.streamService.emit({
@@ -664,6 +696,8 @@ export class VibeService {
         provider: "deerflow",
         threadId: result.threadId,
         finalAction: result.finalAction,
+        requirementMode: result.finalAction.requirementMode,
+        knowledgeRefsUsed: result.finalAction.knowledgeRefsUsed,
         uploads: result.uploads,
         artifacts: result.artifacts,
         finalState: result.finalState,

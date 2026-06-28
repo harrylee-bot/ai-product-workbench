@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import {
   AdminAuditTargetType,
+  KnowledgeScope,
   KnowledgeSource,
   KnowledgeStatus,
   Prisma,
@@ -15,6 +16,7 @@ import type {
   ListKnowledgeItemsQueryDto,
   UpdateKnowledgeItemDto,
 } from "./knowledge.dto";
+import { KnowledgeEmbeddingService } from "./knowledge-embedding.service";
 
 type KnowledgeItemRow = Prisma.KnowledgeItemGetPayload<Record<string, never>>;
 type KnowledgeCategoryRow = Prisma.KnowledgeCategoryGetPayload<Record<string, never>>;
@@ -24,10 +26,13 @@ export class KnowledgeItemService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit?: AdminAuditService,
+    @Optional()
+    private readonly embeddings?: KnowledgeEmbeddingService,
   ) {}
 
   async createItem(user: AuthenticatedUser, dto: CreateKnowledgeItemDto, meta?: RequestMeta) {
     await this.assertCategory(dto.categoryId);
+    await this.assertProductScope(dto.scope, dto.sourceProductId);
     const item = await this.prisma.knowledgeItem.create({
       data: {
         title: dto.title.trim(),
@@ -40,6 +45,7 @@ export class KnowledgeItemService {
         tags: toInputJson(normalizeTags(dto.tags)),
         priority: dto.priority ?? "medium",
         source: KnowledgeSource.manual,
+        sourceProductId: normalizeOptionalText(dto.sourceProductId),
         createdBy: user.id,
         updatedBy: user.id,
       },
@@ -50,6 +56,7 @@ export class KnowledgeItemService {
       type: item.type,
       status: item.status,
     });
+    await this.embeddings?.syncItem(item);
     return this.toItem(item);
   }
 
@@ -61,6 +68,7 @@ export class KnowledgeItemService {
   ) {
     const current = await this.getItemRow(knowledgeId);
     await this.assertCategory(dto.categoryId);
+    await this.assertProductScope(dto.scope ?? current.scope, dto.sourceProductId ?? current.sourceProductId ?? undefined);
 
     const updateData = compactObject<Prisma.KnowledgeItemUpdateInput>({
       title: dto.title?.trim(),
@@ -73,6 +81,11 @@ export class KnowledgeItemService {
         ? undefined
         : dto.categoryId
           ? { connect: { id: dto.categoryId } }
+          : { disconnect: true },
+      product: dto.sourceProductId === undefined
+        ? undefined
+        : dto.sourceProductId
+          ? { connect: { id: dto.sourceProductId } }
           : { disconnect: true },
       tags: dto.tags === undefined ? undefined : toInputJson(normalizeTags(dto.tags)),
       priority: dto.priority,
@@ -92,6 +105,9 @@ export class KnowledgeItemService {
       type: updated.type,
       status: updated.status,
     });
+    if (shouldSyncEmbedding(dto)) {
+      await this.embeddings?.syncItem(updated);
+    }
     return this.toItem(updated);
   }
 
@@ -196,6 +212,7 @@ export class KnowledgeItemService {
       priority: item.priority,
       source: item.source,
       sourceProjectId: item.sourceProjectId ?? undefined,
+      sourceProductId: item.sourceProductId ?? undefined,
       sourceFileId: item.sourceFileId ?? undefined,
       sourcePrdDocumentId: item.sourcePrdDocumentId ?? undefined,
       sourcePrototypeArtifactId: item.sourcePrototypeArtifactId ?? undefined,
@@ -241,6 +258,15 @@ export class KnowledgeItemService {
     if (!category) throw new NotFoundException("KNOWLEDGE_CATEGORY_NOT_FOUND");
   }
 
+  private async assertProductScope(scope?: KnowledgeScope, productId?: string) {
+    if (scope === KnowledgeScope.product && !productId) {
+      throw new BadRequestException("KNOWLEDGE_PRODUCT_SCOPE_REQUIRES_PRODUCT_ID");
+    }
+    if (!productId) return;
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product) throw new NotFoundException("PRODUCT_NOT_FOUND");
+  }
+
   private toCategory(category: KnowledgeCategoryRow) {
     return {
       id: category.id,
@@ -282,6 +308,10 @@ export function jsonArray(value: unknown): string[] {
 export function normalizeOptionalText(value?: string | null) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function shouldSyncEmbedding(dto: UpdateKnowledgeItemDto) {
+  return dto.title !== undefined || dto.content !== undefined || dto.summary !== undefined || dto.tags !== undefined;
 }
 
 function compactObject<T extends Record<string, unknown>>(value: T): T {

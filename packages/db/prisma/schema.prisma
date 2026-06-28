@@ -210,6 +210,10 @@ enum KnowledgeType {
   prd_writing_rule
   prototype_rule
   business_concept
+  product_architecture
+  page_inventory
+  ui_style_guide
+  prototype_asset_ref
 }
 
 enum KnowledgeStatus {
@@ -222,6 +226,7 @@ enum KnowledgeStatus {
 enum KnowledgeScope {
   global
   project
+  product
 }
 
 enum KnowledgePriority {
@@ -261,6 +266,7 @@ enum AdminAuditTargetType {
   model_task_profile
   knowledge_item
   knowledge_candidate
+  product
   system
 }
 
@@ -312,23 +318,23 @@ enum UserIntent {
 }
 
 model User {
-  id             String          @id @default(cuid())
-  username       String          @unique
-  email          String?         @unique
-  passwordHash   String          @map("password_hash")
-  displayName    String          @map("display_name")
-  role           UserRole        @default(user)
-  status         UserStatus      @default(active)
-  lastLoginAt    DateTime?       @map("last_login_at")
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  loginAuditLogs LoginAuditLog[]
-  projects       Project[]
-  conversations  Conversation[]
-  messages       Message[]
-  fileAssets     FileAsset[]
-  runtimeRuns    RuntimeRunLog[]
-  adminAuditLogs AdminAuditLog[]
+  id              String                  @id @default(cuid())
+  username        String                  @unique
+  email           String?                 @unique
+  passwordHash    String                  @map("password_hash")
+  displayName     String                  @map("display_name")
+  role            UserRole                @default(user)
+  status          UserStatus              @default(active)
+  lastLoginAt     DateTime?               @map("last_login_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+  loginAuditLogs  LoginAuditLog[]
+  projects        Project[]
+  conversations   Conversation[]
+  messages        Message[]
+  fileAssets      FileAsset[]
+  runtimeRuns     RuntimeRunLog[]
+  adminAuditLogs  AdminAuditLog[]
   deerFlowThreads DeerFlowThreadBinding[]
 
   @@map("users")
@@ -361,6 +367,7 @@ model Project {
   currentPrdDocumentId        String?                      @map("current_prd_document_id")
   currentPrototypeArtifactId  String?                      @map("current_prototype_artifact_id")
   latestQaReportId            String?                      @map("latest_qa_report_id")
+  productId                   String?                      @map("product_id")
   lastActivityAt              DateTime                     @default(now()) @map("last_activity_at")
   archivedAt                  DateTime?                    @map("archived_at")
   deletedAt                   DateTime?                    @map("deleted_at")
@@ -386,31 +393,48 @@ model Project {
   constraintRules             ConstraintRule[]
   shareLinks                  ShareLink[]
   deerFlowThreads             DeerFlowThreadBinding[]
+  product                     Product?                     @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([ownerId])
   @@index([status])
   @@index([lastActivityAt])
   @@index([deletedAt])
+  @@index([productId])
   @@map("projects")
 }
 
+model Product {
+  id             String          @id @default(cuid())
+  name           String
+  description    String?
+  createdBy      String          @map("created_by")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  projects       Project[]
+  knowledgeItems KnowledgeItem[]
+
+  @@index([name])
+  @@index([createdAt])
+  @@map("products")
+}
+
 model Conversation {
-  id            String             @id @default(cuid())
-  projectId     String             @map("project_id")
-  ownerId       String             @map("owner_id")
-  title         String
-  summary       String?
-  messageCount  Int                @default(0) @map("message_count")
-  lastMessageAt DateTime?          @map("last_message_at")
-  status        ConversationStatus @default(active)
-  deletedAt     DateTime?          @map("deleted_at")
-  createdAt     DateTime           @default(now()) @map("created_at")
-  updatedAt     DateTime           @updatedAt @map("updated_at")
-  project       Project            @relation(fields: [projectId], references: [id])
-  owner         User               @relation(fields: [ownerId], references: [id])
-  messages      Message[]
-  fileAssets    FileAsset[]
-  runtimeRuns   RuntimeRunLog[]
+  id             String                 @id @default(cuid())
+  projectId      String                 @map("project_id")
+  ownerId        String                 @map("owner_id")
+  title          String
+  summary        String?
+  messageCount   Int                    @default(0) @map("message_count")
+  lastMessageAt  DateTime?              @map("last_message_at")
+  status         ConversationStatus     @default(active)
+  deletedAt      DateTime?              @map("deleted_at")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  project        Project                @relation(fields: [projectId], references: [id])
+  owner          User                   @relation(fields: [ownerId], references: [id])
+  messages       Message[]
+  fileAssets     FileAsset[]
+  runtimeRuns    RuntimeRunLog[]
   deerFlowThread DeerFlowThreadBinding?
 
   @@index([projectId])
@@ -591,27 +615,27 @@ model ModelTaskProfile {
 }
 
 model ModelCallLog {
-  id               String          @id @default(uuid())
-  traceId          String?         @map("trace_id")
-  runId            String?         @map("run_id")
-  runtimeName      String?         @map("agent_name")
-  taskType         ModelTaskType   @map("task_type")
-  providerId       String          @map("provider_id")
-  modelConfigId    String          @map("model_config_id")
-  modelName        String          @map("model_name")
+  id               String           @id @default(uuid())
+  traceId          String?          @map("trace_id")
+  runId            String?          @map("run_id")
+  runtimeName      String?          @map("agent_name")
+  taskType         ModelTaskType    @map("task_type")
+  providerId       String           @map("provider_id")
+  modelConfigId    String           @map("model_config_id")
+  modelName        String           @map("model_name")
   status           ModelCallStatus
-  inputSummary     String?         @map("input_summary")
-  outputSummary    String?         @map("output_summary")
-  promptTokens     Int?            @map("prompt_tokens")
-  completionTokens Int?            @map("completion_tokens")
-  totalTokens      Int?            @map("total_tokens")
-  durationMs       Int?            @map("duration_ms")
-  errorCode        String?         @map("error_code")
-  errorMessage     String?         @map("error_message")
-  createdAt        DateTime        @default(now()) @map("created_at")
-  completedAt      DateTime?       @map("completed_at")
-  provider         ModelProvider   @relation(fields: [providerId], references: [id])
-  modelConfig      ModelConfig     @relation(fields: [modelConfigId], references: [id])
+  inputSummary     String?          @map("input_summary")
+  outputSummary    String?          @map("output_summary")
+  promptTokens     Int?             @map("prompt_tokens")
+  completionTokens Int?             @map("completion_tokens")
+  totalTokens      Int?             @map("total_tokens")
+  durationMs       Int?             @map("duration_ms")
+  errorCode        String?          @map("error_code")
+  errorMessage     String?          @map("error_message")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  completedAt      DateTime?        @map("completed_at")
+  provider         ModelProvider    @relation(fields: [providerId], references: [id])
+  modelConfig      ModelConfig      @relation(fields: [modelConfigId], references: [id])
   runtimeStepLogs  RuntimeStepLog[]
 
   @@index([traceId])
@@ -951,6 +975,7 @@ model KnowledgeItem {
   priority                  KnowledgePriority  @default(medium)
   source                    KnowledgeSource
   sourceProjectId           String?            @map("source_project_id")
+  sourceProductId           String?            @map("source_product_id")
   sourceFileId              String?            @map("source_file_id")
   sourcePrdDocumentId       String?            @map("source_prd_document_id")
   sourcePrototypeArtifactId String?            @map("source_prototype_artifact_id")
@@ -959,6 +984,7 @@ model KnowledgeItem {
   createdAt                 DateTime           @default(now()) @map("created_at")
   updatedAt                 DateTime           @updatedAt @map("updated_at")
   category                  KnowledgeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  product                   Product?           @relation(fields: [sourceProductId], references: [id], onDelete: SetNull)
   versions                  KnowledgeVersion[]
 
   @@index([type])
@@ -966,6 +992,8 @@ model KnowledgeItem {
   @@index([scope])
   @@index([categoryId])
   @@index([createdAt])
+  @@index([scope, sourceProjectId])
+  @@index([scope, sourceProductId])
   @@map("knowledge_items")
 }
 
@@ -996,6 +1024,7 @@ model KnowledgeVersion {
   createdAt       DateTime      @default(now()) @map("created_at")
   knowledgeItem   KnowledgeItem @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
 
+  @@unique([knowledgeItemId, version])
   @@index([knowledgeItemId])
   @@index([version])
   @@map("knowledge_versions")
@@ -1101,17 +1130,17 @@ model RuntimeRunLog {
 }
 
 model DeerFlowThreadBinding {
-  id                String       @id @default(uuid())
-  projectId         String       @map("project_id")
-  conversationId    String       @unique @map("conversation_id")
-  userId            String       @map("user_id")
-  deerFlowThreadId  String       @unique @map("deerflow_thread_id")
-  metadata          Json?
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-  project           Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String       @id @default(uuid())
+  projectId        String       @map("project_id")
+  conversationId   String       @unique @map("conversation_id")
+  userId           String       @map("user_id")
+  deerFlowThreadId String       @unique @map("deerflow_thread_id")
+  metadata         Json?
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@index([userId])
@@ -1144,14 +1173,14 @@ model RuntimeStepLog {
 }
 
 model VibeStreamEventLog {
-  id        String      @id @default(uuid())
-  runId     String      @map("run_id")
-  projectId String      @map("project_id")
-  eventType String      @map("event_type")
+  id        String        @id @default(uuid())
+  runId     String        @map("run_id")
+  projectId String        @map("project_id")
+  eventType String        @map("event_type")
   payload   Json
-  createdAt DateTime    @default(now()) @map("created_at")
+  createdAt DateTime      @default(now()) @map("created_at")
   run       RuntimeRunLog @relation(fields: [runId], references: [id])
-  project   Project     @relation(fields: [projectId], references: [id])
+  project   Project       @relation(fields: [projectId], references: [id])
 
   @@index([runId])
   @@index([projectId])

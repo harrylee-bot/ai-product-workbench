@@ -30,47 +30,79 @@ export class KnowledgeRetrievalService {
       : undefined;
     const strictPreferredTypes = Boolean(input.strictPreferredTypes && preferredTypes?.length);
 
-    const items = await this.prisma.knowledgeItem.findMany({
-      where: {
-        status: KnowledgeStatus.active,
-        ...(strictPreferredTypes ? { type: { in: preferredTypes } } : {}),
-        OR: [
-          { scope: "global" },
-          ...(input.projectId
-            ? [{ scope: "project" as const, sourceProjectId: input.projectId }]
-            : []),
-        ],
-      },
-      include: { category: true },
-      orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
+    try {
+      const productId = input.productId ?? await this.resolveProductId(input.projectId);
+      const items = await this.prisma.knowledgeItem.findMany({
+        where: {
+          status: KnowledgeStatus.active,
+          ...(strictPreferredTypes ? { type: { in: preferredTypes } } : {}),
+          OR: [
+            { scope: "global" },
+            ...(input.projectId
+              ? [{ scope: "project" as const, sourceProjectId: input.projectId }]
+              : []),
+            ...(productId
+              ? [{ scope: "product" as const, sourceProductId: productId }]
+              : []),
+          ],
+        },
+        include: { category: true },
+        orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
+      });
+
+      const semanticScores = this.embeddings
+        ? await this.embeddings.scoreItems(query, items)
+        : new Map<string, number>();
+      const matched = items
+        .map((item) => scoreItem(item, query, preferredTypes, semanticScores.get(item.id)))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority));
+      const selected = matched.slice(0, limit);
+      let retrievalError: string | undefined;
+
+      try {
+        await this.prisma.knowledgeRetrievalLog.create({
+          data: {
+            projectId: input.projectId,
+            conversationId: input.conversationId,
+            runId: input.runId,
+            runtimeName: input.runtimeName,
+            query,
+            taskType: input.taskType ? String(input.taskType) : undefined,
+            matchedKnowledgeIds: toInputJson(matched.map((item) => item.itemId)),
+            selectedKnowledgeIds: toInputJson(selected.map((item) => item.itemId)),
+          },
+        });
+      } catch (error) {
+        retrievalError = `知识检索日志写入失败：${errorMessage(error)}`;
+      }
+
+      return {
+        results: selected,
+        references: selected.map((item, index) => toReference(item, input.runtimeName, index)),
+        topScore: selected[0]?.score,
+        matchedCount: matched.length,
+        selectedCount: selected.length,
+        retrievalError,
+      };
+    } catch (error) {
+      return {
+        results: [],
+        references: [],
+        matchedCount: 0,
+        selectedCount: 0,
+        retrievalError: `知识检索失败：${errorMessage(error)}`,
+      };
+    }
+  }
+
+  private async resolveProductId(projectId?: string) {
+    if (!projectId) return undefined;
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { productId: true },
     });
-
-    const semanticScores = this.embeddings
-      ? await this.embeddings.scoreItems(query, items)
-      : new Map<string, number>();
-    const scored = items
-      .map((item) => scoreItem(item, query, preferredTypes, semanticScores.get(item.id)))
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority))
-      .slice(0, limit);
-
-    await this.prisma.knowledgeRetrievalLog.create({
-      data: {
-        projectId: input.projectId,
-        conversationId: input.conversationId,
-        runId: input.runId,
-        runtimeName: input.runtimeName,
-        query,
-        taskType: input.taskType ? String(input.taskType) : undefined,
-        matchedKnowledgeIds: toInputJson(scored.map((item) => item.itemId)),
-        selectedKnowledgeIds: toInputJson(scored.slice(0, limit).map((item) => item.itemId)),
-      },
-    });
-
-    return {
-      results: scored,
-      references: scored.map((item, index) => toReference(item, input.runtimeName, index)),
-    };
+    return project?.productId ?? undefined;
   }
 }
 
@@ -166,10 +198,17 @@ function toReference(
     snippet: result.summary || result.content.slice(0, 160),
     content: result.content,
     type: result.type,
+    score: result.score,
+    semanticScore: result.semanticScore,
+    reason: result.reason,
     usedByRuntime,
     sourceType: "knowledge_base",
     sourceId: result.itemId,
   };
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function tokenize(query: string) {

@@ -659,6 +659,10 @@ function inferKnowledgeType(relativePath: string, title: string, tags: string[])
     }
     return KnowledgeType.default_rule;
   }
+  if (/^08-产品架构\/|产品架构|能力地图|核心对象/.test(text)) return KnowledgeType.product_architecture;
+  if (/^09-页面清单\/|页面清单|信息架构|导航结构|tab栏|Tab栏|Tab Bar/i.test(text)) return KnowledgeType.page_inventory;
+  if (/^10-UI样式规范\/|UI样式|样式规范|组件样式|tab栏样式|Tab栏样式|Tab Bar Style/i.test(text)) return KnowledgeType.ui_style_guide;
+  if (/^11-原型资产\/|原型资产|prototype asset|prototype_asset|页面原型|历史原型/i.test(text)) return KnowledgeType.prototype_asset_ref;
   if (/^04-原型模式\//.test(relativePath)) return KnowledgeType.prototype_rule;
   if (/^03-案例库\//.test(relativePath)) return KnowledgeType.reference_case;
   if (/^02-规则约束\//.test(relativePath)) return KnowledgeType.strong_rule;
@@ -683,7 +687,7 @@ function inferPriority(relativePath: string, title: string, type: KnowledgeType)
   if (isSourceOrInboxPath(relativePath) || /旧版整理|需求文档导入记录|需求资产清单|业务域索引|导入清单|来源台账/.test(text)) {
     return KnowledgePriority.low;
   }
-  if (/01-产品知识|02-规则约束|03-案例库|04-原型模式|05-原型设计规范|06-历史案例库|04-产品文档规范|03-产品进化规划|02-业务域知识|00-知识库使用规范|01-产品架构/.test(text))
+  if (/01-产品知识|02-规则约束|03-案例库|04-原型模式|05-原型设计规范|06-历史案例库|04-产品文档规范|03-产品进化规划|02-业务域知识|00-知识库使用规范|01-产品架构|08-产品架构|09-页面清单|10-UI样式规范|11-原型资产/.test(text))
     return KnowledgePriority.high;
   if (type === KnowledgeType.strong_rule) return KnowledgePriority.high;
   if (/知识库使用规范|产品架构|能力地图|产品进化|产品逻辑|产品文档规范|原型设计规范|历史业务增量|新产品创新|runtime|AI营销助手|Dify|配置化页面|通用约束|资损/.test(text)) return KnowledgePriority.high;

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import {
   AdminAuditTargetType,
   KnowledgeCandidateSource,
@@ -20,6 +20,7 @@ import type {
   MergeKnowledgeCandidateDto,
   RejectKnowledgeCandidateDto,
 } from "./knowledge.dto";
+import { KnowledgeEmbeddingService } from "./knowledge-embedding.service";
 import {
   jsonArray,
   normalizeOptionalText,
@@ -36,6 +37,8 @@ export class KnowledgeCandidateService {
     private readonly prisma: PrismaService,
     private readonly itemService: KnowledgeItemService,
     private readonly audit?: AdminAuditService,
+    @Optional()
+    private readonly embeddings?: KnowledgeEmbeddingService,
   ) {}
 
   async createMany(
@@ -145,6 +148,7 @@ export class KnowledgeCandidateService {
     const candidate = await this.getPendingCandidate(candidateId);
     await this.assertQaAllowsPersistKnowledge(candidate);
     if (dto.categoryId) await this.assertCategory(dto.categoryId);
+    const productId = await this.resolveProjectProductId(candidate.projectId);
 
     const { item, reviewed } = await this.prisma.$transaction(async (tx) => {
       const item = await tx.knowledgeItem.create({
@@ -154,12 +158,13 @@ export class KnowledgeCandidateService {
           summary: dto.summary === undefined ? candidate.summary : normalizeOptionalText(dto.summary),
           type: dto.type ?? candidate.suggestedType,
           status: KnowledgeStatus.active,
-          scope: "global",
+          scope: productId ? "product" : "global",
           categoryId: normalizeOptionalText(dto.categoryId ?? candidate.suggestedCategoryId),
           tags: toInputJson(normalizeTags(dto.tags ?? jsonArray(candidate.suggestedTags))),
           priority: dto.priority ?? "medium",
           source: sourceFromCandidate(candidate.source),
           sourceProjectId: candidate.projectId,
+          sourceProductId: productId ?? null,
           sourceFileId: candidate.source === KnowledgeCandidateSource.uploaded_file ? candidate.sourceRefId : null,
           sourcePrdDocumentId: candidate.source === KnowledgeCandidateSource.prd ? candidate.sourceRefId : null,
           sourcePrototypeArtifactId:
@@ -185,6 +190,7 @@ export class KnowledgeCandidateService {
       projectId: reviewed.projectId,
       createdKnowledgeItemId: item.id,
     });
+    await this.embeddings?.syncItem(item);
 
     return {
       candidate: this.toCandidate(reviewed),
@@ -259,6 +265,7 @@ export class KnowledgeCandidateService {
       projectId: reviewed.projectId,
       targetKnowledgeItemId: item.id,
     });
+    await this.embeddings?.syncItem(item);
 
     return {
       candidate: this.toCandidate(reviewed),
@@ -353,6 +360,14 @@ export class KnowledgeCandidateService {
   private async assertCategory(categoryId: string) {
     const category = await this.prisma.knowledgeCategory.findUnique({ where: { id: categoryId } });
     if (!category) throw new NotFoundException("KNOWLEDGE_CATEGORY_NOT_FOUND");
+  }
+
+  private async resolveProjectProductId(projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { productId: true },
+    });
+    return project?.productId ?? undefined;
   }
 
   private async recordAudit(

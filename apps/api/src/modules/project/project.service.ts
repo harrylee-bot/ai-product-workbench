@@ -1,8 +1,8 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { Conversation, ConversationStatus, Project, ProjectStatus, UserRole } from "@prisma/client";
+import { Conversation, ConversationStatus, Prisma, Project, ProjectStatus, UserRole } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { Phase1User } from "../auth/auth.types";
-import type { CreateProjectDto, ListProjectsQueryDto } from "./dto";
+import type { CreateProjectDto, ListProjectsQueryDto, UpdateProjectDto } from "./dto";
 
 @Injectable()
 export class ProjectService {
@@ -15,6 +15,7 @@ export class ProjectService {
         data: {
           ownerId: user.id,
           title,
+          productId: dto.productId,
           status: ProjectStatus.draft,
         },
       });
@@ -105,6 +106,23 @@ export class ProjectService {
     };
   }
 
+  async update(user: Phase1User, projectId: string, dto: UpdateProjectDto) {
+    const project = await this.getAccessibleProject(user, projectId);
+    const data: Prisma.ProjectUpdateInput = {};
+    if (dto.title !== undefined) data.title = dto.title.trim();
+    if (dto.description !== undefined) data.description = normalizeOptionalText(dto.description);
+    if (dto.productId !== undefined) {
+      const productId = normalizeOptionalText(dto.productId);
+      data.product = productId ? { connect: { id: productId } } : { disconnect: true };
+    }
+    if (!Object.keys(data).length) return { project: this.toProject(project) };
+    const updated = await this.prisma.project.update({
+      where: { id: project.id },
+      data,
+    });
+    return { project: this.toProject(updated) };
+  }
+
   async delete(user: Phase1User, projectId: string) {
     const project = await this.getAccessibleProject(user, projectId);
     const now = new Date();
@@ -153,6 +171,7 @@ export class ProjectService {
       userId: project.ownerId,
       title: project.title,
       status: project.status,
+      productId: project.productId ?? undefined,
       currentConversationId: project.currentConversationId,
       currentProductDesignStateId: project.currentProductDesignStateId,
       currentPrdDocumentId: project.currentPrdDocumentId,
@@ -174,4 +193,9 @@ export class ProjectService {
       updatedAt: conversation.updatedAt.toISOString(),
     };
   }
+}
+
+function normalizeOptionalText(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
