@@ -155,6 +155,7 @@ type Phase1WorkspaceState = {
     prdPreview?: Phase1PrdPreview | null;
     prototypePreview?: Phase1PrototypePreview | null;
   }) => void;
+  upsertPrdSection: (delta: PrdSectionDelta) => void;
 };
 
 const WORKSPACE_SIDEBAR_WIDTH = 284;
@@ -182,6 +183,8 @@ const usePhase1Workspace = create<Phase1WorkspaceState>((set) => ({
       prdPreview: preview.prdPreview === undefined ? state.prdPreview : preview.prdPreview,
       prototypePreview: preview.prototypePreview === undefined ? state.prototypePreview : preview.prototypePreview,
     })),
+  upsertPrdSection: (delta) =>
+    set((state) => ({ prdPreview: mergePrdSectionDelta(state.prdPreview, delta) })),
 }));
 
 export function Phase1WorkspaceClient() {
@@ -213,6 +216,7 @@ function Phase1WorkspaceInner() {
     prototypePreview,
     setSelectedProject,
     setArtifactPreview,
+    upsertPrdSection,
   } = usePhase1Workspace();
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -303,6 +307,10 @@ function Phase1WorkspaceInner() {
 
           if (!cancelRequested || canceledEvent) {
             setRunState((current) => reduceRunState(current ?? createInitialRunState(runId), event));
+          }
+
+          if (!cancelRequested && eventType === "prd_section_delta" && payload) {
+            upsertPrdSection(payload as PrdSectionDelta);
           }
 
           if (!cancelRequested && eventType === "prd_updated" && payload) {
@@ -824,31 +832,83 @@ function normalizePrdPreview(value: unknown): Phase1PrdPreview | null {
   const record = asRecord(value);
   if (!record) return null;
   const sectionsValue = Array.isArray(record.sections) ? record.sections : [];
-  const sections = sectionsValue.flatMap((item, index) => {
-    const section = asRecord(item);
-    if (!section) return [];
-    const title = asText(section.title);
-    const content = asText(section.content) || asText(section.body) || asText(section.description);
-    const blocks = normalizePrdBlocks(section.blocks);
-    const blockContent = blocks.map((block) => block.content).filter(Boolean).join("\n\n");
-    const resolvedContent = content || blockContent;
-    if (!title && !resolvedContent) return [];
-    return [{
-      id: asText(section.id) || `section-${index + 1}`,
-      title: title || "未命名章节",
-      content: resolvedContent || "暂无内容",
-      type: asText(section.type) || undefined,
-      sourcePaths: normalizeTextArray(section.sourcePaths),
-      sourceStatePaths: normalizeTextArray(section.sourceStatePaths),
-      blocks,
-    }];
-  });
+  const sections = sectionsValue
+    .map((item, index) => normalizePrdSection(item, index))
+    .filter((section): section is Phase1PrdPreview["sections"][number] => Boolean(section));
   if (!sections.length) return null;
   return {
     id: asText(record.id) || undefined,
     title: asText(record.title) || "需求文档",
     sections,
   };
+}
+
+function normalizePrdSection(
+  value: unknown,
+  index: number,
+): Phase1PrdPreview["sections"][number] | null {
+  const section = asRecord(value);
+  if (!section) return null;
+  const title = asText(section.title);
+  const content = asText(section.content) || asText(section.body) || asText(section.description);
+  const blocks = normalizePrdBlocks(section.blocks);
+  const blockContent = blocks.map((block) => block.content).filter(Boolean).join("\n\n");
+  const resolvedContent = content || blockContent;
+  if (!title && !resolvedContent) return null;
+  const orderValue = typeof section.order === "number" ? section.order : undefined;
+  return {
+    id: asText(section.id) || `section-${index + 1}`,
+    title: title || "未命名章节",
+    content: resolvedContent || "暂无内容",
+    type: asText(section.type) || undefined,
+    order: orderValue,
+    sourcePaths: normalizeTextArray(section.sourcePaths),
+    sourceStatePaths: normalizeTextArray(section.sourceStatePaths),
+    blocks,
+  };
+}
+
+type PrdSectionDelta = {
+  documentId?: string;
+  documentTitle?: string;
+  section: {
+    id?: string;
+    title?: string;
+    type?: string;
+    order?: number;
+    content?: string;
+    sourcePaths?: string[];
+    sourceStatePaths?: string[];
+    blocks?: unknown;
+  };
+  index?: number;
+  total?: number;
+  isLast?: boolean;
+};
+
+/**
+ * 按 section.id upsert 合并段落增量；documentId 变化则从该段重建（文档切换）。
+ * 返回新对象，触发右侧预览逐段追加而不重置选中/编辑态。
+ */
+export function mergePrdSectionDelta(
+  current: Phase1PrdPreview | null,
+  delta: PrdSectionDelta,
+): Phase1PrdPreview | null {
+  const normalized = normalizePrdSection(delta.section, delta.index ?? 0);
+  if (!normalized) return current;
+
+  const documentId = delta.documentId || current?.id;
+  const documentTitle = delta.documentTitle || current?.title || "需求文档";
+  const currentDocKey = current?.id ?? current?.title;
+  const isSameDoc = currentDocKey === (documentId ?? documentTitle);
+  const baseSections = isSameDoc ? [...(current?.sections ?? [])] : [];
+
+  const existingIndex = baseSections.findIndex((s) => s.id === normalized.id);
+  if (existingIndex >= 0) baseSections[existingIndex] = normalized;
+  else baseSections.push(normalized);
+
+  baseSections.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return { id: documentId, title: documentTitle, sections: baseSections };
 }
 
 function normalizePrdBlocks(value: unknown): NonNullable<Phase1PrdPreview["sections"][number]["blocks"]> {
@@ -1202,6 +1262,10 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
     );
   }
 
+  if (eventType === "prd_section_delta") {
+    next = updateStep(next, "prd_generation", "running", "正在逐段生成 PRD");
+  }
+
   if (eventType === "prd_updated") {
     next = updateStep(next, "prd_generation", "done", "PRD 已更新");
   }
@@ -1270,8 +1334,8 @@ function reduceRunState(current: VibeRunView, event: VibeStreamEvent): VibeRunVi
       next.summary = event.content ?? metaSummary ?? asText(payload?.message) ?? "Vibe Coding 主链路已完成";
     }
     next.steps = next.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step);
-    // 终态：流式文本已落库为助手消息，清空避免重复展示
-    next.streamingText = undefined;
+    // 终态：保留 streamingText 作为占位，直到 messagesQuery 刷出同 relatedRunId 的助手消息后无缝替换。
+    // 不清空，避免“流式气泡消失 → 历史气泡出现”的跳变。
   }
 
   if (isRunCanceledEvent(eventType)) {

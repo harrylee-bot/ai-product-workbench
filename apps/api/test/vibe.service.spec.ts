@@ -517,6 +517,69 @@ describe("VibeService main entry", () => {
     expect(documentService.confirmForPrototypeGate).not.toHaveBeenCalled();
     expect(messageService.createAssistantMessage).not.toHaveBeenCalled();
   });
+
+  it("streams PRD sections as deltas before the final prd_updated snapshot and run_completed", async () => {
+    process.env.PRD_SECTION_DELTA_DELAY_MS = "0";
+    deerFlowRuntime.isEnabled.mockReturnValue(true);
+    fileAssetService.getAttachmentSummaries.mockResolvedValue([]);
+    fileAssetService.getRuntimeAttachmentFiles.mockResolvedValue([]);
+    finalActionApplier.apply.mockResolvedValue({
+      prdDocument: {
+        id: "prd-stream",
+        title: "签到活动 PRD",
+        sections: [
+          { id: "sec-1", title: "背景", type: "overview", level: 1, order: 1, content: "活动背景。", sourcePaths: [] },
+          { id: "sec-2", title: "目标", type: "business_goal", level: 1, order: 2, content: "提升活跃。", sourcePaths: [] },
+          { id: "sec-3", title: "页面", type: "page_requirements", level: 1, order: 3, content: "签到页。", sourcePaths: [] },
+        ],
+      },
+    });
+    deerFlowRuntime.runTurn.mockResolvedValue({
+      threadId: "deerflow-thread-stream",
+      assistantText: "PRD 已生成。",
+      finalAction: {
+        type: "review_prd",
+        message: "PRD 已生成，请确认。",
+        intent: "generate_prd",
+        parsed: true,
+        raw: { type: "review_prd", message: "PRD 已生成，请确认。" },
+      },
+      uploads: [],
+      artifacts: [],
+      rawEvents: [],
+      finalState: { ok: true },
+    });
+
+    await service.handleMessage(user, {
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      message: "生成签到活动 PRD",
+    });
+    await flushAsyncWork();
+
+    const emitCalls = streamService.emit.mock.calls.map(([event]) => event);
+    const deltaCalls = emitCalls.filter((event) => event.type === "prd_section_delta");
+    const updatedCalls = emitCalls.filter((event) => event.type === "prd_updated");
+    const completedIndex = emitCalls.findIndex((event) => event.type === "run_completed");
+
+    expect(deltaCalls).toHaveLength(3);
+    expect(deltaCalls[0].data.section.id).toBe("sec-1");
+    expect(deltaCalls[0].data.isLast).toBe(false);
+    expect(deltaCalls[0].data.index).toBe(0);
+    expect(deltaCalls[0].data.total).toBe(3);
+    expect(deltaCalls[2].data.section.id).toBe("sec-3");
+    expect(deltaCalls[2].data.isLast).toBe(true);
+    expect(updatedCalls).toHaveLength(1);
+    expect(updatedCalls[0].data.id).toBe("prd-stream");
+
+    // 所有 delta 和 prd_updated 必须在 run_completed 之前（终端事件会关闭 SSE 流）。
+    const lastDeltaIndex = emitCalls.map((e) => e.type).lastIndexOf("prd_section_delta");
+    const updatedIndex = emitCalls.map((e) => e.type).lastIndexOf("prd_updated");
+    expect(completedIndex).toBeGreaterThan(lastDeltaIndex);
+    expect(completedIndex).toBeGreaterThan(updatedIndex);
+
+    delete process.env.PRD_SECTION_DELTA_DELAY_MS;
+  });
 });
 
 function baseProject() {

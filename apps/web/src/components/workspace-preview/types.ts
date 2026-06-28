@@ -6,6 +6,7 @@ export type Phase1PrdPreview = {
     title: string;
     content: string;
     type?: string;
+    order?: number;
     sourcePaths?: string[];
     sourceStatePaths?: string[];
     blocks?: Array<{

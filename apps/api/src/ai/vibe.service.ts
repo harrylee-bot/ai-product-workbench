@@ -23,6 +23,7 @@ import { VibeStreamService } from "./vibe-stream.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import { DeerFlowRuntimeService, type DeerFlowFinalAction } from "./deerflow-runtime.service";
 import { FinalActionApplierService } from "./final-action-applier.service";
+import type { RequirementDocument, RequirementDocSection } from "./ai-vibe.types";
 
 @Injectable()
 export class VibeService {
@@ -695,6 +696,9 @@ export class VibeService {
     }
 
     if (applied.prdDocument) {
+      const document = applied.prdDocument as RequirementDocument;
+      await this.emitPrdSectionDeltas(input.runId, input.projectId, document);
+      // 兜底：完整快照，保证右侧预览最终一致（前端做全量 reconcile）。
       await this.streamService.emit({
         runId: input.runId,
         projectId: input.projectId,
@@ -741,11 +745,67 @@ export class VibeService {
       data: runResult,
     });
   }
+
+  /**
+   * 按段落逐个 emit prd_section_delta，让右侧预览逐段流式追加。
+   * 约束：PRD 正文来自 DeerFlow final action JSON，只在 run 应用阶段可解析，
+   * 因此是“应用阶段渐进式揭示”，非“边思考边出”。所有 delta 必须在 run_completed 之前 emit
+   *（终端事件会关闭 SSE 流）。
+   */
+  private async emitPrdSectionDeltas(runId: string, projectId: string, document: RequirementDocument) {
+    const sections = Array.isArray(document.sections) ? document.sections : [];
+    const ordered = [...sections].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const total = ordered.length;
+    for (let index = 0; index < total; index += 1) {
+      const section = ordered[index] as RequirementDocSection;
+      const isLast = index === total - 1;
+      await this.streamService.emit({
+        runId,
+        projectId,
+        type: "prd_section_delta",
+        content: `生成段落：${section.title}`,
+        data: {
+          // 让 buildPayloadMeta 自动拾取 id/title，保持 meta 与 prd_updated 兜底一致。
+          id: document.id,
+          title: document.title,
+          documentId: document.id,
+          documentTitle: document.title,
+          section: {
+            id: section.id,
+            title: section.title,
+            type: section.type,
+            order: section.order,
+            content: section.content,
+            sourcePaths: section.sourcePaths,
+            sourceStatePaths: section.sourceStatePaths,
+            blocks: section.blocks,
+          },
+          index,
+          total,
+          isLast,
+        },
+      });
+      // 微延迟，避免 SSE 批量到达失去逐段流式感。仅多段时生效，不阻塞业务（run 末尾应用阶段）。
+      // 可通过 PRD_SECTION_DELTA_DELAY_MS 配置（测试可设 0）。
+      if (!isLast && total > 1) {
+        const delayMs = readPrdSectionDeltaDelayMs();
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+  }
 }
 
 function normalizeCancelReason(reason: string | undefined) {
   const trimmed = reason?.trim();
   return trimmed ? trimmed.slice(0, 200) : "user_requested";
+}
+
+function readPrdSectionDeltaDelayMs() {
+  const value = Number(process.env.PRD_SECTION_DELTA_DELAY_MS);
+  if (Number.isFinite(value) && value >= 0) return value;
+  return 60;
 }
 
 function toUserIntent(value: string | undefined): UserIntent | undefined {

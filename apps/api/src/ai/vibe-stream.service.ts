@@ -177,6 +177,8 @@ function classifyStreamEvent(type: VibeStreamEventType): {
       return { category: "state", phase: "updated" };
     case "state_version_created":
       return { category: "state", phase: "created" };
+    case "prd_section_delta":
+      return { category: "prd", phase: "applying" };
     case "prd_updated":
       return { category: "prd", phase: "updated" };
     case "prototype_updated":
@@ -208,7 +210,7 @@ function toLegacyEventType(
 ): VibeStreamLegacyEventType {
   if (type === "state_updated") return "state_updated";
   if (type === "state_version_created") return "state_version_created";
-  if (type === "prd_updated") return "prd_generated";
+  if (type === "prd_section_delta" || type === "prd_updated") return "prd_generated";
   if (type === "prototype_updated") return "prototype_generated";
   if (type === "qa_completed") return "qa_completed";
   if (type === "knowledge_candidate_created") return "state_updated";
@@ -333,7 +335,7 @@ function payloadKindForType(type: VibeStreamEventType): VibeStreamPayloadKind {
   if (type === "step_started" || type === "step_completed" || type === "step_failed") return "runtime_step";
   if (type === "message_delta") return "progress";
   if (type === "state_updated" || type === "state_version_created") return "state";
-  if (type === "prd_updated") return "prd";
+  if (type === "prd_section_delta" || type === "prd_updated") return "prd";
   if (type === "prototype_updated") return "prototype";
   if (type === "qa_completed") return "qa";
   if (type.startsWith("rollback_")) return "rollback";

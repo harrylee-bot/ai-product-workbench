@@ -33,7 +33,8 @@ export function PrdPreviewView({
     setEditingIndex(null);
     setSectionEdits({});
     setDraftText("");
-  }, [prdPreview?.id, prdPreview?.title]);
+    // 只在文档 id 变化时重置（文档切换）；同文档段落增量追加/更新不重置选中/编辑态。
+  }, [prdPreview?.id]);
 
   useEffect(() => {
     selectedSectionRef.current?.scrollIntoView({ block: "nearest" });

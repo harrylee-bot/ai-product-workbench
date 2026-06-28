@@ -498,6 +498,7 @@ export type VibeStreamEventType =
   | "tool_call_completed"
   | "state_updated"
   | "state_version_created"
+  | "prd_section_delta"
   | "prd_updated"
   | "prototype_updated"
   | "qa_completed"
