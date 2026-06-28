@@ -189,14 +189,12 @@ export class ShareService {
   }
 
   private async loadPublicPrd(share: ShareLinkRecord) {
-    const document = share.prdDocumentId
-      ? await this.prisma.requirementDocument.findFirst({
-          where: { id: share.prdDocumentId, projectId: share.projectId },
-        })
-      : await this.prisma.requirementDocument.findFirst({
-          where: { projectId: share.projectId },
-          orderBy: { updatedAt: "desc" },
-        });
+    // 严格只返回分享创建时固化的 prdDocumentId 指向的记录，不 fallback 到项目最新文档。
+    // 否则分享后被分享文档删除/降级，会静默返回另一份未在分享时刻确认的内容（share-1）。
+    if (!share.prdDocumentId) return null;
+    const document = await this.prisma.requirementDocument.findFirst({
+      where: { id: share.prdDocumentId, projectId: share.projectId },
+    });
     if (!document) return null;
     return {
       title: document.title,
@@ -206,14 +204,11 @@ export class ShareService {
   }
 
   private async loadPublicPrototype(share: ShareLinkRecord) {
-    const artifact = share.prototypeArtifactId
-      ? await this.prisma.prototypeArtifact.findFirst({
-          where: { id: share.prototypeArtifactId, projectId: share.projectId },
-        })
-      : await this.prisma.prototypeArtifact.findFirst({
-          where: { projectId: share.projectId, status: PrototypeArtifactStatus.ready },
-          orderBy: { updatedAt: "desc" },
-        });
+    // 严格只返回分享创建时固化的 prototypeArtifactId 指向的记录，不 fallback。
+    if (!share.prototypeArtifactId) return null;
+    const artifact = await this.prisma.prototypeArtifact.findFirst({
+      where: { id: share.prototypeArtifactId, projectId: share.projectId },
+    });
     if (!artifact || artifact.status !== PrototypeArtifactStatus.ready || !artifact.htmlContent) {
       return null;
     }

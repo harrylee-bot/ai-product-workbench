@@ -49,16 +49,3 @@ export class ListQaReportsQueryDto {
   @Max(100)
   pageSize?: number;
 }
-
-export class RollbackProductDesignStateByVersionDto {
-  @Type(() => Number)
-  @IsInt({ message: "targetVersion 必须是整数" })
-  @Min(1, { message: "targetVersion 必须大于 0" })
-  targetVersion!: number;
-
-  @IsOptional()
-  @Transform(emptyToUndefined)
-  @IsString({ message: "回滚原因格式不正确" })
-  @MaxLength(500, { message: "回滚原因不能超过 500 个字符" })
-  reason?: string;
-}

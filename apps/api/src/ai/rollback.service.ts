@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   ProjectStatus,
   RollbackRecordStatus,
@@ -35,23 +35,6 @@ export class RollbackService {
     private readonly prisma: PrismaService,
     private readonly stateService: ProductDesignStateService,
   ) {}
-
-  async rollbackProductDesignStateForUser(
-    user: AuthenticatedUser,
-    projectId: string,
-    input: { targetVersion: number; reason?: string },
-  ) {
-    const project = await this.assertProjectAccess(user, projectId);
-    this.assertOwnerMutation(user, project.ownerId);
-
-    const currentState = await this.stateService.getCurrentState(projectId);
-    if (!currentState) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
-    if (input.targetVersion >= currentState.version) {
-      throw new BadRequestException("ROLLBACK_TARGET_VERSION_INVALID");
-    }
-
-    throw new BadRequestException("ROLLBACK_REGEN_DISABLED_DEERFLOW_FIRST");
-  }
 
   async listProjectRollbackRecords(user: AuthenticatedUser, projectId: string) {
     await this.assertProjectAccess(user, projectId, { allowArchived: true });

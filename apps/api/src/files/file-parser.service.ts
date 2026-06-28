@@ -132,9 +132,11 @@ export class FileParserService {
     const buffer = await readFile(input.storagePath);
     const parser = new PDFParse({ data: buffer });
     try {
+      // getInfo 失败可忽略（元数据可选）；getText 失败必须传播——
+      // 否则损坏/加密 PDF 会被静默标记为解析成功但正文为空（file-2）。
       const [info, textResult] = await Promise.all([
         parser.getInfo({ parsePageInfo: true }).catch(() => null),
-        parser.getText().catch(() => ({ text: "" })),
+        parser.getText(),
       ]);
       const text = this.cleanText(textResult.text ?? "");
       const pages = this.buildPdfPages(info?.pages, text);

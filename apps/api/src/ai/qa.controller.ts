@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/co
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
-import { ListQaReportsQueryDto, RollbackProductDesignStateByVersionDto, RunQaDto } from "./qa.dto";
+import { ListQaReportsQueryDto, RunQaDto } from "./qa.dto";
 import { QaService } from "./qa.service";
 import { RollbackService } from "./rollback.service";
 import { VersionHistoryService } from "./version-history.service";
@@ -73,15 +73,6 @@ export class ProjectVersionTimelineController {
 @UseGuards(JwtAuthGuard)
 export class ProjectRollbackController {
   constructor(private readonly rollbackService: RollbackService) {}
-
-  @Post("product-design-state")
-  rollbackProductDesignState(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
-    @Body() dto: RollbackProductDesignStateByVersionDto,
-  ) {
-    return this.rollbackService.rollbackProductDesignStateForUser(user, projectId, dto);
-  }
 
   @Get("records")
   listRollbackRecords(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
