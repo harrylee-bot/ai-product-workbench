@@ -30,6 +30,8 @@ describe("ProductDesignStateService", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    // txn-1：事务化后 service 走 prisma.$transaction；测试中让 tx === prisma，复用上面的 model mock。
+    $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
   };
   const service = new ProductDesignStateService(prisma as never);
   const user = {
