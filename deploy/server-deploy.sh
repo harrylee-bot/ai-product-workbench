@@ -198,29 +198,54 @@ wait_for_postgres() {
   return 1
 }
 
+remove_legacy_container() {
+  local container_name="$1"
+  local compose_project
+
+  if ! docker ps -a --format '{{ .Names }}' | grep -qx "$container_name"; then
+    return 0
+  fi
+
+  compose_project="$(
+    docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$container_name" 2>/dev/null || true
+  )"
+  if [ "$compose_project" != "ai-product-workbench" ]; then
+    echo "Removing legacy container: ${container_name}"
+    docker rm -f "$container_name" >/dev/null 2>&1 || true
+  fi
+}
+
 case "$DEPLOY_TARGET" in
   web)
     "${COMPOSE[@]}" build web
+    remove_legacy_container ai-product-workbench-web
     "${COMPOSE[@]}" up -d --no-deps web
     wait_for_http "http://127.0.0.1:3000/login" "Web"
     ;;
   api)
     "${COMPOSE[@]}" build api
+    remove_legacy_container ai-product-workbench-api
     "${COMPOSE[@]}" up -d --no-deps api
     wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
     ;;
   knowledge)
     ensure_storage_dirs
     "${COMPOSE[@]}" build knowledge
+    remove_legacy_container ai-product-knowledge
     "${COMPOSE[@]}" up -d --no-deps knowledge
     wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
     ;;
   postgres)
+    remove_legacy_container ai-product-workbench-postgres
     "${COMPOSE[@]}" up -d --no-deps postgres
     wait_for_postgres
     ;;
   all)
     ensure_storage_dirs
+    remove_legacy_container ai-product-workbench-postgres
+    remove_legacy_container ai-product-workbench-api
+    remove_legacy_container ai-product-workbench-web
+    remove_legacy_container ai-product-knowledge
     "${COMPOSE[@]}" up -d --build
     wait_for_postgres
     wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
