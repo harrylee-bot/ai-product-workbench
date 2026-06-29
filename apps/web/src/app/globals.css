@@ -75,6 +75,10 @@ button {
   color: #111827;
 }
 
+cpk-web-inspector {
+  display: none !important;
+}
+
 .workbench-scrollbar {
   scrollbar-color: #cbd5e1 transparent;
   scrollbar-width: thin;
@@ -96,14 +100,12 @@ button {
   background: transparent;
 }
 
-.prd-markdown-preview,
-.prd-word-preview {
+.prd-document-preview {
   color: #111827;
   line-height: 1.9;
 }
 
-.prd-markdown-preview h1,
-.prd-word-preview h1 {
+.prd-document-preview h1 {
   margin: 0 0 28px;
   font-size: 32px;
   line-height: 1.25;
@@ -111,8 +113,7 @@ button {
   letter-spacing: 0;
 }
 
-.prd-markdown-preview h2,
-.prd-word-preview h2 {
+.prd-document-preview h2 {
   margin: 28px 0 14px;
   font-size: 22px;
   line-height: 1.35;
@@ -120,8 +121,7 @@ button {
   letter-spacing: 0;
 }
 
-.prd-markdown-preview h3,
-.prd-word-preview h3 {
+.prd-document-preview h3 {
   margin: 22px 0 10px;
   font-size: 18px;
   line-height: 1.4;
@@ -129,8 +129,7 @@ button {
   letter-spacing: 0;
 }
 
-.prd-markdown-preview h4,
-.prd-word-preview h4 {
+.prd-document-preview h4 {
   margin: 18px 0 8px;
   font-size: 16px;
   line-height: 1.45;
@@ -138,29 +137,24 @@ button {
   letter-spacing: 0;
 }
 
-.prd-markdown-preview p,
-.prd-word-preview p {
+.prd-document-preview p {
   margin: 10px 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.prd-markdown-preview ul,
-.prd-markdown-preview ol,
-.prd-word-preview ul,
-.prd-word-preview ol {
+.prd-document-preview ul,
+.prd-document-preview ol {
   margin: 10px 0 14px 22px;
   padding: 0;
 }
 
-.prd-markdown-preview li,
-.prd-word-preview li {
+.prd-document-preview li {
   margin: 4px 0;
   padding-left: 4px;
 }
 
-.prd-markdown-preview pre,
-.prd-word-preview pre {
+.prd-document-preview pre {
   margin: 14px 0;
   overflow-x: auto;
   border-radius: 8px;
@@ -169,15 +163,6 @@ button {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   line-height: 1.7;
-}
-
-.prd-word-preview {
-  max-width: 760px;
-  min-height: 960px;
-  margin: 0 auto;
-  padding: 36px 42px 64px;
-  border-left: 1px solid #f3f4f6;
-  border-right: 1px solid #f3f4f6;
 }
 
 @media (prefers-reduced-motion: reduce) {

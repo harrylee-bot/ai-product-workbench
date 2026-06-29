@@ -1,13 +1,12 @@
 "use client";
 
-import { CopilotChatConfigurationProvider } from "@copilotkit/react-core/v2";
+import { CopilotChatConfigurationProvider, CopilotSidebar } from "@copilotkit/react-core/v2";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type PointerEvent } from "react";
+import { useEffect, useState } from "react";
 import { create } from "zustand";
-import { CopilotPrdChatPanel } from "@/components/copilot-prd-chat-panel";
 import { Modal } from "@/components/modal";
 import { PrdDocumentPanel } from "@/components/prd-document-panel";
-import { ProjectList, type Phase1Conversation, type Phase1Project } from "@/components/project-list";
+import type { Phase1Conversation, Phase1Project } from "@/components/project-list";
 import { ProtectedRoute } from "@/components/protected-route";
 import { Button, ErrorState } from "@/components/ui";
 import type { Phase1PrdPreview } from "@/components/workspace-preview/types";
@@ -27,12 +26,6 @@ type CreateConversationResponse = {
   conversation: Phase1Conversation;
 };
 
-type DeleteConversationResponse = {
-  success: boolean;
-  deletedConversationId: string;
-  nextConversation?: Phase1Conversation | null;
-};
-
 type Phase1WorkspaceState = {
   selectedProjectId: string;
   selectedConversationId: string;
@@ -41,13 +34,20 @@ type Phase1WorkspaceState = {
   setPrdPreview: (preview: Phase1PrdPreview | null) => void;
 };
 
-const WORKSPACE_SIDEBAR_WIDTH = 284;
-const WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 0;
-const WORKSPACE_RESIZER_WIDTH = 8;
-const WORKSPACE_CHAT_MIN_WIDTH = 432;
-const WORKSPACE_PREVIEW_MIN_WIDTH = 520;
-const WORKSPACE_PREVIEW_DEFAULT_WIDTH = 720;
-const WORKSPACE_PREVIEW_MAX_WIDTH = 980;
+const WORKSPACE_PREVIEW_MIN_WIDTH = 720;
+const WORKSPACE_CHAT_WIDTH = 430;
+
+const CHAT_LABELS = {
+  chatInputPlaceholder: "描述你要生成的 PRD...",
+  welcomeMessageText: "告诉我你要做什么产品或功能，我会先生成 PRD。",
+  chatDisclaimerText: "",
+  modalHeaderTitle: "智能产品工作台",
+  chatInputToolbarAddButtonLabel: "添加附件",
+  chatInputToolbarToolsButtonLabel: "工具",
+  assistantMessageToolbarCopyMessageLabel: "复制",
+  assistantMessageToolbarCopyMessageCopiedLabel: "已复制",
+  userMessageToolbarCopyMessageLabel: "复制",
+};
 
 const usePhase1Workspace = create<Phase1WorkspaceState>((set) => ({
   selectedProjectId: "",
@@ -76,18 +76,8 @@ export function Phase1WorkspaceClient() {
 
 function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [previewWidth, setPreviewWidth] = useState(WORKSPACE_PREVIEW_DEFAULT_WIDTH);
-  const [resizingPreview, setResizingPreview] = useState(false);
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
-  const [confirmDialog, setConfirmDialog] = useState<{
-    title: string;
-    message: string;
-    confirmLabel: string;
-    onConfirm: () => void;
-  } | null>(null);
   const {
-    selectedProjectId,
     selectedConversationId,
     prdPreview,
     setSelectedProject,
@@ -122,33 +112,6 @@ function Phase1WorkspaceInner() {
     onError: (error) => showError(error, "新建对话失败"),
   });
 
-  const deleteConversation = useMutation({
-    mutationFn: async (conversation: Phase1Conversation) => {
-      const response = await apiRequest<DeleteConversationResponse>(`/conversations/${conversation.id}`, {
-        method: "DELETE",
-      });
-      return { deleted: conversation, response };
-    },
-    onSuccess: async ({ deleted, response }) => {
-      if (deleted.id === selectedConversationId) {
-        if (response.nextConversation) {
-          setSelectedProject(response.nextConversation.projectId, response.nextConversation.id);
-        } else {
-          setSelectedProject("", "");
-          setPrdPreview(null);
-        }
-      }
-      queryClient.removeQueries({ queryKey: ["phase1-conversation", response.deletedConversationId] });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
-        response.nextConversation
-          ? queryClient.invalidateQueries({ queryKey: ["phase1-conversation", response.nextConversation.id] })
-          : Promise.resolve(),
-      ]);
-    },
-    onError: (error) => showError(error, "删除对话失败"),
-  });
-
   useEffect(() => {
     const first = conversationsQuery.data?.items[0];
     if (!selectedConversationId && first) {
@@ -177,48 +140,17 @@ function Phase1WorkspaceInner() {
     const detail = detailQuery.data;
     if (!detail) return;
     const projectId = detail.conversation.projectId || detail.project.id;
-    if (projectId !== selectedProjectId || detail.conversation.id !== selectedConversationId) {
+    if (detail.conversation.id !== selectedConversationId) {
       setSelectedProject(projectId, detail.conversation.id);
     }
     setPrdPreview(normalizePrdPreview(detail.prd));
-  }, [detailQuery.data, selectedConversationId, selectedProjectId, setPrdPreview, setSelectedProject]);
-
-  useEffect(() => {
-    const handleResize = () => {
-      setPreviewWidth((width) => clampPreviewWidth(width, sidebarCollapsed));
-    };
-    handleResize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, [sidebarCollapsed]);
+  }, [detailQuery.data, selectedConversationId, setPrdPreview, setSelectedProject]);
 
   function showError(error: unknown, fallback: string) {
     setNotice({ title: "操作失败", message: error instanceof Error ? error.message : fallback });
   }
 
-  function startPreviewResize(event: PointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setResizingPreview(true);
-
-    const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
-      const nextWidth = window.innerWidth - moveEvent.clientX;
-      setPreviewWidth(clampPreviewWidth(nextWidth, sidebarCollapsed));
-    };
-    const stopResize = () => {
-      setResizingPreview(false);
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopResize);
-      window.removeEventListener("pointercancel", stopResize);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopResize);
-    window.addEventListener("pointercancel", stopResize);
-  }
-
-  const sidebarWidth = sidebarCollapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : WORKSPACE_SIDEBAR_WIDTH;
-  const shellMinWidth = sidebarWidth + WORKSPACE_CHAT_MIN_WIDTH + WORKSPACE_RESIZER_WIDTH + WORKSPACE_PREVIEW_MIN_WIDTH;
+  const shellMinWidth = WORKSPACE_PREVIEW_MIN_WIDTH + WORKSPACE_CHAT_WIDTH;
   const queryError =
     errorMessage(conversationsQuery.error)
     ?? errorMessage(detailQuery.error);
@@ -226,63 +158,22 @@ function Phase1WorkspaceInner() {
   return (
     <>
       <main
-        className={[
-          "workbench-scrollbar relative grid h-screen min-h-0 overflow-x-auto overflow-y-hidden bg-[var(--color-app-bg)] text-gray-950",
-          resizingPreview ? "cursor-col-resize select-none" : "",
-        ].join(" ")}
+        className="workbench-scrollbar relative grid h-screen min-h-0 overflow-x-auto overflow-y-hidden bg-white text-gray-950"
         style={{
-          gridTemplateColumns: `${sidebarWidth}px minmax(${WORKSPACE_CHAT_MIN_WIDTH}px, 1fr) ${WORKSPACE_RESIZER_WIDTH}px minmax(${WORKSPACE_PREVIEW_MIN_WIDTH}px, ${previewWidth}px)`,
+          gridTemplateColumns: `minmax(${WORKSPACE_PREVIEW_MIN_WIDTH}px, 1fr) ${WORKSPACE_CHAT_WIDTH}px`,
           minWidth: `${shellMinWidth}px`,
         }}
       >
-        {resizingPreview ? <div className="fixed inset-0 z-50 cursor-col-resize bg-transparent" /> : null}
         {queryError ? (
           <div className="pointer-events-none fixed left-1/2 top-4 z-40 w-[420px] max-w-[calc(100vw-32px)] -translate-x-1/2">
             <ErrorState title="工作台数据加载失败" description={queryError} className="pointer-events-auto shadow-[var(--shadow-float)]" />
           </div>
         ) : null}
-        <ProjectList
-          conversations={conversationsQuery.data?.items ?? []}
-          selectedConversationId={selectedConversationId}
-          loading={conversationsQuery.isLoading}
-          collapsed={sidebarCollapsed}
-          creatingConversation={createConversation.isPending}
-          deletingConversationId={deleteConversation.variables?.id}
-          onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
-          onSelectConversation={(conversation) => setSelectedProject(conversation.projectId, conversation.id)}
-          onCreateConversation={() => void createConversation.mutate()}
-          onDeleteConversation={(conversation) => {
-            setConfirmDialog({
-              title: "删除对话",
-              message: "确认删除这条对话吗？删除后会从工作台历史中移除。",
-              confirmLabel: "删除对话",
-              onConfirm: () => deleteConversation.mutate(conversation),
-            });
-          }}
-        />
         <CopilotChatConfigurationProvider
           agentId="workbench-prd"
           threadId={selectedConversationId || undefined}
           hasExplicitThreadId={Boolean(selectedConversationId)}
         >
-          <CopilotPrdChatPanel
-            threadId={selectedConversationId}
-            sidebarCollapsed={sidebarCollapsed}
-            disabled={conversationsQuery.isLoading}
-            creatingConversation={createConversation.isPending}
-            onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
-            onCreateConversation={() => void createConversation.mutate()}
-          />
-          <div
-            role="separator"
-            aria-label="拖动调整预览宽度"
-            aria-orientation="vertical"
-            onPointerDown={startPreviewResize}
-            className="group relative flex min-w-0 cursor-col-resize items-center justify-center border-l border-r border-[var(--color-border)] bg-[var(--color-app-bg)] transition hover:bg-[var(--color-accent-soft)]"
-            title="拖动调整预览宽度"
-          >
-            <span className="h-12 w-1 rounded-full bg-gray-300 transition group-hover:bg-[var(--color-accent)]" />
-          </div>
           <PrdDocumentPanel
             dbPreview={prdPreview}
             onRunSettled={() => {
@@ -293,6 +184,15 @@ function Phase1WorkspaceInner() {
                 queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
               ]);
             }}
+          />
+          <CopilotSidebar
+            agentId="workbench-prd"
+            threadId={selectedConversationId}
+            labels={CHAT_LABELS}
+            defaultOpen
+            position="right"
+            width={WORKSPACE_CHAT_WIDTH}
+            autoScroll="pin-to-send"
           />
         </CopilotChatConfigurationProvider>
       </main>
@@ -307,31 +207,6 @@ function Phase1WorkspaceInner() {
         )}
       >
         <p className="text-sm leading-6 text-gray-600">{notice?.message}</p>
-      </Modal>
-      <Modal
-        open={Boolean(confirmDialog)}
-        title={confirmDialog?.title ?? "确认操作"}
-        onClose={() => setConfirmDialog(null)}
-        footer={(
-          <>
-            <Button type="button" variant="secondary" onClick={() => setConfirmDialog(null)}>
-              取消
-            </Button>
-            <Button
-              type="button"
-              variant="danger"
-              onClick={() => {
-                const action = confirmDialog?.onConfirm;
-                setConfirmDialog(null);
-                action?.();
-              }}
-            >
-              {confirmDialog?.confirmLabel ?? "确认"}
-            </Button>
-          </>
-        )}
-      >
-        <p className="text-sm leading-6 text-gray-600">{confirmDialog?.message}</p>
       </Modal>
     </>
   );
@@ -426,17 +301,4 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asText(value: unknown) {
   return typeof value === "string" ? value : "";
-}
-
-function clampPreviewWidth(width: number, sidebarCollapsed: boolean) {
-  if (typeof window === "undefined") return width;
-  const sidebarWidth = sidebarCollapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : WORKSPACE_SIDEBAR_WIDTH;
-  const maxPreviewWidth = Math.max(
-    WORKSPACE_PREVIEW_MIN_WIDTH,
-    Math.min(
-      WORKSPACE_PREVIEW_MAX_WIDTH,
-      window.innerWidth - sidebarWidth - WORKSPACE_CHAT_MIN_WIDTH - WORKSPACE_RESIZER_WIDTH,
-    ),
-  );
-  return Math.min(Math.max(width, WORKSPACE_PREVIEW_MIN_WIDTH), maxPreviewWidth);
 }

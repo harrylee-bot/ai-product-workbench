@@ -32,8 +32,6 @@ type TocItem = {
   order: number;
 };
 
-type ViewMode = "markdown" | "word";
-
 export function PrdDocumentPanel({
   dbPreview,
   onRunSettled,
@@ -46,7 +44,6 @@ export function PrdDocumentPanel({
     updates: [UseAgentUpdate.OnStateChanged, UseAgentUpdate.OnRunStatusChanged],
     throttleMs: 120,
   });
-  const [mode, setMode] = useState<ViewMode>("markdown");
   const [tocCollapsed, setTocCollapsed] = useState(false);
   const [copied, setCopied] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -65,6 +62,7 @@ export function PrdDocumentPanel({
   }, [documentState.sections, markdown]);
   const activeHeadingId = documentState.activeHeadingId ?? headings.at(-1)?.id;
   const writing = documentState.status === "writing" || agent.isRunning;
+  const showToc = headings.length > 0;
   const renderedBlocks = useMemo(() => parseMarkdown(markdown), [markdown]);
 
   useEffect(() => {
@@ -108,7 +106,7 @@ export function PrdDocumentPanel({
   };
 
   return (
-    <aside className="relative flex min-h-0 min-w-0 flex-col bg-white">
+    <section className="relative flex min-h-0 min-w-0 flex-col bg-white">
       <div className="absolute left-1/2 top-7 z-20 -translate-x-1/2">
         {writing ? (
           <div className="rounded-[10px] border border-blue-500 bg-white px-4 py-2 text-sm font-semibold text-blue-600 shadow-[0_8px_24px_rgba(37,99,235,0.12)]">
@@ -139,25 +137,25 @@ export function PrdDocumentPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         <div className="grid h-full min-h-0 grid-cols-[auto_minmax(0,1fr)]">
-          <nav
-            className={[
-              "min-h-0 border-r border-gray-100 bg-white transition-[width] duration-200",
-              tocCollapsed ? "w-10" : "w-56",
-            ].join(" ")}
-            aria-label="PRD 目录"
-          >
-            <button
-              type="button"
-              className="flex h-12 w-full items-center px-4 text-left text-gray-500 hover:text-gray-950"
-              onClick={() => setTocCollapsed((value) => !value)}
-              title={tocCollapsed ? "展开目录" : "收起目录"}
+          {showToc ? (
+            <nav
+              className={[
+                "min-h-0 border-r border-gray-100 bg-white transition-[width] duration-200",
+                tocCollapsed ? "w-10" : "w-56",
+              ].join(" ")}
+              aria-label="PRD 目录"
             >
-              <ChevronsLeft className={["h-4 w-4 transition", tocCollapsed ? "rotate-180" : ""].join(" ")} />
-            </button>
-            {!tocCollapsed ? (
-              <div className="workbench-scrollbar h-[calc(100%-48px)] overflow-y-auto px-4 pb-6 text-sm">
-                {headings.length ? (
-                  headings.map((item) => (
+              <button
+                type="button"
+                className="flex h-12 w-full items-center px-4 text-left text-gray-500 hover:text-gray-950"
+                onClick={() => setTocCollapsed((value) => !value)}
+                title={tocCollapsed ? "展开目录" : "收起目录"}
+              >
+                <ChevronsLeft className={["h-4 w-4 transition", tocCollapsed ? "rotate-180" : ""].join(" ")} />
+              </button>
+              {!tocCollapsed ? (
+                <div className="workbench-scrollbar h-[calc(100%-48px)] overflow-y-auto px-4 pb-6 text-sm">
+                  {headings.map((item) => (
                     <a
                       key={item.id}
                       href={`#${item.id}`}
@@ -169,47 +167,23 @@ export function PrdDocumentPanel({
                     >
                       {item.title}
                     </a>
-                  ))
-                ) : (
-                  <div className="pt-4 text-xs leading-5 text-gray-400">等待 PRD 正文生成</div>
-                )}
-              </div>
-            ) : null}
-          </nav>
+                  ))}
+                </div>
+              ) : null}
+            </nav>
+          ) : null}
           <div ref={scrollRef} onScroll={handleScroll} className="workbench-scrollbar min-h-0 overflow-y-auto">
             <div className="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-10 pb-28 pt-14">
-              <div className="mb-6 flex justify-center">
-                <div className="inline-flex rounded-[10px] border border-gray-200 bg-white p-1 text-xs font-semibold text-gray-500">
-                  <button
-                    type="button"
-                    className={["rounded-md px-3 py-1.5 transition", mode === "markdown" ? "bg-gray-950 text-white" : "hover:text-gray-950"].join(" ")}
-                    onClick={() => setMode("markdown")}
-                  >
-                    Markdown 预览
-                  </button>
-                  <button
-                    type="button"
-                    className={["rounded-md px-3 py-1.5 transition", mode === "word" ? "bg-gray-950 text-white" : "hover:text-gray-950"].join(" ")}
-                    onClick={() => setMode("word")}
-                  >
-                    Word 预览
-                  </button>
-                </div>
-              </div>
               {markdown ? (
-                <article className={mode === "word" ? "prd-word-preview" : "prd-markdown-preview"}>
+                <article className="prd-document-preview">
                   {renderedBlocks.map((block, index) => renderBlock(block, `${block.type}-${index}`))}
                 </article>
-              ) : (
-                <div className="flex flex-1 items-center justify-center text-center text-sm leading-6 text-gray-400">
-                  右侧会显示生成出来的正式 PRD 文档。
-                </div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
       </div>
-    </aside>
+    </section>
   );
 }
 

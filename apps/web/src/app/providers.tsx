@@ -2,7 +2,7 @@
 
 import { CopilotKit, type ReactActivityMessageRenderer } from "@copilotkit/react-core/v2";
 import { z } from "zod";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { getApiBaseUrl } from "@/lib/api";
 
@@ -41,12 +41,26 @@ function CopilotRuntimeProvider({ children }: { children: ReactNode }) {
   const runtimeUrl = useMemo(() => `${getApiBaseUrl()}/copilotkit`, []);
   const renderers = useMemo(() => [workbenchActivityRenderer], []);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const removeInspector = () => {
+      document.querySelectorAll("cpk-web-inspector").forEach((element) => element.remove());
+    };
+    removeInspector();
+
+    const observer = new MutationObserver(removeInspector);
+    observer.observe(document.body, { childList: true });
+    return () => observer.disconnect();
+  }, []);
+
   if (!user) return <>{children}</>;
 
   return (
     <CopilotKit
       runtimeUrl={runtimeUrl}
       credentials="include"
+      showDevConsole={false}
       renderActivityMessages={renderers}
       onError={(event) => {
         console.error("[copilotkit]", event);
