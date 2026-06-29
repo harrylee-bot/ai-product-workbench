@@ -92,6 +92,57 @@ describe("ConversationService conversation-first APIs", () => {
     });
   });
 
+  it("creates a missing frontend-generated conversation id for first chat stream", async () => {
+    prisma.conversation.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(baseConversation({
+        id: "frontend-chat-id",
+        projectId: "project-new",
+        title: "首条消息标题",
+        project: baseProject({ id: "project-new", title: "首条消息标题" }),
+      }));
+    tx.project.create.mockResolvedValue(baseProject({ id: "project-new", title: "首条消息标题" }));
+    tx.conversation.create.mockResolvedValue(baseConversation({
+      id: "frontend-chat-id",
+      projectId: "project-new",
+      title: "首条消息标题",
+    }));
+    tx.project.update.mockResolvedValue(baseProject({ id: "project-new" }));
+
+    const result = await service.getOrCreateInternal(
+      user,
+      "frontend-chat-id",
+      "首条消息标题",
+    );
+
+    expect(tx.project.create).toHaveBeenCalledWith({
+      data: {
+        ownerId: "user-1",
+        title: "首条消息标题",
+        status: ProjectStatus.draft,
+      },
+    });
+    expect(tx.conversation.create).toHaveBeenCalledWith({
+      data: {
+        id: "frontend-chat-id",
+        projectId: "project-new",
+        ownerId: "user-1",
+        title: "首条消息标题",
+      },
+    });
+    expect(tx.project.update).toHaveBeenCalledWith({
+      where: { id: "project-new" },
+      data: {
+        currentConversationId: "frontend-chat-id",
+        lastActivityAt: expect.any(Date),
+      },
+    });
+    expect(result.conversation).toEqual(expect.objectContaining({
+      id: "frontend-chat-id",
+      projectId: "project-new",
+    }));
+  });
+
   it("lists conversations without requiring the project list API", async () => {
     prisma.conversation.findMany.mockResolvedValue([
       baseConversation({ id: "conversation-1", projectId: "project-1", title: "会话 1" }),

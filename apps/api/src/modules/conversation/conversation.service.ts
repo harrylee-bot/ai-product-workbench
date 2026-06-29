@@ -41,6 +41,19 @@ export class ConversationService {
     return { conversation: this.projects.toConversation(conversation) };
   }
 
+  async getOrCreateInternal(user: Phase1User, conversationId: string, title: string) {
+    const existing = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      await this.createWithInternalProject(user, title, conversationId);
+    }
+
+    return this.get(user, conversationId);
+  }
+
   async list(user: Phase1User) {
     const conversations = await this.prisma.conversation.findMany({
       where: {
@@ -145,7 +158,11 @@ export class ConversationService {
     };
   }
 
-  private async createWithInternalProject(user: Phase1User, title: string) {
+  private async createWithInternalProject(
+    user: Phase1User,
+    title: string,
+    conversationId?: string,
+  ) {
     const conversation = await this.prisma.$transaction(async (tx) => {
       const project = await tx.project.create({
         data: {
@@ -156,6 +173,7 @@ export class ConversationService {
       });
       const created = await tx.conversation.create({
         data: {
+          ...(conversationId ? { id: conversationId } : {}),
           projectId: project.id,
           ownerId: user.id,
           title,

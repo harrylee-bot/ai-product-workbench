@@ -47,15 +47,19 @@ export class AichatStreamService {
   async stream(user: AuthenticatedUser, dto: ChatStreamDto, res: Response): Promise<void> {
     const conversationId = dto.id;
 
-    // a) 校验会话归属
-    const { conversation, project } = await this.conversations.get(user, conversationId);
-    const projectId = conversation.projectId ?? project.id;
-
-    // b) 抽取用户消息文本
+    // a) 抽取用户消息文本
     const content = extractUserText(dto.message);
     if (!content) {
       throw new BadRequestException("请求缺少用户消息文本");
     }
+
+    // b) 新对话页的 id 来自前端临时 UUID；首条消息到达时在后端落成真实会话。
+    const { conversation, project } = await this.conversations.getOrCreateInternal(
+      user,
+      conversationId,
+      buildConversationTitle(content),
+    );
+    const projectId = conversation.projectId ?? project.id;
 
     // c) 持久化用户消息
     await this.messages.createUserMessage({
@@ -339,6 +343,12 @@ function pickAssistantMessageType(
 ): MessageType {
   if (finalActionType === "ask_clarification") return MessageType.clarification;
   return MessageType.text;
+}
+
+function buildConversationTitle(content: string): string {
+  const title = content.replace(/\s+/g, " ").trim();
+  if (!title) return "新对话";
+  return title.length > 60 ? `${title.slice(0, 60)}...` : title;
 }
 
 function serializeError(error: unknown): string {
