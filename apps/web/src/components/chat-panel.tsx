@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Badge, Button, EmptyState } from "@/components/ui";
 import { toChineseText } from "@/components/workspace-preview/helpers";
+import { AgentTask, AgentTaskBadge, AgentTaskContent, AgentTaskItem } from "./workspace-chat/agent-task";
 import { ChatComposer } from "./workspace-chat/chat-composer";
 
 export type Phase1Message = {
@@ -61,10 +62,11 @@ export type VibeToolCallView = {
   result?: string;
 };
 
-type ActivityPillView = {
+type ActivityLineView = {
   id: string;
   label: string;
   status: VibeRunTimelineItem["status"];
+  kind: "task" | "tool" | "status";
 };
 
 export type VibeClarificationQuestion = {
@@ -241,7 +243,7 @@ function MessageBubble({ message }: { message: Phase1Message }) {
 }
 
 /**
- * 纯对话 transcript：助手正文流式输出 → 关键调用胶囊 → 澄清/确认。
+ * 纯对话 transcript：助手正文流式输出 → 关键调用行 → 澄清/确认。
  * 默认只展示公开进度摘要，不展示隐藏推理链、工具入参/返回或原始 payload。
  */
 function AgentActivityFeed({
@@ -263,8 +265,8 @@ function AgentActivityFeed({
 
   const showStreamingText = Boolean(runState.streamingText) && !assistantMessageForRunExists;
   const toolCalls = runState.toolCalls ?? [];
-  const activityPills = buildActivityPills(runState, toolCalls);
-  const hasActivityPills = Boolean(activityPills.length);
+  const activityLines = buildActivityLines(runState, toolCalls);
+  const hasActivityLines = Boolean(activityLines.length);
   const hasClarification = runState.status === "waiting_clarification";
   const hasConfirmation =
     runState.status === "waiting_prd_confirm" ||
@@ -272,7 +274,7 @@ function AgentActivityFeed({
     runState.status === "waiting_confirmation";
 
   // run 已完成且无流式占位、无调用状态、无澄清/确认时不渲染任何东西（结论由历史助手消息承载）。
-  if (!showStreamingText && !hasActivityPills && !hasClarification && !hasConfirmation) {
+  if (!showStreamingText && !hasActivityLines && !hasClarification && !hasConfirmation) {
     return null;
   }
 
@@ -285,7 +287,7 @@ function AgentActivityFeed({
         </div>
       ) : null}
 
-      {hasActivityPills ? <ActivityPillStrip pills={activityPills} /> : null}
+      {hasActivityLines ? <ActivityLineList lines={activityLines} /> : null}
 
       {hasClarification ? (
         <ClarificationConversation runState={runState} />
@@ -304,20 +306,35 @@ function AgentActivityFeed({
   );
 }
 
-function ActivityPillStrip({ pills }: { pills: ActivityPillView[] }) {
+function ActivityLineList({ lines }: { lines: ActivityLineView[] }) {
+  const isRunning = lines.some((line) => line.status === "running");
+  const title = isRunning ? "正在思考" : "执行过程";
+
   return (
-    <div className="flex flex-wrap gap-1.5 pt-0.5" aria-label="关键调用信息">
-      {pills.map((pill) => (
-        <span
-          key={pill.id}
-          className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-gray-200 bg-gray-100 px-2.5 py-1 text-[11px] font-medium leading-none text-gray-600"
-          title={pill.label}
-        >
-          <span className={activityDotClassName(pill.status)} aria-hidden="true" />
-          <span className="truncate">{pill.label}</span>
-        </span>
-      ))}
-    </div>
+    <AgentTask title={title} status={isRunning ? "running" : "done"} aria-label="关键调用信息">
+      <AgentTaskContent>
+        {lines.map((line) => (
+          <AgentTaskItem key={line.id} status={line.status}>
+            <InlineActivityText text={line.label} />
+          </AgentTaskItem>
+        ))}
+      </AgentTaskContent>
+    </AgentTask>
+  );
+}
+
+function InlineActivityText({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`)/g).filter(Boolean);
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.startsWith("`") && part.endsWith("`") && part.length > 1 ? (
+          <AgentTaskBadge key={`${part}-${index}`}>{part.slice(1, -1)}</AgentTaskBadge>
+        ) : (
+          <span key={`${part.slice(0, 18)}-${index}`}>{part}</span>
+        ),
+      )}
+    </>
   );
 }
 
@@ -328,7 +345,8 @@ function AssistantText({
   content: string;
   tone?: "normal" | "muted";
 }) {
-  const segments = parseFencedCodeBlocks(toChineseText(content));
+  const visibleContent = stripProtocolBlocks(toChineseText(content));
+  const segments = parseFencedCodeBlocks(visibleContent);
   const textColor = tone === "muted" ? "text-gray-500" : "text-gray-900";
 
   return (
@@ -418,111 +436,90 @@ function parseFencedCodeBlocks(content: string): Array<{ type: "text" | "code"; 
   return segments.filter((segment) => segment.content.trim().length > 0);
 }
 
-function buildActivityPills(
+function buildActivityLines(
   runState: VibeRunView,
   toolCalls: VibeToolCallView[],
-): ActivityPillView[] {
-  const pills: ActivityPillView[] = [];
+): ActivityLineView[] {
+  const lines: ActivityLineView[] = [];
   const seen = new Set<string>();
-  const addPill = (pill: ActivityPillView) => {
-    const key = normalizeProcessKey(pill.label);
+  const addLine = (line: ActivityLineView) => {
+    const key = normalizeProcessKey(`${line.kind}:${line.label}`);
     if (!key || seen.has(key)) return;
     seen.add(key);
-    pills.push(pill);
+    lines.push(line);
   };
 
-  const liveSteps = runState.steps.filter((step) =>
-    step.status === "running" ||
-    step.status === "failed" ||
-    step.status === "canceled",
-  );
-
-  for (const step of liveSteps.slice(-3)) {
-    addPill({
-      id: `step:${step.step}:${step.status}`,
-      label: `${step.title} · ${stepStatusLabel(step.status)}`,
-      status: stepStatusToRailStatus(step.status),
-    });
-  }
-
   const latestTimelineItems = [...(runState.timeline ?? [])]
-    .filter((item) => item.status !== "done" || runState.status === "running")
-    .slice(-3);
+    .filter((item) => shouldShowActivityTimelineItem(item, runState.status))
+    .slice(-6);
 
   for (const item of latestTimelineItems) {
     const label = compactActivityText(item.text);
     if (!label) continue;
-    addPill({
+    addLine({
       id: `timeline:${item.id}`,
       label,
       status: item.status,
+      kind: "task",
     });
   }
 
   for (const call of toolCalls.slice(-6)) {
-    addPill({
+    addLine({
       id: `tool:${call.id}:${call.status}`,
-      label: `${compactToolName(call.toolName)} · ${toolStatusLabel(call.status)}`,
+      label: compactToolCallText(call),
       status: call.status === "failed" ? "failed" : call.status === "running" ? "running" : "done",
+      kind: "tool",
     });
   }
 
-  if (!pills.length && runState.currentLabel && runState.status === "running") {
-    addPill({
+  if (!lines.length && runState.currentLabel && runState.status === "running") {
+    addLine({
       id: `${runState.runId ?? "run"}:current`,
       label: compactActivityText(runState.currentLabel),
       status: "running",
+      kind: "status",
     });
   }
 
-  return pills.slice(-8);
+  if (runState.status === "running") {
+    addLine({
+      id: `${runState.runId ?? "run"}:thinking`,
+      label: "正在思考",
+      status: "running",
+      kind: "status",
+    });
+  }
+
+  return lines.slice(-10);
 }
 
-function activityDotClassName(status: VibeRunTimelineItem["status"]) {
-  const color =
-    status === "running"
-      ? "bg-amber-500"
-      : status === "failed"
-        ? "bg-red-500"
-        : status === "warning"
-          ? "bg-amber-500"
-          : status === "done"
-            ? "bg-emerald-500"
-            : "bg-gray-400";
-  return `h-1.5 w-1.5 shrink-0 rounded-full ${color} ${status === "running" ? "motion-safe:animate-pulse" : ""}`;
+function shouldShowActivityTimelineItem(
+  item: VibeRunTimelineItem,
+  runStatus: VibeRunView["status"],
+) {
+  const text = normalizeProcessDetail(item.text) ?? "";
+  if (!text) return false;
+  if (text.startsWith("节点目标：")) return false;
+  if (text.includes("前端已经拿到 runId")) return false;
+  if (text.includes("执行流连接")) return false;
+  if (item.status === "done" && runStatus !== "running") return false;
+  return true;
 }
 
-function stepStatusLabel(status: VibeRunStepStatus) {
-  if (status === "running") return "执行中";
-  if (status === "failed") return "失败";
-  if (status === "canceled") return "已停止";
-  return "已完成";
-}
-
-function toolStatusLabel(status: VibeToolCallView["status"]) {
-  if (status === "running") return "调用中";
-  if (status === "failed") return "失败";
-  return "已完成";
-}
-
-function compactToolName(value: string) {
-  return `调用 ${value.replace(/\s+/g, " ").trim() || "工具"}`;
+function compactToolCallText(call: VibeToolCallView) {
+  const toolName = call.toolName.replace(/\s+/g, " ").trim() || "工具";
+  if (call.status === "running") return `正在调用 ${toolName}`;
+  if (call.status === "failed") return `调用失败 ${toolName}`;
+  return `已调用 ${toolName}`;
 }
 
 function compactActivityText(value?: string) {
   const text = normalizeProcessDetail(value)
     ?.replace(/^节点目标：/, "")
-    .replace(/^正在/, "")
     .replace(/。$/, "");
   if (!text) return "";
-  return text.length > 34 ? `${text.slice(0, 34)}...` : text;
-}
-
-function stepStatusToRailStatus(status: VibeRunStepStatus): VibeRunTimelineItem["status"] {
-  if (status === "running") return "running";
-  if (status === "failed") return "failed";
-  if (status === "canceled") return "warning";
-  return "done";
+  return text.length > 72 ? `${text.slice(0, 72)}...` : text;
 }
 
 function normalizeProcessDetail(value?: string) {
@@ -531,6 +528,14 @@ function normalizeProcessDetail(value?: string) {
 
 function normalizeProcessKey(value: string) {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function stripProtocolBlocks(content: string) {
+  return content
+    .replace(/```[^\n`]*ai_product_workbench_final_action[^\n`]*\n?[\s\S]*?```/gi, "")
+    .replace(/```[^\n`]*ai_product_workbench_final_action[\s\S]*$/i, "")
+    .replace(/(^|\n)\s*ai_product_workbench_final_action\s*\n[\s\S]*$/i, "$1")
+    .trim();
 }
 
 /** 澄清对话：轻量内联提示 + 问题列表。 */
