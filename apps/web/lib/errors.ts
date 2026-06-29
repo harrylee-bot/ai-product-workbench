@@ -22,6 +22,30 @@ export type ErrorCode = `${ErrorType}:${Surface}`;
 
 export type ErrorVisibility = "response" | "log" | "none";
 
+const fallbackErrorCode: ErrorCode = "bad_request:api";
+
+const validErrorTypes: ErrorType[] = [
+  "bad_request",
+  "unauthorized",
+  "forbidden",
+  "not_found",
+  "rate_limit",
+  "offline",
+];
+
+const validSurfaces: Surface[] = [
+  "chat",
+  "auth",
+  "api",
+  "stream",
+  "database",
+  "history",
+  "vote",
+  "document",
+  "suggestions",
+  "activate_gateway",
+];
+
 export const visibilityBySurface: Record<Surface, ErrorVisibility> = {
   database: "log",
   chat: "response",
@@ -40,15 +64,20 @@ export class ChatbotError extends Error {
   surface: Surface;
   statusCode: number;
 
-  constructor(errorCode: ErrorCode, cause?: string) {
+  constructor(
+    errorCode: ErrorCode | string | undefined,
+    cause?: string,
+    message?: string,
+  ) {
     super();
 
-    const [type, surface] = errorCode.split(":");
+    const normalizedCode = normalizeErrorCode(errorCode);
+    const [type, surface] = normalizedCode.split(":");
 
     this.type = type as ErrorType;
     this.cause = cause;
     this.surface = surface as Surface;
-    this.message = getMessageByErrorCode(errorCode);
+    this.message = message || getMessageByErrorCode(normalizedCode);
     this.statusCode = getStatusCodeByType(this.type);
   }
 
@@ -73,6 +102,23 @@ export class ChatbotError extends Error {
 
     return Response.json({ code, message, cause }, { status: statusCode });
   }
+}
+
+function normalizeErrorCode(errorCode: ErrorCode | string | undefined): ErrorCode {
+  if (!errorCode) {
+    return fallbackErrorCode;
+  }
+
+  const [type, surface, extra] = errorCode.split(":");
+  if (
+    extra !== undefined ||
+    !validErrorTypes.includes(type as ErrorType) ||
+    !validSurfaces.includes(surface as Surface)
+  ) {
+    return fallbackErrorCode;
+  }
+
+  return errorCode as ErrorCode;
 }
 
 export function getMessageByErrorCode(errorCode: ErrorCode): string {
