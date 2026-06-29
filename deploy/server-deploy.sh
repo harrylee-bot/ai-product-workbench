@@ -175,6 +175,7 @@ docker volume create ai-product-workbench-storage >/dev/null
 if [ "${PRUNE_DOCKER_BEFORE_BUILD:-1}" != "0" ]; then
   docker container prune -f >/dev/null 2>&1 || true
   docker image prune -f >/dev/null 2>&1 || true
+  docker builder prune -af >/dev/null 2>&1 || true
 fi
 
 COMPOSE=(docker compose --env-file .env -f deploy/docker-compose.yml)
@@ -258,3 +259,8 @@ echo "Deployed:"
 echo "  Web: ${APP_PUBLIC_URL}/login"
 echo "  API: ${API_PUBLIC_BASE_URL%/}/system/health"
 echo "  Knowledge: ${KNOWLEDGE_APP_PUBLIC_URL}"
+
+if [ "${PRUNE_DOCKER_AFTER_DEPLOY:-1}" != "0" ]; then
+  docker image prune -f >/dev/null 2>&1 || true
+  docker builder prune -af >/dev/null 2>&1 || true
+fi
