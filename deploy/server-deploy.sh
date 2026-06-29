@@ -86,15 +86,26 @@ fail_if_weak() {
   fi
 }
 
-if [ "$DEPLOY_TARGET" != "web" ]; then
-  fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
-  fail_if_weak "JWT_SECRET" "$JWT_SECRET"
-  fail_if_weak "MODEL_GATEWAY_ENCRYPTION_KEY" "$MODEL_GATEWAY_ENCRYPTION_KEY"
+case "$DEPLOY_TARGET" in
+  all | api)
+    fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+    fail_if_weak "JWT_SECRET" "$JWT_SECRET"
+    fail_if_weak "MODEL_GATEWAY_ENCRYPTION_KEY" "$MODEL_GATEWAY_ENCRYPTION_KEY"
 
-  if [ "${DEERFLOW_ENABLED}" != "true" ]; then
-    echo "WARNING: DEERFLOW_ENABLED 非 true，自然语言→PRD→原型链路将不可用（仅返回停用文案）。" >&2
-  fi
-fi
+    if [ "${DEERFLOW_ENABLED}" != "true" ]; then
+      echo "WARNING: DEERFLOW_ENABLED 非 true，自然语言→PRD→原型链路将不可用（仅返回停用文案）。" >&2
+    fi
+    ;;
+  postgres)
+    fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+    ;;
+  web | knowledge)
+    ;;
+  *)
+    echo "ERROR: DEPLOY_TARGET must be one of: all, web, api, knowledge, postgres" >&2
+    exit 2
+    ;;
+esac
 
 wait_for_http() {
   local url="$1"
@@ -111,6 +122,41 @@ wait_for_http() {
   echo "${label} did not become ready: ${url}" >&2
   return 1
 }
+
+export NODE_IMAGE
+export POSTGRES_IMAGE
+export POSTGRES_PASSWORD
+export JWT_SECRET
+export JWT_EXPIRES_IN
+export AUTH_COOKIE_SECURE
+export AUTH_COOKIE_SAME_SITE
+export FORCE_HTTPS
+export MODEL_GATEWAY_ENCRYPTION_KEY
+export MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER
+export MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS
+export DEFAULT_MODEL_PROVIDER_NAME
+export DEFAULT_MODEL_BASE_URL
+export DEFAULT_MODEL_API_KEY
+export DEFAULT_MODEL_NAME
+export WEB_ORIGIN
+export DEERFLOW_ENABLED
+export DEERFLOW_LANGGRAPH_URL
+export DEERFLOW_GATEWAY_URL
+export DEERFLOW_ASSISTANT_ID
+export DEERFLOW_AGENT_NAME
+export DEERFLOW_STREAM_MODE
+export DEERFLOW_PLAN_MODE
+export DEERFLOW_THINKING_ENABLED
+export DEERFLOW_SUBAGENT_ENABLED
+export DEERFLOW_MAX_CONCURRENT_SUBAGENTS
+export DEERFLOW_TIMEOUT_MS
+export DEERFLOW_UPLOADS_ENABLED
+export DEERFLOW_ARTIFACT_MAX_INLINE_BYTES
+export KNOWLEDGE_APP_PORT
+export QUARTZ_REF
+export QUARTZ_BASE_URL
+export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-$API_PUBLIC_BASE_URL}"
+export NEXT_PUBLIC_KNOWLEDGE_APP_URL="${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-$KNOWLEDGE_APP_PUBLIC_URL}"
 
 cd "$APP_DIR"
 
@@ -131,132 +177,57 @@ if [ "${PRUNE_DOCKER_BEFORE_BUILD:-1}" != "0" ]; then
   docker image prune -f >/dev/null 2>&1 || true
 fi
 
-if [ "$DEPLOY_TARGET" = "web" ]; then
-  docker build \
-    --build-arg NODE_IMAGE="$NODE_IMAGE" \
-    --build-arg NEXT_PUBLIC_API_BASE_URL="$API_PUBLIC_BASE_URL" \
-    --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
-    -f apps/web/Dockerfile \
-    -t ai-product-workbench-web:latest .
+COMPOSE=(docker compose --env-file .env -f deploy/docker-compose.yml)
 
-  docker rm -f ai-product-workbench-web >/dev/null 2>&1 || true
-  docker run -d \
-    --name ai-product-workbench-web \
-    --restart unless-stopped \
-    --network ai-product-workbench \
-    -p 3000:3000 \
-    -e NEXT_PUBLIC_API_BASE_URL="$API_PUBLIC_BASE_URL" \
-    -e NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
-    ai-product-workbench-web:latest
+ensure_storage_dirs() {
+  local storage_mount
+  storage_mount="$(docker volume inspect ai-product-workbench-storage -f '{{ .Mountpoint }}')"
+  mkdir -p "${storage_mount}/knowledge-vault"
+}
 
-  wait_for_http "http://127.0.0.1:3000/login" "Web"
+wait_for_postgres() {
+  local attempt
+  for attempt in $(seq 1 60); do
+    if "${COMPOSE[@]}" exec -T postgres pg_isready -U ai_workbench -d ai_product_workbench >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
 
-  echo "Deployed:"
-  echo "  Web: ${APP_PUBLIC_URL}/login"
-  exit 0
-fi
+  echo "Postgres did not become ready" >&2
+  return 1
+}
 
-docker rm -f ai-product-workbench-web ai-product-workbench-api ai-product-knowledge >/dev/null 2>&1 || true
-
-if ! docker ps -a --format '{{.Names}}' | grep -qx ai-product-workbench-postgres; then
-  docker run -d \
-    --name ai-product-workbench-postgres \
-    --restart unless-stopped \
-    --network ai-product-workbench \
-    -e POSTGRES_DB=ai_product_workbench \
-    -e POSTGRES_USER=ai_workbench \
-    -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-    -v ai-product-workbench-postgres:/var/lib/postgresql/data \
-    "$POSTGRES_IMAGE"
-elif ! docker ps --format '{{.Names}}' | grep -qx ai-product-workbench-postgres; then
-  docker start ai-product-workbench-postgres >/dev/null
-fi
-
-until docker exec ai-product-workbench-postgres pg_isready -U ai_workbench -d ai_product_workbench >/dev/null 2>&1; do
-  sleep 2
-done
-
-docker build \
-  --build-arg NODE_IMAGE="$NODE_IMAGE" \
-  -f apps/api/Dockerfile \
-  -t ai-product-workbench-api:latest .
-docker build \
-  --build-arg NODE_IMAGE="$NODE_IMAGE" \
-  --build-arg NEXT_PUBLIC_API_BASE_URL="$API_PUBLIC_BASE_URL" \
-  --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
-  -f apps/web/Dockerfile \
-  -t ai-product-workbench-web:latest .
-docker build \
-  --build-arg NODE_IMAGE="$NODE_IMAGE" \
-  --build-arg QUARTZ_REF="$QUARTZ_REF" \
-  -f apps/knowledge/Dockerfile \
-  -t ai-product-knowledge:latest .
-
-docker run -d \
-  --name ai-product-workbench-api \
-  --restart unless-stopped \
-  --network ai-product-workbench \
-  -p 4000:4000 \
-  -e DATABASE_URL="postgresql://ai_workbench:${POSTGRES_PASSWORD}@ai-product-workbench-postgres:5432/ai_product_workbench?schema=public" \
-  -e JWT_SECRET="$JWT_SECRET" \
-  -e JWT_EXPIRES_IN="$JWT_EXPIRES_IN" \
-  -e AUTH_COOKIE_SECURE="$AUTH_COOKIE_SECURE" \
-  -e AUTH_COOKIE_SAME_SITE="$AUTH_COOKIE_SAME_SITE" \
-  -e FORCE_HTTPS="$FORCE_HTTPS" \
-  -e MODEL_GATEWAY_ENCRYPTION_KEY="$MODEL_GATEWAY_ENCRYPTION_KEY" \
-  -e MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER="$MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER" \
-  -e MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS="$MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS" \
-  -e KNOWLEDGE_VAULT_ROOT=/app/apps/api/storage/knowledge-vault \
-  -e DEFAULT_MODEL_PROVIDER_NAME="$DEFAULT_MODEL_PROVIDER_NAME" \
-  -e DEFAULT_MODEL_BASE_URL="$DEFAULT_MODEL_BASE_URL" \
-  -e DEFAULT_MODEL_API_KEY="$DEFAULT_MODEL_API_KEY" \
-  -e DEFAULT_MODEL_NAME="$DEFAULT_MODEL_NAME" \
-  -e API_PORT=4000 \
-  -e WEB_ORIGIN="$WEB_ORIGIN" \
-  -e FILE_UPLOAD_ROOT=/app/apps/api/storage/uploads \
-  -e DEERFLOW_ENABLED="$DEERFLOW_ENABLED" \
-  -e DEERFLOW_LANGGRAPH_URL="$DEERFLOW_LANGGRAPH_URL" \
-  -e DEERFLOW_GATEWAY_URL="$DEERFLOW_GATEWAY_URL" \
-  -e DEERFLOW_ASSISTANT_ID="$DEERFLOW_ASSISTANT_ID" \
-  -e DEERFLOW_AGENT_NAME="$DEERFLOW_AGENT_NAME" \
-  -e DEERFLOW_STREAM_MODE="$DEERFLOW_STREAM_MODE" \
-  -e DEERFLOW_PLAN_MODE="$DEERFLOW_PLAN_MODE" \
-  -e DEERFLOW_THINKING_ENABLED="$DEERFLOW_THINKING_ENABLED" \
-  -e DEERFLOW_SUBAGENT_ENABLED="$DEERFLOW_SUBAGENT_ENABLED" \
-  -e DEERFLOW_MAX_CONCURRENT_SUBAGENTS="$DEERFLOW_MAX_CONCURRENT_SUBAGENTS" \
-  -e DEERFLOW_TIMEOUT_MS="$DEERFLOW_TIMEOUT_MS" \
-  -e DEERFLOW_UPLOADS_ENABLED="$DEERFLOW_UPLOADS_ENABLED" \
-  -e DEERFLOW_ARTIFACT_MAX_INLINE_BYTES="$DEERFLOW_ARTIFACT_MAX_INLINE_BYTES" \
-  --add-host host.docker.internal:host-gateway \
-  -v ai-product-workbench-storage:/app/apps/api/storage \
-  ai-product-workbench-api:latest
-
-docker run -d \
-  --name ai-product-workbench-web \
-  --restart unless-stopped \
-  --network ai-product-workbench \
-  -p 3000:3000 \
-  -e NEXT_PUBLIC_API_BASE_URL="$API_PUBLIC_BASE_URL" \
-  -e NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
-  ai-product-workbench-web:latest
-
-STORAGE_MOUNT="$(docker volume inspect ai-product-workbench-storage -f '{{ .Mountpoint }}')"
-mkdir -p "${STORAGE_MOUNT}/knowledge-vault"
-
-docker run -d \
-  --name ai-product-knowledge \
-  --restart unless-stopped \
-  --network ai-product-workbench \
-  -p "${KNOWLEDGE_APP_PORT}:3000" \
-  -e QUARTZ_BASE_URL="$QUARTZ_BASE_URL" \
-  -e QUARTZ_CONTENT_DIR=/storage/knowledge-vault \
-  -e QUARTZ_CONCURRENCY="${QUARTZ_CONCURRENCY:-2}" \
-  -v ai-product-workbench-storage:/storage \
-  ai-product-knowledge:latest
-
-wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
-wait_for_http "http://127.0.0.1:3000/login" "Web"
-wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
+case "$DEPLOY_TARGET" in
+  web)
+    "${COMPOSE[@]}" build web
+    "${COMPOSE[@]}" up -d --no-deps web
+    wait_for_http "http://127.0.0.1:3000/login" "Web"
+    ;;
+  api)
+    "${COMPOSE[@]}" build api
+    "${COMPOSE[@]}" up -d --no-deps api
+    wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
+    ;;
+  knowledge)
+    ensure_storage_dirs
+    "${COMPOSE[@]}" build knowledge
+    "${COMPOSE[@]}" up -d --no-deps knowledge
+    wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
+    ;;
+  postgres)
+    "${COMPOSE[@]}" up -d --no-deps postgres
+    wait_for_postgres
+    ;;
+  all)
+    ensure_storage_dirs
+    "${COMPOSE[@]}" up -d --build
+    wait_for_postgres
+    wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
+    wait_for_http "http://127.0.0.1:3000/login" "Web"
+    wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
+    ;;
+esac
 
 echo "Deployed:"
 echo "  Web: ${APP_PUBLIC_URL}/login"

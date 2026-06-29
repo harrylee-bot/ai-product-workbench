@@ -1,3 +1,5 @@
+name: ai-product-workbench
+
 services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
@@ -33,6 +35,9 @@ services:
       DATABASE_URL: postgresql://ai_workbench:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ai_product_workbench?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      AUTH_COOKIE_SAME_SITE: ${AUTH_COOKIE_SAME_SITE:-lax}
+      FORCE_HTTPS: ${FORCE_HTTPS:-true}
       API_PORT: 4000
       WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN must be set}
       FILE_UPLOAD_ROOT: /app/apps/api/storage/uploads
@@ -68,15 +73,15 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
-        NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-http://8.130.160.177:3001}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://aionbench.com/api}
+        NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-https://aionbench.com/knowledge}
     container_name: ai-product-workbench-web
     restart: unless-stopped
     depends_on:
       - api
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://8.130.160.177:4000/api}
-      NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-http://8.130.160.177:3001}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://aionbench.com/api}
+      NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-https://aionbench.com/knowledge}
     ports:
       - "3000:3000"
 
@@ -93,6 +98,7 @@ services:
       QUARTZ_BASE_URL: ${QUARTZ_BASE_URL:-8.130.160.177:3001}
       QUARTZ_CONTENT_DIR: /storage/knowledge-vault
       QUARTZ_CONCURRENCY: ${QUARTZ_CONCURRENCY:-2}
+      QUARTZ_OUTPUT_DIR: /usr/share/nginx/html
     ports:
       - "${KNOWLEDGE_APP_PORT:-3001}:3000"
     volumes:
@@ -100,4 +106,13 @@ services:
 
 volumes:
   postgres-data:
+    name: ai-product-workbench-postgres
+    external: true
   api-storage:
+    name: ai-product-workbench-storage
+    external: true
+
+networks:
+  default:
+    name: ai-product-workbench
+    external: true
