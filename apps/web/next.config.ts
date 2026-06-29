@@ -10,7 +10,7 @@ const securityHeaders = [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
+      "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       [
         "connect-src 'self'",
@@ -31,10 +31,24 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  reactStrictMode: true,
+  cacheComponents: true,
   devIndicators: false,
+  poweredByHeader: false,
+  reactCompiler: true,
   turbopack: {
     root: path.resolve(process.cwd(), "../.."),
+  },
+  logging: {
+    fetches: {
+      fullUrl: false,
+    },
+    incomingRequests: false,
+  },
+  experimental: {
+    prefetchInlining: true,
+    cachedNavigations: true,
+    appNewScrollHandler: true,
+    inlineCss: true,
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

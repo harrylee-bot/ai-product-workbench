@@ -336,6 +336,8 @@ model User {
   runtimeRuns     RuntimeRunLog[]
   adminAuditLogs  AdminAuditLog[]
   deerFlowThreads DeerFlowThreadBinding[]
+  votes           Vote[]
+  suggestions     Suggestion[]
 
   @@map("users")
 }
@@ -463,6 +465,7 @@ model Message {
   conversation               Conversation @relation(fields: [conversationId], references: [id])
   user                       User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   fileAssets                 FileAsset[]
+  votes                      Vote[]
 
   @@index([projectId])
   @@index([conversationId])
@@ -1187,4 +1190,44 @@ model VibeStreamEventLog {
   @@index([eventType])
   @@index([createdAt])
   @@map("vibe_stream_event_logs")
+}
+
+model Vote {
+  id         String   @id @default(cuid())
+  messageId  String   @map("message_id")
+  userId     String   @map("user_id")
+  isUpvoted  Boolean  @default(false) @map("is_upvoted")
+  createdAt  DateTime @default(now()) @map("created_at")
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
+  @@map("votes")
+}
+
+model Suggestion {
+  id            String   @id @default(cuid())
+  documentId    String   @map("document_id")
+  originalText  String   @map("original_text")
+  suggestedText String   @map("suggested_text")
+  description   String?
+  isResolved    Boolean  @default(false) @map("is_resolved")
+  userId        String   @map("user_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([userId])
+  @@map("suggestions")
+}
+
+model Stream {
+  id        String   @id
+  chatId    String   @map("chat_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([chatId])
+  @@map("streams")
 }

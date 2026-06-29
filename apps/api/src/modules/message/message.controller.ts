@@ -1,31 +1,24 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { Phase1User } from "../auth/auth.types";
-import { VibeService } from "../../ai/vibe.service";
-import { HandleVibeMessageDto } from "../../ai/dto";
 import { MessageService } from "../../projects/message.service";
 import { ListMessagesQueryDto } from "./dto";
 
 /**
- * 消息读写入口。
- * - POST /messages：与 POST /ai/vibe/handle-message 等价的别名（复用 HandleVibeMessageDto，
- *   委托 VibeService.handleMessage），消除此前剥离字段的重复 DTO。
+ * 消息读取入口。
+ *
+ * 注：ai-chatbot 前端通过 POST /api/chat/stream（AI-SDK UIMessageStream 桥端点）发送消息，
+ * 并在 onFinish 时批量持久化 assistant 消息；不再使用单条 POST /messages 发送用户消息，
+ * 因此该控制器仅保留读取端点。
+ *
  * - GET /messages、GET /conversations/:id/messages：读取会话消息 + 最近运行摘要，
- *   统一由 projects/MessageService.listByConversation 提供（合并自原 modules/message/service）。
+ *   统一由 projects/MessageService.listByConversation 提供。
  */
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class MessageController {
-  constructor(
-    private readonly vibe: VibeService,
-    private readonly messages: MessageService,
-  ) {}
-
-  @Post("messages")
-  create(@CurrentUser() user: Phase1User, @Body() dto: HandleVibeMessageDto) {
-    return this.vibe.handleMessage(user, dto);
-  }
+  constructor(private readonly messages: MessageService) {}
 
   @Get("messages")
   list(@CurrentUser() user: Phase1User, @Query() query: ListMessagesQueryDto) {

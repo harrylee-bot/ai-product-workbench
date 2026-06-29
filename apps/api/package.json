@@ -10,7 +10,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ag-ui/core": "^0.0.57",
     "@nestjs/common": "^11.1.6",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.1.6",
@@ -20,6 +19,7 @@
     "@nestjs/throttler": "^6.5.0",
     "@prisma/client": "^6.16.0",
     "@types/cookie-parser": "^1.4.10",
+    "ai": "6.0.116",
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",

@@ -35,21 +35,15 @@ import { QaRuleCheckService } from "./qa-rule-check.service";
 import { QaService } from "./qa.service";
 import { RollbackService } from "./rollback.service";
 import { VersionHistoryService } from "./version-history.service";
-import { VibeController } from "./vibe.controller";
-import { CopilotKitController } from "./copilotkit.controller";
 import { ShareLinkController, PublicShareController } from "./share.controller";
 import { ShareService } from "./share.service";
-import { VibeService } from "./vibe.service";
-import { VibeStreamService } from "./vibe-stream.service";
 import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
 import { FinalActionApplierService } from "./final-action-applier.service";
-import { CopilotPrdRuntimeService } from "./copilot-prd-runtime.service";
+import { AichatModule } from "./aichat/aichat.module";
 
 @Module({
-  imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule],
+  imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule, AichatModule],
   controllers: [
-    VibeController,
-    CopilotKitController,
     ProjectProductDesignStateController,
     ProductDesignStateResourceController,
     ProjectPrdController,
@@ -67,12 +61,9 @@ import { CopilotPrdRuntimeService } from "./copilot-prd-runtime.service";
     PublicShareController,
   ],
   providers: [
-    VibeService,
-    CopilotPrdRuntimeService,
     DeerFlowRuntimeService,
     FinalActionApplierService,
     RuntimeRunLogService,
-    VibeStreamService,
     ProductDesignStateService,
     DocumentCanvasService,
     RequirementDocumentService,
@@ -85,6 +76,11 @@ import { CopilotPrdRuntimeService } from "./copilot-prd-runtime.service";
     MessageService,
     ShareService,
   ],
-  exports: [VibeService, MessageService],
+  exports: [
+    MessageService,
+    DeerFlowRuntimeService,
+    FinalActionApplierService,
+    RuntimeRunLogService,
+  ],
 })
 export class AiModule {}

@@ -4,7 +4,7 @@ import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
 import { AUTH_COOKIE_NAME, authCookieOptions, clearAuthCookieOptions } from "../../common/auth-cookie";
 import { CurrentUser } from "./current-user.decorator";
-import { LoginDto } from "./dto";
+import { LoginDto, RegisterDto } from "./dto";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import type { Phase1User } from "./auth.types";
 
@@ -26,6 +26,16 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: Phase1User) {
     return this.auth.me(user);
+  }
+
+  @Post("register")
+  // sec-3：注册接口限流防刷（5 次/分钟/IP）。
+  @Throttle({ auth: { limit: 5, ttl: 60_000 } })
+  register(@Body() dto: RegisterDto, @Res({ passthrough: true }) response: Response) {
+    return this.auth.register(dto).then(({ accessToken, user }) => {
+      response.cookie(AUTH_COOKIE_NAME, accessToken, authCookieOptions());
+      return { user };
+    });
   }
 
   @Post("logout")

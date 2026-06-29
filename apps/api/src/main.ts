@@ -80,6 +80,7 @@ async function bootstrap() {
       "Accept",
       "X-CopilotKit-Runtime-Client-GQL-Version",
       "x-copilotcloud-public-api-key",
+      "x-vercel-ai-ui-message-stream",
     ],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
