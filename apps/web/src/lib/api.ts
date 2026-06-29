@@ -2,7 +2,7 @@ import { clearSession } from "./auth-storage";
 
 const API_BASE_URL_ENV = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
-function getApiBaseUrl() {
+export function getApiBaseUrl() {
   if (API_BASE_URL_ENV) {
     return API_BASE_URL_ENV;
   }

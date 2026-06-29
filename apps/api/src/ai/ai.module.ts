@@ -36,17 +36,20 @@ import { QaService } from "./qa.service";
 import { RollbackService } from "./rollback.service";
 import { VersionHistoryService } from "./version-history.service";
 import { VibeController } from "./vibe.controller";
+import { CopilotKitController } from "./copilotkit.controller";
 import { ShareLinkController, PublicShareController } from "./share.controller";
 import { ShareService } from "./share.service";
 import { VibeService } from "./vibe.service";
 import { VibeStreamService } from "./vibe-stream.service";
 import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
 import { FinalActionApplierService } from "./final-action-applier.service";
+import { CopilotPrdRuntimeService } from "./copilot-prd-runtime.service";
 
 @Module({
   imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule],
   controllers: [
     VibeController,
+    CopilotKitController,
     ProjectProductDesignStateController,
     ProductDesignStateResourceController,
     ProjectPrdController,
@@ -65,6 +68,7 @@ import { FinalActionApplierService } from "./final-action-applier.service";
   ],
   providers: [
     VibeService,
+    CopilotPrdRuntimeService,
     DeerFlowRuntimeService,
     FinalActionApplierService,
     RuntimeRunLogService,

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
-import { AuthProvider } from "@/lib/auth-context";
+import { AppProviders } from "./providers";
 
 export const metadata: Metadata = {
   title: "智能产品工作台（内测）",
@@ -12,7 +12,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="zh-CN">
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

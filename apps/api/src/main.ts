@@ -75,7 +75,12 @@ async function bootstrap() {
   app.enableCors({
     origin: corsOrigin(),
     credentials: true,
-    allowedHeaders: ["Content-Type"],
+    allowedHeaders: [
+      "Content-Type",
+      "Accept",
+      "X-CopilotKit-Runtime-Client-GQL-Version",
+      "x-copilotcloud-public-api-key",
+    ],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
 
