@@ -26,7 +26,8 @@ import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "./deerflow-r
  * - review_prototype → 保存 PrototypeArtifact + PrototypeSpec + 写入 ProductDesignState.prototypeSpec
  *
  * 修复审计 pipe-1 / pipe-2 / pipe-3 / pipe-4 / pipe-5 / backend-core-1 / knowledge-core-1：
- * 此前 saveGeneratedDocument / saveGeneratedPrototype 全仓零调用，PRD/原型永不进库。
+ * 此前 saveGeneratedDocument / saveGeneratedPrototype 全仓零调用，PRD/原型永不进库；
+ * 现已由本服务在 final-action 应用阶段调用，PRD/原型正常落库。
  */
 @Injectable()
 export class FinalActionApplierService {

@@ -6,8 +6,10 @@ import {
   MessageType,
   Prisma,
   ProjectStatus,
+  UserRole,
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import type { Phase1User } from "../modules/auth/auth.types";
 
 type CreateMessageInput = {
   projectId: string;
@@ -51,6 +53,59 @@ export class MessageService {
     });
 
     return messages.reverse().map((message) => this.toMessageItem(message));
+  }
+
+  /**
+   * 列出会话消息并附带最近一次运行摘要（前端刷新恢复用）。
+   * 读取路径此前位于 modules/message/message.service.ts，已合并到此统一 service。
+   */
+  async listByConversation(user: Phase1User, conversationId: string) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      include: { project: true },
+    });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
+    }
+    if (conversation.project.status === ProjectStatus.deleted || conversation.project.deletedAt) {
+      throw new NotFoundException("项目不存在");
+    }
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+      throw new ForbiddenException("无权访问该会话");
+    }
+
+    const [messages, latestRun] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: "asc" },
+        take: 100,
+      }),
+      this.prisma.runtimeRunLog.findFirst({
+        where: { conversationId },
+        orderBy: { startedAt: "desc" },
+        select: {
+          id: true,
+          projectId: true,
+          conversationId: true,
+          status: true,
+          startedAt: true,
+          endedAt: true,
+        },
+      }),
+    ]);
+    return {
+      items: messages.map((message) => this.toMessageItem(message)),
+      latestRun: latestRun
+        ? {
+            runId: latestRun.id,
+            projectId: latestRun.projectId,
+            conversationId: latestRun.conversationId,
+            status: latestRun.status,
+            startedAt: latestRun.startedAt.toISOString(),
+            endedAt: latestRun.endedAt?.toISOString(),
+          }
+        : null,
+    };
   }
 
   async updateConversationStats(conversationId: string, tx: Prisma.TransactionClient = this.prisma) {

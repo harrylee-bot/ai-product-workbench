@@ -4,6 +4,7 @@ import type {
   KnowledgeType,
   ModelTaskType,
 } from "@prisma/client";
+import type { RequirementMode } from "../ai/requirement-mode.helper";
 
 export type KnowledgeSearchInput = {
   projectId?: string;
@@ -15,6 +16,8 @@ export type KnowledgeSearchInput = {
   taskType?: ModelTaskType | string;
   preferredTypes?: KnowledgeType[];
   strictPreferredTypes?: boolean;
+  /** 需求模式：驱动模式偏重类型的排序加权（不收缩召回）。 */
+  requirementMode?: RequirementMode;
   limit?: number;
 };
 

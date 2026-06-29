@@ -24,6 +24,7 @@ import { VibeStreamService } from "./vibe-stream.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import { DeerFlowRuntimeService, type DeerFlowFinalAction } from "./deerflow-runtime.service";
 import { FinalActionApplierService } from "./final-action-applier.service";
+import { classifyRequirementMode, type RequirementMode } from "./requirement-mode.helper";
 import type { RequirementDocument, RequirementDocSection } from "./ai-vibe.types";
 
 @Injectable()
@@ -371,6 +372,8 @@ export class VibeService {
     message: string;
     productDesignState?: unknown;
   }) {
+    // DeerFlow-first 死开关：DEERFLOW_ENABLED=false 时旧的自研生成链路已停用，
+    // 这里只下发一句说明性文案并结束 run，不提供任何降级生成能力。
     const runtimeAdapter = {
       status: "not_configured",
       provider: "deerflow",
@@ -490,13 +493,32 @@ export class VibeService {
     productDesignState?: unknown;
   }) {
     const signal = this.activeRunControllers.get(input.runId)?.signal;
+
+    // B1：requirementMode 预检索启发式分类，驱动知识检索的模式偏重排序（kb-redesign P1-1：让 mode 真正驱动检索，而非「判了也白判」）。
+    // 仅用于检索排序与可观测，不替代 DeerFlow 在 final action 中的权威判定。启发式为 best-effort，任何异常都回落到保守默认，不拖垮整轮。
+    let hasExistingState = Boolean(input.productDesignState);
+    try {
+      hasExistingState = hasExistingState
+        || Boolean(
+          await this.prisma.productDesignState.findFirst({
+            where: { projectId: input.projectId },
+            select: { id: true },
+          }),
+        );
+    } catch {
+      // 查询失败时按 input.productDesignState 的有无决定，不影响主流程。
+    }
+    const requirementModeHeuristic: RequirementMode = classifyRequirementMode(input.message, {
+      hasExistingState,
+    });
+
     await this.streamService.emit({
       runId: input.runId,
       projectId: input.projectId,
       type: "step_started",
       step: "knowledge_retrieval",
-      content: "正在检索知识库，为生成提供规则与案例基线。",
-      data: { provider: "deerflow" },
+      content: `正在检索知识库，为生成提供规则与案例基线（需求模式预判：${requirementModeHeuristic}）。`,
+      data: { provider: "deerflow", requirementMode: requirementModeHeuristic },
     });
 
     // knowledge-core-2：生成路径接入知识检索（此前仅事后 QA 调用，生成阶段拿不到知识）。
@@ -518,6 +540,7 @@ export class VibeService {
       runtimeName: "runtime_generation",
       query: input.message,
       limit: 8,
+      requirementMode: requirementModeHeuristic,
       preferredTypes: [
         KnowledgeType.strong_rule,
         KnowledgeType.default_rule,
@@ -760,6 +783,8 @@ export class VibeService {
       provider: "deerflow",
       threadId: result.threadId,
       finalAction: result.finalAction,
+      requirementMode: result.finalAction.requirementMode,
+      requirementModeHeuristic,
       uploads: result.uploads,
       artifacts: result.artifacts,
       finalState: result.finalState,

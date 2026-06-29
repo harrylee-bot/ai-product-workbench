@@ -26,6 +26,7 @@ Classify the turn before doing work:
 - Greeting or general chat: return `answer`. Do not call sub-agents or Codex.
 - Product change on an existing project: use `historical_extension`.
 - Product change that creates a new module, workbench, AI capability, role, object, or cross-module loop: use `new_capability`.
+- Completely new system or standalone page with no existing architecture to inherit: use `brand_new_system`.
 - Short or one-sentence product request with ordinary missing details: use `one_sentence_completion` and infer conventional details from product architecture, business-domain knowledge, and historical cases.
 - Missing high-risk or blocking facts for a product change: return `ask_clarification`.
 - PRD/state drafting or revision: produce reviewable structured output and return `review_prd`.
@@ -56,6 +57,17 @@ Required behavior:
 - You may redesign information architecture when it creates a clearer capability loop.
 - State how the new capability connects to existing assets, activity configuration, audit, reporting, and AI generation.
 
+### brand_new_system
+
+Use this when the turn requests a completely new system or standalone page and there is no existing ProductDesignState, architecture, or page to inherit.
+
+Required behavior:
+
+- If retrieved knowledge contains a `ui_style_guide` (especially one with a tab bar or shared frame), follow that style for navigation, color, typography, and component conventions so the new system is visually consistent with the platform.
+- If no `ui_style_guide` exists, design from scratch with a clear information architecture, a reusable frame (header/nav/content/empty+error states), and the platform's audit/publish/reporting conventions where they apply.
+- Still place the new system within the broader product architecture where possible (roles, permissions, audit/publish, reporting, AI generation layer), but do not force-fit onto a historical page that does not exist.
+- Mark structural choices as assumptions and surface high-risk unknowns via `ask_clarification`.
+
 ### one_sentence_completion
 
 Use this when the user gives only a brief goal such as "做一个抽奖活动" or "加一个 AI 营销助手".
@@ -82,6 +94,7 @@ Prototype rule:
 
 - `historical_extension`: consistency is mandatory; do not rebuild the old flow.
 - `new_capability`: framework reuse is mandatory; redesign is allowed inside the platform frame.
+- `brand_new_system`: follow a retrieved `ui_style_guide` if present; otherwise design a clear frame from scratch.
 - `one_sentence_completion`: create the smallest complete loop: backend configuration, frontend experience, preview/audit, and data feedback.
 
 ## Runtime Inputs

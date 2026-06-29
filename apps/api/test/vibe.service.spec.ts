@@ -12,6 +12,9 @@ describe("VibeService main entry", () => {
     runtimeRunLog: {
       findUnique: vi.fn(),
     },
+    productDesignState: {
+      findFirst: vi.fn(),
+    },
   };
   const messageService = {
     createUserMessage: vi.fn(),

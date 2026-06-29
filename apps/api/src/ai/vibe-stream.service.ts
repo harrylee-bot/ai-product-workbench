@@ -11,7 +11,6 @@ import type {
   VibeStreamPayloadKind,
   VibeStreamPayloadMeta,
   VibeStreamEventType,
-  VibeStreamLegacyEventType,
 } from "./ai-vibe.types";
 
 type Listener = (event: VibeStreamEvent) => void;
@@ -20,7 +19,6 @@ type PersistedVibeStreamEvent = {
   protocol: "vibe.v1";
   eventId: string;
   eventType: VibeStreamEventType;
-  legacyEventType: VibeStreamLegacyEventType;
   category: VibeStreamEventCategory;
   phase: VibeStreamEventPhase;
   timestamp: string;
@@ -48,7 +46,6 @@ export class VibeStreamService {
       protocol: event.protocol,
       eventId: event.eventId,
       eventType: event.eventType,
-      legacyEventType: event.legacyEventType,
       category: event.category,
       phase: event.phase,
       timestamp: event.createdAt,
@@ -136,7 +133,6 @@ function buildStreamEvent(input: {
 }): VibeStreamEventEnvelope {
   const createdAt = new Date().toISOString();
   const { category, phase } = classifyStreamEvent(input.type);
-  const legacyEventType = toLegacyEventType(input.type, input.step);
   return {
     protocol: "vibe.v1",
     eventId: createEventId(input.runId, input.type, input.step),
@@ -144,7 +140,6 @@ function buildStreamEvent(input: {
     projectId: input.projectId,
     type: input.type,
     eventType: input.type,
-    legacyEventType,
     category,
     phase,
     step: input.step,
@@ -204,22 +199,6 @@ function classifyStreamEvent(type: VibeStreamEventType): {
   }
 }
 
-function toLegacyEventType(
-  type: VibeStreamEventType,
-  step?: VibeStreamEvent["step"],
-): VibeStreamLegacyEventType {
-  if (type === "state_updated") return "state_updated";
-  if (type === "state_version_created") return "state_version_created";
-  if (type === "prd_section_delta" || type === "prd_updated") return "prd_generated";
-  if (type === "prototype_updated") return "prototype_generated";
-  if (type === "qa_completed") return "qa_completed";
-  if (type === "knowledge_candidate_created") return "state_updated";
-  if (type === "export_ready") return "agent_completed";
-  if (type === "step_started" || type === "message_delta" || type === "tool_call_started") return "agent_started";
-  if (type === "tool_call_completed") return "agent_completed";
-  return "agent_completed";
-}
-
 function unwrapContractPayload(payload: unknown): VibeStreamEvent | null {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
@@ -257,10 +236,6 @@ function normalizeStreamEvent(
     projectId: toOptionalString(payload.projectId) ?? toOptionalString(outer?.projectId),
     type: eventType,
     eventType,
-    legacyEventType:
-      (toOptionalString(payload.legacyEventType) as VibeStreamLegacyEventType | undefined)
-      ?? (toOptionalString(outer?.legacyEventType) as VibeStreamLegacyEventType | undefined)
-      ?? toLegacyEventType(eventType, step),
     category:
       (toOptionalString(payload.category) as VibeStreamEventCategory | undefined)
       ?? (toOptionalString(outer?.category) as VibeStreamEventCategory | undefined)

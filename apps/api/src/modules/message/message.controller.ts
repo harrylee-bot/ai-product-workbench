@@ -3,9 +3,17 @@ import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { Phase1User } from "../auth/auth.types";
 import { VibeService } from "../../ai/vibe.service";
-import { CreateMessageDto, ListMessagesQueryDto } from "./dto";
-import { MessageService } from "./message.service";
+import { HandleVibeMessageDto } from "../../ai/dto";
+import { MessageService } from "../../projects/message.service";
+import { ListMessagesQueryDto } from "./dto";
 
+/**
+ * 消息读写入口。
+ * - POST /messages：与 POST /ai/vibe/handle-message 等价的别名（复用 HandleVibeMessageDto，
+ *   委托 VibeService.handleMessage），消除此前剥离字段的重复 DTO。
+ * - GET /messages、GET /conversations/:id/messages：读取会话消息 + 最近运行摘要，
+ *   统一由 projects/MessageService.listByConversation 提供（合并自原 modules/message/service）。
+ */
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class MessageController {
@@ -15,12 +23,8 @@ export class MessageController {
   ) {}
 
   @Post("messages")
-  create(@CurrentUser() user: Phase1User, @Body() dto: CreateMessageDto) {
-    return this.vibe.handleMessage(user, {
-      projectId: dto.projectId,
-      conversationId: dto.conversationId,
-      message: dto.content,
-    });
+  create(@CurrentUser() user: Phase1User, @Body() dto: HandleVibeMessageDto) {
+    return this.vibe.handleMessage(user, dto);
   }
 
   @Get("messages")

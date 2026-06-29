@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { KnowledgeStatus, KnowledgeType, Prisma } from "@prisma/client";
 import { toInputJson } from "../ai/ai-vibe.helpers";
+import { MODE_BOOST_TYPES, type RequirementMode } from "../ai/requirement-mode.helper";
 import { PrismaService } from "../prisma/prisma.service";
 import { KnowledgeEmbeddingService } from "./knowledge-embedding.service";
 import { jsonArray } from "./knowledge-item.service";
@@ -29,6 +30,7 @@ export class KnowledgeRetrievalService {
       ? [...new Set(input.preferredTypes)]
       : undefined;
     const strictPreferredTypes = Boolean(input.strictPreferredTypes && preferredTypes?.length);
+    const modeBoostTypes = input.requirementMode ? MODE_BOOST_TYPES[input.requirementMode] : undefined;
 
     try {
       const productId = input.productId ?? await this.resolveProductId(input.projectId);
@@ -54,7 +56,7 @@ export class KnowledgeRetrievalService {
         ? await this.embeddings.scoreItems(query, items)
         : new Map<string, number>();
       const matched = items
-        .map((item) => scoreItem(item, query, preferredTypes, semanticScores.get(item.id)))
+        .map((item) => scoreItem(item, query, preferredTypes, semanticScores.get(item.id), modeBoostTypes))
         .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority));
       const selected = matched.slice(0, limit);
@@ -111,6 +113,7 @@ function scoreItem(
   query: string,
   preferredTypes?: KnowledgeType[],
   semanticScore?: number,
+  modeBoostTypes?: KnowledgeType[],
 ): KnowledgeRetrievalResult {
   const tokens = tokenize(query);
   const tags = jsonArray(item.tags);
@@ -160,6 +163,11 @@ function scoreItem(
   if (preferredTypes?.includes(item.type)) {
     keywordScore += 0.16;
     reasons.push("符合调用方偏好类型");
+  }
+  if (modeBoostTypes?.includes(item.type)) {
+    // requirementMode 驱动：模式偏重类型额外加权，仅影响排序不收缩召回。
+    keywordScore += 0.12;
+    reasons.push("符合需求模式偏重");
   }
   keywordScore += priorityWeight(item.priority);
   if (item.priority === "high") reasons.push("高优先级知识");

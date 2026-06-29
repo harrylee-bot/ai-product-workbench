@@ -172,6 +172,27 @@ describe("HTML prototype artifact module", () => {
     expect(sanitizePrototypeHtml("<script>window.parent.postMessage('x','*')</script>")).toBe("");
   });
 
+  it("sanitizePrototypeHtml strips script vectors: javascript:/data: URLs, on* handlers, nested escapes", () => {
+    // javascript: / data: 脚本 URL
+    expect(sanitizePrototypeHtml('<a href="javascript:alert(1)">x</a>')).not.toContain("javascript:");
+    expect(sanitizePrototypeHtml('<a href="data:text/html,<script>alert(1)</script>">x</a>')).not.toContain("<script");
+    // on* 事件处理器（含大小写/前导空格变体）
+    expect(sanitizePrototypeHtml('<img src="x" onerror="alert(1)">')).not.toContain("onerror");
+    expect(sanitizePrototypeHtml('<div OnClick="alert(1)">x</div>')).not.toMatch(/onclick/i);
+    // 嵌套 <script> 与 SVG 载荷
+    expect(sanitizePrototypeHtml("<<script>script>alert(1)<</script>/script>")).not.toContain("<script");
+    // iframe/object/embed 被 FORBID
+    expect(sanitizePrototypeHtml('<iframe src="https://evil"></iframe>')).not.toContain("<iframe");
+    expect(sanitizePrototypeHtml('<object data="https://evil"></object>')).not.toContain("<object");
+    // 原型选区标记 data-component-id / data-page-id / data-action 必须保留
+    const kept = sanitizePrototypeHtml('<button data-component-id="cta" data-page-id="home" data-action="submit">提交</button>');
+    expect(kept).toContain('data-component-id="cta"');
+    expect(kept).toContain('data-page-id="home"');
+    expect(kept).toContain('data-action="submit"');
+    // 其它 data-* 因 ALLOW_DATA_ATTR:false 被剥离
+    expect(sanitizePrototypeHtml('<div data-secret="leak">x</div>')).not.toContain("data-secret");
+  });
+
   it("hides a stale current prototype artifact when it no longer matches ProductDesignState", async () => {
     const state = baseState();
     const currentSpec = prototypeSpec(state, "run-current");

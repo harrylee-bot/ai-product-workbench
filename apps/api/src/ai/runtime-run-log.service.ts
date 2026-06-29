@@ -120,6 +120,21 @@ export class RuntimeRunLogService {
     return run?.status === RuntimeRunStatus.running;
   }
 
+  /**
+   * @deprecated 当前在 vibe 流中未被调用（死代码）。
+   *
+   * 原因：DeerFlow-first 改造后，步骤进度以 step_started / step_completed / step_failed
+   * 流式事件下发，并持久化到 vibe_stream_event_logs（SSE 订阅时回放）。runtimeStepLog
+   * 表（agent_step_logs）的写入因此悬空。
+   *
+   * 未直接删除是因为：a) getRun 仍 include steps 用于静态恢复快照；b) 接线需要把
+   * RuntimeStepName 枚举从旧的自研 agent 名（orchestrator/intent_agent/...）迁移为
+   * DeerFlow-first 实际步骤标签（knowledge_retrieval/requirement_packaging/...），
+   * 该 Postgres 枚举迁移需在 DB 可用环境下验证，暂缓。
+   *
+   * 待迁移完成后，在 vibe.service 的 step emit 处同步调用以填充 agent_step_logs，
+   * 让已完成 run 的执行轨在静态恢复时也有结构化步骤数据。
+   */
   async createStep(input: {
     runId: string;
     runtimeName: RuntimeStepName;

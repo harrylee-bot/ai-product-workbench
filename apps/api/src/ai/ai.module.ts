@@ -81,6 +81,6 @@ import { FinalActionApplierService } from "./final-action-applier.service";
     MessageService,
     ShareService,
   ],
-  exports: [VibeService],
+  exports: [VibeService, MessageService],
 })
 export class AiModule {}

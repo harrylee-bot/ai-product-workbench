@@ -9,7 +9,7 @@ The final action is the only instruction AI Product Workbench will persist from 
   "type": "answer | review_prd | review_prototype | ask_clarification | download_export",
   "message": "Chinese user-facing summary",
   "intent": "optional UserIntent-compatible label",
-  "requirementMode": "historical_extension | new_capability | one_sentence_completion",
+  "requirementMode": "historical_extension | new_capability | brand_new_system | one_sentence_completion",
   "knowledgeRefsUsed": ["optional knowledge paths or titles used for reasoning"],
   "assumptions": ["optional inferred product facts, especially for one-sentence requirements"],
   "consistencyStrategy": "optional prototype/PRD consistency strategy",

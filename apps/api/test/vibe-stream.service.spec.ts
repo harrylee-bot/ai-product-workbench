@@ -26,7 +26,6 @@ describe("VibeStreamService", () => {
         protocol: "vibe.v1",
         eventId: expect.any(String),
         eventType: "prd_updated",
-        legacyEventType: "prd_generated",
         category: "prd",
         phase: "updated",
         timestamp: expect.any(String),
@@ -39,7 +38,6 @@ describe("VibeStreamService", () => {
           projectId: "project-1",
           type: "prd_updated",
           eventType: "prd_updated",
-          legacyEventType: "prd_generated",
           category: "prd",
           phase: "updated",
           step: "prd_generation",
@@ -87,7 +85,6 @@ describe("VibeStreamService", () => {
         projectId: "project-1",
         type: "prd_updated",
         eventType: "prd_updated",
-        legacyEventType: "prd_generated",
         category: "prd",
         phase: "updated",
         step: "prd_generation",
@@ -180,7 +177,6 @@ describe("VibeStreamService", () => {
     expect(createInput.data.payload.payload).toEqual(expect.objectContaining({
       type: "run_canceled",
       eventType: "run_canceled",
-      legacyEventType: "agent_completed",
       category: "run",
       phase: "canceled",
       payloadMeta: expect.objectContaining({

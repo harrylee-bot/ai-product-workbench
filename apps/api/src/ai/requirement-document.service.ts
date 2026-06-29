@@ -201,6 +201,11 @@ export class RequirementDocumentService {
     );
   }
 
+  /**
+   * @deprecated 当前为空实现（返回 { items: [] }）。
+   * PRD 确认后从产物抽取 KnowledgeCandidate 走 pending 审核管线的能力尚未落实，
+   * 避免半成品污染候选库故先置空。落实需设计抽取质量与去重策略，待后续推进。
+   */
   private async extractKnowledgeCandidatesAfterConfirm(userId: string, document: RequirementDocument) {
     void userId;
     void document;

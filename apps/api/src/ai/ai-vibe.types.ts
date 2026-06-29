@@ -502,6 +502,8 @@ export type VibeStreamEventType =
   | "prd_updated"
   | "prototype_updated"
   | "qa_completed"
+  // rollback_* 为保留事件类型：回滚当前是同步 HTTP 流（POST /product-design-states/:stateId/rollback），
+  // 不经 vibe stream（无 runId 上下文），故无 emitter 也无前端 reducer 分支。保留枚举以备未来流式回滚。
   | "rollback_started"
   | "rollback_completed"
   | "rollback_failed"
@@ -510,15 +512,6 @@ export type VibeStreamEventType =
   | "run_completed"
   | "run_canceled"
   | "run_failed";
-
-export type VibeStreamLegacyEventType =
-  | "agent_started"
-  | "agent_completed"
-  | "state_updated"
-  | "state_version_created"
-  | "prd_generated"
-  | "prototype_generated"
-  | "qa_completed";
 
 export type VibeStreamEventProtocol = "vibe.v1";
 
@@ -575,7 +568,6 @@ export type VibeStreamEvent = {
   projectId?: string;
   type: VibeStreamEventType;
   eventType?: VibeStreamEventType;
-  legacyEventType?: VibeStreamLegacyEventType;
   category?: VibeStreamEventCategory;
   phase?: VibeStreamEventPhase;
   step?: RuntimeStreamStepName;
@@ -591,7 +583,6 @@ export type VibeStreamEventEnvelope = VibeStreamEvent & {
   eventId: string;
   projectId: string;
   eventType: VibeStreamEventType;
-  legacyEventType: VibeStreamLegacyEventType;
   category: VibeStreamEventCategory;
   phase: VibeStreamEventPhase;
   payloadMeta: VibeStreamPayloadMeta;
