@@ -3,14 +3,20 @@
 import { CopilotChatConfigurationProvider, CopilotSidebar } from "@copilotkit/react-core/v2";
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { create } from "zustand";
 import { Modal } from "@/components/modal";
-import { PrdDocumentPanel } from "@/components/prd-document-panel";
-import type { Phase1Conversation, Phase1Project } from "@/components/project-list";
+import { PrdDocumentPanel, type Phase1PrdPreview } from "@/components/prd-document-panel";
 import { ProtectedRoute } from "@/components/protected-route";
 import { Button, ErrorState } from "@/components/ui";
-import type { Phase1PrdPreview } from "@/components/workspace-preview/types";
 import { apiRequest } from "@/lib/api";
+
+type Phase1Conversation = {
+  id: string;
+  projectId: string;
+};
+
+type Phase1Project = {
+  id: string;
+};
 
 type ConversationsResponse = {
   items: Phase1Conversation[];
@@ -26,17 +32,6 @@ type CreateConversationResponse = {
   conversation: Phase1Conversation;
 };
 
-type Phase1WorkspaceState = {
-  selectedProjectId: string;
-  selectedConversationId: string;
-  prdPreview: Phase1PrdPreview | null;
-  setSelectedProject: (projectId: string, conversationId: string) => void;
-  setPrdPreview: (preview: Phase1PrdPreview | null) => void;
-};
-
-const WORKSPACE_PREVIEW_MIN_WIDTH = 720;
-const WORKSPACE_CHAT_WIDTH = 430;
-
 const CHAT_LABELS = {
   chatInputPlaceholder: "描述你要生成的 PRD...",
   welcomeMessageText: "告诉我你要做什么产品或功能，我会先生成 PRD。",
@@ -48,19 +43,6 @@ const CHAT_LABELS = {
   assistantMessageToolbarCopyMessageCopiedLabel: "已复制",
   userMessageToolbarCopyMessageLabel: "复制",
 };
-
-const usePhase1Workspace = create<Phase1WorkspaceState>((set) => ({
-  selectedProjectId: "",
-  selectedConversationId: "",
-  prdPreview: null,
-  setSelectedProject: (projectId, conversationId) =>
-    set({
-      selectedProjectId: projectId,
-      selectedConversationId: conversationId,
-      prdPreview: null,
-    }),
-  setPrdPreview: (prdPreview) => set({ prdPreview }),
-}));
 
 export function Phase1WorkspaceClient() {
   const [client] = useState(() => new QueryClient());
@@ -77,12 +59,8 @@ export function Phase1WorkspaceClient() {
 function Phase1WorkspaceInner() {
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
-  const {
-    selectedConversationId,
-    prdPreview,
-    setSelectedProject,
-    setPrdPreview,
-  } = usePhase1Workspace();
+  const [selectedConversationId, setSelectedConversationId] = useState("");
+  const [prdPreview, setPrdPreview] = useState<Phase1PrdPreview | null>(null);
 
   const conversationsQuery = useQuery({
     queryKey: ["phase1-conversations"],
@@ -100,10 +78,11 @@ function Phase1WorkspaceInner() {
       apiRequest<CreateConversationResponse>("/conversations", {
         method: "POST",
         body: JSON.stringify({ title: "新对话" }),
-      }),
+    }),
     onSuccess: async (response) => {
       const conversation = response.conversation;
-      setSelectedProject(conversation.projectId, conversation.id);
+      setSelectedConversationId(conversation.id);
+      setPrdPreview(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["phase1-conversations"] }),
         queryClient.invalidateQueries({ queryKey: ["phase1-conversation", conversation.id] }),
@@ -115,9 +94,10 @@ function Phase1WorkspaceInner() {
   useEffect(() => {
     const first = conversationsQuery.data?.items[0];
     if (!selectedConversationId && first) {
-      setSelectedProject(first.projectId, first.id);
+      setSelectedConversationId(first.id);
+      setPrdPreview(null);
     }
-  }, [conversationsQuery.data?.items, selectedConversationId, setSelectedProject]);
+  }, [conversationsQuery.data?.items, selectedConversationId]);
 
   useEffect(() => {
     if (
@@ -139,31 +119,23 @@ function Phase1WorkspaceInner() {
   useEffect(() => {
     const detail = detailQuery.data;
     if (!detail) return;
-    const projectId = detail.conversation.projectId || detail.project.id;
     if (detail.conversation.id !== selectedConversationId) {
-      setSelectedProject(projectId, detail.conversation.id);
+      setSelectedConversationId(detail.conversation.id);
     }
     setPrdPreview(normalizePrdPreview(detail.prd));
-  }, [detailQuery.data, selectedConversationId, setPrdPreview, setSelectedProject]);
+  }, [detailQuery.data, selectedConversationId]);
 
   function showError(error: unknown, fallback: string) {
     setNotice({ title: "操作失败", message: error instanceof Error ? error.message : fallback });
   }
 
-  const shellMinWidth = WORKSPACE_PREVIEW_MIN_WIDTH + WORKSPACE_CHAT_WIDTH;
   const queryError =
     errorMessage(conversationsQuery.error)
     ?? errorMessage(detailQuery.error);
 
   return (
     <>
-      <main
-        className="workbench-scrollbar relative grid h-screen min-h-0 overflow-x-auto overflow-y-hidden bg-white text-gray-950"
-        style={{
-          gridTemplateColumns: `minmax(${WORKSPACE_PREVIEW_MIN_WIDTH}px, 1fr) ${WORKSPACE_CHAT_WIDTH}px`,
-          minWidth: `${shellMinWidth}px`,
-        }}
-      >
+      <main className="relative h-screen min-h-0 overflow-hidden bg-white text-gray-950">
         {queryError ? (
           <div className="pointer-events-none fixed left-1/2 top-4 z-40 w-[420px] max-w-[calc(100vw-32px)] -translate-x-1/2">
             <ErrorState title="工作台数据加载失败" description={queryError} className="pointer-events-auto shadow-[var(--shadow-float)]" />
@@ -191,7 +163,6 @@ function Phase1WorkspaceInner() {
             labels={CHAT_LABELS}
             defaultOpen
             position="right"
-            width={WORKSPACE_CHAT_WIDTH}
             autoScroll="pin-to-send"
           />
         </CopilotChatConfigurationProvider>

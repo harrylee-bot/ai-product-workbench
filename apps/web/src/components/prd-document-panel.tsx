@@ -1,19 +1,30 @@
 "use client";
 
 import { useAgent, UseAgentUpdate } from "@copilotkit/react-core/v2";
-import {
-  Check,
-  ChevronsLeft,
-  Copy,
-  Download,
-  MessageSquare,
-  MoreHorizontal,
-  Share2,
-  X,
-} from "lucide-react";
+import { ChevronsLeft } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconButton } from "@/components/ui";
-import type { Phase1PrdPreview } from "@/components/workspace-preview/types";
+
+export type Phase1PrdPreview = {
+  id?: string;
+  title: string;
+  sections: Phase1PrdPreviewSection[];
+};
+
+type Phase1PrdPreviewSection = {
+  id: string;
+  title: string;
+  content: string;
+  type?: string;
+  order?: number;
+  sourcePaths?: string[];
+  sourceStatePaths?: string[];
+  blocks?: Array<{
+    id: string;
+    type: "paragraph" | "quote" | "warning" | "info";
+    content: string;
+    sourcePaths?: string[];
+  }>;
+};
 
 type PrdState = {
   status?: "idle" | "writing" | "ready" | "failed";
@@ -45,7 +56,6 @@ export function PrdDocumentPanel({
     throttleMs: 120,
   });
   const [tocCollapsed, setTocCollapsed] = useState(false);
-  const [copied, setCopied] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToEndRef = useRef(true);
   const wasRunningRef = useRef(false);
@@ -85,28 +95,8 @@ export function PrdDocumentPanel({
     shouldStickToEndRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 140;
   };
 
-  const handleCopy = async () => {
-    if (!markdown) return;
-    await navigator.clipboard.writeText(markdown);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
-  };
-
-  const handleDownload = () => {
-    if (!markdown) return;
-    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${safeFileName(documentState.title || "PRD")}.md`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
-  };
-
   return (
-    <section className="relative flex min-h-0 min-w-0 flex-col bg-white">
+    <section className="relative h-screen min-h-0 min-w-0 bg-white">
       <div className="absolute left-1/2 top-7 z-20 -translate-x-1/2">
         {writing ? (
           <div className="rounded-[10px] border border-blue-500 bg-white px-4 py-2 text-sm font-semibold text-blue-600 shadow-[0_8px_24px_rgba(37,99,235,0.12)]">
@@ -114,28 +104,7 @@ export function PrdDocumentPanel({
           </div>
         ) : null}
       </div>
-      <div className="flex h-14 shrink-0 items-center justify-end gap-1 border-b border-gray-100 px-4 text-gray-300">
-        <IconButton label={copied ? "已复制 Markdown" : "复制 Markdown"} variant="ghost" disabled={!markdown} onClick={() => void handleCopy()}>
-          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-        </IconButton>
-        <IconButton label="下载 Markdown" variant="ghost" disabled={!markdown} onClick={handleDownload}>
-          <Download className="h-4 w-4" />
-        </IconButton>
-        <IconButton label="分享（暂未开放）" variant="ghost" disabled>
-          <Share2 className="h-4 w-4" />
-        </IconButton>
-        <IconButton label="评论（暂未开放）" variant="ghost" disabled>
-          <MessageSquare className="h-4 w-4" />
-        </IconButton>
-        <IconButton label="更多（暂未开放）" variant="ghost" disabled>
-          <MoreHorizontal className="h-4 w-4" />
-        </IconButton>
-        <div className="mx-1 h-5 w-px bg-gray-200" />
-        <IconButton label="关闭预览（暂未开放）" variant="ghost" disabled>
-          <X className="h-4 w-4" />
-        </IconButton>
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="h-full min-h-0 overflow-hidden">
         <div className="grid h-full min-h-0 grid-cols-[auto_minmax(0,1fr)]">
           {showToc ? (
             <nav
@@ -355,10 +324,6 @@ function headingId(title: string, index: number) {
     .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "");
   return slug || `heading-${index + 1}`;
-}
-
-function safeFileName(name: string) {
-  return name.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80) || "PRD";
 }
 
 function stringValue(value: unknown) {

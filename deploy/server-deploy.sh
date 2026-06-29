@@ -2,6 +2,7 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/ai-product-workbench}"
+DEPLOY_TARGET="${DEPLOY_TARGET:-all}"
 
 if [ -f "${APP_DIR}/.env" ]; then
   set -a
@@ -85,13 +86,31 @@ fail_if_weak() {
   fi
 }
 
-fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
-fail_if_weak "JWT_SECRET" "$JWT_SECRET"
-fail_if_weak "MODEL_GATEWAY_ENCRYPTION_KEY" "$MODEL_GATEWAY_ENCRYPTION_KEY"
+if [ "$DEPLOY_TARGET" != "web" ]; then
+  fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+  fail_if_weak "JWT_SECRET" "$JWT_SECRET"
+  fail_if_weak "MODEL_GATEWAY_ENCRYPTION_KEY" "$MODEL_GATEWAY_ENCRYPTION_KEY"
 
-if [ "${DEERFLOW_ENABLED}" != "true" ]; then
-  echo "WARNING: DEERFLOW_ENABLED 非 true，自然语言→PRD→原型链路将不可用（仅返回停用文案）。" >&2
+  if [ "${DEERFLOW_ENABLED}" != "true" ]; then
+    echo "WARNING: DEERFLOW_ENABLED 非 true，自然语言→PRD→原型链路将不可用（仅返回停用文案）。" >&2
+  fi
 fi
+
+wait_for_http() {
+  local url="$1"
+  local label="$2"
+  local attempt
+
+  for attempt in $(seq 1 60); do
+    if curl --fail --silent -H "x-forwarded-proto: https" "$url" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "${label} did not become ready: ${url}" >&2
+  return 1
+}
 
 cd "$APP_DIR"
 
@@ -110,6 +129,31 @@ docker volume create ai-product-workbench-storage >/dev/null
 if [ "${PRUNE_DOCKER_BEFORE_BUILD:-1}" != "0" ]; then
   docker container prune -f >/dev/null 2>&1 || true
   docker image prune -f >/dev/null 2>&1 || true
+fi
+
+if [ "$DEPLOY_TARGET" = "web" ]; then
+  docker build \
+    --build-arg NODE_IMAGE="$NODE_IMAGE" \
+    --build-arg NEXT_PUBLIC_API_BASE_URL="$API_PUBLIC_BASE_URL" \
+    --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
+    -f apps/web/Dockerfile \
+    -t ai-product-workbench-web:latest .
+
+  docker rm -f ai-product-workbench-web >/dev/null 2>&1 || true
+  docker run -d \
+    --name ai-product-workbench-web \
+    --restart unless-stopped \
+    --network ai-product-workbench \
+    -p 3000:3000 \
+    -e NEXT_PUBLIC_API_BASE_URL="$API_PUBLIC_BASE_URL" \
+    -e NEXT_PUBLIC_KNOWLEDGE_APP_URL="$KNOWLEDGE_APP_PUBLIC_URL" \
+    ai-product-workbench-web:latest
+
+  wait_for_http "http://127.0.0.1:3000/login" "Web"
+
+  echo "Deployed:"
+  echo "  Web: ${APP_PUBLIC_URL}/login"
+  exit 0
 fi
 
 docker rm -f ai-product-workbench-web ai-product-workbench-api ai-product-knowledge >/dev/null 2>&1 || true
@@ -131,22 +175,6 @@ fi
 until docker exec ai-product-workbench-postgres pg_isready -U ai_workbench -d ai_product_workbench >/dev/null 2>&1; do
   sleep 2
 done
-
-wait_for_http() {
-  local url="$1"
-  local label="$2"
-  local attempt
-
-  for attempt in $(seq 1 60); do
-    if curl --fail --silent -H "x-forwarded-proto: https" "$url" >/dev/null; then
-      return 0
-    fi
-    sleep 2
-  done
-
-  echo "${label} did not become ready: ${url}" >&2
-  return 1
-}
 
 docker build \
   --build-arg NODE_IMAGE="$NODE_IMAGE" \
