@@ -39,10 +39,18 @@ import { ShareLinkController, PublicShareController } from "./share.controller";
 import { ShareService } from "./share.service";
 import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
 import { FinalActionApplierService } from "./final-action-applier.service";
-import { AichatModule } from "./aichat/aichat.module";
+import { ConversationModule } from "../modules/conversation/conversation.module";
+import { AichatStreamController } from "./aichat/aichat-stream.controller";
+import { AichatStreamService } from "./aichat/aichat-stream.service";
 
 @Module({
-  imports: [PrismaModule, ConstraintModule, FileModule, KnowledgeModule, AichatModule],
+  imports: [
+    PrismaModule,
+    ConstraintModule,
+    FileModule,
+    KnowledgeModule,
+    ConversationModule,
+  ],
   controllers: [
     ProjectProductDesignStateController,
     ProductDesignStateResourceController,
@@ -59,6 +67,7 @@ import { AichatModule } from "./aichat/aichat.module";
     ProjectRollbackController,
     ShareLinkController,
     PublicShareController,
+    AichatStreamController,
   ],
   providers: [
     DeerFlowRuntimeService,
@@ -75,6 +84,7 @@ import { AichatModule } from "./aichat/aichat.module";
     RollbackService,
     MessageService,
     ShareService,
+    AichatStreamService,
   ],
   exports: [
     MessageService,
