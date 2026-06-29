@@ -1693,6 +1693,10 @@ function isInspectableMessageDelta(event: VibeStreamEvent) {
   return Boolean(
     asText(payload?.toolName) ||
     runtimeEvent.startsWith("gateway-") ||
+    runtimeEvent === "status" ||
+    runtimeEvent === "runtime-status" ||
+    runtimeEvent === "authorization" ||
+    runtimeEvent === "error" ||
     asRecord(payload?.runtimeAdapter),
   );
 }

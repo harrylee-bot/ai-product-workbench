@@ -1,10 +1,7 @@
 "use client";
 
 import {
-  AlertCircle,
-  CheckCircle2,
   Circle,
-  Clock3,
   HelpCircle,
   PanelLeftOpen,
   Plus,
@@ -64,12 +61,10 @@ export type VibeToolCallView = {
   result?: string;
 };
 
-type ProcessRailRowView = {
+type ActivityPillView = {
   id: string;
-  title: string;
-  detail?: string;
+  label: string;
   status: VibeRunTimelineItem["status"];
-  meta?: string;
 };
 
 export type VibeClarificationQuestion = {
@@ -240,22 +235,14 @@ function MessageBubble({ message }: { message: Phase1Message }) {
 
   return (
     <div className="mr-auto w-full max-w-[min(92%,_760px)]">
-      <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold tracking-wide text-gray-400">
-        <Sparkles className="h-3.5 w-3.5" />
-        <span>{message.role === "system" ? "系统" : "Workbench"}</span>
-        <span>·</span>
-        <span>{formatMessageTime(message.createdAt)}</span>
-      </div>
-      <div className="whitespace-pre-wrap break-words text-sm leading-7 text-gray-700">
-        {toChineseText(message.content)}
-      </div>
+      <AssistantText content={message.content} tone={message.role === "system" ? "muted" : "normal"} />
     </div>
   );
 }
 
 /**
- * 纯对话 transcript：流式回复文本 → 执行过程信号轨 → 澄清对话 → 确认对话。
- * 默认只展示公开进度摘要，不展示隐藏推理链或原始 payload。
+ * 纯对话 transcript：助手正文流式输出 → 关键调用胶囊 → 澄清/确认。
+ * 默认只展示公开进度摘要，不展示隐藏推理链、工具入参/返回或原始 payload。
  */
 function AgentActivityFeed({
   runState,
@@ -276,40 +263,29 @@ function AgentActivityFeed({
 
   const showStreamingText = Boolean(runState.streamingText) && !assistantMessageForRunExists;
   const toolCalls = runState.toolCalls ?? [];
-  const processRows = buildProcessRailRows(runState);
-  const hasProcessRail = Boolean(processRows.length || toolCalls.length);
+  const activityPills = buildActivityPills(runState, toolCalls);
+  const hasActivityPills = Boolean(activityPills.length);
   const hasClarification = runState.status === "waiting_clarification";
   const hasConfirmation =
     runState.status === "waiting_prd_confirm" ||
     runState.status === "waiting_prototype_confirm" ||
     runState.status === "waiting_confirmation";
 
-  // run 已完成且无流式占位、无过程、无澄清/确认时不渲染任何东西（结论由历史助手消息承载）。
-  if (!showStreamingText && !hasProcessRail && !hasClarification && !hasConfirmation) {
+  // run 已完成且无流式占位、无调用状态、无澄清/确认时不渲染任何东西（结论由历史助手消息承载）。
+  if (!showStreamingText && !hasActivityPills && !hasClarification && !hasConfirmation) {
     return null;
   }
 
   return (
     <div className="mr-auto flex w-full max-w-[min(92%,_760px)] flex-col gap-3">
       {showStreamingText ? (
-        <div>
-          <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold tracking-wide text-gray-400">
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>Workbench</span>
-            <span>·</span>
-            <span className="inline-flex items-center gap-1 text-amber-600">
-              <Clock3 className="h-3 w-3" />
-              正在回复
-            </span>
-          </div>
-          <div className="whitespace-pre-wrap break-words text-sm leading-7 text-gray-700">
-            {runState.streamingText}
-            <span className="ml-0.5 inline-block h-3.5 w-1.5 motion-safe:animate-pulse bg-gray-400 align-middle" aria-hidden="true" />
-          </div>
+        <div className="text-[15px] leading-7 text-gray-900">
+          <AssistantText content={runState.streamingText ?? ""} />
+          <span className="ml-0.5 inline-block h-3.5 w-1.5 motion-safe:animate-pulse bg-gray-400 align-middle" aria-hidden="true" />
         </div>
       ) : null}
 
-      {hasProcessRail ? <AgentProcessRail rows={processRows} toolCalls={toolCalls} /> : null}
+      {hasActivityPills ? <ActivityPillStrip pills={activityPills} /> : null}
 
       {hasClarification ? (
         <ClarificationConversation runState={runState} />
@@ -328,126 +304,218 @@ function AgentActivityFeed({
   );
 }
 
-function AgentProcessRail({
-  rows,
-  toolCalls,
+function ActivityPillStrip({ pills }: { pills: ActivityPillView[] }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 pt-0.5" aria-label="关键调用信息">
+      {pills.map((pill) => (
+        <span
+          key={pill.id}
+          className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-gray-200 bg-gray-100 px-2.5 py-1 text-[11px] font-medium leading-none text-gray-600"
+          title={pill.label}
+        >
+          <span className={activityDotClassName(pill.status)} aria-hidden="true" />
+          <span className="truncate">{pill.label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AssistantText({
+  content,
+  tone = "normal",
 }: {
-  rows: ProcessRailRowView[];
-  toolCalls: VibeToolCallView[];
+  content: string;
+  tone?: "normal" | "muted";
 }) {
+  const segments = parseFencedCodeBlocks(toChineseText(content));
+  const textColor = tone === "muted" ? "text-gray-500" : "text-gray-900";
+
   return (
-    <div className="mt-0.5">
-      <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px]">
-        <span className="font-semibold tracking-wide text-gray-700">执行过程</span>
-        <span className="text-gray-400">公开进度摘要，不显示隐藏推理</span>
-      </div>
-      <div className="relative ml-1 border-l border-gray-200 pl-4">
-        {rows.map((row) => (
-          <ProcessRailRow key={row.id} row={row} />
-        ))}
-        {toolCalls.length ? (
-          <div className="pt-1">
-            <div className="mb-0.5 text-[11px] font-semibold tracking-wide text-gray-400">工具 / 技能</div>
-            {toolCalls.map((call) => (
-              <ToolCallRow key={call.id} call={call} />
-            ))}
-          </div>
-        ) : null}
-      </div>
+    <div className={`space-y-3 break-words text-[15px] leading-7 ${textColor}`}>
+      {segments.length ? (
+        segments.map((segment, index) =>
+          segment.type === "code" ? (
+            <CodeBlock key={`${segment.type}-${index}`} language={segment.language} code={segment.content} />
+          ) : (
+            <TextBlock key={`${segment.type}-${index}`} text={segment.content} />
+          ),
+        )
+      ) : (
+        <span />
+      )}
     </div>
   );
 }
 
-function ProcessRailRow({ row }: { row: ProcessRailRowView }) {
+function TextBlock({ text }: { text: string }) {
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
   return (
-    <div className="relative py-1.5">
-      <ProcessStatusDot status={row.status} />
-      <div className="min-w-0 rounded-md px-2 py-1 transition hover:bg-gray-50">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-xs font-semibold text-gray-700">{row.title}</span>
-          {row.meta ? <span className="text-[11px] text-gray-400">{row.meta}</span> : null}
-        </div>
-        {row.detail ? <div className="mt-0.5 break-words text-xs leading-5 text-gray-500">{row.detail}</div> : null}
-      </div>
+    <>
+      {paragraphs.map((paragraph, index) => (
+        <p key={`${paragraph.slice(0, 24)}-${index}`} className="whitespace-pre-wrap">
+          <InlineCodeText text={paragraph} />
+        </p>
+      ))}
+    </>
+  );
+}
+
+function InlineCodeText({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`)/g).filter(Boolean);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
+          return (
+            <code
+              key={`${part}-${index}`}
+              className="mx-0.5 inline-flex max-w-full items-center rounded-md bg-gray-100 px-1.5 py-0.5 align-baseline font-mono text-[0.92em] leading-none text-gray-800"
+            >
+              {part.slice(1, -1)}
+            </code>
+          );
+        }
+        return <span key={`${part.slice(0, 18)}-${index}`}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+function CodeBlock({ language, code }: { language?: string; code: string }) {
+  return (
+    <div className="overflow-hidden rounded-[10px] bg-gray-100 text-gray-900">
+      {language ? <div className="px-3 pt-2 font-mono text-xs text-gray-500">{language}</div> : null}
+      <pre className="workbench-scrollbar overflow-x-auto whitespace-pre-wrap px-3 py-3 font-mono text-[13px] leading-6">
+        {code.trimEnd()}
+      </pre>
     </div>
   );
 }
 
-function ProcessStatusDot({ status }: { status: VibeRunTimelineItem["status"] }) {
-  const className = [
-    "absolute -left-[21px] top-2.5 inline-flex h-3 w-3 items-center justify-center rounded-full border bg-white ring-2 ring-[var(--color-panel-bg)]",
-    status === "running"
-      ? "border-amber-300 bg-amber-100 motion-safe:animate-pulse"
-      : status === "done"
-        ? "border-emerald-300 bg-emerald-100"
-        : status === "failed"
-          ? "border-red-300 bg-red-100"
-          : status === "warning"
-            ? "border-amber-300 bg-amber-50"
-            : "border-gray-300 bg-white",
-  ].join(" ");
-  const innerClassName = [
-    "h-1.5 w-1.5 rounded-full",
-    status === "running"
-      ? "bg-amber-600"
-      : status === "done"
-        ? "bg-emerald-600"
-        : status === "failed"
-          ? "bg-red-600"
-          : status === "warning"
-            ? "bg-amber-600"
-            : "bg-gray-400",
-  ].join(" ");
+function parseFencedCodeBlocks(content: string): Array<{ type: "text" | "code"; content: string; language?: string }> {
+  const segments: Array<{ type: "text" | "code"; content: string; language?: string }> = [];
+  const fencePattern = /```([a-zA-Z0-9_-]+)?\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
 
-  return (
-    <span className={className} aria-hidden="true">
-      <span className={innerClassName} />
-    </span>
-  );
+  while ((match = fencePattern.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: "text", content: content.slice(lastIndex, match.index) });
+    }
+    segments.push({ type: "code", language: match[1], content: match[2] ?? "" });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    segments.push({ type: "text", content: content.slice(lastIndex) });
+  }
+
+  return segments.filter((segment) => segment.content.trim().length > 0);
 }
 
-function buildProcessRailRows(runState: VibeRunView): ProcessRailRowView[] {
-  const rows: ProcessRailRowView[] = [];
+function buildActivityPills(
+  runState: VibeRunView,
+  toolCalls: VibeToolCallView[],
+): ActivityPillView[] {
+  const pills: ActivityPillView[] = [];
   const seen = new Set<string>();
-  const activeStepNames = new Set<string>();
-
-  for (const step of runState.steps.filter((item) => item.status !== "pending")) {
-    activeStepNames.add(step.step);
-    const detail = normalizeProcessDetail(step.message || step.detail);
-    const key = `step:${step.step}`;
-    if (seen.has(key)) continue;
+  const addPill = (pill: ActivityPillView) => {
+    const key = normalizeProcessKey(pill.label);
+    if (!key || seen.has(key)) return;
     seen.add(key);
-    if (detail) seen.add(normalizeProcessKey(detail));
-    rows.push({
-      id: key,
-      title: step.title,
-      detail,
-      meta: step.executor,
+    pills.push(pill);
+  };
+
+  const liveSteps = runState.steps.filter((step) =>
+    step.status === "running" ||
+    step.status === "failed" ||
+    step.status === "canceled",
+  );
+
+  for (const step of liveSteps.slice(-3)) {
+    addPill({
+      id: `step:${step.step}:${step.status}`,
+      label: `${step.title} · ${stepStatusLabel(step.status)}`,
       status: stepStatusToRailStatus(step.status),
     });
   }
 
-  const timelineRows = [...(runState.timeline ?? [])]
-    .reverse()
-    .flatMap((item) => {
-      const detail = normalizeProcessDetail(item.text);
-      if (!detail) return [];
-      const detailKey = normalizeProcessKey(detail);
-      if (seen.has(detailKey)) return [];
-      if (item.step && activeStepNames.has(item.step) && detail.startsWith("节点目标：")) return [];
-      seen.add(detailKey);
-      return [{
-        id: `timeline:${item.id}`,
-        title: timelineRowTitle(item.status),
-        detail,
-        meta: item.createdAt ? formatMessageTime(item.createdAt) : undefined,
-        status: item.status,
-      }];
-    })
-    .slice(0, 6)
-    .reverse();
+  const latestTimelineItems = [...(runState.timeline ?? [])]
+    .filter((item) => item.status !== "done" || runState.status === "running")
+    .slice(-3);
 
-  return [...rows, ...timelineRows];
+  for (const item of latestTimelineItems) {
+    const label = compactActivityText(item.text);
+    if (!label) continue;
+    addPill({
+      id: `timeline:${item.id}`,
+      label,
+      status: item.status,
+    });
+  }
+
+  for (const call of toolCalls.slice(-6)) {
+    addPill({
+      id: `tool:${call.id}:${call.status}`,
+      label: `${compactToolName(call.toolName)} · ${toolStatusLabel(call.status)}`,
+      status: call.status === "failed" ? "failed" : call.status === "running" ? "running" : "done",
+    });
+  }
+
+  if (!pills.length && runState.currentLabel && runState.status === "running") {
+    addPill({
+      id: `${runState.runId ?? "run"}:current`,
+      label: compactActivityText(runState.currentLabel),
+      status: "running",
+    });
+  }
+
+  return pills.slice(-8);
+}
+
+function activityDotClassName(status: VibeRunTimelineItem["status"]) {
+  const color =
+    status === "running"
+      ? "bg-amber-500"
+      : status === "failed"
+        ? "bg-red-500"
+        : status === "warning"
+          ? "bg-amber-500"
+          : status === "done"
+            ? "bg-emerald-500"
+            : "bg-gray-400";
+  return `h-1.5 w-1.5 shrink-0 rounded-full ${color} ${status === "running" ? "motion-safe:animate-pulse" : ""}`;
+}
+
+function stepStatusLabel(status: VibeRunStepStatus) {
+  if (status === "running") return "执行中";
+  if (status === "failed") return "失败";
+  if (status === "canceled") return "已停止";
+  return "已完成";
+}
+
+function toolStatusLabel(status: VibeToolCallView["status"]) {
+  if (status === "running") return "调用中";
+  if (status === "failed") return "失败";
+  return "已完成";
+}
+
+function compactToolName(value: string) {
+  return `调用 ${value.replace(/\s+/g, " ").trim() || "工具"}`;
+}
+
+function compactActivityText(value?: string) {
+  const text = normalizeProcessDetail(value)
+    ?.replace(/^节点目标：/, "")
+    .replace(/^正在/, "")
+    .replace(/。$/, "");
+  if (!text) return "";
+  return text.length > 34 ? `${text.slice(0, 34)}...` : text;
 }
 
 function stepStatusToRailStatus(status: VibeRunStepStatus): VibeRunTimelineItem["status"] {
@@ -457,70 +525,12 @@ function stepStatusToRailStatus(status: VibeRunStepStatus): VibeRunTimelineItem[
   return "done";
 }
 
-function timelineRowTitle(status: VibeRunTimelineItem["status"]) {
-  if (status === "running") return "正在处理";
-  if (status === "done") return "已完成";
-  if (status === "failed") return "执行失败";
-  if (status === "warning") return "需要关注";
-  return "进度摘要";
-}
-
 function normalizeProcessDetail(value?: string) {
   return value?.replace(/\s+/g, " ").trim();
 }
 
 function normalizeProcessKey(value: string) {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-function ToolCallRow({ call }: { call: VibeToolCallView }) {
-  const statusIcon =
-    call.status === "done" ? (
-      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-    ) : call.status === "failed" ? (
-      <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-600" />
-    ) : (
-      <Clock3 className="h-3.5 w-3.5 shrink-0 motion-safe:animate-pulse text-amber-600" />
-    );
-  const statusLabel = call.status === "done" ? "已完成" : call.status === "failed" ? "失败" : "执行中";
-  const hasDetail = call.args !== undefined || Boolean(call.result);
-
-  return (
-    <details className="group relative py-1.5">
-      <ProcessStatusDot status={call.status === "done" ? "done" : call.status === "failed" ? "failed" : "running"} />
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-1 text-xs text-gray-500 transition hover:bg-gray-50 focus:outline-none focus-visible:ring-3 focus-visible:ring-gray-950/10">
-        {statusIcon}
-        <span className="font-medium text-gray-700">{call.toolName}</span>
-        <span className="text-gray-300">·</span>
-        <span className="text-gray-400">{statusLabel}</span>
-      </summary>
-      {hasDetail ? (
-        <div className="mt-1 ml-2 space-y-1.5 rounded-md border-l border-gray-100 pl-3 text-xs leading-5 text-gray-500">
-          {call.args !== undefined ? (
-            <div>
-              <div className="font-semibold text-gray-600">入参</div>
-              <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-50 p-2 text-[11px] text-gray-600">{formatToolDetail(call.args)}</pre>
-            </div>
-          ) : null}
-          {call.result ? (
-            <div>
-              <div className="font-semibold text-gray-600">返回</div>
-              <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-50 p-2 text-[11px] text-gray-600">{call.result}</pre>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </details>
-  );
-}
-
-function formatToolDetail(value: unknown): string {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 /** 澄清对话：轻量内联提示 + 问题列表。 */
