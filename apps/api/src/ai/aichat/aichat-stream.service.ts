@@ -89,6 +89,13 @@ export class AichatStreamService {
         const controller = new AbortController();
         this.activeRunControllers.set(run.id, controller);
         this.activeConversationControllers.set(conversationId, controller);
+        let clientClosed = false;
+        const abortOnClientClose = () => {
+          if (res.writableEnded || controller.signal.aborted) return;
+          clientClosed = true;
+          controller.abort();
+        };
+        res.on("close", abortOnClientClose);
 
         try {
           writer.write({ type: "start", messageId: randomUUID() });
@@ -227,6 +234,19 @@ export class AichatStreamService {
 
           writer.write({ type: "finish" });
         } catch (error) {
+          if (controller.signal.aborted) {
+            await this.runLogs.cancelRun({
+              runId: run.id,
+              canceledBy: user.id,
+              reason: clientClosed ? "客户端断开 aichat 生成" : "用户停止 aichat 生成",
+            }).catch((cancelError) => {
+              this.logger.error(`aichat run 取消状态写入失败 runId=${run.id}：${serializeError(cancelError)}`);
+            });
+            finishText(writer as unknown as UIMessageStreamWriter, ctx);
+            writer.write({ type: "finish", finishReason: "stop" });
+            return;
+          }
+
           this.logger.error(`aichat stream 失败 runId=${run.id}：${serializeError(error)}`);
           await this.runLogs.failRun(run.id, error).catch((failError) => {
             this.logger.error(`aichat run 失败状态写入失败 runId=${run.id}：${serializeError(failError)}`);
@@ -240,6 +260,7 @@ export class AichatStreamService {
             writer.write({ type: "finish", finishReason: "stop" });
           }
         } finally {
+          res.off("close", abortOnClientClose);
           this.activeRunControllers.delete(run.id);
           // 仅当仍是本次 controller 时才清除会话映射（避免覆盖后续轮次）
           if (this.activeConversationControllers.get(conversationId) === controller) {

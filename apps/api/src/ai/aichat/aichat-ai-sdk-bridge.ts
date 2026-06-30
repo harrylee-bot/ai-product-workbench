@@ -55,7 +55,7 @@ export function emitDeerFlowEvent(
 ): void {
   // 1) 助手增量文本
   if (event.messageRole === "assistant" && typeof event.chunk === "string") {
-    bufferTextDelta(safeAssistantDelta(event.chunk, ctx.assistantDeltaFilter), ctx);
+    emitTextDelta(safeAssistantDelta(event.chunk, ctx.assistantDeltaFilter), writer, ctx);
   }
 
   // 2) 工具调用输入
@@ -87,7 +87,7 @@ export function emitDeerFlowEvent(
  * 收尾：若已 text-start 则发 text-end。供 run 结束后统一调用。
  */
 export function finishText(writer: UIMessageStreamWriter, ctx: BridgeContext): void {
-  bufferTextDelta(flushAssistantDelta(ctx.assistantDeltaFilter), ctx);
+  emitTextDelta(flushAssistantDelta(ctx.assistantDeltaFilter), writer, ctx);
   if (ctx.textStarted) {
     writer.write({ type: "text-end", id: "text-1" });
     ctx.textStarted = false;
@@ -181,12 +181,8 @@ function emitTextDelta(delta: string, writer: UIMessageStreamWriter, ctx: Bridge
     ctx.textStarted = true;
   }
   writer.write({ type: "text-delta", id: "text-1", delta });
-  ctx.hasEmittedText = true;
-}
-
-function bufferTextDelta(delta: string, ctx: BridgeContext): void {
-  if (!delta) return;
   ctx.textBuffer += delta;
+  ctx.hasEmittedText = true;
 }
 
 /** 重新导出供 service 直接取用。 */

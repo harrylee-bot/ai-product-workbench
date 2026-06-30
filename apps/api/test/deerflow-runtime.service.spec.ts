@@ -9,6 +9,7 @@ describe("DeerFlowRuntimeService", () => {
     deerFlowThreadBinding: {
       findUnique: vi.fn(),
       create: vi.fn(),
+      update: vi.fn(),
     },
   };
   const fetchMock = vi.fn();
@@ -23,6 +24,9 @@ describe("DeerFlowRuntimeService", () => {
     prisma.deerFlowThreadBinding.findUnique.mockResolvedValue(null);
     prisma.deerFlowThreadBinding.create.mockResolvedValue({
       deerFlowThreadId: "deerflow-thread-1",
+    });
+    prisma.deerFlowThreadBinding.update.mockResolvedValue({
+      deerFlowThreadId: "deerflow-thread-2",
     });
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -409,6 +413,84 @@ describe("DeerFlowRuntimeService", () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("replaces the bound thread and retries once when DeerFlow reports an active run", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        detail: "Thread deerflow-thread-1 already has an active run",
+      }), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-2" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages-tuple",
+          data: [
+            {
+              role: "assistant",
+              content: [
+                "可以继续。",
+                "\n```ai_product_workbench_final_action\n",
+                JSON.stringify({
+                  type: "answer",
+                  message: "可以继续。",
+                  intent: "general_question",
+                }),
+                "\n```",
+              ].join(""),
+            },
+            { node: "lead_agent" },
+          ],
+        },
+        {
+          event: "values",
+          data: { done: true },
+        },
+      ]));
+
+    const service = new DeerFlowRuntimeService(prisma as never);
+    const result = await service.runTurn({
+      runId: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      message: "继续",
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://deerflow.local/threads/deerflow-thread-1/runs/stream",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://deerflow.local/threads",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("active_run_conflict"),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "http://deerflow.local/threads/deerflow-thread-2/runs/stream",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(prisma.deerFlowThreadBinding.update).toHaveBeenCalledWith({
+      where: { conversationId: "conversation-1" },
+      data: expect.objectContaining({
+        projectId: "project-1",
+        userId: "user-1",
+        deerFlowThreadId: "deerflow-thread-2",
+      }),
+    });
+    expect(result.threadId).toBe("deerflow-thread-2");
+    expect(result.finalAction).toEqual(expect.objectContaining({
+      type: "answer",
+      message: "可以继续。",
+    }));
   });
 });
 

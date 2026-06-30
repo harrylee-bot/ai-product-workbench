@@ -136,9 +136,9 @@ export class DeerFlowRuntimeService {
   }
 
   async runTurn(input: DeerFlowRunInput): Promise<DeerFlowTurnResult> {
-    const threadId = await this.ensureThread(input);
-    const uploads = await this.uploadAttachments(threadId, input.attachmentFiles ?? [], input.signal);
-    const runInput = { ...input, deerFlowUploads: uploads };
+    let threadId = await this.ensureThread(input);
+    let uploads = await this.uploadAttachments(threadId, input.attachmentFiles ?? [], input.signal);
+    let runInput = { ...input, deerFlowUploads: uploads };
     const rawEvents: DeerFlowRuntimeEvent[] = [];
     let assistantText = "";
     let finalState: unknown;
@@ -151,16 +151,32 @@ export class DeerFlowRuntimeService {
       });
     }
 
-    await this.streamRun(threadId, runInput, async (event) => {
-      rawEvents.push(event);
-      if (isAssistantTextEvent(event) && event.content) {
-        assistantText += event.content;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.streamRun(threadId, runInput, async (event) => {
+          rawEvents.push(event);
+          if (isAssistantTextEvent(event) && event.content) {
+            assistantText += event.content;
+          }
+          if (event.event === "values") {
+            finalState = event.data;
+          }
+          await input.onEvent?.(event);
+        });
+        break;
+      } catch (error) {
+        if (attempt === 0 && isActiveRunConflict(error)) {
+          threadId = await this.replaceThreadBinding(input, threadId, "active_run_conflict");
+          uploads = await this.uploadAttachments(threadId, input.attachmentFiles ?? [], input.signal);
+          runInput = { ...input, deerFlowUploads: uploads };
+          rawEvents.length = 0;
+          assistantText = "";
+          finalState = undefined;
+          continue;
+        }
+        throw error;
       }
-      if (event.event === "values") {
-        finalState = event.data;
-      }
-      await input.onEvent?.(event);
-    });
+    }
 
     if (!finalState) {
       finalState = await this.getThreadState(threadId, input.signal).catch(() => undefined);
@@ -224,6 +240,44 @@ export class DeerFlowRuntimeService {
     }
   }
 
+  private async replaceThreadBinding(input: DeerFlowRunInput, previousThreadId: string, reason: string) {
+    const thread = await this.createThread({
+      aiProductWorkbenchProjectId: input.projectId,
+      aiProductWorkbenchConversationId: input.conversationId,
+      aiProductWorkbenchUserId: input.userId,
+      source: "ai-product-workbench",
+      replacedDeerFlowThreadId: previousThreadId,
+      replacementReason: reason,
+    }, input.signal);
+
+    try {
+      const updated = await this.prisma.deerFlowThreadBinding.update({
+        where: { conversationId: input.conversationId },
+        data: {
+          projectId: input.projectId,
+          userId: input.userId,
+          deerFlowThreadId: thread.threadId,
+          metadata: toInputJson(thread.metadata),
+        },
+      });
+      return updated.deerFlowThreadId;
+    } catch (error) {
+      if (isRecordNotFoundError(error)) {
+        const created = await this.prisma.deerFlowThreadBinding.create({
+          data: {
+            projectId: input.projectId,
+            conversationId: input.conversationId,
+            userId: input.userId,
+            deerFlowThreadId: thread.threadId,
+            metadata: toInputJson(thread.metadata),
+          },
+        });
+        return created.deerFlowThreadId;
+      }
+      throw error;
+    }
+  }
+
   private async createThread(metadata: Record<string, unknown>, signal?: AbortSignal) {
     const response = await this.requestJson<ThreadCreateResponse>(threadCreatePath(), {
       method: "POST",
@@ -247,7 +301,7 @@ export class DeerFlowRuntimeService {
       body: JSON.stringify(buildRunRequest(input)),
     }, input.signal);
     if (!response.ok) {
-      throw new Error(`DeerFlow run stream 请求失败：${response.status} ${await safeResponseText(response)}`);
+      throw new DeerFlowRunStreamError(response.status, await safeResponseText(response));
     }
     if (!response.body) {
       throw new Error("DeerFlow run stream 未返回响应体");
@@ -891,4 +945,25 @@ function toOptionalString(value: unknown) {
 
 function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function isRecordNotFoundError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025";
+}
+
+function isActiveRunConflict(error: unknown) {
+  if (error instanceof DeerFlowRunStreamError) {
+    return error.status === 409 && /active run/i.test(error.responseText);
+  }
+  if (!(error instanceof Error)) return false;
+  return /409/.test(error.message) && /active run/i.test(error.message);
+}
+
+class DeerFlowRunStreamError extends Error {
+  constructor(
+    readonly status: number,
+    readonly responseText: string,
+  ) {
+    super(`DeerFlow run stream 请求失败：${status} ${responseText}`);
+  }
 }

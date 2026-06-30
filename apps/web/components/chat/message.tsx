@@ -219,7 +219,7 @@ const PurePreviewMessage = ({
     }
 
     if (type === "tool-createDocument") {
-      const { toolCallId } = part;
+      const { state, toolCallId } = part;
 
       if (part.output && "error" in part.output) {
         return (
@@ -232,6 +232,10 @@ const PurePreviewMessage = ({
         );
       }
 
+      if (state !== "output-available" || !part.output) {
+        return null;
+      }
+
       return (
         <DocumentPreview
           isReadonly={isReadonly}
@@ -242,7 +246,7 @@ const PurePreviewMessage = ({
     }
 
     if (type === "tool-updateDocument") {
-      const { toolCallId } = part;
+      const { state, toolCallId } = part;
 
       if (part.output && "error" in part.output) {
         return (
@@ -253,6 +257,10 @@ const PurePreviewMessage = ({
             更新文档失败：{String(part.output.error)}
           </div>
         );
+      }
+
+      if (state !== "output-available" || !part.output) {
+        return null;
       }
 
       return (
