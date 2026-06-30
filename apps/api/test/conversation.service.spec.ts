@@ -9,12 +9,15 @@ describe("ConversationService conversation-first APIs", () => {
       create: vi.fn(),
       update: vi.fn(),
       findUnique: vi.fn(),
+      updateMany: vi.fn(),
     },
     conversation: {
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       findFirst: vi.fn(),
       findUnique: vi.fn(),
+      findMany: vi.fn(),
     },
   };
   const prisma = {
@@ -243,6 +246,49 @@ describe("ConversationService conversation-first APIs", () => {
       id: "conversation-legacy",
       projectId: "project-1",
     }));
+  });
+
+  it("bulk deletes own active conversations without creating a replacement conversation", async () => {
+    tx.conversation.findMany.mockResolvedValue([
+      { id: "conversation-1" },
+      { id: "conversation-2" },
+    ]);
+    tx.conversation.updateMany.mockResolvedValue({ count: 2 });
+    tx.project.updateMany.mockResolvedValue({ count: 2 });
+
+    const result = await service.deleteAll(user);
+
+    expect(tx.conversation.findMany).toHaveBeenCalledWith({
+      where: {
+        ownerId: "user-1",
+        deletedAt: null,
+        status: { not: "deleted" },
+        project: {
+          deletedAt: null,
+          status: { notIn: ["deleted", "archived"] },
+        },
+      },
+      select: { id: true },
+    });
+    expect(tx.conversation.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["conversation-1", "conversation-2"] } },
+      data: {
+        status: "deleted",
+        deletedAt: expect.any(Date),
+      },
+    });
+    expect(tx.project.updateMany).toHaveBeenCalledWith({
+      where: {
+        ownerId: "user-1",
+        currentConversationId: { in: ["conversation-1", "conversation-2"] },
+      },
+      data: {
+        currentConversationId: null,
+        lastActivityAt: expect.any(Date),
+      },
+    });
+    expect(tx.conversation.create).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: true, deletedCount: 2 });
   });
 });
 

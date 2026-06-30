@@ -153,6 +153,10 @@ export async function deleteChat(id: string): Promise<void> {
   await nestFetch(`/conversations/${id}`, { method: "DELETE" });
 }
 
+export async function deleteAllChats(): Promise<{ success: boolean; deletedCount: number }> {
+  return nestFetch("/conversations", { method: "DELETE" });
+}
+
 export async function renameChat(id: string, title: string): Promise<void> {
   await nestFetch(`/conversations/${id}`, {
     method: "PATCH",

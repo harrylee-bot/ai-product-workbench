@@ -106,6 +106,54 @@ export class ConversationService {
     return { items: conversations.map((conversation) => this.projects.toConversation(conversation)) };
   }
 
+  async deleteAll(user: Phase1User) {
+    const deletedCount = await this.prisma.$transaction(async (tx) => {
+      const conversations = await tx.conversation.findMany({
+        where: {
+          ownerId: user.id,
+          deletedAt: null,
+          status: { not: ConversationStatus.deleted },
+          project: {
+            deletedAt: null,
+            status: { notIn: [ProjectStatus.deleted, ProjectStatus.archived] },
+          },
+        },
+        select: { id: true },
+      });
+
+      if (!conversations.length) return 0;
+
+      const conversationIds = conversations.map((conversation) => conversation.id);
+      const now = new Date();
+
+      await tx.conversation.updateMany({
+        where: { id: { in: conversationIds } },
+        data: {
+          status: ConversationStatus.deleted,
+          deletedAt: now,
+        },
+      });
+
+      await tx.project.updateMany({
+        where: {
+          ownerId: user.id,
+          currentConversationId: { in: conversationIds },
+        },
+        data: {
+          currentConversationId: null,
+          lastActivityAt: now,
+        },
+      });
+
+      return conversationIds.length;
+    });
+
+    return {
+      success: true,
+      deletedCount,
+    };
+  }
+
   async delete(user: Phase1User, conversationId: string) {
     const conversation = await this.getAccessibleConversation(user, conversationId);
     const result = await this.prisma.$transaction(async (tx) => {

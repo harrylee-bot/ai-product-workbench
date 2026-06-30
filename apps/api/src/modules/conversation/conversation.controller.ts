@@ -30,6 +30,11 @@ export class ConversationController {
     return this.conversations.listByProject(user, projectId);
   }
 
+  @Delete("conversations")
+  deleteAll(@CurrentUser() user: Phase1User) {
+    return this.conversations.deleteAll(user);
+  }
+
   @Delete("conversations/:conversationId")
   delete(@CurrentUser() user: Phase1User, @Param("conversationId") conversationId: string) {
     return this.conversations.delete(user, conversationId);

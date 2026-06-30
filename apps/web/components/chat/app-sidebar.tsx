@@ -42,7 +42,7 @@ import {
 } from "../ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { useAuth, type NestUser } from "@/lib/auth/nest-auth";
-import { deleteChat, getChats } from "@/lib/api/nest-client";
+import { deleteAllChats } from "@/lib/api/nest-client";
 
 export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) {
   const router = useRouter();
@@ -62,10 +62,11 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
     });
 
     try {
-      const chats = await getChats();
-      await Promise.all(chats.map((chat) => deleteChat(chat.id)));
+      await deleteAllChats();
+      await mutate(CHAT_HISTORY_KEY);
       toast.success("已删除全部对话");
     } catch {
+      mutate(CHAT_HISTORY_KEY);
       toast.error("删除全部对话失败");
     }
   };
