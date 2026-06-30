@@ -104,6 +104,13 @@ describe("DeerFlowRuntimeService", () => {
       "http://deerflow.local/threads/deerflow-thread-1/runs/stream",
       expect.objectContaining({ method: "POST" }),
     );
+    const runRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    const prompt = String(runRequest.input.messages[0].content);
+    expect(prompt).toContain("prototypeHtmlContract");
+    expect(prompt).toContain("iframe srcDoc");
+    expect(prompt).toContain("mnt/user-data/outputs/index.html");
+    expect(prompt).toContain("Never output a bare HTML fragment");
+    expect(prompt).toContain("<style>...complete CSS reset");
     expect(result).toEqual(expect.objectContaining({
       threadId: "deerflow-thread-1",
       finalAction: expect.objectContaining({
