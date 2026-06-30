@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronUp } from "lucide-react";
+import { ChevronUp, ShieldCheckIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useState } from "react";
@@ -99,6 +99,15 @@ export function SidebarUserNav({ user }: { user: NestUser }) {
             >
               {`切换到${resolvedTheme === "light" ? "深色" : "浅色"}模式`}
             </DropdownMenuItem>
+            {user.role === "admin" && (
+              <DropdownMenuItem
+                className="cursor-pointer text-[13px]"
+                onSelect={() => router.push("/admin")}
+              >
+                <ShieldCheckIcon className="size-4" />
+                系统管理
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">
               <button
