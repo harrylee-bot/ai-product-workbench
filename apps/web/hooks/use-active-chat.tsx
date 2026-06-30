@@ -85,7 +85,7 @@ function messagesSignature(messages: ChatMessage[]) {
 
 export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { setDataStream, setRuntimeProcess } = useDataStream();
+  const { setDataStream, runtimeProcess, setRuntimeProcess } = useDataStream();
   const { mutate } = useSWRConfig();
 
   const chatIdFromUrl = extractChatId(pathname);
@@ -217,8 +217,15 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     },
   });
 
-  const displayedStatus =
-    isServerRunRunning && status === "ready" ? "submitted" : status;
+  const isStaleSubmittedAfterCancel =
+    !isServerRunRunning &&
+    runtimeProcess.status === "cancelled" &&
+    (status === "submitted" || status === "streaming");
+  const displayedStatus = isStaleSubmittedAfterCancel
+    ? "ready"
+    : isServerRunRunning && status === "ready"
+      ? "submitted"
+      : status;
 
   const stopGeneration = useCallback(async () => {
     let stopError: unknown;
@@ -401,6 +408,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       currentModelId,
       showCreditCardAlert,
       displayedStatus,
+      runtimeProcess.status,
       runtimeStatus,
     ]
   );
