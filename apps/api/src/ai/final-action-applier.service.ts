@@ -224,18 +224,23 @@ export class FinalActionApplierService {
       validationNotes: true,
     } as const;
 
-    const document = project?.currentPrdDocumentId
-      ? await this.prisma.requirementDocument.findUnique({
-          where: { id: project.currentPrdDocumentId },
-          select,
-        })
-      : await this.prisma.requirementDocument.findFirst({
-          where: { projectId },
-          orderBy: { updatedAt: "desc" },
-          select,
-        });
+    const documents = await this.prisma.requirementDocument.findMany({
+      where: { projectId },
+      orderBy: { updatedAt: "desc" },
+      take: 20,
+      select,
+    });
+    const current = project?.currentPrdDocumentId
+      ? documents.find((document) => document.id === project.currentPrdDocumentId)
+      : undefined;
+    const candidates = current
+      ? [current, ...documents.filter((document) => document.id !== current.id)]
+      : documents;
 
-    return document ?? undefined;
+    return candidates.find((document) => isSubstantialPrdSections(toSections(document.sections)))
+      ?? current
+      ?? documents[0]
+      ?? undefined;
   }
 
   private buildPrototypeSpec(
@@ -356,6 +361,7 @@ function toSections(value: unknown): RequirementDocSection[] {
 }
 
 function isSubstantialPrdSections(sections: RequirementDocSection[]) {
+  if (looksLikeAdviceDocument(sections)) return false;
   if (sections.length >= 4) return true;
   const text = sectionsToPlainText(sections);
   if (text.length >= 800) return true;
@@ -364,6 +370,14 @@ function isSubstantialPrdSections(sections: RequirementDocSection[]) {
       `${section.title}\n${section.content}`,
     ),
   );
+}
+
+function looksLikeAdviceDocument(sections: RequirementDocSection[]) {
+  if (!sections.length) return false;
+  const text = sectionsToPlainText(sections).slice(0, 4000);
+  const adviceHits = (text.match(/建议|可以补充|提升.*质量|评审更容易|研发更容易|运营更容易/g) ?? []).length;
+  const prdBodyHits = (text.match(/项目概述|产品目标|需求范围|业务规则|功能需求|后台配置|验收标准|异常场景/g) ?? []).length;
+  return adviceHits >= 4 && prdBodyHits < 4;
 }
 
 function sectionsToPlainText(sections: RequirementDocSection[]) {
