@@ -3,7 +3,7 @@ import { documentToMarkdown } from "../src/ai/aichat/document-to-markdown";
 import type { RequirementDocument } from "../src/ai/ai-vibe.types";
 
 describe("documentToMarkdown", () => {
-  it("normalizes literal newline escapes and table blocks for the canvas editor", () => {
+  it("normalizes literal newline escapes and keeps markdown tables for the canvas editor", () => {
     const markdown = documentToMarkdown({
       id: "prd-1",
       projectId: "project-1",
@@ -40,9 +40,9 @@ describe("documentToMarkdown", () => {
     } as RequirementDocument);
 
     expect(markdown).not.toContain("\\n");
-    expect(markdown).toContain(
-      "- 版本：V1.0；日期：2026-06-30；说明：新建《连续打开 5 天达成奖励活动需求说明书》；作者：产品",
-    );
+    expect(markdown).toContain("| 版本 | 日期 | 说明 | 作者 |");
+    expect(markdown).toContain("| --- | --- | --- | --- |");
+    expect(markdown).toContain("| V1.0 | 2026-06-30 | 新建《连续打开 5 天达成奖励活动需求说明书》 | 产品 |");
     expect(markdown).toContain("第一段。\n\n第二段。");
   });
 });

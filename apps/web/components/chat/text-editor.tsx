@@ -230,7 +230,7 @@ function PureEditor({
   return (
     <>
       <div
-        className="prose prose-neutral dark:prose-invert relative max-w-none text-[15px] leading-7 prose-h1:text-4xl prose-h1:leading-tight prose-h2:text-2xl prose-h2:leading-snug prose-h3:text-xl prose-h3:leading-snug prose-p:my-4 prose-li:my-1"
+        className="prose prose-neutral dark:prose-invert relative max-w-none text-[15px] leading-7 prose-h1:text-4xl prose-h1:leading-tight prose-h2:text-2xl prose-h2:leading-snug prose-h3:text-xl prose-h3:leading-snug prose-p:my-4 prose-li:my-1 [&_table]:my-6 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[14px] [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_th]:border [&_th]:border-border [&_th]:bg-muted/60 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold"
         ref={containerRef}
       />
       {activeSuggestion &&

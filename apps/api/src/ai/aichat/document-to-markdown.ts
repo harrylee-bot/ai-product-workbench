@@ -50,7 +50,7 @@ export function documentToMarkdown(document: RequirementDocument): string {
 
 export function normalizeCanvasMarkdown(value: string): string {
   if (!value) return "";
-  return markdownTablesToLists(unescapeLiteralNewlines(value))
+  return unescapeLiteralNewlines(value)
     .replace(/\n{4,}/g, "\n\n\n")
     .trim();
 }
@@ -61,49 +61,4 @@ function unescapeLiteralNewlines(value: string): string {
     .replace(/\\r\\n/g, "\n")
     .replace(/\\n/g, "\n")
     .replace(/\\r/g, "\n");
-}
-
-function markdownTablesToLists(value: string): string {
-  const lines = value.split("\n");
-  const output: string[] = [];
-  for (let index = 0; index < lines.length; ) {
-    const header = parseMarkdownTableRow(lines[index]);
-    const separator = parseMarkdownTableRow(lines[index + 1]);
-    if (header && separator && separator.every((cell) => /^:?-{3,}:?$/.test(cell))) {
-      const rows: string[][] = [];
-      index += 2;
-      while (index < lines.length) {
-        const row = parseMarkdownTableRow(lines[index]);
-        if (!row) break;
-        rows.push(row);
-        index += 1;
-      }
-      output.push(...rows.map((row) => tableRowToListItem(header, row)));
-      continue;
-    }
-    output.push(lines[index]);
-    index += 1;
-  }
-  return output.join("\n");
-}
-
-function parseMarkdownTableRow(line?: string): string[] | null {
-  const trimmed = line?.trim();
-  if (!trimmed || !trimmed.includes("|")) return null;
-  const cells = trimmed
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
-  return cells.length >= 2 ? cells : null;
-}
-
-function tableRowToListItem(headers: string[], row: string[]) {
-  const segments = row
-    .map((cell, index) => {
-      const header = headers[index]?.trim();
-      return header ? `${header}：${cell}` : cell;
-    })
-    .filter(Boolean);
-  return `- ${segments.join("；")}`;
 }

@@ -7,7 +7,7 @@ import {
   SquareTerminalIcon,
   XCircleIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { Vote } from "@/lib/api/types";
 import type {
   ChatMessage,
@@ -129,18 +129,27 @@ const PurePreviewMessage = ({
       return null;
     }
 
+    // 在首个 text（正文答案）前插分隔线，把上面的想法/工具与下面的答案分开。
     if (type === "text") {
+      const hasProcessBefore = message.parts
+        ?.slice(0, index)
+        .some(
+          (p: any) =>
+            p.type === "reasoning" || String(p.type ?? "").startsWith("tool-"),
+        );
       return (
-        <MessageContent
-          className={cn("text-[13px] leading-[1.65]", {
-            "w-fit max-w-[min(80%,56ch)] overflow-hidden break-words rounded-2xl rounded-br-lg border border-border/30 bg-gradient-to-br from-secondary to-muted px-3.5 py-2 shadow-[var(--shadow-card)]":
-              message.role === "user",
-          })}
-          data-testid="message-content"
-          key={key}
-        >
-          <MessageResponse>{sanitizeText(part.text)}</MessageResponse>
-        </MessageContent>
+        <Fragment key={key}>
+          {hasProcessBefore ? <Divider /> : null}
+          <MessageContent
+            className={cn("text-[13px] leading-[1.65]", {
+              "w-fit max-w-[min(80%,56ch)] overflow-hidden break-words rounded-2xl rounded-br-lg border border-border/30 bg-gradient-to-br from-secondary to-muted px-3.5 py-2 shadow-[var(--shadow-card)]":
+                message.role === "user",
+            })}
+            data-testid="message-content"
+          >
+            <MessageResponse>{sanitizeText(part.text)}</MessageResponse>
+          </MessageContent>
+        </Fragment>
       );
     }
 
@@ -326,7 +335,7 @@ const PurePreviewMessage = ({
     }
 
     if (type.startsWith("tool-")) {
-      return <CompactToolPart key={part.toolCallId ?? key} part={part} />;
+      return <ToolLineText key={part.toolCallId ?? key} part={part} />;
     }
 
     return null;
@@ -343,22 +352,18 @@ const PurePreviewMessage = ({
     />
   );
 
-  const showRuntimeStatus =
+  const showThinkingText =
     isAssistant &&
     Boolean(showRuntimeProcess) &&
     shouldShowRuntimeStatus(runtimeProcess, hasAnyContent);
-  const runtimePanel = showRuntimeStatus ? (
-    <RuntimeProcessPanel
-      hasAssistantContent={hasAnyContent}
-      runtimeProcess={runtimeProcess}
-    />
+  const thinkingText = showThinkingText ? (
+    <ThinkingText runtimeProcess={runtimeProcess} />
   ) : null;
 
   const content = isThinking ? (
-    runtimePanel
+    thinkingText ?? <ThinkingText runtimeProcess={runtimeProcess} />
   ) : (
     <>
-      {runtimePanel}
       {attachments}
       {parts}
       {actions}
@@ -420,87 +425,56 @@ export const ThinkingMessage = ({
           </div>
         </div>
 
-        <RuntimeProcessPanel
-          hasAssistantContent={false}
-          runtimeProcess={runtimeProcess}
-        />
+        <ThinkingText runtimeProcess={runtimeProcess} />
       </div>
     </div>
   );
 };
 
-function RuntimeProcessPanel({
-  hasAssistantContent,
+function ThinkingText({
   runtimeProcess,
 }: {
-  hasAssistantContent: boolean;
   runtimeProcess?: RuntimeProcessSnapshot;
 }) {
-  const traceEvents = (runtimeProcess?.events ?? []).filter(isVisibleTraceEvent);
-  const isRunning = runtimeProcess?.status === "running";
-  const [open, setOpen] = useState(isRunning);
-
-  useEffect(() => {
-    if (isRunning) setOpen(true);
-  }, [isRunning]);
-
-  if (traceEvents.length === 0) {
-    return (
-      <RuntimeStatusLine
-        hasAssistantContent={hasAssistantContent}
-        runtimeProcess={runtimeProcess}
-      />
-    );
-  }
-
   return (
-    <details
-      className="group/runtime max-w-[min(100%,680px)] rounded-lg border border-border/40 bg-muted/20 text-[13px] leading-[1.65]"
-      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
-      open={open}
-    >
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
-        <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open/runtime:rotate-90" />
-        <RuntimeStatusLine
-          hasAssistantContent={hasAssistantContent}
-          runtimeProcess={runtimeProcess}
-        />
-      </summary>
-      <ol className="flex flex-col gap-1 border-t border-border/40 px-3 py-2">
-        {traceEvents.map((event) => (
-          <RuntimeTraceRow event={event} key={event.id} />
-        ))}
-      </ol>
-    </details>
+    <RuntimeStatusLine
+      hasAssistantContent={false}
+      runtimeProcess={runtimeProcess}
+    />
   );
 }
 
-function RuntimeTraceRow({ event }: { event: RuntimeProcessEvent }) {
-  const isRunning = event.status === "running";
-  const isFailed = event.status === "failed";
-  const icon = isFailed ? (
-    <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
-  ) : isRunning ? (
-    <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-  ) : (
-    <CheckCircle2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+/**
+ * 工具调用压缩成一行文字：`· name · 进行中/完成/失败`，不用卡片。
+ */
+function ToolLineText({ part }: { part: any }) {
+  const state = String(part.state ?? "");
+  const isRunning =
+    state === "input-streaming" ||
+    state === "input-available" ||
+    state === "approval-requested" ||
+    state === "approval-responded";
+  const isFailed = state === "output-error" || state === "output-denied";
+  const toolName = formatToolName(
+    part.toolName ?? String(part.type ?? "").replace(/^tool-/, ""),
   );
-  const detail = event.detail?.trim();
-  const row = (
-    <div className="flex min-w-0 items-start gap-2 text-muted-foreground">
-      {icon}
-      <span className="truncate">{event.label}</span>
+  const statusLabel = isFailed
+    ? "失败"
+    : state === "output-available"
+      ? "完成"
+      : isRunning
+        ? "进行中"
+        : "";
+  return (
+    <div className="text-[12px] leading-[1.6] text-muted-foreground/70">
+      · {toolName}
+      {statusLabel ? <> · {statusLabel}</> : null}
     </div>
   );
-  if (!detail) return <li>{row}</li>;
-  return (
-    <li>
-      {row}
-      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/35 px-2 py-1.5 text-[12px] leading-relaxed text-muted-foreground">
-        {detail}
-      </pre>
-    </li>
-  );
+}
+
+function Divider() {
+  return <div className="my-1 h-px w-full bg-border/40" aria-hidden />;
 }
 
 function RuntimeStatusLine({
@@ -690,20 +664,6 @@ function isDurableRuntimeEvent(event: RuntimeProcessEvent) {
     event.kind === "artifact" ||
     event.kind === "document" ||
     event.kind === "error"
-  );
-}
-
-/**
- * trace 面板可见事件：与 isVisibleRuntimeEvent 相同，但排除 tool —— 工具调用已由
- * tool-* part 的 CompactToolPart 渲染，trace 只承载 knowledge/status/artifact/document/error 叙事。
- */
-function isVisibleTraceEvent(event: RuntimeProcessEvent) {
-  return (
-    event.kind === "artifact" ||
-    event.kind === "document" ||
-    event.kind === "error" ||
-    event.kind === "knowledge" ||
-    event.kind === "status"
   );
 }
 

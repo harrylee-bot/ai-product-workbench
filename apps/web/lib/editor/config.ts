@@ -1,5 +1,5 @@
 import { textblockTypeInputRule } from "prosemirror-inputrules";
-import { Schema } from "prosemirror-model";
+import { Schema, type NodeSpec } from "prosemirror-model";
 import { schema } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
 import type { Transaction } from "prosemirror-state";
@@ -8,8 +8,37 @@ import type { MutableRefObject } from "react";
 
 import { buildContentFromDocument } from "./functions";
 
+const tableNodes: Record<string, NodeSpec> = {
+  table: {
+    content: "table_row+",
+    group: "block",
+    isolating: true,
+    parseDOM: [{ tag: "table" }],
+    toDOM: () => ["table", ["tbody", 0]],
+  },
+  table_row: {
+    content: "(table_cell | table_header)*",
+    parseDOM: [{ tag: "tr" }],
+    toDOM: () => ["tr", 0],
+  },
+  table_cell: {
+    content: "block+",
+    isolating: true,
+    parseDOM: [{ tag: "td" }],
+    toDOM: () => ["td", 0],
+  },
+  table_header: {
+    content: "block+",
+    isolating: true,
+    parseDOM: [{ tag: "th" }],
+    toDOM: () => ["th", 0],
+  },
+};
+
 export const documentSchema = new Schema({
-  nodes: addListNodes(schema.spec.nodes, "paragraph block*", "block"),
+  nodes: addListNodes(schema.spec.nodes, "paragraph block*", "block").append(
+    tableNodes,
+  ),
   marks: schema.spec.marks,
 });
 
