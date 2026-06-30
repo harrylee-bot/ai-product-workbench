@@ -60,8 +60,49 @@ Use when a requirement or PRD should be reviewed before prototype work.
     "summary": "通过每日签到提升活跃和留存"
   },
   "prdDocumentDraft": {
-    "title": "签到活动 PRD",
-    "sections": []
+    "title": "签到活动需求说明书",
+    "sections": [
+      {
+        "id": "intro",
+        "title": "1 引言",
+        "type": "overview",
+        "level": 2,
+        "order": 1,
+        "content": ""
+      },
+      {
+        "id": "background",
+        "title": "1.1 项目背景",
+        "type": "overview",
+        "level": 3,
+        "order": 2,
+        "content": "说明涉及系统、当前现状、变更原因、影响模块和业务目的。"
+      },
+      {
+        "id": "business_requirements",
+        "title": "2 业务需求",
+        "type": "overview",
+        "level": 2,
+        "order": 5,
+        "content": "按页面链接、核心规则、流程状态、接口和验收标准组织。"
+      },
+      {
+        "id": "degradation",
+        "title": "3 业务降级方案（必填）",
+        "type": "overview",
+        "level": 2,
+        "order": 20,
+        "content": "不涉及，或写具体降级方案。"
+      },
+      {
+        "id": "security_baseline",
+        "title": "4 需求安全基线要求（必填）",
+        "type": "overview",
+        "level": 2,
+        "order": 21,
+        "content": "用安全基线自查表描述是否涉及。"
+      }
+    ]
   }
 }
 ```

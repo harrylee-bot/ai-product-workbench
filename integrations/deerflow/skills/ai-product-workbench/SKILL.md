@@ -97,6 +97,36 @@ Prototype rule:
 - `brand_new_system`: follow a retrieved `ui_style_guide` if present; otherwise design a clear frame from scratch.
 - `one_sentence_completion`: create the smallest complete loop: backend configuration, frontend experience, preview/audit, and data feedback.
 
+## PRD / Requirement Document Writing
+
+When the user asks to generate, rewrite, optimize, or regenerate a PRD / 需求文档 / 需求说明书, follow the product document writing rules from `knowledgeContext`, especially `PRD标准结构` and `产品文档规范`.
+
+Default output is the user's requirement-document template, not a freeform lightweight PRD. The persisted `prdDocumentDraft.sections` must use this structure unless the user explicitly asks for another format:
+
+```text
+1 引言
+1.1 项目背景
+1.2 文档范围
+1.3 使用场景（必填）
+2 业务需求
+2.1 页面链接
+2.2 核心业务规则/功能说明
+2.3 核心流程/状态/页面要求
+2.4 本需求涉及新增/修改的接口
+2.5 验收标准
+3 业务降级方案（必填）
+4 需求安全基线要求（必填）
+```
+
+Writing requirements:
+
+- Use title `<工单名称>需求说明书` when the output is a formal requirement document; if the UI title must stay short, keep the body structure above.
+- Include concrete page entry, channel, object, field, state, interface, exception, degradation, safety baseline, and acceptance details.
+- For interface-related requirements, include caller/callee, trigger condition, key inputs/outputs, success result, and failure handling. If exact API names are unknown, write `具体接口地址以技术方案和联调结果为准`.
+- `3 业务降级方案（必填）` cannot be empty. Use `不涉及` only when no meaningful degradation exists; otherwise provide a concrete fallback plan.
+- `4 需求安全基线要求（必填）` must include safety baseline self-check content. Online canvas may use a compact table, but values in `是否涉及` may only be `是`, `否`, or `不涉及`.
+- Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
+
 ## Runtime Inputs
 
 Read the `Context from AI Product Workbench` JSON from the user message. Important fields:
