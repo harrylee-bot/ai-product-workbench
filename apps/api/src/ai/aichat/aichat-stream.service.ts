@@ -184,7 +184,7 @@ export class AichatStreamService {
           } else {
             // 无产物：把 finalAction.message 作为文本下发（若未在 chunk 流里）
             const message = result.finalAction.message || "本轮未生成产物。";
-            if (!ctx.textStarted) {
+            if (!ctx.hasEmittedText) {
               emitStaticText(message, writer as unknown as UIMessageStreamWriter, ctx);
               finishText(writer as unknown as UIMessageStreamWriter, ctx);
             }

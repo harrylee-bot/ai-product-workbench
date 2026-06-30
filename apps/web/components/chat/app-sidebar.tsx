@@ -11,9 +11,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
-import { unstable_serialize } from "swr/infinite";
 import {
-  getChatHistoryPaginationKey,
+  CHAT_HISTORY_KEY,
   SidebarHistory,
 } from "@/components/chat/sidebar-history";
 import { SidebarUserNav } from "@/components/chat/sidebar-user-nav";
@@ -50,7 +49,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
   const { setOpenMobile, toggleSidebar } = useSidebar();
   const { mutate } = useSWRConfig();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
-  const { user: authUser } = useAuth();
+  const { user: authUser, loading: authLoading } = useAuth();
 
   // 优先用传入的 user（服务端注入），否则回退到 AuthProvider 的当前用户。
   const user = userProp ?? authUser ?? undefined;
@@ -58,7 +57,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
   const handleDeleteAll = async () => {
     setShowDeleteAllDialog(false);
     router.replace("/");
-    mutate(unstable_serialize(getChatHistoryPaginationKey), [], {
+    mutate(CHAT_HISTORY_KEY, [], {
       revalidate: false,
     });
 
@@ -139,7 +138,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-          <SidebarHistory user={user} />
+          <SidebarHistory isAuthLoading={authLoading && !user} user={user} />
         </SidebarContent>
         <SidebarFooter className="border-t border-sidebar-border pt-2 pb-3">
           {user && <SidebarUserNav user={user} />}

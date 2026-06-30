@@ -1,6 +1,11 @@
 import type { RequirementDocument, PrototypeArtifact } from "../ai-vibe.types";
 import type { DeerFlowRuntimeEvent } from "../deerflow-runtime.service";
-import { safeAssistantDelta } from "./safe-assistant-delta";
+import {
+  createAssistantDeltaFilterState,
+  flushAssistantDelta,
+  safeAssistantDelta,
+  type AssistantDeltaFilterState,
+} from "./safe-assistant-delta";
 import { documentToMarkdown, sectionToMarkdown } from "./document-to-markdown";
 
 /**
@@ -14,14 +19,19 @@ export type UIMessageStreamWriter = {
   write: (part: Record<string, unknown>) => void;
 };
 
-/** 桥接上下文：跟踪当前文本 part 是否已 start、当前 step 名，避免重复发控制 part。 */
+/** 桥接上下文：跟踪当前文本 part 与 final action 过滤状态，避免重复发控制 part。 */
 export type BridgeContext = {
+  assistantDeltaFilter: AssistantDeltaFilterState;
+  hasEmittedText: boolean;
   textStarted: boolean;
-  currentStepName?: string;
 };
 
 export function createBridgeContext(): BridgeContext {
-  return { textStarted: false };
+  return {
+    assistantDeltaFilter: createAssistantDeltaFilterState(),
+    hasEmittedText: false,
+    textStarted: false,
+  };
 }
 
 /**
@@ -29,7 +39,6 @@ export function createBridgeContext(): BridgeContext {
  *
  * 映射规则：
  * - assistant chunk → safeAssistantDelta 过滤后 → 首次 text-start，后续 text-delta（id="text-1"）
- * - nodeId/nodeName 变化 → finish-step(旧的) / start-step(新的)
  * - toolCalls → tool-input-start + tool-input-available
  * - toolResult（tool 角色，带 toolCallId）→ tool-output-available
  *
@@ -42,27 +51,10 @@ export function emitDeerFlowEvent(
 ): void {
   // 1) 助手增量文本
   if (event.messageRole === "assistant" && typeof event.chunk === "string") {
-    const delta = safeAssistantDelta(event.chunk);
-    if (delta) {
-      if (!ctx.textStarted) {
-        writer.write({ type: "text-start", id: "text-1" });
-        ctx.textStarted = true;
-      }
-      writer.write({ type: "text-delta", id: "text-1", delta });
-    }
+    emitTextDelta(safeAssistantDelta(event.chunk, ctx.assistantDeltaFilter), writer, ctx);
   }
 
-  // 2) 步骤切换（可选，简单处理）
-  const stepName = event.nodeName ?? event.nodeId;
-  if (stepName && stepName !== ctx.currentStepName) {
-    if (ctx.currentStepName) {
-      writer.write({ type: "finish-step" });
-    }
-    ctx.currentStepName = stepName;
-    writer.write({ type: "start-step" });
-  }
-
-  // 3) 工具调用输入
+  // 2) 工具调用输入
   if (event.toolCalls?.length) {
     for (const call of event.toolCalls) {
       const toolCallId = call.id;
@@ -73,7 +65,7 @@ export function emitDeerFlowEvent(
     }
   }
 
-  // 4) 工具输出（tool 角色）
+  // 3) 工具输出（tool 角色）
   if (event.messageRole === "tool" && event.toolCallId) {
     writer.write({
       type: "tool-output-available",
@@ -87,10 +79,7 @@ export function emitDeerFlowEvent(
  * 收尾：若已 text-start 则发 text-end。供 run 结束后统一调用。
  */
 export function finishText(writer: UIMessageStreamWriter, ctx: BridgeContext): void {
-  if (ctx.currentStepName) {
-    writer.write({ type: "finish-step" });
-    ctx.currentStepName = undefined;
-  }
+  emitTextDelta(flushAssistantDelta(ctx.assistantDeltaFilter), writer, ctx);
   if (ctx.textStarted) {
     writer.write({ type: "text-end", id: "text-1" });
     ctx.textStarted = false;
@@ -150,11 +139,17 @@ export function emitPrototypeArtifact(
 /** 工具：直接发一段已确定的文本（用于 finalAction.message 兜底显示）。 */
 export function emitStaticText(text: string, writer: UIMessageStreamWriter, ctx: BridgeContext): void {
   if (!text) return;
+  emitTextDelta(text, writer, ctx);
+}
+
+function emitTextDelta(delta: string, writer: UIMessageStreamWriter, ctx: BridgeContext): void {
+  if (!delta) return;
   if (!ctx.textStarted) {
     writer.write({ type: "text-start", id: "text-1" });
     ctx.textStarted = true;
   }
-  writer.write({ type: "text-delta", id: "text-1", delta: text });
+  writer.write({ type: "text-delta", id: "text-1", delta });
+  ctx.hasEmittedText = true;
 }
 
 /** 重新导出供 service 直接取用。 */

@@ -94,7 +94,13 @@ export function getChatHistoryPaginationKey(
   return null;
 }
 
-export function SidebarHistory({ user }: { user: NestUser | undefined }) {
+export function SidebarHistory({
+  user,
+  isAuthLoading = false,
+}: {
+  user: NestUser | undefined;
+  isAuthLoading?: boolean;
+}) {
   const { setOpenMobile } = useSidebar();
   const pathname = usePathname();
   const id = pathname?.startsWith("/chat/") ? pathname.split("/")[2] : null;
@@ -140,6 +146,35 @@ export function SidebarHistory({ user }: { user: NestUser | undefined }) {
 
     toast.success("Chat deleted");
   };
+
+  if (isAuthLoading) {
+    return (
+      <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
+          History
+        </SidebarGroupLabel>
+        <SidebarGroupContent>
+          <div className="flex flex-col gap-0.5 px-1">
+            {[44, 32, 28].map((item) => (
+              <div
+                className="flex h-8 items-center gap-2 rounded-lg px-2"
+                key={item}
+              >
+                <div
+                  className="h-3 max-w-(--skeleton-width) flex-1 animate-pulse rounded-md bg-sidebar-foreground/[0.06]"
+                  style={
+                    {
+                      "--skeleton-width": `${item}%`,
+                    } as React.CSSProperties
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    );
+  }
 
   if (!user) {
     return (
