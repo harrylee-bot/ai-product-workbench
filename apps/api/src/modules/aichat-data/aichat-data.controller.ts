@@ -136,4 +136,12 @@ export class AichatDataController {
   ) {
     return this.data.listStreams(user, conversationId);
   }
+
+  @Get("conversations/:conversationId/runtime-status")
+  getRuntimeStatus(
+    @CurrentUser() user: Phase1User,
+    @Param("conversationId") conversationId: string,
+  ) {
+    return this.data.getRuntimeStatus(user, conversationId);
+  }
 }

@@ -92,15 +92,20 @@ export class AichatStreamService {
         this.activeRunControllers.set(run.id, controller);
         this.activeConversationControllers.set(conversationId, controller);
         let clientClosed = false;
-        const abortOnClientClose = () => {
-          if (res.writableEnded || controller.signal.aborted) return;
+        const markClientClosed = () => {
           clientClosed = true;
-          controller.abort();
         };
-        res.on("close", abortOnClientClose);
+        const streamWriter: UIMessageStreamWriter = {
+          write: (part) => {
+            if (!clientClosed) {
+              (writer.write as unknown as (chunk: Record<string, unknown>) => void)(part);
+            }
+          },
+        };
+        res.on("close", markClientClosed);
 
         try {
-          writer.write({ type: "start", messageId: randomUUID() });
+          streamWriter.write({ type: "start", messageId: randomUUID() });
 
           const knowledgeContext = await this.retrieveKnowledge({
             projectId,
@@ -121,12 +126,12 @@ export class AichatStreamService {
             signal: controller.signal,
             onEvent: (event) => {
               if (controller.signal.aborted) return;
-              emitDeerFlowEvent(event, writer as unknown as UIMessageStreamWriter, ctx);
+              emitDeerFlowEvent(event, streamWriter, ctx);
             },
           });
 
           // 收尾文本/步骤 part
-          finishText(writer as unknown as UIMessageStreamWriter, ctx);
+          finishText(streamWriter, ctx);
 
           // 落地 final action
           const applied = await this.finalActionApplier.apply({
@@ -139,10 +144,10 @@ export class AichatStreamService {
           });
 
           if (applied.prdDocument) {
-            emitStaticText(result.finalAction.message || "PRD 已生成，请在右侧文档区检查。", writer as unknown as UIMessageStreamWriter, ctx);
-            finishText(writer as unknown as UIMessageStreamWriter, ctx);
-            emitPrdArtifact(applied.prdDocument, writer as unknown as UIMessageStreamWriter);
-            emitPrdDocumentPreview(applied.prdDocument, writer as unknown as UIMessageStreamWriter);
+            emitStaticText(result.finalAction.message || "PRD 已生成，请在右侧文档区检查。", streamWriter, ctx);
+            finishText(streamWriter, ctx);
+            emitPrdArtifact(applied.prdDocument, streamWriter);
+            emitPrdDocumentPreview(applied.prdDocument, streamWriter);
             deliveredUserVisibleResult = true;
             await this.createAssistantMessageBestEffort({
               projectId,
@@ -172,9 +177,9 @@ export class AichatStreamService {
               "PRD 已生成",
             );
           } else if (applied.prototypeArtifact) {
-            emitStaticText(result.finalAction.message || "原型已生成，请在右侧预览区查看。", writer as unknown as UIMessageStreamWriter, ctx);
-            finishText(writer as unknown as UIMessageStreamWriter, ctx);
-            emitPrototypeArtifact(applied.prototypeArtifact, writer as unknown as UIMessageStreamWriter);
+            emitStaticText(result.finalAction.message || "原型已生成，请在右侧预览区查看。", streamWriter, ctx);
+            finishText(streamWriter, ctx);
+            emitPrototypeArtifact(applied.prototypeArtifact, streamWriter);
             deliveredUserVisibleResult = true;
             await this.createAssistantMessageBestEffort({
               projectId,
@@ -206,8 +211,8 @@ export class AichatStreamService {
             // 无产物：把 finalAction.message 作为文本下发（若未在 chunk 流里）
             const message = result.finalAction.message || ctx.textBuffer.trim() || result.assistantText || "本轮未生成产物。";
             if (!ctx.hasEmittedText) {
-              emitStaticText(message, writer as unknown as UIMessageStreamWriter, ctx);
-              finishText(writer as unknown as UIMessageStreamWriter, ctx);
+              emitStaticText(message, streamWriter, ctx);
+              finishText(streamWriter, ctx);
             }
             deliveredUserVisibleResult = true;
             await this.createAssistantMessageBestEffort({
@@ -235,18 +240,18 @@ export class AichatStreamService {
             );
           }
 
-          writer.write({ type: "finish" });
+          streamWriter.write({ type: "finish" });
         } catch (error) {
           if (controller.signal.aborted) {
             await this.runLogs.cancelRun({
               runId: run.id,
               canceledBy: user.id,
-              reason: clientClosed ? "客户端断开 aichat 生成" : "用户停止 aichat 生成",
+              reason: "用户停止 aichat 生成",
             }).catch((cancelError) => {
               this.logger.error(`aichat run 取消状态写入失败 runId=${run.id}：${serializeError(cancelError)}`);
             });
-            finishText(writer as unknown as UIMessageStreamWriter, ctx);
-            writer.write({ type: "finish", finishReason: "stop" });
+            finishText(streamWriter, ctx);
+            streamWriter.write({ type: "finish", finishReason: "stop" });
             return;
           }
 
@@ -256,14 +261,14 @@ export class AichatStreamService {
           });
           if (!deliveredUserVisibleResult) {
             // 收尾已开的文本 part，避免前端解析悬挂
-            finishText(writer as unknown as UIMessageStreamWriter, ctx);
-            writer.write({ type: "error", errorText: "生成失败，请重试" });
-            writer.write({ type: "finish", finishReason: "error" });
+            finishText(streamWriter, ctx);
+            streamWriter.write({ type: "error", errorText: "生成失败，请重试" });
+            streamWriter.write({ type: "finish", finishReason: "error" });
           } else {
-            writer.write({ type: "finish", finishReason: "stop" });
+            streamWriter.write({ type: "finish", finishReason: "stop" });
           }
         } finally {
-          res.off("close", abortOnClientClose);
+          res.off("close", markClientClosed);
           this.activeRunControllers.delete(run.id);
           // 仅当仍是本次 controller 时才清除会话映射（避免覆盖后续轮次）
           if (this.activeConversationControllers.get(conversationId) === controller) {

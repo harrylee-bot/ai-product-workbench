@@ -55,7 +55,12 @@ export function DocumentPreview({
     Document[]
   >(
     documentId ? `document-preview-${documentId}-${documentKind}` : null,
-    () => getDocumentsById(documentId!, documentKind)
+    () => getDocumentsById(documentId!, documentKind),
+    {
+      refreshInterval: (latestDocuments) =>
+        latestDocuments?.[0] ? 0 : 2000,
+      shouldRetryOnError: true,
+    }
   );
 
   const previewDocument = useMemo(() => documents?.[0], [documents]);

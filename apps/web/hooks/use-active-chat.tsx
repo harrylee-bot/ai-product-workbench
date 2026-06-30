@@ -9,6 +9,7 @@ import {
   type Dispatch,
   type ReactNode,
   type SetStateAction,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -22,7 +23,13 @@ import { toast } from "@/components/chat/toast";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import type { Vote } from "@/lib/api/types";
-import { getChatMessages, getChatStreamUrl, getVotesByChatId } from "@/lib/api/nest-client";
+import {
+  getChatMessages,
+  getChatRuntimeStatus,
+  getChatStreamUrl,
+  getVotesByChatId,
+  stopChatRun,
+} from "@/lib/api/nest-client";
 import { ChatbotError } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
 import { fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
@@ -58,6 +65,22 @@ function extractChatId(pathname: string): string | null {
   return match ? match[1] : null;
 }
 
+function messagesSignature(messages: ChatMessage[]) {
+  return messages
+    .map((message) => {
+      const partSignature = message.parts
+        .map((part: any) => {
+          if (part.type === "text") {
+            return `${part.type}:${part.text?.length ?? 0}`;
+          }
+          return `${part.type}:${part.state ?? ""}`;
+        })
+        .join(",");
+      return `${message.id}:${message.role}:${partSignature}`;
+    })
+    .join("|");
+}
+
 export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { setDataStream } = useDataStream();
@@ -84,10 +107,28 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const [input, setInput] = useState("");
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
 
-  const { data: chatData, isLoading } = useSWR(
+  const { data: runtimeStatus, mutate: mutateRuntimeStatus } = useSWR(
+    isNewChat ? null : `chat-runtime-status-${chatId}`,
+    () => getChatRuntimeStatus(chatId),
+    {
+      revalidateOnFocus: true,
+      refreshInterval: (latest) =>
+        latest?.latestRun?.status === "running" ? 2000 : 0,
+    }
+  );
+  const isServerRunRunning = runtimeStatus?.latestRun?.status === "running";
+
+  const {
+    data: chatData,
+    isLoading,
+    mutate: mutateChatMessages,
+  } = useSWR(
     isNewChat ? null : `chat-messages-${chatId}`,
     () => getChatMessages(chatId),
-    { revalidateOnFocus: false }
+    {
+      revalidateOnFocus: false,
+      refreshInterval: isServerRunRunning ? 2000 : 0,
+    }
   );
 
   const initialMessages: ChatMessage[] = isNewChat
@@ -157,6 +198,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     },
     onFinish: () => {
       mutate(CHAT_HISTORY_KEY);
+      mutateRuntimeStatus();
+      mutateChatMessages();
     },
     onError: (error) => {
       if (error.message?.includes("AI Gateway requires a valid credit card")) {
@@ -172,6 +215,24 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     },
   });
 
+  const displayedStatus =
+    isServerRunRunning && status === "ready" ? "submitted" : status;
+
+  const stopGeneration = useCallback(async () => {
+    await stop();
+    try {
+      await stopChatRun(chatId);
+      mutateRuntimeStatus();
+      mutateChatMessages();
+      mutate(CHAT_HISTORY_KEY);
+    } catch (error: any) {
+      toast({
+        type: "error",
+        description: error?.message || "停止生成失败，请稍后重试",
+      });
+    }
+  }, [chatId, mutate, mutateChatMessages, mutateRuntimeStatus, stop]);
+
   const loadedChatIds = useRef(new Set<string>());
 
   if (isNewChat && !loadedChatIds.current.has(newChatIdRef.current)) {
@@ -179,14 +240,33 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    if (loadedChatIds.current.has(chatId)) {
+    if (!chatData?.messages) {
       return;
     }
-    if (chatData?.messages) {
-      loadedChatIds.current.add(chatId);
+
+    const hasLoaded = loadedChatIds.current.has(chatId);
+    const serverSignature = messagesSignature(chatData.messages);
+    const localSignature = messagesSignature(messages);
+
+    if (!hasLoaded || (status === "ready" && serverSignature !== localSignature)) {
       setMessages(chatData.messages);
+      loadedChatIds.current.add(chatId);
     }
-  }, [chatId, chatData?.messages, setMessages]);
+  }, [chatId, chatData?.messages, messages, setMessages, status]);
+
+  const hadServerRunRunningRef = useRef(false);
+  useEffect(() => {
+    if (isServerRunRunning) {
+      hadServerRunRunningRef.current = true;
+      return;
+    }
+
+    if (hadServerRunRunningRef.current) {
+      hadServerRunRunningRef.current = false;
+      mutateChatMessages();
+      mutate(CHAT_HISTORY_KEY);
+    }
+  }, [isServerRunRunning, mutate, mutateChatMessages]);
 
   const prevChatIdRef = useRef(chatId);
   useEffect(() => {
@@ -224,7 +304,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     }
   }, [sendMessage, chatId]);
 
-  // v1: NestJS chat bridge has no resumable-stream support; disable auto-resume.
+  // HTTP stream itself is not resumable yet. After refresh, keep the server run alive
+  // and recover the final persisted message by polling runtime status/messages.
   useAutoResume({
     autoResume: false,
     initialMessages,
@@ -248,8 +329,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       messages,
       setMessages,
       sendMessage,
-      status,
-      stop,
+      status: displayedStatus,
+      stop: stopGeneration,
       regenerate,
       addToolApprovalResponse,
       input,
@@ -268,8 +349,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       messages,
       setMessages,
       sendMessage,
-      status,
-      stop,
+      stopGeneration,
       regenerate,
       addToolApprovalResponse,
       input,
@@ -280,6 +360,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       votes,
       currentModelId,
       showCreditCardAlert,
+      displayedStatus,
     ]
   );
 

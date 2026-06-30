@@ -325,6 +325,28 @@ export async function getStreamIdsByChatId(chatId: string): Promise<string[]> {
   return data.items.map((s) => s.id);
 }
 
+export type ChatRuntimeStatus = {
+  latestRun: {
+    id: string;
+    status: "running" | "succeeded" | "failed" | "cancelled";
+    inputSummary: string;
+    outputSummary?: string | null;
+    errorMessage?: string | null;
+    startedAt: string;
+    endedAt?: string | null;
+  } | null;
+};
+
+export async function getChatRuntimeStatus(
+  chatId: string,
+): Promise<ChatRuntimeStatus> {
+  return nestFetch(`/conversations/${chatId}/runtime-status`);
+}
+
+export async function stopChatRun(chatId: string): Promise<void> {
+  await nestFetch(`/chat/${chatId}/stop`, { method: "POST" });
+}
+
 // ===== Chat stream（AI-SDK 桥） =====
 
 export function getChatStreamUrl(): string {

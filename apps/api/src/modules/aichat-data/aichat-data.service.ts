@@ -308,6 +308,37 @@ export class AichatDataService {
     };
   }
 
+  async getRuntimeStatus(user: Phase1User, conversationId: string) {
+    await this.getOwnedConversation(user, conversationId);
+    const latestRun = await this.prisma.runtimeRunLog.findFirst({
+      where: { conversationId },
+      orderBy: { startedAt: "desc" },
+      select: {
+        id: true,
+        status: true,
+        inputSummary: true,
+        outputSummary: true,
+        errorMessage: true,
+        startedAt: true,
+        endedAt: true,
+      },
+    });
+
+    return {
+      latestRun: latestRun
+        ? {
+            id: latestRun.id,
+            status: latestRun.status,
+            inputSummary: latestRun.inputSummary,
+            outputSummary: latestRun.outputSummary,
+            errorMessage: latestRun.errorMessage,
+            startedAt: latestRun.startedAt.toISOString(),
+            endedAt: latestRun.endedAt?.toISOString() ?? null,
+          }
+        : null,
+    };
+  }
+
   // ---------- 归属校验工具 ----------
 
   private async getOwnedConversation(user: Phase1User, conversationId: string) {
