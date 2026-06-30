@@ -204,6 +204,11 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       mutateChatMessages();
     },
     onError: (error) => {
+      void Promise.all([
+        mutate(CHAT_HISTORY_KEY),
+        mutateRuntimeStatus(),
+        mutateChatMessages(),
+      ]);
       if (error.message?.includes("AI Gateway requires a valid credit card")) {
         setShowCreditCardAlert(true);
       } else if (error instanceof ChatbotError) {
