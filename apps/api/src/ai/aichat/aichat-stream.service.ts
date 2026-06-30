@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { KnowledgeType, MessageType } from "@prisma/client";
+import { KnowledgeType, MessageType, type RuntimeRunLog } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { Response } from "express";
 import { createUIMessageStream, pipeUIMessageStreamToResponse } from "ai";
@@ -482,6 +482,7 @@ export class AichatStreamService {
     runId?: string;
     canceled?: boolean;
     skipped?: boolean;
+    stale?: boolean;
   }> {
     // 1) 优先按 runId 直接 abort
     const directController = this.activeRunControllers.get(conversationIdOrRunId);
@@ -496,23 +497,28 @@ export class AichatStreamService {
     }
 
     // 2) 否则按 conversationId 找当前运行中的 controller
-    //    先校验会话归属，再取映射。若没有在跑的 run，返回 skipped。
+    //    先校验会话归属，再取映射。刷新/重启后 controller 可能丢失，
+    //    但 runtime-status 仍会从 DB 看到 running，所以需要兜底取消 DB 最新运行。
     await this.conversations.get(user, conversationIdOrRunId).catch(() => {
       throw new NotFoundException("会话不存在");
     });
     const conversationController = this.activeConversationControllers.get(conversationIdOrRunId);
-    if (!conversationController) {
-      return { ok: true, skipped: true };
+
+    if (conversationController) {
+      conversationController.abort();
     }
-    conversationController.abort();
+
     // 反查 runId：遍历 activeRunControllers 找到对应 controller
     let runId: string | undefined;
-    for (const [candidateRunId, candidateController] of this.activeRunControllers) {
-      if (candidateController === conversationController) {
-        runId = candidateRunId;
-        break;
+    if (conversationController) {
+      for (const [candidateRunId, candidateController] of this.activeRunControllers) {
+        if (candidateController === conversationController) {
+          runId = candidateRunId;
+          break;
+        }
       }
     }
+
     if (runId) {
       await this.runLogs.cancelRun({
         runId,
@@ -521,7 +527,65 @@ export class AichatStreamService {
       });
       return { ok: true, runId, canceled: true };
     }
+
+    const staleCancellation = await this.runLogs.cancelLatestRunningRunForConversation({
+      conversationId: conversationIdOrRunId,
+      canceledBy: user.id,
+      reason: "用户停止 aichat 生成",
+    });
+
+    if (staleCancellation) {
+      if (staleCancellation.changed) {
+        await this.recordStaleStopEvent(staleCancellation.run).catch((error) => {
+          this.logger.warn(
+            `aichat 停止事件落库失败 runId=${staleCancellation.run.id}：${serializeError(error)}`,
+          );
+        });
+      }
+      return {
+        ok: true,
+        runId: staleCancellation.run.id,
+        canceled: staleCancellation.changed,
+        skipped: !staleCancellation.changed,
+        stale: !conversationController,
+      };
+    }
+
     return { ok: true, skipped: true };
+  }
+
+  private async recordStaleStopEvent(
+    run: Pick<RuntimeRunLog, "id" | "projectId" | "startedAt">,
+  ) {
+    const stoppedAt = new Date().toISOString();
+    const event = createRuntimeEvent({
+      runId: run.id,
+      id: "cancelled",
+      kind: "status",
+      label: "用户已停止本次生成",
+      status: "completed",
+    });
+    const snapshot: RuntimeProcessSnapshot = {
+      runId: run.id,
+      status: "cancelled",
+      startedAt: run.startedAt.toISOString(),
+      endedAt: stoppedAt,
+      title: "已停止",
+      events: [event],
+    };
+
+    await this.runLogs.recordStreamEvent({
+      runId: run.id,
+      projectId: run.projectId,
+      eventType: "runtime_event",
+      payload: event,
+    });
+    await this.runLogs.recordStreamEvent({
+      runId: run.id,
+      projectId: run.projectId,
+      eventType: "runtime_finish",
+      payload: snapshot,
+    });
   }
 
   /** 移植自 copilot-prd-runtime.service.ts 的知识检索。 */

@@ -104,6 +104,28 @@ export class RuntimeRunLogService {
     return { changed: update.count > 0, run: current ?? run };
   }
 
+  async cancelLatestRunningRunForConversation(input: {
+    conversationId: string;
+    canceledBy: string;
+    reason: string;
+  }) {
+    const run = await this.prisma.runtimeRunLog.findFirst({
+      where: {
+        conversationId: input.conversationId,
+        status: RuntimeRunStatus.running,
+      },
+      orderBy: { startedAt: "desc" },
+    });
+
+    if (!run) return null;
+
+    return this.cancelRun({
+      runId: run.id,
+      canceledBy: input.canceledBy,
+      reason: input.reason,
+    });
+  }
+
   async isRunCancelled(runId: string) {
     const run = await this.prisma.runtimeRunLog.findUnique({
       where: { id: runId },

@@ -387,8 +387,18 @@ export async function getChatRuntimeStatus(
   return nestFetch(`/conversations/${chatId}/runtime-status`);
 }
 
-export async function stopChatRun(chatId: string): Promise<void> {
-  await nestFetch(`/chat/${chatId}/stop`, { method: "POST" });
+export type StopChatRunResponse = {
+  ok: boolean;
+  runId?: string;
+  canceled?: boolean;
+  skipped?: boolean;
+  stale?: boolean;
+};
+
+export async function stopChatRun(
+  chatId: string,
+): Promise<StopChatRunResponse> {
+  return nestFetch(`/chat/${chatId}/stop`, { method: "POST" });
 }
 
 // ===== Chat stream（AI-SDK 桥） =====

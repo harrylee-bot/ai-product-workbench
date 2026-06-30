@@ -32,7 +32,7 @@ import {
   stopChatRun,
 } from "@/lib/api/nest-client";
 import { ChatbotError } from "@/lib/errors";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, RuntimeProcessEvent } from "@/lib/types";
 import { fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 
 // v1: 单一固定模型。原 @/lib/ai/models 已删除；模型选择由 data-access agent 统一收敛。
@@ -85,7 +85,7 @@ function messagesSignature(messages: ChatMessage[]) {
 
 export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { setDataStream } = useDataStream();
+  const { setDataStream, setRuntimeProcess } = useDataStream();
   const { mutate } = useSWRConfig();
 
   const chatIdFromUrl = extractChatId(pathname);
@@ -221,19 +221,56 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     isServerRunRunning && status === "ready" ? "submitted" : status;
 
   const stopGeneration = useCallback(async () => {
-    await stop();
+    let stopError: unknown;
     try {
-      await stopChatRun(chatId);
-      mutateRuntimeStatus();
-      mutateChatMessages();
-      mutate(CHAT_HISTORY_KEY);
+      const result = await stopChatRun(chatId);
+      const stoppedAt = new Date().toISOString();
+      setRuntimeProcess((current) => {
+        const stopEvent: RuntimeProcessEvent = {
+          id: `${result.runId ?? current.runId ?? chatId}:client-cancelled:${stoppedAt}`,
+          runId: result.runId ?? current.runId,
+          kind: "status",
+          label: "用户已停止本次生成",
+          status: "completed",
+          createdAt: stoppedAt,
+        };
+        return {
+          ...current,
+          runId: current.runId ?? result.runId,
+          status: "cancelled",
+          endedAt: stoppedAt,
+          title: "已停止",
+          events: [...(current.events ?? []), stopEvent].slice(-80),
+        };
+      });
     } catch (error: any) {
+      stopError = error;
+    } finally {
+      await stop();
+      await Promise.all([
+        mutateRuntimeStatus(),
+        mutateChatMessages(),
+        mutate(CHAT_HISTORY_KEY),
+      ]);
+    }
+
+    if (stopError) {
       toast({
         type: "error",
-        description: error?.message || "停止生成失败，请稍后重试",
+        description:
+          stopError instanceof Error
+            ? stopError.message
+            : "停止生成失败，请稍后重试",
       });
     }
-  }, [chatId, mutate, mutateChatMessages, mutateRuntimeStatus, stop]);
+  }, [
+    chatId,
+    mutate,
+    mutateChatMessages,
+    mutateRuntimeStatus,
+    setRuntimeProcess,
+    stop,
+  ]);
 
   const loadedChatIds = useRef(new Set<string>());
 
