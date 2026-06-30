@@ -16,6 +16,7 @@ import type { Suggestion } from "@/lib/api/types";
 
 type TextArtifactMetadata = {
   suggestions: Suggestion[];
+  selectedText?: string;
 };
 
 export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
@@ -26,6 +27,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
 
     setMetadata({
       suggestions,
+      selectedText: "",
     });
   },
   onStreamPart: ({ streamPart, setMetadata, setArtifact }) => {
@@ -58,6 +60,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
     getDocumentContentById,
     isLoading,
     metadata,
+    setMetadata,
   }) => {
     if (isLoading) {
       return <DocumentSkeleton artifactKind="text" />;
@@ -83,6 +86,12 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
           content={content}
           currentVersionIndex={currentVersionIndex}
           isCurrentVersion={isCurrentVersion}
+          onSelectionChange={(selectedText) => {
+            setMetadata((currentMetadata) => ({
+              suggestions: currentMetadata?.suggestions ?? [],
+              selectedText,
+            }));
+          }}
           onSaveContent={onSaveContent}
           status={status}
           suggestions={isCurrentVersion && metadata ? metadata.suggestions : []}
@@ -149,14 +158,19 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
   toolbar: [
     {
       icon: <PenIcon />,
-      description: "润色全文",
-      onClick: ({ sendMessage }) => {
+      description: "润色选区/全文",
+      onClick: ({ documentId, selectedText, sendMessage }) => {
+        const trimmedSelection = selectedText?.trim();
+        const documentHint = documentId ? `当前画布文档 id：${documentId}\n\n` : "";
+
         sendMessage({
           role: "user",
           parts: [
             {
               type: "text",
-              text: "请对这份内容做最后润色，检查语法和表达，补充更清晰的小节标题，并保证整体阅读顺畅。",
+              text: trimmedSelection
+                ? `${documentHint}请修改现有画布，只润色我在画布中选中的这段对应内容，保持原意，不要改动其他未选中的内容。选中文本如下：\n\n${trimmedSelection}`
+                : "请对这份内容做最后润色，检查语法和表达，补充更清晰的小节标题，并保证整体阅读顺畅。",
             },
           ],
         });
@@ -164,14 +178,19 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
     },
     {
       icon: <MessageIcon />,
-      description: "补充建议",
-      onClick: ({ sendMessage }) => {
+      description: "补充选区建议",
+      onClick: ({ documentId, selectedText, sendMessage }) => {
+        const trimmedSelection = selectedText?.trim();
+        const documentHint = documentId ? `当前画布文档 id：${documentId}\n\n` : "";
+
         sendMessage({
           role: "user",
           parts: [
             {
               type: "text",
-              text: "请补充你认为能提升这份内容质量的建议。",
+              text: trimmedSelection
+                ? `${documentHint}请只针对我在画布中选中的这段内容补充改进建议，不要评价其他未选中的内容。选中文本如下：\n\n${trimmedSelection}`
+                : "请补充你认为能提升这份内容质量的建议。",
             },
           ],
         });

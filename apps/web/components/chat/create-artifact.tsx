@@ -23,14 +23,18 @@ type ArtifactAction<M = any> = {
   isDisabled?: (context: ArtifactActionContext<M>) => boolean;
 };
 
-export type ArtifactToolbarContext = {
+export type ArtifactToolbarContext<M = any> = {
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
+  content: string;
+  documentId?: string;
+  metadata?: M;
+  selectedText?: string;
 };
 
-export type ArtifactToolbarItem = {
+export type ArtifactToolbarItem<M = any> = {
   description: string;
   icon: ReactNode;
-  onClick: (context: ArtifactToolbarContext) => void;
+  onClick: (context: ArtifactToolbarContext<M>) => void;
 };
 
 type ArtifactContent<M = any> = {
@@ -59,7 +63,7 @@ type ArtifactConfig<T extends string, M = any> = {
   description: string;
   content: ComponentType<ArtifactContent<M>>;
   actions: ArtifactAction<M>[];
-  toolbar: ArtifactToolbarItem[];
+  toolbar: ArtifactToolbarItem<M>[];
   initialize?: (parameters: InitializeParameters<M>) => void;
   onStreamPart: (args: {
     setMetadata: Dispatch<SetStateAction<M>>;
@@ -73,7 +77,7 @@ export class Artifact<T extends string, M = any> {
   readonly description: string;
   readonly content: ComponentType<ArtifactContent<M>>;
   readonly actions: ArtifactAction<M>[];
-  readonly toolbar: ArtifactToolbarItem[];
+  readonly toolbar: ArtifactToolbarItem<M>[];
   readonly initialize?: (parameters: InitializeParameters) => void;
   readonly onStreamPart: (args: {
     setMetadata: Dispatch<SetStateAction<M>>;

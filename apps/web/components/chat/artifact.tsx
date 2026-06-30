@@ -386,12 +386,19 @@ function PureArtifact({
                 />
               }
               artifactKind={artifact.kind}
+              content={artifact.content}
               consoleError={consoleError}
               documentId={artifact.documentId}
               isToolbarVisible={isToolbarVisible}
+              metadata={metadata}
               onClose={() => {
                 setArtifact((prev) => ({ ...prev, isVisible: false }));
               }}
+              selectedText={
+                typeof metadata?.selectedText === "string"
+                  ? metadata.selectedText
+                  : undefined
+              }
               sendMessage={sendMessage}
               setIsToolbarVisible={setIsToolbarVisible}
               setMessages={setMessages}

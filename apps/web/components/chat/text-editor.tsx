@@ -36,6 +36,7 @@ type EditorProps = {
   onSuggestionSelect?: (suggestion: UISuggestion | null) => void;
   onSuggestionApply?: () => void;
   activeSuggestion?: UISuggestion | null;
+  onSelectionChange?: (selectedText: string) => void;
 };
 
 function PureEditor({
@@ -43,6 +44,7 @@ function PureEditor({
   onSaveContent,
   suggestions,
   status,
+  onSelectionChange,
 }: EditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<EditorView | null>(null);
@@ -50,6 +52,24 @@ function PureEditor({
     null
   );
   const suggestionsRef = useRef<UISuggestion[]>([]);
+  const selectedTextRef = useRef("");
+
+  const emitSelectionChange = useCallback(() => {
+    const view = editorRef.current;
+    if (!view || !onSelectionChange) {
+      return;
+    }
+
+    const { from, to, empty } = view.state.selection;
+    const selectedText = empty
+      ? ""
+      : view.state.doc.textBetween(from, to, "\n\n", "\n").trim();
+
+    if (selectedTextRef.current !== selectedText) {
+      selectedTextRef.current = selectedText;
+      onSelectionChange(selectedText);
+    }
+  }, [onSelectionChange]);
 
   useEffect(() => {
     if (containerRef.current && !editorRef.current) {
@@ -108,10 +128,11 @@ function PureEditor({
             editorRef,
             onSaveContent,
           });
+          emitSelectionChange();
         },
       });
     }
-  }, [onSaveContent]);
+  }, [emitSelectionChange, onSaveContent]);
 
   useEffect(() => {
     if (editorRef.current && content) {
@@ -235,7 +256,8 @@ function areEqual(prevProps: EditorProps, nextProps: EditorProps) {
     prevProps.isCurrentVersion === nextProps.isCurrentVersion &&
     !(prevProps.status === "streaming" && nextProps.status === "streaming") &&
     prevProps.content === nextProps.content &&
-    prevProps.onSaveContent === nextProps.onSaveContent
+    prevProps.onSaveContent === nextProps.onSaveContent &&
+    prevProps.onSelectionChange === nextProps.onSelectionChange
   );
 }
 

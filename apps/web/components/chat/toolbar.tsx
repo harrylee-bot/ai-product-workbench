@@ -23,7 +23,10 @@ import {
 } from "@/components/ui/tooltip";
 import type { ChatMessage } from "@/lib/types";
 import { type ArtifactKind, artifactDefinitions } from "./artifact";
-import type { ArtifactToolbarItem } from "./create-artifact";
+import type {
+  ArtifactToolbarContext,
+  ArtifactToolbarItem,
+} from "./create-artifact";
 import { ArrowUpIcon, StopIcon, SummarizeIcon } from "./icons";
 
 type ToolProps = {
@@ -35,11 +38,8 @@ type ToolProps = {
   setIsToolbarVisible?: Dispatch<SetStateAction<boolean>>;
   isAnimating: boolean;
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
-  onClick: ({
-    sendMessage,
-  }: {
-    sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
-  }) => void;
+  toolbarContext: ArtifactToolbarContext;
+  onClick: (context: ArtifactToolbarContext) => void;
 };
 
 const Tool = ({
@@ -51,6 +51,7 @@ const Tool = ({
   setIsToolbarVisible,
   isAnimating,
   sendMessage,
+  toolbarContext,
   onClick,
 }: ToolProps) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -75,7 +76,7 @@ const Tool = ({
 
     if (selectedTool === description) {
       setSelectedTool(null);
-      onClick({ sendMessage });
+      onClick({ ...toolbarContext, sendMessage });
     } else {
       setSelectedTool(description);
     }
@@ -247,12 +248,14 @@ export const Tools = ({
   sendMessage,
   isAnimating,
   tools,
+  toolbarContext,
 }: {
   selectedTool: string | null;
   setSelectedTool: Dispatch<SetStateAction<string | null>>;
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
   isAnimating: boolean;
   tools: ArtifactToolbarItem[];
+  toolbarContext: ArtifactToolbarContext;
 }) => {
   return (
     <motion.div
@@ -271,6 +274,7 @@ export const Tools = ({
           selectedTool={selectedTool}
           sendMessage={sendMessage}
           setSelectedTool={setSelectedTool}
+          toolbarContext={toolbarContext}
         />
       ))}
     </motion.div>
@@ -306,6 +310,9 @@ const PureToolbar = ({
   artifactKind,
   consoleError,
   documentId,
+  content,
+  metadata,
+  selectedText,
   artifactActions,
   onClose,
 }: {
@@ -318,6 +325,9 @@ const PureToolbar = ({
   artifactKind: ArtifactKind;
   consoleError?: string;
   documentId?: string;
+  content: string;
+  metadata?: unknown;
+  selectedText?: string;
   artifactActions?: ReactNode;
   onClose?: () => void;
 }) => {
@@ -454,6 +464,13 @@ const PureToolbar = ({
               selectedTool={selectedTool}
               sendMessage={sendMessage}
               setSelectedTool={setSelectedTool}
+              toolbarContext={{
+                content,
+                documentId,
+                metadata,
+                selectedText,
+                sendMessage,
+              }}
               tools={toolsByArtifactKind}
             />
           </>
@@ -471,6 +488,15 @@ export const Toolbar = memo(PureToolbar, (prevProps, nextProps) => {
     return false;
   }
   if (prevProps.artifactKind !== nextProps.artifactKind) {
+    return false;
+  }
+  if (prevProps.content !== nextProps.content) {
+    return false;
+  }
+  if (prevProps.documentId !== nextProps.documentId) {
+    return false;
+  }
+  if (prevProps.selectedText !== nextProps.selectedText) {
     return false;
   }
   if (prevProps.consoleError !== nextProps.consoleError) {
