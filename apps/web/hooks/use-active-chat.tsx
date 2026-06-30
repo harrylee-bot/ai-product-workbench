@@ -24,6 +24,7 @@ import type { VisibilityType } from "@/components/chat/visibility-selector";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import type { Vote } from "@/lib/api/types";
 import {
+  type ChatRuntimeStatus,
   getChatMessages,
   getChatRuntimeStatus,
   getChatStreamUrl,
@@ -56,6 +57,7 @@ type ActiveChatContextValue = {
   setCurrentModelId: (id: string) => void;
   showCreditCardAlert: boolean;
   setShowCreditCardAlert: Dispatch<SetStateAction<boolean>>;
+  runtimeStatus?: ChatRuntimeStatus;
 };
 
 const ActiveChatContext = createContext<ActiveChatContextValue | null>(null);
@@ -343,6 +345,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       setCurrentModelId,
       showCreditCardAlert,
       setShowCreditCardAlert,
+      runtimeStatus,
     }),
     [
       chatId,
@@ -361,6 +364,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       currentModelId,
       showCreditCardAlert,
       displayedStatus,
+      runtimeStatus,
     ]
   );
 

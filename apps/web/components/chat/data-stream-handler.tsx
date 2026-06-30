@@ -4,13 +4,13 @@ import type { DataUIPart } from "ai";
 import { useEffect } from "react";
 import { useSWRConfig } from "swr";
 import { initialArtifactData, useArtifact } from "@/hooks/use-artifact";
-import type { CustomUIDataTypes } from "@/lib/types";
+import type { CustomUIDataTypes, RuntimeProcessEvent } from "@/lib/types";
 import { artifactDefinitions, type ArtifactKind } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 import { CHAT_HISTORY_KEY } from "./sidebar-history";
 
 export function DataStreamHandler() {
-  const { dataStream, setDataStream } = useDataStream();
+  const { dataStream, setDataStream, setRuntimeProcess } = useDataStream();
   const { mutate } = useSWRConfig();
 
   const { artifact, setArtifact, setMetadata } = useArtifact();
@@ -26,6 +26,40 @@ export function DataStreamHandler() {
     let currentArtifactKind = artifact.kind;
 
     for (const delta of newDeltas) {
+      if (delta.type === "data-runtime-start") {
+        setRuntimeProcess({
+          status: delta.data.status ?? "running",
+          runId: delta.data.runId,
+          startedAt: delta.data.startedAt,
+          endedAt: delta.data.endedAt ?? null,
+          title: delta.data.title ?? "思考中...",
+          events: delta.data.events ?? [],
+        });
+        continue;
+      }
+
+      if (delta.type === "data-runtime-event") {
+        setRuntimeProcess((current) => ({
+          ...current,
+          status: current.status === "idle" ? "running" : current.status,
+          events: mergeRuntimeEvent(current.events ?? [], delta.data),
+        }));
+        continue;
+      }
+
+      if (delta.type === "data-runtime-finish") {
+        setRuntimeProcess((current) => ({
+          ...current,
+          ...delta.data,
+          status: delta.data.status ?? current.status,
+          endedAt: delta.data.endedAt ?? new Date().toISOString(),
+          events: delta.data.events
+            ? mergeRuntimeEvents(current.events ?? [], delta.data.events)
+            : current.events,
+        }));
+        continue;
+      }
+
       if (delta.type === "data-chat-title") {
         mutate(CHAT_HISTORY_KEY);
         continue;
@@ -91,9 +125,37 @@ export function DataStreamHandler() {
         }
       });
     }
-  }, [dataStream, setArtifact, setMetadata, artifact, setDataStream, mutate]);
+  }, [
+    dataStream,
+    setArtifact,
+    setMetadata,
+    artifact,
+    setDataStream,
+    setRuntimeProcess,
+    mutate,
+  ]);
 
   return null;
+}
+
+function mergeRuntimeEvents(
+  current: RuntimeProcessEvent[],
+  incoming: RuntimeProcessEvent[],
+) {
+  return incoming.reduce(mergeRuntimeEvent, current);
+}
+
+function mergeRuntimeEvent(
+  current: RuntimeProcessEvent[],
+  incoming: RuntimeProcessEvent,
+) {
+  const index = current.findIndex((item) => item.id === incoming.id);
+  if (index >= 0) {
+    const next = current.slice();
+    next[index] = { ...next[index], ...incoming };
+    return next.slice(-80);
+  }
+  return [...current, incoming].slice(-80);
 }
 
 function kindForStreamPart(

@@ -19,6 +19,25 @@ export type UIMessageStreamWriter = {
   write: (part: Record<string, unknown>) => void;
 };
 
+export type RuntimeProcessEvent = {
+  id: string;
+  runId?: string;
+  kind: "status" | "knowledge" | "tool" | "artifact" | "document" | "error";
+  label: string;
+  detail?: string;
+  status: "running" | "completed" | "failed";
+  createdAt: string;
+};
+
+export type RuntimeProcessSnapshot = {
+  runId?: string;
+  status: "idle" | "running" | "succeeded" | "failed" | "cancelled";
+  startedAt?: string;
+  endedAt?: string | null;
+  title?: string;
+  events?: RuntimeProcessEvent[];
+};
+
 /** 桥接上下文：跟踪当前文本 part 与 final action 过滤状态，避免重复发控制 part。 */
 export type BridgeContext = {
   assistantDeltaFilter: AssistantDeltaFilterState;
@@ -26,6 +45,7 @@ export type BridgeContext = {
   textBuffer: string;
   textStarted: boolean;
   emittedToolCallIds: Set<string>;
+  toolCallNames: Map<string, string>;
 };
 
 export function createBridgeContext(): BridgeContext {
@@ -35,7 +55,103 @@ export function createBridgeContext(): BridgeContext {
     textBuffer: "",
     textStarted: false,
     emittedToolCallIds: new Set(),
+    toolCallNames: new Map(),
   };
+}
+
+export function emitRuntimeStart(
+  writer: UIMessageStreamWriter,
+  snapshot: RuntimeProcessSnapshot,
+): void {
+  writer.write({
+    type: "data-runtime-start",
+    data: snapshot,
+    transient: true,
+  });
+}
+
+export function emitRuntimeEvent(
+  writer: UIMessageStreamWriter,
+  event: RuntimeProcessEvent,
+): void {
+  writer.write({
+    type: "data-runtime-event",
+    data: event,
+    transient: true,
+  });
+}
+
+export function emitRuntimeFinish(
+  writer: UIMessageStreamWriter,
+  snapshot: RuntimeProcessSnapshot,
+): void {
+  writer.write({
+    type: "data-runtime-finish",
+    data: snapshot,
+    transient: true,
+  });
+}
+
+export function runtimeEventsFromDeerFlow(
+  event: DeerFlowRuntimeEvent,
+  ctx: BridgeContext,
+  runId: string,
+): RuntimeProcessEvent[] {
+  const now = new Date().toISOString();
+  const events: RuntimeProcessEvent[] = [];
+
+  if (event.event === "gateway-upload") {
+    events.push({
+      id: `${runId}:gateway-upload`,
+      runId,
+      kind: "artifact",
+      label: "已同步附件到 DeerFlow",
+      detail: event.content,
+      status: "completed",
+      createdAt: now,
+    });
+  }
+
+  if (event.event === "gateway-artifacts") {
+    events.push({
+      id: `${runId}:gateway-artifacts`,
+      runId,
+      kind: "artifact",
+      label: "已同步 DeerFlow 产物",
+      detail: event.content,
+      status: "completed",
+      createdAt: now,
+    });
+  }
+
+  for (const call of event.toolCalls ?? []) {
+    if (!call.id || !call.name) continue;
+    ctx.toolCallNames.set(call.id, call.name);
+    events.push({
+      id: `${runId}:tool:${call.id}:input`,
+      runId,
+      kind: "tool",
+      label: `调用 ${formatToolName(call.name)}`,
+      detail: summarizeUnknown(call.args),
+      status: "running",
+      createdAt: now,
+    });
+  }
+
+  if (event.messageRole === "tool" && event.toolCallId) {
+    const toolName = ctx.toolCallNames.get(event.toolCallId) ?? "工具";
+    events.push({
+      id: `${runId}:tool:${event.toolCallId}:output`,
+      runId,
+      kind: "tool",
+      label: `${formatToolName(toolName)} 已完成`,
+      detail: summarizeUnknown(event.toolResult ?? event.content),
+      status: "completed",
+      createdAt: now,
+    });
+  }
+
+  return events;
 }
 
 /**
@@ -65,6 +181,7 @@ export function emitDeerFlowEvent(
       const toolName = call.name;
       if (!toolCallId || !toolName) continue;
       ctx.emittedToolCallIds.add(toolCallId);
+      ctx.toolCallNames.set(toolCallId, toolName);
       writer.write({ type: "tool-input-start", toolCallId, toolName });
       writer.write({ type: "tool-input-available", toolCallId, toolName, input: call.args ?? {} });
     }
@@ -183,6 +300,48 @@ function emitTextDelta(delta: string, writer: UIMessageStreamWriter, ctx: Bridge
   writer.write({ type: "text-delta", id: "text-1", delta });
   ctx.textBuffer += delta;
   ctx.hasEmittedText = true;
+}
+
+export function createRuntimeEvent(input: {
+  runId: string;
+  id: string;
+  kind: RuntimeProcessEvent["kind"];
+  label: string;
+  detail?: string;
+  status?: RuntimeProcessEvent["status"];
+}): RuntimeProcessEvent {
+  return {
+    id: `${input.runId}:${input.id}`,
+    runId: input.runId,
+    kind: input.kind,
+    label: input.label,
+    detail: input.detail,
+    status: input.status ?? "completed",
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function formatToolName(name: string) {
+  return name
+    .replace(/^mcp__/, "")
+    .replace(/__/g, " / ")
+    .replace(/_/g, " ")
+    .trim();
+}
+
+function summarizeUnknown(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  let text: string;
+  if (typeof value === "string") {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value, null, 2);
+    } catch {
+      text = String(value);
+    }
+  }
+  return text.replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
 /** 重新导出供 service 直接取用。 */

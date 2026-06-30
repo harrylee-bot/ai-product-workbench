@@ -1,7 +1,8 @@
 "use client";
 import type { UseChatHelpers } from "@ai-sdk/react";
+import { useEffect, useMemo, useState } from "react";
 import type { Vote } from "@/lib/api/types";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, RuntimeProcessSnapshot } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import { Shimmer } from "../ai-elements/shimmer";
@@ -32,6 +33,8 @@ const PurePreviewMessage = ({
   isReadonly,
   requiresScrollPadding: _requiresScrollPadding,
   onEdit,
+  runtimeProcess,
+  showRuntimeProcess,
 }: {
   addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
   chatId: string;
@@ -43,6 +46,8 @@ const PurePreviewMessage = ({
   isReadonly: boolean;
   requiresScrollPadding: boolean;
   onEdit?: (message: ChatMessage) => void;
+  runtimeProcess?: RuntimeProcessSnapshot;
+  showRuntimeProcess?: boolean;
 }) => {
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
@@ -323,14 +328,20 @@ const PurePreviewMessage = ({
     />
   );
 
+  const runtimePanel =
+    isAssistant &&
+    (isLoading ||
+      (showRuntimeProcess &&
+        runtimeProcess?.status !== "idle" &&
+        Boolean(runtimeProcess?.events?.length))) ? (
+      <RuntimeProcessPanel runtimeProcess={runtimeProcess} />
+    ) : null;
+
   const content = isThinking ? (
-    <div className="flex h-[calc(13px*1.65)] items-center text-[13px] leading-[1.65]">
-      <Shimmer className="font-medium" duration={1}>
-        思考中...
-      </Shimmer>
-    </div>
+    runtimePanel
   ) : (
     <>
+      {runtimePanel}
       {attachments}
       {parts}
       {actions}
@@ -370,7 +381,11 @@ const PurePreviewMessage = ({
 
 export const PreviewMessage = PurePreviewMessage;
 
-export const ThinkingMessage = () => {
+export const ThinkingMessage = ({
+  runtimeProcess,
+}: {
+  runtimeProcess?: RuntimeProcessSnapshot;
+}) => {
   return (
     <div
       className="group/message w-full"
@@ -384,12 +399,121 @@ export const ThinkingMessage = () => {
           </div>
         </div>
 
-        <div className="flex h-[calc(13px*1.65)] items-center text-[13px] leading-[1.65]">
-          <Shimmer className="font-medium" duration={1}>
-            思考中...
-          </Shimmer>
-        </div>
+        <RuntimeProcessPanel runtimeProcess={runtimeProcess} />
       </div>
     </div>
   );
 };
+
+function RuntimeProcessPanel({
+  runtimeProcess,
+}: {
+  runtimeProcess?: RuntimeProcessSnapshot;
+}) {
+  const startedAt = runtimeProcess?.startedAt;
+  const endedAt = runtimeProcess?.endedAt ?? null;
+  const isRunning =
+    runtimeProcess?.status === "running" || runtimeProcess?.status === "idle";
+  const elapsedMs = useElapsedMs(startedAt, endedAt, isRunning);
+  const events = runtimeProcess?.events ?? [];
+  const visibleEvents = useMemo(() => events.slice(-8), [events]);
+
+  return (
+    <div className="flex max-w-[min(100%,680px)] flex-col gap-2 text-[13px] leading-[1.65]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {isRunning ? (
+          <Shimmer className="font-medium text-muted-foreground" duration={1}>
+            思考中...
+          </Shimmer>
+        ) : (
+          <span className="font-medium text-muted-foreground">
+            {statusText(runtimeProcess?.status)}
+          </span>
+        )}
+        {startedAt ? (
+          <span className="text-[12px] tabular-nums text-muted-foreground">
+            已处理 {formatElapsed(elapsedMs)}
+          </span>
+        ) : null}
+      </div>
+
+      {visibleEvents.length > 0 ? (
+        <div className="rounded-lg border border-border/50 bg-muted/25 px-3 py-2">
+          <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">
+            思考过程
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {visibleEvents.map((event) => (
+              <div className="flex min-w-0 gap-2" key={event.id}>
+                <span
+                  className={cn(
+                    "mt-[0.55em] size-1.5 shrink-0 rounded-full",
+                    event.status === "failed"
+                      ? "bg-red-500"
+                      : event.status === "completed"
+                        ? "bg-emerald-500"
+                        : "animate-pulse bg-muted-foreground/60"
+                  )}
+                />
+                <div className="min-w-0">
+                  <div className="break-words text-foreground/85">
+                    {event.label}
+                  </div>
+                  {event.detail ? (
+                    <div className="line-clamp-2 break-words text-[12px] text-muted-foreground">
+                      {event.detail}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function useElapsedMs(
+  startedAt?: string,
+  endedAt?: string | null,
+  isRunning = false,
+) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isRunning || !startedAt) {
+      return;
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isRunning, startedAt]);
+
+  if (!startedAt) {
+    return 0;
+  }
+
+  const start = new Date(startedAt).getTime();
+  const end = endedAt ? new Date(endedAt).getTime() : now;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return 0;
+  }
+  return Math.max(0, end - start);
+}
+
+function formatElapsed(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function statusText(status?: RuntimeProcessSnapshot["status"]) {
+  if (status === "failed") return "生成失败";
+  if (status === "cancelled") return "已停止";
+  if (status === "succeeded") return "已完成";
+  return "思考中...";
+}

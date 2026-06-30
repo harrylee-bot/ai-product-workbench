@@ -15,12 +15,19 @@ import { toInputJson } from "../ai-vibe.helpers";
 import { classifyRequirementMode, type RequirementMode } from "../requirement-mode.helper";
 import {
   createBridgeContext,
+  createRuntimeEvent,
   emitDeerFlowEvent,
   emitPrdArtifact,
   emitPrdDocumentPreview,
   emitPrototypeArtifact,
+  emitRuntimeEvent,
+  emitRuntimeFinish,
+  emitRuntimeStart,
   emitStaticText,
   finishText,
+  runtimeEventsFromDeerFlow,
+  type RuntimeProcessEvent,
+  type RuntimeProcessSnapshot,
   type UIMessageStreamWriter,
 } from "./aichat-ai-sdk-bridge";
 import type { ChatStreamDto } from "./aichat-stream.dto";
@@ -109,18 +116,102 @@ export class AichatStreamService {
           runId: run.id,
           getContent: () => ctx.textBuffer.trim(),
         });
+        const startedAt = run.startedAt.toISOString();
+        const runtimeEvents: RuntimeProcessEvent[] = [];
+        const recordRuntimeEvent = (eventType: string, payload: unknown) => {
+          void this.runLogs.recordStreamEvent({
+            runId: run.id,
+            projectId,
+            eventType,
+            payload,
+          }).catch((error) => {
+            this.logger.warn(
+              `运行过程事件落库失败 runId=${run.id}：${serializeError(error)}`,
+            );
+          });
+        };
+        const publishRuntimeEvent = (event: RuntimeProcessEvent) => {
+          runtimeEvents.push(event);
+          emitRuntimeEvent(streamWriter, event);
+          recordRuntimeEvent("runtime_event", event);
+        };
+        const publishRuntimeFinish = (
+          status: RuntimeProcessSnapshot["status"],
+          extraEvents: RuntimeProcessEvent[] = [],
+        ) => {
+          const endedAt = new Date().toISOString();
+          for (const event of extraEvents) {
+            runtimeEvents.push(event);
+          }
+          const snapshot: RuntimeProcessSnapshot = {
+            runId: run.id,
+            status,
+            startedAt,
+            endedAt,
+            events: extraEvents,
+            title:
+              status === "succeeded"
+                ? "已完成"
+                : status === "failed"
+                  ? "生成失败"
+                  : status === "cancelled"
+                    ? "已停止"
+                    : "思考中...",
+          };
+          emitRuntimeFinish(streamWriter, snapshot);
+          recordRuntimeEvent("runtime_finish", {
+            ...snapshot,
+            events: runtimeEvents,
+          });
+        };
         res.on("close", markClientClosed);
 
         try {
           streamWriter.write({ type: "start", messageId: randomUUID() });
+          const startSnapshot: RuntimeProcessSnapshot = {
+            runId: run.id,
+            status: "running",
+            startedAt,
+            title: "思考中...",
+            events: [],
+          };
+          emitRuntimeStart(streamWriter, startSnapshot);
+          recordRuntimeEvent("runtime_start", startSnapshot);
+          publishRuntimeEvent(createRuntimeEvent({
+            runId: run.id,
+            id: "request-received",
+            kind: "status",
+            label: "已接收请求，开始理解任务",
+          }));
 
+          publishRuntimeEvent(createRuntimeEvent({
+            runId: run.id,
+            id: "knowledge-start",
+            kind: "knowledge",
+            label: "正在检索项目知识库",
+            status: "running",
+          }));
           const knowledgeContext = await this.retrieveKnowledge({
             projectId,
             conversationId,
             runId: run.id,
             message: content,
           });
+          publishRuntimeEvent(createRuntimeEvent({
+            runId: run.id,
+            id: "knowledge-complete",
+            kind: "knowledge",
+            label: `已召回 ${knowledgeContext.length} 条知识上下文`,
+            detail: knowledgeContext.slice(0, 4).map((item) => item.title).join("、"),
+          }));
 
+          publishRuntimeEvent(createRuntimeEvent({
+            runId: run.id,
+            id: "deerflow-start",
+            kind: "status",
+            label: "正在调用 DeerFlow 生成方案",
+            status: "running",
+          }));
           const result = await this.deerFlow.runTurn({
             runId: run.id,
             projectId,
@@ -134,6 +225,9 @@ export class AichatStreamService {
             onEvent: (event) => {
               if (controller.signal.aborted) return;
               const previousTextLength = ctx.textBuffer.length;
+              for (const runtimeEvent of runtimeEventsFromDeerFlow(event, ctx, run.id)) {
+                publishRuntimeEvent(runtimeEvent);
+              }
               emitDeerFlowEvent(event, streamWriter, ctx);
               if (ctx.textBuffer.length > previousTextLength) {
                 void assistantDraft.persist();
@@ -146,6 +240,13 @@ export class AichatStreamService {
           await assistantDraft.persist(true);
 
           // 落地 final action
+          publishRuntimeEvent(createRuntimeEvent({
+            runId: run.id,
+            id: "apply-final-action",
+            kind: "document",
+            label: "正在整理最终产物并写入工作台",
+            status: "running",
+          }));
           const applied = await this.finalActionApplier.apply({
             projectId,
             userId: user.id,
@@ -154,12 +255,26 @@ export class AichatStreamService {
             artifacts: result.artifacts,
             assistantText: result.assistantText,
           });
+          publishRuntimeEvent(createRuntimeEvent({
+            runId: run.id,
+            id: "apply-final-action",
+            kind: "document",
+            label: "最终产物已写入工作台",
+          }));
 
           if (applied.prdDocument) {
             emitStaticText(result.finalAction.message || "PRD 已生成，请在右侧文档区检查。", streamWriter, ctx);
             finishText(streamWriter, ctx);
             emitPrdArtifact(applied.prdDocument, streamWriter);
             emitPrdDocumentPreview(applied.prdDocument, streamWriter);
+            const prdReadyEvent = createRuntimeEvent({
+              runId: run.id,
+              id: "prd-ready",
+              kind: "document",
+              label: "PRD 已生成，正在唤起右侧画布",
+              detail: applied.prdDocument.title,
+            });
+            publishRuntimeEvent(prdReadyEvent);
             deliveredUserVisibleResult = true;
             await assistantDraft.finalize({
               projectId,
@@ -188,10 +303,19 @@ export class AichatStreamService {
               },
               "PRD 已生成",
             );
+            publishRuntimeFinish("succeeded");
           } else if (applied.prototypeArtifact) {
             emitStaticText(result.finalAction.message || "原型已生成，请在右侧预览区查看。", streamWriter, ctx);
             finishText(streamWriter, ctx);
             emitPrototypeArtifact(applied.prototypeArtifact, streamWriter);
+            const prototypeReadyEvent = createRuntimeEvent({
+              runId: run.id,
+              id: "prototype-ready",
+              kind: "document",
+              label: "原型已生成，正在唤起右侧画布",
+              detail: applied.prototypeArtifact.title,
+            });
+            publishRuntimeEvent(prototypeReadyEvent);
             deliveredUserVisibleResult = true;
             await assistantDraft.finalize({
               projectId,
@@ -203,6 +327,7 @@ export class AichatStreamService {
                 source: "aichat",
                 runId: run.id,
                 prototypeArtifactId: applied.prototypeArtifact.id,
+                prototypeArtifactTitle: applied.prototypeArtifact.title,
                 finalActionType: result.finalAction.type,
                 threadId: result.threadId,
               }),
@@ -219,6 +344,7 @@ export class AichatStreamService {
               },
               "原型已生成",
             );
+            publishRuntimeFinish("succeeded");
           } else {
             // 无产物：把 finalAction.message 作为文本下发（若未在 chunk 流里）
             const message = result.finalAction.message || ctx.textBuffer.trim() || result.assistantText || "本轮未生成产物。";
@@ -250,11 +376,21 @@ export class AichatStreamService {
               },
               message,
             );
+            publishRuntimeFinish("succeeded");
           }
 
           streamWriter.write({ type: "finish" });
         } catch (error) {
           if (controller.signal.aborted) {
+            const cancelledEvent = createRuntimeEvent({
+              runId: run.id,
+              id: "cancelled",
+              kind: "status",
+              label: "用户已停止本次生成",
+              status: "completed",
+            });
+            publishRuntimeEvent(cancelledEvent);
+            publishRuntimeFinish("cancelled");
             await this.runLogs.cancelRun({
               runId: run.id,
               canceledBy: user.id,
@@ -285,6 +421,16 @@ export class AichatStreamService {
           }
 
           this.logger.error(`aichat stream 失败 runId=${run.id}：${serializeError(error)}`);
+          const failedEvent = createRuntimeEvent({
+            runId: run.id,
+            id: "failed",
+            kind: "error",
+            label: "生成失败",
+            detail: serializeError(error),
+            status: "failed",
+          });
+          publishRuntimeEvent(failedEvent);
+          publishRuntimeFinish("failed");
           await this.runLogs.failRun(run.id, error).catch((failError) => {
             this.logger.error(`aichat run 失败状态写入失败 runId=${run.id}：${serializeError(failError)}`);
           });

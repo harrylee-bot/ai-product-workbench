@@ -22,6 +22,10 @@ import { cn } from "@/lib/utils";
 import { Artifact } from "./artifact";
 import { ChatHeader } from "./chat-header";
 import { DataStreamHandler } from "./data-stream-handler";
+import {
+  initialRuntimeProcess,
+  useDataStream,
+} from "./data-stream-provider";
 import { submitEditedMessage } from "./message-editor";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
@@ -46,6 +50,7 @@ export function ChatShell() {
     setCurrentModelId,
     showCreditCardAlert,
     setShowCreditCardAlert,
+    runtimeStatus,
   } = useActiveChat();
 
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
@@ -54,6 +59,8 @@ export function ChatShell() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
   const { setArtifact } = useArtifact();
+  const { setRuntimeProcess } = useDataStream();
+  const autoOpenedArtifactIdRef = useRef<string | null>(null);
 
   const stopRef = useRef(stop);
   stopRef.current = stop;
@@ -64,10 +71,45 @@ export function ChatShell() {
       prevChatIdRef.current = chatId;
       stopRef.current();
       setArtifact(initialArtifactData);
+      setRuntimeProcess(initialRuntimeProcess);
+      autoOpenedArtifactIdRef.current = null;
       setEditingMessage(null);
       setAttachments([]);
     }
-  }, [chatId, setArtifact]);
+  }, [chatId, setArtifact, setRuntimeProcess]);
+
+  useEffect(() => {
+    const latestArtifact = findLatestMessageArtifact(messages);
+    if (!latestArtifact || status !== "ready") {
+      return;
+    }
+    if (autoOpenedArtifactIdRef.current === latestArtifact.id) {
+      return;
+    }
+
+    autoOpenedArtifactIdRef.current = latestArtifact.id;
+    setArtifact((currentArtifact) => {
+      if (
+        currentArtifact.status === "streaming" &&
+        currentArtifact.documentId !== latestArtifact.id
+      ) {
+        return currentArtifact;
+      }
+
+      return {
+        ...currentArtifact,
+        documentId: latestArtifact.id,
+        kind: latestArtifact.kind,
+        title: latestArtifact.title,
+        content:
+          currentArtifact.documentId === latestArtifact.id
+            ? currentArtifact.content
+            : "",
+        status: "idle",
+        isVisible: true,
+      };
+    });
+  }, [messages, setArtifact, status]);
 
   return (
     <>
@@ -104,6 +146,7 @@ export function ChatShell() {
               selectedModelId={currentModelId}
               setMessages={setMessages}
               status={status}
+              runtimeStatus={runtimeStatus}
               votes={votes}
             />
 
@@ -201,4 +244,40 @@ export function ChatShell() {
       </AlertDialog>
     </>
   );
+}
+
+function findLatestMessageArtifact(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "assistant") continue;
+
+    for (
+      let partIndex = (message.parts?.length ?? 0) - 1;
+      partIndex >= 0;
+      partIndex -= 1
+    ) {
+      const part = message.parts?.[partIndex] as
+        | {
+            type?: string;
+            state?: string;
+            output?: { id?: string; title?: string; kind?: string };
+          }
+        | undefined;
+
+      if (
+        part?.type === "tool-createDocument" &&
+        part.state === "output-available" &&
+        part.output?.id &&
+        (part.output.kind === "text" || part.output.kind === "code")
+      ) {
+        return {
+          id: part.output.id,
+          title: part.output.title || "产物",
+          kind: part.output.kind,
+        } as const;
+      }
+    }
+  }
+
+  return null;
 }

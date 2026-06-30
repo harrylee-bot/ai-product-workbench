@@ -313,16 +313,24 @@ export class AichatDataService {
     const latestRun = await this.prisma.runtimeRunLog.findFirst({
       where: { conversationId },
       orderBy: { startedAt: "desc" },
-      select: {
-        id: true,
-        status: true,
-        inputSummary: true,
-        outputSummary: true,
-        errorMessage: true,
-        startedAt: true,
-        endedAt: true,
+      include: {
+        streamEvents: {
+          where: { eventType: { in: ["runtime_event", "runtime_finish"] } },
+          orderBy: { createdAt: "asc" },
+          take: 80,
+          select: {
+            id: true,
+            eventType: true,
+            payload: true,
+            createdAt: true,
+          },
+        },
       },
     });
+    const events = latestRun?.streamEvents
+      .filter((event) => event.eventType === "runtime_event")
+      .map((event) => event.payload)
+      .filter(isRuntimeProcessEvent) ?? [];
 
     return {
       latestRun: latestRun
@@ -334,6 +342,7 @@ export class AichatDataService {
             errorMessage: latestRun.errorMessage,
             startedAt: latestRun.startedAt.toISOString(),
             endedAt: latestRun.endedAt?.toISOString() ?? null,
+            events,
           }
         : null,
     };
@@ -403,4 +412,24 @@ export class AichatDataService {
     }
     return document;
   }
+}
+
+function isRuntimeProcessEvent(value: unknown): value is {
+  id: string;
+  kind: string;
+  label: string;
+  status: string;
+  createdAt: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.kind === "string" &&
+    typeof record.label === "string" &&
+    typeof record.status === "string" &&
+    typeof record.createdAt === "string"
+  );
 }

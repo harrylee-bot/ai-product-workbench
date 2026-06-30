@@ -120,6 +120,22 @@ export class RuntimeRunLogService {
     return run?.status === RuntimeRunStatus.running;
   }
 
+  async recordStreamEvent(input: {
+    runId: string;
+    projectId: string;
+    eventType: string;
+    payload: unknown;
+  }) {
+    return this.prisma.vibeStreamEventLog.create({
+      data: {
+        runId: input.runId,
+        projectId: input.projectId,
+        eventType: input.eventType,
+        payload: toInputJson(input.payload),
+      },
+    });
+  }
+
   /**
    * @deprecated 当前在 vibe 流中未被调用（死代码）。
    *

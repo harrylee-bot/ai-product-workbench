@@ -2,6 +2,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { ArrowDownIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
+import type { ChatRuntimeStatus } from "@/lib/api/nest-client";
 import type { Vote } from "@/lib/api/types";
 import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ type MessagesProps = {
   isReadonly: boolean;
   isArtifactVisible: boolean;
   isLoading?: boolean;
+  runtimeStatus?: ChatRuntimeStatus;
   selectedModelId: string;
   onEditMessage?: (message: ChatMessage) => void;
 };
@@ -35,6 +37,7 @@ function PureMessages({
   isReadonly,
   isArtifactVisible,
   isLoading,
+  runtimeStatus,
   selectedModelId: _selectedModelId,
   onEditMessage,
 }: MessagesProps) {
@@ -49,7 +52,12 @@ function PureMessages({
     status,
   });
 
-  useDataStream();
+  const { runtimeProcess } = useDataStream();
+  const effectiveRuntimeProcess =
+    runtimeProcess.status === "running" || runtimeProcess.events?.length
+      ? runtimeProcess
+      : runtimeStatusToProcess(runtimeStatus);
+  const latestAssistantIndex = findLatestAssistantIndex(messages);
 
   const prevChatIdRef = useRef(chatId);
   useEffect(() => {
@@ -87,6 +95,8 @@ function PureMessages({
               message={message}
               onEdit={onEditMessage}
               regenerate={regenerate}
+              runtimeProcess={effectiveRuntimeProcess}
+              showRuntimeProcess={index === latestAssistantIndex}
               requiresScrollPadding={
                 hasSentMessage && index === messages.length - 1
               }
@@ -100,7 +110,7 @@ function PureMessages({
           ))}
 
           {status === "submitted" && messages.at(-1)?.role !== "assistant" && (
-            <ThinkingMessage />
+            <ThinkingMessage runtimeProcess={effectiveRuntimeProcess} />
           )}
 
           <div
@@ -127,3 +137,35 @@ function PureMessages({
 }
 
 export const Messages = PureMessages;
+
+function runtimeStatusToProcess(runtimeStatus?: ChatRuntimeStatus) {
+  const latestRun = runtimeStatus?.latestRun;
+  if (!latestRun) {
+    return undefined;
+  }
+
+  return {
+    runId: latestRun.id,
+    status: latestRun.status,
+    startedAt: latestRun.startedAt,
+    endedAt: latestRun.endedAt,
+    title:
+      latestRun.status === "running"
+        ? "思考中..."
+        : latestRun.status === "failed"
+          ? "生成失败"
+          : latestRun.status === "cancelled"
+            ? "已停止"
+            : "已完成",
+    events: latestRun.events ?? [],
+  } as const;
+}
+
+function findLatestAssistantIndex(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") {
+      return index;
+    }
+  }
+  return -1;
+}

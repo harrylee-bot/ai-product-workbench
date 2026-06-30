@@ -12,7 +12,7 @@ import type {
 } from "@/lib/api/types";
 import type { ArtifactKind } from "@/components/chat/artifact";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, RuntimeProcessEvent } from "@/lib/types";
 
 // ===== 基础 fetch =====
 
@@ -90,6 +90,21 @@ function buildMessageParts(msg: NestMessageItem): ChatMessage["parts"] {
       state: "output-available",
       input: { title, kind: "text" },
       output: { id: prdDocumentId, title, kind: "text" },
+    });
+  }
+
+  const prototypeArtifactId = stringFromMetadata(
+    msg.metadata?.prototypeArtifactId,
+  );
+  if (msg.role === "assistant" && prototypeArtifactId) {
+    const title = stringFromMetadata(msg.metadata?.prototypeArtifactTitle) || "原型";
+
+    parts.push({
+      type: "tool-createDocument",
+      toolCallId: `prototype-artifact-${prototypeArtifactId}`,
+      state: "output-available",
+      input: { title, kind: "code" },
+      output: { id: prototypeArtifactId, title, kind: "code" },
     });
   }
 
@@ -214,6 +229,17 @@ type NestRequirementDocument = {
   updatedAt: string;
 };
 
+type NestPrototypeArtifactResponse = {
+  artifact: {
+    id: string;
+    title: string;
+    htmlContent?: string | null;
+    html?: string | null;
+    createdAt?: string;
+    updatedAt: string;
+  };
+};
+
 function documentToMarkdown(doc: NestRequirementDocument): string {
   const lines: string[] = [`# ${doc.title || "产品需求文档（PRD）"}`];
   const sections = [...(doc.sections ?? [])].sort(
@@ -252,6 +278,23 @@ export async function getDocumentsById(
   id: string,
   kind: ArtifactKind = "text",
 ): Promise<Document[]> {
+  if (kind === "code") {
+    const data = await nestFetch<NestPrototypeArtifactResponse>(
+      `/prototype-artifacts/${id}`,
+    );
+    const artifact = data.artifact;
+    return [
+      {
+        id: artifact.id,
+        createdAt: artifact.updatedAt ?? artifact.createdAt ?? new Date().toISOString(),
+        title: artifact.title || "原型",
+        content: artifact.htmlContent ?? artifact.html ?? "",
+        kind: "code",
+        userId: "",
+      },
+    ];
+  }
+
   const data = await nestFetch<{ document: NestRequirementDocument }>(
     `/prd-documents/${id}`,
   );
@@ -334,6 +377,7 @@ export type ChatRuntimeStatus = {
     errorMessage?: string | null;
     startedAt: string;
     endedAt?: string | null;
+    events?: RuntimeProcessEvent[];
   } | null;
 };
 

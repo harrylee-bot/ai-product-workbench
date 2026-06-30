@@ -3,12 +3,24 @@
 import type { DataUIPart } from "ai";
 import type React from "react";
 import { createContext, useContext, useMemo, useState } from "react";
-import type { CustomUIDataTypes } from "@/lib/types";
+import type {
+  CustomUIDataTypes,
+  RuntimeProcessSnapshot,
+} from "@/lib/types";
+
+export const initialRuntimeProcess: RuntimeProcessSnapshot = {
+  status: "idle",
+  events: [],
+};
 
 type DataStreamContextValue = {
   dataStream: DataUIPart<CustomUIDataTypes>[];
   setDataStream: React.Dispatch<
     React.SetStateAction<DataUIPart<CustomUIDataTypes>[]>
+  >;
+  runtimeProcess: RuntimeProcessSnapshot;
+  setRuntimeProcess: React.Dispatch<
+    React.SetStateAction<RuntimeProcessSnapshot>
   >;
 };
 
@@ -22,8 +34,13 @@ export function DataStreamProvider({
   const [dataStream, setDataStream] = useState<DataUIPart<CustomUIDataTypes>[]>(
     []
   );
+  const [runtimeProcess, setRuntimeProcess] =
+    useState<RuntimeProcessSnapshot>(initialRuntimeProcess);
 
-  const value = useMemo(() => ({ dataStream, setDataStream }), [dataStream]);
+  const value = useMemo(
+    () => ({ dataStream, setDataStream, runtimeProcess, setRuntimeProcess }),
+    [dataStream, runtimeProcess]
+  );
 
   return (
     <DataStreamContext.Provider value={value}>

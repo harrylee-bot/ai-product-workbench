@@ -25,6 +25,9 @@ export type CustomUIDataTypes = {
   clear: null;
   finish: null;
   "chat-title": string;
+  "runtime-start": RuntimeProcessSnapshot;
+  "runtime-event": RuntimeProcessEvent;
+  "runtime-finish": RuntimeProcessSnapshot;
 };
 
 export type ChatMessage = UIMessage<
@@ -37,4 +40,36 @@ export type Attachment = {
   name: string;
   url: string;
   contentType: string;
+};
+
+export type RuntimeProcessStatus =
+  | "idle"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export type RuntimeProcessEvent = {
+  id: string;
+  runId?: string;
+  kind:
+    | "status"
+    | "knowledge"
+    | "tool"
+    | "artifact"
+    | "document"
+    | "error";
+  label: string;
+  detail?: string;
+  status: "running" | "completed" | "failed";
+  createdAt: string;
+};
+
+export type RuntimeProcessSnapshot = {
+  runId?: string;
+  status: RuntimeProcessStatus;
+  startedAt?: string;
+  endedAt?: string | null;
+  title?: string;
+  events?: RuntimeProcessEvent[];
 };
