@@ -134,14 +134,29 @@ const sections: Array<{
 
 export function AdminConsole() {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const { user, loading, refresh } = useAuth();
   const [activeSection, setActiveSection] = useState<AdminSection>("overview");
+  const [authRefreshed, setAuthRefreshed] = useState(false);
 
   useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, router, user]);
+    let cancelled = false;
 
-  if (loading || !user) {
+    refresh().finally(() => {
+      if (!cancelled) setAuthRefreshed(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh]);
+
+  const authLoading = loading || !authRefreshed;
+
+  useEffect(() => {
+    if (!authLoading && !user) router.replace("/login");
+  }, [authLoading, router, user]);
+
+  if (authLoading || !user) {
     return <AdminScreenState title="正在加载系统设置" />;
   }
 
