@@ -54,7 +54,7 @@ function PureMessages({
 
   const { runtimeProcess } = useDataStream();
   const effectiveRuntimeProcess =
-    runtimeProcess.status === "running" || runtimeProcess.events?.length
+    runtimeProcess.status !== "idle" || runtimeProcess.events?.length
       ? runtimeProcess
       : runtimeStatusToProcess(runtimeStatus);
   const latestAssistantIndex = findLatestAssistantIndex(messages);

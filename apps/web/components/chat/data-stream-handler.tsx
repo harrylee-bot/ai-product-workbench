@@ -52,6 +52,7 @@ export function DataStreamHandler() {
           ...current,
           ...delta.data,
           status: delta.data.status ?? current.status,
+          startedAt: delta.data.startedAt ?? current.startedAt,
           endedAt: delta.data.endedAt ?? new Date().toISOString(),
           events: delta.data.events
             ? mergeRuntimeEvents(current.events ?? [], delta.data.events)

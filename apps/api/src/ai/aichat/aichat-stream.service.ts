@@ -159,10 +159,6 @@ export class AichatStreamService {
                     : "思考中...",
           };
           emitRuntimeFinish(streamWriter, snapshot);
-          recordRuntimeEvent("runtime_finish", {
-            ...snapshot,
-            events: runtimeEvents,
-          });
         };
         res.on("close", markClientClosed);
 
@@ -381,7 +377,13 @@ export class AichatStreamService {
 
           streamWriter.write({ type: "finish" });
         } catch (error) {
-          if (controller.signal.aborted) {
+          // 跨刷新/重启场景下，内存 controller 可能不在本实例，signal.aborted 为 false，
+          // 但 DB run 行已被 stop 兜底置为 cancelled。这里查一次 DB 以走取消分支而非误报失败。
+          // 注意：仅覆盖孤儿流与 stop 同实例的情形；多实例需共享取消信号（如 Redis pub/sub）。
+          const wasCancelled =
+            controller.signal.aborted ||
+            (await this.runLogs.isRunCancelled(run.id).catch(() => false));
+          if (wasCancelled) {
             const cancelledEvent = createRuntimeEvent({
               runId: run.id,
               id: "cancelled",
@@ -557,7 +559,6 @@ export class AichatStreamService {
   private async recordStaleStopEvent(
     run: Pick<RuntimeRunLog, "id" | "projectId" | "startedAt">,
   ) {
-    const stoppedAt = new Date().toISOString();
     const event = createRuntimeEvent({
       runId: run.id,
       id: "cancelled",
@@ -565,26 +566,12 @@ export class AichatStreamService {
       label: "用户已停止本次生成",
       status: "completed",
     });
-    const snapshot: RuntimeProcessSnapshot = {
-      runId: run.id,
-      status: "cancelled",
-      startedAt: run.startedAt.toISOString(),
-      endedAt: stoppedAt,
-      title: "已停止",
-      events: [event],
-    };
 
     await this.runLogs.recordStreamEvent({
       runId: run.id,
       projectId: run.projectId,
       eventType: "runtime_event",
       payload: event,
-    });
-    await this.runLogs.recordStreamEvent({
-      runId: run.id,
-      projectId: run.projectId,
-      eventType: "runtime_finish",
-      payload: snapshot,
     });
   }
 

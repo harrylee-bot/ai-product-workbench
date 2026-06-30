@@ -315,7 +315,7 @@ export class AichatDataService {
       orderBy: { startedAt: "desc" },
       include: {
         streamEvents: {
-          where: { eventType: { in: ["runtime_event", "runtime_finish"] } },
+          where: { eventType: "runtime_event" },
           orderBy: { createdAt: "asc" },
           take: 80,
           select: {
@@ -328,7 +328,6 @@ export class AichatDataService {
       },
     });
     const events = latestRun?.streamEvents
-      .filter((event) => event.eventType === "runtime_event")
       .map((event) => event.payload)
       .filter(isRuntimeProcessEvent) ?? [];
 
