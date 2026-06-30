@@ -29,7 +29,6 @@ import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
-import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { Weather } from "./weather";
 
@@ -118,11 +117,13 @@ const PurePreviewMessage = ({
     if (type === "reasoning") {
       if (index === firstReasoningIndex && mergedReasoningText) {
         return (
-          <MessageReasoning
-            isLoading={isLoading || reasoningIsStreaming}
+          <div
+            className="text-[13px] leading-[1.65] text-muted-foreground/85 italic"
+            data-testid="message-reasoning"
             key={key}
-            reasoning={mergedReasoningText}
-          />
+          >
+            {mergedReasoningText}
+          </div>
         );
       }
       return null;
