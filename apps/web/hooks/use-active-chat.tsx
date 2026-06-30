@@ -209,6 +209,9 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
         mutateRuntimeStatus(),
         mutateChatMessages(),
       ]);
+      const message = error instanceof Error ? error.message : "";
+      const isRecoverableStreamError =
+        /Load failed|Failed to fetch|NetworkError|fetch/i.test(message);
       if (error.message?.includes("AI Gateway requires a valid credit card")) {
         setShowCreditCardAlert(true);
       } else if (error instanceof ChatbotError) {
@@ -216,7 +219,9 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       } else {
         toast({
           type: "error",
-          description: error.message || "出错了，请稍后重试",
+          description: isRecoverableStreamError
+            ? "连接中断，正在尝试恢复回复"
+            : message || "出错了，请稍后重试",
         });
       }
     },
