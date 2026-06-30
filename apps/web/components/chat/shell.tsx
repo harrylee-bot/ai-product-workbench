@@ -62,14 +62,10 @@ export function ChatShell() {
   const { setRuntimeProcess } = useDataStream();
   const autoOpenedArtifactIdRef = useRef<string | null>(null);
 
-  const stopRef = useRef(stop);
-  stopRef.current = stop;
-
   const prevChatIdRef = useRef(chatId);
   useEffect(() => {
     if (prevChatIdRef.current !== chatId) {
       prevChatIdRef.current = chatId;
-      stopRef.current();
       setArtifact(initialArtifactData);
       setRuntimeProcess(initialRuntimeProcess);
       autoOpenedArtifactIdRef.current = null;

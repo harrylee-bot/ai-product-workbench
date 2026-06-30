@@ -1,10 +1,10 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { ArrowDownIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import type { ChatRuntimeStatus } from "@/lib/api/nest-client";
 import type { Vote } from "@/lib/api/types";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, RuntimeProcessSnapshot } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDataStream } from "./data-stream-provider";
 import { Greeting } from "./greeting";
@@ -61,15 +61,34 @@ function PureMessages({
       ? runtimeProcess
       : undefined;
   const persistedRuntimeProcess = runtimeStatusToProcess(runtimeStatus);
-  const pendingRuntimeProcess =
-    liveRuntimeProcess ??
-    (persistedRuntimeProcess?.status === "running"
-      ? persistedRuntimeProcess
-      : undefined);
-  const effectiveRuntimeProcess =
-    liveRuntimeProcess ??
-    (isAwaitingAssistant ? undefined : persistedRuntimeProcess);
   const latestAssistantIndex = findLatestAssistantIndex(messages);
+  const latestUserIndex = findLatestUserIndex(messages);
+  const latestAssistantBelongsToLatestTurn =
+    latestAssistantIndex >= 0 && latestAssistantIndex > latestUserIndex;
+  const runningLiveRuntimeProcess =
+    liveRuntimeProcess?.status === "running" ? liveRuntimeProcess : undefined;
+  const runningPersistedRuntimeProcess =
+    persistedRuntimeProcess?.status === "running"
+      ? persistedRuntimeProcess
+      : undefined;
+  const pendingRuntimeProcess = useMemo(
+    () =>
+      isAwaitingAssistant
+        ? (runningLiveRuntimeProcess ??
+          runningPersistedRuntimeProcess ??
+          createPendingRuntimeProcess(chatId))
+        : undefined,
+    [
+      chatId,
+      isAwaitingAssistant,
+      runningLiveRuntimeProcess,
+      runningPersistedRuntimeProcess,
+    ]
+  );
+  const effectiveRuntimeProcess =
+    latestAssistantBelongsToLatestTurn && !isAwaitingAssistant
+      ? (liveRuntimeProcess ?? persistedRuntimeProcess)
+      : undefined;
 
   const prevChatIdRef = useRef(chatId);
   useEffect(() => {
@@ -107,8 +126,12 @@ function PureMessages({
               message={message}
               onEdit={onEditMessage}
               regenerate={regenerate}
-              runtimeProcess={effectiveRuntimeProcess}
-              showRuntimeProcess={index === latestAssistantIndex}
+              runtimeProcess={
+                index === latestAssistantIndex ? effectiveRuntimeProcess : undefined
+              }
+              showRuntimeProcess={
+                index === latestAssistantIndex && Boolean(effectiveRuntimeProcess)
+              }
               requiresScrollPadding={
                 hasSentMessage && index === messages.length - 1
               }
@@ -180,4 +203,31 @@ function findLatestAssistantIndex(messages: ChatMessage[]) {
     }
   }
   return -1;
+}
+
+function findLatestUserIndex(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function createPendingRuntimeProcess(chatId: string): RuntimeProcessSnapshot {
+  const startedAt = new Date().toISOString();
+  return {
+    status: "running",
+    startedAt,
+    title: "思考中...",
+    events: [
+      {
+        id: `client:${chatId}:pending:${startedAt}`,
+        kind: "status",
+        label: "正在发送请求",
+        status: "running",
+        createdAt: startedAt,
+      },
+    ],
+  };
 }

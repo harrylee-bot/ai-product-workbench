@@ -224,6 +224,7 @@ function PureMultimodalInput({
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
+  const isGenerating = status === "submitted" || status === "streaming";
 
   const submitForm = useCallback(() => {
     window.history.pushState(
@@ -538,7 +539,7 @@ function PureMultimodalInput({
             />
           </PromptInputTools>
 
-          {status === "submitted" ? (
+          {isGenerating ? (
             <StopButton stop={stop} />
           ) : (
             <PromptInputSubmit

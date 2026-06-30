@@ -17,7 +17,10 @@ import {
   useState,
 } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { useDataStream } from "@/components/chat/data-stream-provider";
+import {
+  initialRuntimeProcess,
+  useDataStream,
+} from "@/components/chat/data-stream-provider";
 import { CHAT_HISTORY_KEY } from "@/components/chat/sidebar-history";
 import { toast } from "@/components/chat/toast";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
@@ -92,6 +95,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const isNewChat = !chatIdFromUrl;
   const newChatIdRef = useRef(generateUUID());
   const prevPathnameRef = useRef(pathname);
+  const currentChatIdRef = useRef<string | null>(null);
+  const activeRunChatIdRef = useRef<string | null>(null);
 
   if (isNewChat && prevPathnameRef.current !== pathname) {
     newChatIdRef.current = generateUUID();
@@ -99,6 +104,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   prevPathnameRef.current = pathname;
 
   const chatId = chatIdFromUrl ?? newChatIdRef.current;
+  currentChatIdRef.current = chatId;
 
   const [currentModelId, setCurrentModelId] = useState(DEFAULT_CHAT_MODEL);
   const currentModelIdRef = useRef(currentModelId);
@@ -143,9 +149,9 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const {
     messages,
     setMessages,
-    sendMessage,
+    sendMessage: rawSendMessage,
     status,
-    stop,
+    stop: rawStop,
     regenerate,
     resumeStream,
     addToolApprovalResponse,
@@ -199,17 +205,40 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
     },
     onFinish: () => {
+      activeRunChatIdRef.current = null;
       mutate(CHAT_HISTORY_KEY);
       mutateRuntimeStatus();
       mutateChatMessages();
     },
     onError: (error) => {
+      activeRunChatIdRef.current = null;
+      const message = error instanceof Error ? error.message : "";
+      const failedAt = new Date().toISOString();
+      setRuntimeProcess((current) => {
+        if (current.status !== "running") {
+          return current;
+        }
+        const errorEvent: RuntimeProcessEvent = {
+          id: `${current.runId ?? chatId}:client-error:${failedAt}`,
+          runId: current.runId,
+          kind: "error",
+          label: message || "生成连接中断",
+          status: "failed",
+          createdAt: failedAt,
+        };
+        return {
+          ...current,
+          status: "failed",
+          endedAt: failedAt,
+          title: "生成失败",
+          events: [...(current.events ?? []), errorEvent].slice(-80),
+        };
+      });
       void Promise.all([
         mutate(CHAT_HISTORY_KEY),
         mutateRuntimeStatus(),
         mutateChatMessages(),
       ]);
-      const message = error instanceof Error ? error.message : "";
       const isRecoverableStreamError =
         /Load failed|Failed to fetch|NetworkError|fetch/i.test(message);
       if (error.message?.includes("AI Gateway requires a valid credit card")) {
@@ -227,43 +256,92 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     },
   });
 
-  const isStaleSubmittedAfterCancel =
+  const beginClientRun = useCallback(() => {
+    const startedAt = new Date().toISOString();
+    activeRunChatIdRef.current = chatId;
+    setDataStream([]);
+    setRuntimeProcess({
+      ...initialRuntimeProcess,
+      status: "running",
+      startedAt,
+      title: "思考中...",
+      events: [
+        {
+          id: `client:${chatId}:awaiting:${startedAt}`,
+          kind: "status",
+          label: "正在发送请求",
+          status: "running",
+          createdAt: startedAt,
+        },
+      ],
+    });
+  }, [chatId, setDataStream, setRuntimeProcess]);
+
+  const sendMessage = useCallback<UseChatHelpers<ChatMessage>["sendMessage"]>(
+    async (...args) => {
+      beginClientRun();
+      return rawSendMessage(...args);
+    },
+    [beginClientRun, rawSendMessage]
+  );
+
+  const latestRunStatus = runtimeStatus?.latestRun?.status;
+  const hasLocalRunForCurrentChat =
+    activeRunChatIdRef.current === chatId && runtimeProcess.status === "running";
+  const isStaleSubmittedAfterTerminalRun =
     !isServerRunRunning &&
-    runtimeProcess.status === "cancelled" &&
+    !hasLocalRunForCurrentChat &&
+    (isTerminalRuntimeStatus(runtimeProcess.status) ||
+      isTerminalRuntimeStatus(latestRunStatus)) &&
     (status === "submitted" || status === "streaming");
-  const displayedStatus = isStaleSubmittedAfterCancel
+  const displayedStatus = isStaleSubmittedAfterTerminalRun
     ? "ready"
     : isServerRunRunning && status === "ready"
       ? "submitted"
       : status;
 
   const stopGeneration = useCallback(async () => {
+    const targetChatId = chatId;
+    const hasLocalRunForTarget =
+      activeRunChatIdRef.current === targetChatId &&
+      (runtimeProcess.status === "running" ||
+        status === "submitted" ||
+        status === "streaming");
+    if (!isServerRunRunning && !hasLocalRunForTarget) {
+      rawStop();
+      return;
+    }
+
     let stopError: unknown;
     try {
-      const result = await stopChatRun(chatId);
+      const result = await stopChatRun(targetChatId);
       const stoppedAt = new Date().toISOString();
-      setRuntimeProcess((current) => {
-        const stopEvent: RuntimeProcessEvent = {
-          id: `${result.runId ?? current.runId ?? chatId}:client-cancelled:${stoppedAt}`,
-          runId: result.runId ?? current.runId,
-          kind: "status",
-          label: "用户已停止本次生成",
-          status: "completed",
-          createdAt: stoppedAt,
-        };
-        return {
-          ...current,
-          runId: current.runId ?? result.runId,
-          status: "cancelled",
-          endedAt: stoppedAt,
-          title: "已停止",
-          events: [...(current.events ?? []), stopEvent].slice(-80),
-        };
-      });
+      if (currentChatIdRef.current === targetChatId) {
+        setRuntimeProcess((current) => {
+          const stopEvent: RuntimeProcessEvent = {
+            id: `${result.runId ?? current.runId ?? targetChatId}:client-cancelled:${stoppedAt}`,
+            runId: result.runId ?? current.runId,
+            kind: "status",
+            label: "用户已停止本次生成",
+            status: "completed",
+            createdAt: stoppedAt,
+          };
+          return {
+            ...current,
+            runId: current.runId ?? result.runId,
+            status: "cancelled",
+            endedAt: stoppedAt,
+            title: "已停止",
+            events: [...(current.events ?? []), stopEvent].slice(-80),
+          };
+        });
+      }
     } catch (error: any) {
       stopError = error;
     } finally {
-      await stop();
+      activeRunChatIdRef.current = null;
+      setDataStream([]);
+      await rawStop();
       await Promise.all([
         mutateRuntimeStatus(),
         mutateChatMessages(),
@@ -282,11 +360,15 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     }
   }, [
     chatId,
+    isServerRunRunning,
     mutate,
     mutateChatMessages,
     mutateRuntimeStatus,
+    rawStop,
+    runtimeProcess.status,
+    setDataStream,
     setRuntimeProcess,
-    stop,
+    status,
   ]);
 
   const loadedChatIds = useRef(new Set<string>());
@@ -328,11 +410,14 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (prevChatIdRef.current !== chatId) {
       prevChatIdRef.current = chatId;
+      activeRunChatIdRef.current = null;
+      setDataStream([]);
+      setRuntimeProcess(initialRuntimeProcess);
       if (isNewChat) {
         setMessages([]);
       }
     }
-  }, [chatId, isNewChat, setMessages]);
+  }, [chatId, isNewChat, setDataStream, setMessages, setRuntimeProcess]);
 
   useEffect(() => {
     if (chatData && !isNewChat) {
@@ -436,4 +521,10 @@ export function useActiveChat() {
     throw new Error("useActiveChat must be used within ActiveChatProvider");
   }
   return context;
+}
+
+function isTerminalRuntimeStatus(
+  status?: "idle" | "running" | "succeeded" | "failed" | "cancelled"
+) {
+  return status === "succeeded" || status === "failed" || status === "cancelled";
 }
