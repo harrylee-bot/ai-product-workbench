@@ -1,7 +1,7 @@
 "use client";
 
 import type { DataUIPart } from "ai";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSWRConfig } from "swr";
 import { initialArtifactData, useArtifact } from "@/hooks/use-artifact";
 import type { CustomUIDataTypes, RuntimeProcessEvent } from "@/lib/types";
@@ -14,6 +14,9 @@ export function DataStreamHandler() {
   const { mutate } = useSWRConfig();
 
   const { artifact, setArtifact, setMetadata } = useArtifact();
+  // 用 ref 持有最新 artifact.kind，避免把 artifact 放进 effect 依赖导致 setArtifact 后重跑。
+  const artifactKindRef = useRef<ArtifactKind>(artifact.kind);
+  artifactKindRef.current = artifact.kind;
 
   useEffect(() => {
     if (!dataStream?.length) {
@@ -23,7 +26,7 @@ export function DataStreamHandler() {
     const newDeltas = dataStream.slice();
     setDataStream([]);
 
-    let currentArtifactKind = artifact.kind;
+    let currentArtifactKind = artifactKindRef.current;
 
     for (const delta of newDeltas) {
       if (delta.type === "data-runtime-start") {
@@ -130,7 +133,6 @@ export function DataStreamHandler() {
     dataStream,
     setArtifact,
     setMetadata,
-    artifact,
     setDataStream,
     setRuntimeProcess,
     mutate,
@@ -166,8 +168,10 @@ function kindForStreamPart(
   switch (delta.type) {
     case "data-kind":
       return isArtifactKind(delta.data) ? delta.data : fallback;
+    // prototype 复用 data-codeDelta 传 HTML 快照，kind 由前置 data-kind 决定，
+    // 这里返回 fallback 以免把 prototype 覆盖成 code。
     case "data-codeDelta":
-      return "code";
+      return fallback;
     case "data-imageDelta":
       return "image";
     case "data-sheetDelta":

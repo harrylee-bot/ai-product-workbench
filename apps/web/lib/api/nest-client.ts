@@ -103,8 +103,8 @@ function buildMessageParts(msg: NestMessageItem): ChatMessage["parts"] {
       type: "tool-createDocument",
       toolCallId: `prototype-artifact-${prototypeArtifactId}`,
       state: "output-available",
-      input: { title, kind: "code" },
-      output: { id: prototypeArtifactId, title, kind: "code" },
+      input: { title, kind: "prototype" },
+      output: { id: prototypeArtifactId, title, kind: "prototype" },
     });
   }
 
@@ -278,18 +278,35 @@ export async function getDocumentsById(
   id: string,
   kind: ArtifactKind = "text",
 ): Promise<Document[]> {
-  if (kind === "code") {
+  if (kind === "prototype") {
     const data = await nestFetch<NestPrototypeArtifactResponse>(
       `/prototype-artifacts/${id}`,
     );
     const artifact = data.artifact;
+    const title = artifact.title || "原型";
+    const fallbackContent = artifact.htmlContent ?? artifact.html ?? "";
+    // 优先用后端 sanitized 的预览 HTML（sec-1：读取时再净化）。
+    // preview 端点返回 text/html，需绕过 nestFetch 的 JSON 解析；未就绪时回退原始 htmlContent。
+    let content = fallbackContent;
+    try {
+      const previewRes = await fetch(
+        `${getApiBase()}/prototype-artifacts/${id}/preview`,
+        { credentials: "include" },
+      );
+      if (previewRes.ok) {
+        content = await previewRes.text();
+      }
+    } catch {
+      // 预览端点不可用，回退到原始 htmlContent（iframe sandbox 仍隔离）。
+    }
     return [
       {
         id: artifact.id,
-        createdAt: artifact.updatedAt ?? artifact.createdAt ?? new Date().toISOString(),
-        title: artifact.title || "原型",
-        content: artifact.htmlContent ?? artifact.html ?? "",
-        kind: "code",
+        createdAt:
+          artifact.updatedAt ?? artifact.createdAt ?? new Date().toISOString(),
+        title,
+        content,
+        kind: "prototype",
         userId: "",
       },
     ];

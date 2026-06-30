@@ -44,6 +44,8 @@ export type BridgeContext = {
   hasEmittedText: boolean;
   textBuffer: string;
   textStarted: boolean;
+  reasoningBuffer: string;
+  reasoningStarted: boolean;
   emittedToolCallIds: Set<string>;
   toolCallNames: Map<string, string>;
 };
@@ -54,6 +56,8 @@ export function createBridgeContext(): BridgeContext {
     hasEmittedText: false,
     textBuffer: "",
     textStarted: false,
+    reasoningBuffer: "",
+    reasoningStarted: false,
     emittedToolCallIds: new Set(),
     toolCallNames: new Map(),
   };
@@ -90,6 +94,12 @@ export function emitRuntimeFinish(
     data: snapshot,
     transient: true,
   });
+}
+
+/** 通知前端刷新侧边栏会话标题（标题由后端在首条消息时确定）。 */
+export function emitChatTitle(writer: UIMessageStreamWriter, title: string): void {
+  if (!title) return;
+  writer.write({ type: "data-chat-title", data: title, transient: true });
 }
 
 export function runtimeEventsFromDeerFlow(
@@ -174,6 +184,11 @@ export function emitDeerFlowEvent(
     emitTextDelta(safeAssistantDelta(event.chunk, ctx.assistantDeltaFilter), writer, ctx);
   }
 
+  // 1b) 模型推理思维链（独立 part，不混入正文）
+  if (typeof event.reasoning === "string" && event.reasoning) {
+    emitReasoningDelta(event.reasoning, writer, ctx);
+  }
+
   // 2) 工具调用输入
   if (event.toolCalls?.length) {
     for (const call of event.toolCalls) {
@@ -209,6 +224,26 @@ export function finishText(writer: UIMessageStreamWriter, ctx: BridgeContext): v
     writer.write({ type: "text-end", id: "text-1" });
     ctx.textStarted = false;
   }
+}
+
+/**
+ * 收尾：若已 reasoning-start 则发 reasoning-end。必须在 text 收尾前后均可调用一次。
+ */
+export function finishReasoning(writer: UIMessageStreamWriter, ctx: BridgeContext): void {
+  if (ctx.reasoningStarted) {
+    writer.write({ type: "reasoning-end", id: "reasoning-1" });
+    ctx.reasoningStarted = false;
+  }
+}
+
+function emitReasoningDelta(delta: string, writer: UIMessageStreamWriter, ctx: BridgeContext): void {
+  if (!delta) return;
+  if (!ctx.reasoningStarted) {
+    writer.write({ type: "reasoning-start", id: "reasoning-1" });
+    ctx.reasoningStarted = true;
+  }
+  writer.write({ type: "reasoning-delta", id: "reasoning-1", delta });
+  ctx.reasoningBuffer += delta;
 }
 
 /**
@@ -264,9 +299,9 @@ export function emitPrdDocumentPreview(
 }
 
 /**
- * 合成原型 code 画布 artifact。
+ * 合成原型 prototype 画布 artifact。
  *
- * 顺序承重：data-kind{code} → data-id → data-title → data-clear → data-codeDelta(一次完整快照,替换语义) → data-finish。
+ * 顺序承重：data-kind{prototype} → data-id → data-title → data-clear → data-codeDelta(一次完整快照,替换语义) → data-finish。
  * 全部 transient:true。
  */
 export function emitPrototypeArtifact(
@@ -276,13 +311,38 @@ export function emitPrototypeArtifact(
   const title = prototypeArtifact.title || "原型";
   const html = prototypeArtifact.htmlContent ?? prototypeArtifact.html ?? "";
 
-  writer.write({ type: "data-kind", data: "code", transient: true });
+  writer.write({ type: "data-kind", data: "prototype", transient: true });
   writer.write({ type: "data-id", data: prototypeArtifact.id, transient: true });
   writer.write({ type: "data-title", data: title, transient: true });
   writer.write({ type: "data-clear", data: null, transient: true });
   // codeDelta 为替换语义：每次发完整快照。这里只发一次完整 HTML。
   writer.write({ type: "data-codeDelta", data: html, transient: true });
   writer.write({ type: "data-finish", data: null, transient: true });
+}
+
+/**
+ * 合成原型 prototype 的 createDocument 工具结果，让前端在流式期即出现可点内联卡片，
+ * 与 PRD 流程对齐（reload 时 nest-client.ts 用同 toolCallId 重建，幂等）。
+ */
+export function emitPrototypeDocumentPreview(
+  prototypeArtifact: PrototypeArtifact,
+  writer: UIMessageStreamWriter,
+): void {
+  const title = prototypeArtifact.title || "原型";
+  const toolCallId = `prototype-artifact-${prototypeArtifact.id}`;
+
+  writer.write({ type: "tool-input-start", toolCallId, toolName: "createDocument" });
+  writer.write({
+    type: "tool-input-available",
+    toolCallId,
+    toolName: "createDocument",
+    input: { title, kind: "prototype" },
+  });
+  writer.write({
+    type: "tool-output-available",
+    toolCallId,
+    output: { id: prototypeArtifact.id, title, kind: "prototype" },
+  });
 }
 
 /** 工具：直接发一段已确定的文本（用于 finalAction.message 兜底显示）。 */

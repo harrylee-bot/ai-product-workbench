@@ -16,6 +16,7 @@ import useSWR from "swr";
 import { useWindowSize } from "usehooks-ts";
 import { codeArtifact } from "@/artifacts/code/client";
 import { imageArtifact } from "@/artifacts/image/client";
+import { prototypeArtifact } from "@/artifacts/prototype/client";
 import { sheetArtifact } from "@/artifacts/sheet/client";
 import { textArtifact } from "@/artifacts/text/client";
 import { useArtifact } from "@/hooks/use-artifact";
@@ -38,6 +39,7 @@ export const artifactDefinitions = [
   codeArtifact,
   imageArtifact,
   sheetArtifact,
+  prototypeArtifact,
 ];
 export type ArtifactKind = (typeof artifactDefinitions)[number]["kind"];
 
@@ -98,6 +100,8 @@ function PureArtifact({
       ? `document-${artifact.documentId}-${artifact.kind}`
       : null;
 
+  const isPrototype = artifact.kind === "prototype";
+
   const {
     data: documents,
     isLoading: isDocumentsFetching,
@@ -105,6 +109,10 @@ function PureArtifact({
   } = useSWR<Document[]>(
     documentsKey,
     () => getDocumentsById(artifact.documentId, artifact.kind),
+    {
+      // 原型为一次性快照，404 即永久删除，不重试（与 document-preview 对齐）。
+      shouldRetryOnError: !isPrototype,
+    },
   );
 
   const [mode, setMode] = useState<"edit" | "diff">("edit");

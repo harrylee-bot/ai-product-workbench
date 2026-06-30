@@ -73,7 +73,7 @@ function messagesSignature(messages: ChatMessage[]) {
       const partSignature = message.parts
         .map((part: any) => {
           if (part.type === "text") {
-            return `${part.type}:${part.text?.length ?? 0}`;
+            return `${part.type}:${part.text ?? ""}`;
           }
           return `${part.type}:${part.state ?? ""}`;
         })

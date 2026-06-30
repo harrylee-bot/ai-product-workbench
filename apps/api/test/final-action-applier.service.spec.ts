@@ -10,8 +10,12 @@ describe("FinalActionApplierService", () => {
   };
   const documentService = { saveGeneratedDocument: vi.fn() };
   const prototypeService = { saveGeneratedPrototype: vi.fn() };
+  const prisma = {
+    project: { findUnique: vi.fn() },
+    requirementDocument: { findMany: vi.fn() },
+  };
   const service = new FinalActionApplierService(
-    {} as never,
+    prisma as never,
     stateService as never,
     documentService as never,
     prototypeService as never,
@@ -19,6 +23,8 @@ describe("FinalActionApplierService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.project.findUnique.mockResolvedValue({ currentPrdDocumentId: null });
+    prisma.requirementDocument.findMany.mockResolvedValue([]);
   });
 
   it("bridges DeerFlow review_prd final actions into ProductDesignState and PRD persistence", async () => {

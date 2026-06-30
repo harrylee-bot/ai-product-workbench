@@ -231,6 +231,74 @@ describe("DeerFlowRuntimeService", () => {
     ]);
   });
 
+  it("keeps reasoning out of visible assistant content", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages",
+          data: [
+            {
+              type: "AIMessageChunk",
+              content: "<think>先判断任务类型</think>已开始整理。",
+            },
+            { langgraph_node: "model" },
+          ],
+        },
+        {
+          event: "messages",
+          data: [
+            {
+              type: "AIMessageChunk",
+              content: [
+                { type: "thinking", thinking: "继续检查知识库" },
+                { type: "text", text: "已开始整理。PRD 草稿完成。" },
+              ],
+            },
+            { langgraph_node: "model" },
+          ],
+        },
+        {
+          event: "values",
+          data: {
+            messages: [
+              {
+                type: "ai",
+                content: [
+                  "PRD 草稿完成。",
+                  "\n```ai_product_workbench_final_action\n",
+                  "{\"type\":\"answer\",\"message\":\"PRD 草稿完成。\",\"intent\":\"general_question\"}",
+                  "\n```",
+                ].join(""),
+              },
+            ],
+          },
+        },
+      ]));
+
+    const events: Array<{ content?: string; reasoning?: string }> = [];
+    const service = new DeerFlowRuntimeService(prisma as never);
+    await service.runTurn({
+      runId: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      message: "生成 PRD",
+      onEvent: (event) => {
+        events.push({ content: event.content, reasoning: event.reasoning });
+      },
+    });
+
+    expect(events.map((event) => event.reasoning).filter(Boolean)).toEqual([
+      "先判断任务类型",
+      "继续检查知识库",
+    ]);
+    expect(events.map((event) => event.content).filter(Boolean)).toEqual([
+      "已开始整理。",
+      "PRD 草稿完成。",
+    ]);
+  });
+
   it("falls back to values final state and ignores non-assistant messages", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))

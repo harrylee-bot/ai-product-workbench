@@ -16,14 +16,17 @@ import { classifyRequirementMode, type RequirementMode } from "../requirement-mo
 import {
   createBridgeContext,
   createRuntimeEvent,
+  emitChatTitle,
   emitDeerFlowEvent,
   emitPrdArtifact,
   emitPrdDocumentPreview,
   emitPrototypeArtifact,
+  emitPrototypeDocumentPreview,
   emitRuntimeEvent,
   emitRuntimeFinish,
   emitRuntimeStart,
   emitStaticText,
+  finishReasoning,
   finishText,
   runtimeEventsFromDeerFlow,
   type RuntimeProcessEvent,
@@ -165,6 +168,7 @@ export class AichatStreamService {
 
         try {
           streamWriter.write({ type: "start", messageId: randomUUID() });
+          emitChatTitle(streamWriter, conversation.title);
           const startSnapshot: RuntimeProcessSnapshot = {
             runId: run.id,
             status: "running",
@@ -238,6 +242,7 @@ export class AichatStreamService {
           });
 
           // 收尾文本/步骤 part
+          finishReasoning(streamWriter, ctx);
           finishText(streamWriter, ctx);
           await assistantDraft.persist(true);
 
@@ -266,7 +271,10 @@ export class AichatStreamService {
 
           if (applied.prdDocument) {
             emitStaticText(result.finalAction.message || "PRD 已生成，请在右侧文档区检查。", streamWriter, ctx);
+            finishReasoning(streamWriter, ctx);
             finishText(streamWriter, ctx);
+            // 干净收尾流式 draft 画布，再发最终 PRD，避免 data-clear 空窗闪烁。
+            finishDocumentStream(streamWriter, documentStream);
             emitPrdArtifact(applied.prdDocument, streamWriter);
             emitPrdDocumentPreview(applied.prdDocument, streamWriter);
             const prdReadyEvent = createRuntimeEvent({
@@ -308,8 +316,10 @@ export class AichatStreamService {
             publishRuntimeFinish("succeeded");
           } else if (applied.prototypeArtifact) {
             emitStaticText(result.finalAction.message || "原型已生成，请在右侧预览区查看。", streamWriter, ctx);
+            finishReasoning(streamWriter, ctx);
             finishText(streamWriter, ctx);
             emitPrototypeArtifact(applied.prototypeArtifact, streamWriter);
+            emitPrototypeDocumentPreview(applied.prototypeArtifact, streamWriter);
             const prototypeReadyEvent = createRuntimeEvent({
               runId: run.id,
               id: "prototype-ready",
@@ -353,6 +363,7 @@ export class AichatStreamService {
             finishDocumentStream(streamWriter, documentStream);
             if (!ctx.hasEmittedText) {
               emitStaticText(message, streamWriter, ctx);
+              finishReasoning(streamWriter, ctx);
               finishText(streamWriter, ctx);
             }
             deliveredUserVisibleResult = true;
@@ -424,6 +435,7 @@ export class AichatStreamService {
                 relatedRunId: run.id,
               });
             }
+            finishReasoning(streamWriter, ctx);
             finishText(streamWriter, ctx);
             streamWriter.write({ type: "finish", finishReason: "stop" });
             return;
@@ -459,6 +471,7 @@ export class AichatStreamService {
               relatedRunId: run.id,
             });
             // 收尾已开的文本 part，避免前端解析悬挂
+            finishReasoning(streamWriter, ctx);
             finishText(streamWriter, ctx);
             streamWriter.write({ type: "error", errorText: "生成失败，请重试" });
             streamWriter.write({ type: "finish", finishReason: "error" });

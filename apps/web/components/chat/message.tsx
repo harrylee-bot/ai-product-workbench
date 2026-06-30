@@ -7,7 +7,7 @@ import {
   SquareTerminalIcon,
   XCircleIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Vote } from "@/lib/api/types";
 import type {
   ChatMessage,
@@ -97,32 +97,31 @@ const PurePreviewMessage = ({
     </div>
   );
 
-  const mergedReasoning = message.parts?.reduce(
-    (acc, part) => {
-      if (part.type === "reasoning" && part.text?.trim().length > 0) {
-        return {
-          text: acc.text ? `${acc.text}\n\n${part.text}` : part.text,
-          isStreaming: "state" in part ? part.state === "streaming" : false,
-          rendered: false,
-        };
-      }
-      return acc;
-    },
-    { text: "", isStreaming: false, rendered: false }
-  ) ?? { text: "", isStreaming: false, rendered: false };
+  const { firstReasoningIndex, mergedReasoningText, reasoningIsStreaming } = useMemo(() => {
+    let firstIndex = -1;
+    let text = "";
+    let isStreaming = false;
+    message.parts?.forEach((part: any, index: number) => {
+      if (part.type !== "reasoning") return;
+      if (!part.text || !part.text.trim()) return;
+      if (firstIndex === -1) firstIndex = index;
+      text = text ? `${text}\n\n${part.text}` : part.text;
+      if ("state" in part && part.state === "streaming") isStreaming = true;
+    });
+    return { firstReasoningIndex: firstIndex, mergedReasoningText: text, reasoningIsStreaming: isStreaming };
+  }, [message.parts]);
 
   const parts = message.parts?.map((part: any, index) => {
     const { type } = part;
     const key = `message-${message.id}-part-${index}`;
 
     if (type === "reasoning") {
-      if (!mergedReasoning.rendered && mergedReasoning.text) {
-        mergedReasoning.rendered = true;
+      if (index === firstReasoningIndex && mergedReasoningText) {
         return (
           <MessageReasoning
-            isLoading={isLoading || mergedReasoning.isStreaming}
+            isLoading={isLoading || reasoningIsStreaming}
             key={key}
-            reasoning={mergedReasoning.text}
+            reasoning={mergedReasoningText}
           />
         );
       }
@@ -347,18 +346,18 @@ const PurePreviewMessage = ({
     isAssistant &&
     Boolean(showRuntimeProcess) &&
     shouldShowRuntimeStatus(runtimeProcess, hasAnyContent);
-  const runtimeStatusLine = showRuntimeStatus ? (
-    <RuntimeStatusLine
+  const runtimePanel = showRuntimeStatus ? (
+    <RuntimeProcessPanel
       hasAssistantContent={hasAnyContent}
       runtimeProcess={runtimeProcess}
     />
   ) : null;
 
   const content = isThinking ? (
-    runtimeStatusLine
+    runtimePanel
   ) : (
     <>
-      {runtimeStatusLine}
+      {runtimePanel}
       {attachments}
       {parts}
       {actions}
@@ -420,7 +419,7 @@ export const ThinkingMessage = ({
           </div>
         </div>
 
-        <RuntimeStatusLine
+        <RuntimeProcessPanel
           hasAssistantContent={false}
           runtimeProcess={runtimeProcess}
         />
@@ -428,6 +427,80 @@ export const ThinkingMessage = ({
     </div>
   );
 };
+
+function RuntimeProcessPanel({
+  hasAssistantContent,
+  runtimeProcess,
+}: {
+  hasAssistantContent: boolean;
+  runtimeProcess?: RuntimeProcessSnapshot;
+}) {
+  const traceEvents = (runtimeProcess?.events ?? []).filter(isVisibleTraceEvent);
+  const isRunning = runtimeProcess?.status === "running";
+  const [open, setOpen] = useState(isRunning);
+
+  useEffect(() => {
+    if (isRunning) setOpen(true);
+  }, [isRunning]);
+
+  if (traceEvents.length === 0) {
+    return (
+      <RuntimeStatusLine
+        hasAssistantContent={hasAssistantContent}
+        runtimeProcess={runtimeProcess}
+      />
+    );
+  }
+
+  return (
+    <details
+      className="group/runtime max-w-[min(100%,680px)] rounded-lg border border-border/40 bg-muted/20 text-[13px] leading-[1.65]"
+      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+      open={open}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
+        <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open/runtime:rotate-90" />
+        <RuntimeStatusLine
+          hasAssistantContent={hasAssistantContent}
+          runtimeProcess={runtimeProcess}
+        />
+      </summary>
+      <ol className="flex flex-col gap-1 border-t border-border/40 px-3 py-2">
+        {traceEvents.map((event) => (
+          <RuntimeTraceRow event={event} key={event.id} />
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function RuntimeTraceRow({ event }: { event: RuntimeProcessEvent }) {
+  const isRunning = event.status === "running";
+  const isFailed = event.status === "failed";
+  const icon = isFailed ? (
+    <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
+  ) : isRunning ? (
+    <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+  ) : (
+    <CheckCircle2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+  );
+  const detail = event.detail?.trim();
+  const row = (
+    <div className="flex min-w-0 items-start gap-2 text-muted-foreground">
+      {icon}
+      <span className="truncate">{event.label}</span>
+    </div>
+  );
+  if (!detail) return <li>{row}</li>;
+  return (
+    <li>
+      {row}
+      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/35 px-2 py-1.5 text-[12px] leading-relaxed text-muted-foreground">
+        {detail}
+      </pre>
+    </li>
+  );
+}
 
 function RuntimeStatusLine({
   hasAssistantContent,
@@ -597,6 +670,20 @@ function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
     event.kind === "artifact" ||
     event.kind === "document" ||
     event.kind === "error"
+  );
+}
+
+/**
+ * trace 面板可见事件：与 isVisibleRuntimeEvent 相同，但排除 tool —— 工具调用已由
+ * tool-* part 的 CompactToolPart 渲染，trace 只承载 knowledge/status/artifact/document/error 叙事。
+ */
+function isVisibleTraceEvent(event: RuntimeProcessEvent) {
+  return (
+    event.kind === "artifact" ||
+    event.kind === "document" ||
+    event.kind === "error" ||
+    event.kind === "knowledge" ||
+    event.kind === "status"
   );
 }
 

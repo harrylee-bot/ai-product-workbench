@@ -22,6 +22,8 @@ export type DeerFlowRuntimeEvent = {
   toolResult?: string;
   messageRole?: "assistant" | "tool" | "system" | "human" | "unknown";
   chunk?: string;
+  /** 模型推理思维链（reasoning_content / thinking / <think>），已 delta 化，独立于正文 chunk。 */
+  reasoning?: string;
   nodeId?: string;
   nodeName?: string;
 };
@@ -141,6 +143,7 @@ export class DeerFlowRuntimeService {
     let runInput = { ...input, deerFlowUploads: uploads };
     const rawEvents: DeerFlowRuntimeEvent[] = [];
     let assistantText = "";
+    let reasoningText = "";
     let finalState: unknown;
 
     if (uploads.length) {
@@ -158,7 +161,15 @@ export class DeerFlowRuntimeService {
           if (isAssistantTextEvent(event) && event.content) {
             const delta = assistantTextDelta(assistantText, event.content);
             assistantText += delta;
-            eventForUi = { ...event, content: delta, chunk: delta };
+            eventForUi = { ...eventForUi, content: delta, chunk: delta };
+          }
+          if (event.reasoning) {
+            const reasoningDelta = assistantTextDelta(reasoningText, event.reasoning);
+            reasoningText += reasoningDelta;
+            eventForUi = { ...eventForUi, reasoning: reasoningDelta };
+          } else {
+            // 无推理增量时清空，避免 bridge 误把累计值当 delta。
+            eventForUi = { ...eventForUi, reasoning: undefined };
           }
           rawEvents.push(eventForUi);
           if (eventForUi.event === "values") {
@@ -174,6 +185,7 @@ export class DeerFlowRuntimeService {
           runInput = { ...input, deerFlowUploads: uploads };
           rawEvents.length = 0;
           assistantText = "";
+          reasoningText = "";
           finalState = undefined;
           continue;
         }
@@ -529,6 +541,8 @@ function buildUserPrompt(input: DeerFlowRunInput) {
 function normalizeDeerFlowEvent(event: string, data: unknown): DeerFlowRuntimeEvent {
   const payload = primaryPayload(data);
   const record = asRecord(payload);
+  // 推理内容独立提取（reasoning_content / thinking 项 / <think>），不计入正文 content/chunk。
+  const reasoning = extractReasoning(record);
   const content = shouldExposeEventContent(event, record) ? toContentText(payload) : undefined;
   const toolCalls = extractToolCalls(record) ?? extractToolCalls(asRecord(data));
   const messageRole = detectMessageRole(record);
@@ -547,9 +561,51 @@ function normalizeDeerFlowEvent(event: string, data: unknown): DeerFlowRuntimeEv
     messageRole,
     // assistant 增量文本：用于前端逐字流式渲染（Phase 2）。
     chunk: messageRole === "assistant" ? content : undefined,
+    reasoning,
     nodeId,
     nodeName: nodeId ?? undefined,
   };
+}
+
+/**
+ * 从一条消息记录里提取推理文本（累计值，尚未 delta 化）。
+ * 覆盖三类来源：
+ *  - OpenAI o 系列 / DeepSeek：additional_kwargs.reasoning_content / response_metadata.reasoning_content
+ *  - Anthropic via LangGraph：content 数组中 type === "thinking" 项的 thinking/text 字段
+ *  - 通用 <think>…</think> 包裹
+ * 提取后正文 content 由 toContentText 另算（thinking 项不带 text 字段，故通常不混入正文）。
+ */
+function extractReasoning(record: Record<string, unknown> | null): string | undefined {
+  if (!record) return undefined;
+  const additional = asRecord(record.additional_kwargs);
+  const fromAdditional = toOptionalString(additional?.reasoning_content) ?? toOptionalString(additional?.reasoning);
+  if (fromAdditional) return fromAdditional;
+  const responseMetadata = asRecord(record.response_metadata);
+  const fromResponse = toOptionalString(responseMetadata?.reasoning_content);
+  if (fromResponse) return fromResponse;
+
+  const content = record.content;
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const item of content) {
+      const itemRecord = asRecord(item);
+      const type = toOptionalString(itemRecord?.type)?.toLowerCase();
+      if (type !== "thinking" && type !== "reasoning") continue;
+      const text =
+        toOptionalString(itemRecord?.thinking) ??
+        toOptionalString(itemRecord?.text) ??
+        toOptionalString(itemRecord?.reasoning_text);
+      if (text) parts.push(text);
+    }
+    if (parts.length) return parts.join("\n");
+  }
+
+  const whole = toOptionalString(record.content);
+  if (whole) {
+    const match = whole.match(/<think>([\s\S]*?)<\/think>/i);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+  return undefined;
 }
 
 function detectMessageRole(record: Record<string, unknown> | null): DeerFlowRuntimeEvent["messageRole"] {
@@ -665,18 +721,29 @@ function extractToolName(record: Record<string, unknown> | null) {
 function toContentText(data: unknown) {
   const record = asRecord(data);
   const content = record?.content;
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return stripInlineReasoning(content);
   if (Array.isArray(content)) {
     return content
       .map((item) => {
-        if (typeof item === "string") return item;
+        if (typeof item === "string") return stripInlineReasoning(item);
         const itemRecord = asRecord(item);
-        return toOptionalString(itemRecord?.text) ?? toOptionalString(itemRecord?.content) ?? "";
+        if (isReasoningContentPart(itemRecord)) return "";
+        const text = toOptionalString(itemRecord?.text) ?? toOptionalString(itemRecord?.content) ?? "";
+        return stripInlineReasoning(text);
       })
       .filter(Boolean)
       .join("");
   }
   return undefined;
+}
+
+function isReasoningContentPart(record: Record<string, unknown> | null) {
+  const type = toOptionalString(record?.type)?.toLowerCase();
+  return type === "thinking" || type === "reasoning";
+}
+
+function stripInlineReasoning(value: string) {
+  return value.replace(/<think>[\s\S]*?<\/think>/gi, "");
 }
 
 function extractFinalAction(assistantText: string, finalState: unknown): DeerFlowFinalAction {

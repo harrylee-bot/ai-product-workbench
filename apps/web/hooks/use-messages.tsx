@@ -1,5 +1,5 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ChatMessage } from "@/lib/types";
 import { useScrollToBottom } from "./use-scroll-to-bottom";
 
@@ -15,7 +15,7 @@ export function useMessages({
     scrollToBottom,
     onViewportEnter,
     onViewportLeave,
-    reset,
+    reset: resetScroll,
   } = useScrollToBottom();
 
   const [hasSentMessage, setHasSentMessage] = useState(false);
@@ -25,6 +25,11 @@ export function useMessages({
       setHasSentMessage(true);
     }
   }, [status]);
+
+  const reset = useCallback(() => {
+    resetScroll();
+    setHasSentMessage(false);
+  }, [resetScroll]);
 
   return {
     containerRef,

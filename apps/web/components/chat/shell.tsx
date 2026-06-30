@@ -268,7 +268,9 @@ function findLatestMessageArtifact(messages: ChatMessage[]) {
         part?.type === "tool-createDocument" &&
         part.state === "output-available" &&
         part.output?.id &&
-        (part.output.kind === "text" || part.output.kind === "code")
+        (part.output.kind === "text" ||
+          part.output.kind === "code" ||
+          part.output.kind === "prototype")
       ) {
         return {
           id: part.output.id,

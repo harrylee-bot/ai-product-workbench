@@ -539,7 +539,7 @@ function PureMultimodalInput({
           </PromptInputTools>
 
           {status === "submitted" ? (
-            <StopButton setMessages={setMessages} stop={stop} />
+            <StopButton stop={stop} />
           ) : (
             <PromptInputSubmit
               className={cn(
@@ -732,10 +732,8 @@ const ModelSelectorCompact = memo(PureModelSelectorCompact);
 
 function PureStopButton({
   stop,
-  setMessages,
 }: {
   stop: () => void;
-  setMessages: UseChatHelpers<ChatMessage>["setMessages"];
 }) {
   return (
     <Button
@@ -744,7 +742,6 @@ function PureStopButton({
       onClick={(event) => {
         event.preventDefault();
         stop();
-        setMessages((messages) => messages);
       }}
     >
       <StopIcon size={14} />

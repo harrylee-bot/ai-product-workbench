@@ -50,6 +50,7 @@ export function DocumentPreview({
 
   const documentId = result?.id;
   const documentKind = result?.kind ?? artifact.kind;
+  const isPrototype = documentKind === "prototype";
 
   const { data: documents, isLoading: isDocumentsFetching } = useSWR<
     Document[]
@@ -57,9 +58,12 @@ export function DocumentPreview({
     documentId ? `document-preview-${documentId}-${documentKind}` : null,
     () => getDocumentsById(documentId!, documentKind),
     {
-      refreshInterval: (latestDocuments) =>
-        latestDocuments?.[0] ? 0 : 2000,
-      shouldRetryOnError: true,
+      // PRD 文档流式期间可能尚未创建，需轮询直到出现；
+      // 原型产物为一次性快照，404 即永久删除，不重试也不轮询。
+      refreshInterval: isPrototype
+        ? 0
+        : (latestDocuments) => (latestDocuments?.[0] ? 0 : 2000),
+      shouldRetryOnError: !isPrototype,
     }
   );
 
@@ -235,7 +239,7 @@ const PureDocumentHeader = ({
           </div>
         ) : kind === "image" ? (
           <ImageIcon size={14} />
-        ) : kind === "code" ? (
+        ) : kind === "code" || kind === "prototype" ? (
           <CodeIcon size={14} />
         ) : (
           <FileIcon size={14} />
@@ -265,7 +269,7 @@ const DocumentContent = ({ document }: { document: Document }) => {
     "h-[257px] overflow-hidden rounded-b-2xl border border-t-0 border-border/50 dark:bg-muted",
     {
       "p-4 sm:px-10 sm:py-10": document.kind === "text",
-      "p-0": document.kind === "code",
+      "p-0": document.kind === "code" || document.kind === "prototype",
     }
   );
 
@@ -304,6 +308,13 @@ const DocumentContent = ({ document }: { document: Document }) => {
           isInline={true}
           status={artifact.status}
           title={document.title}
+        />
+      ) : document.kind === "prototype" ? (
+        <iframe
+          title="原型预览"
+          sandbox="allow-scripts"
+          srcDoc={document.content ?? ""}
+          className="h-full w-full border-0 bg-white"
         />
       ) : null}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-muted to-transparent dark:from-muted" />
