@@ -55,12 +55,14 @@ export class AichatStreamService {
     }
 
     // b) 新对话页的 id 来自前端临时 UUID；首条消息到达时在后端落成真实会话。
-    const { conversation, project } = await this.conversations.getOrCreateInternal(
+    const session = await this.conversations.getOrCreateInternal(
       user,
       conversationId,
       buildConversationTitle(content),
     );
+    const { conversation, project } = session;
     const projectId = conversation.projectId ?? project.id;
+    const productContext = buildProductContextForDeerFlow(session);
 
     // c) 持久化用户消息
     await this.messages.createUserMessage({
@@ -114,6 +116,7 @@ export class AichatStreamService {
             userId: user.id,
             message: content,
             previewMode: "prd",
+            productDesignState: productContext,
             knowledgeContext,
             signal: controller.signal,
             onEvent: (event) => {
@@ -422,6 +425,64 @@ function buildConversationTitle(content: string): string {
   const title = content.replace(/\s+/g, " ").trim();
   if (!title) return "新对话";
   return title.length > 60 ? `${title.slice(0, 60)}...` : title;
+}
+
+function buildProductContextForDeerFlow(session: {
+  productDesignState?: unknown;
+  prd?: unknown;
+  prototype?: unknown;
+}) {
+  const state = asRecord(session.productDesignState);
+  const prd = asRecord(session.prd);
+  const prototype = asRecord(session.prototype);
+
+  return {
+    currentProductDesignState: state
+      ? {
+          id: state.id,
+          version: state.version,
+          status: state.status,
+          title: state.title,
+          summary: state.summary,
+          businessGoal: state.businessGoal,
+          targetUsers: state.targetUsers,
+          userScenarios: state.userScenarios,
+          pages: state.pages,
+          features: state.features,
+          backendConfigs: state.backendConfigs,
+          frontendRules: state.frontendRules,
+          businessRules: state.businessRules,
+          stateRules: state.stateRules,
+          exceptionScenarios: state.exceptionScenarios,
+          acceptanceCriteria: state.acceptanceCriteria,
+          prototypeOutline: state.prototypeOutline,
+        }
+      : null,
+    currentPrdDocument: prd
+      ? {
+          id: prd.id,
+          title: prd.title,
+          status: prd.status,
+          sections: prd.sections,
+          updatedAt: prd.updatedAt,
+        }
+      : null,
+    currentPrototypeArtifact: prototype
+      ? {
+          id: prototype.id,
+          title: prototype.title,
+          status: prototype.status,
+          updatedAt: prototype.updatedAt,
+        }
+      : null,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return undefined;
 }
 
 function serializeError(error: unknown): string {

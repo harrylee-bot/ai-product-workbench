@@ -18,6 +18,16 @@ import type {
 } from "./ai-vibe.types";
 import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "./deerflow-runtime.service";
 
+type CurrentRequirementDocumentRecord = {
+  id: string;
+  title: string;
+  sections: unknown;
+  assumptions: unknown;
+  knowledgeRefs: unknown;
+  pendingQuestions: unknown;
+  validationNotes: unknown;
+};
+
 /**
  * DeerFlow 落库桥接（审计 P0 根因修复）。
  *
@@ -67,6 +77,7 @@ export class FinalActionApplierService {
     input: { projectId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[]; assistantText?: string },
     raw: Record<string, unknown> | undefined,
   ) {
+    const previousDocument = await this.getCurrentRequirementDocument(input.projectId);
     const stateDraft = this.buildProductDesignDraft(input.projectId, raw, input.userId);
     const state = await this.stateService.createDraft(input.projectId, stateDraft, {
       userId: input.userId,
@@ -79,6 +90,7 @@ export class FinalActionApplierService {
       raw,
       input.artifacts,
       input.assistantText || input.finalAction.message,
+      previousDocument,
     );
     const document = await this.documentService.saveGeneratedDocument(state, documentDraft, {
       userId: input.userId,
@@ -164,35 +176,66 @@ export class FinalActionApplierService {
     raw: Record<string, unknown> | undefined,
     artifacts: DeerFlowResolvedArtifact[],
     fallbackMessage: string,
+    previousDocument?: CurrentRequirementDocumentRecord,
   ): RequirementDocumentDraft {
     const prdDraft = asRecord(raw?.prdDocumentDraft);
     const title = toStringValue(prdDraft?.title) || "需求文档";
-    const sections = toSections(prdDraft?.sections);
+    let sections = toSections(prdDraft?.sections);
 
-    if (sections.length > 0) {
-      return {
-        projectId,
-        title,
-        sections,
-        knowledgeRefs: toKnowledgeRefRecords(raw?.knowledgeRefsUsed),
-        assumptions: toAssumptionReferences(raw?.assumptions),
-        pendingQuestions: [],
-        validationNotes: [],
-      };
+    if (sections.length === 0) {
+      // DeerFlow 通常把 PRD 正文以 markdown artifact 形式产出；尝试从中解析段落。
+      const markdown = findArtifactText(artifacts, ["prd_markdown", "prd", "markdown"], ["text/markdown", "text/plain"]);
+      const body = markdown ?? fallbackMessage;
+      sections = markdownToSections(body, title);
     }
 
-    // DeerFlow 通常把 PRD 正文以 markdown artifact 形式产出；尝试从中解析段落。
-    const markdown = findArtifactText(artifacts, ["prd_markdown", "prd", "markdown"], ["text/markdown", "text/plain"]);
-    const body = markdown ?? fallbackMessage;
+    if (!isSubstantialPrdSections(sections) && previousDocument) {
+      return mergeSummaryIntoPreviousDocument(
+        projectId,
+        previousDocument,
+        fallbackMessage || sectionsToPlainText(sections),
+      );
+    }
+
     return {
       projectId,
       title,
-      sections: markdownToSections(body, title),
+      sections,
       knowledgeRefs: toKnowledgeRefRecords(raw?.knowledgeRefsUsed),
       assumptions: toAssumptionReferences(raw?.assumptions),
       pendingQuestions: [],
       validationNotes: [],
     };
+  }
+
+  private async getCurrentRequirementDocument(projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { currentPrdDocumentId: true },
+    });
+
+    const select = {
+      id: true,
+      title: true,
+      sections: true,
+      assumptions: true,
+      knowledgeRefs: true,
+      pendingQuestions: true,
+      validationNotes: true,
+    } as const;
+
+    const document = project?.currentPrdDocumentId
+      ? await this.prisma.requirementDocument.findUnique({
+          where: { id: project.currentPrdDocumentId },
+          select,
+        })
+      : await this.prisma.requirementDocument.findFirst({
+          where: { projectId },
+          orderBy: { updatedAt: "desc" },
+          select,
+        });
+
+    return document ?? undefined;
   }
 
   private buildPrototypeSpec(
@@ -310,6 +353,77 @@ function toSections(value: unknown): RequirementDocSection[] {
     });
   });
   return sections;
+}
+
+function isSubstantialPrdSections(sections: RequirementDocSection[]) {
+  if (sections.length >= 4) return true;
+  const text = sectionsToPlainText(sections);
+  if (text.length >= 800) return true;
+  return sections.some((section) =>
+    /项目概述|产品目标|目标用户|用户场景|业务规则|后台配置|验收标准|异常|数据|埋点|状态流转/.test(
+      `${section.title}\n${section.content}`,
+    ),
+  );
+}
+
+function sectionsToPlainText(sections: RequirementDocSection[]) {
+  return sections
+    .map((section) => {
+      const blockText = section.blocks
+        ?.map((block) => block.content?.trim())
+        .filter(Boolean)
+        .join("\n");
+      return [section.title, section.content, blockText].filter(Boolean).join("\n");
+    })
+    .join("\n\n")
+    .trim();
+}
+
+function mergeSummaryIntoPreviousDocument(
+  projectId: string,
+  previousDocument: CurrentRequirementDocumentRecord,
+  summary: string,
+): RequirementDocumentDraft {
+  const previousSections = toSections(previousDocument.sections);
+  const normalizedSummary = summary.trim();
+  const sections = normalizedSummary
+    ? [
+        {
+          id: `section_change_${crypto.randomUUID()}`,
+          title: "本次变更说明",
+          type: "overview" as const,
+          level: 2 as const,
+          order: 1,
+          content: normalizedSummary,
+          sourcePaths: [],
+        },
+        ...previousSections.map((section, index) => ({
+          ...section,
+          order: index + 2,
+        })),
+      ]
+    : previousSections;
+
+  return {
+    projectId,
+    title: previousDocument.title || "需求文档",
+    sections: sections.length ? sections : markdownToSections(normalizedSummary, previousDocument.title || "需求文档"),
+    knowledgeRefs: Array.isArray(previousDocument.knowledgeRefs)
+      ? (previousDocument.knowledgeRefs as Array<Record<string, unknown>>)
+      : [],
+    assumptions: Array.isArray(previousDocument.assumptions)
+      ? (previousDocument.assumptions as AssumptionReference[])
+      : [],
+    pendingQuestions: Array.isArray(previousDocument.pendingQuestions)
+      ? (previousDocument.pendingQuestions as RequirementDocumentDraft["pendingQuestions"])
+      : [],
+    validationNotes: [
+      ...(Array.isArray(previousDocument.validationNotes)
+        ? previousDocument.validationNotes.map(String)
+        : []),
+      "DeerFlow 本轮仅返回修改摘要，已保留上一版 PRD 正文并追加变更说明。",
+    ],
+  };
 }
 
 function findArtifactText(

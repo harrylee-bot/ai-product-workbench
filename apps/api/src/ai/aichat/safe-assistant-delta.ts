@@ -31,7 +31,6 @@ export function createAssistantDeltaFilterState(): AssistantDeltaFilterState {
  * - 以 `{` 或 `[` 开头（疑似 JSON 片段）→ ""
  * - 含 final action 标记 → ""
  * - 像完整 PRD → ""
- * - 过长（>220 字符，疑似整段正文回灌）→ ""
  * 其余返回原始 delta（保留原始未 trim 文本以保持空白）。
  */
 export function safeAssistantDelta(delta: string, state?: AssistantDeltaFilterState): string {
@@ -50,7 +49,6 @@ function safePlainAssistantDelta(delta: string): string {
     return "";
   }
   if (looksLikeFullPrd(trimmed)) return "";
-  if (trimmed.length > 220) return "";
   return delta;
 }
 

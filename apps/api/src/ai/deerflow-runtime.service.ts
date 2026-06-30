@@ -154,14 +154,17 @@ export class DeerFlowRuntimeService {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         await this.streamRun(threadId, runInput, async (event) => {
-          rawEvents.push(event);
+          let eventForUi = event;
           if (isAssistantTextEvent(event) && event.content) {
-            assistantText += event.content;
+            const delta = assistantTextDelta(assistantText, event.content);
+            assistantText += delta;
+            eventForUi = { ...event, content: delta, chunk: delta };
           }
-          if (event.event === "values") {
-            finalState = event.data;
+          rawEvents.push(eventForUi);
+          if (eventForUi.event === "values") {
+            finalState = eventForUi.data;
           }
-          await input.onEvent?.(event);
+          await input.onEvent?.(eventForUi);
         });
         break;
       } catch (error) {
@@ -478,6 +481,8 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         knowledgeRefsUsed: "optional array of knowledge paths or titles used for reasoning",
         assumptions: "optional inferred product facts, especially for one-sentence requirements",
         consistencyStrategy: "optional PRD/prototype consistency strategy",
+        prdDocumentDraft:
+          "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }] }",
         artifacts: [
           {
             kind: "optional artifact kind, for example prototype_html or prd_markdown",
@@ -496,6 +501,8 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "brand_new_system means a completely new system/page: if a tab bar is present in the target product, follow the retrieved ui_style_guide tab style while allowing the rest of the page style to be redesigned; if no tab bar is present, you may redesign the page style from scratch.",
         "Use product_architecture/page_inventory/ui_style_guide/prototype_asset_ref knowledge items when available to decide reuse vs redesign; cite them in knowledgeRefsUsed.",
         "For one_sentence_completion, infer ordinary missing details from product architecture, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
+        "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",
+        "When updating an existing PRD, merge the requested change into the currentPrdDocument and preserve unaffected sections, title hierarchy, tables, state flows, acceptance criteria, and implementation details.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
         "Use deerFlowUploads virtualPath or markdownVirtualPath when reading uploaded files.",
         "When you generate files, include their output artifact paths in finalActionContract.artifacts.",
@@ -576,6 +583,23 @@ function extractToolCalls(record: Record<string, unknown> | null): DeerFlowToolC
 
 function isAssistantTextEvent(event: DeerFlowRuntimeEvent) {
   return (event.event === "messages" || event.event === "messages-tuple") && Boolean(event.content);
+}
+
+function assistantTextDelta(previous: string, incoming: string) {
+  if (!incoming || incoming === previous) return "";
+  if (incoming.startsWith(previous)) return incoming.slice(previous.length);
+
+  const overlap = longestSuffixPrefixOverlap(previous, incoming);
+  if (overlap < 16) return incoming;
+  return overlap > 0 ? incoming.slice(overlap) : incoming;
+}
+
+function longestSuffixPrefixOverlap(previous: string, incoming: string) {
+  const maxLength = Math.min(previous.length, incoming.length);
+  for (let length = maxLength; length > 0; length -= 1) {
+    if (previous.endsWith(incoming.slice(0, length))) return length;
+  }
+  return 0;
 }
 
 function shouldExposeEventContent(event: string, record: Record<string, unknown> | null) {
