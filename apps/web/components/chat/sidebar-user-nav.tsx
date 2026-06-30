@@ -105,7 +105,7 @@ export function SidebarUserNav({ user }: { user: NestUser }) {
               onSelect={() => router.push("/admin")}
             >
               <ShieldCheckIcon className="size-4" />
-              系统管理
+              系统设置
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">

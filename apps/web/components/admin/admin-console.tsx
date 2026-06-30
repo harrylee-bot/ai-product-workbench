@@ -142,7 +142,7 @@ export function AdminConsole() {
   }, [loading, router, user]);
 
   if (loading || !user) {
-    return <AdminScreenState title="正在加载系统管理" />;
+    return <AdminScreenState title="正在加载系统设置" />;
   }
 
   if (user.role !== "admin") {
@@ -176,7 +176,7 @@ export function AdminConsole() {
                   <ServerIcon className="size-4" />
                 </div>
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">系统管理</div>
+                  <div className="truncate text-sm font-semibold">系统设置</div>
                   <div className="text-muted-foreground truncate text-xs">
                     {user.displayName || user.username}
                   </div>
