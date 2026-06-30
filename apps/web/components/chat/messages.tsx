@@ -54,7 +54,8 @@ function PureMessages({
 
   const { runtimeProcess } = useDataStream();
   const isAwaitingAssistant =
-    status === "submitted" && messages.at(-1)?.role !== "assistant";
+    (status === "submitted" || status === "streaming") &&
+    messages.at(-1)?.role !== "assistant";
   const liveRuntimeProcess =
     runtimeProcess.status !== "idle" || runtimeProcess.events?.length
       ? runtimeProcess

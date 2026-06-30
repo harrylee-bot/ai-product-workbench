@@ -182,14 +182,14 @@ export class AichatStreamService {
             runId: run.id,
             id: "request-received",
             kind: "status",
-            label: "已接收请求，开始理解任务",
+            label: "已接收请求",
           }));
 
           publishRuntimeEvent(createRuntimeEvent({
             runId: run.id,
             id: "knowledge-start",
             kind: "knowledge",
-            label: "正在检索项目知识库",
+            label: "正在检查相关知识",
             status: "running",
           }));
           const knowledgeContext = await this.retrieveKnowledge({
@@ -202,15 +202,14 @@ export class AichatStreamService {
             runId: run.id,
             id: "knowledge-complete",
             kind: "knowledge",
-            label: `已召回 ${knowledgeContext.length} 条知识上下文`,
-            detail: knowledgeContext.slice(0, 4).map((item) => item.title).join("、"),
+            label: knowledgeContext.length > 0 ? "已完成知识检索" : "未找到需要引用的知识",
           }));
 
           publishRuntimeEvent(createRuntimeEvent({
             runId: run.id,
             id: "deerflow-start",
             kind: "status",
-            label: "正在调用 DeerFlow 生成方案",
+            label: "正在生成回复",
             status: "running",
           }));
           const result = await this.deerFlow.runTurn({
@@ -246,14 +245,18 @@ export class AichatStreamService {
           finishText(streamWriter, ctx);
           await assistantDraft.persist(true);
 
-          // 落地 final action
-          publishRuntimeEvent(createRuntimeEvent({
-            runId: run.id,
-            id: "apply-final-action",
-            kind: "document",
-            label: "正在整理最终产物并写入工作台",
-            status: "running",
-          }));
+          const expectsArtifact =
+            result.finalAction.type === "review_prd" ||
+            result.finalAction.type === "review_prototype";
+          if (expectsArtifact) {
+            publishRuntimeEvent(createRuntimeEvent({
+              runId: run.id,
+              id: "apply-final-action",
+              kind: "document",
+              label: "正在整理产物并写入工作台",
+              status: "running",
+            }));
+          }
           const applied = await this.finalActionApplier.apply({
             projectId,
             userId: user.id,
@@ -262,14 +265,14 @@ export class AichatStreamService {
             artifacts: result.artifacts,
             assistantText: result.assistantText,
           });
-          publishRuntimeEvent(createRuntimeEvent({
-            runId: run.id,
-            id: "apply-final-action",
-            kind: "document",
-            label: "最终产物已写入工作台",
-          }));
 
           if (applied.prdDocument) {
+            publishRuntimeEvent(createRuntimeEvent({
+              runId: run.id,
+              id: "apply-final-action",
+              kind: "document",
+              label: "PRD 已写入工作台",
+            }));
             emitStaticText(result.finalAction.message || "PRD 已生成，请在右侧文档区检查。", streamWriter, ctx);
             finishReasoning(streamWriter, ctx);
             finishText(streamWriter, ctx);
@@ -315,6 +318,12 @@ export class AichatStreamService {
             );
             publishRuntimeFinish("succeeded");
           } else if (applied.prototypeArtifact) {
+            publishRuntimeEvent(createRuntimeEvent({
+              runId: run.id,
+              id: "apply-final-action",
+              kind: "document",
+              label: "原型已写入工作台",
+            }));
             emitStaticText(result.finalAction.message || "原型已生成，请在右侧预览区查看。", streamWriter, ctx);
             finishReasoning(streamWriter, ctx);
             finishText(streamWriter, ctx);

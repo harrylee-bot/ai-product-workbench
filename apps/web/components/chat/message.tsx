@@ -650,12 +650,20 @@ function shouldShowRuntimeStatus(
   if (!runtimeProcess || runtimeProcess.status === "idle") {
     return false;
   }
+  if (runtimeProcess.status === "running") {
+    return true;
+  }
   if (
     runtimeProcess.status === "failed" ||
-    runtimeProcess.status === "cancelled" ||
-    runtimeProcess.status === "succeeded"
+    runtimeProcess.status === "cancelled"
   ) {
     return true;
+  }
+  if (runtimeProcess.status === "succeeded") {
+    return (
+      !hasAssistantContent ||
+      (runtimeProcess.events ?? []).some(isDurableRuntimeEvent)
+    );
   }
   return hasAssistantContent || Boolean(firstVisibleRuntimeEvent(runtimeProcess));
 }
@@ -665,6 +673,17 @@ function firstVisibleRuntimeEvent(runtimeProcess?: RuntimeProcessSnapshot) {
 }
 
 function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
+  return (
+    event.kind === "status" ||
+    event.kind === "knowledge" ||
+    event.kind === "tool" ||
+    event.kind === "artifact" ||
+    event.kind === "document" ||
+    event.kind === "error"
+  );
+}
+
+function isDurableRuntimeEvent(event: RuntimeProcessEvent) {
   return (
     event.kind === "tool" ||
     event.kind === "artifact" ||
