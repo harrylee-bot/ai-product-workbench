@@ -53,10 +53,21 @@ function PureMessages({
   });
 
   const { runtimeProcess } = useDataStream();
-  const effectiveRuntimeProcess =
+  const isAwaitingAssistant =
+    status === "submitted" && messages.at(-1)?.role !== "assistant";
+  const liveRuntimeProcess =
     runtimeProcess.status !== "idle" || runtimeProcess.events?.length
       ? runtimeProcess
-      : runtimeStatusToProcess(runtimeStatus);
+      : undefined;
+  const persistedRuntimeProcess = runtimeStatusToProcess(runtimeStatus);
+  const pendingRuntimeProcess =
+    liveRuntimeProcess ??
+    (persistedRuntimeProcess?.status === "running"
+      ? persistedRuntimeProcess
+      : undefined);
+  const effectiveRuntimeProcess =
+    liveRuntimeProcess ??
+    (isAwaitingAssistant ? undefined : persistedRuntimeProcess);
   const latestAssistantIndex = findLatestAssistantIndex(messages);
 
   const prevChatIdRef = useRef(chatId);
@@ -109,8 +120,8 @@ function PureMessages({
             />
           ))}
 
-          {status === "submitted" && messages.at(-1)?.role !== "assistant" && (
-            <ThinkingMessage runtimeProcess={effectiveRuntimeProcess} />
+          {isAwaitingAssistant && (
+            <ThinkingMessage runtimeProcess={pendingRuntimeProcess} />
           )}
 
           <div
