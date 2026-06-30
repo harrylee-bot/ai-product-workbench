@@ -510,6 +510,8 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "Use deerFlowUploads virtualPath or markdownVirtualPath when reading uploaded files.",
         "When you generate files, include their output artifact paths in finalActionContract.artifacts.",
         "Return final action instead of asking NestJS to decide the workflow.",
+        "For PRD/document generation, stream the complete user-visible document body as normal assistant markdown before the final action block so AI Product Workbench can show it live in the canvas; do not hide the whole document only inside prdDocumentDraft JSON.",
+        "Keep non-document progress notes, clarifying comments, and tool/coding updates outside the document body so they remain suitable for the chat transcript.",
       ],
     },
   };

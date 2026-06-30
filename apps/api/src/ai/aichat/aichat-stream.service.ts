@@ -8,7 +8,7 @@ import { ConversationService } from "../../modules/conversation/conversation.ser
 import { KnowledgeRetrievalService } from "../../knowledge/knowledge-retrieval.service";
 import { MessageService } from "../../projects/message.service";
 import { DeerFlowRuntimeService } from "../deerflow-runtime.service";
-import type { DeerFlowKnowledgeReference } from "../deerflow-runtime.service";
+import type { DeerFlowKnowledgeReference, DeerFlowRuntimeEvent } from "../deerflow-runtime.service";
 import { FinalActionApplierService } from "../final-action-applier.service";
 import { RuntimeRunLogService } from "../runtime-run-log.service";
 import { toInputJson } from "../ai-vibe.helpers";
@@ -160,6 +160,7 @@ export class AichatStreamService {
           };
           emitRuntimeFinish(streamWriter, snapshot);
         };
+        const documentStream = createDocumentStreamState(run.id);
         res.on("close", markClientClosed);
 
         try {
@@ -224,7 +225,12 @@ export class AichatStreamService {
               for (const runtimeEvent of runtimeEventsFromDeerFlow(event, ctx, run.id)) {
                 publishRuntimeEvent(runtimeEvent);
               }
-              emitDeerFlowEvent(event, streamWriter, ctx);
+              const routedDocumentDelta = routeAssistantDocumentDelta(event, streamWriter, documentStream);
+              if (!routedDocumentDelta.suppressChat) {
+                emitDeerFlowEvent(event, streamWriter, ctx);
+              } else {
+                emitDeerFlowEvent({ ...event, chunk: "", content: "" }, streamWriter, ctx);
+              }
               if (ctx.textBuffer.length > previousTextLength) {
                 void assistantDraft.persist();
               }
@@ -344,6 +350,7 @@ export class AichatStreamService {
           } else {
             // 无产物：把 finalAction.message 作为文本下发（若未在 chunk 流里）
             const message = result.finalAction.message || ctx.textBuffer.trim() || result.assistantText || "本轮未生成产物。";
+            finishDocumentStream(streamWriter, documentStream);
             if (!ctx.hasEmittedText) {
               emitStaticText(message, streamWriter, ctx);
               finishText(streamWriter, ctx);
@@ -736,6 +743,181 @@ export class AichatStreamService {
       });
     }
   }
+}
+
+type DocumentStreamState = {
+  id: string;
+  started: boolean;
+  finished: boolean;
+  title?: string;
+  textBuffer: string;
+  pending: string;
+  inFinalActionBlock: boolean;
+};
+
+const FINAL_ACTION_FENCE = "```ai_product_workbench_final_action";
+
+function createDocumentStreamState(runId: string): DocumentStreamState {
+  return {
+    id: `streaming-prd-${runId}`,
+    started: false,
+    finished: false,
+    textBuffer: "",
+    pending: "",
+    inFinalActionBlock: false,
+  };
+}
+
+function routeAssistantDocumentDelta(
+  event: DeerFlowRuntimeEvent,
+  writer: UIMessageStreamWriter,
+  state: DocumentStreamState,
+): { suppressChat: boolean } {
+  if (event.messageRole !== "assistant" || typeof event.chunk !== "string" || !event.chunk) {
+    return { suppressChat: false };
+  }
+
+  const { visible, touchedFinalAction } = stripFinalActionDelta(event.chunk, state);
+  const shouldRouteToCanvas =
+    state.started ||
+    looksLikeDocumentDraft(`${state.textBuffer}${visible}`, visible);
+
+  if (!shouldRouteToCanvas) {
+    return { suppressChat: touchedFinalAction };
+  }
+
+  if (visible) {
+    startDocumentStream(writer, state, visible);
+    writer.write({ type: "data-textDelta", data: visible, transient: true });
+    state.textBuffer += visible;
+    updateDocumentStreamTitle(writer, state);
+  }
+
+  return { suppressChat: true };
+}
+
+function startDocumentStream(
+  writer: UIMessageStreamWriter,
+  state: DocumentStreamState,
+  firstDelta: string,
+) {
+  if (state.started) return;
+
+  state.started = true;
+  state.title = inferDocumentTitle(firstDelta) ?? "生成中的 PRD";
+  writer.write({ type: "data-kind", data: "text", transient: true });
+  writer.write({ type: "data-id", data: state.id, transient: true });
+  writer.write({ type: "data-title", data: state.title, transient: true });
+  writer.write({ type: "data-clear", data: null, transient: true });
+}
+
+function updateDocumentStreamTitle(
+  writer: UIMessageStreamWriter,
+  state: DocumentStreamState,
+) {
+  const title = inferDocumentTitle(state.textBuffer);
+  if (!title || title === state.title) return;
+
+  state.title = title;
+  writer.write({ type: "data-title", data: title, transient: true });
+}
+
+function finishDocumentStream(
+  writer: UIMessageStreamWriter,
+  state: DocumentStreamState,
+) {
+  if (!state.started || state.finished) return;
+
+  state.finished = true;
+  writer.write({ type: "data-finish", data: null, transient: true });
+}
+
+function stripFinalActionDelta(
+  delta: string,
+  state: DocumentStreamState,
+): { visible: string; touchedFinalAction: boolean } {
+  state.pending += delta;
+  let visible = "";
+  let touchedFinalAction = false;
+
+  while (state.pending) {
+    if (state.inFinalActionBlock) {
+      touchedFinalAction = true;
+      const endIndex = state.pending.indexOf("```");
+      if (endIndex === -1) {
+        state.pending = keepPotentialFenceSuffix(state.pending);
+        break;
+      }
+      state.pending = state.pending.slice(endIndex + 3);
+      state.inFinalActionBlock = false;
+      continue;
+    }
+
+    const startIndex = state.pending.indexOf(FINAL_ACTION_FENCE);
+    if (startIndex !== -1) {
+      visible += state.pending.slice(0, startIndex);
+      state.pending = state.pending.slice(startIndex + FINAL_ACTION_FENCE.length);
+      state.inFinalActionBlock = true;
+      touchedFinalAction = true;
+      continue;
+    }
+
+    const holdLength = longestSuffixMatchingFinalActionFence(state.pending);
+    if (holdLength > 0) {
+      visible += state.pending.slice(0, -holdLength);
+      state.pending = state.pending.slice(-holdLength);
+      touchedFinalAction = true;
+      break;
+    }
+
+    visible += state.pending;
+    state.pending = "";
+  }
+
+  return { visible, touchedFinalAction };
+}
+
+function looksLikeDocumentDraft(buffer: string, delta: string) {
+  const sample = buffer.trim();
+  const current = delta.trim();
+  if (!sample || sample.length < 8) return false;
+
+  if (/产品需求文档|需求文档|PRD/i.test(sample)) return true;
+  if (/^#{1,3}\s+.*(PRD|需求|文档|功能|页面|产品)/im.test(sample)) return true;
+  if (
+    /(^|\n)\s*(#{1,4}\s*)?(\d+(\.\d+)*[.、]?\s*)?(引言|项目背景|文档范围|使用场景|业务需求|功能需求|流程|页面要求|接口|验收标准|业务降级方案|需求安全基线)/.test(sample)
+  ) {
+    return true;
+  }
+
+  const headingCount = (sample.match(/^#{1,4}\s+/gm) ?? []).length;
+  if (headingCount >= 2 && /(用户|页面|功能|规则|流程|奖励|活动|接口|配置)/.test(sample)) {
+    return true;
+  }
+
+  return /^#{1,4}\s+/.test(current) && /(需求|PRD|文档|功能|页面)/i.test(current);
+}
+
+function inferDocumentTitle(value: string) {
+  const heading = value.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  if (!heading) return undefined;
+  return heading.replace(/[#*`]/g, "").trim().slice(0, 80) || undefined;
+}
+
+function keepPotentialFenceSuffix(value: string) {
+  if (value.endsWith("``")) return "``";
+  if (value.endsWith("`")) return "`";
+  return "";
+}
+
+function longestSuffixMatchingFinalActionFence(value: string) {
+  const maxLength = Math.min(value.length, FINAL_ACTION_FENCE.length - 1);
+  for (let length = maxLength; length > 0; length -= 1) {
+    if (FINAL_ACTION_FENCE.startsWith(value.slice(-length))) {
+      return length;
+    }
+  }
+  return 0;
 }
 
 /** 从 dto.message.parts 抽取纯文本。 */
