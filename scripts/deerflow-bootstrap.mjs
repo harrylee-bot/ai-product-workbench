@@ -52,7 +52,7 @@ async function main(config) {
 
     if (config.dryRun) {
       log(`Dry run: would upsert agent '${agent.name}' at ${config.gatewayUrl}/api/agents`);
-      log(`Dry run: would install skill '${skillName}' through ${config.gatewayUrl}/api/skills/install`);
+      log(`Dry run: would install or refresh skill '${skillName}' through ${config.gatewayUrl}/api/skills/install`);
       return;
     }
 
@@ -170,17 +170,32 @@ async function uploadSkillArchive(gatewayUrl, threadId, archivePath) {
 }
 
 async function installSkill(gatewayUrl, threadId, virtualPath, skillName) {
-  const result = await fetchJson(`${gatewayUrl}/api/skills/install`, {
+  const request = {
     method: "POST",
     headers: jsonHeaders(),
     body: JSON.stringify({
       thread_id: threadId,
       path: virtualPath,
     }),
-  }, [409]);
+  };
+  const result = await fetchJson(`${gatewayUrl}/api/skills/install`, request, [409]);
 
   if (result.response.status === 409) {
-    log(`Skill already installed: ${skillName}`);
+    log(`Skill already installed: ${skillName}; reinstalling to refresh files`);
+    await deleteCustomSkill(gatewayUrl, skillName);
+    return (await fetchJson(`${gatewayUrl}/api/skills/install`, request)).data;
+  }
+  return result.data;
+}
+
+async function deleteCustomSkill(gatewayUrl, skillName) {
+  const result = await fetchJson(`${gatewayUrl}/api/skills/custom/${encodeURIComponent(skillName)}`, {
+    method: "DELETE",
+    headers: jsonHeaders(),
+  }, [404]);
+
+  if (result.response.status === 404) {
+    log(`Custom skill not found before reinstall: ${skillName}`);
   }
   return result.data;
 }
