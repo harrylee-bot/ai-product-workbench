@@ -1,8 +1,19 @@
 "use client";
 import type { UseChatHelpers } from "@ai-sdk/react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  CheckCircle2Icon,
+  ChevronRightIcon,
+  Loader2Icon,
+  SquareTerminalIcon,
+  XCircleIcon,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import type { Vote } from "@/lib/api/types";
-import type { ChatMessage, RuntimeProcessSnapshot } from "@/lib/types";
+import type {
+  ChatMessage,
+  RuntimeProcessEvent,
+  RuntimeProcessSnapshot,
+} from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import { Shimmer } from "../ai-elements/shimmer";
@@ -238,7 +249,7 @@ const PurePreviewMessage = ({
       }
 
       if (state !== "output-available" || !part.output) {
-        return null;
+        return <CompactToolPart key={toolCallId} part={part} />;
       }
 
       return (
@@ -265,7 +276,7 @@ const PurePreviewMessage = ({
       }
 
       if (state !== "output-available" || !part.output) {
-        return null;
+        return <CompactToolPart key={toolCallId} part={part} />;
       }
 
       return (
@@ -314,6 +325,10 @@ const PurePreviewMessage = ({
       );
     }
 
+    if (type.startsWith("tool-")) {
+      return <CompactToolPart key={part.toolCallId ?? key} part={part} />;
+    }
+
     return null;
   });
 
@@ -328,20 +343,22 @@ const PurePreviewMessage = ({
     />
   );
 
-  const runtimePanel =
+  const showRuntimeStatus =
     isAssistant &&
-    (isLoading ||
-      (showRuntimeProcess &&
-        runtimeProcess?.status !== "idle" &&
-        Boolean(runtimeProcess?.events?.length))) ? (
-      <RuntimeProcessPanel runtimeProcess={runtimeProcess} />
-    ) : null;
+    Boolean(showRuntimeProcess) &&
+    shouldShowRuntimeStatus(runtimeProcess, hasAnyContent);
+  const runtimeStatusLine = showRuntimeStatus ? (
+    <RuntimeStatusLine
+      hasAssistantContent={hasAnyContent}
+      runtimeProcess={runtimeProcess}
+    />
+  ) : null;
 
   const content = isThinking ? (
-    runtimePanel
+    runtimeStatusLine
   ) : (
     <>
-      {runtimePanel}
+      {runtimeStatusLine}
       {attachments}
       {parts}
       {actions}
@@ -386,6 +403,10 @@ export const ThinkingMessage = ({
 }: {
   runtimeProcess?: RuntimeProcessSnapshot;
 }) => {
+  if (!shouldShowRuntimeStatus(runtimeProcess, false)) {
+    return null;
+  }
+
   return (
     <div
       className="group/message w-full"
@@ -399,78 +420,109 @@ export const ThinkingMessage = ({
           </div>
         </div>
 
-        <RuntimeProcessPanel runtimeProcess={runtimeProcess} />
+        <RuntimeStatusLine
+          hasAssistantContent={false}
+          runtimeProcess={runtimeProcess}
+        />
       </div>
     </div>
   );
 };
 
-function RuntimeProcessPanel({
+function RuntimeStatusLine({
+  hasAssistantContent,
   runtimeProcess,
 }: {
+  hasAssistantContent: boolean;
   runtimeProcess?: RuntimeProcessSnapshot;
 }) {
-  const startedAt = runtimeProcess?.startedAt;
+  const activityStartedAt = firstVisibleRuntimeEvent(runtimeProcess)?.createdAt;
+  const observedStartedAt = useObservedStart(
+    Boolean(
+      runtimeProcess?.status === "running" &&
+        (hasAssistantContent || activityStartedAt)
+    )
+  );
+  const startedAt =
+    activityStartedAt ??
+    observedStartedAt ??
+    (runtimeProcess?.status === "running" ? undefined : runtimeProcess?.startedAt);
   const endedAt = runtimeProcess?.endedAt ?? null;
-  const isRunning =
-    runtimeProcess?.status === "running" || runtimeProcess?.status === "idle";
+  const isRunning = runtimeProcess?.status === "running";
   const elapsedMs = useElapsedMs(startedAt, endedAt, isRunning);
-  const events = runtimeProcess?.events ?? [];
-  const visibleEvents = useMemo(() => events.slice(-8), [events]);
 
   return (
-    <div className="flex max-w-[min(100%,680px)] flex-col gap-2 text-[13px] leading-[1.65]">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {isRunning ? (
-          <Shimmer className="font-medium text-muted-foreground" duration={1}>
-            思考中...
-          </Shimmer>
-        ) : (
-          <span className="font-medium text-muted-foreground">
-            {statusText(runtimeProcess?.status)}
-          </span>
-        )}
-        {startedAt ? (
-          <span className="text-[12px] tabular-nums text-muted-foreground">
-            已处理 {formatElapsed(elapsedMs)}
-          </span>
-        ) : null}
-      </div>
-
-      {visibleEvents.length > 0 ? (
-        <div className="rounded-lg border border-border/50 bg-muted/25 px-3 py-2">
-          <div className="mb-1.5 text-[12px] font-medium text-muted-foreground">
-            思考过程
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {visibleEvents.map((event) => (
-              <div className="flex min-w-0 gap-2" key={event.id}>
-                <span
-                  className={cn(
-                    "mt-[0.55em] size-1.5 shrink-0 rounded-full",
-                    event.status === "failed"
-                      ? "bg-red-500"
-                      : event.status === "completed"
-                        ? "bg-emerald-500"
-                        : "animate-pulse bg-muted-foreground/60"
-                  )}
-                />
-                <div className="min-w-0">
-                  <div className="break-words text-foreground/85">
-                    {event.label}
-                  </div>
-                  {event.detail ? (
-                    <div className="line-clamp-2 break-words text-[12px] text-muted-foreground">
-                      {event.detail}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] leading-[1.65]">
+      {isRunning ? (
+        <Shimmer className="font-medium text-muted-foreground" duration={1}>
+          思考中...
+        </Shimmer>
+      ) : (
+        <span className="font-medium text-muted-foreground">
+          {statusText(runtimeProcess?.status)}
+        </span>
+      )}
+      {startedAt ? (
+        <span className="text-[12px] tabular-nums text-muted-foreground">
+          已处理 {formatElapsed(elapsedMs)}
+        </span>
       ) : null}
     </div>
+  );
+}
+
+function CompactToolPart({ part }: { part: any }) {
+  const state = String(part.state ?? "");
+  const isRunning =
+    state === "input-streaming" ||
+    state === "input-available" ||
+    state === "approval-requested" ||
+    state === "approval-responded";
+  const isFailed = state === "output-error" || state === "output-denied";
+  const toolName = formatToolName(
+    part.toolName ?? String(part.type ?? "").replace(/^tool-/, "")
+  );
+  const title = isFailed
+    ? `${toolName} 运行失败`
+    : state === "output-available"
+      ? `${toolName} 已完成`
+      : isRunning
+        ? `正在运行 ${toolName}`
+        : toolName;
+  const detail = formatToolPayload(part);
+  const row = (
+    <div className="flex min-w-0 items-center gap-2 text-[13px] leading-[1.65] text-muted-foreground">
+      {isFailed ? (
+        <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
+      ) : isRunning ? (
+        <Loader2Icon className="size-3.5 shrink-0 animate-spin" />
+      ) : (
+        <CheckCircle2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <SquareTerminalIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
+      <span className="truncate">{title}</span>
+      {detail ? (
+        <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
+      ) : null}
+    </div>
+  );
+
+  if (!detail) {
+    return <div key={part.toolCallId ?? `${part.type}-${state}`}>{row}</div>;
+  }
+
+  return (
+    <details
+      className="group max-w-[min(100%,680px)] text-[13px]"
+      key={part.toolCallId ?? `${part.type}-${state}`}
+    >
+      <summary className="flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden">
+        {row}
+      </summary>
+      <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-muted/35 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
+        {detail}
+      </pre>
+    </details>
   );
 }
 
@@ -516,4 +568,87 @@ function statusText(status?: RuntimeProcessSnapshot["status"]) {
   if (status === "cancelled") return "已停止";
   if (status === "succeeded") return "已完成";
   return "思考中...";
+}
+
+function shouldShowRuntimeStatus(
+  runtimeProcess: RuntimeProcessSnapshot | undefined,
+  hasAssistantContent: boolean,
+) {
+  if (!runtimeProcess || runtimeProcess.status === "idle") {
+    return false;
+  }
+  if (
+    runtimeProcess.status === "failed" ||
+    runtimeProcess.status === "cancelled" ||
+    runtimeProcess.status === "succeeded"
+  ) {
+    return true;
+  }
+  return hasAssistantContent || Boolean(firstVisibleRuntimeEvent(runtimeProcess));
+}
+
+function firstVisibleRuntimeEvent(runtimeProcess?: RuntimeProcessSnapshot) {
+  return runtimeProcess?.events?.find(isVisibleRuntimeEvent);
+}
+
+function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
+  return (
+    event.kind === "tool" ||
+    event.kind === "artifact" ||
+    event.kind === "document" ||
+    event.kind === "error"
+  );
+}
+
+function useObservedStart(shouldStart: boolean) {
+  const [startedAt, setStartedAt] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (shouldStart && !startedAt) {
+      setStartedAt(new Date().toISOString());
+    }
+    if (!shouldStart && startedAt) {
+      setStartedAt(undefined);
+    }
+  }, [shouldStart, startedAt]);
+
+  return startedAt;
+}
+
+function formatToolName(name: string) {
+  const normalized = name
+    .replace(/^mcp__/, "")
+    .replace(/__/g, " / ")
+    .replace(/_/g, " ")
+    .replace(/-/g, " ")
+    .trim();
+  return normalized || "工具";
+}
+
+function formatToolPayload(part: any) {
+  const segments: string[] = [];
+  if (part.input !== undefined) {
+    segments.push(`输入\n${stringifyToolValue(part.input)}`);
+  }
+  if (part.output !== undefined) {
+    segments.push(`输出\n${stringifyToolValue(part.output)}`);
+  }
+  if (part.errorText) {
+    segments.push(`错误\n${String(part.errorText)}`);
+  }
+  return segments.join("\n\n").trim();
+}
+
+function stringifyToolValue(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
