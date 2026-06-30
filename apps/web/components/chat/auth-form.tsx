@@ -18,7 +18,7 @@ export function AuthForm({
     <Form action={action} className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
         <Label className="font-normal text-muted-foreground" htmlFor="email">
-          Email
+          邮箱
         </Label>
         <Input
           autoComplete="email"
@@ -35,7 +35,7 @@ export function AuthForm({
 
       <div className="flex flex-col gap-2">
         <Label className="font-normal text-muted-foreground" htmlFor="password">
-          Password
+          密码
         </Label>
         <Input
           className="h-10 rounded-lg border-border/50 bg-muted/50 text-sm transition-colors focus:border-foreground/20 focus:bg-muted"

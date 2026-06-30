@@ -31,7 +31,7 @@ function PureArtifactActions({
   );
 
   if (!artifactDefinition) {
-    throw new Error("Artifact definition not found!");
+    throw new Error("未找到画布类型定义");
   }
 
   const actionContext: ArtifactActionContext = {
@@ -62,10 +62,10 @@ function PureArtifactActions({
                   "flex items-center justify-center rounded-full p-3 text-muted-foreground transition-all duration-150",
                   "hover:text-foreground",
                   "active:scale-95",
-                  "disabled:pointer-events-none disabled:opacity-30",
-                  {
-                    "text-foreground":
-                      mode === "diff" && action.description === "View changes",
+                    "disabled:pointer-events-none disabled:opacity-30",
+                    {
+                      "text-foreground":
+                      mode === "diff" && action.description === "查看变更",
                   }
                 )}
                 disabled={disabled}
@@ -75,7 +75,7 @@ function PureArtifactActions({
                   try {
                     await Promise.resolve(action.onClick(actionContext));
                   } catch (_error) {
-                    toast.error("Failed to execute action");
+                    toast.error("操作执行失败");
                   } finally {
                     setIsLoading(false);
                   }

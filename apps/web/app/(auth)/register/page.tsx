@@ -24,15 +24,15 @@ export default function Page() {
     const displayName = (formData.get("displayName") as string)?.trim() ?? "";
 
     if (!username) {
-      toast({ type: "error", description: "Username is required!" });
+      toast({ type: "error", description: "请输入用户名" });
       return;
     }
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-      toast({ type: "error", description: "Failed validating your submission!" });
+      toast({ type: "error", description: "请填写有效的邮箱" });
       return;
     }
     if (password.length < 6) {
-      toast({ type: "error", description: "Failed validating your submission!" });
+      toast({ type: "error", description: "密码至少需要 6 位" });
       return;
     }
 
@@ -43,27 +43,27 @@ export default function Page() {
         password,
         ...(displayName ? { displayName } : {}),
       });
-      toast({ type: "success", description: "Account created!" });
+      toast({ type: "success", description: "账号已创建" });
       setIsSuccessful(true);
       router.push("/");
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to create account!";
+        error instanceof Error ? error.message : "创建账号失败";
       toast({ type: "error", description: message });
     }
   };
 
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight">Create account</h1>
-      <p className="text-sm text-muted-foreground">Get started for free</p>
+      <h1 className="text-2xl font-semibold tracking-tight">创建账号</h1>
+      <p className="text-sm text-muted-foreground">开始使用 AI 产品工作台</p>
       <Form action={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <Label
             className="font-normal text-muted-foreground"
             htmlFor="username"
           >
-            Username
+            用户名
           </Label>
           <Input
             autoComplete="username"
@@ -82,21 +82,21 @@ export default function Page() {
             className="font-normal text-muted-foreground"
             htmlFor="displayName"
           >
-            Display name (optional)
+            昵称（可选）
           </Label>
           <Input
             autoComplete="nickname"
             className="h-10 rounded-lg border-border/50 bg-muted/50 text-sm transition-colors focus:border-foreground/20 focus:bg-muted"
             id="displayName"
             name="displayName"
-            placeholder="Your name"
+            placeholder="你的名字"
             type="text"
           />
         </div>
 
         <div className="flex flex-col gap-2">
           <Label className="font-normal text-muted-foreground" htmlFor="email">
-            Email
+            邮箱
           </Label>
           <Input
             autoComplete="email"
@@ -114,7 +114,7 @@ export default function Page() {
             className="font-normal text-muted-foreground"
             htmlFor="password"
           >
-            Password
+            密码
           </Label>
           <Input
             className="h-10 rounded-lg border-border/50 bg-muted/50 text-sm transition-colors focus:border-foreground/20 focus:bg-muted"
@@ -132,7 +132,7 @@ export default function Page() {
           disabled={isSuccessful}
           type="submit"
         >
-          Sign up
+          注册
           {isSuccessful && (
             <span className="absolute right-4 animate-spin">
               <LoaderIcon />
@@ -141,12 +141,12 @@ export default function Page() {
         </Button>
 
         <p className="text-center text-[13px] text-muted-foreground">
-          {"Have an account? "}
+          {"已有账号？"}
           <Link
             className="text-foreground underline-offset-4 hover:underline"
             href="/login"
           >
-            Sign in
+            登录
           </Link>
         </p>
       </Form>

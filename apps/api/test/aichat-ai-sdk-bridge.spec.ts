@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   createBridgeContext,
   emitDeerFlowEvent,
+  emitPrdDocumentPreview,
   emitStaticText,
   finishText,
   type UIMessageStreamWriter,
 } from "../src/ai/aichat/aichat-ai-sdk-bridge";
+import type { RequirementDocument } from "../src/ai/ai-vibe.types";
 
 function captureWriter() {
   const parts: Record<string, unknown>[] = [];
@@ -68,6 +70,37 @@ describe("aichat AI SDK bridge", () => {
       { type: "text-start", id: "text-1" },
       { type: "text-delta", id: "text-1", delta: "本轮未生成产物。" },
       { type: "text-end", id: "text-1" },
+    ]);
+  });
+
+  it("emits PRD document preview using the createDocument tool shape", () => {
+    const { parts, writer } = captureWriter();
+
+    emitPrdDocumentPreview(
+      {
+        id: "prd-1",
+        title: "签到活动 PRD",
+      } as RequirementDocument,
+      writer,
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "tool-input-start",
+        toolCallId: "prd-document-prd-1",
+        toolName: "createDocument",
+      },
+      {
+        type: "tool-input-available",
+        toolCallId: "prd-document-prd-1",
+        toolName: "createDocument",
+        input: { title: "签到活动 PRD", kind: "text" },
+      },
+      {
+        type: "tool-output-available",
+        toolCallId: "prd-document-prd-1",
+        output: { id: "prd-1", title: "签到活动 PRD", kind: "text" },
+      },
     ]);
   });
 });

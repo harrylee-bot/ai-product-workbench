@@ -18,7 +18,7 @@ export const SignOutForm = () => {
       await logout();
       router.push("/login");
     } catch {
-      toast({ type: "error", description: "Failed to sign out!" });
+      toast({ type: "error", description: "退出登录失败" });
       setSigningOut(false);
     }
   };
@@ -30,7 +30,7 @@ export const SignOutForm = () => {
       onClick={handleSignOut}
       type="button"
     >
-      {signingOut ? "Signing out..." : "Sign out"}
+      {signingOut ? "正在退出..." : "退出登录"}
     </button>
   );
 };

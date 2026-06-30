@@ -20,7 +20,7 @@ type TextArtifactMetadata = {
 
 export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
   kind: "text",
-  description: "Useful for text content, like drafting essays and emails.",
+  description: "适用于 PRD、方案和其他文本内容。",
   initialize: async ({ documentId, setMetadata }) => {
     const suggestions = await getSuggestionsByDocumentId(documentId);
 
@@ -97,7 +97,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
   actions: [
     {
       icon: <ClockRewind size={18} />,
-      description: "View changes",
+      description: "查看变更",
       onClick: ({ handleVersionChange }) => {
         handleVersionChange("toggle");
       },
@@ -111,7 +111,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
     },
     {
       icon: <UndoIcon size={18} />,
-      description: "View Previous version",
+      description: "查看上一版本",
       onClick: ({ handleVersionChange }) => {
         handleVersionChange("prev");
       },
@@ -125,7 +125,7 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
     },
     {
       icon: <RedoIcon size={18} />,
-      description: "View Next version",
+      description: "查看下一版本",
       onClick: ({ handleVersionChange }) => {
         handleVersionChange("next");
       },
@@ -139,24 +139,24 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
     },
     {
       icon: <CopyIcon size={18} />,
-      description: "Copy to clipboard",
+      description: "复制到剪贴板",
       onClick: ({ content }) => {
         navigator.clipboard.writeText(content);
-        toast.success("Copied to clipboard!");
+        toast.success("已复制到剪贴板");
       },
     },
   ],
   toolbar: [
     {
       icon: <PenIcon />,
-      description: "Add final polish",
+      description: "润色全文",
       onClick: ({ sendMessage }) => {
         sendMessage({
           role: "user",
           parts: [
             {
               type: "text",
-              text: "Please add final polish and check for grammar, add section titles for better structure, and ensure everything reads smoothly.",
+              text: "请对这份内容做最后润色，检查语法和表达，补充更清晰的小节标题，并保证整体阅读顺畅。",
             },
           ],
         });
@@ -164,14 +164,14 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
     },
     {
       icon: <MessageIcon />,
-      description: "Request suggestions",
+      description: "补充建议",
       onClick: ({ sendMessage }) => {
         sendMessage({
           role: "user",
           parts: [
             {
               type: "text",
-              text: "Please add suggestions you have that could improve the writing.",
+              text: "请补充你认为能提升这份内容质量的建议。",
             },
           ],
         });

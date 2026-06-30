@@ -31,7 +31,7 @@ export function SubmitButton({
       )}
 
       <output aria-live="polite" className="sr-only">
-        {pending || isSuccessful ? "Loading" : "Submit form"}
+        {pending || isSuccessful ? "加载中" : "提交表单"}
       </output>
     </Button>
   );

@@ -117,6 +117,30 @@ export function emitPrdArtifact(prdDocument: RequirementDocument, writer: UIMess
 }
 
 /**
+ * 合成 AI SDK 文档工具结果，让前端沿用官方 DocumentPreview 卡片作为画布重开入口。
+ */
+export function emitPrdDocumentPreview(
+  prdDocument: RequirementDocument,
+  writer: UIMessageStreamWriter,
+): void {
+  const title = prdDocument.title || "产品需求文档（PRD）";
+  const toolCallId = `prd-document-${prdDocument.id}`;
+
+  writer.write({ type: "tool-input-start", toolCallId, toolName: "createDocument" });
+  writer.write({
+    type: "tool-input-available",
+    toolCallId,
+    toolName: "createDocument",
+    input: { title, kind: "text" },
+  });
+  writer.write({
+    type: "tool-output-available",
+    toolCallId,
+    output: { id: prdDocument.id, title, kind: "text" },
+  });
+}
+
+/**
  * 合成原型 code 画布 artifact。
  *
  * 顺序承重：data-kind{code} → data-id → data-title → data-clear → data-codeDelta(一次完整快照,替换语义) → data-finish。

@@ -14,7 +14,7 @@ type Metadata = Record<string, never>;
 
 export const sheetArtifact = new Artifact<"sheet", Metadata>({
   kind: "sheet",
-  description: "Useful for working with spreadsheets",
+  description: "适用于处理表格数据",
   initialize: () => null,
   onStreamPart: ({ setArtifact, streamPart }) => {
     if (streamPart.type === "data-sheetDelta") {
@@ -40,7 +40,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
   actions: [
     {
       icon: <UndoIcon size={18} />,
-      description: "View Previous version",
+      description: "查看上一版本",
       onClick: ({ handleVersionChange }) => {
         handleVersionChange("prev");
       },
@@ -54,7 +54,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
     },
     {
       icon: <RedoIcon size={18} />,
-      description: "View Next version",
+      description: "查看下一版本",
       onClick: ({ handleVersionChange }) => {
         handleVersionChange("next");
       },
@@ -68,7 +68,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
     },
     {
       icon: <CopyIcon />,
-      description: "Copy as .csv",
+      description: "复制为 .csv",
       onClick: ({ content }) => {
         const parsed = parse<string[]>(content, { skipEmptyLines: true });
 
@@ -79,25 +79,25 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
         const cleanedCsv = unparse(nonEmptyRows);
 
         navigator.clipboard.writeText(cleanedCsv);
-        toast.success("Copied csv to clipboard!");
+        toast.success("CSV 已复制到剪贴板");
       },
     },
   ],
   toolbar: [
     {
-      description: "Format and clean data",
+      description: "格式化并清洗数据",
       icon: <SparklesIcon />,
       onClick: ({ sendMessage }) => {
         sendMessage({
           role: "user",
           parts: [
-            { type: "text", text: "Can you please format and clean the data?" },
+            { type: "text", text: "请帮我格式化并清洗这份数据。" },
           ],
         });
       },
     },
     {
-      description: "Analyze and visualize data",
+      description: "分析并可视化数据",
       icon: <LineChartIcon />,
       onClick: ({ sendMessage }) => {
         sendMessage({
@@ -105,7 +105,7 @@ export const sheetArtifact = new Artifact<"sheet", Metadata>({
           parts: [
             {
               type: "text",
-              text: "Can you please analyze and visualize the data by creating a new code artifact in python?",
+              text: "请分析这份数据，并用 Python 创建一个新的代码画布来完成可视化。",
             },
           ],
         });

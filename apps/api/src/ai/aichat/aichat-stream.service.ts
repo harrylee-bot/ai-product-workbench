@@ -17,6 +17,7 @@ import {
   createBridgeContext,
   emitDeerFlowEvent,
   emitPrdArtifact,
+  emitPrdDocumentPreview,
   emitPrototypeArtifact,
   emitStaticText,
   finishText,
@@ -130,6 +131,7 @@ export class AichatStreamService {
             emitStaticText(result.finalAction.message || "PRD 已生成，请在右侧文档区检查。", writer as unknown as UIMessageStreamWriter, ctx);
             finishText(writer as unknown as UIMessageStreamWriter, ctx);
             emitPrdArtifact(applied.prdDocument, writer as unknown as UIMessageStreamWriter);
+            emitPrdDocumentPreview(applied.prdDocument, writer as unknown as UIMessageStreamWriter);
             await this.messages.createAssistantMessage({
               projectId,
               conversationId,
@@ -140,6 +142,7 @@ export class AichatStreamService {
                 source: "aichat",
                 runId: run.id,
                 prdDocumentId: applied.prdDocument.id,
+                prdDocumentTitle: applied.prdDocument.title,
                 finalActionType: result.finalAction.type,
                 threadId: result.threadId,
               }),

@@ -22,11 +22,11 @@ export default function Page() {
     setEmail(emailValue);
 
     if (!emailValue || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailValue)) {
-      toast({ type: "error", description: "Failed validating your submission!" });
+      toast({ type: "error", description: "请填写有效的邮箱和密码" });
       return;
     }
     if (passwordValue.length < 6) {
-      toast({ type: "error", description: "Failed validating your submission!" });
+      toast({ type: "error", description: "密码至少需要 6 位" });
       return;
     }
 
@@ -35,25 +35,25 @@ export default function Page() {
       setIsSuccessful(true);
       router.push("/");
     } catch {
-      toast({ type: "error", description: "Invalid credentials!" });
+      toast({ type: "error", description: "邮箱或密码不正确" });
     }
   };
 
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">欢迎回来</h1>
       <p className="text-sm text-muted-foreground">
-        Sign in to your account to continue
+        登录后继续使用 AI 产品工作台
       </p>
       <AuthForm action={handleSubmit} defaultEmail={email}>
-        <SubmitButton isSuccessful={isSuccessful}>Sign in</SubmitButton>
+        <SubmitButton isSuccessful={isSuccessful}>登录</SubmitButton>
         <p className="text-center text-[13px] text-muted-foreground">
-          {"No account? "}
+          {"还没有账号？"}
           <Link
             className="text-foreground underline-offset-4 hover:underline"
             href="/register"
           >
-            Sign up
+            注册
           </Link>
         </p>
       </AuthForm>

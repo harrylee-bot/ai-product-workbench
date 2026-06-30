@@ -44,7 +44,7 @@ export function SidebarUserNav({ user }: { user: NestUser }) {
       await logout();
       router.push("/login");
     } catch {
-      toast({ type: "error", description: "Failed to sign out!" });
+      toast({ type: "error", description: "退出登录失败" });
     } finally {
       setSigningOut(false);
     }
@@ -60,7 +60,7 @@ export function SidebarUserNav({ user }: { user: NestUser }) {
                 <div className="flex flex-row items-center gap-2">
                   <div className="size-6 animate-pulse rounded-full bg-sidebar-foreground/10" />
                   <span className="animate-pulse rounded-md bg-sidebar-foreground/10 text-transparent text-[13px]">
-                    Loading...
+                    加载中...
                   </span>
                 </div>
                 <div className="animate-spin text-sidebar-foreground/50">
@@ -97,7 +97,7 @@ export function SidebarUserNav({ user }: { user: NestUser }) {
                 setTheme(resolvedTheme === "dark" ? "light" : "dark")
               }
             >
-              {`Toggle ${resolvedTheme === "light" ? "dark" : "light"} mode`}
+              {`切换到${resolvedTheme === "light" ? "深色" : "浅色"}模式`}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">
@@ -107,7 +107,7 @@ export function SidebarUserNav({ user }: { user: NestUser }) {
                 onClick={handleSignOut}
                 type="button"
               >
-                {signingOut ? "Signing out..." : "Sign out"}
+                {signingOut ? "正在退出..." : "退出登录"}
               </button>
             </DropdownMenuItem>
           </DropdownMenuContent>

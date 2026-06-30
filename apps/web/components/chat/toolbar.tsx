@@ -140,12 +140,12 @@ const ReadingLevelSelector = ({
   sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
 }) => {
   const LEVELS = [
-    "Elementary",
-    "Middle School",
-    "Keep current level",
-    "High School",
-    "College",
-    "Graduate",
+    "小学",
+    "初中",
+    "保持当前水平",
+    "高中",
+    "大学",
+    "研究生",
   ];
 
   const y = useMotionValue(-40 * 2);
@@ -202,7 +202,7 @@ const ReadingLevelSelector = ({
                     parts: [
                       {
                         type: "text",
-                        text: `Please adjust the reading level to ${LEVELS[currentLevel]} level.`,
+                        text: `请把这份内容调整为${LEVELS[currentLevel]}阅读水平。`,
                       },
                     ],
                   });
@@ -282,14 +282,14 @@ const createFixErrorTool = (
   documentId?: string
 ): ArtifactToolbarItem => ({
   icon: <WrenchIcon className="size-4" />,
-  description: "Fix error",
+  description: "修复错误",
   onClick: ({ sendMessage: send }) => {
     send({
       role: "user",
       parts: [
         {
           type: "text",
-          text: `Fix the error in the existing script${documentId ? ` (id: ${documentId})` : ""} using updateDocument. Do not create a new script. Console error:\n\n${consoleOutput}`,
+          text: `请使用 updateDocument 修复现有脚本${documentId ? `（id: ${documentId}）` : ""}里的错误，不要创建新脚本。控制台错误：\n\n${consoleOutput}`,
         },
       ],
     });
@@ -368,7 +368,7 @@ const PureToolbar = ({
   );
 
   if (!artifactDefinition) {
-    throw new Error("Artifact definition not found!");
+    throw new Error("未找到画布类型定义");
   }
 
   const toolsByArtifactKind = consoleError

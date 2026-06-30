@@ -50,7 +50,7 @@ const chatModels: ChatModel[] = [
     id: DEFAULT_CHAT_MODEL,
     name: "GPT-5.5",
     provider: "openai",
-    description: "Default chat model",
+    description: "默认对话模型",
   },
 ];
 
@@ -173,7 +173,7 @@ function PureMultimodalInput({
         setMessages(() => []);
         break;
       case "rename":
-        toast("Rename is available from the sidebar chat menu.");
+        toast("可在左侧对话菜单中重命名。");
         break;
       case "model": {
         const modelBtn = document.querySelector<HTMLButtonElement>(
@@ -186,30 +186,30 @@ function PureMultimodalInput({
         setTheme(resolvedTheme === "dark" ? "light" : "dark");
         break;
       case "delete":
-        toast("Delete this chat?", {
+        toast("删除当前对话？", {
           action: {
-            label: "Delete",
+            label: "删除",
             onClick: () => {
               fetch(
                 `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat?id=${chatId}`,
                 { method: "DELETE" }
               );
               router.push("/");
-              toast.success("Chat deleted");
+              toast.success("对话已删除");
             },
           },
         });
         break;
       case "purge":
-        toast("Delete all chats?", {
+        toast("删除全部对话？", {
           action: {
-            label: "Delete all",
+            label: "删除全部",
             onClick: () => {
               fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/history`, {
                 method: "DELETE",
               });
               router.push("/");
-              toast.success("All chats deleted");
+              toast.success("已删除全部对话");
             },
           },
         });
@@ -292,7 +292,7 @@ function PureMultimodalInput({
       const { error } = await response.json();
       toast.error(error);
     } catch (_error) {
-      toast.error("Failed to upload file, please try again!");
+      toast.error("文件上传失败，请重试");
     }
   }, []);
 
@@ -314,7 +314,7 @@ function PureMultimodalInput({
           ...successfullyUploadedAttachments,
         ]);
       } catch (_error) {
-        toast.error("Failed to upload files");
+        toast.error("文件上传失败");
       } finally {
         setUploadQueue([]);
       }
@@ -339,7 +339,7 @@ function PureMultimodalInput({
 
       event.preventDefault();
 
-      setUploadQueue((prev) => [...prev, "Pasted image"]);
+      setUploadQueue((prev) => [...prev, "粘贴的图片"]);
 
       try {
         const uploadPromises = imageItems
@@ -360,7 +360,7 @@ function PureMultimodalInput({
           ...(successfullyUploadedAttachments as Attachment[]),
         ]);
       } catch (_error) {
-        toast.error("Failed to upload pasted image(s)");
+        toast.error("粘贴图片上传失败");
       } finally {
         setUploadQueue([]);
       }
@@ -382,7 +382,7 @@ function PureMultimodalInput({
     <div className={cn("relative flex w-full flex-col gap-4", className)}>
       {editingMessage && onCancelEdit && (
         <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-          <span>Editing message</span>
+          <span>正在编辑消息</span>
           <button
             className="rounded px-1.5 py-0.5 text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
             onMouseDown={(e) => {
@@ -391,7 +391,7 @@ function PureMultimodalInput({
             }}
             type="button"
           >
-            Cancel
+            取消
           </button>
         </div>
       )}
@@ -445,7 +445,7 @@ function PureMultimodalInput({
           if (status === "ready" || status === "error") {
             submitForm();
           } else {
-            toast.error("Please wait for the model to finish its response!");
+            toast.error("请等待当前回复完成后再发送");
           }
         }}
       >
@@ -520,7 +520,7 @@ function PureMultimodalInput({
             }
           }}
           placeholder={
-            editingMessage ? "Edit your message..." : "Ask anything..."
+            editingMessage ? "编辑你的消息..." : "请输入你的问题..."
           }
           ref={textareaRef}
           value={input}
@@ -660,7 +660,7 @@ function PureModelSelectorCompact({
         </Button>
       </ModelSelectorTrigger>
       <ModelSelectorContent>
-        <ModelSelectorInput placeholder="Search models..." />
+        <ModelSelectorInput placeholder="搜索模型..." />
         <ModelSelectorList>
           {(() => {
             const grouped: Record<
@@ -687,7 +687,7 @@ function PureModelSelectorCompact({
 
             return sortedKeys.map((key) => (
               <ModelSelectorGroup
-                heading={key === "_available" ? "Available" : key}
+                heading={key === "_available" ? "可用模型" : key}
                 key={key}
               >
                 {grouped[key].map(({ model }) => {

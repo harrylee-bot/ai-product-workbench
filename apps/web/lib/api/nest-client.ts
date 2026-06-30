@@ -66,15 +66,38 @@ type NestMessageItem = {
  * 读时优先用 metadata.parts（编辑过的），否则从 content 构造 text part。
  */
 export function nestMessageToUiMessage(msg: NestMessageItem): ChatMessage {
-  const parts = (msg.metadata?.parts as ChatMessage["parts"] | undefined) ?? [
-    { type: "text", text: msg.content },
-  ];
+  const storedParts = msg.metadata?.parts as ChatMessage["parts"] | undefined;
+  const parts = storedParts ?? buildMessageParts(msg);
   return {
     id: msg.id,
     role: msg.role,
     parts,
     metadata: { createdAt: formatISO(new Date(msg.createdAt)) },
   } as ChatMessage;
+}
+
+function buildMessageParts(msg: NestMessageItem): ChatMessage["parts"] {
+  const parts: unknown[] = msg.content ? [{ type: "text", text: msg.content }] : [];
+  const prdDocumentId = stringFromMetadata(msg.metadata?.prdDocumentId);
+
+  if (msg.role === "assistant" && prdDocumentId) {
+    const title =
+      stringFromMetadata(msg.metadata?.prdDocumentTitle) || "产品需求文档（PRD）";
+
+    parts.push({
+      type: "tool-createDocument",
+      toolCallId: `prd-document-${prdDocumentId}`,
+      state: "output-available",
+      input: { title, kind: "text" },
+      output: { id: prdDocumentId, title, kind: "text" },
+    });
+  }
+
+  return parts as ChatMessage["parts"];
+}
+
+function stringFromMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export function convertToUIMessages(messages: NestMessageItem[]): ChatMessage[] {

@@ -166,7 +166,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       } else {
         toast({
           type: "error",
-          description: error.message || "Oops, an error occurred!",
+          description: error.message || "出错了，请稍后重试",
         });
       }
     },

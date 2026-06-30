@@ -113,7 +113,7 @@ export function Console({ consoleOutputs, setConsoleOutputs }: ConsoleProps) {
         <div className="sticky top-0 z-50 flex h-10 w-full items-center justify-between border-b border-border/50 bg-background px-3">
           <div className="flex items-center gap-2.5 text-[13px] text-muted-foreground">
             <TerminalWindowIcon />
-            <span>Console</span>
+            <span>控制台</span>
           </div>
           <Button
             className="size-7 text-muted-foreground/50 hover:text-foreground"
@@ -150,7 +150,7 @@ export function Console({ consoleOutputs, setConsoleOutputs }: ConsoleProps) {
                   <Spinner className="size-3.5" />
                   <span className="text-muted-foreground">
                     {consoleOutput.status === "in_progress"
-                      ? "Initializing..."
+                      ? "初始化中..."
                       : consoleOutput.status === "loading_packages"
                         ? consoleOutput.contents.map((content) =>
                             content.type === "text" ? content.value : null

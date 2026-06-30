@@ -9,7 +9,7 @@ export const Greeting = () => {
         initial={{ opacity: 0, y: 10 }}
         transition={{ delay: 0.35, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
       >
-        What can I help with?
+        需要我帮你做什么？
       </motion.div>
       <motion.div
         animate={{ opacity: 1, y: 0 }}
@@ -17,7 +17,7 @@ export const Greeting = () => {
         initial={{ opacity: 0, y: 10 }}
         transition={{ delay: 0.5, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
       >
-        Ask a question, write code, or explore ideas.
+        可以写 PRD、补充方案，或继续生成原型。
       </motion.div>
     </div>
   );

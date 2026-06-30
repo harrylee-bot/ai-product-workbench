@@ -178,15 +178,13 @@ export function ChatShell() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Activate AI Gateway</AlertDialogTitle>
+            <AlertDialogTitle>需要启用 AI 网关</AlertDialogTitle>
             <AlertDialogDescription>
-              This application requires{" "}
-              {process.env.NODE_ENV === "production" ? "the owner" : "you"} to
-              activate Vercel AI Gateway.
+              当前应用需要启用 AI 网关后才能继续生成回复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 window.open(
@@ -196,7 +194,7 @@ export function ChatShell() {
                 window.location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/`;
               }}
             >
-              Activate
+              去启用
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
