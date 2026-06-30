@@ -1,13 +1,15 @@
 "use client";
 
 import Script from "next/script";
-import { Suspense } from "react";
+import { useRouter } from "next/navigation";
+import { Suspense, useEffect } from "react";
 import { Toaster } from "sonner";
 import { AppSidebar } from "@/components/chat/app-sidebar";
 import { DataStreamProvider } from "@/components/chat/data-stream-provider";
 import { ChatShell } from "@/components/chat/shell";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ActiveChatProvider } from "@/hooks/use-active-chat";
+import { useAuth } from "@/lib/auth/nest-auth";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -26,6 +28,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 }
 
 function SidebarShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login");
+    }
+  }, [loading, router, user]);
+
+  if (loading || !user) {
+    return <div className="flex h-dvh bg-sidebar" />;
+  }
+
   // 客户端读取 sidebar 折叠状态（原 next/headers cookies() 的替代）。
   const isCollapsed =
     typeof document !== "undefined" &&
