@@ -25,6 +25,17 @@ type CreateMessageInput = {
   relatedQaReportId?: string;
 };
 
+type UpdateAssistantMessageInput = {
+  content?: string;
+  type?: MessageType;
+  attachments?: Prisma.InputJsonValue;
+  metadata?: Prisma.InputJsonValue;
+  relatedRunId?: string;
+  relatedPrdDocumentId?: string;
+  relatedPrototypeArtifactId?: string;
+  relatedQaReportId?: string;
+};
+
 @Injectable()
 export class MessageService {
   constructor(private readonly prisma: PrismaService) {}
@@ -39,6 +50,38 @@ export class MessageService {
       role: MessageRole.assistant,
       type: input.type ?? MessageType.text,
     });
+  }
+
+  async updateAssistantMessage(messageId: string, input: UpdateAssistantMessageInput) {
+    const data: Prisma.MessageUpdateManyMutationInput = {};
+    if (input.content !== undefined) data.content = input.content;
+    if (input.type !== undefined) data.type = input.type;
+    if (input.attachments !== undefined) data.attachments = input.attachments;
+    if (input.metadata !== undefined) data.metadata = input.metadata;
+    if (input.relatedRunId !== undefined) data.relatedRunId = input.relatedRunId;
+    if (input.relatedPrdDocumentId !== undefined) data.relatedPrdDocumentId = input.relatedPrdDocumentId;
+    if (input.relatedPrototypeArtifactId !== undefined) {
+      data.relatedPrototypeArtifactId = input.relatedPrototypeArtifactId;
+    }
+    if (input.relatedQaReportId !== undefined) data.relatedQaReportId = input.relatedQaReportId;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.message.updateMany({
+        where: { id: messageId, role: MessageRole.assistant },
+        data,
+      });
+      if (result.count === 0) {
+        throw new NotFoundException("消息不存在");
+      }
+
+      const message = await tx.message.findUnique({ where: { id: messageId } });
+      if (!message) {
+        throw new NotFoundException("消息不存在");
+      }
+      return message;
+    });
+
+    return this.toMessageItem(updated);
   }
 
   async createSystemMessage(input: CreateMessageInput) {

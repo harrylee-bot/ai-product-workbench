@@ -22,6 +22,7 @@ describe("MessageService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.$transaction.mockReset();
   });
 
   it("creates a user message and updates conversation stats", async () => {
@@ -100,6 +101,47 @@ describe("MessageService", () => {
     const result = await service.getRecentMessages("conversation-1");
 
     expect(result.map((message) => message.id)).toEqual(["message-1", "message-2"]);
+  });
+
+  it("updates an assistant message draft in place", async () => {
+    const updatedMessage = {
+      ...baseMessage("message-1"),
+      role: MessageRole.assistant,
+      type: MessageType.agent_summary,
+      content: "PRD 已生成",
+      metadata: { draft: false, runId: "run-1" },
+      relatedRunId: "run-1",
+    };
+    const tx = {
+      message: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue(updatedMessage),
+      },
+    };
+    prisma.$transaction.mockImplementation(async (callback) => callback(tx));
+
+    const result = await service.updateAssistantMessage("message-1", {
+      content: "PRD 已生成",
+      type: MessageType.agent_summary,
+      metadata: { draft: false, runId: "run-1" },
+      relatedRunId: "run-1",
+    });
+
+    expect(result).toMatchObject({
+      id: "message-1",
+      role: MessageRole.assistant,
+      content: "PRD 已生成",
+      relatedRunId: "run-1",
+    });
+    expect(tx.message.updateMany).toHaveBeenCalledWith({
+      where: { id: "message-1", role: MessageRole.assistant },
+      data: {
+        content: "PRD 已生成",
+        type: MessageType.agent_summary,
+        metadata: { draft: false, runId: "run-1" },
+        relatedRunId: "run-1",
+      },
+    });
   });
 });
 

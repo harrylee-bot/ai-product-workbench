@@ -102,6 +102,13 @@ export class AichatStreamService {
             }
           },
         };
+        const assistantDraft = this.createAssistantDraftWriter({
+          projectId,
+          conversationId,
+          userId: user.id,
+          runId: run.id,
+          getContent: () => ctx.textBuffer.trim(),
+        });
         res.on("close", markClientClosed);
 
         try {
@@ -126,12 +133,17 @@ export class AichatStreamService {
             signal: controller.signal,
             onEvent: (event) => {
               if (controller.signal.aborted) return;
+              const previousTextLength = ctx.textBuffer.length;
               emitDeerFlowEvent(event, streamWriter, ctx);
+              if (ctx.textBuffer.length > previousTextLength) {
+                void assistantDraft.persist();
+              }
             },
           });
 
           // 收尾文本/步骤 part
           finishText(streamWriter, ctx);
+          await assistantDraft.persist(true);
 
           // 落地 final action
           const applied = await this.finalActionApplier.apply({
@@ -149,7 +161,7 @@ export class AichatStreamService {
             emitPrdArtifact(applied.prdDocument, streamWriter);
             emitPrdDocumentPreview(applied.prdDocument, streamWriter);
             deliveredUserVisibleResult = true;
-            await this.createAssistantMessageBestEffort({
+            await assistantDraft.finalize({
               projectId,
               conversationId,
               userId: user.id,
@@ -165,7 +177,7 @@ export class AichatStreamService {
               }),
               relatedRunId: run.id,
               relatedPrdDocumentId: applied.prdDocument.id,
-            }, run.id);
+            });
             await this.completeRunBestEffort(
               run.id,
               {
@@ -181,7 +193,7 @@ export class AichatStreamService {
             finishText(streamWriter, ctx);
             emitPrototypeArtifact(applied.prototypeArtifact, streamWriter);
             deliveredUserVisibleResult = true;
-            await this.createAssistantMessageBestEffort({
+            await assistantDraft.finalize({
               projectId,
               conversationId,
               userId: user.id,
@@ -196,7 +208,7 @@ export class AichatStreamService {
               }),
               relatedRunId: run.id,
               relatedPrototypeArtifactId: applied.prototypeArtifact.id,
-            }, run.id);
+            });
             await this.completeRunBestEffort(
               run.id,
               {
@@ -215,7 +227,7 @@ export class AichatStreamService {
               finishText(streamWriter, ctx);
             }
             deliveredUserVisibleResult = true;
-            await this.createAssistantMessageBestEffort({
+            await assistantDraft.finalize({
               projectId,
               conversationId,
               userId: user.id,
@@ -228,7 +240,7 @@ export class AichatStreamService {
                 threadId: result.threadId,
               }),
               relatedRunId: run.id,
-            }, run.id);
+            });
             await this.completeRunBestEffort(
               run.id,
               {
@@ -250,6 +262,23 @@ export class AichatStreamService {
             }).catch((cancelError) => {
               this.logger.error(`aichat run 取消状态写入失败 runId=${run.id}：${serializeError(cancelError)}`);
             });
+            const partialMessage = ctx.textBuffer.trim();
+            if (partialMessage) {
+              await assistantDraft.finalize({
+                projectId,
+                conversationId,
+                userId: user.id,
+                content: partialMessage,
+                type: MessageType.agent_summary,
+                metadata: toInputJson({
+                  source: "aichat",
+                  runId: run.id,
+                  status: "cancelled",
+                  draft: false,
+                }),
+                relatedRunId: run.id,
+              });
+            }
             finishText(streamWriter, ctx);
             streamWriter.write({ type: "finish", finishReason: "stop" });
             return;
@@ -260,6 +289,20 @@ export class AichatStreamService {
             this.logger.error(`aichat run 失败状态写入失败 runId=${run.id}：${serializeError(failError)}`);
           });
           if (!deliveredUserVisibleResult) {
+            await assistantDraft.finalize({
+              projectId,
+              conversationId,
+              userId: user.id,
+              content: ctx.textBuffer.trim() || "生成失败，请重试",
+              type: MessageType.error,
+              metadata: toInputJson({
+                source: "aichat",
+                runId: run.id,
+                status: "failed",
+                draft: false,
+              }),
+              relatedRunId: run.id,
+            });
             // 收尾已开的文本 part，避免前端解析悬挂
             finishText(streamWriter, ctx);
             streamWriter.write({ type: "error", errorText: "生成失败，请重试" });
@@ -375,15 +418,103 @@ export class AichatStreamService {
     }));
   }
 
-  private async createAssistantMessageBestEffort(
-    input: Parameters<MessageService["createAssistantMessage"]>[0],
-    runId: string,
-  ) {
-    try {
-      await this.messages.createAssistantMessage(input);
-    } catch (error) {
-      this.logger.error(`assistant 消息落库失败 runId=${runId}：${serializeError(error)}`);
-    }
+  private createAssistantDraftWriter(input: {
+    projectId: string;
+    conversationId: string;
+    userId: string;
+    runId: string;
+    getContent: () => string;
+  }) {
+    const draftMetadata = () =>
+      toInputJson({
+        source: "aichat",
+        runId: input.runId,
+        status: "running",
+        draft: true,
+      });
+    const toUpdateInput = (message: Parameters<MessageService["createAssistantMessage"]>[0]) => ({
+      content: message.content,
+      type: message.type,
+      attachments: message.attachments,
+      metadata: message.metadata,
+      relatedRunId: message.relatedRunId,
+      relatedPrdDocumentId: message.relatedPrdDocumentId,
+      relatedPrototypeArtifactId: message.relatedPrototypeArtifactId,
+      relatedQaReportId: message.relatedQaReportId,
+    });
+
+    let draftMessageId: string | undefined;
+    let lastPersistedContent = "";
+    let lastPersistedAt = 0;
+    let isFinalizing = false;
+    let pending: Promise<void> = Promise.resolve();
+
+    const queueWrite = (content: string) => {
+      pending = pending
+        .catch(() => undefined)
+        .then(async () => {
+          if (isFinalizing || content === lastPersistedContent) return;
+
+          if (!draftMessageId) {
+            const created = await this.messages.createAssistantMessage({
+              projectId: input.projectId,
+              conversationId: input.conversationId,
+              userId: input.userId,
+              content,
+              type: MessageType.text,
+              metadata: draftMetadata(),
+              relatedRunId: input.runId,
+            });
+            draftMessageId = created.id;
+          } else {
+            await this.messages.updateAssistantMessage(draftMessageId, {
+              content,
+              type: MessageType.text,
+              metadata: draftMetadata(),
+              relatedRunId: input.runId,
+            });
+          }
+
+          lastPersistedContent = content;
+        })
+        .catch((error) => {
+          this.logger.error(`assistant 草稿落库失败 runId=${input.runId}：${serializeError(error)}`);
+        });
+      return pending;
+    };
+
+    return {
+      persist: (force = false) => {
+        if (isFinalizing) return pending;
+
+        const content = input.getContent();
+        if (!content) return pending;
+
+        const now = Date.now();
+        const hasMeaningfulDelta = content.length - lastPersistedContent.length >= 160;
+        const hasWaitedLongEnough = now - lastPersistedAt >= 1200;
+        if (!force && !hasMeaningfulDelta && !hasWaitedLongEnough) {
+          return pending;
+        }
+
+        lastPersistedAt = now;
+        return queueWrite(content);
+      },
+      finalize: async (message: Parameters<MessageService["createAssistantMessage"]>[0]) => {
+        isFinalizing = true;
+        await pending.catch(() => undefined);
+
+        try {
+          if (draftMessageId) {
+            await this.messages.updateAssistantMessage(draftMessageId, toUpdateInput(message));
+          } else {
+            await this.messages.createAssistantMessage(message);
+          }
+        } catch (error) {
+          this.logger.error(`assistant 消息落库失败 runId=${input.runId}：${serializeError(error)}`);
+        }
+      },
+    };
   }
 
   private async completeRunBestEffort(
