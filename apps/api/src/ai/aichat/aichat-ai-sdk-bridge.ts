@@ -25,6 +25,7 @@ export type BridgeContext = {
   hasEmittedText: boolean;
   textBuffer: string;
   textStarted: boolean;
+  emittedToolCallIds: Set<string>;
 };
 
 export function createBridgeContext(): BridgeContext {
@@ -33,6 +34,7 @@ export function createBridgeContext(): BridgeContext {
     hasEmittedText: false,
     textBuffer: "",
     textStarted: false,
+    emittedToolCallIds: new Set(),
   };
 }
 
@@ -62,6 +64,7 @@ export function emitDeerFlowEvent(
       const toolCallId = call.id;
       const toolName = call.name;
       if (!toolCallId || !toolName) continue;
+      ctx.emittedToolCallIds.add(toolCallId);
       writer.write({ type: "tool-input-start", toolCallId, toolName });
       writer.write({ type: "tool-input-available", toolCallId, toolName, input: call.args ?? {} });
     }
@@ -69,6 +72,9 @@ export function emitDeerFlowEvent(
 
   // 3) 工具输出（tool 角色）
   if (event.messageRole === "tool" && event.toolCallId) {
+    if (!ctx.emittedToolCallIds.has(event.toolCallId)) {
+      return;
+    }
     writer.write({
       type: "tool-output-available",
       toolCallId: event.toolCallId,

@@ -79,6 +79,7 @@ export class AichatStreamService {
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
         const ctx = createBridgeContext();
+        let deliveredUserVisibleResult = false;
         const run = await this.runLogs.createRun({
           projectId,
           conversationId,
@@ -132,7 +133,8 @@ export class AichatStreamService {
             finishText(writer as unknown as UIMessageStreamWriter, ctx);
             emitPrdArtifact(applied.prdDocument, writer as unknown as UIMessageStreamWriter);
             emitPrdDocumentPreview(applied.prdDocument, writer as unknown as UIMessageStreamWriter);
-            await this.messages.createAssistantMessage({
+            deliveredUserVisibleResult = true;
+            await this.createAssistantMessageBestEffort({
               projectId,
               conversationId,
               userId: user.id,
@@ -148,8 +150,8 @@ export class AichatStreamService {
               }),
               relatedRunId: run.id,
               relatedPrdDocumentId: applied.prdDocument.id,
-            });
-            await this.runLogs.completeRun(
+            }, run.id);
+            await this.completeRunBestEffort(
               run.id,
               {
                 status: "success",
@@ -163,7 +165,8 @@ export class AichatStreamService {
             emitStaticText(result.finalAction.message || "原型已生成，请在右侧预览区查看。", writer as unknown as UIMessageStreamWriter, ctx);
             finishText(writer as unknown as UIMessageStreamWriter, ctx);
             emitPrototypeArtifact(applied.prototypeArtifact, writer as unknown as UIMessageStreamWriter);
-            await this.messages.createAssistantMessage({
+            deliveredUserVisibleResult = true;
+            await this.createAssistantMessageBestEffort({
               projectId,
               conversationId,
               userId: user.id,
@@ -178,8 +181,8 @@ export class AichatStreamService {
               }),
               relatedRunId: run.id,
               relatedPrototypeArtifactId: applied.prototypeArtifact.id,
-            });
-            await this.runLogs.completeRun(
+            }, run.id);
+            await this.completeRunBestEffort(
               run.id,
               {
                 status: "success",
@@ -196,7 +199,8 @@ export class AichatStreamService {
               emitStaticText(message, writer as unknown as UIMessageStreamWriter, ctx);
               finishText(writer as unknown as UIMessageStreamWriter, ctx);
             }
-            await this.messages.createAssistantMessage({
+            deliveredUserVisibleResult = true;
+            await this.createAssistantMessageBestEffort({
               projectId,
               conversationId,
               userId: user.id,
@@ -209,8 +213,8 @@ export class AichatStreamService {
                 threadId: result.threadId,
               }),
               relatedRunId: run.id,
-            });
-            await this.runLogs.completeRun(
+            }, run.id);
+            await this.completeRunBestEffort(
               run.id,
               {
                 status: "no_artifact",
@@ -224,11 +228,17 @@ export class AichatStreamService {
           writer.write({ type: "finish" });
         } catch (error) {
           this.logger.error(`aichat stream 失败 runId=${run.id}：${serializeError(error)}`);
-          await this.runLogs.failRun(run.id, error);
-          // 收尾已开的文本 part，避免前端解析悬挂
-          finishText(writer as unknown as UIMessageStreamWriter, ctx);
-          writer.write({ type: "error", errorText: "生成失败，请重试" });
-          writer.write({ type: "finish" });
+          await this.runLogs.failRun(run.id, error).catch((failError) => {
+            this.logger.error(`aichat run 失败状态写入失败 runId=${run.id}：${serializeError(failError)}`);
+          });
+          if (!deliveredUserVisibleResult) {
+            // 收尾已开的文本 part，避免前端解析悬挂
+            finishText(writer as unknown as UIMessageStreamWriter, ctx);
+            writer.write({ type: "error", errorText: "生成失败，请重试" });
+            writer.write({ type: "finish", finishReason: "error" });
+          } else {
+            writer.write({ type: "finish", finishReason: "stop" });
+          }
         } finally {
           this.activeRunControllers.delete(run.id);
           // 仅当仍是本次 controller 时才清除会话映射（避免覆盖后续轮次）
@@ -335,6 +345,40 @@ export class AichatStreamService {
       reason: ref.reason,
     }));
   }
+
+  private async createAssistantMessageBestEffort(
+    input: Parameters<MessageService["createAssistantMessage"]>[0],
+    runId: string,
+  ) {
+    try {
+      await this.messages.createAssistantMessage(input);
+    } catch (error) {
+      this.logger.error(`assistant 消息落库失败 runId=${runId}：${serializeError(error)}`);
+    }
+  }
+
+  private async completeRunBestEffort(
+    runId: string,
+    result: unknown,
+    outputSummary: string,
+  ) {
+    try {
+      await this.runLogs.completeRun(runId, result, outputSummary);
+    } catch (error) {
+      this.logger.error(`aichat run 成功状态写入失败 runId=${runId}：${serializeError(error)}`);
+      await this.runLogs.completeRun(
+        runId,
+        {
+          status: readResultStatus(result) ?? "success",
+          resultOmitted: true,
+          warning: serializeError(error),
+        },
+        outputSummary,
+      ).catch((fallbackError) => {
+        this.logger.error(`aichat run 最小成功状态写入失败 runId=${runId}：${serializeError(fallbackError)}`);
+      });
+    }
+  }
 }
 
 /** 从 dto.message.parts 抽取纯文本。 */
@@ -366,4 +410,12 @@ function serializeError(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+function readResultStatus(result: unknown) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return undefined;
+  }
+  const status = (result as { status?: unknown }).status;
+  return typeof status === "string" && status.trim() ? status : undefined;
 }

@@ -73,6 +73,67 @@ describe("aichat AI SDK bridge", () => {
     ]);
   });
 
+  it("skips tool outputs that have no matching tool input", () => {
+    const ctx = createBridgeContext();
+    const { parts, writer } = captureWriter();
+
+    emitDeerFlowEvent(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "tool",
+        toolCallId: "missing-tool-call",
+        toolResult: "orphan result",
+      },
+      writer,
+      ctx,
+    );
+
+    expect(parts).toEqual([]);
+  });
+
+  it("emits tool outputs after the matching tool input", () => {
+    const ctx = createBridgeContext();
+    const { parts, writer } = captureWriter();
+
+    emitDeerFlowEvent(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "assistant",
+        toolCalls: [{ id: "tool-1", name: "search", args: { query: "签到" } }],
+      },
+      writer,
+      ctx,
+    );
+    emitDeerFlowEvent(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "tool",
+        toolCallId: "tool-1",
+        toolResult: "done",
+      },
+      writer,
+      ctx,
+    );
+
+    expect(parts).toEqual([
+      { type: "tool-input-start", toolCallId: "tool-1", toolName: "search" },
+      {
+        type: "tool-input-available",
+        toolCallId: "tool-1",
+        toolName: "search",
+        input: { query: "签到" },
+      },
+      {
+        type: "tool-output-available",
+        toolCallId: "tool-1",
+        output: "done",
+      },
+    ]);
+  });
+
   it("emits PRD document preview using the createDocument tool shape", () => {
     const { parts, writer } = captureWriter();
 
