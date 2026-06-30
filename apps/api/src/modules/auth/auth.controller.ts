@@ -25,7 +25,7 @@ export class AuthController {
   @Get("me")
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: Phase1User) {
-    return this.auth.me(user);
+    return { user: this.auth.me(user) };
   }
 
   @Post("register")

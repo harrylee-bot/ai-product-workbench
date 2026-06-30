@@ -51,12 +51,9 @@ describe("aichat AI SDK bridge", () => {
 
     finishText(writer, ctx);
 
-    expect(parts).toEqual([
-      { type: "text-start", id: "text-1" },
-      { type: "text-delta", id: "text-1", delta: "你好！我在，可以继续帮你写 PRD。" },
-      { type: "text-end", id: "text-1" },
-    ]);
-    expect(ctx.hasEmittedText).toBe(true);
+    expect(parts).toEqual([]);
+    expect(ctx.textBuffer).toBe("你好！我在，可以继续帮你写 PRD。");
+    expect(ctx.hasEmittedText).toBe(false);
   });
 
   it("marks static fallback text as emitted", () => {

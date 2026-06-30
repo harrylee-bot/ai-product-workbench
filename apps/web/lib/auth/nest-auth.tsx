@@ -37,6 +37,11 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function normalizeMeResponse(data: { user?: NestUser } | NestUser): NestUser {
+  if ("user" in data && data.user) return data.user;
+  return data as NestUser;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiBase()}${path}`, {
     credentials: "include",
@@ -71,8 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await request<{ user: NestUser }>("/auth/me");
-      setUser(data.user);
+      const data = await request<{ user?: NestUser } | NestUser>("/auth/me");
+      setUser(normalizeMeResponse(data));
     } catch {
       setUser(null);
     } finally {

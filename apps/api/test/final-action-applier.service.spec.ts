@@ -136,6 +136,51 @@ describe("FinalActionApplierService", () => {
     );
   });
 
+  it("builds PRD sections from assistant markdown when DeerFlow only returns a summary final action", async () => {
+    const state = baseState();
+    const document = baseDocument();
+    stateService.createDraft.mockResolvedValue(state);
+    documentService.saveGeneratedDocument.mockResolvedValue(document);
+    stateService.attachGeneratedArtifacts.mockResolvedValue({ ...state, prdDocument: document });
+
+    await service.apply({
+      projectId: "project-1",
+      userId: "user-1",
+      runId: "run-1",
+      finalAction: finalAction({
+        type: "review_prd",
+        message: "已继续完善签到打卡活动 PRD。",
+        raw: { type: "review_prd", prdDocumentDraft: { title: "需求文档" } },
+      }),
+      artifacts: [],
+      assistantText: [
+        "# 签到打卡活动 PRD",
+        "",
+        "## 产品目标",
+        "提升用户每日活跃和连续访问。",
+        "",
+        "## 用户端功能",
+        "用户可以每日签到、查看连续签到天数和奖励明细。",
+        "",
+        "## 验收标准",
+        "签到成功后页面状态应更新为今日已签到。",
+      ].join("\n"),
+    });
+
+    expect(documentService.saveGeneratedDocument).toHaveBeenCalledWith(
+      state,
+      expect.objectContaining({
+        title: "需求文档",
+        sections: expect.arrayContaining([
+          expect.objectContaining({ title: "产品目标", content: "提升用户每日活跃和连续访问。" }),
+          expect.objectContaining({ title: "用户端功能", content: "用户可以每日签到、查看连续签到天数和奖励明细。" }),
+          expect.objectContaining({ title: "验收标准", content: "签到成功后页面状态应更新为今日已签到。" }),
+        ]),
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("bridges DeerFlow review_prototype final actions into PrototypeSpec, HTML artifact, and state persistence", async () => {
     const state = baseState({ status: "doc_confirmed" });
     const prototypeSpec = { id: "spec-1", pages: [{ id: "page_home", name: "签到页" }] };

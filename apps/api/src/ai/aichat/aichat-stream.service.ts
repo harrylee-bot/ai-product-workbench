@@ -123,9 +123,12 @@ export class AichatStreamService {
             runId: run.id,
             finalAction: result.finalAction,
             artifacts: result.artifacts,
+            assistantText: result.assistantText,
           });
 
           if (applied.prdDocument) {
+            emitStaticText(result.finalAction.message || "PRD 已生成，请在右侧文档区检查。", writer as unknown as UIMessageStreamWriter, ctx);
+            finishText(writer as unknown as UIMessageStreamWriter, ctx);
             emitPrdArtifact(applied.prdDocument, writer as unknown as UIMessageStreamWriter);
             await this.messages.createAssistantMessage({
               projectId,
@@ -154,6 +157,8 @@ export class AichatStreamService {
               "PRD 已生成",
             );
           } else if (applied.prototypeArtifact) {
+            emitStaticText(result.finalAction.message || "原型已生成，请在右侧预览区查看。", writer as unknown as UIMessageStreamWriter, ctx);
+            finishText(writer as unknown as UIMessageStreamWriter, ctx);
             emitPrototypeArtifact(applied.prototypeArtifact, writer as unknown as UIMessageStreamWriter);
             await this.messages.createAssistantMessage({
               projectId,
@@ -183,7 +188,7 @@ export class AichatStreamService {
             );
           } else {
             // 无产物：把 finalAction.message 作为文本下发（若未在 chunk 流里）
-            const message = result.finalAction.message || "本轮未生成产物。";
+            const message = result.finalAction.message || ctx.textBuffer.trim() || result.assistantText || "本轮未生成产物。";
             if (!ctx.hasEmittedText) {
               emitStaticText(message, writer as unknown as UIMessageStreamWriter, ctx);
               finishText(writer as unknown as UIMessageStreamWriter, ctx);

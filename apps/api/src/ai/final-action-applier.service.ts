@@ -46,6 +46,7 @@ export class FinalActionApplierService {
     runId: string;
     finalAction: DeerFlowFinalAction;
     artifacts: DeerFlowResolvedArtifact[];
+    assistantText?: string;
   }): Promise<{
     prdDocument?: RequirementDocument;
     prototypeArtifact?: PrototypeArtifact;
@@ -63,7 +64,7 @@ export class FinalActionApplierService {
   }
 
   private async applyReviewPrd(
-    input: { projectId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[] },
+    input: { projectId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[]; assistantText?: string },
     raw: Record<string, unknown> | undefined,
   ) {
     const stateDraft = this.buildProductDesignDraft(input.projectId, raw, input.userId);
@@ -73,7 +74,12 @@ export class FinalActionApplierService {
       reason: "DeerFlow review_prd：生成 PRD 前更新产品设计状态",
     });
 
-    const documentDraft = this.buildRequirementDocumentDraft(input.projectId, raw, input.artifacts, input.finalAction.message);
+    const documentDraft = this.buildRequirementDocumentDraft(
+      input.projectId,
+      raw,
+      input.artifacts,
+      input.assistantText || input.finalAction.message,
+    );
     const document = await this.documentService.saveGeneratedDocument(state, documentDraft, {
       userId: input.userId,
       runId: input.runId,

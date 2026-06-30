@@ -168,6 +168,7 @@ export class DeerFlowRuntimeService {
 
     const visibleAssistantText = assistantText.trim() || extractAssistantTextFromFinalState(finalState);
     const finalAction = extractFinalAction(visibleAssistantText, finalState);
+    const userVisibleAssistantText = stripFinalActionBlock(visibleAssistantText).trim();
     const artifacts = await this.resolveArtifacts(threadId, finalAction.artifacts ?? [], input.signal);
     if (artifacts.length) {
       await input.onEvent?.({
@@ -179,7 +180,7 @@ export class DeerFlowRuntimeService {
 
     return {
       threadId,
-      assistantText: finalAction.message || visibleAssistantText,
+      assistantText: userVisibleAssistantText || finalAction.message || visibleAssistantText,
       finalAction,
       uploads,
       artifacts,
