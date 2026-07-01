@@ -1,12 +1,10 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { ArrowDownIcon } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
-import type { ChatRuntimeStatus } from "@/lib/api/nest-client";
 import type { Vote } from "@/lib/api/types";
-import type { ChatMessage, RuntimeProcessSnapshot } from "@/lib/types";
+import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { useDataStream } from "./data-stream-provider";
 import { Greeting } from "./greeting";
 import { PreviewMessage, ThinkingMessage } from "./message";
 
@@ -21,7 +19,6 @@ type MessagesProps = {
   isReadonly: boolean;
   isArtifactVisible: boolean;
   isLoading?: boolean;
-  runtimeStatus?: ChatRuntimeStatus;
   selectedModelId: string;
   onEditMessage?: (message: ChatMessage) => void;
 };
@@ -37,7 +34,6 @@ function PureMessages({
   isReadonly,
   isArtifactVisible,
   isLoading,
-  runtimeStatus,
   selectedModelId: _selectedModelId,
   onEditMessage,
 }: MessagesProps) {
@@ -51,44 +47,6 @@ function PureMessages({
   } = useMessages({
     status,
   });
-
-  const { runtimeProcess } = useDataStream();
-  const isAwaitingAssistant =
-    (status === "submitted" || status === "streaming") &&
-    messages.at(-1)?.role !== "assistant";
-  const liveRuntimeProcess =
-    runtimeProcess.status !== "idle" || runtimeProcess.events?.length
-      ? runtimeProcess
-      : undefined;
-  const persistedRuntimeProcess = runtimeStatusToProcess(runtimeStatus);
-  const latestAssistantIndex = findLatestAssistantIndex(messages);
-  const latestUserIndex = findLatestUserIndex(messages);
-  const latestAssistantBelongsToLatestTurn =
-    latestAssistantIndex >= 0 && latestAssistantIndex > latestUserIndex;
-  const runningLiveRuntimeProcess =
-    liveRuntimeProcess?.status === "running" ? liveRuntimeProcess : undefined;
-  const runningPersistedRuntimeProcess =
-    persistedRuntimeProcess?.status === "running"
-      ? persistedRuntimeProcess
-      : undefined;
-  const pendingRuntimeProcess = useMemo(
-    () =>
-      isAwaitingAssistant
-        ? (runningLiveRuntimeProcess ??
-          runningPersistedRuntimeProcess ??
-          createPendingRuntimeProcess(chatId))
-        : undefined,
-    [
-      chatId,
-      isAwaitingAssistant,
-      runningLiveRuntimeProcess,
-      runningPersistedRuntimeProcess,
-    ],
-  );
-  const effectiveRuntimeProcess =
-    latestAssistantBelongsToLatestTurn && !isAwaitingAssistant
-      ? (liveRuntimeProcess ?? persistedRuntimeProcess)
-      : undefined;
 
   const prevChatIdRef = useRef(chatId);
   useEffect(() => {
@@ -126,14 +84,6 @@ function PureMessages({
               message={message}
               onEdit={onEditMessage}
               regenerate={regenerate}
-              runtimeProcess={
-                index === latestAssistantIndex
-                  ? effectiveRuntimeProcess
-                  : undefined
-              }
-              showRuntimeProcess={
-                index === latestAssistantIndex && Boolean(effectiveRuntimeProcess)
-              }
               requiresScrollPadding={
                 hasSentMessage && index === messages.length - 1
               }
@@ -147,7 +97,7 @@ function PureMessages({
           ))}
 
           {status === "submitted" && messages.at(-1)?.role !== "assistant" && (
-            <ThinkingMessage runtimeProcess={pendingRuntimeProcess} />
+            <ThinkingMessage />
           )}
 
           <div
@@ -174,71 +124,3 @@ function PureMessages({
 }
 
 export const Messages = PureMessages;
-
-function runtimeStatusToProcess(runtimeStatus?: ChatRuntimeStatus) {
-  const latestRun = runtimeStatus?.latestRun;
-  if (!latestRun) {
-    return undefined;
-  }
-
-  return {
-    runId: latestRun.id,
-    status: normalizeRuntimeStatus(latestRun.status),
-    startedAt: latestRun.startedAt,
-    endedAt: latestRun.endedAt,
-    title:
-      latestRun.status === "running"
-        ? "思考中..."
-        : latestRun.status === "failed"
-          ? "生成失败"
-          : latestRun.status === "cancelled"
-            ? "已停止"
-            : "已完成",
-    events: latestRun.events ?? [],
-  } satisfies RuntimeProcessSnapshot;
-}
-
-function normalizeRuntimeStatus(status: string): RuntimeProcessSnapshot["status"] {
-  if (status === "success") return "succeeded";
-  if (status === "succeeded") return "succeeded";
-  if (status === "failed") return "failed";
-  if (status === "cancelled") return "cancelled";
-  if (status === "running") return "running";
-  return "succeeded";
-}
-
-function findLatestAssistantIndex(messages: ChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === "assistant") {
-      return index;
-    }
-  }
-  return -1;
-}
-
-function findLatestUserIndex(messages: ChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === "user") {
-      return index;
-    }
-  }
-  return -1;
-}
-
-function createPendingRuntimeProcess(chatId: string): RuntimeProcessSnapshot {
-  const startedAt = new Date().toISOString();
-  return {
-    status: "running",
-    startedAt,
-    title: "思考中...",
-    events: [
-      {
-        id: `client:${chatId}:pending:${startedAt}`,
-        kind: "status",
-        label: "正在发送请求",
-        status: "running",
-        createdAt: startedAt,
-      },
-    ],
-  };
-}

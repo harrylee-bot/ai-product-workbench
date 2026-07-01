@@ -50,7 +50,6 @@ export function ChatShell() {
     setCurrentModelId,
     showCreditCardAlert,
     setShowCreditCardAlert,
-    runtimeStatus,
   } = useActiveChat();
 
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
@@ -142,7 +141,6 @@ export function ChatShell() {
               selectedModelId={currentModelId}
               setMessages={setMessages}
               status={status}
-              runtimeStatus={runtimeStatus}
               votes={votes}
             />
 
@@ -265,7 +263,6 @@ function findLatestMessageArtifact(messages: ChatMessage[]) {
         part.state === "output-available" &&
         part.output?.id &&
         (part.output.kind === "text" ||
-          part.output.kind === "code" ||
           part.output.kind === "prototype")
       ) {
         return {

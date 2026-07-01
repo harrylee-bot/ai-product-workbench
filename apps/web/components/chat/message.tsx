@@ -2,17 +2,33 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { Fragment, useMemo } from "react";
 import type { Vote } from "@/lib/api/types";
-import type { ChatMessage, RuntimeProcessSnapshot } from "@/lib/types";
+import type { ChatMessage } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "../ai-elements/reasoning";
 import { Shimmer } from "../ai-elements/shimmer";
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from "../ai-elements/tool";
+import { Button } from "../ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../ui/dialog";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { PreviewAttachment } from "./preview-attachment";
-import {
-  RuntimeProcessChain,
-  shouldShowRuntimeProcess,
-} from "./runtime-process";
 
 const PurePreviewMessage = ({
   addToolApprovalResponse: _addToolApprovalResponse,
@@ -25,8 +41,6 @@ const PurePreviewMessage = ({
   isReadonly,
   requiresScrollPadding: _requiresScrollPadding,
   onEdit,
-  runtimeProcess,
-  showRuntimeProcess,
 }: {
   addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
   chatId: string;
@@ -38,8 +52,6 @@ const PurePreviewMessage = ({
   isReadonly: boolean;
   requiresScrollPadding: boolean;
   onEdit?: (message: ChatMessage) => void;
-  runtimeProcess?: RuntimeProcessSnapshot;
-  showRuntimeProcess?: boolean;
 }) => {
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
@@ -95,19 +107,17 @@ const PurePreviewMessage = ({
     if (type === "reasoning") {
       if (index === firstReasoningIndex && mergedReasoningText) {
         return (
-          <div
-            className="text-[13px] leading-[1.65] text-muted-foreground/85 italic"
-            data-testid="message-reasoning"
+          <ReasoningDialog
+            isLoading={isLoading}
             key={key}
-          >
-            {mergedReasoningText}
-          </div>
+            reasoning={mergedReasoningText}
+          />
         );
       }
       return null;
     }
 
-    // 在首个 text（正文答案）前插分隔线，把上面的想法/工具与下面的答案分开。
+    // 在首个 text（正文答案）前插分隔线，把上面的附加内容与下面的答案分开。
     if (type === "text") {
       const hasProcessBefore = message.parts
         ?.slice(0, index)
@@ -131,26 +141,8 @@ const PurePreviewMessage = ({
       );
     }
 
-    if (type === "tool-createDocument") {
-      const { state, toolCallId } = part;
-
-      if (part.output && "error" in part.output) {
-        return (
-          <div
-            className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-500 dark:bg-red-950/50"
-            key={toolCallId}
-          >
-            创建文档失败：{String(part.output.error)}
-          </div>
-        );
-      }
-
-      void state;
-      return null;
-    }
-
-    if (type.startsWith("tool-")) {
-      return null;
+    if (isToolPart(part)) {
+      return <MessageToolPart key={key} part={part} />;
     }
 
     return null;
@@ -167,19 +159,10 @@ const PurePreviewMessage = ({
     />
   );
 
-  const runtimeProcessNode =
-    isAssistant &&
-    Boolean(showRuntimeProcess) &&
-    shouldShowRuntimeProcess(runtimeProcess, hasAnyContent) ? (
-      <RuntimeProcessChain runtimeProcess={runtimeProcess} />
-    ) : null;
-
   const content = isThinking ? (
-    runtimeProcessNode ?? <ThinkingText />
+    <ThinkingText />
   ) : (
     <>
-      {runtimeProcessNode}
-      {runtimeProcessNode && hasAnyContent ? <Divider /> : null}
       {attachments}
       {parts}
       {actions}
@@ -219,11 +202,7 @@ const PurePreviewMessage = ({
 
 export const PreviewMessage = PurePreviewMessage;
 
-export const ThinkingMessage = ({
-  runtimeProcess,
-}: {
-  runtimeProcess?: RuntimeProcessSnapshot;
-}) => {
+export const ThinkingMessage = () => {
   return (
     <div
       className="group/message w-full"
@@ -237,11 +216,7 @@ export const ThinkingMessage = ({
           </div>
         </div>
 
-        {shouldShowRuntimeProcess(runtimeProcess, false) ? (
-          <RuntimeProcessChain runtimeProcess={runtimeProcess} />
-        ) : (
-          <ThinkingText />
-        )}
+        <ThinkingText />
       </div>
     </div>
   );
@@ -259,4 +234,101 @@ function ThinkingText() {
 
 function Divider() {
   return <div className="my-1 h-px w-full bg-border/40" aria-hidden />;
+}
+
+function ReasoningDialog({
+  isLoading,
+  reasoning,
+}: {
+  isLoading: boolean;
+  reasoning: string;
+}) {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          className="w-fit text-muted-foreground"
+          data-testid="message-reasoning"
+          size="xs"
+          type="button"
+          variant="ghost"
+        >
+          查看思考内容
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[80vh] overflow-hidden sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>思考内容</DialogTitle>
+        </DialogHeader>
+        <Reasoning defaultOpen={true} isStreaming={isLoading}>
+          <ReasoningTrigger getThinkingMessage={() => <p>思考内容</p>} />
+          <ReasoningContent>{reasoning}</ReasoningContent>
+        </Reasoning>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MessageToolPart({ part }: { part: any }) {
+  if (isCanvasDocumentTool(part)) {
+    return null;
+  }
+
+  const state = normalizeToolState(part);
+  const errorText =
+    part.errorText ??
+    (part.output && typeof part.output === "object" && "error" in part.output
+      ? String(part.output.error)
+      : undefined);
+  const output =
+    errorText && part.output && typeof part.output === "object" && "error" in part.output
+      ? undefined
+      : part.output;
+
+  return (
+    <Tool className="max-w-[min(100%,560px)]" defaultOpen={true}>
+      <ToolHeader
+        state={state as any}
+        toolName={part.toolName}
+        type={part.type as any}
+      />
+      <ToolContent>
+        {part.input !== undefined ? <ToolInput input={part.input} /> : null}
+        <ToolOutput errorText={errorText} output={output} />
+      </ToolContent>
+    </Tool>
+  );
+}
+
+function isToolPart(part: any) {
+  const type = String(part?.type ?? "");
+  return type === "dynamic-tool" || type.startsWith("tool-");
+}
+
+function isCanvasDocumentTool(part: any) {
+  const kind = part?.output?.kind ?? part?.input?.kind;
+  return (
+    part?.type === "tool-createDocument" &&
+    !part?.output?.error &&
+    (kind === "text" || kind === "prototype")
+  );
+}
+
+function normalizeToolState(part: any) {
+  const state = part?.state;
+  if (
+    state === "approval-requested" ||
+    state === "approval-responded" ||
+    state === "input-available" ||
+    state === "input-streaming" ||
+    state === "output-available" ||
+    state === "output-denied" ||
+    state === "output-error"
+  ) {
+    return state;
+  }
+  if (part?.errorText || part?.output?.error) return "output-error";
+  if (part?.output !== undefined) return "output-available";
+  if (part?.input !== undefined) return "input-available";
+  return "input-streaming";
 }
