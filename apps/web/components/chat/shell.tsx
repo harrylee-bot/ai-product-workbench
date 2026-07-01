@@ -76,7 +76,7 @@ export function ChatShell() {
 
   useEffect(() => {
     const latestArtifact = findLatestMessageArtifact(messages);
-    if (!latestArtifact || status !== "ready") {
+    if (!latestArtifact) {
       return;
     }
     if (autoOpenedArtifactIdRef.current === latestArtifact.id) {
@@ -105,7 +105,7 @@ export function ChatShell() {
         isVisible: true,
       };
     });
-  }, [messages, setArtifact, status]);
+  }, [messages, setArtifact]);
 
   return (
     <>

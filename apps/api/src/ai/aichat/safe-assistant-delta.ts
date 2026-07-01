@@ -15,7 +15,9 @@ export function looksLikeFullPrd(content: string): boolean {
   const headingCount = (content.match(/^#{1,3}\s+/gm) ?? []).length;
   if (headingCount >= 3) return true;
   const mentionsPrd =
-    content.includes("需求文档（PRD）") || content.includes("产品需求文档");
+    content.includes("需求文档（PRD）") ||
+    content.includes("产品需求文档") ||
+    content.includes("需求说明书");
   return mentionsPrd && headingCount >= 1;
 }
 const FINAL_ACTION_FENCE = "```ai_product_workbench_final_action";

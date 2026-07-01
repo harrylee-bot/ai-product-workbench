@@ -170,7 +170,9 @@ export class AichatStreamService {
           };
           emitRuntimeFinish(streamWriter, snapshot);
         };
-        const documentStream = createDocumentStreamState(run.id);
+        const documentStream = createDocumentStreamState(run.id, {
+          forceDocumentStream: isDocumentGenerationRequest(content),
+        });
         res.on("close", markClientClosed);
 
         try {
@@ -913,8 +915,9 @@ export class AichatStreamService {
   }
 }
 
-type DocumentStreamState = {
+export type DocumentStreamState = {
   id: string;
+  forceDocumentStream: boolean;
   started: boolean;
   finished: boolean;
   title?: string;
@@ -925,9 +928,13 @@ type DocumentStreamState = {
 
 const FINAL_ACTION_FENCE = "```ai_product_workbench_final_action";
 
-function createDocumentStreamState(runId: string): DocumentStreamState {
+export function createDocumentStreamState(
+  runId: string,
+  options: { forceDocumentStream?: boolean } = {},
+): DocumentStreamState {
   return {
     id: `streaming-prd-${runId}`,
+    forceDocumentStream: options.forceDocumentStream ?? false,
     started: false,
     finished: false,
     textBuffer: "",
@@ -936,7 +943,7 @@ function createDocumentStreamState(runId: string): DocumentStreamState {
   };
 }
 
-function routeAssistantDocumentDelta(
+export function routeAssistantDocumentDelta(
   event: DeerFlowRuntimeEvent,
   writer: UIMessageStreamWriter,
   state: DocumentStreamState,
@@ -948,6 +955,7 @@ function routeAssistantDocumentDelta(
   const { visible, touchedFinalAction } = stripFinalActionDelta(event.chunk, state);
   const shouldRouteToCanvas =
     state.started ||
+    state.forceDocumentStream ||
     looksLikeDocumentDraft(`${state.textBuffer}${visible}`, visible);
 
   if (!shouldRouteToCanvas) {
@@ -1045,31 +1053,50 @@ function stripFinalActionDelta(
   return { visible, touchedFinalAction };
 }
 
-function looksLikeDocumentDraft(buffer: string, delta: string) {
-  const sample = buffer.trim();
-  const current = delta.trim();
+export function looksLikeDocumentDraft(buffer: string, delta: string) {
+  const sample = normalizeDocumentDraftSample(buffer);
+  const current = normalizeDocumentDraftSample(delta);
   if (!sample || sample.length < 8) return false;
 
-  if (/产品需求文档|需求文档|PRD/i.test(sample)) return true;
-  if (/^#{1,3}\s+.*(PRD|需求|文档|功能|页面|产品)/im.test(sample)) return true;
+  if (/产品需求文档|需求文档|需求说明书|PRD|PRD\s*文档/i.test(sample)) return true;
+  if (/^[^\n]{2,80}(需求说明书|需求文档|产品需求文档|PRD)/im.test(sample)) return true;
+  if (/^#{1,4}\s*.*(PRD|需求|文档|说明书|功能|页面|产品)/im.test(sample)) return true;
+  if (/版本历史/.test(sample) && /\|\s*版本\s*\|/.test(sample)) return true;
   if (
-    /(^|\n)\s*(#{1,4}\s*)?(\d+(\.\d+)*[.、]?\s*)?(引言|项目背景|文档范围|使用场景|业务需求|功能需求|流程|页面要求|接口|验收标准|业务降级方案|需求安全基线)/.test(sample)
+    /(^|\n)\s*(#{1,4}\s*)?(\d+(\.\d+)*[.、]?\s*)?(版本历史|引言|项目背景|文档范围|使用场景|业务需求|功能需求|非功能需求|流程|页面要求|接口|权限|数据|统计|导出|审核|发布|下线|验收标准|业务降级方案|需求安全基线)/.test(sample)
   ) {
     return true;
   }
 
   const headingCount = (sample.match(/^#{1,4}\s+/gm) ?? []).length;
-  if (headingCount >= 2 && /(用户|页面|功能|规则|流程|奖励|活动|接口|配置)/.test(sample)) {
+  if (headingCount >= 2 && /(用户|页面|功能|规则|流程|奖励|活动|接口|配置|权限|数据|统计|导出|审核)/.test(sample)) {
     return true;
   }
 
-  return /^#{1,4}\s+/.test(current) && /(需求|PRD|文档|功能|页面)/i.test(current);
+  return /^#{1,4}\s*/.test(current) && /(需求|PRD|文档|说明书|功能|页面)/i.test(current);
+}
+
+function normalizeDocumentDraftSample(value: string) {
+  return value
+    .replace(/([^\n])(?=#{1,4}\S)/g, "$1\n")
+    .replace(/^(#{1,4})(?=\S)/gm, "$1 ")
+    .trim();
 }
 
 function inferDocumentTitle(value: string) {
   const heading = value.match(/^#\s+(.+)$/m)?.[1]?.trim();
-  if (!heading) return undefined;
-  return heading.replace(/[#*`]/g, "").trim().slice(0, 80) || undefined;
+  if (heading) {
+    return heading.replace(/[#*`]/g, "").trim().slice(0, 80) || undefined;
+  }
+
+  const firstLine = normalizeDocumentDraftSample(value)
+    .split("\n")
+    .map((line) => line.replace(/[#*`|]/g, "").trim())
+    .find(Boolean);
+  if (!firstLine || !/(需求文档|需求说明书|产品需求文档|PRD)/i.test(firstLine)) {
+    return undefined;
+  }
+  return firstLine.slice(0, 80);
 }
 
 function keepPotentialFenceSuffix(value: string) {
@@ -1179,6 +1206,14 @@ function isKnowledgeInventoryQuestion(value: string) {
   const compact = value.replace(/\s+/g, "").toLowerCase();
   if (!/(知识库|知识|规则库|素材库)/.test(compact)) return false;
   return /(有哪些|有什么|有什么内容|哪些内容|列出|列表|目录|清单|盘点|收录|包含什么|都有什么)/.test(compact);
+}
+
+export function isDocumentGenerationRequest(value: string) {
+  const compact = value.replace(/\s+/g, "").toLowerCase();
+  if (!/(需求文档|需求说明书|产品需求文档|prd|prd文档)/i.test(compact)) {
+    return false;
+  }
+  return /(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|给我)/.test(compact);
 }
 
 function formatKnowledgeInventoryMessage(output: {
