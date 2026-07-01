@@ -50,6 +50,7 @@ export function ChatShell() {
     setCurrentModelId,
     showCreditCardAlert,
     setShowCreditCardAlert,
+    runtimeStatus,
   } = useActiveChat();
 
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
@@ -138,6 +139,7 @@ export function ChatShell() {
                 setEditingMessage(msg);
               }}
               regenerate={regenerate}
+              runStatus={runtimeStatus}
               selectedModelId={currentModelId}
               setMessages={setMessages}
               status={status}

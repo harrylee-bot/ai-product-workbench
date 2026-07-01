@@ -1,12 +1,18 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { ArrowDownIcon } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMessages } from "@/hooks/use-messages";
+import type { ChatRuntimeStatus } from "@/lib/api/nest-client";
 import type { Vote } from "@/lib/api/types";
-import type { ChatMessage } from "@/lib/types";
+import type {
+  ChatMessage,
+  RuntimeProcessEvent,
+  RuntimeProcessSnapshot,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useDataStream } from "./data-stream-provider";
 import { Greeting } from "./greeting";
-import { PreviewMessage, ThinkingMessage } from "./message";
+import { PreviewMessage, ThinkingMessage, type ThinkingTrace } from "./message";
 
 type MessagesProps = {
   addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
@@ -20,6 +26,7 @@ type MessagesProps = {
   isArtifactVisible: boolean;
   isLoading?: boolean;
   selectedModelId: string;
+  runStatus?: ChatRuntimeStatus;
   onEditMessage?: (message: ChatMessage) => void;
 };
 
@@ -35,8 +42,10 @@ function PureMessages({
   isArtifactVisible,
   isLoading,
   selectedModelId: _selectedModelId,
+  runStatus,
   onEditMessage,
 }: MessagesProps) {
+  const { runtimeProcess: liveRun } = useDataStream();
   const {
     containerRef: messagesContainerRef,
     endRef: messagesEndRef,
@@ -55,6 +64,20 @@ function PureMessages({
       reset();
     }
   }, [chatId, reset]);
+
+  const liveTrace = useMemo(() => traceFromSnapshot(liveRun), [liveRun]);
+  const savedTrace = useMemo(() => traceFromRunStatus(runStatus), [runStatus]);
+  const canUseSavedTrace =
+    status === "ready" || runStatus?.latestRun?.status === "running";
+  const activeTrace = liveTrace ?? (canUseSavedTrace ? savedTrace : undefined);
+  const latestAssistantIndex = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === "assistant") return index;
+    }
+    return -1;
+  }, [messages]);
+  const isAwaitingAssistant =
+    status === "submitted" && messages.at(-1)?.role !== "assistant";
 
   return (
     <div className="relative flex-1 bg-background">
@@ -88,6 +111,13 @@ function PureMessages({
                 hasSentMessage && index === messages.length - 1
               }
               setMessages={setMessages}
+              thinkingTrace={
+                !isAwaitingAssistant &&
+                index === latestAssistantIndex &&
+                message.role === "assistant"
+                  ? activeTrace
+                  : undefined
+              }
               vote={
                 votes
                   ? votes.find((vote) => vote.messageId === message.id)
@@ -96,8 +126,8 @@ function PureMessages({
             />
           ))}
 
-          {status === "submitted" && messages.at(-1)?.role !== "assistant" && (
-            <ThinkingMessage />
+          {isAwaitingAssistant && (
+            <ThinkingMessage thinkingTrace={activeTrace} />
           )}
 
           <div
@@ -124,3 +154,31 @@ function PureMessages({
 }
 
 export const Messages = PureMessages;
+
+function traceFromSnapshot(
+  snapshot: RuntimeProcessSnapshot,
+): ThinkingTrace | undefined {
+  return buildTrace(snapshot.status, snapshot.events);
+}
+
+function traceFromRunStatus(
+  runStatus?: ChatRuntimeStatus,
+): ThinkingTrace | undefined {
+  const latestRun = runStatus?.latestRun;
+  if (!latestRun) return undefined;
+  return buildTrace(latestRun.status, latestRun.events);
+}
+
+function buildTrace(
+  status: RuntimeProcessSnapshot["status"],
+  events?: RuntimeProcessEvent[],
+): ThinkingTrace | undefined {
+  const visibleEvents = (events ?? []).filter(
+    (event) => event.label?.trim() && !event.id.startsWith("client:"),
+  );
+  if (visibleEvents.length === 0) return undefined;
+  return {
+    events: visibleEvents,
+    isStreaming: status === "running",
+  };
+}

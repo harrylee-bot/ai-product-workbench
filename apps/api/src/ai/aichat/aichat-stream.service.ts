@@ -112,15 +112,17 @@ export class AichatStreamService {
             }
           },
         };
+        const startedAt = run.startedAt.toISOString();
+        const runtimeEvents: RuntimeProcessEvent[] = [];
         const assistantDraft = this.createAssistantDraftWriter({
           projectId,
           conversationId,
           userId: user.id,
           runId: run.id,
           getContent: () => ctx.textBuffer.trim(),
+          getReasoning: () => ctx.reasoningBuffer.trim(),
+          getRuntimeEvents: () => runtimeEvents,
         });
-        const startedAt = run.startedAt.toISOString();
-        const runtimeEvents: RuntimeProcessEvent[] = [];
         const recordRuntimeEvent = (eventType: string, payload: unknown) => {
           void this.runLogs.recordStreamEvent({
             runId: run.id,
@@ -267,13 +269,14 @@ export class AichatStreamService {
           });
 
           if (applied.prdDocument) {
+            const prdChatMessage = "PRD 已生成，请在右侧画布查看。";
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
               kind: "document",
               label: "PRD 已写入工作台",
             }));
-            emitStaticText(result.finalAction.message || "PRD 已生成，请在右侧文档区检查。", streamWriter, ctx);
+            emitStaticText(prdChatMessage, streamWriter, ctx);
             finishReasoning(streamWriter, ctx);
             finishText(streamWriter, ctx);
             // 干净收尾流式 draft 画布，再发最终 PRD，避免 data-clear 空窗闪烁。
@@ -298,7 +301,7 @@ export class AichatStreamService {
               projectId,
               conversationId,
               userId: user.id,
-              content: result.finalAction.message || "PRD 已生成，请在右侧文档区检查。",
+              content: prdChatMessage,
               type: MessageType.agent_summary,
               metadata: toInputJson({
                 source: "aichat",
@@ -323,13 +326,14 @@ export class AichatStreamService {
             );
             publishRuntimeFinish("succeeded");
           } else if (applied.prototypeArtifact) {
+            const prototypeChatMessage = "原型已生成，请在右侧画布查看。";
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
               kind: "document",
               label: "原型已写入工作台",
             }));
-            emitStaticText(result.finalAction.message || "原型已生成，请在右侧预览区查看。", streamWriter, ctx);
+            emitStaticText(prototypeChatMessage, streamWriter, ctx);
             finishReasoning(streamWriter, ctx);
             finishText(streamWriter, ctx);
             emitPrototypeArtifact(applied.prototypeArtifact, streamWriter);
@@ -352,7 +356,7 @@ export class AichatStreamService {
               projectId,
               conversationId,
               userId: user.id,
-              content: result.finalAction.message || "原型已生成，请在右侧预览区查看。",
+              content: prototypeChatMessage,
               type: MessageType.agent_summary,
               metadata: toInputJson({
                 source: "aichat",
@@ -660,19 +664,44 @@ export class AichatStreamService {
     userId: string;
     runId: string;
     getContent: () => string;
+    getReasoning: () => string;
+    getRuntimeEvents: () => RuntimeProcessEvent[];
   }) {
+    const thinkingMetadata = () => {
+      const metadata: Record<string, unknown> = {};
+      const reasoningText = input.getReasoning().trim();
+      if (reasoningText) {
+        metadata.reasoningText = reasoningText;
+      }
+
+      const runtimeEvents = input.getRuntimeEvents().filter(isRuntimeProcessEvent).slice(-80);
+      if (runtimeEvents.length > 0) {
+        metadata.runtimeEvents = runtimeEvents;
+      }
+
+      return metadata;
+    };
+
     const draftMetadata = () =>
       toInputJson({
         source: "aichat",
         runId: input.runId,
         status: "running",
         draft: true,
+        ...thinkingMetadata(),
       });
+
+    const mergeFinalMetadata = (metadata: unknown) =>
+      toInputJson({
+        ...recordFromJson(metadata),
+        ...thinkingMetadata(),
+      });
+
     const toUpdateInput = (message: Parameters<MessageService["createAssistantMessage"]>[0]) => ({
       content: message.content,
       type: message.type,
       attachments: message.attachments,
-      metadata: message.metadata,
+      metadata: mergeFinalMetadata(message.metadata),
       relatedRunId: message.relatedRunId,
       relatedPrdDocumentId: message.relatedPrdDocumentId,
       relatedPrototypeArtifactId: message.relatedPrototypeArtifactId,
@@ -739,12 +768,16 @@ export class AichatStreamService {
       finalize: async (message: Parameters<MessageService["createAssistantMessage"]>[0]) => {
         isFinalizing = true;
         await pending.catch(() => undefined);
+        const finalMessage = {
+          ...message,
+          metadata: mergeFinalMetadata(message.metadata),
+        };
 
         try {
           if (draftMessageId) {
-            await this.messages.updateAssistantMessage(draftMessageId, toUpdateInput(message));
+            await this.messages.updateAssistantMessage(draftMessageId, toUpdateInput(finalMessage));
           } else {
-            await this.messages.createAssistantMessage(message);
+            await this.messages.createAssistantMessage(finalMessage);
           }
         } catch (error) {
           this.logger.error(`assistant 消息落库失败 runId=${input.runId}：${serializeError(error)}`);
@@ -1030,6 +1063,26 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return value as Record<string, unknown>;
   }
   return undefined;
+}
+
+function recordFromJson(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>) };
+  }
+  return {};
+}
+
+function isRuntimeProcessEvent(value: unknown): value is RuntimeProcessEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.label === "string" &&
+    typeof record.status === "string" &&
+    typeof record.createdAt === "string"
+  );
 }
 
 function serializeError(error: unknown): string {

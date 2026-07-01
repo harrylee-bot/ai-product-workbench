@@ -67,13 +67,94 @@ type NestMessageItem = {
  */
 export function nestMessageToUiMessage(msg: NestMessageItem): ChatMessage {
   const storedParts = msg.metadata?.parts as ChatMessage["parts"] | undefined;
-  const parts = storedParts ?? buildMessageParts(msg);
+  const parts = appendPersistedThinkingPart(
+    storedParts ?? buildMessageParts(msg),
+    msg
+  );
   return {
     id: msg.id,
     role: msg.role,
     parts,
     metadata: { createdAt: formatISO(new Date(msg.createdAt)) },
   } as ChatMessage;
+}
+
+function appendPersistedThinkingPart(
+  parts: ChatMessage["parts"],
+  msg: NestMessageItem,
+): ChatMessage["parts"] {
+  if (msg.role !== "assistant") return parts;
+  if (hasReasoningPart(parts)) return parts;
+
+  const thinkingText = buildPersistedThinkingText(msg.metadata);
+  if (!thinkingText) return parts;
+
+  const nextParts = [...parts] as unknown[];
+  const textIndex = nextParts.findIndex(
+    (part) =>
+      part &&
+      typeof part === "object" &&
+      (part as { type?: unknown }).type === "text",
+  );
+  const reasoningPart = { type: "reasoning", text: thinkingText };
+
+  if (textIndex === -1) {
+    nextParts.unshift(reasoningPart);
+  } else {
+    nextParts.splice(textIndex, 0, reasoningPart);
+  }
+
+  return nextParts as ChatMessage["parts"];
+}
+
+function hasReasoningPart(parts: ChatMessage["parts"]): boolean {
+  return parts.some(
+    (part) =>
+      part &&
+      typeof part === "object" &&
+      (part as { type?: unknown; text?: unknown }).type === "reasoning" &&
+      typeof (part as { text?: unknown }).text === "string" &&
+      Boolean((part as { text?: string }).text?.trim()),
+  );
+}
+
+function buildPersistedThinkingText(
+  metadata: NestMessageItem["metadata"],
+): string | undefined {
+  const reasoningText = stringFromMetadata(metadata?.reasoningText);
+  if (reasoningText) return reasoningText;
+
+  const runtimeEvents = runtimeEventsFromMetadata(metadata?.runtimeEvents);
+  const text = runtimeEvents
+    .filter((event) => !event.id.startsWith("client:"))
+    .map(formatRuntimeEventForThinking)
+    .filter(Boolean)
+    .join("\n");
+
+  return text || undefined;
+}
+
+function runtimeEventsFromMetadata(value: unknown): RuntimeProcessEvent[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRuntimeProcessEvent);
+}
+
+function isRuntimeProcessEvent(value: unknown): value is RuntimeProcessEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.label === "string" &&
+    typeof record.status === "string" &&
+    typeof record.createdAt === "string"
+  );
+}
+
+function formatRuntimeEventForThinking(event: RuntimeProcessEvent): string {
+  const detail = event.detail?.trim();
+  return detail ? `- ${event.label}\n  ${detail}` : `- ${event.label}`;
 }
 
 function buildMessageParts(msg: NestMessageItem): ChatMessage["parts"] {

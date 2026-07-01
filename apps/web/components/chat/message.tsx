@@ -2,7 +2,7 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { Fragment, useMemo } from "react";
 import type { Vote } from "@/lib/api/types";
-import type { ChatMessage } from "@/lib/types";
+import type { ChatMessage, RuntimeProcessEvent } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import {
@@ -30,12 +30,18 @@ import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { PreviewAttachment } from "./preview-attachment";
 
+export type ThinkingTrace = {
+  events?: RuntimeProcessEvent[];
+  isStreaming?: boolean;
+};
+
 const PurePreviewMessage = ({
   addToolApprovalResponse: _addToolApprovalResponse,
   chatId,
   message,
   vote,
   isLoading,
+  thinkingTrace,
   setMessages: _setMessages,
   regenerate: _regenerate,
   isReadonly,
@@ -47,6 +53,7 @@ const PurePreviewMessage = ({
   message: ChatMessage;
   vote: Vote | undefined;
   isLoading: boolean;
+  thinkingTrace?: ThinkingTrace;
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
   regenerate: UseChatHelpers<ChatMessage>["regenerate"];
   isReadonly: boolean;
@@ -88,46 +95,44 @@ const PurePreviewMessage = ({
     </div>
   );
 
-  const { firstReasoningIndex, mergedReasoningText } = useMemo(() => {
-    let firstIndex = -1;
+  const mergedReasoningText = useMemo(() => {
     let text = "";
-    message.parts?.forEach((part: any, index: number) => {
+    message.parts?.forEach((part: any) => {
       if (part.type !== "reasoning") return;
       if (!part.text || !part.text.trim()) return;
-      if (firstIndex === -1) firstIndex = index;
       text = text ? `${text}\n\n${part.text}` : part.text;
     });
-    return { firstReasoningIndex: firstIndex, mergedReasoningText: text };
+    return text;
   }, [message.parts]);
+
+  const liveThinkingText = useMemo(
+    () => formatRuntimeEvents(thinkingTrace?.events),
+    [thinkingTrace?.events]
+  );
+  const thinkingText = mergedReasoningText || liveThinkingText;
+  const hasThinking = isAssistant && thinkingText.trim().length > 0;
+  const thinkingDialog = hasThinking ? (
+    <ReasoningDialog
+      isLoading={isLoading || Boolean(thinkingTrace?.isStreaming)}
+      reasoning={thinkingText}
+    />
+  ) : null;
 
   const parts = message.parts?.map((part: any, index) => {
     const { type } = part;
     const key = `message-${message.id}-part-${index}`;
 
     if (type === "reasoning") {
-      if (index === firstReasoningIndex && mergedReasoningText) {
-        return (
-          <ReasoningDialog
-            isLoading={isLoading}
-            key={key}
-            reasoning={mergedReasoningText}
-          />
-        );
-      }
       return null;
     }
 
-    // 在首个 text（正文答案）前插分隔线，把上面的附加内容与下面的答案分开。
     if (type === "text") {
-      const hasProcessBefore = message.parts
+      const hasVisibleToolBefore = message.parts
         ?.slice(0, index)
-        .some(
-          (p: any) =>
-            p.type === "reasoning" || String(p.type ?? "").startsWith("tool-"),
-        );
+        .some((p: any) => isToolPart(p) && !isCanvasDocumentTool(p));
       return (
         <Fragment key={key}>
-          {hasProcessBefore ? <Divider /> : null}
+          {hasVisibleToolBefore ? <Divider /> : null}
           <MessageContent
             className={cn("text-[13px] leading-[1.65]", {
               "w-fit max-w-[min(80%,56ch)] overflow-hidden break-words rounded-2xl rounded-br-lg border border-border/30 bg-gradient-to-br from-secondary to-muted px-3.5 py-2 shadow-[var(--shadow-card)]":
@@ -160,10 +165,11 @@ const PurePreviewMessage = ({
   );
 
   const content = isThinking ? (
-    <ThinkingText />
+    (thinkingDialog ?? <ThinkingText />)
   ) : (
     <>
       {attachments}
+      {thinkingDialog}
       {parts}
       {actions}
     </>
@@ -202,7 +208,12 @@ const PurePreviewMessage = ({
 
 export const PreviewMessage = PurePreviewMessage;
 
-export const ThinkingMessage = () => {
+export const ThinkingMessage = ({
+  thinkingTrace,
+}: {
+  thinkingTrace?: ThinkingTrace;
+}) => {
+  const thinkingText = formatRuntimeEvents(thinkingTrace?.events);
   return (
     <div
       className="group/message w-full"
@@ -216,7 +227,16 @@ export const ThinkingMessage = () => {
           </div>
         </div>
 
-        <ThinkingText />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          {thinkingText ? (
+            <ReasoningDialog
+              isLoading={Boolean(thinkingTrace?.isStreaming)}
+              reasoning={thinkingText}
+            />
+          ) : (
+            <ThinkingText />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -267,6 +287,16 @@ function ReasoningDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function formatRuntimeEvents(events?: RuntimeProcessEvent[]): string {
+  return (events ?? [])
+    .filter((event) => event.label?.trim() && !event.id.startsWith("client:"))
+    .map((event) => {
+      const detail = event.detail?.trim();
+      return detail ? `- ${event.label}\n  ${detail}` : `- ${event.label}`;
+    })
+    .join("\n");
 }
 
 function MessageToolPart({ part }: { part: any }) {
