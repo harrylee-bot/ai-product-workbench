@@ -35,7 +35,11 @@ import {
   stopChatRun,
 } from "@/lib/api/nest-client";
 import { ChatbotError } from "@/lib/errors";
-import type { ChatMessage, RuntimeProcessEvent } from "@/lib/types";
+import type {
+  ChatMessage,
+  RuntimeProcessEvent,
+  RuntimeProcessSnapshot,
+} from "@/lib/types";
 import { fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 
 // v1: 单一固定模型。原 @/lib/ai/models 已删除；模型选择由 data-access agent 统一收敛。
@@ -210,9 +214,50 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       mutateRuntimeStatus();
       mutateChatMessages();
     },
-    onError: (error) => {
+    onError: async (error) => {
       activeRunChatIdRef.current = null;
       const message = error instanceof Error ? error.message : "";
+      const isRecoverableStreamError =
+        /Load failed|Failed to fetch|NetworkError|fetch/i.test(message);
+
+      if (isRecoverableStreamError) {
+        const [nextRuntimeStatus, nextChatData] = await Promise.all([
+          mutateRuntimeStatus(),
+          mutateChatMessages(),
+          mutate(CHAT_HISTORY_KEY),
+        ]);
+        const recoveredMessages = nextChatData?.messages ?? [];
+        if (
+          currentChatIdRef.current === chatId &&
+          recoveredMessages.length > 0
+        ) {
+          setMessages(recoveredMessages);
+        }
+
+        const recoveredAssistant = hasRecoveredAssistantMessage(
+          messages,
+          recoveredMessages,
+        );
+        const latestRun = nextRuntimeStatus?.latestRun;
+        const recoveredRun =
+          latestRun?.status === "succeeded" ||
+          latestRun?.status === "cancelled";
+
+        if (recoveredAssistant || recoveredRun) {
+          const snapshot = snapshotFromRuntimeStatus(nextRuntimeStatus);
+          if (snapshot) {
+            setRuntimeProcess(snapshot);
+          }
+          return;
+        }
+      } else {
+        void Promise.all([
+          mutate(CHAT_HISTORY_KEY),
+          mutateRuntimeStatus(),
+          mutateChatMessages(),
+        ]);
+      }
+
       const failedAt = new Date().toISOString();
       setRuntimeProcess((current) => {
         if (current.status !== "running") {
@@ -234,13 +279,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
           events: [...(current.events ?? []), errorEvent].slice(-80),
         };
       });
-      void Promise.all([
-        mutate(CHAT_HISTORY_KEY),
-        mutateRuntimeStatus(),
-        mutateChatMessages(),
-      ]);
-      const isRecoverableStreamError =
-        /Load failed|Failed to fetch|NetworkError|fetch/i.test(message);
+
       if (error.message?.includes("AI Gateway requires a valid credit card")) {
         setShowCreditCardAlert(true);
       } else if (error instanceof ChatbotError) {
@@ -385,8 +424,10 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     const hasLoaded = loadedChatIds.current.has(chatId);
     const serverSignature = messagesSignature(chatData.messages);
     const localSignature = messagesSignature(messages);
+    const canApplyServerMessages =
+      status === "ready" || String(status) === "error";
 
-    if (!hasLoaded || (status === "ready" && serverSignature !== localSignature)) {
+    if (!hasLoaded || (canApplyServerMessages && serverSignature !== localSignature)) {
       setMessages(chatData.messages);
       loadedChatIds.current.add(chatId);
     }
@@ -527,4 +568,45 @@ function isTerminalRuntimeStatus(
   status?: "idle" | "running" | "succeeded" | "failed" | "cancelled"
 ) {
   return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+function hasRecoveredAssistantMessage(
+  localMessages: ChatMessage[],
+  recoveredMessages: ChatMessage[],
+) {
+  if (recoveredMessages.at(-1)?.role !== "assistant") {
+    return false;
+  }
+
+  if (messagesSignature(localMessages) !== messagesSignature(recoveredMessages)) {
+    return true;
+  }
+
+  const localIds = new Set(localMessages.map((message) => message.id));
+  return recoveredMessages.some(
+    (message) => message.role === "assistant" && !localIds.has(message.id),
+  );
+}
+
+function snapshotFromRuntimeStatus(
+  runtimeStatus?: ChatRuntimeStatus,
+): RuntimeProcessSnapshot | undefined {
+  const latestRun = runtimeStatus?.latestRun;
+  if (!latestRun) return undefined;
+
+  return {
+    runId: latestRun.id,
+    status: latestRun.status,
+    startedAt: latestRun.startedAt,
+    endedAt: latestRun.endedAt,
+    title:
+      latestRun.status === "succeeded"
+        ? "已完成"
+        : latestRun.status === "failed"
+          ? "生成失败"
+          : latestRun.status === "cancelled"
+            ? "已停止"
+            : "思考中...",
+    events: latestRun.events ?? [],
+  };
 }
