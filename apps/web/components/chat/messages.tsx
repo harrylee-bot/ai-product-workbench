@@ -83,7 +83,7 @@ function PureMessages({
       isAwaitingAssistant,
       runningLiveRuntimeProcess,
       runningPersistedRuntimeProcess,
-    ]
+    ],
   );
   const effectiveRuntimeProcess =
     latestAssistantBelongsToLatestTurn && !isAwaitingAssistant
@@ -127,7 +127,9 @@ function PureMessages({
               onEdit={onEditMessage}
               regenerate={regenerate}
               runtimeProcess={
-                index === latestAssistantIndex ? effectiveRuntimeProcess : undefined
+                index === latestAssistantIndex
+                  ? effectiveRuntimeProcess
+                  : undefined
               }
               showRuntimeProcess={
                 index === latestAssistantIndex && Boolean(effectiveRuntimeProcess)
@@ -144,7 +146,7 @@ function PureMessages({
             />
           ))}
 
-          {isAwaitingAssistant && (
+          {status === "submitted" && messages.at(-1)?.role !== "assistant" && (
             <ThinkingMessage runtimeProcess={pendingRuntimeProcess} />
           )}
 
@@ -181,7 +183,7 @@ function runtimeStatusToProcess(runtimeStatus?: ChatRuntimeStatus) {
 
   return {
     runId: latestRun.id,
-    status: latestRun.status,
+    status: normalizeRuntimeStatus(latestRun.status),
     startedAt: latestRun.startedAt,
     endedAt: latestRun.endedAt,
     title:
@@ -193,7 +195,16 @@ function runtimeStatusToProcess(runtimeStatus?: ChatRuntimeStatus) {
             ? "已停止"
             : "已完成",
     events: latestRun.events ?? [],
-  } as const;
+  } satisfies RuntimeProcessSnapshot;
+}
+
+function normalizeRuntimeStatus(status: string): RuntimeProcessSnapshot["status"] {
+  if (status === "success") return "succeeded";
+  if (status === "succeeded") return "succeeded";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
+  if (status === "running") return "running";
+  return "succeeded";
 }
 
 function findLatestAssistantIndex(messages: ChatMessage[]) {
