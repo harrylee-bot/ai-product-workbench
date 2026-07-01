@@ -3,7 +3,7 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createContext,
   type Dispatch,
@@ -35,6 +35,7 @@ import {
   getVotesByChatId,
   stopChatRun,
 } from "@/lib/api/nest-client";
+import { NEW_CHAT_DRAFT_PARAM } from "@/lib/chat-navigation";
 import { ChatbotError } from "@/lib/errors";
 import type {
   ChatMessage,
@@ -77,6 +78,13 @@ function extractChatId(pathname: string): string | null {
   return match ? match[1] : null;
 }
 
+function normalizeDraftChatId(value: string | null): string | undefined {
+  if (!value) return undefined;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : undefined;
+}
+
 function messagesSignature(messages: ChatMessage[]) {
   return messages
     .map((message) => {
@@ -95,22 +103,37 @@ function messagesSignature(messages: ChatMessage[]) {
 
 export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { setDataStream, runtimeProcess, setRuntimeProcess } = useDataStream();
   const { mutate } = useSWRConfig();
 
   const chatIdFromUrl = extractChatId(pathname);
   const isNewChat = !chatIdFromUrl;
+  const draftChatIdFromUrl = isNewChat
+    ? normalizeDraftChatId(searchParams.get(NEW_CHAT_DRAFT_PARAM))
+    : undefined;
   const newChatIdRef = useRef(generateUUID());
   const prevPathnameRef = useRef(pathname);
+  const prevDraftChatIdRef = useRef<string | undefined>(draftChatIdFromUrl);
   const currentChatIdRef = useRef<string | null>(null);
   const activeRunChatIdRef = useRef<string | null>(null);
   const recoveryTokenRef = useRef(0);
   const messagesRef = useRef<ChatMessage[]>([]);
 
-  if (isNewChat && prevPathnameRef.current !== pathname) {
-    newChatIdRef.current = generateUUID();
+  if (isNewChat) {
+    if (draftChatIdFromUrl && draftChatIdFromUrl !== newChatIdRef.current) {
+      newChatIdRef.current = draftChatIdFromUrl;
+    } else if (
+      !draftChatIdFromUrl &&
+      (prevPathnameRef.current !== pathname ||
+        prevDraftChatIdRef.current !== draftChatIdFromUrl)
+    ) {
+      newChatIdRef.current = generateUUID();
+    }
   }
   prevPathnameRef.current = pathname;
+  prevDraftChatIdRef.current = draftChatIdFromUrl;
 
   const chatId = chatIdFromUrl ?? newChatIdRef.current;
   currentChatIdRef.current = chatId;
@@ -461,6 +484,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       recoveryTokenRef.current += 1;
       setDataStream([]);
       setRuntimeProcess(initialRuntimeProcess);
+      messagesRef.current = [];
+      setInput("");
       if (isNewChat) {
         setMessages([]);
       }
@@ -485,13 +510,13 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     const query = params.get("query");
     if (query && !hasAppendedQueryRef.current) {
       hasAppendedQueryRef.current = true;
-      window.history.replaceState({}, "", `/chat/${chatId}`);
+      router.replace(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/chat/${chatId}`);
       sendMessage({
         role: "user" as const,
         parts: [{ type: "text", text: query }],
       });
     }
-  }, [sendMessage, chatId]);
+  }, [sendMessage, chatId, router]);
 
   // HTTP stream itself is not resumable yet. After refresh, keep the server run alive
   // and recover the final persisted message by polling runtime status/messages.

@@ -25,6 +25,7 @@ import {
 import type { Chat } from "@/lib/api/types";
 import type { NestUser } from "@/lib/auth/nest-auth";
 import { deleteChat, getChats } from "@/lib/api/nest-client";
+import { createNewChatHref } from "@/lib/chat-navigation";
 import { LoaderIcon } from "./icons";
 import { ChatItem } from "./sidebar-history-item";
 
@@ -127,7 +128,7 @@ export function SidebarHistory({
     setShowDeleteDialog(false);
 
     if (isCurrentChat) {
-      router.replace("/");
+      router.replace(createNewChatHref());
     }
 
     mutate(

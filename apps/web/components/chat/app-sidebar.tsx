@@ -43,6 +43,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { useAuth, type NestUser } from "@/lib/auth/nest-auth";
 import { deleteAllChats } from "@/lib/api/nest-client";
+import { createNewChatHref } from "@/lib/chat-navigation";
 
 export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) {
   const router = useRouter();
@@ -56,7 +57,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
 
   const handleDeleteAll = async () => {
     setShowDeleteAllDialog(false);
-    router.replace("/");
+    router.replace(createNewChatHref());
     mutate(CHAT_HISTORY_KEY, [], {
       revalidate: false,
     });
@@ -83,7 +84,10 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
                   className="size-8 !px-0 items-center justify-center group-data-[collapsible=icon]:group-hover/logo:opacity-0"
                   tooltip="聊天"
                 >
-                  <Link href="/" onClick={() => setOpenMobile(false)}>
+                  <Link
+                    href={createNewChatHref()}
+                    onClick={() => setOpenMobile(false)}
+                  >
                     <MessageSquareIcon className="size-4 text-sidebar-foreground/50" />
                   </Link>
                 </SidebarMenuButton>
@@ -116,7 +120,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
                     className="h-8 rounded-lg border border-sidebar-border text-[13px] text-sidebar-foreground/70 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                     onClick={() => {
                       setOpenMobile(false);
-                      router.push("/");
+                      router.push(createNewChatHref());
                     }}
                     tooltip="新建对话"
                   >
