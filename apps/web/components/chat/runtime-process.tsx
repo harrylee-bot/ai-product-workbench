@@ -1,17 +1,5 @@
 "use client";
 
-import type { LucideIcon } from "lucide-react";
-import {
-  AlertCircleIcon,
-  CheckCircle2Icon,
-  ChevronRightIcon,
-  FileTextIcon,
-  LoaderCircleIcon,
-  PackageIcon,
-  SearchIcon,
-  SparklesIcon,
-  WrenchIcon,
-} from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   ChainOfThought,
@@ -56,14 +44,7 @@ function RuntimeProcessChainContent({
   const elapsedMs = useElapsedMs(startedAt, endedAt, isRunning);
   const elapsedText = startedAt ? formatElapsed(elapsedMs) : undefined;
 
-  const visibleEvents = (runtimeProcess.events ?? []).filter(
-    isVisibleRuntimeEvent,
-  );
-  const events =
-    visibleEvents.length > 0 ? visibleEvents : [fallbackRuntimeEvent()];
-  const maxVisibleEvents = 24;
-  const hiddenCount = Math.max(0, events.length - maxVisibleEvents);
-  const eventsToRender = events.slice(-maxVisibleEvents);
+  const events = (runtimeProcess.events ?? []).filter(isVisibleRuntimeEvent);
 
   return (
     <ChainOfThought
@@ -73,16 +54,13 @@ function RuntimeProcessChainContent({
       <ChainOfThoughtHeader className="text-[13px] leading-[1.65]">
         {runtimeHeaderText(runtimeProcess, elapsedText)}
       </ChainOfThoughtHeader>
-      <ChainOfThoughtContent className="mt-1 space-y-2">
-        {hiddenCount > 0 ? (
-          <div className="pl-6 text-[11px] leading-[1.6] text-muted-foreground/55">
-            还有 {hiddenCount} 条过程记录
-          </div>
-        ) : null}
-        {eventsToRender.map((event) => (
-          <RuntimeProcessStep event={event} key={event.id} />
-        ))}
-      </ChainOfThoughtContent>
+      {events.length > 0 ? (
+        <ChainOfThoughtContent className="mt-1 space-y-2">
+          {events.map((event) => (
+            <RuntimeProcessStep event={event} key={event.id} />
+          ))}
+        </ChainOfThoughtContent>
+      ) : null}
     </ChainOfThought>
   );
 }
@@ -93,6 +71,7 @@ function RuntimeProcessStep({ event }: { event: RuntimeProcessEvent }) {
   const artifact = event.artifact;
   const canOpenArtifact = canOpenCanvasArtifact(artifact);
   const canOpenDetail = Boolean(detail) && !canOpenArtifact;
+  const isActionable = canOpenArtifact || canOpenDetail;
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
   const openArtifact = (target: HTMLElement) => {
@@ -118,21 +97,15 @@ function RuntimeProcessStep({ event }: { event: RuntimeProcessEvent }) {
     }));
   };
 
-  const label = (
-    <RuntimeStepLabel
-      event={event}
-      isActionable={canOpenArtifact || canOpenDetail}
-      onClick={(target) => {
-        if (canOpenArtifact) {
-          openArtifact(target);
-          return;
-        }
-        if (canOpenDetail) {
-          setIsDetailOpen(true);
-        }
-      }}
-    />
-  );
+  const openAction = (target: HTMLElement) => {
+    if (canOpenArtifact) {
+      openArtifact(target);
+      return;
+    }
+    if (canOpenDetail) {
+      setIsDetailOpen(true);
+    }
+  };
 
   return (
     <>
@@ -140,12 +113,22 @@ function RuntimeProcessStep({ event }: { event: RuntimeProcessEvent }) {
         className={cn(
           "text-[12px] leading-[1.6]",
           event.status === "failed" && "text-destructive",
-          event.status === "running" &&
-            "text-foreground [&>div:first-child>svg]:animate-spin",
+          event.status === "running" && "text-foreground",
+          isActionable &&
+            "cursor-pointer rounded-md transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         )}
-        icon={runtimeEventIcon(event)}
-        label={label}
+        description={runtimeEventDescription(event)}
+        label={event.label}
+        onClick={(clickEvent) => isActionable && openAction(clickEvent.currentTarget)}
+        onKeyDown={(keyEvent) => {
+          if (!isActionable) return;
+          if (keyEvent.key !== "Enter" && keyEvent.key !== " ") return;
+          keyEvent.preventDefault();
+          openAction(keyEvent.currentTarget);
+        }}
+        role={isActionable ? "button" : undefined}
         status={runtimeEventStepStatus(event)}
+        tabIndex={isActionable ? 0 : undefined}
       />
       {canOpenDetail ? (
         <Dialog onOpenChange={setIsDetailOpen} open={isDetailOpen}>
@@ -155,8 +138,8 @@ function RuntimeProcessStep({ event }: { event: RuntimeProcessEvent }) {
                 {event.label}
               </DialogTitle>
               <DialogDescription className="text-xs">
-                {runtimeEventKindLabel(event.kind)} ·{" "}
                 {runtimeEventStatusText(event.status)}
+                {event.createdAt ? ` · ${formatRuntimeDate(event.createdAt)}` : ""}
               </DialogDescription>
             </DialogHeader>
             <pre className="max-h-[56vh] overflow-auto whitespace-pre-wrap px-5 py-4 text-[12px] leading-relaxed text-muted-foreground">
@@ -166,42 +149,6 @@ function RuntimeProcessStep({ event }: { event: RuntimeProcessEvent }) {
         </Dialog>
       ) : null}
     </>
-  );
-}
-
-function RuntimeStepLabel({
-  event,
-  isActionable,
-  onClick,
-}: {
-  event: RuntimeProcessEvent;
-  isActionable: boolean;
-  onClick: (target: HTMLElement) => void;
-}) {
-  const content = (
-    <>
-      <span className="mt-px shrink-0 text-muted-foreground/55">
-        {runtimeEventKindLabel(event.kind)}
-      </span>
-      <span className="min-w-0 flex-1 break-words">{event.label}</span>
-      {isActionable ? (
-        <ChevronRightIcon className="mt-1 size-3 shrink-0 text-muted-foreground/45" />
-      ) : null}
-    </>
-  );
-
-  if (!isActionable) {
-    return <div className="flex min-w-0 items-start gap-2">{content}</div>;
-  }
-
-  return (
-    <button
-      className="flex min-w-0 w-full items-start gap-2 rounded-md text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      onClick={(event) => onClick(event.currentTarget)}
-      type="button"
-    >
-      {content}
-    </button>
   );
 }
 
@@ -281,42 +228,17 @@ function runtimeEventStepStatus(
   return "complete";
 }
 
-function runtimeEventIcon(event: RuntimeProcessEvent): LucideIcon {
-  if (event.status === "failed" || event.kind === "error") {
-    return AlertCircleIcon;
-  }
-  if (event.status === "running") {
-    return LoaderCircleIcon;
-  }
-  if (event.kind === "knowledge") return SearchIcon;
-  if (event.kind === "tool") return WrenchIcon;
-  if (event.kind === "artifact") return PackageIcon;
-  if (event.kind === "document") return FileTextIcon;
-  if (event.kind === "status") return SparklesIcon;
-  return CheckCircle2Icon;
-}
-
-function runtimeEventKindLabel(kind: RuntimeProcessEvent["kind"]) {
-  switch (kind) {
-    case "knowledge":
-      return "知识";
-    case "tool":
-      return "工具";
-    case "artifact":
-      return "产物";
-    case "document":
-      return "文档";
-    case "error":
-      return "错误";
-    default:
-      return "步骤";
-  }
-}
-
 function runtimeEventStatusText(status: RuntimeProcessEvent["status"]) {
   if (status === "running") return "执行中";
   if (status === "failed") return "失败";
   return "已完成";
+}
+
+function runtimeEventDescription(event: RuntimeProcessEvent) {
+  if (!event.detail || event.detail.length > 90) {
+    return undefined;
+  }
+  return event.detail;
 }
 
 function statusText(status?: RuntimeProcessSnapshot["status"]) {
@@ -351,22 +273,11 @@ function canOpenCanvasArtifact(artifact?: RuntimeArtifactReference) {
 }
 
 function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
-  return Boolean(event.label?.trim());
+  return Boolean(event.label?.trim()) && !event.id.startsWith("client:");
 }
 
 function firstRuntimeEventTime(runtimeProcess: RuntimeProcessSnapshot) {
   return runtimeProcess.events?.find(isVisibleRuntimeEvent)?.createdAt;
-}
-
-function fallbackRuntimeEvent(): RuntimeProcessEvent {
-  const createdAt = new Date().toISOString();
-  return {
-    id: `runtime-fallback:${createdAt}`,
-    kind: "status",
-    label: "正在处理请求",
-    status: "running",
-    createdAt,
-  };
 }
 
 function formatElapsed(ms: number) {
