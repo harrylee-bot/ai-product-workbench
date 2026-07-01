@@ -28,6 +28,7 @@ import { useAutoResume } from "@/hooks/use-auto-resume";
 import type { Vote } from "@/lib/api/types";
 import {
   type ChatRuntimeStatus,
+  type ChatMessagesResponse,
   getChatMessages,
   getChatRuntimeStatus,
   getChatStreamUrl,
@@ -44,6 +45,8 @@ import { fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 
 // v1: 单一固定模型。原 @/lib/ai/models 已删除；模型选择由 data-access agent 统一收敛。
 const DEFAULT_CHAT_MODEL = "gpt-5.5";
+const STREAM_RECOVERY_ATTEMPTS = 18;
+const STREAM_RECOVERY_INTERVAL_MS = 1000;
 
 type ActiveChatContextValue = {
   chatId: string;
@@ -101,6 +104,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const prevPathnameRef = useRef(pathname);
   const currentChatIdRef = useRef<string | null>(null);
   const activeRunChatIdRef = useRef<string | null>(null);
+  const recoveryTokenRef = useRef(0);
+  const messagesRef = useRef<ChatMessage[]>([]);
 
   if (isNewChat && prevPathnameRef.current !== pathname) {
     newChatIdRef.current = generateUUID();
@@ -218,36 +223,22 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       activeRunChatIdRef.current = null;
       const message = error instanceof Error ? error.message : "";
       const isRecoverableStreamError =
-        /Load failed|Failed to fetch|NetworkError|fetch/i.test(message);
+        /Load failed|Failed to fetch|NetworkError|fetch|aborted|abort/i.test(message);
 
       if (isRecoverableStreamError) {
-        const [nextRuntimeStatus, nextChatData] = await Promise.all([
-          mutateRuntimeStatus(),
-          mutateChatMessages(),
-          mutate(CHAT_HISTORY_KEY),
-        ]);
-        const recoveredMessages = nextChatData?.messages ?? [];
-        if (
-          currentChatIdRef.current === chatId &&
-          recoveredMessages.length > 0
-        ) {
-          setMessages(recoveredMessages);
-        }
+        const recovered = await recoverPersistedReply({
+          baseMessages: messagesRef.current,
+          mutate,
+          mutateChatMessages,
+          mutateRuntimeStatus,
+          recoveryTokenRef,
+          setMessages,
+          setRuntimeProcess,
+          targetChatId: chatId,
+          currentChatIdRef,
+        });
 
-        const recoveredAssistant = hasRecoveredAssistantMessage(
-          messages,
-          recoveredMessages,
-        );
-        const latestRun = nextRuntimeStatus?.latestRun;
-        const recoveredRun =
-          latestRun?.status === "succeeded" ||
-          latestRun?.status === "cancelled";
-
-        if (recoveredAssistant || recoveredRun) {
-          const snapshot = snapshotFromRuntimeStatus(nextRuntimeStatus);
-          if (snapshot) {
-            setRuntimeProcess(snapshot);
-          }
+        if (recovered) {
           return;
         }
       } else {
@@ -294,6 +285,10 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       }
     },
   });
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const beginClientRun = useCallback(() => {
     const startedAt = new Date().toISOString();
@@ -425,13 +420,20 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     const serverSignature = messagesSignature(chatData.messages);
     const localSignature = messagesSignature(messages);
     const canApplyServerMessages =
-      status === "ready" || String(status) === "error";
+      status === "ready" || String(status) === "error" || isServerRunRunning;
 
     if (!hasLoaded || (canApplyServerMessages && serverSignature !== localSignature)) {
       setMessages(chatData.messages);
       loadedChatIds.current.add(chatId);
     }
-  }, [chatId, chatData?.messages, messages, setMessages, status]);
+  }, [
+    chatId,
+    chatData?.messages,
+    isServerRunRunning,
+    messages,
+    setMessages,
+    status,
+  ]);
 
   const hadServerRunRunningRef = useRef(false);
   useEffect(() => {
@@ -452,6 +454,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     if (prevChatIdRef.current !== chatId) {
       prevChatIdRef.current = chatId;
       activeRunChatIdRef.current = null;
+      recoveryTokenRef.current += 1;
       setDataStream([]);
       setRuntimeProcess(initialRuntimeProcess);
       if (isNewChat) {
@@ -574,8 +577,29 @@ function hasRecoveredAssistantMessage(
   localMessages: ChatMessage[],
   recoveredMessages: ChatMessage[],
 ) {
-  if (recoveredMessages.at(-1)?.role !== "assistant") {
+  const latestRecoveredIndex = recoveredMessages.length - 1;
+  const latestRecoveredMessage = recoveredMessages.at(-1);
+  if (latestRecoveredMessage?.role !== "assistant") {
     return false;
+  }
+
+  const latestLocalMessage = localMessages.at(-1);
+  if (latestLocalMessage?.role === "user") {
+    const latestLocalUserText = textFromMessageParts(latestLocalMessage);
+    const matchingUserIndex = findLastMessageIndex(
+      recoveredMessages,
+      (message) =>
+        message.role === "user" &&
+        textFromMessageParts(message) === latestLocalUserText,
+    );
+
+    if (matchingUserIndex === -1 || matchingUserIndex >= latestRecoveredIndex) {
+      return false;
+    }
+  }
+
+  if (hasAssistantVisibleContent(latestRecoveredMessage)) {
+    return true;
   }
 
   if (messagesSignature(localMessages) !== messagesSignature(recoveredMessages)) {
@@ -586,6 +610,103 @@ function hasRecoveredAssistantMessage(
   return recoveredMessages.some(
     (message) => message.role === "assistant" && !localIds.has(message.id),
   );
+}
+
+function findLastMessageIndex(
+  messages: ChatMessage[],
+  predicate: (message: ChatMessage) => boolean,
+) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (predicate(messages[index])) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+async function recoverPersistedReply(input: {
+  baseMessages: ChatMessage[];
+  currentChatIdRef: React.RefObject<string | null>;
+  mutate: (key: string) => Promise<unknown> | unknown;
+  mutateChatMessages: () => Promise<ChatMessagesResponse | undefined>;
+  mutateRuntimeStatus: () => Promise<ChatRuntimeStatus | undefined>;
+  recoveryTokenRef: React.RefObject<number>;
+  setMessages: UseChatHelpers<ChatMessage>["setMessages"];
+  setRuntimeProcess: Dispatch<SetStateAction<RuntimeProcessSnapshot>>;
+  targetChatId: string;
+}) {
+  const token = input.recoveryTokenRef.current + 1;
+  input.recoveryTokenRef.current = token;
+
+  for (let attempt = 0; attempt < STREAM_RECOVERY_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await delay(STREAM_RECOVERY_INTERVAL_MS);
+    }
+
+    const [nextRuntimeStatus, nextChatData] = await Promise.all([
+      input.mutateRuntimeStatus(),
+      input.mutateChatMessages(),
+      input.mutate(CHAT_HISTORY_KEY),
+    ]).catch(() => [undefined, undefined, undefined] as const);
+
+    if (
+      input.recoveryTokenRef.current !== token ||
+      input.currentChatIdRef.current !== input.targetChatId
+    ) {
+      return true;
+    }
+
+    const recoveredMessages = nextChatData?.messages ?? [];
+    if (recoveredMessages.length > 0) {
+      input.setMessages(recoveredMessages);
+    }
+
+    const snapshot = snapshotFromRuntimeStatus(nextRuntimeStatus);
+    if (snapshot) {
+      input.setRuntimeProcess(snapshot);
+    }
+
+    if (hasRecoveredAssistantMessage(input.baseMessages, recoveredMessages)) {
+      return true;
+    }
+
+    const latestRunStatus = nextRuntimeStatus?.latestRun?.status;
+    if (latestRunStatus === "cancelled") {
+      return true;
+    }
+    if (latestRunStatus === "failed") {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function hasAssistantVisibleContent(message: ChatMessage) {
+  return message.parts.some((part: any) => {
+    if (part.type === "text") {
+      return Boolean(part.text?.trim());
+    }
+    if (part.type === "reasoning") {
+      return Boolean(part.text?.trim());
+    }
+    if (String(part.type ?? "").startsWith("tool-")) {
+      return part.state === "output-available" || part.output !== undefined;
+    }
+    return false;
+  });
+}
+
+function textFromMessageParts(message: ChatMessage) {
+  return message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
+    .join("")
+    .trim();
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function snapshotFromRuntimeStatus(
