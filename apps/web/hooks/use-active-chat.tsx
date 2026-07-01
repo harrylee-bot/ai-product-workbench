@@ -420,16 +420,20 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     const serverSignature = messagesSignature(chatData.messages);
     const localSignature = messagesSignature(messages);
     const canApplyServerMessages =
-      status === "ready" || String(status) === "error" || isServerRunRunning;
+      status === "ready" || String(status) === "error";
 
-    if (!hasLoaded || (canApplyServerMessages && serverSignature !== localSignature)) {
+    if (
+      !hasLoaded ||
+      (canApplyServerMessages &&
+        serverSignature !== localSignature &&
+        shouldApplyServerMessages(messages, chatData.messages))
+    ) {
       setMessages(chatData.messages);
       loadedChatIds.current.add(chatId);
     }
   }, [
     chatId,
     chatData?.messages,
-    isServerRunRunning,
     messages,
     setMessages,
     status,
@@ -577,39 +581,11 @@ function hasRecoveredAssistantMessage(
   localMessages: ChatMessage[],
   recoveredMessages: ChatMessage[],
 ) {
-  const latestRecoveredIndex = recoveredMessages.length - 1;
   const latestRecoveredMessage = recoveredMessages.at(-1);
   if (latestRecoveredMessage?.role !== "assistant") {
     return false;
   }
-
-  const latestLocalMessage = localMessages.at(-1);
-  if (latestLocalMessage?.role === "user") {
-    const latestLocalUserText = textFromMessageParts(latestLocalMessage);
-    const matchingUserIndex = findLastMessageIndex(
-      recoveredMessages,
-      (message) =>
-        message.role === "user" &&
-        textFromMessageParts(message) === latestLocalUserText,
-    );
-
-    if (matchingUserIndex === -1 || matchingUserIndex >= latestRecoveredIndex) {
-      return false;
-    }
-  }
-
-  if (hasAssistantVisibleContent(latestRecoveredMessage)) {
-    return true;
-  }
-
-  if (messagesSignature(localMessages) !== messagesSignature(recoveredMessages)) {
-    return true;
-  }
-
-  const localIds = new Set(localMessages.map((message) => message.id));
-  return recoveredMessages.some(
-    (message) => message.role === "assistant" && !localIds.has(message.id),
-  );
+  return shouldApplyServerMessages(localMessages, recoveredMessages);
 }
 
 function findLastMessageIndex(
@@ -622,6 +598,53 @@ function findLastMessageIndex(
     }
   }
   return -1;
+}
+
+function shouldApplyServerMessages(
+  localMessages: ChatMessage[],
+  serverMessages: ChatMessage[],
+) {
+  if (serverMessages.length === 0) {
+    return localMessages.length === 0;
+  }
+  if (localMessages.length === 0) {
+    return true;
+  }
+  if (messagesSignature(localMessages) === messagesSignature(serverMessages)) {
+    return false;
+  }
+
+  const latestLocalUserIndex = findLastMessageIndex(
+    localMessages,
+    (message) => message.role === "user",
+  );
+  if (latestLocalUserIndex === -1) {
+    return serverMessages.length >= localMessages.length;
+  }
+
+  if (serverMessages.length <= latestLocalUserIndex) {
+    return false;
+  }
+
+  const latestLocalUserText = textFromMessageParts(
+    localMessages[latestLocalUserIndex],
+  );
+  const matchingServerUserIndex = findLastMessageIndex(
+    serverMessages,
+    (message) =>
+      message.role === "user" &&
+      textFromMessageParts(message) === latestLocalUserText,
+  );
+  if (matchingServerUserIndex === -1) {
+    return false;
+  }
+
+  return serverMessages.some(
+    (message, index) =>
+      index > matchingServerUserIndex &&
+      message.role === "assistant" &&
+      hasAssistantVisibleContent(message),
+  );
 }
 
 async function recoverPersistedReply(input: {
@@ -657,9 +680,6 @@ async function recoverPersistedReply(input: {
     }
 
     const recoveredMessages = nextChatData?.messages ?? [];
-    if (recoveredMessages.length > 0) {
-      input.setMessages(recoveredMessages);
-    }
 
     const snapshot = snapshotFromRuntimeStatus(nextRuntimeStatus);
     if (snapshot) {
@@ -667,14 +687,21 @@ async function recoverPersistedReply(input: {
     }
 
     if (hasRecoveredAssistantMessage(input.baseMessages, recoveredMessages)) {
+      input.setMessages(recoveredMessages);
       return true;
     }
 
     const latestRunStatus = nextRuntimeStatus?.latestRun?.status;
     if (latestRunStatus === "cancelled") {
+      if (shouldApplyServerMessages(input.baseMessages, recoveredMessages)) {
+        input.setMessages(recoveredMessages);
+      }
       return true;
     }
     if (latestRunStatus === "failed") {
+      if (shouldApplyServerMessages(input.baseMessages, recoveredMessages)) {
+        input.setMessages(recoveredMessages);
+      }
       return false;
     }
   }
