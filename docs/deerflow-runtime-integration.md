@@ -34,6 +34,7 @@ DEERFLOW_LANGGRAPH_URL=http://localhost:2024
 DEERFLOW_GATEWAY_URL=http://localhost:8001
 DEERFLOW_ASSISTANT_ID=lead_agent
 DEERFLOW_AGENT_NAME=ai-product-workbench-lead
+DEERFLOW_MODEL_NAME=datatoken-gpt-5-5
 DEERFLOW_STREAM_MODE=messages,values
 DEERFLOW_UPLOADS_ENABLED=true
 DEERFLOW_ARTIFACT_MAX_INLINE_BYTES=2000000
@@ -45,6 +46,41 @@ DEERFLOW_ARTIFACT_MAX_INLINE_BYTES=2000000
 
 `deerflow_thread_bindings` maps one local conversation to one DeerFlow thread.
 This keeps multi-turn context inside DeerFlow while keeping our database as the app shell source for projects, messages, and run logs.
+
+## Context And Compaction
+
+Context retention and compaction belong to DeerFlow, not to a custom NestJS summarizer.
+
+- Same Workbench conversation -> same DeerFlow thread via `deerflow_thread_bindings`.
+- New Workbench conversation -> new DeerFlow thread, so it must not inherit previous chat state.
+- Long-context compression uses DeerFlow's built-in `DeerFlowSummarizationMiddleware`, which wraps LangChain's `SummarizationMiddleware`.
+- DeerFlow memory and dynamic context injection are handled by `DynamicContextMiddleware` and the DeerFlow memory system.
+- Workbench only forwards product/runtime context and the current turn; it must not reimplement message trimming, summary generation, or Codex/DeerFlow context windows in NestJS.
+
+Required DeerFlow-side `config.yaml` baseline:
+
+```yaml
+summarization:
+  enabled: true
+  model_name: null
+  trigger:
+    - type: tokens
+      value: 32000
+  keep:
+    type: messages
+    value: 10
+  trim_tokens_to_summarize: 15564
+  preserve_recent_skill_count: 5
+  preserve_recent_skill_tokens: 25000
+  preserve_recent_skill_tokens_per_skill: 5000
+  skill_file_read_tool_names:
+    - read_file
+    - read
+    - view
+    - cat
+```
+
+This is the open-source path shipped by DeerFlow/LangChain. If context policy needs tuning, update DeerFlow `config.yaml` and restart DeerFlow Gateway; do not add another summarization service in Workbench.
 
 ## Final Action
 
