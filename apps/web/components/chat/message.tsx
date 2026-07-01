@@ -10,7 +10,6 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "../ai-elements/reasoning";
-import { Shimmer } from "../ai-elements/shimmer";
 import {
   Tool,
   ToolContent,
@@ -73,7 +72,7 @@ const PurePreviewMessage = ({
       (part.type === "reasoning" &&
         "text" in part &&
         part.text?.trim().length > 0) ||
-      part.type.startsWith("tool-")
+      isToolPart(part)
   );
   const isThinking = isAssistant && isLoading && !hasAnyContent;
 
@@ -164,8 +163,12 @@ const PurePreviewMessage = ({
     />
   );
 
+  if (isThinking && !thinkingDialog) {
+    return null;
+  }
+
   const content = isThinking ? (
-    (thinkingDialog ?? <ThinkingText />)
+    thinkingDialog
   ) : (
     <>
       {attachments}
@@ -214,6 +217,8 @@ export const ThinkingMessage = ({
   thinkingTrace?: ThinkingTrace;
 }) => {
   const thinkingText = formatRuntimeEvents(thinkingTrace?.events);
+  if (!thinkingText) return null;
+
   return (
     <div
       className="group/message w-full"
@@ -228,29 +233,15 @@ export const ThinkingMessage = ({
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          {thinkingText ? (
-            <ReasoningDialog
-              isLoading={Boolean(thinkingTrace?.isStreaming)}
-              reasoning={thinkingText}
-            />
-          ) : (
-            <ThinkingText />
-          )}
+          <ReasoningDialog
+            isLoading={Boolean(thinkingTrace?.isStreaming)}
+            reasoning={thinkingText}
+          />
         </div>
       </div>
     </div>
   );
 };
-
-function ThinkingText() {
-  return (
-    <div className="flex h-[calc(13px*1.65)] items-center text-[13px] leading-[1.65]">
-      <Shimmer className="font-medium text-muted-foreground" duration={1}>
-        思考中...
-      </Shimmer>
-    </div>
-  );
-}
 
 function Divider() {
   return <div className="my-1 h-px w-full bg-border/40" aria-hidden />;
@@ -282,7 +273,9 @@ function ReasoningDialog({
         </DialogHeader>
         <Reasoning defaultOpen={true} isStreaming={isLoading}>
           <ReasoningTrigger getThinkingMessage={() => <p>思考内容</p>} />
-          <ReasoningContent>{reasoning}</ReasoningContent>
+          <ReasoningContent className="!text-foreground [&_*]:!text-foreground">
+            {reasoning}
+          </ReasoningContent>
         </Reasoning>
       </DialogContent>
     </Dialog>
@@ -291,12 +284,22 @@ function ReasoningDialog({
 
 function formatRuntimeEvents(events?: RuntimeProcessEvent[]): string {
   return (events ?? [])
-    .filter((event) => event.label?.trim() && !event.id.startsWith("client:"))
+    .filter(isVisibleRuntimeEvent)
     .map((event) => {
       const detail = event.detail?.trim();
       return detail ? `- ${event.label}\n  ${detail}` : `- ${event.label}`;
     })
     .join("\n");
+}
+
+function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
+  if (!event.label?.trim() || event.id.startsWith("client:")) return false;
+  return ![
+    "request-received",
+    "knowledge-start",
+    "knowledge-complete",
+    "deerflow-start",
+  ].some((suffix) => event.id.endsWith(`:${suffix}`));
 }
 
 function MessageToolPart({ part }: { part: any }) {

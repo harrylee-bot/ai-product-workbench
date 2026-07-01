@@ -173,12 +173,20 @@ function buildTrace(
   status: RuntimeProcessSnapshot["status"],
   events?: RuntimeProcessEvent[],
 ): ThinkingTrace | undefined {
-  const visibleEvents = (events ?? []).filter(
-    (event) => event.label?.trim() && !event.id.startsWith("client:"),
-  );
+  const visibleEvents = (events ?? []).filter(isVisibleRuntimeEvent);
   if (visibleEvents.length === 0) return undefined;
   return {
     events: visibleEvents,
     isStreaming: status === "running",
   };
+}
+
+function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
+  if (!event.label?.trim() || event.id.startsWith("client:")) return false;
+  return ![
+    "request-received",
+    "knowledge-start",
+    "knowledge-complete",
+    "deerflow-start",
+  ].some((suffix) => event.id.endsWith(`:${suffix}`));
 }

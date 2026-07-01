@@ -35,7 +35,7 @@ export function DataStreamHandler() {
           runId: delta.data.runId,
           startedAt: delta.data.startedAt,
           endedAt: delta.data.endedAt ?? null,
-          title: delta.data.title ?? "思考中...",
+          title: delta.data.title,
           events: delta.data.events ?? [],
         });
         continue;

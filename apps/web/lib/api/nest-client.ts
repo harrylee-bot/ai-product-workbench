@@ -67,9 +67,10 @@ type NestMessageItem = {
  */
 export function nestMessageToUiMessage(msg: NestMessageItem): ChatMessage {
   const storedParts = msg.metadata?.parts as ChatMessage["parts"] | undefined;
+  const baseParts = storedParts ?? buildMessageParts(msg);
   const parts = appendPersistedThinkingPart(
-    storedParts ?? buildMessageParts(msg),
-    msg
+    appendPersistedCanvasDocumentParts(baseParts, msg),
+    msg,
   );
   return {
     id: msg.id,
@@ -126,7 +127,7 @@ function buildPersistedThinkingText(
 
   const runtimeEvents = runtimeEventsFromMetadata(metadata?.runtimeEvents);
   const text = runtimeEvents
-    .filter((event) => !event.id.startsWith("client:"))
+    .filter(isVisibleRuntimeEvent)
     .map(formatRuntimeEventForThinking)
     .filter(Boolean)
     .join("\n");
@@ -157,8 +158,42 @@ function formatRuntimeEventForThinking(event: RuntimeProcessEvent): string {
   return detail ? `- ${event.label}\n  ${detail}` : `- ${event.label}`;
 }
 
+function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
+  if (!event.label?.trim() || event.id.startsWith("client:")) return false;
+  return ![
+    "request-received",
+    "knowledge-start",
+    "knowledge-complete",
+    "deerflow-start",
+  ].some((suffix) => event.id.endsWith(`:${suffix}`));
+}
+
 function buildMessageParts(msg: NestMessageItem): ChatMessage["parts"] {
   const parts: unknown[] = msg.content ? [{ type: "text", text: msg.content }] : [];
+  parts.push(...buildCanvasDocumentToolParts(msg));
+  return parts as ChatMessage["parts"];
+}
+
+function appendPersistedCanvasDocumentParts(
+  parts: ChatMessage["parts"],
+  msg: NestMessageItem,
+): ChatMessage["parts"] {
+  if (msg.role !== "assistant") return parts;
+  const nextParts = [...parts] as unknown[];
+  for (const toolPart of buildCanvasDocumentToolParts(msg)) {
+    const toolId = (toolPart as { output?: { id?: string } }).output?.id;
+    const alreadyExists = nextParts.some((part) => {
+      if (!part || typeof part !== "object") return false;
+      const record = part as { type?: unknown; output?: { id?: string } };
+      return record.type === "tool-createDocument" && record.output?.id === toolId;
+    });
+    if (!alreadyExists) nextParts.push(toolPart);
+  }
+  return nextParts as ChatMessage["parts"];
+}
+
+function buildCanvasDocumentToolParts(msg: NestMessageItem) {
+  const parts: unknown[] = [];
   const prdDocumentId = stringFromMetadata(msg.metadata?.prdDocumentId);
 
   if (msg.role === "assistant" && prdDocumentId) {
@@ -189,7 +224,7 @@ function buildMessageParts(msg: NestMessageItem): ChatMessage["parts"] {
     });
   }
 
-  return parts as ChatMessage["parts"];
+  return parts;
 }
 
 function stringFromMetadata(value: unknown): string | undefined {

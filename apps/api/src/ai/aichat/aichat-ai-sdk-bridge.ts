@@ -43,6 +43,20 @@ export type RuntimeProcessSnapshot = {
   events?: RuntimeProcessEvent[];
 };
 
+export type PersistedToolPart = {
+  type: "dynamic-tool";
+  toolCallId: string;
+  toolName: string;
+  state:
+    | "input-streaming"
+    | "input-available"
+    | "output-available"
+    | "output-error";
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+};
+
 /** 桥接上下文：跟踪当前文本 part 与 final action 过滤状态，避免重复发控制 part。 */
 export type BridgeContext = {
   assistantDeltaFilter: AssistantDeltaFilterState;
@@ -53,6 +67,8 @@ export type BridgeContext = {
   reasoningStarted: boolean;
   emittedToolCallIds: Set<string>;
   toolCallNames: Map<string, string>;
+  toolPartOrder: string[];
+  toolParts: Map<string, PersistedToolPart>;
 };
 
 export function createBridgeContext(): BridgeContext {
@@ -65,6 +81,8 @@ export function createBridgeContext(): BridgeContext {
     reasoningStarted: false,
     emittedToolCallIds: new Set(),
     toolCallNames: new Map(),
+    toolPartOrder: [],
+    toolParts: new Map(),
   };
 }
 
@@ -200,10 +218,11 @@ export function emitDeerFlowEvent(
       const toolCallId = call.id;
       const toolName = call.name;
       if (!toolCallId || !toolName) continue;
-      ctx.emittedToolCallIds.add(toolCallId);
-      ctx.toolCallNames.set(toolCallId, toolName);
-      writer.write({ type: "tool-input-start", toolCallId, toolName });
-      writer.write({ type: "tool-input-available", toolCallId, toolName, input: call.args ?? {} });
+      emitToolInputAvailable(
+        { input: call.args ?? {}, toolCallId, toolName },
+        writer,
+        ctx,
+      );
     }
   }
 
@@ -212,12 +231,63 @@ export function emitDeerFlowEvent(
     if (!ctx.emittedToolCallIds.has(event.toolCallId)) {
       return;
     }
-    writer.write({
-      type: "tool-output-available",
-      toolCallId: event.toolCallId,
-      output: event.toolResult ?? event.content ?? "",
-    });
+    emitToolOutputAvailable(
+      {
+        toolCallId: event.toolCallId,
+        output: event.toolResult ?? event.content ?? "",
+      },
+      writer,
+      ctx,
+    );
   }
+}
+
+export function emitToolInputAvailable(
+  input: { toolCallId: string; toolName: string; input: unknown },
+  writer: UIMessageStreamWriter,
+  ctx: BridgeContext,
+): void {
+  ctx.emittedToolCallIds.add(input.toolCallId);
+  ctx.toolCallNames.set(input.toolCallId, input.toolName);
+  upsertToolPart(ctx, input.toolCallId, input.toolName, {
+    input: input.input,
+    state: "input-available",
+  });
+  writer.write({
+    type: "tool-input-start",
+    toolCallId: input.toolCallId,
+    toolName: input.toolName,
+  });
+  writer.write({
+    type: "tool-input-available",
+    toolCallId: input.toolCallId,
+    toolName: input.toolName,
+    input: input.input,
+  });
+}
+
+export function emitToolOutputAvailable(
+  input: { toolCallId: string; output: unknown },
+  writer: UIMessageStreamWriter,
+  ctx: BridgeContext,
+): void {
+  const toolName = ctx.toolCallNames.get(input.toolCallId) ?? "tool";
+  upsertToolPart(ctx, input.toolCallId, toolName, {
+    output: input.output,
+    state: "output-available",
+  });
+  writer.write({
+    type: "tool-output-available",
+    toolCallId: input.toolCallId,
+    output: input.output,
+  });
+}
+
+export function getPersistedToolParts(ctx: BridgeContext): PersistedToolPart[] {
+  return ctx.toolPartOrder
+    .map((toolCallId) => ctx.toolParts.get(toolCallId))
+    .filter((part): part is PersistedToolPart => Boolean(part))
+    .map((part) => ({ ...part }));
 }
 
 /**
@@ -365,6 +435,25 @@ function emitTextDelta(delta: string, writer: UIMessageStreamWriter, ctx: Bridge
   writer.write({ type: "text-delta", id: "text-1", delta });
   ctx.textBuffer += delta;
   ctx.hasEmittedText = true;
+}
+
+function upsertToolPart(
+  ctx: BridgeContext,
+  toolCallId: string,
+  toolName: string,
+  patch: Partial<PersistedToolPart> & Pick<PersistedToolPart, "state">,
+) {
+  if (!ctx.toolParts.has(toolCallId)) {
+    ctx.toolPartOrder.push(toolCallId);
+  }
+  const current = ctx.toolParts.get(toolCallId);
+  ctx.toolParts.set(toolCallId, {
+    type: "dynamic-tool",
+    toolCallId,
+    toolName,
+    ...current,
+    ...patch,
+  });
 }
 
 export function createRuntimeEvent(input: {

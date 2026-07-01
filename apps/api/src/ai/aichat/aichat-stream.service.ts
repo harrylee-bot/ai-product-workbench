@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { KnowledgeType, MessageType, type RuntimeRunLog } from "@prisma/client";
+import { KnowledgeType, MessageType, Prisma, type RuntimeRunLog } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { Response } from "express";
 import { createUIMessageStream, pipeUIMessageStreamToResponse } from "ai";
@@ -26,8 +26,12 @@ import {
   emitRuntimeFinish,
   emitRuntimeStart,
   emitStaticText,
+  emitToolInputAvailable,
+  emitToolOutputAvailable,
   finishReasoning,
   finishText,
+  getPersistedToolParts,
+  type PersistedToolPart,
   runtimeEventsFromDeerFlow,
   type RuntimeProcessEvent,
   type RuntimeProcessSnapshot,
@@ -122,6 +126,7 @@ export class AichatStreamService {
           getContent: () => ctx.textBuffer.trim(),
           getReasoning: () => ctx.reasoningBuffer.trim(),
           getRuntimeEvents: () => runtimeEvents,
+          getToolParts: () => getPersistedToolParts(ctx),
         });
         const recordRuntimeEvent = (eventType: string, payload: unknown) => {
           void this.runLogs.recordStreamEvent({
@@ -161,7 +166,7 @@ export class AichatStreamService {
                   ? "生成失败"
                   : status === "cancelled"
                     ? "已停止"
-                    : "思考中...",
+                    : undefined,
           };
           emitRuntimeFinish(streamWriter, snapshot);
         };
@@ -175,45 +180,39 @@ export class AichatStreamService {
             runId: run.id,
             status: "running",
             startedAt,
-            title: "思考中...",
             events: [],
           };
           emitRuntimeStart(streamWriter, startSnapshot);
           recordRuntimeEvent("runtime_start", startSnapshot);
-          publishRuntimeEvent(createRuntimeEvent({
-            runId: run.id,
-            id: "request-received",
-            kind: "status",
-            label: "已接收请求",
-          }));
 
-          publishRuntimeEvent(createRuntimeEvent({
-            runId: run.id,
-            id: "knowledge-start",
-            kind: "knowledge",
-            label: "正在检查相关知识",
-            status: "running",
-          }));
+          if (isKnowledgeInventoryQuestion(content)) {
+            await this.respondWithKnowledgeInventory({
+              content,
+              conversationId,
+              ctx,
+              projectId,
+              runId: run.id,
+              streamWriter,
+              userId: user.id,
+              assistantDraft,
+            });
+            await this.completeRunBestEffort(
+              run.id,
+              { status: "success", handledBy: "listKnowledgeBase" },
+              "已返回知识库真实列表",
+            );
+            publishRuntimeFinish("succeeded");
+            streamWriter.write({ type: "finish" });
+            return;
+          }
+
           const knowledgeContext = await this.retrieveKnowledge({
             projectId,
             conversationId,
             runId: run.id,
             message: content,
           });
-          publishRuntimeEvent(createRuntimeEvent({
-            runId: run.id,
-            id: "knowledge-complete",
-            kind: "knowledge",
-            label: knowledgeContext.length > 0 ? "已完成知识检索" : "未找到需要引用的知识",
-          }));
 
-          publishRuntimeEvent(createRuntimeEvent({
-            runId: run.id,
-            id: "deerflow-start",
-            kind: "status",
-            label: "正在生成回复",
-            status: "running",
-          }));
           const result = await this.deerFlow.runTurn({
             runId: run.id,
             projectId,
@@ -625,14 +624,108 @@ export class AichatStreamService {
     runId: string;
     message: string;
   }): Promise<DeerFlowKnowledgeReference[]> {
+    const retrieval = await this.searchKnowledgeForChat(input);
+    return retrieval.references.map((ref) => ({
+      id: ref.id,
+      title: ref.title,
+      snippet: ref.snippet,
+      content: ref.content,
+      type: ref.type as string | undefined,
+      score: ref.score,
+      semanticScore: ref.semanticScore,
+      reason: ref.reason,
+    }));
+  }
+
+  private async respondWithKnowledgeInventory(input: {
+    content: string;
+    conversationId: string;
+    ctx: ReturnType<typeof createBridgeContext>;
+    projectId: string;
+    runId: string;
+    streamWriter: UIMessageStreamWriter;
+    userId: string;
+    assistantDraft: {
+      finalize: (
+        message: Parameters<MessageService["createAssistantMessage"]>[0],
+      ) => Promise<void>;
+    };
+  }) {
+    const toolCallId = `knowledge-inventory-${input.runId}`;
+    const toolInput = {
+      query: input.content,
+      limit: 20,
+      scope: "current-project",
+    };
+    emitToolInputAvailable(
+      {
+        toolCallId,
+        toolName: "listKnowledgeBase",
+        input: toolInput,
+      },
+      input.streamWriter,
+      input.ctx,
+    );
+
+    const retrieval = await this.searchKnowledgeForChat({
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      runId: input.runId,
+      message: "",
+      limit: 20,
+    });
+    const output = {
+      query: input.content,
+      matchedCount: retrieval.matchedCount,
+      selectedCount: retrieval.selectedCount,
+      retrievalError: retrieval.retrievalError,
+      items: retrieval.references.map((ref) => ({
+        id: ref.knowledgeId,
+        title: ref.title,
+        type: ref.type,
+        score: ref.score,
+        semanticScore: ref.semanticScore,
+        reason: ref.reason,
+        snippet: ref.snippet,
+      })),
+    };
+    emitToolOutputAvailable({ toolCallId, output }, input.streamWriter, input.ctx);
+
+    const message = formatKnowledgeInventoryMessage(output);
+    emitStaticText(message, input.streamWriter, input.ctx);
+    finishReasoning(input.streamWriter, input.ctx);
+    finishText(input.streamWriter, input.ctx);
+
+    await input.assistantDraft.finalize({
+      projectId: input.projectId,
+      conversationId: input.conversationId,
+      userId: input.userId,
+      content: message,
+      type: MessageType.text,
+      metadata: toInputJson({
+        source: "aichat",
+        runId: input.runId,
+        handledBy: "listKnowledgeBase",
+      }),
+      relatedRunId: input.runId,
+    });
+  }
+
+  private async searchKnowledgeForChat(input: {
+    projectId: string;
+    conversationId: string;
+    runId: string;
+    message: string;
+    limit?: number;
+  }) {
     const requirementMode: RequirementMode = classifyRequirementMode(input.message, { hasExistingState: true });
-    const retrieval = await this.knowledgeRetrieval.search({
+    return this.knowledgeRetrieval.search({
       projectId: input.projectId,
       conversationId: input.conversationId,
       runId: input.runId,
       runtimeName: "runtime_generation",
       query: input.message,
-      limit: 8,
+      limit: input.limit ?? 8,
       requirementMode,
       preferredTypes: [
         KnowledgeType.strong_rule,
@@ -646,16 +739,6 @@ export class AichatStreamService {
         KnowledgeType.ui_style_guide,
       ],
     });
-    return retrieval.references.map((ref) => ({
-      id: ref.id,
-      title: ref.title,
-      snippet: ref.snippet,
-      content: ref.content,
-      type: ref.type as string | undefined,
-      score: ref.score,
-      semanticScore: ref.semanticScore,
-      reason: ref.reason,
-    }));
   }
 
   private createAssistantDraftWriter(input: {
@@ -666,6 +749,7 @@ export class AichatStreamService {
     getContent: () => string;
     getReasoning: () => string;
     getRuntimeEvents: () => RuntimeProcessEvent[];
+    getToolParts: () => PersistedToolPart[];
   }) {
     const thinkingMetadata = () => {
       const metadata: Record<string, unknown> = {};
@@ -677,6 +761,15 @@ export class AichatStreamService {
       const runtimeEvents = input.getRuntimeEvents().filter(isRuntimeProcessEvent).slice(-80);
       if (runtimeEvents.length > 0) {
         metadata.runtimeEvents = runtimeEvents;
+      }
+
+      const toolParts = input.getToolParts();
+      if (reasoningText || toolParts.length > 0) {
+        metadata.parts = buildPersistedAssistantParts({
+          content: input.getContent(),
+          reasoningText,
+          toolParts,
+        });
       }
 
       return metadata;
@@ -710,15 +803,20 @@ export class AichatStreamService {
 
     let draftMessageId: string | undefined;
     let lastPersistedContent = "";
+    let lastPersistedSignature = "";
     let lastPersistedAt = 0;
     let isFinalizing = false;
     let pending: Promise<void> = Promise.resolve();
 
-    const queueWrite = (content: string) => {
+    const queueWrite = (
+      content: string,
+      metadata: Prisma.InputJsonValue,
+      signature: string,
+    ) => {
       pending = pending
         .catch(() => undefined)
         .then(async () => {
-          if (isFinalizing || content === lastPersistedContent) return;
+          if (isFinalizing || signature === lastPersistedSignature) return;
 
           if (!draftMessageId) {
             const created = await this.messages.createAssistantMessage({
@@ -727,7 +825,7 @@ export class AichatStreamService {
               userId: input.userId,
               content,
               type: MessageType.text,
-              metadata: draftMetadata(),
+              metadata,
               relatedRunId: input.runId,
             });
             draftMessageId = created.id;
@@ -735,12 +833,13 @@ export class AichatStreamService {
             await this.messages.updateAssistantMessage(draftMessageId, {
               content,
               type: MessageType.text,
-              metadata: draftMetadata(),
+              metadata,
               relatedRunId: input.runId,
             });
           }
 
           lastPersistedContent = content;
+          lastPersistedSignature = signature;
         })
         .catch((error) => {
           this.logger.error(`assistant 草稿落库失败 runId=${input.runId}：${serializeError(error)}`);
@@ -753,17 +852,21 @@ export class AichatStreamService {
         if (isFinalizing) return pending;
 
         const content = input.getContent();
-        if (!content) return pending;
+        const metadata = draftMetadata();
+        const signature = safeJsonSignature({ content, metadata });
+        if (!content && !hasPersistableMetadata(metadata)) return pending;
 
         const now = Date.now();
-        const hasMeaningfulDelta = content.length - lastPersistedContent.length >= 160;
+        const hasMeaningfulDelta =
+          Math.abs(signature.length - lastPersistedSignature.length) >= 160 ||
+          content.length - lastPersistedContent.length >= 160;
         const hasWaitedLongEnough = now - lastPersistedAt >= 1200;
         if (!force && !hasMeaningfulDelta && !hasWaitedLongEnough) {
           return pending;
         }
 
         lastPersistedAt = now;
-        return queueWrite(content);
+        return queueWrite(content, metadata, signature);
       },
       finalize: async (message: Parameters<MessageService["createAssistantMessage"]>[0]) => {
         isFinalizing = true;
@@ -1070,6 +1173,80 @@ function recordFromJson(value: unknown): Record<string, unknown> {
     return { ...(value as Record<string, unknown>) };
   }
   return {};
+}
+
+function isKnowledgeInventoryQuestion(value: string) {
+  const compact = value.replace(/\s+/g, "").toLowerCase();
+  if (!/(知识库|知识|规则库|素材库)/.test(compact)) return false;
+  return /(有哪些|有什么|有什么内容|哪些内容|列出|列表|目录|清单|盘点|收录|包含什么|都有什么)/.test(compact);
+}
+
+function formatKnowledgeInventoryMessage(output: {
+  matchedCount: number;
+  selectedCount: number;
+  retrievalError?: string;
+  items: Array<{
+    title: string;
+    type: string;
+    snippet?: string;
+  }>;
+}) {
+  if (output.items.length === 0) {
+    return output.retrievalError
+      ? `我查询了知识库，但本次没有拿到可展示的知识条目：${output.retrievalError}`
+      : "我查询了知识库，当前没有可展示的已启用知识条目。";
+  }
+
+  const lines = output.items.slice(0, 10).map((item, index) => {
+    const snippet = item.snippet?.trim();
+    return `${index + 1}. ${item.title}（${item.type}）${snippet ? `：${snippet}` : ""}`;
+  });
+  const suffix =
+    output.selectedCount > lines.length
+      ? `\n\n还有 ${output.selectedCount - lines.length} 条已在工具结果里展示。`
+      : "";
+
+  return [
+    `我查询到 ${output.selectedCount} 条可用知识（总命中 ${output.matchedCount} 条），真实列表已在工具结果中展开。`,
+    "",
+    ...lines,
+    suffix,
+  ].join("\n");
+}
+
+function buildPersistedAssistantParts(input: {
+  content: string;
+  reasoningText: string;
+  toolParts: PersistedToolPart[];
+}) {
+  const parts: unknown[] = [];
+  const reasoningText = input.reasoningText.trim();
+  if (reasoningText) {
+    parts.push({ type: "reasoning", text: reasoningText });
+  }
+  parts.push(...input.toolParts.map((part) => ({ ...part })));
+  const content = input.content.trim();
+  if (content) {
+    parts.push({ type: "text", text: content });
+  }
+  return parts;
+}
+
+function hasPersistableMetadata(metadata: Prisma.InputJsonValue) {
+  const record = recordFromJson(metadata);
+  return Boolean(
+    record.reasoningText ||
+      (Array.isArray(record.runtimeEvents) && record.runtimeEvents.length > 0) ||
+      (Array.isArray(record.parts) && record.parts.length > 0),
+  );
+}
+
+function safeJsonSignature(value: unknown) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(Date.now());
+  }
 }
 
 function isRuntimeProcessEvent(value: unknown): value is RuntimeProcessEvent {

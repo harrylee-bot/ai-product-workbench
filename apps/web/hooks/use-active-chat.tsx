@@ -321,16 +321,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       ...initialRuntimeProcess,
       status: "running",
       startedAt,
-      title: "思考中...",
-      events: [
-        {
-          id: `client:${chatId}:awaiting:${startedAt}`,
-          kind: "status",
-          label: "正在发送请求",
-          status: "running",
-          createdAt: startedAt,
-        },
-      ],
+      events: [],
     });
   }, [chatId, setDataStream, setRuntimeProcess]);
 
@@ -779,7 +770,7 @@ function snapshotFromRuntimeStatus(
           ? "生成失败"
           : latestRun.status === "cancelled"
             ? "已停止"
-            : "思考中...",
+            : undefined,
     events: latestRun.events ?? [],
   };
 }
