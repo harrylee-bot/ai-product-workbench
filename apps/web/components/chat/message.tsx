@@ -364,6 +364,8 @@ const PurePreviewMessage = ({
     thinkingText ?? <ThinkingText runtimeProcess={runtimeProcess} />
   ) : (
     <>
+      {thinkingText}
+      {thinkingText && hasAnyContent ? <Divider /> : null}
       {attachments}
       {parts}
       {actions}
@@ -437,11 +439,105 @@ function ThinkingText({
   runtimeProcess?: RuntimeProcessSnapshot;
 }) {
   return (
-    <RuntimeStatusLine
-      hasAssistantContent={false}
-      runtimeProcess={runtimeProcess}
-    />
+    <div className="flex min-w-0 flex-col gap-2">
+      <RuntimeStatusLine
+        hasAssistantContent={false}
+        runtimeProcess={runtimeProcess}
+      />
+      <RuntimeEventList runtimeProcess={runtimeProcess} />
+    </div>
   );
+}
+
+function RuntimeEventList({
+  runtimeProcess,
+}: {
+  runtimeProcess?: RuntimeProcessSnapshot;
+}) {
+  const visibleEvents = (runtimeProcess?.events ?? []).filter(isVisibleRuntimeEvent);
+  if (visibleEvents.length === 0) {
+    return null;
+  }
+
+  const maxVisibleEvents = 16;
+  const hiddenCount = Math.max(0, visibleEvents.length - maxVisibleEvents);
+  const eventsToRender = visibleEvents.slice(-maxVisibleEvents);
+
+  return (
+    <div className="flex min-w-0 max-w-[min(100%,680px)] flex-col gap-1">
+      {hiddenCount > 0 ? (
+        <div className="pl-5 text-[11px] leading-[1.6] text-muted-foreground/55">
+          还有 {hiddenCount} 条过程记录
+        </div>
+      ) : null}
+      {eventsToRender.map((event) => (
+        <RuntimeEventRow event={event} key={event.id} />
+      ))}
+    </div>
+  );
+}
+
+function RuntimeEventRow({ event }: { event: RuntimeProcessEvent }) {
+  const row = (
+    <div className="flex min-w-0 items-start gap-2 text-[12px] leading-[1.6] text-muted-foreground/75">
+      <RuntimeEventIcon event={event} />
+      <span className="mt-px shrink-0 text-muted-foreground/50">
+        {runtimeEventKindLabel(event.kind)}
+      </span>
+      <span className="min-w-0 flex-1 break-words">{event.label}</span>
+      {event.detail ? (
+        <ChevronRightIcon className="mt-1 size-3 shrink-0 transition-transform group-open:rotate-90" />
+      ) : null}
+    </div>
+  );
+
+  if (!event.detail) {
+    return row;
+  }
+
+  return (
+    <details className="group min-w-0">
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        {row}
+      </summary>
+      <pre className="ml-5 mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/25 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground/70">
+        {event.detail}
+      </pre>
+    </details>
+  );
+}
+
+function RuntimeEventIcon({ event }: { event: RuntimeProcessEvent }) {
+  if (event.status === "running") {
+    return (
+      <Loader2Icon className="mt-0.5 size-3.5 shrink-0 animate-spin text-muted-foreground/65" />
+    );
+  }
+  if (event.status === "failed" || event.kind === "error") {
+    return (
+      <XCircleIcon className="mt-0.5 size-3.5 shrink-0 text-red-500/80" />
+    );
+  }
+  return (
+    <CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/65" />
+  );
+}
+
+function runtimeEventKindLabel(kind: RuntimeProcessEvent["kind"]) {
+  switch (kind) {
+    case "knowledge":
+      return "知识";
+    case "tool":
+      return "工具";
+    case "artifact":
+      return "产物";
+    case "document":
+      return "文档";
+    case "error":
+      return "错误";
+    default:
+      return "步骤";
+  }
 }
 
 /**
@@ -637,7 +733,7 @@ function shouldShowRuntimeStatus(
   if (runtimeProcess.status === "succeeded") {
     return (
       !hasAssistantContent ||
-      (runtimeProcess.events ?? []).some(isDurableRuntimeEvent)
+      (runtimeProcess.events ?? []).some(isVisibleRuntimeEvent)
     );
   }
   return hasAssistantContent || Boolean(firstVisibleRuntimeEvent(runtimeProcess));
@@ -651,15 +747,6 @@ function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
   return (
     event.kind === "status" ||
     event.kind === "knowledge" ||
-    event.kind === "tool" ||
-    event.kind === "artifact" ||
-    event.kind === "document" ||
-    event.kind === "error"
-  );
-}
-
-function isDurableRuntimeEvent(event: RuntimeProcessEvent) {
-  return (
     event.kind === "tool" ||
     event.kind === "artifact" ||
     event.kind === "document" ||
