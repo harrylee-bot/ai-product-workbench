@@ -2,12 +2,13 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import {
   CheckCircle2Icon,
+  ChevronDownIcon,
   ChevronRightIcon,
   Loader2Icon,
-  SquareTerminalIcon,
   XCircleIcon,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useArtifact } from "@/hooks/use-artifact";
 import type { Vote } from "@/lib/api/types";
 import type {
   ChatMessage,
@@ -18,22 +19,20 @@ import { cn, sanitizeText } from "@/lib/utils";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
 import { Shimmer } from "../ai-elements/shimmer";
 import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "../ai-elements/tool";
-import { useDataStream } from "./data-stream-provider";
-import { DocumentToolResult } from "./document";
-import { DocumentPreview } from "./document-preview";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { PreviewAttachment } from "./preview-attachment";
-import { Weather } from "./weather";
+
+type RuntimeArtifactReference = NonNullable<RuntimeProcessEvent["artifact"]>;
 
 const PurePreviewMessage = ({
-  addToolApprovalResponse,
+  addToolApprovalResponse: _addToolApprovalResponse,
   chatId,
   message,
   vote,
@@ -62,8 +61,6 @@ const PurePreviewMessage = ({
   const attachmentsFromMessage = message.parts.filter(
     (part) => part.type === "file"
   );
-
-  useDataStream();
 
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
@@ -96,19 +93,22 @@ const PurePreviewMessage = ({
     </div>
   );
 
-  const { firstReasoningIndex, mergedReasoningText, reasoningIsStreaming } = useMemo(() => {
+  const { firstReasoningIndex, mergedReasoningText } = useMemo(() => {
     let firstIndex = -1;
     let text = "";
-    let isStreaming = false;
     message.parts?.forEach((part: any, index: number) => {
       if (part.type !== "reasoning") return;
       if (!part.text || !part.text.trim()) return;
       if (firstIndex === -1) firstIndex = index;
       text = text ? `${text}\n\n${part.text}` : part.text;
-      if ("state" in part && part.state === "streaming") isStreaming = true;
     });
-    return { firstReasoningIndex: firstIndex, mergedReasoningText: text, reasoningIsStreaming: isStreaming };
+    return { firstReasoningIndex: firstIndex, mergedReasoningText: text };
   }, [message.parts]);
+
+  const messageArtifact = useMemo(
+    () => findMessageArtifact(message.parts),
+    [message.parts],
+  );
 
   const parts = message.parts?.map((part: any, index) => {
     const { type } = part;
@@ -153,96 +153,6 @@ const PurePreviewMessage = ({
       );
     }
 
-    if (type === "tool-getWeather") {
-      const { toolCallId, state } = part;
-      const approvalId = (part as { approval?: { id: string } }).approval?.id;
-      const isDenied =
-        state === "output-denied" ||
-        (state === "approval-responded" &&
-          (part as { approval?: { approved?: boolean } }).approval?.approved ===
-            false);
-      const widthClass = "w-[min(100%,450px)]";
-
-      if (state === "output-available") {
-        return (
-          <div className={widthClass} key={toolCallId}>
-            <Weather weatherAtLocation={part.output} />
-          </div>
-        );
-      }
-
-      if (isDenied) {
-        return (
-          <div className={widthClass} key={toolCallId}>
-            <Tool className="w-full" defaultOpen={true}>
-              <ToolHeader state="output-denied" type="tool-getWeather" />
-              <ToolContent>
-                <div className="px-4 py-3 text-muted-foreground text-sm">
-                  已拒绝天气查询。
-                </div>
-              </ToolContent>
-            </Tool>
-          </div>
-        );
-      }
-
-      if (state === "approval-responded") {
-        return (
-          <div className={widthClass} key={toolCallId}>
-            <Tool className="w-full" defaultOpen={true}>
-              <ToolHeader state={state} type="tool-getWeather" />
-              <ToolContent>
-                <ToolInput input={part.input} />
-              </ToolContent>
-            </Tool>
-          </div>
-        );
-      }
-
-      return (
-        <div className={widthClass} key={toolCallId}>
-          <Tool className="w-full" defaultOpen={true}>
-            <ToolHeader state={state} type="tool-getWeather" />
-            <ToolContent>
-              {(state === "input-available" ||
-                state === "approval-requested") && (
-                <ToolInput input={part.input} />
-              )}
-              {state === "approval-requested" && approvalId && (
-                <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
-                  <button
-                    className="rounded-md px-3 py-1.5 text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground"
-                    onClick={() => {
-                      addToolApprovalResponse({
-                        id: approvalId,
-                        approved: false,
-                        reason: "用户拒绝天气查询",
-                      });
-                    }}
-                    type="button"
-                  >
-                    拒绝
-                  </button>
-                  <button
-                    className="rounded-md bg-primary px-3 py-1.5 text-primary-foreground text-sm transition-colors hover:bg-primary/90"
-                    onClick={() => {
-                      addToolApprovalResponse({
-                        id: approvalId,
-                        approved: true,
-                      });
-                    }}
-                    type="button"
-                  >
-                    允许
-                  </button>
-                </div>
-              )}
-            </ToolContent>
-          </Tool>
-        </div>
-      );
-    }
-
     if (type === "tool-createDocument") {
       const { state, toolCallId } = part;
 
@@ -257,85 +167,12 @@ const PurePreviewMessage = ({
         );
       }
 
-      if (state !== "output-available" || !part.output) {
-        return <CompactToolPart key={toolCallId} part={part} />;
-      }
-
-      return (
-        <DocumentPreview
-          isReadonly={isReadonly}
-          key={toolCallId}
-          result={part.output}
-        />
-      );
-    }
-
-    if (type === "tool-updateDocument") {
-      const { state, toolCallId } = part;
-
-      if (part.output && "error" in part.output) {
-        return (
-          <div
-            className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-500 dark:bg-red-950/50"
-            key={toolCallId}
-          >
-            更新文档失败：{String(part.output.error)}
-          </div>
-        );
-      }
-
-      if (state !== "output-available" || !part.output) {
-        return <CompactToolPart key={toolCallId} part={part} />;
-      }
-
-      return (
-        <div className="relative" key={toolCallId}>
-          <DocumentPreview
-            args={{ ...part.output, isUpdate: true }}
-            isReadonly={isReadonly}
-            result={part.output}
-          />
-        </div>
-      );
-    }
-
-    if (type === "tool-requestSuggestions") {
-      const { toolCallId, state } = part;
-
-      return (
-        <Tool
-          className="w-[min(100%,450px)]"
-          defaultOpen={true}
-          key={toolCallId}
-        >
-          <ToolHeader state={state} type="tool-requestSuggestions" />
-          <ToolContent>
-            {state === "input-available" && <ToolInput input={part.input} />}
-            {state === "output-available" && (
-              <ToolOutput
-                errorText={undefined}
-                output={
-                  "error" in part.output ? (
-                    <div className="rounded border p-2 text-red-500">
-                      错误：{String(part.output.error)}
-                    </div>
-                  ) : (
-                    <DocumentToolResult
-                      isReadonly={isReadonly}
-                      result={part.output}
-                      type="request-suggestions"
-                    />
-                  )
-                }
-              />
-            )}
-          </ToolContent>
-        </Tool>
-      );
+      void state;
+      return null;
     }
 
     if (type.startsWith("tool-")) {
-      return <ToolLineText key={part.toolCallId ?? key} part={part} />;
+      return null;
     }
 
     return null;
@@ -357,11 +194,19 @@ const PurePreviewMessage = ({
     Boolean(showRuntimeProcess) &&
     shouldShowRuntimeStatus(runtimeProcess, hasAnyContent);
   const thinkingText = showThinkingText ? (
-    <ThinkingText runtimeProcess={runtimeProcess} />
+    <ThinkingText
+      artifactFallback={messageArtifact}
+      runtimeProcess={runtimeProcess}
+    />
   ) : null;
 
   const content = isThinking ? (
-    thinkingText ?? <ThinkingText runtimeProcess={runtimeProcess} />
+    thinkingText ?? (
+      <ThinkingText
+        artifactFallback={messageArtifact}
+        runtimeProcess={runtimeProcess}
+      />
+    )
   ) : (
     <>
       {thinkingText}
@@ -434,8 +279,10 @@ export const ThinkingMessage = ({
 };
 
 function ThinkingText({
+  artifactFallback,
   runtimeProcess,
 }: {
+  artifactFallback?: RuntimeArtifactReference | null;
   runtimeProcess?: RuntimeProcessSnapshot;
 }) {
   return (
@@ -444,14 +291,19 @@ function ThinkingText({
         hasAssistantContent={false}
         runtimeProcess={runtimeProcess}
       />
-      <RuntimeEventList runtimeProcess={runtimeProcess} />
+      <RuntimeEventList
+        artifactFallback={artifactFallback}
+        runtimeProcess={runtimeProcess}
+      />
     </div>
   );
 }
 
 function RuntimeEventList({
+  artifactFallback,
   runtimeProcess,
 }: {
+  artifactFallback?: RuntimeArtifactReference | null;
   runtimeProcess?: RuntimeProcessSnapshot;
 }) {
   const visibleEvents = (runtimeProcess?.events ?? []).filter(isVisibleRuntimeEvent);
@@ -471,13 +323,51 @@ function RuntimeEventList({
         </div>
       ) : null}
       {eventsToRender.map((event) => (
-        <RuntimeEventRow event={event} key={event.id} />
+        <RuntimeEventRow
+          artifactFallback={artifactFallback}
+          event={event}
+          key={event.id}
+        />
       ))}
     </div>
   );
 }
 
-function RuntimeEventRow({ event }: { event: RuntimeProcessEvent }) {
+function RuntimeEventRow({
+  artifactFallback,
+  event,
+}: {
+  artifactFallback?: RuntimeArtifactReference | null;
+  event: RuntimeProcessEvent;
+}) {
+  const { setArtifact } = useArtifact();
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const artifact = resolveRuntimeEventArtifact(event, artifactFallback);
+  const detail = formatRuntimeEventDetail(event);
+  const isActionable = Boolean(artifact || detail);
+  const openArtifact = (target: HTMLElement) => {
+    if (!artifact) return;
+    const boundingBox = target.getBoundingClientRect();
+    setArtifact((currentArtifact) => ({
+      ...currentArtifact,
+      documentId: artifact.id,
+      kind: artifact.kind,
+      title: artifact.title,
+      content:
+        currentArtifact.documentId === artifact.id
+          ? currentArtifact.content
+          : "",
+      status: "idle",
+      isVisible: true,
+      boundingBox: {
+        left: boundingBox.x,
+        top: boundingBox.y,
+        width: boundingBox.width,
+        height: boundingBox.height,
+      },
+    }));
+  };
+
   const row = (
     <div className="flex min-w-0 items-start gap-2 text-[12px] leading-[1.6] text-muted-foreground/75">
       <RuntimeEventIcon event={event} />
@@ -485,25 +375,53 @@ function RuntimeEventRow({ event }: { event: RuntimeProcessEvent }) {
         {runtimeEventKindLabel(event.kind)}
       </span>
       <span className="min-w-0 flex-1 break-words">{event.label}</span>
-      {event.detail ? (
-        <ChevronRightIcon className="mt-1 size-3 shrink-0 transition-transform group-open:rotate-90" />
+      {isActionable ? (
+        <ChevronRightIcon className="mt-1 size-3 shrink-0 text-muted-foreground/45" />
       ) : null}
     </div>
   );
 
-  if (!event.detail) {
-    return row;
+  if (artifact) {
+    return (
+      <button
+        className="min-w-0 rounded-md text-left transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        onClick={(clickEvent) => openArtifact(clickEvent.currentTarget)}
+        type="button"
+      >
+        {row}
+      </button>
+    );
   }
 
   return (
-    <details className="group min-w-0">
-      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+    <Dialog onOpenChange={setIsDetailOpen} open={isDetailOpen}>
+      <button
+        className={cn(
+          "min-w-0 rounded-md text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          detail && "hover:bg-muted/35",
+        )}
+        disabled={!detail}
+        onClick={() => detail && setIsDetailOpen(true)}
+        type="button"
+      >
         {row}
-      </summary>
-      <pre className="ml-5 mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/25 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground/70">
-        {event.detail}
-      </pre>
-    </details>
+      </button>
+      {detail ? (
+        <DialogContent className="max-h-[80vh] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-2xl">
+          <DialogHeader className="border-b border-border/60 px-5 py-4">
+            <DialogTitle className="pr-8 text-sm leading-6">
+              {event.label}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {runtimeEventKindLabel(event.kind)} · {runtimeEventStatusText(event.status)}
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="max-h-[56vh] overflow-auto whitespace-pre-wrap px-5 py-4 text-[12px] leading-relaxed text-muted-foreground">
+            {detail}
+          </pre>
+        </DialogContent>
+      ) : null}
+    </Dialog>
   );
 }
 
@@ -540,33 +458,117 @@ function runtimeEventKindLabel(kind: RuntimeProcessEvent["kind"]) {
   }
 }
 
-/**
- * 工具调用压缩成一行文字：`· name · 进行中/完成/失败`，不用卡片。
- */
-function ToolLineText({ part }: { part: any }) {
-  const state = String(part.state ?? "");
-  const isRunning =
-    state === "input-streaming" ||
-    state === "input-available" ||
-    state === "approval-requested" ||
-    state === "approval-responded";
-  const isFailed = state === "output-error" || state === "output-denied";
-  const toolName = formatToolName(
-    part.toolName ?? String(part.type ?? "").replace(/^tool-/, ""),
-  );
-  const statusLabel = isFailed
-    ? "失败"
-    : state === "output-available"
-      ? "完成"
-      : isRunning
-        ? "进行中"
-        : "";
-  return (
-    <div className="text-[12px] leading-[1.6] text-muted-foreground/70">
-      · {toolName}
-      {statusLabel ? <> · {statusLabel}</> : null}
-    </div>
-  );
+function findMessageArtifact(
+  parts: ChatMessage["parts"],
+): RuntimeArtifactReference | null {
+  for (let index = (parts?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const part = parts?.[index] as
+      | {
+          type?: string;
+          state?: string;
+          output?: Partial<RuntimeArtifactReference>;
+        }
+      | undefined;
+
+    if (
+      part?.type !== "tool-createDocument" ||
+      part.state !== "output-available" ||
+      !part.output?.id ||
+      !part.output.kind
+    ) {
+      continue;
+    }
+
+    return {
+      id: part.output.id,
+      title: part.output.title || defaultArtifactTitle(part.output.kind),
+      kind: part.output.kind,
+    };
+  }
+
+  return null;
+}
+
+function resolveRuntimeEventArtifact(
+  event: RuntimeProcessEvent,
+  fallback?: RuntimeArtifactReference | null,
+) {
+  if (event.artifact && canOpenCanvasArtifact(event.artifact)) {
+    return event.artifact;
+  }
+
+  if (fallback && canOpenCanvasArtifact(fallback) && eventMentionsArtifact(event, fallback)) {
+    return fallback;
+  }
+
+  return null;
+}
+
+function canOpenCanvasArtifact(artifact: RuntimeArtifactReference) {
+  return artifact.kind === "prototype" || artifact.kind === "text";
+}
+
+function eventMentionsArtifact(
+  event: RuntimeProcessEvent,
+  artifact: RuntimeArtifactReference,
+) {
+  const haystack = `${event.id} ${event.label} ${event.detail ?? ""}`.toLowerCase();
+  if (artifact.kind === "prototype") {
+    return haystack.includes("prototype") || haystack.includes("原型");
+  }
+  return haystack.includes("prd") || haystack.includes("文档");
+}
+
+function defaultArtifactTitle(kind: RuntimeArtifactReference["kind"]) {
+  if (kind === "prototype") return "原型";
+  if (kind === "text") return "产品需求文档（PRD）";
+  return "产物";
+}
+
+function runtimeEventStatusText(status: RuntimeProcessEvent["status"]) {
+  if (status === "running") return "进行中";
+  if (status === "failed") return "失败";
+  return "完成";
+}
+
+function formatRuntimeEventDetail(event: RuntimeProcessEvent) {
+  const lines = [
+    `事件：${event.label}`,
+    `类型：${runtimeEventKindLabel(event.kind)}`,
+    `状态：${runtimeEventStatusText(event.status)}`,
+    `时间：${formatRuntimeDate(event.createdAt)}`,
+  ];
+
+  if (event.runId) {
+    lines.push(`运行 ID：${event.runId}`);
+  }
+
+  lines.push(`事件 ID：${event.id}`);
+
+  if (event.detail) {
+    lines.push("", "详情", event.detail);
+  }
+
+  if (event.artifact) {
+    lines.push("", "产物", stringifyRuntimeValue(event.artifact));
+  }
+
+  return lines.join("\n");
+}
+
+function formatRuntimeDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function stringifyRuntimeValue(value: unknown) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function Divider() {
@@ -594,79 +596,28 @@ function RuntimeStatusLine({
   const endedAt = runtimeProcess?.endedAt ?? null;
   const isRunning = runtimeProcess?.status === "running";
   const elapsedMs = useElapsedMs(startedAt, endedAt, isRunning);
+  const elapsedText = startedAt ? formatElapsed(elapsedMs) : undefined;
+  const terminalLabel = statusText(runtimeProcess?.status);
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] leading-[1.65]">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-[1.65]">
       {isRunning ? (
         <Shimmer className="font-medium text-muted-foreground" duration={1}>
-          思考中...
+          {elapsedText ? `思考中 · 已处理 ${elapsedText}` : "思考中..."}
         </Shimmer>
+      ) : elapsedText ? (
+        <span className="font-medium tabular-nums text-muted-foreground">
+          {runtimeProcess?.status === "succeeded"
+            ? `已处理 ${elapsedText}`
+            : `${terminalLabel} · 已处理 ${elapsedText}`}
+        </span>
       ) : (
         <span className="font-medium text-muted-foreground">
-          {statusText(runtimeProcess?.status)}
+          {terminalLabel}
         </span>
       )}
-      {startedAt ? (
-        <span className="text-[12px] tabular-nums text-muted-foreground">
-          已处理 {formatElapsed(elapsedMs)}
-        </span>
-      ) : null}
+      <ChevronDownIcon className="size-3.5 text-muted-foreground/55" />
     </div>
-  );
-}
-
-function CompactToolPart({ part }: { part: any }) {
-  const state = String(part.state ?? "");
-  const isRunning =
-    state === "input-streaming" ||
-    state === "input-available" ||
-    state === "approval-requested" ||
-    state === "approval-responded";
-  const isFailed = state === "output-error" || state === "output-denied";
-  const toolName = formatToolName(
-    part.toolName ?? String(part.type ?? "").replace(/^tool-/, "")
-  );
-  const title = isFailed
-    ? `${toolName} 运行失败`
-    : state === "output-available"
-      ? `${toolName} 已完成`
-      : isRunning
-        ? `正在运行 ${toolName}`
-        : toolName;
-  const detail = formatToolPayload(part);
-  const row = (
-    <div className="flex min-w-0 items-center gap-2 text-[13px] leading-[1.65] text-muted-foreground">
-      {isFailed ? (
-        <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
-      ) : isRunning ? (
-        <Loader2Icon className="size-3.5 shrink-0 animate-spin" />
-      ) : (
-        <CheckCircle2Icon className="size-3.5 shrink-0 text-muted-foreground" />
-      )}
-      <SquareTerminalIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
-      <span className="truncate">{title}</span>
-      {detail ? (
-        <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
-      ) : null}
-    </div>
-  );
-
-  if (!detail) {
-    return <div key={part.toolCallId ?? `${part.type}-${state}`}>{row}</div>;
-  }
-
-  return (
-    <details
-      className="group max-w-[min(100%,680px)] text-[13px]"
-      key={part.toolCallId ?? `${part.type}-${state}`}
-    >
-      <summary className="flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden">
-        {row}
-      </summary>
-      <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap rounded-md bg-muted/35 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
-        {detail}
-      </pre>
-    </details>
   );
 }
 
@@ -767,42 +718,4 @@ function useObservedStart(shouldStart: boolean) {
   }, [shouldStart, startedAt]);
 
   return startedAt;
-}
-
-function formatToolName(name: string) {
-  const normalized = name
-    .replace(/^mcp__/, "")
-    .replace(/__/g, " / ")
-    .replace(/_/g, " ")
-    .replace(/-/g, " ")
-    .trim();
-  return normalized || "工具";
-}
-
-function formatToolPayload(part: any) {
-  const segments: string[] = [];
-  if (part.input !== undefined) {
-    segments.push(`输入\n${stringifyToolValue(part.input)}`);
-  }
-  if (part.output !== undefined) {
-    segments.push(`输出\n${stringifyToolValue(part.output)}`);
-  }
-  if (part.errorText) {
-    segments.push(`错误\n${String(part.errorText)}`);
-  }
-  return segments.join("\n\n").trim();
-}
-
-function stringifyToolValue(value: unknown) {
-  if (value === undefined || value === null || value === "") {
-    return "";
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }

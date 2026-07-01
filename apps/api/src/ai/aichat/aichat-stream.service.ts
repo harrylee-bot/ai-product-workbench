@@ -286,6 +286,11 @@ export class AichatStreamService {
               kind: "document",
               label: "PRD 已生成，正在唤起右侧画布",
               detail: applied.prdDocument.title,
+              artifact: {
+                id: applied.prdDocument.id,
+                title: applied.prdDocument.title || "产品需求文档（PRD）",
+                kind: "text",
+              },
             });
             publishRuntimeEvent(prdReadyEvent);
             deliveredUserVisibleResult = true;
@@ -335,6 +340,11 @@ export class AichatStreamService {
               kind: "document",
               label: "原型已生成，正在唤起右侧画布",
               detail: applied.prototypeArtifact.title,
+              artifact: {
+                id: applied.prototypeArtifact.id,
+                title: applied.prototypeArtifact.title || "原型",
+                kind: "prototype",
+              },
             });
             publishRuntimeEvent(prototypeReadyEvent);
             deliveredUserVisibleResult = true;

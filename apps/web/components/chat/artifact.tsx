@@ -110,7 +110,7 @@ function PureArtifact({
     documentsKey,
     () => getDocumentsById(artifact.documentId, artifact.kind),
     {
-      // 原型为一次性快照，404 即永久删除，不重试（与 document-preview 对齐）。
+      // 原型为一次性快照，404 即永久删除，不重试。
       shouldRetryOnError: !isPrototype,
     },
   );

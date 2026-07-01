@@ -25,6 +25,11 @@ export type RuntimeProcessEvent = {
   kind: "status" | "knowledge" | "tool" | "artifact" | "document" | "error";
   label: string;
   detail?: string;
+  artifact?: {
+    id: string;
+    title: string;
+    kind: "text" | "code" | "image" | "sheet" | "prototype";
+  };
   status: "running" | "completed" | "failed";
   createdAt: string;
 };
@@ -368,6 +373,7 @@ export function createRuntimeEvent(input: {
   kind: RuntimeProcessEvent["kind"];
   label: string;
   detail?: string;
+  artifact?: RuntimeProcessEvent["artifact"];
   status?: RuntimeProcessEvent["status"];
 }): RuntimeProcessEvent {
   return {
@@ -376,6 +382,7 @@ export function createRuntimeEvent(input: {
     kind: input.kind,
     label: input.label,
     detail: input.detail,
+    artifact: input.artifact,
     status: input.status ?? "completed",
     createdAt: new Date().toISOString(),
   };

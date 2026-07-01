@@ -61,6 +61,11 @@ export type RuntimeProcessEvent = {
     | "error";
   label: string;
   detail?: string;
+  artifact?: {
+    id: string;
+    title: string;
+    kind: ArtifactKind;
+  };
   status: "running" | "completed" | "failed";
   createdAt: string;
 };
