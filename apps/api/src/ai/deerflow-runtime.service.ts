@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { readFile } from "node:fs/promises";
 import type { RuntimeAttachmentFile } from "../files/file.types";
@@ -139,7 +139,7 @@ export class DeerFlowRuntimeService {
 
   async runTurn(input: DeerFlowRunInput): Promise<DeerFlowTurnResult> {
     let threadId = await this.ensureThread(input);
-    let uploads = await this.uploadAttachments(threadId, input.attachmentFiles ?? [], input.signal);
+    let uploads = await this.uploadAttachments(threadId, input.userId, input.attachmentFiles ?? [], input.signal);
     let runInput = { ...input, deerFlowUploads: uploads };
     const rawEvents: DeerFlowRuntimeEvent[] = [];
     let assistantText = "";
@@ -181,7 +181,7 @@ export class DeerFlowRuntimeService {
       } catch (error) {
         if (attempt === 0 && isActiveRunConflict(error)) {
           threadId = await this.replaceThreadBinding(input, threadId, "active_run_conflict");
-          uploads = await this.uploadAttachments(threadId, input.attachmentFiles ?? [], input.signal);
+          uploads = await this.uploadAttachments(threadId, input.userId, input.attachmentFiles ?? [], input.signal);
           runInput = { ...input, deerFlowUploads: uploads };
           rawEvents.length = 0;
           assistantText = "";
@@ -194,13 +194,13 @@ export class DeerFlowRuntimeService {
     }
 
     if (!finalState) {
-      finalState = await this.getThreadState(threadId, input.signal).catch(() => undefined);
+      finalState = await this.getThreadState(threadId, input.userId, input.signal).catch(() => undefined);
     }
 
     const visibleAssistantText = assistantText.trim() || extractAssistantTextFromFinalState(finalState);
     const finalAction = extractFinalAction(visibleAssistantText, finalState);
     const userVisibleAssistantText = stripFinalActionBlock(visibleAssistantText).trim();
-    const artifacts = await this.resolveArtifacts(threadId, finalAction.artifacts ?? [], input.signal);
+    const artifacts = await this.resolveArtifacts(threadId, input.userId, finalAction.artifacts ?? [], input.signal);
     if (artifacts.length) {
       await input.onEvent?.({
         event: "gateway-artifacts",
@@ -224,14 +224,17 @@ export class DeerFlowRuntimeService {
     const existing = await this.prisma.deerFlowThreadBinding.findUnique({
       where: { conversationId: input.conversationId },
     });
-    if (existing) return existing.deerFlowThreadId;
+    if (existing) {
+      assertThreadBindingMatchesInput(existing, input);
+      return existing.deerFlowThreadId;
+    }
 
     const thread = await this.createThread({
       aiProductWorkbenchProjectId: input.projectId,
       aiProductWorkbenchConversationId: input.conversationId,
       aiProductWorkbenchUserId: input.userId,
       source: "ai-product-workbench",
-    }, input.signal);
+    }, input.signal, input.userId);
 
     try {
       const created = await this.prisma.deerFlowThreadBinding.create({
@@ -249,7 +252,10 @@ export class DeerFlowRuntimeService {
         const createdByAnotherTurn = await this.prisma.deerFlowThreadBinding.findUnique({
           where: { conversationId: input.conversationId },
         });
-        if (createdByAnotherTurn) return createdByAnotherTurn.deerFlowThreadId;
+        if (createdByAnotherTurn) {
+          assertThreadBindingMatchesInput(createdByAnotherTurn, input);
+          return createdByAnotherTurn.deerFlowThreadId;
+        }
       }
       throw error;
     }
@@ -263,7 +269,7 @@ export class DeerFlowRuntimeService {
       source: "ai-product-workbench",
       replacedDeerFlowThreadId: previousThreadId,
       replacementReason: reason,
-    }, input.signal);
+    }, input.signal, input.userId);
 
     try {
       const updated = await this.prisma.deerFlowThreadBinding.update({
@@ -293,11 +299,15 @@ export class DeerFlowRuntimeService {
     }
   }
 
-  private async createThread(metadata: Record<string, unknown>, signal?: AbortSignal) {
+  private async createThread(
+    metadata: Record<string, unknown>,
+    signal?: AbortSignal,
+    userId?: string,
+  ) {
     const response = await this.requestJson<ThreadCreateResponse>(threadCreatePath(), {
       method: "POST",
       body: JSON.stringify({ metadata }),
-    }, signal);
+    }, signal, userId);
     const threadId = response.thread_id ?? response.threadId;
     if (!threadId) {
       throw new Error("DeerFlow thread 创建成功但未返回 thread_id");
@@ -312,7 +322,7 @@ export class DeerFlowRuntimeService {
   ) {
     const response = await fetchWithTimeout(langGraphUrl(runStreamPath(threadId)), {
       method: "POST",
-      headers: jsonHeaders(),
+      headers: jsonHeaders(input.userId),
       body: JSON.stringify(buildRunRequest(input)),
     }, input.signal);
     if (!response.ok) {
@@ -328,7 +338,12 @@ export class DeerFlowRuntimeService {
     });
   }
 
-  private async uploadAttachments(threadId: string, attachments: RuntimeAttachmentFile[], signal?: AbortSignal) {
+  private async uploadAttachments(
+    threadId: string,
+    userId: string,
+    attachments: RuntimeAttachmentFile[],
+    signal?: AbortSignal,
+  ) {
     if (!attachments.length) return [];
     if (!readBooleanEnv("DEERFLOW_UPLOADS_ENABLED", true)) return [];
 
@@ -344,6 +359,7 @@ export class DeerFlowRuntimeService {
 
     const response = await fetchWithTimeout(gatewayUrl(uploadPath(threadId)), {
       method: "POST",
+      headers: deerFlowIdentityHeaders(userId),
       body: formData,
     }, signal);
     if (!response.ok) {
@@ -368,7 +384,12 @@ export class DeerFlowRuntimeService {
     }));
   }
 
-  private async resolveArtifacts(threadId: string, artifacts: DeerFlowArtifactReference[], signal?: AbortSignal) {
+  private async resolveArtifacts(
+    threadId: string,
+    userId: string,
+    artifacts: DeerFlowArtifactReference[],
+    signal?: AbortSignal,
+  ) {
     const limit = readNumberEnv("DEERFLOW_ARTIFACT_MAX_INLINE_BYTES", 2_000_000);
     const resolved: DeerFlowResolvedArtifact[] = [];
     for (const artifact of artifacts) {
@@ -378,6 +399,7 @@ export class DeerFlowRuntimeService {
       try {
         const response = await fetchWithTimeout(gatewayUrl(artifactPathFor(threadId, artifactPath)), {
           method: "GET",
+          headers: deerFlowIdentityHeaders(userId),
         }, signal);
         if (!response.ok) {
           resolved.push({
@@ -426,15 +448,20 @@ export class DeerFlowRuntimeService {
     return resolved;
   }
 
-  private async getThreadState(threadId: string, signal?: AbortSignal) {
-    return this.requestJson(threadStatePath(threadId), { method: "GET" }, signal);
+  private async getThreadState(threadId: string, userId: string, signal?: AbortSignal) {
+    return this.requestJson(threadStatePath(threadId), { method: "GET" }, signal, userId);
   }
 
-  private async requestJson<T>(path: string, init: RequestInit, signal?: AbortSignal): Promise<T> {
+  private async requestJson<T>(
+    path: string,
+    init: RequestInit,
+    signal?: AbortSignal,
+    userId?: string,
+  ): Promise<T> {
     const response = await fetchWithTimeout(langGraphUrl(path), {
       ...init,
       headers: {
-        ...jsonHeaders(),
+        ...jsonHeaders(userId),
         ...(init.headers ?? {}),
       },
     }, signal);
@@ -468,6 +495,34 @@ function buildRunRequest(input: DeerFlowRunInput) {
       },
     },
   };
+}
+
+function assertThreadBindingMatchesInput(
+  binding: {
+    projectId: string;
+    conversationId: string;
+    userId: string;
+    deerFlowThreadId: string;
+  },
+  input: DeerFlowRunInput,
+) {
+  if (
+    binding.projectId === input.projectId &&
+    binding.conversationId === input.conversationId &&
+    binding.userId === input.userId
+  ) {
+    return;
+  }
+
+  throw new ConflictException(
+    [
+      "DeerFlow thread 绑定与当前会话不一致，已拒绝复用旧上下文。",
+      `conversationId=${input.conversationId}`,
+      `projectId=${input.projectId}`,
+      `userId=${input.userId}`,
+      `boundThreadId=${binding.deerFlowThreadId}`,
+    ].join(" "),
+  );
 }
 
 function buildUserPrompt(input: DeerFlowRunInput) {
@@ -1026,8 +1081,26 @@ function joinUrl(base: string, path: string) {
   return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
-function jsonHeaders() {
-  return { "content-type": "application/json", accept: "application/json, text/event-stream" };
+function jsonHeaders(userId?: string) {
+  return {
+    ...deerFlowIdentityHeaders(userId),
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+  };
+}
+
+function deerFlowIdentityHeaders(userId?: string) {
+  const headers: Record<string, string> = {};
+  if (userId) {
+    headers["X-DeerFlow-Owner-User-Id"] = userId;
+  }
+  const internalToken =
+    process.env.DEER_FLOW_INTERNAL_AUTH_TOKEN ??
+    process.env.DEERFLOW_INTERNAL_AUTH_TOKEN;
+  if (internalToken) {
+    headers["X-DeerFlow-Internal-Token"] = internalToken;
+  }
+  return headers;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, signal?: AbortSignal) {

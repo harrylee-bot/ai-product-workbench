@@ -32,7 +32,7 @@ import {
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
 import type { Attachment, ChatMessage } from "@/lib/types";
-import { createNewChatHref } from "@/lib/chat-navigation";
+import { createChatHref, createNewChatHref } from "@/lib/chat-navigation";
 import { cn } from "@/lib/utils";
 
 // v1: 单一固定模型，后端 NestJS 桥不感知前端模型选择。
@@ -228,7 +228,7 @@ function PureMultimodalInput({
   const isGenerating = status === "submitted" || status === "streaming";
 
   const submitForm = useCallback(() => {
-    router.replace(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/chat/${chatId}`);
+    router.replace(createChatHref(chatId));
 
     sendMessage({
       role: "user",

@@ -36,6 +36,133 @@ describe("DeerFlowRuntimeService", () => {
     process.env = { ...envBackup };
   });
 
+  it("reuses the DeerFlow thread only for the same bound conversation", async () => {
+    prisma.deerFlowThreadBinding.findUnique.mockResolvedValueOnce({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      deerFlowThreadId: "deerflow-thread-existing",
+    });
+    fetchMock.mockResolvedValueOnce(sseResponse([
+      {
+        event: "messages",
+        data: [
+          {
+            type: "AIMessageChunk",
+            content: [
+              "可以继续。",
+              "\n```ai_product_workbench_final_action\n",
+              "{\"type\":\"answer\",\"message\":\"可以继续。\",\"intent\":\"general_question\"}",
+              "\n```",
+            ].join(""),
+          },
+          { langgraph_node: "model" },
+        ],
+      },
+      { event: "values", data: { done: true } },
+    ]));
+
+    const service = new DeerFlowRuntimeService(prisma as never);
+    const result = await service.runTurn({
+      runId: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      message: "继续",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://deerflow.local/threads/deerflow-thread-existing/runs/stream",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(prisma.deerFlowThreadBinding.create).not.toHaveBeenCalled();
+    expect(result.threadId).toBe("deerflow-thread-existing");
+  });
+
+  it("creates separate DeerFlow threads for separate conversations", async () => {
+    prisma.deerFlowThreadBinding.create.mockImplementation(async ({ data }) => data);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages",
+          data: [
+            {
+              type: "AIMessageChunk",
+              content:
+                "第一轮完成。\n```ai_product_workbench_final_action\n{\"type\":\"answer\",\"message\":\"第一轮完成。\"}\n```",
+            },
+            { langgraph_node: "model" },
+          ],
+        },
+        { event: "values", data: { done: true } },
+      ]))
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-2" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages",
+          data: [
+            {
+              type: "AIMessageChunk",
+              content:
+                "第二轮完成。\n```ai_product_workbench_final_action\n{\"type\":\"answer\",\"message\":\"第二轮完成。\"}\n```",
+            },
+            { langgraph_node: "model" },
+          ],
+        },
+        { event: "values", data: { done: true } },
+      ]));
+
+    const service = new DeerFlowRuntimeService(prisma as never);
+    const first = await service.runTurn({
+      runId: "run-1",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      message: "你好",
+    });
+    const second = await service.runTurn({
+      runId: "run-2",
+      projectId: "project-2",
+      conversationId: "conversation-2",
+      userId: "user-1",
+      message: "新对话",
+    });
+
+    expect(first.threadId).toBe("deerflow-thread-1");
+    expect(second.threadId).toBe("deerflow-thread-2");
+    expect(prisma.deerFlowThreadBinding.findUnique).toHaveBeenNthCalledWith(1, {
+      where: { conversationId: "conversation-1" },
+    });
+    expect(prisma.deerFlowThreadBinding.findUnique).toHaveBeenNthCalledWith(2, {
+      where: { conversationId: "conversation-2" },
+    });
+    expect(prisma.deerFlowThreadBinding.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a mismatched DeerFlow thread binding instead of reusing stale context", async () => {
+    prisma.deerFlowThreadBinding.findUnique.mockResolvedValueOnce({
+      projectId: "project-old",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      deerFlowThreadId: "deerflow-thread-old",
+    });
+
+    const service = new DeerFlowRuntimeService(prisma as never);
+    await expect(service.runTurn({
+      runId: "run-1",
+      projectId: "project-new",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      message: "继续",
+    })).rejects.toThrow("已拒绝复用旧上下文");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(prisma.deerFlowThreadBinding.create).not.toHaveBeenCalled();
+  });
+
   it("creates a bound thread and parses LangGraph messages-tuple final action", async () => {
     const finalActionPayload = {
       type: "answer",

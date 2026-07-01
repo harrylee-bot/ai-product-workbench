@@ -36,6 +36,7 @@ DEERFLOW_ASSISTANT_ID=lead_agent
 DEERFLOW_AGENT_NAME=ai-product-workbench-lead
 DEERFLOW_MODEL_NAME=datatoken-gpt-5-5
 DEERFLOW_STREAM_MODE=messages,values
+DEERFLOW_INTERNAL_AUTH_TOKEN=
 DEERFLOW_UPLOADS_ENABLED=true
 DEERFLOW_ARTIFACT_MAX_INLINE_BYTES=2000000
 ```
@@ -46,6 +47,8 @@ DEERFLOW_ARTIFACT_MAX_INLINE_BYTES=2000000
 
 `deerflow_thread_bindings` maps one local conversation to one DeerFlow thread.
 This keeps multi-turn context inside DeerFlow while keeping our database as the app shell source for projects, messages, and run logs.
+
+Workbench sends `X-DeerFlow-Owner-User-Id` on LangGraph and Gateway calls. If the DeerFlow Gateway enables internal authentication, set Workbench `DEERFLOW_INTERNAL_AUTH_TOKEN` to the same value as DeerFlow `DEER_FLOW_INTERNAL_AUTH_TOKEN` so DeerFlow honors that owner scope. This prevents a new Workbench conversation from inheriting another conversation's user memory while still allowing the same conversation to reuse its thread.
 
 ## Context And Compaction
 

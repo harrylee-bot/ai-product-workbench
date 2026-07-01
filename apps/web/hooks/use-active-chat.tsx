@@ -35,7 +35,7 @@ import {
   getVotesByChatId,
   stopChatRun,
 } from "@/lib/api/nest-client";
-import { NEW_CHAT_DRAFT_PARAM } from "@/lib/chat-navigation";
+import { createChatHref, NEW_CHAT_DRAFT_PARAM } from "@/lib/chat-navigation";
 import { ChatbotError } from "@/lib/errors";
 import type {
   ChatMessage,
@@ -510,7 +510,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     const query = params.get("query");
     if (query && !hasAppendedQueryRef.current) {
       hasAppendedQueryRef.current = true;
-      router.replace(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/chat/${chatId}`);
+      router.replace(createChatHref(chatId));
       sendMessage({
         role: "user" as const,
         parts: [{ type: "text", text: query }],
