@@ -81,6 +81,7 @@ enum FileParserType {
   zip
   axure_html_zip
   rp_reference
+  rp_project
   unsupported
 }
 
@@ -90,7 +91,17 @@ enum FileChunkSourceType {
   page
   image_context
   axure_page
+  prototype_snapshot
+  prototype_flow_edge
   pdf_page
+}
+
+enum PrototypeConversionStatus {
+  queued
+  running
+  succeeded
+  failed
+  canceled
 }
 
 enum ModelProviderType {
@@ -214,6 +225,10 @@ enum KnowledgeType {
   page_inventory
   ui_style_guide
   prototype_asset_ref
+  prototype_project
+  prototype_page
+  prototype_snapshot
+  prototype_flow_edge
 }
 
 enum KnowledgeStatus {
@@ -395,6 +410,7 @@ model Project {
   constraintRules             ConstraintRule[]
   shareLinks                  ShareLink[]
   deerFlowThreads             DeerFlowThreadBinding[]
+  prototypeConversionJobs     PrototypeConversionJob[]
   product                     Product?                     @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([ownerId])
@@ -499,6 +515,7 @@ model FileAsset {
   uploader        User                @relation(fields: [uploadedBy], references: [id])
   parseResult     FileParseResult?
   chunks          FileChunk[]
+  prototypeConversionJob PrototypeConversionJob?
 
   @@index([projectId])
   @@index([conversationId])
@@ -507,6 +524,36 @@ model FileAsset {
   @@index([status])
   @@index([createdAt])
   @@map("file_assets")
+}
+
+model PrototypeConversionJob {
+  id               String                    @id @default(uuid())
+  fileAssetId      String                    @unique @map("file_asset_id")
+  projectId        String                    @map("project_id")
+  status           PrototypeConversionStatus @default(queued)
+  stage            String                    @default("queued")
+  sourceFilePath   String                    @map("source_file_path")
+  outputPath       String?                   @map("output_path")
+  outputEntryFile  String?                   @map("output_entry_file")
+  outputZipPath    String?                   @map("output_zip_path")
+  pageCount        Int                       @default(0) @map("page_count")
+  screenshotCount  Int                       @default(0) @map("screenshot_count")
+  converterName    String?                   @map("converter_name")
+  converterVersion String?                   @map("converter_version")
+  errorMessage     String?                   @map("error_message")
+  metadata         Json?
+  startedAt        DateTime?                 @map("started_at")
+  completedAt      DateTime?                 @map("completed_at")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
+  fileAsset        FileAsset                 @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+  project          Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([status])
+  @@index([stage])
+  @@index([createdAt])
+  @@map("prototype_conversion_jobs")
 }
 
 model FileParseResult {

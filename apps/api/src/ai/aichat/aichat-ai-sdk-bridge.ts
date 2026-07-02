@@ -499,6 +499,3 @@ function summarizeUnknown(value: unknown) {
   }
   return text.replace(/\s+/g, " ").trim().slice(0, 240);
 }
-
-/** 重新导出供 service 直接取用。 */
-export { documentToMarkdown };

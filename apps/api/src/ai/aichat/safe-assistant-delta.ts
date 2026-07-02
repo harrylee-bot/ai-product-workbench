@@ -11,7 +11,7 @@
  * - 标题数 >=2（多章节结构），或
  * - 同时含 PRD 全称关键词且标题数 >=1（避免一句提到 PRD 就被误吞）
  */
-export function looksLikeFullPrd(content: string): boolean {
+function looksLikeFullPrd(content: string): boolean {
   const headingCount = (content.match(/^#{1,3}\s+/gm) ?? []).length;
   if (headingCount >= 3) return true;
   const mentionsPrd =

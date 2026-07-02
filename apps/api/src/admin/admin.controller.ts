@@ -1,9 +1,11 @@
-import { Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { UserRole } from "@prisma/client";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
+import { PrototypeConversionService } from "../files/prototype-conversion.service";
 import {
+  BackfillPrototypeConversionsDto,
   ListAdminAuditLogsQueryDto,
   ListAdminModelCallsQueryDto,
   ListAdminProjectsQueryDto,
@@ -21,6 +23,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly auditService: AdminAuditService,
+    private readonly prototypeConversionService: PrototypeConversionService,
   ) {}
 
   @Get("dashboard/stats")
@@ -84,6 +87,11 @@ export class AdminController {
   @Get("logs/file-parses/:fileId")
   getFileParse(@Param("fileId") fileId: string) {
     return this.adminService.getFileParse(fileId);
+  }
+
+  @Post("prototype-conversions/backfill")
+  backfillPrototypeConversions(@Body() dto: BackfillPrototypeConversionsDto) {
+    return this.prototypeConversionService.backfillRpConversions(dto);
   }
 
   @Get("logs/qa-reports")

@@ -76,6 +76,10 @@ function PureMessages({
     }
     return -1;
   }, [messages]);
+  const voteByMessageId = useMemo(
+    () => new Map((votes ?? []).map((vote) => [vote.messageId, vote])),
+    [votes]
+  );
   const isAwaitingAssistant =
     status === "submitted" && messages.at(-1)?.role !== "assistant";
 
@@ -118,11 +122,7 @@ function PureMessages({
                   ? activeTrace
                   : undefined
               }
-              vote={
-                votes
-                  ? votes.find((vote) => vote.messageId === message.id)
-                  : undefined
-              }
+              vote={voteByMessageId.get(message.id)}
             />
           ))}
 

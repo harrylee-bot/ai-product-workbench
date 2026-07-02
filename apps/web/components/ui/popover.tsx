@@ -35,6 +35,4 @@ function PopoverContent({
       />
     </Popover.Portal>
   );
-}
-
-export { PopoverRoot as Popover, PopoverTrigger, PopoverContent, PopoverAnchor };
+}export { PopoverRoot as Popover, PopoverTrigger, PopoverContent };

@@ -636,6 +636,7 @@ export class AichatStreamService {
       score: ref.score,
       semanticScore: ref.semanticScore,
       reason: ref.reason,
+      visualAssets: ref.visualAssets,
     }));
   }
 
@@ -1058,6 +1059,14 @@ export function looksLikeDocumentDraft(buffer: string, delta: string) {
   const current = normalizeDocumentDraftSample(delta);
   if (!sample || sample.length < 8) return false;
 
+  if (/```?\s*mermaid|(^|\n)\s*mermaid\s*\n|flowchart\s+(TD|LR|BT|RL)|sequenceDiagram|stateDiagram|classDiagram/.test(sample)) {
+    return /(需求|文档|说明书|业务|活动|页面|接口|配置|状态|流程|快照|验收)/.test(sample);
+  }
+  if (
+    /"type"\s*:\s*"(table|diagram|image|prototype_snapshot|asset_reference)"|"blocks"\s*:|"sourcePaths"\s*:|"prdDocumentDraft"\s*:|"productDesignStateDraft"\s*:/.test(sample)
+  ) {
+    return true;
+  }
   if (/产品需求文档|需求文档|需求说明书|PRD|PRD\s*文档/i.test(sample)) return true;
   if (/^[^\n]{2,80}(需求说明书|需求文档|产品需求文档|PRD)/im.test(sample)) return true;
   if (/^#{1,4}\s*.*(PRD|需求|文档|说明书|功能|页面|产品)/im.test(sample)) return true;
@@ -1213,7 +1222,13 @@ export function isDocumentGenerationRequest(value: string) {
   if (!/(需求文档|需求说明书|产品需求文档|prd|prd文档)/i.test(compact)) {
     return false;
   }
-  return /(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|给我)/.test(compact);
+  if (/(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|给我)/.test(compact)) {
+    return true;
+  }
+  if (/(为什么|怎么|如何|哪些|有哪些|风险|问题|评价|检查|审查|对比|原因|吗|？|\?)/.test(compact)) {
+    return false;
+  }
+  return true;
 }
 
 function formatKnowledgeInventoryMessage(output: {

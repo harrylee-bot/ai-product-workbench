@@ -71,11 +71,7 @@ export const ModelSelectorList = ({ className, ...props }: ModelSelectorListProp
   <CommandList className={cn("max-h-[280px]", className)} {...props} />
 );
 
-export type ModelSelectorEmptyProps = ComponentProps<typeof CommandEmpty>;
-
-export const ModelSelectorEmpty = (props: ModelSelectorEmptyProps) => (
-  <CommandEmpty {...props} />
-);
+type ModelSelectorEmptyProps = ComponentProps<typeof CommandEmpty>;
 
 export type ModelSelectorGroupProps = ComponentProps<typeof CommandGroup>;
 
@@ -89,21 +85,9 @@ export const ModelSelectorItem = ({ className, ...props }: ModelSelectorItemProp
   <CommandItem className={cn("w-full text-[13px] rounded-lg", className)} {...props} />
 );
 
-export type ModelSelectorShortcutProps = ComponentProps<typeof CommandShortcut>;
-
-export const ModelSelectorShortcut = (props: ModelSelectorShortcutProps) => (
-  <CommandShortcut {...props} />
-);
-
-export type ModelSelectorSeparatorProps = ComponentProps<
+type ModelSelectorShortcutProps = ComponentProps<typeof CommandShortcut>;type ModelSelectorSeparatorProps = ComponentProps<
   typeof CommandSeparator
->;
-
-export const ModelSelectorSeparator = (props: ModelSelectorSeparatorProps) => (
-  <CommandSeparator {...props} />
-);
-
-export type ModelSelectorLogoProps = Omit<
+>;export type ModelSelectorLogoProps = Omit<
   ComponentProps<"img">,
   "src" | "alt"
 > & {
@@ -183,20 +167,7 @@ export const ModelSelectorLogo = ({
   />
 );
 
-export type ModelSelectorLogoGroupProps = ComponentProps<"div">;
-
-export const ModelSelectorLogoGroup = ({
-  className,
-  ...props
-}: ModelSelectorLogoGroupProps) => (
-  <div
-    className={cn(
-      "flex shrink-0 items-center -space-x-1 [&>img]:rounded-full [&>img]:p-px [&>img]:ring-1 [&>img]:ring-border/30",
-      className
-    )}
-    {...props}
-  />
-);
+type ModelSelectorLogoGroupProps = ComponentProps<"div">;
 
 export type ModelSelectorNameProps = ComponentProps<"span">;
 

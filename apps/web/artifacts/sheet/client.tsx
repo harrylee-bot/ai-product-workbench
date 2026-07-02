@@ -1,3 +1,4 @@
+import dynamic from "next/dynamic";
 import { parse, unparse } from "papaparse";
 import { toast } from "sonner";
 import { Artifact } from "@/components/chat/create-artifact";
@@ -8,7 +9,13 @@ import {
   SparklesIcon,
   UndoIcon,
 } from "@/components/chat/icons";
-import { SpreadsheetEditor } from "@/components/chat/sheet-editor";
+
+const SpreadsheetEditor = dynamic(
+  () => import("@/components/chat/sheet-editor").then((module) => module.SpreadsheetEditor),
+  {
+    loading: () => <div className="h-full min-h-[320px] w-full animate-pulse bg-muted/30" />,
+  }
+);
 
 type Metadata = Record<string, never>;
 

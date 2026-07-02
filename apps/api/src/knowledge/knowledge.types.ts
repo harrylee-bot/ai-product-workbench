@@ -32,6 +32,12 @@ export type KnowledgeRetrievalResult = {
   keywordScore?: number;
   semanticScore?: number;
   reason: string;
+  visualAssets?: Array<{
+    kind: "prototype_snapshot" | "image";
+    title?: string;
+    path: string;
+    note?: string;
+  }>;
 };
 
 export type KnowledgeReference = {
@@ -45,6 +51,12 @@ export type KnowledgeReference = {
   semanticScore?: number;
   reason?: string;
   relatedPath?: string;
+  visualAssets?: Array<{
+    kind: "prototype_snapshot" | "image";
+    title?: string;
+    path: string;
+    note?: string;
+  }>;
   usedByRuntime?: string;
   sourceType: "knowledge_base";
   sourceId?: string;

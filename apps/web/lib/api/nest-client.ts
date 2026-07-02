@@ -5,7 +5,6 @@ import { formatISO } from "date-fns";
 import { getApiBase } from "@/lib/api/config";
 import type {
   Chat,
-  DBMessage,
   Document,
   Suggestion,
   Vote,
@@ -65,7 +64,7 @@ type NestMessageItem = {
  * NestJS Message 无 parts 列，parts 存在 metadata.parts。
  * 读时优先用 metadata.parts（编辑过的），否则从 content 构造 text part。
  */
-export function nestMessageToUiMessage(msg: NestMessageItem): ChatMessage {
+function nestMessageToUiMessage(msg: NestMessageItem): ChatMessage {
   const storedParts = msg.metadata?.parts as ChatMessage["parts"] | undefined;
   const baseParts = storedParts ?? buildMessageParts(msg);
   const parts = appendPersistedThinkingPart(
@@ -231,7 +230,7 @@ function stringFromMetadata(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-export function convertToUIMessages(messages: NestMessageItem[]): ChatMessage[] {
+function convertToUIMessages(messages: NestMessageItem[]): ChatMessage[] {
   return messages.map(nestMessageToUiMessage);
 }
 
@@ -250,7 +249,7 @@ type NestConversation = {
   updatedAt: string;
 };
 
-export function conversationToChat(c: NestConversation): Chat {
+function conversationToChat(c: NestConversation): Chat {
   return {
     id: c.id,
     createdAt: c.createdAt,
@@ -271,13 +270,6 @@ export async function deleteChat(id: string): Promise<void> {
 
 export async function deleteAllChats(): Promise<{ success: boolean; deletedCount: number }> {
   return nestFetch("/conversations", { method: "DELETE" });
-}
-
-export async function renameChat(id: string, title: string): Promise<void> {
-  await nestFetch(`/conversations/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ title }),
-  });
 }
 
 // ===== Messages =====
@@ -301,27 +293,6 @@ export async function getChatMessages(
   };
 }
 
-/** 批量保存 ai-chatbot parts（编辑/落库 assistant 消息） */
-export async function saveMessages(
-  chatId: string,
-  messages: { role: string; parts: unknown; attachments?: unknown }[],
-): Promise<void> {
-  await nestFetch(`/conversations/${chatId}/messages/bulk`, {
-    method: "POST",
-    body: JSON.stringify({ messages }),
-  });
-}
-
-export async function updateMessageParts(
-  messageId: string,
-  parts: unknown,
-): Promise<void> {
-  await nestFetch(`/messages/${messageId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ parts }),
-  });
-}
-
 export async function deleteMessagesAfter(
   chatId: string,
   after: string,
@@ -342,9 +313,16 @@ type NestRequirementDocument = {
   sections: Array<{
     id: string;
     title: string;
+    level?: number;
     order: number;
     content: string;
-    blocks?: Array<{ content?: string }>;
+    blocks?: Array<{
+      type?: string;
+      content?: string;
+      title?: string;
+      assetPath?: string;
+      diagramSyntax?: string;
+    }>;
   }>;
   updatedAt: string;
 };
@@ -380,15 +358,47 @@ function documentToMarkdown(doc: NestRequirementDocument): string {
     const title = s.title?.trim();
     const content = normalizeCanvasMarkdown(s.content ?? "").trim();
     if (!title && !content) continue;
-    lines.push("", `## ${title || "未命名章节"}`, "");
+    lines.push("", `${headingPrefix(s.level)} ${title || "未命名章节"}`, "");
     if (content) lines.push(content);
     const blockText = s.blocks
-      ?.map((b) => normalizeCanvasMarkdown(b.content ?? "").trim())
+      ?.map((b) => normalizeCanvasMarkdown(blockToMarkdown(b)).trim())
       .filter(Boolean)
       .join("\n\n");
     if (blockText && blockText !== content) lines.push("", blockText);
   }
   return normalizeCanvasMarkdown(lines.join("\n")).trim();
+}
+
+function headingPrefix(level: number | undefined) {
+  const normalized = Math.min(Math.max(Number(level) || 1, 1), 3);
+  return "#".repeat(normalized + 1);
+}
+
+function blockToMarkdown(block: NonNullable<NestRequirementDocument["sections"][number]["blocks"]>[number]) {
+  const title = block.title?.trim();
+  const content = block.content?.trim() ?? "";
+  if (block.type === "diagram") {
+    return [
+      title ? `**${title}**` : "",
+      `\`\`\`${block.diagramSyntax ?? "mermaid"}`,
+      content,
+      "```",
+    ].filter(Boolean).join("\n");
+  }
+  if ((block.type === "image" || block.type === "prototype_snapshot") && block.assetPath) {
+    return [
+      `![${title || content || "原型截图"}](${block.assetPath})`,
+      content,
+    ].filter(Boolean).join("\n\n");
+  }
+  if (block.type === "asset_reference") {
+    return [
+      title ? `**${title}**` : "**素材引用**",
+      content,
+      block.assetPath ? `素材路径：${block.assetPath}` : "",
+    ].filter(Boolean).join("\n");
+  }
+  return [title ? `**${title}**` : "", content].filter(Boolean).join("\n");
 }
 
 function normalizeCanvasMarkdown(value: string): string {
@@ -513,7 +523,7 @@ export async function getDocumentsById(
   }
 }
 
-export async function getDocumentVersions(
+async function getDocumentVersions(
   id: string,
 ): Promise<{ items: NestRequirementDocumentVersion[] }> {
   return nestFetch(`/prd-documents/${id}/versions`);
@@ -568,24 +578,7 @@ export async function getSuggestionsByDocumentId(
   return [];
 }
 
-// ===== Stream（断线重连） =====
-
-export async function createStreamId(
-  streamId: string,
-  chatId: string,
-): Promise<void> {
-  await nestFetch(`/conversations/${chatId}/streams`, {
-    method: "POST",
-    body: JSON.stringify({ streamId }),
-  });
-}
-
-export async function getStreamIdsByChatId(chatId: string): Promise<string[]> {
-  const data = await nestFetch<{ items: Array<{ id: string }> }>(
-    `/conversations/${chatId}/streams`,
-  );
-  return data.items.map((s) => s.id);
-}
+// ===== Runtime status =====
 
 export type ChatRuntimeStatus = {
   latestRun: {
@@ -625,5 +618,3 @@ export async function stopChatRun(
 export function getChatStreamUrl(): string {
   return `${getApiBase()}/chat/stream`;
 }
-
-export type { DBMessage };

@@ -16,6 +16,7 @@
     "db:generate": "prisma generate --schema packages/db/prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema packages/db/prisma/schema.prisma",
     "db:seed": "npm --workspace @ai-product-workbench/db run seed",
+    "axure:export": "node scripts/axure-rp-export-html.mjs",
     "deerflow:bootstrap": "node scripts/deerflow-bootstrap.mjs"
   },
   "devDependencies": {
@@ -23,8 +24,5 @@
     "prisma": "^6.16.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
-  },
-  "dependencies": {
-    "zod": "^3.25.76"
   }
 }

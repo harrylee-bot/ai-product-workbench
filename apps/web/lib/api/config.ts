@@ -9,5 +9,3 @@ export function getApiBase(): string {
   }
   return "http://localhost:4000/api";
 }
-
-export const API_BASE = getApiBase();

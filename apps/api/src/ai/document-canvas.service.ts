@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import type { RequirementDocBlock, RequirementDocSection, RequirementDocument } from "./ai-vibe.types";
 import { RequirementDocumentService } from "./requirement-document.service";
 
-export type JsonCanvasNode =
+type JsonCanvasNode =
   | {
       id: string;
       type: "text";
@@ -27,7 +27,7 @@ export type JsonCanvasNode =
       color?: string;
     };
 
-export type JsonCanvasEdge = {
+type JsonCanvasEdge = {
   id: string;
   fromNode: string;
   fromSide?: "top" | "right" | "bottom" | "left";
@@ -39,7 +39,7 @@ export type JsonCanvasEdge = {
   label?: string;
 };
 
-export type JsonCanvasDocument = {
+type JsonCanvasDocument = {
   nodes: JsonCanvasNode[];
   edges: JsonCanvasEdge[];
 };
@@ -60,7 +60,7 @@ export type DocumentCanvasView = {
   generatedAt: string;
 };
 
-export type CanvasExportArtifact = {
+type CanvasExportArtifact = {
   format: "prd_canvas";
   projectId: string;
   title: string;

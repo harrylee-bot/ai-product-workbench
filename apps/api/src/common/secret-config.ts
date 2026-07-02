@@ -5,7 +5,7 @@
  */
 
 /** 读取必填环境变量，缺失即抛错（fail-fast），杜绝静默回退到默认值。 */
-export function requireEnv(name: string): string {
+function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
     throw new Error(

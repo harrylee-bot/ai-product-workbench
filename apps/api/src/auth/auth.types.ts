@@ -1,6 +1,6 @@
 import type { UserRole, UserStatus } from "@prisma/client";
 
-export type PublicUser = {
+type PublicUser = {
   id: string;
   username: string;
   email?: string | null;

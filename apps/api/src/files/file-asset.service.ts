@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
@@ -19,13 +20,14 @@ import {
 } from "@prisma/client";
 import { fileTypeFromFile } from "file-type";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import type { ListProjectFilesQueryDto, UploadFilesDto } from "./dto";
 import { FileParserService } from "./file-parser.service";
-import type { AttachmentSummary, ParserOutput, RuntimeAttachmentFile } from "./file.types";
+import type { AttachmentSummary, ParserOutput, RuntimeAttachmentFile, VisualAttachmentContext } from "./file.types";
+import { PrototypeConversionService } from "./prototype-conversion.service";
 
 const ALLOWED_EXTENSIONS = new Set(["txt", "md", "docx", "pdf", "png", "jpg", "jpeg", "zip", "rp"]);
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
@@ -43,6 +45,7 @@ export class FileAssetService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(FileParserService) private readonly parser: FileParserService,
     @Inject(ConfigService) configService: ConfigService,
+    @Optional() private readonly prototypeConversion?: PrototypeConversionService,
   ) {
     this.uploadRoot =
       configService.get<string>("FILE_UPLOAD_ROOT") ??
@@ -67,11 +70,27 @@ export class FileAssetService {
       await this.assertMessageBelongsToProject(dto.messageId, projectId);
     }
 
+    const prepared: Array<{ file: Express.Multer.File; extension: string }> = [];
     const items: FileAsset[] = [];
-    for (const file of files) {
-      const created = await this.createFileAsset(user, projectId, dto, file);
-      items.push(created);
-      void this.parseFileInBackground(created.id);
+
+    try {
+      for (const file of files) {
+        const extension = this.normalizeExtension(file.originalname);
+        await this.assertFileAllowed(file, extension);
+        prepared.push({ file, extension });
+      }
+
+      for (const item of prepared) {
+        const created = await this.createFileAsset(user, projectId, dto, item.file, item.extension);
+        items.push(created);
+      }
+    } catch (error) {
+      await this.cleanupFailedUpload(items, files);
+      throw error;
+    }
+
+    for (const item of items) {
+      void this.parseFileInBackground(item.id);
     }
 
     return { items: items.map((item) => this.toFileAssetItem(item)) };
@@ -114,17 +133,24 @@ export class FileAssetService {
     const parseResult = await this.prisma.fileParseResult.findUnique({
       where: { fileAssetId: file.id },
     });
+    const prototypeConversionJob = await this.prisma.prototypeConversionJob.findUnique({
+      where: { fileAssetId: file.id },
+    });
 
     return {
       file: this.toFileAssetItem(file),
       parseResult: parseResult ? this.toParseResultItem(parseResult) : undefined,
+      prototypeConversionJob: prototypeConversionJob
+        ? this.prototypeConversion?.toJobItem(prototypeConversionJob)
+        : undefined,
     };
   }
 
   async getParseResult(user: AuthenticatedUser, fileId: string) {
     const file = await this.getAccessibleFile(user, fileId, { includeDeleted: false });
-    const [parseResult, chunks] = await Promise.all([
+    const [parseResult, prototypeConversionJob, chunks] = await Promise.all([
       this.prisma.fileParseResult.findUnique({ where: { fileAssetId: file.id } }),
+      this.prisma.prototypeConversionJob.findUnique({ where: { fileAssetId: file.id } }),
       this.prisma.fileChunk.findMany({
         where: { fileAssetId: file.id },
         orderBy: { chunkIndex: "asc" },
@@ -133,6 +159,9 @@ export class FileAssetService {
 
     return {
       parseResult: parseResult ? this.toParseResultItem(parseResult) : null,
+      prototypeConversionJob: prototypeConversionJob
+        ? this.prototypeConversion?.toJobItem(prototypeConversionJob)
+        : null,
       chunks: chunks.map((chunk) => ({
         id: chunk.id,
         fileAssetId: chunk.fileAssetId,
@@ -202,7 +231,7 @@ export class FileAssetService {
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
       },
-      include: { parseResult: true },
+      include: { parseResult: true, prototypeConversionJob: true },
     });
     const order = new Map(fileIds.map((id, index) => [id, index]));
 
@@ -231,6 +260,9 @@ export class FileAssetService {
           sections: sections.length ? sections : undefined,
           visualContexts: this.readJsonArray(parseResult?.visualContexts),
           axureInfo: this.readJsonValue(parseResult?.axureInfo),
+          prototypeConversionJob: file.prototypeConversionJob && this.prototypeConversion
+            ? this.prototypeConversion.toJobItem(file.prototypeConversionJob)
+            : undefined,
           warnings: this.readJsonArray<string>(parseResult?.warnings),
         };
       });
@@ -261,6 +293,33 @@ export class FileAssetService {
       }));
   }
 
+  async getVisualContextFile(user: AuthenticatedUser, fileId: string, contextId: string) {
+    const file = await this.getAccessibleFile(user, fileId, { includeDeleted: false });
+    const parseResult = await this.prisma.fileParseResult.findUnique({
+      where: { fileAssetId: file.id },
+    });
+    const context = this.readJsonArray<VisualAttachmentContext>(parseResult?.visualContexts)
+      .find((item) => item.id === contextId);
+    if (!context?.storagePath) throw new NotFoundException("视觉素材不存在");
+
+    const filePath = path.resolve(context.storagePath);
+    const uploadRoot = path.resolve(this.uploadRoot);
+    if (filePath !== uploadRoot && !filePath.startsWith(`${uploadRoot}${path.sep}`)) {
+      throw new ForbiddenException("视觉素材路径非法");
+    }
+
+    try {
+      await access(filePath);
+    } catch {
+      throw new NotFoundException("视觉素材文件不存在");
+    }
+    return {
+      filePath,
+      mimeType: context.mimeType || "application/octet-stream",
+      fileName: path.basename(filePath),
+    };
+  }
+
   async parseFileNow(fileId: string) {
     const file = await this.prisma.fileAsset.findUnique({ where: { id: fileId } });
     if (!file || file.deletedAt || file.status === FileAssetStatus.deleted) return null;
@@ -274,10 +333,8 @@ export class FileAssetService {
     projectId: string,
     dto: UploadFilesDto,
     file: Express.Multer.File,
+    extension: string,
   ) {
-    const extension = this.normalizeExtension(file.originalname);
-    await this.assertFileAllowed(file, extension);
-
     const projectDir = path.join(this.uploadRoot, projectId);
     const storedName = `${randomUUID()}.${extension}`;
     const storagePath = path.join(projectDir, storedName);
@@ -300,6 +357,16 @@ export class FileAssetService {
         status: FileAssetStatus.uploaded,
       },
     });
+  }
+
+  private async cleanupFailedUpload(created: FileAsset[], files: Express.Multer.File[]) {
+    await Promise.all(files.map((file) => rm(file.path, { force: true }).catch(() => undefined)));
+    await Promise.all(created.map((file) => rm(file.storagePath, { force: true }).catch(() => undefined)));
+    if (created.length) {
+      await this.prisma.fileAsset.deleteMany({
+        where: { id: { in: created.map((file) => file.id) } },
+      });
+    }
   }
 
   private parseFileInBackground(fileId: string) {
@@ -423,6 +490,10 @@ export class FileAssetService {
 
       return saved;
     });
+
+    if (output.prototypeConversion) {
+      await this.prototypeConversion?.enqueueForFile(file, output.prototypeConversion);
+    }
 
     return parseResult;
   }

@@ -1,6 +1,6 @@
 import type { KnowledgeType } from "@prisma/client";
 
-export type KnowledgeReference = {
+type KnowledgeReference = {
   id: string;
   knowledgeId?: string;
   title: string;
@@ -13,7 +13,7 @@ export type KnowledgeReference = {
   sourceId?: string;
 };
 
-export type KnowledgeConflict = {
+type KnowledgeConflict = {
   id: string;
   description: string;
   references: string[];
@@ -83,13 +83,13 @@ export type ProductDesignDraft = Omit<
   "id" | "version" | "prototypeSpec" | "prdDocument" | "status" | "createdAt" | "updatedAt"
 >;
 
-export type RequirementDocTag =
+type RequirementDocTag =
   | "ai_assumption"
   | "knowledge_base"
   | "user_confirmed"
   | "pending_question";
 
-export type RequirementDocSectionType =
+type RequirementDocSectionType =
   | "overview"
   | "background"
   | "business_goal"
@@ -110,8 +110,21 @@ export type RequirementDocSectionType =
 
 export type RequirementDocBlock = {
   id: string;
-  type: "paragraph" | "bullet_list" | "table" | "quote" | "warning" | "info";
+  type:
+    | "paragraph"
+    | "bullet_list"
+    | "table"
+    | "quote"
+    | "warning"
+    | "info"
+    | "diagram"
+    | "image"
+    | "prototype_snapshot"
+    | "asset_reference";
   content: string;
+  title?: string;
+  assetPath?: string;
+  diagramSyntax?: "mermaid" | "plantuml";
   sourcePaths?: string[];
   tags?: RequirementDocTag[];
 };
@@ -138,7 +151,7 @@ export type AssumptionReference = {
   status: "pending" | "confirmed" | "rejected";
 };
 
-export type ClarificationQuestionReference = {
+type ClarificationQuestionReference = {
   questionId: string;
   question: string;
   reason: string;
@@ -146,7 +159,7 @@ export type ClarificationQuestionReference = {
   status: "pending" | "answered" | "skipped";
 };
 
-export type RequirementDocumentStatus = "draft" | "generating" | "ready" | "failed" | "confirmed";
+type RequirementDocumentStatus = "draft" | "generating" | "ready" | "failed" | "confirmed";
 
 export type RequirementDocument = {
   id: string;
@@ -179,9 +192,9 @@ export type RequirementDocumentDraft = {
 };
 
 export type PrototypeTargetDevice = "desktop" | "mobile" | "both";
-export type PrototypeArtifactStatus = "generating" | "ready" | "failed";
+type PrototypeArtifactStatus = "generating" | "ready" | "failed";
 
-export type PrototypeStyleGuide = {
+type PrototypeStyleGuide = {
   tone: "professional" | "clean" | "business" | "consumer" | "dashboard" | "mobile_app";
   primaryColor?: string;
   backgroundColor?: string;
@@ -227,7 +240,7 @@ export type PrototypeComponentSpec = {
   sourcePaths: string[];
 };
 
-export type PrototypePageState = {
+type PrototypePageState = {
   id: string;
   name: string;
   description: string;
@@ -260,7 +273,7 @@ export type PrototypePageSpec = {
   order: number;
 };
 
-export type PrototypeNavigation = {
+type PrototypeNavigation = {
   id: string;
   fromPageId: string;
   toPageId: string;
@@ -268,7 +281,7 @@ export type PrototypeNavigation = {
   label?: string;
 };
 
-export type PrototypeInteraction = {
+type PrototypeInteraction = {
   id: string;
   pageId: string;
   componentId: string;
@@ -349,7 +362,7 @@ export type PrototypeArtifactDraft = {
   assets?: Array<{ name: string; path: string; type: string }>;
 };
 
-export type ExportArtifactFormat = "prd_word" | "prototype_html" | "prd_canvas";
+type ExportArtifactFormat = "prd_word" | "prototype_html" | "prd_canvas";
 
 export type ExportArtifactSummary = {
   format: ExportArtifactFormat;
@@ -389,11 +402,11 @@ export type QACheckType =
   | "knowledge_rule_compliance"
   | "assumption_risk";
 
-export type QAIssueSeverity = "blocking" | "major" | "minor" | "info";
+type QAIssueSeverity = "blocking" | "major" | "minor" | "info";
 export type QAReportStatus = "running" | "passed" | "failed" | "warning";
 export type QAReportTrigger = "initial_generation" | "manual" | "rollback" | "pre_confirm";
-export type QAIssueStatus = "open" | "resolved" | "ignored";
-export type QAGateStatus = "open" | "warning" | "blocked";
+type QAIssueStatus = "open" | "resolved" | "ignored";
+type QAGateStatus = "open" | "warning" | "blocked";
 export type QAGateAction =
   | "confirm_artifacts"
   | "persist_knowledge"
@@ -489,7 +502,7 @@ export type ProjectVersionTimelineItem = {
   createdBy?: string;
 };
 
-export type VibeStreamEventType =
+type VibeStreamEventType =
   | "step_started"
   | "step_completed"
   | "step_failed"
@@ -513,9 +526,9 @@ export type VibeStreamEventType =
   | "run_canceled"
   | "run_failed";
 
-export type VibeStreamEventProtocol = "vibe.v1";
+type VibeStreamEventProtocol = "vibe.v1";
 
-export type VibeStreamEventCategory =
+type VibeStreamEventCategory =
   | "runtime"
   | "run"
   | "state"
@@ -526,7 +539,7 @@ export type VibeStreamEventCategory =
   | "knowledge"
   | "export";
 
-export type VibeStreamEventPhase =
+type VibeStreamEventPhase =
   | "started"
   | "progress"
   | "completed"
@@ -536,7 +549,7 @@ export type VibeStreamEventPhase =
   | "updated"
   | "applying";
 
-export type VibeStreamPayloadKind =
+type VibeStreamPayloadKind =
   | "runtime_step"
   | "progress"
   | "state"
@@ -548,7 +561,7 @@ export type VibeStreamPayloadKind =
   | "export"
   | "run";
 
-export type VibeStreamPayloadMeta = {
+type VibeStreamPayloadMeta = {
   schema: "vibe.stream.payload.v1";
   kind: VibeStreamPayloadKind;
   primaryId?: string;
@@ -561,7 +574,7 @@ export type VibeStreamPayloadMeta = {
   refs?: Record<string, string>;
 };
 
-export type VibeStreamEvent = {
+type VibeStreamEvent = {
   protocol?: VibeStreamEventProtocol;
   eventId?: string;
   runId: string;
@@ -578,17 +591,7 @@ export type VibeStreamEvent = {
   createdAt: string;
 };
 
-export type VibeStreamEventEnvelope = VibeStreamEvent & {
-  protocol: VibeStreamEventProtocol;
-  eventId: string;
-  projectId: string;
-  eventType: VibeStreamEventType;
-  category: VibeStreamEventCategory;
-  phase: VibeStreamEventPhase;
-  payloadMeta: VibeStreamPayloadMeta;
-};
-
-export type RuntimeStreamStepName =
+type RuntimeStreamStepName =
   | "intent_detection"
   | "knowledge_retrieval"
   | "context_fetch"

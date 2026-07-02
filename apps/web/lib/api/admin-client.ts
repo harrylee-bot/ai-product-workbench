@@ -102,6 +102,16 @@ export type FileParseLog = {
   createdAt: string;
 };
 
+export type PrototypeConversionBackfillResult = {
+  matchedCount: number;
+  enqueuedCount: number;
+  skippedCount: number;
+  runRequested: boolean;
+  background: boolean;
+  backgroundStarted: boolean;
+  converterConfigured: boolean;
+};
+
 export type QaReportLog = {
   id: string;
   projectTitle: string;
@@ -292,6 +302,19 @@ export function getFileParses(query?: QueryParams) {
   return nestFetch<PageResponse<FileParseLog>>(
     `/admin/logs/file-parses${queryString(query)}`,
   );
+}
+
+export function backfillPrototypeConversions(input?: {
+  projectId?: string;
+  limit?: number;
+  run?: boolean;
+  force?: boolean;
+  background?: boolean;
+}) {
+  return nestFetch<PrototypeConversionBackfillResult>("/admin/prototype-conversions/backfill", {
+    method: "POST",
+    body: JSON.stringify(input ?? { run: true, background: true }),
+  });
 }
 
 export function getQaReports(query?: QueryParams) {

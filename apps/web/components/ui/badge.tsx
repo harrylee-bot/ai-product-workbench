@@ -44,6 +44,4 @@ function Badge({
       {...props}
     />
   )
-}
-
-export { Badge, badgeVariants }
+}export { Badge };

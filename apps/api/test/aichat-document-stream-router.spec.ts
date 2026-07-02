@@ -21,6 +21,7 @@ describe("aichat document stream router", () => {
   it("detects Chinese requirement document requests", () => {
     expect(isDocumentGenerationRequest("给我生成一个问卷活动的需求文档")).toBe(true);
     expect(isDocumentGenerationRequest("请编写签到活动 PRD")).toBe(true);
+    expect(isDocumentGenerationRequest("活动交易快照功能需求说明书")).toBe(true);
     expect(isDocumentGenerationRequest("这份需求文档有哪些风险？")).toBe(false);
   });
 
@@ -29,6 +30,21 @@ describe("aichat document stream router", () => {
       looksLikeDocumentDraft(
         "问卷调查活动需求说明书##版本历史|版本|日期|作者|变更说明|",
         "问卷调查活动需求说明书##版本历史|版本|日期|作者|变更说明|",
+      ),
+    ).toBe(true);
+  });
+
+  it("routes PRD block source snippets that start with mermaid or JSON blocks", () => {
+    expect(
+      looksLikeDocumentDraft(
+        "mermaid\nflowchart TD\nA[用户参与活动] --> B[生成交易快照]",
+        "mermaid\nflowchart TD\nA[用户参与活动] --> B[生成交易快照]",
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeDocumentDraft(
+        '{"type":"table","title":"页面异常态要求","content":"| 异常态 | 处理要求 |"}',
+        '{"type":"table","title":"页面异常态要求","content":"| 异常态 | 处理要求 |"}',
       ),
     ).toBe(true);
   });

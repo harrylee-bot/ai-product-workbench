@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  backfillPrototypeConversions,
   approveKnowledgeCandidate,
   createAdminUser,
   getAdminDashboardStats,
@@ -509,10 +510,16 @@ function ProjectsSection() {
 
 function ModelsSection() {
   const [tab, setTab] = useState("providers");
-  const providers = useSWR("model-providers", getModelProviders);
-  const configs = useSWR("model-configs", getModelConfigs);
-  const profiles = useSWR("model-task-profiles", getModelTaskProfiles);
-  const skills = useSWR("deerflow-skills", getDeerflowSkills);
+  const providers = useSWR(
+    tab === "providers" ? "model-providers" : null,
+    getModelProviders,
+  );
+  const configs = useSWR(tab === "configs" ? "model-configs" : null, getModelConfigs);
+  const profiles = useSWR(
+    tab === "profiles" ? "model-task-profiles" : null,
+    getModelTaskProfiles,
+  );
+  const skills = useSWR(tab === "skills" ? "deerflow-skills" : null, getDeerflowSkills);
 
   return (
     <SectionPanel
@@ -546,8 +553,10 @@ function ModelsSection() {
 function KnowledgeSection() {
   const [tab, setTab] = useState("items");
   const vault = useSWR("knowledge-vault", getKnowledgeVaultStatus);
-  const items = useSWR("knowledge-items", () => getKnowledgeItems({ pageSize: PAGE_SIZE }));
-  const candidates = useSWR("knowledge-candidates", () =>
+  const items = useSWR(tab === "items" ? "knowledge-items" : null, () =>
+    getKnowledgeItems({ pageSize: PAGE_SIZE }),
+  );
+  const candidates = useSWR(tab === "candidates" ? "knowledge-candidates" : null, () =>
     getKnowledgeCandidates({ pageSize: PAGE_SIZE }),
   );
 
@@ -611,10 +620,18 @@ function KnowledgeSection() {
 
 function RuntimeSection() {
   const [tab, setTab] = useState("runs");
-  const runs = useSWR("runtime-runs", () => getRuntimeRuns({ pageSize: PAGE_SIZE }));
-  const modelCalls = useSWR("model-calls", () => getModelCalls({ pageSize: PAGE_SIZE }));
-  const files = useSWR("file-parses", () => getFileParses({ pageSize: PAGE_SIZE }));
-  const qa = useSWR("qa-reports", () => getQaReports({ pageSize: PAGE_SIZE }));
+  const runs = useSWR(tab === "runs" ? "runtime-runs" : null, () =>
+    getRuntimeRuns({ pageSize: PAGE_SIZE }),
+  );
+  const modelCalls = useSWR(tab === "models" ? "model-calls" : null, () =>
+    getModelCalls({ pageSize: PAGE_SIZE }),
+  );
+  const files = useSWR(tab === "files" ? "file-parses" : null, () =>
+    getFileParses({ pageSize: PAGE_SIZE }),
+  );
+  const qa = useSWR(tab === "qa" ? "qa-reports" : null, () =>
+    getQaReports({ pageSize: PAGE_SIZE }),
+  );
 
   return (
     <SectionPanel
@@ -631,7 +648,7 @@ function RuntimeSection() {
       </Tabs>
       {tab === "runs" && <RuntimeRunsTable data={runs.data?.items} error={runs.error} loading={runs.isLoading} />}
       {tab === "models" && <ModelCallsTable data={modelCalls.data?.items} error={modelCalls.error} loading={modelCalls.isLoading} />}
-      {tab === "files" && <FileParsesTable data={files.data?.items} error={files.error} loading={files.isLoading} />}
+      {tab === "files" && <FileParsesTable data={files.data?.items} error={files.error} loading={files.isLoading} mutate={files.mutate} />}
       {tab === "qa" && <QaReportsTable data={qa.data?.items} error={qa.error} loading={qa.isLoading} />}
     </SectionPanel>
   );
@@ -940,7 +957,31 @@ function FileParsesTable(props: {
   data?: FileParseLog[];
   error?: unknown;
   loading: boolean;
+  mutate: () => Promise<unknown>;
 }) {
+  const [backfilling, setBackfilling] = useState(false);
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      const result = await backfillPrototypeConversions({
+        run: true,
+        background: true,
+      });
+      toast.success(
+        result.backgroundStarted
+          ? `已启动 RP 预转换：${result.enqueuedCount} 个任务`
+          : `RP 预转换已检查：${result.enqueuedCount} 个任务，跳过 ${result.skippedCount} 个`,
+      );
+      if (!result.converterConfigured) {
+        toast.warning("未配置 Axure 转换 Worker，任务会等待 AXURE_RP_CONVERTER_BIN");
+      }
+      void props.mutate();
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setBackfilling(false);
+    }
+  };
   const columns: Column<FileParseLog>[] = [
     { header: "文件", cell: (row) => <NameWithSub name={row.originalName} sub={row.projectTitle} /> },
     { header: "状态", className: "w-[140px]", cell: (row) => <StatusBadge value={row.status} /> },
@@ -951,14 +992,22 @@ function FileParsesTable(props: {
     { header: "时间", className: "w-[180px]", cell: (row) => formatDate(row.createdAt) },
   ];
   return (
-    <AdminTable
-      columns={columns}
-      emptyText="暂无文件解析记录"
-      error={props.error}
-      getRowKey={(row) => row.id}
-      loading={props.loading}
-      rows={props.data}
-    />
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <Button disabled={backfilling} onClick={handleBackfill} size="sm" variant="outline">
+          <RefreshCwIcon className={cn("size-4", backfilling && "animate-spin")} />
+          预转换 RP
+        </Button>
+      </div>
+      <AdminTable
+        columns={columns}
+        emptyText="暂无文件解析记录"
+        error={props.error}
+        getRowKey={(row) => row.id}
+        loading={props.loading}
+        rows={props.data}
+      />
+    </div>
   );
 }
 

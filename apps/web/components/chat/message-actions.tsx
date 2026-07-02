@@ -12,7 +12,7 @@ import {
 } from "../ai-elements/message";
 import { CopyIcon, PencilEditIcon, ThumbDownIcon, ThumbUpIcon } from "./icons";
 
-export function PureMessageActions({
+function PureMessageActions({
   chatId,
   message,
   vote,

@@ -4,18 +4,7 @@
 import type { ArtifactKind } from "@/components/chat/artifact";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
 
-export type Visibility = VisibilityType;
-
-export type User = {
-  id: string;
-  email: string | null;
-  name?: string | null;
-  emailVerified?: boolean;
-  image?: string | null;
-  isAnonymous?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-};
+type Visibility = VisibilityType;
 
 export type Chat = {
   id: string;
@@ -23,15 +12,6 @@ export type Chat = {
   title: string;
   userId: string;
   visibility: Visibility;
-};
-
-export type DBMessage = {
-  id: string;
-  chatId: string;
-  role: string;
-  parts: unknown;
-  attachments: unknown;
-  createdAt: string;
 };
 
 export type Vote = {
@@ -58,11 +38,5 @@ export type Suggestion = {
   description?: string | null;
   isResolved: boolean;
   userId: string;
-  createdAt: string;
-};
-
-export type Stream = {
-  id: string;
-  chatId: string;
   createdAt: string;
 };

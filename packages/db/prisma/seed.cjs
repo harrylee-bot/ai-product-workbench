@@ -31,23 +31,34 @@ async function main() {
     return;
   }
 
+  const isProduction = process.env.NODE_ENV === "production";
+  const adminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD?.trim() || (isProduction ? "" : "Admin123456");
+  if (!adminPassword) {
+    throw new Error("BOOTSTRAP_ADMIN_PASSWORD is required when seeding the first production admin.");
+  }
+
   await upsertUser({
-    username: "admin",
-    email: "admin@example.local",
-    displayName: "管理员",
-    password: "Admin123456",
+    username: process.env.BOOTSTRAP_ADMIN_USERNAME?.trim() || "admin",
+    email: process.env.BOOTSTRAP_ADMIN_EMAIL?.trim() || "admin@example.local",
+    displayName: process.env.BOOTSTRAP_ADMIN_DISPLAY_NAME?.trim() || "管理员",
+    password: adminPassword,
     role: UserRole.admin,
   });
 
-  await upsertUser({
-    username: "zhangsan",
-    email: "zhangsan@example.local",
-    displayName: "张三",
-    password: "User123456",
-    role: UserRole.user,
-  });
+  const demoUserPassword = process.env.BOOTSTRAP_DEMO_USER_PASSWORD?.trim() || (isProduction ? "" : "User123456");
+  if (demoUserPassword) {
+    await upsertUser({
+      username: process.env.BOOTSTRAP_DEMO_USERNAME?.trim() || "zhangsan",
+      email: process.env.BOOTSTRAP_DEMO_EMAIL?.trim() || "zhangsan@example.local",
+      displayName: process.env.BOOTSTRAP_DEMO_DISPLAY_NAME?.trim() || "张三",
+      password: demoUserPassword,
+      role: UserRole.user,
+    });
+  }
 
-  console.log("初始化完成：admin/Admin123456，zhangsan/User123456（首次启动，请立即修改默认口令）");
+  console.log(isProduction
+    ? "初始化完成：已创建首个管理员账号。"
+    : "初始化完成：admin/Admin123456，zhangsan/User123456（仅开发环境默认口令，请勿用于生产）");
 }
 
 main()

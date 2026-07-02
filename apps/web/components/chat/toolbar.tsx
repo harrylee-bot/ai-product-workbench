@@ -242,7 +242,7 @@ const ReadingLevelSelector = ({
   );
 };
 
-export const Tools = ({
+const Tools = ({
   selectedTool,
   setSelectedTool,
   sendMessage,

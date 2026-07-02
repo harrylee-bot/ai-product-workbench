@@ -9,6 +9,9 @@ import {
   UserStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { FileAssetService } from "../src/files/file-asset.service";
 
 describe("FileAssetService", () => {
@@ -20,6 +23,8 @@ describe("FileAssetService", () => {
       findMany: vi.fn(),
       count: vi.fn(),
       findUnique: vi.fn(),
+      create: vi.fn(),
+      deleteMany: vi.fn(),
     },
     fileParseResult: {
       findUnique: vi.fn(),
@@ -101,6 +106,7 @@ describe("FileAssetService", () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         },
+        prototypeConversionJob: null,
       },
     ]);
 
@@ -113,7 +119,7 @@ describe("FileAssetService", () => {
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
       },
-      include: { parseResult: true },
+      include: { parseResult: true, prototypeConversionJob: true },
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -155,7 +161,67 @@ describe("FileAssetService", () => {
       }),
     ]);
   });
+
+  it("cleans every temp file and avoids partial DB writes when one upload is invalid", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "workbench-upload-root-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "workbench-upload-tmp-"));
+    const files = [
+      await multerFile(tempDir, "valid-1.md", "第一份资料"),
+      await multerFile(tempDir, "bad.md", "bad\0content"),
+      await multerFile(tempDir, "valid-2.md", "第二份资料"),
+    ];
+    const localPrisma = {
+      ...prisma,
+      project: { findUnique: vi.fn().mockResolvedValue(projectRecord()) },
+      fileAsset: {
+        ...prisma.fileAsset,
+        create: vi.fn(),
+        deleteMany: vi.fn(),
+      },
+    };
+    const localService = new FileAssetService(
+      localPrisma as never,
+      parser as never,
+      { get: vi.fn((key: string) => key === "FILE_UPLOAD_ROOT" ? root : undefined) } as never,
+    );
+
+    await expect(localService.uploadProjectFiles(user, "project-1", {}, files)).rejects.toThrow("文本文件包含非法二进制内容");
+
+    expect(localPrisma.fileAsset.create).not.toHaveBeenCalled();
+    expect(localPrisma.fileAsset.deleteMany).not.toHaveBeenCalled();
+    await expect(stat(files[0].path)).rejects.toThrow();
+    await expect(stat(files[1].path)).rejects.toThrow();
+    await expect(stat(files[2].path)).rejects.toThrow();
+  });
 });
+
+async function multerFile(dir: string, originalname: string, content: string): Promise<Express.Multer.File> {
+  const filePath = path.join(dir, originalname);
+  await writeFile(filePath, content);
+  const fileStat = await stat(filePath);
+  return {
+    fieldname: "files",
+    originalname,
+    encoding: "7bit",
+    mimetype: "text/markdown",
+    size: fileStat.size,
+    destination: dir,
+    filename: originalname,
+    path: filePath,
+    buffer: Buffer.from(content),
+    stream: undefined as never,
+  };
+}
+
+function projectRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "project-1",
+    ownerId: "user-1",
+    status: ProjectStatus.draft,
+    deletedAt: null,
+    ...overrides,
+  };
+}
 
 function fileRecord(overrides: Record<string, unknown> = {}) {
   return {

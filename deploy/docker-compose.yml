@@ -40,6 +40,10 @@ services:
       FORCE_HTTPS: ${FORCE_HTTPS:-true}
       API_PORT: 4000
       WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN must be set}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://aionbench.com/api}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.local}
       FILE_UPLOAD_ROOT: /app/apps/api/storage/uploads
       KNOWLEDGE_VAULT_ROOT: /app/apps/api/storage/knowledge-vault
       MODEL_GATEWAY_ENCRYPTION_KEY: ${MODEL_GATEWAY_ENCRYPTION_KEY:?MODEL_GATEWAY_ENCRYPTION_KEY must be set}

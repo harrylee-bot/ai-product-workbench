@@ -20,6 +20,10 @@ export type ParsedPage = {
   filePath?: string;
   previewImagePath?: string;
   visualContextId?: string;
+  outboundLinks?: Array<{
+    label?: string;
+    targetPath: string;
+  }>;
 };
 
 export type ParsedImage = {
@@ -45,6 +49,7 @@ export type VisualAttachmentContext = {
   purpose:
     | "product_screenshot"
     | "prototype_reference"
+    | "prototype_snapshot"
     | "document_page_image"
     | "axure_page_preview"
     | "unknown";
@@ -69,6 +74,18 @@ export type AxureParseInfo = {
   notes?: string[];
 };
 
+export type PrototypeConversionPlan = {
+  source: "rp";
+  status: "queued";
+  stage: "queued";
+  sourceFilePath: string;
+  expectedOutputKind: "axure_html";
+  converter: {
+    requiredRuntime: "macos_axure_rp";
+    commandConfigured: boolean;
+  };
+};
+
 export type ParsedChunk = {
   chunkIndex: number;
   content: string;
@@ -89,6 +106,7 @@ export type ParserOutput = {
   images?: ParsedImage[];
   visualContexts?: VisualAttachmentContext[];
   axureInfo?: AxureParseInfo;
+  prototypeConversion?: PrototypeConversionPlan;
   errorMessage?: string;
   warnings?: string[];
   chunks?: ParsedChunk[];
@@ -109,6 +127,8 @@ export type AttachmentSummary = {
   }>;
   visualContexts?: VisualAttachmentContext[];
   axureInfo?: AxureParseInfo;
+  prototypeConversion?: PrototypeConversionPlan | Record<string, unknown>;
+  prototypeConversionJob?: Record<string, unknown>;
   warnings?: string[];
 };
 

@@ -5,7 +5,7 @@ import type { RuntimeAttachmentFile } from "../files/file.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 
-export type DeerFlowToolCall = {
+type DeerFlowToolCall = {
   id: string;
   name: string;
   args?: unknown;
@@ -58,7 +58,7 @@ export type DeerFlowResolvedArtifact = DeerFlowArtifactReference & {
   errorMessage?: string;
 };
 
-export type DeerFlowUploadedFile = {
+type DeerFlowUploadedFile = {
   fileId: string;
   fileName: string;
   fileType: string;
@@ -116,6 +116,12 @@ export type DeerFlowKnowledgeReference = {
   semanticScore?: number;
   reason?: string;
   relatedPath?: string;
+  visualAssets?: Array<{
+    kind: "prototype_snapshot" | "image";
+    title?: string;
+    path: string;
+    note?: string;
+  }>;
 };
 
 type ThreadCreateResponse = {
@@ -549,7 +555,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         assumptions: "optional inferred product facts, especially for one-sentence requirements",
         consistencyStrategy: "optional PRD/prototype consistency strategy",
         prdDocumentDraft:
-          "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }] }",
+          "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }], validationNotes? }. Use the standard Chinese requirement-document section order: 1 引言 / 1.1 项目背景 / 1.2 文档范围 / 1.3 使用场景（必填） / 2 业务需求 / 2.1 页面链接 / core business sections / 本需求涉及新增/修改的接口 / 验收标准 / 3 业务降级方案（必填） / 4 需求安全基线要求（必填）. blocks may include paragraph, bullet_list, table, quote, warning, info, diagram, image, prototype_snapshot, asset_reference.",
         artifacts: [
           {
             kind: "optional artifact kind, for example prototype_html or prd_markdown",
@@ -569,16 +575,21 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "Use product_architecture/page_inventory/ui_style_guide/prototype_asset_ref knowledge items when available to decide reuse vs redesign; cite them in knowledgeRefsUsed.",
         "For one_sentence_completion, infer ordinary missing details from product architecture, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
         "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",
-        "For PRD/需求文档/需求说明书 generation, follow the requirement-document template from PRD标准结构: 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(页面链接, 核心规则/功能, 流程/状态/页面要求, 新增/修改接口, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
+        "For activity-configuration PRDs, include visual evidence blocks when knowledgeContext provides them: at least one business flow diagram, one configuration architecture diagram, and prototype_snapshot/image blocks for key Axure pages. Use Mermaid for diagram blocks and local visualAssets paths for prototype_snapshot/image blocks.",
+        "If no suitable prototype snapshot, flow, architecture, or field-rule knowledge is available, do not invent visuals. Add a validationNotes item and an info/warning block that names the missing asset and the required follow-up.",
+        "For PRD/需求文档/需求说明书 generation, follow the requirement-document template from PRD标准结构 exactly: cover title should be <工单名称>需求说明书; body sections must include 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(2.1 页面链接, core rules/features, flow/state/page requirements, 本需求涉及新增/修改的接口, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
+        "For PRD tables, use explicit table blocks or markdown tables for version history, channel/使用场景, field/rule tables, interface tables, acceptance tables, and the safety baseline self-check. Do not replace tables with prose.",
+        "For PRD section content, every heading must have concrete content. If an exact route, endpoint, author, participant, or date is unknown, write 待确认 or 以实际上线地址/技术方案/联调结果为准, while still describing expected behavior.",
         "For interface-related PRD content, include caller/callee, trigger condition, key inputs/outputs, success result, and failure handling; if exact API names are unknown, state that the exact endpoint is subject to technical design and joint debugging.",
         "For PRD safety/degradation content, do not leave the section empty: write 不涉及 only when truly irrelevant; otherwise provide concrete fallback behavior and safety baseline self-check values using only 是, 否, or 不涉及.",
         "When updating an existing PRD, merge the requested change into the currentPrdDocument and preserve unaffected sections, title hierarchy, tables, state flows, acceptance criteria, and implementation details.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
         "Use deerFlowUploads virtualPath or markdownVirtualPath when reading uploaded files.",
+        "When knowledgeContext entries contain visualAssets, cite the asset path in blocks as { type: 'prototype_snapshot' | 'image', content: 'caption', assetPath, title?, sourcePaths? }.",
         "When you generate files, include their output artifact paths in finalActionContract.artifacts.",
         "For review_prototype, the prototype_html artifact must satisfy prototypeHtmlContract exactly. Never output a bare HTML fragment, unstyled semantic HTML, markdown, an image mock, or content that relies on browser default typography/table/button styles.",
         "Return final action instead of asking NestJS to decide the workflow.",
-        "For PRD/document generation, stream the complete user-visible document body as normal assistant markdown before the final action block so AI Product Workbench can show it live in the canvas; do not hide the whole document only inside prdDocumentDraft JSON.",
+        "For PRD/document generation, do not stream the full PRD body as ordinary chat prose. Put the complete body in prdDocumentDraft.sections or a prd_markdown artifact, then use a concise finalAction.message; AI Product Workbench will open the canvas from the saved PRD.",
         "Keep non-document progress notes, clarifying comments, and tool/coding updates outside the document body so they remain suitable for the chat transcript.",
       ],
     },

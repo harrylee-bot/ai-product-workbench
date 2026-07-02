@@ -89,8 +89,15 @@ describe("FinalActionApplierService", () => {
     expect(documentService.saveGeneratedDocument).toHaveBeenCalledWith(
       state,
       expect.objectContaining({
-        title: "签到活动 PRD",
-        sections: [expect.objectContaining({ id: "overview", content: "用户每日签到领取积分。" })],
+        title: "签到活动需求说明书",
+        sections: expect.arrayContaining([
+          expect.objectContaining({ id: "version_history", title: "版 本 历 史" }),
+          expect.objectContaining({ id: "manual_toc", title: "目 录" }),
+          expect.objectContaining({ id: "background", title: "1.1 项目背景" }),
+          expect.objectContaining({ id: "core_1", title: "2.2 概览", content: "用户每日签到领取积分。" }),
+          expect.objectContaining({ id: "degradation_plan", title: "3 业务降级方案（必填）" }),
+          expect.objectContaining({ id: "safety_baseline", title: "4 需求安全基线要求（必填）" }),
+        ]),
       }),
       expect.objectContaining({ userId: "user-1", runId: "run-1" }),
     );
@@ -133,9 +140,12 @@ describe("FinalActionApplierService", () => {
     expect(documentService.saveGeneratedDocument).toHaveBeenCalledWith(
       state,
       expect.objectContaining({
+        title: "签到活动需求说明书",
         sections: expect.arrayContaining([
-          expect.objectContaining({ title: "目标", content: "提升用户活跃。" }),
-          expect.objectContaining({ title: "页面", content: "签到页展示连续签到天数。" }),
+          expect.objectContaining({ title: "2.2 目标", content: "提升用户活跃。" }),
+          expect.objectContaining({ title: "2.3 页面", content: "签到页展示连续签到天数。" }),
+          expect.objectContaining({ title: "3 业务降级方案（必填）" }),
+          expect.objectContaining({ title: "4 需求安全基线要求（必填）" }),
         ]),
       }),
       expect.any(Object),
@@ -176,11 +186,12 @@ describe("FinalActionApplierService", () => {
     expect(documentService.saveGeneratedDocument).toHaveBeenCalledWith(
       state,
       expect.objectContaining({
-        title: "需求文档",
+        title: "签到活动需求说明书",
         sections: expect.arrayContaining([
-          expect.objectContaining({ title: "产品目标", content: "提升用户每日活跃和连续访问。" }),
-          expect.objectContaining({ title: "用户端功能", content: "用户可以每日签到、查看连续签到天数和奖励明细。" }),
-          expect.objectContaining({ title: "验收标准", content: "签到成功后页面状态应更新为今日已签到。" }),
+          expect.objectContaining({ title: "2.2 产品目标", content: "提升用户每日活跃和连续访问。" }),
+          expect.objectContaining({ title: "2.3 用户端功能", content: "用户可以每日签到、查看连续签到天数和奖励明细。" }),
+          expect.objectContaining({ title: "2.4 本需求涉及新增/修改的接口" }),
+          expect.objectContaining({ title: "2.5 验收标准", content: "签到成功后页面状态应更新为今日已签到。" }),
         ]),
       }),
       expect.any(Object),

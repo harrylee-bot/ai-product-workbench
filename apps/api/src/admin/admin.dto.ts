@@ -1,5 +1,5 @@
 import { Transform, Type } from "class-transformer";
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
 import {
   AdminAuditTargetType,
   RuntimeStepName,
@@ -16,7 +16,14 @@ import {
 const emptyToUndefined = ({ value }: { value: unknown }) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
 
-export class AdminPaginationQueryDto {
+const toOptionalBoolean = ({ value }: { value: unknown }) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.toLowerCase() === "true" || value === "1";
+  return Boolean(value);
+};
+
+class AdminPaginationQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -142,6 +149,35 @@ export class ListFileParsesQueryDto extends AdminPaginationQueryDto {
   @Transform(emptyToUndefined)
   @IsString()
   extension?: string;
+}
+
+export class BackfillPrototypeConversionsDto {
+  @IsOptional()
+  @Transform(emptyToUndefined)
+  @IsString()
+  projectId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  limit?: number;
+
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  run?: boolean;
+
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  force?: boolean;
+
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  background?: boolean;
 }
 
 export class ListQaReportsQueryDto extends AdminPaginationQueryDto {

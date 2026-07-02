@@ -38,7 +38,6 @@
     "yauzl": "^3.4.0"
   },
   "devDependencies": {
-    "@nestjs/testing": "^11.1.6",
     "@types/bcryptjs": "^2.4.6",
     "@types/multer": "^2.1.0",
     "@types/passport-jwt": "^4.0.1",

@@ -3,14 +3,14 @@ import { z } from "zod";
 import type { ArtifactKind } from "@/components/chat/artifact";
 import type { Suggestion } from "@/lib/api/types";
 
-export const messageMetadataSchema = z.object({
+const messageMetadataSchema = z.object({
   createdAt: z.string(),
 });
 
-export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
+type MessageMetadata = z.infer<typeof messageMetadataSchema>;
 
 // NestJS 桥不发 tool-call（用 data-* artifact parts），无前端工具类型。
-export type ChatTools = {};
+type ChatTools = {};
 
 export type CustomUIDataTypes = {
   textDelta: string;
@@ -42,7 +42,7 @@ export type Attachment = {
   contentType: string;
 };
 
-export type RuntimeProcessStatus =
+type RuntimeProcessStatus =
   | "idle"
   | "running"
   | "succeeded"

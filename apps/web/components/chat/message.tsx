@@ -117,6 +117,7 @@ const PurePreviewMessage = ({
     />
   ) : null;
 
+  let hasVisibleToolBefore = false;
   const parts = message.parts?.map((part: any, index) => {
     const { type } = part;
     const key = `message-${message.id}-part-${index}`;
@@ -126,12 +127,10 @@ const PurePreviewMessage = ({
     }
 
     if (type === "text") {
-      const hasVisibleToolBefore = message.parts
-        ?.slice(0, index)
-        .some((p: any) => isToolPart(p) && !isCanvasDocumentTool(p));
+      const shouldDivideFromTool = hasVisibleToolBefore;
       return (
         <Fragment key={key}>
-          {hasVisibleToolBefore ? <Divider /> : null}
+          {shouldDivideFromTool ? <Divider /> : null}
           <MessageContent
             className={cn("text-[13px] leading-[1.65]", {
               "w-fit max-w-[min(80%,56ch)] overflow-hidden break-words rounded-2xl rounded-br-lg border border-border/30 bg-gradient-to-br from-secondary to-muted px-3.5 py-2 shadow-[var(--shadow-card)]":
@@ -146,6 +145,7 @@ const PurePreviewMessage = ({
     }
 
     if (isToolPart(part)) {
+      if (!isCanvasDocumentTool(part)) hasVisibleToolBefore = true;
       return <MessageToolPart key={key} part={part} />;
     }
 

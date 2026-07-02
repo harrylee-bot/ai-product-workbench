@@ -53,6 +53,8 @@ npm run dev
 | 管理员 | admin | admin@example.local | Admin123456 |
 | 普通用户 | zhangsan | zhangsan@example.local | User123456 |
 
+上述默认账号只用于本地开发。生产环境首次 seed 时必须配置 `BOOTSTRAP_ADMIN_PASSWORD`，否则不会创建固定默认口令账号。
+
 ## 验证
 
 ```bash

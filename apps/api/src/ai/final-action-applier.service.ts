@@ -8,6 +8,7 @@ import { RequirementDocumentService } from "./requirement-document.service";
 import type {
   AssumptionReference,
   ProductDesignDraft,
+  ProductDesignState,
   PrototypeArtifact,
   PrototypeArtifactDraft,
   PrototypeSpec,
@@ -17,6 +18,7 @@ import type {
   RequirementDocumentDraft,
 } from "./ai-vibe.types";
 import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "./deerflow-runtime.service";
+import { formatRequirementDocumentDraft } from "./requirement-document-format";
 
 type CurrentRequirementDocumentRecord = {
   id: string;
@@ -91,6 +93,8 @@ export class FinalActionApplierService {
       input.artifacts,
       input.assistantText || input.finalAction.message,
       previousDocument,
+      state,
+      input.userId,
     );
     const document = await this.documentService.saveGeneratedDocument(state, documentDraft, {
       userId: input.userId,
@@ -177,6 +181,8 @@ export class FinalActionApplierService {
     artifacts: DeerFlowResolvedArtifact[],
     fallbackMessage: string,
     previousDocument?: CurrentRequirementDocumentRecord,
+    state?: ProductDesignState,
+    userId?: string,
   ): RequirementDocumentDraft {
     const prdDraft = asRecord(raw?.prdDocumentDraft);
     const title = toStringValue(prdDraft?.title) || "需求文档";
@@ -190,22 +196,25 @@ export class FinalActionApplierService {
     }
 
     if (!isSubstantialPrdSections(sections) && previousDocument) {
-      return mergeSummaryIntoPreviousDocument(
+      return formatRequirementDocumentDraft(mergeSummaryIntoPreviousDocument(
         projectId,
         previousDocument,
         fallbackMessage || sectionsToPlainText(sections),
-      );
+      ), state, { author: userId });
     }
 
-    return {
+    return formatRequirementDocumentDraft({
       projectId,
       title,
       sections,
       knowledgeRefs: toKnowledgeRefRecords(raw?.knowledgeRefsUsed),
       assumptions: toAssumptionReferences(raw?.assumptions),
       pendingQuestions: [],
-      validationNotes: [],
-    };
+      validationNotes: [
+        ...toStringArray(raw?.validationNotes),
+        ...toStringArray(prdDraft?.validationNotes),
+      ],
+    }, state, { author: userId });
   }
 
   private async getCurrentRequirementDocument(projectId: string) {
@@ -309,6 +318,13 @@ function toStringValue(value: unknown): string | undefined {
 function toArray(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.map((item) => (item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : { value: String(item) }));
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => toStringValue(item) ?? toStringValue(asRecord(item)?.content) ?? toStringValue(asRecord(item)?.message))
+    .filter((item): item is string => Boolean(item));
 }
 
 function toAssumptionReferences(value: unknown): AssumptionReference[] {

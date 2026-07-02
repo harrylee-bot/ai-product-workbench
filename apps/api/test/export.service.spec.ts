@@ -57,7 +57,17 @@ describe("Vibe export module", () => {
     expect(artifact.downloadPath).toBe("/api/projects/project-1/export/word");
     expect(artifact.productDesignStateId).toBe("state-1");
     expect(artifact.qaGate).toEqual(expect.objectContaining({ status: "open" }));
-    expect(html).toContain("签到活动 PRD");
+    expect(artifact.title).toBe("签到活动需求说明书");
+    expect(artifact.fileName).toBe("签到活动需求说明书.doc");
+    expect(html).toContain("签到活动需求说明书");
+    expect(html).toContain("版 本 历 史");
+    expect(html).toContain("目 录");
+    expect(html).toContain("1 引言");
+    expect(html).toContain("1.1 项目背景");
+    expect(html).toContain("2 业务需求");
+    expect(html).toContain("3 业务降级方案（必填）");
+    expect(html).toContain("4 需求安全基线要求（必填）");
+    expect(html.match(/class=\"safety-row\"/g)).toHaveLength(21);
     expect(html).toContain("ProductDesignState");
     expect(html).toContain("每日签到");
   });
@@ -74,6 +84,49 @@ describe("Vibe export module", () => {
     expect(artifact.format).toBe("prototype_html");
     expect(artifact.fileName).toBe("签到活动原型.html");
     expect(artifact.buffer.toString("utf8")).toContain('data-page-id="page_home"');
+  });
+
+  it("keeps diagram and prototype snapshot blocks in Word exports", async () => {
+    documentService.getCurrentForUser.mockResolvedValue({
+      document: baseDocument({
+        sections: [
+          {
+            id: "visuals",
+            title: "可视化说明",
+            type: "page_requirements",
+            level: 1,
+            order: 1,
+            content: "活动交易快照需要图文说明。",
+            sourcePaths: [],
+            blocks: [
+              {
+                id: "flow",
+                type: "diagram",
+                title: "业务流程图",
+                diagramSyntax: "mermaid",
+                content: "flowchart TD\nA[配置活动] --> B[生成交易快照]",
+              },
+              {
+                id: "snapshot",
+                type: "prototype_snapshot",
+                title: "交易快照页",
+                content: "Axure 原型截图",
+                assetPath: "/tmp/snapshots/trade.png",
+              },
+            ],
+          },
+        ],
+      }),
+      productDesignState: baseState(),
+    });
+
+    const artifact = await service.exportPrdWordForUser(user, "project-1");
+    const html = artifact.buffer.toString("utf8");
+
+    expect(html).toContain("图表源码（mermaid）");
+    expect(html).toContain("flowchart TD");
+    expect(html).toContain('<img src="/tmp/snapshots/trade.png"');
+    expect(html).toContain("素材路径：/tmp/snapshots/trade.png");
   });
 
   it("exports the current PRD as a JSON Canvas file", async () => {

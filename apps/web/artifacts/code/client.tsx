@@ -1,5 +1,5 @@
+import dynamic from "next/dynamic";
 import { toast } from "sonner";
-import { CodeEditor } from "@/components/chat/code-editor";
 import {
   Console,
   type ConsoleOutput,
@@ -15,6 +15,13 @@ import {
   UndoIcon,
 } from "@/components/chat/icons";
 import { generateUUID } from "@/lib/utils";
+
+const CodeEditor = dynamic(
+  () => import("@/components/chat/code-editor").then((module) => module.CodeEditor),
+  {
+    loading: () => <div className="min-h-[300px] w-full animate-pulse bg-muted/30" />,
+  }
+);
 
 const OUTPUT_HANDLERS = {
   matplotlib: `
@@ -128,8 +135,8 @@ export const codeArtifact = new Artifact<"code", Metadata>({
         }));
 
         try {
-          // @ts-expect-error - loadPyodide is not defined
-          const currentPyodideInstance = await globalThis.loadPyodide({
+          const loadPyodide = await getLoadPyodide();
+          const currentPyodideInstance = await loadPyodide({
             indexURL: "https://cdn.jsdelivr.net/pyodide/v0.23.4/full/",
           });
 
@@ -279,3 +286,35 @@ export const codeArtifact = new Artifact<"code", Metadata>({
     },
   ],
 });
+
+type LoadPyodide = (options: { indexURL: string }) => Promise<{
+  setStdout: (options: { batched: (output: string) => void }) => void;
+  loadPackagesFromImports: (
+    code: string,
+    options: { messageCallback: (message: string) => void },
+  ) => Promise<void>;
+  runPythonAsync: (code: string) => Promise<unknown>;
+}>;
+
+let loadPyodidePromise: Promise<LoadPyodide> | null = null;
+
+function getLoadPyodide(): Promise<LoadPyodide> {
+  const existing = (globalThis as unknown as { loadPyodide?: LoadPyodide }).loadPyodide;
+  if (existing) return Promise.resolve(existing);
+  if (loadPyodidePromise) return loadPyodidePromise;
+
+  loadPyodidePromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js";
+    script.async = true;
+    script.onload = () => {
+      const loadPyodide = (globalThis as unknown as { loadPyodide?: LoadPyodide }).loadPyodide;
+      if (loadPyodide) resolve(loadPyodide);
+      else reject(new Error("PYODIDE_LOAD_FAILED"));
+    };
+    script.onerror = () => reject(new Error("PYODIDE_SCRIPT_LOAD_FAILED"));
+    document.head.append(script);
+  });
+
+  return loadPyodidePromise;
+}

@@ -143,13 +143,4 @@ function InputGroupTextarea({
       {...props}
     />
   )
-}
-
-export {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupText,
-  InputGroupInput,
-  InputGroupTextarea,
-}
+}export { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea };

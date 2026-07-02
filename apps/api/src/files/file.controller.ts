@@ -6,6 +6,8 @@ import {
   Param,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -13,6 +15,8 @@ import {
 import { FilesInterceptor } from "@nestjs/platform-express";
 import { Throttle } from "@nestjs/throttler";
 import { diskStorage } from "multer";
+import type { Response } from "express";
+import { createReadStream } from "node:fs";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -21,6 +25,7 @@ import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import { FileAssetService } from "./file-asset.service";
 import { ListProjectFilesQueryDto, UploadFilesDto } from "./dto";
+import { PrototypeConversionService } from "./prototype-conversion.service";
 
 const tempUploadDir = path.resolve(process.cwd(), "storage/tmp");
 mkdirSync(tempUploadDir, { recursive: true });
@@ -28,7 +33,10 @@ mkdirSync(tempUploadDir, { recursive: true });
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class FileController {
-  constructor(private readonly fileAssetService: FileAssetService) {}
+  constructor(
+    private readonly fileAssetService: FileAssetService,
+    private readonly prototypeConversionService: PrototypeConversionService,
+  ) {}
 
   @Post("projects/:projectId/files")
   @Throttle({ heavy: { limit: 10, ttl: 60_000 } })
@@ -75,9 +83,33 @@ export class FileController {
     return this.fileAssetService.getParseResult(user, fileId);
   }
 
+  @Get("files/:fileId/visual-contexts/:contextId")
+  async getVisualContextFile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("fileId") fileId: string,
+    @Param("contextId") contextId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.fileAssetService.getVisualContextFile(user, fileId, contextId);
+    response.setHeader("Content-Type", file.mimeType);
+    response.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.fileName)}"`);
+    return new StreamableFile(createReadStream(file.filePath));
+  }
+
   @Post("files/:fileId/reparse")
   reparseFile(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
     return this.fileAssetService.reparseFile(user, fileId);
+  }
+
+  @Get("files/:fileId/prototype-conversion")
+  getPrototypeConversion(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
+    return this.prototypeConversionService.getJobForFile(user, fileId);
+  }
+
+  @Post("files/:fileId/prototype-conversion/run")
+  @Throttle({ heavy: { limit: 5, ttl: 60_000 } })
+  runPrototypeConversion(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
+    return this.prototypeConversionService.runConversionForFile(user, fileId);
   }
 
   @Delete("files/:fileId")

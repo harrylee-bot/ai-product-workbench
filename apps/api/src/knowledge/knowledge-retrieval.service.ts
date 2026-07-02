@@ -191,6 +191,7 @@ function scoreItem(
     keywordScore: Number(normalizedKeywordScore.toFixed(3)),
     semanticScore,
     reason: [...new Set(reasons)].slice(0, 5).join("；") || "按知识优先级命中",
+    visualAssets: extractVisualAssets(item),
   };
 }
 
@@ -212,7 +213,22 @@ function toReference(
     usedByRuntime,
     sourceType: "knowledge_base",
     sourceId: result.itemId,
+    visualAssets: result.visualAssets,
   };
+}
+
+function extractVisualAssets(item: KnowledgeItemRow) {
+  if (item.type !== KnowledgeType.prototype_snapshot) return undefined;
+  const paths = [...item.content.matchAll(/(?:截图路径|图片路径|previewImagePath)[:：]\s*([^\n]+)/g)]
+    .map((match) => match[1]?.trim())
+    .filter(Boolean);
+  if (!paths.length) return undefined;
+  return paths.slice(0, 5).map((assetPath) => ({
+    kind: "prototype_snapshot" as const,
+    title: item.title,
+    path: assetPath,
+    note: item.summary ?? "原型页面截图",
+  }));
 }
 
 function errorMessage(error: unknown) {

@@ -37,11 +37,6 @@ type GroupedChats = {
   older: Chat[];
 };
 
-export type ChatHistory = {
-  chats: Chat[];
-  hasMore: boolean;
-};
-
 const groupChatsByDate = (chats: Chat[]): GroupedChats => {
   const now = new Date();
   const oneWeekAgo = subWeeks(now, 1);
@@ -76,24 +71,6 @@ const groupChatsByDate = (chats: Chat[]): GroupedChats => {
 };
 
 export const CHAT_HISTORY_KEY = "chat-history";
-
-export function getChatHistoryPaginationKey(
-  pageIndex: number,
-  previousPageData: ChatHistory,
-) {
-  // NestJS 后端无游标分页；v1 用单页全量历史。
-  // 保留原签名以兼容 use-active-chat / use-chat-visibility 的 mutate 调用，
-  // 统一返回稳定 key。
-  if (previousPageData && previousPageData.hasMore === false) {
-    return null;
-  }
-
-  if (pageIndex === 0) {
-    return CHAT_HISTORY_KEY;
-  }
-
-  return null;
-}
 
 export function SidebarHistory({
   user,

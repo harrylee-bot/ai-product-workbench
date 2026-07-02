@@ -5,7 +5,7 @@ import {
   ParseResultStatus,
 } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import mammoth from "mammoth";
 import yauzl from "yauzl";
@@ -61,7 +61,7 @@ export class FileParserService {
       case "zip":
         return this.parseZip(input);
       case "rp":
-        return this.parseRpReference(input);
+        return this.parseRpProject(input);
       default:
         return {
           status: ParseResultStatus.failed,
@@ -224,41 +224,7 @@ export class FileParserService {
 
     const axureInfo = this.detectAxureHtmlZip(entries);
     if (axureInfo.isAxureHtmlExport) {
-      const pages: ParsedPage[] = axureInfo.pages.slice(0, 50).map((page, index) => ({
-        id: randomUUID(),
-        title: page.title,
-        pageNumber: index + 1,
-        filePath: path.join(input.extractDir, page.filePath),
-      }));
-
-      return {
-        status: ParseResultStatus.partial_success,
-        parserType: FileParserType.axure_html_zip,
-        title: input.originalName,
-        summary: `已识别为 Axure HTML 导出包，入口文件：${axureInfo.entryFile ?? "未识别"}，页面数：${axureInfo.pageCount ?? 0}。一期仅保留预览和页面列表，不还原交互或组件树。`,
-        pages,
-        axureInfo,
-        visualContexts: axureInfo.entryFile
-          ? [
-              this.createVisualContext({
-                fileId: input.fileId,
-                fileName: input.originalName,
-                mimeType: input.mimeType,
-                storagePath: path.join(input.extractDir, axureInfo.entryFile),
-                purpose: "axure_page_preview",
-                note: "Axure HTML 包仅用于 sandbox iframe 预览和 AI 参考，不执行或逆向还原交互。",
-              }),
-            ]
-          : undefined,
-        warnings: ["Axure HTML zip 不做 1:1 交互解析；如需更好理解，请补充关键页面截图。"],
-        chunks: pages.map((page, index) => ({
-          chunkIndex: index,
-          content: `Axure 页面：${page.title ?? page.filePath}`,
-          tokenEstimate: 20,
-          sourceType: FileChunkSourceType.axure_page,
-          sourceRef: page.filePath,
-        })),
-      };
+      return this.buildAxureParserOutput(input, axureInfo, "zip");
     }
 
     const summaryEntries = entries
@@ -278,16 +244,32 @@ export class FileParserService {
     };
   }
 
-  async parseRpReference(input: ParseInput): Promise<ParserOutput> {
+  async parseRpProject(input: ParseInput): Promise<ParserOutput> {
     const summary =
-      "该文件为 Axure RP 源文件，当前版本仅作为参考资料保存，不支持逆向解析。建议上传 Axure 导出的 HTML zip 或关键页面截图，以便 AI 更好理解原型。";
+      "该文件为 Axure RP 源文件，已保存源文件并创建 .rp -> Axure HTML 转换计划。转换需要 macOS + Axure RP Worker，转换完成后会抽取页面、截图、文本和跳转关系进入知识库。";
 
     return {
       status: ParseResultStatus.partial_success,
-      parserType: FileParserType.rp_reference,
+      parserType: FileParserType.rp_project,
       title: input.originalName,
       summary,
-      warnings: ["不支持 .rp 源文件逆向解析，也不承诺 .rp 1:1 转 HTML。"],
+      prototypeConversion: {
+        source: "rp",
+        status: "queued",
+        stage: "queued",
+        sourceFilePath: input.storagePath,
+        expectedOutputKind: "axure_html",
+        converter: {
+          requiredRuntime: "macos_axure_rp",
+          commandConfigured: Boolean(process.env.AXURE_RP_CONVERTER_BIN?.trim()),
+        },
+      },
+      warnings: [
+        process.env.AXURE_RP_CONVERTER_BIN?.trim()
+          ? "已检测到 AXURE_RP_CONVERTER_BIN，后台 Worker 可尝试自动转换。"
+          : "未配置 AXURE_RP_CONVERTER_BIN，任务会保持排队，需由 macOS Axure Worker 或人工 HTML 导出包补齐。",
+        ".rp 不直接逆向私有格式；v1 使用 Axure 官方导出 HTML 后再解析页面结构。",
+      ],
       chunks: [
         {
           chunkIndex: 0,
@@ -297,6 +279,23 @@ export class FileParserService {
         },
       ],
     };
+  }
+
+  async parseAxureHtmlDirectory(input: Omit<ParseInput, "extension" | "storagePath">): Promise<ParserOutput> {
+    const entries = await this.listDirectoryEntries(input.extractDir);
+    const axureInfo = this.detectAxureHtmlZip(entries);
+    if (!axureInfo.isAxureHtmlExport) {
+      return {
+        status: ParseResultStatus.failed,
+        parserType: FileParserType.axure_html_zip,
+        title: input.originalName,
+        summary: "转换产物未识别为 Axure HTML 导出目录。",
+        errorMessage: "AXURE_HTML_OUTPUT_NOT_DETECTED",
+        warnings: axureInfo.notes,
+        chunks: [],
+      };
+    }
+    return this.buildAxureParserOutput(input, axureInfo, "rp_conversion");
   }
 
   private parseMarkdownSections(text: string): ParsedSection[] {
@@ -423,6 +422,188 @@ export class FileParserService {
     } finally {
       zipFile.close();
     }
+  }
+
+  private async listDirectoryEntries(rootDir: string): Promise<ZipEntryInfo[]> {
+    const root = path.resolve(rootDir);
+    const entries: ZipEntryInfo[] = [];
+    let totalSize = 0;
+
+    const visit = async (directory: string) => {
+      const items = await readdir(directory, { withFileTypes: true });
+      for (const item of items) {
+        if (entries.length >= ZIP_MAX_ENTRIES) {
+          throw new BadRequestException("Axure HTML 目录文件数量超过限制");
+        }
+        if (item.isSymbolicLink()) continue;
+
+        const absolutePath = path.join(directory, item.name);
+        const relativePath = path.relative(root, absolutePath).replace(/\\/g, "/");
+        if (!relativePath || relativePath.startsWith("..")) {
+          throw new BadRequestException("Axure HTML 目录包含非法路径");
+        }
+        const info = await stat(absolutePath);
+        totalSize += info.size;
+        if (info.size > ZIP_MAX_ENTRY_SIZE) {
+          throw new BadRequestException("Axure HTML 单个文件超过限制");
+        }
+        if (totalSize > ZIP_MAX_TOTAL_SIZE) {
+          throw new BadRequestException("Axure HTML 目录总大小超过限制");
+        }
+
+        entries.push({
+          fileName: item.isDirectory() ? `${relativePath}/` : relativePath,
+          compressedSize: info.size,
+          uncompressedSize: info.size,
+          isDirectory: item.isDirectory(),
+        });
+        if (item.isDirectory()) await visit(absolutePath);
+      }
+    };
+
+    await visit(root);
+    return entries;
+  }
+
+  private async buildAxureParserOutput(
+    input: Pick<ParseInput, "fileId" | "originalName" | "mimeType" | "extractDir">,
+    axureInfo: AxureParseInfo,
+    source: "zip" | "rp_conversion",
+  ): Promise<ParserOutput> {
+    const pages = await this.parseAxureHtmlPages(input.extractDir, axureInfo.pages);
+    const visualContexts = axureInfo.entryFile
+      ? [
+          this.createVisualContext({
+            fileId: input.fileId,
+            fileName: input.originalName,
+            mimeType: input.mimeType,
+            storagePath: path.join(input.extractDir, axureInfo.entryFile),
+            purpose: "axure_page_preview",
+            note:
+              source === "rp_conversion"
+                ? "由 .rp 转换得到的 Axure HTML 入口，可用于 sandbox iframe 预览和页面截图。"
+                : "Axure HTML 包用于 sandbox iframe 预览和 AI 参考。",
+          }),
+        ]
+      : undefined;
+    const pageText = pages
+      .map((page) => {
+        const links = page.outboundLinks?.map((link) => `${link.label || "跳转"} -> ${link.targetPath}`).join("；");
+        return [
+          `页面：${page.title ?? page.filePath}`,
+          page.content ? `文本：${this.limitText(page.content, 900)}` : undefined,
+          links ? `跳转：${links}` : undefined,
+        ].filter(Boolean).join("\n");
+      })
+      .join("\n\n");
+    const chunks = pages.map((page, index) => ({
+      chunkIndex: index,
+      content: [
+        `Axure 页面：${page.title ?? page.filePath}`,
+        page.content ? this.limitText(page.content, 1200) : undefined,
+        page.outboundLinks?.length
+          ? `页面跳转：${page.outboundLinks.map((link) => `${link.label || "未命名"} -> ${link.targetPath}`).join("；")}`
+          : undefined,
+      ].filter(Boolean).join("\n"),
+      tokenEstimate: this.estimateTokens(page.content ?? page.title ?? page.filePath ?? ""),
+      sourceType: FileChunkSourceType.axure_page,
+      sourceRef: page.filePath,
+    }));
+
+    return {
+      status: ParseResultStatus.success,
+      parserType: FileParserType.axure_html_zip,
+      title: input.originalName,
+      summary: `已识别为 Axure HTML ${source === "rp_conversion" ? "转换产物" : "导出包"}，入口文件：${axureInfo.entryFile ?? "未识别"}，页面数：${axureInfo.pageCount ?? pages.length}，已抽取页面文本和跳转关系。`,
+      extractedText: pageText ? this.limitText(pageText) : undefined,
+      wordCount: pageText ? this.countWords(pageText) : 0,
+      pages,
+      axureInfo: {
+        ...axureInfo,
+        pages: pages.map((page) => ({
+          title: page.title ?? page.filePath ?? "未命名页面",
+          filePath: page.filePath ? path.relative(input.extractDir, page.filePath).replace(/\\/g, "/") : "",
+          previewImagePath: page.previewImagePath,
+        })),
+        notes: [
+          ...(axureInfo.notes ?? []),
+          "已解析 HTML 页面文本、a[href] 跳转和基础标题；复杂 Axure 动态面板交互由截图/人工验收补充。",
+        ],
+      },
+      visualContexts,
+      warnings: pages.length
+        ? ["复杂 Axure 动态面板、条件逻辑和变量不会被 1:1 逆向，仅保留页面文本、链接和截图线索。"]
+        : ["未在 Axure HTML 中识别到页面文件。"],
+      chunks,
+    };
+  }
+
+  private async parseAxureHtmlPages(rootDir: string, pages: AxureParseInfo["pages"]): Promise<ParsedPage[]> {
+    const result: ParsedPage[] = [];
+    const selectedPages = pages.slice(0, 80);
+    for (const page of selectedPages) {
+      const pagePath = path.resolve(rootDir, page.filePath);
+      if (!pagePath.startsWith(`${path.resolve(rootDir)}${path.sep}`)) continue;
+      const html = await readFile(pagePath, "utf8").catch(() => "");
+      const title = this.extractHtmlTitle(html) || page.title;
+      const content = this.extractVisibleTextFromHtml(html);
+      const outboundLinks = this.extractHtmlLinks(html)
+        .filter((link) => link.targetPath.toLowerCase().endsWith(".html"))
+        .slice(0, 40);
+      result.push({
+        id: randomUUID(),
+        title,
+        pageNumber: result.length + 1,
+        content: this.limitText(content, 5000),
+        filePath: pagePath,
+        outboundLinks,
+      });
+    }
+    return result;
+  }
+
+  private extractHtmlTitle(html: string) {
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    return titleMatch ? this.decodeHtmlEntities(this.stripTags(titleMatch[1])).trim() : undefined;
+  }
+
+  private extractVisibleTextFromHtml(html: string) {
+    const withoutScripts = html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
+    return this.cleanText(this.decodeHtmlEntities(this.stripTags(withoutScripts)).replace(/[ \t]{2,}/g, " "));
+  }
+
+  private extractHtmlLinks(html: string) {
+    const links: Array<{ label?: string; targetPath: string }> = [];
+    const linkRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = linkRegex.exec(html))) {
+      const href = match[1]?.trim();
+      if (!href || href.startsWith("#") || /^[a-z]+:/i.test(href)) continue;
+      links.push({
+        targetPath: href.split("#")[0],
+        label: this.decodeHtmlEntities(this.stripTags(match[2] ?? "")).trim() || undefined,
+      });
+    }
+    return links;
+  }
+
+  private stripTags(value: string) {
+    return value.replace(/<[^>]+>/g, " ");
+  }
+
+  private decodeHtmlEntities(value: string) {
+    return value
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, "\"")
+      .replace(/&#39;/g, "'")
+      .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
+      .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)));
   }
 
   private async extractZipSafely(filePath: string, destination: string, entries: ZipEntryInfo[]) {
@@ -564,7 +745,16 @@ export class FileParserService {
       };
     }
 
-    const pages = htmlPages.slice(0, 200).map((file) => ({
+    const prototypePages = htmlPages.filter((file) => this.isAxurePrototypePage(file, entryFile));
+    const pageFiles = prototypePages.length ? prototypePages : htmlPages;
+    const pages = pageFiles
+      .sort((left, right) => {
+        if (left === entryFile) return -1;
+        if (right === entryFile) return 1;
+        return left.localeCompare(right, "zh-CN");
+      })
+      .slice(0, 200)
+      .map((file) => ({
       title: this.titleFromFileName(file),
       filePath: file,
     }));
@@ -575,8 +765,34 @@ export class FileParserService {
       pageCount: pages.length,
       pages,
       assetCount: files.length,
-      notes: ["仅识别页面列表和入口文件，不执行 zip 内脚本。"],
+      notes: [
+        prototypePages.length
+          ? "已过滤 Axure 预览壳页面和浏览器说明页，仅保留原型业务页面。"
+          : "未识别到独立原型业务页，保留 HTML 页面兜底解析。",
+        "仅识别页面列表和入口文件，不执行 zip 内脚本。",
+      ],
     };
+  }
+
+  private isAxurePrototypePage(file: string, entryFile?: string) {
+    const normalized = file.replace(/\\/g, "/").replace(/^\/+/, "");
+    const lower = normalized.toLowerCase();
+    if (entryFile && lower === entryFile.toLowerCase()) return false;
+    if (lower === "index.html") return false;
+    if (/^start(?:[_-].*)?\.html$/.test(lower)) return false;
+    if (
+      lower.startsWith("resources/") ||
+      lower.includes("/resources/") ||
+      lower.startsWith("plugins/") ||
+      lower.includes("/plugins/") ||
+      lower.startsWith("data/") ||
+      lower.includes("/data/") ||
+      lower.startsWith("files/") ||
+      lower.includes("/files/")
+    ) {
+      return false;
+    }
+    return lower.endsWith(".html");
   }
 
   private async readImageDimensions(filePath: string, extension: string) {
