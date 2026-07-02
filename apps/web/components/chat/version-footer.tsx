@@ -13,6 +13,7 @@ type VersionFooterProps = {
   documents: Document[] | undefined;
   currentVersionIndex: number;
   mode: "edit" | "diff";
+  onRestore: () => Promise<void>;
   setMode: Dispatch<SetStateAction<"edit" | "diff">>;
 };
 
@@ -21,6 +22,7 @@ export const VersionFooter = ({
   documents,
   currentVersionIndex,
   mode,
+  onRestore,
   setMode,
 }: VersionFooterProps) => {
   const [isMutating, setIsMutating] = useState(false);
@@ -84,16 +86,14 @@ export const VersionFooter = ({
             setIsMutating(true);
 
             try {
-              // v1: NestJS 后端无文档版本删除/恢复端点。
-              // Restore 切换到当前最新版本（本地状态），不调用后端。
-              handleVersionChange("latest");
+              await onRestore();
             } finally {
               setIsMutating(false);
             }
           }}
           type="button"
         >
-          恢复
+          恢复为最新
           {isMutating && (
             <div className="animate-spin">
               <LoaderIcon size={14} />

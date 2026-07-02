@@ -3,7 +3,11 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import { DocumentCanvasService } from "./document-canvas.service";
-import { ConfirmPrdDto, UpdatePrdSectionDto } from "./requirement-document.dto";
+import {
+  ConfirmPrdDto,
+  UpdatePrdDocumentDto,
+  UpdatePrdSectionDto,
+} from "./requirement-document.dto";
 import { RequirementDocumentService } from "./requirement-document.service";
 
 @Controller("projects/:projectId/prd")
@@ -33,6 +37,15 @@ export class PrdDocumentController {
   @Get(":documentId/preview")
   getPreview(@CurrentUser() user: AuthenticatedUser, @Param("documentId") documentId: string) {
     return this.documentService.getPreviewForUser(user, documentId);
+  }
+
+  @Patch(":documentId")
+  updateDocument(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("documentId") documentId: string,
+    @Body() dto: UpdatePrdDocumentDto,
+  ) {
+    return this.documentService.updateDocumentContentForUser(user, documentId, dto);
   }
 
   @Get(":documentId/canvas")

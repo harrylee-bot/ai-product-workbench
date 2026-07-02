@@ -24,3 +24,10 @@ export class UpdatePrdSectionDto {
   @MaxLength(200, { message: "段落标题不能超过 200 个字符" })
   title?: string;
 }
+
+export class UpdatePrdDocumentDto {
+  @IsString({ message: "文档内容不能为空" })
+  @IsNotEmpty({ message: "文档内容不能为空" })
+  @MaxLength(200000, { message: "文档内容不能超过 200000 个字符" })
+  content!: string;
+}

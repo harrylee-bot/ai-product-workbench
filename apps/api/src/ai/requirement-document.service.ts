@@ -174,6 +174,39 @@ export class RequirementDocumentService {
     return { document: updatedDocument, version };
   }
 
+  async updateDocumentContentForUser(
+    user: AuthenticatedUser,
+    documentId: string,
+    input: { content: string },
+  ) {
+    const current = await this.getAccessibleDocument(user, documentId);
+    this.assertOwnerMutation(user, current.project.ownerId);
+    const document = this.toDocumentItem(current as RequirementDocumentRecord);
+    const edited = applyDocumentContentEdit(document, input.content);
+
+    const updated = await this.prisma.requirementDocument.update({
+      where: { id: documentId },
+      data: {
+        title: edited.title,
+        status: RequirementDocumentStatus.ready,
+        sections: toInputJson(edited.sections),
+        updatedBy: user.id,
+      },
+    });
+    const updatedDocument = this.toDocumentItem(updated as RequirementDocumentRecord);
+    const version = await this.createVersion(updatedDocument, user.id, "整文编辑 PRD");
+    const productDesignState = await this.stateService.attachGeneratedArtifacts(
+      updatedDocument.productDesignStateId,
+      {
+        prdDocument: updatedDocument,
+        status: ProductDesignStateStatus.doc_ready,
+        userId: user.id,
+        reason: "整文编辑 PRD 后回流到 ProductDesignState",
+      },
+    );
+    return { document: updatedDocument, version, productDesignState };
+  }
+
   async confirmForUser(user: AuthenticatedUser, documentId: string, reason?: string) {
     const current = await this.getAccessibleDocument(user, documentId);
     this.assertOwnerMutation(user, current.project.ownerId);
@@ -343,6 +376,143 @@ export class RequirementDocumentService {
 
 function isDocumentFromCurrentState(document: RequirementDocument, state: ProductDesignState) {
   return document.productDesignStateId === state.id && document.productDesignStateVersion === state.version;
+}
+
+function applyDocumentContentEdit(document: RequirementDocument, markdown: string) {
+  const parsed = parseDocumentMarkdown(markdown);
+  if (parsed.sections.length === 0) {
+    throw new BadRequestException("PRD_CONTENT_NO_SECTIONS");
+  }
+  const usedSectionIds = new Set<string>();
+  const now = new Date().toISOString();
+  const sections = parsed.sections.map((section, index) => {
+    const existing = findMatchingSection(document.sections, section.title, index, usedSectionIds);
+    const id = existing?.id ?? manualSectionId(section.title, index, usedSectionIds);
+    usedSectionIds.add(id);
+    const sourcePaths = existing?.sourcePaths?.length ? existing.sourcePaths : [];
+    const sourceStatePaths = existing?.sourceStatePaths;
+    const existingBlock = existing?.blocks?.length === 1 ? existing.blocks[0] : undefined;
+    const content = section.content.trim();
+
+    return {
+      id,
+      title: section.title || existing?.title || `章节 ${index + 1}`,
+      type: existing?.type ?? "appendix",
+      level: existing?.level ?? 1,
+      order: index + 1,
+      content,
+      blocks: content
+        ? [
+            {
+              id: existingBlock?.id ?? `${id}_body`,
+              type: existingBlock?.type ?? "paragraph",
+              content,
+              title: existingBlock?.title,
+              assetPath: existingBlock?.assetPath,
+              diagramSyntax: existingBlock?.diagramSyntax,
+              sourcePaths: existingBlock?.sourcePaths?.length ? existingBlock.sourcePaths : sourcePaths,
+              tags: existingBlock?.tags?.length ? existingBlock.tags : existing?.tags,
+            },
+          ]
+        : [],
+      sourcePaths,
+      tags: existing?.tags,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      sourceStatePaths,
+    } satisfies RequirementDocSection;
+  });
+
+  return {
+    title: parsed.title || document.title,
+    sections,
+  };
+}
+
+type ParsedMarkdownSection = {
+  title: string;
+  content: string;
+};
+
+function parseDocumentMarkdown(markdown: string) {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  let title = "";
+  const introLines: string[] = [];
+  const sections: Array<{ title: string; lines: string[] }> = [];
+  let currentSection: { title: string; lines: string[] } | undefined;
+
+  for (const line of lines) {
+    const h1 = /^#\s+(.+?)\s*$/.exec(line);
+    if (h1 && !title && !currentSection && sections.length === 0 && introLines.every((item) => !item.trim())) {
+      title = h1[1].trim();
+      continue;
+    }
+
+    const h2 = /^##\s+(.+?)\s*$/.exec(line);
+    if (h2) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { title: h2[1].trim(), lines: [] };
+      continue;
+    }
+
+    if (currentSection) {
+      currentSection.lines.push(line);
+    } else {
+      introLines.push(line);
+    }
+  }
+
+  if (currentSection) sections.push(currentSection);
+
+  const intro = introLines.join("\n").trim();
+  const parsedSections: ParsedMarkdownSection[] = sections.map((section) => ({
+    title: section.title,
+    content: section.lines.join("\n").trim(),
+  }));
+  if (intro) {
+    parsedSections.unshift({ title: "概览", content: intro });
+  }
+
+  return { title, sections: parsedSections };
+}
+
+function findMatchingSection(
+  sections: RequirementDocSection[],
+  title: string,
+  index: number,
+  usedIds: Set<string>,
+) {
+  const normalizedTitle = normalizeSectionTitle(title);
+  const titleMatched = sections.find(
+    (section) =>
+      !usedIds.has(section.id) &&
+      normalizeSectionTitle(section.title) === normalizedTitle,
+  );
+  if (titleMatched) return titleMatched;
+
+  const positional = sections[index];
+  if (positional && !usedIds.has(positional.id)) return positional;
+  return sections.find((section) => !usedIds.has(section.id));
+}
+
+function normalizeSectionTitle(title: string) {
+  return title.replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function manualSectionId(title: string, index: number, usedIds: Set<string>) {
+  let hash = 0;
+  for (const char of title) {
+    hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  }
+  const suffix = Math.abs(hash).toString(36) || "0";
+  const base = `manual_section_${index + 1}_${suffix}`;
+  let candidate = base;
+  let counter = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${base}_${counter}`;
+    counter += 1;
+  }
+  return candidate;
 }
 
 function applySectionContentEdit(

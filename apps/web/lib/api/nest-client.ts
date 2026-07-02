@@ -349,6 +349,17 @@ type NestRequirementDocument = {
   updatedAt: string;
 };
 
+type NestRequirementDocumentVersion = {
+  id: string;
+  documentId: string;
+  projectId: string;
+  version: number;
+  snapshot: unknown;
+  reason?: string;
+  createdBy: string;
+  createdAt: string;
+};
+
 type NestPrototypeArtifactResponse = {
   artifact: {
     id: string;
@@ -398,15 +409,40 @@ function unescapeLiteralNewlines(value: string): string {
 function nestDocToDocument(
   doc: NestRequirementDocument,
   kind: ArtifactKind = "text",
+  createdAt = doc.updatedAt,
 ): Document {
   return {
     id: doc.id,
-    createdAt: doc.updatedAt,
+    createdAt,
     title: doc.title,
     content: documentToMarkdown(doc),
     kind,
     userId: "",
   };
+}
+
+function isNestRequirementDocument(value: unknown): value is NestRequirementDocument {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Partial<NestRequirementDocument>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.projectId === "string" &&
+    typeof record.title === "string" &&
+    Array.isArray(record.sections)
+  );
+}
+
+function versionToDocument(
+  version: NestRequirementDocumentVersion,
+  kind: ArtifactKind,
+): Document | undefined {
+  if (!isNestRequirementDocument(version.snapshot)) {
+    return undefined;
+  }
+
+  return nestDocToDocument(version.snapshot, kind, version.createdAt);
 }
 
 export async function getDocumentsById(
@@ -450,25 +486,56 @@ export async function getDocumentsById(
   const data = await nestFetch<{ document: NestRequirementDocument }>(
     `/prd-documents/${id}`,
   );
-  // ai-chatbot 期望版本数组；NestJS 用 RequirementDocumentVersion。
-  // v1：返回单元素数组（当前版本）。版本切换由 versions 端点支撑。
-  return [nestDocToDocument(data.document, kind)];
+  const currentDocument = nestDocToDocument(data.document, kind);
+
+  try {
+    const versions = await getDocumentVersions(id);
+    const versionDocuments = versions.items
+      .sort((a, b) => a.version - b.version)
+      .map((version) => versionToDocument(version, kind))
+      .filter((document): document is Document => Boolean(document));
+
+    if (versionDocuments.length === 0) {
+      return [currentDocument];
+    }
+
+    const latestVersion = versionDocuments.at(-1);
+    if (
+      latestVersion?.content !== currentDocument.content ||
+      latestVersion?.title !== currentDocument.title
+    ) {
+      return [...versionDocuments, currentDocument];
+    }
+
+    return versionDocuments;
+  } catch {
+    return [currentDocument];
+  }
 }
 
 export async function getDocumentVersions(
   id: string,
-): Promise<{ items: Array<{ id: string; createdAt: string; snapshot: unknown }> }> {
+): Promise<{ items: NestRequirementDocumentVersion[] }> {
   return nestFetch(`/prd-documents/${id}/versions`);
 }
 
 export async function saveDocumentContent(
   id: string,
   content: string,
-): Promise<void> {
-  // PRD 文档按 section 存储；v1 简化为不落库整文（PRD 由生成产生）。
-  // 若需手动编辑保存，需要先解析 section，此处留空避免破坏数据。
-  void id;
-  void content;
+  kind: ArtifactKind = "text",
+): Promise<Document | undefined> {
+  if (kind !== "text") {
+    return undefined;
+  }
+
+  const data = await nestFetch<{ document: NestRequirementDocument }>(
+    `/prd-documents/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ content }),
+    },
+  );
+  return nestDocToDocument(data.document, kind);
 }
 
 // ===== Votes =====

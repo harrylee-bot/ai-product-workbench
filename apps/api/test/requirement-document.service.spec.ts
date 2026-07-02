@@ -182,6 +182,70 @@ describe("PRD requirement document module", () => {
     }));
   });
 
+  it("updates the whole PRD markdown and creates a restorable version", async () => {
+    const draft = prdDraft(baseState());
+    prisma.requirementDocument.findUnique.mockResolvedValue({
+      ...documentRecord({
+        id: "prd-1",
+        ...draft,
+        status: "confirmed",
+      }),
+      project: baseProject(),
+    });
+    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
+      documentRecord({
+        id: "prd-1",
+        ...draft,
+        title: data.title,
+        status: data.status,
+        sections: data.sections,
+        updatedBy: data.updatedBy,
+      }),
+    );
+
+    const result = await service.updateDocumentContentForUser(user, "prd-1", {
+      content: [
+        "# 连续打开 5 天达成奖励活动需求说明书",
+        "",
+        "## 需求概览",
+        "",
+        "连续 5 天打开后发放一次性奖励。",
+        "",
+        "## 新增风控说明",
+        "",
+        "同一用户每天只能记一次打开。",
+      ].join("\n"),
+    });
+
+    expect(result.document.title).toBe("连续打开 5 天达成奖励活动需求说明书");
+    expect(result.document.sections).toEqual([
+      expect.objectContaining({
+        id: "overview",
+        title: "需求概览",
+        content: "连续 5 天打开后发放一次性奖励。",
+        order: 1,
+      }),
+      expect.objectContaining({
+        title: "新增风控说明",
+        content: "同一用户每天只能记一次打开。",
+        order: 2,
+      }),
+    ]);
+    expect(prisma.requirementDocumentVersion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        documentId: "prd-1",
+        version: 1,
+        reason: "整文编辑 PRD",
+        createdBy: "user-1",
+      }),
+    });
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
+      prdDocument: expect.objectContaining({ id: "prd-1", status: "ready" }),
+      status: "doc_ready",
+      userId: "user-1",
+    }));
+  });
+
   it("confirms a PRD for the prototype gate and syncs doc_confirmed into ProductDesignState", async () => {
     const draft = prdDraft(baseState());
     prisma.requirementDocument.findUnique.mockResolvedValue({

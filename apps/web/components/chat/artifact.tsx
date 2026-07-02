@@ -176,25 +176,33 @@ function PureArtifact({
 
         const currentDocument = currentDocuments.at(-1);
 
-        if (!currentDocument?.content) {
+        if (!currentDocument) {
           setIsContentDirty(false);
           return currentDocuments;
         }
 
-        if (currentDocument.content === updatedContent) {
+        if ((currentDocument.content ?? "") === updatedContent) {
           setIsContentDirty(false);
           return currentDocuments;
         }
 
-        await saveDocumentContent(artifact.documentId, updatedContent);
+        const savedDocument = await saveDocumentContent(
+          artifact.documentId,
+          updatedContent,
+          artifact.kind,
+        );
 
         setIsContentDirty(false);
 
-        return currentDocuments.map((doc, i) =>
-          i === currentDocuments.length - 1
-            ? { ...doc, content: updatedContent }
-            : doc
-        );
+        if (!savedDocument) {
+          return currentDocuments.map((doc, i) =>
+            i === currentDocuments.length - 1
+              ? { ...doc, content: updatedContent }
+              : doc
+          );
+        }
+
+        return [...currentDocuments, savedDocument];
       }, { revalidate: false });
     },
     [artifact, mutateDocuments]
@@ -257,6 +265,34 @@ function PureArtifact({
       setCurrentVersionIndex((index) => index + 1);
     }
   };
+
+  const restoreSelectedVersion = useCallback(async () => {
+    if (!documents || currentVersionIndex < 0) {
+      return;
+    }
+
+    const selectedDocument = documents[currentVersionIndex];
+    const selectedContent = selectedDocument?.content ?? "";
+    if (!selectedContent) {
+      return;
+    }
+
+    const savedDocument = await saveDocumentContent(
+      artifact.documentId,
+      selectedContent,
+      artifact.kind,
+    );
+    if (!savedDocument) {
+      return;
+    }
+
+    await mutateDocuments((currentDocuments) => {
+      const nextDocuments = currentDocuments?.length ? currentDocuments : documents;
+      return [...nextDocuments, savedDocument];
+    }, { revalidate: false });
+    setCurrentVersionIndex((documents.length ? documents.length : 1));
+    setMode("edit");
+  }, [artifact.documentId, artifact.kind, currentVersionIndex, documents, mutateDocuments]);
 
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
 
@@ -423,6 +459,7 @@ function PureArtifact({
             documents={documents}
             handleVersionChange={handleVersionChange}
             mode={mode}
+            onRestore={restoreSelectedVersion}
             setMode={setMode}
           />
         )}
