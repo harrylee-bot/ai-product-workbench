@@ -174,7 +174,8 @@ export class AichatStreamService {
           emitRuntimeFinish(streamWriter, snapshot);
         };
         const documentStream = createDocumentStreamState(run.id, {
-          forceDocumentStream: isDocumentGenerationRequest(content),
+          // 用户明确要求生成 PRD，或项目已有 ProductDesignState（续写/修改场景），均强制走画布流。
+          forceDocumentStream: isDocumentGenerationRequest(content) || Boolean(productContext?.currentProductDesignState),
         });
         res.on("close", markClientClosed);
 
@@ -1074,7 +1075,7 @@ export function looksLikeDocumentDraft(buffer: string, delta: string) {
     return /(需求|文档|说明书|业务|活动|页面|接口|配置|状态|流程|快照|验收)/.test(sample);
   }
   if (
-    /"type"\s*:\s*"(table|diagram|image|prototype_snapshot|asset_reference)"|"blocks"\s*:|"sourcePaths"\s*:|"prdDocumentDraft"\s*:|"productDesignStateDraft"\s*:/.test(sample)
+    /"type"\s*:\s*"(table|diagram|image|prototype_snapshot|asset_reference|section)"|"blocks"\s*:|"sourcePaths"\s*:|"prdDocumentDraft"\s*:|"productDesignStateDraft"\s*:|"acceptanceCriteria"\s*:|"exceptionScenarios"\s*:|"businessRules"\s*:/.test(sample)
   ) {
     return true;
   }

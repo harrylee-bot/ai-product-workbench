@@ -205,8 +205,8 @@ describe("FinalActionApplierService", () => {
         sections: expect.arrayContaining([
           expect.objectContaining({ title: "2.2 产品目标", content: "提升用户每日活跃和连续访问。" }),
           expect.objectContaining({ title: "2.3 用户端功能", content: "用户可以每日签到、查看连续签到天数和奖励明细。" }),
-          expect.objectContaining({ title: "2.4 本需求涉及新增/修改的接口" }),
-          expect.objectContaining({ title: "2.5 验收标准", content: "签到成功后页面状态应更新为今日已签到。" }),
+          // 接口章节已从强制列表中移除，验收标准编号相应调整
+          expect.objectContaining({ title: expect.stringMatching(/验收标准/), content: "签到成功后页面状态应更新为今日已签到。" }),
         ]),
       }),
       expect.any(Object),

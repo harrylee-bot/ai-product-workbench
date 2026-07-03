@@ -51,6 +51,20 @@ describe("aichat document stream router", () => {
         '{"type":"table","title":"页面异常态要求","content":"| 异常态 | 处理要求 |"}',
       ),
     ).toBe(true);
+    // sections JSON（type: section）应被识别为文档内容，不应泄漏到聊天区
+    expect(
+      looksLikeDocumentDraft(
+        '{"id":"data_review","title":"2.9 数据复盘","type":"section","level":2,"order":16,"content":"交易快照需要支持基础统计","sourcePaths":["summary"]}',
+        '{"id":"data_review","title":"2.9 数据复盘","type":"section","level":2,"order":16,"content":"交易快照需要支持基础统计","sourcePaths":["summary"]}',
+      ),
+    ).toBe(true);
+    // businessRules、acceptanceCriteria 等 PRD 专属字段也应被识别
+    expect(
+      looksLikeDocumentDraft(
+        '{"acceptanceCriteria":[{"id":"ac1","title":"验收标准1"}]}',
+        '{"acceptanceCriteria":[{"id":"ac1","title":"验收标准1"}]}',
+      ),
+    ).toBe(true);
   });
 
   it("routes document generation text into the text artifact stream", () => {
