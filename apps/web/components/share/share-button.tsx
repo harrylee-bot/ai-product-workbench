@@ -33,8 +33,9 @@ interface ShareLink {
   id: string;
   token: string;
   scope: "prd" | "prototype" | "both";
-  expiresAt: string | null;
-  isExpired: boolean;
+  status: "active" | "revoked";
+  expiresAt?: string;
+  isExpired?: boolean;
 }
 
 export function ShareButton({ projectId, projectName }: ShareButtonProps) {
@@ -47,8 +48,17 @@ export function ShareButton({ projectId, projectName }: ShareButtonProps) {
 
   const loadShareLinks = async () => {
     try {
-      const response = await nestFetch<{ shares: ShareLink[] }>(`/api/share?projectId=${projectId}`);
-      setShareLinks(response.shares || []);
+      const response = await nestFetch<{ items: ShareLink[] }>(
+        `/api/share-links/project/${projectId}`
+      );
+      // 只展示未吊销的链接，并计算过期状态
+      const activeLinks = (response.items || [])
+        .filter((link) => link.status !== "revoked")
+        .map((link) => ({
+          ...link,
+          isExpired: link.expiresAt ? new Date(link.expiresAt) < new Date() : false,
+        }));
+      setShareLinks(activeLinks);
     } catch (error) {
       console.error("Failed to load share links:", error);
       toast.error("加载分享链接失败");
@@ -65,7 +75,7 @@ export function ShareButton({ projectId, projectName }: ShareButtonProps) {
   const handleCreateShare = async () => {
     setLoading(true);
     try {
-      await nestFetch("/api/share", {
+      await nestFetch("/api/share-links", {
         method: "POST",
         body: JSON.stringify({
           projectId,
@@ -94,7 +104,7 @@ export function ShareButton({ projectId, projectName }: ShareButtonProps) {
 
   const handleRevoke = async (shareId: string) => {
     try {
-      await nestFetch(`/api/share/${shareId}`, {
+      await nestFetch(`/api/share-links/${shareId}`, {
         method: "DELETE",
       });
       toast.success("分享链接已吊销");

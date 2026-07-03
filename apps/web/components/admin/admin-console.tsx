@@ -6,6 +6,7 @@ import {
   BrainIcon,
   CheckIcon,
   DatabaseIcon,
+  ExternalLinkIcon,
   FolderKanbanIcon,
   GaugeIcon,
   KeyRoundIcon,
@@ -118,6 +119,11 @@ type Column<T> = {
 };
 
 const PAGE_SIZE = 12;
+const configuredKnowledgeAppUrl =
+  process.env.NEXT_PUBLIC_KNOWLEDGE_APP_URL?.trim() || "/knowledge/";
+const knowledgeAppUrl = configuredKnowledgeAppUrl.endsWith("/knowledge")
+  ? `${configuredKnowledgeAppUrl}/`
+  : configuredKnowledgeAppUrl;
 
 const sections: Array<{
   id: AdminSection;
@@ -575,10 +581,18 @@ function KnowledgeSection() {
     <div className="space-y-5">
       <SectionPanel
         actions={
-          <Button onClick={handleSync} size="sm" variant="outline">
-            <RefreshCwIcon className="size-4" />
-            同步
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <a href={knowledgeAppUrl} rel="noreferrer" target="_blank">
+                <ExternalLinkIcon className="size-4" />
+                打开知识库
+              </a>
+            </Button>
+            <Button onClick={handleSync} size="sm" variant="outline">
+              <RefreshCwIcon className="size-4" />
+              同步
+            </Button>
+          </div>
         }
         description="Obsidian vault 状态和知识同步入口。"
         title="知识库状态"
