@@ -1,6 +1,7 @@
-import {
-  ProjectStatus,
-  PrototypeArtifactStatus,
+	import {
+	  KnowledgeCandidateSource,
+	  ProjectStatus,
+	  PrototypeArtifactStatus,
   PrototypeTargetDevice,
   UserRole,
   UserStatus,
@@ -31,24 +32,26 @@ describe("HTML prototype artifact module", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
-    prototypeVersion: {
-      create: vi.fn(),
-      findFirst: vi.fn(),
-      findMany: vi.fn(),
-    },
-  };
+	    prototypeVersion: {
+	      create: vi.fn(),
+	      findFirst: vi.fn(),
+	      findMany: vi.fn(),
+	    },
+	    $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+	  };
   const stateService = {
     getCurrentState: vi.fn(),
     getStateByIdForProject: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
   };
-  const qaService = { assertGateAllows: vi.fn() };
-  const service = new PrototypeService(
-    prisma as never,
-    stateService as never,
-    undefined,
-    qaService as never,
-  );
+	  const qaService = { assertGateAllows: vi.fn() };
+	  const knowledgeCandidateService = { createMany: vi.fn() };
+	  const service = new PrototypeService(
+	    prisma as never,
+	    stateService as never,
+	    knowledgeCandidateService as never,
+	    qaService as never,
+	  );
   const user = {
     id: "user-1",
     username: "zhangsan",
@@ -68,13 +71,14 @@ describe("HTML prototype artifact module", () => {
       reason: data.reason ?? null,
       createdAt: now,
     }));
-    stateService.attachGeneratedArtifacts.mockImplementation(async (_stateId, input) => ({
-      ...baseState(),
-      version: 4,
-      status: input.status,
-      prototypeSpec: input.prototypeSpec,
-    }));
-  });
+	    stateService.attachGeneratedArtifacts.mockImplementation(async (_stateId, input) => ({
+	      ...baseState(),
+	      version: 4,
+	      status: input.status,
+	      prototypeSpec: input.prototypeSpec,
+	    }));
+	    knowledgeCandidateService.createMany.mockResolvedValue({ items: [] });
+	  });
 
   it("saves generated prototype, creates version, and updates project pointer", async () => {
     const state = baseState();
@@ -210,7 +214,7 @@ describe("HTML prototype artifact module", () => {
     expect(result.artifact).toBeNull();
   });
 
-  it("confirms a ready prototype and syncs confirmed status into ProductDesignState", async () => {
+	  it("confirms a ready prototype and syncs confirmed status into ProductDesignState", async () => {
     const state = baseState();
     const spec = prototypeSpec(state);
     prisma.prototypeArtifact.findUnique.mockResolvedValue({
@@ -241,13 +245,62 @@ describe("HTML prototype artifact module", () => {
       status: "confirmed",
       reason: "确认原型，同步原型确认状态到 ProductDesignState",
     }));
-    expect(prisma.prototypeVersion.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        artifactId: "artifact-1",
-        reason: "确认原型",
-      }),
-    });
-  });
+	    expect(prisma.prototypeVersion.create).toHaveBeenCalledWith({
+	      data: expect.objectContaining({
+	        artifactId: "artifact-1",
+	        reason: "确认原型",
+	      }),
+	    });
+	  });
+
+	  it("extracts pending knowledge candidates after prototype confirmation", async () => {
+	    const state = baseState();
+	    const spec = prototypeSpec(state);
+	    prisma.prototypeArtifact.findUnique.mockResolvedValue({
+	      ...artifactRecord({
+	        id: "artifact-1",
+	        prototypeSpecId: spec.id,
+	        productDesignStateId: state.id,
+	        htmlContent: prototypeHtml(spec),
+	      }),
+	      project: baseProject({ status: ProjectStatus.prototype_ready }),
+	    });
+	    prisma.prototypeSpecRecord.findUniqueOrThrow.mockResolvedValue(specRecord(spec as unknown as Record<string, unknown>));
+	    prisma.prototypeArtifact.update.mockImplementation(async ({ data }) =>
+	      artifactRecord({
+	        id: "artifact-1",
+	        prototypeSpecId: spec.id,
+	        productDesignStateId: state.id,
+	        htmlContent: prototypeHtml(spec),
+	        generatedByRunId: "run-1",
+	        updatedBy: data.updatedBy,
+	      }),
+	    );
+	    qaService.assertGateAllows.mockResolvedValue({ allowPersistKnowledge: true });
+	    knowledgeCandidateService.createMany.mockResolvedValue({
+	      items: [{ id: "candidate-prototype", title: "签到页原型" }],
+	    });
+
+	    const result = await service.confirmForUser(user, "artifact-1", "确认原型");
+
+	    expect(knowledgeCandidateService.createMany).toHaveBeenCalledWith(
+	      "project-1",
+	      expect.arrayContaining([
+	        expect.objectContaining({
+	          title: expect.stringContaining("原型方案"),
+	          sourcePath: "prototype",
+	        }),
+	        expect.objectContaining({
+	          title: expect.stringContaining("签到页"),
+	          sourcePath: "pages.page_home",
+	        }),
+	      ]),
+	      { source: KnowledgeCandidateSource.prototype, sourceRefId: "artifact-1", runId: "run-1" },
+	    );
+	    expect(result.knowledgeCandidates.items).toEqual([
+	      expect.objectContaining({ id: "candidate-prototype" }),
+	    ]);
+	  });
 
   it("blocks prototype confirmation when QA gate does not allow artifact confirmation", async () => {
     qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));

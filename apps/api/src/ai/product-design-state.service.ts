@@ -5,13 +5,15 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import {
-  Prisma,
-  ProductDesignChangeType,
-  ProductDesignStateStatus,
-  ProjectStatus,
-  UserRole,
-} from "@prisma/client";
+	import {
+	  Prisma,
+	  ProductDesignChangeType,
+	  ProductDesignStateStatus,
+	  ProjectStatus,
+	  RollbackRecordStatus,
+	  RollbackType,
+	  UserRole,
+	} from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
@@ -116,6 +118,24 @@ export class ProductDesignStateService {
     return state ? this.toStateItem(state as ProductDesignStateRecord) : undefined;
   }
 
+  async getCurrentStateInTransaction(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+    projectId: string,
+  ): Promise<ProductDesignState | undefined> {
+    const project = await tx.project.findUnique({
+      where: { id: projectId },
+      include: {
+        productDesignStates: {
+          orderBy: { version: "desc" },
+          take: 1,
+        },
+      },
+    });
+
+    const state = project?.productDesignStates[0];
+    return state ? this.toStateItem(state as ProductDesignStateRecord) : undefined;
+  }
+
   async getStateByIdForProject(stateId: string, projectId: string): Promise<ProductDesignState | undefined> {
     const state = await this.prisma.productDesignState.findFirst({
       where: { id: stateId, projectId },
@@ -181,48 +201,66 @@ export class ProductDesignStateService {
   ) {
     const current = await this.getAccessibleState(user, stateId);
     this.assertOwnerMutation(user, current.project.ownerId);
-    const version = await this.prisma.productDesignVersion.findFirst({
-      where: { id: input.versionId, stateId },
-    });
-    if (!version) throw new NotFoundException("PRODUCT_DESIGN_STATE_VERSION_NOT_FOUND");
+	    const previous = this.toStateItem(current as ProductDesignStateRecord);
+	    return this.prisma.$transaction(async (tx) => {
+	      const version = await tx.productDesignVersion.findFirst({
+	        where: { id: input.versionId, stateId },
+	      });
+	      if (!version) throw new NotFoundException("PRODUCT_DESIGN_STATE_VERSION_NOT_FOUND");
 
-    const snapshot = this.normalizeStatePayload(version.snapshot);
-    if (!snapshot) throw new BadRequestException("PRODUCT_DESIGN_STATE_ROLLBACK_FAILED");
+	      const snapshot = this.normalizeStatePayload(version.snapshot);
+	      if (!snapshot) throw new BadRequestException("PRODUCT_DESIGN_STATE_ROLLBACK_FAILED");
 
-    const previous = this.toStateItem(current as ProductDesignStateRecord);
-    const nextVersion = await this.getNextStateVersion(current.projectId);
-    const updated = await this.prisma.productDesignState.update({
-      where: { id: stateId },
-      data: {
-        ...this.toPrismaStateData(snapshot),
-        version: nextVersion,
-        updatedBy: user.id,
-      },
-    });
-    await this.prisma.project.update({
-      where: { id: current.projectId },
-      data: { currentProductDesignStateId: stateId },
-    });
+	      const nextVersion = await this.getNextStateVersion(current.projectId, tx);
+	      const updated = await tx.productDesignState.update({
+	        where: { id: stateId },
+	        data: {
+	          ...this.toPrismaStateData(snapshot),
+	          version: nextVersion,
+	          updatedBy: user.id,
+	        },
+	      });
+	      const next = this.toStateItem(updated as ProductDesignStateRecord);
+	      await tx.project.update({
+	        where: { id: current.projectId },
+	        data: {
+	          currentProductDesignStateId: stateId,
+	          status: projectStatusFromProductDesignState(next),
+	          lastActivityAt: new Date(),
+	        },
+	      });
 
-    const next = this.toStateItem(updated as ProductDesignStateRecord);
-    await this.writeChangeLog({
-      projectId: next.projectId,
-      stateId: next.id,
-      changeType: ProductDesignChangeType.rollback,
-      path: "*",
-      before: previous,
-      after: next,
-      reason: input.reason ?? `回滚到版本 ${version.version}`,
-      createdBy: user.id,
-    });
-    const createdVersion = await this.createVersionSnapshot(
-      next,
-      user.id,
-      input.reason ?? `回滚到版本 ${version.version}`,
-    );
+	      const reason = input.reason ?? `回滚到版本 ${version.version}`;
+	      await this.writeChangeLog({
+	        projectId: next.projectId,
+	        stateId: next.id,
+	        changeType: ProductDesignChangeType.rollback,
+	        path: "*",
+	        before: previous,
+	        after: next,
+	        reason,
+	        createdBy: user.id,
+	      }, tx);
+	      const createdVersion = await this.createVersionSnapshot(next, user.id, reason, tx);
+	      await tx.rollbackRecord.create({
+	        data: {
+	          projectId: next.projectId,
+	          rollbackType: RollbackType.product_design_state,
+	          fromProductDesignStateVersion: previous.version,
+	          toProductDesignStateVersion: next.version,
+	          beforePrdDocumentId: previous.prdDocument?.id,
+	          afterPrdDocumentId: next.prdDocument?.id,
+	          beforePrototypeArtifactId: undefined,
+	          afterPrototypeArtifactId: undefined,
+	          reason,
+	          status: RollbackRecordStatus.completed,
+	          createdBy: user.id,
+	        },
+	      });
 
-    return { state: next, version: this.toVersionItem(createdVersion) };
-  }
+	      return { state: next, version: this.toVersionItem(createdVersion) };
+	    });
+	  }
 
   async restoreVersionSnapshotForProject(
     projectId: string,
@@ -459,39 +497,61 @@ export class ProductDesignStateService {
 
     // txn-1：state.create + project.update + changeLog + versionSnapshot 原子化，部分失败不留半成品。
     return this.prisma.$transaction(async (tx) => {
-      const state = await tx.productDesignState.create({
-        data: {
-          projectId,
-          version: 1,
-          ...this.toPrismaStateData(this.normalizeDraft(projectId, draft)),
-          createdBy: options.userId ?? "system",
-          updatedBy: options.userId,
-        },
-      });
-
-      await tx.project.update({
-        where: { id: projectId },
-        data: { currentProductDesignStateId: state.id },
-      });
-
-      const item = this.toStateItem(state as ProductDesignStateRecord);
-      await this.writeChangeLog(
-        {
-          projectId,
-          stateId: item.id,
-          changeType: ProductDesignChangeType.create,
-          path: "*",
-          after: item,
-          reason: options.reason ?? "首次生成 ProductDesignState",
-          runId: options.runId,
-          messageId: options.messageId,
-          createdBy: options.userId ?? "system",
-        },
-        tx,
-      );
-      await this.createVersionSnapshot(item, options.userId ?? "system", "首次创建状态", tx);
-      return item;
+      return this.createDraftInTransactionImpl(tx, projectId, draft, options);
     });
+  }
+
+  async createDraftInTransaction(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+    projectId: string,
+    draft: ProductDesignDraft,
+    options: { userId?: string; reason?: string; runId?: string; messageId?: string } = {},
+  ): Promise<ProductDesignState> {
+    const latest = await this.getCurrentStateInTransaction(tx, projectId);
+    if (latest) {
+      return this.updateStateFromDraftInTransaction(tx, projectId, latest, draft, options);
+    }
+    return this.createDraftInTransactionImpl(tx, projectId, draft, options);
+  }
+
+  private async createDraftInTransactionImpl(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+    projectId: string,
+    draft: ProductDesignDraft,
+    options: { userId?: string; reason?: string; runId?: string; messageId?: string },
+  ): Promise<ProductDesignState> {
+    const state = await tx.productDesignState.create({
+      data: {
+        projectId,
+        version: 1,
+        ...this.toPrismaStateData(this.normalizeDraft(projectId, draft)),
+        createdBy: options.userId ?? "system",
+        updatedBy: options.userId,
+      },
+    });
+
+    await tx.project.update({
+      where: { id: projectId },
+      data: { currentProductDesignStateId: state.id },
+    });
+
+    const item = this.toStateItem(state as ProductDesignStateRecord);
+    await this.writeChangeLog(
+      {
+        projectId,
+        stateId: item.id,
+        changeType: ProductDesignChangeType.create,
+        path: "*",
+        after: item,
+        reason: options.reason ?? "首次生成 ProductDesignState",
+        runId: options.runId,
+        messageId: options.messageId,
+        createdBy: options.userId ?? "system",
+      },
+      tx,
+    );
+    await this.createVersionSnapshot(item, options.userId ?? "system", "首次创建状态", tx);
+    return item;
   }
 
   async attachGeneratedArtifacts(
@@ -510,71 +570,88 @@ export class ProductDesignStateService {
     // txn-1 + race-1：读取、版本校验、写入、changeLog、versionSnapshot 在同一事务内原子完成；
     // 用乐观锁（where id AND version=expected）防止并发覆盖。
     return this.prisma.$transaction(async (tx) => {
-      const current = await tx.productDesignState.findUnique({ where: { id: stateId } });
-      if (!current) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
-      const before = this.toStateItem(current as ProductDesignStateRecord);
-
-      const prototypeOutline = input.prototypeSpec
-        ? toPrototypeOutline(input.prototypeSpec, before.prototypeOutline)
-        : before.prototypeOutline;
-
-      // race-1：乐观锁——仅当库中 version 仍为读取时的 before.version 才更新，防止并发覆盖。
-      const result = await tx.productDesignState.updateMany({
-        where: { id: stateId, version: before.version },
-        data: {
-          version: before.version + 1,
-          prdDocument: input.prdDocument ? toInputJson(input.prdDocument) : undefined,
-          prototypeSpec: input.prototypeSpec ? toInputJson(input.prototypeSpec) : undefined,
-          prototypeOutline: prototypeOutline ? toInputJson(prototypeOutline) : undefined,
-          status: input.status,
-          updatedBy: input.userId,
-        },
-      });
-      if (result.count === 0) {
-        throw new ConflictException("PRODUCT_DESIGN_STATE_VERSION_CONFLICT：状态已被并发修改，请重试。");
-      }
-      const updated = await tx.productDesignState.findUnique({ where: { id: stateId } });
-      if (!updated) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
-
-      const after = this.toStateItem(updated as ProductDesignStateRecord);
-      await tx.project.update({
-        where: { id: after.projectId },
-        data: {
-          currentProductDesignStateId: after.id,
-          status: projectStatusFromProductDesignState(after),
-          lastActivityAt: new Date(),
-        },
-      });
-      await this.writeChangeLog(
-        {
-          projectId: after.projectId,
-          stateId: after.id,
-          changeType: ProductDesignChangeType.update,
-          path: "generatedArtifacts",
-          before: {
-            prdDocument: before.prdDocument,
-            prototypeSpec: before.prototypeSpec,
-            prototypeOutline: before.prototypeOutline,
-            status: before.status,
-          },
-          after: {
-            prdDocument: after.prdDocument,
-            prototypeSpec: after.prototypeSpec,
-            prototypeOutline: after.prototypeOutline,
-            status: after.status,
-          },
-          reason: input.reason ?? "生成 PRD 和 PrototypeSpec 后更新状态",
-          runId: input.runId,
-          messageId: input.messageId,
-          createdBy: input.userId ?? "system",
-        },
-        tx,
-      );
-      if (input.createVersion ?? true) {
-        await this.createVersionSnapshot(after, input.userId ?? "system", input.reason ?? "生成物更新后保存版本", tx);
-      }
-      return after;
+      return this.attachGeneratedArtifactsInTransaction(tx, stateId, input);
     });
+  }
+
+  async attachGeneratedArtifactsInTransaction(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+    stateId: string,
+    input: {
+      prdDocument?: RequirementDocument;
+      prototypeSpec?: PrototypeSpec;
+      status?: ProductDesignStateStatus;
+      userId?: string;
+      reason?: string;
+      runId?: string;
+      messageId?: string;
+      createVersion?: boolean;
+    },
+  ) {
+    const current = await tx.productDesignState.findUnique({ where: { id: stateId } });
+    if (!current) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
+    const before = this.toStateItem(current as ProductDesignStateRecord);
+
+    const prototypeOutline = input.prototypeSpec
+      ? toPrototypeOutline(input.prototypeSpec, before.prototypeOutline)
+      : before.prototypeOutline;
+
+    // race-1：乐观锁——仅当库中 version 仍为读取时的 before.version 才更新，防止并发覆盖。
+    const result = await tx.productDesignState.updateMany({
+      where: { id: stateId, version: before.version },
+      data: {
+        version: before.version + 1,
+        prdDocument: input.prdDocument ? toInputJson(input.prdDocument) : undefined,
+        prototypeSpec: input.prototypeSpec ? toInputJson(input.prototypeSpec) : undefined,
+        prototypeOutline: prototypeOutline ? toInputJson(prototypeOutline) : undefined,
+        status: input.status,
+        updatedBy: input.userId,
+      },
+    });
+    if (result.count === 0) {
+      throw new ConflictException("PRODUCT_DESIGN_STATE_VERSION_CONFLICT：状态已被并发修改，请重试。");
+    }
+    const updated = await tx.productDesignState.findUnique({ where: { id: stateId } });
+    if (!updated) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
+
+    const after = this.toStateItem(updated as ProductDesignStateRecord);
+    await tx.project.update({
+      where: { id: after.projectId },
+      data: {
+        currentProductDesignStateId: after.id,
+        status: projectStatusFromProductDesignState(after),
+        lastActivityAt: new Date(),
+      },
+    });
+    await this.writeChangeLog(
+      {
+        projectId: after.projectId,
+        stateId: after.id,
+        changeType: ProductDesignChangeType.update,
+        path: "generatedArtifacts",
+        before: {
+          prdDocument: before.prdDocument,
+          prototypeSpec: before.prototypeSpec,
+          prototypeOutline: before.prototypeOutline,
+          status: before.status,
+        },
+        after: {
+          prdDocument: after.prdDocument,
+          prototypeSpec: after.prototypeSpec,
+          prototypeOutline: after.prototypeOutline,
+          status: after.status,
+        },
+        reason: input.reason ?? "生成 PRD 和 PrototypeSpec 后更新状态",
+        runId: input.runId,
+        messageId: input.messageId,
+        createdBy: input.userId ?? "system",
+      },
+      tx,
+    );
+    if (input.createVersion ?? true) {
+      await this.createVersionSnapshot(after, input.userId ?? "system", input.reason ?? "生成物更新后保存版本", tx);
+    }
+    return after;
   }
 
   async syncRequirementDocumentEdit(input: {
@@ -675,44 +752,54 @@ export class ProductDesignStateService {
     options: { userId?: string; reason?: string; runId?: string; messageId?: string },
   ) {
     return this.prisma.$transaction(async (tx) => {
-      const normalized = this.normalizeDraft(projectId, draft, current);
-      normalized.version = current.version + 1;
-      normalized.id = current.id;
-      normalized.createdAt = current.createdAt;
-      normalized.createdBy = current.createdBy;
-      const updated = await tx.productDesignState.update({
-        where: { id: current.id },
-        data: {
-          version: normalized.version,
-          ...this.toPrismaStateData(normalized),
-          prototypeSpec: Prisma.JsonNull,
-          prdDocument: Prisma.JsonNull,
-          updatedBy: options.userId,
-        },
-      });
-      await tx.project.update({
-        where: { id: projectId },
-        data: { currentProductDesignStateId: current.id },
-      });
-      const after = this.toStateItem(updated as ProductDesignStateRecord);
-      await this.writeChangeLog(
-        {
-          projectId,
-          stateId: after.id,
-          changeType: ProductDesignChangeType.update,
-          path: "*",
-          before: current,
-          after,
-          reason: options.reason ?? "DeerFlow final action 更新 ProductDesignState",
-          runId: options.runId,
-          messageId: options.messageId,
-          createdBy: options.userId ?? "system",
-        },
-        tx,
-      );
-      await this.createVersionSnapshot(after, options.userId ?? "system", options.reason ?? "完整设计更新", tx);
-      return after;
+      return this.updateStateFromDraftInTransaction(tx, projectId, current, draft, options);
     });
+  }
+
+  private async updateStateFromDraftInTransaction(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+    projectId: string,
+    current: ProductDesignState,
+    draft: ProductDesignDraft,
+    options: { userId?: string; reason?: string; runId?: string; messageId?: string },
+  ) {
+    const normalized = this.normalizeDraft(projectId, draft, current);
+    normalized.version = current.version + 1;
+    normalized.id = current.id;
+    normalized.createdAt = current.createdAt;
+    normalized.createdBy = current.createdBy;
+    const updated = await tx.productDesignState.update({
+      where: { id: current.id },
+      data: {
+        version: normalized.version,
+        ...this.toPrismaStateData(normalized),
+        prototypeSpec: Prisma.JsonNull,
+        prdDocument: Prisma.JsonNull,
+        updatedBy: options.userId,
+      },
+    });
+    await tx.project.update({
+      where: { id: projectId },
+      data: { currentProductDesignStateId: current.id },
+    });
+    const after = this.toStateItem(updated as ProductDesignStateRecord);
+    await this.writeChangeLog(
+      {
+        projectId,
+        stateId: after.id,
+        changeType: ProductDesignChangeType.update,
+        path: "*",
+        before: current,
+        after,
+        reason: options.reason ?? "DeerFlow final action 更新 ProductDesignState",
+        runId: options.runId,
+        messageId: options.messageId,
+        createdBy: options.userId ?? "system",
+      },
+      tx,
+    );
+    await this.createVersionSnapshot(after, options.userId ?? "system", options.reason ?? "完整设计更新", tx);
+    return after;
   }
 
   private async replaceState(
@@ -816,10 +903,11 @@ export class ProductDesignStateService {
     });
   }
 
-  private async getNextStateVersion(projectId: string) {
-    const latest = await this.prisma.productDesignState.findFirst({
-      where: { projectId },
-      orderBy: { version: "desc" },
+	  private async getNextStateVersion(projectId: string, tx?: Prisma.TransactionClient) {
+	    const client = tx ?? this.prisma;
+	    const latest = await client.productDesignState.findFirst({
+	      where: { projectId },
+	      orderBy: { version: "desc" },
       select: { version: true },
     });
     return (latest?.version ?? 0) + 1;

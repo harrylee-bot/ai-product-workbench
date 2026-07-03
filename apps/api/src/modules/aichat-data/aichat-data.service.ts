@@ -276,15 +276,41 @@ export class AichatDataService {
     dto: RegisterStreamDto,
   ) {
     await this.getOwnedConversation(user, conversationId);
-    // 幂等：重连场景下 ai-chatbot 可能重复注册同一 streamId。
-    const stream = await this.prisma.stream.upsert({
+    const existing = await this.prisma.stream.findUnique({
       where: { id: dto.streamId },
-      update: {},
-      create: {
-        id: dto.streamId,
-        chatId: conversationId,
-      },
     });
+    if (existing) {
+      if (existing.chatId !== conversationId) {
+        throw new ForbiddenException("无权访问该 stream");
+      }
+      return {
+        id: existing.id,
+        chatId: existing.chatId,
+        createdAt: existing.createdAt.toISOString(),
+      };
+    }
+
+    let stream: { id: string; chatId: string; createdAt: Date };
+    try {
+      stream = await this.prisma.stream.create({
+        data: {
+          id: dto.streamId,
+          chatId: conversationId,
+        },
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+      const raced = await this.prisma.stream.findUnique({
+        where: { id: dto.streamId },
+      });
+      if (!raced || raced.chatId !== conversationId) {
+        throw new ForbiddenException("无权访问该 stream");
+      }
+      stream = raced;
+    }
+
     return {
       id: stream.id,
       chatId: stream.chatId,
@@ -411,6 +437,10 @@ export class AichatDataService {
     }
     return document;
   }
+}
+
+function isUniqueConstraintError(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
 function isRuntimeProcessEvent(value: unknown): value is {

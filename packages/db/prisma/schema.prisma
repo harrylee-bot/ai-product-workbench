@@ -10,6 +10,8 @@ datasource db {
 enum UserRole {
   user
   admin
+  product
+  developer
 }
 
 enum UserStatus {
@@ -333,26 +335,28 @@ enum UserIntent {
 }
 
 model User {
-  id              String                  @id @default(cuid())
-  username        String                  @unique
-  email           String?                 @unique
-  passwordHash    String                  @map("password_hash")
-  displayName     String                  @map("display_name")
-  role            UserRole                @default(user)
-  status          UserStatus              @default(active)
-  lastLoginAt     DateTime?               @map("last_login_at")
-  createdAt       DateTime                @default(now()) @map("created_at")
-  updatedAt       DateTime                @updatedAt @map("updated_at")
-  loginAuditLogs  LoginAuditLog[]
-  projects        Project[]
-  conversations   Conversation[]
-  messages        Message[]
-  fileAssets      FileAsset[]
-  runtimeRuns     RuntimeRunLog[]
-  adminAuditLogs  AdminAuditLog[]
-  deerFlowThreads DeerFlowThreadBinding[]
-  votes           Vote[]
-  suggestions     Suggestion[]
+  id               String                  @id @default(cuid())
+  username         String                  @unique
+  email            String?                 @unique
+  passwordHash     String                  @map("password_hash")
+  displayName      String                  @map("display_name")
+  role             UserRole                @default(user)
+  status           UserStatus              @default(active)
+  lastLoginAt      DateTime?               @map("last_login_at")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
+  loginAuditLogs   LoginAuditLog[]
+  projects         Project[]
+  conversations    Conversation[]
+  messages         Message[]
+  fileAssets       FileAsset[]
+  runtimeRuns      RuntimeRunLog[]
+  adminAuditLogs   AdminAuditLog[]
+  deerFlowThreads  DeerFlowThreadBinding[]
+  votes            Vote[]
+  suggestions      Suggestion[]
+  comments         Comment[]
+  resolvedComments Comment[]               @relation("CommentResolver")
 
   @@map("users")
 }
@@ -411,6 +415,7 @@ model Project {
   shareLinks                  ShareLink[]
   deerFlowThreads             DeerFlowThreadBinding[]
   prototypeConversionJobs     PrototypeConversionJob[]
+  comments                    Comment[]
   product                     Product?                     @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([ownerId])
@@ -491,30 +496,30 @@ model Message {
 }
 
 model FileAsset {
-  id              String              @id @default(uuid())
-  projectId       String              @map("project_id")
-  conversationId  String?             @map("conversation_id")
-  messageId       String?             @map("message_id")
-  uploadedBy      String              @map("uploaded_by")
-  originalName    String              @map("original_name")
-  storedName      String              @map("stored_name")
-  mimeType        String              @map("mime_type")
-  extension       String
-  size            Int
-  storageProvider FileStorageProvider @default(local) @map("storage_provider")
-  storagePath     String              @map("storage_path")
-  publicUrl       String?             @map("public_url")
-  status          FileAssetStatus     @default(uploaded)
-  parseError      String?             @map("parse_error")
-  createdAt       DateTime            @default(now()) @map("created_at")
-  updatedAt       DateTime            @updatedAt @map("updated_at")
-  deletedAt       DateTime?           @map("deleted_at")
-  project         Project             @relation(fields: [projectId], references: [id])
-  conversation    Conversation?       @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  message         Message?            @relation(fields: [messageId], references: [id], onDelete: SetNull)
-  uploader        User                @relation(fields: [uploadedBy], references: [id])
-  parseResult     FileParseResult?
-  chunks          FileChunk[]
+  id                     String                  @id @default(uuid())
+  projectId              String                  @map("project_id")
+  conversationId         String?                 @map("conversation_id")
+  messageId              String?                 @map("message_id")
+  uploadedBy             String                  @map("uploaded_by")
+  originalName           String                  @map("original_name")
+  storedName             String                  @map("stored_name")
+  mimeType               String                  @map("mime_type")
+  extension              String
+  size                   Int
+  storageProvider        FileStorageProvider     @default(local) @map("storage_provider")
+  storagePath            String                  @map("storage_path")
+  publicUrl              String?                 @map("public_url")
+  status                 FileAssetStatus         @default(uploaded)
+  parseError             String?                 @map("parse_error")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  deletedAt              DateTime?               @map("deleted_at")
+  project                Project                 @relation(fields: [projectId], references: [id])
+  conversation           Conversation?           @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  message                Message?                @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  uploader               User                    @relation(fields: [uploadedBy], references: [id])
+  parseResult            FileParseResult?
+  chunks                 FileChunk[]
   prototypeConversionJob PrototypeConversionJob?
 
   @@index([projectId])
@@ -1240,13 +1245,13 @@ model VibeStreamEventLog {
 }
 
 model Vote {
-  id         String   @id @default(cuid())
-  messageId  String   @map("message_id")
-  userId     String   @map("user_id")
-  isUpvoted  Boolean  @default(false) @map("is_upvoted")
-  createdAt  DateTime @default(now()) @map("created_at")
-  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  isUpvoted Boolean  @default(false) @map("is_upvoted")
+  createdAt DateTime @default(now()) @map("created_at")
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
   @@index([messageId])
@@ -1268,6 +1273,36 @@ model Suggestion {
   @@index([documentId])
   @@index([userId])
   @@map("suggestions")
+}
+
+model Comment {
+  id              String    @id @default(cuid())
+  projectId       String    @map("project_id")
+  targetType      String    @map("target_type") // 'prd' | 'prototype' | 'section'
+  targetId        String    @map("target_id")
+  sectionId       String?   @map("section_id") // 锚点评论：针对特定段落
+  content         String    @db.Text
+  parentCommentId String?   @map("parent_comment_id") // 回复评论
+  userId          String    @map("user_id")
+  isResolved      Boolean   @default(false) @map("is_resolved")
+  resolvedBy      String?   @map("resolved_by")
+  resolvedAt      DateTime? @map("resolved_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentComment Comment?  @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies       Comment[] @relation("CommentReplies")
+  resolver      User?     @relation("CommentResolver", fields: [resolvedBy], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([targetType, targetId])
+  @@index([userId])
+  @@index([parentCommentId])
+  @@index([createdAt])
+  @@map("comments")
 }
 
 model Stream {

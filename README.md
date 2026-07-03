@@ -46,14 +46,14 @@ npm run dev
 - API: `http://localhost:4000/api`
 - Knowledge: `http://localhost:3001`
 
-默认账号：
+	默认账号：
 
-| 角色 | 用户名 | 邮箱 | 密码 |
-|---|---|---|---|
-| 管理员 | admin | admin@example.local | Admin123456 |
-| 普通用户 | zhangsan | zhangsan@example.local | User123456 |
+	| 角色 | 用户名 | 邮箱 | 密码 |
+	|---|---|---|---|
+	| 管理员 | admin | admin@example.local | 由 `BOOTSTRAP_ADMIN_PASSWORD` 指定 |
+	| 普通用户 | zhangsan | zhangsan@example.local | 由 `BOOTSTRAP_DEMO_USER_PASSWORD` 指定（可选） |
 
-上述默认账号只用于本地开发。生产环境首次 seed 时必须配置 `BOOTSTRAP_ADMIN_PASSWORD`，否则不会创建固定默认口令账号。
+	本地开发可不配置上述变量，seed 会生成开发用账号；生产环境首次 seed 时必须配置 `BOOTSTRAP_ADMIN_PASSWORD`，否则不会创建管理员账号。
 
 ## 验证
 
@@ -65,14 +65,9 @@ npm run build
 
 ## 部署
 
-生产服务器当前为：
+	部署脚本：
 
-```text
-8.130.160.177
-```
-
-部署脚本：
-
-```bash
-bash deploy/server-deploy.sh
-```
+	```bash
+	APP_HOST=example.com \
+	bash deploy/server-deploy.sh
+	```

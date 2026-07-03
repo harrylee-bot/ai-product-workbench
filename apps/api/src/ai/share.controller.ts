@@ -7,6 +7,8 @@ import { CurrentUser } from "../common/current-user.decorator";
 import { CreateShareLinkDto } from "./share.dto";
 import { ShareService } from "./share.service";
 
+const USER_HTML_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+
 /** 创建/管理分享链接：仅项目 owner（需登录）。 */
 @Controller("share-links")
 @UseGuards(JwtAuthGuard)
@@ -33,22 +35,28 @@ export class ShareLinkController {
   }
 }
 
-/** 公开只读访问：免登录（无 Guard），只读、不可下载、不可编辑（FR-4.2/4.3）。 */
+/**
+ * 分享链接访问：需要登录（根据需求：不支持游客访问）
+ * 用户登录后可查看分享内容，只读、不可下载、不可编辑（FR-4.2/4.3）
+ */
 @Controller("public/share")
+@UseGuards(JwtAuthGuard)
 export class PublicShareController {
   constructor(private readonly shareService: ShareService) {}
 
-  // sec-3：公开分享接口限流防刷量（30 次/分钟/IP）。
+  // sec-3：分享接口限流防刷量（30 次/分钟/用户）。
   @Throttle({ public: { limit: 30, ttl: 60_000 } })
   @Get(":token")
-  resolve(@Param("token") token: string) {
+  resolve(@Param("token") token: string, @CurrentUser() user: AuthenticatedUser) {
     return this.shareService.resolvePublic(token);
   }
 
-  @Throttle({ public: { limit: 30, ttl: 60_000 } })
-  @Get(":token/prototype")
-  @Header("Content-Type", "text/html; charset=utf-8")
-  prototypeHtml(@Param("token") token: string) {
+	  @Throttle({ public: { limit: 30, ttl: 60_000 } })
+	  @Get(":token/prototype")
+	  @Header("Content-Type", "text/html; charset=utf-8")
+	  @Header("Content-Security-Policy", USER_HTML_CSP)
+	  @Header("X-Content-Type-Options", "nosniff")
+	  prototypeHtml(@Param("token") token: string, @CurrentUser() user: AuthenticatedUser) {
     return this.shareService.resolvePublicPrototypeHtml(token);
   }
 }

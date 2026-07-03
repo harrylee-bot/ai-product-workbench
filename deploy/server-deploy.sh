@@ -20,8 +20,12 @@ if [ "${DEPLOY_LOCK_DISABLED:-0}" != "1" ] && command -v flock >/dev/null 2>&1; 
   fi
 fi
 
-APP_HOST="${APP_HOST:-8.130.160.177}"
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+	APP_HOST="${APP_HOST:-}"
+	if [ -z "$APP_HOST" ]; then
+	  echo "APP_HOST is required. Example: APP_HOST=example.com bash deploy/server-deploy.sh" >&2
+	  exit 64
+	fi
+	DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 APP_PUBLIC_URL="${APP_PUBLIC_URL:-http://${APP_HOST}:3000}"
 API_PUBLIC_BASE_URL="${API_PUBLIC_BASE_URL:-http://${APP_HOST}:4000/api}"
 if [[ "$APP_PUBLIC_URL" == https://* ]]; then

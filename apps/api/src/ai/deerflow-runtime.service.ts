@@ -577,10 +577,9 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",
         "For activity-configuration PRDs, include visual evidence blocks when knowledgeContext provides them: at least one business flow diagram, one configuration architecture diagram, and prototype_snapshot/image blocks for key Axure pages. Use Mermaid for diagram blocks and local visualAssets paths for prototype_snapshot/image blocks.",
         "If no suitable prototype snapshot, flow, architecture, or field-rule knowledge is available, do not invent visuals. Add a validationNotes item and an info/warning block that names the missing asset and the required follow-up.",
-        "For PRD/需求文档/需求说明书 generation, follow the requirement-document template from PRD标准结构 exactly: cover title should be <工单名称>需求说明书; body sections must include 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(2.1 页面链接, core rules/features, flow/state/page requirements, 本需求涉及新增/修改的接口, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
-        "For PRD tables, use explicit table blocks or markdown tables for version history, channel/使用场景, field/rule tables, interface tables, acceptance tables, and the safety baseline self-check. Do not replace tables with prose.",
-        "For PRD section content, every heading must have concrete content. If an exact route, endpoint, author, participant, or date is unknown, write 待确认 or 以实际上线地址/技术方案/联调结果为准, while still describing expected behavior.",
-        "For interface-related PRD content, include caller/callee, trigger condition, key inputs/outputs, success result, and failure handling; if exact API names are unknown, state that the exact endpoint is subject to technical design and joint debugging.",
+        "For PRD/需求文档/需求说明书 generation, follow the requirement-document template from PRD标准结构 exactly: cover title should be <工单名称>需求说明书; body sections must include 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(2.1 页面链接, core rules/features, flow/state/page requirements, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not include API/interface specifications in PRD - technical implementation details belong in separate technical documents. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
+        "For PRD tables, use explicit table blocks or markdown tables for version history, channel/使用场景, field/rule tables, acceptance tables, and the safety baseline self-check. Do not replace tables with prose.",
+        "For PRD section content, every heading must have concrete content. If an exact route, author, participant, or date is unknown, write 待确认 or 以实际上线地址/联调结果为准, while still describing expected behavior from the product perspective.",
         "For PRD safety/degradation content, do not leave the section empty: write 不涉及 only when truly irrelevant; otherwise provide concrete fallback behavior and safety baseline self-check values using only 是, 否, or 不涉及.",
         "When updating an existing PRD, merge the requested change into the currentPrdDocument and preserve unaffected sections, title hierarchy, tables, state flows, acceptance criteria, and implementation details.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
@@ -935,20 +934,42 @@ async function readSse(
   body: ReadableStream<Uint8Array>,
   onEvent: (event: { event: string; data: unknown }) => Promise<void> | void,
 ) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+	  const reader = body.getReader();
+	  const decoder = new TextDecoder();
+	  const idleTimeoutMs = readNumberEnv("DEERFLOW_IDLE_TIMEOUT_MS", 120_000);
+	  let buffer = "";
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+	  while (true) {
+	    const { value, done } = await readStreamChunkWithIdleTimeout(reader, idleTimeoutMs);
+	    if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const parts = buffer.split(/\r?\n\r?\n/);
     buffer = parts.pop() ?? "";
     for (const part of parts) {
       const event = parseSseChunk(part);
-      if (event) await onEvent(event);
-    }
+	  if (event) await onEvent(event);
+	}
+
+	async function readStreamChunkWithIdleTimeout(
+	  reader: ReadableStreamDefaultReader<Uint8Array>,
+	  idleTimeoutMs: number,
+	) {
+	  if (idleTimeoutMs <= 0) return reader.read();
+	  let timer: ReturnType<typeof setTimeout> | undefined;
+	  try {
+	    return await Promise.race([
+	      reader.read(),
+	      new Promise<never>((_resolve, reject) => {
+	        timer = setTimeout(() => {
+	          void reader.cancel("DEERFLOW_STREAM_IDLE_TIMEOUT").catch(() => undefined);
+	          reject(new Error(`DEERFLOW_STREAM_IDLE_TIMEOUT: no stream chunk received within ${idleTimeoutMs}ms`));
+	        }, idleTimeoutMs);
+	      }),
+	    ]);
+	  } finally {
+	    if (timer) clearTimeout(timer);
+	  }
+	}
   }
 
   buffer += decoder.decode();

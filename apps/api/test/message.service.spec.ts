@@ -1,4 +1,4 @@
-import { ConversationStatus, MessageRole, MessageType, ProjectStatus } from "@prisma/client";
+import { ConversationStatus, MessageRole, MessageType, ProjectStatus, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageService } from "../src/projects/message.service";
 
@@ -14,10 +14,13 @@ describe("MessageService", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
-    project: {
-      update: vi.fn(),
-    },
-  };
+	    project: {
+	      update: vi.fn(),
+	    },
+	    runtimeRunLog: {
+	      findFirst: vi.fn(),
+	    },
+	  };
   const service = new MessageService(prisma as never);
 
   beforeEach(() => {
@@ -92,7 +95,7 @@ describe("MessageService", () => {
     });
   });
 
-  it("returns recent messages in ascending order", async () => {
+	  it("returns recent messages in ascending order", async () => {
     prisma.message.findMany.mockResolvedValue([
       { ...baseMessage("message-2"), createdAt: new Date("2026-06-20T08:02:00Z") },
       { ...baseMessage("message-1"), createdAt: new Date("2026-06-20T08:01:00Z") },
@@ -101,7 +104,43 @@ describe("MessageService", () => {
     const result = await service.getRecentMessages("conversation-1");
 
     expect(result.map((message) => message.id)).toEqual(["message-1", "message-2"]);
-  });
+	  });
+
+	  it("lists the latest conversation messages in chronological order", async () => {
+	    prisma.conversation.findUnique.mockResolvedValue({
+	      id: "conversation-1",
+	      ownerId: "user-1",
+	      status: ConversationStatus.active,
+	      deletedAt: null,
+	      project: {
+	        id: "project-1",
+	        status: ProjectStatus.draft,
+	        deletedAt: null,
+	      },
+	    });
+	    prisma.message.findMany.mockResolvedValue([
+	      { ...baseMessage("message-3"), createdAt: new Date("2026-06-20T08:03:00Z") },
+	      { ...baseMessage("message-2"), createdAt: new Date("2026-06-20T08:02:00Z") },
+	      { ...baseMessage("message-1"), createdAt: new Date("2026-06-20T08:01:00Z") },
+	    ]);
+	    prisma.runtimeRunLog.findFirst.mockResolvedValue(null);
+
+	    const result = await service.listByConversation({
+	      id: "user-1",
+	      username: "zhangsan",
+	      email: "zhangsan@example.local",
+	      displayName: "张三",
+	      role: UserRole.user,
+	      status: UserStatus.active,
+	    }, "conversation-1");
+
+	    expect(prisma.message.findMany).toHaveBeenCalledWith({
+	      where: { conversationId: "conversation-1" },
+	      orderBy: { createdAt: "desc" },
+	      take: 100,
+	    });
+	    expect(result.items.map((message) => message.id)).toEqual(["message-1", "message-2", "message-3"]);
+	  });
 
   it("updates an assistant message draft in place", async () => {
     const updatedMessage = {

@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { NotFoundException } from "@nestjs/common";
+import { UserRole, UserStatus } from "@prisma/client";
+import { describe, expect, it, vi } from "vitest";
 import {
+  AichatStreamService,
   createDocumentStreamState,
   isDocumentGenerationRequest,
   looksLikeDocumentDraft,
   routeAssistantDocumentDelta,
 } from "../src/ai/aichat/aichat-stream.service";
 import type { UIMessageStreamWriter } from "../src/ai/aichat/aichat-ai-sdk-bridge";
+import type { AuthenticatedUser } from "../src/auth/auth.types";
 
 function captureWriter() {
   const parts: Record<string, unknown>[] = [];
@@ -97,5 +101,69 @@ describe("aichat document stream router", () => {
 
     expect(result).toEqual({ suppressChat: false });
     expect(parts).toEqual([]);
+  });
+});
+
+describe("AichatStreamService stop", () => {
+  const user: AuthenticatedUser = {
+    id: "user-1",
+    username: "user",
+    displayName: "User",
+    role: UserRole.user,
+    status: UserStatus.active,
+  };
+
+  function createService() {
+    const conversations = { get: vi.fn().mockResolvedValue({}) };
+    const runLogs = { cancelRun: vi.fn().mockResolvedValue({ changed: true }) };
+    const service = new AichatStreamService(
+      conversations as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      runLogs as never,
+      {} as never,
+    );
+    const internals = service as unknown as {
+      activeRunControllers: Map<string, AbortController>;
+      activeRunConversationIds: Map<string, string>;
+    };
+    return { conversations, internals, runLogs, service };
+  }
+
+  it("checks conversation access before stopping by run id", async () => {
+    const { conversations, internals, runLogs, service } = createService();
+    const controller = new AbortController();
+    const abort = vi.spyOn(controller, "abort");
+    internals.activeRunControllers.set("run-1", controller);
+    internals.activeRunConversationIds.set("run-1", "conversation-1");
+
+    await expect(service.stop(user, "run-1")).resolves.toEqual({
+      ok: true,
+      runId: "run-1",
+      canceled: true,
+    });
+
+    expect(conversations.get).toHaveBeenCalledWith(user, "conversation-1");
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(runLogs.cancelRun).toHaveBeenCalledWith({
+      runId: "run-1",
+      canceledBy: "user-1",
+      reason: "用户停止 aichat 生成",
+    });
+  });
+
+  it("does not abort a run when the user cannot access its conversation", async () => {
+    const { conversations, internals, runLogs, service } = createService();
+    const controller = new AbortController();
+    const abort = vi.spyOn(controller, "abort");
+    conversations.get.mockRejectedValueOnce(new Error("forbidden"));
+    internals.activeRunControllers.set("run-1", controller);
+    internals.activeRunConversationIds.set("run-1", "conversation-2");
+
+    await expect(service.stop(user, "run-1")).rejects.toThrow(NotFoundException);
+
+    expect(abort).not.toHaveBeenCalled();
+    expect(runLogs.cancelRun).not.toHaveBeenCalled();
   });
 });

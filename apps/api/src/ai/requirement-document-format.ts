@@ -159,16 +159,21 @@ export function formatRequirementDocumentDraft(
     });
   }
 
-  const interfaceNumber = `2.${sections.filter((section) => /^2\./.test(section.title)).length + 1}`;
-  add({
-    id: "interface_requirements",
-    title: `${interfaceNumber} 本需求涉及新增/修改的接口`,
-    type: "backend_configs",
-    level: 2,
-    content: findSectionContent(sourceSections, ["backend_configs"], /接口|API|能力调用|新增\/修改/)
-      || buildInterfaceFallback(baseName, sourceSections, state),
-    sourcePaths: ["interfaces"],
-  });
+  // 接口信息章节已移除（根据需求：PRD 不应包含接口类信息）
+  // 如果 DeerFlow 生成了 backend_configs 内容，仍保留但不强制生成
+  const backendConfigContent = findSectionContent(sourceSections, ["backend_configs"], /接口|API|能力调用|新增\/修改/);
+  if (backendConfigContent && backendConfigContent.trim().length > 0) {
+    const interfaceNumber = `2.${sections.filter((section) => /^2\./.test(section.title)).length + 1}`;
+    add({
+      id: "interface_requirements",
+      title: `${interfaceNumber} 本需求涉及新增/修改的接口`,
+      type: "backend_configs",
+      level: 2,
+      content: backendConfigContent,
+      sourcePaths: ["interfaces"],
+    });
+  }
+
   const acceptanceNumber = `2.${sections.filter((section) => /^2\./.test(section.title)).length + 1}`;
   add({
     id: "acceptance_criteria",

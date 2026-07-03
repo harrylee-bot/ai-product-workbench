@@ -5,8 +5,11 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-import {
-  ProductDesignStateStatus,
+	import {
+	  KnowledgeCandidateSource,
+	  KnowledgeType,
+	  Prisma,
+	  ProductDesignStateStatus,
   ProjectStatus,
   RequirementDocumentStatus,
   UserRole,
@@ -23,6 +26,7 @@ import type {
 } from "./ai-vibe.types";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { QaService } from "./qa.service";
+import type { KnowledgeCandidateDraft } from "../knowledge/knowledge.types";
 
 type RequirementDocumentRecord = {
   id: string;
@@ -54,37 +58,48 @@ export class RequirementDocumentService {
     private readonly qaService?: QaService,
   ) {}
 
-  async saveGeneratedDocument(
-    state: ProductDesignState,
-    draft: RequirementDocumentDraft,
-    options: { userId: string; runId?: string; reason?: string },
-  ) {
-    const document = await this.prisma.requirementDocument.create({
-      data: {
-        projectId: state.projectId,
-        productDesignStateId: state.id,
-        productDesignStateVersion: state.version,
-        title: draft.title,
-        status: RequirementDocumentStatus.ready,
-        sections: toInputJson(draft.sections),
-        assumptions: toInputJson(draft.assumptions),
-        knowledgeRefs: toInputJson(draft.knowledgeRefs),
-        pendingQuestions: toInputJson(draft.pendingQuestions),
-        validationNotes: toInputJson(draft.validationNotes),
-        generatedByRunId: options.runId,
-        createdBy: options.userId,
-        updatedBy: options.userId,
-      },
-    });
+	  async saveGeneratedDocument(
+	    state: ProductDesignState,
+	    draft: RequirementDocumentDraft,
+	    options: { userId: string; runId?: string; reason?: string },
+	  ) {
+	    return this.prisma.$transaction(async (tx) => {
+	      return this.saveGeneratedDocumentInTransaction(tx, state, draft, options);
+	    });
+	  }
 
-    const item = this.toDocumentItem(document as RequirementDocumentRecord);
-    await this.prisma.project.update({
-      where: { id: state.projectId },
-      data: { currentPrdDocumentId: document.id },
-    });
-    await this.createVersion(item, options.userId, options.reason ?? "PRD 生成完成");
-    return item;
-  }
+	  async saveGeneratedDocumentInTransaction(
+	    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+	    state: ProductDesignState,
+	    draft: RequirementDocumentDraft,
+	    options: { userId: string; runId?: string; reason?: string },
+	  ) {
+	    const document = await tx.requirementDocument.create({
+	      data: {
+	        projectId: state.projectId,
+	        productDesignStateId: state.id,
+	        productDesignStateVersion: state.version,
+	        title: draft.title,
+	        status: RequirementDocumentStatus.ready,
+	        sections: toInputJson(draft.sections),
+	        assumptions: toInputJson(draft.assumptions),
+	        knowledgeRefs: toInputJson(draft.knowledgeRefs),
+	        pendingQuestions: toInputJson(draft.pendingQuestions),
+	        validationNotes: toInputJson(draft.validationNotes),
+	        generatedByRunId: options.runId,
+	        createdBy: options.userId,
+	        updatedBy: options.userId,
+	      },
+	    });
+
+	    const item = this.toDocumentItem(document as RequirementDocumentRecord);
+	    await tx.project.update({
+	      where: { id: state.projectId },
+	      data: { currentPrdDocumentId: document.id },
+	    });
+	    await this.createVersion(item, options.userId, options.reason ?? "PRD 生成完成", tx);
+	    return item;
+	  }
 
   async getCurrentForUser(user: AuthenticatedUser, projectId: string) {
     await this.assertProjectAccess(user, projectId, { allowArchived: true });
@@ -234,16 +249,17 @@ export class RequirementDocumentService {
     );
   }
 
-  /**
-   * @deprecated 当前为空实现（返回 { items: [] }）。
-   * PRD 确认后从产物抽取 KnowledgeCandidate 走 pending 审核管线的能力尚未落实，
-   * 避免半成品污染候选库故先置空。落实需设计抽取质量与去重策略，待后续推进。
-   */
-  private async extractKnowledgeCandidatesAfterConfirm(userId: string, document: RequirementDocument) {
-    void userId;
-    void document;
-    return { items: [] };
-  }
+	  private async extractKnowledgeCandidatesAfterConfirm(userId: string, document: RequirementDocument) {
+	    void userId;
+	    if (!this.knowledgeCandidateService) return { items: [] };
+	    const drafts = document.sections
+	      .map((section) => prdSectionToKnowledgeCandidate(section, document))
+	      .filter((draft): draft is KnowledgeCandidateDraft => Boolean(draft));
+	    return this.knowledgeCandidateService.createMany(document.projectId, drafts, {
+	      source: KnowledgeCandidateSource.prd,
+	      sourceRefId: document.id,
+	    });
+	  }
 
   private async confirmDocumentAndSyncState(
     current: RequirementDocumentRecord,
@@ -297,14 +313,20 @@ export class RequirementDocumentService {
     };
   }
 
-  private async createVersion(document: RequirementDocument, createdBy: string, reason: string) {
-    const latest = await this.prisma.requirementDocumentVersion.findFirst({
-      where: { documentId: document.id },
-      orderBy: { version: "desc" },
-    });
-    return this.prisma.requirementDocumentVersion.create({
-      data: {
-        documentId: document.id,
+	  private async createVersion(
+	    document: RequirementDocument,
+	    createdBy: string,
+	    reason: string,
+	    tx?: Prisma.TransactionClient,
+	  ) {
+	    const client = tx ?? this.prisma;
+	    const latest = await client.requirementDocumentVersion.findFirst({
+	      where: { documentId: document.id },
+	      orderBy: { version: "desc" },
+	    });
+	    return client.requirementDocumentVersion.create({
+	      data: {
+	        documentId: document.id,
         projectId: document.projectId,
         version: (latest?.version ?? 0) + 1,
         snapshot: toInputJson(document),
@@ -510,6 +532,55 @@ function manualSectionId(title: string, index: number, usedIds: Set<string>) {
     counter += 1;
   }
   return candidate;
+}
+
+function prdSectionToKnowledgeCandidate(
+  section: RequirementDocSection,
+  document: RequirementDocument,
+): KnowledgeCandidateDraft | null {
+  if (isTemplateOnlySection(section)) return null;
+  const content = sectionKnowledgeContent(section);
+  if (content.length < 20) return null;
+  return {
+    title: `${document.title} - ${section.title}`.slice(0, 120),
+    content,
+    summary: content.slice(0, 180),
+    suggestedType: knowledgeTypeForPrdSection(section),
+    suggestedTags: ["prd", section.type, ...section.sourcePaths.slice(0, 3)],
+    confidence: 0.78,
+    sourcePath: `sections.${section.id}`,
+    reason: "从用户确认后的 PRD 章节抽取，进入知识候选审核。",
+  };
+}
+
+function isTemplateOnlySection(section: RequirementDocSection) {
+  return [
+    "version_history",
+    "manual_toc",
+    "knowledge_refs",
+    "pending_questions",
+  ].includes(section.id) || section.type === "knowledge_refs" || section.type === "pending_questions";
+}
+
+function sectionKnowledgeContent(section: RequirementDocSection) {
+  const blocks = section.blocks
+    ?.map((block) => [block.title, block.content].filter(Boolean).join("\n"))
+    .filter(Boolean)
+    .join("\n\n");
+  return [`# ${section.title}`, section.content, blocks]
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function knowledgeTypeForPrdSection(section: RequirementDocSection) {
+  if (["business_rules", "state_rules", "exception_scenarios", "acceptance_criteria"].includes(section.type)) {
+    return KnowledgeType.strong_rule;
+  }
+  if (section.type === "page_requirements") return KnowledgeType.page_inventory;
+  if (section.type === "frontend_rules" || section.type === "backend_configs") return KnowledgeType.default_rule;
+  return KnowledgeType.business_concept;
 }
 
 function applySectionContentEdit(

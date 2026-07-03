@@ -84,22 +84,30 @@ export class FileController {
   }
 
   @Get("files/:fileId/visual-contexts/:contextId")
-  async getVisualContextFile(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("fileId") fileId: string,
-    @Param("contextId") contextId: string,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const file = await this.fileAssetService.getVisualContextFile(user, fileId, contextId);
-    response.setHeader("Content-Type", file.mimeType);
-    response.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(file.fileName)}"`);
-    return new StreamableFile(createReadStream(file.filePath));
-  }
+	  async getVisualContextFile(
+	    @CurrentUser() user: AuthenticatedUser,
+	    @Param("fileId") fileId: string,
+	    @Param("contextId") contextId: string,
+	    @Res({ passthrough: true }) response: Response,
+	  ) {
+	    const file = await this.fileAssetService.getVisualContextFile(user, fileId, contextId);
+	    const inlineSafe = isSafeInlineVisualContextMimeType(file.mimeType);
+	    response.setHeader("Content-Type", inlineSafe ? file.mimeType : "application/octet-stream");
+	    response.setHeader("X-Content-Type-Options", "nosniff");
+	    if (!inlineSafe) {
+	      response.setHeader("Content-Security-Policy", "sandbox; default-src 'none'");
+	    }
+	    response.setHeader(
+	      "Content-Disposition",
+	      `${inlineSafe ? "inline" : "attachment"}; filename="${encodeURIComponent(file.fileName)}"`,
+	    );
+	    return new StreamableFile(createReadStream(file.filePath));
+	  }
 
-  @Post("files/:fileId/reparse")
-  reparseFile(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
-    return this.fileAssetService.reparseFile(user, fileId);
-  }
+	  @Post("files/:fileId/reparse")
+	  reparseFile(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
+	    return this.fileAssetService.reparseFile(user, fileId);
+	  }
 
   @Get("files/:fileId/prototype-conversion")
   getPrototypeConversion(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
@@ -113,7 +121,15 @@ export class FileController {
   }
 
   @Delete("files/:fileId")
-  deleteFile(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
-    return this.fileAssetService.deleteFile(user, fileId);
-  }
-}
+	  deleteFile(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
+	    return this.fileAssetService.deleteFile(user, fileId);
+	  }
+	}
+
+	function isSafeInlineVisualContextMimeType(mimeType: string) {
+	  const normalized = mimeType.toLowerCase().split(";")[0]?.trim();
+	  if (!normalized) return false;
+	  if (normalized === "image/svg+xml") return false;
+	  if (normalized.startsWith("image/")) return true;
+	  return normalized === "application/pdf" || normalized === "text/plain";
+	}

@@ -5,14 +5,24 @@ import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "../src/ai/de
 describe("FinalActionApplierService", () => {
   const stateService = {
     createDraft: vi.fn(),
+    createDraftInTransaction: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
+    attachGeneratedArtifactsInTransaction: vi.fn(),
     getCurrentState: vi.fn(),
+    getCurrentStateInTransaction: vi.fn(),
   };
-  const documentService = { saveGeneratedDocument: vi.fn() };
-  const prototypeService = { saveGeneratedPrototype: vi.fn() };
+  const documentService = {
+    saveGeneratedDocument: vi.fn(),
+    saveGeneratedDocumentInTransaction: vi.fn(),
+  };
+  const prototypeService = {
+    saveGeneratedPrototype: vi.fn(),
+    saveGeneratedPrototypeInTransaction: vi.fn(),
+  };
   const prisma = {
     project: { findUnique: vi.fn() },
     requirementDocument: { findMany: vi.fn() },
+    $transaction: vi.fn((callback) => callback(prisma)),
   };
   const service = new FinalActionApplierService(
     prisma as never,
@@ -25,15 +35,16 @@ describe("FinalActionApplierService", () => {
     vi.clearAllMocks();
     prisma.project.findUnique.mockResolvedValue({ currentPrdDocumentId: null });
     prisma.requirementDocument.findMany.mockResolvedValue([]);
+    prisma.$transaction.mockImplementation((callback) => callback(prisma));
   });
 
   it("bridges DeerFlow review_prd final actions into ProductDesignState and PRD persistence", async () => {
     const state = baseState({ status: "design_ready" });
     const document = baseDocument();
     const updatedState = { ...state, status: "doc_ready", prdDocument: document };
-    stateService.createDraft.mockResolvedValue(state);
-    documentService.saveGeneratedDocument.mockResolvedValue(document);
-    stateService.attachGeneratedArtifacts.mockResolvedValue(updatedState);
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue(updatedState);
 
     const result = await service.apply({
       projectId: "project-1",
@@ -72,7 +83,8 @@ describe("FinalActionApplierService", () => {
       artifacts: [],
     });
 
-    expect(stateService.createDraft).toHaveBeenCalledWith(
+    expect(stateService.createDraftInTransaction).toHaveBeenCalledWith(
+      prisma,
       "project-1",
       expect.objectContaining({
         title: "签到活动",
@@ -86,7 +98,8 @@ describe("FinalActionApplierService", () => {
       }),
       expect.objectContaining({ userId: "user-1", runId: "run-1" }),
     );
-    expect(documentService.saveGeneratedDocument).toHaveBeenCalledWith(
+    expect(documentService.saveGeneratedDocumentInTransaction).toHaveBeenCalledWith(
+      prisma,
       state,
       expect.objectContaining({
         title: "签到活动需求说明书",
@@ -101,7 +114,7 @@ describe("FinalActionApplierService", () => {
       }),
       expect.objectContaining({ userId: "user-1", runId: "run-1" }),
     );
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
+    expect(stateService.attachGeneratedArtifactsInTransaction).toHaveBeenCalledWith(prisma, "state-1", expect.objectContaining({
       prdDocument: document,
       status: "doc_ready",
       runId: "run-1",
@@ -112,9 +125,9 @@ describe("FinalActionApplierService", () => {
   it("builds PRD sections from DeerFlow markdown artifacts when structured sections are absent", async () => {
     const state = baseState();
     const document = baseDocument();
-    stateService.createDraft.mockResolvedValue(state);
-    documentService.saveGeneratedDocument.mockResolvedValue(document);
-    stateService.attachGeneratedArtifacts.mockResolvedValue({ ...state, prdDocument: document });
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({ ...state, prdDocument: document });
 
     await service.apply({
       projectId: "project-1",
@@ -137,7 +150,8 @@ describe("FinalActionApplierService", () => {
       ],
     });
 
-    expect(documentService.saveGeneratedDocument).toHaveBeenCalledWith(
+    expect(documentService.saveGeneratedDocumentInTransaction).toHaveBeenCalledWith(
+      prisma,
       state,
       expect.objectContaining({
         title: "签到活动需求说明书",
@@ -155,9 +169,9 @@ describe("FinalActionApplierService", () => {
   it("builds PRD sections from assistant markdown when DeerFlow only returns a summary final action", async () => {
     const state = baseState();
     const document = baseDocument();
-    stateService.createDraft.mockResolvedValue(state);
-    documentService.saveGeneratedDocument.mockResolvedValue(document);
-    stateService.attachGeneratedArtifacts.mockResolvedValue({ ...state, prdDocument: document });
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({ ...state, prdDocument: document });
 
     await service.apply({
       projectId: "project-1",
@@ -183,7 +197,8 @@ describe("FinalActionApplierService", () => {
       ].join("\n"),
     });
 
-    expect(documentService.saveGeneratedDocument).toHaveBeenCalledWith(
+    expect(documentService.saveGeneratedDocumentInTransaction).toHaveBeenCalledWith(
+      prisma,
       state,
       expect.objectContaining({
         title: "签到活动需求说明书",
@@ -203,9 +218,9 @@ describe("FinalActionApplierService", () => {
     const prototypeSpec = { id: "spec-1", pages: [{ id: "page_home", name: "签到页" }] };
     const artifact = { id: "artifact-1", htmlContent: "<main>签到页</main>" };
     const updatedState = { ...state, status: "prototype_ready", prototypeSpec };
-    stateService.getCurrentState.mockResolvedValue(state);
-    prototypeService.saveGeneratedPrototype.mockResolvedValue({ prototypeSpec, artifact });
-    stateService.attachGeneratedArtifacts.mockResolvedValue(updatedState);
+    stateService.getCurrentStateInTransaction.mockResolvedValue(state);
+    prototypeService.saveGeneratedPrototypeInTransaction.mockResolvedValue({ prototypeSpec, artifact, hasContent: true });
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue(updatedState);
 
     const result = await service.apply({
       projectId: "project-1",
@@ -226,7 +241,8 @@ describe("FinalActionApplierService", () => {
       artifacts: [prototypeHtmlArtifact()],
     });
 
-    expect(prototypeService.saveGeneratedPrototype).toHaveBeenCalledWith(
+    expect(prototypeService.saveGeneratedPrototypeInTransaction).toHaveBeenCalledWith(
+      prisma,
       state,
       expect.objectContaining({
         projectId: "project-1",
@@ -244,8 +260,10 @@ describe("FinalActionApplierService", () => {
         targetDevice: "desktop",
       }),
       expect.objectContaining({ userId: "user-1", runId: "run-2" }),
+      expect.any(String), // htmlContent
+      expect.any(Boolean), // hasContent
     );
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
+    expect(stateService.attachGeneratedArtifactsInTransaction).toHaveBeenCalledWith(prisma, "state-1", expect.objectContaining({
       prototypeSpec,
       status: "prototype_ready",
       runId: "run-2",
@@ -254,7 +272,7 @@ describe("FinalActionApplierService", () => {
   });
 
   it("fails prototype bridge when no ProductDesignState exists", async () => {
-    stateService.getCurrentState.mockResolvedValue(null);
+    stateService.getCurrentStateInTransaction.mockResolvedValue(null);
 
     await expect(service.apply({
       projectId: "project-1",
@@ -264,7 +282,7 @@ describe("FinalActionApplierService", () => {
       artifacts: [prototypeHtmlArtifact()],
     })).rejects.toThrow("PROTOTYPE_STATE_NOT_FOUND");
 
-    expect(prototypeService.saveGeneratedPrototype).not.toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototypeInTransaction).not.toHaveBeenCalled();
   });
 });
 

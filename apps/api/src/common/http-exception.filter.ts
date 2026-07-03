@@ -1,18 +1,26 @@
-import {
-  ArgumentsHost,
-  Catch,
-  ExceptionFilter,
-  HttpException,
-  HttpStatus,
-} from "@nestjs/common";
-import type { Response } from "express";
+	import {
+	  ArgumentsHost,
+	  Catch,
+	  ExceptionFilter,
+	  HttpException,
+	  HttpStatus,
+	  Logger,
+	} from "@nestjs/common";
+	import type { Request, Response } from "express";
 
-@Catch()
-export class HttpExceptionFilter implements ExceptionFilter {
-  catch(exception: unknown, host: ArgumentsHost) {
-    const response = host.switchToHttp().getResponse<Response>();
+	@Catch()
+	export class HttpExceptionFilter implements ExceptionFilter {
+	  private readonly logger = new Logger(HttpExceptionFilter.name);
 
-    if (exception instanceof HttpException) {
+	  catch(exception: unknown, host: ArgumentsHost) {
+	    const http = host.switchToHttp();
+	    const response = http.getResponse<Response>();
+	    if (response.headersSent) {
+	      if (!response.writableEnded) response.end();
+	      return;
+	    }
+
+	    if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
       const message =
@@ -21,11 +29,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
           : this.readMessage(exceptionResponse);
 
       response.status(status).json({ message });
-      return;
-    }
+	      return;
+	    }
 
-    response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-      message: "服务器内部错误，请稍后重试",
+	    const request = http.getRequest<Request>();
+	    const method = request?.method ?? "UNKNOWN";
+	    const url = request?.originalUrl ?? request?.url ?? "unknown-url";
+	    const message = exception instanceof Error ? exception.message : String(exception);
+	    const stack = exception instanceof Error ? exception.stack : undefined;
+	    this.logger.error(`Unhandled exception ${method} ${url}: ${message}`, stack);
+
+	    response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+	      message: "服务器内部错误，请稍后重试",
     });
   }
 

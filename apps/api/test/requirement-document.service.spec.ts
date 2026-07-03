@@ -1,4 +1,4 @@
-import { ProjectStatus, RequirementDocumentStatus, UserRole, UserStatus } from "@prisma/client";
+import { KnowledgeCandidateSource, ProjectStatus, RequirementDocumentStatus, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProductDesignState, RequirementDocumentDraft } from "../src/ai/ai-vibe.types";
 import { RequirementDocumentService } from "../src/ai/requirement-document.service";
@@ -16,27 +16,31 @@ describe("PRD requirement document module", () => {
       update: vi.fn(),
       findUnique: vi.fn(),
     },
-    requirementDocumentVersion: {
-      create: vi.fn(),
-      findFirst: vi.fn(),
-      findMany: vi.fn(),
-    },
-  };
+	    requirementDocumentVersion: {
+	      create: vi.fn(),
+	      findFirst: vi.fn(),
+	      findMany: vi.fn(),
+	    },
+	    $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+	  };
   const stateService = {
     getCurrentState: vi.fn(),
     getStateByIdForProject: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
     syncRequirementDocumentEdit: vi.fn(),
   };
-  const qaService = {
-    assertGateAllows: vi.fn(),
-  };
-  const service = new RequirementDocumentService(
-    prisma as never,
-    stateService as never,
-    undefined,
-    qaService as never,
-  );
+	  const qaService = {
+	    assertGateAllows: vi.fn(),
+	  };
+	  const knowledgeCandidateService = {
+	    createMany: vi.fn(),
+	  };
+	  const service = new RequirementDocumentService(
+	    prisma as never,
+	    stateService as never,
+	    knowledgeCandidateService as never,
+	    qaService as never,
+	  );
   const user = {
     id: "user-1",
     username: "zhangsan",
@@ -62,14 +66,15 @@ describe("PRD requirement document module", () => {
       status: input.status,
       prdDocument: input.prdDocument,
     }));
-    stateService.syncRequirementDocumentEdit.mockImplementation(async (input) => ({
-      ...baseState(),
-      version: 4,
-      status: "doc_ready",
-      prdDocument: input.document,
-      prototypeSpec: undefined,
-    }));
-  });
+	    stateService.syncRequirementDocumentEdit.mockImplementation(async (input) => ({
+	      ...baseState(),
+	      version: 4,
+	      status: "doc_ready",
+	      prdDocument: input.document,
+	      prototypeSpec: undefined,
+	    }));
+	    knowledgeCandidateService.createMany.mockResolvedValue({ items: [] });
+	  });
 
   it("saves generated documents, creates a version, and updates the project pointer", async () => {
     const state = baseState();
@@ -246,7 +251,7 @@ describe("PRD requirement document module", () => {
     }));
   });
 
-  it("confirms a PRD for the prototype gate and syncs doc_confirmed into ProductDesignState", async () => {
+	  it("confirms a PRD for the prototype gate and syncs doc_confirmed into ProductDesignState", async () => {
     const draft = prdDraft(baseState());
     prisma.requirementDocument.findUnique.mockResolvedValue({
       ...documentRecord({
@@ -254,9 +259,10 @@ describe("PRD requirement document module", () => {
         ...draft,
       }),
       project: baseProject(),
-    });
-    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
-      documentRecord({
+	  });
+
+	    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
+	      documentRecord({
         id: "prd-1",
         ...draft,
         status: data.status,
@@ -271,8 +277,48 @@ describe("PRD requirement document module", () => {
     expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
       prdDocument: expect.objectContaining({ id: "prd-1", status: "confirmed" }),
       status: "doc_confirmed",
-    }));
-  });
+	    }));
+	  });
+
+	  it("extracts pending knowledge candidates after PRD confirmation", async () => {
+	    const draft = prdDraft(baseState());
+	    prisma.requirementDocument.findUnique.mockResolvedValue({
+	      ...documentRecord({
+	        id: "prd-1",
+	        ...draft,
+	      }),
+	      project: baseProject(),
+	    });
+	    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
+	      documentRecord({
+	        id: "prd-1",
+	        ...draft,
+	        status: data.status,
+	        updatedBy: data.updatedBy,
+	      }),
+	    );
+	    stateService.getStateByIdForProject.mockResolvedValue(baseState({ status: "doc_ready" }));
+	    qaService.assertGateAllows.mockResolvedValue({ allowPersistKnowledge: true });
+	    knowledgeCandidateService.createMany.mockResolvedValue({
+	      items: [{ id: "candidate-1", title: "业务目标候选" }],
+	    });
+
+	    const result = await service.confirmForUser(user, "prd-1", "确认 PRD");
+
+	    expect(knowledgeCandidateService.createMany).toHaveBeenCalledWith(
+	      "project-1",
+	      expect.arrayContaining([
+	        expect.objectContaining({
+	          title: expect.stringContaining("业务目标"),
+	          sourcePath: "sections.business_goal",
+	        }),
+	      ]),
+	      { source: KnowledgeCandidateSource.prd, sourceRefId: "prd-1" },
+	    );
+	    expect(result.knowledgeCandidates.items).toEqual([
+	      expect.objectContaining({ id: "candidate-1" }),
+	    ]);
+	  });
 
   it("blocks PRD confirmation when QA gate does not allow artifact confirmation", async () => {
     qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));

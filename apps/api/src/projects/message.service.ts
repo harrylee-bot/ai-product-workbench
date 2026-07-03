@@ -117,12 +117,12 @@ export class MessageService {
       throw new ForbiddenException("无权访问该会话");
     }
 
-    const [messages, latestRun] = await Promise.all([
-      this.prisma.message.findMany({
-        where: { conversationId },
-        orderBy: { createdAt: "asc" },
-        take: 100,
-      }),
+	    const [messages, latestRun] = await Promise.all([
+	      this.prisma.message.findMany({
+	        where: { conversationId },
+	        orderBy: { createdAt: "desc" },
+	        take: 100,
+	      }),
       this.prisma.runtimeRunLog.findFirst({
         where: { conversationId },
         orderBy: { startedAt: "desc" },
@@ -135,9 +135,10 @@ export class MessageService {
           endedAt: true,
         },
       }),
-    ]);
-    return {
-      items: messages.map((message) => this.toMessageItem(message)),
+	    ]);
+	    const chronologicalMessages = [...messages].reverse();
+	    return {
+	      items: chronologicalMessages.map((message) => this.toMessageItem(message)),
       latestRun: latestRun
         ? {
             runId: latestRun.id,

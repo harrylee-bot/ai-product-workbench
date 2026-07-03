@@ -5,7 +5,10 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-import {
+	import {
+	  KnowledgeCandidateSource,
+	  KnowledgeType,
+	  Prisma,
   ProductDesignStateStatus,
   ProjectStatus,
   PrototypeArtifactStatus,
@@ -29,6 +32,7 @@ import type {
 } from "./ai-vibe.types";
 import { ProductDesignStateService } from "./product-design-state.service";
 import { QaService } from "./qa.service";
+import type { KnowledgeCandidateDraft } from "../knowledge/knowledge.types";
 
 type PrototypeSpecRecord = {
   id: string;
@@ -88,7 +92,7 @@ export class PrototypeService {
     private readonly qaService?: QaService,
   ) {}
 
-  async saveGeneratedPrototype(
+	  async saveGeneratedPrototype(
     state: ProductDesignState,
     prototypeSpec: PrototypeSpec,
     draft: PrototypeArtifactDraft,
@@ -100,7 +104,29 @@ export class PrototypeService {
     const htmlContent = sanitizePrototypeHtml(rawHtml);
     const hasContent = htmlContent.trim().length > 0;
 
-    const specRecord = await this.prisma.prototypeSpecRecord.create({
+    const result = await this.prisma.$transaction(async (tx) => {
+      return this.saveGeneratedPrototypeInTransaction(tx, state, prototypeSpec, draft, options, htmlContent, hasContent);
+    });
+    if (!result.hasContent) {
+      throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
+    }
+    return {
+      prototypeSpec: result.prototypeSpec,
+      artifact: result.artifact,
+      version: result.version,
+    };
+  }
+
+  async saveGeneratedPrototypeInTransaction(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+    state: ProductDesignState,
+    prototypeSpec: PrototypeSpec,
+    draft: PrototypeArtifactDraft,
+    options: { userId: string; runId?: string; reason?: string },
+    htmlContent: string,
+    hasContent: boolean,
+  ) {
+    const specRecord = await tx.prototypeSpecRecord.create({
       data: {
         id: prototypeSpec.id,
         projectId: state.projectId,
@@ -118,7 +144,7 @@ export class PrototypeService {
       },
     });
 
-    const artifactRecord = await this.prisma.prototypeArtifact.create({
+    const artifactRecord = await tx.prototypeArtifact.create({
       data: {
         projectId: state.projectId,
         prototypeSpecId: specRecord.id,
@@ -141,11 +167,11 @@ export class PrototypeService {
     const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
     const artifact = this.toArtifactItem(artifactRecord as PrototypeArtifactRecord);
     if (!hasContent) {
-      await this.createVersion(spec, artifact, options.userId, "原型生成失败：净化后无 HTML 内容");
-      throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
+      const version = await this.createVersion(spec, artifact, options.userId, "原型生成失败：净化后无 HTML 内容", tx);
+      return { prototypeSpec: spec, artifact, version, hasContent };
     }
 
-    await this.prisma.project.update({
+    await tx.project.update({
       where: { id: state.projectId },
       data: { currentPrototypeArtifactId: artifact.id },
     });
@@ -154,8 +180,9 @@ export class PrototypeService {
       artifact,
       options.userId,
       options.reason ?? "HTML 原型生成完成",
+      tx,
     );
-    return { prototypeSpec: spec, artifact, version };
+    return { prototypeSpec: spec, artifact, version, hasContent };
   }
 
   async getCurrentForUser(user: AuthenticatedUser, projectId: string) {
@@ -291,29 +318,38 @@ export class PrototypeService {
     return { artifact, version, productDesignState, knowledgeCandidates, qaGate };
   }
 
-  private async extractKnowledgeCandidatesAfterConfirm(
-    userId: string,
-    spec: PrototypeSpec,
-    artifact: PrototypeArtifact,
-  ) {
-    void userId;
-    void spec;
-    void artifact;
-    return { items: [] };
-  }
+	  private async extractKnowledgeCandidatesAfterConfirm(
+	    userId: string,
+	    spec: PrototypeSpec,
+	    artifact: PrototypeArtifact,
+	  ) {
+	    void userId;
+	    if (!this.knowledgeCandidateService) return { items: [] };
+	    return this.knowledgeCandidateService.createMany(
+	      artifact.projectId,
+	      prototypeToKnowledgeCandidates(spec, artifact),
+	      {
+	        source: KnowledgeCandidateSource.prototype,
+	        sourceRefId: artifact.id,
+	        runId: artifact.generatedByRunId,
+	      },
+	    );
+	  }
 
-  private async createVersion(
-    prototypeSpec: PrototypeSpec,
-    artifact: PrototypeArtifact,
-    createdBy: string,
-    reason: string,
-  ): Promise<PrototypeVersion> {
-    const latest = await this.prisma.prototypeVersion.findFirst({
-      where: { artifactId: artifact.id },
-      orderBy: { version: "desc" },
-    });
-    const version = await this.prisma.prototypeVersion.create({
-      data: {
+	  private async createVersion(
+	    prototypeSpec: PrototypeSpec,
+	    artifact: PrototypeArtifact,
+	    createdBy: string,
+	    reason: string,
+	    tx?: Prisma.TransactionClient,
+	  ): Promise<PrototypeVersion> {
+	    const client = tx ?? this.prisma;
+	    const latest = await client.prototypeVersion.findFirst({
+	      where: { artifactId: artifact.id },
+	      orderBy: { version: "desc" },
+	    });
+	    const version = await client.prototypeVersion.create({
+	      data: {
         projectId: artifact.projectId,
         artifactId: artifact.id,
         version: (latest?.version ?? 0) + 1,
@@ -518,6 +554,78 @@ function prototypeComponentNode(component: PrototypeComponentSpec): PrototypeSta
     layout: {},
     children: (component.children ?? []).map(prototypeComponentNode),
   };
+}
+
+function prototypeToKnowledgeCandidates(
+  spec: PrototypeSpec,
+  artifact: PrototypeArtifact,
+): KnowledgeCandidateDraft[] {
+  const drafts: KnowledgeCandidateDraft[] = [];
+  const overview = [
+    `# ${spec.title}`,
+    `目标设备：${spec.targetDevice}`,
+    `页面数量：${spec.pages.length}`,
+    spec.pages.map((page) => `- ${page.name}${page.route ? `（${page.route}）` : ""}`).join("\n"),
+  ].filter(Boolean).join("\n\n");
+  if (overview.length >= 20) {
+    drafts.push({
+      title: `${spec.title} 原型方案`,
+      content: overview,
+      summary: `${spec.title} 的原型结构与页面清单。`,
+      suggestedType: KnowledgeType.prototype_project,
+      suggestedTags: ["prototype", "prototype_project", spec.targetDevice],
+      confidence: 0.78,
+      sourcePath: "prototype",
+      reason: "从用户确认后的原型产物抽取整体原型知识候选。",
+    });
+  }
+
+  for (const page of spec.pages) {
+    const content = prototypePageKnowledgeContent(page);
+    if (content.length < 20) continue;
+    drafts.push({
+      title: `${spec.title} - ${page.name}`,
+      content,
+      summary: page.description ?? `${page.name} 页面原型结构。`,
+      suggestedType: KnowledgeType.prototype_page,
+      suggestedTags: ["prototype", "prototype_page", page.device, page.layout],
+      confidence: 0.82,
+      sourcePath: `pages.${page.id}`,
+      reason: "从用户确认后的原型页面抽取页面级知识候选。",
+    });
+  }
+
+  if (!drafts.length && artifact.htmlContent) {
+    drafts.push({
+      title: `${artifact.title} 原型 HTML`,
+      content: artifact.htmlContent.slice(0, 4000),
+      summary: `${artifact.title} 的 HTML 原型快照。`,
+      suggestedType: KnowledgeType.prototype_snapshot,
+      suggestedTags: ["prototype", "html"],
+      confidence: 0.6,
+      sourcePath: "htmlContent",
+      reason: "从用户确认后的原型 HTML 抽取快照候选。",
+    });
+  }
+  return drafts;
+}
+
+function prototypePageKnowledgeContent(page: PrototypePageSpec) {
+  const components = page.components
+    .map((component) => `- ${component.name}：${component.description ?? component.content ?? component.type}`)
+    .join("\n");
+  const states = page.states
+    ?.map((state) => `- ${state.name}：${state.description}`)
+    .join("\n");
+  return [
+    `# ${page.name}`,
+    page.route ? `路由：${page.route}` : "",
+    `设备：${page.device}`,
+    `布局：${page.layout}`,
+    page.description ?? "",
+    components ? `## 组件\n${components}` : "",
+    states ? `## 状态\n${states}` : "",
+  ].filter(Boolean).join("\n\n").trim();
 }
 
 /**

@@ -16,6 +16,7 @@ import { ProjectModule } from "./modules/project/project.module";
 import { ProductModule } from "./products/product.module";
 import { SystemModule } from "./modules/system/system.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { CommentModule } from "./comments/comment.module";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     ConstraintModule,
     AiModule,
     SystemModule,
+    CommentModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

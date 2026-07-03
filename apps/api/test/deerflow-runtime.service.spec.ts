@@ -617,7 +617,7 @@ describe("DeerFlowRuntimeService", () => {
     }
   });
 
-  it("replaces the bound thread and retries once when DeerFlow reports an active run", async () => {
+	  it("replaces the bound thread and retries once when DeerFlow reports an active run", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -689,12 +689,46 @@ describe("DeerFlowRuntimeService", () => {
       }),
     });
     expect(result.threadId).toBe("deerflow-thread-2");
-    expect(result.finalAction).toEqual(expect.objectContaining({
-      type: "answer",
-      message: "可以继续。",
-    }));
-  });
-});
+	    expect(result.finalAction).toEqual(expect.objectContaining({
+	      type: "answer",
+	      message: "可以继续。",
+	    }));
+	  });
+
+	  it("fails a DeerFlow stream that stays idle after headers", async () => {
+	    process.env.DEERFLOW_IDLE_TIMEOUT_MS = "5";
+	    prisma.deerFlowThreadBinding.findUnique.mockResolvedValueOnce({
+	      projectId: "project-1",
+	      conversationId: "conversation-1",
+	      userId: "user-1",
+	      deerFlowThreadId: "deerflow-thread-existing",
+	    });
+	    const encoder = new TextEncoder();
+	    const reader = {
+	      read: vi.fn()
+	        .mockResolvedValueOnce({ value: encoder.encode(": stream-open\n\n"), done: false })
+	        .mockImplementationOnce(() => new Promise(() => undefined)),
+	      cancel: vi.fn().mockResolvedValue(undefined),
+	    };
+	    fetchMock.mockResolvedValueOnce({
+	      ok: true,
+	      body: {
+	        getReader() {
+	          return reader;
+	        },
+	      },
+	    });
+
+	    const service = new DeerFlowRuntimeService(prisma as never);
+	    await expect(service.runTurn({
+	      runId: "run-1",
+	      projectId: "project-1",
+	      conversationId: "conversation-1",
+	      userId: "user-1",
+	      message: "继续",
+	    })).rejects.toThrow("DEERFLOW_STREAM_IDLE_TIMEOUT");
+	  });
+	});
 
 function jsonResponse(data: unknown) {
   return new Response(JSON.stringify(data), {

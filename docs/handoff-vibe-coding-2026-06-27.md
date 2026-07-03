@@ -8,7 +8,7 @@
 ## 当前状态
 
 - 当前分支本地相对 `origin/feat/vibe-coding-v1` 领先 9 个提交。
-- 线上已经部署到 `8.130.160.177`，Workbench Web / API / DeerFlow Gateway 均健康。
+- 线上已经部署到 `<redacted-production-host>`，Workbench Web / API / DeerFlow Gateway 均健康。
 - 本地工作区仍有用户未提交改动，主要在 `knowledge-vault/` 和 `apps/api/src/knowledge/obsidian-vault.service.ts`。这些不属于本轮改造，不要 reset、revert 或覆盖。
 - 本轮最后一个提交是 `519fe35 feat: show agent activity in chat`。
 
@@ -55,7 +55,7 @@
 
 DeerFlow Gateway 已部署为独立 runtime：
 
-- 服务器：`8.130.160.177`
+- 服务器：`<redacted-production-host>`
 - DeerFlow release：`/opt/deer-flow.release-20260626183352`
 - 容器：`deer-flow-gateway`
 - 端口：`2026:8001`
@@ -130,10 +130,10 @@ API 侧关键环境变量：
 最近一次 web 部署方式：
 
 ```bash
-rsync -av apps/web/src/components/chat-panel.tsx 8.130.160.177:/opt/ai-product-workbench/apps/web/src/components/chat-panel.tsx
-rsync -av apps/web/src/app/workspace/phase1-workspace-client.tsx 8.130.160.177:/opt/ai-product-workbench/apps/web/src/app/workspace/phase1-workspace-client.tsx
-ssh 8.130.160.177 'cd /opt/ai-product-workbench && docker compose --env-file .env -f deploy/docker-compose.yml build web'
-ssh 8.130.160.177 'cd /opt/ai-product-workbench && docker rm -f ai-product-workbench-web && docker compose --env-file .env -f deploy/docker-compose.yml up -d --no-deps web'
+rsync -av apps/web/src/components/chat-panel.tsx <redacted-production-host>:/opt/ai-product-workbench/apps/web/src/components/chat-panel.tsx
+rsync -av apps/web/src/app/workspace/phase1-workspace-client.tsx <redacted-production-host>:/opt/ai-product-workbench/apps/web/src/app/workspace/phase1-workspace-client.tsx
+ssh <redacted-production-host> 'cd /opt/ai-product-workbench && docker compose --env-file .env -f deploy/docker-compose.yml build web'
+ssh <redacted-production-host> 'cd /opt/ai-product-workbench && docker rm -f ai-product-workbench-web && docker compose --env-file .env -f deploy/docker-compose.yml up -d --no-deps web'
 ```
 
 注意：线上旧 `ai-product-workbench-web` 容器最初没有 compose label，直接 `compose up -d web` 会遇到 container name conflict。处理方式是只移除旧 web 容器，再用新 compose 创建同名 web 容器，不动 API / DB / DeerFlow。

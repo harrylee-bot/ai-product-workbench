@@ -465,10 +465,9 @@ export async function getDocumentsById(
     );
     const artifact = data.artifact;
     const title = artifact.title || "原型";
-    const fallbackContent = artifact.htmlContent ?? artifact.html ?? "";
     // 优先用后端 sanitized 的预览 HTML（sec-1：读取时再净化）。
-    // preview 端点返回 text/html，需绕过 nestFetch 的 JSON 解析；未就绪时回退原始 htmlContent。
-    let content = fallbackContent;
+    // preview 端点返回 text/html，需绕过 nestFetch 的 JSON 解析；失败时不再回退未净化的原始 HTML。
+    let content = prototypePreviewUnavailableHtml(title);
     try {
       const previewRes = await fetch(
         `${getApiBase()}/prototype-artifacts/${id}/preview`,
@@ -478,7 +477,7 @@ export async function getDocumentsById(
         content = await previewRes.text();
       }
     } catch {
-      // 预览端点不可用，回退到原始 htmlContent（iframe sandbox 仍隔离）。
+      // 保持安全占位内容。
     }
     return [
       {
@@ -521,6 +520,48 @@ export async function getDocumentsById(
   } catch {
     return [currentDocument];
   }
+}
+
+function prototypePreviewUnavailableHtml(title: string) {
+  return [
+    "<!doctype html>",
+    '<html lang="zh-CN">',
+    "<head>",
+    '<meta charset="utf-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    `<title>${escapeHtml(title)}</title>`,
+    "<style>",
+    "html,body{height:100%;margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;background:#f9fafb;}",
+    "body{display:grid;place-items:center;padding:24px;box-sizing:border-box;}",
+    ".empty{max-width:360px;text-align:center;line-height:1.6;}",
+    ".title{font-weight:600;margin-bottom:8px;}",
+    "</style>",
+    "</head>",
+    "<body>",
+    '<main class="empty">',
+    `<div class="title">${escapeHtml(title)}</div>`,
+    "<div>原型预览暂不可用，请稍后重试。</div>",
+    "</main>",
+    "</body>",
+    "</html>",
+  ].join("");
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
 }
 
 async function getDocumentVersions(

@@ -44,6 +44,8 @@ export class AichatStreamService {
   private readonly logger = new Logger(AichatStreamService.name);
   /** runId → AbortController，用于 stop by runId。 */
   private readonly activeRunControllers = new Map<string, AbortController>();
+  /** runId → conversationId，用于 stop by runId 前做归属校验。 */
+  private readonly activeRunConversationIds = new Map<string, string>();
   /** conversationId → AbortController，用于 stop by conversationId（取最近一次）。 */
   private readonly activeConversationControllers = new Map<string, AbortController>();
 
@@ -104,6 +106,7 @@ export class AichatStreamService {
         });
         const controller = new AbortController();
         this.activeRunControllers.set(run.id, controller);
+        this.activeRunConversationIds.set(run.id, conversationId);
         this.activeConversationControllers.set(conversationId, controller);
         let clientClosed = false;
         const markClientClosed = () => {
@@ -505,6 +508,7 @@ export class AichatStreamService {
         } finally {
           res.off("close", markClientClosed);
           this.activeRunControllers.delete(run.id);
+          this.activeRunConversationIds.delete(run.id);
           // 仅当仍是本次 controller 时才清除会话映射（避免覆盖后续轮次）
           if (this.activeConversationControllers.get(conversationId) === controller) {
             this.activeConversationControllers.delete(conversationId);
@@ -533,6 +537,13 @@ export class AichatStreamService {
     // 1) 优先按 runId 直接 abort
     const directController = this.activeRunControllers.get(conversationIdOrRunId);
     if (directController) {
+      const conversationId = this.activeRunConversationIds.get(conversationIdOrRunId);
+      if (!conversationId) {
+        throw new NotFoundException("运行不存在");
+      }
+      await this.conversations.get(user, conversationId).catch(() => {
+        throw new NotFoundException("运行不存在");
+      });
       directController.abort();
       await this.runLogs.cancelRun({
         runId: conversationIdOrRunId,

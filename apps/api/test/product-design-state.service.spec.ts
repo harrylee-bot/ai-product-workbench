@@ -11,12 +11,13 @@ import type { ProductDesignState } from "../src/ai/ai-vibe.types";
 
 describe("ProductDesignStateService", () => {
   const prisma = {
-    productDesignState: {
-      findUnique: vi.fn(),
-      findFirst: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-    },
+	    productDesignState: {
+	      findUnique: vi.fn(),
+	      findFirst: vi.fn(),
+	      create: vi.fn(),
+	      update: vi.fn(),
+	      updateMany: vi.fn(),
+	    },
     productDesignVersion: {
       create: vi.fn(),
       findMany: vi.fn(),
@@ -26,10 +27,13 @@ describe("ProductDesignStateService", () => {
       create: vi.fn(),
       findMany: vi.fn(),
     },
-    project: {
-      findUnique: vi.fn(),
-      update: vi.fn(),
-    },
+	    project: {
+	      findUnique: vi.fn(),
+	      update: vi.fn(),
+	    },
+	    rollbackRecord: {
+	      create: vi.fn(),
+	    },
     // txn-1：事务化后 service 走 prisma.$transaction；测试中让 tx === prisma，复用上面的 model mock。
     $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
   };
@@ -61,8 +65,17 @@ describe("ProductDesignStateService", () => {
       reason: data.reason ?? null,
       createdAt: new Date("2026-06-20T08:00:00Z"),
     }));
-    prisma.project.update.mockResolvedValue({});
-  });
+	    prisma.project.update.mockResolvedValue({});
+	    prisma.productDesignState.updateMany.mockResolvedValue({ count: 1 });
+	    prisma.rollbackRecord.create.mockImplementation(async ({ data }) => ({
+	      id: "rollback-1",
+	      ...data,
+	      errorMessage: data.errorMessage ?? null,
+	      generatedByRunId: data.generatedByRunId ?? null,
+	      createdAt: new Date("2026-06-20T08:00:00Z"),
+	      updatedAt: new Date("2026-06-20T08:00:00Z"),
+	    }));
+	  });
 
   it("creates ProductDesignState with version snapshot and change log", async () => {
     const createdAt = new Date("2026-06-20T08:00:00Z");
@@ -280,12 +293,13 @@ describe("ProductDesignStateService", () => {
     });
   });
 
-  it("records array PRD section edits as user-confirmed state revisions", async () => {
+	  it("records array PRD section edits as user-confirmed state revisions", async () => {
     const current = baseState({
       version: 4,
       frontendRules: [{ id: "rule_initial", description: "默认可点击" }],
-    });
-    const section = {
+	  });
+
+	    const section = {
       id: "frontend_rules",
       title: "9. 前端展示规则",
       type: "frontend_rules" as const,
@@ -340,13 +354,82 @@ describe("ProductDesignStateService", () => {
     ]);
     expect(result.status).toBe(ProductDesignStateStatus.doc_ready);
     expect(result.prototypeSpec).toBeUndefined();
-    expect(result.confirmedFacts).toEqual([
-      expect.objectContaining({
-        relatedPath: "frontendRules",
-        sourceSectionId: "frontend_rules",
-      }),
-    ]);
-  });
+	    expect(result.confirmedFacts).toEqual([
+	      expect.objectContaining({
+	        relatedPath: "frontendRules",
+	        sourceSectionId: "frontend_rules",
+	      }),
+	    ]);
+	  });
+
+	  it("rolls back state snapshots atomically and records rollback history", async () => {
+	    const current = baseState({
+	      version: 5,
+	      status: ProductDesignStateStatus.prototype_ready,
+	      prdDocument: { id: "prd-current" } as never,
+	    });
+	    const snapshot = baseState({
+	      version: 2,
+	      status: ProductDesignStateStatus.doc_ready,
+	      prdDocument: { id: "prd-previous" } as never,
+	      prototypeSpec: undefined,
+	    });
+	    prisma.productDesignState.findUnique.mockResolvedValue({
+	      ...stateRecord(current),
+	      project: baseProject(),
+	    });
+	    prisma.productDesignVersion.findFirst
+	      .mockResolvedValueOnce({
+	        id: "version-target",
+	        stateId: "state-1",
+	        projectId: "project-1",
+	        version: 2,
+	        snapshot,
+	        reason: "旧版本",
+	        createdBy: "user-1",
+	        createdAt: new Date("2026-06-20T07:00:00Z"),
+	      })
+	      .mockResolvedValueOnce({ version: 5 });
+	    prisma.productDesignState.findFirst.mockResolvedValue({ version: 5 });
+	    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
+	      stateRecord({
+	        ...snapshot,
+	        id: "state-1",
+	        projectId: "project-1",
+	        version: data.version,
+	        updatedBy: data.updatedBy,
+	        createdAt: new Date(current.createdAt),
+	        updatedAt: new Date("2026-06-20T09:00:00Z"),
+	      }),
+	    );
+
+	    const result = await service.rollbackForUser(user, "state-1", {
+	      versionId: "version-target",
+	      reason: "恢复到可用 PRD",
+	    });
+
+	    expect(result.state.version).toBe(6);
+	    expect(result.state.prdDocument).toEqual(expect.objectContaining({ id: "prd-previous" }));
+	    expect(prisma.project.update).toHaveBeenCalledWith({
+	      where: { id: "project-1" },
+	      data: expect.objectContaining({
+	        currentProductDesignStateId: "state-1",
+	        status: ProjectStatus.prd_ready,
+	      }),
+	    });
+	    expect(prisma.rollbackRecord.create).toHaveBeenCalledWith({
+	      data: expect.objectContaining({
+	        projectId: "project-1",
+	        fromProductDesignStateVersion: 5,
+	        toProductDesignStateVersion: 6,
+	        beforePrdDocumentId: "prd-current",
+	        afterPrdDocumentId: "prd-previous",
+	        reason: "恢复到可用 PRD",
+	        status: "completed",
+	        createdBy: "user-1",
+	      }),
+	    });
+	  });
 
 });
 

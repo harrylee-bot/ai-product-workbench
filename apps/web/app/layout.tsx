@@ -12,7 +12,9 @@ export const metadata: Metadata = {
 };
 
 export const viewport = {
-  maximumScale: 1,
+  // 移除 maximumScale 限制，允许用户缩放以提升可访问性
+  width: "device-width",
+  initialScale: 1,
 };
 
 const LIGHT_THEME_COLOR = "hsl(0 0% 100%)";

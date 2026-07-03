@@ -1,4 +1,5 @@
 const bcrypt = require("bcryptjs");
+const { randomBytes } = require("node:crypto");
 const { PrismaClient, UserRole, UserStatus } = require("@prisma/client");
 
 const prisma = new PrismaClient();
@@ -32,7 +33,8 @@ async function main() {
   }
 
   const isProduction = process.env.NODE_ENV === "production";
-  const adminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD?.trim() || (isProduction ? "" : "Admin123456");
+  const generatedAdminPassword = isProduction ? "" : generateDevelopmentPassword();
+  const adminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD?.trim() || generatedAdminPassword;
   if (!adminPassword) {
     throw new Error("BOOTSTRAP_ADMIN_PASSWORD is required when seeding the first production admin.");
   }
@@ -45,7 +47,8 @@ async function main() {
     role: UserRole.admin,
   });
 
-  const demoUserPassword = process.env.BOOTSTRAP_DEMO_USER_PASSWORD?.trim() || (isProduction ? "" : "User123456");
+  const generatedDemoUserPassword = isProduction ? "" : generateDevelopmentPassword();
+  const demoUserPassword = process.env.BOOTSTRAP_DEMO_USER_PASSWORD?.trim() || generatedDemoUserPassword;
   if (demoUserPassword) {
     await upsertUser({
       username: process.env.BOOTSTRAP_DEMO_USERNAME?.trim() || "zhangsan",
@@ -56,9 +59,21 @@ async function main() {
     });
   }
 
-  console.log(isProduction
-    ? "初始化完成：已创建首个管理员账号。"
-    : "初始化完成：admin/Admin123456，zhangsan/User123456（仅开发环境默认口令，请勿用于生产）");
+  if (isProduction) {
+    console.log("初始化完成：已创建首个管理员账号。");
+  } else {
+    console.log("初始化完成：已创建开发环境账号。");
+    if (!process.env.BOOTSTRAP_ADMIN_PASSWORD) {
+      console.log(`开发管理员临时口令：admin/${generatedAdminPassword}`);
+    }
+    if (demoUserPassword && !process.env.BOOTSTRAP_DEMO_USER_PASSWORD) {
+      console.log(`开发普通用户临时口令：zhangsan/${generatedDemoUserPassword}`);
+    }
+  }
+}
+
+function generateDevelopmentPassword() {
+  return randomBytes(18).toString("base64url");
 }
 
 main()

@@ -101,7 +101,7 @@ services:
     container_name: ai-product-knowledge
     restart: unless-stopped
     environment:
-      QUARTZ_BASE_URL: ${QUARTZ_BASE_URL:-8.130.160.177:3001}
+	      QUARTZ_BASE_URL: ${QUARTZ_BASE_URL:-localhost:3001}
       QUARTZ_CONTENT_DIR: /storage/knowledge-vault
       QUARTZ_CONCURRENCY: ${QUARTZ_CONCURRENCY:-2}
       QUARTZ_OUTPUT_DIR: /usr/share/nginx/html
