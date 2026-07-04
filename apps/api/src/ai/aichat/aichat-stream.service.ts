@@ -219,6 +219,23 @@ export class AichatStreamService {
             message: content,
           });
 
+          // 知识库检索结果摘要事件——告诉用户检索了哪些知识
+          publishRuntimeEvent(createRuntimeEvent({
+            runId: run.id,
+            id: `${run.id}:knowledge-complete`,
+            kind: "knowledge",
+            label: knowledgeContext.length > 0
+              ? `知识库检索完成，命中 ${knowledgeContext.length} 条相关知识`
+              : "知识库未命中，将根据模型知识和行业经验补充",
+            detail: knowledgeContext.length > 0
+              ? knowledgeContext
+                  .slice(0, 5)
+                  .map((k) => `· ${k.title}${k.type ? ` [${k.type}]` : ""}`)
+                  .join("\n")
+              : "将参考行业最佳实践和产品设计经验",
+            status: "completed",
+          }));
+
           const result = await this.deerFlow.runTurn({
             runId: run.id,
             projectId,

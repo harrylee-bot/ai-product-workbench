@@ -216,8 +216,8 @@ export const ThinkingMessage = ({
 }: {
   thinkingTrace?: ThinkingTrace;
 }) => {
-  const thinkingText = formatRuntimeEvents(thinkingTrace?.events);
-  if (!thinkingText) return null;
+  const events = (thinkingTrace?.events ?? []).filter(isVisibleRuntimeEvent);
+  if (events.length === 0) return null;
 
   return (
     <div
@@ -232,16 +232,76 @@ export const ThinkingMessage = ({
           </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <ReasoningDialog
-            isLoading={Boolean(thinkingTrace?.isStreaming)}
-            reasoning={thinkingText}
-          />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5 pt-0.5">
+          {events.map((event, i) => (
+            <ThinkingStep
+              key={event.id}
+              event={event}
+              isLast={i === events.length - 1}
+              isStreaming={thinkingTrace?.isStreaming ?? false}
+            />
+          ))}
         </div>
       </div>
     </div>
   );
 };
+
+function ThinkingStep({
+  event,
+  isLast,
+  isStreaming,
+}: {
+  event: RuntimeProcessEvent;
+  isLast: boolean;
+  isStreaming: boolean;
+}) {
+  const icon = stepIcon(event.kind);
+  const isRunning = isLast && isStreaming && event.status === "running";
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm shrink-0" aria-hidden>
+          {icon}
+        </span>
+        <span
+          className={cn(
+            "text-sm text-muted-foreground leading-snug",
+            isRunning && "animate-pulse"
+          )}
+        >
+          {event.label}
+        </span>
+        {isRunning && (
+          <span className="ml-1 text-xs text-muted-foreground/60">…</span>
+        )}
+      </div>
+      {event.detail && (
+        <div className="ml-6 text-xs text-muted-foreground/70 whitespace-pre-wrap leading-relaxed border-l border-border/40 pl-2">
+          {event.detail}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function stepIcon(kind?: RuntimeProcessEvent["kind"]) {
+  switch (kind) {
+    case "knowledge":
+      return "📚";
+    case "tool":
+      return "🔧";
+    case "artifact":
+      return "📎";
+    case "document":
+      return "📄";
+    case "error":
+      return "⚠️";
+    default:
+      return "💭";
+  }
+}
 
 function Divider() {
   return <div className="my-1 h-px w-full bg-border/40" aria-hidden />;
