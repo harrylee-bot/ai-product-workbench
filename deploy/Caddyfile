@@ -3,7 +3,11 @@ www.aionbench.com {
 }
 
 aionbench.com {
-	encode gzip
+	# SSE 流式端点不能 gzip（gzip buffer 会阻塞事件实时下发）
+	@notStreaming {
+		not path /api/chat/stream
+	}
+	encode @notStreaming gzip
 
 	handle /knowledge {
 		redir * /knowledge/ 308
