@@ -85,13 +85,9 @@ export function ChatShell() {
 
     autoOpenedArtifactIdRef.current = latestArtifact.id;
     setArtifact((currentArtifact) => {
-      if (
-        currentArtifact.status === "streaming" &&
-        currentArtifact.documentId !== latestArtifact.id
-      ) {
-        return currentArtifact;
-      }
-
+      // Removed streaming race guard: it dropped isVisible:true for a newly arrived
+      // document when a prior doc was still streaming. The autoOpenedArtifactIdRef
+      // dedup above already prevents re-opening the same doc.
       return {
         ...currentArtifact,
         documentId: latestArtifact.id,
@@ -123,28 +119,42 @@ export function ChatShell() {
           />
 
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:rounded-tl-[12px] md:border-t md:border-l md:border-border/40">
-            <Messages
-              addToolApprovalResponse={addToolApprovalResponse}
-              chatId={chatId}
-              isArtifactVisible={isArtifactVisible}
-              isLoading={isLoading}
-              isReadonly={isReadonly}
-              messages={messages}
-              onEditMessage={(msg) => {
-                const text = msg.parts
-                  ?.filter((p) => p.type === "text")
-                  .map((p) => p.text)
-                  .join("");
-                setInput(text ?? "");
-                setEditingMessage(msg);
-              }}
-              regenerate={regenerate}
-              runStatus={runtimeStatus}
-              selectedModelId={currentModelId}
-              setMessages={setMessages}
-              status={status}
-              votes={votes}
-            />
+            {isLoading && messages.length === 0 ? (
+              <div className="flex flex-1 flex-col gap-4 p-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex gap-3 animate-pulse">
+                    <div className="size-8 shrink-0 rounded-full bg-muted" />
+                    <div className="flex flex-1 flex-col gap-2 pt-1">
+                      <div className="h-4 w-3/4 rounded bg-muted" />
+                      <div className="h-4 w-1/2 rounded bg-muted" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Messages
+                addToolApprovalResponse={addToolApprovalResponse}
+                chatId={chatId}
+                isArtifactVisible={isArtifactVisible}
+                isLoading={isLoading}
+                isReadonly={isReadonly}
+                messages={messages}
+                onEditMessage={(msg) => {
+                  const text = msg.parts
+                    ?.filter((p) => p.type === "text")
+                    .map((p) => p.text)
+                    .join("");
+                  setInput(text ?? "");
+                  setEditingMessage(msg);
+                }}
+                regenerate={regenerate}
+                runStatus={runtimeStatus}
+                selectedModelId={currentModelId}
+                setMessages={setMessages}
+                status={status}
+                votes={votes}
+              />
+            )}
 
             <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
               {!isReadonly && (
@@ -265,7 +275,8 @@ function findLatestMessageArtifact(messages: ChatMessage[]) {
         part.state === "output-available" &&
         part.output?.id &&
         (part.output.kind === "text" ||
-          part.output.kind === "prototype")
+          part.output.kind === "prototype" ||
+          part.output.kind === "prd")
       ) {
         return {
           id: part.output.id,

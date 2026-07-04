@@ -174,8 +174,8 @@ export class AichatStreamService {
           emitRuntimeFinish(streamWriter, snapshot);
         };
         const documentStream = createDocumentStreamState(run.id, {
-          // 用户明确要求生成 PRD，或项目已有 ProductDesignState（续写/修改场景），均强制走画布流。
-          forceDocumentStream: isDocumentGenerationRequest(content) || Boolean(productContext?.currentProductDesignState),
+          // previewMode is always "prd"; all DeerFlow output routes to canvas
+          forceDocumentStream: true,
         });
         res.on("close", markClientClosed);
 

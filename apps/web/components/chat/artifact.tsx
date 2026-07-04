@@ -41,7 +41,7 @@ export const artifactDefinitions = [
   sheetArtifact,
   prototypeArtifact,
 ];
-export type ArtifactKind = (typeof artifactDefinitions)[number]["kind"];
+export type ArtifactKind = (typeof artifactDefinitions)[number]["kind"] | "prd";
 
 export type UIArtifact = {
   title: string;

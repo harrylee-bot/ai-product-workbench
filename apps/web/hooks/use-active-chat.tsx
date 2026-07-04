@@ -509,10 +509,9 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     }
   }, [sendMessage, chatId, router]);
 
-  // HTTP stream itself is not resumable yet. After refresh, keep the server run alive
-  // and recover the final persisted message by polling runtime status/messages.
+  // Re-attach to in-flight generation on mount (e.g. after page refresh mid-stream).
   useAutoResume({
-    autoResume: false,
+    autoResume: true,
     initialMessages,
     resumeStream,
     setMessages,

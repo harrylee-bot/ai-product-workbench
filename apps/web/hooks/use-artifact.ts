@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import useSWR from "swr";
 import type { UIArtifact } from "@/components/chat/artifact";
+import { getDocumentsById } from "@/lib/api/nest-client";
 
 export const initialArtifactData: UIArtifact = {
   documentId: "init",
@@ -65,6 +66,29 @@ export function useArtifact() {
       });
     },
     [setLocalArtifact]
+  );
+
+  // On page refresh the in-memory SWR cache is lost and content is "".
+  // Re-fetch the document from the backend whenever we have a documentId but no content.
+  useSWR(
+    artifact.documentId && artifact.documentId !== "init" && !artifact.content
+      ? `artifact-content-${artifact.documentId}`
+      : null,
+    () => getDocumentsById(artifact.documentId),
+    {
+      onSuccess: (docs) => {
+        const doc = docs?.[0];
+        if (doc?.content) {
+          setLocalArtifact((current) => {
+            const base = current || initialArtifactData;
+            // Only patch if content is still empty to avoid overwriting a live stream
+            if (base.content) return base;
+            return { ...base, content: doc.content ?? "", title: doc.title || base.title };
+          });
+        }
+      },
+      revalidateOnFocus: false,
+    }
   );
 
   const { data: localArtifactMetadata, mutate: setLocalArtifactMetadata } =
