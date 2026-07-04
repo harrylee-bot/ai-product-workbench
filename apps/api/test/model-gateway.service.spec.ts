@@ -127,6 +127,24 @@ describe("ModelGatewayService", () => {
       }),
     ).rejects.toBeInstanceOf(ModelGatewayError);
   });
+
+  it("reports encrypted API key decrypt failures as model gateway configuration errors", async () => {
+    const corruptedApiKey = corruptAuthTag(apiKeyEncrypted);
+    prisma.modelTaskProfile.findUnique.mockResolvedValue(baseProfile(corruptedApiKey));
+
+    await expect(
+      service.generateText({
+        taskType: ModelTaskType.general_chat,
+        messages: [{ role: "user", content: "你好" }],
+      }),
+    ).rejects.toMatchObject({
+      code: "MODEL_API_KEY_INVALID",
+      message: expect.stringContaining("模型供应商 API Key 解密失败"),
+    });
+
+    expect(adapter.chat).not.toHaveBeenCalled();
+    expect(prisma.modelCallLog.create).not.toHaveBeenCalled();
+  });
 });
 
 function baseProfile(apiKeyEncrypted: string) {
@@ -171,4 +189,10 @@ function baseProfile(apiKeyEncrypted: string) {
       },
     },
   };
+}
+
+function corruptAuthTag(apiKeyEncrypted: string) {
+  const parts = apiKeyEncrypted.split(":");
+  parts[2] = Buffer.alloc(16).toString("base64");
+  return parts.join(":");
 }

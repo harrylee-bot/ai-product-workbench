@@ -210,7 +210,7 @@ export class ModelGatewayService {
       providerId: provider.id,
       providerName: provider.name,
       baseUrl: provider.baseUrl,
-      apiKey: this.encryption.decrypt(provider.apiKeyEncrypted),
+      apiKey: this.decryptProviderApiKey(provider.apiKeyEncrypted),
       defaultHeaders: this.toStringRecord(provider.defaultHeaders),
       providerTimeoutMs: provider.timeoutMs,
       modelConfigId: modelConfig.id,
@@ -226,6 +226,21 @@ export class ModelGatewayService {
       temperature: input.temperature ?? profile.temperature ?? modelConfig.defaultTemperature,
       maxTokens: input.maxTokens ?? profile.maxTokens ?? modelConfig.defaultMaxTokens ?? undefined,
     };
+  }
+
+  private decryptProviderApiKey(cipherText: string) {
+    try {
+      return this.encryption.decrypt(cipherText);
+    } catch (error) {
+      const reason = error instanceof Error && error.message
+        ? `：${this.sanitizeErrorMessage(error.message)}`
+        : "";
+      throw new ModelGatewayError(
+        "MODEL_API_KEY_INVALID",
+        `模型供应商 API Key 解密失败${reason}。请在模型网关重新保存该供应商 API Key。`,
+        error,
+      );
+    }
   }
 
   private async createRunningLog(input: GenerateTextInput, route: ResolvedModelRoute) {

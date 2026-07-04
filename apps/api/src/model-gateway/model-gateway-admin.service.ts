@@ -75,8 +75,10 @@ export class ModelGatewayAdminService {
 
   async updateProvider(providerId: string, dto: UpdateModelProviderDto, admin?: AuthenticatedUser, meta?: RequestMeta) {
     let provider: ModelProvider;
+    let reroutedTaskProfileCount = 0;
+    let defaultModelConfigId: string | undefined;
     try {
-      provider = await this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         if (dto.isDefault) {
           await tx.modelProvider.updateMany({
             where: { isDefault: true, id: { not: providerId } },
@@ -84,7 +86,7 @@ export class ModelGatewayAdminService {
           });
         }
 
-        return tx.modelProvider.update({
+        const provider = await tx.modelProvider.update({
           where: { id: providerId },
           data: {
             name: dto.name?.trim(),
@@ -100,7 +102,36 @@ export class ModelGatewayAdminService {
             isDefault: dto.isDefault,
           },
         });
+
+        if (dto.isDefault) {
+          const defaultConfig = await tx.modelConfig.findFirst({
+            where: {
+              providerId,
+              isEnabled: true,
+            },
+            orderBy: { createdAt: "desc" },
+          });
+
+          if (defaultConfig) {
+            const update = await tx.modelTaskProfile.updateMany({
+              data: {
+                modelConfigId: defaultConfig.id,
+                isEnabled: true,
+              },
+            });
+            return {
+              provider,
+              defaultModelConfigId: defaultConfig.id,
+              reroutedTaskProfileCount: update.count,
+            };
+          }
+        }
+
+        return { provider, reroutedTaskProfileCount: 0 };
       });
+      provider = result.provider;
+      reroutedTaskProfileCount = result.reroutedTaskProfileCount;
+      defaultModelConfigId = result.defaultModelConfigId;
     } catch (error) {
       this.throwNotFound(error, "模型供应商不存在");
       throw error;
@@ -111,6 +142,8 @@ export class ModelGatewayAdminService {
         name: provider.name,
         isDefault: provider.isDefault,
         apiKeyUpdated: Boolean(dto.apiKey),
+        defaultModelConfigId,
+        reroutedTaskProfileCount,
       });
     }
 

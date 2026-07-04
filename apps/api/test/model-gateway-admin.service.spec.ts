@@ -31,12 +31,14 @@ describe("ModelGatewayAdminService", () => {
     modelConfig: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
     modelTaskProfile: {
       findMany: vi.fn(),
       upsert: vi.fn(),
+      updateMany: vi.fn(),
     },
     modelCallLog: {
       findMany: vi.fn(),
@@ -89,5 +91,49 @@ describe("ModelGatewayAdminService", () => {
     expect(tx.modelProvider.create.mock.calls[0][0].data.apiKeyEncrypted).not.toContain(
       "sk-live-secretabcd",
     );
+  });
+
+  it("reroutes task profiles to the provider model config when a provider becomes default", async () => {
+    const defaultConfig = {
+      id: "config-default",
+      providerId: "provider-1",
+      createdAt: new Date("2026-06-20T08:00:00Z"),
+    };
+    const tx = {
+      modelProvider: {
+        updateMany: vi.fn(),
+        update: vi.fn().mockResolvedValue({ ...provider, isDefault: true }),
+      },
+      modelConfig: {
+        findFirst: vi.fn().mockResolvedValue(defaultConfig),
+      },
+      modelTaskProfile: {
+        updateMany: vi.fn().mockResolvedValue({ count: 12 }),
+      },
+    };
+    prisma.$transaction.mockImplementation(async (callback) => callback(tx));
+
+    const result = await service.updateProvider("provider-1", {
+      isDefault: true,
+    });
+
+    expect(result.isDefault).toBe(true);
+    expect(tx.modelProvider.updateMany).toHaveBeenCalledWith({
+      where: { isDefault: true, id: { not: "provider-1" } },
+      data: { isDefault: false },
+    });
+    expect(tx.modelConfig.findFirst).toHaveBeenCalledWith({
+      where: {
+        providerId: "provider-1",
+        isEnabled: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(tx.modelTaskProfile.updateMany).toHaveBeenCalledWith({
+      data: {
+        modelConfigId: "config-default",
+        isEnabled: true,
+      },
+    });
   });
 });
