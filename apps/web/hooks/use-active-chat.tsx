@@ -511,7 +511,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
 
   // Re-attach to in-flight generation on mount (e.g. after page refresh mid-stream).
   useAutoResume({
-    autoResume: true,
+    autoResume: false,
     initialMessages,
     resumeStream,
     setMessages,
