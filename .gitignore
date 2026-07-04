@@ -8,6 +8,14 @@ output
 .env.local
 .DS_Store
 *.log
+*.bak
+*.backup
+*.orig
+*.rej
+*.tmp
+*.temp
+*.swp
+*~
 *.tsbuildinfo
 __pycache__/
 *.pyc
