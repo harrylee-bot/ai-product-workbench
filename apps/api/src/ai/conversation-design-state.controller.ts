@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { CurrentUser } from "../common/current-user.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import {
   AnswerClarificationQuestionDto,
   CreateConversationDesignStateDto,

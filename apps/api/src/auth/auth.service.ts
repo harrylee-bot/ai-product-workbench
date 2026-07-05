@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable 
 import { JwtService } from "@nestjs/jwt";
 import bcrypt from "bcryptjs";
 import { User, UserRole, UserStatus } from "@prisma/client";
-import { PrismaService } from "../../prisma/prisma.service";
+import { PrismaService } from "../prisma/prisma.service";
 import type { LoginDto, RegisterDto } from "./dto";
 import type { AuthJwtPayload, AuthenticatedUser } from "./auth.types";
 

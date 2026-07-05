@@ -1,8 +1,8 @@
 import { BadRequestException, Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
-import { CurrentUser } from "../auth/current-user.decorator";
-import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import type { AuthenticatedUser } from "../auth/auth.types";
+import { CurrentUser } from "../../auth/current-user.decorator";
+import { JwtAuthGuard } from "../../auth/jwt-auth.guard";
+import type { AuthenticatedUser } from "../../auth/auth.types";
 import { MessageService } from "../../conversations/message.service";
 import { ListMessagesQueryDto } from "./dto";
 

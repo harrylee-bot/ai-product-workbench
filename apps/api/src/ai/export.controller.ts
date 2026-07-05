@@ -2,7 +2,7 @@ import { Controller, Get, Param, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { CurrentUser } from "../common/current-user.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import type { ExportArtifact } from "./export.service";
 import { ExportService } from "./export.service";
 

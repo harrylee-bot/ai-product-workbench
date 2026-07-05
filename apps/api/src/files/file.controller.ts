@@ -22,7 +22,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { CurrentUser } from "../common/current-user.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import { FileAssetService } from "./file-asset.service";
 import { ListConversationFilesQueryDto, UploadFilesDto } from "./dto";
 import { PrototypeConversionService } from "./prototype-conversion.service";

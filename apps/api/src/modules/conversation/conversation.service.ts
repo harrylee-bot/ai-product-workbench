@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Conversation, ConversationStatus, UserRole } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
-import type { AuthenticatedUser } from "../auth/auth.types";
+import type { AuthenticatedUser } from "../../auth/auth.types";
 import type { CreateConversationDto } from "./dto";
 
 @Injectable()

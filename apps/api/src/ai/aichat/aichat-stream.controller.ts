@@ -1,7 +1,7 @@
 import { Body, Controller, Param, Post, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { JwtAuthGuard } from "../../auth/jwt-auth.guard";
-import { CurrentUser } from "../../common/current-user.decorator";
+import { CurrentUser } from "../../auth/current-user.decorator";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { AichatStreamService } from "./aichat-stream.service";
 import { ChatStreamDto } from "./aichat-stream.dto";

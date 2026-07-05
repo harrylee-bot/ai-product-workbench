@@ -2,7 +2,7 @@ import { ForbiddenException } from "@nestjs/common";
 import { UserRole, UserStatus } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthService } from "../src/modules/auth/auth.service";
+import { AuthService } from "../src/auth/auth.service";
 
 describe("AuthService", () => {
   const prisma = {

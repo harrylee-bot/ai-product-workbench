@@ -1,5 +1,11 @@
 import type { UserRole, UserStatus } from "@prisma/client";
 
+export type AuthJwtPayload = {
+  sub: string;
+  userId: string;
+  role: UserRole;
+};
+
 type PublicUser = {
   id: string;
   username: string;

@@ -4,9 +4,9 @@ import { PassportStrategy } from "@nestjs/passport";
 import type { Request } from "express";
 import { Strategy } from "passport-jwt";
 import { UserStatus } from "@prisma/client";
-import { PrismaService } from "../../prisma/prisma.service";
-import { getJwtSecret } from "../../common/secret-config";
-import { AUTH_COOKIE_NAME } from "../../common/auth-cookie";
+import { PrismaService } from "../prisma/prisma.service";
+import { getJwtSecret } from "../common/secret-config";
+import { AUTH_COOKIE_NAME } from "../common/auth-cookie";
 import type { AuthJwtPayload, AuthenticatedUser } from "./auth.types";
 
 @Injectable()

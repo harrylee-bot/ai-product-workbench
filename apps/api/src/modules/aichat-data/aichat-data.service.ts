@@ -11,7 +11,7 @@ import {
   UserRole,
 } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
-import type { AuthenticatedUser } from "../auth/auth.types";
+import type { AuthenticatedUser } from "../../auth/auth.types";
 import {
   buildMessagePayload,
   BulkCreateMessagesDto,

@@ -2,7 +2,7 @@ import { ForbiddenException } from "@nestjs/common";
 import { ConversationStatus, UserRole, UserStatus } from "@prisma/client";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AichatDataService } from "../src/modules/aichat-data/aichat-data.service";
-import type { AuthenticatedUser } from "../src/modules/auth/auth.types";
+import type { AuthenticatedUser } from "../src/auth/auth.types";
 
 describe("AichatDataService", () => {
   const user: AuthenticatedUser = {

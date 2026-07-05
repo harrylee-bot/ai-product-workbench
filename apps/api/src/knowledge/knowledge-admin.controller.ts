@@ -4,7 +4,7 @@ import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../auth/roles.decorator";
 import { RolesGuard } from "../auth/roles.guard";
-import { CurrentUser } from "../common/current-user.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import { CurrentRequestMeta } from "../common/request-meta.decorator";
 import { KnowledgeCandidateService } from "./knowledge-candidate.service";
 import {

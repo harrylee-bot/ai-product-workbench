@@ -3,7 +3,7 @@ import { Throttle } from "@nestjs/throttler";
 import { ShareScope } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { CurrentUser } from "../common/current-user.decorator";
+import { CurrentUser } from "../auth/current-user.decorator";
 import { CreateShareLinkDto } from "./share.dto";
 import { ShareService } from "./share.service";
 import { USER_HTML_CSP } from "./user-html-security";

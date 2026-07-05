@@ -1,8 +1,8 @@
 import { Body, Controller, ForbiddenException, Get, NotFoundException, Post, Query, UseGuards } from "@nestjs/common";
 import { ConversationStatus, UserRole } from "@prisma/client";
-import { CurrentUser } from "../modules/auth/current-user.decorator";
-import { JwtAuthGuard } from "../modules/auth/jwt-auth.guard";
-import type { AuthenticatedUser } from "../modules/auth/auth.types";
+import { CurrentUser } from "../auth/current-user.decorator";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { BuildConstraintDto } from "./constraint.dto";
 import { ConstraintService } from "./constraint.service";

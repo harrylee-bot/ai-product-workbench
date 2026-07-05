@@ -8,7 +8,7 @@ import { ConstraintModule } from "./constraint/constraint.module";
 import { KnowledgeModule } from "./knowledge/knowledge.module";
 import { ModelGatewayModule } from "./model-gateway/model-gateway.module";
 import { AiModule } from "./ai/ai.module";
-import { AuthModule } from "./modules/auth/auth.module";
+import { AuthModule } from "./auth/auth.module";
 import { ConversationModule } from "./modules/conversation/conversation.module";
 import { MessageModule } from "./modules/message/message.module";
 import { AichatDataModule } from "./modules/aichat-data/aichat-data.module";

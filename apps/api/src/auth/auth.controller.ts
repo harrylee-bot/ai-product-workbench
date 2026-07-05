@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Inject, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
-import { AUTH_COOKIE_NAME, authCookieOptions, clearAuthCookieOptions } from "../../common/auth-cookie";
+import { AUTH_COOKIE_NAME, authCookieOptions, clearAuthCookieOptions } from "../common/auth-cookie";
 import { CurrentUser } from "./current-user.decorator";
 import { LoginDto, RegisterDto } from "./dto";
 import { JwtAuthGuard } from "./jwt-auth.guard";
@@ -50,7 +50,7 @@ export class AuthController {
   }
 
   @Post("logout")
-  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
   logout(@Res({ passthrough: true }) response: Response) {
     response.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
     return this.auth.logout();

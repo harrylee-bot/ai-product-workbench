@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from "@nestjs/common";
-import { CurrentUser } from "../auth/current-user.decorator";
-import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import type { AuthenticatedUser } from "../auth/auth.types";
+import { CurrentUser } from "../../auth/current-user.decorator";
+import { JwtAuthGuard } from "../../auth/jwt-auth.guard";
+import type { AuthenticatedUser } from "../../auth/auth.types";
 import { ConversationService } from "./conversation.service";
 import { CreateConversationDto } from "./dto";
 
