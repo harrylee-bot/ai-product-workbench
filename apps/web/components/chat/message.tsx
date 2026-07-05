@@ -389,7 +389,10 @@ function MessageToolPart({ part }: { part: any }) {
     toolName: getToolName(part),
   });
   const shouldOpenByDefault =
-    state === "approval-requested" || state === "output-error";
+    state === "approval-requested" ||
+    state === "input-available" ||
+    state === "output-available" ||
+    state === "output-error";
 
   return (
     <Tool className="max-w-[min(100%,560px)]" defaultOpen={shouldOpenByDefault}>
@@ -402,13 +405,27 @@ function MessageToolPart({ part }: { part: any }) {
       />
       <ToolContent>
         <div className="space-y-2 rounded-md bg-muted/35 px-3 py-2 text-sm leading-relaxed text-muted-foreground">
-          <p>{presentation.summary}</p>
+          <ToolSummaryLine label="为什么" text={presentation.reason} />
+          <ToolSummaryLine label="执行" text={presentation.action} />
+          <ToolSummaryLine
+            label={presentation.errorSummary ? "状态" : "结果"}
+            text={presentation.summary}
+          />
           {presentation.errorSummary ? (
             <p className="text-destructive">{presentation.errorSummary}</p>
           ) : null}
         </div>
       </ToolContent>
     </Tool>
+  );
+}
+
+function ToolSummaryLine({ label, text }: { label: string; text: string }) {
+  return (
+    <p>
+      <span className="text-foreground/80">{label}：</span>
+      {text}
+    </p>
   );
 }
 
@@ -488,7 +505,8 @@ function buildToolPresentation(input: {
 }) {
   const action = toolActionCopy(input.toolName);
   const statusSummary = statusSummaryForTool(action, input.state);
-  const inputSummary = summarizeToolIntent(input.toolName, input.input);
+  const reason = summarizeToolReason(input.toolName, input.input);
+  const actionSummary = summarizeToolAction(input.toolName, input.input);
   const outputSummary = summarizeToolOutput(input.toolName, input.output);
   const errorSummary = input.errorText
     ? "这一步没有完成，系统已保留失败状态，后续可重新尝试。"
@@ -498,11 +516,13 @@ function buildToolPresentation(input: {
     title: action.title,
     description:
       input.state === "output-available"
-        ? outputSummary ?? statusSummary
-        : inputSummary ?? statusSummary,
+        ? reason
+        : actionSummary ?? reason ?? statusSummary,
+    reason,
+    action: actionSummary ?? statusSummary,
     summary: input.errorText
       ? statusSummary
-      : outputSummary ?? inputSummary ?? statusSummary,
+      : outputSummary ?? statusSummary,
     errorSummary,
   };
 }
@@ -511,9 +531,9 @@ function toolActionCopy(name: string) {
   const normalized = normalizeToolName(name);
   if (normalized.includes("listknowledgebase")) {
     return {
-      title: "查询知识库",
-      running: "正在查询知识库",
-      completed: "已查询知识库",
+      title: "查询项目知识库",
+      running: "正在查询项目知识库",
+      completed: "已查询项目知识库",
       failed: "知识库查询失败",
     };
   }
@@ -615,31 +635,34 @@ function statusSummaryForTool(
   return action.running;
 }
 
-function summarizeToolIntent(toolName: string, input: unknown) {
+function summarizeToolReason(toolName: string, input: unknown) {
   const action = toolActionCopy(toolName);
-  if (input === undefined || input === null || input === "") {
-    return action.running;
-  }
   const normalized = normalizeToolName(toolName);
+  const query = extractReadableQuery(input);
+
   if (normalized.includes("listknowledgebase")) {
-    return "正在从知识库中查找可复用的产品资料。";
+    return query
+      ? `为了让回答贴合已有沉淀，我围绕「${query}」查询项目知识库，确认是否有可复用的业务规则、历史方案或 PRD 模板。`
+      : "为了让回答贴合已有沉淀，我先查询项目知识库，确认是否有可复用的业务规则、历史方案或 PRD 模板。";
   }
   if (normalized.includes("readfile") || normalized.includes("read_file")) {
-    return "正在读取必要资料，用于理解上下文。";
+    return "为了避免凭空生成，我先读取与本轮需求相关的参考资料，确认已有业务背景、约束和文档结构。";
   }
   if (
     normalized.includes("writefile") ||
     normalized.includes("editfile") ||
     normalized.includes("updatefile")
   ) {
-    return "正在把处理结果整理成可用内容。";
+    return "为了把分析结果变成用户可直接使用的内容，我正在整理生成文档或更新产物。";
   }
   if (
     normalized.includes("search") ||
     normalized.includes("grep") ||
     normalized.includes("find")
   ) {
-    return "正在检索和当前需求相关的信息。";
+    return query
+      ? `为了确认「${query}」相关上下文，我先检索已有资料，避免遗漏历史约束。`
+      : "为了确认本轮需求相关上下文，我先检索已有资料，避免遗漏历史约束。";
   }
   if (
     normalized.includes("shell") ||
@@ -647,7 +670,61 @@ function summarizeToolIntent(toolName: string, input: unknown) {
     normalized.includes("exec") ||
     normalized.includes("bash")
   ) {
-    return "正在执行必要的验证步骤。";
+    return "为了确认改动真实可用，我执行必要的本地验证和健康检查。";
+  }
+  if (
+    normalized.includes("fetch") ||
+    normalized.includes("http") ||
+    normalized.includes("curl")
+  ) {
+    return "为了确认服务状态和外部依赖可用，我获取接口或页面的最新响应。";
+  }
+  return action.running;
+}
+
+function summarizeToolAction(toolName: string, input: unknown) {
+  const action = toolActionCopy(toolName);
+  const normalized = normalizeToolName(toolName);
+  const query = extractReadableQuery(input);
+
+  if (normalized.includes("listknowledgebase")) {
+    return query
+      ? `按「${query}」检索项目知识库，并筛选能支撑当前需求的条目。`
+      : "检索项目知识库，并筛选能支撑当前需求的条目。";
+  }
+  if (normalized.includes("readfile") || normalized.includes("read_file")) {
+    return "读取必要的参考资料，只提取与需求理解相关的信息。";
+  }
+  if (
+    normalized.includes("writefile") ||
+    normalized.includes("editfile") ||
+    normalized.includes("updatefile")
+  ) {
+    return "把已确认的分析结果整理成用户可查看的产物。";
+  }
+  if (
+    normalized.includes("search") ||
+    normalized.includes("grep") ||
+    normalized.includes("find")
+  ) {
+    return query
+      ? `检索「${query}」相关资料，并提取可复用上下文。`
+      : "检索相关资料，并提取可复用上下文。";
+  }
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized.includes("exec") ||
+    normalized.includes("bash")
+  ) {
+    return "运行必要检查，确认页面、接口或构建结果正常。";
+  }
+  if (
+    normalized.includes("fetch") ||
+    normalized.includes("http") ||
+    normalized.includes("curl")
+  ) {
+    return "读取接口或页面响应，确认当前系统状态。";
   }
   return action.running;
 }
@@ -700,6 +777,29 @@ function summarizeToolOutput(toolName: string, output: unknown) {
 
 function numberFromUnknown(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function extractReadableQuery(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const candidate =
+    stringFromUnknown(record.query) ??
+    stringFromUnknown(record.keyword) ??
+    stringFromUnknown(record.search) ??
+    stringFromUnknown(record.message) ??
+    stringFromUnknown(record.prompt);
+  if (!candidate) return undefined;
+  const cleaned = sanitizeRuntimeText(candidate)
+    .replace(/["'`{}[\]<>]/g, "")
+    .trim();
+  if (!cleaned || looksTechnicalRuntimeText(cleaned)) return undefined;
+  return cleaned.length > 28 ? `${cleaned.slice(0, 28)}…` : cleaned;
+}
+
+function stringFromUnknown(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function formatUserRuntimeLabel(label: string) {
@@ -756,7 +856,7 @@ function sanitizeRuntimeText(text: string) {
   return text
     .replace(/read[_ ]?file/gi, "读取参考资料")
     .replace(/write[_ ]?file/gi, "整理生成内容")
-    .replace(/listKnowledgeBase/gi, "查询知识库")
+    .replace(/listKnowledgeBase/gi, "查询项目知识库")
     .replace(/\s+/g, " ")
     .trim();
 }

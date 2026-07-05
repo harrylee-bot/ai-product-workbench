@@ -166,7 +166,7 @@ export function runtimeEventsFromDeerFlow(
       runId,
       kind: "tool",
       label: action.running,
-      detail: summarizeToolPayload(call.name, call.args, "input"),
+      detail: summarizeToolEvent(call.name, call.args, "input"),
       status: "running",
       createdAt: now,
     });
@@ -180,7 +180,7 @@ export function runtimeEventsFromDeerFlow(
       runId,
       kind: "tool",
       label: action.completed,
-      detail: summarizeToolPayload(
+      detail: summarizeToolEvent(
         toolName,
         event.toolResult ?? event.content,
         "output",
@@ -487,8 +487,8 @@ function toolActionCopy(name: string) {
   const normalized = normalizeToolName(name);
   if (normalized.includes("listknowledgebase")) {
     return {
-      running: "正在查询知识库",
-      completed: "已查询知识库",
+      running: "正在查询项目知识库",
+      completed: "已查询项目知识库",
     };
   }
   if (normalized.includes("readfile") || normalized.includes("read_file")) {
@@ -564,12 +564,114 @@ function normalizeToolName(name: string) {
     .toLowerCase();
 }
 
-function summarizeToolPayload(
+function summarizeToolEvent(
   toolName: string,
   value: unknown,
   phase: "input" | "output",
 ) {
-  if (value === undefined || value === null || value === "") return undefined;
+  const reason = summarizeToolReason(toolName, value);
+  const action = summarizeToolAction(toolName, value);
+  const result = phase === "output" ? summarizeToolResult(toolName, value) : undefined;
+  return [
+    reason ? `为什么：${reason}` : "",
+    action ? `执行：${action}` : "",
+    result ? `结果：${result}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function summarizeToolReason(toolName: string, value: unknown) {
+  const normalized = normalizeToolName(toolName);
+  const query = extractReadableQuery(value);
+
+  if (normalized.includes("listknowledgebase")) {
+    return query
+      ? `围绕「${query}」查询项目知识库，确认是否有可复用的业务规则、历史方案或 PRD 模板。`
+      : "查询项目知识库，确认是否有可复用的业务规则、历史方案或 PRD 模板。";
+  }
+  if (normalized.includes("readfile") || normalized.includes("read_file")) {
+    return "读取参考资料，确认已有业务背景、约束和文档结构，避免凭空生成。";
+  }
+  if (
+    normalized.includes("writefile") ||
+    normalized.includes("editfile") ||
+    normalized.includes("updatefile")
+  ) {
+    return "把已确认的分析结果整理成用户可直接查看的内容。";
+  }
+  if (
+    normalized.includes("search") ||
+    normalized.includes("grep") ||
+    normalized.includes("find")
+  ) {
+    return query
+      ? `检索「${query}」相关资料，确认是否存在历史约束或可复用内容。`
+      : "检索相关资料，确认是否存在历史约束或可复用内容。";
+  }
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized.includes("exec") ||
+    normalized.includes("bash")
+  ) {
+    return "执行必要检查，确认当前改动或服务状态真实可用。";
+  }
+  if (
+    normalized.includes("fetch") ||
+    normalized.includes("http") ||
+    normalized.includes("curl")
+  ) {
+    return "获取接口或页面响应，确认当前服务状态和外部依赖。";
+  }
+  return "处理当前任务步骤，补齐生成结果所需的信息。";
+}
+
+function summarizeToolAction(toolName: string, value: unknown) {
+  const normalized = normalizeToolName(toolName);
+  const query = extractReadableQuery(value);
+  if (normalized.includes("listknowledgebase")) {
+    return query
+      ? `按「${query}」检索项目知识库，并筛选能支撑当前需求的条目。`
+      : "检索项目知识库，并筛选能支撑当前需求的条目。";
+  }
+  if (normalized.includes("readfile") || normalized.includes("read_file")) {
+    return "读取必要资料，并提取与需求理解相关的信息。";
+  }
+  if (
+    normalized.includes("writefile") ||
+    normalized.includes("editfile") ||
+    normalized.includes("updatefile")
+  ) {
+    return "整理输出内容，并更新对应产物。";
+  }
+  if (
+    normalized.includes("search") ||
+    normalized.includes("grep") ||
+    normalized.includes("find")
+  ) {
+    return query
+      ? `检索「${query}」相关资料，并提取可复用上下文。`
+      : "检索相关资料，并提取可复用上下文。";
+  }
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized.includes("exec") ||
+    normalized.includes("bash")
+  ) {
+    return "运行必要检查，确认页面、接口或构建结果正常。";
+  }
+  if (
+    normalized.includes("fetch") ||
+    normalized.includes("http") ||
+    normalized.includes("curl")
+  ) {
+    return "读取接口或页面响应，判断服务是否正常。";
+  }
+  return "处理当前步骤。";
+}
+
+function summarizeToolResult(toolName: string, value: unknown) {
+  if (value === undefined || value === null || value === "") return "这一步已完成。";
   const normalized = normalizeToolName(toolName);
   const record =
     value && typeof value === "object" && !Array.isArray(value)
@@ -579,33 +681,29 @@ function summarizeToolPayload(
   if (normalized.includes("listknowledgebase")) {
     const selectedCount = numberFromUnknown(record?.selectedCount);
     const matchedCount = numberFromUnknown(record?.matchedCount);
-    if (phase === "output" && selectedCount !== undefined) {
+    if (selectedCount !== undefined) {
       return matchedCount !== undefined
-        ? `已找到 ${selectedCount} 条可用资料，总命中 ${matchedCount} 条。`
-        : `已找到 ${selectedCount} 条可用资料。`;
+        ? `找到 ${selectedCount} 条可用资料，总命中 ${matchedCount} 条。`
+        : `找到 ${selectedCount} 条可用资料。`;
     }
-    return "正在从知识库中查找可复用的产品资料。";
+    return "项目知识库查询已完成。";
   }
   if (normalized.includes("readfile") || normalized.includes("read_file")) {
-    return phase === "output"
-      ? "已读取相关资料，并用于后续分析。"
-      : "正在读取必要资料，用于理解上下文。";
+    return "已读取相关资料，并用于后续分析。";
   }
   if (
     normalized.includes("writefile") ||
     normalized.includes("editfile") ||
     normalized.includes("updatefile")
   ) {
-    return phase === "output" ? "已完成内容整理。" : "正在整理输出内容。";
+    return "内容整理已完成。";
   }
   if (
     normalized.includes("search") ||
     normalized.includes("grep") ||
     normalized.includes("find")
   ) {
-    return phase === "output"
-      ? "已完成相关信息检索。"
-      : "正在检索和当前需求相关的信息。";
+    return "相关信息检索已完成。";
   }
   if (
     normalized.includes("shell") ||
@@ -613,13 +711,42 @@ function summarizeToolPayload(
     normalized.includes("exec") ||
     normalized.includes("bash")
   ) {
-    return phase === "output"
-      ? "已完成必要的系统验证。"
-      : "正在执行必要的验证步骤。";
+    return "系统验证已完成。";
   }
-  return phase === "output" ? "已完成这一步处理。" : "正在处理当前步骤。";
+  return "这一步已完成。";
 }
 
 function numberFromUnknown(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function extractReadableQuery(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const candidate =
+    stringFromUnknown(record.query) ??
+    stringFromUnknown(record.keyword) ??
+    stringFromUnknown(record.search) ??
+    stringFromUnknown(record.message) ??
+    stringFromUnknown(record.prompt);
+  if (!candidate) return undefined;
+  const cleaned = candidate
+    .replace(/read[_ ]?file/gi, "读取参考资料")
+    .replace(/write[_ ]?file/gi, "整理生成内容")
+    .replace(/listKnowledgeBase/gi, "查询项目知识库")
+    .replace(/["'`{}[\]<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned || looksTechnicalText(cleaned)) return undefined;
+  return cleaned.length > 28 ? `${cleaned.slice(0, 28)}…` : cleaned;
+}
+
+function stringFromUnknown(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function looksTechnicalText(text: string) {
+  return /--|&&|\|\||\/[\w.-]+|\\n|\.tsx?|\.jsx?|\.json|npm |git |ssh |docker |curl /i.test(text);
 }
