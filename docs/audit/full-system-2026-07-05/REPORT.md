@@ -18,7 +18,7 @@
 - 已删除 DeerFlow-first 后不再写入的旧 `agent_step_logs` 运行步骤表、`AgentName`/`AgentStepStatus` 枚举、API step 查询和前端 `0 步` 展示噪音；当前运行日志只展示真实 `vibe_stream_event_logs` 流事件。
 - Web CSP 已收紧：生产态不再允许 `unsafe-eval`，开发态保留 Next dev 必需权限并去重本地 API origin。
 - 后台写操作已补真实 smoke：管理员登录、用户创建/禁用/启用/重置密码、模型供应商创建/更新/禁用/启用、模型配置创建/禁用均通过，并自动清理。
-- 生产服务器当前 HEAD 为 `0c02341`，Knowledge 容器已重新部署并启动。
+- 生产服务器当前 HEAD 为 `be04b8b`，API/Web 已重新部署；Knowledge 容器保持健康运行。
 - Knowledge Quartz core 固定为 `v5.0.0` / `ab346fa66a895e12d63a308e70ce330ba795822a`，25 个社区插件写入 `quartz.lock.json` 并按 commit 恢复。
 - Knowledge 生产本机 `http://127.0.0.1:3001/__health` 200，容器内 `.quartz-source-revision` 为 `ab346fa66a895e12d63a308e70ce330ba795822a`。
 - 生产 Knowledge 日志已无 `direct eval`、`CustomOgImagesEmitterName`、`Couldn't parse Quartz configuration` 错误/噪音。
@@ -123,13 +123,17 @@ Gateway 线程删除：1 个线程返回 200。最终 `cleanup:smoke -- --dry-ru
 
 | 验证项 | 结果 |
 |---|---|
-| 服务器 HEAD | `0c02341` |
+| 服务器 HEAD | `be04b8b` |
+| API 容器 | `ai-product-workbench-api` Up；启动日志显示已应用 `20260705092000_drop_legacy_agent_step_logs` |
+| Web 容器 | `ai-product-workbench-web` Up；生产 CSP 无 `unsafe-eval` |
 | Knowledge 容器 | `ai-product-knowledge` Up |
 | Quartz revision | `ab346fa66a895e12d63a308e70ce330ba795822a` |
 | Knowledge 本机 health | `http://127.0.0.1:3001/__health` 200，正文 `ok` |
 | Knowledge 本机 index | `http://127.0.0.1:3001/` 200 |
 | Knowledge 日志 | 80 个 Markdown 文件解析成功；输出 114 个文件；无 direct eval/CustomOgImages/parse 错误 |
-| 生产 API health | `ok=true`，DeerFlow enabled |
+| 生产 API health | `ok=true`，phase=`deerflow-first-runtime`，runtime=`ai-product-workbench-lead`，model=`datatoken-gpt-5-5` |
+| 生产旧 step schema | `agent_step_logs` 为 null，`AgentName`/`AgentStepStatus` type count 为 0 |
+| 生产 smoke dry-run | users/conversations/messages/runs/share/model/deerflow 均为 0 |
 | Git 工作区 | 仅 `?? backups/` 为生产备份目录，未纳入 Git |
 
 部署中真实暴露并修复的问题：
@@ -138,6 +142,7 @@ Gateway 线程删除：1 个线程返回 200。最终 `cleanup:smoke -- --dry-ru
 2. 修复为复制 `quartz.lock.json` 并调用无参 `npx quartz plugin install`，25 个插件从 lockfile commit 恢复。
 3. 尝试删除 disabled 的 `og-image` 后，生产启动报 `No matching export ... CustomOgImagesEmitterName`。结论：`og-image` 虽 disabled，但 Quartz core 静态依赖其导出，不能删除。
 4. 删除真正产生日志噪音的 `note-properties` 后，生产日志不再出现 `direct eval` warning。
+5. 抽出 Web 安全头模块后，首次 Web runner 镜像只复制了 `next.config.ts`，未复制 `lib/security-headers.ts`，生产容器报 `Cannot find module './lib/security-headers'` 并重启；已修复 Dockerfile，runner 同步复制该模块，复部署后 Web 正常。
 
 ## 7. 本轮修复清单
 
@@ -152,6 +157,7 @@ Gateway 线程删除：1 个线程返回 200。最终 `cleanup:smoke -- --dry-ru
 | P2 | DeerFlow-first 后旧 `agent_step_logs` 永远为空，但 admin 仍展示 `0 步` | 新增迁移删除旧表和枚举，API/UI 改为只展示真实流事件 |
 | P2 | Web 生产 CSP 仍允许 `unsafe-eval` | 抽出可测安全头构造函数，生产去掉 `unsafe-eval`，新增断言 |
 | P2 | Admin 写路径缺少真实验证 | 新增 `smoke:admin-write`，覆盖用户和模型配置写操作并自动清理 |
+| P2 | Web runner 镜像遗漏 next.config 的本地依赖模块 | Dockerfile runner 阶段复制 `apps/web/lib/security-headers.ts`，生产复部署通过 |
 
 既有修复仍有效：
 
