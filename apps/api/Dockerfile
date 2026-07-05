@@ -5,6 +5,8 @@ WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always \
     DEBIAN_FRONTEND=noninteractive
 RUN sed -i \
     -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
@@ -33,6 +35,8 @@ ENV NODE_ENV=production
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always \
     DEBIAN_FRONTEND=noninteractive
 RUN sed -i \
     -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
