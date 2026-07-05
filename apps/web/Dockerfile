@@ -24,6 +24,7 @@ COPY apps/web/package.json apps/web/package.json
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/apps/web/.next apps/web/.next
 COPY --from=build /app/apps/web/next.config.ts apps/web/next.config.ts
+COPY --from=build /app/apps/web/lib/security-headers.ts apps/web/lib/security-headers.ts
 WORKDIR /app/apps/web
 EXPOSE 3000
 CMD ["npx", "next", "start", "--hostname", "0.0.0.0", "--port", "3000"]
