@@ -11,7 +11,7 @@ const repoRoot = path.resolve(scriptDir, "..");
 
 const defaults = {
   gatewayUrl: process.env.DEERFLOW_GATEWAY_URL ?? "http://localhost:8001",
-  langgraphUrl: process.env.DEERFLOW_LANGGRAPH_URL ?? "http://localhost:2024",
+  langgraphUrl: process.env.DEERFLOW_LANGGRAPH_URL ?? `${process.env.DEERFLOW_GATEWAY_URL ?? "http://localhost:8001"}/api`,
   agentDir: path.join(repoRoot, "integrations/deerflow/agents/ai-product-workbench-lead"),
   skillDir: path.join(repoRoot, "integrations/deerflow/skills/ai-product-workbench"),
   threadId: process.env.DEERFLOW_BOOTSTRAP_THREAD_ID,
@@ -268,7 +268,7 @@ function printHelp() {
 Options:
   --dry-run                 Package and validate assets without network calls
   --gateway-url <url>       DeerFlow Gateway URL, default DEERFLOW_GATEWAY_URL or http://localhost:8001
-  --langgraph-url <url>     DeerFlow LangGraph URL, default DEERFLOW_LANGGRAPH_URL or http://localhost:2024
+  --langgraph-url <url>     DeerFlow LangGraph-compatible URL, default DEERFLOW_LANGGRAPH_URL or DEERFLOW_GATEWAY_URL/api
   --thread-id <id>          Existing DeerFlow thread used to upload the .skill archive
   --skip-agent              Do not create/update the custom agent
   --skip-skill              Do not install/enable the skill

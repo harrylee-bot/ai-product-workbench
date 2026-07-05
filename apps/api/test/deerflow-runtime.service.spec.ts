@@ -138,6 +138,47 @@ describe("DeerFlowRuntimeService", () => {
     expect(prisma.deerFlowThreadBinding.create).toHaveBeenCalledTimes(2);
   });
 
+  it("defaults LangGraph-compatible calls to the DeerFlow Gateway API surface", async () => {
+    delete process.env.DEERFLOW_LANGGRAPH_URL;
+    delete process.env.DEERFLOW_GATEWAY_URL;
+    prisma.deerFlowThreadBinding.create.mockImplementation(async ({ data }) => data);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "gateway-thread-1" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages",
+          data: [
+            {
+              type: "AIMessageChunk",
+              content:
+                "默认 Gateway API 正常。\n```ai_product_workbench_final_action\n{\"type\":\"answer\",\"message\":\"默认 Gateway API 正常。\"}\n```",
+            },
+            { langgraph_node: "model" },
+          ],
+        },
+        { event: "values", data: { done: true } },
+      ]));
+
+    const service = new DeerFlowRuntimeService(prisma as never);
+    await service.runTurn({
+      runId: "run-default-gateway",
+      conversationId: "conversation-default-gateway",
+      userId: "user-1",
+      message: "默认地址测试",
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8001/api/threads",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8001/api/threads/gateway-thread-1/runs/stream",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("rejects a mismatched DeerFlow thread binding instead of reusing stale context", async () => {
     prisma.deerFlowThreadBinding.findUnique.mockResolvedValueOnce({
       conversationId: "conversation-old",

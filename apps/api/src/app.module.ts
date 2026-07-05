@@ -22,11 +22,11 @@ import { CommentModule } from "./comments/comment.module";
       isGlobal: true,
       envFilePath: [".env", "../../.env"],
     }),
-    // sec-3：全局限流（默认每分钟 60 次/IP），登录/公开分享接口另设更严格配额。
+    // sec-3：全局限流（默认每分钟 60 次/IP），登录/登录后分享接口另设更严格配额。
     ThrottlerModule.forRoot([
       { name: "default", ttl: 60_000, limit: 60 },
       { name: "auth", ttl: 60_000, limit: 10 },
-      { name: "public", ttl: 60_000, limit: 30 },
+      { name: "share", ttl: 60_000, limit: 30 },
       { name: "heavy", ttl: 60_000, limit: 10 },
     ]),
     PrismaModule,

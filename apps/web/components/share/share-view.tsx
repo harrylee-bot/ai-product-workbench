@@ -44,7 +44,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
   const showPrototype = shareData.scope === "prototype" || shareData.scope === "both";
   const prototypePreviewUrl = shareData.prototype?.previewUrl
     ? toApiUrl(shareData.prototype.previewUrl)
-    : `${getApiBase()}/public/share/${encodeURIComponent(token)}/prototype`;
+    : `${getApiBase()}/authenticated-share/${encodeURIComponent(token)}/prototype`;
 
   return (
     <div className="min-h-screen bg-gray-50">

@@ -145,7 +145,7 @@ export class ShareService {
    * 分享解析（控制器层要求登录、只读）。返回可见的文档/原型只读快照。
    * 不暴露任何编辑/导出能力；原型仅返回经安全校验的 HTML。
    */
-  async resolvePublic(token: string, options: { incrementView?: boolean } = {}) {
+  async resolveAuthenticatedShare(token: string, options: { incrementView?: boolean } = {}) {
     const incrementView = options.incrementView ?? true;
     const now = new Date();
     const { share, conversation } = await this.prisma.$transaction(async (tx) => {
@@ -179,8 +179,8 @@ export class ShareService {
     const wantsPrd = scope === ShareScope.prd || scope === ShareScope.both;
     const wantsPrototype = scope === ShareScope.prototype || scope === ShareScope.both;
 
-    const prd = wantsPrd ? await this.loadPublicPrd(share as ShareLinkRecord) : null;
-    const prototype = wantsPrototype ? await this.loadPublicPrototype(share as ShareLinkRecord, token) : null;
+    const prd = wantsPrd ? await this.loadAuthenticatedPrd(share as ShareLinkRecord) : null;
+    const prototype = wantsPrototype ? await this.loadAuthenticatedPrototype(share as ShareLinkRecord, token) : null;
 
     return {
       title: share.title ?? conversation.title,
@@ -194,13 +194,13 @@ export class ShareService {
   }
 
   /** 仅返回原型 HTML，用于 iframe 预览。 */
-  async resolvePublicPrototypeHtml(token: string) {
-    const result = await this.resolvePublic(token, { incrementView: false });
+  async resolveAuthenticatedPrototypeHtml(token: string) {
+    const result = await this.resolveAuthenticatedShare(token, { incrementView: false });
     if (!result.prototype?.html) throw new NotFoundException("SHARE_PROTOTYPE_NOT_AVAILABLE");
     return result.prototype.html;
   }
 
-  private async loadPublicPrd(share: ShareLinkRecord) {
+  private async loadAuthenticatedPrd(share: ShareLinkRecord) {
     // 严格只返回分享创建时固化的 prdDocumentId 指向的记录，不 fallback 到会话最新文档。
     // 否则分享后被分享文档删除/降级，会静默返回另一份未在分享时刻确认的内容（share-1）。
     if (!share.prdDocumentId) return null;
@@ -215,7 +215,7 @@ export class ShareService {
     };
   }
 
-  private async loadPublicPrototype(share: ShareLinkRecord, token: string) {
+  private async loadAuthenticatedPrototype(share: ShareLinkRecord, token: string) {
     // 严格只返回分享创建时固化的 prototypeArtifactId 指向的记录，不 fallback。
     if (!share.prototypeArtifactId) return null;
     const artifact = await this.prisma.prototypeArtifact.findFirst({
@@ -227,7 +227,7 @@ export class ShareService {
     return {
       title: artifact.title,
       html: sanitizePrototypeDocumentHtml(artifact.htmlContent, artifact.title),
-      previewUrl: `/api/public/share/${token}/prototype`,
+      previewUrl: `/api/authenticated-share/${token}/prototype`,
       pageCount: artifact.pageCount,
       updatedAt: artifact.updatedAt.toISOString(),
     };

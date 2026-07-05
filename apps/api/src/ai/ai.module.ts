@@ -35,7 +35,7 @@ import { QaRuleCheckService } from "./qa-rule-check.service";
 import { QaService } from "./qa.service";
 import { RollbackService } from "./rollback.service";
 import { VersionHistoryService } from "./version-history.service";
-import { ShareLinkController, PublicShareController } from "./share.controller";
+import { ShareLinkController, AuthenticatedShareController } from "./share.controller";
 import { ShareService } from "./share.service";
 import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
 import { FinalActionApplierService } from "./final-action-applier.service";
@@ -66,7 +66,7 @@ import { AichatStreamService } from "./aichat/aichat-stream.service";
     ConversationVersionTimelineController,
     ConversationRollbackController,
     ShareLinkController,
-    PublicShareController,
+    AuthenticatedShareController,
     AichatStreamController,
   ],
   providers: [

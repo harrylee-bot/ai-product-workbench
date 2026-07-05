@@ -19,19 +19,22 @@ The Nest backend must not reimplement DeerFlow's graph, planner, coding node, or
 
 ## Runtime URLs
 
-Official DeerFlow 2.0 docs separate the surfaces:
+DeerFlow 2.0 Gateway exposes the LangGraph-compatible thread/run APIs under `/api`.
+AI Product Workbench uses the Gateway surface by default so service-to-service calls, uploads,
+artifacts, custom agents, and skills all share the same runtime boundary.
 
-- LangGraph server: `DEERFLOW_LANGGRAPH_URL`, default `http://localhost:2024`
+- LangGraph-compatible API: `DEERFLOW_LANGGRAPH_URL`, default `http://localhost:8001/api`
 - Gateway API: `DEERFLOW_GATEWAY_URL`, default `http://localhost:8001`
 
-The integration uses LangGraph thread/run/stream plus Gateway upload/artifact access.
+Direct LangGraph Server on `http://localhost:2024` is still useful for LangGraph Studio or
+DeerFlow debugging, but it is not the Workbench default path.
 
 ## Required Env
 
 ```env
 DEERFLOW_ENABLED=true
-DEERFLOW_LANGGRAPH_URL=http://localhost:2024
 DEERFLOW_GATEWAY_URL=http://localhost:8001
+DEERFLOW_LANGGRAPH_URL=http://localhost:8001/api
 DEERFLOW_ASSISTANT_ID=lead_agent
 DEERFLOW_AGENT_NAME=ai-product-workbench-lead
 DEERFLOW_MODEL_NAME=workbench-claude
@@ -147,7 +150,7 @@ This repository ships DeerFlow-side runtime assets under `integrations/deerflow/
 Install or update them on a running DeerFlow instance:
 
 ```bash
-npm run deerflow:bootstrap -- --gateway-url http://localhost:8001 --langgraph-url http://localhost:2024
+npm run deerflow:bootstrap -- --gateway-url http://localhost:8001 --langgraph-url http://localhost:8001/api
 ```
 
 Validate locally without network calls:

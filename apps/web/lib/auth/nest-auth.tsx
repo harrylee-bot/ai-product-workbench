@@ -37,8 +37,8 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function normalizeMeResponse(data: { user?: NestUser } | NestUser): NestUser {
-  if ("user" in data && data.user) return data.user;
+function normalizeSessionResponse(data: { user?: NestUser | null } | NestUser): NestUser | null {
+  if ("user" in data) return data.user ?? null;
   return data as NestUser;
 }
 
@@ -76,8 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const data = await request<{ user?: NestUser } | NestUser>("/auth/me");
-      setUser(normalizeMeResponse(data));
+      const data = await request<{ user?: NestUser | null } | NestUser>("/auth/session");
+      setUser(normalizeSessionResponse(data));
     } catch {
       setUser(null);
     } finally {

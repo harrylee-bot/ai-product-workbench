@@ -37,6 +37,12 @@ EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
 
+DO $legacy_backfill$
+BEGIN
+IF to_regclass('public.projects') IS NULL OR to_regclass('public.product_design_states') IS NULL THEN
+  RETURN;
+END IF;
+
 CREATE TEMP TABLE "_project_conversation_map" ON COMMIT DROP AS
 SELECT
   p.id AS project_id,
@@ -505,3 +511,5 @@ CREATE INDEX IF NOT EXISTS "prototype_conversion_jobs_conversation_id_idx"
   ON "prototype_conversion_jobs"("conversation_id");
 CREATE INDEX IF NOT EXISTS "vibe_stream_event_logs_conversation_id_idx"
   ON "vibe_stream_event_logs"("conversation_id");
+
+END $legacy_backfill$;

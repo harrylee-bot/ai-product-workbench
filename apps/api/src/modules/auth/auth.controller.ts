@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Inject, Post, Res, UseGuards } from "@nestjs/common";
-import type { Response } from "express";
+import { Body, Controller, Get, Inject, Post, Req, Res, UseGuards } from "@nestjs/common";
+import type { Request, Response } from "express";
 import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
 import { AUTH_COOKIE_NAME, authCookieOptions, clearAuthCookieOptions } from "../../common/auth-cookie";
@@ -28,6 +28,17 @@ export class AuthController {
     return { user: this.auth.me(user) };
   }
 
+  @Get("session")
+  session(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    const token = readAuthCookie(request);
+    return this.auth.session(token).then((user) => {
+      if (!user && token) {
+        response.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
+      }
+      return { user };
+    });
+  }
+
   @Post("register")
   // sec-3：注册接口限流防刷（5 次/分钟/IP）。
   @Throttle({ auth: { limit: 5, ttl: 60_000 } })
@@ -44,4 +55,9 @@ export class AuthController {
     response.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
     return this.auth.logout();
   }
+}
+
+function readAuthCookie(request: Request) {
+  const cookies = request.cookies as Record<string, string | undefined> | undefined;
+  return cookies?.[AUTH_COOKIE_NAME] ?? null;
 }

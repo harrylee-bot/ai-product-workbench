@@ -51,6 +51,23 @@ export class AuthService {
     return user;
   }
 
+  async session(accessToken?: string | null) {
+    if (!accessToken) return null;
+
+    try {
+      const payload = await this.jwt.verifyAsync<AuthJwtPayload>(accessToken);
+      const userId = payload.userId ?? payload.sub;
+      if (!userId) return null;
+
+      const user = await this.prisma.user.findUnique({ where: { id: userId } });
+      if (!user || user.status !== UserStatus.active) return null;
+
+      return this.toPublicUser(user);
+    } catch {
+      return null;
+    }
+  }
+
   async register(dto: RegisterDto) {
     const username = dto.username.trim();
     if (!username) throw new BadRequestException("username 不能为空");

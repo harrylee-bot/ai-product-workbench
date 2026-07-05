@@ -8,11 +8,13 @@ describe("AuthService", () => {
   const prisma = {
     user: {
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
   };
   const jwtService = {
     signAsync: vi.fn(),
+    verifyAsync: vi.fn(),
   };
   const service = new AuthService(prisma as never, jwtService as never);
 
@@ -78,5 +80,34 @@ describe("AuthService", () => {
     await expect(
       service.login({ account: "missing", password: "bad" }),
     ).rejects.toThrow("账号或密码错误");
+  });
+
+  it("returns an empty session without token or invalid token", async () => {
+    await expect(service.session()).resolves.toBeNull();
+
+    jwtService.verifyAsync.mockRejectedValue(new Error("bad token"));
+    await expect(service.session("bad-token")).resolves.toBeNull();
+  });
+
+  it("returns the active user for a valid session token", async () => {
+    jwtService.verifyAsync.mockResolvedValue({ sub: "user-1", userId: "user-1", role: UserRole.user });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "user-1",
+      username: "zhangsan",
+      email: "zhangsan@example.local",
+      displayName: "张三",
+      passwordHash: "hidden",
+      role: UserRole.user,
+      status: UserStatus.active,
+      lastLoginAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await expect(service.session("good-token")).resolves.toMatchObject({
+      id: "user-1",
+      username: "zhangsan",
+      status: UserStatus.active,
+    });
   });
 });

@@ -15,7 +15,7 @@ export function buildUserHtmlCsp() {
 
 export function isUserHtmlPreviewPath(path: string) {
   return /^\/api\/prototype-artifacts\/[^/]+\/preview$/.test(path)
-    || /^\/api\/public\/share\/[^/]+\/prototype$/.test(path);
+    || /^\/api\/authenticated-share\/[^/]+\/prototype$/.test(path);
 }
 
 function readWebFrameAncestors() {

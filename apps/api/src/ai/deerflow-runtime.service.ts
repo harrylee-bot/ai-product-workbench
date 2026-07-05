@@ -1044,7 +1044,7 @@ function readStreamMode() {
 }
 
 function langGraphUrl(path: string) {
-  return joinUrl(process.env.DEERFLOW_LANGGRAPH_URL ?? "http://localhost:2024", path);
+  return joinUrl(process.env.DEERFLOW_LANGGRAPH_URL ?? "http://localhost:8001/api", path);
 }
 
 function gatewayUrl(path: string) {

@@ -137,7 +137,7 @@ describe("ShareService", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("resolves public payload read-only and increments view count", async () => {
+  it("resolves authenticated share payload read-only and increments view count", async () => {
     const shareRecord = {
       id: "share-1",
       token: "tok-abc",
@@ -177,13 +177,14 @@ describe("ShareService", () => {
       lastViewedAt: new Date("2026-06-24T00:00:01.000Z"),
     });
 
-    const result = await service.resolvePublic("tok-abc");
+    const result = await service.resolveAuthenticatedShare("tok-abc");
 
     expect(result.readOnly).toBe(true);
     expect(result.allowDownload).toBe(false);
     expect(result.allowEdit).toBe(false);
     expect(result.prd?.title).toBe("签到活动 PRD");
     expect(result.prototype?.html).toContain("签到");
+    expect(result.prototype?.previewUrl).toBe("/api/authenticated-share/tok-abc/prototype");
     expect(prisma.shareLink.update).toHaveBeenCalledWith({
       where: { id: "share-1" },
       data: { viewCount: { increment: 1 }, lastViewedAt: expect.any(Date) },
@@ -200,10 +201,10 @@ describe("ShareService", () => {
       expiresAt: null,
     });
 
-    await expect(service.resolvePublic("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.resolveAuthenticatedShare("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it("treats archived conversations as unavailable for public shares", async () => {
+  it("treats archived conversations as unavailable for authenticated shares", async () => {
     prisma.shareLink.findUnique.mockResolvedValue({
       id: "share-1",
       token: "tok-abc",
@@ -220,7 +221,7 @@ describe("ShareService", () => {
       deletedAt: null,
     });
 
-    await expect(service.resolvePublic("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.resolveAuthenticatedShare("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.shareLink.update).not.toHaveBeenCalled();
   });
 
@@ -234,6 +235,6 @@ describe("ShareService", () => {
       expiresAt: new Date("2000-01-01T00:00:00.000Z"),
     });
 
-    await expect(service.resolvePublic("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.resolveAuthenticatedShare("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
   });
 });
