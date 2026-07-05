@@ -60,6 +60,7 @@
 | API 单测 | `npm run test` | 35 个测试文件 passed、1 skipped；169 passed、1 skipped |
 | API 路由边界 | `apps/api/test/api-route-boundary.spec.ts` | 覆盖 `authenticated-share` 受保护、旧 public 命名不复活、logout 幂等 200 |
 | API clean build | `npm --workspace @ai-product-workbench/api run build` | 编译前清理 `dist`，旧 product/project 编译产物不再残留 |
+| Knowledge source pin | `npm run knowledge:assert-pinned` | Quartz core 固定到 `v5.0.0` / `ab346fa66a895e12d63a308e70ce330ba795822a` 并校验 checkout |
 | 生产构建 | `npm run build` | API `tsc` + Next production build 通过 |
 | 主依赖审计 | `npm_config_registry=https://registry.npmjs.org npm audit --omit=optional` | 0 vulnerabilities |
 | 未用扫描 | `npx --yes knip --include files,dependencies,devDependencies,exports,types --workspace apps/web --workspace apps/api` | 无输出 |
@@ -147,6 +148,7 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 | P1 | DeerFlow 默认仍指向 `localhost:2024`，与当前 Gateway 架构不一致 | 默认改为 `http://localhost:8001/api`，生产改为 `host.docker.internal:8001/api` |
 | P1 | Origin-Agent-Cluster warning | Web 增加 `Origin-Agent-Cluster: ?1` |
 | P2 | API `dist` 会保留已删除历史模块的旧编译产物，本地审计会误扫到 `project/products/product-design` | API build 改为先 `rm -rf dist` 再 `tsc`，并清掉本地旧产物 |
+| P2 | Knowledge/Quartz Dockerfile 使用浮动 `v5` 分支，生产构建不可复现 | 固定 Quartz `v5.0.0` commit，并增加 `knowledge:assert-pinned` 门禁 |
 | P2 | 回放迁移时 legacy backfill 对已删除表不够宽容 | 回填迁移和 relax 迁移增加存在性保护 |
 
 ## 7. 产品架构和业务逻辑审计
@@ -184,6 +186,7 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 - 登出过期会话 401 噪音已通过幂等 `/auth/logout` 消除。
 - 重复 auth 模块边界已删除：`apps/api/src/modules/auth` 不再存在，认证类型、guard、decorator 统一从 `apps/api/src/auth` 引用。
 - API 旧 `dist` 编译产物已清理，后续 build 会先删除 `dist`，避免已删除模块继续污染本地运行和审计。
+- Knowledge Quartz core 不再跟随浮动 `v5` 分支，Docker build 会校验固定 commit 并写入 `.quartz-source-revision`。
 - 本地 Playwright 临时目录和临时测试邮箱文件已删除。
 - 本地和生产 smoke/test 数据均已清理到 0。
 - 当前只保留本轮报告和截图证据；未发现额外历史审查报告文件。
@@ -193,7 +196,7 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 
 | 类型 | 当前状态 | 建议 |
 |---|---|---|
-| Knowledge/Quartz 依赖链 | 主 Web/API audit 为 0；Knowledge 是独立 Quartz 应用 | 单独升级 Quartz/plugin，不能用主应用审计结果覆盖 |
+| Knowledge/Quartz 镜像依赖 | Quartz core 已固定 commit；主 Web/API audit 仍不能覆盖镜像内 OS 包和 Quartz plugin 依赖 | 后续补镜像级 SBOM/漏洞扫描，不能用主应用审计结果覆盖 |
 | 后台管理写操作 | 本轮验证页面加载，未逐项写入 admin 操作 | 补 admin E2E，覆盖用户禁用、模型切换、知识库审批等 |
 | 分享产品定位 | 当前是登录后只读分享 | 若要外部免登录分享，需要重新设计 token 权限、审计、撤销和速率限制 |
 | 可执行原型 | 当前 sanitizer 禁止脚本，偏静态安全 | 若支持 JS 原型，建议独立 sandbox 子域名 + postMessage contract |

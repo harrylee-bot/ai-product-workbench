@@ -1,9 +1,11 @@
 ARG NODE_IMAGE=node:22-bookworm-slim
-ARG QUARTZ_REF=v5
+ARG QUARTZ_REF=v5.0.0
+ARG QUARTZ_COMMIT=ab346fa66a895e12d63a308e70ce330ba795822a
 
 FROM ${NODE_IMAGE}
 
 ARG QUARTZ_REF
+ARG QUARTZ_COMMIT
 
 WORKDIR /opt/quartz
 
@@ -16,7 +18,10 @@ RUN sed -i \
   && rm -f /etc/nginx/sites-enabled/default \
   && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --branch "${QUARTZ_REF}" https://github.com/jackyzha0/quartz.git /opt/quartz
+RUN git clone --depth 1 --branch "${QUARTZ_REF}" https://github.com/jackyzha0/quartz.git /opt/quartz \
+  && cd /opt/quartz \
+  && test "$(git rev-parse HEAD)" = "${QUARTZ_COMMIT}" \
+  && git rev-parse HEAD > /opt/quartz/.quartz-source-revision
 
 COPY apps/knowledge/quartz.config.yaml /opt/quartz/quartz.config.yaml
 COPY apps/knowledge/nginx.conf /etc/nginx/conf.d/default.conf
