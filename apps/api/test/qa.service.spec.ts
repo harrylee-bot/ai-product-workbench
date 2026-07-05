@@ -25,6 +25,40 @@ describe("Module 13 QA services", () => {
     );
   });
 
+  it("supports PRD-only QA without prototype blocking issues", () => {
+    const service = new QaRuleCheckService();
+    const state = baseState({ pages: [], businessRules: [] });
+    const prdDocument = toRequirementDocument(state, "prd-1");
+
+    const issues = service.run({
+      conversationDesignState: state,
+      prdDocument,
+      prototypeSpec: null,
+      prototypeArtifact: null,
+      knowledgeContext: emptyKnowledgeContext(),
+      checkTypes: [
+        "prd_completeness",
+        "state_prd_consistency",
+        "knowledge_rule_compliance",
+        "assumption_risk",
+      ],
+    });
+
+    expect(issues).toEqual([
+      expect.objectContaining({
+        id: "qa_pending_assumptions",
+        severity: "info",
+      }),
+    ]);
+    expect(issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "qa_state_pages_empty" }),
+        expect.objectContaining({ id: "qa_prototype_missing" }),
+        expect.objectContaining({ id: "qa_prototype_spec_pages_empty" }),
+      ]),
+    );
+  });
+
   it("persists QAReport with issue counts and updates latestQaReportId", async () => {
     const now = new Date("2026-06-21T09:00:00Z");
     const prisma = {

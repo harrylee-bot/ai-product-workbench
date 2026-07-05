@@ -14,7 +14,7 @@ import { FinalActionApplierService } from "../final-action-applier.service";
 import { QaService } from "../qa.service";
 import { RuntimeRunLogService } from "../runtime-run-log.service";
 import { toInputJson } from "../ai-vibe.helpers";
-import type { QAReport } from "../ai-vibe.types";
+import type { QACheckType, QAReport } from "../ai-vibe.types";
 import { classifyRequirementMode, type RequirementMode } from "../requirement-mode.helper";
 import {
   createBridgeContext,
@@ -302,6 +302,7 @@ export class AichatStreamService {
               trigger: "initial_generation",
               runId: run.id,
               prdDocument: applied.prdDocument,
+              checkTypes: PRD_GENERATION_QA_CHECK_TYPES,
             });
             const prdChatMessage = `PRD 已生成，${formatQaOutcome(qaReport)}，请在右侧画布查看。`;
             publishRuntimeEvent(createRuntimeEvent({
@@ -959,6 +960,13 @@ export class AichatStreamService {
   }
 }
 
+const PRD_GENERATION_QA_CHECK_TYPES: QACheckType[] = [
+  "prd_completeness",
+  "state_prd_consistency",
+  "knowledge_rule_compliance",
+  "assumption_risk",
+];
+
 export type DocumentStreamState = {
   id: string;
   forceDocumentStream: boolean;
@@ -966,6 +974,7 @@ export type DocumentStreamState = {
   finished: boolean;
   title?: string;
   textBuffer: string;
+  candidateBuffer: string;
   pending: string;
   inFinalActionBlock: boolean;
 };
@@ -982,6 +991,7 @@ export function createDocumentStreamState(
     started: false,
     finished: false,
     textBuffer: "",
+    candidateBuffer: "",
     pending: "",
     inFinalActionBlock: false,
   };
@@ -999,10 +1009,24 @@ export function routeAssistantDocumentDelta(
   const { visible, touchedFinalAction } = stripFinalActionDelta(event.chunk, state);
   const shouldRouteToCanvas =
     state.started ||
-    state.forceDocumentStream ||
     looksLikeDocumentDraft(`${state.textBuffer}${visible}`, visible);
 
   if (!shouldRouteToCanvas) {
+    if (state.forceDocumentStream && visible) {
+      state.candidateBuffer = trimDocumentCandidateBuffer(`${state.candidateBuffer}${visible}`);
+      const candidate = extractDocumentDraftCandidate(state.candidateBuffer);
+      if (candidate && looksLikeDocumentDraft(candidate, visible)) {
+        startDocumentStream(writer, state, candidate);
+        writer.write({ type: "data-textDelta", data: candidate, transient: true });
+        state.textBuffer += candidate;
+        state.candidateBuffer = "";
+        updateDocumentStreamTitle(writer, state);
+        return { suppressChat: true };
+      }
+
+      return { suppressChat: true };
+    }
+
     return { suppressChat: touchedFinalAction };
   }
 
@@ -1102,6 +1126,10 @@ export function looksLikeDocumentDraft(buffer: string, delta: string) {
   const current = normalizeDocumentDraftSample(delta);
   if (!sample || sample.length < 8) return false;
 
+  if (looksLikeRuntimeNarration(sample) && !hasStrongDocumentDraftStructure(sample)) {
+    return false;
+  }
+
   if (/```?\s*mermaid|(^|\n)\s*mermaid\s*\n|flowchart\s+(TD|LR|BT|RL)|sequenceDiagram|stateDiagram|classDiagram/.test(sample)) {
     return /(需求|文档|说明书|业务|活动|页面|接口|配置|状态|流程|快照|验收)/.test(sample);
   }
@@ -1110,8 +1138,7 @@ export function looksLikeDocumentDraft(buffer: string, delta: string) {
   ) {
     return true;
   }
-  if (/产品需求文档|需求文档|需求说明书|PRD|PRD\s*文档/i.test(sample)) return true;
-  if (/^[^\n]{2,80}(需求说明书|需求文档|产品需求文档|PRD)/im.test(sample)) return true;
+  if (hasDocumentTitleLine(sample)) return true;
   if (/^#{1,4}\s*.*(PRD|需求|文档|说明书|功能|页面|产品)/im.test(sample)) return true;
   if (/版本历史/.test(sample) && /\|\s*版本\s*\|/.test(sample)) return true;
   if (
@@ -1126,6 +1153,83 @@ export function looksLikeDocumentDraft(buffer: string, delta: string) {
   }
 
   return /^#{1,4}\s*/.test(current) && /(需求|PRD|文档|说明书|功能|页面)/i.test(current);
+}
+
+function trimDocumentCandidateBuffer(value: string) {
+  const max = 8_000;
+  if (value.length <= max) return value;
+  return value.slice(-max);
+}
+
+function extractDocumentDraftCandidate(value: string) {
+  const starts = [
+    findDocumentTitleLineStart(value),
+    findDocumentSectionStart(value),
+    findMarkdownDocumentHeadingStart(value),
+  ].filter((index): index is number => typeof index === "number" && index >= 0);
+  const start = starts.length ? Math.min(...starts) : undefined;
+  if (start === undefined) return undefined;
+  return value.slice(start).trimStart();
+}
+
+function findDocumentTitleLineStart(value: string) {
+  const pattern = /(^|\n)\s*[^\n。！？!?]{2,80}(需求说明书|需求文档|产品需求文档|PRD)(?=\s*(#|\n|$|\|))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(value)) !== null) {
+    const start = match.index + (match[1] ? match[1].length : 0);
+    const lineEnd = value.indexOf("\n", start);
+    const line = value.slice(start, lineEnd === -1 ? undefined : lineEnd).trim();
+    if (!looksLikeRuntimeNarration(line)) return start;
+  }
+  return undefined;
+}
+
+function findDocumentSectionStart(value: string) {
+  const match = value.match(
+    /(^|\n)\s*(#{1,4}\s*)?(\d+(\.\d+)*[.、]?\s*)?(版本历史|引言|项目背景|文档范围|使用场景|业务需求|功能需求|非功能需求|流程|页面要求|接口|权限|数据|统计|导出|审核|发布|下线|验收标准|业务降级方案|需求安全基线)/,
+  );
+  if (!match || match.index === undefined) return undefined;
+  return match.index + (match[1] ? match[1].length : 0);
+}
+
+function findMarkdownDocumentHeadingStart(value: string) {
+  const match = value.match(
+    /(^|\n)\s*#{1,4}\s*.*(PRD|需求|文档|说明书|功能|页面|产品|业务|验收)/i,
+  );
+  if (!match || match.index === undefined) return undefined;
+  return match.index + (match[1] ? match[1].length : 0);
+}
+
+function hasStrongDocumentDraftStructure(sample: string) {
+  if (/^#{1,4}\s*.*(PRD|需求|文档|说明书|功能|页面|产品)/im.test(sample)) {
+    return true;
+  }
+  if (hasDocumentTitleLine(sample)) return true;
+  if (/版本历史/.test(sample) && /\|\s*版本\s*\|/.test(sample)) return true;
+  if (
+    /(^|\n)\s*(#{1,4}\s*)?(\d+(\.\d+)*[.、]?\s*)?(版本历史|引言|项目背景|文档范围|使用场景|业务需求|功能需求|验收标准|业务降级方案|需求安全基线)/.test(sample)
+  ) {
+    return true;
+  }
+  const headingCount = (sample.match(/^#{1,4}\s+/gm) ?? []).length;
+  return headingCount >= 2;
+}
+
+function hasDocumentTitleLine(sample: string) {
+  return normalizeDocumentDraftSample(sample)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .some((line) => {
+      if (looksLikeRuntimeNarration(line)) return false;
+      if (line.length > 96) return false;
+      return /^(#\s*)?[^。！？!?]{2,80}(需求说明书|需求文档|产品需求文档|PRD)(\s*(#|\||$))?/i.test(line);
+    });
+}
+
+function looksLikeRuntimeNarration(sample: string) {
+  const head = sample.slice(0, 240);
+  return /(我已|我将|现在开始|开始分析|分析请求|思考过程|用户明确|用户要求|请求中|已加载技能|调用\s*\w+|工具调用|read[_ ]?file|已完成|本轮)/i.test(head);
 }
 
 function normalizeDocumentDraftSample(value: string) {

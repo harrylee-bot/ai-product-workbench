@@ -100,6 +100,81 @@ describe("aichat document stream router", () => {
     ]);
   });
 
+  it("does not treat runtime narration as canvas document content", () => {
+    expect(
+      looksLikeDocumentDraft(
+        [
+          "我已加载技能文件。现在开始分析请求并生成PRD。思考过程：",
+          "用户明确要求生成签到打卡活动PRD，指定四个部分：目标、用户流程、功能点、验收标准。",
+        ].join("\n"),
+        "用户明确要求生成签到打卡活动PRD",
+      ),
+    ).toBe(false);
+  });
+
+  it("suppresses forced document prelude instead of streaming it into canvas", () => {
+    const { parts, writer } = captureWriter();
+    const state = createDocumentStreamState("run-1", {
+      forceDocumentStream: true,
+    });
+
+    const result = routeAssistantDocumentDelta(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "assistant",
+        chunk: "我已加载技能文件。现在开始分析请求并生成PRD。思考过程：",
+      },
+      writer,
+      state,
+    );
+
+    expect(result).toEqual({ suppressChat: true });
+    expect(parts).toEqual([]);
+  });
+
+  it("starts forced document streaming only from the real document title", () => {
+    const { parts, writer } = captureWriter();
+    const state = createDocumentStreamState("run-1", {
+      forceDocumentStream: true,
+    });
+
+    routeAssistantDocumentDelta(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "assistant",
+        chunk: "我已加载技能文件。现在开始分析请求并生成PRD。\n",
+      },
+      writer,
+      state,
+    );
+
+    const result = routeAssistantDocumentDelta(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "assistant",
+        chunk: "签到打卡活动需求说明书##版本历史|版本|日期|作者|变更说明|",
+      },
+      writer,
+      state,
+    );
+
+    expect(result).toEqual({ suppressChat: true });
+    expect(parts).toEqual([
+      { type: "data-kind", data: "text", transient: true },
+      { type: "data-id", data: "streaming-prd-run-1", transient: true },
+      { type: "data-title", data: "签到打卡活动需求说明书", transient: true },
+      { type: "data-clear", data: null, transient: true },
+      {
+        type: "data-textDelta",
+        data: "签到打卡活动需求说明书##版本历史|版本|日期|作者|变更说明|",
+        transient: true,
+      },
+    ]);
+  });
+
   it("does not route ordinary answers into the artifact stream", () => {
     const { parts, writer } = captureWriter();
     const state = createDocumentStreamState("run-1");

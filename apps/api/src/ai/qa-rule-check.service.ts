@@ -62,33 +62,36 @@ export class QaRuleCheckService {
             suggestion: "补充关键业务规则或明确说明该阶段没有业务规则。",
           }));
         }
-        const pendingQuestions = state.pendingQuestions.filter((item) => text(item.status) !== "answered");
-        if (pendingQuestions.length) {
-          issues.push(issue({
-            id: "qa_pending_questions",
-            checkType: "assumption_risk",
-            severity: "info",
-            title: "存在待确认问题",
-            description: `当前仍有 ${pendingQuestions.length} 个 pending question，后续确认可能改变 PRD 或原型。`,
-            relatedStatePaths: ["pendingQuestions"],
-            suggestion: "优先回答影响范围、规则和关键状态的问题。",
-          }));
-        }
-        const pendingAssumptions = state.assumptions.filter((item) => {
-          const status = text(item.status);
-          return !status || status === "pending";
-        });
-        if (pendingAssumptions.length) {
-          issues.push(issue({
-            id: "qa_pending_assumptions",
-            checkType: "assumption_risk",
-            severity: "info",
-            title: "存在未确认 AI 推断",
-            description: `当前仍有 ${pendingAssumptions.length} 个 AI assumption 未确认。`,
-            relatedStatePaths: ["assumptions"],
-            suggestion: "确认、否定或补充这些推断，避免被误当成正式规则。",
-          }));
-        }
+      }
+    }
+
+    if (state && enabled.has("assumption_risk")) {
+      const pendingQuestions = state.pendingQuestions.filter((item) => text(item.status) !== "answered");
+      if (pendingQuestions.length) {
+        issues.push(issue({
+          id: "qa_pending_questions",
+          checkType: "assumption_risk",
+          severity: "info",
+          title: "存在待确认问题",
+          description: `当前仍有 ${pendingQuestions.length} 个 pending question，后续确认可能改变 PRD 或原型。`,
+          relatedStatePaths: ["pendingQuestions"],
+          suggestion: "优先回答影响范围、规则和关键状态的问题。",
+        }));
+      }
+      const pendingAssumptions = state.assumptions.filter((item) => {
+        const status = text(item.status);
+        return !status || status === "pending";
+      });
+      if (pendingAssumptions.length) {
+        issues.push(issue({
+          id: "qa_pending_assumptions",
+          checkType: "assumption_risk",
+          severity: "info",
+          title: "存在未确认 AI 推断",
+          description: `当前仍有 ${pendingAssumptions.length} 个 AI assumption 未确认。`,
+          relatedStatePaths: ["assumptions"],
+          suggestion: "确认、否定或补充这些推断，避免被误当成正式规则。",
+        }));
       }
     }
 
