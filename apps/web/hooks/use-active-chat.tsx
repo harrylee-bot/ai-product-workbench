@@ -53,8 +53,12 @@ const DEFAULT_RUNTIME_MODEL: ChatRuntimeModel = {
   provider: "deerflow",
   description: "当前后端 DeerFlow 运行时模型",
 };
-const STREAM_RECOVERY_ATTEMPTS = 18;
-const STREAM_RECOVERY_INTERVAL_MS = 1000;
+const STREAM_RECOVERY_ATTEMPTS = 8;
+const STREAM_RECOVERY_INTERVAL_MS = 2000;
+const STREAM_RECOVERY_RATE_LIMIT_BACKOFF_MS = 10_000;
+const RUN_STATUS_REFRESH_MS = 12_000;
+const RUNNING_MESSAGES_REFRESH_MS = 12_000;
+const CHAT_DATA_DEDUPE_MS = 5_000;
 
 type ActiveChatContextValue = {
   chatId: string;
@@ -169,7 +173,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     {
       revalidateOnFocus: true,
       refreshInterval: (latest) =>
-        latest?.latestRun?.status === "running" ? 4000 : 0,
+        latest?.latestRun?.status === "running" ? RUN_STATUS_REFRESH_MS : 0,
+      dedupingInterval: CHAT_DATA_DEDUPE_MS,
     }
   );
   const isServerRunRunning = runtimeStatus?.latestRun?.status === "running";
@@ -183,7 +188,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     () => getChatMessages(chatId),
     {
       revalidateOnFocus: false,
-      refreshInterval: isServerRunRunning ? 4000 : 0,
+      refreshInterval: isServerRunRunning ? RUNNING_MESSAGES_REFRESH_MS : 0,
+      dedupingInterval: CHAT_DATA_DEDUPE_MS,
     }
   );
 
@@ -712,14 +718,25 @@ async function recoverPersistedReply(input: {
 
   for (let attempt = 0; attempt < STREAM_RECOVERY_ATTEMPTS; attempt += 1) {
     if (attempt > 0) {
-      await delay(STREAM_RECOVERY_INTERVAL_MS);
+      await delay(STREAM_RECOVERY_INTERVAL_MS * Math.min(attempt, 4));
     }
 
-    const [nextRuntimeStatus, nextChatData] = await Promise.all([
-      input.mutateRuntimeStatus(),
-      input.mutateChatMessages(),
-      input.mutate(CHAT_HISTORY_KEY),
-    ]).catch(() => [undefined, undefined, undefined] as const);
+    const [runtimeResult, chatResult, historyResult] = await Promise.all([
+      recoverMutation(input.mutateRuntimeStatus),
+      recoverMutation(input.mutateChatMessages),
+      recoverMutation(() => input.mutate(CHAT_HISTORY_KEY)),
+    ]);
+    const nextRuntimeStatus = runtimeResult.data;
+    const nextChatData = chatResult.data;
+
+    if (
+      runtimeResult.rateLimited ||
+      chatResult.rateLimited ||
+      historyResult.rateLimited
+    ) {
+      await delay(STREAM_RECOVERY_RATE_LIMIT_BACKOFF_MS);
+      continue;
+    }
 
     if (
       input.recoveryTokenRef.current !== token ||
@@ -756,6 +773,21 @@ async function recoverPersistedReply(input: {
   }
 
   return false;
+}
+
+async function recoverMutation<T>(fn: () => Promise<T> | T): Promise<{
+  data?: Awaited<T>;
+  rateLimited: boolean;
+}> {
+  try {
+    return { data: await fn(), rateLimited: false };
+  } catch (error) {
+    return { rateLimited: isRateLimitError(error) };
+  }
+}
+
+function isRateLimitError(error: unknown) {
+  return error instanceof ChatbotError && error.statusCode === 429;
 }
 
 function hasAssistantVisibleContent(message: ChatMessage) {

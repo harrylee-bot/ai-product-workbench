@@ -44,13 +44,13 @@ export class AuthenticatedShareController {
   constructor(private readonly shareService: ShareService) {}
 
   // sec-3：分享接口限流防刷量（30 次/分钟/用户）。
-  @Throttle({ share: { limit: 30, ttl: 60_000 } })
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get(":token")
   resolve(@Param("token") token: string) {
     return this.shareService.resolveAuthenticatedShare(token);
   }
 
-  @Throttle({ share: { limit: 30, ttl: 60_000 } })
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get(":token/prototype")
   @Header("Content-Type", "text/html; charset=utf-8")
   @Header("Content-Security-Policy", USER_HTML_CSP)

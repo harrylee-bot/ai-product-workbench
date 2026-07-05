@@ -39,7 +39,7 @@ export class FileController {
   ) {}
 
   @Post("conversations/:conversationId/files")
-  @Throttle({ heavy: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseInterceptors(
     FilesInterceptor("files", 10, {
       storage: diskStorage({
@@ -115,7 +115,7 @@ export class FileController {
   }
 
   @Post("files/:fileId/prototype-conversion/run")
-  @Throttle({ heavy: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   runPrototypeConversion(@CurrentUser() user: AuthenticatedUser, @Param("fileId") fileId: string) {
     return this.prototypeConversionService.runConversionForFile(user, fileId);
   }

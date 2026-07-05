@@ -14,7 +14,7 @@ export class AuthController {
 
   @Post("login")
   // sec-3：登录接口严格限流防暴破（10 次/分钟/IP）。
-  @Throttle({ auth: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   login(@Body() dto: LoginDto, @Res({ passthrough: true }) response: Response) {
     return this.auth.login(dto).then(({ accessToken, user }) => {
       response.cookie(AUTH_COOKIE_NAME, accessToken, authCookieOptions());
@@ -41,7 +41,7 @@ export class AuthController {
 
   @Post("register")
   // sec-3：注册接口限流防刷（5 次/分钟/IP）。
-  @Throttle({ auth: { limit: 5, ttl: 60_000 } })
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   register(@Body() dto: RegisterDto, @Res({ passthrough: true }) response: Response) {
     return this.auth.register(dto).then(({ accessToken, user }) => {
       response.cookie(AUTH_COOKIE_NAME, accessToken, authCookieOptions());
