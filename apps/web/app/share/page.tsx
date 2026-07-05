@@ -1,14 +1,15 @@
-import { Suspense } from "react";
-import { ShareClient } from "@/components/share/share-client";
+import { redirect } from "next/navigation";
 
-export default function SharePage() {
+export default async function SharePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ token?: string }>;
+}) {
+  const token = (await searchParams).token?.trim();
+  if (token) redirect(`/share/${encodeURIComponent(token)}`);
   return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-muted-foreground text-sm">加载分享内容…</div>
-      </div>
-    }>
-      <ShareClient />
-    </Suspense>
+    <div className="flex min-h-screen items-center justify-center">
+      <p className="text-muted-foreground text-sm">无效的分享链接</p>
+    </div>
   );
 }

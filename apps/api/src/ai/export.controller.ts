@@ -6,18 +6,18 @@ import { CurrentUser } from "../common/current-user.decorator";
 import type { ExportArtifact } from "./export.service";
 import { ExportService } from "./export.service";
 
-@Controller("projects/:projectId/export")
+@Controller("conversations/:conversationId/export")
 @UseGuards(JwtAuthGuard)
-export class ProjectExportController {
+export class ConversationExportController {
   constructor(private readonly exportService: ExportService) {}
 
   @Get("word")
   async exportWord(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
+    @Param("conversationId") conversationId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const artifact = await this.exportService.exportPrdWordForUser(user, projectId);
+    const artifact = await this.exportService.exportPrdWordForUser(user, conversationId);
     setDownloadHeaders(response, artifact);
     return artifact.buffer;
   }
@@ -25,10 +25,10 @@ export class ProjectExportController {
   @Get("html")
   async exportHtml(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
+    @Param("conversationId") conversationId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const artifact = await this.exportService.exportPrototypeHtmlForUser(user, projectId);
+    const artifact = await this.exportService.exportPrototypeHtmlForUser(user, conversationId);
     setDownloadHeaders(response, artifact);
     return artifact.buffer;
   }
@@ -36,10 +36,10 @@ export class ProjectExportController {
   @Get("canvas")
   async exportCanvas(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
+    @Param("conversationId") conversationId: string,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const artifact = await this.exportService.exportPrdCanvasForUser(user, projectId);
+    const artifact = await this.exportService.exportPrdCanvasForUser(user, conversationId);
     setDownloadHeaders(response, artifact);
     return artifact.buffer;
   }
@@ -49,8 +49,8 @@ function setDownloadHeaders(response: Response, artifact: ExportArtifact) {
   response.setHeader("Content-Type", artifact.contentType);
   response.setHeader("Content-Length", String(artifact.sizeBytes));
   response.setHeader("Content-Disposition", contentDisposition(artifact.fileName));
-  response.setHeader("X-Product-Design-State-Id", artifact.productDesignStateId);
-  response.setHeader("X-Product-Design-State-Version", String(artifact.productDesignStateVersion));
+  response.setHeader("X-Conversation-Design-State-Id", artifact.conversationDesignStateId);
+  response.setHeader("X-Conversation-Design-State-Version", String(artifact.conversationDesignStateVersion));
   response.setHeader("X-Export-Source-Id", artifact.sourceId);
 }
 

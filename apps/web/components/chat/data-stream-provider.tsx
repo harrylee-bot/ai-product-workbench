@@ -14,14 +14,20 @@ export const initialRuntimeProcess: RuntimeProcessSnapshot = {
 };
 
 type DataStreamContextValue = {
-  dataStream: DataUIPart<CustomUIDataTypes>[];
+  dataStream: DataStreamEntry[];
   setDataStream: React.Dispatch<
-    React.SetStateAction<DataUIPart<CustomUIDataTypes>[]>
+    React.SetStateAction<DataStreamEntry[]>
   >;
   runtimeProcess: RuntimeProcessSnapshot;
   setRuntimeProcess: React.Dispatch<
     React.SetStateAction<RuntimeProcessSnapshot>
   >;
+};
+
+export type DataStreamEntry = {
+  chatId: string;
+  runId?: string;
+  part: DataUIPart<CustomUIDataTypes>;
 };
 
 const DataStreamContext = createContext<DataStreamContextValue | null>(null);
@@ -31,7 +37,7 @@ export function DataStreamProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [dataStream, setDataStream] = useState<DataUIPart<CustomUIDataTypes>[]>(
+  const [dataStream, setDataStream] = useState<DataStreamEntry[]>(
     []
   );
   const [runtimeProcess, setRuntimeProcess] =

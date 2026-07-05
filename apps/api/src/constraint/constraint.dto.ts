@@ -1,9 +1,9 @@
 import { IsNotEmpty, IsString, MaxLength } from "class-validator";
 
 export class BuildConstraintDto {
-  @IsString({ message: "projectId 不能为空" })
-  @IsNotEmpty({ message: "projectId 不能为空" })
-  projectId!: string;
+  @IsString({ message: "conversationId 不能为空" })
+  @IsNotEmpty({ message: "conversationId 不能为空" })
+  conversationId!: string;
 
   @IsString({ message: "input 不能为空" })
   @IsNotEmpty({ message: "input 不能为空" })

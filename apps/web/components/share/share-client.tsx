@@ -5,9 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { getApiBase } from "@/lib/api/config";
 import { ShareView } from "./share-view";
 
-export function ShareClient() {
+export function ShareClient({ token: tokenProp }: { token?: string }) {
   const searchParams = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  const token = tokenProp ?? searchParams.get("token") ?? "";
 
   const [shareData, setShareData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +17,7 @@ export function ShareClient() {
     if (!token) { setLoading(false); return; }
     fetch(`${getApiBase()}/public/share/${token}`, { credentials: "include" })
       .then((res) => {
-        if (res.status === 401) { window.location.href = `/login?redirect=/share?token=${token}`; return null; }
+        if (res.status === 401) { window.location.href = `/login?redirect=/share/${token}`; return null; }
         if (!res.ok) throw new Error(`加载失败 (${res.status})`);
         return res.json();
       })

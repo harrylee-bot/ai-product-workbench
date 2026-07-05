@@ -15,7 +15,7 @@ export class ConstraintService {
   constructor(private readonly prisma: PrismaService) {}
 
   async build(input: {
-    projectId: string;
+    conversationId: string;
     userInput: string;
     createdBy: string;
     knowledgeReferences?: KnowledgeConstraintSource[];
@@ -26,7 +26,7 @@ export class ConstraintService {
     ];
     const rows = await this.prisma.constraintRule.createManyAndReturn({
       data: constraints.map((constraint) => ({
-        projectId: input.projectId,
+        conversationId: input.conversationId,
         rule: constraint.rule,
         scope: constraint.scope,
         condition: constraint.condition,
@@ -41,9 +41,9 @@ export class ConstraintService {
     return groupConstraints(rows.map(toConstraint));
   }
 
-  async context(projectId: string): Promise<ConstraintContext> {
+  async context(conversationId: string): Promise<ConstraintContext> {
     const rows = await this.prisma.constraintRule.findMany({
-      where: { projectId },
+      where: { conversationId },
       orderBy: { createdAt: "desc" },
       take: 40,
     });
@@ -59,14 +59,14 @@ function buildDefaultConstraints(input: string): Array<Omit<Constraint, "id">> {
       rule: "must_follow",
       scope: "runtime",
       condition: "所有生成、修改和质检请求必须进入 DeerFlow 2.0 runtime 边界。",
-      effect: "产品系统只维护协议、状态机、线程绑定、事件接收和 final action 落库。",
+      effect: "对话工作台只维护协议、状态机、线程绑定、事件接收和 final action 落库。",
       weight: 1,
       sourceKnowledgeId: "vibe:deerflow-runtime-required",
     },
     {
       rule: "must_follow",
       scope: "runtime",
-      condition: "任何操作只要改变产品状态、需求文档、原型或系统图。",
+      condition: "任何操作只要改变设计状态、需求文档、原型或系统图。",
       effect: "落库前必须由 DeerFlow final action 明确变更内容、风险和复核要求。",
       weight: 1,
       sourceKnowledgeId: "fusion:final-action-review-required",

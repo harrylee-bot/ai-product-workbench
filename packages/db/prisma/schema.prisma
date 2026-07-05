@@ -10,25 +10,12 @@ datasource db {
 enum UserRole {
   user
   admin
-  product
   developer
 }
 
 enum UserStatus {
   active
   disabled
-}
-
-enum ProjectStatus {
-  draft
-  clarifying
-  designing
-  prd_ready
-  prototype_ready
-  qa_failed
-  completed
-  archived
-  deleted
 }
 
 enum ConversationStatus {
@@ -83,7 +70,7 @@ enum FileParserType {
   zip
   axure_html_zip
   rp_reference
-  rp_project
+  rp_source
   unsupported
 }
 
@@ -114,8 +101,8 @@ enum ModelTaskType {
   intent_detection
   knowledge_classification
   requirement_analysis
-  product_planning
-  product_design
+  conversation_planning
+  conversation_design
   prd_generation
   prototype_design
   prototype_code_generation
@@ -135,7 +122,7 @@ enum ModelCallStatus {
   failed
 }
 
-enum ProductDesignStateStatus {
+enum ConversationDesignStateStatus {
   draft
   intake
   format_check
@@ -151,7 +138,7 @@ enum ProductDesignStateStatus {
   confirmed
 }
 
-enum ProductDesignChangeType {
+enum ConversationDesignChangeType {
   create
   update
   rollback
@@ -195,7 +182,7 @@ enum QAReportTrigger {
 }
 
 enum RollbackType {
-  product_design_state
+  conversation_design_state
 }
 
 enum RollbackRecordStatus {
@@ -227,7 +214,7 @@ enum KnowledgeType {
   page_inventory
   ui_style_guide
   prototype_asset_ref
-  prototype_project
+  prototype_package
   prototype_page
   prototype_snapshot
   prototype_flow_edge
@@ -242,8 +229,7 @@ enum KnowledgeStatus {
 
 enum KnowledgeScope {
   global
-  project
-  product
+  conversation
 }
 
 enum KnowledgePriority {
@@ -254,7 +240,7 @@ enum KnowledgePriority {
 
 enum KnowledgeSource {
   manual
-  project_extraction
+  conversation_extraction
   file_extraction
   prd_confirmation
   prototype_confirmation
@@ -263,7 +249,7 @@ enum KnowledgeSource {
 enum KnowledgeCandidateSource {
   prd
   prototype
-  product_design_state
+  conversation_design_state
   conversation
   uploaded_file
 }
@@ -277,13 +263,12 @@ enum KnowledgeCandidateStatus {
 
 enum AdminAuditTargetType {
   user
-  project
+  conversation
   model_provider
   model_config
   model_task_profile
   knowledge_item
   knowledge_candidate
-  product
   system
 }
 
@@ -311,8 +296,8 @@ enum RuntimeStepName {
   intent_agent
   knowledge_agent
   requirement_analyst_agent
-  product_planner_agent
-  product_designer_agent
+  conversation_planner_agent
+  conversation_designer_agent
   prd_writer_agent
   prototype_designer_agent
   prototype_code_agent
@@ -346,7 +331,6 @@ model User {
   createdAt        DateTime                @default(now()) @map("created_at")
   updatedAt        DateTime                @updatedAt @map("updated_at")
   loginAuditLogs   LoginAuditLog[]
-  projects         Project[]
   conversations    Conversation[]
   messages         Message[]
   fileAssets       FileAsset[]
@@ -377,99 +361,56 @@ model LoginAuditLog {
   @@map("login_audit_logs")
 }
 
-model Project {
-  id                          String                       @id @default(cuid())
-  ownerId                     String                       @map("owner_id")
-  title                       String
-  description                 String?
-  status                      ProjectStatus                @default(draft)
-  currentConversationId       String?                      @map("current_conversation_id")
-  currentProductDesignStateId String?                      @map("current_product_design_state_id")
-  currentPrdDocumentId        String?                      @map("current_prd_document_id")
-  currentPrototypeArtifactId  String?                      @map("current_prototype_artifact_id")
-  latestQaReportId            String?                      @map("latest_qa_report_id")
-  productId                   String?                      @map("product_id")
-  lastActivityAt              DateTime                     @default(now()) @map("last_activity_at")
-  archivedAt                  DateTime?                    @map("archived_at")
-  deletedAt                   DateTime?                    @map("deleted_at")
-  createdAt                   DateTime                     @default(now()) @map("created_at")
-  updatedAt                   DateTime                     @updatedAt @map("updated_at")
-  owner                       User                         @relation(fields: [ownerId], references: [id])
-  conversations               Conversation[]
-  messages                    Message[]
-  fileAssets                  FileAsset[]
-  productDesignStates         ProductDesignState[]
-  productDesignVersions       ProductDesignVersion[]
-  productDesignChangeLogs     ProductDesignChangeLog[]
-  requirementDocuments        RequirementDocument[]
-  requirementDocumentVersions RequirementDocumentVersion[]
-  prototypeSpecs              PrototypeSpecRecord[]
-  prototypeArtifacts          PrototypeArtifact[]
-  prototypeVersions           PrototypeVersion[]
-  qaReports                   QAReport[]
-  rollbackRecords             RollbackRecord[]
-  knowledgeCandidates         KnowledgeCandidate[]
-  runtimeRuns                 RuntimeRunLog[]
-  vibeStreamEvents            VibeStreamEventLog[]
-  constraintRules             ConstraintRule[]
-  shareLinks                  ShareLink[]
-  deerFlowThreads             DeerFlowThreadBinding[]
-  prototypeConversionJobs     PrototypeConversionJob[]
-  comments                    Comment[]
-  product                     Product?                     @relation(fields: [productId], references: [id], onDelete: SetNull)
-
-  @@index([ownerId])
-  @@index([status])
-  @@index([lastActivityAt])
-  @@index([deletedAt])
-  @@index([productId])
-  @@map("projects")
-}
-
-model Product {
-  id             String          @id @default(cuid())
-  name           String
-  description    String?
-  createdBy      String          @map("created_by")
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  projects       Project[]
-  knowledgeItems KnowledgeItem[]
-
-  @@index([name])
-  @@index([createdAt])
-  @@map("products")
-}
-
 model Conversation {
-  id             String                 @id @default(cuid())
-  projectId      String                 @map("project_id")
-  ownerId        String                 @map("owner_id")
-  title          String
-  summary        String?
-  messageCount   Int                    @default(0) @map("message_count")
-  lastMessageAt  DateTime?              @map("last_message_at")
-  status         ConversationStatus     @default(active)
-  deletedAt      DateTime?              @map("deleted_at")
-  createdAt      DateTime               @default(now()) @map("created_at")
-  updatedAt      DateTime               @updatedAt @map("updated_at")
-  project        Project                @relation(fields: [projectId], references: [id])
-  owner          User                   @relation(fields: [ownerId], references: [id])
-  messages       Message[]
-  fileAssets     FileAsset[]
-  runtimeRuns    RuntimeRunLog[]
-  deerFlowThread DeerFlowThreadBinding?
+  id                         String                   @id @default(cuid())
+  ownerId                    String                   @map("owner_id")
+  title                      String
+  summary                    String?
+  messageCount               Int                      @default(0) @map("message_count")
+  lastMessageAt              DateTime?                @map("last_message_at")
+  currentDesignStateId       String?                  @map("current_design_state_id")
+  currentPrdDocumentId       String?                  @map("current_prd_document_id")
+  currentPrototypeArtifactId String?                  @map("current_prototype_artifact_id")
+  latestQaReportId           String?                  @map("latest_qa_report_id")
+  lastActivityAt             DateTime                 @default(now()) @map("last_activity_at")
+  status                     ConversationStatus       @default(active)
+  archivedAt                 DateTime?                @map("archived_at")
+  deletedAt                  DateTime?                @map("deleted_at")
+  createdAt                  DateTime                 @default(now()) @map("created_at")
+  updatedAt                  DateTime                 @updatedAt @map("updated_at")
+  owner                      User                     @relation(fields: [ownerId], references: [id])
+  messages                   Message[]
+  fileAssets                 FileAsset[]
+  conversationDesignStates   ConversationDesignState[]
+  conversationDesignVersions ConversationDesignVersion[]
+  conversationDesignChangeLogs ConversationDesignChangeLog[]
+  requirementDocuments       RequirementDocument[]
+  requirementDocumentVersions RequirementDocumentVersion[]
+  prototypeSpecs             PrototypeSpecRecord[]
+  prototypeArtifacts         PrototypeArtifact[]
+  prototypeVersions          PrototypeVersion[]
+  qaReports                  QAReport[]
+  rollbackRecords            RollbackRecord[]
+  shareLinks                 ShareLink[]
+  constraintRules            ConstraintRule[]
+  knowledgeItems             KnowledgeItem[]
+  knowledgeCandidates        KnowledgeCandidate[]
+  runtimeRuns                RuntimeRunLog[]
+  vibeStreamEvents           VibeStreamEventLog[]
+  deerFlowThread             DeerFlowThreadBinding?
+  prototypeConversionJobs    PrototypeConversionJob[]
+  comments                   Comment[]
 
-  @@index([projectId])
   @@index([ownerId])
   @@index([lastMessageAt])
+  @@index([lastActivityAt])
+  @@index([status])
   @@index([deletedAt])
   @@map("conversations")
 }
 
 model Message {
   id                         String       @id @default(cuid())
-  projectId                  String       @map("project_id")
   conversationId             String       @map("conversation_id")
   userId                     String?      @map("user_id")
   role                       MessageRole
@@ -482,23 +423,20 @@ model Message {
   relatedPrototypeArtifactId String?      @map("related_prototype_artifact_id")
   relatedQaReportId          String?      @map("related_qa_report_id")
   createdAt                  DateTime     @default(now()) @map("created_at")
-  project                    Project      @relation(fields: [projectId], references: [id])
   conversation               Conversation @relation(fields: [conversationId], references: [id])
   user                       User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   fileAssets                 FileAsset[]
   votes                      Vote[]
 
-  @@index([projectId])
-  @@index([conversationId])
   @@index([userId])
   @@index([createdAt])
+  @@index([conversationId])
   @@map("messages")
 }
 
 model FileAsset {
   id                     String                  @id @default(uuid())
-  projectId              String                  @map("project_id")
-  conversationId         String?                 @map("conversation_id")
+  conversationId         String                  @map("conversation_id")
   messageId              String?                 @map("message_id")
   uploadedBy             String                  @map("uploaded_by")
   originalName           String                  @map("original_name")
@@ -514,27 +452,25 @@ model FileAsset {
   createdAt              DateTime                @default(now()) @map("created_at")
   updatedAt              DateTime                @updatedAt @map("updated_at")
   deletedAt              DateTime?               @map("deleted_at")
-  project                Project                 @relation(fields: [projectId], references: [id])
-  conversation           Conversation?           @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  conversation           Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   message                Message?                @relation(fields: [messageId], references: [id], onDelete: SetNull)
   uploader               User                    @relation(fields: [uploadedBy], references: [id])
   parseResult            FileParseResult?
   chunks                 FileChunk[]
   prototypeConversionJob PrototypeConversionJob?
 
-  @@index([projectId])
-  @@index([conversationId])
   @@index([messageId])
   @@index([uploadedBy])
   @@index([status])
   @@index([createdAt])
+  @@index([conversationId])
   @@map("file_assets")
 }
 
 model PrototypeConversionJob {
   id               String                    @id @default(uuid())
   fileAssetId      String                    @unique @map("file_asset_id")
-  projectId        String                    @map("project_id")
+  conversationId        String                    @map("conversation_id")
   status           PrototypeConversionStatus @default(queued)
   stage            String                    @default("queued")
   sourceFilePath   String                    @map("source_file_path")
@@ -552,9 +488,9 @@ model PrototypeConversionJob {
   createdAt        DateTime                  @default(now()) @map("created_at")
   updatedAt        DateTime                  @updatedAt @map("updated_at")
   fileAsset        FileAsset                 @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
-  project          Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([status])
   @@index([stage])
   @@index([createdAt])
@@ -564,7 +500,7 @@ model PrototypeConversionJob {
 model FileParseResult {
   id             String            @id @default(uuid())
   fileAssetId    String            @unique @map("file_asset_id")
-  projectId      String            @map("project_id")
+  conversationId      String            @map("conversation_id")
   status         ParseResultStatus
   parserType     FileParserType    @map("parser_type")
   title          String?
@@ -582,7 +518,7 @@ model FileParseResult {
   updatedAt      DateTime          @updatedAt @map("updated_at")
   fileAsset      FileAsset         @relation(fields: [fileAssetId], references: [id])
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([status])
   @@index([parserType])
   @@map("file_parse_results")
@@ -591,7 +527,7 @@ model FileParseResult {
 model FileChunk {
   id            String              @id @default(uuid())
   fileAssetId   String              @map("file_asset_id")
-  projectId     String              @map("project_id")
+  conversationId     String              @map("conversation_id")
   chunkIndex    Int                 @map("chunk_index")
   content       String
   tokenEstimate Int?                @map("token_estimate")
@@ -601,7 +537,7 @@ model FileChunk {
   fileAsset     FileAsset           @relation(fields: [fileAssetId], references: [id])
 
   @@index([fileAssetId])
-  @@index([projectId])
+  @@index([conversationId])
   @@index([chunkIndex])
   @@map("file_chunks")
 }
@@ -702,9 +638,9 @@ model ModelCallLog {
   @@map("model_call_logs")
 }
 
-model ProductDesignState {
+model ConversationDesignState {
   id                   String                   @id @default(uuid())
-  projectId            String                   @map("project_id")
+  conversationId            String                   @map("conversation_id")
   version              Int
   title                String
   summary              String?
@@ -727,70 +663,70 @@ model ProductDesignState {
   confirmedFacts       Json                     @map("confirmed_facts")
   prototypeSpec        Json?                    @map("prototype_spec")
   prdDocument          Json?                    @map("prd_document")
-  status               ProductDesignStateStatus @default(draft)
+  status               ConversationDesignStateStatus @default(draft)
   createdBy            String                   @map("created_by")
   updatedBy            String?                  @map("updated_by")
   createdAt            DateTime                 @default(now()) @map("created_at")
   updatedAt            DateTime                 @updatedAt @map("updated_at")
-  project              Project                  @relation(fields: [projectId], references: [id])
-  versions             ProductDesignVersion[]
-  changeLogs           ProductDesignChangeLog[]
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  versions             ConversationDesignVersion[]
+  changeLogs           ConversationDesignChangeLog[]
   requirementDocuments RequirementDocument[]
   prototypeSpecs       PrototypeSpecRecord[]
   prototypeArtifacts   PrototypeArtifact[]
 
-  @@unique([projectId, version])
-  @@index([projectId])
+  @@unique([conversationId, version])
+  @@index([conversationId])
   @@index([status])
-  @@map("product_design_states")
+  @@map("conversation_design_states")
 }
 
-model ProductDesignVersion {
+model ConversationDesignVersion {
   id        String             @id @default(uuid())
-  projectId String             @map("project_id")
+  conversationId String             @map("conversation_id")
   stateId   String             @map("state_id")
   version   Int
   snapshot  Json
   reason    String?
   createdBy String             @map("created_by")
   createdAt DateTime           @default(now()) @map("created_at")
-  project   Project            @relation(fields: [projectId], references: [id])
-  state     ProductDesignState @relation(fields: [stateId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  state     ConversationDesignState @relation(fields: [stateId], references: [id])
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([stateId])
   @@index([version])
-  @@map("product_design_versions")
+  @@map("conversation_design_versions")
 }
 
-model ProductDesignChangeLog {
+model ConversationDesignChangeLog {
   id         String                  @id @default(uuid())
-  projectId  String                  @map("project_id")
+  conversationId  String                  @map("conversation_id")
   stateId    String                  @map("state_id")
   runId      String?                 @map("run_id")
   messageId  String?                 @map("message_id")
-  changeType ProductDesignChangeType @map("change_type")
+  changeType ConversationDesignChangeType @map("change_type")
   path       String?
   before     Json?
   after      Json?
   reason     String?
   createdBy  String                  @map("created_by")
   createdAt  DateTime                @default(now()) @map("created_at")
-  project    Project                 @relation(fields: [projectId], references: [id])
-  state      ProductDesignState      @relation(fields: [stateId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  state      ConversationDesignState      @relation(fields: [stateId], references: [id])
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([stateId])
   @@index([runId])
   @@index([createdAt])
-  @@map("product_design_change_logs")
+  @@map("conversation_design_change_logs")
 }
 
 model RequirementDocument {
   id                        String                       @id @default(uuid())
-  projectId                 String                       @map("project_id")
-  productDesignStateId      String                       @map("product_design_state_id")
-  productDesignStateVersion Int                          @map("product_design_state_version")
+  conversationId                 String                       @map("conversation_id")
+  conversationDesignStateId      String                       @map("conversation_design_state_id")
+  conversationDesignStateVersion Int                          @map("conversation_design_state_version")
   title                     String
   status                    RequirementDocumentStatus    @default(draft)
   sections                  Json
@@ -803,12 +739,12 @@ model RequirementDocument {
   updatedBy                 String?                      @map("updated_by")
   createdAt                 DateTime                     @default(now()) @map("created_at")
   updatedAt                 DateTime                     @updatedAt @map("updated_at")
-  project                   Project                      @relation(fields: [projectId], references: [id])
-  productDesignState        ProductDesignState           @relation(fields: [productDesignStateId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationDesignState        ConversationDesignState           @relation(fields: [conversationDesignStateId], references: [id])
   versions                  RequirementDocumentVersion[]
 
-  @@index([projectId])
-  @@index([productDesignStateId])
+  @@index([conversationId])
+  @@index([conversationDesignStateId])
   @@index([status])
   @@index([updatedAt])
   @@map("requirement_documents")
@@ -817,26 +753,26 @@ model RequirementDocument {
 model RequirementDocumentVersion {
   id         String              @id @default(uuid())
   documentId String              @map("document_id")
-  projectId  String              @map("project_id")
+  conversationId  String              @map("conversation_id")
   version    Int
   snapshot   Json
   reason     String?
   createdBy  String              @map("created_by")
   createdAt  DateTime            @default(now()) @map("created_at")
   document   RequirementDocument @relation(fields: [documentId], references: [id])
-  project    Project             @relation(fields: [projectId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([documentId])
-  @@index([projectId])
+  @@index([conversationId])
   @@index([version])
   @@map("requirement_document_versions")
 }
 
 model PrototypeSpecRecord {
   id                        String                @id @default(uuid())
-  projectId                 String                @map("project_id")
-  productDesignStateId      String                @map("product_design_state_id")
-  productDesignStateVersion Int                   @map("product_design_state_version")
+  conversationId                 String                @map("conversation_id")
+  conversationDesignStateId      String                @map("conversation_design_state_id")
+  conversationDesignStateVersion Int                   @map("conversation_design_state_version")
   title                     String
   targetDevice              PrototypeTargetDevice @default(both) @map("target_device")
   styleGuide                Json                  @map("style_guide")
@@ -848,22 +784,22 @@ model PrototypeSpecRecord {
   generatedByRunId          String?               @map("generated_by_run_id")
   createdAt                 DateTime              @default(now()) @map("created_at")
   updatedAt                 DateTime              @updatedAt @map("updated_at")
-  project                   Project               @relation(fields: [projectId], references: [id])
-  productDesignState        ProductDesignState    @relation(fields: [productDesignStateId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationDesignState        ConversationDesignState    @relation(fields: [conversationDesignStateId], references: [id])
   artifacts                 PrototypeArtifact[]
 
-  @@index([projectId])
-  @@index([productDesignStateId])
+  @@index([conversationId])
+  @@index([conversationDesignStateId])
   @@index([updatedAt])
   @@map("prototype_spec_records")
 }
 
 model PrototypeArtifact {
   id                        String                  @id @default(uuid())
-  projectId                 String                  @map("project_id")
+  conversationId                 String                  @map("conversation_id")
   prototypeSpecId           String                  @map("prototype_spec_id")
-  productDesignStateId      String                  @map("product_design_state_id")
-  productDesignStateVersion Int                     @map("product_design_state_version")
+  conversationDesignStateId      String                  @map("conversation_design_state_id")
+  conversationDesignStateVersion Int                     @map("conversation_design_state_version")
   title                     String
   status                    PrototypeArtifactStatus @default(generating)
   htmlContent               String?                 @map("html_content")
@@ -877,14 +813,14 @@ model PrototypeArtifact {
   updatedBy                 String?                 @map("updated_by")
   createdAt                 DateTime                @default(now()) @map("created_at")
   updatedAt                 DateTime                @updatedAt @map("updated_at")
-  project                   Project                 @relation(fields: [projectId], references: [id])
-  productDesignState        ProductDesignState      @relation(fields: [productDesignStateId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationDesignState        ConversationDesignState      @relation(fields: [conversationDesignStateId], references: [id])
   prototypeSpec             PrototypeSpecRecord     @relation(fields: [prototypeSpecId], references: [id])
   versions                  PrototypeVersion[]
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([prototypeSpecId])
-  @@index([productDesignStateId])
+  @@index([conversationDesignStateId])
   @@index([status])
   @@index([updatedAt])
   @@map("prototype_artifacts")
@@ -892,7 +828,7 @@ model PrototypeArtifact {
 
 model PrototypeVersion {
   id                    String            @id @default(uuid())
-  projectId             String            @map("project_id")
+  conversationId             String            @map("conversation_id")
   artifactId            String            @map("artifact_id")
   version               Int
   prototypeSpecSnapshot Json              @map("prototype_spec_snapshot")
@@ -900,10 +836,10 @@ model PrototypeVersion {
   reason                String?
   createdBy             String            @map("created_by")
   createdAt             DateTime          @default(now()) @map("created_at")
-  project               Project           @relation(fields: [projectId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   artifact              PrototypeArtifact @relation(fields: [artifactId], references: [id])
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([artifactId])
   @@index([version])
   @@map("prototype_versions")
@@ -911,9 +847,9 @@ model PrototypeVersion {
 
 model QAReport {
   id                        String          @id @default(uuid())
-  projectId                 String          @map("project_id")
-  productDesignStateId      String          @map("product_design_state_id")
-  productDesignStateVersion Int             @map("product_design_state_version")
+  conversationId                 String          @map("conversation_id")
+  conversationDesignStateId      String          @map("conversation_design_state_id")
+  conversationDesignStateVersion Int             @map("conversation_design_state_version")
   prdDocumentId             String?         @map("prd_document_id")
   prototypeArtifactId       String?         @map("prototype_artifact_id")
   prototypeSpecId           String?         @map("prototype_spec_id")
@@ -931,11 +867,11 @@ model QAReport {
   createdBy                 String          @map("created_by")
   createdAt                 DateTime        @default(now()) @map("created_at")
   updatedAt                 DateTime        @updatedAt @map("updated_at")
-  project                   Project         @relation(fields: [projectId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
-  @@index([productDesignStateId])
-  @@index([productDesignStateVersion])
+  @@index([conversationId])
+  @@index([conversationDesignStateId])
+  @@index([conversationDesignStateVersion])
   @@index([status])
   @@index([trigger])
   @@index([generatedByRunId])
@@ -946,10 +882,10 @@ model QAReport {
 
 model RollbackRecord {
   id                            String               @id @default(uuid())
-  projectId                     String               @map("project_id")
+  conversationId                     String               @map("conversation_id")
   rollbackType                  RollbackType         @map("rollback_type")
-  fromProductDesignStateVersion Int                  @map("from_product_design_state_version")
-  toProductDesignStateVersion   Int                  @map("to_product_design_state_version")
+  fromConversationDesignStateVersion Int                  @map("from_conversation_design_state_version")
+  toConversationDesignStateVersion   Int                  @map("to_conversation_design_state_version")
   beforePrdDocumentId           String?              @map("before_prd_document_id")
   afterPrdDocumentId            String?              @map("after_prd_document_id")
   beforePrototypeArtifactId     String?              @map("before_prototype_artifact_id")
@@ -961,9 +897,9 @@ model RollbackRecord {
   createdBy                     String               @map("created_by")
   createdAt                     DateTime             @default(now()) @map("created_at")
   updatedAt                     DateTime             @updatedAt @map("updated_at")
-  project                       Project              @relation(fields: [projectId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([status])
   @@index([createdAt])
   @@map("rollback_records")
@@ -972,13 +908,13 @@ model RollbackRecord {
 model ShareLink {
   id                   String          @id @default(uuid())
   token                String          @unique
-  projectId            String          @map("project_id")
+  conversationId            String          @map("conversation_id")
   scope                ShareScope      @default(both)
   status               ShareLinkStatus @default(active)
   title                String?
   prdDocumentId        String?         @map("prd_document_id")
   prototypeArtifactId  String?         @map("prototype_artifact_id")
-  productDesignStateId String?         @map("product_design_state_id")
+  conversationDesignStateId String?         @map("conversation_design_state_id")
   expiresAt            DateTime?       @map("expires_at")
   viewCount            Int             @default(0) @map("view_count")
   lastViewedAt         DateTime?       @map("last_viewed_at")
@@ -986,9 +922,9 @@ model ShareLink {
   createdBy            String          @map("created_by")
   createdAt            DateTime        @default(now()) @map("created_at")
   updatedAt            DateTime        @updatedAt @map("updated_at")
-  project              Project         @relation(fields: [projectId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([status])
   @@index([createdAt])
   @@map("share_links")
@@ -996,7 +932,7 @@ model ShareLink {
 
 model ConstraintRule {
   id                String   @id @default(uuid())
-  projectId         String   @map("project_id")
+  conversationId         String   @map("conversation_id")
   rule              String
   scope             String
   condition         String
@@ -1006,9 +942,9 @@ model ConstraintRule {
   sourceInput       String?  @map("source_input")
   createdBy         String   @map("created_by")
   createdAt         DateTime @default(now()) @map("created_at")
-  project           Project  @relation(fields: [projectId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([rule])
   @@index([scope])
   @@index([sourceKnowledgeId])
@@ -1029,8 +965,7 @@ model KnowledgeItem {
   embedding                 Json?
   priority                  KnowledgePriority  @default(medium)
   source                    KnowledgeSource
-  sourceProjectId           String?            @map("source_project_id")
-  sourceProductId           String?            @map("source_product_id")
+  sourceConversationId      String?            @map("source_conversation_id")
   sourceFileId              String?            @map("source_file_id")
   sourcePrdDocumentId       String?            @map("source_prd_document_id")
   sourcePrototypeArtifactId String?            @map("source_prototype_artifact_id")
@@ -1039,7 +974,7 @@ model KnowledgeItem {
   createdAt                 DateTime           @default(now()) @map("created_at")
   updatedAt                 DateTime           @updatedAt @map("updated_at")
   category                  KnowledgeCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  product                   Product?           @relation(fields: [sourceProductId], references: [id], onDelete: SetNull)
+  conversation              Conversation?       @relation(fields: [sourceConversationId], references: [id], onDelete: SetNull)
   versions                  KnowledgeVersion[]
 
   @@index([type])
@@ -1047,8 +982,7 @@ model KnowledgeItem {
   @@index([scope])
   @@index([categoryId])
   @@index([createdAt])
-  @@index([scope, sourceProjectId])
-  @@index([scope, sourceProductId])
+  @@index([scope, sourceConversationId])
   @@map("knowledge_items")
 }
 
@@ -1087,7 +1021,7 @@ model KnowledgeVersion {
 
 model KnowledgeCandidate {
   id                  String                   @id @default(uuid())
-  projectId           String                   @map("project_id")
+  conversationId           String                   @map("conversation_id")
   title               String
   content             String
   summary             String?
@@ -1106,9 +1040,9 @@ model KnowledgeCandidate {
   createdByRunId      String?                  @map("created_by_run_id")
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
-  project             Project                  @relation(fields: [projectId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([status])
   @@index([suggestedType])
   @@index([createdAt])
@@ -1117,7 +1051,6 @@ model KnowledgeCandidate {
 
 model KnowledgeRetrievalLog {
   id                   String   @id @default(uuid())
-  projectId            String?  @map("project_id")
   conversationId       String?  @map("conversation_id")
   runId                String?  @map("run_id")
   runtimeName          String?  @map("agent_name")
@@ -1127,10 +1060,10 @@ model KnowledgeRetrievalLog {
   selectedKnowledgeIds Json     @map("selected_knowledge_ids")
   createdAt            DateTime @default(now()) @map("created_at")
 
-  @@index([projectId])
   @@index([runId])
   @@index([runtimeName])
   @@index([createdAt])
+  @@index([conversationId])
   @@map("knowledge_retrieval_logs")
 }
 
@@ -1154,50 +1087,44 @@ model AdminAuditLog {
 }
 
 model RuntimeRunLog {
-  id             String               @id @default(uuid())
-  projectId      String               @map("project_id")
-  conversationId String               @map("conversation_id")
-  userId         String               @map("user_id")
+  id             String           @id @default(uuid())
+  conversationId String           @map("conversation_id")
+  userId         String           @map("user_id")
   intent         UserIntent?
-  status         RuntimeRunStatus     @default(running)
-  inputSummary   String               @map("input_summary")
-  outputSummary  String?              @map("output_summary")
+  status         RuntimeRunStatus @default(running)
+  inputSummary   String           @map("input_summary")
+  outputSummary  String?          @map("output_summary")
   result         Json?
-  errorMessage   String?              @map("error_message")
-  traceId        String               @map("trace_id")
-  startedAt      DateTime             @default(now()) @map("started_at")
-  endedAt        DateTime?            @map("ended_at")
-  durationMs     Int?                 @map("duration_ms")
-  project        Project              @relation(fields: [projectId], references: [id])
-  conversation   Conversation         @relation(fields: [conversationId], references: [id])
-  user           User                 @relation(fields: [userId], references: [id])
+  errorMessage   String?          @map("error_message")
+  traceId        String           @map("trace_id")
+  startedAt      DateTime         @default(now()) @map("started_at")
+  endedAt        DateTime?        @map("ended_at")
+  durationMs     Int?             @map("duration_ms")
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id])
   steps          RuntimeStepLog[]
   streamEvents   VibeStreamEventLog[]
 
-  @@index([projectId])
-  @@index([conversationId])
   @@index([userId])
   @@index([intent])
   @@index([status])
   @@index([traceId])
   @@index([startedAt])
+  @@index([conversationId])
   @@map("agent_run_logs")
 }
 
 model DeerFlowThreadBinding {
   id               String       @id @default(uuid())
-  projectId        String       @map("project_id")
   conversationId   String       @unique @map("conversation_id")
   userId           String       @map("user_id")
   deerFlowThreadId String       @unique @map("deerflow_thread_id")
   metadata         Json?
   createdAt        DateTime     @default(now()) @map("created_at")
   updatedAt        DateTime     @updatedAt @map("updated_at")
-  project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
   @@index([userId])
   @@map("deerflow_thread_bindings")
 }
@@ -1230,15 +1157,15 @@ model RuntimeStepLog {
 model VibeStreamEventLog {
   id        String        @id @default(uuid())
   runId     String        @map("run_id")
-  projectId String        @map("project_id")
+  conversationId String        @map("conversation_id")
   eventType String        @map("event_type")
   payload   Json
   createdAt DateTime      @default(now()) @map("created_at")
   run       RuntimeRunLog @relation(fields: [runId], references: [id])
-  project   Project       @relation(fields: [projectId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([runId])
-  @@index([projectId])
+  @@index([conversationId])
   @@index([eventType])
   @@index([createdAt])
   @@map("vibe_stream_event_logs")
@@ -1277,7 +1204,7 @@ model Suggestion {
 
 model Comment {
   id              String    @id @default(cuid())
-  projectId       String    @map("project_id")
+  conversationId       String    @map("conversation_id")
   targetType      String    @map("target_type") // 'prd' | 'prototype' | 'section'
   targetId        String    @map("target_id")
   sectionId       String?   @map("section_id") // 锚点评论：针对特定段落
@@ -1291,13 +1218,13 @@ model Comment {
   updatedAt       DateTime  @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   parentComment Comment?  @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
   replies       Comment[] @relation("CommentReplies")
   resolver      User?     @relation("CommentResolver", fields: [resolvedBy], references: [id], onDelete: SetNull)
 
-  @@index([projectId])
+  @@index([conversationId])
   @@index([targetType, targetId])
   @@index([userId])
   @@index([parentCommentId])

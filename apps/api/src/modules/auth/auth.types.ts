@@ -1,12 +1,12 @@
 import { UserRole, UserStatus } from "@prisma/client";
 
-export type Phase1JwtPayload = {
+export type AuthJwtPayload = {
   sub: string;
   userId: string;
   role: UserRole;
 };
 
-export type Phase1User = {
+export type AuthenticatedUser = {
   id: string;
   email?: string | null;
   username: string;

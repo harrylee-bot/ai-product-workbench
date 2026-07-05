@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { User, UserRole, UserStatus } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { LoginDto, RegisterDto } from "./dto";
-import type { Phase1JwtPayload, Phase1User } from "./auth.types";
+import type { AuthJwtPayload, AuthenticatedUser } from "./auth.types";
 
 @Injectable()
 export class AuthService {
@@ -35,7 +35,7 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    const payload: Phase1JwtPayload = {
+    const payload: AuthJwtPayload = {
       sub: user.id,
       userId: user.id,
       role: user.role,
@@ -47,7 +47,7 @@ export class AuthService {
     };
   }
 
-  me(user: Phase1User) {
+  me(user: AuthenticatedUser) {
     return user;
   }
 
@@ -90,7 +90,7 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    const payload: Phase1JwtPayload = {
+    const payload: AuthJwtPayload = {
       sub: user.id,
       userId: user.id,
       role: user.role,
@@ -106,7 +106,7 @@ export class AuthService {
     return { success: true };
   }
 
-  private toPublicUser(user: User): Phase1User {
+  private toPublicUser(user: User): AuthenticatedUser {
     return {
       id: user.id,
       email: user.email,

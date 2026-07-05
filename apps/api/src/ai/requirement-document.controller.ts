@@ -10,14 +10,14 @@ import {
 } from "./requirement-document.dto";
 import { RequirementDocumentService } from "./requirement-document.service";
 
-@Controller("projects/:projectId/prd")
+@Controller("conversations/:conversationId/prd")
 @UseGuards(JwtAuthGuard)
-export class ProjectPrdController {
+export class ConversationPrdController {
   constructor(private readonly documentService: RequirementDocumentService) {}
 
   @Get("current")
-  getCurrent(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.documentService.getCurrentForUser(user, projectId);
+  getCurrent(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
+    return this.documentService.getCurrentForUser(user, conversationId);
   }
 }
 

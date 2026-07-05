@@ -1,4 +1,4 @@
-import { BadGatewayException, Injectable } from "@nestjs/common";
+import { BadGatewayException, BadRequestException, Injectable } from "@nestjs/common";
 
 type DeerflowSkill = {
   name: string;
@@ -11,10 +11,16 @@ type DeerflowSkill = {
 @Injectable()
 export class AdminDeerflowService {
   async listSkills() {
+    if (!isDeerFlowEnabled()) return { skills: [] };
+
     return this.request<{ skills: DeerflowSkill[] }>("/api/skills");
   }
 
   async updateSkill(skillName: string, enabled: boolean) {
+    if (!isDeerFlowEnabled()) {
+      throw new BadRequestException("DeerFlow 未启用，无法更新 Skill。");
+    }
+
     return this.request<DeerflowSkill>(
       `/api/skills/${encodeURIComponent(cleanPathSegment(skillName))}`,
       {
@@ -48,6 +54,10 @@ export class AdminDeerflowService {
 
     return response.json() as Promise<T>;
   }
+}
+
+function isDeerFlowEnabled() {
+  return process.env.DEERFLOW_ENABLED === "true";
 }
 
 function cleanPathSegment(value: string) {

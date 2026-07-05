@@ -7,14 +7,14 @@ import { PrototypeService } from "./prototype.service";
 
 const USER_HTML_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
-@Controller("projects/:projectId/prototype")
+@Controller("conversations/:conversationId/prototype")
 @UseGuards(JwtAuthGuard)
-export class ProjectPrototypeController {
+export class ConversationPrototypeController {
   constructor(private readonly prototypeService: PrototypeService) {}
 
   @Get("current")
-  getCurrent(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.prototypeService.getCurrentForUser(user, projectId);
+  getCurrent(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
+    return this.prototypeService.getCurrentForUser(user, conversationId);
   }
 }
 

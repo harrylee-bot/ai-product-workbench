@@ -1,11 +1,11 @@
-import { ProjectStatus, UserRole, UserStatus } from "@prisma/client";
+import { ConversationStatus, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VersionHistoryService } from "../src/ai/version-history.service";
 
 describe("VersionHistoryService", () => {
   const prisma = {
-    project: { findUnique: vi.fn() },
-    productDesignVersion: { findMany: vi.fn() },
+    conversation: { findUnique: vi.fn() },
+    conversationDesignVersion: { findMany: vi.fn() },
     requirementDocumentVersion: { findMany: vi.fn() },
     prototypeVersion: { findMany: vi.fn() },
     qAReport: { findMany: vi.fn() },
@@ -23,17 +23,17 @@ describe("VersionHistoryService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
       ownerId: "user-1",
-      status: ProjectStatus.prototype_ready,
+      status: ConversationStatus.prototype_ready,
       deletedAt: null,
     });
     prisma.$transaction.mockImplementation(async (queries) => Promise.all(queries));
   });
 
-  it("merges all version sources into a descending project timeline", async () => {
-    prisma.productDesignVersion.findMany.mockResolvedValue([
+  it("merges all version sources into a descending conversation timeline", async () => {
+    prisma.conversationDesignVersion.findMany.mockResolvedValue([
       {
         id: "state-version-1",
         version: 2,
@@ -77,21 +77,21 @@ describe("VersionHistoryService", () => {
         id: "rollback-1",
         status: "succeeded",
         reason: null,
-        fromProductDesignStateVersion: 3,
-        toProductDesignStateVersion: 2,
+        fromConversationDesignStateVersion: 3,
+        toConversationDesignStateVersion: 2,
         createdBy: "user-1",
         createdAt: new Date("2026-06-28T08:04:00.000Z"),
       },
     ]);
 
-    const result = await service.listProjectTimeline(user, "project-1");
+    const result = await service.listConversationTimeline(user, "conversation-1");
 
     expect(result.items.map((item) => item.type)).toEqual([
       "rollback",
       "qa",
       "prototype",
       "prd",
-      "product_design_state",
+      "conversation_design_state",
     ]);
     expect(result.items[0]).toMatchObject({
       id: "rollback-1",
@@ -109,27 +109,27 @@ describe("VersionHistoryService", () => {
   });
 
   it("allows admins and blocks non-owners", async () => {
-    prisma.project.findUnique.mockResolvedValueOnce({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValueOnce({
+      id: "conversation-1",
       ownerId: "other-user",
-      status: ProjectStatus.prototype_ready,
+      status: ConversationStatus.prototype_ready,
       deletedAt: null,
     });
 
-    await expect(service.listProjectTimeline(user, "project-1")).rejects.toThrow("VERSION_FORBIDDEN");
+    await expect(service.listConversationTimeline(user, "conversation-1")).rejects.toThrow("VERSION_FORBIDDEN");
 
-    prisma.project.findUnique.mockResolvedValueOnce({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValueOnce({
+      id: "conversation-1",
       ownerId: "other-user",
-      status: ProjectStatus.archived,
+      status: ConversationStatus.archived,
       deletedAt: null,
     });
-    prisma.productDesignVersion.findMany.mockResolvedValue([]);
+    prisma.conversationDesignVersion.findMany.mockResolvedValue([]);
     prisma.requirementDocumentVersion.findMany.mockResolvedValue([]);
     prisma.prototypeVersion.findMany.mockResolvedValue([]);
     prisma.qAReport.findMany.mockResolvedValue([]);
     prisma.rollbackRecord.findMany.mockResolvedValue([]);
 
-    await expect(service.listProjectTimeline({ ...user, role: UserRole.admin }, "project-1")).resolves.toEqual({ items: [] });
+    await expect(service.listConversationTimeline({ ...user, role: UserRole.admin }, "conversation-1")).resolves.toEqual({ items: [] });
   });
 });

@@ -9,14 +9,12 @@ export class RuntimeRunLogService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createRun(input: {
-    projectId: string;
     conversationId: string;
     userId: string;
     userInput: string;
   }) {
     return this.prisma.runtimeRunLog.create({
       data: {
-        projectId: input.projectId,
         conversationId: input.conversationId,
         userId: input.userId,
         status: RuntimeRunStatus.running,
@@ -144,14 +142,14 @@ export class RuntimeRunLogService {
 
   async recordStreamEvent(input: {
     runId: string;
-    projectId: string;
+    conversationId: string;
     eventType: string;
     payload: unknown;
   }) {
     return this.prisma.vibeStreamEventLog.create({
       data: {
         runId: input.runId,
-        projectId: input.projectId,
+        conversationId: input.conversationId,
         eventType: input.eventType,
         payload: toInputJson(input.payload),
       },
@@ -256,7 +254,6 @@ export class RuntimeRunLogService {
 
     return {
       id: run.id,
-      projectId: run.projectId,
       conversationId: run.conversationId,
       userId: run.userId,
       intent: run.intent,

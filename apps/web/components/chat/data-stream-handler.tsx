@@ -9,22 +9,36 @@ import { artifactDefinitions, type ArtifactKind } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 import { CHAT_HISTORY_KEY } from "./sidebar-history";
 
-export function DataStreamHandler() {
-  const { dataStream, setDataStream, setRuntimeProcess } = useDataStream();
+export function DataStreamHandler({ chatId }: { chatId: string }) {
+  const { dataStream, setRuntimeProcess } = useDataStream();
   const { mutate } = useSWRConfig();
+  const processedIndexRef = useRef(0);
 
   const { artifact, setArtifact, setMetadata } = useArtifact();
   // 用 ref 持有最新 artifact.kind，避免把 artifact 放进 effect 依赖导致 setArtifact 后重跑。
   const artifactKindRef = useRef<ArtifactKind>(artifact.kind);
+  const artifactStreamActiveRef = useRef(false);
   artifactKindRef.current = artifact.kind;
+
+  useEffect(() => {
+    processedIndexRef.current = 0;
+    artifactStreamActiveRef.current = false;
+  }, [chatId]);
 
   useEffect(() => {
     if (!dataStream?.length) {
       return;
     }
+    if (processedIndexRef.current > dataStream.length) {
+      processedIndexRef.current = 0;
+    }
 
-    const newDeltas = dataStream.slice();
-    setDataStream([]);
+    const newEntries = dataStream.slice(processedIndexRef.current);
+    processedIndexRef.current = dataStream.length;
+    const newDeltas = newEntries
+      .filter((entry) => entry.chatId === chatId)
+      .map((entry) => entry.part);
+    if (!newDeltas.length) return;
 
     let currentArtifactKind = artifactKindRef.current;
 
@@ -69,6 +83,13 @@ export function DataStreamHandler() {
         continue;
       }
 
+      if (!isArtifactStreamPart(delta)) {
+        continue;
+      }
+      if (!artifactStreamActiveRef.current && !startsArtifactStream(delta)) {
+        continue;
+      }
+      artifactStreamActiveRef.current = true;
       currentArtifactKind = kindForStreamPart(delta, currentArtifactKind);
       const artifactDefinition = artifactDefinitions.find(
         (currentArtifactDefinition) =>
@@ -128,12 +149,15 @@ export function DataStreamHandler() {
             return draftArtifact;
         }
       });
+      if (delta.type === "data-finish") {
+        artifactStreamActiveRef.current = false;
+      }
     }
   }, [
     dataStream,
+    chatId,
     setArtifact,
     setMetadata,
-    setDataStream,
     setRuntimeProcess,
     mutate,
   ]);
@@ -180,6 +204,39 @@ function kindForStreamPart(
       return "text";
     default:
       return fallback;
+  }
+}
+
+function isArtifactStreamPart(delta: DataUIPart<CustomUIDataTypes>) {
+  switch (delta.type) {
+    case "data-kind":
+    case "data-id":
+    case "data-title":
+    case "data-clear":
+    case "data-finish":
+    case "data-textDelta":
+    case "data-codeDelta":
+    case "data-imageDelta":
+    case "data-sheetDelta":
+    case "data-suggestion":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function startsArtifactStream(delta: DataUIPart<CustomUIDataTypes>) {
+  switch (delta.type) {
+    case "data-kind":
+    case "data-id":
+    case "data-title":
+    case "data-clear":
+    case "data-codeDelta":
+    case "data-imageDelta":
+    case "data-sheetDelta":
+      return true;
+    default:
+      return false;
   }
 }
 

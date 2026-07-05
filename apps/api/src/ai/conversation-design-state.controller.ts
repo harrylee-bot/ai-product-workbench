@@ -4,48 +4,48 @@ import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import {
   AnswerClarificationQuestionDto,
-  CreateProductDesignStateDto,
-  CreateProductDesignVersionDto,
-  RollbackProductDesignStateDto,
-} from "./product-design-state.dto";
-import { ProductDesignStateService } from "./product-design-state.service";
-import type { ProductDesignState } from "./ai-vibe.types";
+  CreateConversationDesignStateDto,
+  CreateConversationDesignVersionDto,
+  RollbackConversationDesignStateDto,
+} from "./conversation-design-state.dto";
+import { ConversationDesignStateService } from "./conversation-design-state.service";
+import type { ConversationDesignState } from "./ai-vibe.types";
 
-@Controller("projects/:projectId/product-design-state")
+@Controller("conversations/:conversationId/conversation-design-state")
 @UseGuards(JwtAuthGuard)
-export class ProjectProductDesignStateController {
-  constructor(private readonly stateService: ProductDesignStateService) {}
+export class ConversationDesignStateController {
+  constructor(private readonly stateService: ConversationDesignStateService) {}
 
   @Get()
-  getCurrent(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.stateService.getCurrentStateForUser(user, projectId);
+  getCurrent(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
+    return this.stateService.getCurrentStateForUser(user, conversationId);
   }
 
   @Post()
   create(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
-    @Body() dto: CreateProductDesignStateDto,
+    @Param("conversationId") conversationId: string,
+    @Body() dto: CreateConversationDesignStateDto,
   ) {
-    return this.stateService.createStateForUser(user, projectId, {
+    return this.stateService.createStateForUser(user, conversationId, {
       title: dto.title,
       businessGoal: dto.businessGoal,
-      initialState: dto.initialState as Partial<ProductDesignState> | undefined,
+      initialState: dto.initialState as Partial<ConversationDesignState> | undefined,
       reason: dto.reason,
     });
   }
 }
 
-@Controller("product-design-states")
+@Controller("conversation-design-states")
 @UseGuards(JwtAuthGuard)
-export class ProductDesignStateResourceController {
-  constructor(private readonly stateService: ProductDesignStateService) {}
+export class ConversationDesignStateResourceController {
+  constructor(private readonly stateService: ConversationDesignStateService) {}
 
   @Post(":stateId/versions")
   createVersion(
     @CurrentUser() user: AuthenticatedUser,
     @Param("stateId") stateId: string,
-    @Body() dto: CreateProductDesignVersionDto,
+    @Body() dto: CreateConversationDesignVersionDto,
   ) {
     return this.stateService.createVersionForUser(user, stateId, dto.reason);
   }
@@ -59,7 +59,7 @@ export class ProductDesignStateResourceController {
   rollback(
     @CurrentUser() user: AuthenticatedUser,
     @Param("stateId") stateId: string,
-    @Body() dto: RollbackProductDesignStateDto,
+    @Body() dto: RollbackConversationDesignStateDto,
   ) {
     return this.stateService.rollbackForUser(user, stateId, dto);
   }

@@ -7,7 +7,7 @@ import { UserStatus } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { getJwtSecret } from "../../common/secret-config";
 import { AUTH_COOKIE_NAME } from "../../common/auth-cookie";
-import type { Phase1JwtPayload, Phase1User } from "./auth.types";
+import type { AuthJwtPayload, AuthenticatedUser } from "./auth.types";
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -25,7 +25,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     this.prisma = prisma;
   }
 
-  async validate(payload: Phase1JwtPayload): Promise<Phase1User> {
+  async validate(payload: AuthJwtPayload): Promise<AuthenticatedUser> {
     const userId = payload.userId ?? payload.sub;
     if (!userId) throw new UnauthorizedException("未登录");
 

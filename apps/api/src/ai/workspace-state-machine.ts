@@ -1,53 +1,40 @@
-import { ProductDesignStateStatus, ProjectStatus } from "@prisma/client";
-import type { ProductDesignState, QAReport, QAReportStatus } from "./ai-vibe.types";
+import { ConversationDesignStateStatus, ConversationStatus } from "@prisma/client";
+import type { ConversationDesignState, QAReport, QAReportStatus } from "./ai-vibe.types";
 
-type ProductStateLike = Pick<ProductDesignState, "status"> | null | undefined;
+type DesignStateLike = Pick<ConversationDesignState, "status"> | null | undefined;
 
-export function projectStatusFromProductDesignState(
-  state: ProductStateLike,
-  fallback: ProjectStatus = ProjectStatus.draft,
-): ProjectStatus {
-  return projectStatusFromProductDesignStateStatus(state?.status, fallback);
+export function conversationStatusFromDesignState(
+  state: DesignStateLike,
+  fallback: ConversationStatus = ConversationStatus.active,
+): ConversationStatus {
+  return conversationStatusFromDesignStateStatus(state?.status, fallback);
 }
 
-export function projectStatusFromProductDesignStateStatus(
-  status: ProductDesignStateStatus | ProductDesignState["status"] | null | undefined,
-  fallback: ProjectStatus = ProjectStatus.draft,
-): ProjectStatus {
+export function conversationStatusFromDesignStateStatus(
+  status: ConversationDesignStateStatus | ConversationDesignState["status"] | null | undefined,
+  fallback: ConversationStatus = ConversationStatus.active,
+): ConversationStatus {
   if (!status) return fallback;
-  if (status === ProductDesignStateStatus.intake) return ProjectStatus.designing;
-  if (status === ProductDesignStateStatus.format_check) return ProjectStatus.designing;
-  if (status === ProductDesignStateStatus.scoring) return ProjectStatus.designing;
-  if (status === ProductDesignStateStatus.optimizing) return ProjectStatus.designing;
-  if (status === ProductDesignStateStatus.clarifying) return ProjectStatus.clarifying;
-  if (status === ProductDesignStateStatus.doc_ready) return ProjectStatus.prd_ready;
-  if (status === ProductDesignStateStatus.doc_confirmed) return ProjectStatus.prd_ready;
-  if (status === ProductDesignStateStatus.prd_ready) return ProjectStatus.prd_ready;
-  if (status === ProductDesignStateStatus.prototype_ready) return ProjectStatus.prototype_ready;
-  if (status === ProductDesignStateStatus.qa_failed) return ProjectStatus.qa_failed;
-  if (status === ProductDesignStateStatus.confirmed) return ProjectStatus.completed;
-  return fallback;
+  return isLifecycleLockedConversationStatus(fallback) ? fallback : ConversationStatus.active;
 }
 
-export function projectStatusAfterQa(input: {
+export function conversationStatusAfterQa(input: {
   qaStatus: QAReportStatus;
-  currentProjectStatus: ProjectStatus;
-  productDesignState?: ProductStateLike;
-}): ProjectStatus {
-  if (isLifecycleLockedProjectStatus(input.currentProjectStatus)) return input.currentProjectStatus;
-  if (input.qaStatus === "failed") return ProjectStatus.qa_failed;
-  return projectStatusFromProductDesignState(input.productDesignState, input.currentProjectStatus);
+  currentConversationStatus: ConversationStatus;
+  conversationDesignState?: DesignStateLike;
+}): ConversationStatus {
+  if (isLifecycleLockedConversationStatus(input.currentConversationStatus)) return input.currentConversationStatus;
+  return conversationStatusFromDesignState(input.conversationDesignState, input.currentConversationStatus);
 }
 
-export function projectStatusForCompletedArtifacts(input: {
-  productDesignState?: ProductStateLike;
+export function conversationStatusForCompletedArtifacts(input: {
+  conversationDesignState?: DesignStateLike;
   qaReport?: Pick<QAReport, "status"> | null;
-  fallback?: ProjectStatus;
-}): ProjectStatus {
-  if (input.qaReport?.status === "failed") return ProjectStatus.qa_failed;
-  return projectStatusFromProductDesignState(input.productDesignState, input.fallback ?? ProjectStatus.draft);
+  fallback?: ConversationStatus;
+}): ConversationStatus {
+  return conversationStatusFromDesignState(input.conversationDesignState, input.fallback ?? ConversationStatus.active);
 }
 
-function isLifecycleLockedProjectStatus(status: ProjectStatus) {
-  return status === ProjectStatus.archived || status === ProjectStatus.deleted;
+function isLifecycleLockedConversationStatus(status: ConversationStatus) {
+  return status === ConversationStatus.archived || status === ConversationStatus.deleted;
 }

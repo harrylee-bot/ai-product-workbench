@@ -13,6 +13,21 @@ export class ChatStreamPartDto {
   @IsOptional()
   @IsString()
   text?: string;
+
+  @IsOptional()
+  @IsString()
+  fileId?: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  mediaType?: string;
+
+  @IsOptional()
+  size?: number;
 }
 
 /**

@@ -5,8 +5,8 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
-  ProductDesignStateStatus,
-  ProjectStatus,
+  ConversationDesignStateStatus,
+  ConversationStatus,
   PrototypeArtifactStatus,
   RequirementDocumentStatus,
   ShareLinkStatus,
@@ -16,12 +16,12 @@ import {
 import { randomBytes } from "node:crypto";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
-import { ProductDesignStateService } from "./product-design-state.service";
+import { ConversationDesignStateService } from "./conversation-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import { PrototypeService, sanitizePrototypeHtml } from "./prototype.service";
 
 type CreateShareInput = {
-  projectId: string;
+  conversationId: string;
   scope?: ShareScope;
   expiresInDays?: number;
 };
@@ -29,13 +29,13 @@ type CreateShareInput = {
 type ShareLinkRecord = {
   id: string;
   token: string;
-  projectId: string;
+  conversationId: string;
   scope: ShareScope;
   status: ShareLinkStatus;
   title: string | null;
   prdDocumentId: string | null;
   prototypeArtifactId: string | null;
-  productDesignStateId: string | null;
+  conversationDesignStateId: string | null;
   expiresAt: Date | null;
   viewCount: number;
   lastViewedAt: Date | null;
@@ -47,33 +47,33 @@ type ShareLinkRecord = {
 
 /**
  * 只读分享链接（FR-4）。
- * - 创建/吊销/列举：仅项目 owner（走 JwtAuthGuard）。
- * - 公开解析：免登录、只读；不可下载文档、不可编辑原型（产品层软约束 FR-4.4）。
+ * - 创建/吊销/列举：仅对话 owner（走 JwtAuthGuard）。
+ * - 分享访问需登录，只读；不可下载文档、不可编辑原型（分享层软约束 FR-4.4）。
  * - token 不可枚举（crypto 随机），可设有效期、可吊销（FR-4.5）。
  */
 @Injectable()
 export class ShareService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly stateService: ProductDesignStateService,
+    private readonly stateService: ConversationDesignStateService,
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
   ) {}
 
   async createForUser(user: AuthenticatedUser, input: CreateShareInput) {
-    const project = await this.assertProjectAccess(user, input.projectId);
-    this.assertOwnerMutation(user, project.ownerId);
+    const conversation = await this.assertConversationAccess(user, input.conversationId);
+    this.assertOwnerMutation(user, conversation.ownerId);
 
     const scope = input.scope ?? ShareScope.both;
-    const state = await this.stateService.getCurrentState(input.projectId);
-    if (!state) throw new NotFoundException("SHARE_NO_PRODUCT_DESIGN_STATE");
+    const state = await this.stateService.getCurrentState(input.conversationId);
+    if (!state) throw new NotFoundException("SHARE_NO_DESIGN_STATE");
 
     // 仅允许分享已确认无误的产物：文档需存在、原型需已就绪（FR-4.1）。
     const needsPrd = scope === ShareScope.prd || scope === ShareScope.both;
     const needsPrototype = scope === ShareScope.prototype || scope === ShareScope.both;
 
     const prdDocument = needsPrd
-      ? (await this.documentService.getCurrentForProject(input.projectId)).document
+      ? (await this.documentService.getCurrentForConversation(input.conversationId)).document
       : null;
     if (needsPrd && !prdDocument) {
       throw new BadRequestException("SHARE_PRD_NOT_READY");
@@ -83,13 +83,13 @@ export class ShareService {
     }
 
     const prototype = needsPrototype
-      ? await this.prototypeService.getCurrentForProject(input.projectId).catch(() => null)
+      ? await this.prototypeService.getCurrentForConversation(input.conversationId).catch(() => null)
       : null;
     const prototypeArtifact = prototype?.artifact ?? null;
     if (needsPrototype && (!prototypeArtifact || prototypeArtifact.status !== PrototypeArtifactStatus.ready)) {
       throw new BadRequestException("SHARE_PROTOTYPE_NOT_READY");
     }
-    if (needsPrototype && state.status !== ProductDesignStateStatus.confirmed) {
+    if (needsPrototype && state.status !== ConversationDesignStateStatus.confirmed) {
       throw new BadRequestException("SHARE_PROTOTYPE_NOT_CONFIRMED");
     }
 
@@ -100,13 +100,13 @@ export class ShareService {
     const created = await this.prisma.shareLink.create({
       data: {
         token: this.generateToken(),
-        projectId: input.projectId,
+        conversationId: input.conversationId,
         scope,
         status: ShareLinkStatus.active,
-        title: state.title ?? project.title,
+        title: state.title ?? conversation.title,
         prdDocumentId: prdDocument?.id ?? null,
         prototypeArtifactId: prototypeArtifact?.id ?? null,
-        productDesignStateId: state.id,
+        conversationDesignStateId: state.id,
         expiresAt,
         createdBy: user.id,
       },
@@ -115,10 +115,10 @@ export class ShareService {
     return { share: this.toShareItem(created as ShareLinkRecord) };
   }
 
-  async listForUser(user: AuthenticatedUser, projectId: string) {
-    await this.assertProjectAccess(user, projectId, { allowArchived: true });
+  async listForUser(user: AuthenticatedUser, conversationId: string) {
+    await this.assertConversationAccess(user, conversationId, { allowArchived: true });
     const items = await this.prisma.shareLink.findMany({
-      where: { projectId },
+      where: { conversationId },
       orderBy: { createdAt: "desc" },
     });
     return { items: items.map((item) => this.toShareItem(item as ShareLinkRecord)) };
@@ -127,13 +127,13 @@ export class ShareService {
   async revokeForUser(user: AuthenticatedUser, shareId: string) {
     const share = await this.prisma.shareLink.findUnique({
       where: { id: shareId },
-      include: { project: true },
+      include: { conversation: true },
     });
     if (!share) throw new NotFoundException("SHARE_NOT_FOUND");
-    if (user.role !== UserRole.admin && share.project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && share.conversation.ownerId !== user.id) {
       throw new ForbiddenException("SHARE_FORBIDDEN");
     }
-    this.assertOwnerMutation(user, share.project.ownerId);
+    this.assertOwnerMutation(user, share.conversation.ownerId);
     const updated = await this.prisma.shareLink.update({
       where: { id: shareId },
       data: { status: ShareLinkStatus.revoked, revokedAt: new Date() },
@@ -148,7 +148,7 @@ export class ShareService {
   async resolvePublic(token: string, options: { incrementView?: boolean } = {}) {
     const incrementView = options.incrementView ?? true;
     const now = new Date();
-    const { share, project } = await this.prisma.$transaction(async (tx) => {
+    const { share, conversation } = await this.prisma.$transaction(async (tx) => {
       const current = await tx.shareLink.findUnique({ where: { token } });
       if (!current) throw new NotFoundException("SHARE_NOT_FOUND");
       if (current.status !== ShareLinkStatus.active) throw new NotFoundException("SHARE_REVOKED");
@@ -156,9 +156,9 @@ export class ShareService {
         throw new NotFoundException("SHARE_EXPIRED");
       }
 
-      const currentProject = await tx.project.findUnique({ where: { id: current.projectId } });
-      if (!currentProject || currentProject.deletedAt || currentProject.status === ProjectStatus.deleted) {
-        throw new NotFoundException("SHARE_PROJECT_UNAVAILABLE");
+      const currentConversation = await tx.conversation.findUnique({ where: { id: current.conversationId } });
+      if (!currentConversation || currentConversation.deletedAt || currentConversation.status === ConversationStatus.deleted) {
+        throw new NotFoundException("SHARE_CONVERSATION_UNAVAILABLE");
       }
 
       const resolvedShare = incrementView
@@ -168,7 +168,7 @@ export class ShareService {
           })
         : current;
 
-      return { share: resolvedShare, project: currentProject };
+      return { share: resolvedShare, conversation: currentConversation };
     });
 
     const scope = share.scope;
@@ -176,10 +176,10 @@ export class ShareService {
     const wantsPrototype = scope === ShareScope.prototype || scope === ShareScope.both;
 
     const prd = wantsPrd ? await this.loadPublicPrd(share as ShareLinkRecord) : null;
-    const prototype = wantsPrototype ? await this.loadPublicPrototype(share as ShareLinkRecord) : null;
+    const prototype = wantsPrototype ? await this.loadPublicPrototype(share as ShareLinkRecord, token) : null;
 
     return {
-      title: share.title ?? project.title,
+      title: share.title ?? conversation.title,
       scope,
       readOnly: true,
       allowDownload: false,
@@ -197,11 +197,11 @@ export class ShareService {
   }
 
   private async loadPublicPrd(share: ShareLinkRecord) {
-    // 严格只返回分享创建时固化的 prdDocumentId 指向的记录，不 fallback 到项目最新文档。
+    // 严格只返回分享创建时固化的 prdDocumentId 指向的记录，不 fallback 到会话最新文档。
     // 否则分享后被分享文档删除/降级，会静默返回另一份未在分享时刻确认的内容（share-1）。
     if (!share.prdDocumentId) return null;
     const document = await this.prisma.requirementDocument.findFirst({
-      where: { id: share.prdDocumentId, projectId: share.projectId },
+      where: { id: share.prdDocumentId, conversationId: share.conversationId },
     });
     if (!document) return null;
     return {
@@ -211,11 +211,11 @@ export class ShareService {
     };
   }
 
-  private async loadPublicPrototype(share: ShareLinkRecord) {
+  private async loadPublicPrototype(share: ShareLinkRecord, token: string) {
     // 严格只返回分享创建时固化的 prototypeArtifactId 指向的记录，不 fallback。
     if (!share.prototypeArtifactId) return null;
     const artifact = await this.prisma.prototypeArtifact.findFirst({
-      where: { id: share.prototypeArtifactId, projectId: share.projectId },
+      where: { id: share.prototypeArtifactId, conversationId: share.conversationId },
     });
     if (!artifact || artifact.status !== PrototypeArtifactStatus.ready || !artifact.htmlContent) {
       return null;
@@ -223,6 +223,7 @@ export class ShareService {
     return {
       title: artifact.title,
       html: sanitizePrototypeHtml(artifact.htmlContent),
+      previewUrl: `/api/public/share/${token}/prototype`,
       pageCount: artifact.pageCount,
       updatedAt: artifact.updatedAt.toISOString(),
     };
@@ -233,27 +234,27 @@ export class ShareService {
     return randomBytes(32).toString("base64url");
   }
 
-  private async assertProjectAccess(
+  private async assertConversationAccess(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && project.status === ProjectStatus.archived) {
-      throw new ForbiddenException("项目已归档，请先恢复后再继续操作");
+    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+      throw new ForbiddenException("会话已归档，请先恢复后再继续操作");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
-      throw new ForbiddenException("你无权访问该项目");
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+      throw new ForbiddenException("你无权访问该会话");
     }
-    return project;
+    return conversation;
   }
 
   private assertOwnerMutation(user: AuthenticatedUser, ownerId: string) {
     if (user.role === UserRole.admin && user.id !== ownerId) {
-      throw new ForbiddenException("管理员不可直接为用户项目创建分享链接");
+      throw new ForbiddenException("管理员不可直接为用户会话创建分享链接");
     }
   }
 
@@ -261,7 +262,7 @@ export class ShareService {
     return {
       id: share.id,
       token: share.token,
-      projectId: share.projectId,
+      conversationId: share.conversationId,
       scope: share.scope,
       status: share.status,
       title: share.title ?? undefined,

@@ -18,7 +18,7 @@ import { CommentService } from "./comment.service";
 class CreateCommentDto {
   @IsNotEmpty()
   @IsString()
-  projectId!: string;
+  conversationId!: string;
 
   @IsNotEmpty()
   @IsString()
@@ -64,13 +64,13 @@ export class CommentController {
   @Get()
   async list(
     @CurrentUser() user: AuthenticatedUser,
-    @Query("projectId") projectId: string,
+    @Query("conversationId") conversationId: string,
     @Query("targetType") targetType?: string,
     @Query("targetId") targetId?: string
   ) {
     const comments = await this.commentService.listComments(
       user,
-      projectId,
+      conversationId,
       targetType,
       targetId
     );

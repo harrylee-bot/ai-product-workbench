@@ -6,12 +6,15 @@ import { createUIMessageStream, pipeUIMessageStreamToResponse } from "ai";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { ConversationService } from "../../modules/conversation/conversation.service";
 import { KnowledgeRetrievalService } from "../../knowledge/knowledge-retrieval.service";
-import { MessageService } from "../../projects/message.service";
+import { FileAssetService } from "../../files/file-asset.service";
+import { MessageService } from "../../conversations/message.service";
 import { DeerFlowRuntimeService } from "../deerflow-runtime.service";
 import type { DeerFlowKnowledgeReference, DeerFlowRuntimeEvent } from "../deerflow-runtime.service";
 import { FinalActionApplierService } from "../final-action-applier.service";
+import { QaService } from "../qa.service";
 import { RuntimeRunLogService } from "../runtime-run-log.service";
 import { toInputJson } from "../ai-vibe.helpers";
+import type { QAReport } from "../ai-vibe.types";
 import { classifyRequirementMode, type RequirementMode } from "../requirement-mode.helper";
 import {
   createBridgeContext,
@@ -54,8 +57,10 @@ export class AichatStreamService {
     private readonly messages: MessageService,
     private readonly deerFlow: DeerFlowRuntimeService,
     private readonly finalActionApplier: FinalActionApplierService,
+    private readonly qaService: QaService,
     private readonly runLogs: RuntimeRunLogService,
     private readonly knowledgeRetrieval: KnowledgeRetrievalService,
+    private readonly files: FileAssetService,
   ) {}
 
   /**
@@ -76,18 +81,21 @@ export class AichatStreamService {
       conversationId,
       buildConversationTitle(content),
     );
-    const { conversation, project } = session;
-    const projectId = conversation.projectId ?? project.id;
-    const productContext = buildProductContextForDeerFlow(session);
+    const { conversation } = session;
+    const conversationContext = buildConversationContextForDeerFlow(session);
+    const fileParts = extractFileParts(dto.message);
+    const fileIds = [...new Set(fileParts.map((part) => part.fileId))];
+    const attachmentFiles = await this.files.getRuntimeAttachmentFiles(fileIds, conversationId);
 
     // c) 持久化用户消息
-    await this.messages.createUserMessage({
-      projectId,
+    const userMessage = await this.messages.createUserMessage({
       conversationId,
       userId: user.id,
       content,
+      attachments: fileParts.length ? toInputJson(fileParts) : undefined,
       metadata: toInputJson({ source: "aichat" }),
     });
+    await this.files.attachFilesToMessage(fileIds, userMessage.id, conversationId);
 
     if (!this.deerFlow.isEnabled()) {
       throw new BadRequestException("DeerFlow 未启用，无法生成回复。");
@@ -99,7 +107,6 @@ export class AichatStreamService {
         const ctx = createBridgeContext();
         let deliveredUserVisibleResult = false;
         const run = await this.runLogs.createRun({
-          projectId,
           conversationId,
           userId: user.id,
           userInput: content,
@@ -122,7 +129,6 @@ export class AichatStreamService {
         const startedAt = run.startedAt.toISOString();
         const runtimeEvents: RuntimeProcessEvent[] = [];
         const assistantDraft = this.createAssistantDraftWriter({
-          projectId,
           conversationId,
           userId: user.id,
           runId: run.id,
@@ -134,7 +140,7 @@ export class AichatStreamService {
         const recordRuntimeEvent = (eventType: string, payload: unknown) => {
           void this.runLogs.recordStreamEvent({
             runId: run.id,
-            projectId,
+            conversationId,
             eventType,
             payload,
           }).catch((error) => {
@@ -174,8 +180,7 @@ export class AichatStreamService {
           emitRuntimeFinish(streamWriter, snapshot);
         };
         const documentStream = createDocumentStreamState(run.id, {
-          // previewMode is always "prd"; all DeerFlow output routes to canvas
-          forceDocumentStream: true,
+          forceDocumentStream: isDocumentGenerationRequest(content),
         });
         res.on("close", markClientClosed);
 
@@ -196,7 +201,6 @@ export class AichatStreamService {
               content,
               conversationId,
               ctx,
-              projectId,
               runId: run.id,
               streamWriter,
               userId: user.id,
@@ -213,7 +217,6 @@ export class AichatStreamService {
           }
 
           const knowledgeContext = await this.retrieveKnowledge({
-            projectId,
             conversationId,
             runId: run.id,
             message: content,
@@ -238,12 +241,13 @@ export class AichatStreamService {
 
           const result = await this.deerFlow.runTurn({
             runId: run.id,
-            projectId,
             conversationId,
             userId: user.id,
             message: content,
+            attachments: fileParts,
+            attachmentFiles,
             previewMode: "prd",
-            productDesignState: productContext,
+            conversationDesignState: conversationContext,
             knowledgeContext,
             signal: controller.signal,
             onEvent: (event) => {
@@ -272,6 +276,9 @@ export class AichatStreamService {
           const expectsArtifact =
             result.finalAction.type === "review_prd" ||
             result.finalAction.type === "review_prototype";
+          if (!result.finalAction.parsed && requiresExplicitFinalAction(content)) {
+            throw new BadRequestException("FINAL_ACTION_REQUIRED_FOR_ARTIFACT_INTENT");
+          }
           if (expectsArtifact) {
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
@@ -282,7 +289,7 @@ export class AichatStreamService {
             }));
           }
           const applied = await this.finalActionApplier.apply({
-            projectId,
+            conversationId,
             userId: user.id,
             runId: run.id,
             finalAction: result.finalAction,
@@ -291,7 +298,12 @@ export class AichatStreamService {
           });
 
           if (applied.prdDocument) {
-            const prdChatMessage = "PRD 已生成，请在右侧画布查看。";
+            const qaReport = await this.qaService.runForConversation(conversationId, user.id, {
+              trigger: "initial_generation",
+              runId: run.id,
+              prdDocument: applied.prdDocument,
+            });
+            const prdChatMessage = `PRD 已生成，${formatQaOutcome(qaReport)}，请在右侧画布查看。`;
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
@@ -320,7 +332,6 @@ export class AichatStreamService {
             publishRuntimeEvent(prdReadyEvent);
             deliveredUserVisibleResult = true;
             await assistantDraft.finalize({
-              projectId,
               conversationId,
               userId: user.id,
               content: prdChatMessage,
@@ -330,11 +341,15 @@ export class AichatStreamService {
                 runId: run.id,
                 prdDocumentId: applied.prdDocument.id,
                 prdDocumentTitle: applied.prdDocument.title,
+                qaReportId: qaReport.id,
+                qaStatus: qaReport.status,
+                qaBlockingSummary: qaBlockingSummary(qaReport),
                 finalActionType: result.finalAction.type,
                 threadId: result.threadId,
               }),
               relatedRunId: run.id,
               relatedPrdDocumentId: applied.prdDocument.id,
+              relatedQaReportId: qaReport.id,
             });
             await this.completeRunBestEffort(
               run.id,
@@ -343,12 +358,18 @@ export class AichatStreamService {
                 threadId: result.threadId,
                 finalAction: result.finalAction,
                 prdDocument: applied.prdDocument,
+                qaReport,
               },
-              "PRD 已生成",
+              prdChatMessage,
             );
             publishRuntimeFinish("succeeded");
           } else if (applied.prototypeArtifact) {
-            const prototypeChatMessage = "原型已生成，请在右侧画布查看。";
+            const qaReport = await this.qaService.runForConversation(conversationId, user.id, {
+              trigger: "initial_generation",
+              runId: run.id,
+              prototypeArtifact: applied.prototypeArtifact,
+            });
+            const prototypeChatMessage = `原型已生成，${formatQaOutcome(qaReport)}，请在右侧画布查看。`;
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
@@ -375,7 +396,6 @@ export class AichatStreamService {
             publishRuntimeEvent(prototypeReadyEvent);
             deliveredUserVisibleResult = true;
             await assistantDraft.finalize({
-              projectId,
               conversationId,
               userId: user.id,
               content: prototypeChatMessage,
@@ -385,11 +405,15 @@ export class AichatStreamService {
                 runId: run.id,
                 prototypeArtifactId: applied.prototypeArtifact.id,
                 prototypeArtifactTitle: applied.prototypeArtifact.title,
+                qaReportId: qaReport.id,
+                qaStatus: qaReport.status,
+                qaBlockingSummary: qaBlockingSummary(qaReport),
                 finalActionType: result.finalAction.type,
                 threadId: result.threadId,
               }),
               relatedRunId: run.id,
               relatedPrototypeArtifactId: applied.prototypeArtifact.id,
+              relatedQaReportId: qaReport.id,
             });
             await this.completeRunBestEffort(
               run.id,
@@ -398,8 +422,9 @@ export class AichatStreamService {
                 threadId: result.threadId,
                 finalAction: result.finalAction,
                 prototypeArtifact: applied.prototypeArtifact,
+                qaReport,
               },
-              "原型已生成",
+              prototypeChatMessage,
             );
             publishRuntimeFinish("succeeded");
           } else {
@@ -413,7 +438,6 @@ export class AichatStreamService {
             }
             deliveredUserVisibleResult = true;
             await assistantDraft.finalize({
-              projectId,
               conversationId,
               userId: user.id,
               content: message,
@@ -466,7 +490,6 @@ export class AichatStreamService {
             const partialMessage = ctx.textBuffer.trim();
             if (partialMessage) {
               await assistantDraft.finalize({
-                projectId,
                 conversationId,
                 userId: user.id,
                 content: partialMessage,
@@ -502,7 +525,6 @@ export class AichatStreamService {
           });
           if (!deliveredUserVisibleResult) {
             await assistantDraft.finalize({
-              projectId,
               conversationId,
               userId: user.id,
               content: ctx.textBuffer.trim() || "生成失败，请重试",
@@ -630,7 +652,7 @@ export class AichatStreamService {
   }
 
   private async recordStaleStopEvent(
-    run: Pick<RuntimeRunLog, "id" | "projectId" | "startedAt">,
+    run: Pick<RuntimeRunLog, "id" | "conversationId" | "startedAt">,
   ) {
     const event = createRuntimeEvent({
       runId: run.id,
@@ -642,7 +664,7 @@ export class AichatStreamService {
 
     await this.runLogs.recordStreamEvent({
       runId: run.id,
-      projectId: run.projectId,
+      conversationId: run.conversationId,
       eventType: "runtime_event",
       payload: event,
     });
@@ -650,7 +672,6 @@ export class AichatStreamService {
 
   /** 移植自 copilot-prd-runtime.service.ts 的知识检索。 */
   private async retrieveKnowledge(input: {
-    projectId: string;
     conversationId: string;
     runId: string;
     message: string;
@@ -673,7 +694,6 @@ export class AichatStreamService {
     content: string;
     conversationId: string;
     ctx: ReturnType<typeof createBridgeContext>;
-    projectId: string;
     runId: string;
     streamWriter: UIMessageStreamWriter;
     userId: string;
@@ -687,7 +707,7 @@ export class AichatStreamService {
     const toolInput = {
       query: input.content,
       limit: 20,
-      scope: "current-project",
+      scope: "current-conversation",
     };
     emitToolInputAvailable(
       {
@@ -700,7 +720,6 @@ export class AichatStreamService {
     );
 
     const retrieval = await this.searchKnowledgeForChat({
-      projectId: input.projectId,
       conversationId: input.conversationId,
       runId: input.runId,
       message: "",
@@ -729,7 +748,6 @@ export class AichatStreamService {
     finishText(input.streamWriter, input.ctx);
 
     await input.assistantDraft.finalize({
-      projectId: input.projectId,
       conversationId: input.conversationId,
       userId: input.userId,
       content: message,
@@ -744,7 +762,6 @@ export class AichatStreamService {
   }
 
   private async searchKnowledgeForChat(input: {
-    projectId: string;
     conversationId: string;
     runId: string;
     message: string;
@@ -752,7 +769,6 @@ export class AichatStreamService {
   }) {
     const requirementMode: RequirementMode = classifyRequirementMode(input.message, { hasExistingState: true });
     return this.knowledgeRetrieval.search({
-      projectId: input.projectId,
       conversationId: input.conversationId,
       runId: input.runId,
       runtimeName: "runtime_generation",
@@ -774,7 +790,6 @@ export class AichatStreamService {
   }
 
   private createAssistantDraftWriter(input: {
-    projectId: string;
     conversationId: string;
     userId: string;
     runId: string;
@@ -852,7 +867,6 @@ export class AichatStreamService {
 
           if (!draftMessageId) {
             const created = await this.messages.createAssistantMessage({
-              projectId: input.projectId,
               conversationId: input.conversationId,
               userId: input.userId,
               content,
@@ -1092,7 +1106,7 @@ export function looksLikeDocumentDraft(buffer: string, delta: string) {
     return /(需求|文档|说明书|业务|活动|页面|接口|配置|状态|流程|快照|验收)/.test(sample);
   }
   if (
-    /"type"\s*:\s*"(table|diagram|image|prototype_snapshot|asset_reference|section)"|"blocks"\s*:|"sourcePaths"\s*:|"prdDocumentDraft"\s*:|"productDesignStateDraft"\s*:|"acceptanceCriteria"\s*:|"exceptionScenarios"\s*:|"businessRules"\s*:/.test(sample)
+    /"type"\s*:\s*"(table|diagram|image|prototype_snapshot|asset_reference|section)"|"blocks"\s*:|"sourcePaths"\s*:|"prdDocumentDraft"\s*:|"designStateDraft"\s*:|"acceptanceCriteria"\s*:|"exceptionScenarios"\s*:|"businessRules"\s*:/.test(sample)
   ) {
     return true;
   }
@@ -1162,6 +1176,19 @@ function extractUserText(message: ChatStreamDto["message"]): string {
     .trim();
 }
 
+function extractFileParts(message: ChatStreamDto["message"]) {
+  if (!message?.parts?.length) return [];
+  return message.parts
+    .filter((part) => part.type === "file" && typeof part.fileId === "string" && part.fileId.trim())
+    .map((part) => ({
+      type: "file" as const,
+      fileId: part.fileId!.trim(),
+      name: part.name?.trim() || "file",
+      mediaType: part.mediaType?.trim() || "application/octet-stream",
+      size: typeof part.size === "number" ? part.size : undefined,
+    }));
+}
+
 function pickAssistantMessageType(
   finalActionType: string,
 ): MessageType {
@@ -1175,17 +1202,17 @@ function buildConversationTitle(content: string): string {
   return title.length > 60 ? `${title.slice(0, 60)}...` : title;
 }
 
-function buildProductContextForDeerFlow(session: {
-  productDesignState?: unknown;
+function buildConversationContextForDeerFlow(session: {
+  conversationDesignState?: unknown;
   prd?: unknown;
   prototype?: unknown;
 }) {
-  const state = asRecord(session.productDesignState);
+  const state = asRecord(session.conversationDesignState);
   const prd = asRecord(session.prd);
   const prototype = asRecord(session.prototype);
 
   return {
-    currentProductDesignState: state
+    currentConversationDesignState: state
       ? {
           id: state.id,
           version: state.version,
@@ -1246,9 +1273,33 @@ function isKnowledgeInventoryQuestion(value: string) {
   return /(有哪些|有什么|有什么内容|哪些内容|列出|列表|目录|清单|盘点|收录|包含什么|都有什么)/.test(compact);
 }
 
+function requiresExplicitFinalAction(value: string) {
+  const compact = value.replace(/\s+/g, "").toLowerCase();
+  if (hasNegatedArtifactIntent(compact)) {
+    return false;
+  }
+  return /(prd|需求文档|需求说明书|原型|prototype|导出|下载|export)/i.test(compact);
+}
+
+function formatQaOutcome(report: QAReport) {
+  if (report.status === "passed") return "QA 通过";
+  if (report.status === "warning") return "QA 未完全通过";
+  if (report.status === "failed") return "QA 未通过";
+  return `QA ${report.status}`;
+}
+
+function qaBlockingSummary(report: QAReport) {
+  const blocking = report.issues.filter((issue) => issue.severity === "blocking");
+  if (blocking.length === 0) return undefined;
+  return blocking.slice(0, 3).map((issue) => issue.title).join("；");
+}
+
 export function isDocumentGenerationRequest(value: string) {
   const compact = value.replace(/\s+/g, "").toLowerCase();
   if (!/(需求文档|需求说明书|产品需求文档|prd|prd文档)/i.test(compact)) {
+    return false;
+  }
+  if (hasNegatedArtifactIntent(compact)) {
     return false;
   }
   if (/(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|给我)/.test(compact)) {
@@ -1258,6 +1309,20 @@ export function isDocumentGenerationRequest(value: string) {
     return false;
   }
   return true;
+}
+
+function hasNegatedArtifactIntent(compact: string) {
+  const artifact =
+    "(prd|prd文档|需求文档|需求说明书|产品需求文档|原型|prototype|导出|下载|export)";
+  const artifactAction =
+    "(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|产出|触发|打开|唤起)";
+  const negation = "(不要|无需|不需要|不用|别|先别|禁止|不必|不要再|不生成|不写|不输出|不产出|不触发)";
+
+  return (
+    new RegExp(`${negation}.{0,16}${artifactAction}?.{0,16}${artifact}`, "i").test(compact) ||
+    new RegExp(`${artifact}.{0,16}${negation}.{0,16}${artifactAction}?`, "i").test(compact) ||
+    new RegExp(`(不是|并非).{0,12}${artifactAction}.{0,16}${artifact}`, "i").test(compact)
+  );
 }
 
 function formatKnowledgeInventoryMessage(output: {

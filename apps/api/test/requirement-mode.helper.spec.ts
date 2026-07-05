@@ -15,7 +15,7 @@ describe("classifyRequirementMode", () => {
     expect(classifyRequirementMode("做一个抽奖活动", { hasExistingState: true })).toBe("one_sentence_completion");
   });
 
-  it("classifies a new project with no existing state and a detailed prompt as brand_new_system", () => {
+  it("classifies a new conversation with no existing state and a detailed prompt as brand_new_system", () => {
     expect(
       classifyRequirementMode("我要做一个营销活动管理后台，包含活动创建、素材管理、奖品配置、审核发布和数据报表", {
         hasExistingState: false,

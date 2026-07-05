@@ -6,7 +6,7 @@ import {
   KnowledgeSource,
   KnowledgeStatus,
   KnowledgeType,
-  ProjectStatus,
+  ConversationStatus,
   QAReportStatus,
   UserRole,
   UserStatus,
@@ -45,7 +45,7 @@ describe("Knowledge module services", () => {
     knowledgeRetrievalLog: {
       create: vi.fn(),
     },
-    project: {
+    conversation: {
       findUnique: vi.fn(),
     },
     qAReport: {
@@ -72,9 +72,9 @@ describe("Knowledge module services", () => {
       ...data,
       createdAt: now,
     }));
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
-      status: ProjectStatus.prototype_ready,
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
+      status: ConversationStatus.prototype_ready,
       deletedAt: null,
       latestQaReportId: "qa-pass",
     });
@@ -126,7 +126,7 @@ describe("Knowledge module services", () => {
     prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
 
     const result = await retrievalService.search({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       runId: "run-1",
       runtimeName: "deerflow_runtime",
       query: "签到 每日一次",
@@ -158,7 +158,7 @@ describe("Knowledge module services", () => {
     expect(prisma.knowledgeItem.findMany.mock.calls.at(-1)?.[0].where.type).toBeUndefined();
     expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        projectId: "project-1",
+        conversationId: "conversation-1",
         runId: "run-1",
         matchedKnowledgeIds: ["active-1"],
         selectedKnowledgeIds: ["active-1"],
@@ -181,7 +181,7 @@ describe("Knowledge module services", () => {
     prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
 
     const result = await retrievalService.search({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       runId: "run-1",
       runtimeName: "deerflow_runtime",
       query: "帮我生成一个企业客户线索管理系统，包含需求文档和原型",
@@ -222,7 +222,7 @@ describe("Knowledge module services", () => {
     prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
 
     const broad = await retrievalService.search({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       runId: "run-2",
       runtimeName: "deerflow_runtime",
       query: "工作台画布变更安全",
@@ -237,7 +237,7 @@ describe("Knowledge module services", () => {
     expect(prisma.knowledgeItem.findMany.mock.calls.at(-1)?.[0].where.type).toBeUndefined();
 
     await retrievalService.search({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       runId: "run-3",
       runtimeName: "deerflow_runtime",
       query: "工作台画布变更安全",
@@ -293,7 +293,7 @@ describe("Knowledge module services", () => {
         checkType: "knowledge_rule_compliance",
         severity: "major",
         title: "知识规则未体现",
-        description: "ProductDesignState 未体现强规则。",
+        description: "ConversationDesignState 未体现强规则。",
         status: "open",
       }],
     }));
@@ -322,7 +322,7 @@ describe("Knowledge module services", () => {
     ]);
 
     const result = await candidateService.createMany(
-      "project-1",
+      "conversation-1",
       [
         {
           title: "每日签到规则候选",
@@ -357,7 +357,7 @@ describe("Knowledge module services", () => {
     );
 
     const created = await candidateService.createMany(
-      "project-1",
+      "conversation-1",
       [{
         title: "每日签到强规则",
         content: "用户每日只能签到一次。",
@@ -400,7 +400,7 @@ describe("Knowledge module services", () => {
       id: "knowledge-closed-loop",
       status: KnowledgeStatus.active,
       source: KnowledgeSource.prd_confirmation,
-      sourceProjectId: "project-1",
+      sourceConversationId: "conversation-1",
       sourcePrdDocumentId: "prd-1",
     }));
 
@@ -414,14 +414,14 @@ describe("Knowledge module services", () => {
         priority: KnowledgePriority.high,
         tags: approved.item.tags,
         source: KnowledgeSource.prd_confirmation,
-        sourceProjectId: "project-1",
+        sourceConversationId: "conversation-1",
         sourcePrdDocumentId: "prd-1",
       }),
     ]);
     prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
 
     const nextHit = await retrievalService.search({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       runId: "run-next",
       runtimeName: "deerflow_runtime",
       query: "做一个每日签到活动",
@@ -456,7 +456,7 @@ function itemRow(input: Record<string, unknown>) {
     tags: input.tags ?? [],
     priority: input.priority ?? KnowledgePriority.medium,
     source: input.source ?? KnowledgeSource.manual,
-    sourceProjectId: input.sourceProjectId ? String(input.sourceProjectId) : null,
+    sourceConversationId: input.sourceConversationId ? String(input.sourceConversationId) : null,
     sourceFileId: input.sourceFileId ? String(input.sourceFileId) : null,
     sourcePrdDocumentId: input.sourcePrdDocumentId ? String(input.sourcePrdDocumentId) : null,
     sourcePrototypeArtifactId: input.sourcePrototypeArtifactId ? String(input.sourcePrototypeArtifactId) : null,
@@ -471,7 +471,7 @@ function itemRow(input: Record<string, unknown>) {
 function candidateRow(input: Record<string, unknown> = {}) {
   return {
     id: String(input.id ?? "candidate-1"),
-    projectId: String(input.projectId ?? "project-1"),
+    conversationId: String(input.conversationId ?? "conversation-1"),
     title: String(input.title ?? "每日签到规则候选"),
     content: String(input.content ?? "用户每日只能签到一次。"),
     summary: input.summary ? String(input.summary) : null,
@@ -496,7 +496,7 @@ function candidateRow(input: Record<string, unknown> = {}) {
 function qaReportRow(input: Record<string, unknown> = {}) {
   return {
     id: String(input.id ?? "qa-pass"),
-    projectId: String(input.projectId ?? "project-1"),
+    conversationId: String(input.conversationId ?? "conversation-1"),
     status: input.status ?? QAReportStatus.passed,
     blockingCount: Number(input.blockingCount ?? 0),
     majorCount: Number(input.majorCount ?? 0),

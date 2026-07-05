@@ -1,24 +1,24 @@
 import { UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProductDesignState, PrototypeArtifact, QAGateDecision, RequirementDocument } from "../src/ai/ai-vibe.types";
+import type { ConversationDesignState, PrototypeArtifact, QAGateDecision, RequirementDocument } from "../src/ai/ai-vibe.types";
 import { ExportService } from "../src/ai/export.service";
 
 describe("Vibe export module", () => {
   const documentService = {
     getCurrentForUser: vi.fn(),
-    getCurrentForProject: vi.fn(),
+    getCurrentForConversation: vi.fn(),
   };
   const prototypeService = {
     getCurrentForUser: vi.fn(),
-    getCurrentForProject: vi.fn(),
+    getCurrentForConversation: vi.fn(),
   };
   const qaService = {
     assertGateAllows: vi.fn(),
-    assertGateAllowsForProject: vi.fn(),
+    assertGateAllowsForConversation: vi.fn(),
   };
   const documentCanvasService = {
     createCanvasExportForUser: vi.fn(),
-    createCanvasExportForProject: vi.fn(),
+    createCanvasExportForConversation: vi.fn(),
   };
   const service = new ExportService(
     documentService as never,
@@ -37,25 +37,25 @@ describe("Vibe export module", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     qaService.assertGateAllows.mockResolvedValue(openGate());
-    qaService.assertGateAllowsForProject.mockResolvedValue(openGate());
+    qaService.assertGateAllowsForConversation.mockResolvedValue(openGate());
     documentCanvasService.createCanvasExportForUser.mockResolvedValue(baseCanvasExport());
-    documentCanvasService.createCanvasExportForProject.mockResolvedValue(baseCanvasExport());
+    documentCanvasService.createCanvasExportForConversation.mockResolvedValue(baseCanvasExport());
   });
 
-  it("exports the current ProductDesignState PRD as a Word-readable document", async () => {
+  it("exports the current ConversationDesignState PRD as a Word-readable document", async () => {
     documentService.getCurrentForUser.mockResolvedValue({
       document: baseDocument(),
-      productDesignState: baseState(),
+      conversationDesignState: baseState(),
     });
 
-    const artifact = await service.exportPrdWordForUser(user, "project-1");
+    const artifact = await service.exportPrdWordForUser(user, "conversation-1");
     const html = artifact.buffer.toString("utf8");
 
-    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "project-1", "export_or_publish");
+    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "conversation-1", "export_or_publish");
     expect(artifact.format).toBe("prd_word");
     expect(artifact.contentType).toContain("application/msword");
-    expect(artifact.downloadPath).toBe("/api/projects/project-1/export/word");
-    expect(artifact.productDesignStateId).toBe("state-1");
+    expect(artifact.downloadPath).toBe("/api/conversations/conversation-1/export/word");
+    expect(artifact.conversationDesignStateId).toBe("state-1");
     expect(artifact.qaGate).toEqual(expect.objectContaining({ status: "open" }));
     expect(artifact.title).toBe("签到活动需求说明书");
     expect(artifact.fileName).toBe("签到活动需求说明书.doc");
@@ -68,19 +68,19 @@ describe("Vibe export module", () => {
     expect(html).toContain("3 业务降级方案（必填）");
     expect(html).toContain("4 需求安全基线要求（必填）");
     expect(html.match(/class=\"safety-row\"/g)).toHaveLength(21);
-    expect(html).toContain("ProductDesignState");
+    expect(html).toContain("ConversationDesignState");
     expect(html).toContain("每日签到");
   });
 
   it("exports the current state-bound HTML prototype as a single html file", async () => {
     prototypeService.getCurrentForUser.mockResolvedValue({
       artifact: baseArtifact(),
-      productDesignState: baseState(),
+      conversationDesignState: baseState(),
     });
 
-    const artifact = await service.exportPrototypeHtmlForUser(user, "project-1");
+    const artifact = await service.exportPrototypeHtmlForUser(user, "conversation-1");
 
-    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "project-1", "export_or_publish");
+    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "conversation-1", "export_or_publish");
     expect(artifact.format).toBe("prototype_html");
     expect(artifact.fileName).toBe("签到活动原型.html");
     expect(artifact.buffer.toString("utf8")).toContain('data-page-id="page_home"');
@@ -117,10 +117,10 @@ describe("Vibe export module", () => {
           },
         ],
       }),
-      productDesignState: baseState(),
+      conversationDesignState: baseState(),
     });
 
-    const artifact = await service.exportPrdWordForUser(user, "project-1");
+    const artifact = await service.exportPrdWordForUser(user, "conversation-1");
     const html = artifact.buffer.toString("utf8");
 
     expect(html).toContain("图表源码（mermaid）");
@@ -130,10 +130,10 @@ describe("Vibe export module", () => {
   });
 
   it("exports the current PRD as a JSON Canvas file", async () => {
-    const artifact = await service.exportPrdCanvasForUser(user, "project-1");
+    const artifact = await service.exportPrdCanvasForUser(user, "conversation-1");
 
-    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "project-1", "export_or_publish");
-    expect(documentCanvasService.createCanvasExportForUser).toHaveBeenCalledWith(user, "project-1");
+    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "conversation-1", "export_or_publish");
+    expect(documentCanvasService.createCanvasExportForUser).toHaveBeenCalledWith(user, "conversation-1");
     expect(artifact.format).toBe("prd_canvas");
     expect(artifact.fileName).toBe("签到活动-PRD.canvas");
     expect(JSON.parse(artifact.buffer.toString("utf8"))).toEqual(expect.objectContaining({
@@ -142,46 +142,46 @@ describe("Vibe export module", () => {
     }));
   });
 
-  it("rejects stale PRD exports that do not match the current ProductDesignState", async () => {
+  it("rejects stale PRD exports that do not match the current ConversationDesignState", async () => {
     documentService.getCurrentForUser.mockResolvedValue({
-      document: baseDocument({ productDesignStateVersion: 2 }),
-      productDesignState: baseState(),
+      document: baseDocument({ conversationDesignStateVersion: 2 }),
+      conversationDesignState: baseState(),
     });
 
-    await expect(service.exportPrdWordForUser(user, "project-1")).rejects.toThrow("PRD_EXPORT_STATE_MISMATCH");
+    await expect(service.exportPrdWordForUser(user, "conversation-1")).rejects.toThrow("PRD_EXPORT_STATE_MISMATCH");
     expect(qaService.assertGateAllows).not.toHaveBeenCalled();
   });
 
-  it("rejects stale HTML exports that do not match the current ProductDesignState", async () => {
+  it("rejects stale HTML exports that do not match the current ConversationDesignState", async () => {
     prototypeService.getCurrentForUser.mockResolvedValue({
-      artifact: baseArtifact({ productDesignStateId: "state-old" }),
-      productDesignState: baseState(),
+      artifact: baseArtifact({ conversationDesignStateId: "state-old" }),
+      conversationDesignState: baseState(),
     });
 
-    await expect(service.exportPrototypeHtmlForUser(user, "project-1")).rejects.toThrow("HTML_EXPORT_STATE_MISMATCH");
+    await expect(service.exportPrototypeHtmlForUser(user, "conversation-1")).rejects.toThrow("HTML_EXPORT_STATE_MISMATCH");
     expect(qaService.assertGateAllows).not.toHaveBeenCalled();
   });
 
-  it("uses the project-level QA gate for orchestrator export intents", async () => {
-    documentService.getCurrentForProject.mockResolvedValue({
+  it("uses the conversation-level QA gate for orchestrator export intents", async () => {
+    documentService.getCurrentForConversation.mockResolvedValue({
       document: baseDocument(),
-      productDesignState: baseState(),
+      conversationDesignState: baseState(),
     });
 
-    const artifact = await service.createPrdWordExport("project-1");
+    const artifact = await service.createPrdWordExport("conversation-1");
 
-    expect(qaService.assertGateAllowsForProject).toHaveBeenCalledWith("project-1", "export_or_publish");
+    expect(qaService.assertGateAllowsForConversation).toHaveBeenCalledWith("conversation-1", "export_or_publish");
     expect(artifact.sourceId).toBe("prd-1");
   });
 
   it("blocks export when QA gate rejects export_or_publish", async () => {
     documentService.getCurrentForUser.mockResolvedValue({
       document: baseDocument(),
-      productDesignState: baseState(),
+      conversationDesignState: baseState(),
     });
     qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));
 
-    await expect(service.exportPrdWordForUser(user, "project-1")).rejects.toThrow("QA_GATE_BLOCKED");
+    await expect(service.exportPrdWordForUser(user, "conversation-1")).rejects.toThrow("QA_GATE_BLOCKED");
   });
 });
 
@@ -199,10 +199,10 @@ function openGate(): QAGateDecision {
   };
 }
 
-function baseState(): ProductDesignState {
+function baseState(): ConversationDesignState {
   return {
     id: "state-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     version: 3,
     title: "签到活动",
     summary: "让用户每天完成签到并领取积分奖励。",
@@ -233,9 +233,9 @@ function baseState(): ProductDesignState {
 function baseDocument(overrides: Partial<RequirementDocument> = {}): RequirementDocument {
   return {
     id: "prd-1",
-    projectId: "project-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 3,
+    conversationId: "conversation-1",
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 3,
     title: "签到活动 PRD",
     status: "ready",
     sections: [
@@ -264,10 +264,10 @@ function baseDocument(overrides: Partial<RequirementDocument> = {}): Requirement
 function baseArtifact(overrides: Partial<PrototypeArtifact> = {}): PrototypeArtifact {
   return {
     id: "artifact-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     prototypeSpecId: "spec-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 3,
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 3,
     title: "签到活动原型",
     status: "ready",
     htmlContent: '<!doctype html><html><body><main data-page-id="page_home">签到</main></body></html>',
@@ -291,15 +291,15 @@ function baseCanvasExport() {
   const buffer = Buffer.from(JSON.stringify(canvas), "utf8");
   return {
     format: "prd_canvas" as const,
-    projectId: "project-1",
+    conversationId: "conversation-1",
     title: "签到活动 PRD",
     sourceType: "requirement_document" as const,
     sourceId: "prd-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 3,
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 3,
     fileName: "签到活动-PRD.canvas",
     contentType: "application/json; charset=utf-8",
-    downloadPath: "/api/projects/project-1/export/canvas",
+    downloadPath: "/api/conversations/conversation-1/export/canvas",
     sizeBytes: buffer.byteLength,
     generatedAt: "2026-06-20T08:00:00.000Z",
     buffer,

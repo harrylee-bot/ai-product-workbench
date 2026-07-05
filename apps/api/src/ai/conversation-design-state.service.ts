@@ -7,9 +7,9 @@ import {
 } from "@nestjs/common";
 	import {
 	  Prisma,
-	  ProductDesignChangeType,
-	  ProductDesignStateStatus,
-	  ProjectStatus,
+	  ConversationDesignChangeType,
+	  ConversationDesignStateStatus,
+	  ConversationStatus,
 	  RollbackRecordStatus,
 	  RollbackType,
 	  UserRole,
@@ -18,13 +18,13 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
-  ProductDesignDraft,
+  ConversationDesignDraft,
   RequirementDocSection,
   RequirementDocument,
-  ProductDesignState,
+  ConversationDesignState,
   PrototypeSpec,
 } from "./ai-vibe.types";
-import { projectStatusFromProductDesignState } from "./workspace-state-machine";
+import { conversationStatusFromDesignState } from "./workspace-state-machine";
 
 type StateArrayKey =
   | "targetUsers"
@@ -48,9 +48,9 @@ type StatePathKey = StateArrayKey | StateScalarKey | "prototypeOutline" | "proto
 type StatePathOperation = "add" | "replace" | "remove" | "append";
 
 type ChangeLogInput = {
-  projectId: string;
+  conversationId: string;
   stateId: string;
-  changeType: ProductDesignChangeType;
+  changeType: ConversationDesignChangeType;
   path?: string;
   before?: unknown;
   after?: unknown;
@@ -63,13 +63,13 @@ type ChangeLogInput = {
 type CreateStateInput = {
   title: string;
   businessGoal?: string;
-  initialState?: Partial<ProductDesignState>;
+  initialState?: Partial<ConversationDesignState>;
   reason?: string;
 };
 
-type ProductDesignStateRecord = {
+type ConversationDesignStateRecord = {
   id: string;
-  projectId: string;
+  conversationId: string;
   version: number;
   title: string;
   summary: string | null;
@@ -92,7 +92,7 @@ type ProductDesignStateRecord = {
   confirmedFacts: unknown;
   prototypeSpec: unknown;
   prdDocument: unknown;
-  status: ProductDesignStateStatus;
+  status: ConversationDesignStateStatus;
   createdBy: string;
   updatedBy: string | null;
   createdAt: Date;
@@ -100,70 +100,70 @@ type ProductDesignStateRecord = {
 };
 
 @Injectable()
-export class ProductDesignStateService {
+export class ConversationDesignStateService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getCurrentState(projectId: string): Promise<ProductDesignState | undefined> {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
+  async getCurrentState(conversationId: string): Promise<ConversationDesignState | undefined> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
       include: {
-        productDesignStates: {
+        conversationDesignStates: {
           orderBy: { version: "desc" },
           take: 1,
         },
       },
     });
 
-    const state = project?.productDesignStates[0];
-    return state ? this.toStateItem(state as ProductDesignStateRecord) : undefined;
+    const state = conversation?.conversationDesignStates[0];
+    return state ? this.toStateItem(state as ConversationDesignStateRecord) : undefined;
   }
 
   async getCurrentStateInTransaction(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
-    projectId: string,
-  ): Promise<ProductDesignState | undefined> {
-    const project = await tx.project.findUnique({
-      where: { id: projectId },
+    conversationId: string,
+  ): Promise<ConversationDesignState | undefined> {
+    const conversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
       include: {
-        productDesignStates: {
+        conversationDesignStates: {
           orderBy: { version: "desc" },
           take: 1,
         },
       },
     });
 
-    const state = project?.productDesignStates[0];
-    return state ? this.toStateItem(state as ProductDesignStateRecord) : undefined;
+    const state = conversation?.conversationDesignStates[0];
+    return state ? this.toStateItem(state as ConversationDesignStateRecord) : undefined;
   }
 
-  async getStateByIdForProject(stateId: string, projectId: string): Promise<ProductDesignState | undefined> {
-    const state = await this.prisma.productDesignState.findFirst({
-      where: { id: stateId, projectId },
+  async getStateByIdForConversation(stateId: string, conversationId: string): Promise<ConversationDesignState | undefined> {
+    const state = await this.prisma.conversationDesignState.findFirst({
+      where: { id: stateId, conversationId },
     });
-    return state ? this.toStateItem(state as ProductDesignStateRecord) : undefined;
+    return state ? this.toStateItem(state as ConversationDesignStateRecord) : undefined;
   }
 
-  async getCurrentStateForUser(user: AuthenticatedUser, projectId: string) {
-    await this.assertProjectAccess(user, projectId, { allowArchived: true });
-    const state = await this.getCurrentState(projectId);
+  async getCurrentStateForUser(user: AuthenticatedUser, conversationId: string) {
+    await this.assertConversationAccess(user, conversationId, { allowArchived: true });
+    const state = await this.getCurrentState(conversationId);
     return { state: state ?? null };
   }
 
-  async createStateForUser(user: AuthenticatedUser, projectId: string, input: CreateStateInput) {
-    const project = await this.assertProjectAccess(user, projectId);
-    this.assertOwnerMutation(user, project.ownerId);
-    const draft = this.createDraftFromInput(projectId, input);
-    const state = await this.createDraft(projectId, draft, {
+  async createStateForUser(user: AuthenticatedUser, conversationId: string, input: CreateStateInput) {
+    const conversation = await this.assertConversationAccess(user, conversationId);
+    this.assertOwnerMutation(user, conversation.ownerId);
+    const draft = this.createDraftFromInput(conversationId, input);
+    const state = await this.createDraft(conversationId, draft, {
       userId: user.id,
-      reason: input.reason ?? "用户创建 ProductDesignState",
+      reason: input.reason ?? "用户创建 ConversationDesignState",
     });
     return { state };
   }
 
   async createVersionForUser(user: AuthenticatedUser, stateId: string, reason?: string) {
     const current = await this.getAccessibleState(user, stateId);
-    this.assertOwnerMutation(user, current.project.ownerId);
-    const state = this.toStateItem(current as ProductDesignStateRecord);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
+    const state = this.toStateItem(current as ConversationDesignStateRecord);
     const next = {
       ...state,
       version: state.version + 1,
@@ -171,14 +171,14 @@ export class ProductDesignStateService {
     };
     await this.replaceState(next, {
       userId: user.id,
-      changeType: ProductDesignChangeType.update,
+      changeType: ConversationDesignChangeType.update,
       path: "version",
       before: { version: state.version },
       after: { version: next.version },
       reason: reason ?? "用户手动保存版本",
       createVersion: true,
     });
-    const version = await this.prisma.productDesignVersion.findFirstOrThrow({
+    const version = await this.prisma.conversationDesignVersion.findFirstOrThrow({
       where: { stateId: next.id, version: next.version },
       orderBy: { createdAt: "desc" },
     });
@@ -187,7 +187,7 @@ export class ProductDesignStateService {
 
   async listVersionsForUser(user: AuthenticatedUser, stateId: string) {
     await this.getAccessibleState(user, stateId);
-    const items = await this.prisma.productDesignVersion.findMany({
+    const items = await this.prisma.conversationDesignVersion.findMany({
       where: { stateId },
       orderBy: { version: "desc" },
     });
@@ -200,19 +200,19 @@ export class ProductDesignStateService {
     input: { versionId: string; reason?: string },
   ) {
     const current = await this.getAccessibleState(user, stateId);
-    this.assertOwnerMutation(user, current.project.ownerId);
-	    const previous = this.toStateItem(current as ProductDesignStateRecord);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
+	    const previous = this.toStateItem(current as ConversationDesignStateRecord);
 	    return this.prisma.$transaction(async (tx) => {
-	      const version = await tx.productDesignVersion.findFirst({
+	      const version = await tx.conversationDesignVersion.findFirst({
 	        where: { id: input.versionId, stateId },
 	      });
-	      if (!version) throw new NotFoundException("PRODUCT_DESIGN_STATE_VERSION_NOT_FOUND");
+	      if (!version) throw new NotFoundException("CONVERSATION_DESIGN_STATE_VERSION_NOT_FOUND");
 
 	      const snapshot = this.normalizeStatePayload(version.snapshot);
-	      if (!snapshot) throw new BadRequestException("PRODUCT_DESIGN_STATE_ROLLBACK_FAILED");
+	      if (!snapshot) throw new BadRequestException("CONVERSATION_DESIGN_STATE_ROLLBACK_FAILED");
 
-	      const nextVersion = await this.getNextStateVersion(current.projectId, tx);
-	      const updated = await tx.productDesignState.update({
+	      const nextVersion = await this.getNextStateVersion(current.conversationId, tx);
+	      const updated = await tx.conversationDesignState.update({
 	        where: { id: stateId },
 	        data: {
 	          ...this.toPrismaStateData(snapshot),
@@ -220,21 +220,21 @@ export class ProductDesignStateService {
 	          updatedBy: user.id,
 	        },
 	      });
-	      const next = this.toStateItem(updated as ProductDesignStateRecord);
-	      await tx.project.update({
-	        where: { id: current.projectId },
+	      const next = this.toStateItem(updated as ConversationDesignStateRecord);
+	      await tx.conversation.update({
+	        where: { id: current.conversationId },
 	        data: {
-	          currentProductDesignStateId: stateId,
-	          status: projectStatusFromProductDesignState(next),
+	          currentDesignStateId: stateId,
+	          status: conversationStatusFromDesignState(next),
 	          lastActivityAt: new Date(),
 	        },
 	      });
 
 	      const reason = input.reason ?? `回滚到版本 ${version.version}`;
 	      await this.writeChangeLog({
-	        projectId: next.projectId,
+	        conversationId: next.conversationId,
 	        stateId: next.id,
-	        changeType: ProductDesignChangeType.rollback,
+	        changeType: ConversationDesignChangeType.rollback,
 	        path: "*",
 	        before: previous,
 	        after: next,
@@ -244,10 +244,10 @@ export class ProductDesignStateService {
 	      const createdVersion = await this.createVersionSnapshot(next, user.id, reason, tx);
 	      await tx.rollbackRecord.create({
 	        data: {
-	          projectId: next.projectId,
-	          rollbackType: RollbackType.product_design_state,
-	          fromProductDesignStateVersion: previous.version,
-	          toProductDesignStateVersion: next.version,
+	          conversationId: next.conversationId,
+	          rollbackType: RollbackType.conversation_design_state,
+	          fromConversationDesignStateVersion: previous.version,
+	          toConversationDesignStateVersion: next.version,
 	          beforePrdDocumentId: previous.prdDocument?.id,
 	          afterPrdDocumentId: next.prdDocument?.id,
 	          beforePrototypeArtifactId: undefined,
@@ -262,19 +262,19 @@ export class ProductDesignStateService {
 	    });
 	  }
 
-  async restoreVersionSnapshotForProject(
-    projectId: string,
+  async restoreVersionSnapshotForConversation(
+    conversationId: string,
     targetVersion: number,
     options: { userId: string; reason?: string; runId?: string; messageId?: string },
   ) {
-    const currentRecord = await this.prisma.productDesignState.findFirst({
-      where: { projectId },
+    const currentRecord = await this.prisma.conversationDesignState.findFirst({
+      where: { conversationId },
       orderBy: { version: "desc" },
     });
-    if (!currentRecord) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
-    const current = this.toStateItem(currentRecord as ProductDesignStateRecord);
-    const version = await this.prisma.productDesignVersion.findFirst({
-      where: { projectId, version: targetVersion },
+    if (!currentRecord) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
+    const current = this.toStateItem(currentRecord as ConversationDesignStateRecord);
+    const version = await this.prisma.conversationDesignVersion.findFirst({
+      where: { conversationId, version: targetVersion },
       orderBy: { createdAt: "desc" },
     });
     if (!version) throw new NotFoundException("ROLLBACK_VERSION_NOT_FOUND");
@@ -283,10 +283,10 @@ export class ProductDesignStateService {
     if (!snapshot) throw new BadRequestException("ROLLBACK_VERSION_INVALID");
 
     const nextVersion = current.version + 1;
-    const restored: ProductDesignState = {
+    const restored: ConversationDesignState = {
       ...this.cloneState(snapshot),
       id: current.id,
-      projectId,
+      conversationId,
       version: nextVersion,
       prdDocument: undefined,
       prototypeSpec: undefined,
@@ -297,7 +297,7 @@ export class ProductDesignStateService {
       updatedAt: new Date().toISOString(),
     };
 
-    const updated = await this.prisma.productDesignState.update({
+    const updated = await this.prisma.conversationDesignState.update({
       where: { id: current.id },
       data: {
         version: restored.version,
@@ -307,20 +307,20 @@ export class ProductDesignStateService {
         updatedBy: options.userId,
       },
     });
-    await this.prisma.project.update({
-      where: { id: projectId },
-      data: { currentProductDesignStateId: current.id },
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { currentDesignStateId: current.id },
     });
 
-    const next = this.toStateItem(updated as ProductDesignStateRecord);
+    const next = this.toStateItem(updated as ConversationDesignStateRecord);
     await this.writeChangeLog({
-      projectId,
+      conversationId,
       stateId: next.id,
-      changeType: ProductDesignChangeType.rollback,
+      changeType: ConversationDesignChangeType.rollback,
       path: "*",
       before: current,
       after: next,
-      reason: options.reason ?? `回滚到 ProductDesignState v${targetVersion}`,
+      reason: options.reason ?? `回滚到 ConversationDesignState v${targetVersion}`,
       runId: options.runId,
       messageId: options.messageId,
       createdBy: options.userId,
@@ -328,7 +328,7 @@ export class ProductDesignStateService {
     const createdVersion = await this.createVersionSnapshot(
       next,
       options.userId,
-      options.reason ?? `回滚到 ProductDesignState v${targetVersion}`,
+      options.reason ?? `回滚到 ConversationDesignState v${targetVersion}`,
     );
 
     return {
@@ -341,7 +341,7 @@ export class ProductDesignStateService {
 
   async listChangeLogsForUser(user: AuthenticatedUser, stateId: string) {
     await this.getAccessibleState(user, stateId);
-    const items = await this.prisma.productDesignChangeLog.findMany({
+    const items = await this.prisma.conversationDesignChangeLog.findMany({
       where: { stateId },
       orderBy: { createdAt: "desc" },
       take: 100,
@@ -349,7 +349,7 @@ export class ProductDesignStateService {
     return {
       items: items.map((item) => ({
         id: item.id,
-        projectId: item.projectId,
+        conversationId: item.conversationId,
         stateId: item.stateId,
         runId: item.runId ?? undefined,
         messageId: item.messageId ?? undefined,
@@ -366,8 +366,8 @@ export class ProductDesignStateService {
 
   async confirmAssumptionForUser(user: AuthenticatedUser, stateId: string, assumptionId: string) {
     const current = await this.getAccessibleState(user, stateId);
-    this.assertOwnerMutation(user, current.project.ownerId);
-    const state = this.toStateItem(current as ProductDesignStateRecord);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
+    const state = this.toStateItem(current as ConversationDesignStateRecord);
     const index = state.assumptions.findIndex((item) => item.id === assumptionId);
     if (index < 0) throw new NotFoundException("ASSUMPTION_NOT_FOUND");
 
@@ -391,7 +391,7 @@ export class ProductDesignStateService {
 
     const updated = await this.replaceState(state, {
       userId: user.id,
-      changeType: ProductDesignChangeType.confirm_assumption,
+      changeType: ConversationDesignChangeType.confirm_assumption,
       path: `assumptions.${assumptionId}`,
       before,
       after: nextAssumption,
@@ -403,8 +403,8 @@ export class ProductDesignStateService {
 
   async rejectAssumptionForUser(user: AuthenticatedUser, stateId: string, assumptionId: string) {
     const current = await this.getAccessibleState(user, stateId);
-    this.assertOwnerMutation(user, current.project.ownerId);
-    const state = this.toStateItem(current as ProductDesignStateRecord);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
+    const state = this.toStateItem(current as ConversationDesignStateRecord);
     const index = state.assumptions.findIndex((item) => item.id === assumptionId);
     if (index < 0) throw new NotFoundException("ASSUMPTION_NOT_FOUND");
 
@@ -420,7 +420,7 @@ export class ProductDesignStateService {
 
     const updated = await this.replaceState(state, {
       userId: user.id,
-      changeType: ProductDesignChangeType.reject_assumption,
+      changeType: ConversationDesignChangeType.reject_assumption,
       path: `assumptions.${assumptionId}`,
       before,
       after: nextAssumption,
@@ -440,8 +440,8 @@ export class ProductDesignStateService {
     if (!answer) throw new BadRequestException("回答不能为空");
 
     const current = await this.getAccessibleState(user, stateId);
-    this.assertOwnerMutation(user, current.project.ownerId);
-    const state = this.toStateItem(current as ProductDesignStateRecord);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
+    const state = this.toStateItem(current as ConversationDesignStateRecord);
     const index = state.pendingQuestions.findIndex((item) => item.id === questionId);
     if (index < 0) throw new NotFoundException("QUESTION_NOT_FOUND");
 
@@ -475,7 +475,7 @@ export class ProductDesignStateService {
 
     const updated = await this.replaceState(state, {
       userId: user.id,
-      changeType: ProductDesignChangeType.answer_question,
+      changeType: ConversationDesignChangeType.answer_question,
       path: `pendingQuestions.${questionId}`,
       before,
       after: nextQuestion,
@@ -486,64 +486,64 @@ export class ProductDesignStateService {
   }
 
   async createDraft(
-    projectId: string,
-    draft: ProductDesignDraft,
+    conversationId: string,
+    draft: ConversationDesignDraft,
     options: { userId?: string; reason?: string; runId?: string; messageId?: string } = {},
-  ): Promise<ProductDesignState> {
-    const latest = await this.getCurrentState(projectId);
+  ): Promise<ConversationDesignState> {
+    const latest = await this.getCurrentState(conversationId);
     if (latest) {
-      return this.updateStateFromDraft(projectId, latest, draft, options);
+      return this.updateStateFromDraft(conversationId, latest, draft, options);
     }
 
-    // txn-1：state.create + project.update + changeLog + versionSnapshot 原子化，部分失败不留半成品。
+    // txn-1：state.create + conversation.update + changeLog + versionSnapshot 原子化，部分失败不留半成品。
     return this.prisma.$transaction(async (tx) => {
-      return this.createDraftInTransactionImpl(tx, projectId, draft, options);
+      return this.createDraftInTransactionImpl(tx, conversationId, draft, options);
     });
   }
 
   async createDraftInTransaction(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
-    projectId: string,
-    draft: ProductDesignDraft,
+    conversationId: string,
+    draft: ConversationDesignDraft,
     options: { userId?: string; reason?: string; runId?: string; messageId?: string } = {},
-  ): Promise<ProductDesignState> {
-    const latest = await this.getCurrentStateInTransaction(tx, projectId);
+  ): Promise<ConversationDesignState> {
+    const latest = await this.getCurrentStateInTransaction(tx, conversationId);
     if (latest) {
-      return this.updateStateFromDraftInTransaction(tx, projectId, latest, draft, options);
+      return this.updateStateFromDraftInTransaction(tx, conversationId, latest, draft, options);
     }
-    return this.createDraftInTransactionImpl(tx, projectId, draft, options);
+    return this.createDraftInTransactionImpl(tx, conversationId, draft, options);
   }
 
   private async createDraftInTransactionImpl(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
-    projectId: string,
-    draft: ProductDesignDraft,
+    conversationId: string,
+    draft: ConversationDesignDraft,
     options: { userId?: string; reason?: string; runId?: string; messageId?: string },
-  ): Promise<ProductDesignState> {
-    const state = await tx.productDesignState.create({
+  ): Promise<ConversationDesignState> {
+    const state = await tx.conversationDesignState.create({
       data: {
-        projectId,
+        conversationId,
         version: 1,
-        ...this.toPrismaStateData(this.normalizeDraft(projectId, draft)),
+        ...this.toPrismaStateData(this.normalizeDraft(conversationId, draft)),
         createdBy: options.userId ?? "system",
         updatedBy: options.userId,
       },
     });
 
-    await tx.project.update({
-      where: { id: projectId },
-      data: { currentProductDesignStateId: state.id },
+    await tx.conversation.update({
+      where: { id: conversationId },
+      data: { currentDesignStateId: state.id },
     });
 
-    const item = this.toStateItem(state as ProductDesignStateRecord);
+    const item = this.toStateItem(state as ConversationDesignStateRecord);
     await this.writeChangeLog(
       {
-        projectId,
+        conversationId,
         stateId: item.id,
-        changeType: ProductDesignChangeType.create,
+        changeType: ConversationDesignChangeType.create,
         path: "*",
         after: item,
-        reason: options.reason ?? "首次生成 ProductDesignState",
+        reason: options.reason ?? "首次生成 ConversationDesignState",
         runId: options.runId,
         messageId: options.messageId,
         createdBy: options.userId ?? "system",
@@ -559,7 +559,7 @@ export class ProductDesignStateService {
     input: {
       prdDocument?: RequirementDocument;
       prototypeSpec?: PrototypeSpec;
-      status?: ProductDesignStateStatus;
+      status?: ConversationDesignStateStatus;
       userId?: string;
       reason?: string;
       runId?: string;
@@ -580,7 +580,7 @@ export class ProductDesignStateService {
     input: {
       prdDocument?: RequirementDocument;
       prototypeSpec?: PrototypeSpec;
-      status?: ProductDesignStateStatus;
+      status?: ConversationDesignStateStatus;
       userId?: string;
       reason?: string;
       runId?: string;
@@ -588,16 +588,16 @@ export class ProductDesignStateService {
       createVersion?: boolean;
     },
   ) {
-    const current = await tx.productDesignState.findUnique({ where: { id: stateId } });
-    if (!current) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
-    const before = this.toStateItem(current as ProductDesignStateRecord);
+    const current = await tx.conversationDesignState.findUnique({ where: { id: stateId } });
+    if (!current) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
+    const before = this.toStateItem(current as ConversationDesignStateRecord);
 
     const prototypeOutline = input.prototypeSpec
       ? toPrototypeOutline(input.prototypeSpec, before.prototypeOutline)
       : before.prototypeOutline;
 
     // race-1：乐观锁——仅当库中 version 仍为读取时的 before.version 才更新，防止并发覆盖。
-    const result = await tx.productDesignState.updateMany({
+    const result = await tx.conversationDesignState.updateMany({
       where: { id: stateId, version: before.version },
       data: {
         version: before.version + 1,
@@ -609,25 +609,25 @@ export class ProductDesignStateService {
       },
     });
     if (result.count === 0) {
-      throw new ConflictException("PRODUCT_DESIGN_STATE_VERSION_CONFLICT：状态已被并发修改，请重试。");
+      throw new ConflictException("CONVERSATION_DESIGN_STATE_VERSION_CONFLICT：状态已被并发修改，请重试。");
     }
-    const updated = await tx.productDesignState.findUnique({ where: { id: stateId } });
-    if (!updated) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
+    const updated = await tx.conversationDesignState.findUnique({ where: { id: stateId } });
+    if (!updated) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
 
-    const after = this.toStateItem(updated as ProductDesignStateRecord);
-    await tx.project.update({
-      where: { id: after.projectId },
+    const after = this.toStateItem(updated as ConversationDesignStateRecord);
+    await tx.conversation.update({
+      where: { id: after.conversationId },
       data: {
-        currentProductDesignStateId: after.id,
-        status: projectStatusFromProductDesignState(after),
+        currentDesignStateId: after.id,
+        status: conversationStatusFromDesignState(after),
         lastActivityAt: new Date(),
       },
     });
     await this.writeChangeLog(
       {
-        projectId: after.projectId,
+        conversationId: after.conversationId,
         stateId: after.id,
-        changeType: ProductDesignChangeType.update,
+        changeType: ConversationDesignChangeType.update,
         path: "generatedArtifacts",
         before: {
           prdDocument: before.prdDocument,
@@ -662,12 +662,12 @@ export class ProductDesignStateService {
   }) {
     // txn-1：读取 + 更新 + changeLog + versionSnapshot 原子化。
     return this.prisma.$transaction(async (tx) => {
-      const currentRecord = await tx.productDesignState.findUnique({
-        where: { id: input.document.productDesignStateId },
+      const currentRecord = await tx.conversationDesignState.findUnique({
+        where: { id: input.document.conversationDesignStateId },
       });
-      if (!currentRecord) throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
+      if (!currentRecord) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
 
-      const before = this.toStateItem(currentRecord as ProductDesignStateRecord);
+      const before = this.toStateItem(currentRecord as ConversationDesignStateRecord);
       const next = this.cloneState(before);
       const now = new Date().toISOString();
       const content = prdSectionContent(input.section);
@@ -693,7 +693,7 @@ export class ProductDesignStateService {
         this.markSourceConfirmed(next, path);
       }
 
-      const updated = await tx.productDesignState.update({
+      const updated = await tx.conversationDesignState.update({
         where: { id: before.id },
         data: {
           version: next.version,
@@ -703,20 +703,20 @@ export class ProductDesignStateService {
           updatedBy: input.userId,
         },
       });
-      const after = this.toStateItem(updated as ProductDesignStateRecord);
-      await tx.project.update({
-        where: { id: after.projectId },
+      const after = this.toStateItem(updated as ConversationDesignStateRecord);
+      await tx.conversation.update({
+        where: { id: after.conversationId },
         data: {
-          currentProductDesignStateId: after.id,
-          status: projectStatusFromProductDesignState(after),
+          currentDesignStateId: after.id,
+          status: conversationStatusFromDesignState(after),
           lastActivityAt: new Date(),
         },
       });
       await this.writeChangeLog(
         {
-          projectId: after.projectId,
+          conversationId: after.conversationId,
           stateId: after.id,
-          changeType: ProductDesignChangeType.update,
+          changeType: ConversationDesignChangeType.update,
           path: `prdDocument.sections.${input.section.id}`,
           before: {
             prdDocument: before.prdDocument,
@@ -730,7 +730,7 @@ export class ProductDesignStateService {
             status: after.status,
             changedPaths,
           },
-          reason: input.reason ?? `PRD 段落 ${input.section.id} 已回流到 ProductDesignState`,
+          reason: input.reason ?? `PRD 段落 ${input.section.id} 已回流到 ConversationDesignState`,
           createdBy: input.userId,
         },
         tx,
@@ -738,7 +738,7 @@ export class ProductDesignStateService {
       await this.createVersionSnapshot(
         after,
         input.userId,
-        input.reason ?? `PRD 段落 ${input.section.id} 已回流到 ProductDesignState`,
+        input.reason ?? `PRD 段落 ${input.section.id} 已回流到 ConversationDesignState`,
         tx,
       );
       return after;
@@ -746,29 +746,29 @@ export class ProductDesignStateService {
   }
 
   private async updateStateFromDraft(
-    projectId: string,
-    current: ProductDesignState,
-    draft: ProductDesignDraft,
+    conversationId: string,
+    current: ConversationDesignState,
+    draft: ConversationDesignDraft,
     options: { userId?: string; reason?: string; runId?: string; messageId?: string },
   ) {
     return this.prisma.$transaction(async (tx) => {
-      return this.updateStateFromDraftInTransaction(tx, projectId, current, draft, options);
+      return this.updateStateFromDraftInTransaction(tx, conversationId, current, draft, options);
     });
   }
 
   private async updateStateFromDraftInTransaction(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
-    projectId: string,
-    current: ProductDesignState,
-    draft: ProductDesignDraft,
+    conversationId: string,
+    current: ConversationDesignState,
+    draft: ConversationDesignDraft,
     options: { userId?: string; reason?: string; runId?: string; messageId?: string },
   ) {
-    const normalized = this.normalizeDraft(projectId, draft, current);
+    const normalized = this.normalizeDraft(conversationId, draft, current);
     normalized.version = current.version + 1;
     normalized.id = current.id;
     normalized.createdAt = current.createdAt;
     normalized.createdBy = current.createdBy;
-    const updated = await tx.productDesignState.update({
+    const updated = await tx.conversationDesignState.update({
       where: { id: current.id },
       data: {
         version: normalized.version,
@@ -778,20 +778,20 @@ export class ProductDesignStateService {
         updatedBy: options.userId,
       },
     });
-    await tx.project.update({
-      where: { id: projectId },
-      data: { currentProductDesignStateId: current.id },
+    await tx.conversation.update({
+      where: { id: conversationId },
+      data: { currentDesignStateId: current.id },
     });
-    const after = this.toStateItem(updated as ProductDesignStateRecord);
+    const after = this.toStateItem(updated as ConversationDesignStateRecord);
     await this.writeChangeLog(
       {
-        projectId,
+        conversationId,
         stateId: after.id,
-        changeType: ProductDesignChangeType.update,
+        changeType: ConversationDesignChangeType.update,
         path: "*",
         before: current,
         after,
-        reason: options.reason ?? "DeerFlow final action 更新 ProductDesignState",
+        reason: options.reason ?? "DeerFlow final action 更新 ConversationDesignState",
         runId: options.runId,
         messageId: options.messageId,
         createdBy: options.userId ?? "system",
@@ -803,10 +803,10 @@ export class ProductDesignStateService {
   }
 
   private async replaceState(
-    state: ProductDesignState,
+    state: ConversationDesignState,
     options: {
       userId: string;
-      changeType: ProductDesignChangeType;
+      changeType: ConversationDesignChangeType;
       path: string;
       before?: unknown;
       after?: unknown;
@@ -816,9 +816,9 @@ export class ProductDesignStateService {
       messageId?: string;
     },
   ) {
-    // txn-1：update + project.update + changeLog + versionSnapshot 原子化。
+    // txn-1：update + conversation.update + changeLog + versionSnapshot 原子化。
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.productDesignState.update({
+      const updated = await tx.conversationDesignState.update({
         where: { id: state.id },
         data: {
           version: state.version,
@@ -826,14 +826,14 @@ export class ProductDesignStateService {
           updatedBy: options.userId,
         },
       });
-      await tx.project.update({
-        where: { id: state.projectId },
-        data: { currentProductDesignStateId: state.id },
+      await tx.conversation.update({
+        where: { id: state.conversationId },
+        data: { currentDesignStateId: state.id },
       });
-      const afterState = this.toStateItem(updated as ProductDesignStateRecord);
+      const afterState = this.toStateItem(updated as ConversationDesignStateRecord);
       await this.writeChangeLog(
         {
-          projectId: afterState.projectId,
+          conversationId: afterState.conversationId,
           stateId: afterState.id,
           changeType: options.changeType,
           path: options.path,
@@ -854,15 +854,15 @@ export class ProductDesignStateService {
   }
 
   private async createVersionSnapshot(
-    state: ProductDesignState,
+    state: ConversationDesignState,
     createdBy: string,
     reason?: string,
     tx?: Prisma.TransactionClient,
   ) {
     const client = tx ?? this.prisma;
-    const version = await client.productDesignVersion.create({
+    const version = await client.conversationDesignVersion.create({
       data: {
-        projectId: state.projectId,
+        conversationId: state.conversationId,
         stateId: state.id,
         version: state.version,
         snapshot: toInputJson(state),
@@ -872,9 +872,9 @@ export class ProductDesignStateService {
     });
     await this.writeChangeLog(
       {
-        projectId: state.projectId,
+        conversationId: state.conversationId,
         stateId: state.id,
-        changeType: ProductDesignChangeType.update,
+        changeType: ConversationDesignChangeType.update,
         path: "version",
         after: { version: state.version },
         reason: reason ? `版本快照：${reason}` : "版本快照",
@@ -887,9 +887,9 @@ export class ProductDesignStateService {
 
   private async writeChangeLog(input: ChangeLogInput, tx?: Prisma.TransactionClient) {
     const client = tx ?? this.prisma;
-    return client.productDesignChangeLog.create({
+    return client.conversationDesignChangeLog.create({
       data: {
-        projectId: input.projectId,
+        conversationId: input.conversationId,
         stateId: input.stateId,
         runId: input.runId,
         messageId: input.messageId,
@@ -903,55 +903,55 @@ export class ProductDesignStateService {
     });
   }
 
-	  private async getNextStateVersion(projectId: string, tx?: Prisma.TransactionClient) {
+	  private async getNextStateVersion(conversationId: string, tx?: Prisma.TransactionClient) {
 	    const client = tx ?? this.prisma;
-	    const latest = await client.productDesignState.findFirst({
-	      where: { projectId },
+	    const latest = await client.conversationDesignState.findFirst({
+	      where: { conversationId },
 	      orderBy: { version: "desc" },
       select: { version: true },
     });
     return (latest?.version ?? 0) + 1;
   }
 
-  private async assertProjectAccess(
+  private async assertConversationAccess(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && project.status === ProjectStatus.archived) {
-      throw new ForbiddenException("项目已归档，请先恢复后再继续操作");
+    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+      throw new ForbiddenException("会话已归档，请先恢复后再继续操作");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
-      throw new ForbiddenException("你无权访问该项目");
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+      throw new ForbiddenException("你无权访问该会话");
     }
-    return project;
+    return conversation;
   }
 
   private async getAccessibleState(user: AuthenticatedUser, stateId: string) {
-    const state = await this.prisma.productDesignState.findUnique({
+    const state = await this.prisma.conversationDesignState.findUnique({
       where: { id: stateId },
-      include: { project: true },
+      include: { conversation: true },
     });
-    if (!state || state.project.deletedAt || state.project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("PRODUCT_DESIGN_STATE_NOT_FOUND");
+    if (!state || state.conversation.deletedAt || state.conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
     }
-    if (user.role !== UserRole.admin && state.project.ownerId !== user.id) {
-      throw new ForbiddenException("PRODUCT_DESIGN_STATE_FORBIDDEN");
+    if (user.role !== UserRole.admin && state.conversation.ownerId !== user.id) {
+      throw new ForbiddenException("CONVERSATION_DESIGN_STATE_FORBIDDEN");
     }
     return state;
   }
 
   private assertOwnerMutation(user: AuthenticatedUser, ownerId: string) {
     if (user.role === UserRole.admin && user.id !== ownerId) {
-      throw new ForbiddenException("管理员不可直接修改用户项目状态");
+      throw new ForbiddenException("管理员不可直接修改用户会话状态");
     }
   }
 
-  private createDraftFromInput(projectId: string, input: CreateStateInput): ProductDesignDraft {
+  private createDraftFromInput(conversationId: string, input: CreateStateInput): ConversationDesignDraft {
     const partial = input.initialState ?? {};
     return {
       title: input.title,
@@ -975,20 +975,20 @@ export class ProductDesignStateService {
       confirmedFacts: partial.confirmedFacts ?? [],
       createdBy: partial.createdBy ?? "system",
       updatedBy: partial.updatedBy,
-      projectId,
-    } as ProductDesignDraft;
+      conversationId,
+    } as ConversationDesignDraft;
   }
 
   private normalizeDraft(
-    projectId: string,
-    draft: ProductDesignDraft,
-    existing?: ProductDesignState,
-  ): ProductDesignState {
+    conversationId: string,
+    draft: ConversationDesignDraft,
+    existing?: ConversationDesignState,
+  ): ConversationDesignState {
     const now = new Date().toISOString();
     const pendingQuestions = normalizeQuestions(draft.pendingQuestions ?? []);
     return {
       id: existing?.id ?? "",
-      projectId,
+      conversationId,
       version: existing?.version ?? 1,
       title: draft.title || existing?.title || "产品需求方案",
       summary: draft.summary ?? existing?.summary,
@@ -1025,12 +1025,12 @@ export class ProductDesignStateService {
     };
   }
 
-  private cloneState(state: ProductDesignState): ProductDesignState {
-    return JSON.parse(JSON.stringify(state)) as ProductDesignState;
+  private cloneState(state: ConversationDesignState): ConversationDesignState {
+    return JSON.parse(JSON.stringify(state)) as ConversationDesignState;
   }
 
   private applyValueAtPath(
-    state: ProductDesignState,
+    state: ConversationDesignState,
     path: string,
     value: unknown,
     op: StatePathOperation,
@@ -1039,9 +1039,9 @@ export class ProductDesignStateService {
     if (!resolved.valid) return false;
 
     if (resolved.parent === null) {
-      if (resolved.key === "id" || resolved.key === "projectId" || resolved.key === "version") return false;
+      if (resolved.key === "id" || resolved.key === "conversationId" || resolved.key === "version") return false;
       if (op === "remove") return false;
-      const key = resolved.key as keyof ProductDesignState;
+      const key = resolved.key as keyof ConversationDesignState;
       if (Array.isArray(state[key])) {
         const current = state[key] as unknown[];
         if (op === "append" || op === "add") {
@@ -1087,7 +1087,7 @@ export class ProductDesignStateService {
     return true;
   }
 
-  private markSourceConfirmed(state: ProductDesignState, path?: string) {
+  private markSourceConfirmed(state: ConversationDesignState, path?: string) {
     if (!path) return;
     const resolved = resolveStatePath(state, path);
     const target = resolved.valid ? resolved.value : undefined;
@@ -1101,12 +1101,12 @@ export class ProductDesignStateService {
     }
   }
 
-  private normalizeStatePayload(value: unknown): ProductDesignState | null {
-    const record = value && typeof value === "object" ? (value as ProductDesignState) : null;
-    return record?.id && record.projectId ? record : null;
+  private normalizeStatePayload(value: unknown): ConversationDesignState | null {
+    const record = value && typeof value === "object" ? (value as ConversationDesignState) : null;
+    return record?.id && record.conversationId ? record : null;
   }
 
-  private toPrismaStateData(state: ProductDesignState) {
+  private toPrismaStateData(state: ConversationDesignState) {
     return {
       title: state.title,
       summary: state.summary,
@@ -1127,14 +1127,14 @@ export class ProductDesignStateService {
       knowledgeRefs: toInputJson(state.knowledgeRefs),
       pendingQuestions: toInputJson(state.pendingQuestions),
       confirmedFacts: toInputJson(state.confirmedFacts),
-      status: state.status as ProductDesignStateStatus,
+      status: state.status as ConversationDesignStateStatus,
     };
   }
 
-  private toStateItem(state: ProductDesignStateRecord): ProductDesignState {
+  private toStateItem(state: ConversationDesignStateRecord): ConversationDesignState {
     return {
       id: state.id,
-      projectId: state.projectId,
+      conversationId: state.conversationId,
       version: state.version,
       title: state.title,
       summary: state.summary ?? undefined,
@@ -1170,7 +1170,7 @@ export class ProductDesignStateService {
 
   private toVersionItem(version: {
     id: string;
-    projectId: string;
+    conversationId: string;
     stateId: string;
     version: number;
     snapshot: unknown;
@@ -1180,7 +1180,7 @@ export class ProductDesignStateService {
   }) {
     return {
       id: version.id,
-      projectId: version.projectId,
+      conversationId: version.conversationId,
       stateId: version.stateId,
       version: version.version,
       snapshot: version.snapshot,
@@ -1192,11 +1192,11 @@ export class ProductDesignStateService {
 
   private toChangeLogItem(log: {
     id: string;
-    projectId: string;
+    conversationId: string;
     stateId: string;
     runId: string | null;
     messageId: string | null;
-    changeType: ProductDesignChangeType;
+    changeType: ConversationDesignChangeType;
     path: string | null;
     before: unknown;
     after: unknown;
@@ -1206,7 +1206,7 @@ export class ProductDesignStateService {
   }) {
     return {
       id: log.id,
-      projectId: log.projectId,
+      conversationId: log.conversationId,
       stateId: log.stateId,
       runId: log.runId ?? undefined,
       messageId: log.messageId ?? undefined,
@@ -1236,7 +1236,7 @@ function prdSectionContent(section: RequirementDocSection) {
 }
 
 function syncPrdSectionContent(
-  state: ProductDesignState,
+  state: ConversationDesignState,
   section: RequirementDocSection,
   content: string,
   userId: string,
@@ -1494,7 +1494,7 @@ function normalizeKnowledgeType(value: unknown) {
   return "reference_case";
 }
 
-function resolveStatePath(state: ProductDesignState, path: string) {
+function resolveStatePath(state: ConversationDesignState, path: string) {
   const normalized = normalizeStatePath(path);
   if (!normalized.length) return { valid: false as const };
   if (!isAllowedRoot(normalized[0])) return { valid: false as const };
@@ -1541,7 +1541,7 @@ function resolveStatePath(state: ProductDesignState, path: string) {
 
 function normalizeStatePath(path: string) {
   const normalized = path
-    .replace(/^productDesignState\.?/i, "")
+    .replace(/^conversationDesignState\.?/i, "")
     .replace(/^state\.?/i, "")
     .replace(/\[(\d+)\]/g, ".$1")
     .trim();

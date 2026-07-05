@@ -1,12 +1,12 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
-import { ProjectStatus, PrototypeArtifactStatus, ShareLinkStatus, ShareScope, UserRole, UserStatus } from "@prisma/client";
+import { ConversationStatus, PrototypeArtifactStatus, ShareLinkStatus, ShareScope, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ShareService } from "../src/ai/share.service";
 
 describe("ShareService", () => {
   const prisma = {
     $transaction: vi.fn(),
-    project: { findUnique: vi.fn() },
+    conversation: { findUnique: vi.fn() },
     shareLink: {
       create: vi.fn(),
       findUnique: vi.fn(),
@@ -17,8 +17,8 @@ describe("ShareService", () => {
     prototypeArtifact: { findFirst: vi.fn() },
   };
   const stateService = { getCurrentState: vi.fn() };
-  const documentService = { getCurrentForProject: vi.fn() };
-  const prototypeService = { getCurrentForProject: vi.fn() };
+  const documentService = { getCurrentForConversation: vi.fn() };
+  const prototypeService = { getCurrentForConversation: vi.fn() };
   const service = new ShareService(
     prisma as never,
     stateService as never,
@@ -39,28 +39,28 @@ describe("ShareService", () => {
   });
 
   it("creates a share link only when the requested artifacts are ready", async () => {
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ProjectStatus.prototype_ready,
+      status: ConversationStatus.prototype_ready,
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "confirmed" });
-    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
-    prototypeService.getCurrentForProject.mockResolvedValue({
+    documentService.getCurrentForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
+    prototypeService.getCurrentForConversation.mockResolvedValue({
       artifact: { id: "artifact-1", status: PrototypeArtifactStatus.ready },
     });
     prisma.shareLink.create.mockResolvedValue({
       id: "share-1",
       token: "tok-abc",
-      projectId: "project-1",
+      conversationId: "conversation-1",
       scope: ShareScope.both,
       status: ShareLinkStatus.active,
       title: "签到活动",
       prdDocumentId: "prd-1",
       prototypeArtifactId: "artifact-1",
-      productDesignStateId: "state-1",
+      conversationDesignStateId: "state-1",
       expiresAt: null,
       viewCount: 0,
       lastViewedAt: null,
@@ -70,7 +70,7 @@ describe("ShareService", () => {
       updatedAt: new Date("2026-06-24T00:00:00.000Z"),
     });
 
-    const result = await service.createForUser(user, { projectId: "project-1", scope: ShareScope.both });
+    const result = await service.createForUser(user, { conversationId: "conversation-1", scope: ShareScope.both });
 
     expect(result.share).toMatchObject({
       id: "share-1",
@@ -82,58 +82,58 @@ describe("ShareService", () => {
   });
 
   it("refuses to share an unconfirmed PRD", async () => {
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ProjectStatus.prd_ready,
+      status: ConversationStatus.prd_ready,
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "doc_ready" });
-    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1", status: "ready" } });
+    documentService.getCurrentForConversation.mockResolvedValue({ document: { id: "prd-1", status: "ready" } });
 
     await expect(
-      service.createForUser(user, { projectId: "project-1", scope: ShareScope.prd }),
+      service.createForUser(user, { conversationId: "conversation-1", scope: ShareScope.prd }),
     ).rejects.toThrow("SHARE_PRD_NOT_CONFIRMED");
 
     expect(prisma.shareLink.create).not.toHaveBeenCalled();
   });
 
   it("refuses to share an unconfirmed prototype", async () => {
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ProjectStatus.prototype_ready,
+      status: ConversationStatus.prototype_ready,
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "prototype_ready" });
-    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
-    prototypeService.getCurrentForProject.mockResolvedValue({
+    documentService.getCurrentForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
+    prototypeService.getCurrentForConversation.mockResolvedValue({
       artifact: { id: "artifact-1", status: PrototypeArtifactStatus.ready },
     });
 
     await expect(
-      service.createForUser(user, { projectId: "project-1", scope: ShareScope.prototype }),
+      service.createForUser(user, { conversationId: "conversation-1", scope: ShareScope.prototype }),
     ).rejects.toThrow("SHARE_PROTOTYPE_NOT_CONFIRMED");
 
     expect(prisma.shareLink.create).not.toHaveBeenCalled();
   });
 
   it("refuses to share a prototype that is not ready", async () => {
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ProjectStatus.prd_ready,
+      status: ConversationStatus.prd_ready,
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "doc_confirmed" });
-    documentService.getCurrentForProject.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
-    prototypeService.getCurrentForProject.mockResolvedValue({ artifact: null });
+    documentService.getCurrentForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
+    prototypeService.getCurrentForConversation.mockResolvedValue({ artifact: null });
 
     await expect(
-      service.createForUser(user, { projectId: "project-1", scope: ShareScope.both }),
+      service.createForUser(user, { conversationId: "conversation-1", scope: ShareScope.both }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -141,7 +141,7 @@ describe("ShareService", () => {
     const shareRecord = {
       id: "share-1",
       token: "tok-abc",
-      projectId: "project-1",
+      conversationId: "conversation-1",
       scope: ShareScope.both,
       status: ShareLinkStatus.active,
       title: "签到活动",
@@ -150,11 +150,11 @@ describe("ShareService", () => {
       expiresAt: null,
     };
     prisma.shareLink.findUnique.mockResolvedValue(shareRecord);
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ProjectStatus.prototype_ready,
+      status: ConversationStatus.prototype_ready,
       deletedAt: null,
     });
     prisma.requirementDocument.findFirst.mockResolvedValue({
@@ -194,7 +194,7 @@ describe("ShareService", () => {
     prisma.shareLink.findUnique.mockResolvedValue({
       id: "share-1",
       token: "tok-abc",
-      projectId: "project-1",
+      conversationId: "conversation-1",
       scope: ShareScope.both,
       status: ShareLinkStatus.revoked,
       expiresAt: null,
@@ -207,7 +207,7 @@ describe("ShareService", () => {
     prisma.shareLink.findUnique.mockResolvedValue({
       id: "share-1",
       token: "tok-abc",
-      projectId: "project-1",
+      conversationId: "conversation-1",
       scope: ShareScope.both,
       status: ShareLinkStatus.active,
       expiresAt: new Date("2000-01-01T00:00:00.000Z"),

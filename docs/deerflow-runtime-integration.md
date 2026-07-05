@@ -8,7 +8,7 @@ AI Product Workbench treats DeerFlow 2.0 as an external first-class runtime.
 
 The Nest backend is responsible for:
 
-- validating user/project/conversation access;
+- validating user/conversation access;
 - creating the user message and local run record;
 - creating or reusing a DeerFlow thread for the current conversation;
 - forwarding context to DeerFlow;
@@ -34,7 +34,7 @@ DEERFLOW_LANGGRAPH_URL=http://localhost:2024
 DEERFLOW_GATEWAY_URL=http://localhost:8001
 DEERFLOW_ASSISTANT_ID=lead_agent
 DEERFLOW_AGENT_NAME=ai-product-workbench-lead
-DEERFLOW_MODEL_NAME=datatoken-gpt-5-5
+DEERFLOW_MODEL_NAME=workbench-claude
 DEERFLOW_STREAM_MODE=messages,values
 DEERFLOW_INTERNAL_AUTH_TOKEN=
 DEERFLOW_UPLOADS_ENABLED=true
@@ -46,7 +46,7 @@ DEERFLOW_ARTIFACT_MAX_INLINE_BYTES=2000000
 ## Thread Binding
 
 `deerflow_thread_bindings` maps one local conversation to one DeerFlow thread.
-This keeps multi-turn context inside DeerFlow while keeping our database as the app shell source for projects, messages, and run logs.
+This keeps multi-turn context inside DeerFlow while keeping our database as the app shell source for conversations, messages, and run logs.
 
 Workbench sends `X-DeerFlow-Owner-User-Id` on LangGraph and Gateway calls. If the DeerFlow Gateway enables internal authentication, set Workbench `DEERFLOW_INTERNAL_AUTH_TOKEN` to the same value as DeerFlow `DEER_FLOW_INTERNAL_AUTH_TOKEN` so DeerFlow honors that owner scope. This prevents a new Workbench conversation from inheriting another conversation's user memory while still allowing the same conversation to reuse its thread.
 
@@ -58,7 +58,7 @@ Context retention and compaction belong to DeerFlow, not to a custom NestJS summ
 - New Workbench conversation -> new DeerFlow thread, so it must not inherit previous chat state.
 - Long-context compression uses DeerFlow's built-in `DeerFlowSummarizationMiddleware`, which wraps LangChain's `SummarizationMiddleware`.
 - DeerFlow memory and dynamic context injection are handled by `DynamicContextMiddleware` and the DeerFlow memory system.
-- Workbench only forwards product/runtime context and the current turn; it must not reimplement message trimming, summary generation, or Codex/DeerFlow context windows in NestJS.
+- Workbench only forwards conversation/runtime context and the current turn; it must not reimplement message trimming, summary generation, or Codex/DeerFlow context windows in NestJS.
 
 Required DeerFlow-side `config.yaml` baseline:
 

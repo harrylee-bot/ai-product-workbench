@@ -38,6 +38,7 @@ export function AuthForm({
           密码
         </Label>
         <Input
+          autoComplete="current-password"
           className="h-10 rounded-lg border-border/50 bg-muted/50 text-sm transition-colors focus:border-foreground/20 focus:bg-muted"
           id="password"
           name="password"

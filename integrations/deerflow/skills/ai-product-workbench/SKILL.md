@@ -1,6 +1,6 @@
 ---
 name: ai-product-workbench
-description: AI Product Workbench runtime workflow for PRD, ProductDesignState, prototype generation, QA, exports, and final action JSON. Use when the turn context includes runtimeContract ai-product-workbench.deerflow-runtime.v1, finalActionContract, deerFlowUploads, PRD/prototype generation, product requirements, or DeerFlow runtime execution.
+description: AI Product Workbench runtime workflow for PRD, ConversationDesignState, prototype generation, QA, exports, and final action JSON. Use when the turn context includes runtimeContract ai-product-workbench.deerflow-runtime.v1, finalActionContract, deerFlowUploads, PRD/prototype generation, product requirements, or DeerFlow runtime execution.
 license: MIT
 allowed-tools:
   - task
@@ -37,13 +37,13 @@ Classify the turn before doing work:
 
 ### historical_extension
 
-Use this when the turn references an existing ProductDesignState, PRD, prototype, page, activity, template, material, prize, report, or current project history.
+Use this when the turn references an existing ConversationDesignState, PRD, prototype, page, activity, template, material, prize, report, or current project history.
 
 Required behavior:
 
 - Use the current persisted project state and prior artifacts before inventing a new structure.
 - Keep navigation, layout, field grouping, status flow, permissions, empty/error states, and interaction style consistent with the historical prototype.
-- Express the change as a delta: inherited behavior, added behavior, compatibility, history data impact, QA regression scope.
+- Express the change as a delta: inherited behavior, added behavior, stored-data impact, and QA regression scope.
 - For prototypes, show the new field/button/status/section in the closest existing page location.
 
 ### new_capability
@@ -59,7 +59,7 @@ Required behavior:
 
 ### brand_new_system
 
-Use this when the turn requests a completely new system or standalone page and there is no existing ProductDesignState, architecture, or page to inherit.
+Use this when the turn requests a completely new system or standalone page and there is no existing ConversationDesignState, architecture, or page to inherit.
 
 Required behavior:
 
@@ -83,7 +83,7 @@ Required behavior:
 
 Use this order for product work:
 
-1. Current runtime context: `productDesignState`, selected region, preview mode, prior PRD/prototype and attached files.
+1. Current runtime context: `conversationDesignState`, selected region, preview mode, prior PRD/prototype and attached files.
 2. Product architecture and business-domain knowledge.
 3. Historical-extension or new-capability rules.
 4. PRD/prototype writing rules.
@@ -112,7 +112,7 @@ Default output is the user's requirement-document template, not a freeform light
 2.1 页面链接
 2.2 核心业务规则/功能说明
 2.3 核心流程/状态/页面要求
-2.4 本需求涉及新增/修改的接口
+2.4 接口能力/联动口径（不写真实 API 地址、密钥或后端实现规格）
 2.5 验收标准
 3 业务降级方案（必填）
 4 需求安全基线要求（必填）
@@ -131,10 +131,10 @@ Writing requirements:
 
 Read the `Context from AI Product Workbench` JSON from the user message. Important fields:
 
-- `runId`, `projectId`, `conversationId`
+- `runId`, `conversationId`, `conversationId`
 - `attachments`: local app summaries for user-facing context
 - `deerFlowUploads`: DeerFlow Gateway upload handles with `virtualPath`, `markdownVirtualPath`, and artifact URLs
-- `productDesignState`: current persisted product state when available
+- `conversationDesignState`: current persisted product state when available
 - `selectedRegion`, `previewMode`, `resumeReason`
 - `finalActionContract`: the backend's final action schema
 
@@ -152,4 +152,4 @@ For full schema and examples, see `references/final-action-contract.md`.
 
 ## Prototype Execution
 
-Use DeerFlow's own graph, sandbox, tools, and sub-agent capabilities for concrete prototype artifacts. Do not ask NestJS to call Codex or any legacy adapter.
+Use DeerFlow's own graph, sandbox, tools, and sub-agent capabilities for concrete prototype artifacts. Do not ask NestJS to call Codex or any retired adapter.

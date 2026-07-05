@@ -1,47 +1,21 @@
-import { ProjectStatus, UserRole } from "@prisma/client";
+import { ConversationStatus, UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationService } from "../src/modules/conversation/conversation.service";
-import { ProjectService } from "../src/modules/project/project.service";
 
-describe("ConversationService conversation-first APIs", () => {
-  const tx = {
-    project: {
-      create: vi.fn(),
-      update: vi.fn(),
-      findUnique: vi.fn(),
-      updateMany: vi.fn(),
-    },
-    conversation: {
-      create: vi.fn(),
-      update: vi.fn(),
-      updateMany: vi.fn(),
-      findFirst: vi.fn(),
-      findUnique: vi.fn(),
-      findMany: vi.fn(),
-    },
-  };
+describe("ConversationService", () => {
   const prisma = {
-    project: {
+    conversation: {
+      create: vi.fn(),
+      findMany: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
-    conversation: {
-      findUnique: vi.fn(),
-      findMany: vi.fn(),
-    },
-    productDesignState: {
-      findFirst: vi.fn(),
-    },
-    requirementDocument: {
-      findUnique: vi.fn(),
-    },
-    prototypeArtifact: {
-      findUnique: vi.fn(),
-    },
-    $transaction: vi.fn(),
+    conversationDesignState: { findFirst: vi.fn() },
+    requirementDocument: { findFirst: vi.fn() },
+    prototypeArtifact: { findFirst: vi.fn() },
   };
-  const projectService = new ProjectService(prisma as never);
-  const service = new ConversationService(prisma as never, projectService);
+  const service = new ConversationService(prisma as never);
   const user = {
     id: "user-1",
     username: "lee",
@@ -51,106 +25,25 @@ describe("ConversationService conversation-first APIs", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    prisma.$transaction.mockImplementation(async (callback) => callback(tx));
   });
 
-  it("creates an internal project when projectId is omitted", async () => {
-    tx.project.create.mockResolvedValue(baseProject({ id: "project-new", title: "新需求对话" }));
-    tx.conversation.create.mockResolvedValue(baseConversation({
-      id: "conversation-new",
-      projectId: "project-new",
-      title: "新需求对话",
-    }));
-    tx.project.update.mockResolvedValue(baseProject({ id: "project-new" }));
+  it("creates a conversation as the only work unit", async () => {
+    prisma.conversation.create.mockResolvedValue(baseConversation({ title: "新需求对话" }));
 
     const result = await service.create(user, { title: " 新需求对话 " });
 
-    expect(tx.project.create).toHaveBeenCalledWith({
+    expect(prisma.conversation.create).toHaveBeenCalledWith({
       data: {
         ownerId: "user-1",
         title: "新需求对话",
-        status: ProjectStatus.draft,
+        status: ConversationStatus.active,
       },
     });
-    expect(tx.conversation.create).toHaveBeenCalledWith({
-      data: {
-        projectId: "project-new",
-        ownerId: "user-1",
-        title: "新需求对话",
-      },
-    });
-    expect(tx.project.update).toHaveBeenCalledWith({
-      where: { id: "project-new" },
-      data: {
-        currentConversationId: "conversation-new",
-        lastActivityAt: expect.any(Date),
-      },
-    });
-    expect(result).toEqual({
-      conversation: expect.objectContaining({
-        id: "conversation-new",
-        projectId: "project-new",
-        title: "新需求对话",
-      }),
-    });
+    expect(result.conversation.title).toBe("新需求对话");
   });
 
-  it("creates a missing frontend-generated conversation id for first chat stream", async () => {
-    prisma.conversation.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(baseConversation({
-        id: "frontend-chat-id",
-        projectId: "project-new",
-        title: "首条消息标题",
-        project: baseProject({ id: "project-new", title: "首条消息标题" }),
-      }));
-    tx.project.create.mockResolvedValue(baseProject({ id: "project-new", title: "首条消息标题" }));
-    tx.conversation.create.mockResolvedValue(baseConversation({
-      id: "frontend-chat-id",
-      projectId: "project-new",
-      title: "首条消息标题",
-    }));
-    tx.project.update.mockResolvedValue(baseProject({ id: "project-new" }));
-
-    const result = await service.getOrCreateInternal(
-      user,
-      "frontend-chat-id",
-      "首条消息标题",
-    );
-
-    expect(tx.project.create).toHaveBeenCalledWith({
-      data: {
-        ownerId: "user-1",
-        title: "首条消息标题",
-        status: ProjectStatus.draft,
-      },
-    });
-    expect(tx.conversation.create).toHaveBeenCalledWith({
-      data: {
-        id: "frontend-chat-id",
-        projectId: "project-new",
-        ownerId: "user-1",
-        title: "首条消息标题",
-      },
-    });
-    expect(tx.project.update).toHaveBeenCalledWith({
-      where: { id: "project-new" },
-      data: {
-        currentConversationId: "frontend-chat-id",
-        lastActivityAt: expect.any(Date),
-      },
-    });
-    expect(result.conversation).toEqual(expect.objectContaining({
-      id: "frontend-chat-id",
-      projectId: "project-new",
-    }));
-  });
-
-  it("lists conversations without requiring the project list API", async () => {
-    prisma.conversation.findMany.mockResolvedValue([
-      baseConversation({ id: "conversation-1", projectId: "project-1", title: "会话 1" }),
-      baseConversation({ id: "conversation-2", projectId: "project-2", title: "会话 2" }),
-    ]);
+  it("lists only accessible non-deleted conversations for normal users", async () => {
+    prisma.conversation.findMany.mockResolvedValue([baseConversation()]);
 
     const result = await service.list(user);
 
@@ -158,173 +51,73 @@ describe("ConversationService conversation-first APIs", () => {
       where: {
         ownerId: "user-1",
         deletedAt: null,
-        status: { not: "deleted" },
-        project: {
-          deletedAt: null,
-          status: { notIn: ["deleted", "archived"] },
-        },
+        status: { not: ConversationStatus.deleted },
       },
-      orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ lastMessageAt: "desc" }, { lastActivityAt: "desc" }, { createdAt: "desc" }],
     });
-    expect(prisma.project.findUnique).not.toHaveBeenCalled();
-    expect(result.items).toEqual([
-      expect.objectContaining({ id: "conversation-1", projectId: "project-1" }),
-      expect.objectContaining({ id: "conversation-2", projectId: "project-2" }),
-    ]);
+    expect(result.items).toHaveLength(1);
   });
 
-  it("returns conversation detail with project and current artifacts", async () => {
+  it("returns conversation current artifacts by conversation pointers", async () => {
     prisma.conversation.findUnique.mockResolvedValue(baseConversation({
-      project: baseProject({
-        id: "project-1",
-        currentProductDesignStateId: "state-1",
-        currentPrdDocumentId: "prd-1",
-        currentPrototypeArtifactId: "prototype-1",
-      }),
+      currentDesignStateId: "state-1",
+      currentPrdDocumentId: "prd-1",
+      currentPrototypeArtifactId: "prototype-1",
     }));
-    prisma.productDesignState.findFirst.mockResolvedValue({ id: "state-1", title: "产品状态", version: 2 });
-    prisma.requirementDocument.findUnique.mockResolvedValue({ id: "prd-1", title: "PRD" });
-    prisma.prototypeArtifact.findUnique.mockResolvedValue({ id: "prototype-1", title: "原型" });
+    prisma.conversationDesignState.findFirst.mockResolvedValue({ id: "state-1" });
+    prisma.requirementDocument.findFirst.mockResolvedValue({ id: "prd-1" });
+    prisma.prototypeArtifact.findFirst.mockResolvedValue({ id: "prototype-1" });
 
     const result = await service.get(user, "conversation-1");
 
-    expect(result).toEqual({
-      conversation: expect.objectContaining({
-        id: "conversation-1",
-        projectId: "project-1",
-      }),
-      project: expect.objectContaining({
-        id: "project-1",
-        currentProductDesignStateId: "state-1",
-        currentPrdDocumentId: "prd-1",
-        currentPrototypeArtifactId: "prototype-1",
-      }),
-      productDesignState: { id: "state-1", title: "产品状态", version: 2 },
-      prd: { id: "prd-1", title: "PRD" },
-      prototype: { id: "prototype-1", title: "原型" },
+    expect(prisma.conversationDesignState.findFirst).toHaveBeenCalledWith({
+      where: { id: "state-1", conversationId: "conversation-1" },
     });
-    expect(prisma.productDesignState.findFirst).toHaveBeenCalledWith({
-      where: { projectId: "project-1" },
-      orderBy: { version: "desc" },
+    expect(prisma.requirementDocument.findFirst).toHaveBeenCalledWith({
+      where: { id: "prd-1", conversationId: "conversation-1" },
     });
+    expect(prisma.prototypeArtifact.findFirst).toHaveBeenCalledWith({
+      where: { id: "prototype-1", conversationId: "conversation-1" },
+    });
+    expect(result.conversationDesignState).toEqual({ id: "state-1" });
+    expect(result.prd).toEqual({ id: "prd-1" });
+    expect(result.prototype).toEqual({ id: "prototype-1" });
   });
 
-  it("rejects cross-user conversation detail access", async () => {
-    prisma.conversation.findUnique.mockResolvedValue(baseConversation({
-      ownerId: "user-2",
-      project: baseProject({ ownerId: "user-2" }),
-    }));
+  it("soft deletes a conversation without conversation delete behavior", async () => {
+    prisma.conversation.findUnique.mockResolvedValue(baseConversation());
+    prisma.conversation.update.mockResolvedValue(baseConversation({ status: ConversationStatus.deleted }));
 
-    await expect(service.get(user, "conversation-1")).rejects.toThrow("无权访问该会话");
-    expect(prisma.productDesignState.findFirst).not.toHaveBeenCalled();
-  });
-
-  it("keeps legacy projectId-based conversation creation working", async () => {
-    prisma.project.findUnique.mockResolvedValue(baseProject({ id: "project-1", ownerId: "user-1" }));
-    tx.conversation.create.mockResolvedValue(baseConversation({
-      id: "conversation-legacy",
-      projectId: "project-1",
-      title: "旧项目新会话",
-    }));
-    tx.project.update.mockResolvedValue(baseProject({ id: "project-1" }));
-
-    const result = await service.create(user, {
-      projectId: "project-1",
-      title: "旧项目新会话",
+    await expect(service.delete(user, "conversation-1")).resolves.toEqual({
+      success: true,
+      deletedConversationId: "conversation-1",
     });
-
-    expect(tx.project.create).not.toHaveBeenCalled();
-    expect(prisma.project.findUnique).toHaveBeenCalledWith({ where: { id: "project-1" } });
-    expect(tx.conversation.create).toHaveBeenCalledWith({
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: "conversation-1" },
       data: {
-        projectId: "project-1",
-        ownerId: "user-1",
-        title: "旧项目新会话",
-      },
-    });
-    expect(result.conversation).toEqual(expect.objectContaining({
-      id: "conversation-legacy",
-      projectId: "project-1",
-    }));
-  });
-
-  it("bulk deletes own active conversations without creating a replacement conversation", async () => {
-    tx.conversation.findMany.mockResolvedValue([
-      { id: "conversation-1" },
-      { id: "conversation-2" },
-    ]);
-    tx.conversation.updateMany.mockResolvedValue({ count: 2 });
-    tx.project.updateMany.mockResolvedValue({ count: 2 });
-
-    const result = await service.deleteAll(user);
-
-    expect(tx.conversation.findMany).toHaveBeenCalledWith({
-      where: {
-        ownerId: "user-1",
-        deletedAt: null,
-        status: { not: "deleted" },
-        project: {
-          deletedAt: null,
-          status: { notIn: ["deleted", "archived"] },
-        },
-      },
-      select: { id: true },
-    });
-    expect(tx.conversation.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["conversation-1", "conversation-2"] } },
-      data: {
-        status: "deleted",
+        status: ConversationStatus.deleted,
         deletedAt: expect.any(Date),
       },
     });
-    expect(tx.project.updateMany).toHaveBeenCalledWith({
-      where: {
-        ownerId: "user-1",
-        currentConversationId: { in: ["conversation-1", "conversation-2"] },
-      },
-      data: {
-        currentConversationId: null,
-        lastActivityAt: expect.any(Date),
-      },
-    });
-    expect(tx.conversation.create).not.toHaveBeenCalled();
-    expect(result).toEqual({ success: true, deletedCount: 2 });
   });
 });
 
-function baseProject(overrides: Record<string, unknown> = {}) {
-  const now = new Date("2026-06-27T08:00:00.000Z");
+function baseConversation(overrides: Record<string, unknown> = {}) {
+  const now = new Date("2026-07-01T00:00:00.000Z");
   return {
-    id: "project-1",
+    id: "conversation-1",
     ownerId: "user-1",
-    title: "内部项目",
-    description: null,
-    status: ProjectStatus.draft,
-    currentConversationId: "conversation-1",
-    currentProductDesignStateId: null,
+    title: "对话",
+    summary: null,
+    status: ConversationStatus.active,
+    currentDesignStateId: null,
     currentPrdDocumentId: null,
     currentPrototypeArtifactId: null,
     latestQaReportId: null,
-    lastActivityAt: now,
-    archivedAt: null,
-    deletedAt: null,
-    createdAt: now,
-    updatedAt: now,
-    ...overrides,
-  };
-}
-
-function baseConversation(overrides: Record<string, unknown> = {}) {
-  const now = new Date("2026-06-27T08:00:00.000Z");
-  return {
-    id: "conversation-1",
-    projectId: "project-1",
-    ownerId: "user-1",
-    title: "默认会话",
-    summary: null,
     messageCount: 0,
     lastMessageAt: null,
-    status: "active",
+    lastActivityAt: now,
+    archivedAt: null,
     deletedAt: null,
     createdAt: now,
     updatedAt: now,

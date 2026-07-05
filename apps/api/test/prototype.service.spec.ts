@@ -1,6 +1,6 @@
 	import {
 	  KnowledgeCandidateSource,
-	  ProjectStatus,
+	  ConversationStatus,
 	  PrototypeArtifactStatus,
   PrototypeTargetDevice,
   UserRole,
@@ -8,7 +8,7 @@
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
-  ProductDesignState,
+  ConversationDesignState,
   PrototypeArtifactDraft,
   PrototypeSpec,
 } from "../src/ai/ai-vibe.types";
@@ -17,7 +17,7 @@ import { PrototypeService, sanitizePrototypeHtml } from "../src/ai/prototype.ser
 describe("HTML prototype artifact module", () => {
   const now = new Date("2026-06-20T08:00:00Z");
   const prisma = {
-    project: {
+    conversation: {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
@@ -41,7 +41,7 @@ describe("HTML prototype artifact module", () => {
 	  };
   const stateService = {
     getCurrentState: vi.fn(),
-    getStateByIdForProject: vi.fn(),
+    getStateByIdForConversation: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
   };
 	  const qaService = { assertGateAllows: vi.fn() };
@@ -62,8 +62,8 @@ describe("HTML prototype artifact module", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    prisma.project.findUnique.mockResolvedValue(baseProject());
-    prisma.project.update.mockResolvedValue({});
+    prisma.conversation.findUnique.mockResolvedValue(baseProject());
+    prisma.conversation.update.mockResolvedValue({});
     prisma.prototypeVersion.findFirst.mockResolvedValue(null);
     prisma.prototypeVersion.create.mockImplementation(async ({ data }) => ({
       id: `prototype-version-${data.version}`,
@@ -80,11 +80,11 @@ describe("HTML prototype artifact module", () => {
 	    knowledgeCandidateService.createMany.mockResolvedValue({ items: [] });
 	  });
 
-  it("saves generated prototype, creates version, and updates project pointer", async () => {
+  it("saves generated prototype, creates version, and updates conversation pointer", async () => {
     const state = baseState();
     const spec = prototypeSpec(state);
     const draft: PrototypeArtifactDraft = {
-      projectId: state.projectId,
+      conversationId: state.conversationId,
       prototypeSpecId: spec.id,
       htmlContent: prototypeHtml(spec),
       entryFilePath: "index.html",
@@ -102,9 +102,9 @@ describe("HTML prototype artifact module", () => {
 
     expect(result.artifact.id).toBe("artifact-1");
     expect(result.artifact.status).toBe("ready");
-    expect(result.artifact.productDesignStateVersion).toBe(3);
-    expect(prisma.project.update).toHaveBeenCalledWith({
-      where: { id: "project-1" },
+    expect(result.artifact.conversationDesignStateVersion).toBe(3);
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: "conversation-1" },
       data: { currentPrototypeArtifactId: "artifact-1" },
     });
     expect(prisma.prototypeVersion.create).toHaveBeenCalledWith({
@@ -119,17 +119,17 @@ describe("HTML prototype artifact module", () => {
   it("derives PrototypeState from current artifact and PrototypeSpec without mutating state", async () => {
     const state = baseState();
     const spec = prototypeSpec(state);
-    prisma.project.findUnique.mockResolvedValue(baseProject({ currentPrototypeArtifactId: "artifact-1" }));
+    prisma.conversation.findUnique.mockResolvedValue(baseProject({ currentPrototypeArtifactId: "artifact-1" }));
     prisma.prototypeArtifact.findFirst.mockResolvedValue(artifactRecord({
       id: "artifact-1",
       prototypeSpecId: spec.id,
-      productDesignStateId: state.id,
-      productDesignStateVersion: state.version,
+      conversationDesignStateId: state.id,
+      conversationDesignStateVersion: state.version,
       htmlContent: prototypeHtml(spec),
     }));
     prisma.prototypeSpecRecord.findUnique.mockResolvedValue(specRecord(spec as unknown as Record<string, unknown>));
 
-    const result = await service.getPrototypeStateForUser(user, { projectId: "project-1" });
+    const result = await service.getPrototypeStateForUser(user, { conversationId: "conversation-1" });
 
     expect(result.prototypeState).toEqual(
       expect.objectContaining({
@@ -147,7 +147,7 @@ describe("HTML prototype artifact module", () => {
       }),
     );
     expect(prisma.prototypeArtifact.update).not.toHaveBeenCalled();
-    expect(prisma.project.update).not.toHaveBeenCalled();
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
   });
 
   it("sanitizes unsafe HTML before storing and previewing", async () => {
@@ -160,7 +160,7 @@ describe("HTML prototype artifact module", () => {
       state,
       spec,
       {
-        projectId: state.projectId,
+        conversationId: state.conversationId,
         prototypeSpecId: spec.id,
         htmlContent: '<!doctype html><html><body><button onclick="alert(1)" data-component-id="cta" data-secret="x">提交</button><script src="https://example.com/tracker.js"></script></body></html>',
       },
@@ -172,7 +172,7 @@ describe("HTML prototype artifact module", () => {
     expect(result.artifact.htmlContent).not.toContain("onclick");
     expect(result.artifact.htmlContent).not.toContain("data-secret");
     expect(result.artifact.htmlContent).not.toContain("<script");
-    expect(prisma.project.update).toHaveBeenCalled();
+    expect(prisma.conversation.update).toHaveBeenCalled();
     expect(sanitizePrototypeHtml("<script>window.parent.postMessage('x','*')</script>")).toBe("");
   });
 
@@ -197,41 +197,41 @@ describe("HTML prototype artifact module", () => {
     expect(sanitizePrototypeHtml('<div data-secret="leak">x</div>')).not.toContain("data-secret");
   });
 
-  it("hides a stale current prototype artifact when it no longer matches ProductDesignState", async () => {
+  it("hides a stale current prototype artifact when it no longer matches ConversationDesignState", async () => {
     const state = baseState();
     const currentSpec = prototypeSpec(state, "run-current");
     stateService.getCurrentState.mockResolvedValue(baseState({ prototypeSpec: currentSpec }));
-    prisma.project.findUnique.mockResolvedValue(baseProject({ currentPrototypeArtifactId: "artifact-stale" }));
+    prisma.conversation.findUnique.mockResolvedValue(baseProject({ currentPrototypeArtifactId: "artifact-stale" }));
     prisma.prototypeArtifact.findFirst.mockResolvedValue(artifactRecord({
       id: "artifact-stale",
       prototypeSpecId: "spec-stale",
-      productDesignStateId: state.id,
-      productDesignStateVersion: state.version,
+      conversationDesignStateId: state.id,
+      conversationDesignStateVersion: state.version,
     }));
 
-    const result = await service.getCurrentForUser(user, "project-1");
+    const result = await service.getCurrentForUser(user, "conversation-1");
 
     expect(result.artifact).toBeNull();
   });
 
-	  it("confirms a ready prototype and syncs confirmed status into ProductDesignState", async () => {
+	  it("confirms a ready prototype and syncs confirmed status into ConversationDesignState", async () => {
     const state = baseState();
     const spec = prototypeSpec(state);
     prisma.prototypeArtifact.findUnique.mockResolvedValue({
       ...artifactRecord({
         id: "artifact-1",
         prototypeSpecId: spec.id,
-        productDesignStateId: state.id,
+        conversationDesignStateId: state.id,
         htmlContent: prototypeHtml(spec),
       }),
-      project: baseProject({ status: ProjectStatus.prototype_ready }),
+      conversation: baseProject({ status: ConversationStatus.prototype_ready }),
     });
     prisma.prototypeSpecRecord.findUniqueOrThrow.mockResolvedValue(specRecord(spec as unknown as Record<string, unknown>));
     prisma.prototypeArtifact.update.mockImplementation(async ({ data }) =>
       artifactRecord({
         id: "artifact-1",
         prototypeSpecId: spec.id,
-        productDesignStateId: state.id,
+        conversationDesignStateId: state.id,
         htmlContent: prototypeHtml(spec),
         updatedBy: data.updatedBy,
       }),
@@ -239,11 +239,11 @@ describe("HTML prototype artifact module", () => {
 
     const result = await service.confirmForUser(user, "artifact-1", "确认原型");
 
-    expect(result.productDesignState.status).toBe("confirmed");
+    expect(result.conversationDesignState.status).toBe("confirmed");
     expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
       prototypeSpec: expect.objectContaining({ id: spec.id }),
       status: "confirmed",
-      reason: "确认原型，同步原型确认状态到 ProductDesignState",
+      reason: "确认原型，同步原型确认状态到 ConversationDesignState",
     }));
 	    expect(prisma.prototypeVersion.create).toHaveBeenCalledWith({
 	      data: expect.objectContaining({
@@ -260,17 +260,17 @@ describe("HTML prototype artifact module", () => {
 	      ...artifactRecord({
 	        id: "artifact-1",
 	        prototypeSpecId: spec.id,
-	        productDesignStateId: state.id,
+	        conversationDesignStateId: state.id,
 	        htmlContent: prototypeHtml(spec),
 	      }),
-	      project: baseProject({ status: ProjectStatus.prototype_ready }),
+	      conversation: baseProject({ status: ConversationStatus.prototype_ready }),
 	    });
 	    prisma.prototypeSpecRecord.findUniqueOrThrow.mockResolvedValue(specRecord(spec as unknown as Record<string, unknown>));
 	    prisma.prototypeArtifact.update.mockImplementation(async ({ data }) =>
 	      artifactRecord({
 	        id: "artifact-1",
 	        prototypeSpecId: spec.id,
-	        productDesignStateId: state.id,
+	        conversationDesignStateId: state.id,
 	        htmlContent: prototypeHtml(spec),
 	        generatedByRunId: "run-1",
 	        updatedBy: data.updatedBy,
@@ -284,7 +284,7 @@ describe("HTML prototype artifact module", () => {
 	    const result = await service.confirmForUser(user, "artifact-1", "确认原型");
 
 	    expect(knowledgeCandidateService.createMany).toHaveBeenCalledWith(
-	      "project-1",
+	      "conversation-1",
 	      expect.arrayContaining([
 	        expect.objectContaining({
 	          title: expect.stringContaining("原型方案"),
@@ -310,12 +310,12 @@ describe("HTML prototype artifact module", () => {
         prototypeSpecId: "spec-1",
         htmlContent: "<!doctype html>",
       }),
-      project: baseProject({ status: ProjectStatus.qa_failed }),
+      conversation: baseProject({ status: ConversationStatus.qa_failed }),
     });
 
     await expect(service.confirmForUser(user, "artifact-1", "确认原型")).rejects.toThrow("QA_GATE_BLOCKED");
 
-    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "project-1", "confirm_artifacts");
+    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "conversation-1", "confirm_artifacts");
     expect(prisma.prototypeSpecRecord.findUniqueOrThrow).not.toHaveBeenCalled();
     expect(prisma.prototypeArtifact.update).not.toHaveBeenCalled();
     expect(prisma.prototypeVersion.create).not.toHaveBeenCalled();
@@ -324,19 +324,19 @@ describe("HTML prototype artifact module", () => {
 
 function baseProject(overrides: Record<string, unknown> = {}) {
   return {
-    id: "project-1",
+    id: "conversation-1",
     ownerId: "user-1",
-    status: ProjectStatus.draft,
+    status: ConversationStatus.draft,
     deletedAt: null,
     currentPrototypeArtifactId: null,
     ...overrides,
   };
 }
 
-function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignState {
+function baseState(overrides: Partial<ConversationDesignState> = {}): ConversationDesignState {
   return {
     id: "state-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     version: 3,
     title: "签到活动",
     summary: "让用户每天完成签到并领取积分奖励。",
@@ -368,9 +368,9 @@ function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignSt
 function basePrd(overrides: Record<string, unknown> = {}) {
   return {
     id: "prd-1",
-    projectId: "project-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 3,
+    conversationId: "conversation-1",
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 3,
     title: "签到活动 PRD",
     status: "confirmed",
     sections: [],
@@ -385,12 +385,12 @@ function basePrd(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function prototypeSpec(state: ProductDesignState, runId = "run-1"): PrototypeSpec {
+function prototypeSpec(state: ConversationDesignState, runId = "run-1"): PrototypeSpec {
   return {
     id: `spec-${runId}`,
-    projectId: state.projectId,
-    productDesignStateId: state.id,
-    productDesignStateVersion: state.version,
+    conversationId: state.conversationId,
+    conversationDesignStateId: state.id,
+    conversationDesignStateVersion: state.version,
     title: `${state.title} HTML 原型`,
     targetDevice: "both",
     styleGuide: {
@@ -432,9 +432,9 @@ function prototypeHtml(spec: PrototypeSpec) {
 function specRecord(input: Record<string, unknown>) {
   return {
     id: String(input.id),
-    projectId: String(input.projectId ?? "project-1"),
-    productDesignStateId: String(input.productDesignStateId ?? "state-1"),
-    productDesignStateVersion: Number(input.productDesignStateVersion ?? 3),
+    conversationId: String(input.conversationId ?? "conversation-1"),
+    conversationDesignStateId: String(input.conversationDesignStateId ?? "state-1"),
+    conversationDesignStateVersion: Number(input.conversationDesignStateVersion ?? 3),
     title: String(input.title ?? "签到活动 HTML 原型"),
     targetDevice: input.targetDevice ?? PrototypeTargetDevice.both,
     styleGuide: input.styleGuide ?? {},
@@ -452,10 +452,10 @@ function specRecord(input: Record<string, unknown>) {
 function artifactRecord(input: Record<string, unknown>) {
   return {
     id: String(input.id ?? "artifact-1"),
-    projectId: String(input.projectId ?? "project-1"),
+    conversationId: String(input.conversationId ?? "conversation-1"),
     prototypeSpecId: String(input.prototypeSpecId),
-    productDesignStateId: String(input.productDesignStateId ?? "state-1"),
-    productDesignStateVersion: Number(input.productDesignStateVersion ?? 3),
+    conversationDesignStateId: String(input.conversationDesignStateId ?? "state-1"),
+    conversationDesignStateVersion: Number(input.conversationDesignStateVersion ?? 3),
     title: String(input.title ?? "签到活动 HTML 原型"),
     status: input.status ?? PrototypeArtifactStatus.ready,
     htmlContent: typeof input.htmlContent === "string" ? input.htmlContent : null,

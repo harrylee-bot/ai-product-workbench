@@ -6,7 +6,7 @@ import {
   KnowledgeSource,
   KnowledgeStatus,
   Prisma,
-  ProjectStatus,
+  ConversationStatus,
 } from "@prisma/client";
 import { AdminAuditService } from "../admin/admin-audit.service";
 import type { AuthenticatedUser, RequestMeta } from "../auth/auth.types";
@@ -42,7 +42,7 @@ export class KnowledgeCandidateService {
   ) {}
 
   async createMany(
-    projectId: string,
+    conversationId: string,
     drafts: KnowledgeCandidateDraft[],
     options: {
       source?: KnowledgeCandidateSource;
@@ -55,7 +55,7 @@ export class KnowledgeCandidateService {
 
     const existing = await this.prisma.knowledgeCandidate.findMany({
       where: {
-        projectId,
+        conversationId,
         status: {
           in: [
             KnowledgeCandidateStatus.pending,
@@ -64,7 +64,7 @@ export class KnowledgeCandidateService {
           ],
         },
         OR: normalized.map((draft) => ({
-          source: draft.source ?? options.source ?? KnowledgeCandidateSource.product_design_state,
+          source: draft.source ?? options.source ?? KnowledgeCandidateSource.conversation_design_state,
           sourceRefId: draft.sourceRefId ?? null,
           sourcePath: draft.sourcePath ?? null,
           title: draft.title,
@@ -74,8 +74,8 @@ export class KnowledgeCandidateService {
     });
     const existingKeys = new Set(existing.map(candidateDedupeKey));
     const toCreate = normalized.filter((draft) => !existingKeys.has(candidateDedupeKey({
-      projectId,
-      source: draft.source ?? options.source ?? KnowledgeCandidateSource.product_design_state,
+      conversationId,
+      source: draft.source ?? options.source ?? KnowledgeCandidateSource.conversation_design_state,
       sourceRefId: draft.sourceRefId ?? null,
       sourcePath: draft.sourcePath ?? null,
       title: draft.title,
@@ -89,7 +89,7 @@ export class KnowledgeCandidateService {
       toCreate.map((draft) =>
         this.prisma.knowledgeCandidate.create({
           data: {
-            projectId,
+            conversationId,
             title: draft.title,
             content: draft.content,
             summary: draft.summary,
@@ -97,7 +97,7 @@ export class KnowledgeCandidateService {
             suggestedCategoryId: draft.suggestedCategoryId,
             suggestedTags: toInputJson(draft.suggestedTags),
             confidence: draft.confidence,
-            source: draft.source ?? options.source ?? KnowledgeCandidateSource.product_design_state,
+            source: draft.source ?? options.source ?? KnowledgeCandidateSource.conversation_design_state,
             sourceRefId: draft.sourceRefId ?? options.sourceRefId,
             sourcePath: draft.sourcePath,
             reason: draft.reason,
@@ -117,7 +117,7 @@ export class KnowledgeCandidateService {
     const page = Math.max(Number(query.page ?? 1), 1);
     const pageSize = Math.min(Math.max(Number(query.pageSize ?? 20), 1), 100);
     const where: Prisma.KnowledgeCandidateWhereInput = {
-      ...(query.projectId ? { projectId: query.projectId } : {}),
+      ...(query.conversationId ? { conversationId: query.conversationId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.suggestedType ? { suggestedType: query.suggestedType } : {}),
     };
@@ -148,8 +148,6 @@ export class KnowledgeCandidateService {
     const candidate = await this.getPendingCandidate(candidateId);
     await this.assertQaAllowsPersistKnowledge(candidate);
     if (dto.categoryId) await this.assertCategory(dto.categoryId);
-    const productId = await this.resolveProjectProductId(candidate.projectId);
-
     const { item, reviewed } = await this.prisma.$transaction(async (tx) => {
       const item = await tx.knowledgeItem.create({
         data: {
@@ -158,13 +156,12 @@ export class KnowledgeCandidateService {
           summary: dto.summary === undefined ? candidate.summary : normalizeOptionalText(dto.summary),
           type: dto.type ?? candidate.suggestedType,
           status: KnowledgeStatus.active,
-          scope: productId ? "product" : "global",
+          scope: "conversation",
           categoryId: normalizeOptionalText(dto.categoryId ?? candidate.suggestedCategoryId),
           tags: toInputJson(normalizeTags(dto.tags ?? jsonArray(candidate.suggestedTags))),
           priority: dto.priority ?? "medium",
           source: sourceFromCandidate(candidate.source),
-          sourceProjectId: candidate.projectId,
-          sourceProductId: productId ?? null,
+          sourceConversationId: candidate.conversationId,
           sourceFileId: candidate.source === KnowledgeCandidateSource.uploaded_file ? candidate.sourceRefId : null,
           sourcePrdDocumentId: candidate.source === KnowledgeCandidateSource.prd ? candidate.sourceRefId : null,
           sourcePrototypeArtifactId:
@@ -187,7 +184,7 @@ export class KnowledgeCandidateService {
     });
 
     await this.recordAudit(user, "knowledge_candidate.approve", reviewed.id, meta, {
-      projectId: reviewed.projectId,
+      conversationId: reviewed.conversationId,
       createdKnowledgeItemId: item.id,
     });
     await this.embeddings?.syncItem(item);
@@ -215,7 +212,7 @@ export class KnowledgeCandidateService {
       },
     });
     await this.recordAudit(user, "knowledge_candidate.reject", reviewed.id, meta, {
-      projectId: reviewed.projectId,
+      conversationId: reviewed.conversationId,
       reviewComment: reviewed.reviewComment,
     });
     return { candidate: this.toCandidate(reviewed) };
@@ -262,7 +259,7 @@ export class KnowledgeCandidateService {
     });
 
     await this.recordAudit(user, "knowledge_candidate.merge", reviewed.id, meta, {
-      projectId: reviewed.projectId,
+      conversationId: reviewed.conversationId,
       targetKnowledgeItemId: item.id,
     });
     await this.embeddings?.syncItem(item);
@@ -276,7 +273,7 @@ export class KnowledgeCandidateService {
   toCandidate(candidate: KnowledgeCandidateRow) {
     return {
       id: candidate.id,
-      projectId: candidate.projectId,
+      conversationId: candidate.conversationId,
       title: candidate.title,
       content: candidate.content,
       summary: candidate.summary ?? undefined,
@@ -327,13 +324,13 @@ export class KnowledgeCandidateService {
   }
 
   private async assertQaAllowsPersistKnowledge(candidate: KnowledgeCandidateRow) {
-    const project = await this.prisma.project.findUnique({ where: { id: candidate.projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("PROJECT_NOT_FOUND");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: candidate.conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("CONVERSATION_NOT_FOUND");
     }
-    const report = project.latestQaReportId
-      ? await this.prisma.qAReport.findFirst({ where: { id: project.latestQaReportId, projectId: candidate.projectId } })
-      : await this.prisma.qAReport.findFirst({ where: { projectId: candidate.projectId }, orderBy: { createdAt: "desc" } });
+    const report = conversation.latestQaReportId
+      ? await this.prisma.qAReport.findFirst({ where: { id: conversation.latestQaReportId, conversationId: candidate.conversationId } })
+      : await this.prisma.qAReport.findFirst({ where: { conversationId: candidate.conversationId }, orderBy: { createdAt: "desc" } });
     const qaGate = evaluateQaGate(report
       ? {
         id: report.id,
@@ -362,14 +359,6 @@ export class KnowledgeCandidateService {
     if (!category) throw new NotFoundException("KNOWLEDGE_CATEGORY_NOT_FOUND");
   }
 
-  private async resolveProjectProductId(projectId: string) {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { productId: true },
-    });
-    return project?.productId ?? undefined;
-  }
-
   private async recordAudit(
     admin: AuthenticatedUser,
     action: string,
@@ -392,7 +381,7 @@ function sourceFromCandidate(source: KnowledgeCandidateSource) {
   if (source === KnowledgeCandidateSource.prd) return KnowledgeSource.prd_confirmation;
   if (source === KnowledgeCandidateSource.prototype) return KnowledgeSource.prototype_confirmation;
   if (source === KnowledgeCandidateSource.uploaded_file) return KnowledgeSource.file_extraction;
-  return KnowledgeSource.project_extraction;
+  return KnowledgeSource.conversation_extraction;
 }
 
 function appendCandidateContent(current: string, candidate: string) {
@@ -404,8 +393,8 @@ function uniqueCandidateDrafts(drafts: KnowledgeCandidateDraft[]) {
   const seen = new Set<string>();
   return drafts.filter((draft) => {
     const key = candidateDedupeKey({
-      projectId: "",
-      source: draft.source ?? KnowledgeCandidateSource.product_design_state,
+      conversationId: "",
+      source: draft.source ?? KnowledgeCandidateSource.conversation_design_state,
       sourceRefId: draft.sourceRefId ?? null,
       sourcePath: draft.sourcePath ?? null,
       title: draft.title,
@@ -418,7 +407,7 @@ function uniqueCandidateDrafts(drafts: KnowledgeCandidateDraft[]) {
 }
 
 function candidateDedupeKey(input: {
-  projectId: string;
+  conversationId: string;
   source: KnowledgeCandidateSource;
   sourceRefId?: string | null;
   sourcePath?: string | null;
@@ -426,7 +415,7 @@ function candidateDedupeKey(input: {
   content: string;
 }) {
   return [
-    input.projectId,
+    input.conversationId,
     input.source,
     input.sourceRefId ?? "",
     input.sourcePath ?? "",

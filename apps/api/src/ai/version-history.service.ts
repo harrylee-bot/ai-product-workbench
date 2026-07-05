@@ -1,54 +1,54 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { ProjectStatus, UserRole } from "@prisma/client";
+import { ConversationStatus, UserRole } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
-import type { ProjectVersionTimelineItem } from "./ai-vibe.types";
+import type { ConversationVersionTimelineItem } from "./ai-vibe.types";
 
 @Injectable()
 export class VersionHistoryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listProjectTimeline(user: AuthenticatedUser, projectId: string) {
-    await this.assertProjectAccess(user, projectId, { allowArchived: true });
-    return this.listTimeline(projectId);
+  async listConversationTimeline(user: AuthenticatedUser, conversationId: string) {
+    await this.assertConversationAccess(user, conversationId, { allowArchived: true });
+    return this.listTimeline(conversationId);
   }
 
-  async listTimeline(projectId: string) {
+  async listTimeline(conversationId: string) {
     const [stateVersions, prdVersions, prototypeVersions, qaReports, rollbackRecords] =
       await this.prisma.$transaction([
-        this.prisma.productDesignVersion.findMany({
-          where: { projectId },
+        this.prisma.conversationDesignVersion.findMany({
+          where: { conversationId },
           orderBy: { createdAt: "desc" },
           take: 50,
         }),
         this.prisma.requirementDocumentVersion.findMany({
-          where: { projectId },
+          where: { conversationId },
           orderBy: { createdAt: "desc" },
           take: 50,
         }),
         this.prisma.prototypeVersion.findMany({
-          where: { projectId },
+          where: { conversationId },
           orderBy: { createdAt: "desc" },
           take: 50,
         }),
         this.prisma.qAReport.findMany({
-          where: { projectId },
+          where: { conversationId },
           orderBy: { createdAt: "desc" },
           take: 50,
         }),
         this.prisma.rollbackRecord.findMany({
-          where: { projectId },
+          where: { conversationId },
           orderBy: { createdAt: "desc" },
           take: 50,
         }),
       ]);
 
-    const items: ProjectVersionTimelineItem[] = [
+    const items: ConversationVersionTimelineItem[] = [
       ...stateVersions.map((item) => ({
         id: item.id,
-        type: "product_design_state" as const,
+        type: "conversation_design_state" as const,
         version: item.version,
-        title: `ProductDesignState v${item.version}`,
+        title: `ConversationDesignState v${item.version}`,
         description: item.reason ?? undefined,
         relatedId: item.stateId,
         createdAt: item.createdAt.toISOString(),
@@ -87,7 +87,7 @@ export class VersionHistoryService {
         id: item.id,
         type: "rollback" as const,
         title: `回滚 ${item.status}`,
-        description: item.reason ?? `v${item.fromProductDesignStateVersion} -> v${item.toProductDesignStateVersion}`,
+        description: item.reason ?? `v${item.fromConversationDesignStateVersion} -> v${item.toConversationDesignStateVersion}`,
         relatedId: item.id,
         createdAt: item.createdAt.toISOString(),
         createdBy: item.createdBy,
@@ -97,21 +97,21 @@ export class VersionHistoryService {
     return { items };
   }
 
-  private async assertProjectAccess(
+  private async assertConversationAccess(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && project.status === ProjectStatus.archived) {
-      throw new ForbiddenException("项目已归档，请先恢复后再继续操作");
+    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+      throw new ForbiddenException("会话已归档，请先恢复后再继续操作");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
       throw new ForbiddenException("VERSION_FORBIDDEN");
     }
-    return project;
+    return conversation;
   }
 }

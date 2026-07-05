@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import {
   KnowledgeType,
   Prisma,
-  ProjectStatus,
+  ConversationStatus,
   PrototypeArtifactStatus,
   PrototypeTargetDevice,
   QAReportStatus as PrismaQAReportStatus,
@@ -15,7 +15,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
   KnowledgeContext,
-  ProductDesignState,
+  ConversationDesignState,
   PrototypeArtifact,
   PrototypeSpec,
   QAGateAction,
@@ -29,7 +29,7 @@ import type {
 } from "./ai-vibe.types";
 import { evaluateQaGate, isQaGateActionAllowed } from "./qa-gate.helpers";
 import { DEFAULT_CHECK_TYPES, QaRuleCheckService } from "./qa-rule-check.service";
-import { projectStatusAfterQa } from "./workspace-state-machine";
+import { conversationStatusAfterQa } from "./workspace-state-machine";
 
 type RunQaOptions = {
   trigger: QAReportTrigger;
@@ -42,9 +42,9 @@ type RunQaOptions = {
   prototypeArtifact?: PrototypeArtifact;
 };
 
-type ProductDesignStateRecord = {
+type ConversationDesignStateRecord = {
   id: string;
-  projectId: string;
+  conversationId: string;
   version: number;
   title: string;
   summary: string | null;
@@ -76,9 +76,9 @@ type ProductDesignStateRecord = {
 
 type RequirementDocumentRecord = {
   id: string;
-  projectId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationId: string;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   status: string;
   sections: unknown;
@@ -95,9 +95,9 @@ type RequirementDocumentRecord = {
 
 type PrototypeSpecRecord = {
   id: string;
-  projectId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationId: string;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   targetDevice: PrototypeTargetDevice;
   styleGuide: unknown;
@@ -113,10 +113,10 @@ type PrototypeSpecRecord = {
 
 type PrototypeArtifactRecord = {
   id: string;
-  projectId: string;
+  conversationId: string;
   prototypeSpecId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   status: PrototypeArtifactStatus;
   htmlContent: string | null;
@@ -134,9 +134,9 @@ type PrototypeArtifactRecord = {
 
 type QAReportRecord = {
   id: string;
-  projectId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationId: string;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   prdDocumentId: string | null;
   prototypeArtifactId: string | null;
   prototypeSpecId: string | null;
@@ -164,10 +164,10 @@ export class QaService {
     private readonly knowledgeRetrieval: KnowledgeRetrievalService,
   ) {}
 
-  async runForUser(user: AuthenticatedUser, projectId: string, input: { checkTypes?: QACheckType[] }) {
-    const project = await this.assertProjectAccess(user, projectId);
-    this.assertOwnerMutation(user, project.ownerId);
-    const qaReport = await this.runForProject(projectId, user.id, {
+  async runForUser(user: AuthenticatedUser, conversationId: string, input: { checkTypes?: QACheckType[] }) {
+    const conversation = await this.assertConversationAccess(user, conversationId);
+    this.assertOwnerMutation(user, conversation.ownerId);
+    const qaReport = await this.runForConversation(conversationId, user.id, {
       trigger: "manual",
       checkTypes: input.checkTypes,
       traceId: `manual-qa-${Date.now()}`,
@@ -175,26 +175,26 @@ export class QaService {
     return { qaReport, qaGate: qaReport.gate };
   }
 
-  async runForProject(projectId: string, userId: string, options: RunQaOptions): Promise<QAReport> {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+  async runForConversation(conversationId: string, userId: string, options: RunQaOptions): Promise<QAReport> {
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
 
-    const state = await this.getCurrentState(projectId);
+    const state = await this.getCurrentState(conversationId);
     const prdDocument = options.prdDocument
       ?? state?.prdDocument
-      ?? await this.getCurrentPrdForState(projectId, project.currentPrdDocumentId, state);
+      ?? await this.getCurrentPrdForState(conversationId, conversation.currentPrdDocumentId, state);
     const currentArtifact = options.prototypeArtifact
-      ?? await this.getCurrentPrototypeArtifactForState(projectId, project.currentPrototypeArtifactId, state);
+      ?? await this.getCurrentPrototypeArtifactForState(conversationId, conversation.currentPrototypeArtifactId, state);
     const prototypeSpec = options.prototypeSpec
       ?? state?.prototypeSpec
       ?? (currentArtifact ? await this.getPrototypeSpec(currentArtifact.prototypeSpecId) : undefined);
 
     const checkTypes = options.checkTypes?.length ? options.checkTypes : DEFAULT_CHECK_TYPES;
-    const knowledgeContext = await this.getKnowledgeContext(projectId, state, options);
+    const knowledgeContext = await this.getKnowledgeContext(conversationId, state, options);
     const ruleIssues = this.ruleCheck.run({
-      productDesignState: state,
+      conversationDesignState: state,
       prdDocument,
       prototypeSpec,
       prototypeArtifact: currentArtifact,
@@ -212,9 +212,9 @@ export class QaService {
     const report = await this.prisma.$transaction(async (tx) => {
       const created = await tx.qAReport.create({
         data: {
-          projectId,
-          productDesignStateId: state?.id ?? "missing",
-          productDesignStateVersion: state?.version ?? 0,
+          conversationId,
+          conversationDesignStateId: state?.id ?? "missing",
+          conversationDesignStateVersion: state?.version ?? 0,
           prdDocumentId: prdDocument?.id,
           prototypeArtifactId: currentArtifact?.id,
           prototypeSpecId: prototypeSpec?.id,
@@ -230,16 +230,16 @@ export class QaService {
         },
       });
 
-      // txn-2：QAReport.create + project.update 原子化，避免 create 成功而 latestQaReportId 更新失败
+      // txn-2：QAReport.create + conversation.update 原子化，避免 create 成功而 latestQaReportId 更新失败
       // 留下孤儿报告 + 门禁状态漂移。
-      await tx.project.update({
-        where: { id: projectId },
+      await tx.conversation.update({
+        where: { id: conversationId },
         data: {
           latestQaReportId: created.id,
-          status: projectStatusAfterQa({
+          status: conversationStatusAfterQa({
             qaStatus: status,
-            currentProjectStatus: project.status,
-            productDesignState: state,
+            currentConversationStatus: conversation.status,
+            conversationDesignState: state,
           }),
           lastActivityAt: new Date(),
         },
@@ -251,11 +251,11 @@ export class QaService {
     return this.toQaReport(report as QAReportRecord);
   }
 
-  async getLatestForUser(user: AuthenticatedUser, projectId: string) {
-    const project = await this.assertProjectAccess(user, projectId, { allowArchived: true });
-    const report = project.latestQaReportId
-      ? await this.prisma.qAReport.findFirst({ where: { id: project.latestQaReportId, projectId } })
-      : await this.prisma.qAReport.findFirst({ where: { projectId }, orderBy: { createdAt: "desc" } });
+  async getLatestForUser(user: AuthenticatedUser, conversationId: string) {
+    const conversation = await this.assertConversationAccess(user, conversationId, { allowArchived: true });
+    const report = conversation.latestQaReportId
+      ? await this.prisma.qAReport.findFirst({ where: { id: conversation.latestQaReportId, conversationId } })
+      : await this.prisma.qAReport.findFirst({ where: { conversationId }, orderBy: { createdAt: "desc" } });
     const qaReport = report ? this.toQaReport(report as QAReportRecord) : null;
     return { qaReport, qaGate: this.evaluateGate(qaReport) };
   }
@@ -266,29 +266,29 @@ export class QaService {
     return { qaReport, qaGate: qaReport.gate };
   }
 
-  async getGateForUser(user: AuthenticatedUser, projectId: string) {
-    const project = await this.assertProjectAccess(user, projectId, { allowArchived: true });
-    const report = project.latestQaReportId
-      ? await this.prisma.qAReport.findFirst({ where: { id: project.latestQaReportId, projectId } })
-      : await this.prisma.qAReport.findFirst({ where: { projectId }, orderBy: { createdAt: "desc" } });
+  async getGateForUser(user: AuthenticatedUser, conversationId: string) {
+    const conversation = await this.assertConversationAccess(user, conversationId, { allowArchived: true });
+    const report = conversation.latestQaReportId
+      ? await this.prisma.qAReport.findFirst({ where: { id: conversation.latestQaReportId, conversationId } })
+      : await this.prisma.qAReport.findFirst({ where: { conversationId }, orderBy: { createdAt: "desc" } });
     const qaReport = report ? this.toQaReport(report as QAReportRecord) : null;
     return { qaGate: this.evaluateGate(qaReport), qaReport };
   }
 
-  async getGateForProject(projectId: string) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+  async getGateForConversation(conversationId: string) {
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    const report = project.latestQaReportId
-      ? await this.prisma.qAReport.findFirst({ where: { id: project.latestQaReportId, projectId } })
-      : await this.prisma.qAReport.findFirst({ where: { projectId }, orderBy: { createdAt: "desc" } });
+    const report = conversation.latestQaReportId
+      ? await this.prisma.qAReport.findFirst({ where: { id: conversation.latestQaReportId, conversationId } })
+      : await this.prisma.qAReport.findFirst({ where: { conversationId }, orderBy: { createdAt: "desc" } });
     const qaReport = report ? this.toQaReport(report as QAReportRecord) : null;
     return { qaGate: this.evaluateGate(qaReport), qaReport };
   }
 
-  async assertGateAllows(user: AuthenticatedUser, projectId: string, action: QAGateAction) {
-    const { qaGate } = await this.getGateForUser(user, projectId);
+  async assertGateAllows(user: AuthenticatedUser, conversationId: string, action: QAGateAction) {
+    const { qaGate } = await this.getGateForUser(user, conversationId);
     if (!this.isActionAllowed(qaGate, action)) {
       throw new ForbiddenException({
         code: "QA_GATE_BLOCKED",
@@ -300,8 +300,8 @@ export class QaService {
     return qaGate;
   }
 
-  async assertGateAllowsForProject(projectId: string, action: QAGateAction) {
-    const { qaGate } = await this.getGateForProject(projectId);
+  async assertGateAllowsForConversation(conversationId: string, action: QAGateAction) {
+    const { qaGate } = await this.getGateForConversation(conversationId);
     if (!this.isActionAllowed(qaGate, action)) {
       throw new ForbiddenException({
         code: "QA_GATE_BLOCKED",
@@ -313,23 +313,23 @@ export class QaService {
     return qaGate;
   }
 
-  async listForProject(
+  async listForConversation(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     query: { status?: PrismaQAReportStatus; trigger?: PrismaQAReportTrigger; page?: number; pageSize?: number },
   ) {
-    await this.assertProjectAccess(user, projectId, { allowArchived: true });
-    return this.listByProject(projectId, query);
+    await this.assertConversationAccess(user, conversationId, { allowArchived: true });
+    return this.listByConversation(conversationId, query);
   }
 
-  async listByProject(
-    projectId: string,
+  async listByConversation(
+    conversationId: string,
     query: { status?: PrismaQAReportStatus; trigger?: PrismaQAReportTrigger; page?: number; pageSize?: number },
   ) {
     const page = Math.max(Number(query.page ?? 1), 1);
     const pageSize = Math.min(Math.max(Number(query.pageSize ?? 20), 1), 100);
     const where: Prisma.QAReportWhereInput = {
-      projectId,
+      conversationId,
       status: query.status,
       trigger: query.trigger,
     };
@@ -350,9 +350,9 @@ export class QaService {
     const checkTypes = Array.isArray(row.checkTypes) ? row.checkTypes as QACheckType[] : [];
     return {
       id: row.id,
-      projectId: row.projectId,
-      productDesignStateId: row.productDesignStateId,
-      productDesignStateVersion: row.productDesignStateVersion,
+      conversationId: row.conversationId,
+      conversationDesignStateId: row.conversationDesignStateId,
+      conversationDesignStateVersion: row.conversationDesignStateVersion,
       prdDocumentId: row.prdDocumentId ?? undefined,
       prototypeArtifactId: row.prototypeArtifactId ?? undefined,
       prototypeSpecId: row.prototypeSpecId ?? undefined,
@@ -391,44 +391,44 @@ export class QaService {
     return isQaGateActionAllowed(gate, action);
   }
 
-  private async getCurrentState(projectId: string) {
-    const row = await this.prisma.productDesignState.findFirst({
-      where: { projectId },
+  private async getCurrentState(conversationId: string) {
+    const row = await this.prisma.conversationDesignState.findFirst({
+      where: { conversationId },
       orderBy: { version: "desc" },
     });
-    return row ? toStateItem(row as ProductDesignStateRecord) : null;
+    return row ? toStateItem(row as ConversationDesignStateRecord) : null;
   }
 
   private async getCurrentPrdForState(
-    projectId: string,
+    conversationId: string,
     currentPrdDocumentId: string | null | undefined,
-    state: ProductDesignState | null,
+    state: ConversationDesignState | null,
   ) {
     const row = currentPrdDocumentId
-      ? await this.prisma.requirementDocument.findFirst({ where: { id: currentPrdDocumentId, projectId } })
-      : await this.prisma.requirementDocument.findFirst({ where: { projectId }, orderBy: { updatedAt: "desc" } });
+      ? await this.prisma.requirementDocument.findFirst({ where: { id: currentPrdDocumentId, conversationId } })
+      : await this.prisma.requirementDocument.findFirst({ where: { conversationId }, orderBy: { updatedAt: "desc" } });
     const document = row ? toRequirementDocument(row as RequirementDocumentRecord) : null;
     if (!document || !state) return document;
-    return document.productDesignStateId === state.id && document.productDesignStateVersion === state.version
+    return document.conversationDesignStateId === state.id && document.conversationDesignStateVersion === state.version
       ? document
       : null;
   }
 
   private async getCurrentPrototypeArtifactForState(
-    projectId: string,
+    conversationId: string,
     currentPrototypeArtifactId: string | null | undefined,
-    state: ProductDesignState | null,
+    state: ConversationDesignState | null,
   ) {
     const row = currentPrototypeArtifactId
-      ? await this.prisma.prototypeArtifact.findFirst({ where: { id: currentPrototypeArtifactId, projectId } })
-      : await this.prisma.prototypeArtifact.findFirst({ where: { projectId }, orderBy: { updatedAt: "desc" } });
+      ? await this.prisma.prototypeArtifact.findFirst({ where: { id: currentPrototypeArtifactId, conversationId } })
+      : await this.prisma.prototypeArtifact.findFirst({ where: { conversationId }, orderBy: { updatedAt: "desc" } });
     const artifact = row ? toPrototypeArtifact(row as PrototypeArtifactRecord) : null;
     if (!artifact || !state) return artifact;
-    if (artifact.productDesignStateId !== state.id) return null;
+    if (artifact.conversationDesignStateId !== state.id) return null;
     if (state.prototypeSpec?.id) {
       return artifact.prototypeSpecId === state.prototypeSpec.id ? artifact : null;
     }
-    return artifact.productDesignStateVersion === state.version ? artifact : null;
+    return artifact.conversationDesignStateVersion === state.version ? artifact : null;
   }
 
   private async getPrototypeSpec(prototypeSpecId: string) {
@@ -437,13 +437,13 @@ export class QaService {
   }
 
   private async getKnowledgeContext(
-    projectId: string,
-    state: ProductDesignState | null,
+    conversationId: string,
+    state: ConversationDesignState | null,
     options: RunQaOptions,
   ): Promise<KnowledgeContext> {
-    const query = state ? `${state.title} ${state.summary ?? ""} ${state.businessGoal}` : `QA ${projectId}`;
+    const query = state ? `${state.title} ${state.summary ?? ""} ${state.businessGoal}` : `QA ${conversationId}`;
     const search = await this.knowledgeRetrieval.search({
-      projectId,
+      conversationId,
       runId: options.runId,
       runtimeName: "runtime_qa",
       query,
@@ -478,38 +478,38 @@ export class QaService {
   private async getAccessibleReport(user: AuthenticatedUser, qaReportId: string) {
     const report = await this.prisma.qAReport.findUnique({
       where: { id: qaReportId },
-      include: { project: true },
+      include: { conversation: true },
     });
-    if (!report || report.project.deletedAt || report.project.status === ProjectStatus.deleted) {
+    if (!report || report.conversation.deletedAt || report.conversation.status === ConversationStatus.deleted) {
       throw new NotFoundException("QA_REPORT_NOT_FOUND");
     }
-    if (user.role !== UserRole.admin && report.project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && report.conversation.ownerId !== user.id) {
       throw new ForbiddenException("QA_REPORT_FORBIDDEN");
     }
     return report;
   }
 
-  private async assertProjectAccess(
+  private async assertConversationAccess(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && project.status === ProjectStatus.archived) {
-      throw new ForbiddenException("项目已归档，请先恢复后再继续操作");
+    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+      throw new ForbiddenException("会话已归档，请先恢复后再继续操作");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
       throw new ForbiddenException("QA_REPORT_FORBIDDEN");
     }
-    return project;
+    return conversation;
   }
 
   private assertOwnerMutation(user: AuthenticatedUser, ownerId: string) {
     if (user.role === UserRole.admin && user.id !== ownerId) {
-      throw new ForbiddenException("管理员不可直接修改用户项目 QA");
+      throw new ForbiddenException("管理员不可直接修改用户会话 QA");
     }
   }
 }
@@ -539,10 +539,10 @@ function dedupeIssues(issues: QAIssue[]) {
   });
 }
 
-function toStateItem(state: ProductDesignStateRecord): ProductDesignState {
+function toStateItem(state: ConversationDesignStateRecord): ConversationDesignState {
   return {
     id: state.id,
-    projectId: state.projectId,
+    conversationId: state.conversationId,
     version: state.version,
     title: state.title,
     summary: state.summary ?? undefined,
@@ -565,7 +565,7 @@ function toStateItem(state: ProductDesignStateRecord): ProductDesignState {
     confirmedFacts: arrayOfRecords(state.confirmedFacts),
     prototypeSpec: recordOrUndefined(state.prototypeSpec) as PrototypeSpec | undefined,
     prdDocument: recordOrUndefined(state.prdDocument) as RequirementDocument | undefined,
-    status: state.status as ProductDesignState["status"],
+    status: state.status as ConversationDesignState["status"],
     createdBy: state.createdBy,
     updatedBy: state.updatedBy ?? undefined,
     createdAt: state.createdAt.toISOString(),
@@ -576,9 +576,9 @@ function toStateItem(state: ProductDesignStateRecord): ProductDesignState {
 function toRequirementDocument(row: RequirementDocumentRecord): RequirementDocument {
   return {
     id: row.id,
-    projectId: row.projectId,
-    productDesignStateId: row.productDesignStateId,
-    productDesignStateVersion: row.productDesignStateVersion,
+    conversationId: row.conversationId,
+    conversationDesignStateId: row.conversationDesignStateId,
+    conversationDesignStateVersion: row.conversationDesignStateVersion,
     title: row.title,
     status: row.status as RequirementDocument["status"],
     sections: Array.isArray(row.sections) ? row.sections as RequirementDocument["sections"] : [],
@@ -597,9 +597,9 @@ function toRequirementDocument(row: RequirementDocumentRecord): RequirementDocum
 function toPrototypeSpec(row: PrototypeSpecRecord): PrototypeSpec {
   return {
     id: row.id,
-    projectId: row.projectId,
-    productDesignStateId: row.productDesignStateId,
-    productDesignStateVersion: row.productDesignStateVersion,
+    conversationId: row.conversationId,
+    conversationDesignStateId: row.conversationDesignStateId,
+    conversationDesignStateVersion: row.conversationDesignStateVersion,
     title: row.title,
     targetDevice: row.targetDevice,
     styleGuide: recordOrUndefined(row.styleGuide) as PrototypeSpec["styleGuide"] ?? {
@@ -621,10 +621,10 @@ function toPrototypeSpec(row: PrototypeSpecRecord): PrototypeSpec {
 function toPrototypeArtifact(row: PrototypeArtifactRecord): PrototypeArtifact {
   return {
     id: row.id,
-    projectId: row.projectId,
+    conversationId: row.conversationId,
     prototypeSpecId: row.prototypeSpecId,
-    productDesignStateId: row.productDesignStateId,
-    productDesignStateVersion: row.productDesignStateVersion,
+    conversationDesignStateId: row.conversationDesignStateId,
+    conversationDesignStateVersion: row.conversationDesignStateVersion,
     title: row.title,
     status: row.status,
     htmlContent: row.htmlContent ?? undefined,

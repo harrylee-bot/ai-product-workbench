@@ -4,21 +4,17 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Clock, Eye, FileText, Layout, Share2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { getApiBase } from "@/lib/api/config";
 
 interface ShareViewProps {
   shareData: {
-    id: string;
-    token: string;
+    title: string;
     scope: "prd" | "prototype" | "both";
-    expiresAt: string | null;
-    isExpired: boolean;
-    project: {
-      id: string;
-      name: string;
-    };
-    prdDocument?: {
-      id: string;
+    readOnly: boolean;
+    allowDownload: boolean;
+    allowEdit: boolean;
+    expiresAt?: string | null;
+    prd?: {
       title: string;
       sections: Array<{
         id: string;
@@ -29,11 +25,10 @@ interface ShareViewProps {
       }>;
       updatedAt: string;
     };
-    prototypeArtifact?: {
-      id: string;
+    prototype?: {
       title: string;
-      htmlContent: string;
-      targetDevice: string;
+      previewUrl?: string;
+      pageCount?: number;
       updatedAt: string;
     };
   };
@@ -47,23 +42,9 @@ export function ShareView({ shareData, token }: ShareViewProps) {
 
   const showPRD = shareData.scope === "prd" || shareData.scope === "both";
   const showPrototype = shareData.scope === "prototype" || shareData.scope === "both";
-
-  if (shareData.isExpired) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="w-full max-w-md rounded-2xl border bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-center gap-2 text-red-600">
-            <Clock className="size-5" />
-            <h1 className="text-lg font-semibold">分享链接已过期</h1>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            此分享链接已于 {new Date(shareData.expiresAt!).toLocaleString("zh-CN")} 过期。
-            请联系项目所有者重新生成分享链接。
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const prototypePreviewUrl = shareData.prototype?.previewUrl
+    ? toApiUrl(shareData.prototype.previewUrl)
+    : `${getApiBase()}/public/share/${encodeURIComponent(token)}/prototype`;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -73,7 +54,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
           <div className="flex items-center gap-3">
             <Share2 className="size-6 text-blue-600" />
             <div>
-              <h1 className="text-lg font-semibold">{shareData.project.name}</h1>
+              <h1 className="text-lg font-semibold">{shareData.title}</h1>
               <p className="text-sm text-muted-foreground">只读分享</p>
             </div>
           </div>
@@ -123,18 +104,18 @@ export function ShareView({ shareData, token }: ShareViewProps) {
         )}
 
         {/* PRD View */}
-        {showPRD && activeView === "prd" && shareData.prdDocument && (
+        {showPRD && activeView === "prd" && shareData.prd && (
           <div className="rounded-2xl border bg-white p-6 shadow-sm">
             <div className="mb-6 border-b pb-4">
-              <h2 className="text-2xl font-bold">{shareData.prdDocument.title}</h2>
+              <h2 className="text-2xl font-bold">{shareData.prd.title}</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                最后更新：{new Date(shareData.prdDocument.updatedAt).toLocaleString("zh-CN")}
+                最后更新：{new Date(shareData.prd.updatedAt).toLocaleString("zh-CN")}
               </p>
             </div>
             <div className="prose prose-sm max-w-none">
-              {shareData.prdDocument.sections.map((section) => (
+              {shareData.prd.sections.map((section, index) => (
                 <motion.div
-                  key={section.id}
+                  key={section.id ?? `${section.title}-${index}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
@@ -159,20 +140,20 @@ export function ShareView({ shareData, token }: ShareViewProps) {
         )}
 
         {/* Prototype View */}
-        {showPrototype && activeView === "prototype" && shareData.prototypeArtifact && (
+        {showPrototype && activeView === "prototype" && shareData.prototype && (
           <div className="rounded-2xl border bg-white p-6 shadow-sm">
             <div className="mb-6 border-b pb-4">
-              <h2 className="text-2xl font-bold">{shareData.prototypeArtifact.title}</h2>
+              <h2 className="text-2xl font-bold">{shareData.prototype.title}</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                设备类型：{shareData.prototypeArtifact.targetDevice} · 最后更新：
-                {new Date(shareData.prototypeArtifact.updatedAt).toLocaleString("zh-CN")}
+                页面数：{shareData.prototype.pageCount ?? 1} · 最后更新：
+                {new Date(shareData.prototype.updatedAt).toLocaleString("zh-CN")}
               </p>
             </div>
             <div className="rounded-lg border bg-white">
               <iframe
                 title="原型预览"
                 sandbox="allow-scripts"
-                srcDoc={shareData.prototypeArtifact.htmlContent}
+                src={prototypePreviewUrl}
                 className="h-[800px] w-full border-0"
               />
             </div>
@@ -188,4 +169,10 @@ export function ShareView({ shareData, token }: ShareViewProps) {
       </footer>
     </div>
   );
+}
+
+function toApiUrl(path: string) {
+  if (/^https?:\/\//.test(path)) return path;
+  if (path.startsWith("/api/")) return `${getApiBase()}${path.slice(4)}`;
+  return path;
 }

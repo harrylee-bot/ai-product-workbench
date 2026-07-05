@@ -10,9 +10,9 @@ const emptyToUndefined = ({ value }: { value: unknown }) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
 
 export class GetPrototypeStateDto {
-  @IsString({ message: "projectId 不能为空" })
-  @IsNotEmpty({ message: "projectId 不能为空" })
-  projectId!: string;
+  @IsString({ message: "conversationId 不能为空" })
+  @IsNotEmpty({ message: "conversationId 不能为空" })
+  conversationId!: string;
 
   @IsOptional()
   @Transform(emptyToUndefined)

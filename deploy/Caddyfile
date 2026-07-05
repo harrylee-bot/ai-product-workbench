@@ -46,13 +46,6 @@ aionbench.com {
 		reverse_proxy 127.0.0.1:4000
 	}
 
-	handle /api/copilotkit* {
-		header Cache-Control "no-store, no-cache, must-revalidate, private"
-		header Pragma "no-cache"
-		header Expires "0"
-		reverse_proxy 127.0.0.1:3000
-	}
-
 	handle /api/* {
 		header Cache-Control "no-store, no-cache, must-revalidate, private"
 		header Pragma "no-cache"

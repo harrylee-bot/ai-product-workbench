@@ -1,8 +1,8 @@
-import { Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import type { Phase1User } from "../auth/auth.types";
-import { MessageService } from "../../projects/message.service";
+import type { AuthenticatedUser } from "../auth/auth.types";
+import { MessageService } from "../../conversations/message.service";
 import { ListMessagesQueryDto } from "./dto";
 
 /**
@@ -13,7 +13,7 @@ import { ListMessagesQueryDto } from "./dto";
  * 因此该控制器仅保留读取端点。
  *
  * - GET /messages、GET /conversations/:id/messages：读取会话消息 + 最近运行摘要，
- *   统一由 projects/MessageService.listByConversation 提供。
+ *   统一由 conversations/MessageService.listByConversation 提供。
  */
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -21,12 +21,17 @@ export class MessageController {
   constructor(private readonly messages: MessageService) {}
 
   @Get("messages")
-  list(@CurrentUser() user: Phase1User, @Query() query: ListMessagesQueryDto) {
-    return this.messages.listByConversation(user, query.conversationId ?? "");
+  list(@CurrentUser() user: AuthenticatedUser, @Query() query: ListMessagesQueryDto) {
+    const conversationId = query.conversationId?.trim();
+    if (!conversationId) {
+      throw new BadRequestException("conversationId 不能为空");
+    }
+
+    return this.messages.listByConversation(user, conversationId);
   }
 
   @Get("conversations/:conversationId/messages")
-  listByConversation(@CurrentUser() user: Phase1User, @Param("conversationId") conversationId: string) {
+  listByConversation(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
     return this.messages.listByConversation(user, conversationId);
   }
 }

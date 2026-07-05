@@ -15,7 +15,7 @@ import {
   FileStorageProvider,
   ParseResultStatus,
   Prisma,
-  ProjectStatus,
+  ConversationStatus,
   UserRole,
 } from "@prisma/client";
 import { fileTypeFromFile } from "file-type";
@@ -24,7 +24,7 @@ import { access, mkdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
-import type { ListProjectFilesQueryDto, UploadFilesDto } from "./dto";
+import type { ListConversationFilesQueryDto, UploadFilesDto } from "./dto";
 import { FileParserService } from "./file-parser.service";
 import type { AttachmentSummary, ParserOutput, RuntimeAttachmentFile, VisualAttachmentContext } from "./file.types";
 import { PrototypeConversionService } from "./prototype-conversion.service";
@@ -52,22 +52,22 @@ export class FileAssetService {
       path.resolve(process.cwd(), "storage/uploads");
   }
 
-  async uploadProjectFiles(
+  async uploadConversationFiles(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     dto: UploadFilesDto,
     files: Express.Multer.File[] = [],
   ) {
     if (!files.length) throw new BadRequestException("请选择要上传的文件");
     if (files.length > MAX_FILES_PER_UPLOAD) throw new BadRequestException("单次最多上传 10 个文件");
 
-    const project = await this.getAccessibleProject(user, projectId);
+    await this.getAccessibleConversation(user, conversationId);
 
-    if (dto.conversationId) {
-      await this.assertConversationBelongsToProject(dto.conversationId, projectId);
+    if (dto.conversationId && dto.conversationId !== conversationId) {
+      throw new BadRequestException("文件上传会话不一致");
     }
     if (dto.messageId) {
-      await this.assertMessageBelongsToProject(dto.messageId, projectId);
+      await this.assertMessageBelongsToConversation(dto.messageId, conversationId);
     }
 
     const prepared: Array<{ file: Express.Multer.File; extension: string }> = [];
@@ -81,7 +81,7 @@ export class FileAssetService {
       }
 
       for (const item of prepared) {
-        const created = await this.createFileAsset(user, projectId, dto, item.file, item.extension);
+        const created = await this.createFileAsset(user, conversationId, dto, item.file, item.extension);
         items.push(created);
       }
     } catch (error) {
@@ -96,13 +96,13 @@ export class FileAssetService {
     return { items: items.map((item) => this.toFileAssetItem(item)) };
   }
 
-  async listProjectFiles(user: AuthenticatedUser, projectId: string, query: ListProjectFilesQueryDto) {
-    await this.getAccessibleProject(user, projectId, { allowArchived: true });
+  async listConversationFiles(user: AuthenticatedUser, conversationId: string, query: ListConversationFilesQueryDto) {
+    await this.getAccessibleConversation(user, conversationId, { allowArchived: true });
     const page = Math.max(Number(query.page ?? 1), 1);
     const pageSize = Math.min(Math.max(Number(query.pageSize ?? 20), 1), 100);
 
     const where: Prisma.FileAssetWhereInput = {
-      projectId,
+      conversationId,
       deletedAt: null,
       status: query.status ?? { not: FileAssetStatus.deleted },
     };
@@ -165,7 +165,7 @@ export class FileAssetService {
       chunks: chunks.map((chunk) => ({
         id: chunk.id,
         fileAssetId: chunk.fileAssetId,
-        projectId: chunk.projectId,
+        conversationId: chunk.conversationId,
         chunkIndex: chunk.chunkIndex,
         content: chunk.content,
         tokenEstimate: chunk.tokenEstimate ?? undefined,
@@ -205,34 +205,37 @@ export class FileAssetService {
     return { success: true };
   }
 
-  async attachFilesToMessage(fileIds: string[], messageId: string, projectId: string, conversationId: string) {
+  async attachFilesToMessage(fileIds: string[], messageId: string, conversationId: string) {
     if (!fileIds.length) return;
     await this.prisma.fileAsset.updateMany({
       where: {
         id: { in: fileIds },
-        projectId,
+        conversationId,
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
       },
       data: {
         messageId,
-        conversationId,
       },
     });
   }
 
-  async getAttachmentSummaries(fileIds: string[], projectId?: string): Promise<AttachmentSummary[]> {
+  async getAttachmentSummaries(fileIds: string[], conversationId?: string): Promise<AttachmentSummary[]> {
     if (!fileIds.length) return [];
 
     const files = await this.prisma.fileAsset.findMany({
       where: {
         id: { in: fileIds },
-        ...(projectId ? { projectId } : {}),
+        ...(conversationId ? { conversationId } : {}),
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
       },
       include: { parseResult: true, prototypeConversionJob: true },
     });
+    const uniqueIds = [...new Set(fileIds)];
+    if (files.length !== uniqueIds.length) {
+      throw new BadRequestException("附件不存在或不属于当前会话");
+    }
     const order = new Map(fileIds.map((id, index) => [id, index]));
 
     return files
@@ -268,13 +271,13 @@ export class FileAssetService {
       });
   }
 
-  async getRuntimeAttachmentFiles(fileIds: string[], projectId: string): Promise<RuntimeAttachmentFile[]> {
+  async getRuntimeAttachmentFiles(fileIds: string[], conversationId: string): Promise<RuntimeAttachmentFile[]> {
     if (!fileIds.length) return [];
 
     const files = await this.prisma.fileAsset.findMany({
       where: {
         id: { in: fileIds },
-        projectId,
+        conversationId,
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
       },
@@ -330,12 +333,12 @@ export class FileAssetService {
 
   private async createFileAsset(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     dto: UploadFilesDto,
     file: Express.Multer.File,
     extension: string,
   ) {
-    const projectDir = path.join(this.uploadRoot, projectId);
+    const projectDir = path.join(this.uploadRoot, conversationId);
     const storedName = `${randomUUID()}.${extension}`;
     const storagePath = path.join(projectDir, storedName);
     await mkdir(projectDir, { recursive: true });
@@ -343,8 +346,7 @@ export class FileAssetService {
 
     return this.prisma.fileAsset.create({
       data: {
-        projectId,
-        conversationId: dto.conversationId,
+        conversationId,
         messageId: dto.messageId,
         uploadedBy: user.id,
         originalName: file.originalname,
@@ -394,7 +396,7 @@ export class FileAssetService {
         extension: file.extension,
         mimeType: file.mimeType,
         storagePath: file.storagePath,
-        extractDir: path.join(this.uploadRoot, file.projectId, `${file.id}_extracted`),
+        extractDir: path.join(this.uploadRoot, file.conversationId, `${file.id}_extracted`),
       });
     } catch (error) {
       return {
@@ -423,7 +425,7 @@ export class FileAssetService {
         where: { fileAssetId: file.id },
         create: {
           fileAssetId: file.id,
-          projectId: file.projectId,
+          conversationId: file.conversationId,
           status: output.status,
           parserType: output.parserType,
           title: output.title,
@@ -459,7 +461,7 @@ export class FileAssetService {
         await tx.fileChunk.createMany({
           data: output.chunks.map((chunk, index) => ({
             fileAssetId: file.id,
-            projectId: file.projectId,
+            conversationId: file.conversationId,
             chunkIndex: index,
             content: chunk.content,
             tokenEstimate: chunk.tokenEstimate,
@@ -471,7 +473,7 @@ export class FileAssetService {
         await tx.fileChunk.create({
           data: {
             fileAssetId: file.id,
-            projectId: file.projectId,
+            conversationId: file.conversationId,
             chunkIndex: 0,
             content: output.summary,
             tokenEstimate: Math.ceil(output.summary.length / 3.5),
@@ -498,22 +500,22 @@ export class FileAssetService {
     return parseResult;
   }
 
-  private async getAccessibleProject(
+  private async getAccessibleConversation(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.status === ProjectStatus.deleted || project.deletedAt) {
-      throw new NotFoundException("项目不存在");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.status === ConversationStatus.deleted || conversation.deletedAt) {
+      throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && project.status === ProjectStatus.archived) {
-      throw new ForbiddenException("项目已归档，请先恢复后再上传文件");
+    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+      throw new ForbiddenException("会话已归档，请先恢复后再上传文件");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
-      throw new ForbiddenException("你无权访问该项目");
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+      throw new ForbiddenException("你无权访问该会话");
     }
-    return project;
+    return conversation;
   }
 
   private async getAccessibleFile(
@@ -523,41 +525,30 @@ export class FileAssetService {
   ) {
     const file = await this.prisma.fileAsset.findUnique({
       where: { id: fileId },
-      include: { project: true },
+      include: { conversation: true },
     });
     if (
       !file ||
       (!options.includeDeleted && (file.deletedAt || file.status === FileAssetStatus.deleted)) ||
-      file.project.status === ProjectStatus.deleted ||
-      file.project.deletedAt
+      file.conversation.status === ConversationStatus.deleted ||
+      file.conversation.deletedAt
     ) {
       throw new NotFoundException("文件不存在");
     }
-    if (user.role !== UserRole.admin && file.project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && file.conversation.ownerId !== user.id) {
       throw new ForbiddenException("你无权访问该文件");
     }
     return file;
   }
 
-  private async assertConversationBelongsToProject(conversationId: string, projectId: string) {
-    const conversation = await this.prisma.conversation.findFirst({
-      where: {
-        id: conversationId,
-        projectId,
-        deletedAt: null,
-      },
-    });
-    if (!conversation) throw new BadRequestException("会话不属于当前项目");
-  }
-
-  private async assertMessageBelongsToProject(messageId: string, projectId: string) {
+  private async assertMessageBelongsToConversation(messageId: string, conversationId: string) {
     const message = await this.prisma.message.findFirst({
       where: {
         id: messageId,
-        projectId,
+        conversationId,
       },
     });
-    if (!message) throw new BadRequestException("消息不属于当前项目");
+    if (!message) throw new BadRequestException("消息不属于当前会话");
   }
 
   private async assertFileAllowed(file: Express.Multer.File, extension: string) {
@@ -635,8 +626,7 @@ export class FileAssetService {
   private toFileAssetItem(file: FileAsset) {
     return {
       id: file.id,
-      projectId: file.projectId,
-      conversationId: file.conversationId ?? undefined,
+      conversationId: file.conversationId,
       messageId: file.messageId ?? undefined,
       uploadedBy: file.uploadedBy,
       originalName: file.originalName,
@@ -658,7 +648,7 @@ export class FileAssetService {
   private toParseResultItem(parseResult: {
     id: string;
     fileAssetId: string;
-    projectId: string;
+    conversationId: string;
     status: ParseResultStatus;
     parserType: FileParserType;
     title: string | null;
@@ -678,7 +668,7 @@ export class FileAssetService {
     return {
       id: parseResult.id,
       fileAssetId: parseResult.fileAssetId,
-      projectId: parseResult.projectId,
+      conversationId: parseResult.conversationId,
       status: parseResult.status,
       parserType: parseResult.parserType,
       title: parseResult.title ?? undefined,

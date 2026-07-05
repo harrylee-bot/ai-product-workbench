@@ -9,7 +9,7 @@ import { PrismaService } from "../prisma/prisma.service";
 
 type CommentRecord = {
   id: string;
-  projectId: string;
+  conversationId: string;
   targetType: string;
   targetId: string;
   sectionId: string | null;
@@ -36,7 +36,7 @@ type CommentRecord = {
 
 export type Comment = {
   id: string;
-  projectId: string;
+  conversationId: string;
   targetType: string;
   targetId: string;
   sectionId: string | null;
@@ -61,7 +61,7 @@ export class CommentService {
   async createComment(
     user: AuthenticatedUser,
     input: {
-      projectId: string;
+      conversationId: string;
       targetType: string;
       targetId: string;
       sectionId?: string;
@@ -69,12 +69,22 @@ export class CommentService {
       parentCommentId?: string;
     }
   ): Promise<Comment> {
-    // 验证项目访问权限
-    await this.assertProjectAccess(user, input.projectId);
+    // 验证会话访问权限
+    await this.assertConversationAccess(user, input.conversationId);
+    if (input.parentCommentId) {
+      const parent = await this.prisma.comment.findFirst({
+        where: {
+          id: input.parentCommentId,
+          conversationId: input.conversationId,
+          deletedAt: null,
+        },
+      });
+      if (!parent) throw new BadRequestException("父评论不属于当前会话");
+    }
 
     const comment = await this.prisma.comment.create({
       data: {
-        projectId: input.projectId,
+        conversationId: input.conversationId,
         targetType: input.targetType,
         targetId: input.targetId,
         sectionId: input.sectionId,
@@ -98,15 +108,15 @@ export class CommentService {
 
   async listComments(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     targetType?: string,
     targetId?: string
   ): Promise<Comment[]> {
-    await this.assertProjectAccess(user, projectId);
+    await this.assertConversationAccess(user, conversationId);
 
     const comments = await this.prisma.comment.findMany({
       where: {
-        projectId,
+        conversationId,
         targetType,
         targetId,
         parentCommentId: null, // 只获取顶层评论
@@ -127,7 +137,7 @@ export class CommentService {
           },
         },
         replies: {
-          where: { deletedAt: null },
+          where: { conversationId, deletedAt: null },
           include: {
             user: {
               select: {
@@ -201,12 +211,12 @@ export class CommentService {
       throw new NotFoundException("评论不存在");
     }
 
-    const project = await this.prisma.project.findUnique({
-      where: { id: comment.projectId },
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: comment.conversationId },
     });
 
-    // 只有评论作者或项目所有者可以删除
-    if (comment.userId !== user.id && project?.ownerId !== user.id) {
+    // 只有评论作者或会话所有者可以删除
+    if (comment.userId !== user.id && conversation?.ownerId !== user.id) {
       throw new ForbiddenException("无权删除此评论");
     }
 
@@ -228,7 +238,7 @@ export class CommentService {
       throw new NotFoundException("评论不存在");
     }
 
-    await this.assertProjectAccess(user, comment.projectId);
+    await this.assertConversationAccess(user, comment.conversationId);
 
     const updated = await this.prisma.comment.update({
       where: { id: commentId },
@@ -269,7 +279,7 @@ export class CommentService {
       throw new NotFoundException("评论不存在");
     }
 
-    await this.assertProjectAccess(user, comment.projectId);
+    await this.assertConversationAccess(user, comment.conversationId);
 
     const updated = await this.prisma.comment.update({
       where: { id: commentId },
@@ -292,34 +302,33 @@ export class CommentService {
     return this.toCommentItem(updated as CommentRecord);
   }
 
-  private async assertProjectAccess(
+  private async assertConversationAccess(
     user: AuthenticatedUser,
-    projectId: string
+    conversationId: string
   ) {
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
     });
 
-    if (!project) {
-      throw new NotFoundException("项目不存在");
+    if (!conversation) {
+      throw new NotFoundException("会话不存在");
     }
 
-    // Admin 可以访问所有项目
+    // Admin 可以访问所有会话
     if (user.role === "admin") {
       return;
     }
 
-    // Product/Developer/User 可以访问自己的项目或被邀请的项目
-    if (project.ownerId !== user.id) {
-      // TODO: 检查是否被邀请参与此项目（待实现邀请功能）
-      throw new ForbiddenException("无权访问此项目");
+    // 用户可以访问自己的会话
+    if (conversation.ownerId !== user.id) {
+      throw new ForbiddenException("无权访问此会话");
     }
   }
 
   private toCommentItem(record: CommentRecord): Comment {
     return {
       id: record.id,
-      projectId: record.projectId,
+      conversationId: record.conversationId,
       targetType: record.targetType,
       targetId: record.targetId,
       sectionId: record.sectionId,

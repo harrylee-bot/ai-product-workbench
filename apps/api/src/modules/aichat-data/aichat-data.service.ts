@@ -8,15 +8,15 @@ import {
   MessageRole,
   MessageType,
   Prisma,
-  ProjectStatus,
   UserRole,
 } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
-import type { Phase1User } from "../auth/auth.types";
+import type { AuthenticatedUser } from "../auth/auth.types";
 import {
   buildMessagePayload,
   BulkCreateMessagesDto,
   CreateSuggestionsDto,
+  extractTextFromParts,
   RegisterStreamDto,
   RenameConversationDto,
   UpdateMessagePartsDto,
@@ -43,7 +43,7 @@ export class AichatDataService {
   // ---------- 1. 会话重命名 ----------
 
   async renameConversation(
-    user: Phase1User,
+    user: AuthenticatedUser,
     conversationId: string,
     dto: RenameConversationDto,
   ) {
@@ -58,7 +58,7 @@ export class AichatDataService {
   // ---------- 2. 批量写消息 ----------
 
   async bulkCreateMessages(
-    user: Phase1User,
+    user: AuthenticatedUser,
     conversationId: string,
     dto: BulkCreateMessagesDto,
   ) {
@@ -68,11 +68,9 @@ export class AichatDataService {
       const payload = buildMessagePayload(
         item,
         conversation.id,
-        conversation.projectId,
         user.id,
       );
       const data: Prisma.MessageUncheckedCreateInput = {
-        projectId: conversation.projectId,
         conversationId: conversation.id,
         userId: user.id,
         role: payload.role as MessageRole,
@@ -94,10 +92,6 @@ export class AichatDataService {
           lastMessageAt: new Date(),
         },
       });
-      await tx.project.update({
-        where: { id: conversation.projectId },
-        data: { lastActivityAt: new Date() },
-      });
       return created;
     });
 
@@ -107,7 +101,7 @@ export class AichatDataService {
   // ---------- 3. 编辑消息 parts ----------
 
   async updateMessageParts(
-    user: Phase1User,
+    user: AuthenticatedUser,
     messageId: string,
     dto: UpdateMessagePartsDto,
   ) {
@@ -119,10 +113,47 @@ export class AichatDataService {
       ...existingMetadata,
       parts: dto.parts,
     } as Prisma.InputJsonObject;
+    const content = extractTextFromParts(dto.parts) || "(empty)";
 
-    const updated = await this.prisma.message.update({
-      where: { id: message.id },
-      data: { metadata: nextMetadata },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const nextMessage = await tx.message.update({
+        where: { id: message.id },
+        data: { content, metadata: nextMetadata },
+      });
+
+      if (dto.truncateAfter) {
+        const orderedMessages = await tx.message.findMany({
+          where: { conversationId: message.conversationId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true },
+        });
+        const editedIndex = orderedMessages.findIndex((item) => item.id === message.id);
+        const idsToDelete =
+          editedIndex >= 0
+            ? orderedMessages.slice(editedIndex + 1).map((item) => item.id)
+            : [];
+
+        if (idsToDelete.length > 0) {
+          await tx.message.deleteMany({ where: { id: { in: idsToDelete } } });
+        }
+
+        const [messageCount, latestMessage] = await Promise.all([
+          tx.message.count({ where: { conversationId: message.conversationId } }),
+          tx.message.findFirst({
+            where: { conversationId: message.conversationId },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          }),
+        ]);
+        await tx.conversation.update({
+          where: { id: message.conversationId },
+          data: {
+            messageCount,
+            lastMessageAt: latestMessage?.createdAt ?? null,
+          },
+        });
+      }
+
+      return nextMessage;
     });
 
     return {
@@ -133,7 +164,7 @@ export class AichatDataService {
 
   // ---------- 4. 按时间点截断消息 ----------
 
-  async deleteMessagesAfter(user: Phase1User, conversationId: string, after: string) {
+  async deleteMessagesAfter(user: AuthenticatedUser, conversationId: string, after: string) {
     const conversation = await this.getOwnedConversation(user, conversationId);
     const afterDate = new Date(after);
     if (Number.isNaN(afterDate.getTime())) {
@@ -172,7 +203,7 @@ export class AichatDataService {
 
   // ---------- 5. 用户消息计数 ----------
 
-  async countUserMessages(user: Phase1User, hours?: number) {
+  async countUserMessages(user: AuthenticatedUser, hours?: number) {
     const windowHours = hours && hours > 0 ? hours : 24;
     const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
 
@@ -189,7 +220,7 @@ export class AichatDataService {
 
   // ---------- 6. 投票 ----------
 
-  async voteMessage(user: Phase1User, messageId: string, type: "up" | "down") {
+  async voteMessage(user: AuthenticatedUser, messageId: string, type: "up" | "down") {
     await this.getOwnedMessage(user, messageId);
     const isUpvoted = type === "up";
 
@@ -211,7 +242,7 @@ export class AichatDataService {
     };
   }
 
-  async getVote(user: Phase1User, messageId: string) {
+  async getVote(user: AuthenticatedUser, messageId: string) {
     await this.getOwnedMessage(user, messageId);
     const record = await this.prisma.vote.findUnique({
       where: {
@@ -227,11 +258,11 @@ export class AichatDataService {
   // ---------- 7. 建议 ----------
 
   async createSuggestions(
-    user: Phase1User,
+    user: AuthenticatedUser,
     documentId: string,
     dto: CreateSuggestionsDto,
   ) {
-    // 文档归属校验：RequirementDocument 通过 project.ownerId 判定。
+    // 文档归属校验：RequirementDocument 通过 conversation.ownerId 判定。
     await this.getOwnedDocument(user, documentId);
 
     const created = await this.prisma.suggestion.createMany({
@@ -247,7 +278,7 @@ export class AichatDataService {
     return { count: created.count };
   }
 
-  async listSuggestions(user: Phase1User, documentId: string) {
+  async listSuggestions(user: AuthenticatedUser, documentId: string) {
     await this.getOwnedDocument(user, documentId);
     const items = await this.prisma.suggestion.findMany({
       where: { documentId },
@@ -271,7 +302,7 @@ export class AichatDataService {
   // ---------- 8. Stream id 记录 ----------
 
   async registerStream(
-    user: Phase1User,
+    user: AuthenticatedUser,
     conversationId: string,
     dto: RegisterStreamDto,
   ) {
@@ -318,7 +349,7 @@ export class AichatDataService {
     };
   }
 
-  async listStreams(user: Phase1User, conversationId: string) {
+  async listStreams(user: AuthenticatedUser, conversationId: string) {
     await this.getOwnedConversation(user, conversationId);
     const items = await this.prisma.stream.findMany({
       where: { chatId: conversationId },
@@ -334,7 +365,7 @@ export class AichatDataService {
     };
   }
 
-  async getRuntimeStatus(user: Phase1User, conversationId: string) {
+  async getRuntimeStatus(user: AuthenticatedUser, conversationId: string) {
     await this.getOwnedConversation(user, conversationId);
     const latestRun = await this.prisma.runtimeRunLog.findFirst({
       where: { conversationId },
@@ -375,20 +406,13 @@ export class AichatDataService {
 
   // ---------- 归属校验工具 ----------
 
-  private async getOwnedConversation(user: Phase1User, conversationId: string) {
+  private async getOwnedConversation(user: AuthenticatedUser, conversationId: string) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: { project: true },
     });
 
     if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
       throw new NotFoundException("会话不存在");
-    }
-    if (
-      conversation.project.status === ProjectStatus.deleted ||
-      conversation.project.deletedAt
-    ) {
-      throw new NotFoundException("项目不存在");
     }
     if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
       throw new ForbiddenException("无权访问该会话");
@@ -396,7 +420,7 @@ export class AichatDataService {
     return conversation;
   }
 
-  private async getOwnedMessage(user: Phase1User, messageId: string) {
+  private async getOwnedMessage(user: AuthenticatedUser, messageId: string) {
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },
       include: { conversation: true },
@@ -418,21 +442,21 @@ export class AichatDataService {
     return message;
   }
 
-  private async getOwnedDocument(user: Phase1User, documentId: string) {
+  private async getOwnedDocument(user: AuthenticatedUser, documentId: string) {
     const document = await this.prisma.requirementDocument.findUnique({
       where: { id: documentId },
-      include: { project: true },
+      include: { conversation: true },
     });
     if (!document) {
       throw new NotFoundException("文档不存在");
     }
     if (
-      document.project.status === ProjectStatus.deleted ||
-      document.project.deletedAt
+      document.conversation.status === ConversationStatus.deleted ||
+      document.conversation.deletedAt
     ) {
-      throw new NotFoundException("项目不存在");
+      throw new NotFoundException("会话不存在");
     }
-    if (user.role !== UserRole.admin && document.project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && document.conversation.ownerId !== user.id) {
       throw new ForbiddenException("无权访问该文档");
     }
     return document;

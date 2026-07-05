@@ -7,43 +7,43 @@ import { QaService } from "./qa.service";
 import { RollbackService } from "./rollback.service";
 import { VersionHistoryService } from "./version-history.service";
 
-@Controller("projects/:projectId/qa")
+@Controller("conversations/:conversationId/qa")
 @UseGuards(JwtAuthGuard)
-export class ProjectQaController {
+export class ConversationQaController {
   constructor(private readonly qaService: QaService) {}
 
   @Post("run")
   run(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
+    @Param("conversationId") conversationId: string,
     @Body() dto: RunQaDto,
   ) {
-    return this.qaService.runForUser(user, projectId, dto);
+    return this.qaService.runForUser(user, conversationId, dto);
   }
 
   @Get("latest")
-  latest(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.qaService.getLatestForUser(user, projectId);
+  latest(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
+    return this.qaService.getLatestForUser(user, conversationId);
   }
 
   @Get("gate")
-  gate(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.qaService.getGateForUser(user, projectId);
+  gate(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
+    return this.qaService.getGateForUser(user, conversationId);
   }
 }
 
-@Controller("projects/:projectId/qa-reports")
+@Controller("conversations/:conversationId/qa-reports")
 @UseGuards(JwtAuthGuard)
-export class ProjectQaReportsController {
+export class ConversationQaReportsController {
   constructor(private readonly qaService: QaService) {}
 
   @Get()
   list(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
+    @Param("conversationId") conversationId: string,
     @Query() query: ListQaReportsQueryDto,
   ) {
-    return this.qaService.listForProject(user, projectId, query);
+    return this.qaService.listForConversation(user, conversationId, query);
   }
 }
 
@@ -58,24 +58,24 @@ export class QaReportController {
   }
 }
 
-@Controller("projects/:projectId/version-timeline")
+@Controller("conversations/:conversationId/version-timeline")
 @UseGuards(JwtAuthGuard)
-export class ProjectVersionTimelineController {
+export class ConversationVersionTimelineController {
   constructor(private readonly versionHistory: VersionHistoryService) {}
 
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.versionHistory.listProjectTimeline(user, projectId);
+  list(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
+    return this.versionHistory.listConversationTimeline(user, conversationId);
   }
 }
 
-@Controller("projects/:projectId/rollback")
+@Controller("conversations/:conversationId/rollback")
 @UseGuards(JwtAuthGuard)
-export class ProjectRollbackController {
+export class ConversationRollbackController {
   constructor(private readonly rollbackService: RollbackService) {}
 
   @Get("records")
-  listRollbackRecords(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.rollbackService.listProjectRollbackRecords(user, projectId);
+  listRollbackRecords(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
+    return this.rollbackService.listConversationRollbackRecords(user, conversationId);
   }
 }

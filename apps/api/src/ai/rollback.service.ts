@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
-  ProjectStatus,
+  ConversationStatus,
   RollbackRecordStatus,
   RollbackType,
   UserRole,
@@ -8,14 +8,14 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import type { RollbackRecord } from "./ai-vibe.types";
-import { ProductDesignStateService } from "./product-design-state.service";
+import { ConversationDesignStateService } from "./conversation-design-state.service";
 
 type RollbackRecordRow = {
   id: string;
-  projectId: string;
+  conversationId: string;
   rollbackType: RollbackType;
-  fromProductDesignStateVersion: number;
-  toProductDesignStateVersion: number;
+  fromConversationDesignStateVersion: number;
+  toConversationDesignStateVersion: number;
   beforePrdDocumentId: string | null;
   afterPrdDocumentId: string | null;
   beforePrototypeArtifactId: string | null;
@@ -33,13 +33,13 @@ type RollbackRecordRow = {
 export class RollbackService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly stateService: ProductDesignStateService,
+    private readonly stateService: ConversationDesignStateService,
   ) {}
 
-  async listProjectRollbackRecords(user: AuthenticatedUser, projectId: string) {
-    await this.assertProjectAccess(user, projectId, { allowArchived: true });
+  async listConversationRollbackRecords(user: AuthenticatedUser, conversationId: string) {
+    await this.assertConversationAccess(user, conversationId, { allowArchived: true });
     const items = await this.prisma.rollbackRecord.findMany({
-      where: { projectId },
+      where: { conversationId },
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -49,10 +49,10 @@ export class RollbackService {
   toRollbackRecord(row: RollbackRecordRow): RollbackRecord {
     return {
       id: row.id,
-      projectId: row.projectId,
+      conversationId: row.conversationId,
       rollbackType: row.rollbackType,
-      fromProductDesignStateVersion: row.fromProductDesignStateVersion,
-      toProductDesignStateVersion: row.toProductDesignStateVersion,
+      fromConversationDesignStateVersion: row.fromConversationDesignStateVersion,
+      toConversationDesignStateVersion: row.toConversationDesignStateVersion,
       beforePrdDocumentId: row.beforePrdDocumentId ?? undefined,
       afterPrdDocumentId: row.afterPrdDocumentId ?? undefined,
       beforePrototypeArtifactId: row.beforePrototypeArtifactId ?? undefined,
@@ -67,27 +67,27 @@ export class RollbackService {
     };
   }
 
-  private async assertProjectAccess(
+  private async assertConversationAccess(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && project.status === ProjectStatus.archived) {
-      throw new ForbiddenException("项目已归档，请先恢复后再继续操作");
+    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+      throw new ForbiddenException("会话已归档，请先恢复后再继续操作");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
       throw new ForbiddenException("ROLLBACK_FORBIDDEN");
     }
-    return project;
+    return conversation;
   }
 
   private assertOwnerMutation(user: AuthenticatedUser, ownerId: string) {
     if (user.role === UserRole.admin && user.id !== ownerId) {
-      throw new ForbiddenException("管理员不可直接回滚用户项目");
+      throw new ForbiddenException("管理员不可直接回滚用户会话");
     }
   }
 }

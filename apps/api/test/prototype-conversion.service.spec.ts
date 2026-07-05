@@ -1,7 +1,7 @@
 import {
   FileAssetStatus,
   FileStorageProvider,
-  ProjectStatus,
+  ConversationStatus,
   PrototypeConversionStatus,
   UserRole,
   UserStatus,
@@ -78,7 +78,7 @@ describe("PrototypeConversionService", () => {
   });
 
   it("keeps manual conversion runs queued when no converter command is configured", async () => {
-    prisma.fileAsset.findUnique.mockResolvedValue(fileRecord({ project: projectRecord() }));
+    prisma.fileAsset.findUnique.mockResolvedValue(fileRecord({ conversation: conversationRecord() }));
     prisma.prototypeConversionJob.findUnique.mockResolvedValue(null);
     prisma.prototypeConversionJob.upsert.mockResolvedValue(jobRecord());
     prisma.prototypeConversionJob.update.mockResolvedValue(jobRecord({
@@ -102,7 +102,7 @@ describe("PrototypeConversionService", () => {
   });
 
   it("does not restart a conversion job that is already running", async () => {
-    prisma.fileAsset.findUnique.mockResolvedValue(fileRecord({ project: projectRecord() }));
+    prisma.fileAsset.findUnique.mockResolvedValue(fileRecord({ conversation: conversationRecord() }));
     prisma.prototypeConversionJob.findUnique.mockResolvedValue(jobRecord({
       status: PrototypeConversionStatus.running,
       stage: "converting_rp_to_html",
@@ -127,7 +127,7 @@ describe("PrototypeConversionService", () => {
     prisma.prototypeConversionJob.findUnique
       .mockResolvedValueOnce({
         ...jobRecord({ status: PrototypeConversionStatus.queued }),
-        fileAsset: fileRecord({ project: projectRecord() }),
+        fileAsset: fileRecord({ conversation: conversationRecord() }),
       })
       .mockResolvedValueOnce(jobRecord({
         status: PrototypeConversionStatus.running,
@@ -200,7 +200,7 @@ describe("PrototypeConversionService", () => {
     prisma.prototypeConversionJob.upsert.mockResolvedValue(jobRecord({ id: "job-1", fileAssetId: "file-rp-1" }));
     prisma.prototypeConversionJob.findUnique.mockResolvedValue({
       ...jobRecord({ id: "job-1", fileAssetId: "file-rp-1" }),
-      fileAsset: fileRecord({ id: "file-rp-1", project: projectRecord() }),
+      fileAsset: fileRecord({ id: "file-rp-1", conversation: conversationRecord() }),
     });
     prisma.prototypeConversionJob.update.mockResolvedValue(jobRecord({
       id: "job-1",
@@ -226,12 +226,11 @@ describe("PrototypeConversionService", () => {
   });
 });
 
-function projectRecord(overrides: Record<string, unknown> = {}) {
+function conversationRecord(overrides: Record<string, unknown> = {}) {
   return {
-    id: "project-1",
+    id: "conversation-1",
     ownerId: "user-1",
-    productId: "product-1",
-    status: ProjectStatus.draft,
+    status: ConversationStatus.draft,
     deletedAt: null,
     ...overrides,
   };
@@ -240,8 +239,7 @@ function projectRecord(overrides: Record<string, unknown> = {}) {
 function fileRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: "file-rp",
-    projectId: "project-1",
-    conversationId: null,
+    conversationId: "conversation-1",
     messageId: null,
     uploadedBy: "user-1",
     originalName: "prototype.rp",
@@ -257,7 +255,7 @@ function fileRecord(overrides: Record<string, unknown> = {}) {
     createdAt: new Date("2026-07-01T00:00:00.000Z"),
     updatedAt: new Date("2026-07-01T00:00:00.000Z"),
     deletedAt: null,
-    project: projectRecord(),
+    conversation: conversationRecord(),
     ...overrides,
   };
 }
@@ -266,7 +264,7 @@ function jobRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: "job-1",
     fileAssetId: "file-rp",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     status: PrototypeConversionStatus.queued,
     stage: "queued",
     sourceFilePath: "/tmp/prototype.rp",

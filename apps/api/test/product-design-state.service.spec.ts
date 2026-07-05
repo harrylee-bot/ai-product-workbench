@@ -1,33 +1,33 @@
 import {
-  ProductDesignChangeType,
-  ProductDesignStateStatus,
-  ProjectStatus,
+  ConversationDesignChangeType,
+  ConversationDesignStateStatus,
+  ConversationStatus,
   UserRole,
   UserStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ProductDesignStateService } from "../src/ai/product-design-state.service";
-import type { ProductDesignState } from "../src/ai/ai-vibe.types";
+import { ConversationDesignStateService } from "../src/ai/conversation-design-state.service";
+import type { ConversationDesignState } from "../src/ai/ai-vibe.types";
 
-describe("ProductDesignStateService", () => {
+describe("ConversationDesignStateService", () => {
   const prisma = {
-	    productDesignState: {
+	    conversationDesignState: {
 	      findUnique: vi.fn(),
 	      findFirst: vi.fn(),
 	      create: vi.fn(),
 	      update: vi.fn(),
 	      updateMany: vi.fn(),
 	    },
-    productDesignVersion: {
+    conversationDesignVersion: {
       create: vi.fn(),
       findMany: vi.fn(),
       findFirst: vi.fn(),
     },
-    productDesignChangeLog: {
+    conversationDesignChangeLog: {
       create: vi.fn(),
       findMany: vi.fn(),
     },
-	    project: {
+	    conversation: {
 	      findUnique: vi.fn(),
 	      update: vi.fn(),
 	    },
@@ -37,7 +37,7 @@ describe("ProductDesignStateService", () => {
     // txn-1：事务化后 service 走 prisma.$transaction；测试中让 tx === prisma，复用上面的 model mock。
     $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
   };
-  const service = new ProductDesignStateService(prisma as never);
+  const service = new ConversationDesignStateService(prisma as never);
   const user = {
     id: "user-1",
     username: "zhangsan",
@@ -48,7 +48,7 @@ describe("ProductDesignStateService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    prisma.productDesignChangeLog.create.mockImplementation(async ({ data }) => ({
+    prisma.conversationDesignChangeLog.create.mockImplementation(async ({ data }) => ({
       id: `change-${Math.random()}`,
       ...data,
       runId: data.runId ?? null,
@@ -59,14 +59,14 @@ describe("ProductDesignStateService", () => {
       reason: data.reason ?? null,
       createdAt: new Date("2026-06-20T08:00:00Z"),
     }));
-    prisma.productDesignVersion.create.mockImplementation(async ({ data }) => ({
+    prisma.conversationDesignVersion.create.mockImplementation(async ({ data }) => ({
       id: `version-${data.version}`,
       ...data,
       reason: data.reason ?? null,
       createdAt: new Date("2026-06-20T08:00:00Z"),
     }));
-	    prisma.project.update.mockResolvedValue({});
-	    prisma.productDesignState.updateMany.mockResolvedValue({ count: 1 });
+	    prisma.conversation.update.mockResolvedValue({});
+	    prisma.conversationDesignState.updateMany.mockResolvedValue({ count: 1 });
 	    prisma.rollbackRecord.create.mockImplementation(async ({ data }) => ({
 	      id: "rollback-1",
 	      ...data,
@@ -77,11 +77,11 @@ describe("ProductDesignStateService", () => {
 	    }));
 	  });
 
-  it("creates ProductDesignState with version snapshot and change log", async () => {
+  it("creates ConversationDesignState with version snapshot and change log", async () => {
     const createdAt = new Date("2026-06-20T08:00:00Z");
-    prisma.project.findUnique.mockResolvedValue(baseProject());
-    prisma.productDesignState.findFirst.mockResolvedValue(null);
-    prisma.productDesignState.create.mockImplementation(async ({ data }) =>
+    prisma.conversation.findUnique.mockResolvedValue(baseProject());
+    prisma.conversationDesignState.findFirst.mockResolvedValue(null);
+    prisma.conversationDesignState.create.mockImplementation(async ({ data }) =>
       stateRecord({
         id: "state-1",
         ...data,
@@ -90,34 +90,34 @@ describe("ProductDesignStateService", () => {
       }),
     );
 
-    const result = await service.createStateForUser(user, "project-1", {
+    const result = await service.createStateForUser(user, "conversation-1", {
       title: "签到活动",
       businessGoal: "提升用户活跃",
       initialState: {
         pages: [{ id: "page_home", name: "签到页" }],
         businessRules: [{ id: "rule_daily_once", title: "每日一次" }],
         assumptions: [{ id: "assumption_reward", content: "奖励默认发积分" }],
-      } as Partial<ProductDesignState>,
+      } as Partial<ConversationDesignState>,
     });
 
     expect(result.state.id).toBe("state-1");
     expect(result.state.version).toBe(1);
     expect(result.state.pages[0]).toEqual(expect.objectContaining({ id: "page_home" }));
-    expect(prisma.project.update).toHaveBeenCalledWith({
-      where: { id: "project-1" },
-      data: { currentProductDesignStateId: "state-1" },
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: "conversation-1" },
+      data: { currentDesignStateId: "state-1" },
     });
-    expect(prisma.productDesignVersion.create).toHaveBeenCalledWith({
+    expect(prisma.conversationDesignVersion.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        projectId: "project-1",
+        conversationId: "conversation-1",
         stateId: "state-1",
         version: 1,
         createdBy: "user-1",
       }),
     });
-    expect(prisma.productDesignChangeLog.create).toHaveBeenCalledWith({
+    expect(prisma.conversationDesignChangeLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        changeType: ProductDesignChangeType.create,
+        changeType: ConversationDesignChangeType.create,
         path: "*",
         createdBy: "user-1",
       }),
@@ -135,11 +135,11 @@ describe("ProductDesignStateService", () => {
         },
       ],
     });
-    prisma.productDesignState.findUnique.mockResolvedValue({
+    prisma.conversationDesignState.findUnique.mockResolvedValue({
       ...stateRecord(current),
-      project: baseProject(),
+      conversation: baseProject(),
     });
-    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
+    prisma.conversationDesignState.update.mockImplementation(async ({ data }) =>
       stateRecord({
         ...current,
         ...data,
@@ -160,9 +160,9 @@ describe("ProductDesignStateService", () => {
     expect(result.state.confirmedFacts[0]).toEqual(
       expect.objectContaining({ content: "签到奖励默认发积分", confirmedBy: "user-1" }),
     );
-    expect(prisma.productDesignChangeLog.create).toHaveBeenCalledWith({
+    expect(prisma.conversationDesignChangeLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        changeType: ProductDesignChangeType.confirm_assumption,
+        changeType: ConversationDesignChangeType.confirm_assumption,
         path: "assumptions.assumption_reward",
       }),
     });
@@ -179,11 +179,11 @@ describe("ProductDesignStateService", () => {
         },
       ],
     });
-    prisma.productDesignState.findUnique.mockResolvedValue({
+    prisma.conversationDesignState.findUnique.mockResolvedValue({
       ...stateRecord(current),
-      project: baseProject(),
+      conversation: baseProject(),
     });
-    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
+    prisma.conversationDesignState.update.mockImplementation(async ({ data }) =>
       stateRecord({
         ...current,
         ...data,
@@ -206,7 +206,7 @@ describe("ProductDesignStateService", () => {
     expect(result.state.businessGoal).toBe("签到奖励采用积分");
   });
 
-  it("syncs scalar PRD section edits into ProductDesignState and invalidates stale prototype artifacts", async () => {
+  it("syncs scalar PRD section edits into ConversationDesignState and invalidates stale prototype artifacts", async () => {
     const current = baseState({
       version: 3,
       businessGoal: "提升用户活跃",
@@ -231,9 +231,9 @@ describe("ProductDesignStateService", () => {
     };
     const document = {
       id: "prd-1",
-      projectId: "project-1",
-      productDesignStateId: "state-1",
-      productDesignStateVersion: 3,
+      conversationId: "conversation-1",
+      conversationDesignStateId: "state-1",
+      conversationDesignStateVersion: 3,
       title: "签到活动 PRD",
       status: "ready" as const,
       sections: [section],
@@ -246,8 +246,8 @@ describe("ProductDesignStateService", () => {
       createdAt: "2026-06-20T08:00:00.000Z",
       updatedAt: "2026-06-20T09:00:00.000Z",
     };
-    prisma.productDesignState.findUnique.mockResolvedValue(stateRecord(current));
-    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
+    prisma.conversationDesignState.findUnique.mockResolvedValue(stateRecord(current));
+    prisma.conversationDesignState.update.mockImplementation(async ({ data }) =>
       stateRecord({
         ...current,
         ...data,
@@ -265,7 +265,7 @@ describe("ProductDesignStateService", () => {
     });
 
     expect(result.version).toBe(4);
-    expect(result.status).toBe(ProductDesignStateStatus.doc_ready);
+    expect(result.status).toBe(ConversationDesignStateStatus.doc_ready);
     expect(result.businessGoal).toBe("提升签到转化率，并让运营能追踪连续签到效果。");
     expect(result.prototypeSpec).toBeUndefined();
     expect(result.prdDocument).toEqual(expect.objectContaining({ id: "prd-1" }));
@@ -278,16 +278,16 @@ describe("ProductDesignStateService", () => {
         sourceSectionId: "business_goal",
       }),
     ]);
-    expect(prisma.project.update).toHaveBeenCalledWith({
-      where: { id: "project-1" },
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: "conversation-1" },
       data: expect.objectContaining({
-        currentProductDesignStateId: "state-1",
-        status: ProjectStatus.prd_ready,
+        currentDesignStateId: "state-1",
+        status: ConversationStatus.active,
       }),
     });
-    expect(prisma.productDesignChangeLog.create).toHaveBeenCalledWith({
+    expect(prisma.conversationDesignChangeLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        changeType: ProductDesignChangeType.update,
+        changeType: ConversationDesignChangeType.update,
         path: "prdDocument.sections.business_goal",
       }),
     });
@@ -310,9 +310,9 @@ describe("ProductDesignStateService", () => {
     };
     const document = {
       id: "prd-1",
-      projectId: "project-1",
-      productDesignStateId: "state-1",
-      productDesignStateVersion: 4,
+      conversationId: "conversation-1",
+      conversationDesignStateId: "state-1",
+      conversationDesignStateVersion: 4,
       title: "签到活动 PRD",
       status: "ready" as const,
       sections: [section],
@@ -325,8 +325,8 @@ describe("ProductDesignStateService", () => {
       createdAt: "2026-06-20T08:00:00.000Z",
       updatedAt: "2026-06-20T09:00:00.000Z",
     };
-    prisma.productDesignState.findUnique.mockResolvedValue(stateRecord(current));
-    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
+    prisma.conversationDesignState.findUnique.mockResolvedValue(stateRecord(current));
+    prisma.conversationDesignState.update.mockImplementation(async ({ data }) =>
       stateRecord({
         ...current,
         ...data,
@@ -352,7 +352,7 @@ describe("ProductDesignStateService", () => {
         source: expect.objectContaining({ type: "user_confirmed", confidence: 1 }),
       }),
     ]);
-    expect(result.status).toBe(ProductDesignStateStatus.doc_ready);
+    expect(result.status).toBe(ConversationDesignStateStatus.doc_ready);
     expect(result.prototypeSpec).toBeUndefined();
 	    expect(result.confirmedFacts).toEqual([
 	      expect.objectContaining({
@@ -365,24 +365,24 @@ describe("ProductDesignStateService", () => {
 	  it("rolls back state snapshots atomically and records rollback history", async () => {
 	    const current = baseState({
 	      version: 5,
-	      status: ProductDesignStateStatus.prototype_ready,
+	      status: ConversationDesignStateStatus.prototype_ready,
 	      prdDocument: { id: "prd-current" } as never,
 	    });
 	    const snapshot = baseState({
 	      version: 2,
-	      status: ProductDesignStateStatus.doc_ready,
+	      status: ConversationDesignStateStatus.doc_ready,
 	      prdDocument: { id: "prd-previous" } as never,
 	      prototypeSpec: undefined,
 	    });
-	    prisma.productDesignState.findUnique.mockResolvedValue({
+	    prisma.conversationDesignState.findUnique.mockResolvedValue({
 	      ...stateRecord(current),
-	      project: baseProject(),
+	      conversation: baseProject(),
 	    });
-	    prisma.productDesignVersion.findFirst
+	    prisma.conversationDesignVersion.findFirst
 	      .mockResolvedValueOnce({
 	        id: "version-target",
 	        stateId: "state-1",
-	        projectId: "project-1",
+	        conversationId: "conversation-1",
 	        version: 2,
 	        snapshot,
 	        reason: "旧版本",
@@ -390,12 +390,12 @@ describe("ProductDesignStateService", () => {
 	        createdAt: new Date("2026-06-20T07:00:00Z"),
 	      })
 	      .mockResolvedValueOnce({ version: 5 });
-	    prisma.productDesignState.findFirst.mockResolvedValue({ version: 5 });
-	    prisma.productDesignState.update.mockImplementation(async ({ data }) =>
+	    prisma.conversationDesignState.findFirst.mockResolvedValue({ version: 5 });
+	    prisma.conversationDesignState.update.mockImplementation(async ({ data }) =>
 	      stateRecord({
 	        ...snapshot,
 	        id: "state-1",
-	        projectId: "project-1",
+	        conversationId: "conversation-1",
 	        version: data.version,
 	        updatedBy: data.updatedBy,
 	        createdAt: new Date(current.createdAt),
@@ -410,18 +410,18 @@ describe("ProductDesignStateService", () => {
 
 	    expect(result.state.version).toBe(6);
 	    expect(result.state.prdDocument).toEqual(expect.objectContaining({ id: "prd-previous" }));
-	    expect(prisma.project.update).toHaveBeenCalledWith({
-	      where: { id: "project-1" },
+	    expect(prisma.conversation.update).toHaveBeenCalledWith({
+	      where: { id: "conversation-1" },
 	      data: expect.objectContaining({
-	        currentProductDesignStateId: "state-1",
-	        status: ProjectStatus.prd_ready,
+	        currentDesignStateId: "state-1",
+	        status: ConversationStatus.active,
 	      }),
 	    });
 	    expect(prisma.rollbackRecord.create).toHaveBeenCalledWith({
 	      data: expect.objectContaining({
-	        projectId: "project-1",
-	        fromProductDesignStateVersion: 5,
-	        toProductDesignStateVersion: 6,
+	        conversationId: "conversation-1",
+	        fromConversationDesignStateVersion: 5,
+	        toConversationDesignStateVersion: 6,
 	        beforePrdDocumentId: "prd-current",
 	        afterPrdDocumentId: "prd-previous",
 	        reason: "恢复到可用 PRD",
@@ -435,18 +435,18 @@ describe("ProductDesignStateService", () => {
 
 function baseProject() {
   return {
-    id: "project-1",
+    id: "conversation-1",
     ownerId: "user-1",
-    status: ProjectStatus.draft,
+    status: ConversationStatus.draft,
     deletedAt: null,
-    productDesignStates: [],
+    conversationDesignStates: [],
   };
 }
 
-function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignState {
+function baseState(overrides: Partial<ConversationDesignState> = {}): ConversationDesignState {
   return {
     id: "state-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     version: 1,
     title: "签到活动",
     summary: "签到活动摘要",
@@ -469,7 +469,7 @@ function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignSt
     confirmedFacts: [],
     prototypeSpec: {
       id: "prototype-1",
-      projectId: "project-1",
+      conversationId: "conversation-1",
       pages: [],
       components: [],
       states: [],
@@ -479,7 +479,7 @@ function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignSt
     },
     prdDocument: {
       id: "prd-1",
-      projectId: "project-1",
+      conversationId: "conversation-1",
       title: "签到活动 PRD",
       sections: [],
       knowledgeRefs: [],
@@ -495,11 +495,11 @@ function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignSt
   };
 }
 
-function stateRecord(input: Partial<ProductDesignState> & Record<string, unknown>) {
+function stateRecord(input: Partial<ConversationDesignState> & Record<string, unknown>) {
   const state = baseState(input);
   return {
     id: state.id,
-    projectId: state.projectId,
+    conversationId: state.conversationId,
     version: state.version,
     title: state.title,
     summary: state.summary ?? null,

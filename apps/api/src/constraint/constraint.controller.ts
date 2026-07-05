@@ -1,8 +1,8 @@
 import { Body, Controller, ForbiddenException, Get, NotFoundException, Post, Query, UseGuards } from "@nestjs/common";
-import { ProjectStatus, UserRole } from "@prisma/client";
+import { ConversationStatus, UserRole } from "@prisma/client";
 import { CurrentUser } from "../modules/auth/current-user.decorator";
 import { JwtAuthGuard } from "../modules/auth/jwt-auth.guard";
-import type { Phase1User } from "../modules/auth/auth.types";
+import type { AuthenticatedUser } from "../modules/auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { BuildConstraintDto } from "./constraint.dto";
 import { ConstraintService } from "./constraint.service";
@@ -16,28 +16,28 @@ export class ConstraintController {
   ) {}
 
   @Post("build")
-  async build(@CurrentUser() user: Phase1User, @Body() dto: BuildConstraintDto) {
-    await this.assertProjectAccess(user, dto.projectId);
+  async build(@CurrentUser() user: AuthenticatedUser, @Body() dto: BuildConstraintDto) {
+    await this.assertConversationAccess(user, dto.conversationId);
     return this.constraints.build({
-      projectId: dto.projectId,
+      conversationId: dto.conversationId,
       userInput: dto.input,
       createdBy: user.id,
     });
   }
 
   @Get("context")
-  async context(@CurrentUser() user: Phase1User, @Query("projectId") projectId: string) {
-    await this.assertProjectAccess(user, projectId);
-    return this.constraints.context(projectId);
+  async context(@CurrentUser() user: AuthenticatedUser, @Query("conversationId") conversationId: string) {
+    await this.assertConversationAccess(user, conversationId);
+    return this.constraints.context(conversationId);
   }
 
-  private async assertProjectAccess(user: Phase1User, projectId: string) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+  private async assertConversationAccess(user: AuthenticatedUser, conversationId: string) {
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
-      throw new ForbiddenException("无权访问该项目");
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+      throw new ForbiddenException("无权访问该会话");
     }
   }
 }

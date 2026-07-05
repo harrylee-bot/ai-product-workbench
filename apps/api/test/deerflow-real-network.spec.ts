@@ -39,7 +39,6 @@ describeRealNetwork("DeerFlowRuntimeService real network smoke", () => {
       const events: string[] = [];
       const result = await service.runTurn({
         runId: `real-run-${Date.now()}`,
-        projectId: "real-project-smoke",
         conversationId: `real-conversation-${Date.now()}`,
         userId: "real-user-smoke",
         message: "请基于附件做一次最小真实网络冒烟测试，返回 answer final action。",

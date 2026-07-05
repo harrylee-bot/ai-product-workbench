@@ -6,7 +6,7 @@ describe("documentToMarkdown", () => {
   it("normalizes literal newline escapes and keeps markdown tables for the canvas editor", () => {
     const markdown = documentToMarkdown({
       id: "prd-1",
-      projectId: "project-1",
+      conversationId: "conversation-1",
       title: "连续打开 5 天达成奖励活动需求说明书",
       status: "ready",
       version: 1,

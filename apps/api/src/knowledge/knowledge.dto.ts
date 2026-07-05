@@ -71,7 +71,7 @@ export class CreateKnowledgeItemDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
-  sourceProductId?: string;
+  sourceConversationId?: string;
 
   @IsOptional()
   @IsEnum(KnowledgePriority, { message: "知识优先级不正确" })
@@ -124,7 +124,7 @@ export class UpdateKnowledgeItemDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
-  sourceProductId?: string;
+  sourceConversationId?: string;
 
   @IsOptional()
   @IsEnum(KnowledgePriority, { message: "知识优先级不正确" })
@@ -204,7 +204,7 @@ export class ListKnowledgeCandidatesQueryDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
-  projectId?: string;
+  conversationId?: string;
 
   @IsOptional()
   @Transform(emptyToUndefined)

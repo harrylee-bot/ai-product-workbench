@@ -33,9 +33,9 @@ export type KnowledgeContext = {
   summary: string;
 };
 
-export type ProductDesignState = {
+export type ConversationDesignState = {
   id: string;
-  projectId: string;
+  conversationId: string;
   version: number;
   title: string;
   summary?: string;
@@ -78,8 +78,8 @@ export type ProductDesignState = {
   updatedAt: string;
 };
 
-export type ProductDesignDraft = Omit<
-  ProductDesignState,
+export type ConversationDesignDraft = Omit<
+  ConversationDesignState,
   "id" | "version" | "prototypeSpec" | "prdDocument" | "status" | "createdAt" | "updatedAt"
 >;
 
@@ -163,9 +163,9 @@ type RequirementDocumentStatus = "draft" | "generating" | "ready" | "failed" | "
 
 export type RequirementDocument = {
   id: string;
-  projectId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationId: string;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   status: RequirementDocumentStatus;
   sections: RequirementDocSection[];
@@ -182,7 +182,7 @@ export type RequirementDocument = {
 
 export type RequirementDocumentDraft = {
   id?: string;
-  projectId: string;
+  conversationId: string;
   title: string;
   sections: RequirementDocSection[];
   knowledgeRefs: Array<Record<string, unknown>>;
@@ -302,9 +302,9 @@ type PrototypeInteraction = {
 
 export type PrototypeSpec = {
   id: string;
-  projectId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationId: string;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   targetDevice: PrototypeTargetDevice;
   styleGuide: PrototypeStyleGuide;
@@ -320,10 +320,10 @@ export type PrototypeSpec = {
 
 export type PrototypeArtifact = {
   id: string;
-  projectId: string;
+  conversationId: string;
   prototypeSpecId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   status: PrototypeArtifactStatus;
   htmlContent?: string;
@@ -344,10 +344,10 @@ export type PrototypeArtifact = {
 
 export type PrototypeArtifactDraft = {
   id?: string;
-  projectId: string;
+  conversationId: string;
   prototypeSpecId?: string;
-  productDesignStateId?: string;
-  productDesignStateVersion?: number;
+  conversationDesignStateId?: string;
+  conversationDesignStateVersion?: number;
   title?: string;
   status?: PrototypeArtifactStatus;
   htmlContent?: string;
@@ -366,12 +366,12 @@ type ExportArtifactFormat = "prd_word" | "prototype_html" | "prd_canvas";
 
 export type ExportArtifactSummary = {
   format: ExportArtifactFormat;
-  projectId: string;
+  conversationId: string;
   title: string;
   sourceType: "requirement_document" | "prototype_artifact";
   sourceId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   fileName: string;
   contentType: string;
   downloadPath: string;
@@ -382,7 +382,7 @@ export type ExportArtifactSummary = {
 
 export type PrototypeVersion = {
   id: string;
-  projectId: string;
+  conversationId: string;
   artifactId: string;
   version: number;
   prototypeSpecSnapshot: PrototypeSpec;
@@ -448,9 +448,9 @@ export type QAIssue = {
 
 export type QAReport = {
   id: string;
-  projectId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationId: string;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   prdDocumentId?: string;
   prototypeArtifactId?: string;
   prototypeSpecId?: string;
@@ -474,10 +474,10 @@ export type QAReport = {
 
 export type RollbackRecord = {
   id: string;
-  projectId: string;
-  rollbackType: "product_design_state";
-  fromProductDesignStateVersion: number;
-  toProductDesignStateVersion: number;
+  conversationId: string;
+  rollbackType: "conversation_design_state";
+  fromConversationDesignStateVersion: number;
+  toConversationDesignStateVersion: number;
   beforePrdDocumentId?: string;
   afterPrdDocumentId?: string;
   beforePrototypeArtifactId?: string;
@@ -491,9 +491,9 @@ export type RollbackRecord = {
   updatedAt: string;
 };
 
-export type ProjectVersionTimelineItem = {
+export type ConversationVersionTimelineItem = {
   id: string;
-  type: "product_design_state" | "prd" | "prototype" | "qa" | "rollback";
+  type: "conversation_design_state" | "prd" | "prototype" | "qa" | "rollback";
   version?: number;
   title: string;
   description?: string;
@@ -515,7 +515,7 @@ type VibeStreamEventType =
   | "prd_updated"
   | "prototype_updated"
   | "qa_completed"
-  // rollback_* 为保留事件类型：回滚当前是同步 HTTP 流（POST /product-design-states/:stateId/rollback），
+  // rollback_* 为保留事件类型：回滚当前是同步 HTTP 流（POST /conversation-design-states/:stateId/rollback），
   // 不经 vibe stream（无 runId 上下文），故无 emitter 也无前端 reducer 分支。保留枚举以备未来流式回滚。
   | "rollback_started"
   | "rollback_completed"
@@ -578,7 +578,7 @@ type VibeStreamEvent = {
   protocol?: VibeStreamEventProtocol;
   eventId?: string;
   runId: string;
-  projectId?: string;
+  conversationId?: string;
   type: VibeStreamEventType;
   eventType?: VibeStreamEventType;
   category?: VibeStreamEventCategory;
@@ -597,10 +597,10 @@ type RuntimeStreamStepName =
   | "context_fetch"
   | "requirement_analysis"
   | "requirement_packaging"
-  | "product_planning"
+  | "conversation_planning"
   | "requirement_validation"
   | "safety_check"
-  | "product_design"
+  | "conversation_design"
   | "prd_generation"
   | "prototype_design"
   | "prototype_code_generation"

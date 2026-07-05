@@ -9,7 +9,7 @@ import {
 const emptyToUndefined = ({ value }: { value: unknown }) =>
   typeof value === "string" && value.trim() === "" ? undefined : value;
 
-export class CreateProductDesignStateDto {
+export class CreateConversationDesignStateDto {
   @IsString({ message: "标题不能为空" })
   @IsNotEmpty({ message: "标题不能为空" })
   @MaxLength(100, { message: "标题不能超过 100 个字符" })
@@ -31,7 +31,7 @@ export class CreateProductDesignStateDto {
   reason?: string;
 }
 
-export class CreateProductDesignVersionDto {
+export class CreateConversationDesignVersionDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString({ message: "版本原因格式不正确" })
@@ -39,7 +39,7 @@ export class CreateProductDesignVersionDto {
   reason?: string;
 }
 
-export class RollbackProductDesignStateDto {
+export class RollbackConversationDesignStateDto {
   @IsString({ message: "versionId 不能为空" })
   @IsNotEmpty({ message: "versionId 不能为空" })
   versionId!: string;

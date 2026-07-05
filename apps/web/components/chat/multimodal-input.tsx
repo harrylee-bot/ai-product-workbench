@@ -32,28 +32,14 @@ import {
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
 import type { Attachment, ChatMessage } from "@/lib/types";
+import {
+  type ChatRuntimeModel,
+  deleteAllChats,
+  deleteChat,
+} from "@/lib/api/nest-client";
+import { getApiBase } from "@/lib/api/config";
 import { createChatHref, createNewChatHref } from "@/lib/chat-navigation";
 import { cn } from "@/lib/utils";
-
-// v1: 单一固定模型，后端 NestJS 桥不感知前端模型选择。
-// 原 lib/ai/models 与 /api/models 路由已删除，模型选择器保留 UI 但只展示这一个模型。
-type ChatModel = {
-  id: string;
-  name: string;
-  provider: string;
-  description: string;
-};
-
-const DEFAULT_CHAT_MODEL = "gpt-5.5";
-
-const chatModels: ChatModel[] = [
-  {
-    id: DEFAULT_CHAT_MODEL,
-    name: "GPT-5.5",
-    provider: "openai",
-    description: "默认对话模型",
-  },
-];
 
 import {
   PromptInput,
@@ -94,6 +80,7 @@ function PureMultimodalInput({
   selectedVisibilityType,
   selectedModelId,
   onModelChange,
+  runtimeModel,
   editingMessage,
   onCancelEdit,
   isLoading,
@@ -114,6 +101,7 @@ function PureMultimodalInput({
   selectedVisibilityType: VisibilityType;
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
+  runtimeModel: ChatRuntimeModel;
   editingMessage?: ChatMessage | null;
   onCancelEdit?: () => void;
   isLoading?: boolean;
@@ -190,13 +178,14 @@ function PureMultimodalInput({
         toast("删除当前对话？", {
           action: {
             label: "删除",
-            onClick: () => {
-              fetch(
-                `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat?id=${chatId}`,
-                { method: "DELETE" }
-              );
-              router.push(createNewChatHref());
-              toast.success("对话已删除");
+            onClick: async () => {
+              try {
+                await deleteChat(chatId);
+                router.push(createNewChatHref());
+                toast.success("对话已删除");
+              } catch {
+                toast.error("删除对话失败");
+              }
             },
           },
         });
@@ -205,12 +194,14 @@ function PureMultimodalInput({
         toast("删除全部对话？", {
           action: {
             label: "删除全部",
-            onClick: () => {
-              fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/history`, {
-                method: "DELETE",
-              });
-              router.push(createNewChatHref());
-              toast.success("已删除全部对话");
+            onClick: async () => {
+              try {
+                await deleteAllChats();
+                router.push(createNewChatHref());
+                toast.success("已删除全部对话");
+              } catch {
+                toast.error("删除全部对话失败");
+              }
             },
           },
         });
@@ -235,9 +226,11 @@ function PureMultimodalInput({
       parts: [
         ...attachments.map((attachment) => ({
           type: "file" as const,
+          fileId: attachment.fileId,
           url: attachment.url,
           name: attachment.name,
           mediaType: attachment.contentType,
+          size: attachment.size,
         })),
         {
           type: "text",
@@ -267,33 +260,37 @@ function PureMultimodalInput({
 
   const uploadFile = useCallback(async (file: File) => {
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("files", file);
 
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/files/upload`,
+        `${getApiBase()}/conversations/${chatId}/files`,
         {
           method: "POST",
           body: formData,
+          credentials: "include",
         }
       );
 
       if (response.ok) {
         const data = await response.json();
-        const { url, pathname, contentType } = data;
+        const item = data.items?.[0];
+        if (!item) throw new Error("UPLOAD_EMPTY_RESPONSE");
 
         return {
-          url,
-          name: pathname,
-          contentType,
+          fileId: item.id,
+          url: item.publicUrl ?? URL.createObjectURL(file),
+          name: item.originalName ?? file.name,
+          contentType: item.mimeType ?? file.type,
+          size: item.size ?? file.size,
         };
       }
       const { error } = await response.json();
       toast.error(error);
-    } catch (_error) {
+    } catch {
       toast.error("文件上传失败，请重试");
     }
-  }, []);
+  }, [chatId]);
 
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -312,7 +309,7 @@ function PureMultimodalInput({
           ...currentAttachments,
           ...successfullyUploadedAttachments,
         ]);
-      } catch (_error) {
+      } catch {
         toast.error("文件上传失败");
       } finally {
         setUploadQueue([]);
@@ -358,7 +355,7 @@ function PureMultimodalInput({
           ...curr,
           ...(successfullyUploadedAttachments as Attachment[]),
         ]);
-      } catch (_error) {
+      } catch {
         toast.error("粘贴图片上传失败");
       } finally {
         setUploadQueue([]);
@@ -528,11 +525,11 @@ function PureMultimodalInput({
           <PromptInputTools>
             <AttachmentsButton
               fileInputRef={fileInputRef}
-              selectedModelId={selectedModelId}
               status={status}
             />
             <ModelSelectorCompact
               onModelChange={onModelChange}
+              runtimeModel={runtimeModel}
               selectedModelId={selectedModelId}
             />
           </PromptInputTools>
@@ -579,6 +576,9 @@ export const MultimodalInput = memo(
     if (prevProps.selectedModelId !== nextProps.selectedModelId) {
       return false;
     }
+    if (prevProps.runtimeModel.id !== nextProps.runtimeModel.id) {
+      return false;
+    }
     if (prevProps.editingMessage !== nextProps.editingMessage) {
       return false;
     }
@@ -596,14 +596,10 @@ export const MultimodalInput = memo(
 function PureAttachmentsButton({
   fileInputRef,
   status,
-  selectedModelId,
 }: {
   fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
   status: UseChatHelpers<ChatMessage>["status"];
-  selectedModelId: string;
 }) {
-  void selectedModelId;
-  // v1: 单一固定模型，假定支持视觉附件（原 /api/models 能力查询已删除）。
   const hasVision = true;
 
   return (
@@ -632,17 +628,17 @@ const AttachmentsButton = memo(PureAttachmentsButton);
 function PureModelSelectorCompact({
   selectedModelId,
   onModelChange,
+  runtimeModel,
 }: {
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
+  runtimeModel: ChatRuntimeModel;
 }) {
   const [open, setOpen] = useState(false);
-  // v1: 单一固定模型，原 /api/models 动态模型与能力查询已删除。
-  const activeModels = chatModels;
+  const activeModels = [runtimeModel];
 
   const selectedModel =
-    activeModels.find((m: ChatModel) => m.id === selectedModelId) ??
-    activeModels.find((m: ChatModel) => m.id === DEFAULT_CHAT_MODEL) ??
+    activeModels.find((m) => m.id === selectedModelId) ??
     activeModels[0];
   const [provider] = selectedModel.id.split("/");
 
@@ -664,7 +660,7 @@ function PureModelSelectorCompact({
           {(() => {
             const grouped: Record<
               string,
-              { model: ChatModel; curated: boolean }[]
+              { model: ChatRuntimeModel; curated: boolean }[]
             > = {};
             for (const model of activeModels) {
               const key = "_available";

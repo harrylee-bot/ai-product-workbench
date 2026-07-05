@@ -7,7 +7,7 @@ describe("DocumentCanvasService", () => {
   const documentService = {
     getDocumentForUser: vi.fn(),
     getCurrentForUser: vi.fn(),
-    getCurrentForProject: vi.fn(),
+    getCurrentForConversation: vi.fn(),
   };
   const service = new DocumentCanvasService(documentService as never);
   const user = {
@@ -50,7 +50,7 @@ describe("DocumentCanvasService", () => {
   it("exports the current PRD as a .canvas artifact", async () => {
     documentService.getCurrentForUser.mockResolvedValue({ document: baseDocument() });
 
-    const artifact = await service.createCanvasExportForUser(user, "project-1");
+    const artifact = await service.createCanvasExportForUser(user, "conversation-1");
 
     expect(artifact.format).toBe("prd_canvas");
     expect(artifact.fileName).toBe("签到活动-PRD.canvas");
@@ -65,9 +65,9 @@ describe("DocumentCanvasService", () => {
 function baseDocument(overrides: Partial<RequirementDocument> = {}): RequirementDocument {
   return {
     id: "prd-1",
-    projectId: "project-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 3,
+    conversationId: "conversation-1",
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 3,
     title: "签到活动 PRD",
     status: "ready",
     sections: [

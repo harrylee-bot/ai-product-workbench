@@ -1,11 +1,11 @@
 import { ForbiddenException } from "@nestjs/common";
-import { ConversationStatus, ProjectStatus, UserRole, UserStatus } from "@prisma/client";
+import { ConversationStatus, UserRole, UserStatus } from "@prisma/client";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AichatDataService } from "../src/modules/aichat-data/aichat-data.service";
-import type { Phase1User } from "../src/modules/auth/auth.types";
+import type { AuthenticatedUser } from "../src/modules/auth/auth.types";
 
 describe("AichatDataService", () => {
-  const user: Phase1User = {
+  const user: AuthenticatedUser = {
     id: "user-1",
     username: "user",
     displayName: "User",
@@ -30,8 +30,8 @@ describe("AichatDataService", () => {
       ownerId: "user-1",
       status: ConversationStatus.active,
       deletedAt: null,
-      project: {
-        status: ProjectStatus.draft,
+      conversation: {
+        status: ConversationStatus.draft,
         deletedAt: null,
       },
     });

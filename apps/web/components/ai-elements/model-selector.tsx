@@ -2,13 +2,10 @@ import type { ComponentProps, ReactNode } from "react";
 
 import {
   Command,
-  CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
-  CommandShortcut,
 } from "@/components/ui/command";
 import {
   Popover,
@@ -71,8 +68,6 @@ export const ModelSelectorList = ({ className, ...props }: ModelSelectorListProp
   <CommandList className={cn("max-h-[280px]", className)} {...props} />
 );
 
-type ModelSelectorEmptyProps = ComponentProps<typeof CommandEmpty>;
-
 export type ModelSelectorGroupProps = ComponentProps<typeof CommandGroup>;
 
 export const ModelSelectorGroup = (props: ModelSelectorGroupProps) => (
@@ -85,12 +80,7 @@ export const ModelSelectorItem = ({ className, ...props }: ModelSelectorItemProp
   <CommandItem className={cn("w-full text-[13px] rounded-lg", className)} {...props} />
 );
 
-type ModelSelectorShortcutProps = ComponentProps<typeof CommandShortcut>;type ModelSelectorSeparatorProps = ComponentProps<
-  typeof CommandSeparator
->;export type ModelSelectorLogoProps = Omit<
-  ComponentProps<"img">,
-  "src" | "alt"
-> & {
+export type ModelSelectorLogoProps = ComponentProps<"span"> & {
   provider:
     | "moonshotai-cn"
     | "lucidquery"
@@ -157,17 +147,17 @@ export const ModelSelectorLogo = ({
   className,
   ...props
 }: ModelSelectorLogoProps) => (
-  <img
+  <span
     {...props}
-    alt={`${provider} logo`}
-    className={cn("size-4 dark:invert", className)}
-    height={16}
-    src={`https://models.dev/logos/${provider}.svg`}
-    width={16}
-  />
+    aria-hidden="true"
+    className={cn(
+      "inline-flex size-4 shrink-0 items-center justify-center rounded border border-border/70 bg-muted text-[9px] font-semibold uppercase leading-none text-muted-foreground",
+      className
+    )}
+  >
+    {providerInitial(provider)}
+  </span>
 );
-
-type ModelSelectorLogoGroupProps = ComponentProps<"div">;
 
 export type ModelSelectorNameProps = ComponentProps<"span">;
 
@@ -177,3 +167,7 @@ export const ModelSelectorName = ({
 }: ModelSelectorNameProps) => (
   <span className={cn("flex-1 truncate text-left", className)} {...props} />
 );
+
+function providerInitial(provider: string) {
+  return provider.trim().charAt(0) || "M";
+}

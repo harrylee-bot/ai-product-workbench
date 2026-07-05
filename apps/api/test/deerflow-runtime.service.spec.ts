@@ -38,7 +38,6 @@ describe("DeerFlowRuntimeService", () => {
 
   it("reuses the DeerFlow thread only for the same bound conversation", async () => {
     prisma.deerFlowThreadBinding.findUnique.mockResolvedValueOnce({
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       deerFlowThreadId: "deerflow-thread-existing",
@@ -65,7 +64,6 @@ describe("DeerFlowRuntimeService", () => {
     const service = new DeerFlowRuntimeService(prisma as never);
     const result = await service.runTurn({
       runId: "run-1",
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       message: "继续",
@@ -118,14 +116,12 @@ describe("DeerFlowRuntimeService", () => {
     const service = new DeerFlowRuntimeService(prisma as never);
     const first = await service.runTurn({
       runId: "run-1",
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       message: "你好",
     });
     const second = await service.runTurn({
       runId: "run-2",
-      projectId: "project-2",
       conversationId: "conversation-2",
       userId: "user-1",
       message: "新对话",
@@ -144,8 +140,7 @@ describe("DeerFlowRuntimeService", () => {
 
   it("rejects a mismatched DeerFlow thread binding instead of reusing stale context", async () => {
     prisma.deerFlowThreadBinding.findUnique.mockResolvedValueOnce({
-      projectId: "project-old",
-      conversationId: "conversation-1",
+      conversationId: "conversation-old",
       userId: "user-1",
       deerFlowThreadId: "deerflow-thread-old",
     });
@@ -153,8 +148,7 @@ describe("DeerFlowRuntimeService", () => {
     const service = new DeerFlowRuntimeService(prisma as never);
     await expect(service.runTurn({
       runId: "run-1",
-      projectId: "project-new",
-      conversationId: "conversation-1",
+      conversationId: "conversation-new",
       userId: "user-1",
       message: "继续",
     })).rejects.toThrow("已拒绝复用旧上下文");
@@ -204,7 +198,6 @@ describe("DeerFlowRuntimeService", () => {
     const service = new DeerFlowRuntimeService(prisma as never);
     const result = await service.runTurn({
       runId: "run-1",
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       message: "你好",
@@ -215,7 +208,6 @@ describe("DeerFlowRuntimeService", () => {
 
     expect(prisma.deerFlowThreadBinding.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        projectId: "project-1",
         conversationId: "conversation-1",
         userId: "user-1",
         deerFlowThreadId: "deerflow-thread-1",
@@ -234,7 +226,7 @@ describe("DeerFlowRuntimeService", () => {
     const runRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
     const prompt = String(runRequest.input.messages[0].content);
     expect(prompt).toContain("prototypeHtmlContract");
-    expect(prompt).toContain("iframe srcDoc");
+    expect(prompt).toContain("preview URL");
     expect(prompt).toContain("mnt/user-data/outputs/index.html");
     expect(prompt).toContain("Never output a bare HTML fragment");
     expect(prompt).toContain("<style>...complete CSS reset");
@@ -345,7 +337,6 @@ describe("DeerFlowRuntimeService", () => {
     const service = new DeerFlowRuntimeService(prisma as never);
     const result = await service.runTurn({
       runId: "run-1",
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       message: "你好",
@@ -414,7 +405,6 @@ describe("DeerFlowRuntimeService", () => {
     const service = new DeerFlowRuntimeService(prisma as never);
     await service.runTurn({
       runId: "run-1",
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       message: "生成 PRD",
@@ -467,7 +457,6 @@ describe("DeerFlowRuntimeService", () => {
     const service = new DeerFlowRuntimeService(prisma as never);
     const result = await service.runTurn({
       runId: "run-1",
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       message: "生成签到活动",
@@ -549,7 +538,6 @@ describe("DeerFlowRuntimeService", () => {
       const service = new DeerFlowRuntimeService(prisma as never);
       const result = await service.runTurn({
         runId: "run-1",
-        projectId: "project-1",
         conversationId: "conversation-1",
         userId: "user-1",
         message: "根据附件生成原型",
@@ -656,7 +644,6 @@ describe("DeerFlowRuntimeService", () => {
     const service = new DeerFlowRuntimeService(prisma as never);
     const result = await service.runTurn({
       runId: "run-1",
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       message: "继续",
@@ -683,7 +670,7 @@ describe("DeerFlowRuntimeService", () => {
     expect(prisma.deerFlowThreadBinding.update).toHaveBeenCalledWith({
       where: { conversationId: "conversation-1" },
       data: expect.objectContaining({
-        projectId: "project-1",
+        conversationId: "conversation-1",
         userId: "user-1",
         deerFlowThreadId: "deerflow-thread-2",
       }),
@@ -698,7 +685,6 @@ describe("DeerFlowRuntimeService", () => {
 	  it("fails a DeerFlow stream that stays idle after headers", async () => {
 	    process.env.DEERFLOW_IDLE_TIMEOUT_MS = "5";
 	    prisma.deerFlowThreadBinding.findUnique.mockResolvedValueOnce({
-	      projectId: "project-1",
 	      conversationId: "conversation-1",
 	      userId: "user-1",
 	      deerFlowThreadId: "deerflow-thread-existing",
@@ -722,7 +708,6 @@ describe("DeerFlowRuntimeService", () => {
 	    const service = new DeerFlowRuntimeService(prisma as never);
 	    await expect(service.runTurn({
 	      runId: "run-1",
-	      projectId: "project-1",
 	      conversationId: "conversation-1",
 	      userId: "user-1",
 	      message: "继续",

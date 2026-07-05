@@ -4,7 +4,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { DocumentCanvasService } from "./document-canvas.service";
 import type {
   ExportArtifactSummary,
-  ProductDesignState,
+  ConversationDesignState,
   PrototypeArtifact,
   RequirementDocBlock,
   RequirementDocument,
@@ -26,53 +26,53 @@ export class ExportService {
     private readonly documentCanvasService: DocumentCanvasService,
   ) {}
 
-  async exportPrdWordForUser(user: AuthenticatedUser, projectId: string) {
-    const current = await this.documentService.getCurrentForUser(user, projectId);
+  async exportPrdWordForUser(user: AuthenticatedUser, conversationId: string) {
+    const current = await this.documentService.getCurrentForUser(user, conversationId);
     if (!current.document) throw new NotFoundException("PRD_EXPORT_NOT_FOUND");
-    assertDocumentMatchesState(current.document, current.productDesignState ?? undefined);
-    const qaGate = await this.qaService.assertGateAllows(user, projectId, "export_or_publish");
-    return this.buildPrdWordExport(current.document, current.productDesignState ?? undefined, qaGate);
+    assertDocumentMatchesState(current.document, current.conversationDesignState ?? undefined);
+    const qaGate = await this.qaService.assertGateAllows(user, conversationId, "export_or_publish");
+    return this.buildPrdWordExport(current.document, current.conversationDesignState ?? undefined, qaGate);
   }
 
-  async exportPrototypeHtmlForUser(user: AuthenticatedUser, projectId: string) {
-    const current = await this.prototypeService.getCurrentForUser(user, projectId);
+  async exportPrototypeHtmlForUser(user: AuthenticatedUser, conversationId: string) {
+    const current = await this.prototypeService.getCurrentForUser(user, conversationId);
     if (!current.artifact) throw new NotFoundException("HTML_EXPORT_NOT_FOUND");
-    assertArtifactMatchesState(current.artifact, current.productDesignState ?? undefined);
-    const qaGate = await this.qaService.assertGateAllows(user, projectId, "export_or_publish");
+    assertArtifactMatchesState(current.artifact, current.conversationDesignState ?? undefined);
+    const qaGate = await this.qaService.assertGateAllows(user, conversationId, "export_or_publish");
     return this.buildPrototypeHtmlExport(current.artifact, qaGate);
   }
 
-  async exportPrdCanvasForUser(user: AuthenticatedUser, projectId: string) {
-    const qaGate = await this.qaService.assertGateAllows(user, projectId, "export_or_publish");
-    const artifact = await this.documentCanvasService.createCanvasExportForUser(user, projectId);
+  async exportPrdCanvasForUser(user: AuthenticatedUser, conversationId: string) {
+    const qaGate = await this.qaService.assertGateAllows(user, conversationId, "export_or_publish");
+    const artifact = await this.documentCanvasService.createCanvasExportForUser(user, conversationId);
     return { ...artifact, qaGate };
   }
 
-  async createPrdWordExport(projectId: string) {
-    const current = await this.documentService.getCurrentForProject(projectId);
+  async createPrdWordExport(conversationId: string) {
+    const current = await this.documentService.getCurrentForConversation(conversationId);
     if (!current.document) throw new NotFoundException("PRD_EXPORT_NOT_FOUND");
-    assertDocumentMatchesState(current.document, current.productDesignState ?? undefined);
-    const qaGate = await this.qaService.assertGateAllowsForProject(projectId, "export_or_publish");
-    return this.buildPrdWordExport(current.document, current.productDesignState ?? undefined, qaGate);
+    assertDocumentMatchesState(current.document, current.conversationDesignState ?? undefined);
+    const qaGate = await this.qaService.assertGateAllowsForConversation(conversationId, "export_or_publish");
+    return this.buildPrdWordExport(current.document, current.conversationDesignState ?? undefined, qaGate);
   }
 
-  async createPrototypeHtmlExport(projectId: string) {
-    const current = await this.prototypeService.getCurrentForProject(projectId);
+  async createPrototypeHtmlExport(conversationId: string) {
+    const current = await this.prototypeService.getCurrentForConversation(conversationId);
     if (!current.artifact) throw new NotFoundException("HTML_EXPORT_NOT_FOUND");
-    assertArtifactMatchesState(current.artifact, current.productDesignState ?? undefined);
-    const qaGate = await this.qaService.assertGateAllowsForProject(projectId, "export_or_publish");
+    assertArtifactMatchesState(current.artifact, current.conversationDesignState ?? undefined);
+    const qaGate = await this.qaService.assertGateAllowsForConversation(conversationId, "export_or_publish");
     return this.buildPrototypeHtmlExport(current.artifact, qaGate);
   }
 
-  async createPrdCanvasExport(projectId: string) {
-    const qaGate = await this.qaService.assertGateAllowsForProject(projectId, "export_or_publish");
-    const artifact = await this.documentCanvasService.createCanvasExportForProject(projectId);
+  async createPrdCanvasExport(conversationId: string) {
+    const qaGate = await this.qaService.assertGateAllowsForConversation(conversationId, "export_or_publish");
+    const artifact = await this.documentCanvasService.createCanvasExportForConversation(conversationId);
     return { ...artifact, qaGate };
   }
 
   private buildPrdWordExport(
     document: RequirementDocument,
-    state?: ProductDesignState,
+    state?: ConversationDesignState,
     qaGate?: ExportArtifactSummary["qaGate"],
   ): ExportArtifact {
     const html = renderRequirementDocumentAsWordHtml(document, state);
@@ -81,15 +81,15 @@ export class ExportService {
     const fileName = `${safeFileName(exportTitle)}.doc`;
     return {
       format: "prd_word",
-      projectId: document.projectId,
+      conversationId: document.conversationId,
       title: exportTitle,
       sourceType: "requirement_document",
       sourceId: document.id,
-      productDesignStateId: document.productDesignStateId,
-      productDesignStateVersion: document.productDesignStateVersion,
+      conversationDesignStateId: document.conversationDesignStateId,
+      conversationDesignStateVersion: document.conversationDesignStateVersion,
       fileName,
       contentType: "application/msword; charset=utf-8",
-      downloadPath: `/api/projects/${document.projectId}/export/word`,
+      downloadPath: `/api/conversations/${document.conversationId}/export/word`,
       sizeBytes: buffer.byteLength,
       qaGate,
       generatedAt: new Date().toISOString(),
@@ -111,15 +111,15 @@ export class ExportService {
     const fileName = `${safeFileName(artifact.title || "prototype")}.html`;
     return {
       format: "prototype_html",
-      projectId: artifact.projectId,
+      conversationId: artifact.conversationId,
       title: artifact.title,
       sourceType: "prototype_artifact",
       sourceId: artifact.id,
-      productDesignStateId: artifact.productDesignStateId,
-      productDesignStateVersion: artifact.productDesignStateVersion,
+      conversationDesignStateId: artifact.conversationDesignStateId,
+      conversationDesignStateVersion: artifact.conversationDesignStateVersion,
       fileName,
       contentType: "text/html; charset=utf-8",
-      downloadPath: `/api/projects/${artifact.projectId}/export/html`,
+      downloadPath: `/api/conversations/${artifact.conversationId}/export/html`,
       sizeBytes: buffer.byteLength,
       qaGate,
       generatedAt: new Date().toISOString(),
@@ -128,21 +128,21 @@ export class ExportService {
   }
 }
 
-function assertDocumentMatchesState(document: RequirementDocument, state?: ProductDesignState) {
+function assertDocumentMatchesState(document: RequirementDocument, state?: ConversationDesignState) {
   if (!state) return;
-  if (document.productDesignStateId === state.id && document.productDesignStateVersion === state.version) return;
+  if (document.conversationDesignStateId === state.id && document.conversationDesignStateVersion === state.version) return;
   throw new BadRequestException("PRD_EXPORT_STATE_MISMATCH");
 }
 
-function assertArtifactMatchesState(artifact: PrototypeArtifact, state?: ProductDesignState) {
+function assertArtifactMatchesState(artifact: PrototypeArtifact, state?: ConversationDesignState) {
   if (!state) return;
-  if (artifact.productDesignStateId === state.id && artifact.productDesignStateVersion === state.version) return;
+  if (artifact.conversationDesignStateId === state.id && artifact.conversationDesignStateVersion === state.version) return;
   throw new BadRequestException("HTML_EXPORT_STATE_MISMATCH");
 }
 
 function renderRequirementDocumentAsWordHtml(
   document: RequirementDocument,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
 ) {
   const sections = [...document.sections].sort((left, right) => left.order - right.order);
   const exportTitle = getRequirementDocumentExportTitle(document, state);
@@ -162,7 +162,7 @@ function renderRequirementDocumentAsWordHtml(
     { number: "4", title: "需求安全基线要求（必填）", level: 1 },
   ];
   const stateMeta = state
-    ? `<p class="meta">ProductDesignState：${escapeHtml(state.id)} v${state.version}</p>`
+    ? `<p class="meta">ConversationDesignState：${escapeHtml(state.id)} v${state.version}</p>`
     : "";
   return [
     "<!doctype html>",
@@ -386,7 +386,7 @@ function parseMarkdownTableRow(line: string) {
 function buildIntroSections(
   sections: RequirementDocument["sections"],
   document: RequirementDocument,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
 ): ExportSection[] {
   const background = findSection(sections, (section) => section.type === "background" || /背景|项目背景/.test(section.title));
   const scope = findSection(sections, (section) => section.type === "scope" || /范围|文档范围/.test(section.title));
@@ -418,7 +418,7 @@ function buildIntroSections(
 function buildBusinessSections(
   sections: RequirementDocument["sections"],
   document: RequirementDocument,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
 ): ExportSection[] {
   const used = new Set<string>();
   const pageLink = findSection(sections, (section) => /页面链接|页面入口/.test(section.title));
@@ -480,7 +480,7 @@ function buildBusinessSections(
 function renderScope(
   source: RequirementDocument["sections"][number] | undefined,
   document: RequirementDocument,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
 ) {
   const items = splitLines(source?.content ?? "")
     .map(stripListPrefix)
@@ -503,7 +503,7 @@ function renderScope(
 function renderPageLinks(
   source: RequirementDocument["sections"][number] | undefined,
   document: RequirementDocument,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
 ) {
   const sourceContent = source?.content?.trim();
   const pageItems = compactRecordItems(state?.pages, "页面");
@@ -517,7 +517,7 @@ function renderPageLinks(
   return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
 }
 
-function renderCoreRulesFallback(document: RequirementDocument, state?: ProductDesignState) {
+function renderCoreRulesFallback(document: RequirementDocument, state?: ConversationDesignState) {
   const rows = [
     ...compactRecordItems(state?.features, "功能点"),
     ...compactRecordItems(state?.businessRules, "业务规则"),
@@ -538,7 +538,7 @@ function renderCoreRulesFallback(document: RequirementDocument, state?: ProductD
 function renderInterfaceTable(
   source: RequirementDocument["sections"][number] | undefined,
   document: RequirementDocument,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
 ) {
   const sourceContent = source?.content?.trim();
   if (sourceContent) {
@@ -560,7 +560,7 @@ function renderInterfaceTable(
 function renderAcceptanceTable(
   source: RequirementDocument["sections"][number] | undefined,
   document: RequirementDocument,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
 ) {
   const sourceContent = source?.content?.trim();
   if (sourceContent) {
@@ -576,7 +576,7 @@ function renderAcceptanceTable(
       ["1", "页面可见性", `${base}相关入口、页面标题、配置项和结果展示符合评审确认范围。`],
       ["2", "业务规则", "配置保存、查询、状态流转、重复操作、空态和异常提示均符合需求规则。"],
       ["3", "接口处理", "接口成功、失败、超时和无权限场景均有明确返回、页面提示和日志记录。"],
-      ["4", "兼容回归", "存量活动、存量配置和历史页面不受本需求影响，新增能力可按权限和配置开关控制。"],
+      ["4", "存量影响", "存量活动、存量配置和历史页面不受本需求影响，新增能力可按权限和配置开关控制。"],
     ],
   );
 }
@@ -584,7 +584,7 @@ function renderAcceptanceTable(
 function buildDegradationSection(
   sections: RequirementDocument["sections"],
   document: RequirementDocument,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
 ) {
   const source = findSection(sections, (section) => /降级/.test(section.title))
     ?? findSection(sections, (section) => section.type === "exception_scenarios" || /异常|兜底|失败/.test(section.title));
@@ -597,7 +597,7 @@ function buildDegradationSection(
   ].join("\n");
 }
 
-function buildSafetyBaselineRows(document: RequirementDocument, state?: ProductDesignState) {
+function buildSafetyBaselineRows(document: RequirementDocument, state?: ConversationDesignState) {
   const text = JSON.stringify({ title: document.title, sections: document.sections, state }).toLowerCase();
   const rows = STANDARD_SAFETY_BASELINE_ROWS.map((row) => ({ ...row }));
   const setYes = (...indexes: string[]) => {
@@ -618,11 +618,11 @@ function buildSafetyBaselineRows(document: RequirementDocument, state?: ProductD
   return rows.map((row) => [row.index, row.content, row.scope, row.status]);
 }
 
-function getRequirementDocumentExportTitle(document: RequirementDocument, state?: ProductDesignState) {
+function getRequirementDocumentExportTitle(document: RequirementDocument, state?: ConversationDesignState) {
   return `${getRequirementBaseName(document, state)}需求说明书`;
 }
 
-function getRequirementBaseName(document: RequirementDocument, state?: ProductDesignState) {
+function getRequirementBaseName(document: RequirementDocument, state?: ConversationDesignState) {
   const preferred = state?.title || document.title || "需求";
   const normalized = preferred
     .replace(/\s+/g, " ")
@@ -632,25 +632,25 @@ function getRequirementBaseName(document: RequirementDocument, state?: ProductDe
   return normalized || "需求";
 }
 
-function getBusinessGoal(document: RequirementDocument, state?: ProductDesignState) {
+function getBusinessGoal(document: RequirementDocument, state?: ConversationDesignState) {
   const goalSection = findSection(document.sections, (section) => section.type === "business_goal" || /目标/.test(section.title));
   return state?.businessGoal || goalSection?.content || state?.summary || `${getRequirementBaseName(document, state)}形成可配置、可验证、可回滚的业务闭环。`;
 }
 
-function buildBackgroundFallback(document: RequirementDocument, state?: ProductDesignState) {
+function buildBackgroundFallback(document: RequirementDocument, state?: ConversationDesignState) {
   return state?.background
     || state?.summary
     || `${getRequirementBaseName(document, state)}涉及活动配置平台相关业务能力。本次需求用于补充配置、页面展示、接口联动、结果校验和运营验收口径，支撑业务上线评审与测试用例编写。`;
 }
 
-function buildScenarioFallback(document: RequirementDocument, state?: ProductDesignState) {
+function buildScenarioFallback(document: RequirementDocument, state?: ConversationDesignState) {
   const scenarios = compactRecordItems(state?.userScenarios, "场景");
   return scenarios.length
     ? scenarios.join("；")
     : `运营人员在活动配置平台完成${getRequirementBaseName(document, state)}相关配置，用户或下游系统按配置完成页面访问、结果查询或状态反馈。`;
 }
 
-function buildChannelRows(document: RequirementDocument, state?: ProductDesignState) {
+function buildChannelRows(document: RequirementDocument, state?: ConversationDesignState) {
   const text = JSON.stringify({ title: document.title, sections: document.sections, state });
   const inApp = /端内|app|APP|小程序/.test(text) ? "☑是 □否" : "☑是 □否";
   const h5 = /H5|WAP|端外|wap|h5/.test(text) ? "☑是 □否" : "□是 ☑否";

@@ -1,16 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useActiveChat } from "@/hooks/use-active-chat";
 import {
   initialArtifactData,
@@ -48,8 +38,7 @@ export function ChatShell() {
     votes,
     currentModelId,
     setCurrentModelId,
-    showCreditCardAlert,
-    setShowCreditCardAlert,
+    runtimeModel,
     runtimeStatus,
   } = useActiveChat();
 
@@ -170,6 +159,7 @@ export function ChatShell() {
                     setInput("");
                   }}
                   onModelChange={setCurrentModelId}
+                  runtimeModel={runtimeModel}
                   selectedModelId={currentModelId}
                   selectedVisibilityType={visibilityType}
                   sendMessage={
@@ -180,7 +170,6 @@ export function ChatShell() {
                           await submitEditedMessage({
                             message: msg,
                             text: input,
-                            chatId,
                             setMessages,
                             regenerate,
                           });
@@ -219,35 +208,7 @@ export function ChatShell() {
         />
       </div>
 
-      <DataStreamHandler />
-
-      <AlertDialog
-        onOpenChange={setShowCreditCardAlert}
-        open={showCreditCardAlert}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>需要启用 AI 网关</AlertDialogTitle>
-            <AlertDialogDescription>
-              当前应用需要启用 AI 网关后才能继续生成回复。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                window.open(
-                  "https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card",
-                  "_blank"
-                );
-                window.location.href = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/`;
-              }}
-            >
-              去启用
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DataStreamHandler chatId={chatId} />
     </>
   );
 }

@@ -61,7 +61,7 @@ import {
   approveKnowledgeCandidate,
   createAdminUser,
   getAdminDashboardStats,
-  getAdminProjects,
+  getAdminConversations,
   getAdminUsers,
   getAuditLogs,
   getDeerflowSkills,
@@ -85,7 +85,7 @@ import {
   updateAdminUser,
   updateDeerflowSkill,
   updateModelConfig,
-  type AdminProject,
+  type AdminConversation,
   type AdminUser,
   type AuditLog,
   type DeerflowSkill,
@@ -106,7 +106,7 @@ import { cn } from "@/lib/utils";
 type AdminSection =
   | "overview"
   | "users"
-  | "projects"
+  | "conversations"
   | "models"
   | "knowledge"
   | "runtime"
@@ -132,7 +132,7 @@ const sections: Array<{
 }> = [
   { id: "overview", label: "总览", icon: LayoutDashboardIcon },
   { id: "users", label: "用户", icon: UsersIcon },
-  { id: "projects", label: "项目", icon: FolderKanbanIcon },
+  { id: "conversations", label: "对话", icon: FolderKanbanIcon },
   { id: "models", label: "模型与 Skill", icon: BrainIcon },
   { id: "knowledge", label: "知识库", icon: DatabaseIcon },
   { id: "runtime", label: "运行日志", icon: ActivityIcon },
@@ -240,7 +240,7 @@ export function AdminConsole() {
           <div className="mx-auto w-full max-w-7xl space-y-6 px-5 py-5">
             {activeSection === "overview" && <OverviewSection />}
             {activeSection === "users" && <UsersSection />}
-            {activeSection === "projects" && <ProjectsSection />}
+            {activeSection === "conversations" && <ConversationsSection />}
             {activeSection === "models" && <ModelsSection />}
             {activeSection === "knowledge" && <KnowledgeSection />}
             {activeSection === "runtime" && <RuntimeSection />}
@@ -271,9 +271,9 @@ function OverviewSection() {
         />
         <MetricTile
           icon={FolderKanbanIcon}
-          label="项目总数"
+          label="对话总数"
           loading={stats.isLoading}
-          value={stats.data?.projectCount}
+          value={stats.data?.conversationCount}
         />
         <MetricTile
           icon={ActivityIcon}
@@ -451,20 +451,20 @@ function UsersSection() {
   );
 }
 
-function ProjectsSection() {
+function ConversationsSection() {
   const [keyword, setKeyword] = useState("");
-  const projects = useSWR(["admin-projects", keyword], () =>
-    getAdminProjects({ pageSize: PAGE_SIZE, keyword }),
+  const conversations = useSWR(["admin-conversations", keyword], () =>
+    getAdminConversations({ pageSize: PAGE_SIZE, keyword }),
   );
 
-  const columns: Column<AdminProject>[] = [
+  const columns: Column<AdminConversation>[] = [
     {
-      header: "项目",
+      header: "对话",
       cell: (row) => (
         <div>
           <div className="max-w-[320px] truncate font-medium">{row.title}</div>
           <div className="text-muted-foreground max-w-[420px] truncate text-xs">
-            {row.description || row.id}
+            {row.summary || row.id}
           </div>
         </div>
       ),
@@ -475,15 +475,15 @@ function ProjectsSection() {
       cell: (row) => <StatusBadge value={row.status} />,
     },
     {
-      header: "负责人",
+      header: "所属用户",
       className: "w-[180px]",
-      cell: (row) => row.ownerDisplayName || row.ownerUsername,
+      cell: (row) => row.ownerName,
     },
     {
       header: "数据",
       className: "w-[220px]",
       cell: (row) =>
-        `${row.conversationCount} 对话 · ${row.runtimeRunCount} 运行 · ${row.fileCount} 文件`,
+        `${row.messageCount} 消息 · ${row.fileCount} 文件 · ${row.qaReportCount} QA`,
     },
     {
       header: "最近活动",
@@ -493,23 +493,23 @@ function ProjectsSection() {
   ];
 
   return (
-    <SectionPanel description="查看线上项目、负责人和最近活动。" title="项目">
+    <SectionPanel description="查看线上对话、所属用户和最近活动。" title="对话">
       <Toolbar>
         <SearchInput
           onChange={setKeyword}
-          placeholder="搜索项目名称或描述"
+          placeholder="搜索对话标题或摘要"
           value={keyword}
         />
       </Toolbar>
       <AdminTable
         columns={columns}
-        emptyText="暂无项目"
-        error={projects.error}
+        emptyText="暂无对话"
+        error={conversations.error}
         getRowKey={(row) => row.id}
-        loading={projects.isLoading}
-        rows={projects.data?.items}
+        loading={conversations.isLoading}
+        rows={conversations.data?.items}
       />
-      <PaginationSummary data={projects.data} />
+      <PaginationSummary data={conversations.data} />
     </SectionPanel>
   );
 }
@@ -923,9 +923,9 @@ function RuntimeRunsTable(props: {
   loading: boolean;
 }) {
   const columns: Column<RuntimeRunLog>[] = [
-    { header: "运行", cell: (row) => <NameWithSub name={row.projectTitle} sub={row.intent || row.conversationTitle} /> },
+    { header: "运行", cell: (row) => <NameWithSub name={row.conversationTitle} sub={row.intent || row.inputSummary} /> },
     { header: "状态", className: "w-[120px]", cell: (row) => <StatusBadge value={row.status} /> },
-    { header: "阶段", className: "w-[180px]", cell: (row) => row.currentStep || "-" },
+    { header: "事件", className: "w-[180px]", cell: (row) => `${row.stepCount} 步 · ${row.streamEventCount} 流事件` },
     { header: "耗时", className: "w-[100px]", cell: (row) => formatDuration(row.durationMs) },
     { header: "错误", cell: (row) => row.errorMessage ? <ErrorText error={row.errorMessage} /> : <MutedText>无</MutedText> },
     { header: "开始时间", className: "w-[180px]", cell: (row) => formatDate(row.startedAt) },
@@ -997,12 +997,12 @@ function FileParsesTable(props: {
     }
   };
   const columns: Column<FileParseLog>[] = [
-    { header: "文件", cell: (row) => <NameWithSub name={row.originalName} sub={row.projectTitle} /> },
+    { header: "文件", cell: (row) => <NameWithSub name={row.originalName} sub={row.conversationTitle} /> },
     { header: "状态", className: "w-[140px]", cell: (row) => <StatusBadge value={row.status} /> },
-    { header: "解析器", className: "w-[120px]", cell: (row) => row.parserType || "-" },
+    { header: "解析器", className: "w-[120px]", cell: (row) => row.parseResult?.parserType || "-" },
     { header: "大小", className: "w-[100px]", cell: (row) => formatBytes(row.size) },
     { header: "分块", className: "w-[80px]", cell: (row) => row.chunkCount },
-    { header: "错误", cell: (row) => row.parseError ? <ErrorText error={row.parseError} /> : <MutedText>无</MutedText> },
+    { header: "错误", cell: (row) => row.parseResult?.parseError ? <ErrorText error={row.parseResult.parseError} /> : <MutedText>无</MutedText> },
     { header: "时间", className: "w-[180px]", cell: (row) => formatDate(row.createdAt) },
   ];
   return (
@@ -1031,10 +1031,10 @@ function QaReportsTable(props: {
   loading: boolean;
 }) {
   const columns: Column<QaReportLog>[] = [
-    { header: "项目", cell: (row) => <NameWithSub name={row.projectTitle} sub={row.summary || row.runId} /> },
+    { header: "对话", cell: (row) => <NameWithSub name={row.conversationTitle} sub={row.summary || row.generatedByRunId} /> },
     { header: "状态", className: "w-[120px]", cell: (row) => <StatusBadge value={row.status} /> },
     { header: "触发", className: "w-[120px]", cell: (row) => row.trigger },
-    { header: "问题", className: "w-[120px]", cell: (row) => `${row.criticalIssueCount}/${row.issueCount}` },
+    { header: "问题", className: "w-[140px]", cell: (row) => `${row.blockingCount} 阻塞 · ${row.majorCount} 主要` },
     { header: "时间", className: "w-[180px]", cell: (row) => formatDate(row.createdAt) },
   ];
   return (
@@ -1098,10 +1098,10 @@ function CreateUserDialog(props: {
             <Input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} />
           </Field>
           <Field label="邮箱">
-            <Input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
+            <Input autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
           </Field>
           <Field label="密码">
-            <Input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
+            <Input autoComplete="new-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
           </Field>
           <Field label="角色">
             <Select value={form.role} onValueChange={(value) => setForm({ ...form, role: value as "admin" | "user" })}>
@@ -1214,6 +1214,7 @@ function ResetPasswordButton({ user }: { user: AdminUser }) {
           </DialogHeader>
           <Field label="新密码">
             <Input
+              autoComplete="new-password"
               autoFocus
               type="password"
               value={password}

@@ -1,13 +1,10 @@
 import type { UIMessage } from "ai";
-import { z } from "zod";
 import type { ArtifactKind } from "@/components/chat/artifact";
 import type { Suggestion } from "@/lib/api/types";
 
-const messageMetadataSchema = z.object({
-  createdAt: z.string(),
-});
-
-type MessageMetadata = z.infer<typeof messageMetadataSchema>;
+type MessageMetadata = {
+  createdAt: string;
+};
 
 // NestJS 桥不发 tool-call（用 data-* artifact parts），无前端工具类型。
 type ChatTools = {};
@@ -37,9 +34,11 @@ export type ChatMessage = UIMessage<
 >;
 
 export type Attachment = {
+  fileId?: string;
   name: string;
   url: string;
   contentType: string;
+  size?: number;
 };
 
 type RuntimeProcessStatus =

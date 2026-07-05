@@ -24,7 +24,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import { FileAssetService } from "./file-asset.service";
-import { ListProjectFilesQueryDto, UploadFilesDto } from "./dto";
+import { ListConversationFilesQueryDto, UploadFilesDto } from "./dto";
 import { PrototypeConversionService } from "./prototype-conversion.service";
 
 const tempUploadDir = path.resolve(process.cwd(), "storage/tmp");
@@ -38,7 +38,7 @@ export class FileController {
     private readonly prototypeConversionService: PrototypeConversionService,
   ) {}
 
-  @Post("projects/:projectId/files")
+  @Post("conversations/:conversationId/files")
   @Throttle({ heavy: { limit: 10, ttl: 60_000 } })
   @UseInterceptors(
     FilesInterceptor("files", 10, {
@@ -55,22 +55,22 @@ export class FileController {
       },
     }),
   )
-  uploadProjectFiles(
+  uploadConversationFiles(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
+    @Param("conversationId") conversationId: string,
     @Body() dto: UploadFilesDto,
     @UploadedFiles() files: Express.Multer.File[],
   ) {
-    return this.fileAssetService.uploadProjectFiles(user, projectId, dto, files);
+    return this.fileAssetService.uploadConversationFiles(user, conversationId, dto, files);
   }
 
-  @Get("projects/:projectId/files")
-  listProjectFiles(
+  @Get("conversations/:conversationId/files")
+  listConversationFiles(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
-    @Query() query: ListProjectFilesQueryDto,
+    @Param("conversationId") conversationId: string,
+    @Query() query: ListConversationFilesQueryDto,
   ) {
-    return this.fileAssetService.listProjectFiles(user, projectId, query);
+    return this.fileAssetService.listConversationFiles(user, conversationId, query);
   }
 
   @Get("files/:fileId")

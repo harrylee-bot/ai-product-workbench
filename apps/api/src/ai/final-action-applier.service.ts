@@ -1,14 +1,14 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { ProductDesignStateStatus } from "@prisma/client";
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { ConversationDesignStateStatus } from "@prisma/client";
 import crypto from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
-import { ProductDesignStateService } from "./product-design-state.service";
+import { ConversationDesignStateService } from "./conversation-design-state.service";
 import { PrototypeService, sanitizePrototypeHtml } from "./prototype.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import type {
   AssumptionReference,
-  ProductDesignDraft,
-  ProductDesignState,
+  ConversationDesignDraft,
+  ConversationDesignState,
   PrototypeArtifact,
   PrototypeArtifactDraft,
   PrototypeSpec,
@@ -34,8 +34,8 @@ type CurrentRequirementDocumentRecord = {
  * DeerFlow 落库桥接（审计 P0 根因修复）。
  *
  * runDeerFlowTurn 拿到 DeerFlow 的 finalAction 后，本服务按 type 把产物落库：
- * - review_prd → 保存 RequirementDocument + 写入 ProductDesignState.prdDocument
- * - review_prototype → 保存 PrototypeArtifact + PrototypeSpec + 写入 ProductDesignState.prototypeSpec
+ * - review_prd → 保存 RequirementDocument + 写入 ConversationDesignState.prdDocument
+ * - review_prototype → 保存 PrototypeArtifact + PrototypeSpec + 写入 ConversationDesignState.prototypeSpec
  *
  * 修复审计 pipe-1 / pipe-2 / pipe-3 / pipe-4 / pipe-5 / backend-core-1 / knowledge-core-1：
  * 此前 saveGeneratedDocument / saveGeneratedPrototype 全仓零调用，PRD/原型永不进库；
@@ -47,13 +47,13 @@ export class FinalActionApplierService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly stateService: ProductDesignStateService,
+    private readonly stateService: ConversationDesignStateService,
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
   ) {}
 
   async apply(input: {
-    projectId: string;
+    conversationId: string;
     userId: string;
     runId: string;
     finalAction: DeerFlowFinalAction;
@@ -76,22 +76,22 @@ export class FinalActionApplierService {
   }
 
   private async applyReviewPrd(
-    input: { projectId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[]; assistantText?: string },
+    input: { conversationId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[]; assistantText?: string },
     raw: Record<string, unknown> | undefined,
   ) {
     // G1-1：将 createDraft → saveGeneratedDocument → attachGeneratedArtifacts 三步合并到一个事务中，
     // 避免中途失败留下不一致状态（state 已创建但 document 未保存，或 document 已保存但 state 未关联）。
     return this.prisma.$transaction(async (tx) => {
-      const previousDocument = await this.getCurrentRequirementDocument(input.projectId, tx);
-      const stateDraft = this.buildProductDesignDraft(input.projectId, raw, input.userId);
-      const state = await this.stateService.createDraftInTransaction(tx, input.projectId, stateDraft, {
+      const previousDocument = await this.getCurrentRequirementDocument(input.conversationId, tx);
+      const stateDraft = this.buildConversationDesignDraft(input.conversationId, raw, input.userId);
+      const state = await this.stateService.createDraftInTransaction(tx, input.conversationId, stateDraft, {
         userId: input.userId,
         runId: input.runId,
         reason: "DeerFlow review_prd：生成 PRD 前更新产品设计状态",
       });
 
       const documentDraft = this.buildRequirementDocumentDraft(
-        input.projectId,
+        input.conversationId,
         raw,
         input.artifacts,
         input.assistantText || input.finalAction.message,
@@ -107,10 +107,10 @@ export class FinalActionApplierService {
 
       const updatedState = await this.stateService.attachGeneratedArtifactsInTransaction(tx, state.id, {
         prdDocument: document,
-        status: ProductDesignStateStatus.doc_ready,
+        status: ConversationDesignStateStatus.doc_ready,
         userId: input.userId,
         runId: input.runId,
-        reason: "DeerFlow 生成 PRD，写入 ProductDesignState",
+        reason: "DeerFlow 生成 PRD，写入 ConversationDesignState",
       });
 
       return { prdDocument: document, state: updatedState };
@@ -118,18 +118,18 @@ export class FinalActionApplierService {
   }
 
   private async applyReviewPrototype(
-    input: { projectId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[] },
+    input: { conversationId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[] },
     raw: Record<string, unknown> | undefined,
   ) {
     // G1-1：将 saveGeneratedPrototype → attachGeneratedArtifacts 两步合并到一个事务中。
     return this.prisma.$transaction(async (tx) => {
-      const state = await this.stateService.getCurrentStateInTransaction(tx, input.projectId);
+      const state = await this.stateService.getCurrentStateInTransaction(tx, input.conversationId);
       if (!state) {
-        throw new Error("PROTOTYPE_STATE_NOT_FOUND：生成原型前需要先有 ProductDesignState（通常先 review_prd）。");
+        throw new Error("PROTOTYPE_STATE_NOT_FOUND：生成原型前需要先有 ConversationDesignState（通常先 review_prd）。");
       }
 
-      const prototypeSpec = this.buildPrototypeSpec(state.projectId, state.id, state.version, raw);
-      const artifactDraft = this.buildPrototypeArtifactDraft(input.projectId, raw, input.artifacts, input.finalAction.message);
+      const prototypeSpec = this.buildPrototypeSpec(state.conversationId, state.id, state.version, raw);
+      const artifactDraft = this.buildPrototypeArtifactDraft(input.conversationId, raw, input.artifacts, input.finalAction.message);
 
       // 预先净化 HTML，以便在事务中使用
       const rawHtml = artifactDraft.htmlContent ?? artifactDraft.html ?? "";
@@ -141,29 +141,32 @@ export class FinalActionApplierService {
         runId: input.runId,
         reason: "DeerFlow 生成原型",
       }, htmlContent, hasContent);
+      if (!result.hasContent) {
+        throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
+      }
 
       const updatedState = await this.stateService.attachGeneratedArtifactsInTransaction(tx, state.id, {
         prototypeSpec: result.prototypeSpec,
-        status: ProductDesignStateStatus.prototype_ready,
+        status: ConversationDesignStateStatus.prototype_ready,
         userId: input.userId,
         runId: input.runId,
-        reason: "DeerFlow 生成原型，写入 ProductDesignState",
+        reason: "DeerFlow 生成原型，写入 ConversationDesignState",
       });
 
       return { prototypeArtifact: result.artifact, state: updatedState };
     });
   }
 
-  private buildProductDesignDraft(
-    projectId: string,
+  private buildConversationDesignDraft(
+    conversationId: string,
     raw: Record<string, unknown> | undefined,
     userId: string,
-  ): ProductDesignDraft {
-    const stateDraft = asRecord(raw?.productDesignStateDraft);
+  ): ConversationDesignDraft {
+    const stateDraft = asRecord(raw?.designStateDraft);
     const assumptions = toAssumptionReferences(raw?.assumptions);
     const knowledgeRefs = toKnowledgeRefRecords(raw?.knowledgeRefsUsed);
     return {
-      projectId,
+      conversationId,
       title: toStringValue(stateDraft?.title) || "产品需求方案",
       summary: toStringValue(stateDraft?.summary),
       background: toStringValue(stateDraft?.background),
@@ -184,16 +187,16 @@ export class FinalActionApplierService {
       pendingQuestions: [],
       confirmedFacts: [],
       createdBy: userId,
-    } as ProductDesignDraft;
+    } as ConversationDesignDraft;
   }
 
   private buildRequirementDocumentDraft(
-    projectId: string,
+    conversationId: string,
     raw: Record<string, unknown> | undefined,
     artifacts: DeerFlowResolvedArtifact[],
     fallbackMessage: string,
     previousDocument?: CurrentRequirementDocumentRecord,
-    state?: ProductDesignState,
+    state?: ConversationDesignState,
     userId?: string,
   ): RequirementDocumentDraft {
     const prdDraft = asRecord(raw?.prdDocumentDraft);
@@ -209,14 +212,14 @@ export class FinalActionApplierService {
 
     if (!isSubstantialPrdSections(sections) && previousDocument) {
       return formatRequirementDocumentDraft(mergeSummaryIntoPreviousDocument(
-        projectId,
+        conversationId,
         previousDocument,
         fallbackMessage || sectionsToPlainText(sections),
       ), state, { author: userId });
     }
 
     return formatRequirementDocumentDraft({
-      projectId,
+      conversationId,
       title,
       sections,
       knowledgeRefs: toKnowledgeRefRecords(raw?.knowledgeRefsUsed),
@@ -229,10 +232,10 @@ export class FinalActionApplierService {
     }, state, { author: userId });
   }
 
-  private async getCurrentRequirementDocument(projectId: string, tx?: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0]) {
+  private async getCurrentRequirementDocument(conversationId: string, tx?: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0]) {
     const prisma = tx ?? this.prisma;
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
       select: { currentPrdDocumentId: true },
     });
 
@@ -247,13 +250,13 @@ export class FinalActionApplierService {
     } as const;
 
     const documents = await prisma.requirementDocument.findMany({
-      where: { projectId },
+      where: { conversationId },
       orderBy: { updatedAt: "desc" },
       take: 20,
       select,
     });
-    const current = project?.currentPrdDocumentId
-      ? documents.find((document) => document.id === project.currentPrdDocumentId)
+    const current = conversation?.currentPrdDocumentId
+      ? documents.find((document) => document.id === conversation.currentPrdDocumentId)
       : undefined;
     const candidates = current
       ? [current, ...documents.filter((document) => document.id !== current.id)]
@@ -266,7 +269,7 @@ export class FinalActionApplierService {
   }
 
   private buildPrototypeSpec(
-    projectId: string,
+    conversationId: string,
     stateId: string,
     stateVersion: number,
     raw: Record<string, unknown> | undefined,
@@ -275,9 +278,9 @@ export class FinalActionApplierService {
     const id = crypto.randomUUID();
     return {
       id,
-      projectId,
-      productDesignStateId: stateId,
-      productDesignStateVersion: stateVersion,
+      conversationId,
+      conversationDesignStateId: stateId,
+      conversationDesignStateVersion: stateVersion,
       title: toStringValue(spec?.title) || "原型",
       targetDevice: toTargetDevice(spec?.targetDevice),
       styleGuide: (toRecord(spec?.styleGuide) ?? {}) as PrototypeSpec["styleGuide"],
@@ -291,14 +294,14 @@ export class FinalActionApplierService {
   }
 
   private buildPrototypeArtifactDraft(
-    projectId: string,
+    conversationId: string,
     raw: Record<string, unknown> | undefined,
     artifacts: DeerFlowResolvedArtifact[],
     fallbackMessage: string,
   ): PrototypeArtifactDraft {
     const html = findArtifactText(artifacts, ["prototype_html", "html", "prototype"], ["text/html"]);
     return {
-      projectId,
+      conversationId,
       htmlContent: html ?? "",
       html: html ?? "",
       title: toStringValue(asRecord(raw?.prototypeSpec)?.title) || "原型",
@@ -423,7 +426,7 @@ function sectionsToPlainText(sections: RequirementDocSection[]) {
 }
 
 function mergeSummaryIntoPreviousDocument(
-  projectId: string,
+  conversationId: string,
   previousDocument: CurrentRequirementDocumentRecord,
   summary: string,
 ): RequirementDocumentDraft {
@@ -448,7 +451,7 @@ function mergeSummaryIntoPreviousDocument(
     : previousSections;
 
   return {
-    projectId,
+    conversationId,
     title: previousDocument.title || "需求文档",
     sections: sections.length ? sections : markdownToSections(normalizedSummary, previousDocument.title || "需求文档"),
     knowledgeRefs: Array.isArray(previousDocument.knowledgeRefs)

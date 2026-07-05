@@ -51,13 +51,13 @@ async function bootstrap() {
   app.setGlobalPrefix("api");
   app.use(cookieParser());
   app.use(enforceHttpsInProduction);
-  // sec-2：安全响应头 + CSP。frame-ancestors 'none' 防点击劫持（原型 iframe 由 srcDoc 嵌入，不受影响）。
+  // sec-2：安全响应头 + CSP。frame-ancestors 'none' 防点击劫持。
   app.use(
     helmet({
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          // API 不提供可执行 HTML；原型 iframe 由 Web 端 srcDoc 承载，不放宽全局 script-src。
+          // API 不提供可执行 HTML；原型预览走专用 preview 响应，不放宽全局 script-src。
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:"],
@@ -78,8 +78,6 @@ async function bootstrap() {
     allowedHeaders: [
       "Content-Type",
       "Accept",
-      "X-CopilotKit-Runtime-Client-GQL-Version",
-      "x-copilotcloud-public-api-key",
       "x-vercel-ai-ui-message-stream",
     ],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

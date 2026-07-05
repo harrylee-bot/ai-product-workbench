@@ -4,7 +4,7 @@ import {
   RuntimeStepStatus,
   KnowledgeCandidateStatus,
   ModelCallStatus,
-  ProjectStatus,
+  ConversationStatus,
   UserRole,
   UserStatus,
 } from "@prisma/client";
@@ -16,11 +16,12 @@ describe("Admin module services", () => {
   const prisma = {
     $transaction: vi.fn(),
     user: { count: vi.fn() },
-    project: { count: vi.fn(), findUnique: vi.fn() },
+    conversation: { count: vi.fn(), findUnique: vi.fn() },
     runtimeRunLog: { count: vi.fn(), findUnique: vi.fn() },
     modelCallLog: { count: vi.fn() },
     knowledgeCandidate: { count: vi.fn() },
     fileAsset: { count: vi.fn() },
+    qAReport: { count: vi.fn() },
     adminAuditLog: { create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
   };
   const service = new AdminService(prisma as never);
@@ -40,33 +41,32 @@ describe("Admin module services", () => {
 
   it("aggregates dashboard stats from operational tables", async () => {
     prisma.user.count.mockResolvedValue(2);
-    prisma.project.count
-      .mockResolvedValueOnce(4)
-      .mockResolvedValueOnce(1);
+    prisma.conversation.count.mockResolvedValue(4);
     prisma.runtimeRunLog.count.mockResolvedValue(5);
     prisma.modelCallLog.count
       .mockResolvedValueOnce(12)
       .mockResolvedValueOnce(3);
     prisma.knowledgeCandidate.count.mockResolvedValue(6);
     prisma.fileAsset.count.mockResolvedValue(1);
+    prisma.qAReport.count.mockResolvedValue(1);
 
     const result = await service.getDashboardStats();
 
     expect(result).toMatchObject({
       userCount: 2,
-      projectCount: 4,
+      conversationCount: 4,
       todayRuntimeRunCount: 5,
       todayModelCallCount: 12,
       todayFailedModelCallCount: 3,
       pendingKnowledgeCandidateCount: 6,
       failedFileParseCount: 1,
-      qaFailedProjectCount: 1,
+      qaFailedReportCount: 1,
     });
     expect(prisma.knowledgeCandidate.count).toHaveBeenCalledWith({
       where: { status: KnowledgeCandidateStatus.pending },
     });
-    expect(prisma.project.count).toHaveBeenLastCalledWith({
-      where: { status: ProjectStatus.qa_failed, deletedAt: null },
+    expect(prisma.qAReport.count).toHaveBeenCalledWith({
+      where: { status: "failed" },
     });
   });
 
@@ -103,7 +103,6 @@ describe("Admin module services", () => {
   it("returns runtime run details with step timeline and contract events", async () => {
     prisma.runtimeRunLog.findUnique.mockResolvedValue({
       id: "run-1",
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       intent: null,
@@ -116,7 +115,6 @@ describe("Admin module services", () => {
       startedAt: new Date("2026-06-21T08:00:00Z"),
       endedAt: new Date("2026-06-21T08:00:05Z"),
       durationMs: 5000,
-      project: { id: "project-1", title: "签到活动" },
       conversation: { id: "conversation-1", title: "默认会话" },
       user: { id: "user-1", username: "zhangsan", displayName: "张三" },
       steps: [
@@ -191,35 +189,23 @@ describe("Admin module services", () => {
     expect(result).toMatchObject({
       id: "run-1",
       traceId: "trace-1",
-      projectTitle: "签到活动",
+      conversationTitle: "默认会话",
       steps: [
         {
           runtimeName: "qa_agent",
           modelCallLogId: "model-log-1",
-          modelCall: expect.objectContaining({
+          modelCallLog: expect.objectContaining({
             id: "model-log-1",
-            providerName: "Test Provider",
-            modelDisplayName: "GPT Test",
             inputSummary: "QA input",
             outputSummary: "QA output",
           }),
         },
       ],
-      events: [
+      streamEvents: [
         {
           eventType: "qa_completed",
         },
       ],
-      debugSummary: expect.objectContaining({
-        riskLevel: "warning",
-        stepCount: 1,
-        eventCount: 1,
-        modelCallCount: 1,
-        qaGateStatus: "warning",
-        qaIssueCount: 1,
-        minorIssueCount: 1,
-        lastEventType: "qa_completed",
-      }),
     });
   });
 });

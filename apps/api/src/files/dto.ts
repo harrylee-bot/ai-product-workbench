@@ -17,7 +17,7 @@ export class UploadFilesDto {
   messageId?: string;
 }
 
-export class ListProjectFilesQueryDto {
+export class ListConversationFilesQueryDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsEnum(FileAssetStatus, { message: "文件状态不正确" })

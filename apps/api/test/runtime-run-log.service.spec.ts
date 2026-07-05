@@ -27,7 +27,6 @@ describe("RuntimeRunLogService", () => {
     prisma.runtimeRunLog.create.mockResolvedValue({ id: "run-1", traceId: "trace-1" });
 
     await service.createRun({
-      projectId: "project-1",
       conversationId: "conversation-1",
       userId: "user-1",
       userInput: `  ${"生成签到活动 ".repeat(300)}  `,
@@ -35,7 +34,6 @@ describe("RuntimeRunLogService", () => {
 
     expect(prisma.runtimeRunLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        projectId: "project-1",
         conversationId: "conversation-1",
         userId: "user-1",
         status: RuntimeRunStatus.running,
@@ -131,7 +129,7 @@ describe("RuntimeRunLogService", () => {
     await service.completeStep("step-1", { done: true }, {
       modelCallLogId: "model-log-1",
       tokenUsage: { totalTokens: 123 },
-      modelName: "gpt-5.5",
+      modelName: "workbench-claude",
       modelProviderId: "provider-1",
     });
 
@@ -154,7 +152,7 @@ describe("RuntimeRunLogService", () => {
         outputSummary: '{"done":true}',
         modelCallLogId: "model-log-1",
         tokenUsage: { totalTokens: 123 },
-        modelName: "gpt-5.5",
+        modelName: "workbench-claude",
         modelProviderId: "provider-1",
         durationMs: 1250,
       }),

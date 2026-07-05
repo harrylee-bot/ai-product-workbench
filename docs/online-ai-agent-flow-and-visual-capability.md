@@ -56,7 +56,7 @@ POST /admin/prototype-conversions/backfill
 Content-Type: application/json
 
 {
-  "projectId": "可选，只处理某个项目",
+  "conversationId": "可选，只处理某个会话",
   "limit": 500,
   "run": true,
   "background": true,

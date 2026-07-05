@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeContext, ProductDesignState, PrototypeArtifact, PrototypeSpec, RequirementDocument } from "../src/ai/ai-vibe.types";
+import type { KnowledgeContext, ConversationDesignState, PrototypeArtifact, PrototypeSpec, RequirementDocument } from "../src/ai/ai-vibe.types";
 import { QaRuleCheckService } from "../src/ai/qa-rule-check.service";
 
 describe("QaRuleCheckService", () => {
@@ -7,7 +7,7 @@ describe("QaRuleCheckService", () => {
 
   it("reports blocking state, PRD, and prototype gaps independently", () => {
     const issues = service.run({
-      productDesignState: baseState({ pages: [] }),
+      conversationDesignState: baseState({ pages: [] }),
       prdDocument: { ...basePrd(), sections: [] },
       prototypeSpec: { ...baseSpec(), pages: [] },
       prototypeArtifact: { ...baseArtifact(), status: "failed", errorMessage: "生成失败" },
@@ -30,7 +30,7 @@ describe("QaRuleCheckService", () => {
       ],
     });
     const issues = service.run({
-      productDesignState: state,
+      conversationDesignState: state,
       prdDocument: basePrd({ sections: [section({ title: "签到页", content: "签到页规则" })] }),
       prototypeSpec: baseSpec({ pages: [page({ id: "page_home", name: "签到页" })] }),
       prototypeArtifact: baseArtifact(),
@@ -65,7 +65,7 @@ describe("QaRuleCheckService", () => {
     };
 
     const issues = service.run({
-      productDesignState: baseState(),
+      conversationDesignState: baseState(),
       prdDocument: basePrd(),
       prototypeSpec: baseSpec(),
       prototypeArtifact: baseArtifact(),
@@ -85,7 +85,7 @@ describe("QaRuleCheckService", () => {
 
   it("does not emit assumption risk when questions and assumptions are resolved", () => {
     const issues = service.run({
-      productDesignState: baseState({
+      conversationDesignState: baseState({
         pendingQuestions: [{ id: "q1", status: "answered", question: "奖励上限？" }],
         assumptions: [{ id: "a1", status: "confirmed", content: "每日一次" }],
       }),
@@ -96,10 +96,10 @@ describe("QaRuleCheckService", () => {
   });
 });
 
-function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignState {
+function baseState(overrides: Partial<ConversationDesignState> = {}): ConversationDesignState {
   return {
     id: "state-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     version: 2,
     title: "签到活动",
     summary: "签到活动需求",
@@ -130,9 +130,9 @@ function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignSt
 function basePrd(overrides: Partial<RequirementDocument> = {}): RequirementDocument {
   return {
     id: "prd-1",
-    projectId: "project-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 2,
+    conversationId: "conversation-1",
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 2,
     title: "签到活动 PRD",
     status: "ready",
     sections: [section()],
@@ -164,9 +164,9 @@ function section(overrides: Partial<RequirementDocument["sections"][number]> = {
 function baseSpec(overrides: Partial<PrototypeSpec> = {}): PrototypeSpec {
   return {
     id: "spec-1",
-    projectId: "project-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 2,
+    conversationId: "conversation-1",
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 2,
     title: "签到活动原型",
     targetDevice: "both",
     styleGuide: { tone: "clean", layoutDensity: "comfortable", borderRadius: "small" },
@@ -195,10 +195,10 @@ function page(overrides: Partial<PrototypeSpec["pages"][number]> = {}): Prototyp
 function baseArtifact(overrides: Partial<PrototypeArtifact> = {}): PrototypeArtifact {
   return {
     id: "artifact-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     prototypeSpecId: "spec-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 2,
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 2,
     title: "签到活动原型",
     status: "ready",
     htmlContent: "<main>签到页</main>",

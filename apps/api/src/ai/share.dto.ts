@@ -1,9 +1,9 @@
 import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from "class-validator";
 
 export class CreateShareLinkDto {
-  @IsString({ message: "projectId 不能为空" })
-  @IsNotEmpty({ message: "projectId 不能为空" })
-  projectId!: string;
+  @IsString({ message: "conversationId 不能为空" })
+  @IsNotEmpty({ message: "conversationId 不能为空" })
+  conversationId!: string;
 
   @IsOptional()
   @IsIn(["prd", "prototype", "both"], { message: "scope 不正确" })

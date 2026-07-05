@@ -1,6 +1,6 @@
-import { KnowledgeType, ProjectStatus, QAReportStatus, QAReportTrigger, UserRole, UserStatus } from "@prisma/client";
+import { KnowledgeType, ConversationStatus, QAReportStatus, QAReportTrigger, UserRole, UserStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProductDesignState, PrototypeSpec, QAReport, RequirementDocument } from "../src/ai/ai-vibe.types";
+import type { ConversationDesignState, PrototypeSpec, QAReport, RequirementDocument } from "../src/ai/ai-vibe.types";
 import { QaRuleCheckService } from "../src/ai/qa-rule-check.service";
 import { QaService } from "../src/ai/qa.service";
 
@@ -9,7 +9,7 @@ describe("Module 13 QA services", () => {
     const service = new QaRuleCheckService();
 
     const issues = service.run({
-      productDesignState: baseState({ pages: [] }),
+      conversationDesignState: baseState({ pages: [] }),
       prdDocument: null,
       prototypeSpec: null,
       prototypeArtifact: null,
@@ -28,11 +28,11 @@ describe("Module 13 QA services", () => {
   it("persists QAReport with issue counts and updates latestQaReportId", async () => {
     const now = new Date("2026-06-21T09:00:00Z");
     const prisma = {
-      project: {
+      conversation: {
         findUnique: vi.fn(),
         update: vi.fn(),
       },
-      productDesignState: {
+      conversationDesignState: {
         findFirst: vi.fn(),
       },
       requirementDocument: {
@@ -69,15 +69,15 @@ describe("Module 13 QA services", () => {
       knowledgeRetrieval as never,
     );
 
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
       ownerId: "user-1",
-      status: ProjectStatus.prototype_ready,
+      status: ConversationStatus.prototype_ready,
       deletedAt: null,
       currentPrdDocumentId: "prd-1",
       currentPrototypeArtifactId: "artifact-1",
     });
-    prisma.productDesignState.findFirst.mockResolvedValue(stateRecord(baseState({ pages: [] })));
+    prisma.conversationDesignState.findFirst.mockResolvedValue(stateRecord(baseState({ pages: [] })));
     prisma.requirementDocument.findFirst.mockResolvedValue(null);
     prisma.prototypeArtifact.findFirst.mockResolvedValue(null);
     prisma.qAReport.create.mockImplementation(async ({ data }) => ({
@@ -94,7 +94,7 @@ describe("Module 13 QA services", () => {
       updatedAt: now,
     }));
 
-    const report = await service.runForProject("project-1", "user-1", {
+    const report = await service.runForConversation("conversation-1", "user-1", {
       trigger: "manual",
       runId: "run-1",
     });
@@ -114,29 +114,29 @@ describe("Module 13 QA services", () => {
     );
     expect(prisma.qAReport.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        projectId: "project-1",
+        conversationId: "conversation-1",
         status: "failed",
         trigger: "manual",
         generatedByRunId: "run-1",
       }),
     });
-    expect(prisma.project.update).toHaveBeenCalledWith({
-      where: { id: "project-1" },
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: "conversation-1" },
       data: expect.objectContaining({
         latestQaReportId: "qa-1",
-        status: ProjectStatus.qa_failed,
+        status: ConversationStatus.active,
       }),
     });
   });
 
-  it("runs QA from ProductDesignState snapshots instead of stale project pointers", async () => {
+  it("runs QA from ConversationDesignState snapshots instead of stale conversation pointers", async () => {
     const now = new Date("2026-06-21T09:00:00Z");
     const prisma = {
-      project: {
+      conversation: {
         findUnique: vi.fn(),
         update: vi.fn(),
       },
-      productDesignState: {
+      conversationDesignState: {
         findFirst: vi.fn(),
       },
       requirementDocument: {
@@ -176,25 +176,25 @@ describe("Module 13 QA services", () => {
     const prdDocument = toRequirementDocument(state, "prd-state");
     const prototypeSpec = toPrototypeSpec(state, "run-state");
 
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-1",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
       ownerId: "user-1",
-      status: ProjectStatus.prototype_ready,
+      status: ConversationStatus.prototype_ready,
       deletedAt: null,
       currentPrdDocumentId: "prd-stale",
       currentPrototypeArtifactId: "artifact-stale",
     });
-    prisma.productDesignState.findFirst.mockResolvedValue(stateRecord({
+    prisma.conversationDesignState.findFirst.mockResolvedValue(stateRecord({
       ...state,
       prdDocument,
       prototypeSpec,
     }));
     prisma.prototypeArtifact.findFirst.mockResolvedValue({
       id: "artifact-stale",
-      projectId: "project-1",
+      conversationId: "conversation-1",
       prototypeSpecId: "spec-stale",
-      productDesignStateId: "state-1",
-      productDesignStateVersion: state.version,
+      conversationDesignStateId: "state-1",
+      conversationDesignStateVersion: state.version,
       title: "旧原型",
       status: "ready",
       htmlContent: "<!doctype html>",
@@ -223,7 +223,7 @@ describe("Module 13 QA services", () => {
       updatedAt: now,
     }));
 
-    const report = await service.runForProject("project-1", "user-1", {
+    const report = await service.runForConversation("conversation-1", "user-1", {
       trigger: "manual",
       runId: "run-state",
     });
@@ -301,10 +301,10 @@ describe("Module 13 QA services", () => {
   });
 });
 
-function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignState {
+function baseState(overrides: Partial<ConversationDesignState> = {}): ConversationDesignState {
   return {
     id: "state-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     version: 2,
     title: "签到活动",
     summary: "签到活动需求",
@@ -332,7 +332,7 @@ function baseState(overrides: Partial<ProductDesignState> = {}): ProductDesignSt
   };
 }
 
-function stateRecord(state: ProductDesignState) {
+function stateRecord(state: ConversationDesignState) {
   return {
     ...state,
     summary: state.summary ?? null,
@@ -362,12 +362,12 @@ function emptyKnowledgeContext() {
   };
 }
 
-function toRequirementDocument(state: ProductDesignState, id: string): RequirementDocument {
+function toRequirementDocument(state: ConversationDesignState, id: string): RequirementDocument {
   return {
     id,
-    projectId: state.projectId,
-    productDesignStateId: state.id,
-    productDesignStateVersion: state.version,
+    conversationId: state.conversationId,
+    conversationDesignStateId: state.id,
+    conversationDesignStateVersion: state.version,
     title: `${state.title} PRD`,
     status: "ready",
     sections: [
@@ -398,12 +398,12 @@ function toRequirementDocument(state: ProductDesignState, id: string): Requireme
   };
 }
 
-function toPrototypeSpec(state: ProductDesignState, runId: string): PrototypeSpec {
+function toPrototypeSpec(state: ConversationDesignState, runId: string): PrototypeSpec {
   return {
     id: `spec-${runId}`,
-    projectId: state.projectId,
-    productDesignStateId: state.id,
-    productDesignStateVersion: state.version,
+    conversationId: state.conversationId,
+    conversationDesignStateId: state.id,
+    conversationDesignStateVersion: state.version,
     title: `${state.title} HTML 原型`,
     targetDevice: "both",
     styleGuide: {
@@ -441,9 +441,9 @@ function toPrototypeSpec(state: ProductDesignState, runId: string): PrototypeSpe
 function qaReport(overrides: Partial<QAReport> = {}): QAReport {
   return {
     id: "qa-1",
-    projectId: "project-1",
-    productDesignStateId: "state-1",
-    productDesignStateVersion: 2,
+    conversationId: "conversation-1",
+    conversationDesignStateId: "state-1",
+    conversationDesignStateVersion: 2,
     status: "passed",
     trigger: "manual",
     checkTypes: ["state_schema"],

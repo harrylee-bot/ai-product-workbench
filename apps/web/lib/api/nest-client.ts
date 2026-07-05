@@ -15,6 +15,32 @@ import type { ChatMessage, RuntimeProcessEvent } from "@/lib/types";
 
 // ===== 基础 fetch =====
 
+export type ChatRuntimeModel = {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+};
+
+export type SystemHealth = {
+  ok: boolean;
+  service: string;
+  phase: string;
+  deerflow: {
+    enabled: boolean;
+    modelId: string;
+    modelName: string;
+    modelDisplayName: string;
+    runtimeName: string;
+    provider: string;
+  };
+  modules: string[];
+};
+
+export function getSystemHealth() {
+  return nestFetch<SystemHealth>("/system/health");
+}
+
 export async function nestFetch<T>(
   path: string,
   init?: RequestInit,
@@ -49,7 +75,6 @@ export async function nestFetch<T>(
 
 type NestMessageItem = {
   id: string;
-  projectId: string;
   conversationId: string;
   userId?: string;
   role: "user" | "assistant" | "system";
@@ -238,7 +263,7 @@ function convertToUIMessages(messages: NestMessageItem[]): ChatMessage[] {
 
 type NestConversation = {
   id: string;
-  projectId: string;
+  conversationId: string;
   ownerId: string;
   title: string;
   summary?: string | null;
@@ -293,21 +318,25 @@ export async function getChatMessages(
   };
 }
 
-export async function deleteMessagesAfter(
-  chatId: string,
-  after: string,
+export async function updateMessageParts(
+  messageId: string,
+  parts: ChatMessage["parts"],
+  options?: { truncateAfter?: boolean },
 ): Promise<void> {
-  await nestFetch(
-    `/conversations/${chatId}/messages?after=${encodeURIComponent(after)}`,
-    { method: "DELETE" },
-  );
+  await nestFetch(`/messages/${messageId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      parts,
+      truncateAfter: options?.truncateAfter ?? false,
+    }),
+  });
 }
 
 // ===== Documents（PRD 文档，映射为 ai-chatbot Document） =====
 
 type NestRequirementDocument = {
   id: string;
-  projectId: string;
+  conversationId: string;
   title: string;
   status: string;
   sections: Array<{
@@ -330,7 +359,7 @@ type NestRequirementDocument = {
 type NestRequirementDocumentVersion = {
   id: string;
   documentId: string;
-  projectId: string;
+  conversationId: string;
   version: number;
   snapshot: unknown;
   reason?: string;
@@ -438,7 +467,7 @@ function isNestRequirementDocument(value: unknown): value is NestRequirementDocu
   const record = value as Partial<NestRequirementDocument>;
   return (
     typeof record.id === "string" &&
-    typeof record.projectId === "string" &&
+    typeof record.conversationId === "string" &&
     typeof record.title === "string" &&
     Array.isArray(record.sections)
   );
@@ -465,20 +494,7 @@ export async function getDocumentsById(
     );
     const artifact = data.artifact;
     const title = artifact.title || "原型";
-    // 优先用后端 sanitized 的预览 HTML（sec-1：读取时再净化）。
-    // preview 端点返回 text/html，需绕过 nestFetch 的 JSON 解析；失败时不再回退未净化的原始 HTML。
-    let content = prototypePreviewUnavailableHtml(title);
-    try {
-      const previewRes = await fetch(
-        `${getApiBase()}/prototype-artifacts/${id}/preview`,
-        { credentials: "include" },
-      );
-      if (previewRes.ok) {
-        content = await previewRes.text();
-      }
-    } catch {
-      // 保持安全占位内容。
-    }
+    const content = `preview:${getApiBase()}/prototype-artifacts/${id}/preview`;
     return [
       {
         id: artifact.id,
@@ -522,47 +538,6 @@ export async function getDocumentsById(
   }
 }
 
-function prototypePreviewUnavailableHtml(title: string) {
-  return [
-    "<!doctype html>",
-    '<html lang="zh-CN">',
-    "<head>",
-    '<meta charset="utf-8" />',
-    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
-    `<title>${escapeHtml(title)}</title>`,
-    "<style>",
-    "html,body{height:100%;margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;background:#f9fafb;}",
-    "body{display:grid;place-items:center;padding:24px;box-sizing:border-box;}",
-    ".empty{max-width:360px;text-align:center;line-height:1.6;}",
-    ".title{font-weight:600;margin-bottom:8px;}",
-    "</style>",
-    "</head>",
-    "<body>",
-    '<main class="empty">',
-    `<div class="title">${escapeHtml(title)}</div>`,
-    "<div>原型预览暂不可用，请稍后重试。</div>",
-    "</main>",
-    "</body>",
-    "</html>",
-  ].join("");
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      default:
-        return "&#39;";
-    }
-  });
-}
 
 async function getDocumentVersions(
   id: string,

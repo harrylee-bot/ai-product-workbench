@@ -8,7 +8,7 @@ The final action is the only instruction AI Product Workbench will persist from 
 {
   "type": "answer | review_prd | review_prototype | ask_clarification | download_export",
   "message": "Chinese user-facing summary",
-  "intent": "optional UserIntent-compatible label",
+  "intent": "optional UserIntent label",
   "requirementMode": "historical_extension | new_capability | brand_new_system | one_sentence_completion",
   "knowledgeRefsUsed": ["optional knowledge paths or titles used for reasoning"],
   "assumptions": ["optional inferred product facts, especially for one-sentence requirements"],
@@ -55,7 +55,7 @@ Use when a requirement or PRD should be reviewed before prototype work.
   "requirementMode": "one_sentence_completion",
   "knowledgeRefsUsed": ["01-产品架构/产品能力地图", "02-业务域知识/活动发布与模板配置"],
   "assumptions": ["默认使用活动发布后台、前台活动页、预览审核和活动报表闭环"],
-  "productDesignStateDraft": {
+  "designStateDraft": {
     "title": "签到活动",
     "summary": "通过每日签到提升活跃和留存"
   },

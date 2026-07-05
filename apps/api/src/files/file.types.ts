@@ -47,7 +47,7 @@ export type VisualAttachmentContext = {
   storagePath: string;
   previewUrl?: string;
   purpose:
-    | "product_screenshot"
+    | "conversation_screenshot"
     | "prototype_reference"
     | "prototype_snapshot"
     | "document_page_image"

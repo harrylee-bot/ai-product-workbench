@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps, CSSProperties, HTMLAttributes } from "react";
+import type { CSSProperties, HTMLAttributes } from "react";
 import type {
   BundledLanguage,
   BundledTheme,
@@ -8,34 +8,20 @@ import type {
   ThemedToken,
 } from "shiki";
 
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { CheckIcon, CopyIcon } from "lucide-react";
 import {
   createContext,
   memo,
-  useCallback,
-  useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { createHighlighter } from "shiki";
 
 // Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
 // biome-ignore lint/suspicious/noBitwiseOperators: shiki bitflag check
-// eslint-disable-next-line no-bitwise -- shiki bitflag check
 const isItalic = (fontStyle: number | undefined) => fontStyle && fontStyle & 1;
 // biome-ignore lint/suspicious/noBitwiseOperators: shiki bitflag check
-// eslint-disable-next-line no-bitwise -- shiki bitflag check
 // oxlint-disable-next-line eslint(no-bitwise)
 const isBold = (fontStyle: number | undefined) => fontStyle && fontStyle & 2;
 const isUnderline = (fontStyle: number | undefined) =>
@@ -392,23 +378,3 @@ export const CodeBlock = ({
     </CodeBlockContext.Provider>
   );
 };
-
-type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
-  onCopy?: () => void;
-  onError?: (error: Error) => void;
-  timeout?: number;
-};
-
-type CodeBlockLanguageSelectorProps = ComponentProps<typeof Select>;
-type CodeBlockLanguageSelectorTriggerProps = ComponentProps<
-  typeof SelectTrigger
->;
-type CodeBlockLanguageSelectorValueProps = ComponentProps<
-  typeof SelectValue
->;
-type CodeBlockLanguageSelectorContentProps = ComponentProps<
-  typeof SelectContent
->;
-type CodeBlockLanguageSelectorItemProps = ComponentProps<
-  typeof SelectItem
->;

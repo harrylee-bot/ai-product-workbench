@@ -1,5 +1,5 @@
 import type {
-  ProductDesignState,
+  ConversationDesignState,
   RequirementDocBlock,
   RequirementDocSection,
   RequirementDocumentDraft,
@@ -46,7 +46,7 @@ const SAFETY_BASELINE_INTRO = [
 
 export function formatRequirementDocumentDraft(
   draft: RequirementDocumentDraft,
-  state?: ProductDesignState,
+  state?: ConversationDesignState,
   options: { author?: string; date?: string } = {},
 ): RequirementDocumentDraft {
   const title = getRequirementDocumentTitle(draft.title, state);
@@ -219,7 +219,7 @@ export function formatRequirementDocumentDraft(
   };
 }
 
-function getRequirementDocumentTitle(title: string, state?: ProductDesignState) {
+function getRequirementDocumentTitle(title: string, state?: ConversationDesignState) {
   const preferred = state?.title || title || "需求";
   const base = preferred
     .replace(/\s+/g, " ")
@@ -256,13 +256,13 @@ function findSectionContent(
   )?.content.trim();
 }
 
-function buildBackgroundFallback(baseName: string, state?: ProductDesignState) {
+function buildBackgroundFallback(baseName: string, state?: ConversationDesignState) {
   return state?.background
     || state?.summary
     || `${baseName}涉及活动配置平台相关业务能力。本次需求用于补充配置、页面展示、接口联动、结果校验和运营验收口径，支撑业务上线评审与测试用例编写。`;
 }
 
-function buildScopeFallback(baseName: string, state?: ProductDesignState) {
+function buildScopeFallback(baseName: string, state?: ConversationDesignState) {
   const rows = [
     ...compactRecordItems(state?.pages, "页面"),
     ...compactRecordItems(state?.backendConfigs, "后台配置"),
@@ -274,7 +274,7 @@ function buildScopeFallback(baseName: string, state?: ProductDesignState) {
     : `- ${baseName}相关页面、配置项、业务流程、接口、验收标准、降级方案和安全基线。\n- 具体上线范围以业务评审、技术方案和联调结果为准。`;
 }
 
-function buildChannelRows(sections: RequirementDocSection[], state?: ProductDesignState) {
+function buildChannelRows(sections: RequirementDocSection[], state?: ConversationDesignState) {
   const text = JSON.stringify({ sections, state });
   return [
     ["1", "端内渠道", "☑是 □否"],
@@ -283,14 +283,14 @@ function buildChannelRows(sections: RequirementDocSection[], state?: ProductDesi
   ];
 }
 
-function getBusinessGoal(baseName: string, sections: RequirementDocSection[], state?: ProductDesignState) {
+function getBusinessGoal(baseName: string, sections: RequirementDocSection[], state?: ConversationDesignState) {
   return state?.businessGoal
     || findSectionContent(sections, ["business_goal"], /目标/)
     || state?.summary
     || `${baseName}形成可配置、可查询、可导出、可审计、可降级的业务闭环。`;
 }
 
-function buildPageLinksFallback(baseName: string, state?: ProductDesignState) {
+function buildPageLinksFallback(baseName: string, state?: ConversationDesignState) {
   const pageItems = compactRecordItems(state?.pages, "页面");
   return [
     `- 页面入口：${pageItems[0] || `${baseName}相关页面入口以活动配置平台实际菜单为准。`}`,
@@ -299,7 +299,7 @@ function buildPageLinksFallback(baseName: string, state?: ProductDesignState) {
   ].join("\n");
 }
 
-function buildCoreRulesFallback(baseName: string, state?: ProductDesignState) {
+function buildCoreRulesFallback(baseName: string, state?: ConversationDesignState) {
   const rows = [
     ...compactRecordItems(state?.features, "功能点"),
     ...compactRecordItems(state?.businessRules, "业务规则"),
@@ -314,7 +314,7 @@ function buildCoreRulesFallback(baseName: string, state?: ProductDesignState) {
   );
 }
 
-function buildInterfaceFallback(baseName: string, sections: RequirementDocSection[], state?: ProductDesignState) {
+function buildInterfaceFallback(baseName: string, sections: RequirementDocSection[], state?: ConversationDesignState) {
   const text = JSON.stringify({ sections, state });
   const type = /新增|新建|创建/.test(text) ? "新增/修改" : "修改";
   return [
@@ -333,7 +333,7 @@ function buildAcceptanceFallback(baseName: string) {
       ["1", "页面可见性", `${baseName}相关入口、页面标题、配置项和结果展示符合评审确认范围。`],
       ["2", "业务规则", "配置保存、查询、状态流转、重复操作、空态和异常提示均符合需求规则。"],
       ["3", "接口处理", "接口成功、失败、超时和无权限场景均有明确返回、页面提示和日志记录。"],
-      ["4", "兼容回归", "存量活动、存量配置和历史页面不受本需求影响，新增能力可按权限和配置开关控制。"],
+      ["4", "存量影响", "存量活动、存量配置和历史页面不受本需求影响，新增能力可按权限和配置开关控制。"],
     ],
   );
 }
@@ -346,7 +346,7 @@ function buildDegradationFallback(baseName: string) {
   ].join("\n");
 }
 
-function buildSafetyRows(title: string, sections: RequirementDocSection[], state?: ProductDesignState) {
+function buildSafetyRows(title: string, sections: RequirementDocSection[], state?: ConversationDesignState) {
   const text = JSON.stringify({ title, sections, state }).toLowerCase();
   const rows = SAFETY_BASELINE_ROWS.map((row) => ({ ...row }));
   const setYes = (...indexes: string[]) => {

@@ -11,10 +11,6 @@ function PopoverTrigger({ ...props }: React.ComponentProps<typeof Popover.Trigge
   return <Popover.Trigger data-slot="popover-trigger" {...props} />;
 }
 
-function PopoverAnchor({ ...props }: React.ComponentProps<typeof Popover.Anchor>) {
-  return <Popover.Anchor data-slot="popover-anchor" {...props} />;
-}
-
 function PopoverContent({
   className,
   align = "center",

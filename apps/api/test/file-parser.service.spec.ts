@@ -57,7 +57,7 @@ describe("FileParserService", () => {
     });
 
     expect(result.status).toBe(ParseResultStatus.partial_success);
-    expect(result.parserType).toBe(FileParserType.rp_project);
+    expect(result.parserType).toBe(FileParserType.rp_source);
     expect(result.summary).toContain("转换计划");
     expect(result.prototypeConversion).toMatchObject({
       source: "rp",

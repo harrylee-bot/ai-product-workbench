@@ -1,6 +1,7 @@
 "use client";
 
 import { nestFetch } from "@/lib/api/nest-client";
+import type { SystemHealth } from "@/lib/api/nest-client";
 
 export type PageResponse<T> = {
   items: T[];
@@ -11,22 +12,16 @@ export type PageResponse<T> = {
 
 export type AdminDashboardStats = {
   userCount: number;
-  projectCount: number;
+  conversationCount: number;
   todayRuntimeRunCount: number;
   todayModelCallCount: number;
   todayFailedModelCallCount: number;
   pendingKnowledgeCandidateCount: number;
   failedFileParseCount: number;
-  qaFailedProjectCount: number;
+  qaFailedReportCount: number;
 };
 
-export type SystemHealth = {
-  ok: boolean;
-  service: string;
-  phase: string;
-  deerflow: { enabled: boolean };
-  modules: string[];
-};
+export type { SystemHealth };
 
 export type AdminUser = {
   id: string;
@@ -40,30 +35,32 @@ export type AdminUser = {
   updatedAt: string;
 };
 
-export type AdminProject = {
+export type AdminConversation = {
   id: string;
   title: string;
-  description?: string;
+  summary?: string;
   status: string;
-  ownerUsername: string;
-  ownerDisplayName: string;
-  ownerEmail?: string;
-  conversationCount: number;
-  runtimeRunCount: number;
+  ownerId: string;
+  ownerName: string;
+  messageCount: number;
   fileCount: number;
+  qaReportCount: number;
   lastActivityAt: string;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type RuntimeRunLog = {
   id: string;
-  projectTitle: string;
+  conversationId: string;
   conversationTitle: string;
-  userDisplayName: string;
+  userName: string;
   intent?: string;
   status: string;
-  currentStep?: string;
-  currentStepStatus?: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  stepCount: number;
+  streamEventCount: number;
   traceId?: string;
   errorMessage?: string;
   startedAt: string;
@@ -89,15 +86,17 @@ export type ModelCallLog = {
 
 export type FileParseLog = {
   id: string;
-  projectTitle: string;
-  uploaderDisplayName: string;
+  conversationId: string;
+  conversationTitle: string;
+  uploaderName: string;
   originalName: string;
   extension?: string;
   size: number;
   status: string;
-  parserType?: string;
-  parseStatus?: string;
-  parseError?: string;
+  parseResult?: {
+    parserType?: string;
+    parseError?: string;
+  } | null;
   chunkCount: number;
   createdAt: string;
 };
@@ -114,13 +113,15 @@ export type PrototypeConversionBackfillResult = {
 
 export type QaReportLog = {
   id: string;
-  projectTitle: string;
-  projectStatus: string;
+  conversationId: string;
+  conversationTitle: string;
   trigger: string;
-  runId: string;
+  generatedByRunId?: string;
   status: string;
-  issueCount: number;
-  criticalIssueCount: number;
+  blockingCount: number;
+  majorCount: number;
+  minorCount: number;
+  infoCount: number;
   summary?: string;
   createdAt: string;
 };
@@ -203,7 +204,7 @@ export type KnowledgeItem = {
 
 export type KnowledgeCandidate = {
   id: string;
-  projectId: string;
+  conversationId: string;
   title: string;
   content: string;
   summary?: string;
@@ -282,8 +283,8 @@ export function resetAdminUserPassword(id: string, password: string) {
   });
 }
 
-export function getAdminProjects(query?: QueryParams) {
-  return nestFetch<PageResponse<AdminProject>>(`/admin/projects${queryString(query)}`);
+export function getAdminConversations(query?: QueryParams) {
+  return nestFetch<PageResponse<AdminConversation>>(`/admin/conversations${queryString(query)}`);
 }
 
 export function getRuntimeRuns(query?: QueryParams) {
@@ -305,7 +306,7 @@ export function getFileParses(query?: QueryParams) {
 }
 
 export function backfillPrototypeConversions(input?: {
-  projectId?: string;
+  conversationId?: string;
   limit?: number;
   run?: boolean;
   force?: boolean;

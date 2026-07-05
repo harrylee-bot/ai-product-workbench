@@ -33,18 +33,14 @@ export class KnowledgeRetrievalService {
     const modeBoostTypes = input.requirementMode ? MODE_BOOST_TYPES[input.requirementMode] : undefined;
 
     try {
-      const productId = input.productId ?? await this.resolveProductId(input.projectId);
       const items = await this.prisma.knowledgeItem.findMany({
         where: {
           status: KnowledgeStatus.active,
           ...(strictPreferredTypes ? { type: { in: preferredTypes } } : {}),
           OR: [
             { scope: "global" },
-            ...(input.projectId
-              ? [{ scope: "project" as const, sourceProjectId: input.projectId }]
-              : []),
-            ...(productId
-              ? [{ scope: "product" as const, sourceProductId: productId }]
+            ...(input.conversationId
+              ? [{ scope: "conversation" as const, sourceConversationId: input.conversationId }]
               : []),
           ],
         },
@@ -65,7 +61,6 @@ export class KnowledgeRetrievalService {
       try {
         await this.prisma.knowledgeRetrievalLog.create({
           data: {
-            projectId: input.projectId,
             conversationId: input.conversationId,
             runId: input.runId,
             runtimeName: input.runtimeName,
@@ -96,15 +91,6 @@ export class KnowledgeRetrievalService {
         retrievalError: `知识检索失败：${errorMessage(error)}`,
       };
     }
-  }
-
-  private async resolveProductId(projectId?: string) {
-    if (!projectId) return undefined;
-    const project = await this.prisma.project.findUnique({
-      where: { id: projectId },
-      select: { productId: true },
-    });
-    return project?.productId ?? undefined;
   }
 }
 

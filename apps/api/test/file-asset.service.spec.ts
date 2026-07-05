@@ -4,7 +4,7 @@ import {
   FileParserType,
   FileStorageProvider,
   ParseResultStatus,
-  ProjectStatus,
+  ConversationStatus,
   UserRole,
   UserStatus,
 } from "@prisma/client";
@@ -16,7 +16,7 @@ import { FileAssetService } from "../src/files/file-asset.service";
 
 describe("FileAssetService", () => {
   const prisma = {
-    project: {
+    conversation: {
       findUnique: vi.fn(),
     },
     fileAsset: {
@@ -54,22 +54,21 @@ describe("FileAssetService", () => {
   });
 
   it("rejects normal users from listing files in projects they do not own", async () => {
-    prisma.project.findUnique.mockResolvedValue({
-      id: "project-2",
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-2",
       ownerId: "other-user",
-      status: ProjectStatus.draft,
+      status: ConversationStatus.draft,
       deletedAt: null,
     });
 
-    await expect(service.listProjectFiles(user, "project-2", {})).rejects.toThrow(ForbiddenException);
+    await expect(service.listConversationFiles(user, "conversation-2", {})).rejects.toThrow(ForbiddenException);
   });
 
-  it("returns attachment summaries scoped to the current project", async () => {
+  it("returns attachment summaries scoped to the current conversation", async () => {
     prisma.fileAsset.findMany.mockResolvedValue([
       {
         id: "file-1",
-        projectId: "project-1",
-        conversationId: null,
+        conversationId: "conversation-1",
         messageId: null,
         uploadedBy: "user-1",
         originalName: "brief.md",
@@ -89,7 +88,7 @@ describe("FileAssetService", () => {
         parseResult: {
           id: "parse-1",
           fileAssetId: "file-1",
-          projectId: "project-1",
+          conversationId: "conversation-1",
           status: ParseResultStatus.success,
           parserType: FileParserType.markdown,
           title: "brief.md",
@@ -110,12 +109,12 @@ describe("FileAssetService", () => {
       },
     ]);
 
-    const result = await service.getAttachmentSummaries(["file-1", "file-2"], "project-1");
+    const result = await service.getAttachmentSummaries(["file-1"], "conversation-1");
 
     expect(prisma.fileAsset.findMany).toHaveBeenCalledWith({
       where: {
-        id: { in: ["file-1", "file-2"] },
-        projectId: "project-1",
+        id: { in: ["file-1"] },
+        conversationId: "conversation-1",
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
       },
@@ -136,12 +135,12 @@ describe("FileAssetService", () => {
       fileRecord({ id: "file-1", originalName: "brief.md", extension: "md", storagePath: "/tmp/brief.md" }),
     ]);
 
-    const result = await service.getRuntimeAttachmentFiles(["file-1", "file-2"], "project-1");
+    const result = await service.getRuntimeAttachmentFiles(["file-1", "file-2"], "conversation-1");
 
     expect(prisma.fileAsset.findMany).toHaveBeenCalledWith({
       where: {
         id: { in: ["file-1", "file-2"] },
-        projectId: "project-1",
+        conversationId: "conversation-1",
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
       },
@@ -172,7 +171,7 @@ describe("FileAssetService", () => {
     ];
     const localPrisma = {
       ...prisma,
-      project: { findUnique: vi.fn().mockResolvedValue(projectRecord()) },
+      conversation: { findUnique: vi.fn().mockResolvedValue(projectRecord()) },
       fileAsset: {
         ...prisma.fileAsset,
         create: vi.fn(),
@@ -185,7 +184,7 @@ describe("FileAssetService", () => {
       { get: vi.fn((key: string) => key === "FILE_UPLOAD_ROOT" ? root : undefined) } as never,
     );
 
-    await expect(localService.uploadProjectFiles(user, "project-1", {}, files)).rejects.toThrow("文本文件包含非法二进制内容");
+    await expect(localService.uploadConversationFiles(user, "conversation-1", {}, files)).rejects.toThrow("文本文件包含非法二进制内容");
 
     expect(localPrisma.fileAsset.create).not.toHaveBeenCalled();
     expect(localPrisma.fileAsset.deleteMany).not.toHaveBeenCalled();
@@ -215,9 +214,9 @@ async function multerFile(dir: string, originalname: string, content: string): P
 
 function projectRecord(overrides: Record<string, unknown> = {}) {
   return {
-    id: "project-1",
+    id: "conversation-1",
     ownerId: "user-1",
-    status: ProjectStatus.draft,
+    status: ConversationStatus.draft,
     deletedAt: null,
     ...overrides,
   };
@@ -226,8 +225,7 @@ function projectRecord(overrides: Record<string, unknown> = {}) {
 function fileRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: "file-1",
-    projectId: "project-1",
-    conversationId: null,
+    conversationId: "conversation-1",
     messageId: null,
     uploadedBy: "user-1",
     originalName: "brief.md",

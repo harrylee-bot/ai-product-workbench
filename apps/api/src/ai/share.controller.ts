@@ -9,7 +9,7 @@ import { ShareService } from "./share.service";
 
 const USER_HTML_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
-/** 创建/管理分享链接：仅项目 owner（需登录）。 */
+/** 创建/管理分享链接：仅会话 owner（需登录）。 */
 @Controller("share-links")
 @UseGuards(JwtAuthGuard)
 export class ShareLinkController {
@@ -18,15 +18,15 @@ export class ShareLinkController {
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateShareLinkDto) {
     return this.shareService.createForUser(user, {
-      projectId: dto.projectId,
+      conversationId: dto.conversationId,
       scope: dto.scope as ShareScope | undefined,
       expiresInDays: dto.expiresInDays,
     });
   }
 
-  @Get("project/:projectId")
-  list(@CurrentUser() user: AuthenticatedUser, @Param("projectId") projectId: string) {
-    return this.shareService.listForUser(user, projectId);
+  @Get("conversations/:conversationId")
+  list(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
+    return this.shareService.listForUser(user, conversationId);
   }
 
   @Delete(":shareId")

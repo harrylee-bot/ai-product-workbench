@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type {
   KnowledgeContext,
-  ProductDesignState,
+  ConversationDesignState,
   PrototypeArtifact,
   PrototypeSpec,
   QACheckType,
@@ -10,7 +10,7 @@ import type {
 } from "./ai-vibe.types";
 
 export type QaRuleCheckInput = {
-  productDesignState?: ProductDesignState | null;
+  conversationDesignState?: ConversationDesignState | null;
   prdDocument?: RequirementDocument | null;
   prototypeSpec?: PrototypeSpec | null;
   prototypeArtifact?: PrototypeArtifact | null;
@@ -23,7 +23,7 @@ export class QaRuleCheckService {
   run(input: QaRuleCheckInput): QAIssue[] {
     const enabled = new Set<QACheckType>(input.checkTypes ?? DEFAULT_CHECK_TYPES);
     const issues: QAIssue[] = [];
-    const state = input.productDesignState;
+    const state = input.conversationDesignState;
     const prd = input.prdDocument;
     const spec = input.prototypeSpec;
     const artifact = input.prototypeArtifact;
@@ -34,10 +34,10 @@ export class QaRuleCheckService {
           id: "qa_state_missing",
           checkType: "state_schema",
           severity: "blocking",
-          title: "ProductDesignState 不存在",
-          description: "项目缺少 ProductDesignState，无法生成可信的 PRD 或原型。",
+          title: "ConversationDesignState 不存在",
+          description: "项目缺少 ConversationDesignState，无法生成可信的 PRD 或原型。",
           relatedStatePaths: ["*"],
-          suggestion: "先通过对话生成或恢复 ProductDesignState。",
+          suggestion: "先通过对话生成或恢复 ConversationDesignState。",
         }));
       } else {
         if (!state.pages.length) {
@@ -46,7 +46,7 @@ export class QaRuleCheckService {
             checkType: "state_schema",
             severity: "blocking",
             title: "缺少页面定义",
-            description: "ProductDesignState.pages 为空，PRD 与原型缺少页面范围依据。",
+            description: "ConversationDesignState.pages 为空，PRD 与原型缺少页面范围依据。",
             relatedStatePaths: ["pages"],
             suggestion: "补充核心页面、页面用途和入口关系。",
           }));
@@ -57,7 +57,7 @@ export class QaRuleCheckService {
             checkType: "state_schema",
             severity: "major",
             title: "缺少业务规则",
-            description: "ProductDesignState.businessRules 为空，可能导致后续 PRD 与原型缺少业务约束。",
+            description: "ConversationDesignState.businessRules 为空，可能导致后续 PRD 与原型缺少业务约束。",
             relatedStatePaths: ["businessRules"],
             suggestion: "补充关键业务规则或明确说明该阶段没有业务规则。",
           }));
@@ -99,8 +99,8 @@ export class QaRuleCheckService {
           checkType: "prd_completeness",
           severity: "blocking",
           title: "PRD 不存在",
-          description: "项目尚未生成当前 ProductDesignState 对应的 PRD。",
-          suggestion: "基于当前 ProductDesignState 重新生成 PRD。",
+          description: "项目尚未生成当前 ConversationDesignState 对应的 PRD。",
+          suggestion: "基于当前 ConversationDesignState 重新生成 PRD。",
         }));
       } else if (!prd.sections.length) {
         issues.push(issue({
@@ -122,8 +122,8 @@ export class QaRuleCheckService {
           checkType: "prototype_completeness",
           severity: "blocking",
           title: "HTML 原型不存在",
-          description: "项目尚未生成当前 ProductDesignState 对应的 HTML 原型。",
-          suggestion: "基于当前 ProductDesignState 重新生成 PrototypeSpec 与 HTML 原型。",
+          description: "项目尚未生成当前 ConversationDesignState 对应的 HTML 原型。",
+          suggestion: "基于当前 ConversationDesignState 重新生成 PrototypeSpec 与 HTML 原型。",
         }));
       } else if (artifact.status !== "ready") {
         issues.push(issue({
@@ -160,7 +160,7 @@ export class QaRuleCheckService {
           checkType: "state_prd_consistency",
           severity: "major",
           title: "PRD 未覆盖部分页面",
-          description: `PRD 未明确覆盖 ${missingPages.length} 个 ProductDesignState 页面。`,
+          description: `PRD 未明确覆盖 ${missingPages.length} 个 ConversationDesignState 页面。`,
           relatedStatePaths: missingPages.map((page) => `pages.${text(page.id) || entityName(page)}`),
           relatedPrdSectionIds: prd.sections.map((section) => section.id).slice(0, 5),
           suggestion: "补充页面需求章节或重新生成 PRD。",
@@ -180,7 +180,7 @@ export class QaRuleCheckService {
           checkType: "state_prototype_consistency",
           severity: "major",
           title: "原型未覆盖部分页面",
-          description: `PrototypeSpec 未明确覆盖 ${missingPages.length} 个 ProductDesignState 页面。`,
+          description: `PrototypeSpec 未明确覆盖 ${missingPages.length} 个 ConversationDesignState 页面。`,
           relatedStatePaths: missingPages.map((page) => `pages.${text(page.id) || entityName(page)}`),
           relatedPrototypePageIds: spec.pages.map((page) => page.id).slice(0, 5),
           suggestion: "补充原型页面或重新生成 PrototypeSpec。",
@@ -222,9 +222,9 @@ export class QaRuleCheckService {
             checkType: "knowledge_rule_compliance",
             severity: "major",
             title: `强规则未明确体现：${rule.title}`,
-            description: "知识库 strong_rule 未在当前 ProductDesignState、PRD 或 PrototypeSpec 中明确体现。",
+            description: "知识库 strong_rule 未在当前 ConversationDesignState、PRD 或 PrototypeSpec 中明确体现。",
             relatedKnowledgeIds: [rule.knowledgeId ?? rule.id],
-            suggestion: "将该规则补充到 ProductDesignState 并重新生成 PRD/Prototype。",
+            suggestion: "将该规则补充到 ConversationDesignState 并重新生成 PRD/Prototype。",
           }));
         }
       }

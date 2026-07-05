@@ -20,7 +20,7 @@ describe("FinalActionApplierService", () => {
     saveGeneratedPrototypeInTransaction: vi.fn(),
   };
   const prisma = {
-    project: { findUnique: vi.fn() },
+    conversation: { findUnique: vi.fn() },
     requirementDocument: { findMany: vi.fn() },
     $transaction: vi.fn((callback) => callback(prisma)),
   };
@@ -33,12 +33,12 @@ describe("FinalActionApplierService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    prisma.project.findUnique.mockResolvedValue({ currentPrdDocumentId: null });
+    prisma.conversation.findUnique.mockResolvedValue({ currentPrdDocumentId: null });
     prisma.requirementDocument.findMany.mockResolvedValue([]);
     prisma.$transaction.mockImplementation((callback) => callback(prisma));
   });
 
-  it("bridges DeerFlow review_prd final actions into ProductDesignState and PRD persistence", async () => {
+  it("bridges DeerFlow review_prd final actions into ConversationDesignState and PRD persistence", async () => {
     const state = baseState({ status: "design_ready" });
     const document = baseDocument();
     const updatedState = { ...state, status: "doc_ready", prdDocument: document };
@@ -47,7 +47,7 @@ describe("FinalActionApplierService", () => {
     stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue(updatedState);
 
     const result = await service.apply({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       userId: "user-1",
       runId: "run-1",
       finalAction: finalAction({
@@ -55,7 +55,7 @@ describe("FinalActionApplierService", () => {
         message: "已生成 PRD，请确认。",
         raw: {
           type: "review_prd",
-          productDesignStateDraft: {
+          designStateDraft: {
             title: "签到活动",
             summary: "用户每日签到领取积分",
             businessGoal: "提升活跃",
@@ -85,7 +85,7 @@ describe("FinalActionApplierService", () => {
 
     expect(stateService.createDraftInTransaction).toHaveBeenCalledWith(
       prisma,
-      "project-1",
+      "conversation-1",
       expect.objectContaining({
         title: "签到活动",
         summary: "用户每日签到领取积分",
@@ -130,7 +130,7 @@ describe("FinalActionApplierService", () => {
     stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({ ...state, prdDocument: document });
 
     await service.apply({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       userId: "user-1",
       runId: "run-1",
       finalAction: finalAction({
@@ -174,7 +174,7 @@ describe("FinalActionApplierService", () => {
     stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({ ...state, prdDocument: document });
 
     await service.apply({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       userId: "user-1",
       runId: "run-1",
       finalAction: finalAction({
@@ -223,7 +223,7 @@ describe("FinalActionApplierService", () => {
     stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue(updatedState);
 
     const result = await service.apply({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       userId: "user-1",
       runId: "run-2",
       finalAction: finalAction({
@@ -245,15 +245,15 @@ describe("FinalActionApplierService", () => {
       prisma,
       state,
       expect.objectContaining({
-        projectId: "project-1",
-        productDesignStateId: "state-1",
-        productDesignStateVersion: 3,
+        conversationId: "conversation-1",
+        conversationDesignStateId: "state-1",
+        conversationDesignStateVersion: 3,
         title: "签到活动原型",
         targetDevice: "desktop",
         pages: [{ id: "page_home", name: "签到页", components: [] }],
       }),
       expect.objectContaining({
-        projectId: "project-1",
+        conversationId: "conversation-1",
         htmlContent: "<html><body>签到页</body></html>",
         html: "<html><body>签到页</body></html>",
         title: "签到活动原型",
@@ -271,11 +271,11 @@ describe("FinalActionApplierService", () => {
     expect(result).toEqual({ prototypeArtifact: artifact, state: updatedState });
   });
 
-  it("fails prototype bridge when no ProductDesignState exists", async () => {
+  it("fails prototype bridge when no ConversationDesignState exists", async () => {
     stateService.getCurrentStateInTransaction.mockResolvedValue(null);
 
     await expect(service.apply({
-      projectId: "project-1",
+      conversationId: "conversation-1",
       userId: "user-1",
       runId: "run-2",
       finalAction: finalAction({ type: "review_prototype", message: "原型已生成。" }),
@@ -310,7 +310,7 @@ function prototypeHtmlArtifact(): DeerFlowResolvedArtifact {
 function baseState(overrides: Record<string, unknown> = {}) {
   return {
     id: "state-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     version: 3,
     title: "签到活动",
     status: "doc_ready",
@@ -321,7 +321,7 @@ function baseState(overrides: Record<string, unknown> = {}) {
 function baseDocument() {
   return {
     id: "prd-1",
-    projectId: "project-1",
+    conversationId: "conversation-1",
     title: "签到活动 PRD",
     sections: [],
   };

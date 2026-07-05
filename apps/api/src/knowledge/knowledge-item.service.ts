@@ -32,7 +32,7 @@ export class KnowledgeItemService {
 
   async createItem(user: AuthenticatedUser, dto: CreateKnowledgeItemDto, meta?: RequestMeta) {
     await this.assertCategory(dto.categoryId);
-    await this.assertProductScope(dto.scope, dto.sourceProductId);
+    await this.assertConversationScope(dto.scope, dto.sourceConversationId);
     const item = await this.prisma.knowledgeItem.create({
       data: {
         title: dto.title.trim(),
@@ -45,7 +45,7 @@ export class KnowledgeItemService {
         tags: toInputJson(normalizeTags(dto.tags)),
         priority: dto.priority ?? "medium",
         source: KnowledgeSource.manual,
-        sourceProductId: normalizeOptionalText(dto.sourceProductId),
+        sourceConversationId: normalizeOptionalText(dto.sourceConversationId),
         createdBy: user.id,
         updatedBy: user.id,
       },
@@ -68,7 +68,7 @@ export class KnowledgeItemService {
   ) {
     const current = await this.getItemRow(knowledgeId);
     await this.assertCategory(dto.categoryId);
-    await this.assertProductScope(dto.scope ?? current.scope, dto.sourceProductId ?? current.sourceProductId ?? undefined);
+    await this.assertConversationScope(dto.scope ?? current.scope, dto.sourceConversationId ?? current.sourceConversationId ?? undefined);
 
     const updateData = compactObject<Prisma.KnowledgeItemUpdateInput>({
       title: dto.title?.trim(),
@@ -82,10 +82,10 @@ export class KnowledgeItemService {
         : dto.categoryId
           ? { connect: { id: dto.categoryId } }
           : { disconnect: true },
-      product: dto.sourceProductId === undefined
+      conversation: dto.sourceConversationId === undefined
         ? undefined
-        : dto.sourceProductId
-          ? { connect: { id: dto.sourceProductId } }
+        : dto.sourceConversationId
+          ? { connect: { id: dto.sourceConversationId } }
           : { disconnect: true },
       tags: dto.tags === undefined ? undefined : toInputJson(normalizeTags(dto.tags)),
       priority: dto.priority,
@@ -211,8 +211,7 @@ export class KnowledgeItemService {
       tags: jsonArray(item.tags),
       priority: item.priority,
       source: item.source,
-      sourceProjectId: item.sourceProjectId ?? undefined,
-      sourceProductId: item.sourceProductId ?? undefined,
+      sourceConversationId: item.sourceConversationId ?? undefined,
       sourceFileId: item.sourceFileId ?? undefined,
       sourcePrdDocumentId: item.sourcePrdDocumentId ?? undefined,
       sourcePrototypeArtifactId: item.sourcePrototypeArtifactId ?? undefined,
@@ -258,13 +257,13 @@ export class KnowledgeItemService {
     if (!category) throw new NotFoundException("KNOWLEDGE_CATEGORY_NOT_FOUND");
   }
 
-  private async assertProductScope(scope?: KnowledgeScope, productId?: string) {
-    if (scope === KnowledgeScope.product && !productId) {
-      throw new BadRequestException("KNOWLEDGE_PRODUCT_SCOPE_REQUIRES_PRODUCT_ID");
+  private async assertConversationScope(scope?: KnowledgeScope, conversationId?: string) {
+    if (scope === KnowledgeScope.conversation && !conversationId) {
+      throw new BadRequestException("KNOWLEDGE_CONVERSATION_SCOPE_REQUIRES_CONVERSATION_ID");
     }
-    if (!productId) return;
-    const product = await this.prisma.product.findUnique({ where: { id: productId } });
-    if (!product) throw new NotFoundException("PRODUCT_NOT_FOUND");
+    if (!conversationId) return;
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt) throw new NotFoundException("CONVERSATION_NOT_FOUND");
   }
 
   private toCategory(category: KnowledgeCategoryRow) {

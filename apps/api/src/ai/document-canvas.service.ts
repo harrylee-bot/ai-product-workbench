@@ -46,10 +46,10 @@ type JsonCanvasDocument = {
 
 export type DocumentCanvasView = {
   documentId: string;
-  projectId: string;
+  conversationId: string;
   title: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   canvas: JsonCanvasDocument;
   stats: {
     sectionCount: number;
@@ -62,12 +62,12 @@ export type DocumentCanvasView = {
 
 type CanvasExportArtifact = {
   format: "prd_canvas";
-  projectId: string;
+  conversationId: string;
   title: string;
   sourceType: "requirement_document";
   sourceId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   fileName: string;
   contentType: string;
   downloadPath: string;
@@ -85,19 +85,19 @@ export class DocumentCanvasService {
     return buildDocumentCanvasView(document);
   }
 
-  async getCurrentCanvasForUser(user: AuthenticatedUser, projectId: string) {
-    const current = await this.documentService.getCurrentForUser(user, projectId);
+  async getCurrentCanvasForUser(user: AuthenticatedUser, conversationId: string) {
+    const current = await this.documentService.getCurrentForUser(user, conversationId);
     if (!current.document) throw new NotFoundException("PRD_CANVAS_NOT_FOUND");
     return buildDocumentCanvasView(current.document);
   }
 
-  async createCanvasExportForUser(user: AuthenticatedUser, projectId: string) {
-    const view = await this.getCurrentCanvasForUser(user, projectId);
+  async createCanvasExportForUser(user: AuthenticatedUser, conversationId: string) {
+    const view = await this.getCurrentCanvasForUser(user, conversationId);
     return buildCanvasExport(view);
   }
 
-  async createCanvasExportForProject(projectId: string) {
-    const current = await this.documentService.getCurrentForProject(projectId);
+  async createCanvasExportForConversation(conversationId: string) {
+    const current = await this.documentService.getCurrentForConversation(conversationId);
     if (!current.document) throw new NotFoundException("PRD_CANVAS_NOT_FOUND");
     return buildCanvasExport(buildDocumentCanvasView(current.document));
   }
@@ -110,10 +110,10 @@ export function buildDocumentCanvasView(document: RequirementDocument): Document
   const blockCount = sections.reduce((sum, section) => sum + sectionBlocks(section).length, 0);
   return {
     documentId: document.id,
-    projectId: document.projectId,
+    conversationId: document.conversationId,
     title: document.title,
-    productDesignStateId: document.productDesignStateId,
-    productDesignStateVersion: document.productDesignStateVersion,
+    conversationDesignStateId: document.conversationDesignStateId,
+    conversationDesignStateVersion: document.conversationDesignStateVersion,
     canvas,
     stats: {
       sectionCount: sections.length,
@@ -144,7 +144,7 @@ function buildJsonCanvas(
       `# ${document.title}`,
       "",
       `状态：${document.status}`,
-      `ProductDesignState：${document.productDesignStateId} v${document.productDesignStateVersion}`,
+      `ConversationDesignState：${document.conversationDesignStateId} v${document.conversationDesignStateVersion}`,
       `章节：${sections.length}`,
     ].join("\n"),
   });
@@ -269,15 +269,15 @@ function buildCanvasExport(view: DocumentCanvasView): CanvasExportArtifact {
   const buffer = Buffer.from(json, "utf8");
   return {
     format: "prd_canvas",
-    projectId: view.projectId,
+    conversationId: view.conversationId,
     title: view.title,
     sourceType: "requirement_document",
     sourceId: view.documentId,
-    productDesignStateId: view.productDesignStateId,
-    productDesignStateVersion: view.productDesignStateVersion,
+    conversationDesignStateId: view.conversationDesignStateId,
+    conversationDesignStateVersion: view.conversationDesignStateVersion,
     fileName: `${safeFileName(view.title || "prd")}.canvas`,
     contentType: "application/json; charset=utf-8",
-    downloadPath: `/api/projects/${view.projectId}/export/canvas`,
+    downloadPath: `/api/conversations/${view.conversationId}/export/canvas`,
     sizeBytes: buffer.byteLength,
     generatedAt: view.generatedAt,
     buffer,

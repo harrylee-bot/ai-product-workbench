@@ -2,7 +2,7 @@
 
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, type DataUIPart } from "ai";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createContext,
@@ -28,10 +28,12 @@ import { useAutoResume } from "@/hooks/use-auto-resume";
 import type { Vote } from "@/lib/api/types";
 import {
   type ChatRuntimeStatus,
+  type ChatRuntimeModel,
   type ChatMessagesResponse,
   getChatMessages,
   getChatRuntimeStatus,
   getChatStreamUrl,
+  getSystemHealth,
   getVotesByChatId,
   stopChatRun,
 } from "@/lib/api/nest-client";
@@ -39,13 +41,18 @@ import { createChatHref, NEW_CHAT_DRAFT_PARAM } from "@/lib/chat-navigation";
 import { ChatbotError } from "@/lib/errors";
 import type {
   ChatMessage,
+  CustomUIDataTypes,
   RuntimeProcessEvent,
   RuntimeProcessSnapshot,
 } from "@/lib/types";
 import { fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
 
-// v1: 单一固定模型。原 @/lib/ai/models 已删除；模型选择由 data-access agent 统一收敛。
-const DEFAULT_CHAT_MODEL = "gpt-5.5";
+const DEFAULT_RUNTIME_MODEL: ChatRuntimeModel = {
+  id: "deerflow/deerflow-runtime",
+  name: "DeerFlow Runtime",
+  provider: "deerflow",
+  description: "当前后端 DeerFlow 运行时模型",
+};
 const STREAM_RECOVERY_ATTEMPTS = 18;
 const STREAM_RECOVERY_INTERVAL_MS = 1000;
 
@@ -66,8 +73,7 @@ type ActiveChatContextValue = {
   votes: Vote[] | undefined;
   currentModelId: string;
   setCurrentModelId: (id: string) => void;
-  showCreditCardAlert: boolean;
-  setShowCreditCardAlert: Dispatch<SetStateAction<boolean>>;
+  runtimeModel: ChatRuntimeModel;
   runtimeStatus?: ChatRuntimeStatus;
 };
 
@@ -138,14 +144,24 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const chatId = chatIdFromUrl ?? newChatIdRef.current;
   currentChatIdRef.current = chatId;
 
-  const [currentModelId, setCurrentModelId] = useState(DEFAULT_CHAT_MODEL);
+  const { data: systemHealth } = useSWR("system-health", getSystemHealth, {
+    revalidateOnFocus: true,
+  });
+  const runtimeModel = useMemo(
+    () => buildRuntimeModel(systemHealth),
+    [systemHealth],
+  );
+
+  const [currentModelId, setCurrentModelId] = useState(DEFAULT_RUNTIME_MODEL.id);
   const currentModelIdRef = useRef(currentModelId);
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
+  useEffect(() => {
+    setCurrentModelId(runtimeModel.id);
+  }, [runtimeModel.id]);
 
   const [input, setInput] = useState("");
-  const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
 
   const { data: runtimeStatus, mutate: mutateRuntimeStatus } = useSWR(
     isNewChat ? null : `chat-runtime-status-${chatId}`,
@@ -234,7 +250,14 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       },
     }),
     onData: (dataPart) => {
-      setDataStream((ds) => (ds ? [...ds, dataPart] : []));
+      setDataStream((ds) => [
+        ...(ds ?? []),
+        {
+          chatId,
+          runId: readDataPartRunId(dataPart),
+          part: dataPart,
+        },
+      ].slice(-1000));
     },
     onFinish: () => {
       activeRunChatIdRef.current = null;
@@ -294,9 +317,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
         };
       });
 
-      if (error.message?.includes("AI Gateway requires a valid credit card")) {
-        setShowCreditCardAlert(true);
-      } else if (error instanceof ChatbotError) {
+      if (error instanceof ChatbotError) {
         toast({ type: "error", description: error.message });
       } else {
         toast({
@@ -545,8 +566,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       votes,
       currentModelId,
       setCurrentModelId,
-      showCreditCardAlert,
-      setShowCreditCardAlert,
+      runtimeModel,
       runtimeStatus,
     }),
     [
@@ -564,7 +584,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       isLoading,
       votes,
       currentModelId,
-      showCreditCardAlert,
+      runtimeModel,
       displayedStatus,
       runtimeProcess.status,
       runtimeStatus,
@@ -584,6 +604,20 @@ export function useActiveChat() {
     throw new Error("useActiveChat must be used within ActiveChatProvider");
   }
   return context;
+}
+
+function buildRuntimeModel(
+  systemHealth: Awaited<ReturnType<typeof getSystemHealth>> | undefined,
+): ChatRuntimeModel {
+  const deerflow = systemHealth?.deerflow;
+  if (!deerflow) return DEFAULT_RUNTIME_MODEL;
+
+  return {
+    id: deerflow.modelId,
+    name: deerflow.modelDisplayName || deerflow.modelName,
+    provider: deerflow.provider,
+    description: `${deerflow.runtimeName} · ${deerflow.modelName}`,
+  };
 }
 
 function isTerminalRuntimeStatus(
@@ -772,4 +806,13 @@ function snapshotFromRuntimeStatus(
             : undefined,
     events: latestRun.events ?? [],
   };
+}
+
+function readDataPartRunId(dataPart: DataUIPart<CustomUIDataTypes>) {
+  const data = dataPart.data;
+  if (data && typeof data === "object" && "runId" in data) {
+    const runId = (data as { runId?: unknown }).runId;
+    return typeof runId === "string" ? runId : undefined;
+  }
+  return undefined;
 }

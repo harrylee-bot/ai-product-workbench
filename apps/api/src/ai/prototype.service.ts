@@ -9,8 +9,8 @@ import {
 	  KnowledgeCandidateSource,
 	  KnowledgeType,
 	  Prisma,
-  ProductDesignStateStatus,
-  ProjectStatus,
+  ConversationDesignStateStatus,
+  ConversationStatus,
   PrototypeArtifactStatus,
   PrototypeTargetDevice,
   RequirementDocumentStatus,
@@ -23,22 +23,22 @@ import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
   PrototypeComponentSpec,
-  ProductDesignState,
+  ConversationDesignState,
   PrototypeArtifact,
   PrototypeArtifactDraft,
   PrototypePageSpec,
   PrototypeSpec,
   PrototypeVersion,
 } from "./ai-vibe.types";
-import { ProductDesignStateService } from "./product-design-state.service";
+import { ConversationDesignStateService } from "./conversation-design-state.service";
 import { QaService } from "./qa.service";
 import type { KnowledgeCandidateDraft } from "../knowledge/knowledge.types";
 
 type PrototypeSpecRecord = {
   id: string;
-  projectId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationId: string;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   targetDevice: PrototypeTargetDevice;
   styleGuide: unknown;
@@ -54,10 +54,10 @@ type PrototypeSpecRecord = {
 
 type PrototypeArtifactRecord = {
   id: string;
-  projectId: string;
+  conversationId: string;
   prototypeSpecId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   status: PrototypeArtifactStatus;
   htmlContent: string | null;
@@ -85,7 +85,7 @@ type PrototypeStateNode = {
 export class PrototypeService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly stateService: ProductDesignStateService,
+    private readonly stateService: ConversationDesignStateService,
     @Optional()
     private readonly knowledgeCandidateService?: KnowledgeCandidateService,
     @Optional()
@@ -93,7 +93,7 @@ export class PrototypeService {
   ) {}
 
 	  async saveGeneratedPrototype(
-    state: ProductDesignState,
+    state: ConversationDesignState,
     prototypeSpec: PrototypeSpec,
     draft: PrototypeArtifactDraft,
     options: { userId: string; runId?: string; reason?: string },
@@ -119,7 +119,7 @@ export class PrototypeService {
 
   async saveGeneratedPrototypeInTransaction(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
-    state: ProductDesignState,
+    state: ConversationDesignState,
     prototypeSpec: PrototypeSpec,
     draft: PrototypeArtifactDraft,
     options: { userId: string; runId?: string; reason?: string },
@@ -129,9 +129,9 @@ export class PrototypeService {
     const specRecord = await tx.prototypeSpecRecord.create({
       data: {
         id: prototypeSpec.id,
-        projectId: state.projectId,
-        productDesignStateId: state.id,
-        productDesignStateVersion: state.version,
+        conversationId: state.conversationId,
+        conversationDesignStateId: state.id,
+        conversationDesignStateVersion: state.version,
         title: prototypeSpec.title,
         targetDevice: toPrismaTargetDevice(prototypeSpec.targetDevice),
         styleGuide: toInputJson(prototypeSpec.styleGuide),
@@ -146,10 +146,10 @@ export class PrototypeService {
 
     const artifactRecord = await tx.prototypeArtifact.create({
       data: {
-        projectId: state.projectId,
+        conversationId: state.conversationId,
         prototypeSpecId: specRecord.id,
-        productDesignStateId: state.id,
-        productDesignStateVersion: state.version,
+        conversationDesignStateId: state.id,
+        conversationDesignStateVersion: state.version,
         title: draft.title ?? prototypeSpec.title,
         status: hasContent ? PrototypeArtifactStatus.ready : PrototypeArtifactStatus.failed,
         htmlContent: hasContent ? htmlContent : null,
@@ -171,8 +171,8 @@ export class PrototypeService {
       return { prototypeSpec: spec, artifact, version, hasContent };
     }
 
-    await tx.project.update({
-      where: { id: state.projectId },
+    await tx.conversation.update({
+      where: { id: state.conversationId },
       data: { currentPrototypeArtifactId: artifact.id },
     });
     const version = await this.createVersion(
@@ -185,41 +185,41 @@ export class PrototypeService {
     return { prototypeSpec: spec, artifact, version, hasContent };
   }
 
-  async getCurrentForUser(user: AuthenticatedUser, projectId: string) {
-    await this.assertProjectAccess(user, projectId, { allowArchived: true });
-    return this.getCurrentForProject(projectId);
+  async getCurrentForUser(user: AuthenticatedUser, conversationId: string) {
+    await this.assertConversationAccess(user, conversationId, { allowArchived: true });
+    return this.getCurrentForConversation(conversationId);
   }
 
-  async getCurrentForProject(projectId: string) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+  async getCurrentForConversation(conversationId: string) {
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    const state = await this.stateService.getCurrentState(projectId);
+    const state = await this.stateService.getCurrentState(conversationId);
     const artifact = await this.getCurrentPrototypeArtifactForState(
-      projectId,
-      project.currentPrototypeArtifactId,
+      conversationId,
+      conversation.currentPrototypeArtifactId,
       state,
     );
     return {
       artifact: artifact ? this.toArtifactItem(artifact as PrototypeArtifactRecord) : null,
-      productDesignState: state ?? null,
+      conversationDesignState: state ?? null,
     };
   }
 
   async getPrototypeStateForUser(
     user: AuthenticatedUser,
-    input: { projectId: string; artifactId?: string },
+    input: { conversationId: string; artifactId?: string },
   ) {
-    const project = await this.assertProjectAccess(user, input.projectId, { allowArchived: true });
-    const state = input.artifactId ? undefined : await this.stateService.getCurrentState(input.projectId);
+    const conversation = await this.assertConversationAccess(user, input.conversationId, { allowArchived: true });
+    const state = input.artifactId ? undefined : await this.stateService.getCurrentState(input.conversationId);
     const artifact = input.artifactId
       ? await this.prisma.prototypeArtifact.findFirst({
-          where: { id: input.artifactId, projectId: input.projectId },
+          where: { id: input.artifactId, conversationId: input.conversationId },
         })
       : await this.getCurrentPrototypeArtifactForState(
-          input.projectId,
-          project.currentPrototypeArtifactId,
+          input.conversationId,
+          conversation.currentPrototypeArtifactId,
           state,
         );
 
@@ -233,24 +233,24 @@ export class PrototypeService {
     return {
       prototypeState: {
         id: artifactItem.id,
-        projectId: artifactItem.projectId,
+        conversationId: artifactItem.conversationId,
         artifactId: artifactItem.id,
         prototypeSpecId: artifactItem.prototypeSpecId,
-        productDesignStateId: artifactItem.productDesignStateId,
-        productDesignStateVersion: artifactItem.productDesignStateVersion,
-        version: artifactItem.productDesignStateVersion,
+        conversationDesignStateId: artifactItem.conversationDesignStateId,
+        conversationDesignStateVersion: artifactItem.conversationDesignStateVersion,
+        version: artifactItem.conversationDesignStateVersion,
         updatedAt: artifactItem.updatedAt,
         root: prototypeStateRoot(spec, artifactItem),
         pages: spec?.pages ?? [],
         interactions: spec?.interactions ?? [],
         sourceStateRef: {
-          productDesignStateId: artifactItem.productDesignStateId,
-          version: artifactItem.productDesignStateVersion,
+          conversationDesignStateId: artifactItem.conversationDesignStateId,
+          version: artifactItem.conversationDesignStateVersion,
         },
       },
       prototypeSpec: spec,
       artifact: artifactItem,
-      productDesignState: state ?? null,
+      conversationDesignState: state ?? null,
     };
   }
 
@@ -289,12 +289,12 @@ export class PrototypeService {
 
   async confirmForUser(user: AuthenticatedUser, artifactId: string, reason?: string) {
     const current = await this.getAccessibleArtifact(user, artifactId);
-    this.assertOwnerMutation(user, current.project.ownerId);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
     if (current.status !== PrototypeArtifactStatus.ready || !current.htmlContent) {
       throw new BadRequestException("PROTOTYPE_CONFIRM_NOT_READY");
     }
     const qaGate = this.qaService
-      ? await this.qaService.assertGateAllows(user, current.projectId, "confirm_artifacts")
+      ? await this.qaService.assertGateAllows(user, current.conversationId, "confirm_artifacts")
       : undefined;
     const specRecord = await this.prisma.prototypeSpecRecord.findUniqueOrThrow({
       where: { id: current.prototypeSpecId },
@@ -306,16 +306,16 @@ export class PrototypeService {
     const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
     const artifact = this.toArtifactItem(updated as PrototypeArtifactRecord);
     const version = await this.createVersion(spec, artifact, user.id, reason ?? "用户确认原型");
-    const productDesignState = await this.stateService.attachGeneratedArtifacts(artifact.productDesignStateId, {
+    const conversationDesignState = await this.stateService.attachGeneratedArtifacts(artifact.conversationDesignStateId, {
       prototypeSpec: spec,
-      status: ProductDesignStateStatus.confirmed,
+      status: ConversationDesignStateStatus.confirmed,
       userId: user.id,
-      reason: `${reason ?? "用户确认原型"}，同步原型确认状态到 ProductDesignState`,
+      reason: `${reason ?? "用户确认原型"}，同步原型确认状态到 ConversationDesignState`,
     });
     const knowledgeCandidates = qaGate && !qaGate.allowPersistKnowledge
       ? { items: [], qaGate }
       : await this.extractKnowledgeCandidatesAfterConfirm(user.id, spec, artifact);
-    return { artifact, version, productDesignState, knowledgeCandidates, qaGate };
+    return { artifact, version, conversationDesignState, knowledgeCandidates, qaGate };
   }
 
 	  private async extractKnowledgeCandidatesAfterConfirm(
@@ -326,7 +326,7 @@ export class PrototypeService {
 	    void userId;
 	    if (!this.knowledgeCandidateService) return { items: [] };
 	    return this.knowledgeCandidateService.createMany(
-	      artifact.projectId,
+	      artifact.conversationId,
 	      prototypeToKnowledgeCandidates(spec, artifact),
 	      {
 	        source: KnowledgeCandidateSource.prototype,
@@ -350,7 +350,7 @@ export class PrototypeService {
 	    });
 	    const version = await client.prototypeVersion.create({
 	      data: {
-        projectId: artifact.projectId,
+        conversationId: artifact.conversationId,
         artifactId: artifact.id,
         version: (latest?.version ?? 0) + 1,
         prototypeSpecSnapshot: toInputJson(prototypeSpec),
@@ -363,16 +363,16 @@ export class PrototypeService {
   }
 
   private async getCurrentPrototypeArtifactForState(
-    projectId: string,
+    conversationId: string,
     currentPrototypeArtifactId: string | null | undefined,
-    state?: ProductDesignState,
+    state?: ConversationDesignState,
   ) {
     const artifact = currentPrototypeArtifactId
       ? await this.prisma.prototypeArtifact.findFirst({
-          where: { id: currentPrototypeArtifactId, projectId },
+          where: { id: currentPrototypeArtifactId, conversationId },
         })
       : await this.prisma.prototypeArtifact.findFirst({
-          where: { projectId },
+          where: { conversationId },
           orderBy: { updatedAt: "desc" },
         });
 
@@ -381,33 +381,33 @@ export class PrototypeService {
     return null;
   }
 
-  private async assertProjectAccess(
+  private async assertConversationAccess(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && project.status === ProjectStatus.archived) {
-      throw new ForbiddenException("项目已归档，请先恢复后再继续操作");
+    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+      throw new ForbiddenException("会话已归档，请先恢复后再继续操作");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
       throw new ForbiddenException("PROTOTYPE_ARTIFACT_FORBIDDEN");
     }
-    return project;
+    return conversation;
   }
 
   private async getAccessibleArtifact(user: AuthenticatedUser, artifactId: string) {
     const artifact = await this.prisma.prototypeArtifact.findUnique({
       where: { id: artifactId },
-      include: { project: true },
+      include: { conversation: true },
     });
-    if (!artifact || artifact.project.deletedAt || artifact.project.status === ProjectStatus.deleted) {
+    if (!artifact || artifact.conversation.deletedAt || artifact.conversation.status === ConversationStatus.deleted) {
       throw new NotFoundException("PROTOTYPE_ARTIFACT_NOT_FOUND");
     }
-    if (user.role !== UserRole.admin && artifact.project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && artifact.conversation.ownerId !== user.id) {
       throw new ForbiddenException("PROTOTYPE_ARTIFACT_FORBIDDEN");
     }
     return artifact;
@@ -415,16 +415,16 @@ export class PrototypeService {
 
   private assertOwnerMutation(user: AuthenticatedUser, ownerId: string) {
     if (user.role === UserRole.admin && user.id !== ownerId) {
-      throw new ForbiddenException("管理员不可直接修改用户项目原型");
+      throw new ForbiddenException("管理员不可直接修改用户会话原型");
     }
   }
 
   private toPrototypeSpecItem(record: PrototypeSpecRecord): PrototypeSpec {
     return {
       id: record.id,
-      projectId: record.projectId,
-      productDesignStateId: record.productDesignStateId,
-      productDesignStateVersion: record.productDesignStateVersion,
+      conversationId: record.conversationId,
+      conversationDesignStateId: record.conversationDesignStateId,
+      conversationDesignStateVersion: record.conversationDesignStateVersion,
       title: record.title,
       targetDevice: record.targetDevice,
       styleGuide: asRecord(record.styleGuide) as PrototypeSpec["styleGuide"],
@@ -442,10 +442,10 @@ export class PrototypeService {
   private toArtifactItem(record: PrototypeArtifactRecord): PrototypeArtifact {
     return {
       id: record.id,
-      projectId: record.projectId,
+      conversationId: record.conversationId,
       prototypeSpecId: record.prototypeSpecId,
-      productDesignStateId: record.productDesignStateId,
-      productDesignStateVersion: record.productDesignStateVersion,
+      conversationDesignStateId: record.conversationDesignStateId,
+      conversationDesignStateVersion: record.conversationDesignStateVersion,
       title: record.title,
       status: record.status,
       htmlContent: record.htmlContent ?? undefined,
@@ -467,7 +467,7 @@ export class PrototypeService {
 
   private toVersionItem(version: {
     id: string;
-    projectId: string;
+    conversationId: string;
     artifactId: string;
     version: number;
     prototypeSpecSnapshot: unknown;
@@ -478,7 +478,7 @@ export class PrototypeService {
   }): PrototypeVersion {
     return {
       id: version.id,
-      projectId: version.projectId,
+      conversationId: version.conversationId,
       artifactId: version.artifactId,
       version: version.version,
       prototypeSpecSnapshot: version.prototypeSpecSnapshot as PrototypeSpec,
@@ -490,10 +490,10 @@ export class PrototypeService {
   }
 }
 
-function isArtifactFromCurrentState(artifact: PrototypeArtifactRecord, state: ProductDesignState) {
-  if (artifact.productDesignStateId !== state.id) return false;
+function isArtifactFromCurrentState(artifact: PrototypeArtifactRecord, state: ConversationDesignState) {
+  if (artifact.conversationDesignStateId !== state.id) return false;
   if (state.prototypeSpec?.id) return artifact.prototypeSpecId === state.prototypeSpec.id;
-  return artifact.productDesignStateVersion === state.version;
+  return artifact.conversationDesignStateVersion === state.version;
 }
 
 function prototypeStateRoot(
@@ -508,7 +508,7 @@ function prototypeStateRoot(
       artifactId: artifact.id,
       prototypeSpecId: artifact.prototypeSpecId,
       status: artifact.status,
-      sourceStateRef: artifact.productDesignStateId,
+      sourceStateRef: artifact.conversationDesignStateId,
     },
     layout: {
       targetDevice: artifact.targetDevice,
@@ -572,8 +572,8 @@ function prototypeToKnowledgeCandidates(
       title: `${spec.title} 原型方案`,
       content: overview,
       summary: `${spec.title} 的原型结构与页面清单。`,
-      suggestedType: KnowledgeType.prototype_project,
-      suggestedTags: ["prototype", "prototype_project", spec.targetDevice],
+      suggestedType: KnowledgeType.prototype_package,
+      suggestedTags: ["prototype", "prototype_package", spec.targetDevice],
       confidence: 0.78,
       sourcePath: "prototype",
       reason: "从用户确认后的原型产物抽取整体原型知识候选。",

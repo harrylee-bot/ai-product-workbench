@@ -2,6 +2,7 @@ import { Type } from "class-transformer";
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  IsBoolean,
   IsArray,
   IsDateString,
   IsInt,
@@ -65,6 +66,10 @@ export class UpdateMessagePartsDto {
   @ArrayMinSize(0)
   @ArrayMaxSize(200, { message: "单条消息 parts 不能超过 200 个" })
   parts!: unknown[];
+
+  @IsOptional()
+  @IsBoolean({ message: "truncateAfter 必须是布尔值" })
+  truncateAfter?: boolean;
 }
 
 export class MessageCountQueryDto {
@@ -124,7 +129,6 @@ export class DeleteMessagesAfterQueryDto {
 export function buildMessagePayload(
   item: BulkMessageItemDto,
   conversationId: string,
-  projectId: string,
   userId: string,
 ): {
   role: "user" | "assistant" | "system";
@@ -154,7 +158,7 @@ export function buildMessagePayload(
 }
 
 /** 从 ai-chatbot parts 里拼接可读文本，用于落库 Message.content（列表/搜索兜底展示）。 */
-function extractTextFromParts(parts: unknown[]): string {
+export function extractTextFromParts(parts: unknown[]): string {
   if (!Array.isArray(parts)) return "";
   const segments: string[] = [];
   for (const part of parts) {

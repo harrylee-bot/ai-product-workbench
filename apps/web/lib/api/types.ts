@@ -1,5 +1,5 @@
 // ai-chatbot 前端数据类型（与 NestJS 后端对接，不依赖 drizzle）。
-// 替代原 lib/db/schema.ts 的类型导出，保持组件 import 路径兼容。
+// 替代原 lib/db/schema.ts 的类型导出，保留前端 API 类型出口。
 
 import type { ArtifactKind } from "@/components/chat/artifact";
 import type { VisibilityType } from "@/components/chat/visibility-selector";

@@ -17,7 +17,7 @@ import {
   KnowledgeType,
   ParseResultStatus,
   Prisma,
-  ProjectStatus,
+  ConversationStatus,
   PrototypeConversionJob,
   PrototypeConversionStatus,
   UserRole,
@@ -37,12 +37,11 @@ import type {
   VisualAttachmentContext,
 } from "./file.types";
 
-type FileWithProject = FileAsset & {
-  project: {
+type FileWithConversation = FileAsset & {
+  conversation: {
     id: string;
     ownerId: string;
-    productId: string | null;
-    status: ProjectStatus;
+    status: ConversationStatus;
     deletedAt: Date | null;
   };
 };
@@ -89,7 +88,7 @@ export class PrototypeConversionService {
       where: { fileAssetId: file.id },
       create: {
         fileAssetId: file.id,
-        projectId: file.projectId,
+        conversationId: file.conversationId,
         status: PrototypeConversionStatus.queued,
         stage: plan.stage,
         sourceFilePath: plan.sourceFilePath,
@@ -119,7 +118,7 @@ export class PrototypeConversionService {
   }
 
   async backfillRpConversions(input: {
-    projectId?: string;
+    conversationId?: string;
     limit?: number;
     run?: boolean;
     force?: boolean;
@@ -134,7 +133,7 @@ export class PrototypeConversionService {
         extension: "rp",
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
-        ...(input.projectId ? { projectId: input.projectId } : {}),
+        ...(input.conversationId ? { conversationId: input.conversationId } : {}),
         ...(force
           ? {}
           : {
@@ -248,7 +247,7 @@ export class PrototypeConversionService {
       where: { fileAssetId: file.id },
       create: {
         fileAssetId: file.id,
-        projectId: file.projectId,
+        conversationId: file.conversationId,
         status: PrototypeConversionStatus.queued,
         stage: "queued",
         sourceFilePath: file.storagePath,
@@ -282,7 +281,7 @@ export class PrototypeConversionService {
 
     const job = await this.prisma.prototypeConversionJob.findUnique({
       where: { id: jobId },
-      include: { fileAsset: { include: { project: true } } },
+      include: { fileAsset: { include: { conversation: true } } },
     });
     if (!job || !job.fileAsset || job.fileAsset.deletedAt) {
       throw new NotFoundException("PROTOTYPE_CONVERSION_JOB_NOT_FOUND");
@@ -301,7 +300,7 @@ export class PrototypeConversionService {
     }
 
     const attemptId = randomUUID();
-    const outputDir = path.join(this.uploadRoot, job.projectId, `${job.fileAssetId}_axure_html`, attemptId);
+    const outputDir = path.join(this.uploadRoot, job.conversationId, `${job.fileAssetId}_axure_html`, attemptId);
     const lock = await this.prisma.prototypeConversionJob.updateMany({
       where: {
         id: job.id,
@@ -378,7 +377,7 @@ export class PrototypeConversionService {
         where: { id: job.id },
         data: { stage: "persisting_visual_knowledge" },
       });
-      await this.persistPrototypeKnowledge(job.fileAsset as FileWithProject, output);
+      await this.persistPrototypeKnowledge(job.fileAsset as FileWithConversation, output);
 
       const updated = await this.prisma.prototypeConversionJob.update({
         where: { id: job.id },
@@ -419,7 +418,7 @@ export class PrototypeConversionService {
     return {
       id: job.id,
       fileAssetId: job.fileAssetId,
-      projectId: job.projectId,
+      conversationId: job.conversationId,
       status: job.status,
       stage: job.stage,
       outputPath: job.outputPath ?? undefined,
@@ -535,7 +534,7 @@ export class PrototypeConversionService {
         where: { fileAssetId: file.id },
         create: {
           fileAssetId: file.id,
-          projectId: file.projectId,
+          conversationId: file.conversationId,
           status: output.status,
           parserType: output.parserType,
           title: output.title,
@@ -571,7 +570,7 @@ export class PrototypeConversionService {
         await tx.fileChunk.createMany({
           data: output.chunks.map((chunk, index) => ({
             fileAssetId: file.id,
-            projectId: file.projectId,
+            conversationId: file.conversationId,
             chunkIndex: index,
             content: chunk.content,
             tokenEstimate: chunk.tokenEstimate,
@@ -590,10 +589,10 @@ export class PrototypeConversionService {
     });
   }
 
-  private async persistPrototypeKnowledge(file: FileWithProject, output: ParserOutput) {
+  private async persistPrototypeKnowledge(file: FileWithConversation, output: ParserOutput) {
     const pages = output.pages ?? [];
     const sourceTypes = [
-      KnowledgeType.prototype_project,
+      KnowledgeType.prototype_package,
       KnowledgeType.prototype_page,
       KnowledgeType.prototype_snapshot,
       KnowledgeType.prototype_flow_edge,
@@ -620,14 +619,13 @@ export class PrototypeConversionService {
             ...pages.map((page, index) => `${index + 1}. ${page.title ?? page.filePath ?? "未命名页面"}`),
           ].join("\n"),
           summary: output.summary,
-          type: KnowledgeType.prototype_project,
+          type: KnowledgeType.prototype_package,
           status: KnowledgeStatus.active,
-          scope: "project",
-          tags: toInputJson(["rp", "axure", "prototype_project", file.originalName]),
+          scope: "conversation",
+          tags: toInputJson(["rp", "axure", "prototype_package", file.originalName]),
           priority: "high",
           source: KnowledgeSource.file_extraction,
-          sourceProjectId: file.projectId,
-          sourceProductId: file.project.productId,
+          sourceConversationId: file.conversationId,
           sourceFileId: file.id,
           createdBy: file.uploadedBy,
           updatedBy: file.uploadedBy,
@@ -642,12 +640,11 @@ export class PrototypeConversionService {
             summary: page.content?.slice(0, 240),
             type: KnowledgeType.prototype_page,
             status: KnowledgeStatus.active,
-            scope: "project",
+            scope: "conversation",
             tags: toInputJson(["rp", "axure", "prototype_page", page.title ?? "page"]),
             priority: "high",
             source: KnowledgeSource.file_extraction,
-            sourceProjectId: file.projectId,
-            sourceProductId: file.project.productId,
+            sourceConversationId: file.conversationId,
             sourceFileId: file.id,
             createdBy: file.uploadedBy,
             updatedBy: file.uploadedBy,
@@ -666,12 +663,11 @@ export class PrototypeConversionService {
               summary: `Axure HTML 页面截图：${page.title ?? "未命名页面"}`,
               type: KnowledgeType.prototype_snapshot,
               status: KnowledgeStatus.active,
-              scope: "project",
+              scope: "conversation",
               tags: toInputJson(["rp", "axure", "prototype_snapshot", page.title ?? "snapshot"]),
               priority: "high",
               source: KnowledgeSource.file_extraction,
-              sourceProjectId: file.projectId,
-              sourceProductId: file.project.productId,
+              sourceConversationId: file.conversationId,
               sourceFileId: file.id,
               createdBy: file.uploadedBy,
               updatedBy: file.uploadedBy,
@@ -691,12 +687,11 @@ export class PrototypeConversionService {
               summary: `${page.title ?? "页面"} 跳转到 ${link.label || link.targetPath}`,
               type: KnowledgeType.prototype_flow_edge,
               status: KnowledgeStatus.active,
-              scope: "project",
+              scope: "conversation",
               tags: toInputJson(["rp", "axure", "prototype_flow_edge"]),
               priority: "medium",
               source: KnowledgeSource.file_extraction,
-              sourceProjectId: file.projectId,
-              sourceProductId: file.project.productId,
+              sourceConversationId: file.conversationId,
               sourceFileId: file.id,
               createdBy: file.uploadedBy,
               updatedBy: file.uploadedBy,
@@ -721,8 +716,7 @@ export class PrototypeConversionService {
               tags: item.tags,
               priority: item.priority,
               source: item.source,
-              sourceProjectId: item.sourceProjectId,
-              sourceProductId: item.sourceProductId,
+              sourceConversationId: item.sourceConversationId,
               sourceFileId: item.sourceFileId,
             }),
             changeSummary: "由 .rp/Axure HTML 原型转换链路自动入库",
@@ -733,24 +727,24 @@ export class PrototypeConversionService {
     });
   }
 
-  private async getAccessibleFile(user: AuthenticatedUser, fileId: string): Promise<FileWithProject> {
+  private async getAccessibleFile(user: AuthenticatedUser, fileId: string): Promise<FileWithConversation> {
     const file = await this.prisma.fileAsset.findUnique({
       where: { id: fileId },
-      include: { project: true },
+      include: { conversation: true },
     });
     if (
       !file ||
       file.deletedAt ||
       file.status === FileAssetStatus.deleted ||
-      file.project.status === ProjectStatus.deleted ||
-      file.project.deletedAt
+      file.conversation.status === ConversationStatus.deleted ||
+      file.conversation.deletedAt
     ) {
       throw new NotFoundException("文件不存在");
     }
-    if (user.role !== UserRole.admin && file.project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && file.conversation.ownerId !== user.id) {
       throw new ForbiddenException("你无权访问该文件");
     }
-    return file as FileWithProject;
+    return file as FileWithConversation;
   }
 
   private hasConverterCommand() {

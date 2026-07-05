@@ -61,7 +61,7 @@ export class FileParserService {
       case "zip":
         return this.parseZip(input);
       case "rp":
-        return this.parseRpProject(input);
+        return this.parseRpSource(input);
       default:
         return {
           status: ParseResultStatus.failed,
@@ -193,7 +193,7 @@ export class FileParserService {
       storagePath: input.storagePath,
       width: dimensions?.width,
       height: dimensions?.height,
-      purpose: "product_screenshot",
+      purpose: "conversation_screenshot",
       note: "图片内容后续通过多模态模型理解。",
     });
 
@@ -244,13 +244,13 @@ export class FileParserService {
     };
   }
 
-  async parseRpProject(input: ParseInput): Promise<ParserOutput> {
+  async parseRpSource(input: ParseInput): Promise<ParserOutput> {
     const summary =
       "该文件为 Axure RP 源文件，已保存源文件并创建 .rp -> Axure HTML 转换计划。转换需要 macOS + Axure RP Worker，转换完成后会抽取页面、截图、文本和跳转关系进入知识库。";
 
     return {
       status: ParseResultStatus.partial_success,
-      parserType: FileParserType.rp_project,
+      parserType: FileParserType.rp_source,
       title: input.originalName,
       summary,
       prototypeConversion: {

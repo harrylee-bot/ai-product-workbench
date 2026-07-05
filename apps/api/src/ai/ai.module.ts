@@ -3,32 +3,32 @@ import { ConstraintModule } from "../constraint/constraint.module";
 import { FileModule } from "../files/file.module";
 import { KnowledgeModule } from "../knowledge/knowledge.module";
 import { PrismaModule } from "../prisma/prisma.module";
-import { MessageService } from "../projects/message.service";
+import { MessageService } from "../conversations/message.service";
 import { RuntimeRunLogService } from "./runtime-run-log.service";
 import { DocumentCanvasService } from "./document-canvas.service";
-import { ProjectExportController } from "./export.controller";
+import { ConversationExportController } from "./export.controller";
 import { ExportService } from "./export.service";
-import { ProductDesignStateService } from "./product-design-state.service";
+import { ConversationDesignStateService } from "./conversation-design-state.service";
 import {
-  ProductDesignStateResourceController,
-  ProjectProductDesignStateController,
-} from "./product-design-state.controller";
+  ConversationDesignStateResourceController,
+  ConversationDesignStateController,
+} from "./conversation-design-state.controller";
 import {
   PrdDocumentController,
-  ProjectPrdController,
+  ConversationPrdController,
 } from "./requirement-document.controller";
 import { RequirementDocumentService } from "./requirement-document.service";
 import {
-  ProjectPrototypeController,
+  ConversationPrototypeController,
   PrototypeArtifactController,
   PrototypeStateController,
 } from "./prototype.controller";
 import { PrototypeService } from "./prototype.service";
 import {
-  ProjectQaController,
-  ProjectQaReportsController,
-  ProjectRollbackController,
-  ProjectVersionTimelineController,
+  ConversationQaController,
+  ConversationQaReportsController,
+  ConversationRollbackController,
+  ConversationVersionTimelineController,
   QaReportController,
 } from "./qa.controller";
 import { QaRuleCheckService } from "./qa-rule-check.service";
@@ -52,19 +52,19 @@ import { AichatStreamService } from "./aichat/aichat-stream.service";
     ConversationModule,
   ],
   controllers: [
-    ProjectProductDesignStateController,
-    ProductDesignStateResourceController,
-    ProjectPrdController,
+    ConversationDesignStateController,
+    ConversationDesignStateResourceController,
+    ConversationPrdController,
     PrdDocumentController,
-    ProjectPrototypeController,
+    ConversationPrototypeController,
     PrototypeStateController,
     PrototypeArtifactController,
-    ProjectExportController,
-    ProjectQaController,
-    ProjectQaReportsController,
+    ConversationExportController,
+    ConversationQaController,
+    ConversationQaReportsController,
     QaReportController,
-    ProjectVersionTimelineController,
-    ProjectRollbackController,
+    ConversationVersionTimelineController,
+    ConversationRollbackController,
     ShareLinkController,
     PublicShareController,
     AichatStreamController,
@@ -73,7 +73,7 @@ import { AichatStreamService } from "./aichat/aichat-stream.service";
     DeerFlowRuntimeService,
     FinalActionApplierService,
     RuntimeRunLogService,
-    ProductDesignStateService,
+    ConversationDesignStateService,
     DocumentCanvasService,
     RequirementDocumentService,
     PrototypeService,

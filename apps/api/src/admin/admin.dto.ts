@@ -8,7 +8,7 @@ import {
   FileParserType,
   ModelCallStatus,
   ModelTaskType,
-  ProjectStatus,
+  ConversationStatus,
   QAReportStatus,
   QAReportTrigger,
 } from "@prisma/client";
@@ -38,7 +38,7 @@ class AdminPaginationQueryDto {
   pageSize?: number;
 }
 
-export class ListAdminProjectsQueryDto extends AdminPaginationQueryDto {
+export class ListAdminConversationsQueryDto extends AdminPaginationQueryDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
@@ -51,16 +51,11 @@ export class ListAdminProjectsQueryDto extends AdminPaginationQueryDto {
 
   @IsOptional()
   @Transform(emptyToUndefined)
-  @IsEnum(ProjectStatus, { message: "项目状态不正确" })
-  status?: ProjectStatus;
+  @IsEnum(ConversationStatus, { message: "会话状态不正确" })
+  status?: ConversationStatus;
 }
 
 export class ListRuntimeRunsQueryDto extends AdminPaginationQueryDto {
-  @IsOptional()
-  @Transform(emptyToUndefined)
-  @IsString()
-  projectId?: string;
-
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
@@ -128,7 +123,7 @@ export class ListFileParsesQueryDto extends AdminPaginationQueryDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
-  projectId?: string;
+  conversationId?: string;
 
   @IsOptional()
   @Transform(emptyToUndefined)
@@ -155,7 +150,7 @@ export class BackfillPrototypeConversionsDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
-  projectId?: string;
+  conversationId?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -184,7 +179,7 @@ export class ListQaReportsQueryDto extends AdminPaginationQueryDto {
   @IsOptional()
   @Transform(emptyToUndefined)
   @IsString()
-  projectId?: string;
+  conversationId?: string;
 
   @IsOptional()
   @Transform(emptyToUndefined)

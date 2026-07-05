@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Post, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
@@ -6,11 +6,11 @@ import { AUTH_COOKIE_NAME, authCookieOptions, clearAuthCookieOptions } from "../
 import { CurrentUser } from "./current-user.decorator";
 import { LoginDto, RegisterDto } from "./dto";
 import { JwtAuthGuard } from "./jwt-auth.guard";
-import type { Phase1User } from "./auth.types";
+import type { AuthenticatedUser } from "./auth.types";
 
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(@Inject(AuthService) private readonly auth: AuthService) {}
 
   @Post("login")
   // sec-3：登录接口严格限流防暴破（10 次/分钟/IP）。
@@ -24,7 +24,7 @@ export class AuthController {
 
   @Get("me")
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: Phase1User) {
+  me(@CurrentUser() user: AuthenticatedUser) {
     return { user: this.auth.me(user) };
   }
 

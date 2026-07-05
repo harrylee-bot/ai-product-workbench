@@ -8,7 +8,7 @@ import {
   BackfillPrototypeConversionsDto,
   ListAdminAuditLogsQueryDto,
   ListAdminModelCallsQueryDto,
-  ListAdminProjectsQueryDto,
+  ListAdminConversationsQueryDto,
   ListRuntimeRunsQueryDto,
   ListFileParsesQueryDto,
   ListQaReportsQueryDto,
@@ -31,32 +31,32 @@ export class AdminController {
     return this.adminService.getDashboardStats();
   }
 
-  @Get("projects")
-  listProjects(@Query() query: ListAdminProjectsQueryDto) {
-    return this.adminService.listProjects(query);
+  @Get("conversations")
+  listConversations(@Query() query: ListAdminConversationsQueryDto) {
+    return this.adminService.listConversations(query);
   }
 
-  @Get("projects/:projectId")
-  getProject(@Param("projectId") projectId: string) {
-    return this.adminService.getProject(projectId);
+  @Get("conversations/:conversationId")
+  getConversation(@Param("conversationId") conversationId: string) {
+    return this.adminService.getConversation(conversationId);
   }
 
-  @Get("projects/:projectId/runs")
-  listProjectRuns(@Param("projectId") projectId: string, @Query() query: ListRuntimeRunsQueryDto) {
-    return this.adminService.listProjectRuns(projectId, query);
+  @Get("conversations/:conversationId/runs")
+  listConversationRuns(@Param("conversationId") conversationId: string, @Query() query: ListRuntimeRunsQueryDto) {
+    return this.adminService.listConversationRuns(conversationId, query);
   }
 
-  @Get("projects/:projectId/files")
-  listProjectFiles(@Param("projectId") projectId: string, @Query() query: ListFileParsesQueryDto) {
-    return this.adminService.listProjectFiles(projectId, query);
+  @Get("conversations/:conversationId/files")
+  listConversationFiles(@Param("conversationId") conversationId: string, @Query() query: ListFileParsesQueryDto) {
+    return this.adminService.listConversationFiles(conversationId, query);
   }
 
-  @Get("projects/:projectId/qa-reports")
-  listProjectQaReports(
-    @Param("projectId") projectId: string,
+  @Get("conversations/:conversationId/qa-reports")
+  listConversationQaReports(
+    @Param("conversationId") conversationId: string,
     @Query() query: ListQaReportsQueryDto,
   ) {
-    return this.adminService.listProjectQaReports(projectId, query);
+    return this.adminService.listConversationQaReports(conversationId, query);
   }
 
   @Get("logs/runtime-runs")

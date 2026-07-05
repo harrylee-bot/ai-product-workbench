@@ -9,8 +9,8 @@ import {
 	  KnowledgeCandidateSource,
 	  KnowledgeType,
 	  Prisma,
-	  ProductDesignStateStatus,
-  ProjectStatus,
+	  ConversationDesignStateStatus,
+  ConversationStatus,
   RequirementDocumentStatus,
   UserRole,
 } from "@prisma/client";
@@ -19,20 +19,20 @@ import { KnowledgeCandidateService } from "../knowledge/knowledge-candidate.serv
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type {
-  ProductDesignState,
+  ConversationDesignState,
   RequirementDocSection,
   RequirementDocument,
   RequirementDocumentDraft,
 } from "./ai-vibe.types";
-import { ProductDesignStateService } from "./product-design-state.service";
+import { ConversationDesignStateService } from "./conversation-design-state.service";
 import { QaService } from "./qa.service";
 import type { KnowledgeCandidateDraft } from "../knowledge/knowledge.types";
 
 type RequirementDocumentRecord = {
   id: string;
-  projectId: string;
-  productDesignStateId: string;
-  productDesignStateVersion: number;
+  conversationId: string;
+  conversationDesignStateId: string;
+  conversationDesignStateVersion: number;
   title: string;
   status: RequirementDocumentStatus;
   sections: unknown;
@@ -51,7 +51,7 @@ type RequirementDocumentRecord = {
 export class RequirementDocumentService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly stateService: ProductDesignStateService,
+    private readonly stateService: ConversationDesignStateService,
     @Optional()
     private readonly knowledgeCandidateService?: KnowledgeCandidateService,
     @Optional()
@@ -59,7 +59,7 @@ export class RequirementDocumentService {
   ) {}
 
 	  async saveGeneratedDocument(
-	    state: ProductDesignState,
+	    state: ConversationDesignState,
 	    draft: RequirementDocumentDraft,
 	    options: { userId: string; runId?: string; reason?: string },
 	  ) {
@@ -70,15 +70,15 @@ export class RequirementDocumentService {
 
 	  async saveGeneratedDocumentInTransaction(
 	    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
-	    state: ProductDesignState,
+	    state: ConversationDesignState,
 	    draft: RequirementDocumentDraft,
 	    options: { userId: string; runId?: string; reason?: string },
 	  ) {
 	    const document = await tx.requirementDocument.create({
 	      data: {
-	        projectId: state.projectId,
-	        productDesignStateId: state.id,
-	        productDesignStateVersion: state.version,
+	        conversationId: state.conversationId,
+	        conversationDesignStateId: state.id,
+	        conversationDesignStateVersion: state.version,
 	        title: draft.title,
 	        status: RequirementDocumentStatus.ready,
 	        sections: toInputJson(draft.sections),
@@ -93,42 +93,42 @@ export class RequirementDocumentService {
 	    });
 
 	    const item = this.toDocumentItem(document as RequirementDocumentRecord);
-	    await tx.project.update({
-	      where: { id: state.projectId },
+	    await tx.conversation.update({
+	      where: { id: state.conversationId },
 	      data: { currentPrdDocumentId: document.id },
 	    });
 	    await this.createVersion(item, options.userId, options.reason ?? "PRD 生成完成", tx);
 	    return item;
 	  }
 
-  async getCurrentForUser(user: AuthenticatedUser, projectId: string) {
-    await this.assertProjectAccess(user, projectId, { allowArchived: true });
-    return this.getCurrentForProject(projectId);
+  async getCurrentForUser(user: AuthenticatedUser, conversationId: string) {
+    await this.assertConversationAccess(user, conversationId, { allowArchived: true });
+    return this.getCurrentForConversation(conversationId);
   }
 
-  async getCurrentForProject(projectId: string) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+  async getCurrentForConversation(conversationId: string) {
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    const state = await this.stateService.getCurrentState(projectId);
+    const state = await this.stateService.getCurrentState(conversationId);
     if (state?.prdDocument) {
-      return { document: state.prdDocument, productDesignState: state };
+      return { document: state.prdDocument, conversationDesignState: state };
     }
 
-    const document = project.currentPrdDocumentId
+    const document = conversation.currentPrdDocumentId
       ? await this.prisma.requirementDocument.findFirst({
-          where: { id: project.currentPrdDocumentId, projectId },
+          where: { id: conversation.currentPrdDocumentId, conversationId },
         })
       : await this.prisma.requirementDocument.findFirst({
-          where: { projectId },
+          where: { conversationId },
           orderBy: { updatedAt: "desc" },
         });
     const item = document ? this.toDocumentItem(document as RequirementDocumentRecord) : null;
     if (state && item && !isDocumentFromCurrentState(item, state)) {
-      return { document: null, productDesignState: state };
+      return { document: null, conversationDesignState: state };
     }
-    return { document: item, productDesignState: state ?? null };
+    return { document: item, conversationDesignState: state ?? null };
   }
 
   async getDocumentForUser(user: AuthenticatedUser, documentId: string) {
@@ -144,7 +144,7 @@ export class RequirementDocumentService {
       sections: item.sections,
       meta: {
         status: item.status,
-        productDesignStateVersion: item.productDesignStateVersion,
+        conversationDesignStateVersion: item.conversationDesignStateVersion,
         assumptionCount: item.assumptions.length,
         knowledgeRefCount: item.knowledgeRefs.length,
         pendingQuestionCount: item.pendingQuestions.length,
@@ -160,7 +160,7 @@ export class RequirementDocumentService {
     input: { content: string; title?: string },
   ) {
     const current = await this.getAccessibleDocument(user, documentId);
-    this.assertOwnerMutation(user, current.project.ownerId);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
     const document = this.toDocumentItem(current as RequirementDocumentRecord);
     let matched = false;
     const sections = document.sections.map((section) => {
@@ -184,7 +184,7 @@ export class RequirementDocumentService {
       document: updatedDocument,
       section: sections.find((section) => section.id === sectionId) ?? updatedDocument.sections.find((section) => section.id === sectionId)!,
       userId: user.id,
-      reason: `PRD 段落 ${sectionId} 已回流到 ProductDesignState`,
+      reason: `PRD 段落 ${sectionId} 已回流到 ConversationDesignState`,
     });
     return { document: updatedDocument, version };
   }
@@ -195,7 +195,7 @@ export class RequirementDocumentService {
     input: { content: string },
   ) {
     const current = await this.getAccessibleDocument(user, documentId);
-    this.assertOwnerMutation(user, current.project.ownerId);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
     const document = this.toDocumentItem(current as RequirementDocumentRecord);
     const edited = applyDocumentContentEdit(document, input.content);
 
@@ -210,23 +210,23 @@ export class RequirementDocumentService {
     });
     const updatedDocument = this.toDocumentItem(updated as RequirementDocumentRecord);
     const version = await this.createVersion(updatedDocument, user.id, "整文编辑 PRD");
-    const productDesignState = await this.stateService.attachGeneratedArtifacts(
-      updatedDocument.productDesignStateId,
+    const conversationDesignState = await this.stateService.attachGeneratedArtifacts(
+      updatedDocument.conversationDesignStateId,
       {
         prdDocument: updatedDocument,
-        status: ProductDesignStateStatus.doc_ready,
+        status: ConversationDesignStateStatus.doc_ready,
         userId: user.id,
-        reason: "整文编辑 PRD 后回流到 ProductDesignState",
+        reason: "整文编辑 PRD 后回流到 ConversationDesignState",
       },
     );
-    return { document: updatedDocument, version, productDesignState };
+    return { document: updatedDocument, version, conversationDesignState };
   }
 
   async confirmForUser(user: AuthenticatedUser, documentId: string, reason?: string) {
     const current = await this.getAccessibleDocument(user, documentId);
-    this.assertOwnerMutation(user, current.project.ownerId);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
     const qaGate = this.qaService
-      ? await this.qaService.assertGateAllows(user, current.projectId, "confirm_artifacts")
+      ? await this.qaService.assertGateAllows(user, current.conversationId, "confirm_artifacts")
       : undefined;
     const { document, version } = await this.confirmDocumentAndSyncState(
       current as RequirementDocumentRecord,
@@ -241,7 +241,7 @@ export class RequirementDocumentService {
 
   async confirmForPrototypeGate(user: AuthenticatedUser, documentId: string, reason?: string) {
     const current = await this.getAccessibleDocument(user, documentId);
-    this.assertOwnerMutation(user, current.project.ownerId);
+    this.assertOwnerMutation(user, current.conversation.ownerId);
     return this.confirmDocumentAndSyncState(
       current as RequirementDocumentRecord,
       user.id,
@@ -255,7 +255,7 @@ export class RequirementDocumentService {
 	    const drafts = document.sections
 	      .map((section) => prdSectionToKnowledgeCandidate(section, document))
 	      .filter((draft): draft is KnowledgeCandidateDraft => Boolean(draft));
-	    return this.knowledgeCandidateService.createMany(document.projectId, drafts, {
+	    return this.knowledgeCandidateService.createMany(document.conversationId, drafts, {
 	      source: KnowledgeCandidateSource.prd,
 	      sourceRefId: document.id,
 	    });
@@ -277,20 +277,20 @@ export class RequirementDocumentService {
         });
     const document = this.toDocumentItem(updated as RequirementDocumentRecord);
     const version = await this.createVersion(document, userId, reason);
-    const state = await this.stateService.getStateByIdForProject(
-      document.productDesignStateId,
-      document.projectId,
+    const state = await this.stateService.getStateByIdForConversation(
+      document.conversationDesignStateId,
+      document.conversationId,
     );
     const status = state?.prototypeSpec
-      ? ProductDesignStateStatus.prototype_ready
-      : ProductDesignStateStatus.doc_confirmed;
-    const productDesignState = await this.stateService.attachGeneratedArtifacts(document.productDesignStateId, {
+      ? ConversationDesignStateStatus.prototype_ready
+      : ConversationDesignStateStatus.doc_confirmed;
+    const conversationDesignState = await this.stateService.attachGeneratedArtifacts(document.conversationDesignStateId, {
       prdDocument: document,
       status,
       userId,
-      reason: `${reason}，同步 PRD 确认状态到 ProductDesignState`,
+      reason: `${reason}，同步 PRD 确认状态到 ConversationDesignState`,
     });
-    return { document, version, productDesignState };
+    return { document, version, conversationDesignState };
   }
 
   async listVersionsForUser(user: AuthenticatedUser, documentId: string) {
@@ -303,7 +303,7 @@ export class RequirementDocumentService {
       items: items.map((item) => ({
         id: item.id,
         documentId: item.documentId,
-        projectId: item.projectId,
+        conversationId: item.conversationId,
         version: item.version,
         snapshot: item.snapshot,
         reason: item.reason ?? undefined,
@@ -327,7 +327,7 @@ export class RequirementDocumentService {
 	    return client.requirementDocumentVersion.create({
 	      data: {
 	        documentId: document.id,
-        projectId: document.projectId,
+        conversationId: document.conversationId,
         version: (latest?.version ?? 0) + 1,
         snapshot: toInputJson(document),
         reason,
@@ -336,33 +336,33 @@ export class RequirementDocumentService {
     });
   }
 
-  private async assertProjectAccess(
+  private async assertConversationAccess(
     user: AuthenticatedUser,
-    projectId: string,
+    conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project || project.deletedAt || project.status === ProjectStatus.deleted) {
-      throw new NotFoundException("项目不存在");
+    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+      throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && project.status === ProjectStatus.archived) {
-      throw new ForbiddenException("项目已归档，请先恢复后再继续操作");
+    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+      throw new ForbiddenException("会话已归档，请先恢复后再继续操作");
     }
-    if (user.role !== UserRole.admin && project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
       throw new ForbiddenException("PRD_DOCUMENT_FORBIDDEN");
     }
-    return project;
+    return conversation;
   }
 
   private async getAccessibleDocument(user: AuthenticatedUser, documentId: string) {
     const document = await this.prisma.requirementDocument.findUnique({
       where: { id: documentId },
-      include: { project: true },
+      include: { conversation: true },
     });
-    if (!document || document.project.deletedAt || document.project.status === ProjectStatus.deleted) {
+    if (!document || document.conversation.deletedAt || document.conversation.status === ConversationStatus.deleted) {
       throw new NotFoundException("PRD_DOCUMENT_NOT_FOUND");
     }
-    if (user.role !== UserRole.admin && document.project.ownerId !== user.id) {
+    if (user.role !== UserRole.admin && document.conversation.ownerId !== user.id) {
       throw new ForbiddenException("PRD_DOCUMENT_FORBIDDEN");
     }
     return document;
@@ -370,16 +370,16 @@ export class RequirementDocumentService {
 
   private assertOwnerMutation(user: AuthenticatedUser, ownerId: string) {
     if (user.role === UserRole.admin && user.id !== ownerId) {
-      throw new ForbiddenException("管理员不可直接修改用户项目 PRD");
+      throw new ForbiddenException("管理员不可直接修改用户会话 PRD");
     }
   }
 
   private toDocumentItem(document: RequirementDocumentRecord): RequirementDocument {
     return {
       id: document.id,
-      projectId: document.projectId,
-      productDesignStateId: document.productDesignStateId,
-      productDesignStateVersion: document.productDesignStateVersion,
+      conversationId: document.conversationId,
+      conversationDesignStateId: document.conversationDesignStateId,
+      conversationDesignStateVersion: document.conversationDesignStateVersion,
       title: document.title,
       status: document.status,
       sections: Array.isArray(document.sections) ? document.sections as RequirementDocument["sections"] : [],
@@ -396,8 +396,8 @@ export class RequirementDocumentService {
   }
 }
 
-function isDocumentFromCurrentState(document: RequirementDocument, state: ProductDesignState) {
-  return document.productDesignStateId === state.id && document.productDesignStateVersion === state.version;
+function isDocumentFromCurrentState(document: RequirementDocument, state: ConversationDesignState) {
+  return document.conversationDesignStateId === state.id && document.conversationDesignStateVersion === state.version;
 }
 
 function applyDocumentContentEdit(document: RequirementDocument, markdown: string) {

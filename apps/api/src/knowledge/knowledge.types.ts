@@ -7,8 +7,6 @@ import type {
 import type { RequirementMode } from "../ai/requirement-mode.helper";
 
 export type KnowledgeSearchInput = {
-  projectId?: string;
-  productId?: string;
   conversationId?: string;
   runId?: string;
   runtimeName?: string;

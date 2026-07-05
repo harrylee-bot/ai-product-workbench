@@ -27,6 +27,8 @@ describe("aichat document stream router", () => {
     expect(isDocumentGenerationRequest("请编写签到活动 PRD")).toBe(true);
     expect(isDocumentGenerationRequest("活动交易快照功能需求说明书")).toBe(true);
     expect(isDocumentGenerationRequest("这份需求文档有哪些风险？")).toBe(false);
+    expect(isDocumentGenerationRequest("请用一句话说明当前系统是否在线，不要生成PRD。")).toBe(false);
+    expect(isDocumentGenerationRequest("不要生成 PRD，只回答运行状态")).toBe(false);
   });
 
   it("recognizes compact requirement specs with adjacent markdown headings", () => {
@@ -116,6 +118,27 @@ describe("aichat document stream router", () => {
     expect(result).toEqual({ suppressChat: false });
     expect(parts).toEqual([]);
   });
+
+  it("keeps ordinary audit answers in chat even when they mention full verification", () => {
+    const { parts, writer } = captureWriter();
+    const state = createDocumentStreamState("run-1", {
+      forceDocumentStream: isDocumentGenerationRequest("现在开始全量测试系统所有细节，所有代码，给我完整详细报告"),
+    });
+
+    const result = routeAssistantDocumentDelta(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "assistant",
+        chunk: "我会先启动本地服务，然后覆盖前后端交互、接口、构建和依赖安全检查。",
+      },
+      writer,
+      state,
+    );
+
+    expect(result).toEqual({ suppressChat: false });
+    expect(parts).toEqual([]);
+  });
 });
 
 describe("AichatStreamService stop", () => {
@@ -135,7 +158,9 @@ describe("AichatStreamService stop", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       runLogs as never,
+      {} as never,
       {} as never,
     );
     const internals = service as unknown as {

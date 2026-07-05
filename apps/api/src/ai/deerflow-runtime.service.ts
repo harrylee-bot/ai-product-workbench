@@ -87,7 +87,6 @@ export type DeerFlowTurnResult = {
 };
 
 type DeerFlowRunInput = {
-  projectId: string;
   conversationId: string;
   userId: string;
   message: string;
@@ -98,7 +97,7 @@ type DeerFlowRunInput = {
   selectedRegion?: unknown;
   previewMode?: string;
   resumeReason?: string;
-  productDesignState?: unknown;
+  conversationDesignState?: unknown;
   /** knowledge-core-2：生成路径注入的知识库召回（标题/摘要/内容/类型），让 DeerFlow 按知识基线产出 */
   knowledgeContext?: DeerFlowKnowledgeReference[];
   signal?: AbortSignal;
@@ -236,7 +235,6 @@ export class DeerFlowRuntimeService {
     }
 
     const thread = await this.createThread({
-      aiProductWorkbenchProjectId: input.projectId,
       aiProductWorkbenchConversationId: input.conversationId,
       aiProductWorkbenchUserId: input.userId,
       source: "ai-product-workbench",
@@ -245,7 +243,6 @@ export class DeerFlowRuntimeService {
     try {
       const created = await this.prisma.deerFlowThreadBinding.create({
         data: {
-          projectId: input.projectId,
           conversationId: input.conversationId,
           userId: input.userId,
           deerFlowThreadId: thread.threadId,
@@ -269,7 +266,6 @@ export class DeerFlowRuntimeService {
 
   private async replaceThreadBinding(input: DeerFlowRunInput, previousThreadId: string, reason: string) {
     const thread = await this.createThread({
-      aiProductWorkbenchProjectId: input.projectId,
       aiProductWorkbenchConversationId: input.conversationId,
       aiProductWorkbenchUserId: input.userId,
       source: "ai-product-workbench",
@@ -281,7 +277,7 @@ export class DeerFlowRuntimeService {
       const updated = await this.prisma.deerFlowThreadBinding.update({
         where: { conversationId: input.conversationId },
         data: {
-          projectId: input.projectId,
+          conversationId: input.conversationId,
           userId: input.userId,
           deerFlowThreadId: thread.threadId,
           metadata: toInputJson(thread.metadata),
@@ -292,7 +288,6 @@ export class DeerFlowRuntimeService {
       if (isRecordNotFoundError(error)) {
         const created = await this.prisma.deerFlowThreadBinding.create({
           data: {
-            projectId: input.projectId,
             conversationId: input.conversationId,
             userId: input.userId,
             deerFlowThreadId: thread.threadId,
@@ -505,7 +500,6 @@ function buildRunRequest(input: DeerFlowRunInput) {
 
 function assertThreadBindingMatchesInput(
   binding: {
-    projectId: string;
     conversationId: string;
     userId: string;
     deerFlowThreadId: string;
@@ -513,7 +507,7 @@ function assertThreadBindingMatchesInput(
   input: DeerFlowRunInput,
 ) {
   if (
-    binding.projectId === input.projectId &&
+    binding.conversationId === input.conversationId &&
     binding.conversationId === input.conversationId &&
     binding.userId === input.userId
   ) {
@@ -524,7 +518,7 @@ function assertThreadBindingMatchesInput(
     [
       "DeerFlow thread 绑定与当前会话不一致，已拒绝复用旧上下文。",
       `conversationId=${input.conversationId}`,
-      `projectId=${input.projectId}`,
+      `conversationId=${input.conversationId}`,
       `userId=${input.userId}`,
       `boundThreadId=${binding.deerFlowThreadId}`,
     ].join(" "),
@@ -535,14 +529,13 @@ function buildUserPrompt(input: DeerFlowRunInput) {
   const context = {
     runtimeContract: "ai-product-workbench.deerflow-runtime.v1",
     runId: input.runId,
-    projectId: input.projectId,
     conversationId: input.conversationId,
     previewMode: input.previewMode,
     selectedRegion: input.selectedRegion,
     attachments: input.attachments ?? [],
     deerFlowUploads: input.deerFlowUploads ?? [],
     resumeReason: input.resumeReason,
-    productDesignState: input.productDesignState,
+    conversationDesignState: input.conversationDesignState,
     knowledgeContext: input.knowledgeContext ?? [],
     finalActionContract: {
       instruction: "At the end, include one fenced block named ai_product_workbench_final_action with JSON.",
@@ -552,7 +545,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         intent: "optional intent label",
         requirementMode: "optional: historical_extension | new_capability | brand_new_system | one_sentence_completion",
         knowledgeRefsUsed: "optional array of knowledge paths or titles used for reasoning",
-        assumptions: "optional inferred product facts, especially for one-sentence requirements",
+        assumptions: "optional inferred business facts, especially for one-sentence requirements",
         consistencyStrategy: "optional PRD/prototype consistency strategy",
         prdDocumentDraft:
           "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }], validationNotes? }. Use the standard Chinese requirement-document section order: 1 引言 / 1.1 项目背景 / 1.2 文档范围 / 1.3 使用场景（必填） / 2 业务需求 / 2.1 页面链接 / core business sections / 本需求涉及新增/修改的接口 / 验收标准 / 3 业务降级方案（必填） / 4 需求安全基线要求（必填）. blocks may include paragraph, bullet_list, table, quote, warning, info, diagram, image, prototype_snapshot, asset_reference.",
@@ -567,19 +560,19 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         ],
       },
       constraints: [
-        "Do not mutate the product database directly.",
-        "Classify product turns as historical_extension, new_capability, brand_new_system, or one_sentence_completion before drafting.",
-        "historical_extension means adding to or changing an existing product/page: preserve the existing PRD/prototype information architecture, layout, field grouping, state flow, interaction style, tab-bar style, and component conventions unless the user explicitly asks for redesign.",
-        "new_capability means a new capability inside an existing product: reuse product_architecture and the platform page framework, then design a clearer local information architecture for the new capability.",
-        "brand_new_system means a completely new system/page: if a tab bar is present in the target product, follow the retrieved ui_style_guide tab style while allowing the rest of the page style to be redesigned; if no tab bar is present, you may redesign the page style from scratch.",
+        "Do not mutate the Workbench database directly.",
+        "Classify conversation turns as historical_extension, new_capability, brand_new_system, or one_sentence_completion before drafting.",
+        "historical_extension means adding to or changing an existing conversation/page: preserve the existing PRD/prototype information architecture, layout, field grouping, state flow, interaction style, tab-bar style, and component conventions unless the user explicitly asks for redesign.",
+        "new_capability means a new capability inside an existing conversation: reuse product_architecture and the platform page framework, then design a clearer local information architecture for the new capability.",
+        "brand_new_system means a completely new system/page: if a tab bar is present in the target experience, follow the retrieved ui_style_guide tab style while allowing the rest of the page style to be redesigned; if no tab bar is present, you may redesign the page style from scratch.",
         "Use product_architecture/page_inventory/ui_style_guide/prototype_asset_ref knowledge items when available to decide reuse vs redesign; cite them in knowledgeRefsUsed.",
-        "For one_sentence_completion, infer ordinary missing details from product architecture, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
+        "For one_sentence_completion, infer ordinary missing details from product_architecture knowledge, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
         "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",
         "For activity-configuration PRDs, include visual evidence blocks when knowledgeContext provides them: at least one business flow diagram, one configuration architecture diagram, and prototype_snapshot/image blocks for key Axure pages. Use Mermaid for diagram blocks and local visualAssets paths for prototype_snapshot/image blocks.",
         "If no suitable prototype snapshot, flow, architecture, or field-rule knowledge is available, do not invent visuals. Add a validationNotes item and an info/warning block that names the missing asset and the required follow-up.",
-        "For PRD/需求文档/需求说明书 generation, follow the requirement-document template from PRD标准结构 exactly: cover title should be <工单名称>需求说明书; body sections must include 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(2.1 页面链接, core rules/features, flow/state/page requirements, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not include API/interface specifications in PRD - technical implementation details belong in separate technical documents. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
+        "For PRD/需求文档/需求说明书 generation, follow the requirement-document template from PRD标准结构 exactly: cover title should be <工单名称>需求说明书; body sections must include 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(2.1 页面链接, core rules/features, flow/state/page requirements, 2.4 接口能力/联动口径, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Section 2.4 may describe required interface capabilities, upstream/downstream linkage, trigger timing, data direction, and business error handling, but must not include real API URLs, secrets, credentials, or backend implementation specifications. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
         "For PRD tables, use explicit table blocks or markdown tables for version history, channel/使用场景, field/rule tables, acceptance tables, and the safety baseline self-check. Do not replace tables with prose.",
-        "For PRD section content, every heading must have concrete content. If an exact route, author, participant, or date is unknown, write 待确认 or 以实际上线地址/联调结果为准, while still describing expected behavior from the product perspective.",
+        "For PRD section content, every heading must have concrete content. If an exact route, author, participant, or date is unknown, write 待确认 or 以实际上线地址/联调结果为准, while still describing expected behavior from the business perspective.",
         "For PRD safety/degradation content, do not leave the section empty: write 不涉及 only when truly irrelevant; otherwise provide concrete fallback behavior and safety baseline self-check values using only 是, 否, or 不涉及.",
         "When updating an existing PRD, merge the requested change into the currentPrdDocument and preserve unaffected sections, title hierarchy, tables, state flows, acceptance criteria, and implementation details.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
@@ -594,7 +587,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
     },
     prototypeHtmlContract: {
       previewEnvironment:
-        "AI Product Workbench renders prototype_html as an iframe srcDoc with sandbox=allow-scripts. The iframe does not inherit parent app CSS, fonts, layout, or resets.",
+        "AI Product Workbench renders saved prototype_html through a preview URL in a sandboxed iframe. The prototype must be a complete standalone HTML document that does not rely on parent app CSS, fonts, layout, or resets.",
       requiredArtifact:
         "For review_prototype, create exactly one text/html artifact at mnt/user-data/outputs/index.html and reference it in finalActionContract.artifacts with kind=prototype_html and contentType=text/html.",
       requiredDocumentShape: [
@@ -612,10 +605,10 @@ function buildUserPrompt(input: DeerFlowRunInput) {
       stylingRequirements: [
         "All visual styling must be inside the same HTML file, preferably in one <style> block in <head>; do not depend on Tailwind, parent CSS, remote CSS, local assets, web fonts, or CDN resources.",
         "Start with a small CSS reset: box-sizing:border-box; html/body margin:0; system sans-serif font; stable background; readable color; explicit line-height.",
-        "Use app-like product UI, not a document outline: constrained page shell, header/navigation, tabs/filter chips, tables/lists/forms/cards/status badges/actions, empty/error states, and realistic spacing.",
+        "Use app-like operational UI, not a document outline: constrained page shell, header/navigation, tabs/filter chips, tables/lists/forms/cards/status badges/actions, empty/error states, and realistic spacing.",
         "Set explicit font sizes for h1/h2/h3/body/table/button/input so the iframe never falls back to oversized Times-style browser defaults.",
         "Style tables with width:100%, border-collapse, padded th/td, header background, and responsive overflow handling.",
-        "Use Chinese labels and realistic sample data from the PRD/product state; keep columns and controls aligned at desktop width while remaining usable in the small inline preview.",
+        "Use Chinese labels and realistic sample data from the PRD/design state; keep columns and controls aligned at desktop width while remaining usable in the small inline preview.",
         "If interaction cannot use scripts because stored prototypes are sanitized, present the key states as visible static sections or CSS-only variants.",
       ],
       forbiddenOutput: [

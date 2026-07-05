@@ -12,8 +12,6 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { ConversationModule } from "./modules/conversation/conversation.module";
 import { MessageModule } from "./modules/message/message.module";
 import { AichatDataModule } from "./modules/aichat-data/aichat-data.module";
-import { ProjectModule } from "./modules/project/project.module";
-import { ProductModule } from "./products/product.module";
 import { SystemModule } from "./modules/system/system.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { CommentModule } from "./comments/comment.module";
@@ -37,8 +35,6 @@ import { CommentModule } from "./comments/comment.module";
     AdminUsersModule,
     KnowledgeModule,
     ModelGatewayModule,
-    ProjectModule,
-    ProductModule,
     ConversationModule,
     MessageModule,
     AichatDataModule,

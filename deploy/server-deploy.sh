@@ -47,7 +47,7 @@ MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS="${MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS:-
 DEFAULT_MODEL_PROVIDER_NAME="${DEFAULT_MODEL_PROVIDER_NAME:-datatoken}"
 DEFAULT_MODEL_BASE_URL="${DEFAULT_MODEL_BASE_URL:-https://datatoken.shop}"
 DEFAULT_MODEL_API_KEY="${DEFAULT_MODEL_API_KEY:-}"
-DEFAULT_MODEL_NAME="${DEFAULT_MODEL_NAME:-gpt-5.5}"
+DEFAULT_MODEL_NAME="${DEFAULT_MODEL_NAME:-}"
 KNOWLEDGE_APP_PORT="${KNOWLEDGE_APP_PORT:-3001}"
 KNOWLEDGE_APP_PUBLIC_URL="${KNOWLEDGE_APP_PUBLIC_URL:-http://${APP_HOST}:${KNOWLEDGE_APP_PORT}}"
 WEB_ORIGIN="${WEB_ORIGIN:-$APP_PUBLIC_URL}"
@@ -207,7 +207,7 @@ wait_for_postgres() {
   return 1
 }
 
-remove_legacy_container() {
+remove_existing_container_outside_compose() {
   local container_name="$1"
   local compose_project
 
@@ -219,7 +219,7 @@ remove_legacy_container() {
     docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$container_name" 2>/dev/null || true
   )"
   if [ "$compose_project" != "ai-product-workbench" ]; then
-    echo "Removing legacy container: ${container_name}"
+    echo "Removing pre-existing container outside current compose project: ${container_name}"
     docker rm -f "$container_name" >/dev/null 2>&1 || true
   fi
 }
@@ -227,34 +227,34 @@ remove_legacy_container() {
 case "$DEPLOY_TARGET" in
   web)
     "${COMPOSE[@]}" build web
-    remove_legacy_container ai-product-workbench-web
+    remove_existing_container_outside_compose ai-product-workbench-web
     "${COMPOSE[@]}" up -d --no-deps web
     wait_for_http "http://127.0.0.1:3000/login" "Web"
     ;;
   api)
     "${COMPOSE[@]}" build api
-    remove_legacy_container ai-product-workbench-api
+    remove_existing_container_outside_compose ai-product-workbench-api
     "${COMPOSE[@]}" up -d --no-deps api
     wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
     ;;
   knowledge)
     ensure_storage_dirs
     "${COMPOSE[@]}" build knowledge
-    remove_legacy_container ai-product-knowledge
+    remove_existing_container_outside_compose ai-product-knowledge
     "${COMPOSE[@]}" up -d --no-deps knowledge
     wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
     ;;
   postgres)
-    remove_legacy_container ai-product-workbench-postgres
+    remove_existing_container_outside_compose ai-product-workbench-postgres
     "${COMPOSE[@]}" up -d --no-deps postgres
     wait_for_postgres
     ;;
   all)
     ensure_storage_dirs
-    remove_legacy_container ai-product-workbench-postgres
-    remove_legacy_container ai-product-workbench-api
-    remove_legacy_container ai-product-workbench-web
-    remove_legacy_container ai-product-knowledge
+    remove_existing_container_outside_compose ai-product-workbench-postgres
+    remove_existing_container_outside_compose ai-product-workbench-api
+    remove_existing_container_outside_compose ai-product-workbench-web
+    remove_existing_container_outside_compose ai-product-knowledge
     "${COMPOSE[@]}" up -d --build
     wait_for_postgres
     wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
