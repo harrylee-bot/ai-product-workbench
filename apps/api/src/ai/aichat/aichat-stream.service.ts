@@ -1630,11 +1630,11 @@ function formatKnowledgeInventoryMessage(output: {
   });
   const suffix =
     output.selectedCount > lines.length
-      ? `\n\n还有 ${output.selectedCount - lines.length} 条已在工具结果里展示。`
+      ? `\n\n还有 ${output.selectedCount - lines.length} 条已作为执行摘要保留。`
       : "";
 
   return [
-    `我查询到 ${output.selectedCount} 条可用知识（总命中 ${output.matchedCount} 条），真实列表已在工具结果中展开。`,
+    `我查询到 ${output.selectedCount} 条可用知识（总命中 ${output.matchedCount} 条），摘要如下。`,
     "",
     ...lines,
     suffix,

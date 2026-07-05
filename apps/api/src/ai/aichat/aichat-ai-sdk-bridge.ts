@@ -138,8 +138,8 @@ export function runtimeEventsFromDeerFlow(
       id: `${runId}:gateway-upload`,
       runId,
       kind: "artifact",
-      label: "已同步附件到 DeerFlow",
-      detail: event.content,
+      label: "已同步附件",
+      detail: "已准备好用户上传的资料。",
       status: "completed",
       createdAt: now,
     });
@@ -150,8 +150,8 @@ export function runtimeEventsFromDeerFlow(
       id: `${runId}:gateway-artifacts`,
       runId,
       kind: "artifact",
-      label: "已同步 DeerFlow 产物",
-      detail: event.content,
+      label: "已整理生成产物",
+      detail: "已接收并整理本轮生成结果。",
       status: "completed",
       createdAt: now,
     });
@@ -159,13 +159,14 @@ export function runtimeEventsFromDeerFlow(
 
   for (const call of event.toolCalls ?? []) {
     if (!call.id || !call.name) continue;
+    const action = toolActionCopy(call.name);
     ctx.toolCallNames.set(call.id, call.name);
     events.push({
       id: `${runId}:tool:${call.id}:input`,
       runId,
       kind: "tool",
-      label: `调用 ${formatToolName(call.name)}`,
-      detail: summarizeUnknown(call.args),
+      label: action.running,
+      detail: summarizeToolPayload(call.name, call.args, "input"),
       status: "running",
       createdAt: now,
     });
@@ -173,12 +174,17 @@ export function runtimeEventsFromDeerFlow(
 
   if (event.messageRole === "tool" && event.toolCallId) {
     const toolName = ctx.toolCallNames.get(event.toolCallId) ?? "工具";
+    const action = toolActionCopy(toolName);
     events.push({
       id: `${runId}:tool:${event.toolCallId}:output`,
       runId,
       kind: "tool",
-      label: `${formatToolName(toolName)} 已完成`,
-      detail: summarizeUnknown(event.toolResult ?? event.content),
+      label: action.completed,
+      detail: summarizeToolPayload(
+        toolName,
+        event.toolResult ?? event.content,
+        "output",
+      ),
       status: "completed",
       createdAt: now,
     });
@@ -477,25 +483,143 @@ export function createRuntimeEvent(input: {
   };
 }
 
-function formatToolName(name: string) {
-  return name
-    .replace(/^mcp__/, "")
-    .replace(/__/g, " / ")
-    .replace(/_/g, " ")
-    .trim();
+function toolActionCopy(name: string) {
+  const normalized = normalizeToolName(name);
+  if (normalized.includes("listknowledgebase")) {
+    return {
+      running: "正在查询知识库",
+      completed: "已查询知识库",
+    };
+  }
+  if (normalized.includes("readfile") || normalized.includes("read_file")) {
+    return {
+      running: "正在读取参考资料",
+      completed: "已读取参考资料",
+    };
+  }
+  if (
+    normalized.includes("writefile") ||
+    normalized.includes("editfile") ||
+    normalized.includes("updatefile") ||
+    normalized.includes("createfile")
+  ) {
+    return {
+      running: "正在整理生成内容",
+      completed: "已整理生成内容",
+    };
+  }
+  if (
+    normalized.includes("search") ||
+    normalized.includes("grep") ||
+    normalized.includes("find") ||
+    normalized === "rg"
+  ) {
+    return {
+      running: "正在检索相关信息",
+      completed: "已检索相关信息",
+    };
+  }
+  if (
+    normalized.includes("listdir") ||
+    normalized.includes("listdirectory") ||
+    normalized === "ls"
+  ) {
+    return {
+      running: "正在查看资料目录",
+      completed: "已查看资料目录",
+    };
+  }
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized.includes("exec") ||
+    normalized.includes("bash")
+  ) {
+    return {
+      running: "正在执行系统验证",
+      completed: "已完成系统验证",
+    };
+  }
+  if (
+    normalized.includes("fetch") ||
+    normalized.includes("http") ||
+    normalized.includes("curl")
+  ) {
+    return {
+      running: "正在获取外部信息",
+      completed: "已获取外部信息",
+    };
+  }
+  return {
+    running: "正在处理任务步骤",
+    completed: "已完成任务步骤",
+  };
 }
 
-function summarizeUnknown(value: unknown) {
+function normalizeToolName(name: string) {
+  return name
+    .replace(/^mcp__/i, "")
+    .replace(/__/g, "_")
+    .replace(/[^a-z0-9_]/gi, "")
+    .toLowerCase();
+}
+
+function summarizeToolPayload(
+  toolName: string,
+  value: unknown,
+  phase: "input" | "output",
+) {
   if (value === undefined || value === null || value === "") return undefined;
-  let text: string;
-  if (typeof value === "string") {
-    text = value;
-  } else {
-    try {
-      text = JSON.stringify(value, null, 2);
-    } catch {
-      text = String(value);
+  const normalized = normalizeToolName(toolName);
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+
+  if (normalized.includes("listknowledgebase")) {
+    const selectedCount = numberFromUnknown(record?.selectedCount);
+    const matchedCount = numberFromUnknown(record?.matchedCount);
+    if (phase === "output" && selectedCount !== undefined) {
+      return matchedCount !== undefined
+        ? `已找到 ${selectedCount} 条可用资料，总命中 ${matchedCount} 条。`
+        : `已找到 ${selectedCount} 条可用资料。`;
     }
+    return "正在从知识库中查找可复用的产品资料。";
   }
-  return text.replace(/\s+/g, " ").trim().slice(0, 240);
+  if (normalized.includes("readfile") || normalized.includes("read_file")) {
+    return phase === "output"
+      ? "已读取相关资料，并用于后续分析。"
+      : "正在读取必要资料，用于理解上下文。";
+  }
+  if (
+    normalized.includes("writefile") ||
+    normalized.includes("editfile") ||
+    normalized.includes("updatefile")
+  ) {
+    return phase === "output" ? "已完成内容整理。" : "正在整理输出内容。";
+  }
+  if (
+    normalized.includes("search") ||
+    normalized.includes("grep") ||
+    normalized.includes("find")
+  ) {
+    return phase === "output"
+      ? "已完成相关信息检索。"
+      : "正在检索和当前需求相关的信息。";
+  }
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized.includes("exec") ||
+    normalized.includes("bash")
+  ) {
+    return phase === "output"
+      ? "已完成必要的系统验证。"
+      : "正在执行必要的验证步骤。";
+  }
+  return phase === "output" ? "已完成这一步处理。" : "正在处理当前步骤。";
+}
+
+function numberFromUnknown(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

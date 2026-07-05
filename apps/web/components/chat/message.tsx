@@ -14,8 +14,6 @@ import {
   Tool,
   ToolContent,
   ToolHeader,
-  ToolInput,
-  ToolOutput,
 } from "../ai-elements/tool";
 import { Button } from "../ui/button";
 import {
@@ -259,6 +257,8 @@ function ThinkingStep({
 }) {
   const icon = stepIcon(event.kind);
   const isRunning = isLast && isStreaming && event.status === "running";
+  const label = formatUserRuntimeLabel(event.label);
+  const detail = formatUserRuntimeDetail(event.detail);
 
   return (
     <div className="flex flex-col gap-0.5">
@@ -272,15 +272,15 @@ function ThinkingStep({
             isRunning && "animate-pulse"
           )}
         >
-          {event.label}
+          {label}
         </span>
         {isRunning && (
           <span className="ml-1 text-xs text-muted-foreground/60">…</span>
         )}
       </div>
-      {event.detail && (
+      {detail && (
         <div className="ml-6 text-xs text-muted-foreground/70 whitespace-pre-wrap leading-relaxed border-l border-border/40 pl-2">
-          {event.detail}
+          {detail}
         </div>
       )}
     </div>
@@ -347,8 +347,9 @@ function formatRuntimeEvents(events?: RuntimeProcessEvent[]): string {
   return (events ?? [])
     .filter(isVisibleRuntimeEvent)
     .map((event) => {
-      const detail = event.detail?.trim();
-      return detail ? `- ${event.label}\n  ${detail}` : `- ${event.label}`;
+      const label = formatUserRuntimeLabel(event.label);
+      const detail = formatUserRuntimeDetail(event.detail);
+      return detail ? `- ${label}\n  ${detail}` : `- ${label}`;
     })
     .join("\n");
 }
@@ -380,19 +381,32 @@ function MessageToolPart({ part }: { part: any }) {
     errorText && part.output && typeof part.output === "object" && "error" in part.output
       ? undefined
       : part.output;
+  const presentation = buildToolPresentation({
+    errorText,
+    input: part.input,
+    output,
+    state,
+    toolName: getToolName(part),
+  });
   const shouldOpenByDefault =
     state === "approval-requested" || state === "output-error";
 
   return (
     <Tool className="max-w-[min(100%,560px)]" defaultOpen={shouldOpenByDefault}>
       <ToolHeader
+        description={presentation.description}
         state={state as any}
+        title={presentation.title}
         toolName={part.toolName}
         type={part.type as any}
       />
       <ToolContent>
-        {part.input !== undefined ? <ToolInput input={part.input} /> : null}
-        <ToolOutput errorText={errorText} output={output} />
+        <div className="space-y-2 rounded-md bg-muted/35 px-3 py-2 text-sm leading-relaxed text-muted-foreground">
+          <p>{presentation.summary}</p>
+          {presentation.errorSummary ? (
+            <p className="text-destructive">{presentation.errorSummary}</p>
+          ) : null}
+        </div>
       </ToolContent>
     </Tool>
   );
@@ -455,4 +469,294 @@ function normalizeToolState(part: any) {
   if (part?.output !== undefined) return "output-available";
   if (part?.input !== undefined) return "input-available";
   return "input-streaming";
+}
+
+function getToolName(part: any) {
+  if (typeof part?.toolName === "string" && part.toolName.trim()) {
+    return part.toolName;
+  }
+  const type = String(part?.type ?? "");
+  return type.startsWith("tool-") ? type.slice("tool-".length) : type;
+}
+
+function buildToolPresentation(input: {
+  errorText?: string;
+  input: unknown;
+  output: unknown;
+  state: string;
+  toolName: string;
+}) {
+  const action = toolActionCopy(input.toolName);
+  const statusSummary = statusSummaryForTool(action, input.state);
+  const inputSummary = summarizeToolIntent(input.toolName, input.input);
+  const outputSummary = summarizeToolOutput(input.toolName, input.output);
+  const errorSummary = input.errorText
+    ? "这一步没有完成，系统已保留失败状态，后续可重新尝试。"
+    : undefined;
+
+  return {
+    title: action.title,
+    description:
+      input.state === "output-available"
+        ? outputSummary ?? statusSummary
+        : inputSummary ?? statusSummary,
+    summary: input.errorText
+      ? statusSummary
+      : outputSummary ?? inputSummary ?? statusSummary,
+    errorSummary,
+  };
+}
+
+function toolActionCopy(name: string) {
+  const normalized = normalizeToolName(name);
+  if (normalized.includes("listknowledgebase")) {
+    return {
+      title: "查询知识库",
+      running: "正在查询知识库",
+      completed: "已查询知识库",
+      failed: "知识库查询失败",
+    };
+  }
+  if (normalized.includes("readfile") || normalized.includes("read_file")) {
+    return {
+      title: "读取参考资料",
+      running: "正在读取参考资料",
+      completed: "已读取参考资料",
+      failed: "资料读取失败",
+    };
+  }
+  if (
+    normalized.includes("writefile") ||
+    normalized.includes("editfile") ||
+    normalized.includes("updatefile") ||
+    normalized.includes("createfile")
+  ) {
+    return {
+      title: "整理生成内容",
+      running: "正在整理生成内容",
+      completed: "已整理生成内容",
+      failed: "内容整理失败",
+    };
+  }
+  if (
+    normalized.includes("search") ||
+    normalized.includes("grep") ||
+    normalized.includes("find") ||
+    normalized === "rg"
+  ) {
+    return {
+      title: "检索相关信息",
+      running: "正在检索相关信息",
+      completed: "已检索相关信息",
+      failed: "信息检索失败",
+    };
+  }
+  if (
+    normalized.includes("listdir") ||
+    normalized.includes("listdirectory") ||
+    normalized === "ls"
+  ) {
+    return {
+      title: "查看资料目录",
+      running: "正在查看资料目录",
+      completed: "已查看资料目录",
+      failed: "资料目录读取失败",
+    };
+  }
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized.includes("exec") ||
+    normalized.includes("bash")
+  ) {
+    return {
+      title: "执行系统验证",
+      running: "正在执行系统验证",
+      completed: "已完成系统验证",
+      failed: "系统验证失败",
+    };
+  }
+  if (
+    normalized.includes("fetch") ||
+    normalized.includes("http") ||
+    normalized.includes("curl")
+  ) {
+    return {
+      title: "获取外部信息",
+      running: "正在获取外部信息",
+      completed: "已获取外部信息",
+      failed: "外部信息获取失败",
+    };
+  }
+  return {
+    title: "处理任务步骤",
+    running: "正在处理任务步骤",
+    completed: "已完成任务步骤",
+    failed: "任务步骤失败",
+  };
+}
+
+function normalizeToolName(name: string) {
+  return name
+    .replace(/^mcp__/i, "")
+    .replace(/__/g, "_")
+    .replace(/[^a-z0-9_]/gi, "")
+    .toLowerCase();
+}
+
+function statusSummaryForTool(
+  action: ReturnType<typeof toolActionCopy>,
+  state: string,
+) {
+  if (state === "output-error") return action.failed;
+  if (state === "output-available") return action.completed;
+  if (state === "approval-requested") return "等待用户确认后继续。";
+  if (state === "output-denied") return "用户已拒绝执行这一步。";
+  return action.running;
+}
+
+function summarizeToolIntent(toolName: string, input: unknown) {
+  const action = toolActionCopy(toolName);
+  if (input === undefined || input === null || input === "") {
+    return action.running;
+  }
+  const normalized = normalizeToolName(toolName);
+  if (normalized.includes("listknowledgebase")) {
+    return "正在从知识库中查找可复用的产品资料。";
+  }
+  if (normalized.includes("readfile") || normalized.includes("read_file")) {
+    return "正在读取必要资料，用于理解上下文。";
+  }
+  if (
+    normalized.includes("writefile") ||
+    normalized.includes("editfile") ||
+    normalized.includes("updatefile")
+  ) {
+    return "正在把处理结果整理成可用内容。";
+  }
+  if (
+    normalized.includes("search") ||
+    normalized.includes("grep") ||
+    normalized.includes("find")
+  ) {
+    return "正在检索和当前需求相关的信息。";
+  }
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized.includes("exec") ||
+    normalized.includes("bash")
+  ) {
+    return "正在执行必要的验证步骤。";
+  }
+  return action.running;
+}
+
+function summarizeToolOutput(toolName: string, output: unknown) {
+  if (output === undefined || output === null || output === "") return undefined;
+  const normalized = normalizeToolName(toolName);
+  const record = output && typeof output === "object" && !Array.isArray(output)
+    ? (output as Record<string, unknown>)
+    : null;
+
+  if (normalized.includes("listknowledgebase")) {
+    const selectedCount = numberFromUnknown(record?.selectedCount);
+    const matchedCount = numberFromUnknown(record?.matchedCount);
+    if (selectedCount !== undefined && matchedCount !== undefined) {
+      return `已找到 ${selectedCount} 条可用资料，总命中 ${matchedCount} 条。`;
+    }
+    if (selectedCount !== undefined) {
+      return `已找到 ${selectedCount} 条可用资料。`;
+    }
+    return "已完成知识库查询。";
+  }
+  if (normalized.includes("readfile") || normalized.includes("read_file")) {
+    return "已读取相关资料，并用于后续分析。";
+  }
+  if (
+    normalized.includes("writefile") ||
+    normalized.includes("editfile") ||
+    normalized.includes("updatefile")
+  ) {
+    return "已完成内容整理。";
+  }
+  if (
+    normalized.includes("search") ||
+    normalized.includes("grep") ||
+    normalized.includes("find")
+  ) {
+    return "已完成相关信息检索。";
+  }
+  if (
+    normalized.includes("shell") ||
+    normalized.includes("command") ||
+    normalized.includes("exec") ||
+    normalized.includes("bash")
+  ) {
+    return "已完成必要的系统验证。";
+  }
+  return "已完成这一步处理。";
+}
+
+function numberFromUnknown(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function formatUserRuntimeLabel(label: string) {
+  const action = toolActionFromText(label);
+  if (!action) return sanitizeRuntimeText(label);
+  if (/失败|错误|error|failed/i.test(label)) return action.failed;
+  if (/已完成|完成|completed|output/i.test(label)) return action.completed;
+  return action.running;
+}
+
+function formatUserRuntimeDetail(detail?: string) {
+  if (!detail?.trim()) return undefined;
+  const text = detail.trim();
+  if (looksTechnicalRuntimeText(text)) {
+    return "已处理必要的信息，技术细节已隐藏。";
+  }
+  return sanitizeRuntimeText(text).slice(0, 140);
+}
+
+function toolActionFromText(text: string) {
+  const normalized = normalizeToolName(text);
+  const candidates = [
+    "listKnowledgeBase",
+    "read_file",
+    "readFile",
+    "write_file",
+    "edit_file",
+    "update_file",
+    "search",
+    "grep",
+    "find",
+    "list_dir",
+    "exec_command",
+    "shell",
+    "bash",
+    "curl",
+  ];
+  return candidates
+    .map((candidate) => toolActionCopy(candidate))
+    .find((_action, index) => {
+      const candidate = normalizeToolName(candidates[index]);
+      return normalized.includes(candidate);
+    });
+}
+
+function looksTechnicalRuntimeText(text: string) {
+  return (
+    /^[{[]/.test(text) ||
+    /[`{}$]|--|&&|\|\||\/[\w.-]+|\\n|\.tsx?|\.jsx?|\.json|npm |git |ssh |docker |curl |read[_ ]?file|write[_ ]?file/i.test(text)
+  );
+}
+
+function sanitizeRuntimeText(text: string) {
+  return text
+    .replace(/read[_ ]?file/gi, "读取参考资料")
+    .replace(/write[_ ]?file/gi, "整理生成内容")
+    .replace(/listKnowledgeBase/gi, "查询知识库")
+    .replace(/\s+/g, " ")
+    .trim();
 }
