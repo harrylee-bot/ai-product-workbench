@@ -1,6 +1,7 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { ArrowDownIcon } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
+import { useArtifactSelector } from "@/hooks/use-artifact";
 import { useMessages } from "@/hooks/use-messages";
 import type { ChatRuntimeStatus } from "@/lib/api/nest-client";
 import type { Vote } from "@/lib/api/types";
@@ -10,8 +11,11 @@ import type {
   RuntimeProcessSnapshot,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import type { ArtifactKind, UIArtifact } from "./artifact";
+import { CanvasDocumentCard } from "./canvas-document-card";
 import { useDataStream } from "./data-stream-provider";
 import { Greeting } from "./greeting";
+import { SparklesIcon } from "./icons";
 import { PreviewMessage, ThinkingMessage, type ThinkingTrace } from "./message";
 
 type MessagesProps = {
@@ -46,6 +50,7 @@ function PureMessages({
   onEditMessage,
 }: MessagesProps) {
   const { runtimeProcess: liveRun } = useDataStream();
+  const liveArtifact = useArtifactSelector((artifact) => artifact);
   const {
     containerRef: messagesContainerRef,
     endRef: messagesEndRef,
@@ -82,6 +87,10 @@ function PureMessages({
   );
   const isAwaitingAssistant =
     status === "submitted" && messages.at(-1)?.role !== "assistant";
+  const liveCanvasDocument = useMemo(
+    () => getLiveCanvasDocument(liveArtifact, messages, status),
+    [liveArtifact, messages, status]
+  );
 
   return (
     <div className="relative flex-1 bg-background">
@@ -130,6 +139,10 @@ function PureMessages({
             <ThinkingMessage thinkingTrace={activeTrace} />
           )}
 
+          {liveCanvasDocument ? (
+            <LiveCanvasDocumentMessage document={liveCanvasDocument} />
+          ) : null}
+
           <div
             className="min-h-[24px] min-w-[24px] shrink-0"
             ref={messagesEndRef}
@@ -154,6 +167,37 @@ function PureMessages({
 }
 
 export const Messages = PureMessages;
+
+function LiveCanvasDocumentMessage({
+  document,
+}: {
+  document: {
+    documentId: string;
+    kind: ArtifactKind;
+    title: string;
+    status: "streaming" | "idle";
+  };
+}) {
+  return (
+    <div
+      className="group/message w-full"
+      data-role="assistant"
+      data-testid="live-canvas-document-message"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-[calc(13px*1.65)] shrink-0 items-center">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground ring-1 ring-border/50">
+            <SparklesIcon size={13} />
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <CanvasDocumentCard {...document} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function traceFromSnapshot(
   snapshot: RuntimeProcessSnapshot,
@@ -189,4 +233,59 @@ function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
     "knowledge-complete",
     "deerflow-start",
   ].some((suffix) => event.id.endsWith(`:${suffix}`));
+}
+
+function getLiveCanvasDocument(
+  artifact: UIArtifact,
+  messages: ChatMessage[],
+  status: UseChatHelpers<ChatMessage>["status"],
+) {
+  const isGenerating = status === "submitted" || status === "streaming";
+  if (!isGenerating && artifact.status !== "streaming") {
+    return null;
+  }
+
+  const kind = normalizeCanvasKind(artifact.kind);
+  if (!kind) {
+    return null;
+  }
+
+  const hasDocumentIdentity =
+    artifact.documentId !== "init" || artifact.title.trim() || artifact.content.trim();
+  if (!hasDocumentIdentity) {
+    return null;
+  }
+
+  if (
+    artifact.documentId !== "init" &&
+    messages.some((message) => messageHasCanvasDocument(message, artifact.documentId))
+  ) {
+    return null;
+  }
+
+  return {
+    documentId: artifact.documentId,
+    kind,
+    title: artifact.title || (kind === "prototype" ? "原型" : "产品需求文档"),
+    status: artifact.status,
+  };
+}
+
+function messageHasCanvasDocument(message: ChatMessage, documentId: string) {
+  return message.parts?.some((part: any) => {
+    if (part?.type !== "tool-createDocument" || part?.output?.error) {
+      return false;
+    }
+    return part?.output?.id === documentId || part?.input?.id === documentId;
+  });
+}
+
+function normalizeCanvasKind(kind: ArtifactKind): ArtifactKind | null {
+  if (kind === "text" || kind === "prototype") {
+    return kind;
+  }
+  if (kind === "prd") {
+    return "text";
+  }
+  return null;
 }

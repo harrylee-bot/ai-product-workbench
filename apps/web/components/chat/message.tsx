@@ -25,6 +25,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../ui/dialog";
+import { CanvasDocumentCard } from "./canvas-document-card";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { PreviewAttachment } from "./preview-attachment";
@@ -145,7 +146,7 @@ const PurePreviewMessage = ({
     }
 
     if (isToolPart(part)) {
-      if (!isCanvasDocumentTool(part)) hasVisibleToolBefore = true;
+      hasVisibleToolBefore = true;
       return <MessageToolPart key={key} part={part} />;
     }
 
@@ -364,7 +365,9 @@ function isVisibleRuntimeEvent(event: RuntimeProcessEvent) {
 
 function MessageToolPart({ part }: { part: any }) {
   if (isCanvasDocumentTool(part)) {
-    return null;
+    const canvasDocument = getCanvasDocumentFromToolPart(part);
+    if (!canvasDocument) return null;
+    return <CanvasDocumentCard {...canvasDocument} />;
   }
 
   const state = normalizeToolState(part);
@@ -401,12 +404,38 @@ function isToolPart(part: any) {
 }
 
 function isCanvasDocumentTool(part: any) {
+  return getCanvasDocumentFromToolPart(part) !== null;
+}
+
+function getCanvasDocumentFromToolPart(part: any) {
+  if (part?.type !== "tool-createDocument" || part?.output?.error) {
+    return null;
+  }
+
   const kind = part?.output?.kind ?? part?.input?.kind;
-  return (
-    part?.type === "tool-createDocument" &&
-    !part?.output?.error &&
-    (kind === "text" || kind === "prototype")
-  );
+  if (kind !== "text" && kind !== "prototype" && kind !== "prd") {
+    return null;
+  }
+
+  const documentId = part?.output?.id ?? part?.input?.id;
+  if (typeof documentId !== "string" || documentId.length === 0) {
+    return null;
+  }
+
+  const fallbackTitle = kind === "prototype" ? "原型" : "产品需求文档";
+  const title =
+    typeof part?.output?.title === "string" && part.output.title.length > 0
+      ? part.output.title
+      : typeof part?.input?.title === "string" && part.input.title.length > 0
+        ? part.input.title
+        : fallbackTitle;
+
+  return {
+    documentId,
+    kind: kind === "prd" ? "text" : kind,
+    title,
+    status: "idle" as const,
+  };
 }
 
 function normalizeToolState(part: any) {
