@@ -13,10 +13,11 @@
 - 本地 LangGraph 2024 直连服务已停止，Workbench 现在默认走 DeerFlow Gateway `/api`。
 - 本地真实浏览器完成注册、登录后首页、聊天流式回复、未登录分享登录回跳，控制台 0 warning/error。
 - 本地测试数据已清理：测试用户、会话、消息、运行日志、流事件、DeerFlow 线程绑定全部反查为 0。
-- 生产已部署到 `https://aionbench.com`，生产服务器 HEAD 为 `5e02584`。
+- 生产已部署到 `https://aionbench.com`，生产服务器运行代码 HEAD 为 `467b071`。
 - 生产 API health 正常，DeerFlow 启用，线上模型为 `datatoken-gpt-5-5`。
-- 生产 `public/share` 旧误导路由已变为 404，新的 `authenticated-share` 未登录返回 401。
+- 生产 `public/share` 旧误导路由已变为 404，新的 `authenticated-share` 未登录返回 401；`/api/auth/logout` 已改为幂等 200，避免过期会话登出时产生 401 控制台噪音。
 - 生产 `share_links.product_design_state_id` 残留列已删除，旧 `projects/products/product_design_*` 表、旧列、旧 enum 类型扫描均为空。
+- API auth 边界已统一到 `apps/api/src/auth`，旧 `apps/api/src/modules/auth` 与重复 `common/current-user.decorator.ts` 已删除。
 - 主 Web/API 依赖审计为 0 vulnerabilities，Knip 未发现可直接删除的未用文件、依赖、导出或类型。
 
 本轮没有在生产重新发起长耗时 DeerFlow 生成任务，避免再次写入 smoke 数据和产生额外成本；DeerFlow 端到端生成通信已在本地真实 Web/API/Gateway 链路中验证。
@@ -56,7 +57,8 @@
 |---|---|---|
 | Web lint | `npm --workspace @ai-product-workbench/web run lint` | 通过 |
 | TypeScript | `npm run typecheck` | API + Web 通过 |
-| API 单测 | `npm run test` | 33 个测试文件 passed、1 skipped；163 passed、1 skipped |
+| API 单测 | `npm run test` | 35 个测试文件 passed、1 skipped；169 passed、1 skipped |
+| API 路由边界 | `apps/api/test/api-route-boundary.spec.ts` | 覆盖 `authenticated-share` 受保护、旧 public 命名不复活、logout 幂等 200 |
 | 生产构建 | `npm run build` | API `tsc` + Next production build 通过 |
 | 主依赖审计 | `npm_config_registry=https://registry.npmjs.org npm audit --omit=optional` | 0 vulnerabilities |
 | 未用扫描 | `npx --yes knip --include files,dependencies,devDependencies,exports,types --workspace apps/web --workspace apps/api` | 无输出 |
@@ -100,10 +102,11 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 
 | 验证项 | 结果 |
 |---|---|
-| 生产服务器 HEAD | `5e02584` |
+| 生产服务器 HEAD | `467b071` |
 | API 容器 | 已重建并启动 |
 | API health | `ok=true`，DeerFlow enabled |
 | `/api/auth/session` | 200，正文 `{"user":null}` |
+| `/api/auth/logout` | 200，清理 `access_token` cookie |
 | `/api/public/share/bad` | 404 |
 | `/api/authenticated-share/bad` | 401 |
 | `/login` headers | `Origin-Agent-Cluster: ?1`，生产 CSP 无 localhost |
@@ -138,6 +141,8 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 | P1 | 未登录页面用 `/auth/me` 造成 401 控制台噪音 | 增加 `/api/auth/session` 静默会话接口，前端 AuthProvider 改用 session |
 | P1 | 分享需要登录，但 API 路由名叫 `public/share`，与业务规则冲突 | 后端改为 `authenticated-share`，前端 fetch/iframe 同步更新 |
 | P1 | 未登录访问分享页会先请求分享 API，造成无意义 401 | 分享客户端等待 auth session，未登录先跳 `/login?next=...` |
+| P1 | 登出接口依赖 JWT guard，过期会话登出会在浏览器 console 留 401 噪音 | `/api/auth/logout` 改为幂等 200，始终清 cookie |
+| P1 | API auth 同时存在 `src/auth` 与 `src/modules/auth` 两套边界 | 统一到 `src/auth`，删除旧模块、重复 decorator/guard/types，并补路由边界测试 |
 | P1 | DeerFlow 默认仍指向 `localhost:2024`，与当前 Gateway 架构不一致 | 默认改为 `http://localhost:8001/api`，生产改为 `host.docker.internal:8001/api` |
 | P1 | Origin-Agent-Cluster warning | Web 增加 `Origin-Agent-Cluster: ?1` |
 | P2 | 回放迁移时 legacy backfill 对已删除表不够宽容 | 回填迁移和 relax 迁移增加存在性保护 |
@@ -174,6 +179,8 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 - `share_links.product_design_state_id` 生产残留列已删除。
 - `public/share` 误导 API 命名已移除，旧 route 返回 404。
 - 未登录 auth 401 噪音已通过 `/auth/session` 消除。
+- 登出过期会话 401 噪音已通过幂等 `/auth/logout` 消除。
+- 重复 auth 模块边界已删除：`apps/api/src/modules/auth` 不再存在，认证类型、guard、decorator 统一从 `apps/api/src/auth` 引用。
 - 本地 Playwright 临时目录和临时测试邮箱文件已删除。
 - 本地和生产 smoke/test 数据均已清理到 0。
 - 当前只保留本轮报告和截图证据；未发现额外历史审查报告文件。
@@ -209,7 +216,7 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 ## 10. 风险和优化建议
 
 1. 将 DeerFlow Gateway 作为唯一默认 runtime 继续固化，避免 2024 direct 和 Gateway 双入口再次漂移。
-2. 给 `authenticated-share` 补端到端测试：未登录跳转、登录后可读、旧 `public/share` 404、prototype iframe sandbox。
+2. 继续加强 `authenticated-share` 测试：当前已有路由边界测试和真实浏览器验证，下一步可补完整 HTTP E2E，覆盖未登录跳转、登录后可读、旧 `public/share` 404、prototype iframe sandbox。
 3. 增加生产迁移前自动 legacy 扫描和迁移后断言，让残留列能在 CI/CD 中被提前发现。
 4. 为本地 smoke 测试提供固定清理脚本，统一清理 Workbench DB 和 DeerFlow Gateway 线程。
 5. 给后台管理写操作补最小 E2E，尤其是用户状态、模型配置、知识库候选项和运行日志详情。
