@@ -49,9 +49,9 @@ export function formatRequirementDocumentDraft(
   state?: ConversationDesignState,
   options: { author?: string; date?: string } = {},
 ): RequirementDocumentDraft {
-  const title = getRequirementDocumentTitle(draft.title, state);
-  const baseName = title.replace(/需求说明书$/, "") || "需求";
   const sourceSections = [...(draft.sections ?? [])].sort((a, b) => a.order - b.order);
+  const title = getRequirementDocumentTitle(draft.title, state, sourceSections);
+  const baseName = title.replace(/需求说明书$/, "") || "需求";
   const author = options.author || state?.updatedBy || state?.createdBy || "待确认";
   const date = options.date || formatDate(state?.updatedAt);
   const sections: RequirementDocSection[] = [];
@@ -219,14 +219,48 @@ export function formatRequirementDocumentDraft(
   };
 }
 
-function getRequirementDocumentTitle(title: string, state?: ConversationDesignState) {
-  const preferred = state?.title || title || "需求";
-  const base = preferred
+function getRequirementDocumentTitle(
+  title: string,
+  state?: ConversationDesignState,
+  sections: RequirementDocSection[] = [],
+) {
+  const candidates = [
+    state?.title,
+    title,
+    inferRequirementTitleFromSections(sections),
+  ].filter((value): value is string => Boolean(value?.trim()));
+  const preferred =
+    candidates.find((candidate) => !isGenericRequirementTitle(candidate))
+    ?? candidates[0]
+    ?? "需求";
+  const base = normalizeRequirementTitleBase(preferred);
+  return `${base || "需求"}需求说明书`;
+}
+
+function inferRequirementTitleFromSections(sections: RequirementDocSection[]) {
+  const text = sections
+    .flatMap((section) => [
+      section.title,
+      section.content,
+      ...(section.blocks ?? []).map((block) => block.content ?? ""),
+    ])
+    .join("\n")
+    .slice(0, 6000);
+  const match = text.match(/(^|\n|\s)([^。\n|]{2,60}?(?:需求说明书|需求文档|产品需求文档|PRD|prd))(?=\s|\n|\||$)/);
+  return match?.[2]?.trim();
+}
+
+function isGenericRequirementTitle(value: string) {
+  const base = normalizeRequirementTitleBase(value);
+  return /^(产品需求方案|产品方案|需求方案|需求|方案|产品需求)$/.test(base);
+}
+
+function normalizeRequirementTitleBase(value: string) {
+  return value
     .replace(/\s+/g, " ")
     .replace(/(产品需求文档|需求说明书|需求文档|PRD|prd)$/i, "")
     .replace(/[－\-—_ ]+$/g, "")
     .trim();
-  return `${base || "需求"}需求说明书`;
 }
 
 function buildTocMarkdown() {

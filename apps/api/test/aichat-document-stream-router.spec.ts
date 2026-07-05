@@ -28,6 +28,12 @@ describe("aichat document stream router", () => {
     expect(isDocumentGenerationRequest("给我生成一个问卷活动的需求文档")).toBe(true);
     expect(isDocumentGenerationRequest("请编写签到活动 PRD")).toBe(true);
     expect(isDocumentGenerationRequest("活动交易快照功能需求说明书")).toBe(true);
+    expect(isDocumentGenerationRequest("请生成PRD，不要生成原型")).toBe(true);
+    expect(
+      isDocumentGenerationRequest(
+        "请生成一份会员积分商城 PRD，只生成需求文档，不生成原型。不要把工具调用、文件加载、Claude、read_file 等运行日志写进需求文档。",
+      ),
+    ).toBe(true);
     expect(isDocumentGenerationRequest("这份需求文档有哪些风险？")).toBe(false);
     expect(isDocumentGenerationRequest("请用一句话说明当前系统是否在线，不要生成PRD。")).toBe(false);
     expect(isDocumentGenerationRequest("不要生成 PRD，只回答运行状态")).toBe(false);
@@ -42,33 +48,57 @@ describe("aichat document stream router", () => {
     ).toBe(true);
   });
 
-  it("routes PRD block source snippets that start with mermaid or JSON blocks", () => {
+  it("routes PRD block source snippets that start with mermaid blocks", () => {
     expect(
       looksLikeDocumentDraft(
         "mermaid\nflowchart TD\nA[用户参与活动] --> B[生成交易快照]",
         "mermaid\nflowchart TD\nA[用户参与活动] --> B[生成交易快照]",
       ),
     ).toBe(true);
+  });
+
+  it("does not start document streaming from loose structured JSON blocks", () => {
     expect(
       looksLikeDocumentDraft(
         '{"type":"table","title":"页面异常态要求","content":"| 异常态 | 处理要求 |"}',
         '{"type":"table","title":"页面异常态要求","content":"| 异常态 | 处理要求 |"}',
       ),
-    ).toBe(true);
-    // sections JSON（type: section）应被识别为文档内容，不应泄漏到聊天区
+    ).toBe(false);
+    // sections JSON 属于 final action / artifact 原料，不应裸渲染到画布。
     expect(
       looksLikeDocumentDraft(
         '{"id":"data_review","title":"2.9 数据复盘","type":"section","level":2,"order":16,"content":"交易快照需要支持基础统计","sourcePaths":["summary"]}',
         '{"id":"data_review","title":"2.9 数据复盘","type":"section","level":2,"order":16,"content":"交易快照需要支持基础统计","sourcePaths":["summary"]}',
       ),
-    ).toBe(true);
-    // businessRules、acceptanceCriteria 等 PRD 专属字段也应被识别
+    ).toBe(false);
+    // businessRules、acceptanceCriteria 等 PRD 专属字段也等待最终动作解析。
     expect(
       looksLikeDocumentDraft(
         '{"acceptanceCriteria":[{"id":"ac1","title":"验收标准1"}]}',
         '{"acceptanceCriteria":[{"id":"ac1","title":"验收标准1"}]}',
       ),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("suppresses loose structured JSON during forced document generation without opening canvas", () => {
+    const { parts, writer } = captureWriter();
+    const state = createDocumentStreamState("run-1", {
+      forceDocumentStream: true,
+    });
+
+    const result = routeAssistantDocumentDelta(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "assistant",
+        chunk: '{"type":"table","title":"页面异常态要求","content":"| 异常态 | 处理要求 |"}',
+      },
+      writer,
+      state,
+    );
+
+    expect(result).toEqual({ suppressChat: true });
+    expect(parts).toEqual([]);
   });
 
   it("routes document generation text into the text artifact stream", () => {
@@ -249,6 +279,17 @@ describe("aichat document stream router", () => {
     expect(body).toContain("会员积分商城记录页");
     expect(body).toContain("运行说明不写入需求正文");
     expect(body).not.toContain("思考过程");
+  });
+
+  it("keeps fallback PRD titles focused on the business subject", () => {
+    const finalAction = buildFallbackPrdFinalAction(
+      "请生成一份会员积分商城 PRD，只生成需求文档，不生成原型。要求包含业务目标、目标用户、用户流程、功能需求、字段与状态、验收标准、风控和埋点。",
+    );
+    const raw = finalAction.raw as {
+      prdDocumentDraft?: { title?: string };
+    };
+
+    expect(raw.prdDocumentDraft?.title).toBe("会员积分商城需求说明书");
   });
 });
 

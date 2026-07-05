@@ -1153,10 +1153,8 @@ export function looksLikeDocumentDraft(buffer: string, delta: string) {
   if (/```?\s*mermaid|(^|\n)\s*mermaid\s*\n|flowchart\s+(TD|LR|BT|RL)|sequenceDiagram|stateDiagram|classDiagram/.test(sample)) {
     return /(需求|文档|说明书|业务|活动|页面|接口|配置|状态|流程|快照|验收)/.test(sample);
   }
-  if (
-    /"type"\s*:\s*"(table|diagram|image|prototype_snapshot|asset_reference|section)"|"blocks"\s*:|"sourcePaths"\s*:|"prdDocumentDraft"\s*:|"designStateDraft"\s*:|"acceptanceCriteria"\s*:|"exceptionScenarios"\s*:|"businessRules"\s*:/.test(sample)
-  ) {
-    return true;
+  if (looksLikeStructuredJsonDraft(sample)) {
+    return false;
   }
   if (hasDocumentTitleLine(sample)) return true;
   if (/^#{1,4}\s*.*(PRD|需求|文档|说明书|功能|页面|产品)/im.test(sample)) return true;
@@ -1233,6 +1231,10 @@ function hasStrongDocumentDraftStructure(sample: string) {
   }
   const headingCount = (sample.match(/^#{1,4}\s+/gm) ?? []).length;
   return headingCount >= 2;
+}
+
+function looksLikeStructuredJsonDraft(sample: string) {
+  return /"type"\s*:\s*"(table|diagram|image|prototype_snapshot|asset_reference|section)"|"blocks"\s*:|"sourcePaths"\s*:|"prdDocumentDraft"\s*:|"designStateDraft"\s*:|"acceptanceCriteria"\s*:|"exceptionScenarios"\s*:|"businessRules"\s*:/.test(sample);
 }
 
 function hasDocumentTitleLine(sample: string) {
@@ -1519,8 +1521,16 @@ export function buildFallbackPrdFinalAction(userPrompt: string): DeerFlowFinalAc
 }
 
 function extractPrdSubject(userPrompt: string) {
-  const compact = userPrompt
+  const normalized = userPrompt.replace(/\s+/g, " ").trim();
+  const explicitSubject = normalized.match(
+    /(?:请|帮我|给我|生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|只生成|仅生成|一份|一个|\s)*([^，。,.;；:：!?？]{2,60}?)(?:\s*(?:prd|PRD|需求文档|需求说明书|产品需求文档))/,
+  )?.[1];
+
+  const compact = (explicitSubject ?? normalized)
     .replace(/\s+/g, " ")
+    .replace(/(不要|无需|不需要|不用|别|先别|禁止|不必|不要再|不)(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|产出)?原型/gi, "")
+    .replace(/要求包含.+$/gi, "")
+    .replace(/包含.+$/gi, "")
     .replace(/请|帮我|给我|生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|一份|一个|简短但结构完整的/gi, "")
     .replace(/只生成需求文档|只|仅|包含目标、用户流程、功能需求、验收标准|包含目标|用户流程|功能需求|验收标准|prd|需求文档|需求说明书/gi, "")
     .replace(/[，。,.;；:：]/g, " ")
@@ -1536,10 +1546,11 @@ function isKnowledgeInventoryQuestion(value: string) {
 
 function requiresExplicitFinalAction(value: string) {
   const compact = value.replace(/\s+/g, "").toLowerCase();
-  if (hasNegatedArtifactIntent(compact)) {
-    return false;
-  }
-  return /(prd|需求文档|需求说明书|原型|prototype|导出|下载|export)/i.test(compact);
+  return (
+    hasPositiveArtifactIntent(compact, DOCUMENT_ARTIFACT_PATTERN) ||
+    hasPositiveArtifactIntent(compact, PROTOTYPE_ARTIFACT_PATTERN) ||
+    hasPositiveArtifactIntent(compact, EXPORT_ARTIFACT_PATTERN)
+  );
 }
 
 export function formatQaOutcome(report: QAReport) {
@@ -1560,7 +1571,7 @@ export function isDocumentGenerationRequest(value: string) {
   if (!/(需求文档|需求说明书|产品需求文档|prd|prd文档)/i.test(compact)) {
     return false;
   }
-  if (hasNegatedArtifactIntent(compact)) {
+  if (hasNegatedArtifactIntent(compact, DOCUMENT_ARTIFACT_PATTERN)) {
     return false;
   }
   if (/(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|给我)/.test(compact)) {
@@ -1572,17 +1583,28 @@ export function isDocumentGenerationRequest(value: string) {
   return true;
 }
 
-function hasNegatedArtifactIntent(compact: string) {
-  const artifact =
-    "(prd|prd文档|需求文档|需求说明书|产品需求文档|原型|prototype|导出|下载|export)";
+const DOCUMENT_ARTIFACT_PATTERN = "(prd|prd文档|需求文档|需求说明书|产品需求文档)";
+const PROTOTYPE_ARTIFACT_PATTERN = "(原型|prototype)";
+const EXPORT_ARTIFACT_PATTERN = "(导出|下载|export)";
+
+function hasPositiveArtifactIntent(compact: string, artifactPattern: string) {
+  return new RegExp(artifactPattern, "i").test(compact)
+    && !hasNegatedArtifactIntent(compact, artifactPattern);
+}
+
+function hasNegatedArtifactIntent(compact: string, artifactPattern: string) {
   const artifactAction =
     "(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|产出|触发|打开|唤起)";
-  const negation = "(不要|无需|不需要|不用|别|先别|禁止|不必|不要再|不生成|不写|不输出|不产出|不触发)";
+  const negationOnly = "(不要|无需|不需要|不用|别|先别|禁止|不必|不要再)";
+  const negatedAction = `(${negationOnly}${artifactAction}|不${artifactAction})`;
+  const sameClauseGap = "[^，。；;,.!?！？、]{0,16}";
 
   return (
-    new RegExp(`${negation}.{0,16}${artifactAction}?.{0,16}${artifact}`, "i").test(compact) ||
-    new RegExp(`${artifact}.{0,16}${negation}.{0,16}${artifactAction}?`, "i").test(compact) ||
-    new RegExp(`(不是|并非).{0,12}${artifactAction}.{0,16}${artifact}`, "i").test(compact)
+    new RegExp(`${negatedAction}${sameClauseGap}${artifactPattern}`, "i").test(compact) ||
+    new RegExp(`${negationOnly}${sameClauseGap}${artifactAction}${sameClauseGap}${artifactPattern}`, "i").test(compact) ||
+    new RegExp(`${artifactPattern}${sameClauseGap}${negatedAction}`, "i").test(compact) ||
+    new RegExp(`${artifactPattern}${sameClauseGap}${negationOnly}${sameClauseGap}${artifactAction}`, "i").test(compact) ||
+    new RegExp(`(不是|并非)${sameClauseGap}${artifactAction}${sameClauseGap}${artifactPattern}`, "i").test(compact)
   );
 }
 

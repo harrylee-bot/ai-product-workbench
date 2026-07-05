@@ -213,6 +213,59 @@ describe("FinalActionApplierService", () => {
     );
   });
 
+  it("infers a specific PRD title from sections when DeerFlow returns generic titles", async () => {
+    const state = baseState({ title: "产品需求方案" });
+    const document = baseDocument();
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({ ...state, prdDocument: document });
+
+    await service.apply({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-1",
+      finalAction: finalAction({
+        type: "review_prd",
+        message: "PRD 已生成。",
+        raw: {
+          type: "review_prd",
+          designStateDraft: { title: "产品需求方案" },
+          prdDocumentDraft: {
+            title: "产品需求方案",
+            sections: [
+              {
+                id: "business_doc",
+                title: "会员积分商城需求说明书",
+                type: "overview",
+                level: 1,
+                order: 1,
+                content: "会员积分商城覆盖积分查询、商品兑换、兑换记录和库存管理。",
+              },
+              {
+                id: "acceptance",
+                title: "验收标准",
+                type: "acceptance_criteria",
+                level: 2,
+                order: 2,
+                content: "兑换成功后需扣减积分并生成兑换单。",
+              },
+            ],
+          },
+        },
+      }),
+      artifacts: [],
+    });
+
+    expect(documentService.saveGeneratedDocumentInTransaction).toHaveBeenCalledWith(
+      prisma,
+      state,
+      expect.objectContaining({
+        title: "会员积分商城需求说明书",
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("bridges DeerFlow review_prototype final actions into PrototypeSpec, HTML artifact, and state persistence", async () => {
     const state = baseState({ status: "doc_confirmed" });
     const prototypeSpec = { id: "spec-1", pages: [{ id: "page_home", name: "签到页" }] };
