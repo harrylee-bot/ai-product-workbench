@@ -925,7 +925,7 @@ function RuntimeRunsTable(props: {
   const columns: Column<RuntimeRunLog>[] = [
     { header: "运行", cell: (row) => <NameWithSub name={row.conversationTitle} sub={row.intent || row.inputSummary} /> },
     { header: "状态", className: "w-[120px]", cell: (row) => <StatusBadge value={row.status} /> },
-    { header: "事件", className: "w-[180px]", cell: (row) => `${row.stepCount} 步 · ${row.streamEventCount} 流事件` },
+    { header: "事件", className: "w-[120px]", cell: (row) => `${row.streamEventCount} 流事件` },
     { header: "耗时", className: "w-[100px]", cell: (row) => formatDuration(row.durationMs) },
     { header: "错误", cell: (row) => row.errorMessage ? <ErrorText error={row.errorMessage} /> : <MutedText>无</MutedText> },
     { header: "开始时间", className: "w-[180px]", cell: (row) => formatDate(row.startedAt) },

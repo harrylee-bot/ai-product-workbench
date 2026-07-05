@@ -2,7 +2,6 @@ import { Transform, Type } from "class-transformer";
 import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
 import {
   AdminAuditTargetType,
-  RuntimeStepName,
   RuntimeRunStatus,
   FileAssetStatus,
   FileParserType,
@@ -70,11 +69,6 @@ export class ListRuntimeRunsQueryDto extends AdminPaginationQueryDto {
   @Transform(emptyToUndefined)
   @IsEnum(RuntimeRunStatus, { message: "运行状态不正确" })
   status?: RuntimeRunStatus;
-
-  @IsOptional()
-  @Transform(emptyToUndefined)
-  @IsEnum(RuntimeStepName, { message: "Runtime 名称不正确" })
-  runtimeName?: RuntimeStepName;
 
   @IsOptional()
   @Transform(emptyToUndefined)

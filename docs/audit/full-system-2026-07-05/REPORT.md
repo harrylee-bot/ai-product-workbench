@@ -15,6 +15,9 @@
 - 本轮浏览器测试数据已清理：用户、会话、消息、运行日志、知识项、分享链接、DeerFlow 绑定 dry-run 均为 0。
 - Web/API 主依赖 `npm audit --omit=optional` 为 0 vulnerabilities。
 - TypeScript、单测、生产 build、Web lint、Knip 未用扫描、Prisma validate/status、legacy schema 断言均通过。
+- 已删除 DeerFlow-first 后不再写入的旧 `agent_step_logs` 运行步骤表、`AgentName`/`AgentStepStatus` 枚举、API step 查询和前端 `0 步` 展示噪音；当前运行日志只展示真实 `vibe_stream_event_logs` 流事件。
+- Web CSP 已收紧：生产态不再允许 `unsafe-eval`，开发态保留 Next dev 必需权限并去重本地 API origin。
+- 后台写操作已补真实 smoke：管理员登录、用户创建/禁用/启用/重置密码、模型供应商创建/更新/禁用/启用、模型配置创建/禁用均通过，并自动清理。
 - 生产服务器当前 HEAD 为 `0c02341`，Knowledge 容器已重新部署并启动。
 - Knowledge Quartz core 固定为 `v5.0.0` / `ab346fa66a895e12d63a308e70ce330ba795822a`，25 个社区插件写入 `quartz.lock.json` 并按 commit 恢复。
 - Knowledge 生产本机 `http://127.0.0.1:3001/__health` 200，容器内 `.quartz-source-revision` 为 `ab346fa66a895e12d63a308e70ce330ba795822a`。
@@ -63,10 +66,12 @@
 | Web lint | `npm --workspace @ai-product-workbench/web run lint` | 通过 |
 | 未用扫描 | `npx --yes knip --include files,dependencies,devDependencies,exports,types --workspace apps/web --workspace apps/api` | 无输出 |
 | 主依赖审计 | `npm_config_registry=https://registry.npmjs.org npm audit --omit=optional` | 0 vulnerabilities |
+| Web 安全头 | `npm run web:assert-security-headers` | 通过；生产 CSP 无 `unsafe-eval`，开发 API origin 无重复 |
+| Admin 写 smoke | `npm run smoke:admin-write` | 通过；用户/模型供应商/模型配置写操作真实 HTTP 验证，结束后无残留 |
 | Prisma validate | `npx prisma validate --schema packages/db/prisma/schema.prisma` | schema valid |
-| Prisma migrate status | `npx prisma migrate status --schema packages/db/prisma/schema.prisma` | 38 migrations，Database schema is up to date |
+| Prisma migrate status | `npx prisma migrate status --schema packages/db/prisma/schema.prisma` | 39 migrations，Database schema is up to date |
 | Legacy schema | `npm run db:assert-no-legacy` | 无旧 project/product/product-design schema residue |
-| Smoke 清理复核 | `npm run cleanup:smoke -- --dry-run --skip-gateway --json` | users/conversations/messages/runs/share/deerflow 均为 0 |
+| Smoke 清理复核 | `npm run cleanup:smoke -- --dry-run --skip-gateway --json` | users/conversations/messages/runs/share/model/deerflow 均为 0 |
 | Diff hygiene | `git diff --check` | 通过 |
 | API 旧产物扫描 | `apps/api/dist` 精确扫描旧 `modules/auth`、`common/current-user`、project/product/product-design | 无输出 |
 
@@ -78,38 +83,41 @@
 
 | 文件 | 步骤 | 健康状态 |
 |---|---|---|
-| `36-cli-login.png` | 桌面登录页 | 健康；邮箱、密码、登录、注册链接和右侧提示均可见 |
-| `37-cli-home-after-login.png` | 登录后首页 | 健康；空态居中、输入框和 `workbench-claude` runtime 可见 |
-| `38-cli-chat-deerflow-reply.png` | 发送普通聊天 | 健康；`/api/chat/stream` 200，页面出现 DeerFlow 回复 |
-| `39-cli-mobile-chat.png` | 移动端聊天页 | 健康；prompt、回复、输入区在 390x844 下可用，无横向溢出 |
-| `40-cli-mobile-share-login-redirect.png` | 移动端未登录分享 | 健康；跳到 `/login?next=%2Fshare%2Fbad-token-current-audit` |
+| `41-current-home-after-register.png` | 桌面注册后首页 | 健康；注册成功、输入框和 `workbench-claude` runtime 可见 |
+| `42-current-chat-deerflow-reply.png` | 发送普通聊天 | 健康；`/api/chat/stream` 200，页面出现 DeerFlow 回复，未误开 artifact |
+| `43-current-admin-runtime-events.png` | 后台运行日志 | 健康；运行日志显示真实 `2 流事件`，旧 `0 步` 噪音已消失 |
+| `44-current-mobile-chat.png` | 移动端聊天页 | 健康；390x844 下 `scrollWidth=390`，无横向溢出 |
+| `45-current-mobile-share-login-redirect.png` | 移动端未登录分享 | 健康；跳到 `/login?next=%2Fshare%2Fbad-token-current-fix` |
 
 浏览器网络和控制台结果：
 
+- 注册请求：`POST /api/auth/register` 201。
 - 登录请求：`POST /api/auth/login` 201。
 - 聊天请求：`POST /api/chat/stream` 200；messages/runtime-status/conversations 后续请求均 200。
 - 未登录分享：仅请求 `/api/auth/session` 200，没有请求旧 `/api/public/share`。
-- 桌面和移动端 console：warning 0、error 0。
+- 桌面、后台和移动端 console：warning 0、error 0。
 - 应用内浏览器 DOM 可读，但动态聊天区截图不稳定；最终视觉证据使用 Playwright CLI 截图，临时 `.playwright-cli` 已删除。
 
 ## 5. 本地测试数据清理
 
-本轮真实浏览器测试创建了 1 个审计用户、2 个会话、4 条消息、2 条运行日志、2 个 DeerFlow 绑定。发现并修复了清理脚本遗漏：旧规则只覆盖 `audit_%@example.test`，未覆盖本轮 `audit-current-*` 用户。
+本轮真实浏览器复验创建了 2 个审计用户（普通用户和后台 UI 管理员）、1 个会话、2 条消息、1 条运行日志、1 个 DeerFlow 绑定。`smoke:admin-write` 会额外创建用户、模型供应商和模型配置，但脚本在 `finally` 中自清理，并由最终 dry-run 复核。
 
 清理执行结果：
 
 | 项目 | 清理前 | 清理后 |
 |---|---:|---:|
-| users | 1 | 0 |
-| conversations | 2 | 0 |
-| messages | 4 | 0 |
-| agent_run_logs | 2 | 0 |
+| users | 2 | 0 |
+| conversations | 1 | 0 |
+| messages | 2 | 0 |
+| agent_run_logs | 1 | 0 |
 | file_assets | 0 | 0 |
 | knowledge_items | 0 | 0 |
 | share_links | 0 | 0 |
-| deerflow_thread_bindings | 2 | 0 |
+| model_providers | 0 | 0 |
+| model_configs | 0 | 0 |
+| deerflow_thread_bindings | 1 | 0 |
 
-Gateway 线程删除：2 个线程均返回 200。
+Gateway 线程删除：1 个线程返回 200。最终 `cleanup:smoke -- --dry-run --skip-gateway --json` 结果为 users/conversations/messages/runs/share/model/deerflow 全部 0。
 
 ## 6. 生产部署复验
 
@@ -141,6 +149,9 @@ Gateway 线程删除：2 个线程均返回 200。
 | P2 | `note-properties` 插件触发生产 `direct eval` warning | 删除该插件配置和 lockfile 条目 |
 | P2 | 误判 disabled `og-image` 为可删插件会破坏 Quartz core 静态 import | 恢复 `og-image` disabled 配置和 lockfile 条目，并在报告注明不可删原因 |
 | P2 | smoke 清理脚本漏掉 `audit-current-*` 测试账号 | 增加 username/email/login_audit_logs 清理规则 |
+| P2 | DeerFlow-first 后旧 `agent_step_logs` 永远为空，但 admin 仍展示 `0 步` | 新增迁移删除旧表和枚举，API/UI 改为只展示真实流事件 |
+| P2 | Web 生产 CSP 仍允许 `unsafe-eval` | 抽出可测安全头构造函数，生产去掉 `unsafe-eval`，新增断言 |
+| P2 | Admin 写路径缺少真实验证 | 新增 `smoke:admin-write`，覆盖用户和模型配置写操作并自动清理 |
 
 既有修复仍有效：
 
@@ -183,6 +194,10 @@ Gateway 线程删除：2 个线程均返回 200。
 - 参数式 `npx quartz plugin install plugin...`：不符合 v5 lockfile 模式，已删除。
 - 本轮 `.playwright-cli`、`output/playwright` 临时目录：已删除。
 - 本轮测试用户、会话、消息、运行日志、DeerFlow 线程绑定：已清理为 0。
+- 本轮测试模型供应商和模型配置：已纳入 `cleanup:smoke` 并清理为 0。
+- 旧 `agent_step_logs`、`AgentName`、`AgentStepStatus`：当前运行态不再写入，已从 schema/API/UI 删除。
+- 旧运行日志 `0 步` 展示：已改为真实流事件计数。
+- Web CSP 开发态重复 `http://localhost:4000` source：已去重。
 - API `dist` 中旧 `modules/auth`、旧 `common/current-user`、project/product/product-design 运行产物：精确扫描无输出。
 
 不能删除但容易误判的项：
@@ -200,7 +215,7 @@ Gateway 线程删除：2 个线程均返回 200。
 | Docker buildx | 生产提示 buildx 未安装，compose fallback 可用但有 warning | 安装 buildx 或禁用 bake warning，减少部署日志噪音 |
 | 服务器 OS 更新 | SSH MOTD 显示 58 个可更新包、4 个 ESM Apps security updates、1 个 zombie process | 单独排期系统维护窗口，避免和应用部署混在一起 |
 | CDN 缓存 | 公网 Knowledge URL 命中 CDN 旧缓存，本机 3001 已是新内容 | 部署后增加 CDN purge 或 cache-busting 验证策略 |
-| 后台管理写操作 | 本轮保留页面加载证据，未逐项执行写操作 | 补 admin E2E：用户禁用、模型切换、知识候选审批、运行日志详情 |
+| 后台管理写操作 | 用户管理、模型供应商、模型配置已由 `smoke:admin-write` 覆盖；运行日志 UI 已由浏览器验证 | 后续只剩知识候选 approve/merge 的 QA gate 通过态专项 E2E，不建议硬造绕过业务门禁的数据 |
 | 完整无障碍 | 截图能验证布局和可识别控件，不能证明 WCAG | 补键盘顺序、读屏、对比度、200% 缩放测试 |
 
 ## 11. 可访问地址和证据
@@ -212,4 +227,4 @@ Gateway 线程删除：2 个线程均返回 200。
 - 线上 API Health：`https://aionbench.com/api/system/health`
 - 线上 Knowledge：`https://aionbench.com/knowledge/`
 - 生产 Knowledge 本机健康：`http://127.0.0.1:3001/__health` 返回 `ok`
-- 有效截图证据：`36-cli-login.png`、`37-cli-home-after-login.png`、`38-cli-chat-deerflow-reply.png`、`39-cli-mobile-chat.png`、`40-cli-mobile-share-login-redirect.png`
+- 有效截图证据：`41-current-home-after-register.png`、`42-current-chat-deerflow-reply.png`、`43-current-admin-runtime-events.png`、`44-current-mobile-chat.png`、`45-current-mobile-share-login-redirect.png`

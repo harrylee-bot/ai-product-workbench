@@ -281,32 +281,6 @@ enum RuntimeRunStatus {
   @@map("AgentRunStatus")
 }
 
-enum RuntimeStepStatus {
-  pending
-  running
-  succeeded
-  failed
-  skipped
-
-  @@map("AgentStepStatus")
-}
-
-enum RuntimeStepName {
-  orchestrator
-  intent_agent
-  knowledge_agent
-  requirement_analyst_agent
-  conversation_planner_agent
-  conversation_designer_agent
-  prd_writer_agent
-  prototype_designer_agent
-  prototype_code_agent
-  qa_agent
-  knowledge_extractor_agent
-
-  @@map("AgentName")
-}
-
 enum UserIntent {
   new_requirement
   complete_requirement
@@ -627,7 +601,6 @@ model ModelCallLog {
   completedAt      DateTime?        @map("completed_at")
   provider         ModelProvider    @relation(fields: [providerId], references: [id])
   modelConfig      ModelConfig      @relation(fields: [modelConfigId], references: [id])
-  runtimeStepLogs  RuntimeStepLog[]
 
   @@index([traceId])
   @@index([runId])
@@ -1102,7 +1075,6 @@ model RuntimeRunLog {
   durationMs     Int?             @map("duration_ms")
   conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user           User             @relation(fields: [userId], references: [id])
-  steps          RuntimeStepLog[]
   streamEvents   VibeStreamEventLog[]
 
   @@index([userId])
@@ -1127,31 +1099,6 @@ model DeerFlowThreadBinding {
 
   @@index([userId])
   @@map("deerflow_thread_bindings")
-}
-
-model RuntimeStepLog {
-  id              String            @id @default(uuid())
-  runId           String            @map("run_id")
-  runtimeName     RuntimeStepName   @map("agent_name")
-  status          RuntimeStepStatus @default(pending)
-  inputSummary    String            @map("input_summary")
-  outputSummary   String?           @map("output_summary")
-  modelCallLogId  String?           @map("model_call_log_id")
-  modelProviderId String?           @map("model_provider_id")
-  modelName       String?           @map("model_name")
-  tokenUsage      Json?             @map("token_usage")
-  startedAt       DateTime?         @map("started_at")
-  endedAt         DateTime?         @map("ended_at")
-  durationMs      Int?              @map("duration_ms")
-  errorMessage    String?           @map("error_message")
-  run             RuntimeRunLog     @relation(fields: [runId], references: [id])
-  modelCallLog    ModelCallLog?     @relation(fields: [modelCallLogId], references: [id], onDelete: SetNull)
-
-  @@index([runId])
-  @@index([runtimeName])
-  @@index([status])
-  @@index([modelCallLogId])
-  @@map("agent_step_logs")
 }
 
 model VibeStreamEventLog {

@@ -1,4 +1,4 @@
-import { RuntimeRunStatus, RuntimeStepName, RuntimeStepStatus, UserIntent } from "@prisma/client";
+import { RuntimeRunStatus, UserIntent } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRunLogService } from "../src/ai/runtime-run-log.service";
 
@@ -9,11 +9,6 @@ describe("RuntimeRunLogService", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
-    },
-    runtimeStepLog: {
-      create: vi.fn(),
-      findUnique: vi.fn(),
-      update: vi.fn(),
     },
   };
   const service = new RuntimeRunLogService(prisma as never);
@@ -107,54 +102,6 @@ describe("RuntimeRunLogService", () => {
           messageStatus: "not_created",
         }),
         durationMs: 5000,
-      }),
-    });
-  });
-
-  it("records step lifecycle with token and model metadata", async () => {
-    prisma.runtimeStepLog.create.mockResolvedValue({ id: "step-1" });
-    prisma.runtimeStepLog.findUnique.mockResolvedValue({
-      id: "step-1",
-      startedAt: new Date("2026-06-28T08:00:00.000Z"),
-    });
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-06-28T08:00:01.250Z"));
-
-    await service.createStep({
-      runId: "run-1",
-      runtimeName: RuntimeStepName.orchestrator,
-      inputSummary: "生成 PRD",
-    });
-    await service.startStep("step-1");
-    await service.completeStep("step-1", { done: true }, {
-      modelCallLogId: "model-log-1",
-      tokenUsage: { totalTokens: 123 },
-      modelName: "workbench-claude",
-      modelProviderId: "provider-1",
-    });
-
-    expect(prisma.runtimeStepLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        runId: "run-1",
-        runtimeName: RuntimeStepName.orchestrator,
-        status: RuntimeStepStatus.pending,
-        inputSummary: "生成 PRD",
-      }),
-    });
-    expect(prisma.runtimeStepLog.update).toHaveBeenCalledWith({
-      where: { id: "step-1" },
-      data: expect.objectContaining({ status: RuntimeStepStatus.running, startedAt: expect.any(Date) }),
-    });
-    expect(prisma.runtimeStepLog.update).toHaveBeenLastCalledWith({
-      where: { id: "step-1" },
-      data: expect.objectContaining({
-        status: RuntimeStepStatus.succeeded,
-        outputSummary: '{"done":true}',
-        modelCallLogId: "model-log-1",
-        tokenUsage: { totalTokens: 123 },
-        modelName: "workbench-claude",
-        modelProviderId: "provider-1",
-        durationMs: 1250,
       }),
     });
   });

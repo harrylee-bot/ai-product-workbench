@@ -59,7 +59,6 @@ export type RuntimeRunLog = {
   status: string;
   inputSummary?: string;
   outputSummary?: string;
-  stepCount: number;
   streamEventCount: number;
   traceId?: string;
   errorMessage?: string;

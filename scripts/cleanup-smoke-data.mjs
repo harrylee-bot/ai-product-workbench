@@ -21,6 +21,11 @@ const SHARE_TOKEN_PREDICATES = [
   "token LIKE 'codex#_%' ESCAPE '#'",
 ];
 
+const MODEL_PROVIDER_PREDICATES = [
+  "name LIKE 'codex#_local#_smoke#_%' ESCAPE '#'",
+  "name LIKE 'codex#_prod#_smoke#_%' ESCAPE '#'",
+];
+
 const TARGET_CTES = `
 WITH target_users AS (
   SELECT id FROM users WHERE ${USER_PREDICATES.join(" OR ")}
@@ -50,6 +55,15 @@ target_share_links AS (
   SELECT id FROM share_links
   WHERE conversation_id IN (SELECT id FROM target_conversations)
      OR ${SHARE_TOKEN_PREDICATES.join(" OR ")}
+),
+target_model_providers AS (
+  SELECT id FROM model_providers WHERE ${MODEL_PROVIDER_PREDICATES.join(" OR ")}
+),
+target_model_configs AS (
+  SELECT id FROM model_configs
+  WHERE provider_id IN (SELECT id FROM target_model_providers)
+     OR display_name LIKE 'codex#_local#_smoke#_%' ESCAPE '#'
+     OR display_name LIKE 'codex#_prod#_smoke#_%' ESCAPE '#'
 )
 `;
 
@@ -62,8 +76,10 @@ const DELETE_STATEMENTS = [
   "DELETE FROM knowledge_candidates WHERE conversation_id IN (SELECT id FROM _smoke_conversation_ids)",
   "DELETE FROM knowledge_retrieval_logs WHERE conversation_id IN (SELECT id FROM _smoke_conversation_ids) OR run_id IN (SELECT id FROM _smoke_run_ids)",
   "DELETE FROM vibe_stream_event_logs WHERE conversation_id IN (SELECT id FROM _smoke_conversation_ids) OR run_id IN (SELECT id FROM _smoke_run_ids)",
-  "DELETE FROM agent_step_logs WHERE run_id IN (SELECT id FROM _smoke_run_ids)",
-  "DELETE FROM model_call_logs WHERE run_id IN (SELECT id FROM _smoke_run_ids)",
+  "DELETE FROM model_call_logs WHERE run_id IN (SELECT id FROM _smoke_run_ids) OR provider_id IN (SELECT id FROM _smoke_model_provider_ids) OR model_config_id IN (SELECT id FROM _smoke_model_config_ids)",
+  "DELETE FROM model_task_profiles WHERE model_config_id IN (SELECT id FROM _smoke_model_config_ids)",
+  "DELETE FROM model_configs WHERE id IN (SELECT id FROM _smoke_model_config_ids)",
+  "DELETE FROM model_providers WHERE id IN (SELECT id FROM _smoke_model_provider_ids)",
   "DELETE FROM agent_run_logs WHERE id IN (SELECT id FROM _smoke_run_ids)",
   "DELETE FROM deerflow_thread_bindings WHERE conversation_id IN (SELECT id FROM _smoke_conversation_ids) OR user_id IN (SELECT id FROM _smoke_user_ids)",
   "DELETE FROM share_links WHERE id IN (SELECT id FROM _smoke_share_ids)",
@@ -123,6 +139,8 @@ export async function collectSmokeCounts(prisma) {
     UNION ALL SELECT 'file_assets', count(*)::int FROM target_file_assets
     UNION ALL SELECT 'knowledge_items', count(*)::int FROM target_knowledge_items
     UNION ALL SELECT 'share_links', count(*)::int FROM target_share_links
+    UNION ALL SELECT 'model_providers', count(*)::int FROM target_model_providers
+    UNION ALL SELECT 'model_configs', count(*)::int FROM target_model_configs
     UNION ALL SELECT 'deerflow_thread_bindings', count(*)::int FROM deerflow_thread_bindings
       WHERE conversation_id IN (SELECT id FROM target_conversations)
          OR user_id IN (SELECT id FROM target_users)
@@ -157,6 +175,14 @@ async function createTargetTables(tx) {
   await tx.$executeRawUnsafe("CREATE TEMP TABLE _smoke_file_asset_ids ON COMMIT DROP AS SELECT id FROM file_assets WHERE conversation_id IN (SELECT id FROM _smoke_conversation_ids) OR uploaded_by IN (SELECT id FROM _smoke_user_ids)");
   await tx.$executeRawUnsafe("CREATE TEMP TABLE _smoke_knowledge_item_ids ON COMMIT DROP AS SELECT id FROM knowledge_items WHERE source_conversation_id IN (SELECT id FROM _smoke_conversation_ids) OR created_by IN (SELECT id FROM _smoke_user_ids)");
   await tx.$executeRawUnsafe(`CREATE TEMP TABLE _smoke_share_ids ON COMMIT DROP AS SELECT id FROM share_links WHERE conversation_id IN (SELECT id FROM _smoke_conversation_ids) OR ${SHARE_TOKEN_PREDICATES.join(" OR ")}`);
+  await tx.$executeRawUnsafe(`CREATE TEMP TABLE _smoke_model_provider_ids ON COMMIT DROP AS SELECT id FROM model_providers WHERE ${MODEL_PROVIDER_PREDICATES.join(" OR ")}`);
+  await tx.$executeRawUnsafe(`
+    CREATE TEMP TABLE _smoke_model_config_ids ON COMMIT DROP AS
+    SELECT id FROM model_configs
+    WHERE provider_id IN (SELECT id FROM _smoke_model_provider_ids)
+       OR display_name LIKE 'codex#_local#_smoke#_%' ESCAPE '#'
+       OR display_name LIKE 'codex#_prod#_smoke#_%' ESCAPE '#'
+  `);
 }
 
 export async function deleteSmokeData(prisma) {

@@ -157,12 +157,11 @@ export class AdminService {
       ...(query.userId ? { userId: query.userId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.traceId ? { traceId: query.traceId } : {}),
-      ...(query.runtimeName ? { steps: { some: { runtimeName: query.runtimeName } } } : {}),
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.runtimeRunLog.findMany({
         where,
-        include: { conversation: true, user: true, _count: { select: { steps: true, streamEvents: true } } },
+        include: { conversation: true, user: true, _count: { select: { streamEvents: true } } },
         orderBy: { startedAt: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -182,7 +181,6 @@ export class AdminService {
         outputSummary: run.outputSummary,
         errorMessage: run.errorMessage,
         traceId: run.traceId,
-        stepCount: run._count.steps,
         streamEventCount: run._count.streamEvents,
         startedAt: run.startedAt.toISOString(),
         endedAt: run.endedAt?.toISOString(),
@@ -200,7 +198,6 @@ export class AdminService {
       include: {
         conversation: true,
         user: true,
-        steps: { orderBy: { startedAt: "asc" }, include: { modelCallLog: true } },
         streamEvents: { orderBy: { createdAt: "asc" } },
       },
     });
@@ -221,7 +218,6 @@ export class AdminService {
       startedAt: run.startedAt.toISOString(),
       endedAt: run.endedAt?.toISOString(),
       durationMs: run.durationMs,
-      steps: run.steps.map((step) => ({ ...step, startedAt: step.startedAt?.toISOString(), endedAt: step.endedAt?.toISOString() })),
       streamEvents: run.streamEvents.map((event) => ({
         id: event.id,
         eventType: event.eventType,

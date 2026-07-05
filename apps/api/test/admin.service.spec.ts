@@ -1,7 +1,6 @@
 import {
   AdminAuditTargetType,
   RuntimeRunStatus,
-  RuntimeStepStatus,
   KnowledgeCandidateStatus,
   ModelCallStatus,
   ConversationStatus,
@@ -100,7 +99,7 @@ describe("Admin module services", () => {
     });
   });
 
-  it("returns runtime run details with step timeline and contract events", async () => {
+  it("returns runtime run details with stream events", async () => {
     prisma.runtimeRunLog.findUnique.mockResolvedValue({
       id: "run-1",
       conversationId: "conversation-1",
@@ -117,46 +116,6 @@ describe("Admin module services", () => {
       durationMs: 5000,
       conversation: { id: "conversation-1", title: "默认会话" },
       user: { id: "user-1", username: "zhangsan", displayName: "张三" },
-      steps: [
-        {
-          id: "step-1",
-          runtimeName: "qa_agent",
-          status: RuntimeStepStatus.succeeded,
-          inputSummary: "检查",
-          outputSummary: "通过",
-          modelCallLogId: "model-log-1",
-          modelProviderId: "provider-1",
-          modelName: "gpt-test",
-          modelCallLog: {
-            id: "model-log-1",
-            traceId: "trace-1",
-            runId: "run-1",
-            runtimeName: "qa_agent",
-            taskType: "qa_check",
-            providerId: "provider-1",
-            modelConfigId: "model-config-1",
-            modelName: "gpt-test",
-            status: "succeeded",
-            inputSummary: "QA input",
-            outputSummary: "QA output",
-            promptTokens: 10,
-            completionTokens: 5,
-            totalTokens: 15,
-            durationMs: 1200,
-            errorCode: null,
-            errorMessage: null,
-            createdAt: new Date("2026-06-21T08:00:01Z"),
-            completedAt: new Date("2026-06-21T08:00:02Z"),
-            provider: { id: "provider-1", name: "Test Provider" },
-            modelConfig: { id: "model-config-1", displayName: "GPT Test" },
-          },
-          tokenUsage: null,
-          startedAt: new Date("2026-06-21T08:00:01Z"),
-          endedAt: new Date("2026-06-21T08:00:04Z"),
-          durationMs: 3000,
-          errorMessage: null,
-        },
-      ],
       streamEvents: [
         {
           id: "event-1",
@@ -190,17 +149,6 @@ describe("Admin module services", () => {
       id: "run-1",
       traceId: "trace-1",
       conversationTitle: "默认会话",
-      steps: [
-        {
-          runtimeName: "qa_agent",
-          modelCallLogId: "model-log-1",
-          modelCallLog: expect.objectContaining({
-            id: "model-log-1",
-            inputSummary: "QA input",
-            outputSummary: "QA output",
-          }),
-        },
-      ],
       streamEvents: [
         {
           eventType: "qa_completed",

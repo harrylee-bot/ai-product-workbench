@@ -1,45 +1,12 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import { buildSecurityHeaders } from "./lib/security-headers";
 
 const isProduction = process.env.NODE_ENV === "production";
-const apiOrigin = readApiOrigin();
-const localApiOrigins = isProduction
-  ? []
-  : [
-      "http://localhost:4000",
-      "https://localhost:4000",
-      "http://127.0.0.1:4000",
-      "https://127.0.0.1:4000",
-    ];
-
-const securityHeaders = [
-  {
-    key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https:",
-      "font-src 'self' data:",
-      [
-        "connect-src 'self'",
-        ...apiOrigin,
-        ...localApiOrigins,
-      ].join(" "),
-      [
-        "frame-src 'self' blob:",
-        ...apiOrigin,
-        ...localApiOrigins,
-      ].join(" "),
-      "object-src 'none'",
-      "base-uri 'self'",
-      "frame-ancestors 'none'",
-    ].join("; "),
-  },
-  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "Origin-Agent-Cluster", value: "?1" },
-];
+const securityHeaders = buildSecurityHeaders({
+  isProduction,
+  apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL,
+});
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -65,15 +32,5 @@ const nextConfig: NextConfig = {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
 };
-
-function readApiOrigin() {
-  const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  if (!configured) return [];
-  try {
-    return [new URL(configured).origin];
-  } catch {
-    return isProduction ? [] : ["http://localhost:4000"];
-  }
-}
 
 export default nextConfig;
