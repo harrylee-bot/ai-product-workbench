@@ -6,7 +6,7 @@ configuration:
   enablePopovers: true
   analytics: null
   locale: zh-CN
-	  baseUrl: localhost:3001
+  baseUrl: localhost:3001
   ignorePatterns:
     - private
     - templates
@@ -163,8 +163,8 @@ plugins:
     enabled: true
     options:
       links:
-	        业务系统: http://localhost:3000/workspace
-	        知识维护: http://localhost:3000/admin/knowledge/vault
+        业务系统: http://localhost:3000
+        知识维护: http://localhost:3000/admin/knowledge/vault
   - source: github:quartz-community/spacer
     enabled: true
     options: {}

@@ -29,6 +29,14 @@ if [ -n "${QUARTZ_BASE_URL:-}" ]; then
   sed -i "s#^  baseUrl:.*#  baseUrl: ${escaped_base_url}#" "$CONFIG_PATH"
 fi
 
+if [ -n "${KNOWLEDGE_WEB_URL:-}" ]; then
+  knowledge_web_url="${KNOWLEDGE_WEB_URL%/}"
+  escaped_web_url="$(printf '%s\n' "$knowledge_web_url" | sed 's/[\/&]/\\&/g')"
+  escaped_admin_url="$(printf '%s\n' "${knowledge_web_url}/admin/knowledge/vault" | sed 's/[\/&]/\\&/g')"
+  sed -i "s#^        业务系统:.*#        业务系统: ${escaped_web_url}#" "$CONFIG_PATH"
+  sed -i "s#^        知识维护:.*#        知识维护: ${escaped_admin_url}#" "$CONFIG_PATH"
+fi
+
 cd /opt/quartz
 npx quartz build \
   --directory "$BUILD_CONTENT_DIR" \
