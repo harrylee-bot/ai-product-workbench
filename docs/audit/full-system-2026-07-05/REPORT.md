@@ -60,6 +60,13 @@
 | P1 | 分享页移动端标题/徽章可能挤压，原型 iframe 高度固定 | header 改为小屏纵向布局，标题可换行，iframe 使用响应式高度 |
 | P1 | 聊天原型 artifact 没有下载入口，且 prototype toolbar 为空导致 actions 整组不可见 | toolbar 允许仅 actions 渲染，原型新增“下载 HTML”，PRD 新增“下载 Word” |
 | P1 | artifact 刷新后只按 PRD 文档接口取内容，prototype id 会请求 `/prd-documents/:id` 404 | `useArtifact` 的 SWR key 和取数函数加入 artifact kind |
+| P1 | 生产用户 HTML CSP 默认带本地 frame ancestor，线上响应可能出现 localhost 噪音 | `USER_HTML_CSP` 改为生产只使用显式 `WEB_ORIGIN`，本地 origin 只在 development/test 注入 |
+| P1 | iframe sandbox 仍显式 `allow-scripts`，与当前“脚本剥离、静态预览”的安全模型不一致 | 分享页和聊天原型 iframe 改为严格 sandbox，不允许脚本执行 |
+| P1 | 分享链接解析仍允许归档会话 | 分享公共解析改为只允许 `ConversationStatus.active`，归档/删除均不可访问 |
+| P2 | Word/原型 HTML 标题转义未覆盖单引号 | 导出/原型文档转义补齐 `' -> &#39;`，覆盖文本和属性上下文 |
+| P2 | API 测试中存在不存在的 `ConversationStatus.prototype_ready/draft/qa_failed` 枚举噪音 | 测试数据收敛为真实 Prisma conversation 状态，避免运行时 `undefined` 假象 |
+| P2 | 登录 `next` 虽已拒绝外部 URL，但未显式拒绝反斜杠/控制字符 | `safeNextPath` 增加反斜杠、控制字符和 URL origin 校验 |
+| P2 | 部署脚本入口存在 tab 缩进噪音 | `deploy/server-deploy.sh` 前置变量校验段缩进清理，`bash -n` 通过 |
 | P2 | 分享/原型只读注释仍写“免登录” | controller/service 注释改为“需登录、只读” |
 | P2 | 回归测试仍验证旧快照优先逻辑 | PRD/Prototype 单测更新为数据库正式记录优先和 sanitizer 空内容契约 |
 
@@ -88,6 +95,8 @@
 | `17-share-prototype-iframe.png` | 桌面分享原型 | iframe 成功渲染原型 HTML |
 | `18-share-prototype-mobile.png` | 移动端分享原型 | 小屏无明显重叠，原型可查看 |
 | `20-chat-artifact-download-actions.png` | 聊天原型 artifact | iframe 正常，复制/下载动作按钮可见 |
+| `21-share-prototype-sandbox.png` | 二次加固后分享原型 | iframe 严格 sandbox 下仍可渲染静态原型 |
+| `22-chat-prototype-sandbox-download.png` | 二次加固后聊天原型 | artifact iframe 严格 sandbox，下载动作可见 |
 
 ## 5. 写入型 Smoke 结果
 
@@ -101,6 +110,8 @@
 | 分享原型 HTML | `GET /api/public/share/:token/prototype` | 200，`Content-Security-Policy` 含 `sandbox` / `frame-ancestors` |
 | 分享登录回跳 | 浏览器访问 `/share/:token` | 未登录跳 login，登录后回原分享页 |
 | 聊天 artifact 下载 | 浏览器点击“下载 HTML” | 下载得到 `prototype.html`，内容为完整安全 HTML |
+| 二次 sandbox 验证 | Playwright 访问分享和聊天 artifact | iframe `sandbox=""`，prototype HTML 200，视觉渲染非空 |
+| 下载安全验证 | Playwright 下载 `prototype.html` 后读取文件 | `startsDoctype=true`，`hasScript=false`，`hasOnHandler=false` |
 
 ## 6. 产品路径审计
 
@@ -124,7 +135,7 @@
 |---|---|
 | `npm --workspace @ai-product-workbench/web run lint` | 通过，无 warning 输出 |
 | `npm run typecheck` | 通过，API + Web TypeScript 均通过 |
-| `npm --workspace @ai-product-workbench/api run test` | 通过，32 个测试文件 passed、1 skipped；155 passed、1 skipped |
+| `npm --workspace @ai-product-workbench/api run test` | 通过，33 个测试文件 passed、1 skipped；160 passed、1 skipped |
 | `npm run build` | 通过，API `tsc` + Next 16.2.10 production build 成功 |
 | `npm_config_registry=https://registry.npmjs.org npm audit --omit=optional` | 通过，0 vulnerabilities |
 | `npx --yes knip --include files,dependencies,devDependencies,exports,types --workspace apps/web --workspace apps/api` | 通过，无未用文件/导出输出 |
@@ -157,8 +168,8 @@
 
 - 旧审查报告和旧架构文档噪音已在前序提交删除；当前只保留本轮报告与截图证据。
 - Web 未用 UI 文件和旧未用导出已在前序提交删除；本轮 `knip` 无输出。
-- 本轮 Playwright 原始临时目录 `output/playwright/full-audit/.playwright-cli` 已删除。
-- `/tmp/ai-workbench-*` 与 `codex_export_share_*` 临时文件已删除。
+- 本轮 Playwright 原始临时目录 `output/playwright/full-audit/.playwright-cli` 和仓库根目录 `.playwright-cli` 已删除。
+- `/tmp/ai-workbench-*`、`codex_export_share_*` 与 `codex_hardening_*` 临时文件已删除。
 - `apps/web/next-env.d.ts` 的 dev 自动路径变更未纳入提交，避免生成文件噪音。
 - 历史 Prisma migration 中的旧命名不建议重写，属于数据库迁移链路，不作为本轮删除对象。
 
@@ -169,12 +180,15 @@
 | 数据类型 | 删除数量 |
 |---|---:|
 | `codex_export_share_*` users | 5 |
+| `codex_hardening_*` users | 1 |
 | conversations | 5 |
-| messages | 1 |
-| requirementDocuments | 5 |
-| prototypeArtifacts | 5 |
+| conversations（二次加固 smoke） | 1 |
+| messages | 3 |
+| requirementDocuments | 6 |
+| prototypeArtifacts | 6 |
 | qaReports | 5 |
-| shareLinks | 2 |
+| qaReports（二次加固 smoke） | 1 |
+| shareLinks | 3 |
 | runtimeRuns | 0 |
 
 清理后验证：
@@ -182,6 +196,7 @@
 | 数据类型 | 剩余数量 |
 |---|---:|
 | `codex_export_share_*` users | 0 |
+| `codex_hardening_*` users | 0 |
 | conversations | 0 |
 | messages | 0 |
 | requirementDocuments | 0 |

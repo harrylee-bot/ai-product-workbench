@@ -14,6 +14,7 @@ import type {
 } from "../src/ai/ai-vibe.types";
 import {
   PrototypeService,
+  sanitizePrototypeDocumentHtml,
   sanitizePrototypeHtml,
 } from "../src/ai/prototype.service";
 
@@ -245,6 +246,20 @@ describe("HTML prototype artifact module", () => {
     ).not.toContain("data-secret");
   });
 
+  it("wraps prototype exports as safe standalone documents", () => {
+    const html = sanitizePrototypeDocumentHtml(
+      '<button onclick="alert(1)" data-component-id="cta">提交</button><script>alert(1)</script>',
+      "原型 '标题'",
+    );
+
+    expect(html).toMatch(/^<!doctype html>/i);
+    expect(html).toContain("<html");
+    expect(html).toContain('data-component-id="cta"');
+    expect(html).toContain("原型 &#39;标题&#39;");
+    expect(html).not.toContain("onclick");
+    expect(html).not.toContain("<script");
+  });
+
   it("hides a stale current prototype artifact when it no longer matches ConversationDesignState", async () => {
     const state = baseState();
     const currentSpec = prototypeSpec(state, "run-current");
@@ -278,7 +293,7 @@ describe("HTML prototype artifact module", () => {
         conversationDesignStateId: state.id,
         htmlContent: prototypeHtml(spec),
       }),
-      conversation: baseProject({ status: ConversationStatus.prototype_ready }),
+      conversation: baseProject({ status: ConversationStatus.active }),
     });
     prisma.prototypeSpecRecord.findUniqueOrThrow.mockResolvedValue(
       specRecord(spec as unknown as Record<string, unknown>),
@@ -322,7 +337,7 @@ describe("HTML prototype artifact module", () => {
         conversationDesignStateId: state.id,
         htmlContent: prototypeHtml(spec),
       }),
-      conversation: baseProject({ status: ConversationStatus.prototype_ready }),
+      conversation: baseProject({ status: ConversationStatus.active }),
     });
     prisma.prototypeSpecRecord.findUniqueOrThrow.mockResolvedValue(
       specRecord(spec as unknown as Record<string, unknown>),
@@ -377,7 +392,7 @@ describe("HTML prototype artifact module", () => {
         prototypeSpecId: "spec-1",
         htmlContent: "<!doctype html>",
       }),
-      conversation: baseProject({ status: ConversationStatus.qa_failed }),
+      conversation: baseProject({ status: ConversationStatus.active }),
     });
 
     await expect(
@@ -399,7 +414,7 @@ function baseProject(overrides: Record<string, unknown> = {}) {
   return {
     id: "conversation-1",
     ownerId: "user-1",
-    status: ConversationStatus.draft,
+    status: ConversationStatus.active,
     deletedAt: null,
     currentPrototypeArtifactId: null,
     ...overrides,

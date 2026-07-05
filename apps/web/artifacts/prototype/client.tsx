@@ -76,7 +76,7 @@ function PrototypeFrame({ content }: { content: string }) {
   return (
     <iframe
       title="原型预览"
-      sandbox="allow-scripts"
+      sandbox=""
       src={src}
       className="h-full w-full border-0 bg-white"
     />

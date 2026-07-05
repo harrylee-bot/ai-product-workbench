@@ -129,6 +129,43 @@ describe("Vibe export module", () => {
     expect(html).toContain("素材路径：/tmp/snapshots/trade.png");
   });
 
+  it("escapes quotes in Word HTML text and attribute contexts", async () => {
+    documentService.getCurrentForUser.mockResolvedValue({
+      document: baseDocument({
+        title: "活动 '引号' PRD",
+        sections: [
+          {
+            id: "asset",
+            title: "素材展示",
+            type: "page_requirements",
+            level: 1,
+            order: 1,
+            content: "素材说明",
+            sourcePaths: [],
+            blocks: [
+              {
+                id: "image-1",
+                type: "image",
+                title: "截图 'onerror'",
+                content: "图片 '说明'",
+                assetPath: "/tmp/a'b.png",
+              },
+            ],
+          },
+        ],
+      }),
+      conversationDesignState: baseState({ title: "活动 '引号'" }),
+    });
+
+    const artifact = await service.exportPrdWordForUser(user, "conversation-1");
+    const html = artifact.buffer.toString("utf8");
+
+    expect(html).toContain("活动 &#39;引号&#39;需求说明书");
+    expect(html).toContain('<img src="/tmp/a&#39;b.png"');
+    expect(html).not.toContain("活动 '引号'");
+    expect(html).not.toContain("/tmp/a'b.png");
+  });
+
   it("exports the current PRD as a JSON Canvas file", async () => {
     const artifact = await service.exportPrdCanvasForUser(user, "conversation-1");
 
@@ -199,7 +236,7 @@ function openGate(): QAGateDecision {
   };
 }
 
-function baseState(): ConversationDesignState {
+function baseState(overrides: Partial<ConversationDesignState> = {}): ConversationDesignState {
   return {
     id: "state-1",
     conversationId: "conversation-1",
@@ -227,6 +264,7 @@ function baseState(): ConversationDesignState {
     updatedBy: "user-1",
     createdAt: "2026-06-20T08:00:00.000Z",
     updatedAt: "2026-06-20T08:00:00.000Z",
+    ...overrides,
   };
 }
 

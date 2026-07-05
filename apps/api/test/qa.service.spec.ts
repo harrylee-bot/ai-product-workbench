@@ -72,7 +72,7 @@ describe("Module 13 QA services", () => {
     prisma.conversation.findUnique.mockResolvedValue({
       id: "conversation-1",
       ownerId: "user-1",
-      status: ConversationStatus.prototype_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
       currentPrdDocumentId: "prd-1",
       currentPrototypeArtifactId: "artifact-1",
@@ -179,7 +179,7 @@ describe("Module 13 QA services", () => {
     prisma.conversation.findUnique.mockResolvedValue({
       id: "conversation-1",
       ownerId: "user-1",
-      status: ConversationStatus.prototype_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
       currentPrdDocumentId: "prd-stale",
       currentPrototypeArtifactId: "artifact-stale",

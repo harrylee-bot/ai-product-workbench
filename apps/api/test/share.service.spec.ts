@@ -43,7 +43,7 @@ describe("ShareService", () => {
       id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ConversationStatus.prototype_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "confirmed" });
@@ -86,7 +86,7 @@ describe("ShareService", () => {
       id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ConversationStatus.prd_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "doc_ready" });
@@ -104,7 +104,7 @@ describe("ShareService", () => {
       id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ConversationStatus.prototype_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "prototype_ready" });
@@ -125,7 +125,7 @@ describe("ShareService", () => {
       id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ConversationStatus.prd_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "doc_confirmed" });
@@ -154,7 +154,7 @@ describe("ShareService", () => {
       id: "conversation-1",
       ownerId: "user-1",
       title: "签到活动",
-      status: ConversationStatus.prototype_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
     });
     prisma.requirementDocument.findFirst.mockResolvedValue({
@@ -201,6 +201,27 @@ describe("ShareService", () => {
     });
 
     await expect(service.resolvePublic("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("treats archived conversations as unavailable for public shares", async () => {
+    prisma.shareLink.findUnique.mockResolvedValue({
+      id: "share-1",
+      token: "tok-abc",
+      conversationId: "conversation-1",
+      scope: ShareScope.both,
+      status: ShareLinkStatus.active,
+      expiresAt: null,
+    });
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
+      ownerId: "user-1",
+      title: "签到活动",
+      status: ConversationStatus.archived,
+      deletedAt: null,
+    });
+
+    await expect(service.resolvePublic("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.shareLink.update).not.toHaveBeenCalled();
   });
 
   it("treats expired links as not found", async () => {

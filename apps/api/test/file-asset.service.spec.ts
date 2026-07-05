@@ -57,7 +57,7 @@ describe("FileAssetService", () => {
     prisma.conversation.findUnique.mockResolvedValue({
       id: "conversation-2",
       ownerId: "other-user",
-      status: ConversationStatus.draft,
+      status: ConversationStatus.active,
       deletedAt: null,
     });
 
@@ -216,7 +216,7 @@ function projectRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: "conversation-1",
     ownerId: "user-1",
-    status: ConversationStatus.draft,
+    status: ConversationStatus.active,
     deletedAt: null,
     ...overrides,
   };

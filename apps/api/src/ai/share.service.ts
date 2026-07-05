@@ -157,7 +157,11 @@ export class ShareService {
       }
 
       const currentConversation = await tx.conversation.findUnique({ where: { id: current.conversationId } });
-      if (!currentConversation || currentConversation.deletedAt || currentConversation.status === ConversationStatus.deleted) {
+      if (
+        !currentConversation ||
+        currentConversation.deletedAt ||
+        currentConversation.status !== ConversationStatus.active
+      ) {
         throw new NotFoundException("SHARE_CONVERSATION_UNAVAILABLE");
       }
 

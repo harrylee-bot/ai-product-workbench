@@ -230,7 +230,7 @@ function conversationRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: "conversation-1",
     ownerId: "user-1",
-    status: ConversationStatus.draft,
+    status: ConversationStatus.active,
     deletedAt: null,
     ...overrides,
   };

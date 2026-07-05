@@ -65,5 +65,19 @@ export default function Page() {
 
 function safeNextPath(value: string | null) {
   if (!value?.startsWith("/") || value.startsWith("//")) return "/";
-  return value;
+  if (value.includes("\\") || hasControlCharacter(value)) return "/";
+  try {
+    const url = new URL(value, "http://local.invalid");
+    if (url.origin !== "http://local.invalid") return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
+function hasControlCharacter(value: string) {
+  return Array.from(value).some((char) => {
+    const code = char.charCodeAt(0);
+    return code < 32 || code === 127;
+  });
 }

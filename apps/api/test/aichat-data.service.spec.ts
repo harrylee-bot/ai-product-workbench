@@ -31,7 +31,7 @@ describe("AichatDataService", () => {
       status: ConversationStatus.active,
       deletedAt: null,
       conversation: {
-        status: ConversationStatus.draft,
+        status: ConversationStatus.active,
         deletedAt: null,
       },
     });

@@ -152,7 +152,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
             <div className="rounded-lg border bg-white">
               <iframe
                 title="原型预览"
-                sandbox="allow-scripts"
+                sandbox=""
                 src={prototypePreviewUrl}
                 className="h-[70vh] min-h-[520px] w-full border-0"
               />

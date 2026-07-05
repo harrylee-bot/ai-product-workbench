@@ -381,7 +381,7 @@ describe("PRD requirement document module", () => {
         id: "prd-1",
         ...prdDraft(baseState()),
       }),
-      conversation: baseProject({ status: ConversationStatus.qa_failed }),
+      conversation: baseProject({ status: ConversationStatus.active }),
     });
 
     await expect(
@@ -402,7 +402,7 @@ function baseProject(overrides: Record<string, unknown> = {}) {
   return {
     id: "conversation-1",
     ownerId: "user-1",
-    status: ConversationStatus.draft,
+    status: ConversationStatus.active,
     deletedAt: null,
     currentPrdDocumentId: null,
     ...overrides,

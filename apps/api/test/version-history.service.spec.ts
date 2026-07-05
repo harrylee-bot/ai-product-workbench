@@ -26,7 +26,7 @@ describe("VersionHistoryService", () => {
     prisma.conversation.findUnique.mockResolvedValue({
       id: "conversation-1",
       ownerId: "user-1",
-      status: ConversationStatus.prototype_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
     });
     prisma.$transaction.mockImplementation(async (queries) => Promise.all(queries));
@@ -112,7 +112,7 @@ describe("VersionHistoryService", () => {
     prisma.conversation.findUnique.mockResolvedValueOnce({
       id: "conversation-1",
       ownerId: "other-user",
-      status: ConversationStatus.prototype_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
     });
 

@@ -74,7 +74,7 @@ describe("Knowledge module services", () => {
     }));
     prisma.conversation.findUnique.mockResolvedValue({
       id: "conversation-1",
-      status: ConversationStatus.prototype_ready,
+      status: ConversationStatus.active,
       deletedAt: null,
       latestQaReportId: "qa-pass",
     });
