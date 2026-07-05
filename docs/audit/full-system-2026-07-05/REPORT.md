@@ -1,26 +1,26 @@
 # AI Product Workbench / DeerFlow 全量系统审计报告
 
 审计日期：2026-07-05
-审计方式：本地真实启动、真实浏览器交互、API/DB/迁移/构建/单测/依赖/未用扫描、生产部署复验
+审计方式：本地真实启动、真实浏览器交互、API/DB/迁移/构建/单测/依赖/未用扫描、Knowledge 镜像真实部署复验。
 审计范围：Web、Nest API、PostgreSQL/Prisma、DeerFlow Gateway、聊天主链路、PRD/原型/QA/导出/分享、后台管理台、Knowledge 站点、部署脚本、历史噪音和测试数据。
 外部同步：未同步到飞书/Lark 或任何外部知识库。
 
 ## 1. 最终结论
 
-本轮完成了本地和生产两层验证，并把发现的问题修复到线上。当前系统可以按 Conversation-first + DeerFlow Gateway-first 的路径运行：
+本轮不是只做静态代码审查，而是按产品架构和业务逻辑做了真实验证，并把验证中暴露的问题继续修到生产：
 
-- 本地 Web、API、DeerFlow Gateway 已启动：`http://localhost:3000`、`http://localhost:4000`、`http://127.0.0.1:8001`。
-- 本地 LangGraph 2024 直连服务已停止，Workbench 现在默认走 DeerFlow Gateway `/api`。
-- 本地真实浏览器完成注册、登录后首页、聊天流式回复、未登录分享登录回跳，控制台 0 warning/error。
-- 本地测试数据已清理：测试用户、会话、消息、运行日志、流事件、DeerFlow 线程绑定全部反查为 0。
-- 生产已部署到 `https://aionbench.com`，生产服务器运行代码 HEAD 为 `467b071`。
-- 生产 API health 正常，DeerFlow 启用，线上模型为 `datatoken-gpt-5-5`。
-- 生产 `public/share` 旧误导路由已变为 404，新的 `authenticated-share` 未登录返回 401；`/api/auth/logout` 已改为幂等 200，避免过期会话登出时产生 401 控制台噪音。
-- 生产 `share_links.product_design_state_id` 残留列已删除，旧 `projects/products/product_design_*` 表、旧列、旧 enum 类型扫描均为空。
-- API auth 边界已统一到 `apps/api/src/auth`，旧 `apps/api/src/modules/auth` 与重复 `common/current-user.decorator.ts` 已删除。
-- 主 Web/API 依赖审计为 0 vulnerabilities，Knip 未发现可直接删除的未用文件、依赖、导出或类型。
+- 本地 Web/API/DeerFlow Gateway 均在线：`http://localhost:3000`、`http://localhost:4000`、`http://127.0.0.1:8001`。
+- 本地 API health 为 `ok=true`，phase 为 `deerflow-first-runtime`，本地 runtime 为 `workbench-claude`。
+- 桌面和移动端浏览器真实跑通登录、聊天流式回复、未登录分享登录回跳；console warning/error 为 0。
+- 本轮浏览器测试数据已清理：用户、会话、消息、运行日志、知识项、分享链接、DeerFlow 绑定 dry-run 均为 0。
+- Web/API 主依赖 `npm audit --omit=optional` 为 0 vulnerabilities。
+- TypeScript、单测、生产 build、Web lint、Knip 未用扫描、Prisma validate/status、legacy schema 断言均通过。
+- 生产服务器当前 HEAD 为 `0c02341`，Knowledge 容器已重新部署并启动。
+- Knowledge Quartz core 固定为 `v5.0.0` / `ab346fa66a895e12d63a308e70ce330ba795822a`，25 个社区插件写入 `quartz.lock.json` 并按 commit 恢复。
+- Knowledge 生产本机 `http://127.0.0.1:3001/__health` 200，容器内 `.quartz-source-revision` 为 `ab346fa66a895e12d63a308e70ce330ba795822a`。
+- 生产 Knowledge 日志已无 `direct eval`、`CustomOgImagesEmitterName`、`Couldn't parse Quartz configuration` 错误/噪音。
 
-本轮没有在生产重新发起长耗时 DeerFlow 生成任务，避免再次写入 smoke 数据和产生额外成本；DeerFlow 端到端生成通信已在本地真实 Web/API/Gateway 链路中验证。
+当前仍保留的真实风险：Quartz v5.0.0 自身 `npm ci` 仍报告 11 个上游依赖漏洞；它不属于主 Web/API 依赖树，已在报告第 10 节列为 Knowledge 供应链残留风险。
 
 ## 2. 当前运行状态
 
@@ -28,14 +28,15 @@
 |---|---|---|
 | 本地 Web | `http://localhost:3000` | Next dev server 在线 |
 | 本地 API | `http://localhost:4000/api/system/health` | `ok=true`，phase=`deerflow-first-runtime` |
-| 本地 DeerFlow Gateway | `127.0.0.1:8001` | 在线，Workbench 默认访问 `/api` |
-| 本地 LangGraph direct | `2024` | 已停止，避免双 runtime 噪音 |
-| 生产 Web | `https://aionbench.com/login` | 可访问，OAC header 已存在 |
-| 生产 API | `https://aionbench.com/api/system/health` | `ok=true` |
-| 生产 Knowledge | `https://aionbench.com/knowledge` | 200 |
-| 生产容器 | API/Web/Postgres/Knowledge | 均 Up，Postgres healthy |
+| 本地 DeerFlow Gateway | `http://127.0.0.1:8001/health` | `{"status":"healthy","service":"deer-flow-gateway"}` |
+| 本地 LangGraph direct | `2024` | 未作为默认入口，Workbench 默认走 DeerFlow Gateway `/api` |
+| 生产 Web | `https://aionbench.com/login` | 可访问 |
+| 生产 API | `https://aionbench.com/api/system/health` | `ok=true`，model=`datatoken-gpt-5-5` |
+| 生产 Knowledge | `https://aionbench.com/knowledge/` | 公网 200；CDN 可能命中旧缓存 |
+| 生产 Knowledge 本机 | `http://127.0.0.1:3001/__health` | 200，正文 `ok` |
+| 生产 Knowledge 容器 | `ai-product-knowledge` | Up，映射 `3001->3000` |
 
-生产 health 关键结果：
+生产 API health 关键结果：
 
 ```json
 {
@@ -55,19 +56,21 @@
 
 | 验证项 | 命令或方式 | 结果 |
 |---|---|---|
-| Web lint | `npm --workspace @ai-product-workbench/web run lint` | 通过 |
+| Knowledge pin | `npm run knowledge:assert-pinned` | 通过；Quartz core + 25 个插件 commit 锁定 |
 | TypeScript | `npm run typecheck` | API + Web 通过 |
 | API 单测 | `npm run test` | 35 个测试文件 passed、1 skipped；169 passed、1 skipped |
-| API 路由边界 | `apps/api/test/api-route-boundary.spec.ts` | 覆盖 `authenticated-share` 受保护、旧 public 命名不复活、logout 幂等 200 |
-| API clean build | `npm --workspace @ai-product-workbench/api run build` | 编译前清理 `dist`，旧 product/project 编译产物不再残留 |
-| Knowledge source pin | `npm run knowledge:assert-pinned` | Quartz core 固定到 `v5.0.0` / `ab346fa66a895e12d63a308e70ce330ba795822a` 并校验 checkout |
-| 生产构建 | `npm run build` | API `tsc` + Next production build 通过 |
-| 主依赖审计 | `npm_config_registry=https://registry.npmjs.org npm audit --omit=optional` | 0 vulnerabilities |
+| 生产 build | `npm run build` | API clean build + Next production build 通过 |
+| Web lint | `npm --workspace @ai-product-workbench/web run lint` | 通过 |
 | 未用扫描 | `npx --yes knip --include files,dependencies,devDependencies,exports,types --workspace apps/web --workspace apps/api` | 无输出 |
-| Prisma 当前库 | `prisma migrate status`、`prisma validate` | 38 条迁移，schema valid |
-| 空库迁移重放 | 临时 PostgreSQL 数据库从零 `migrate deploy` | 38 条迁移全部成功 |
-| 空库 legacy 扫描 | 表/列扫描 | `legacy_columns=[]`，`legacy_tables=[]` |
+| 主依赖审计 | `npm_config_registry=https://registry.npmjs.org npm audit --omit=optional` | 0 vulnerabilities |
+| Prisma validate | `npx prisma validate --schema packages/db/prisma/schema.prisma` | schema valid |
+| Prisma migrate status | `npx prisma migrate status --schema packages/db/prisma/schema.prisma` | 38 migrations，Database schema is up to date |
+| Legacy schema | `npm run db:assert-no-legacy` | 无旧 project/product/product-design schema residue |
+| Smoke 清理复核 | `npm run cleanup:smoke -- --dry-run --skip-gateway --json` | users/conversations/messages/runs/share/deerflow 均为 0 |
 | Diff hygiene | `git diff --check` | 通过 |
+| API 旧产物扫描 | `apps/api/dist` 精确扫描旧 `modules/auth`、`common/current-user`、project/product/product-design | 无输出 |
+
+说明：Prisma CLI 提示有 `6.19.3 -> 7.8.0` major update，这是工具升级提示，不是本轮阻塞；需要单独评估 Prisma 7 迁移成本。
 
 ## 4. 本地真实浏览器验证
 
@@ -75,165 +78,138 @@
 
 | 文件 | 步骤 | 健康状态 |
 |---|---|---|
-| `27-final-local-login.png` | 打开 `/login` | 健康；邮箱、密码、登录、注册链接可识别 |
-| `28-final-local-share-login-redirect.png` | 未登录访问 `/share/bad-token` | 健康；跳到 `/login?next=%2Fshare%2Fbad-token`，没有旧分享 401 噪音 |
-| `29-final-local-home-authenticated.png` | UI 注册后进入首页 | 健康；`POST /api/auth/register` 201，首页输入区和模型状态可见 |
-| `30-final-local-chat-deerflow.png` | 发送聊天消息 | 健康；`POST /api/chat/stream` 200，页面收到 “DeerFlow 通信正常。” |
+| `36-cli-login.png` | 桌面登录页 | 健康；邮箱、密码、登录、注册链接和右侧提示均可见 |
+| `37-cli-home-after-login.png` | 登录后首页 | 健康；空态居中、输入框和 `workbench-claude` runtime 可见 |
+| `38-cli-chat-deerflow-reply.png` | 发送普通聊天 | 健康；`/api/chat/stream` 200，页面出现 DeerFlow 回复 |
+| `39-cli-mobile-chat.png` | 移动端聊天页 | 健康；prompt、回复、输入区在 390x844 下可用，无横向溢出 |
+| `40-cli-mobile-share-login-redirect.png` | 移动端未登录分享 | 健康；跳到 `/login?next=%2Fshare%2Fbad-token-current-audit` |
 
-本地浏览器请求和控制台结果：
+浏览器网络和控制台结果：
 
-- 注册后请求：`/api/auth/register` 201，`/api/conversations` 200。
-- 聊天请求：`/api/chat/stream` 200，消息列表和 runtime-status 均 200。
-- 未登录分享请求：只打 `/api/auth/session`，没有请求旧 `/api/public/share`。
-- 控制台：关键流程 warning/error 均为 0。
+- 登录请求：`POST /api/auth/login` 201。
+- 聊天请求：`POST /api/chat/stream` 200；messages/runtime-status/conversations 后续请求均 200。
+- 未登录分享：仅请求 `/api/auth/session` 200，没有请求旧 `/api/public/share`。
+- 桌面和移动端 console：warning 0、error 0。
+- 应用内浏览器 DOM 可读，但动态聊天区截图不稳定；最终视觉证据使用 Playwright CLI 截图，临时 `.playwright-cli` 已删除。
 
-本地测试数据清理结果：
+## 5. 本地测试数据清理
 
-| 查询 | 剩余数量 |
-|---|---:|
-| `users_by_email` | 0 |
-| `conversations_by_title` | 0 |
-| `messages_by_prompt` | 0 |
-| `agent_run_logs_by_named_conversation` | 0 |
-| `vibe_events_by_named_conversation` | 0 |
-| `deerflow_bindings_by_named_conversation` | 0 |
+本轮真实浏览器测试创建了 1 个审计用户、2 个会话、4 条消息、2 条运行日志、2 个 DeerFlow 绑定。发现并修复了清理脚本遗漏：旧规则只覆盖 `audit_%@example.test`，未覆盖本轮 `audit-current-*` 用户。
 
-DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/playwright` 和 `/tmp/ai-workbench-audit-email.txt` 均已删除。
+清理执行结果：
 
-## 5. 生产部署复验
+| 项目 | 清理前 | 清理后 |
+|---|---:|---:|
+| users | 1 | 0 |
+| conversations | 2 | 0 |
+| messages | 4 | 0 |
+| agent_run_logs | 2 | 0 |
+| file_assets | 0 | 0 |
+| knowledge_items | 0 | 0 |
+| share_links | 0 | 0 |
+| deerflow_thread_bindings | 2 | 0 |
+
+Gateway 线程删除：2 个线程均返回 200。
+
+## 6. 生产部署复验
 
 | 验证项 | 结果 |
 |---|---|
-| 生产服务器 HEAD | `467b071` |
-| API 容器 | 已重建并启动 |
-| API health | `ok=true`，DeerFlow enabled |
-| `/api/auth/session` | 200，正文 `{"user":null}` |
-| `/api/auth/logout` | 200，清理 `access_token` cookie |
-| `/api/public/share/bad` | 404 |
-| `/api/authenticated-share/bad` | 401 |
-| `/login` headers | `Origin-Agent-Cluster: ?1`，生产 CSP 无 localhost |
-| Knowledge | 200 |
-| API 启动日志 | `AuthenticatedShareController {/api/authenticated-share}` 已映射，Nest started |
+| 服务器 HEAD | `0c02341` |
+| Knowledge 容器 | `ai-product-knowledge` Up |
+| Quartz revision | `ab346fa66a895e12d63a308e70ce330ba795822a` |
+| Knowledge 本机 health | `http://127.0.0.1:3001/__health` 200，正文 `ok` |
+| Knowledge 本机 index | `http://127.0.0.1:3001/` 200 |
+| Knowledge 日志 | 80 个 Markdown 文件解析成功；输出 114 个文件；无 direct eval/CustomOgImages/parse 错误 |
+| 生产 API health | `ok=true`，DeerFlow enabled |
+| Git 工作区 | 仅 `?? backups/` 为生产备份目录，未纳入 Git |
 
-生产 DB 复验：
+部署中真实暴露并修复的问题：
 
-| 检查 | 结果 |
-|---|---|
-| 新迁移记录 | `20260705061000_drop_share_link_legacy_state_column` 已在 `_prisma_migrations` |
-| `share_links.product_design_state_id` | 0 |
-| legacy 列扫描 | 无 `project_id`、`source_product_id`、`%product_design%` 旧列 |
-| legacy 表扫描 | 无 `projects`、`products`、`product_design_states`、`product_design_versions`、`product_design_change_logs` |
-| legacy enum 扫描 | 无 `ProductDesignChangeType`、`ProductDesignStateStatus`、`ProjectStatus` |
-| 生产 smoke users | 0 |
-| 生产 smoke conversations | 0 |
-| 生产 smoke share_links | 0 |
+1. 固定 Quartz `v5.0.0` 后，旧 Dockerfile 继续调用 `npx quartz plugin install plugin-name...`，v5 CLI 报 `Unknown arguments`，Knowledge 构建失败。
+2. 修复为复制 `quartz.lock.json` 并调用无参 `npx quartz plugin install`，25 个插件从 lockfile commit 恢复。
+3. 尝试删除 disabled 的 `og-image` 后，生产启动报 `No matching export ... CustomOgImagesEmitterName`。结论：`og-image` 虽 disabled，但 Quartz core 静态依赖其导出，不能删除。
+4. 删除真正产生日志噪音的 `note-properties` 后，生产日志不再出现 `direct eval` warning。
 
-生产破坏性迁移前已备份：
-
-```text
-/opt/ai-product-workbench/backups/ai_product_workbench_20260705134258_before_legacy_drop.dump
-```
-
-## 6. 本轮修复清单
+## 7. 本轮修复清单
 
 | 优先级 | 问题 | 修复 |
 |---|---|---|
-| P0 | 生产和本地 schema 有旧 project/product/product-design 物理结构噪音 | 增加 legacy drop 迁移，生产备份后执行并复验 |
-| P0 | 生产 `share_links.product_design_state_id` 残留列未被第一条 legacy 迁移覆盖 | 新增 `20260705061000_drop_share_link_legacy_state_column` 幂等删除 |
-| P1 | 未登录页面用 `/auth/me` 造成 401 控制台噪音 | 增加 `/api/auth/session` 静默会话接口，前端 AuthProvider 改用 session |
-| P1 | 分享需要登录，但 API 路由名叫 `public/share`，与业务规则冲突 | 后端改为 `authenticated-share`，前端 fetch/iframe 同步更新 |
-| P1 | 未登录访问分享页会先请求分享 API，造成无意义 401 | 分享客户端等待 auth session，未登录先跳 `/login?next=...` |
-| P1 | 登出接口依赖 JWT guard，过期会话登出会在浏览器 console 留 401 噪音 | `/api/auth/logout` 改为幂等 200，始终清 cookie |
-| P1 | API auth 同时存在 `src/auth` 与 `src/modules/auth` 两套边界 | 统一到 `src/auth`，删除旧模块、重复 decorator/guard/types，并补路由边界测试 |
-| P1 | DeerFlow 默认仍指向 `localhost:2024`，与当前 Gateway 架构不一致 | 默认改为 `http://localhost:8001/api`，生产改为 `host.docker.internal:8001/api` |
-| P1 | Origin-Agent-Cluster warning | Web 增加 `Origin-Agent-Cluster: ?1` |
-| P2 | API `dist` 会保留已删除历史模块的旧编译产物，本地审计会误扫到 `project/products/product-design` | API build 改为先 `rm -rf dist` 再 `tsc`，并清掉本地旧产物 |
-| P2 | Knowledge/Quartz Dockerfile 使用浮动 `v5` 分支，生产构建不可复现 | 固定 Quartz `v5.0.0` commit，并增加 `knowledge:assert-pinned` 门禁 |
-| P2 | 回放迁移时 legacy backfill 对已删除表不够宽容 | 回填迁移和 relax 迁移增加存在性保护 |
+| P1 | Knowledge Quartz core 已固定，但社区插件仍无 lockfile，部署不可复现 | 新增 `apps/knowledge/quartz.lock.json`，25 个插件锁到具体 commit |
+| P1 | Dockerfile 调用错误的参数式插件安装，固定 `v5.0.0` 后构建失败 | 改为复制 lockfile 后运行无参 `npx quartz plugin install` |
+| P1 | Dockerfile 把 `knowledge-vault` 放在 npm/plugin 层之前，内容变化会打穿昂贵依赖层 | 调整 COPY 顺序，插件层只依赖 config/lockfile |
+| P2 | `note-properties` 插件触发生产 `direct eval` warning | 删除该插件配置和 lockfile 条目 |
+| P2 | 误判 disabled `og-image` 为可删插件会破坏 Quartz core 静态 import | 恢复 `og-image` disabled 配置和 lockfile 条目，并在报告注明不可删原因 |
+| P2 | smoke 清理脚本漏掉 `audit-current-*` 测试账号 | 增加 username/email/login_audit_logs 清理规则 |
 
-## 7. 产品架构和业务逻辑审计
+既有修复仍有效：
 
-当前产品主线是 Conversation-first：
+- 旧 `public/share` 误导路由已移除，旧 route 返回 404。
+- 分享页未登录先跳登录并保留 `next`，避免无意义 401。
+- `/api/auth/logout` 幂等 200，避免过期会话登出 401 噪音。
+- API auth 统一到 `apps/api/src/auth`，旧 `apps/api/src/modules/auth` 和重复 decorator 已删除。
+- API build 先清 `dist`，旧编译产物不会残留。
+- 旧 project/product/product-design 表、列、enum 已从当前库和生产库清理。
+
+## 8. 产品架构和业务逻辑审计
+
+当前产品主线是 Conversation-first + DeerFlow Gateway-first：
 
 1. Auth 建立用户和安全 cookie。
-2. Conversation/Message 作为所有工作流的归属根。
+2. Conversation/Message 是所有生成工作流的归属根。
 3. Aichat Stream 接收用户意图、附件和上下文，写入运行日志。
-4. DeerFlow Gateway 提供 LangGraph-compatible `/api`，Workbench 不再直连 2024。
+4. DeerFlow Gateway 提供 LangGraph-compatible `/api`，Workbench 默认不直连 2024。
 5. DeerFlow final action 驱动 PRD、Prototype、QA、Knowledge 等正式记录。
-6. ShareLink 只绑定 conversation、PRD、prototype 和 conversation design state，不再依赖旧 product design state。
+6. ShareLink 绑定 conversation、PRD、prototype 和 conversation design state，不依赖旧 product design state。
 7. 分享页是登录后只读分享，不是免登录公开链接。
 
 关键业务规则审计结果：
 
 | 业务规则 | 状态 |
 |---|---|
-| 普通聊天不应误开 PRD artifact | 已有截图和单测覆盖 |
-| PRD/Prototype 当前对象以数据库正式记录为准 | 通过架构检查和既有 smoke 验证 |
-| QA gate 通过后才允许导出和分享 | 既有线上 smoke 验证通过 |
-| 分享链接需登录、只读、不暴露编辑/下载动作 | 本地和线上截图验证通过 |
-| 用户 HTML 必须经过 sanitizer、CSP sandbox、iframe sandbox | 既有线上 smoke 和安全单测覆盖 |
-| 前端模型名来自 API health/runtime 状态 | 本地、生产 health 均验证 |
-| 后台管理台能加载关键视图 | 本轮保留 04 到 10 号截图证据 |
+| 普通聊天不应误开 PRD artifact | 本轮普通聊天只返回 DeerFlow 文本回复，未生成 artifact |
+| 前端 runtime 展示来自 API health/runtime | 本地显示 `workbench-claude`，生产 health 显示 `datatoken-gpt-5-5` |
+| 分享链接需登录 | 本地桌面/移动端未登录均先跳 `/login?next=...` |
+| 旧 public share 不应复活 | API route boundary 测试覆盖；本地未登录分享未打旧接口 |
+| 用户 HTML sandbox/sanitizer | 既有安全单测和线上 smoke 覆盖；本轮未新增可执行原型能力 |
+| Knowledge 站点构建来源可追踪 | core revision 文件 + plugin lockfile 双重约束 |
 
-## 8. 未用模块与系统噪音
+## 9. 未用模块与系统噪音
 
-已清理或确认无需继续保留：
+已删除或确认无需保留：
 
-- 旧 project/product/product-design 表、列、enum 已从生产库删除。
-- `share_links.product_design_state_id` 生产残留列已删除。
-- `public/share` 误导 API 命名已移除，旧 route 返回 404。
-- 未登录 auth 401 噪音已通过 `/auth/session` 消除。
-- 登出过期会话 401 噪音已通过幂等 `/auth/logout` 消除。
-- 重复 auth 模块边界已删除：`apps/api/src/modules/auth` 不再存在，认证类型、guard、decorator 统一从 `apps/api/src/auth` 引用。
-- API 旧 `dist` 编译产物已清理，后续 build 会先删除 `dist`，避免已删除模块继续污染本地运行和审计。
-- Knowledge Quartz core 不再跟随浮动 `v5` 分支，Docker build 会校验固定 commit 并写入 `.quartz-source-revision`。
-- 本地 Playwright 临时目录和临时测试邮箱文件已删除。
-- 本地和生产 smoke/test 数据均已清理到 0。
-- 当前只保留本轮报告和截图证据；未发现额外历史审查报告文件。
-- Knip 对 Web/API 无未用文件、依赖、devDependencies、exports、types 输出。
+- `note-properties` Quartz 插件：会触发 direct eval warning，已删除。
+- `installedAt` lockfile 时间戳：不参与恢复，已从 `quartz.lock.json` 删除，避免无意义变动。
+- 参数式 `npx quartz plugin install plugin...`：不符合 v5 lockfile 模式，已删除。
+- 本轮 `.playwright-cli`、`output/playwright` 临时目录：已删除。
+- 本轮测试用户、会话、消息、运行日志、DeerFlow 线程绑定：已清理为 0。
+- API `dist` 中旧 `modules/auth`、旧 `common/current-user`、project/product/product-design 运行产物：精确扫描无输出。
 
-仍建议后续单独处理：
+不能删除但容易误判的项：
+
+- `og-image` 插件：配置 disabled，但 Quartz core 的 `Head.tsx` 仍静态 import `CustomOgImagesEmitterName`，删除会导致 Knowledge 容器启动失败。
+- 历史 Prisma migrations 中的 `project/product/product_design_state`：它们属于迁移历史链，不是当前 schema/runtime 噪音；当前库由 legacy guard 保证最终状态干净。
+- 生产服务器 `backups/`：是迁移/部署备份目录，保持 untracked，不提交。
+
+## 10. 残留风险和优化建议
 
 | 类型 | 当前状态 | 建议 |
 |---|---|---|
-| Knowledge/Quartz 镜像依赖 | Quartz core 已固定 commit；主 Web/API audit 仍不能覆盖镜像内 OS 包和 Quartz plugin 依赖 | 后续补镜像级 SBOM/漏洞扫描，不能用主应用审计结果覆盖 |
-| 后台管理写操作 | 本轮验证页面加载，未逐项写入 admin 操作 | 补 admin E2E，覆盖用户禁用、模型切换、知识库审批等 |
-| 分享产品定位 | 当前是登录后只读分享 | 若要外部免登录分享，需要重新设计 token 权限、审计、撤销和速率限制 |
-| 可执行原型 | 当前 sanitizer 禁止脚本，偏静态安全 | 若支持 JS 原型，建议独立 sandbox 子域名 + postMessage contract |
-| 完整无障碍 | 截图能看布局和可识别控件，不能证明 WCAG | 补键盘顺序、读屏、对比度、200% 缩放测试 |
+| Knowledge Quartz npm 依赖 | `npm ci` 仍报告 11 vulnerabilities；v5 分支 HEAD 仍有 8 个，不能靠简单换 HEAD 清零 | 单独做 Quartz 依赖升级/patch 方案；必要时 fork Quartz 或等待上游修复后再 pin 新 commit |
+| Knowledge OS/镜像扫描 | 已修复应用层 lock，但未做 Trivy/Syft/Grype 级别镜像 SBOM | 增加镜像级 SBOM 和漏洞门禁，不用主应用 audit 代替镜像 audit |
+| Docker buildx | 生产提示 buildx 未安装，compose fallback 可用但有 warning | 安装 buildx 或禁用 bake warning，减少部署日志噪音 |
+| 服务器 OS 更新 | SSH MOTD 显示 58 个可更新包、4 个 ESM Apps security updates、1 个 zombie process | 单独排期系统维护窗口，避免和应用部署混在一起 |
+| CDN 缓存 | 公网 Knowledge URL 命中 CDN 旧缓存，本机 3001 已是新内容 | 部署后增加 CDN purge 或 cache-busting 验证策略 |
+| 后台管理写操作 | 本轮保留页面加载证据，未逐项执行写操作 | 补 admin E2E：用户禁用、模型切换、知识候选审批、运行日志详情 |
+| 完整无障碍 | 截图能验证布局和可识别控件，不能证明 WCAG | 补键盘顺序、读屏、对比度、200% 缩放测试 |
 
-## 9. 产品体验审计步骤
-
-| 步骤 | 产品路径 | 健康状态 | 证据 |
-|---:|---|---|---|
-| 1 | 未登录进入登录页 | 健康 | `27-final-local-login.png` |
-| 2 | 未登录访问分享 | 健康；先登录，保留 `next` | `28-final-local-share-login-redirect.png` |
-| 3 | 注册后进入工作台 | 健康；首页可输入 | `29-final-local-home-authenticated.png` |
-| 4 | 发送普通聊天 | 健康；stream 200，页面出现回复 | `30-final-local-chat-deerflow.png` |
-| 5 | 后台管理台浏览 | 健康；主要视图可进入 | `04-admin-overview.jpg` 到 `10-admin-audit.jpg` |
-| 6 | PRD artifact | 健康；正向 PRD 可读 | `14-prd-positive-artifact.png` |
-| 7 | 分享 PRD | 健康；只读 | `16-share-prd-readonly.png`、`25-prod-share-prd-readonly.png` |
-| 8 | 分享原型 | 健康；iframe 可渲染 | `17-share-prototype-iframe.png`、`24-prod-share-prototype.png` |
-| 9 | 移动端分享/首页 | 未见明显横向溢出 | `03-home-mobile.png`、`18-share-prototype-mobile.png` |
-| 10 | 生产登录后 chat | 健康；线上登录跳转已修复 | `23-prod-chat-after-login.png` |
-
-截图限制：截图可证明可见状态、布局、关键控件和部分交互结果；不能单独证明权限矩阵、读屏体验、键盘路径或所有异常分支。
-
-## 10. 风险和优化建议
-
-1. 将 DeerFlow Gateway 作为唯一默认 runtime 继续固化，避免 2024 direct 和 Gateway 双入口再次漂移。
-2. 继续加强 `authenticated-share` 测试：当前已有路由边界测试和真实浏览器验证，下一步可补完整 HTTP E2E，覆盖未登录跳转、登录后可读、旧 `public/share` 404、prototype iframe sandbox。
-3. 增加生产迁移前自动 legacy 扫描和迁移后断言，让残留列能在 CI/CD 中被提前发现。
-4. 为本地 smoke 测试提供固定清理脚本，统一清理 Workbench DB 和 DeerFlow Gateway 线程。
-5. 给后台管理写操作补最小 E2E，尤其是用户状态、模型配置、知识库候选项和运行日志详情。
-6. Knowledge/Quartz 作为独立站点做单独安全升级和依赖审计。
-7. 若后续允许公开分享或可执行 HTML 原型，应先做 threat model，再改权限和 sandbox 策略。
-
-## 11. 可访问地址
+## 11. 可访问地址和证据
 
 - 本地 Web：`http://localhost:3000`
 - 本地 API Health：`http://localhost:4000/api/system/health`
 - 本地 DeerFlow Gateway：`http://127.0.0.1:8001/health`
 - 线上 Web：`https://aionbench.com`
 - 线上 API Health：`https://aionbench.com/api/system/health`
-- 线上 Knowledge：`https://aionbench.com/knowledge`
+- 线上 Knowledge：`https://aionbench.com/knowledge/`
+- 生产 Knowledge 本机健康：`http://127.0.0.1:3001/__health` 返回 `ok`
+- 有效截图证据：`36-cli-login.png`、`37-cli-home-after-login.png`、`38-cli-chat-deerflow-reply.png`、`39-cli-mobile-chat.png`、`40-cli-mobile-share-login-redirect.png`
