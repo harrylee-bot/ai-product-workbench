@@ -3,7 +3,9 @@ import { UserRole, UserStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import {
   AichatStreamService,
+  buildFallbackPrdFinalAction,
   createDocumentStreamState,
+  formatQaOutcome,
   isDocumentGenerationRequest,
   looksLikeDocumentDraft,
   routeAssistantDocumentDelta,
@@ -214,7 +216,45 @@ describe("aichat document stream router", () => {
     expect(result).toEqual({ suppressChat: false });
     expect(parts).toEqual([]);
   });
+
+  it("describes non-blocking QA warnings without failure wording", () => {
+    expect(formatQaOutcome(qaReport("passed"))).toBe("QA 通过");
+    expect(formatQaOutcome(qaReport("warning"))).toBe("QA 通过，有待补充项");
+    expect(formatQaOutcome(qaReport("failed"))).toBe("QA 未通过");
+  });
+
+  it("builds a structured fallback PRD final action when DeerFlow omits final action", () => {
+    const finalAction = buildFallbackPrdFinalAction("请生成一份会员积分商城 PRD，只生成需求文档，包含目标、用户流程、功能需求、验收标准。");
+    const raw = finalAction.raw as {
+      prdDocumentDraft?: { title?: string; sections?: Array<{ title: string; content: string }> };
+    };
+
+    expect(finalAction).toEqual(expect.objectContaining({
+      type: "review_prd",
+      parsed: true,
+      message: expect.stringContaining("结构化 PRD 草稿"),
+    }));
+    expect(raw.prdDocumentDraft?.title).toContain("会员积分商城");
+    expect(raw.prdDocumentDraft?.sections?.map((section) => section.title)).toEqual(
+      expect.arrayContaining([
+        "1 引言",
+        "2 业务需求",
+        "2.5 验收标准",
+        "3 业务降级方案（必填）",
+        "4 需求安全基线要求（必填）",
+      ]),
+    );
+    const body = raw.prdDocumentDraft?.sections?.map((section) => section.content).join("\n") ?? "";
+    expect(body).toContain("会员积分商城详情/确认页");
+    expect(body).toContain("会员积分商城记录页");
+    expect(body).toContain("运行说明不写入需求正文");
+    expect(body).not.toContain("思考过程");
+  });
 });
+
+function qaReport(status: "passed" | "warning" | "failed") {
+  return { status } as Parameters<typeof formatQaOutcome>[0];
+}
 
 describe("AichatStreamService stop", () => {
   const user: AuthenticatedUser = {

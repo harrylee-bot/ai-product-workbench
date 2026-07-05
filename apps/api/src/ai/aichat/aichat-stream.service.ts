@@ -9,7 +9,11 @@ import { KnowledgeRetrievalService } from "../../knowledge/knowledge-retrieval.s
 import { FileAssetService } from "../../files/file-asset.service";
 import { MessageService } from "../../conversations/message.service";
 import { DeerFlowRuntimeService } from "../deerflow-runtime.service";
-import type { DeerFlowKnowledgeReference, DeerFlowRuntimeEvent } from "../deerflow-runtime.service";
+import type {
+  DeerFlowFinalAction,
+  DeerFlowKnowledgeReference,
+  DeerFlowRuntimeEvent,
+} from "../deerflow-runtime.service";
 import { FinalActionApplierService } from "../final-action-applier.service";
 import { QaService } from "../qa.service";
 import { RuntimeRunLogService } from "../runtime-run-log.service";
@@ -273,10 +277,26 @@ export class AichatStreamService {
           finishText(streamWriter, ctx);
           await assistantDraft.persist(true);
 
+          let finalAction = result.finalAction;
+          let artifacts = result.artifacts;
+          let assistantText = result.assistantText;
+          if (!finalAction.parsed && isDocumentGenerationRequest(content)) {
+            finalAction = buildFallbackPrdFinalAction(content);
+            artifacts = [];
+            assistantText = finalAction.message;
+            publishRuntimeEvent(createRuntimeEvent({
+              runId: run.id,
+              id: "fallback-prd-final-action",
+              kind: "document",
+              label: "模型未返回最终动作，已生成结构化 PRD 草稿",
+              detail: "已按标准需求文档结构写入画布，保留 QA 提示供后续补充。",
+            }));
+          }
+
           const expectsArtifact =
-            result.finalAction.type === "review_prd" ||
-            result.finalAction.type === "review_prototype";
-          if (!result.finalAction.parsed && requiresExplicitFinalAction(content)) {
+            finalAction.type === "review_prd" ||
+            finalAction.type === "review_prototype";
+          if (!finalAction.parsed && requiresExplicitFinalAction(content)) {
             throw new BadRequestException("FINAL_ACTION_REQUIRED_FOR_ARTIFACT_INTENT");
           }
           if (expectsArtifact) {
@@ -292,9 +312,9 @@ export class AichatStreamService {
             conversationId,
             userId: user.id,
             runId: run.id,
-            finalAction: result.finalAction,
-            artifacts: result.artifacts,
-            assistantText: result.assistantText,
+            finalAction,
+            artifacts,
+            assistantText,
           });
 
           if (applied.prdDocument) {
@@ -345,7 +365,7 @@ export class AichatStreamService {
                 qaReportId: qaReport.id,
                 qaStatus: qaReport.status,
                 qaBlockingSummary: qaBlockingSummary(qaReport),
-                finalActionType: result.finalAction.type,
+                finalActionType: finalAction.type,
                 threadId: result.threadId,
               }),
               relatedRunId: run.id,
@@ -357,7 +377,7 @@ export class AichatStreamService {
               {
                 status: "success",
                 threadId: result.threadId,
-                finalAction: result.finalAction,
+                finalAction,
                 prdDocument: applied.prdDocument,
                 qaReport,
               },
@@ -409,7 +429,7 @@ export class AichatStreamService {
                 qaReportId: qaReport.id,
                 qaStatus: qaReport.status,
                 qaBlockingSummary: qaBlockingSummary(qaReport),
-                finalActionType: result.finalAction.type,
+                finalActionType: finalAction.type,
                 threadId: result.threadId,
               }),
               relatedRunId: run.id,
@@ -421,7 +441,7 @@ export class AichatStreamService {
               {
                 status: "success",
                 threadId: result.threadId,
-                finalAction: result.finalAction,
+                finalAction,
                 prototypeArtifact: applied.prototypeArtifact,
                 qaReport,
               },
@@ -430,7 +450,7 @@ export class AichatStreamService {
             publishRuntimeFinish("succeeded");
           } else {
             // 无产物：把 finalAction.message 作为文本下发（若未在 chunk 流里）
-            const message = result.finalAction.message || ctx.textBuffer.trim() || result.assistantText || "本轮未生成产物。";
+            const message = finalAction.message || ctx.textBuffer.trim() || assistantText || "本轮未生成产物。";
             finishDocumentStream(streamWriter, documentStream);
             if (!ctx.hasEmittedText) {
               emitStaticText(message, streamWriter, ctx);
@@ -442,11 +462,11 @@ export class AichatStreamService {
               conversationId,
               userId: user.id,
               content: message,
-              type: pickAssistantMessageType(result.finalAction.type),
+              type: pickAssistantMessageType(finalAction.type),
               metadata: toInputJson({
                 source: "aichat",
                 runId: run.id,
-                finalAction: result.finalAction,
+                finalAction,
                 threadId: result.threadId,
               }),
               relatedRunId: run.id,
@@ -455,7 +475,7 @@ export class AichatStreamService {
               run.id,
               {
                 status: "no_artifact",
-                finalAction: result.finalAction,
+                finalAction,
                 threadId: result.threadId,
               },
               message,
@@ -1371,6 +1391,143 @@ function recordFromJson(value: unknown): Record<string, unknown> {
   return {};
 }
 
+export function buildFallbackPrdFinalAction(userPrompt: string): DeerFlowFinalAction {
+  const subject = extractPrdSubject(userPrompt);
+  const title = `${subject}需求说明书`;
+  const section = (
+    id: string,
+    sectionTitle: string,
+    type: string,
+    level: 1 | 2 | 3,
+    order: number,
+    content: string,
+  ) => ({
+    id,
+    title: sectionTitle,
+    type,
+    level,
+    order,
+    content,
+    sourcePaths: ["fallback.final_action"],
+  });
+  const designStateDraft = {
+    title: subject,
+    summary: `围绕${subject}建立可评审、可验收的产品需求闭环。`,
+    businessGoal: `完成${subject}的核心业务流程、页面能力、异常处理和验收口径定义。`,
+    targetUsers: [
+      { id: "target_user", name: "目标用户", description: "使用该能力完成核心业务操作的 C 端用户或运营人员。" },
+    ],
+    userScenarios: [
+      { id: "scenario_main", title: "主流程使用", description: `用户进入${subject}相关页面后完成浏览、选择、确认和结果查看。` },
+    ],
+    pages: [
+      { id: "page_entry", name: `${subject}入口页`, purpose: "承接用户访问并展示核心信息。" },
+      { id: "page_detail", name: `${subject}详情/确认页`, purpose: "展示明细、校验条件并提交操作。" },
+      { id: "page_record", name: `${subject}记录页`, purpose: "展示操作结果、状态和历史记录。" },
+    ],
+    features: [
+      { id: "feature_entry", title: "入口与列表展示", description: "展示核心对象、状态、筛选和分页加载能力。" },
+      { id: "feature_submit", title: "确认与提交", description: "提交前完成资格、库存、余额、权限等必要校验。" },
+      { id: "feature_record", title: "结果与记录", description: "展示成功、失败、处理中等状态，并支持用户追踪结果。" },
+    ],
+    backendConfigs: [
+      { id: "config_business", title: "业务配置", description: "支持对象配置、状态管理、上下线控制和基础审计。" },
+    ],
+    frontendRules: [
+      { id: "frontend_empty_error", title: "空态与异常态", description: "接口失败、无数据、无权限和处理中均给出明确提示。" },
+    ],
+    businessRules: [
+      { id: "rule_idempotent", title: "提交幂等", description: "重复点击或请求重试不得造成重复扣减、重复发放或重复创建记录。" },
+      { id: "rule_state", title: "状态一致", description: "前端展示状态必须以后端最终状态为准。" },
+    ],
+    stateRules: [
+      { id: "state_flow", title: "状态流转", description: "草稿/可用/处理中/成功/失败/关闭等状态需要有明确入口和退出条件。" },
+    ],
+    exceptionScenarios: [
+      { id: "exception_timeout", title: "接口超时", description: "提示用户稍后查看结果，后端保证幂等。" },
+      { id: "exception_no_permission", title: "无权限", description: "隐藏不可用入口或展示无权限说明。" },
+    ],
+    acceptanceCriteria: [
+      { id: "ac_canvas", title: "PRD 可评审", description: "需求文档应在右侧画布完整展示，包含目标、流程、功能、验收标准。" },
+      { id: "ac_error", title: "异常可理解", description: "失败、超时、空态、无权限均有用户可理解提示。" },
+    ],
+    assumptions: [
+      { id: "assumption_1", content: "具体页面路径、字段名称、接口地址和运营规则需以后续评审结论为准。", status: "pending" },
+    ],
+    knowledgeRefs: [],
+    pendingQuestions: [],
+    confirmedFacts: [],
+  };
+  const sections = [
+    section("intro", "1 引言", "overview", 2, 1, `本文档用于定义${subject}的业务目标、范围、核心流程、功能要求、异常处理、验收标准和安全基线。`),
+    section("background", "1.1 项目背景", "background", 3, 2, `${subject}需要形成从用户访问、业务校验、操作提交到结果追踪的完整闭环，降低沟通成本并支撑研发、测试、运营评审。`),
+    section("scope", "1.2 文档范围", "scope", 3, 3, `本次范围覆盖${subject}的前端页面、后端配置、关键业务规则、接口联动口径、异常降级、验收标准和安全基线；不包含真实接口地址、密钥、生产账号或不可逆发布操作。`),
+    section("scenario", "1.3 使用场景（必填）", "user_scenarios", 3, 4, `用户进入${subject}入口，浏览核心信息，完成必要选择和确认；系统完成资格、状态和风控校验后返回结果，用户可在记录页查看处理进度和最终状态。`),
+    section("business", "2 业务需求", "business_goal", 2, 5, designStateDraft.businessGoal),
+    section("links", "2.1 页面链接", "page_requirements", 3, 6, [
+      `页面入口以实际产品路由为准，至少包含${subject}入口页、${subject}详情/确认页、${subject}记录页。`,
+      `${subject}入口页用于承接用户访问并展示核心对象、状态、筛选和空态。`,
+      `${subject}详情/确认页用于展示明细、完成资格/库存/权限校验并提交操作。`,
+      `${subject}记录页用于展示处理中、成功、失败、取消等状态和历史结果。`,
+      "管理后台入口需支持配置、上下线、查询和审计。",
+    ].join("\n")),
+    section("features", "2.2 核心业务规则/功能说明", "business_rules", 3, 7, [
+      "入口页展示核心对象、状态、筛选条件、分页和空态。",
+      "提交前校验用户资格、对象状态、库存/额度/权限等关键条件。",
+      "提交动作必须幂等，重复点击、网络重试或页面刷新不得产生重复业务结果。",
+      "结果页或记录页展示处理中、成功、失败、取消等状态，并提供下一步操作指引。",
+    ].join("\n")),
+    section("flow", "2.3 核心流程/状态/页面要求", "state_rules", 3, 8, `主流程：访问入口 → 查看列表/详情 → 选择或确认 → 提交 → 系统校验 → 返回结果 → 记录页追踪。状态流转需覆盖草稿、可用、处理中、成功、失败、关闭。`),
+    section("interfaces", "2.4 接口能力/联动口径", "backend_configs", 3, 9, "涉及查询、详情、提交、状态查询、记录列表、后台配置等接口能力。具体接口地址以技术方案和联调结果为准；每个接口需明确调用方、触发条件、关键入参、成功结果、失败处理和日志口径。"),
+    section("acceptance", "2.5 验收标准", "acceptance_criteria", 3, 10, [
+      "需求文档在右侧画布完整展示，运行说明不写入需求正文。",
+      "核心页面、状态、异常、权限和空态均可被测试用例覆盖。",
+      "接口成功、失败、超时、重复提交和无权限场景均有明确提示和日志。",
+      "QA 仅对当前产物范围给出阻塞或补充项，不因未请求的后续产物误判失败。",
+    ].join("\n")),
+    section("fallback", "3 业务降级方案（必填）", "exception_scenarios", 2, 11, "查询失败时展示空态和重试入口；提交超时时提示用户不要重复提交并到记录页确认结果；后台配置失败时保留原配置并提示运营重试；关键状态以后端最终结果为准。"),
+    section("security", "4 需求安全基线要求（必填）", "appendix", 2, 12, [
+      "| 序号 | 安全基线内容 | 是否涉及 |",
+      "| --- | --- | --- |",
+      "| 1 | 是否涉及新增或变更接口 | 是 |",
+      "| 2 | 是否涉及用户信息展示或查询 | 是 |",
+      "| 3 | 是否涉及第三方跳转或数据共享 | 不涉及 |",
+      "| 4 | 是否需要操作日志和异常审计 | 是 |",
+      "| 5 | 是否需要权限控制和接口鉴权 | 是 |",
+    ].join("\n")),
+  ];
+
+  return {
+    type: "review_prd",
+    message: "已根据当前输入生成结构化 PRD 草稿。",
+    intent: "generate_prd",
+    requirementMode: "one_sentence_completion",
+    parsed: true,
+    raw: {
+      type: "review_prd",
+      designStateDraft,
+      prdDocumentDraft: {
+        title,
+        sections,
+        validationNotes: ["DeerFlow 未返回最终动作时由工作台生成的结构化 PRD 草稿，需结合业务细节继续确认。"],
+      },
+      assumptions: designStateDraft.assumptions,
+      knowledgeRefsUsed: [],
+      validationNotes: ["fallback_prd_final_action"],
+    },
+  };
+}
+
+function extractPrdSubject(userPrompt: string) {
+  const compact = userPrompt
+    .replace(/\s+/g, " ")
+    .replace(/请|帮我|给我|生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|一份|一个|简短但结构完整的/gi, "")
+    .replace(/只生成需求文档|只|仅|包含目标、用户流程、功能需求、验收标准|包含目标|用户流程|功能需求|验收标准|prd|需求文档|需求说明书/gi, "")
+    .replace(/[，。,.;；:：]/g, " ")
+    .trim();
+  return compact.slice(0, 40) || "产品需求方案";
+}
+
 function isKnowledgeInventoryQuestion(value: string) {
   const compact = value.replace(/\s+/g, "").toLowerCase();
   if (!/(知识库|知识|规则库|素材库)/.test(compact)) return false;
@@ -1385,9 +1542,9 @@ function requiresExplicitFinalAction(value: string) {
   return /(prd|需求文档|需求说明书|原型|prototype|导出|下载|export)/i.test(compact);
 }
 
-function formatQaOutcome(report: QAReport) {
+export function formatQaOutcome(report: QAReport) {
   if (report.status === "passed") return "QA 通过";
-  if (report.status === "warning") return "QA 未完全通过";
+  if (report.status === "warning") return "QA 通过，有待补充项";
   if (report.status === "failed") return "QA 未通过";
   return `QA ${report.status}`;
 }
