@@ -237,4 +237,42 @@ describe("ShareService", () => {
 
     await expect(service.resolveAuthenticatedShare("tok-abc")).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it("serves prototype HTML for authenticated iframe access without incrementing views again", async () => {
+    const shareRecord = {
+      id: "share-1",
+      token: "tok-abc",
+      conversationId: "conversation-1",
+      scope: ShareScope.prototype,
+      status: ShareLinkStatus.active,
+      title: "签到活动",
+      prdDocumentId: null,
+      prototypeArtifactId: "artifact-1",
+      expiresAt: null,
+    };
+    prisma.shareLink.findUnique.mockResolvedValue(shareRecord);
+    prisma.conversation.findUnique.mockResolvedValue({
+      id: "conversation-1",
+      ownerId: "user-1",
+      title: "签到活动",
+      status: ConversationStatus.active,
+      deletedAt: null,
+    });
+    prisma.prototypeArtifact.findFirst.mockResolvedValue({
+      id: "artifact-1",
+      title: "签到原型",
+      status: PrototypeArtifactStatus.ready,
+      htmlContent: "<main onclick=\"alert(1)\"><script>alert(2)</script>签到</main>",
+      pageCount: 1,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    });
+
+    const html = await service.resolveAuthenticatedPrototypeHtml("tok-abc");
+
+    expect(html.toLowerCase()).toContain("<!doctype html>");
+    expect(html).toContain("签到");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("onclick=");
+    expect(prisma.shareLink.update).not.toHaveBeenCalled();
+  });
 });

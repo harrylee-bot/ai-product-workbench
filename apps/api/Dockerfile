@@ -38,6 +38,7 @@ COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/db/prisma packages/db/prisma
 COPY --from=build /app/node_modules/.prisma node_modules/.prisma
 COPY --from=build /app/node_modules/@prisma node_modules/@prisma
+COPY scripts/assert-no-legacy-schema.mjs scripts/assert-no-legacy-schema.mjs
 COPY deploy/api-entrypoint.sh deploy/api-entrypoint.sh
 RUN chmod +x deploy/api-entrypoint.sh
 WORKDIR /app/apps/api

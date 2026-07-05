@@ -15,7 +15,9 @@
     "test": "npm --workspace @ai-product-workbench/api run test",
     "db:generate": "prisma generate --schema packages/db/prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema packages/db/prisma/schema.prisma",
+    "db:assert-no-legacy": "node scripts/assert-no-legacy-schema.mjs",
     "db:seed": "npm --workspace @ai-product-workbench/db run seed",
+    "cleanup:smoke": "node scripts/cleanup-smoke-data.mjs",
     "axure:export": "node scripts/axure-rp-export-html.mjs",
     "deerflow:bootstrap": "node scripts/deerflow-bootstrap.mjs"
   },

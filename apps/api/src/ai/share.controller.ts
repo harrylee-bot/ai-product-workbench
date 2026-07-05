@@ -46,7 +46,7 @@ export class AuthenticatedShareController {
   // sec-3：分享接口限流防刷量（30 次/分钟/用户）。
   @Throttle({ share: { limit: 30, ttl: 60_000 } })
   @Get(":token")
-  resolve(@Param("token") token: string, @CurrentUser() user: AuthenticatedUser) {
+  resolve(@Param("token") token: string) {
     return this.shareService.resolveAuthenticatedShare(token);
   }
 
@@ -55,7 +55,7 @@ export class AuthenticatedShareController {
   @Header("Content-Type", "text/html; charset=utf-8")
   @Header("Content-Security-Policy", USER_HTML_CSP)
   @Header("X-Content-Type-Options", "nosniff")
-  prototypeHtml(@Param("token") token: string, @CurrentUser() user: AuthenticatedUser) {
+  prototypeHtml(@Param("token") token: string) {
     return this.shareService.resolveAuthenticatedPrototypeHtml(token);
   }
 }
