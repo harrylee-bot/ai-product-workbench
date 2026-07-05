@@ -97,7 +97,8 @@ services:
       dockerfile: apps/knowledge/Dockerfile
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
-        QUARTZ_REF: ${QUARTZ_REF:-v5}
+        QUARTZ_REF: ${QUARTZ_REF:-v5.0.0}
+        QUARTZ_COMMIT: ${QUARTZ_COMMIT:-ab346fa66a895e12d63a308e70ce330ba795822a}
     container_name: ai-product-knowledge
     restart: unless-stopped
     environment:
