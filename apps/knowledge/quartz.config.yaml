@@ -173,6 +173,8 @@ plugins:
       position: left
       priority: 25
       display: mobile-only
+  - source: github:quartz-community/og-image
+    enabled: false
 layout:
   groups:
     toolbar:

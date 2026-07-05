@@ -91,6 +91,11 @@
       "resolved": "https://github.com/quartz-community/obsidian-flavored-markdown.git",
       "commit": "07eaca7b31a537c7c4a0fd2848b1f00014c940af"
     },
+    "og-image": {
+      "source": "github:quartz-community/og-image",
+      "resolved": "https://github.com/quartz-community/og-image.git",
+      "commit": "31343c612d02c5fd22ff27a1e6035b2486be75f5"
+    },
     "page-title": {
       "source": "github:quartz-community/page-title",
       "resolved": "https://github.com/quartz-community/page-title.git",
