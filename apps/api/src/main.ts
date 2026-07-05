@@ -6,6 +6,7 @@ import cookieParser from "cookie-parser";
 import type { NextFunction, Request, Response } from "express";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { isUserHtmlPreviewPath } from "./ai/user-html-security";
 import { HttpExceptionFilter } from "./common/http-exception.filter";
 import { validateSecrets } from "./common/secret-config";
 
@@ -72,6 +73,13 @@ async function bootstrap() {
         : false,
     }),
   );
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    if (isUserHtmlPreviewPath(request.path)) {
+      response.removeHeader("X-Frame-Options");
+      response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    }
+    next();
+  });
   app.enableCors({
     origin: corsOrigin(),
     credentials: true,

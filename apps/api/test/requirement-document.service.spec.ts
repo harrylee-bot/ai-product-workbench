@@ -1,6 +1,15 @@
-import { KnowledgeCandidateSource, ConversationStatus, RequirementDocumentStatus, UserRole, UserStatus } from "@prisma/client";
+import {
+  KnowledgeCandidateSource,
+  ConversationStatus,
+  RequirementDocumentStatus,
+  UserRole,
+  UserStatus,
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConversationDesignState, RequirementDocumentDraft } from "../src/ai/ai-vibe.types";
+import type {
+  ConversationDesignState,
+  RequirementDocumentDraft,
+} from "../src/ai/ai-vibe.types";
 import { RequirementDocumentService } from "../src/ai/requirement-document.service";
 
 describe("PRD requirement document module", () => {
@@ -16,31 +25,33 @@ describe("PRD requirement document module", () => {
       update: vi.fn(),
       findUnique: vi.fn(),
     },
-	    requirementDocumentVersion: {
-	      create: vi.fn(),
-	      findFirst: vi.fn(),
-	      findMany: vi.fn(),
-	    },
-	    $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
-	  };
+    requirementDocumentVersion: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+    },
+    $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback(prisma),
+    ),
+  };
   const stateService = {
     getCurrentState: vi.fn(),
     getStateByIdForConversation: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
     syncRequirementDocumentEdit: vi.fn(),
   };
-	  const qaService = {
-	    assertGateAllows: vi.fn(),
-	  };
-	  const knowledgeCandidateService = {
-	    createMany: vi.fn(),
-	  };
-	  const service = new RequirementDocumentService(
-	    prisma as never,
-	    stateService as never,
-	    knowledgeCandidateService as never,
-	    qaService as never,
-	  );
+  const qaService = {
+    assertGateAllows: vi.fn(),
+  };
+  const knowledgeCandidateService = {
+    createMany: vi.fn(),
+  };
+  const service = new RequirementDocumentService(
+    prisma as never,
+    stateService as never,
+    knowledgeCandidateService as never,
+    qaService as never,
+  );
   const user = {
     id: "user-1",
     username: "zhangsan",
@@ -54,27 +65,33 @@ describe("PRD requirement document module", () => {
     prisma.conversation.findUnique.mockResolvedValue(baseProject());
     prisma.conversation.update.mockResolvedValue({});
     prisma.requirementDocumentVersion.findFirst.mockResolvedValue(null);
-    prisma.requirementDocumentVersion.create.mockImplementation(async ({ data }) => ({
-      id: `prd-version-${data.version}`,
-      ...data,
-      reason: data.reason ?? null,
-      createdAt: now,
-    }));
-    stateService.attachGeneratedArtifacts.mockImplementation(async (_stateId, input) => ({
-      ...baseState(),
-      version: 4,
-      status: input.status,
-      prdDocument: input.prdDocument,
-    }));
-	    stateService.syncRequirementDocumentEdit.mockImplementation(async (input) => ({
-	      ...baseState(),
-	      version: 4,
-	      status: "doc_ready",
-	      prdDocument: input.document,
-	      prototypeSpec: undefined,
-	    }));
-	    knowledgeCandidateService.createMany.mockResolvedValue({ items: [] });
-	  });
+    prisma.requirementDocumentVersion.create.mockImplementation(
+      async ({ data }) => ({
+        id: `prd-version-${data.version}`,
+        ...data,
+        reason: data.reason ?? null,
+        createdAt: now,
+      }),
+    );
+    stateService.attachGeneratedArtifacts.mockImplementation(
+      async (_stateId, input) => ({
+        ...baseState(),
+        version: 4,
+        status: input.status,
+        prdDocument: input.prdDocument,
+      }),
+    );
+    stateService.syncRequirementDocumentEdit.mockImplementation(
+      async (input) => ({
+        ...baseState(),
+        version: 4,
+        status: "doc_ready",
+        prdDocument: input.document,
+        prototypeSpec: undefined,
+      }),
+    );
+    knowledgeCandidateService.createMany.mockResolvedValue({ items: [] });
+  });
 
   it("saves generated documents, creates a version, and updates the conversation pointer", async () => {
     const state = baseState();
@@ -111,7 +128,9 @@ describe("PRD requirement document module", () => {
 
   it("loads the current PRD through Conversation.currentPrdDocumentId", async () => {
     const draft = prdDraft(baseState());
-    prisma.conversation.findUnique.mockResolvedValue(baseProject({ currentPrdDocumentId: "prd-current" }));
+    prisma.conversation.findUnique.mockResolvedValue(
+      baseProject({ currentPrdDocumentId: "prd-current" }),
+    );
     prisma.requirementDocument.findFirst.mockResolvedValueOnce(
       documentRecord({
         id: "prd-current",
@@ -127,26 +146,33 @@ describe("PRD requirement document module", () => {
     expect(result.document?.id).toBe("prd-current");
   });
 
-  it("prefers the PRD embedded in ConversationDesignState over a stale conversation pointer", async () => {
+  it("does not trust a stale PRD snapshot embedded in ConversationDesignState", async () => {
     const statePrd = documentRecord({
       id: "prd-state",
       ...prdDraft(baseState()),
     });
-    stateService.getCurrentState.mockResolvedValue(baseState({
-      version: 4,
-      prdDocument: {
-        ...statePrd,
-        status: "ready",
-        createdAt: statePrd.createdAt.toISOString(),
-        updatedAt: statePrd.updatedAt.toISOString(),
-      },
-    }));
-    prisma.conversation.findUnique.mockResolvedValue(baseProject({ currentPrdDocumentId: "prd-stale" }));
+    stateService.getCurrentState.mockResolvedValue(
+      baseState({
+        version: 4,
+        prdDocument: {
+          ...statePrd,
+          status: "ready",
+          createdAt: statePrd.createdAt.toISOString(),
+          updatedAt: statePrd.updatedAt.toISOString(),
+        },
+      }),
+    );
+    prisma.conversation.findUnique.mockResolvedValue(
+      baseProject({ currentPrdDocumentId: "prd-stale" }),
+    );
+    prisma.requirementDocument.findFirst.mockResolvedValueOnce(null);
 
     const result = await service.getCurrentForUser(user, "conversation-1");
 
-    expect(result.document?.id).toBe("prd-state");
-    expect(prisma.requirementDocument.findFirst).not.toHaveBeenCalled();
+    expect(result.document).toBeNull();
+    expect(prisma.requirementDocument.findFirst).toHaveBeenCalledWith({
+      where: { id: "prd-stale", conversationId: "conversation-1" },
+    });
   });
 
   it("updates a section, creates a version, and syncs the PRD back into ConversationDesignState", async () => {
@@ -169,22 +195,35 @@ describe("PRD requirement document module", () => {
       }),
     );
 
-    const result = await service.updateSectionForUser(user, "prd-1", "business_goal", {
-      content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
-    });
+    const result = await service.updateSectionForUser(
+      user,
+      "prd-1",
+      "business_goal",
+      {
+        content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
+      },
+    );
 
-    const section = result.document.sections.find((item) => item.id === "business_goal");
+    const section = result.document.sections.find(
+      (item) => item.id === "business_goal",
+    );
     expect(result.document.status).toBe("ready");
-    expect(section?.content).toBe("提升签到转化率，并让运营能清楚追踪连续签到效果。");
-    expect(section?.blocks?.[0]).toEqual(expect.objectContaining({
-      id: "business_goal_body",
-      content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
-    }));
-    expect(stateService.syncRequirementDocumentEdit).toHaveBeenCalledWith(expect.objectContaining({
-      document: expect.objectContaining({ id: "prd-1", status: "ready" }),
-      section: expect.objectContaining({ id: "business_goal" }),
-      userId: "user-1",
-    }));
+    expect(section?.content).toBe(
+      "提升签到转化率，并让运营能清楚追踪连续签到效果。",
+    );
+    expect(section?.blocks?.[0]).toEqual(
+      expect.objectContaining({
+        id: "business_goal_body",
+        content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
+      }),
+    );
+    expect(stateService.syncRequirementDocumentEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document: expect.objectContaining({ id: "prd-1", status: "ready" }),
+        section: expect.objectContaining({ id: "business_goal" }),
+        userId: "user-1",
+      }),
+    );
   });
 
   it("updates the whole PRD markdown and creates a restorable version", async () => {
@@ -244,14 +283,17 @@ describe("PRD requirement document module", () => {
         createdBy: "user-1",
       }),
     });
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
-      prdDocument: expect.objectContaining({ id: "prd-1", status: "ready" }),
-      status: "doc_ready",
-      userId: "user-1",
-    }));
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith(
+      "state-1",
+      expect.objectContaining({
+        prdDocument: expect.objectContaining({ id: "prd-1", status: "ready" }),
+        status: "doc_ready",
+        userId: "user-1",
+      }),
+    );
   });
 
-	  it("confirms a PRD for the prototype gate and syncs doc_confirmed into ConversationDesignState", async () => {
+  it("confirms a PRD for the prototype gate and syncs doc_confirmed into ConversationDesignState", async () => {
     const draft = prdDraft(baseState());
     prisma.requirementDocument.findUnique.mockResolvedValue({
       ...documentRecord({
@@ -259,66 +301,78 @@ describe("PRD requirement document module", () => {
         ...draft,
       }),
       conversation: baseProject(),
-	  });
+    });
 
-	    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
-	      documentRecord({
+    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
+      documentRecord({
         id: "prd-1",
         ...draft,
         status: data.status,
         updatedBy: data.updatedBy,
       }),
     );
-    stateService.getStateByIdForConversation.mockResolvedValue(baseState({ status: "doc_ready" }));
+    stateService.getStateByIdForConversation.mockResolvedValue(
+      baseState({ status: "doc_ready" }),
+    );
 
     const result = await service.confirmForPrototypeGate(user, "prd-1");
 
     expect(result.document.status).toBe("confirmed");
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith("state-1", expect.objectContaining({
-      prdDocument: expect.objectContaining({ id: "prd-1", status: "confirmed" }),
-      status: "doc_confirmed",
-	    }));
-	  });
+    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith(
+      "state-1",
+      expect.objectContaining({
+        prdDocument: expect.objectContaining({
+          id: "prd-1",
+          status: "confirmed",
+        }),
+        status: "doc_confirmed",
+      }),
+    );
+  });
 
-	  it("extracts pending knowledge candidates after PRD confirmation", async () => {
-	    const draft = prdDraft(baseState());
-	    prisma.requirementDocument.findUnique.mockResolvedValue({
-	      ...documentRecord({
-	        id: "prd-1",
-	        ...draft,
-	      }),
-	      conversation: baseProject(),
-	    });
-	    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
-	      documentRecord({
-	        id: "prd-1",
-	        ...draft,
-	        status: data.status,
-	        updatedBy: data.updatedBy,
-	      }),
-	    );
-	    stateService.getStateByIdForConversation.mockResolvedValue(baseState({ status: "doc_ready" }));
-	    qaService.assertGateAllows.mockResolvedValue({ allowPersistKnowledge: true });
-	    knowledgeCandidateService.createMany.mockResolvedValue({
-	      items: [{ id: "candidate-1", title: "业务目标候选" }],
-	    });
+  it("extracts pending knowledge candidates after PRD confirmation", async () => {
+    const draft = prdDraft(baseState());
+    prisma.requirementDocument.findUnique.mockResolvedValue({
+      ...documentRecord({
+        id: "prd-1",
+        ...draft,
+      }),
+      conversation: baseProject(),
+    });
+    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
+      documentRecord({
+        id: "prd-1",
+        ...draft,
+        status: data.status,
+        updatedBy: data.updatedBy,
+      }),
+    );
+    stateService.getStateByIdForConversation.mockResolvedValue(
+      baseState({ status: "doc_ready" }),
+    );
+    qaService.assertGateAllows.mockResolvedValue({
+      allowPersistKnowledge: true,
+    });
+    knowledgeCandidateService.createMany.mockResolvedValue({
+      items: [{ id: "candidate-1", title: "业务目标候选" }],
+    });
 
-	    const result = await service.confirmForUser(user, "prd-1", "确认 PRD");
+    const result = await service.confirmForUser(user, "prd-1", "确认 PRD");
 
-	    expect(knowledgeCandidateService.createMany).toHaveBeenCalledWith(
-	      "conversation-1",
-	      expect.arrayContaining([
-	        expect.objectContaining({
-	          title: expect.stringContaining("业务目标"),
-	          sourcePath: "sections.business_goal",
-	        }),
-	      ]),
-	      { source: KnowledgeCandidateSource.prd, sourceRefId: "prd-1" },
-	    );
-	    expect(result.knowledgeCandidates.items).toEqual([
-	      expect.objectContaining({ id: "candidate-1" }),
-	    ]);
-	  });
+    expect(knowledgeCandidateService.createMany).toHaveBeenCalledWith(
+      "conversation-1",
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: expect.stringContaining("业务目标"),
+          sourcePath: "sections.business_goal",
+        }),
+      ]),
+      { source: KnowledgeCandidateSource.prd, sourceRefId: "prd-1" },
+    );
+    expect(result.knowledgeCandidates.items).toEqual([
+      expect.objectContaining({ id: "candidate-1" }),
+    ]);
+  });
 
   it("blocks PRD confirmation when QA gate does not allow artifact confirmation", async () => {
     qaService.assertGateAllows.mockRejectedValue(new Error("QA_GATE_BLOCKED"));
@@ -330,9 +384,15 @@ describe("PRD requirement document module", () => {
       conversation: baseProject({ status: ConversationStatus.qa_failed }),
     });
 
-    await expect(service.confirmForUser(user, "prd-1", "确认 PRD")).rejects.toThrow("QA_GATE_BLOCKED");
+    await expect(
+      service.confirmForUser(user, "prd-1", "确认 PRD"),
+    ).rejects.toThrow("QA_GATE_BLOCKED");
 
-    expect(qaService.assertGateAllows).toHaveBeenCalledWith(user, "conversation-1", "confirm_artifacts");
+    expect(qaService.assertGateAllows).toHaveBeenCalledWith(
+      user,
+      "conversation-1",
+      "confirm_artifacts",
+    );
     expect(prisma.requirementDocument.update).not.toHaveBeenCalled();
     expect(prisma.requirementDocumentVersion.create).not.toHaveBeenCalled();
   });
@@ -349,7 +409,9 @@ function baseProject(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function baseState(overrides: Partial<ConversationDesignState> = {}): ConversationDesignState {
+function baseState(
+  overrides: Partial<ConversationDesignState> = {},
+): ConversationDesignState {
   return {
     id: "state-1",
     conversationId: "conversation-1",
@@ -358,19 +420,85 @@ function baseState(overrides: Partial<ConversationDesignState> = {}): Conversati
     summary: "让用户每天完成签到并领取积分奖励。",
     businessGoal: "提升用户活跃和连续访问。",
     background: "运营希望用轻量活动提升留存。",
-    targetUsers: [{ id: "target_user_1", name: "普通用户", description: "参与日常签到的用户" }],
-    userScenarios: [{ id: "scenario_1", title: "每日签到", description: "用户进入页面后完成签到" }],
-    pages: [{ id: "page_home", name: "签到页", description: "展示签到状态和奖励" }],
-    features: [{ id: "feature_checkin", name: "签到", description: "用户点击后完成当日签到" }],
-    backendConfigs: [{ id: "config_reward", name: "奖励配置", description: "配置每日奖励额度" }],
-    frontendRules: [{ id: "front_status", title: "状态展示", description: "已签到后按钮置灰" }],
-    businessRules: [{ id: "rule_daily_once", title: "每日一次", description: "每个用户每天只能签到一次" }],
-    stateRules: [{ id: "state_signed", name: "已签到", description: "用户当天完成签到后的状态" }],
-    exceptionScenarios: [{ id: "exception_repeat", title: "重复签到", expectedBehavior: "提示今日已签到" }],
-    acceptanceCriteria: [{ id: "accept_once", title: "每日签到限制", description: "重复签到不会重复发奖" }],
-    assumptions: [{ id: "assumption_reward", content: "默认奖励为积分", status: "pending" }],
-    knowledgeRefs: [{ id: "knowledge_1", title: "活动规范", content: "活动必须展示奖励说明" }],
-    pendingQuestions: [{ id: "question_reward", question: "积分额度是多少？", status: "pending" }],
+    targetUsers: [
+      {
+        id: "target_user_1",
+        name: "普通用户",
+        description: "参与日常签到的用户",
+      },
+    ],
+    userScenarios: [
+      {
+        id: "scenario_1",
+        title: "每日签到",
+        description: "用户进入页面后完成签到",
+      },
+    ],
+    pages: [
+      { id: "page_home", name: "签到页", description: "展示签到状态和奖励" },
+    ],
+    features: [
+      {
+        id: "feature_checkin",
+        name: "签到",
+        description: "用户点击后完成当日签到",
+      },
+    ],
+    backendConfigs: [
+      {
+        id: "config_reward",
+        name: "奖励配置",
+        description: "配置每日奖励额度",
+      },
+    ],
+    frontendRules: [
+      {
+        id: "front_status",
+        title: "状态展示",
+        description: "已签到后按钮置灰",
+      },
+    ],
+    businessRules: [
+      {
+        id: "rule_daily_once",
+        title: "每日一次",
+        description: "每个用户每天只能签到一次",
+      },
+    ],
+    stateRules: [
+      {
+        id: "state_signed",
+        name: "已签到",
+        description: "用户当天完成签到后的状态",
+      },
+    ],
+    exceptionScenarios: [
+      {
+        id: "exception_repeat",
+        title: "重复签到",
+        expectedBehavior: "提示今日已签到",
+      },
+    ],
+    acceptanceCriteria: [
+      {
+        id: "accept_once",
+        title: "每日签到限制",
+        description: "重复签到不会重复发奖",
+      },
+    ],
+    assumptions: [
+      { id: "assumption_reward", content: "默认奖励为积分", status: "pending" },
+    ],
+    knowledgeRefs: [
+      { id: "knowledge_1", title: "活动规范", content: "活动必须展示奖励说明" },
+    ],
+    pendingQuestions: [
+      {
+        id: "question_reward",
+        question: "积分额度是多少？",
+        status: "pending",
+      },
+    ],
     confirmedFacts: [],
     status: "prd_ready",
     createdBy: "user-1",
@@ -423,12 +551,18 @@ function prdDraft(state: ConversationDesignState): RequirementDocumentDraft {
   };
 }
 
-function documentRecord(input: Partial<RequirementDocumentDraft> & Record<string, unknown>) {
+function documentRecord(
+  input: Partial<RequirementDocumentDraft> & Record<string, unknown>,
+) {
   return {
     id: String(input.id ?? "prd-1"),
     conversationId: String(input.conversationId ?? "conversation-1"),
-    conversationDesignStateId: String(input.conversationDesignStateId ?? "state-1"),
-    conversationDesignStateVersion: Number(input.conversationDesignStateVersion ?? 3),
+    conversationDesignStateId: String(
+      input.conversationDesignStateId ?? "state-1",
+    ),
+    conversationDesignStateVersion: Number(
+      input.conversationDesignStateVersion ?? 3,
+    ),
     title: String(input.title ?? "签到活动 PRD"),
     status: input.status ?? RequirementDocumentStatus.ready,
     sections: input.sections ?? [],
@@ -439,7 +573,13 @@ function documentRecord(input: Partial<RequirementDocumentDraft> & Record<string
     generatedByRunId: input.generatedByRunId ?? null,
     createdBy: String(input.createdBy ?? "user-1"),
     updatedBy: input.updatedBy ? String(input.updatedBy) : null,
-    createdAt: input.createdAt instanceof Date ? input.createdAt : new Date("2026-06-20T08:00:00Z"),
-    updatedAt: input.updatedAt instanceof Date ? input.updatedAt : new Date("2026-06-20T08:00:00Z"),
+    createdAt:
+      input.createdAt instanceof Date
+        ? input.createdAt
+        : new Date("2026-06-20T08:00:00Z"),
+    updatedAt:
+      input.updatedAt instanceof Date
+        ? input.updatedAt
+        : new Date("2026-06-20T08:00:00Z"),
   };
 }

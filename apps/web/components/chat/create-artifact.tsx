@@ -3,10 +3,13 @@ import type { DataUIPart } from "ai";
 import type { ComponentType, Dispatch, ReactNode, SetStateAction } from "react";
 import type { Suggestion } from "@/lib/api/types";
 import type { ChatMessage, CustomUIDataTypes } from "@/lib/types";
-import type { UIArtifact } from "./artifact";
+import type { ArtifactKind, UIArtifact } from "./artifact";
 
 export type ArtifactActionContext<M = any> = {
   content: string;
+  conversationId: string;
+  documentId: string;
+  kind: ArtifactKind;
   handleVersionChange: (type: "next" | "prev" | "toggle" | "latest") => void;
   currentVersionIndex: number;
   isCurrentVersion: boolean;

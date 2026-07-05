@@ -4,8 +4,7 @@ import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser } from "../common/current-user.decorator";
 import { ConfirmPrototypeDto, GetPrototypeStateDto } from "./prototype.dto";
 import { PrototypeService } from "./prototype.service";
-
-const USER_HTML_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+import { USER_HTML_CSP } from "./user-html-security";
 
 @Controller("conversations/:conversationId/prototype")
 @UseGuards(JwtAuthGuard)
@@ -39,11 +38,11 @@ export class PrototypeArtifactController {
     return this.prototypeService.getArtifactForUser(user, artifactId);
   }
 
-	  @Get(":artifactId/preview")
-	  @Header("Content-Type", "text/html; charset=utf-8")
-	  @Header("Content-Security-Policy", USER_HTML_CSP)
-	  @Header("X-Content-Type-Options", "nosniff")
-	  getPreviewHtml(@CurrentUser() user: AuthenticatedUser, @Param("artifactId") artifactId: string) {
+  @Get(":artifactId/preview")
+  @Header("Content-Type", "text/html; charset=utf-8")
+  @Header("Content-Security-Policy", USER_HTML_CSP)
+  @Header("X-Content-Type-Options", "nosniff")
+  getPreviewHtml(@CurrentUser() user: AuthenticatedUser, @Param("artifactId") artifactId: string) {
     return this.prototypeService.getPreviewHtmlForUser(user, artifactId);
   }
 

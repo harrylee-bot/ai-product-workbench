@@ -9,7 +9,7 @@ import type {
   RequirementDocBlock,
   RequirementDocument,
 } from "./ai-vibe.types";
-import { PrototypeService, sanitizePrototypeHtml } from "./prototype.service";
+import { PrototypeService, sanitizePrototypeDocumentHtml } from "./prototype.service";
 import { QaService } from "./qa.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 
@@ -104,7 +104,7 @@ export class ExportService {
     if (artifact.status !== "ready" || !artifact.htmlContent) {
       throw new BadRequestException("PROTOTYPE_EXPORT_NOT_READY");
     }
-    const htmlContent = sanitizePrototypeHtml(artifact.htmlContent);
+    const htmlContent = sanitizePrototypeDocumentHtml(artifact.htmlContent, artifact.title);
     if (!htmlContent.trim()) throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
 
     const buffer = Buffer.from(htmlContent, "utf8");

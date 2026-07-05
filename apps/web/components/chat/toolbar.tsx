@@ -388,7 +388,7 @@ const PureToolbar = ({
       ]
     : artifactDefinition.toolbar;
 
-  if (toolsByArtifactKind.length === 0) {
+  if (toolsByArtifactKind.length === 0 && !artifactActions) {
     return null;
   }
 
@@ -396,7 +396,7 @@ const PureToolbar = ({
     <TooltipProvider delayDuration={0}>
       <motion.div
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        className="fixed right-6 bottom-6 z-50 flex cursor-pointer flex-col items-center rounded-3xl border bg-background py-1 shadow-lg"
+        className="fixed right-6 bottom-6 z-50 flex cursor-pointer flex-col items-center rounded-lg border bg-background py-1 shadow-lg"
         exit={{ opacity: 0, y: -20, transition: { duration: 0.1 } }}
         initial={{ opacity: 0, y: -20, scale: 1 }}
         onAnimationComplete={() => {
@@ -458,21 +458,23 @@ const PureToolbar = ({
         ) : (
           <>
             {artifactActions}
-            <Tools
-              isAnimating={isAnimating}
-              key="tools"
-              selectedTool={selectedTool}
-              sendMessage={sendMessage}
-              setSelectedTool={setSelectedTool}
-              toolbarContext={{
-                content,
-                documentId,
-                metadata,
-                selectedText,
-                sendMessage,
-              }}
-              tools={toolsByArtifactKind}
-            />
+            {toolsByArtifactKind.length > 0 && (
+              <Tools
+                isAnimating={isAnimating}
+                key="tools"
+                selectedTool={selectedTool}
+                sendMessage={sendMessage}
+                setSelectedTool={setSelectedTool}
+                toolbarContext={{
+                  content,
+                  documentId,
+                  metadata,
+                  selectedText,
+                  sendMessage,
+                }}
+                tools={toolsByArtifactKind}
+              />
+            )}
           </>
         )}
       </motion.div>

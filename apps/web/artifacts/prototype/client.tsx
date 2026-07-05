@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { DownloadIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Artifact } from "@/components/chat/create-artifact";
 import { CopyIcon } from "@/components/chat/icons";
+import { downloadApiFile } from "@/lib/api/download";
 
 type Metadata = Record<string, never>;
 const PREVIEW_PREFIX = "preview:";
@@ -29,6 +31,17 @@ export const prototypeArtifact = new Artifact<"prototype", Metadata>({
           content.startsWith(PREVIEW_PREFIX) ? content.slice(PREVIEW_PREFIX.length) : content,
         );
         toast.success("已复制到剪贴板");
+      },
+    },
+    {
+      icon: <DownloadIcon size={18} />,
+      description: "下载 HTML",
+      onClick: async ({ conversationId }) => {
+        await downloadApiFile(
+          `/conversations/${conversationId}/export/html`,
+          "prototype.html",
+        );
+        toast.success("已开始下载 HTML");
       },
     },
   ],

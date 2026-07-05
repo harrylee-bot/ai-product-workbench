@@ -50,15 +50,15 @@ export function ShareView({ shareData, token }: ShareViewProps) {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="sticky top-0 z-10 border-b bg-white shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
             <Share2 className="size-6 text-blue-600" />
-            <div>
-              <h1 className="text-lg font-semibold">{shareData.title}</h1>
+            <div className="min-w-0">
+              <h1 className="break-words text-lg font-semibold">{shareData.title}</h1>
               <p className="text-sm text-muted-foreground">只读分享</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="flex items-center gap-1">
               <Eye className="size-3" />
               只读模式
@@ -105,7 +105,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
 
         {/* PRD View */}
         {showPRD && activeView === "prd" && shareData.prd && (
-          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="rounded-lg border bg-white p-6 shadow-sm">
             <div className="mb-6 border-b pb-4">
               <h2 className="text-2xl font-bold">{shareData.prd.title}</h2>
               <p className="text-sm text-muted-foreground mt-1">
@@ -141,7 +141,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
 
         {/* Prototype View */}
         {showPrototype && activeView === "prototype" && shareData.prototype && (
-          <div className="rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="rounded-lg border bg-white p-6 shadow-sm">
             <div className="mb-6 border-b pb-4">
               <h2 className="text-2xl font-bold">{shareData.prototype.title}</h2>
               <p className="text-sm text-muted-foreground mt-1">
@@ -154,7 +154,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
                 title="原型预览"
                 sandbox="allow-scripts"
                 src={prototypePreviewUrl}
-                className="h-[800px] w-full border-0"
+                className="h-[70vh] min-h-[520px] w-full border-0"
               />
             </div>
           </div>

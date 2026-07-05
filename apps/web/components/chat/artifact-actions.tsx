@@ -7,6 +7,7 @@ import type { ArtifactActionContext } from "./create-artifact";
 
 type ArtifactActionsProps = {
   artifact: UIArtifact;
+  chatId: string;
   handleVersionChange: (type: "next" | "prev" | "toggle" | "latest") => void;
   currentVersionIndex: number;
   isCurrentVersion: boolean;
@@ -17,6 +18,7 @@ type ArtifactActionsProps = {
 
 function PureArtifactActions({
   artifact,
+  chatId,
   handleVersionChange,
   currentVersionIndex,
   isCurrentVersion,
@@ -36,6 +38,9 @@ function PureArtifactActions({
 
   const actionContext: ArtifactActionContext = {
     content: artifact.content,
+    conversationId: chatId,
+    documentId: artifact.documentId,
+    kind: artifact.kind,
     handleVersionChange,
     currentVersionIndex,
     isCurrentVersion,
@@ -58,13 +63,14 @@ function PureArtifactActions({
           <Tooltip key={action.description}>
             <TooltipTrigger asChild>
               <button
+                aria-label={action.description}
                 className={cn(
                   "flex items-center justify-center rounded-full p-3 text-muted-foreground transition-all duration-150",
                   "hover:text-foreground",
                   "active:scale-95",
-                    "disabled:pointer-events-none disabled:opacity-30",
-                    {
-                      "text-foreground":
+                  "disabled:pointer-events-none disabled:opacity-30",
+                  {
+                    "text-foreground":
                       mode === "diff" && action.description === "查看变更",
                   }
                 )}
@@ -80,6 +86,7 @@ function PureArtifactActions({
                     setIsLoading(false);
                   }
                 }}
+                title={action.description}
                 type="button"
               >
                 {action.icon}
@@ -98,6 +105,9 @@ function PureArtifactActions({
 export const ArtifactActions = memo(
   PureArtifactActions,
   (prevProps, nextProps) => {
+    if (prevProps.chatId !== nextProps.chatId) {
+      return false;
+    }
     if (prevProps.artifact.status !== nextProps.artifact.status) {
       return false;
     }

@@ -60,7 +60,7 @@ export type UIArtifact = {
 
 function PureArtifact({
   addToolApprovalResponse: _addToolApprovalResponse,
-  chatId: _chatId,
+  chatId,
   input: _input,
   setInput: _setInput,
   status,
@@ -421,6 +421,7 @@ function PureArtifact({
               artifactActions={
                 <ArtifactActions
                   artifact={artifact}
+                  chatId={chatId}
                   currentVersionIndex={currentVersionIndex}
                   handleVersionChange={handleVersionChange}
                   isCurrentVersion={isCurrentVersion}

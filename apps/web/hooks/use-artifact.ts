@@ -72,9 +72,9 @@ export function useArtifact() {
   // Re-fetch the document from the backend whenever we have a documentId but no content.
   useSWR(
     artifact.documentId && artifact.documentId !== "init" && !artifact.content
-      ? `artifact-content-${artifact.documentId}`
+      ? `artifact-content-${artifact.kind}-${artifact.documentId}`
       : null,
-    () => getDocumentsById(artifact.documentId),
+    () => getDocumentsById(artifact.documentId, artifact.kind),
     {
       onSuccess: (docs) => {
         const doc = docs?.[0];

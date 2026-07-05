@@ -5,10 +5,10 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-	import {
-	  KnowledgeCandidateSource,
-	  KnowledgeType,
-	  Prisma,
+import {
+  KnowledgeCandidateSource,
+  KnowledgeType,
+  Prisma,
   ConversationDesignStateStatus,
   ConversationStatus,
   PrototypeArtifactStatus,
@@ -92,7 +92,7 @@ export class PrototypeService {
     private readonly qaService?: QaService,
   ) {}
 
-	  async saveGeneratedPrototype(
+  async saveGeneratedPrototype(
     state: ConversationDesignState,
     prototypeSpec: PrototypeSpec,
     draft: PrototypeArtifactDraft,
@@ -105,7 +105,15 @@ export class PrototypeService {
     const hasContent = htmlContent.trim().length > 0;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      return this.saveGeneratedPrototypeInTransaction(tx, state, prototypeSpec, draft, options, htmlContent, hasContent);
+      return this.saveGeneratedPrototypeInTransaction(
+        tx,
+        state,
+        prototypeSpec,
+        draft,
+        options,
+        htmlContent,
+        hasContent,
+      );
     });
     if (!result.hasContent) {
       throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
@@ -151,23 +159,37 @@ export class PrototypeService {
         conversationDesignStateId: state.id,
         conversationDesignStateVersion: state.version,
         title: draft.title ?? prototypeSpec.title,
-        status: hasContent ? PrototypeArtifactStatus.ready : PrototypeArtifactStatus.failed,
+        status: hasContent
+          ? PrototypeArtifactStatus.ready
+          : PrototypeArtifactStatus.failed,
         htmlContent: hasContent ? htmlContent : null,
         entryFilePath: draft.entryFilePath ?? draft.entryFile ?? "index.html",
         previewUrl: draft.previewUrl,
-        targetDevice: toPrismaTargetDevice(draft.targetDevice ?? prototypeSpec.targetDevice),
+        targetDevice: toPrismaTargetDevice(
+          draft.targetDevice ?? prototypeSpec.targetDevice,
+        ),
         pageCount: draft.pageCount ?? (prototypeSpec.pages.length || 1),
         generatedByRunId: options.runId ?? draft.generatedByRunId,
-        errorMessage: hasContent ? draft.errorMessage : "PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE",
+        errorMessage: hasContent
+          ? draft.errorMessage
+          : "PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE",
         createdBy: options.userId,
         updatedBy: options.userId,
       },
     });
 
     const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
-    const artifact = this.toArtifactItem(artifactRecord as PrototypeArtifactRecord);
+    const artifact = this.toArtifactItem(
+      artifactRecord as PrototypeArtifactRecord,
+    );
     if (!hasContent) {
-      const version = await this.createVersion(spec, artifact, options.userId, "原型生成失败：净化后无 HTML 内容", tx);
+      const version = await this.createVersion(
+        spec,
+        artifact,
+        options.userId,
+        "原型生成失败：净化后无 HTML 内容",
+        tx,
+      );
       return { prototypeSpec: spec, artifact, version, hasContent };
     }
 
@@ -186,13 +208,21 @@ export class PrototypeService {
   }
 
   async getCurrentForUser(user: AuthenticatedUser, conversationId: string) {
-    await this.assertConversationAccess(user, conversationId, { allowArchived: true });
+    await this.assertConversationAccess(user, conversationId, {
+      allowArchived: true,
+    });
     return this.getCurrentForConversation(conversationId);
   }
 
   async getCurrentForConversation(conversationId: string) {
-    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
-    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (
+      !conversation ||
+      conversation.deletedAt ||
+      conversation.status === ConversationStatus.deleted
+    ) {
       throw new NotFoundException("会话不存在");
     }
     const state = await this.stateService.getCurrentState(conversationId);
@@ -202,7 +232,9 @@ export class PrototypeService {
       state,
     );
     return {
-      artifact: artifact ? this.toArtifactItem(artifact as PrototypeArtifactRecord) : null,
+      artifact: artifact
+        ? this.toArtifactItem(artifact as PrototypeArtifactRecord)
+        : null,
       conversationDesignState: state ?? null,
     };
   }
@@ -211,8 +243,14 @@ export class PrototypeService {
     user: AuthenticatedUser,
     input: { conversationId: string; artifactId?: string },
   ) {
-    const conversation = await this.assertConversationAccess(user, input.conversationId, { allowArchived: true });
-    const state = input.artifactId ? undefined : await this.stateService.getCurrentState(input.conversationId);
+    const conversation = await this.assertConversationAccess(
+      user,
+      input.conversationId,
+      { allowArchived: true },
+    );
+    const state = input.artifactId
+      ? undefined
+      : await this.stateService.getCurrentState(input.conversationId);
     const artifact = input.artifactId
       ? await this.prisma.prototypeArtifact.findFirst({
           where: { id: input.artifactId, conversationId: input.conversationId },
@@ -227,8 +265,12 @@ export class PrototypeService {
     const specRecord = await this.prisma.prototypeSpecRecord.findUnique({
       where: { id: artifact.prototypeSpecId },
     });
-    const artifactItem = this.toArtifactItem(artifact as PrototypeArtifactRecord);
-    const spec = specRecord ? this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord) : undefined;
+    const artifactItem = this.toArtifactItem(
+      artifact as PrototypeArtifactRecord,
+    );
+    const spec = specRecord
+      ? this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord)
+      : undefined;
 
     return {
       prototypeState: {
@@ -237,7 +279,8 @@ export class PrototypeService {
         artifactId: artifactItem.id,
         prototypeSpecId: artifactItem.prototypeSpecId,
         conversationDesignStateId: artifactItem.conversationDesignStateId,
-        conversationDesignStateVersion: artifactItem.conversationDesignStateVersion,
+        conversationDesignStateVersion:
+          artifactItem.conversationDesignStateVersion,
         version: artifactItem.conversationDesignStateVersion,
         updatedAt: artifactItem.updatedAt,
         root: prototypeStateRoot(spec, artifactItem),
@@ -269,11 +312,14 @@ export class PrototypeService {
 
   async getPreviewHtmlForUser(user: AuthenticatedUser, artifactId: string) {
     const artifact = await this.getAccessibleArtifact(user, artifactId);
-    if (artifact.status !== PrototypeArtifactStatus.ready || !artifact.htmlContent) {
+    if (
+      artifact.status !== PrototypeArtifactStatus.ready ||
+      !artifact.htmlContent
+    ) {
       throw new BadRequestException("PROTOTYPE_PREVIEW_NOT_READY");
     }
-    // sec-1：读取时再净化一遍（防御历史未净化数据）。
-    return sanitizePrototypeHtml(artifact.htmlContent);
+    // sec-1：读取时再净化一遍（防御历史未净化数据），并返回可独立渲染的 HTML 文档。
+    return sanitizePrototypeDocumentHtml(artifact.htmlContent, artifact.title);
   }
 
   async listVersionsForUser(user: AuthenticatedUser, artifactId: string) {
@@ -287,14 +333,25 @@ export class PrototypeService {
     };
   }
 
-  async confirmForUser(user: AuthenticatedUser, artifactId: string, reason?: string) {
+  async confirmForUser(
+    user: AuthenticatedUser,
+    artifactId: string,
+    reason?: string,
+  ) {
     const current = await this.getAccessibleArtifact(user, artifactId);
     this.assertOwnerMutation(user, current.conversation.ownerId);
-    if (current.status !== PrototypeArtifactStatus.ready || !current.htmlContent) {
+    if (
+      current.status !== PrototypeArtifactStatus.ready ||
+      !current.htmlContent
+    ) {
       throw new BadRequestException("PROTOTYPE_CONFIRM_NOT_READY");
     }
     const qaGate = this.qaService
-      ? await this.qaService.assertGateAllows(user, current.conversationId, "confirm_artifacts")
+      ? await this.qaService.assertGateAllows(
+          user,
+          current.conversationId,
+          "confirm_artifacts",
+        )
       : undefined;
     const specRecord = await this.prisma.prototypeSpecRecord.findUniqueOrThrow({
       where: { id: current.prototypeSpecId },
@@ -305,51 +362,71 @@ export class PrototypeService {
     });
     const spec = this.toPrototypeSpecItem(specRecord as PrototypeSpecRecord);
     const artifact = this.toArtifactItem(updated as PrototypeArtifactRecord);
-    const version = await this.createVersion(spec, artifact, user.id, reason ?? "用户确认原型");
-    const conversationDesignState = await this.stateService.attachGeneratedArtifacts(artifact.conversationDesignStateId, {
-      prototypeSpec: spec,
-      status: ConversationDesignStateStatus.confirmed,
-      userId: user.id,
-      reason: `${reason ?? "用户确认原型"}，同步原型确认状态到 ConversationDesignState`,
-    });
-    const knowledgeCandidates = qaGate && !qaGate.allowPersistKnowledge
-      ? { items: [], qaGate }
-      : await this.extractKnowledgeCandidatesAfterConfirm(user.id, spec, artifact);
-    return { artifact, version, conversationDesignState, knowledgeCandidates, qaGate };
+    const version = await this.createVersion(
+      spec,
+      artifact,
+      user.id,
+      reason ?? "用户确认原型",
+    );
+    const conversationDesignState =
+      await this.stateService.attachGeneratedArtifacts(
+        artifact.conversationDesignStateId,
+        {
+          prototypeSpec: spec,
+          status: ConversationDesignStateStatus.confirmed,
+          userId: user.id,
+          reason: `${reason ?? "用户确认原型"}，同步原型确认状态到 ConversationDesignState`,
+        },
+      );
+    const knowledgeCandidates =
+      qaGate && !qaGate.allowPersistKnowledge
+        ? { items: [], qaGate }
+        : await this.extractKnowledgeCandidatesAfterConfirm(
+            user.id,
+            spec,
+            artifact,
+          );
+    return {
+      artifact,
+      version,
+      conversationDesignState,
+      knowledgeCandidates,
+      qaGate,
+    };
   }
 
-	  private async extractKnowledgeCandidatesAfterConfirm(
-	    userId: string,
-	    spec: PrototypeSpec,
-	    artifact: PrototypeArtifact,
-	  ) {
-	    void userId;
-	    if (!this.knowledgeCandidateService) return { items: [] };
-	    return this.knowledgeCandidateService.createMany(
-	      artifact.conversationId,
-	      prototypeToKnowledgeCandidates(spec, artifact),
-	      {
-	        source: KnowledgeCandidateSource.prototype,
-	        sourceRefId: artifact.id,
-	        runId: artifact.generatedByRunId,
-	      },
-	    );
-	  }
+  private async extractKnowledgeCandidatesAfterConfirm(
+    userId: string,
+    spec: PrototypeSpec,
+    artifact: PrototypeArtifact,
+  ) {
+    void userId;
+    if (!this.knowledgeCandidateService) return { items: [] };
+    return this.knowledgeCandidateService.createMany(
+      artifact.conversationId,
+      prototypeToKnowledgeCandidates(spec, artifact),
+      {
+        source: KnowledgeCandidateSource.prototype,
+        sourceRefId: artifact.id,
+        runId: artifact.generatedByRunId,
+      },
+    );
+  }
 
-	  private async createVersion(
-	    prototypeSpec: PrototypeSpec,
-	    artifact: PrototypeArtifact,
-	    createdBy: string,
-	    reason: string,
-	    tx?: Prisma.TransactionClient,
-	  ): Promise<PrototypeVersion> {
-	    const client = tx ?? this.prisma;
-	    const latest = await client.prototypeVersion.findFirst({
-	      where: { artifactId: artifact.id },
-	      orderBy: { version: "desc" },
-	    });
-	    const version = await client.prototypeVersion.create({
-	      data: {
+  private async createVersion(
+    prototypeSpec: PrototypeSpec,
+    artifact: PrototypeArtifact,
+    createdBy: string,
+    reason: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<PrototypeVersion> {
+    const client = tx ?? this.prisma;
+    const latest = await client.prototypeVersion.findFirst({
+      where: { artifactId: artifact.id },
+      orderBy: { version: "desc" },
+    });
+    const version = await client.prototypeVersion.create({
+      data: {
         conversationId: artifact.conversationId,
         artifactId: artifact.id,
         version: (latest?.version ?? 0) + 1,
@@ -377,7 +454,8 @@ export class PrototypeService {
         });
 
     if (!artifact || !state) return artifact;
-    if (isArtifactFromCurrentState(artifact as PrototypeArtifactRecord, state)) return artifact;
+    if (isArtifactFromCurrentState(artifact as PrototypeArtifactRecord, state))
+      return artifact;
     return null;
   }
 
@@ -386,11 +464,20 @@ export class PrototypeService {
     conversationId: string,
     options: { allowArchived?: boolean } = {},
   ) {
-    const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
-    if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (
+      !conversation ||
+      conversation.deletedAt ||
+      conversation.status === ConversationStatus.deleted
+    ) {
       throw new NotFoundException("会话不存在");
     }
-    if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
+    if (
+      !options.allowArchived &&
+      conversation.status === ConversationStatus.archived
+    ) {
       throw new ForbiddenException("会话已归档，请先恢复后再继续操作");
     }
     if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
@@ -399,15 +486,25 @@ export class PrototypeService {
     return conversation;
   }
 
-  private async getAccessibleArtifact(user: AuthenticatedUser, artifactId: string) {
+  private async getAccessibleArtifact(
+    user: AuthenticatedUser,
+    artifactId: string,
+  ) {
     const artifact = await this.prisma.prototypeArtifact.findUnique({
       where: { id: artifactId },
       include: { conversation: true },
     });
-    if (!artifact || artifact.conversation.deletedAt || artifact.conversation.status === ConversationStatus.deleted) {
+    if (
+      !artifact ||
+      artifact.conversation.deletedAt ||
+      artifact.conversation.status === ConversationStatus.deleted
+    ) {
       throw new NotFoundException("PROTOTYPE_ARTIFACT_NOT_FOUND");
     }
-    if (user.role !== UserRole.admin && artifact.conversation.ownerId !== user.id) {
+    if (
+      user.role !== UserRole.admin &&
+      artifact.conversation.ownerId !== user.id
+    ) {
       throw new ForbiddenException("PROTOTYPE_ARTIFACT_FORBIDDEN");
     }
     return artifact;
@@ -428,11 +525,21 @@ export class PrototypeService {
       title: record.title,
       targetDevice: record.targetDevice,
       styleGuide: asRecord(record.styleGuide) as PrototypeSpec["styleGuide"],
-      pages: Array.isArray(record.pages) ? record.pages as PrototypeSpec["pages"] : [],
-      navigation: Array.isArray(record.navigation) ? record.navigation as PrototypeSpec["navigation"] : [],
-      interactions: Array.isArray(record.interactions) ? record.interactions as PrototypeSpec["interactions"] : [],
-      assumptions: Array.isArray(record.assumptions) ? record.assumptions as PrototypeSpec["assumptions"] : [],
-      knowledgeRefs: Array.isArray(record.knowledgeRefs) ? record.knowledgeRefs as Array<Record<string, unknown>> : [],
+      pages: Array.isArray(record.pages)
+        ? (record.pages as PrototypeSpec["pages"])
+        : [],
+      navigation: Array.isArray(record.navigation)
+        ? (record.navigation as PrototypeSpec["navigation"])
+        : [],
+      interactions: Array.isArray(record.interactions)
+        ? (record.interactions as PrototypeSpec["interactions"])
+        : [],
+      assumptions: Array.isArray(record.assumptions)
+        ? (record.assumptions as PrototypeSpec["assumptions"])
+        : [],
+      knowledgeRefs: Array.isArray(record.knowledgeRefs)
+        ? (record.knowledgeRefs as Array<Record<string, unknown>>)
+        : [],
       generatedByRunId: record.generatedByRunId ?? undefined,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
@@ -490,9 +597,13 @@ export class PrototypeService {
   }
 }
 
-function isArtifactFromCurrentState(artifact: PrototypeArtifactRecord, state: ConversationDesignState) {
+function isArtifactFromCurrentState(
+  artifact: PrototypeArtifactRecord,
+  state: ConversationDesignState,
+) {
   if (artifact.conversationDesignStateId !== state.id) return false;
-  if (state.prototypeSpec?.id) return artifact.prototypeSpecId === state.prototypeSpec.id;
+  if (state.prototypeSpec?.id)
+    return artifact.prototypeSpecId === state.prototypeSpec.id;
   return artifact.conversationDesignStateVersion === state.version;
 }
 
@@ -538,7 +649,9 @@ function prototypePageNode(page: PrototypePageSpec): PrototypeStateNode {
   };
 }
 
-function prototypeComponentNode(component: PrototypeComponentSpec): PrototypeStateNode {
+function prototypeComponentNode(
+  component: PrototypeComponentSpec,
+): PrototypeStateNode {
   return {
     id: component.id,
     type: component.type,
@@ -565,8 +678,12 @@ function prototypeToKnowledgeCandidates(
     `# ${spec.title}`,
     `目标设备：${spec.targetDevice}`,
     `页面数量：${spec.pages.length}`,
-    spec.pages.map((page) => `- ${page.name}${page.route ? `（${page.route}）` : ""}`).join("\n"),
-  ].filter(Boolean).join("\n\n");
+    spec.pages
+      .map((page) => `- ${page.name}${page.route ? `（${page.route}）` : ""}`)
+      .join("\n"),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   if (overview.length >= 20) {
     drafts.push({
       title: `${spec.title} 原型方案`,
@@ -612,7 +729,10 @@ function prototypeToKnowledgeCandidates(
 
 function prototypePageKnowledgeContent(page: PrototypePageSpec) {
   const components = page.components
-    .map((component) => `- ${component.name}：${component.description ?? component.content ?? component.type}`)
+    .map(
+      (component) =>
+        `- ${component.name}：${component.description ?? component.content ?? component.type}`,
+    )
     .join("\n");
   const states = page.states
     ?.map((state) => `- ${state.name}：${state.description}`)
@@ -625,7 +745,10 @@ function prototypePageKnowledgeContent(page: PrototypePageSpec) {
     page.description ?? "",
     components ? `## 组件\n${components}` : "",
     states ? `## 状态\n${states}` : "",
-  ].filter(Boolean).join("\n\n").trim();
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
 }
 
 /**
@@ -636,31 +759,162 @@ function prototypePageKnowledgeContent(page: PrototypePageSpec) {
 export function sanitizePrototypeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      "html","head","body","title","meta","link","style",
-      "a","abbr","b","blockquote","br","caption","code","col","colgroup","dd","del","div","dl","dt",
-      "em","figcaption","figure","h1","h2","h3","h4","h5","h6","hr","i","img","ins","kbd","li","mark",
-      "ol","p","pre","q","s","samp","small","span","strong","sub","sup","table","tbody","td","tfoot",
-      "th","thead","time","tr","u","ul","var","wbr","button","label","input","select","option","textarea",
-      "fieldset","legend","nav","header","footer","main","section","article","aside","dialog",
+      "html",
+      "head",
+      "body",
+      "title",
+      "meta",
+      "link",
+      "style",
+      "a",
+      "abbr",
+      "b",
+      "blockquote",
+      "br",
+      "caption",
+      "code",
+      "col",
+      "colgroup",
+      "dd",
+      "del",
+      "div",
+      "dl",
+      "dt",
+      "em",
+      "figcaption",
+      "figure",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "hr",
+      "i",
+      "img",
+      "ins",
+      "kbd",
+      "li",
+      "mark",
+      "ol",
+      "p",
+      "pre",
+      "q",
+      "s",
+      "samp",
+      "small",
+      "span",
+      "strong",
+      "sub",
+      "sup",
+      "table",
+      "tbody",
+      "td",
+      "tfoot",
+      "th",
+      "thead",
+      "time",
+      "tr",
+      "u",
+      "ul",
+      "var",
+      "wbr",
+      "button",
+      "label",
+      "input",
+      "select",
+      "option",
+      "textarea",
+      "fieldset",
+      "legend",
+      "nav",
+      "header",
+      "footer",
+      "main",
+      "section",
+      "article",
+      "aside",
+      "dialog",
     ],
     ALLOWED_ATTR: [
-      "class","id","style","href","src","alt","title","type","name","value","placeholder","for",
-      "colspan","rowspan","target","rel","width","height","disabled","checked","selected","required",
-      "aria-label","aria-hidden","role","data-component-id","data-page-id","data-action",
+      "class",
+      "id",
+      "style",
+      "href",
+      "src",
+      "alt",
+      "title",
+      "type",
+      "name",
+      "value",
+      "placeholder",
+      "for",
+      "colspan",
+      "rowspan",
+      "target",
+      "rel",
+      "width",
+      "height",
+      "disabled",
+      "checked",
+      "selected",
+      "required",
+      "aria-label",
+      "aria-hidden",
+      "role",
+      "data-component-id",
+      "data-page-id",
+      "data-action",
     ],
     ALLOW_DATA_ATTR: false,
-    ADD_ATTR: ["data-component-id","data-page-id","data-action"],
-    FORBID_TAGS: ["script","iframe","object","embed","base","form"],
-    FORBID_ATTR: ["onerror","onclick","onload","onmouseover","onmouseout","onsubmit","onchange","oninput","onfocus","onblur"],
+    ADD_ATTR: ["data-component-id", "data-page-id", "data-action"],
+    FORBID_TAGS: ["script", "iframe", "object", "embed", "base", "form"],
+    FORBID_ATTR: [
+      "onerror",
+      "onclick",
+      "onload",
+      "onmouseover",
+      "onmouseout",
+      "onsubmit",
+      "onchange",
+      "oninput",
+      "onfocus",
+      "onblur",
+    ],
   });
 }
 
+export function sanitizePrototypeDocumentHtml(
+  html: string,
+  title = "prototype",
+): string {
+  const sanitized = sanitizePrototypeHtml(html).trim();
+  if (!sanitized) {
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body></body></html>`;
+  }
+  if (/^<!doctype\s+html/i.test(sanitized)) return sanitized;
+  if (/^<html[\s>]/i.test(sanitized)) return `<!doctype html>${sanitized}`;
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body>${sanitized}</body></html>`;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function asRecord(value: unknown) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
 }
 
 function toPrismaTargetDevice(value: string): PrototypeTargetDevice {
-  if (value === PrototypeTargetDevice.desktop) return PrototypeTargetDevice.desktop;
-  if (value === PrototypeTargetDevice.mobile) return PrototypeTargetDevice.mobile;
+  if (value === PrototypeTargetDevice.desktop)
+    return PrototypeTargetDevice.desktop;
+  if (value === PrototypeTargetDevice.mobile)
+    return PrototypeTargetDevice.mobile;
   return PrototypeTargetDevice.both;
 }

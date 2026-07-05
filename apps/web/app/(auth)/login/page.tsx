@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { AuthForm } from "@/components/chat/auth-form";
@@ -11,9 +11,11 @@ import { useAuth } from "@/lib/auth/nest-auth";
 
 export default function Page() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [isSuccessful, setIsSuccessful] = useState(false);
+  const nextPath = safeNextPath(searchParams.get("next"));
 
   const handleSubmit = async (formData: FormData) => {
     const emailValue = (formData.get("email") as string) ?? "";
@@ -33,7 +35,7 @@ export default function Page() {
     try {
       await login({ email: emailValue, password: passwordValue });
       setIsSuccessful(true);
-      router.push("/");
+      router.push(nextPath);
     } catch {
       toast({ type: "error", description: "邮箱或密码不正确" });
     }
@@ -59,4 +61,9 @@ export default function Page() {
       </AuthForm>
     </>
   );
+}
+
+function safeNextPath(value: string | null) {
+  if (!value?.startsWith("/") || value.startsWith("//")) return "/";
+  return value;
 }

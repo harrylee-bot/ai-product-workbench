@@ -18,7 +18,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { ConversationDesignStateService } from "./conversation-design-state.service";
 import { RequirementDocumentService } from "./requirement-document.service";
-import { PrototypeService, sanitizePrototypeHtml } from "./prototype.service";
+import { PrototypeService, sanitizePrototypeDocumentHtml } from "./prototype.service";
 
 type CreateShareInput = {
   conversationId: string;
@@ -142,7 +142,7 @@ export class ShareService {
   }
 
   /**
-   * 公开解析（免登录、只读）。返回访客可见的文档/原型只读快照。
+   * 分享解析（控制器层要求登录、只读）。返回可见的文档/原型只读快照。
    * 不暴露任何编辑/导出能力；原型仅返回经安全校验的 HTML。
    */
   async resolvePublic(token: string, options: { incrementView?: boolean } = {}) {
@@ -189,7 +189,7 @@ export class ShareService {
     };
   }
 
-  /** 仅返回原型 HTML（免登录），用于 iframe 预览。 */
+  /** 仅返回原型 HTML，用于 iframe 预览。 */
   async resolvePublicPrototypeHtml(token: string) {
     const result = await this.resolvePublic(token, { incrementView: false });
     if (!result.prototype?.html) throw new NotFoundException("SHARE_PROTOTYPE_NOT_AVAILABLE");
@@ -222,7 +222,7 @@ export class ShareService {
     }
     return {
       title: artifact.title,
-      html: sanitizePrototypeHtml(artifact.htmlContent),
+      html: sanitizePrototypeDocumentHtml(artifact.htmlContent, artifact.title),
       previewUrl: `/api/public/share/${token}/prototype`,
       pageCount: artifact.pageCount,
       updatedAt: artifact.updatedAt.toISOString(),

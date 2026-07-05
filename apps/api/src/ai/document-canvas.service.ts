@@ -208,7 +208,7 @@ function sectionNodeText(section: RequirementDocSection, index: number) {
     `## ${index + 1}. ${section.title}`,
     "",
     compactText(section.content, 220),
-    section.sourcePaths.length ? `\nsourcePaths：${section.sourcePaths.join(" / ")}` : "",
+    section.sourcePaths?.length ? `\nsourcePaths：${section.sourcePaths.join(" / ")}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -233,7 +233,7 @@ function sectionBlocks(section: RequirementDocSection): RequirementDocBlock[] {
 }
 
 function splitParagraphs(content: string) {
-  return content
+  return String(content ?? "")
     .split(/\n{2,}|\n(?=\d+\.|[-*]\s+)/)
     .map((item) => item.trim())
     .filter(Boolean)
@@ -306,8 +306,8 @@ function validateJsonCanvas(canvas: JsonCanvasDocument) {
   }
 }
 
-function compactText(value: string, maxLength: number) {
-  const normalized = value.replace(/\s+/g, " ").trim();
+function compactText(value: string | null | undefined, maxLength: number) {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized || "暂无内容";
   return `${normalized.slice(0, maxLength - 1)}...`;
 }

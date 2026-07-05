@@ -17,7 +17,10 @@ export function ShareClient({ token: tokenProp }: { token?: string }) {
     if (!token) { setLoading(false); return; }
     fetch(`${getApiBase()}/public/share/${token}`, { credentials: "include" })
       .then((res) => {
-        if (res.status === 401) { window.location.href = `/login?redirect=/share/${token}`; return null; }
+        if (res.status === 401) {
+          window.location.href = `/login?next=${encodeURIComponent(`/share/${encodeURIComponent(token)}`)}`;
+          return null;
+        }
         if (!res.ok) throw new Error(`加载失败 (${res.status})`);
         return res.json();
       })

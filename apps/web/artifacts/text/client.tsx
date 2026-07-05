@@ -1,4 +1,5 @@
 import dynamic from "next/dynamic";
+import { DownloadIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Artifact } from "@/components/chat/create-artifact";
 import { DocumentSkeleton } from "@/components/chat/document-skeleton";
@@ -10,6 +11,7 @@ import {
   RedoIcon,
   UndoIcon,
 } from "@/components/chat/icons";
+import { downloadApiFile } from "@/lib/api/download";
 import { getSuggestionsByDocumentId } from "@/lib/api/nest-client";
 import type { Suggestion } from "@/lib/api/types";
 
@@ -165,6 +167,17 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
       onClick: ({ content }) => {
         navigator.clipboard.writeText(content);
         toast.success("已复制到剪贴板");
+      },
+    },
+    {
+      icon: <DownloadIcon size={18} />,
+      description: "下载 Word",
+      onClick: async ({ conversationId }) => {
+        await downloadApiFile(
+          `/conversations/${conversationId}/export/word`,
+          "需求说明书.doc",
+        );
+        toast.success("已开始下载 Word");
       },
     },
   ],

@@ -15,34 +15,36 @@ export class ConversationExportController {
   async exportWord(
     @CurrentUser() user: AuthenticatedUser,
     @Param("conversationId") conversationId: string,
-    @Res({ passthrough: true }) response: Response,
+    @Res() response: Response,
   ) {
     const artifact = await this.exportService.exportPrdWordForUser(user, conversationId);
-    setDownloadHeaders(response, artifact);
-    return artifact.buffer;
+    sendDownload(response, artifact);
   }
 
   @Get("html")
   async exportHtml(
     @CurrentUser() user: AuthenticatedUser,
     @Param("conversationId") conversationId: string,
-    @Res({ passthrough: true }) response: Response,
+    @Res() response: Response,
   ) {
     const artifact = await this.exportService.exportPrototypeHtmlForUser(user, conversationId);
-    setDownloadHeaders(response, artifact);
-    return artifact.buffer;
+    sendDownload(response, artifact);
   }
 
   @Get("canvas")
   async exportCanvas(
     @CurrentUser() user: AuthenticatedUser,
     @Param("conversationId") conversationId: string,
-    @Res({ passthrough: true }) response: Response,
+    @Res() response: Response,
   ) {
     const artifact = await this.exportService.exportPrdCanvasForUser(user, conversationId);
-    setDownloadHeaders(response, artifact);
-    return artifact.buffer;
+    sendDownload(response, artifact);
   }
+}
+
+function sendDownload(response: Response, artifact: ExportArtifact) {
+  setDownloadHeaders(response, artifact);
+  response.send(artifact.buffer);
 }
 
 function setDownloadHeaders(response: Response, artifact: ExportArtifact) {

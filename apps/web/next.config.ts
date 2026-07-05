@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
-const apiConnectOrigin = readApiConnectOrigin();
+const apiOrigin = readApiOrigin();
+const localApiOrigins = [
+  "http://localhost:4000",
+  "https://localhost:4000",
+  "http://127.0.0.1:4000",
+  "https://127.0.0.1:4000",
+];
 
 const securityHeaders = [
   {
@@ -14,13 +20,14 @@ const securityHeaders = [
       "font-src 'self' data:",
       [
         "connect-src 'self'",
-        apiConnectOrigin,
-        "http://localhost:4000",
-        "https://localhost:4000",
-        "http://127.0.0.1:4000",
-        "https://127.0.0.1:4000",
+        apiOrigin,
+        ...localApiOrigins,
       ].join(" "),
-      "frame-src 'self' blob:",
+      [
+        "frame-src 'self' blob:",
+        apiOrigin,
+        ...localApiOrigins,
+      ].join(" "),
       "object-src 'none'",
       "base-uri 'self'",
       "frame-ancestors 'none'",
@@ -55,7 +62,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-function readApiConnectOrigin() {
+function readApiOrigin() {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
   if (!configured) return "http://localhost:4000";
   try {
