@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import Form from "next/form";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { LoaderIcon } from "@/components/chat/icons";
@@ -13,7 +12,6 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth/nest-auth";
 
 export default function Page() {
-  const router = useRouter();
   const { register } = useAuth();
   const [isSuccessful, setIsSuccessful] = useState(false);
 
@@ -45,7 +43,7 @@ export default function Page() {
       });
       toast({ type: "success", description: "账号已创建" });
       setIsSuccessful(true);
-      router.push("/");
+      window.location.assign("/");
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "创建账号失败";

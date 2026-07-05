@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { AuthForm } from "@/components/chat/auth-form";
@@ -10,7 +10,6 @@ import { toast } from "@/components/chat/toast";
 import { useAuth } from "@/lib/auth/nest-auth";
 
 export default function Page() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { login } = useAuth();
   const [email, setEmail] = useState("");
@@ -35,7 +34,7 @@ export default function Page() {
     try {
       await login({ email: emailValue, password: passwordValue });
       setIsSuccessful(true);
-      router.push(nextPath);
+      window.location.assign(nextPath);
     } catch {
       toast({ type: "error", description: "邮箱或密码不正确" });
     }
