@@ -12,7 +12,7 @@ RUN sed -i \
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/db/package.json packages/db/package.json
-RUN npm ci --include=dev
+RUN NPM_CONFIG_UPDATE_NOTIFIER=false npm ci --include=dev --no-fund
 
 FROM deps AS build
 COPY apps/api apps/api
@@ -33,7 +33,7 @@ RUN sed -i \
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/db/package.json packages/db/package.json
-RUN npm ci --omit=dev && npm cache clean --force
+RUN NPM_CONFIG_UPDATE_NOTIFIER=false npm ci --omit=dev --no-fund && npm cache clean --force
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/db/prisma packages/db/prisma
 COPY --from=build /app/node_modules/.prisma node_modules/.prisma

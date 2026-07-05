@@ -20,6 +20,12 @@ if [ "${DEPLOY_LOCK_DISABLED:-0}" != "1" ] && command -v flock >/dev/null 2>&1; 
   fi
 fi
 
+# The production host does not install Docker buildx. Keep Compose on the
+# classic builder by default so every deploy does not emit a misleading Bake
+# warning. Operators can still opt in with COMPOSE_BAKE=true after installing
+# buildx.
+COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
+
 APP_HOST="${APP_HOST:-}"
 if [ -z "$APP_HOST" ]; then
   echo "APP_HOST is required. Example: APP_HOST=example.com bash deploy/server-deploy.sh" >&2
@@ -165,6 +171,7 @@ export KNOWLEDGE_APP_PORT
 export QUARTZ_REF
 export QUARTZ_COMMIT
 export QUARTZ_BASE_URL
+export COMPOSE_BAKE
 export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-$API_PUBLIC_BASE_URL}"
 export NEXT_PUBLIC_KNOWLEDGE_APP_URL="${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-$KNOWLEDGE_APP_PUBLIC_URL}"
 

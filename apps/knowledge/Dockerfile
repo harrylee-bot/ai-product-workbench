@@ -26,7 +26,7 @@ RUN git clone --depth 1 --branch "${QUARTZ_REF}" https://github.com/jackyzha0/qu
 COPY apps/knowledge/quartz.config.yaml /opt/quartz/quartz.config.yaml
 COPY apps/knowledge/quartz.lock.json /opt/quartz/quartz.lock.json
 
-RUN npm ci \
+RUN NPM_CONFIG_UPDATE_NOTIFIER=false npm ci --no-fund \
   && npx quartz plugin install \
   && mkdir -p /vault /usr/share/nginx/html /var/cache/nginx /var/run/nginx
 
