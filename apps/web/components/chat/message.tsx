@@ -377,9 +377,11 @@ function MessageToolPart({ part }: { part: any }) {
     errorText && part.output && typeof part.output === "object" && "error" in part.output
       ? undefined
       : part.output;
+  const shouldOpenByDefault =
+    state === "approval-requested" || state === "output-error";
 
   return (
-    <Tool className="max-w-[min(100%,560px)]" defaultOpen={true}>
+    <Tool className="max-w-[min(100%,560px)]" defaultOpen={shouldOpenByDefault}>
       <ToolHeader
         state={state as any}
         toolName={part.toolName}

@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -138,6 +139,7 @@ export class AichatDataController {
   }
 
   @Get("conversations/:conversationId/runtime-status")
+  @Throttle({ default: { limit: 240, ttl: 60_000 } })
   getRuntimeStatus(
     @CurrentUser() user: AuthenticatedUser,
     @Param("conversationId") conversationId: string,

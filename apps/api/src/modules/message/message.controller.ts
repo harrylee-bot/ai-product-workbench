@@ -1,4 +1,5 @@
 import { BadRequestException, Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -31,6 +32,7 @@ export class MessageController {
   }
 
   @Get("conversations/:conversationId/messages")
+  @Throttle({ default: { limit: 240, ttl: 60_000 } })
   listByConversation(@CurrentUser() user: AuthenticatedUser, @Param("conversationId") conversationId: string) {
     return this.messages.listByConversation(user, conversationId);
   }

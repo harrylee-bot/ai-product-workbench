@@ -169,7 +169,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     {
       revalidateOnFocus: true,
       refreshInterval: (latest) =>
-        latest?.latestRun?.status === "running" ? 2000 : 0,
+        latest?.latestRun?.status === "running" ? 4000 : 0,
     }
   );
   const isServerRunRunning = runtimeStatus?.latestRun?.status === "running";
@@ -183,7 +183,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     () => getChatMessages(chatId),
     {
       revalidateOnFocus: false,
-      refreshInterval: isServerRunRunning ? 2000 : 0,
+      refreshInterval: isServerRunRunning ? 4000 : 0,
     }
   );
 
