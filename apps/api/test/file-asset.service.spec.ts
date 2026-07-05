@@ -53,7 +53,7 @@ describe("FileAssetService", () => {
     vi.clearAllMocks();
   });
 
-  it("rejects normal users from listing files in projects they do not own", async () => {
+  it("rejects normal users from listing files in conversations they do not own", async () => {
     prisma.conversation.findUnique.mockResolvedValue({
       id: "conversation-2",
       ownerId: "other-user",
@@ -171,7 +171,7 @@ describe("FileAssetService", () => {
     ];
     const localPrisma = {
       ...prisma,
-      conversation: { findUnique: vi.fn().mockResolvedValue(projectRecord()) },
+      conversation: { findUnique: vi.fn().mockResolvedValue(conversationRecord()) },
       fileAsset: {
         ...prisma.fileAsset,
         create: vi.fn(),
@@ -212,7 +212,7 @@ async function multerFile(dir: string, originalname: string, content: string): P
   };
 }
 
-function projectRecord(overrides: Record<string, unknown> = {}) {
+function conversationRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: "conversation-1",
     ownerId: "user-1",

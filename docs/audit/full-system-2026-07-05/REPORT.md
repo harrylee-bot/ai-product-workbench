@@ -59,6 +59,7 @@
 | TypeScript | `npm run typecheck` | API + Web 通过 |
 | API 单测 | `npm run test` | 35 个测试文件 passed、1 skipped；169 passed、1 skipped |
 | API 路由边界 | `apps/api/test/api-route-boundary.spec.ts` | 覆盖 `authenticated-share` 受保护、旧 public 命名不复活、logout 幂等 200 |
+| API clean build | `npm --workspace @ai-product-workbench/api run build` | 编译前清理 `dist`，旧 product/project 编译产物不再残留 |
 | 生产构建 | `npm run build` | API `tsc` + Next production build 通过 |
 | 主依赖审计 | `npm_config_registry=https://registry.npmjs.org npm audit --omit=optional` | 0 vulnerabilities |
 | 未用扫描 | `npx --yes knip --include files,dependencies,devDependencies,exports,types --workspace apps/web --workspace apps/api` | 无输出 |
@@ -145,6 +146,7 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 | P1 | API auth 同时存在 `src/auth` 与 `src/modules/auth` 两套边界 | 统一到 `src/auth`，删除旧模块、重复 decorator/guard/types，并补路由边界测试 |
 | P1 | DeerFlow 默认仍指向 `localhost:2024`，与当前 Gateway 架构不一致 | 默认改为 `http://localhost:8001/api`，生产改为 `host.docker.internal:8001/api` |
 | P1 | Origin-Agent-Cluster warning | Web 增加 `Origin-Agent-Cluster: ?1` |
+| P2 | API `dist` 会保留已删除历史模块的旧编译产物，本地审计会误扫到 `project/products/product-design` | API build 改为先 `rm -rf dist` 再 `tsc`，并清掉本地旧产物 |
 | P2 | 回放迁移时 legacy backfill 对已删除表不够宽容 | 回填迁移和 relax 迁移增加存在性保护 |
 
 ## 7. 产品架构和业务逻辑审计
@@ -181,6 +183,7 @@ DeerFlow Gateway 临时线程删除返回 200；`.playwright-cli`、`output/play
 - 未登录 auth 401 噪音已通过 `/auth/session` 消除。
 - 登出过期会话 401 噪音已通过幂等 `/auth/logout` 消除。
 - 重复 auth 模块边界已删除：`apps/api/src/modules/auth` 不再存在，认证类型、guard、decorator 统一从 `apps/api/src/auth` 引用。
+- API 旧 `dist` 编译产物已清理，后续 build 会先删除 `dist`，避免已删除模块继续污染本地运行和审计。
 - 本地 Playwright 临时目录和临时测试邮箱文件已删除。
 - 本地和生产 smoke/test 数据均已清理到 0。
 - 当前只保留本轮报告和截图证据；未发现额外历史审查报告文件。
