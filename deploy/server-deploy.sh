@@ -20,13 +20,14 @@ if [ "${DEPLOY_LOCK_DISABLED:-0}" != "1" ] && command -v flock >/dev/null 2>&1; 
   fi
 fi
 
-# The production host does not install Docker buildx. Keep Compose on the
-# classic builder by default so every deploy does not emit a misleading Bake
-# warning. Operators can opt in after installing buildx with ENABLE_COMPOSE_BAKE=1.
+# The production host is small; serial Compose builds avoid starving running
+# containers. Operators can opt into Bake after installing buildx.
+COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
+COMPOSE_ENV=(env COMPOSE_PARALLEL_LIMIT="$COMPOSE_PARALLEL_LIMIT")
 if [ "${ENABLE_COMPOSE_BAKE:-0}" = "1" ]; then
-  COMPOSE_BAKE=true
+  COMPOSE_ENV+=(COMPOSE_BAKE=true)
 else
-  COMPOSE_BAKE=0
+  unset COMPOSE_BAKE
 fi
 
 APP_HOST="${APP_HOST:-}"
@@ -174,7 +175,6 @@ export KNOWLEDGE_APP_PORT
 export QUARTZ_REF
 export QUARTZ_COMMIT
 export QUARTZ_BASE_URL
-export COMPOSE_BAKE
 export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-$API_PUBLIC_BASE_URL}"
 export NEXT_PUBLIC_KNOWLEDGE_APP_URL="${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-$KNOWLEDGE_APP_PUBLIC_URL}"
 
@@ -198,7 +198,7 @@ if [ "${PRUNE_DOCKER_BEFORE_BUILD:-1}" != "0" ]; then
   docker builder prune -af >/dev/null 2>&1 || true
 fi
 
-COMPOSE=(env COMPOSE_BAKE="$COMPOSE_BAKE" docker compose --env-file .env -f deploy/docker-compose.yml)
+COMPOSE=("${COMPOSE_ENV[@]}" docker compose --env-file .env -f deploy/docker-compose.yml)
 
 ensure_storage_dirs() {
   local storage_mount

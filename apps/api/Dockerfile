@@ -2,6 +2,9 @@ ARG NODE_IMAGE=node:22-bookworm-slim
 
 FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
 RUN sed -i \
     -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
     -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
@@ -12,7 +15,7 @@ RUN sed -i \
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/db/package.json packages/db/package.json
-RUN NPM_CONFIG_UPDATE_NOTIFIER=false npm ci --include=dev --no-fund
+RUN npm ci --include=dev --no-audit --no-fund
 
 FROM deps AS build
 COPY apps/api apps/api
@@ -23,6 +26,9 @@ RUN npm --workspace @ai-product-workbench/api run build
 FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
 RUN sed -i \
     -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
     -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
@@ -33,7 +39,7 @@ RUN sed -i \
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/db/package.json packages/db/package.json
-RUN NPM_CONFIG_UPDATE_NOTIFIER=false npm ci --omit=dev --no-fund && npm cache clean --force
+RUN npm ci --omit=dev --no-audit --no-fund && rm -rf /root/.npm
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/db/prisma packages/db/prisma
 COPY --from=build /app/node_modules/.prisma node_modules/.prisma

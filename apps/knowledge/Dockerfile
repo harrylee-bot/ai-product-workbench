@@ -8,6 +8,9 @@ ARG QUARTZ_REF
 ARG QUARTZ_COMMIT
 
 WORKDIR /opt/quartz
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
 
 RUN sed -i \
     -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
@@ -26,7 +29,7 @@ RUN git clone --depth 1 --branch "${QUARTZ_REF}" https://github.com/jackyzha0/qu
 COPY apps/knowledge/quartz.config.yaml /opt/quartz/quartz.config.yaml
 COPY apps/knowledge/quartz.lock.json /opt/quartz/quartz.lock.json
 
-RUN NPM_CONFIG_UPDATE_NOTIFIER=false npm ci --no-fund \
+RUN npm ci --no-audit --no-fund \
   && npx quartz plugin install \
   && mkdir -p /vault /usr/share/nginx/html /var/cache/nginx /var/run/nginx
 
