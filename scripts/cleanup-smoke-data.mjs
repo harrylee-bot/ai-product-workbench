@@ -8,8 +8,10 @@ const SMOKE_TITLE_PREDICATES = [
 ];
 
 const USER_PREDICATES = [
+  "username LIKE 'audit#_current#_%' ESCAPE '#'",
   "username LIKE 'codex#_prod#_smoke#_%' ESCAPE '#'",
   "username LIKE 'codex#_local#_smoke#_%' ESCAPE '#'",
+  "email LIKE 'audit-current-%@example.test'",
   "email LIKE 'audit#_%@example.test' ESCAPE '#'",
   "email LIKE 'codex#_prod#_smoke#_%' ESCAPE '#'",
   "email LIKE 'codex#_local#_smoke#_%' ESCAPE '#'",
@@ -84,6 +86,7 @@ const DELETE_STATEMENTS = [
   "DELETE FROM streams WHERE chat_id IN (SELECT id FROM _smoke_conversation_ids)",
   `DELETE FROM login_audit_logs
     WHERE user_id IN (SELECT id FROM _smoke_user_ids)
+       OR account LIKE 'audit-current-%@example.test'
        OR account LIKE 'audit#_%@example.test' ESCAPE '#'
        OR account LIKE 'codex#_prod#_smoke#_%' ESCAPE '#'
        OR account LIKE 'codex#_local#_smoke#_%' ESCAPE '#'`,
