@@ -22,9 +22,12 @@ fi
 
 # The production host does not install Docker buildx. Keep Compose on the
 # classic builder by default so every deploy does not emit a misleading Bake
-# warning. Operators can still opt in with COMPOSE_BAKE=true after installing
-# buildx.
-COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
+# warning. Operators can opt in after installing buildx with ENABLE_COMPOSE_BAKE=1.
+if [ "${ENABLE_COMPOSE_BAKE:-0}" = "1" ]; then
+  COMPOSE_BAKE=true
+else
+  COMPOSE_BAKE=0
+fi
 
 APP_HOST="${APP_HOST:-}"
 if [ -z "$APP_HOST" ]; then
@@ -195,7 +198,7 @@ if [ "${PRUNE_DOCKER_BEFORE_BUILD:-1}" != "0" ]; then
   docker builder prune -af >/dev/null 2>&1 || true
 fi
 
-COMPOSE=(docker compose --env-file .env -f deploy/docker-compose.yml)
+COMPOSE=(env COMPOSE_BAKE="$COMPOSE_BAKE" docker compose --env-file .env -f deploy/docker-compose.yml)
 
 ensure_storage_dirs() {
   local storage_mount

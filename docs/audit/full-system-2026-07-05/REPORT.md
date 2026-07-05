@@ -158,7 +158,7 @@ Gateway 线程删除：1 个线程返回 200。最终 `cleanup:smoke -- --dry-ru
 | P2 | Web 生产 CSP 仍允许 `unsafe-eval` | 抽出可测安全头构造函数，生产去掉 `unsafe-eval`，新增断言 |
 | P2 | Admin 写路径缺少真实验证 | 新增 `smoke:admin-write`，覆盖用户和模型配置写操作并自动清理 |
 | P2 | Web runner 镜像遗漏 next.config 的本地依赖模块 | Dockerfile runner 阶段复制 `apps/web/lib/security-headers.ts`，生产复部署通过 |
-| P3 | 生产部署每次输出 Docker Compose Bake/buildx warning | 部署脚本默认 `COMPOSE_BAKE=false`，保留装好 buildx 后手动开启的出口 |
+| P3 | 生产部署每次输出 Docker Compose Bake/buildx warning | 部署脚本默认 `COMPOSE_BAKE=0`，保留装好 buildx 后 `ENABLE_COMPOSE_BAKE=1` 的出口 |
 | P3 | Web/Node 镜像构建输出 Next telemetry、npm fund/update-notifier 提示 | Dockerfile 构建命令关闭 telemetry 和 npm 提示，减少非门禁日志 |
 
 既有修复仍有效：
@@ -206,7 +206,7 @@ Gateway 线程删除：1 个线程返回 200。最终 `cleanup:smoke -- --dry-ru
 - 旧 `agent_step_logs`、`AgentName`、`AgentStepStatus`：当前运行态不再写入，已从 schema/API/UI 删除。
 - 旧运行日志 `0 步` 展示：已改为真实流事件计数。
 - Web CSP 开发态重复 `http://localhost:4000` source：已去重。
-- Docker Compose Bake/buildx warning：部署脚本默认关闭 Bake，避免未安装 buildx 时每次部署都出现误导 warning。
+- Docker Compose Bake/buildx warning：部署脚本默认 `COMPOSE_BAKE=0` 关闭 Bake，避免未安装 buildx 时每次部署都出现误导 warning。
 - Next telemetry、npm fund/update-notifier：Docker 构建期已关闭，减少部署日志噪音。
 - API `dist` 中旧 `modules/auth`、旧 `common/current-user`、project/product/product-design 运行产物：精确扫描无输出。
 
@@ -222,7 +222,7 @@ Gateway 线程删除：1 个线程返回 200。最终 `cleanup:smoke -- --dry-ru
 |---|---|---|
 | Knowledge Quartz npm 依赖 | `npm ci` 仍报告 11 vulnerabilities；v5 分支 HEAD 仍有 8 个，不能靠简单换 HEAD 清零 | 单独做 Quartz 依赖升级/patch 方案；必要时 fork Quartz 或等待上游修复后再 pin 新 commit |
 | Knowledge OS/镜像扫描 | 已修复应用层 lock，但未做 Trivy/Syft/Grype 级别镜像 SBOM | 增加镜像级 SBOM 和漏洞门禁，不用主应用 audit 代替镜像 audit |
-| Docker buildx | 已在部署脚本默认 `COMPOSE_BAKE=false`，不再要求未安装 buildx 的服务器打印 Bake warning | 需要 Bake 加速时先安装 buildx，再显式 `COMPOSE_BAKE=true` |
+| Docker buildx | 已在部署脚本默认 `COMPOSE_BAKE=0`，不再要求未安装 buildx 的服务器打印 Bake warning | 需要 Bake 加速时先安装 buildx，再显式 `ENABLE_COMPOSE_BAKE=1` |
 | 服务器 OS 更新 | SSH MOTD 显示 58 个可更新包、4 个 ESM Apps security updates、1 个 zombie process | 单独排期系统维护窗口，避免和应用部署混在一起 |
 | CDN 缓存 | 公网 Knowledge URL 命中 CDN 旧缓存，本机 3001 已是新内容 | 部署后增加 CDN purge 或 cache-busting 验证策略 |
 | 后台管理写操作 | 用户管理、模型供应商、模型配置已由 `smoke:admin-write` 覆盖；运行日志 UI 已由浏览器验证 | 后续只剩知识候选 approve/merge 的 QA gate 通过态专项 E2E，不建议硬造绕过业务门禁的数据 |
