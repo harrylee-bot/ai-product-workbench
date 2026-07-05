@@ -1,13 +1,16 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
+const isProduction = process.env.NODE_ENV === "production";
 const apiOrigin = readApiOrigin();
-const localApiOrigins = [
-  "http://localhost:4000",
-  "https://localhost:4000",
-  "http://127.0.0.1:4000",
-  "https://127.0.0.1:4000",
-];
+const localApiOrigins = isProduction
+  ? []
+  : [
+      "http://localhost:4000",
+      "https://localhost:4000",
+      "http://127.0.0.1:4000",
+      "https://127.0.0.1:4000",
+    ];
 
 const securityHeaders = [
   {
@@ -20,12 +23,12 @@ const securityHeaders = [
       "font-src 'self' data:",
       [
         "connect-src 'self'",
-        apiOrigin,
+        ...apiOrigin,
         ...localApiOrigins,
       ].join(" "),
       [
         "frame-src 'self' blob:",
-        apiOrigin,
+        ...apiOrigin,
         ...localApiOrigins,
       ].join(" "),
       "object-src 'none'",
@@ -64,11 +67,11 @@ const nextConfig: NextConfig = {
 
 function readApiOrigin() {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  if (!configured) return "http://localhost:4000";
+  if (!configured) return [];
   try {
-    return new URL(configured).origin;
+    return [new URL(configured).origin];
   } catch {
-    return "http://localhost:4000";
+    return isProduction ? [] : ["http://localhost:4000"];
   }
 }
 
