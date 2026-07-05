@@ -18,7 +18,7 @@ RUN sed -i \
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/db/package.json packages/db/package.json
-RUN --mount=type=cache,target=/root/.npm npm ci --include=dev --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm ci --include=dev --ignore-scripts --no-audit --no-fund
 
 FROM deps AS build
 COPY apps/api apps/api
