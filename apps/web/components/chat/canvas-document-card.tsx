@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CheckCircle2Icon,
   ChevronRightIcon,
   FileTextIcon,
   PanelRightOpenIcon,
@@ -31,12 +30,13 @@ export function CanvasDocumentCard({
   const label = kind === "prototype" ? "原型" : "文档";
   const safeTitle = title?.trim() || (kind === "prototype" ? "原型" : "产品需求文档");
   const isStreaming = displayStatus === "streaming";
+  const statusText = isStreaming ? `正在生成${label}` : `已生成${label}`;
 
   return (
     <button
       aria-label={`打开${label}：${safeTitle}`}
       className={cn(
-        "group/canvas-card flex w-full max-w-[min(100%,520px)] items-center gap-3 rounded-lg border border-border/70 bg-card/85 px-3 py-2.5 text-left shadow-[var(--shadow-card)] backdrop-blur-xl transition-all hover:border-foreground/20 hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+        "group/canvas-card flex w-full max-w-[min(100%,520px)] items-center gap-3 rounded-lg border border-border/70 bg-card/90 px-3 py-2.5 text-left shadow-[var(--shadow-card)] backdrop-blur-xl transition-all hover:border-foreground/20 hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
         className
       )}
       data-document-id={documentId}
@@ -60,7 +60,7 @@ export function CanvasDocumentCard({
       }}
       type="button"
     >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted/80 text-foreground ring-1 ring-border/60">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted/50 text-primary ring-1 ring-border/50">
         {kind === "prototype" ? (
           <PanelRightOpenIcon className="size-4" />
         ) : (
@@ -69,19 +69,14 @@ export function CanvasDocumentCard({
       </span>
 
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{label}</span>
-          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/80">
-            {isStreaming ? (
-              <span className="size-1.5 rounded-full bg-foreground/45 animate-pulse" />
-            ) : (
-              <CheckCircle2Icon className="size-3 text-emerald-500" />
-            )}
-            {isStreaming ? "生成中" : "已生成"}
-          </span>
-        </span>
         <span className="truncate text-sm font-medium leading-snug text-foreground">
           {safeTitle}
+        </span>
+        <span className="flex items-center gap-1.5 truncate text-xs leading-snug text-muted-foreground">
+          {isStreaming ? (
+            <span className="size-1.5 shrink-0 rounded-full bg-primary/70 animate-pulse" />
+          ) : null}
+          <span className="truncate">{statusText}</span>
         </span>
       </span>
 
