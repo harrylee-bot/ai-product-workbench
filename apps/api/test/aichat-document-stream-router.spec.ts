@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AichatStreamService,
   buildCanvasDocumentRuntimePrompt,
-  buildFallbackPrdFinalAction,
   createDocumentStreamState,
   formatQaOutcome,
+  getPrdGenerationFailureReason,
   isDocumentGenerationRequest,
   looksLikeDocumentDraft,
   routeAssistantDocumentDelta,
@@ -293,57 +293,98 @@ describe("aichat document stream router", () => {
     expect(formatQaOutcome(qaReport("failed"))).toBe("QA 未通过");
   });
 
-  it("builds a structured fallback PRD final action when DeerFlow omits final action", () => {
-    const finalAction = buildFallbackPrdFinalAction("请生成一份会员积分商城 PRD，只生成需求文档，包含目标、用户流程、功能需求、验收标准。");
-    const raw = finalAction.raw as {
-      prdDocumentDraft?: { title?: string; sections?: Array<{ title: string; content: string }> };
-    };
-
-    expect(finalAction).toEqual(expect.objectContaining({
-      type: "review_prd",
-      parsed: true,
-      message: expect.stringContaining("结构化 PRD 草稿"),
-    }));
-    expect(raw.prdDocumentDraft?.title).toContain("会员积分商城");
-    expect(raw.prdDocumentDraft?.sections?.map((section) => section.title)).toEqual(
-      expect.arrayContaining([
-        "1 引言",
-        "2 业务需求",
-        "2.5 验收标准",
-        "3 业务降级方案（必填）",
-        "4 需求安全基线要求（必填）",
-      ]),
-    );
-    const body = raw.prdDocumentDraft?.sections?.map((section) => section.content).join("\n") ?? "";
-    expect(body).toContain("会员积分商城详情/确认页");
-    expect(body).toContain("会员积分商城记录页");
-    expect(body).toContain("运行说明不写入需求正文");
-    expect(body).not.toContain("思考过程");
+  it("fails PRD generation instead of creating fallback content when the final action is missing", () => {
+    expect(
+      getPrdGenerationFailureReason({
+        expectsPrdDocument: true,
+        artifacts: [],
+        finalAction: {
+          type: "answer",
+          parsed: false,
+          message: "我已经生成了需求文档，请查看右侧画布。",
+        },
+      }),
+    ).toBe("模型未返回可解析的最终动作");
   });
 
-  it("keeps fallback PRD titles focused on the business subject", () => {
-    const finalAction = buildFallbackPrdFinalAction(
-      "请生成一份会员积分商城 PRD，只生成需求文档，不生成原型。要求包含业务目标、目标用户、用户流程、功能需求、字段与状态、验收标准、风控和埋点。",
-    );
-    const raw = finalAction.raw as {
-      prdDocumentDraft?: { title?: string };
-    };
-
-    expect(raw.prdDocumentDraft?.title).toBe("会员积分商城需求说明书");
+  it("fails PRD generation when the model returns a non-PRD final action", () => {
+    expect(
+      getPrdGenerationFailureReason({
+        expectsPrdDocument: true,
+        artifacts: [],
+        finalAction: {
+          type: "answer",
+          parsed: true,
+          message: "可以生成需求文档。",
+          raw: { type: "answer" },
+        },
+      }),
+    ).toBe("模型未返回需求文档最终动作");
   });
 
-  it("cleans trailing particles from fallback PRD subjects", () => {
-    const finalAction = buildFallbackPrdFinalAction(
-      "帮我生成一个营销日历的需求文档，输出中文执行摘要和需求结构",
-    );
-    const raw = finalAction.raw as {
-      prdDocumentDraft?: { title?: string; sections?: Array<{ content: string }> };
-    };
-    const body = raw.prdDocumentDraft?.sections?.map((section) => section.content).join("\n") ?? "";
+  it("fails PRD generation when review_prd has no document body", () => {
+    expect(
+      getPrdGenerationFailureReason({
+        expectsPrdDocument: true,
+        artifacts: [],
+        finalAction: {
+          type: "review_prd",
+          parsed: true,
+          message: "已生成《营销日历需求说明书》，请在右侧画布查看。",
+          raw: { type: "review_prd", prdDocumentDraft: { title: "营销日历需求说明书" } },
+        },
+      }),
+    ).toBe("模型未返回完整需求文档正文");
+  });
 
-    expect(raw.prdDocumentDraft?.title).toBe("营销日历需求说明书");
-    expect(body).toContain("营销日历的业务目标");
-    expect(body).not.toContain("营销日历的的");
+  it("accepts review_prd only when it carries usable sections or a PRD markdown artifact", () => {
+    expect(
+      getPrdGenerationFailureReason({
+        expectsPrdDocument: true,
+        artifacts: [],
+        finalAction: {
+          type: "review_prd",
+          parsed: true,
+          message: "PRD 已生成。",
+          raw: {
+            type: "review_prd",
+            prdDocumentDraft: {
+              title: "营销日历需求说明书",
+              sections: [
+                {
+                  id: "background",
+                  title: "1.1 项目背景",
+                  content: "营销日历需要支持活动排期、资源位占用、审核发布和复盘归因，帮助运营统一管理营销节奏。",
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toBeUndefined();
+
+    expect(
+      getPrdGenerationFailureReason({
+        expectsPrdDocument: true,
+        finalAction: {
+          type: "review_prd",
+          parsed: true,
+          message: "PRD 已生成。",
+          raw: { type: "review_prd" },
+        },
+        artifacts: [
+          {
+            kind: "prd_markdown",
+            title: "营销日历需求说明书.md",
+            path: "/tmp/prd.md",
+            artifactUrl: "file:///tmp/prd.md",
+            contentType: "text/markdown",
+            status: "fetched",
+            text: "## 1 引言\n营销日历用于管理活动排期、渠道资源、审核发布和复盘归因。",
+          },
+        ],
+      }),
+    ).toBeUndefined();
   });
 });
 
