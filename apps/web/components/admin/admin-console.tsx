@@ -182,19 +182,19 @@ export function AdminConsole() {
 
   return (
     <main className="min-h-dvh bg-background text-foreground">
-      <Toaster position="top-center" theme="system" />
-      <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="border-border/70 border-b bg-sidebar/80 lg:border-r lg:border-b-0">
+      <Toaster position="top-center" theme="dark" />
+      <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)]">
+        <aside className="border-border/70 border-b bg-sidebar/90 shadow-[inset_-1px_0_0_rgba(255,255,255,0.025)] backdrop-blur-xl lg:border-r lg:border-b-0">
           <div className="flex h-full flex-col">
             <div className="border-border/70 border-b px-4 py-4">
-              <Button asChild className="mb-4" size="sm" variant="outline">
+              <Button asChild className="mb-5 rounded-full" size="sm" variant="outline">
                 <Link href="/">
                   <ArrowLeftIcon className="size-4" />
                   返回工作台
                 </Link>
               </Button>
               <div className="flex items-center gap-3">
-                <div className="bg-primary text-primary-foreground flex size-9 items-center justify-center rounded-lg">
+                <div className="flex size-9 items-center justify-center rounded-lg border border-border/70 bg-primary text-primary-foreground shadow-[var(--shadow-card)]">
                   <ServerIcon className="size-4" />
                 </div>
                 <div className="min-w-0">
@@ -208,10 +208,14 @@ export function AdminConsole() {
             <nav className="grid gap-1 p-3">
               {sections.map(({ id, label, icon: Icon }) => (
                 <Button
-                  className={cn("justify-start", activeSection === id && "bg-muted")}
+                  className={cn(
+                    "justify-start rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+                    activeSection === id &&
+                      "border border-sidebar-border bg-sidebar-accent/80 text-foreground shadow-[var(--shadow-card)]"
+                  )}
                   key={id}
                   onClick={() => setActiveSection(id)}
-                  variant={activeSection === id ? "secondary" : "ghost"}
+                  variant="ghost"
                 >
                   <Icon className="size-4" />
                   {label}
@@ -222,7 +226,7 @@ export function AdminConsole() {
         </aside>
 
         <section className="min-w-0">
-          <header className="border-border/70 flex items-center justify-between gap-4 border-b px-5 py-4">
+          <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border/70 bg-background/80 px-5 py-4 backdrop-blur-xl">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <ActiveIcon className="text-muted-foreground size-4" />
@@ -237,7 +241,7 @@ export function AdminConsole() {
             <StatusPill label="Admin" value="已登录" />
           </header>
 
-          <div className="mx-auto w-full max-w-7xl space-y-6 px-5 py-5">
+          <div className="mx-auto w-full max-w-7xl space-y-5 px-5 py-5 md:py-6">
             {activeSection === "overview" && <OverviewSection />}
             {activeSection === "users" && <UsersSection />}
             {activeSection === "conversations" && <ConversationsSection />}
@@ -602,7 +606,7 @@ function KnowledgeSection() {
         ) : (
           <div className="grid gap-3 md:grid-cols-4">
             {Object.entries(vault.data ?? {}).slice(0, 8).map(([key, value]) => (
-              <div className="rounded-lg border p-3" key={key}>
+              <div className="rounded-lg border border-border/70 bg-input/30 p-3 shadow-[var(--shadow-inset)]" key={key}>
                 <div className="text-muted-foreground text-xs">{key}</div>
                 <div className="mt-1 truncate text-sm font-medium">
                   {formatUnknown(value)}
@@ -1308,7 +1312,7 @@ function AdminTable<T>(props: {
   if (props.error) return <ErrorText error={props.error} />;
 
   return (
-    <div className="rounded-lg border">
+    <div className="overflow-hidden rounded-lg border border-border/70 bg-card/30 shadow-[var(--shadow-inset)]">
       <Table>
         <TableHeader>
           <TableRow>
@@ -1324,7 +1328,7 @@ function AdminTable<T>(props: {
             Array.from({ length: 4 }).map((_, index) => (
               <TableRow key={`loading-${index}`}>
                 <TableCell colSpan={props.columns.length}>
-                  <div className="bg-muted h-5 animate-pulse rounded" />
+                  <div className="h-5 animate-pulse rounded bg-muted/70" />
                 </TableCell>
               </TableRow>
             ))}
@@ -1361,7 +1365,7 @@ function SectionPanel(props: {
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4 rounded-lg border bg-card p-4 shadow-xs">
+    <section className="space-y-4 rounded-lg border border-border/70 bg-card/75 p-4 shadow-[var(--shadow-card)] backdrop-blur-xl">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-base font-semibold">{props.title}</h2>
@@ -1369,7 +1373,7 @@ function SectionPanel(props: {
         </div>
         {props.actions}
       </div>
-      <Separator />
+      <Separator className="bg-border/70" />
       {props.children}
     </section>
   );
@@ -1389,12 +1393,12 @@ function MetricTile(props: {
 }) {
   const Icon = props.icon;
   return (
-    <div className="rounded-lg border bg-card p-4 shadow-xs">
+    <div className="rounded-lg border border-border/70 bg-card/75 p-4 shadow-[var(--shadow-card)] backdrop-blur-xl">
       <div className="flex items-center justify-between gap-2">
         <span className="text-muted-foreground text-sm">{props.label}</span>
         <Icon className="text-muted-foreground size-4" />
       </div>
-      <div className={cn("mt-3 text-2xl font-semibold", props.tone === "warning" && "text-amber-600")}>
+      <div className={cn("mt-3 text-2xl font-semibold", props.tone === "warning" && "text-amber-300")}>
         {props.loading ? "..." : formatNumber(props.value)}
       </div>
       {props.detail && <div className="text-muted-foreground mt-1 text-xs">{props.detail}</div>}
@@ -1487,8 +1491,8 @@ function PaginationSummary<T>({ data }: { data?: PageResponse<T> }) {
 function AdminScreenState(props: { title: string; description?: string }) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background px-6">
-      <div className="max-w-sm text-center">
-        <div className="bg-muted mx-auto mb-4 flex size-12 items-center justify-center rounded-lg">
+      <div className="max-w-sm rounded-2xl border border-border/70 bg-card/75 p-6 text-center shadow-[var(--shadow-float)] backdrop-blur-xl">
+        <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg border border-border/70 bg-muted/70">
           <ShieldCheckIcon className="text-muted-foreground size-5" />
         </div>
         <h1 className="text-lg font-semibold">{props.title}</h1>

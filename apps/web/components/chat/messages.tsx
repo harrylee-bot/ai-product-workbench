@@ -93,7 +93,7 @@ function PureMessages({
   );
 
   return (
-    <div className="relative flex-1 bg-background">
+    <div className="relative flex-1 bg-transparent">
       {messages.length === 0 && !isLoading && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
           <Greeting />
@@ -102,7 +102,7 @@ function PureMessages({
       <div
         className={cn(
           "absolute inset-0 touch-pan-y overflow-y-auto",
-          messages.length > 0 ? "bg-background" : "bg-transparent"
+          messages.length > 0 ? "bg-transparent" : "bg-transparent"
         )}
         ref={messagesContainerRef}
         style={isArtifactVisible ? { scrollbarWidth: "none" } : undefined}
@@ -152,7 +152,7 @@ function PureMessages({
 
       <button
         aria-label="滚动到底部"
-        className={`absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center rounded-full border border-border/50 bg-card/90 px-3.5 shadow-[var(--shadow-float)] backdrop-blur-lg transition-all duration-200 h-7 text-[10px] ${
+        className={`absolute bottom-4 left-1/2 z-10 flex h-7 -translate-x-1/2 items-center rounded-full border border-border/70 bg-card/90 px-3.5 text-[10px] shadow-[var(--shadow-float)] backdrop-blur-xl transition-all duration-200 ${
           isAtBottom
             ? "pointer-events-none scale-90 opacity-0"
             : "pointer-events-auto scale-100 opacity-100"
@@ -186,7 +186,7 @@ function LiveCanvasDocumentMessage({
     >
       <div className="flex items-start gap-3">
         <div className="flex h-[calc(13px*1.65)] shrink-0 items-center">
-          <div className="flex size-7 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground ring-1 ring-border/50">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground ring-1 ring-border/70">
             <SparklesIcon size={13} />
           </div>
         </div>

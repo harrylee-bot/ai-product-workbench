@@ -19,7 +19,6 @@ export default function Page() {
     const username = (formData.get("username") as string)?.trim() ?? "";
     const email = (formData.get("email") as string)?.trim() ?? "";
     const password = (formData.get("password") as string) ?? "";
-    const displayName = (formData.get("displayName") as string)?.trim() ?? "";
 
     if (!username) {
       toast({ type: "error", description: "请输入用户名" });
@@ -39,7 +38,6 @@ export default function Page() {
         username,
         email,
         password,
-        ...(displayName ? { displayName } : {}),
       });
       toast({ type: "success", description: "账号已创建" });
       setIsSuccessful(true);
@@ -53,8 +51,6 @@ export default function Page() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight">创建账号</h1>
-      <p className="text-sm text-muted-foreground">开始使用 AI 产品工作台</p>
       <Form action={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <Label
@@ -76,23 +72,6 @@ export default function Page() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label
-            className="font-normal text-muted-foreground"
-            htmlFor="displayName"
-          >
-            昵称（可选）
-          </Label>
-          <Input
-            autoComplete="nickname"
-            className="h-10 rounded-lg border-border/50 bg-muted/50 text-sm transition-colors focus:border-foreground/20 focus:bg-muted"
-            id="displayName"
-            name="displayName"
-            placeholder="你的名字"
-            type="text"
-          />
-        </div>
-
-        <div className="flex flex-col gap-2">
           <Label className="font-normal text-muted-foreground" htmlFor="email">
             邮箱
           </Label>
@@ -101,7 +80,7 @@ export default function Page() {
             className="h-10 rounded-lg border-border/50 bg-muted/50 text-sm transition-colors focus:border-foreground/20 focus:bg-muted"
             id="email"
             name="email"
-            placeholder="you@someo.ne"
+            placeholder="name@company.com"
             required
             type="email"
           />
@@ -131,7 +110,7 @@ export default function Page() {
           disabled={isSuccessful}
           type="submit"
         >
-          注册
+          创建工作台
           {isSuccessful && (
             <span className="absolute right-4 animate-spin">
               <LoaderIcon />
@@ -140,12 +119,12 @@ export default function Page() {
         </Button>
 
         <p className="text-center text-[13px] text-muted-foreground">
-          {"已有账号？"}
+          {"已有工作台账号？"}
           <Link
             className="text-foreground underline-offset-4 hover:underline"
             href="/login"
           >
-            登录
+            登录继续
           </Link>
         </p>
       </Form>

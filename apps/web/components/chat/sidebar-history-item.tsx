@@ -47,7 +47,7 @@ const PureChatItem = ({
     <SidebarMenuItem>
       <SidebarMenuButton
         asChild
-        className="h-8 rounded-none pr-7 text-[13px] text-sidebar-foreground/50 transition-all duration-150 hover:bg-transparent hover:text-sidebar-foreground data-active:bg-transparent data-active:font-normal data-active:text-sidebar-foreground/50 data-[active=true]:text-sidebar-foreground data-[active=true]:font-medium data-[active=true]:border-b data-[active=true]:border-dashed data-[active=true]:border-sidebar-foreground/50"
+        className="h-8 rounded-lg pr-7 text-[13px] text-sidebar-foreground/55 transition-all duration-150 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground data-active:font-normal data-active:text-sidebar-accent-foreground data-[active=true]:border data-[active=true]:border-sidebar-border data-[active=true]:bg-sidebar-accent/70 data-[active=true]:font-medium data-[active=true]:text-sidebar-foreground"
         isActive={isActive}
       >
         <Link href={createChatHref(chat.id)} onClick={() => setOpenMobile(false)}>

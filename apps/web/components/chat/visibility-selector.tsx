@@ -69,7 +69,7 @@ export function VisibilitySelector({
         )}
       >
         <Button
-          className="gap-1.5 rounded-lg border-border/50 text-muted-foreground shadow-none transition-colors hover:text-foreground focus-visible:ring-0 focus-visible:border-border/50 active:translate-y-0"
+          className="gap-1.5 rounded-full border-border/70 bg-input/30 text-muted-foreground shadow-none transition-colors hover:border-foreground/20 hover:bg-input/60 hover:text-foreground focus-visible:border-border/70 focus-visible:ring-0 active:translate-y-0"
           data-testid="visibility-selector"
           size="sm"
           variant="outline"

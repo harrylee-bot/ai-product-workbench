@@ -9,7 +9,7 @@ import { AuthProvider } from "@/lib/auth/nest-auth";
 export const metadata: Metadata = {
   metadataBase: new URL("https://aionbench.com"),
   title: "AI Product Workbench",
-  description: "PRD 与原型生成的 AI 工作台。",
+  description: "把产品需求、原型生成和项目知识沉淀连接起来的 AI 工作台。",
 };
 
 export const viewport = {
@@ -60,9 +60,9 @@ export default function RootLayout({
       <body className="antialiased">
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="dark"
           disableTransitionOnChange
-          enableSystem
+          enableSystem={false}
         >
           <Suspense fallback={null}>
             <AuthProvider>

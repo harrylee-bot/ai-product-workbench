@@ -81,7 +81,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
               <div className="group/logo relative flex items-center justify-center">
                 <SidebarMenuButton
                   asChild
-                  className="size-8 !px-0 items-center justify-center group-data-[collapsible=icon]:group-hover/logo:opacity-0"
+                  className="size-8 !px-0 items-center justify-center rounded-lg border border-sidebar-border/70 bg-sidebar-accent/30 group-data-[collapsible=icon]:group-hover/logo:opacity-0"
                   tooltip="聊天"
                 >
                   <Link
@@ -89,7 +89,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
                     href={createNewChatHref()}
                     onClick={() => setOpenMobile(false)}
                   >
-                    <MessageSquareIcon className="size-4 text-sidebar-foreground/50" />
+                    <MessageSquareIcon className="size-4 text-sidebar-foreground/70" />
                   </Link>
                 </SidebarMenuButton>
                 <Tooltip>
@@ -119,7 +119,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    className="h-8 rounded-lg border border-sidebar-border text-[13px] text-sidebar-foreground/70 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    className="h-8 rounded-lg border border-sidebar-border bg-sidebar-accent/30 text-[13px] text-sidebar-foreground/80 shadow-[var(--shadow-card)] transition-colors duration-150 hover:border-sidebar-foreground/20 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground"
                     onClick={() => {
                       setOpenMobile(false);
                       router.push(createNewChatHref());
@@ -133,7 +133,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
                 {user && (
                   <SidebarMenuItem>
                     <SidebarMenuButton
-                      className="rounded-lg text-sidebar-foreground/40 transition-colors duration-150 hover:bg-destructive/10 hover:text-destructive"
+                      className="rounded-lg text-sidebar-foreground/50 transition-colors duration-150 hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => setShowDeleteAllDialog(true)}
                       tooltip="删除全部对话"
                     >
@@ -147,7 +147,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
           </SidebarGroup>
           <SidebarHistory isAuthLoading={authLoading && !user} user={user} />
         </SidebarContent>
-        <SidebarFooter className="border-t border-sidebar-border pt-2 pb-3">
+        <SidebarFooter className="border-t border-sidebar-border/80 pt-2 pb-3">
           {user && <SidebarUserNav user={user} />}
         </SidebarFooter>
         <SidebarRail />

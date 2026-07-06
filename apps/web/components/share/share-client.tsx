@@ -32,9 +32,9 @@ export function ShareClient({ token: tokenProp }: { token?: string }) {
       .finally(() => setLoading(false));
   }, [authLoading, token, user]);
 
-  if (!token) return <div className="flex min-h-screen items-center justify-center"><p className="text-muted-foreground text-sm">无效的分享链接</p></div>;
-  if (loading) return <div className="flex min-h-screen items-center justify-center"><p className="text-muted-foreground text-sm">加载分享内容…</p></div>;
-  if (error) return <div className="flex min-h-screen items-center justify-center"><p className="text-destructive text-sm">{error}</p></div>;
+  if (!token) return <div className="flex min-h-screen items-center justify-center bg-background"><p className="text-muted-foreground text-sm">无效的分享链接</p></div>;
+  if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><p className="text-muted-foreground text-sm">加载分享内容…</p></div>;
+  if (error) return <div className="flex min-h-screen items-center justify-center bg-background"><p className="text-destructive text-sm">{error}</p></div>;
   if (!shareData) return null;
   return <ShareView shareData={shareData} token={token} />;
 }

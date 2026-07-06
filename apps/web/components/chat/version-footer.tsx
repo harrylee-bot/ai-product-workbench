@@ -37,7 +37,7 @@ export const VersionFooter = ({
   return (
     <motion.div
       animate={{ opacity: 1 }}
-      className="z-50 flex w-full shrink-0 items-center justify-between gap-3 border-t border-border/50 bg-background px-4 py-3"
+      className="z-50 flex w-full shrink-0 items-center justify-between gap-3 border-t border-border/70 bg-background/90 px-4 py-3 backdrop-blur-xl"
       exit={{ opacity: 0, transition: { duration: 0 } }}
       initial={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
@@ -45,7 +45,7 @@ export const VersionFooter = ({
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1">
           <button
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
             disabled={isFirst}
             onClick={() => handleVersionChange("prev")}
             type="button"
@@ -56,7 +56,7 @@ export const VersionFooter = ({
             {currentVersionIndex + 1} / {documents.length}
           </span>
           <button
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
             disabled={isLast}
             onClick={() => handleVersionChange("next")}
             type="button"
@@ -67,8 +67,8 @@ export const VersionFooter = ({
 
         <button
           className={cn(
-            "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-            mode === "diff" && "bg-muted text-foreground"
+            "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground",
+            mode === "diff" && "bg-muted/80 text-foreground"
           )}
           onClick={() => setMode(mode === "diff" ? "edit" : "diff")}
           title="查看变更"
@@ -80,7 +80,7 @@ export const VersionFooter = ({
 
       <div className="flex flex-row gap-2">
         <button
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background transition-all duration-150 hover:opacity-90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-all duration-150 hover:opacity-90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
           disabled={isMutating}
           onClick={async () => {
             setIsMutating(true);
@@ -101,7 +101,7 @@ export const VersionFooter = ({
           )}
         </button>
         <button
-          className="inline-flex items-center justify-center rounded-lg border border-border px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:bg-muted active:scale-[0.98]"
+          className="inline-flex items-center justify-center rounded-lg border border-border/70 bg-input/30 px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:bg-muted/70 active:scale-[0.98]"
           onClick={() => {
             setMode("edit");
             handleVersionChange("latest");

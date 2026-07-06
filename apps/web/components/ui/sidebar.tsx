@@ -126,7 +126,7 @@ function SidebarProvider({
           } as React.CSSProperties
         }
         className={cn(
-          "group/sidebar-wrapper flex min-h-svh w-full bg-sidebar",
+          "group/sidebar-wrapper flex min-h-svh w-full bg-background",
           className
         )}
         {...props}
@@ -157,7 +157,7 @@ function Sidebar({
       <div
         data-slot="sidebar"
         className={cn(
-          "flex h-full w-(--sidebar-width) flex-col bg-sidebar text-sidebar-foreground",
+          "flex h-full w-(--sidebar-width) flex-col border-r border-sidebar-border bg-sidebar/90 text-sidebar-foreground backdrop-blur-xl",
           className
         )}
         {...props}
@@ -175,7 +175,7 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="inset-x-0 bottom-0 top-auto h-[70dvh] w-full rounded-t-2xl border-t border-border/30 bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          className="inset-x-0 bottom-0 top-auto h-[70dvh] w-full rounded-t-2xl border-t border-border/50 bg-sidebar/95 p-0 text-sidebar-foreground shadow-[var(--shadow-float)] backdrop-blur-2xl [&>button]:hidden"
           showCloseButton={false}
           side="bottom"
         >
@@ -225,7 +225,7 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border-none group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          className="flex size-full flex-col border-r border-sidebar-border bg-sidebar/90 backdrop-blur-xl group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-[var(--shadow-card)]"
         >
           {children}
         </div>
@@ -320,7 +320,7 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-sidebar [transform:translate3d(0,0,0)]",
+        "relative flex w-full flex-1 flex-col bg-transparent [transform:translate3d(0,0,0)]",
         className
       )}
       {...props}
@@ -435,13 +435,13 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden px-2.5 text-left text-[13px] text-sidebar-foreground/70 outline-hidden transition-colors duration-150 group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:text-sidebar-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:text-sidebar-accent-foreground data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden px-2.5 text-left text-[13px] text-sidebar-foreground/70 outline-hidden transition-all duration-150 group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:text-sidebar-accent-foreground data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
         default: "hover:text-sidebar-accent-foreground",
         outline:
-          "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
+          "border border-sidebar-border bg-background/30 shadow-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
       },
       size: {
         default: "h-8 text-[13px]",

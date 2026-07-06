@@ -47,12 +47,14 @@ export function ShareView({ shareData, token }: ShareViewProps) {
     : `${getApiBase()}/authenticated-share/${encodeURIComponent(token)}/prototype`;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b bg-white shadow-sm">
+      <header className="sticky top-0 z-10 border-b border-border/70 bg-background/80 shadow-[var(--shadow-card)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
-            <Share2 className="size-6 text-blue-600" />
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-primary text-primary-foreground shadow-[var(--shadow-card)]">
+              <Share2 className="size-4" />
+            </div>
             <div className="min-w-0">
               <h1 className="break-words text-lg font-semibold">{shareData.title}</h1>
               <p className="text-sm text-muted-foreground">只读分享</p>
@@ -77,12 +79,12 @@ export function ShareView({ shareData, token }: ShareViewProps) {
       <main className="mx-auto max-w-7xl px-4 py-6">
         {/* View Switcher */}
         {showPRD && showPrototype && (
-          <div className="mb-4 inline-flex rounded-lg bg-muted p-1">
+          <div className="mb-4 inline-flex rounded-full border border-border/70 bg-muted/80 p-1 shadow-[var(--shadow-card)] backdrop-blur-xl">
             <button
               onClick={() => setActiveView("prd")}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
                 activeView === "prd"
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-primary text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -91,9 +93,9 @@ export function ShareView({ shareData, token }: ShareViewProps) {
             </button>
             <button
               onClick={() => setActiveView("prototype")}
-              className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
                 activeView === "prototype"
-                  ? "bg-background text-foreground shadow-sm"
+                  ? "bg-primary text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -105,14 +107,14 @@ export function ShareView({ shareData, token }: ShareViewProps) {
 
         {/* PRD View */}
         {showPRD && activeView === "prd" && shareData.prd && (
-          <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <div className="mb-6 border-b pb-4">
+          <div className="rounded-lg border border-border/70 bg-card/75 p-6 shadow-[var(--shadow-card)] backdrop-blur-xl">
+            <div className="mb-6 border-b border-border/70 pb-4">
               <h2 className="text-2xl font-bold">{shareData.prd.title}</h2>
               <p className="text-sm text-muted-foreground mt-1">
                 最后更新：{new Date(shareData.prd.updatedAt).toLocaleString("zh-CN")}
               </p>
             </div>
-            <div className="prose prose-sm max-w-none">
+            <div className="prose prose-invert prose-sm max-w-none">
               {shareData.prd.sections.map((section, index) => (
                 <motion.div
                   key={section.id ?? `${section.title}-${index}`}
@@ -130,7 +132,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
                   {section.level === 3 && (
                     <h3 className="text-lg font-medium mb-2">{section.title}</h3>
                   )}
-                  <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                  <div className="whitespace-pre-wrap text-sm text-foreground/80">
                     {section.content}
                   </div>
                 </motion.div>
@@ -141,15 +143,15 @@ export function ShareView({ shareData, token }: ShareViewProps) {
 
         {/* Prototype View */}
         {showPrototype && activeView === "prototype" && shareData.prototype && (
-          <div className="rounded-lg border bg-white p-6 shadow-sm">
-            <div className="mb-6 border-b pb-4">
+          <div className="rounded-lg border border-border/70 bg-card/75 p-6 shadow-[var(--shadow-card)] backdrop-blur-xl">
+            <div className="mb-6 border-b border-border/70 pb-4">
               <h2 className="text-2xl font-bold">{shareData.prototype.title}</h2>
               <p className="text-sm text-muted-foreground mt-1">
                 页面数：{shareData.prototype.pageCount ?? 1} · 最后更新：
                 {new Date(shareData.prototype.updatedAt).toLocaleString("zh-CN")}
               </p>
             </div>
-            <div className="rounded-lg border bg-white">
+            <div className="overflow-hidden rounded-lg border border-border/70 bg-background/70 shadow-[var(--shadow-inset)]">
               <iframe
                 title="原型预览"
                 sandbox=""
@@ -162,7 +164,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
       </main>
 
       {/* Footer */}
-      <footer className="border-t bg-white py-4 mt-8">
+      <footer className="mt-8 border-t border-border/70 bg-background/80 py-4 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-4 text-center text-sm text-muted-foreground">
           <p>此页面为只读分享，不支持编辑和下载</p>
         </div>

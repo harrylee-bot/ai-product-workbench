@@ -42,19 +42,15 @@ export default function Page() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight">欢迎回来</h1>
-      <p className="text-sm text-muted-foreground">
-        登录后继续使用 AI 产品工作台
-      </p>
       <AuthForm action={handleSubmit} defaultEmail={email}>
-        <SubmitButton isSuccessful={isSuccessful}>登录</SubmitButton>
+        <SubmitButton isSuccessful={isSuccessful}>登陆</SubmitButton>
         <p className="text-center text-[13px] text-muted-foreground">
-          {"还没有账号？"}
+          {"还没有团队账号？"}
           <Link
             className="text-foreground underline-offset-4 hover:underline"
             href="/register"
           >
-            注册
+            创建一个
           </Link>
         </p>
       </AuthForm>

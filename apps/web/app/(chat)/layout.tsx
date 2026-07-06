@@ -14,7 +14,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <DataStreamProvider>
-        <Suspense fallback={<div className="flex h-dvh bg-sidebar" />}>
+        <Suspense fallback={<div className="flex h-dvh bg-background" />}>
           <SidebarShell>{children}</SidebarShell>
         </Suspense>
       </DataStreamProvider>
@@ -33,7 +33,7 @@ function SidebarShell({ children }: { children: React.ReactNode }) {
   }, [loading, router, user]);
 
   if (loading || !user) {
-    return <div className="flex h-dvh bg-sidebar" />;
+    return <div className="flex h-dvh bg-background" />;
   }
 
   // 客户端读取 sidebar 折叠状态（原 next/headers cookies() 的替代）。
@@ -51,10 +51,10 @@ function SidebarShell({ children }: { children: React.ReactNode }) {
       <SidebarInset>
         <Toaster
           position="top-center"
-          theme="system"
+          theme="dark"
           toastOptions={{
             className:
-              "!bg-card !text-foreground !border-border/50 !shadow-[var(--shadow-float)]",
+              "!bg-card !text-foreground !border-border/70 !shadow-[var(--shadow-float)] !backdrop-blur-xl",
           }}
         />
         <Suspense fallback={<div className="flex h-dvh" />}>
