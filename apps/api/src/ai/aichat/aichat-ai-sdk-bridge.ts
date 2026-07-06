@@ -551,8 +551,8 @@ function toolActionCopy(name: string) {
     };
   }
   return {
-    running: "正在处理任务步骤",
-    completed: "已完成任务步骤",
+    running: "正在处理当前步骤",
+    completed: "已完成当前步骤",
   };
 }
 
@@ -572,11 +572,7 @@ function summarizeToolEvent(
   const reason = summarizeToolReason(toolName, value);
   const action = summarizeToolAction(toolName, value);
   const result = phase === "output" ? summarizeToolResult(toolName, value) : undefined;
-  return [
-    reason ? `为什么：${reason}` : "",
-    action ? `执行：${action}` : "",
-    result ? `结果：${result}` : "",
-  ].filter(Boolean).join("\n");
+  return [reason, action, result].filter(Boolean).join("\n");
 }
 
 function summarizeToolReason(toolName: string, value: unknown) {

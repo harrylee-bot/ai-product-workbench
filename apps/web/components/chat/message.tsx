@@ -391,41 +391,60 @@ function MessageToolPart({ part }: { part: any }) {
   const shouldOpenByDefault =
     state === "approval-requested" ||
     state === "input-available" ||
-    state === "output-available" ||
     state === "output-error";
+  const shouldShowResult =
+    state === "output-available" || state === "output-error";
 
   return (
-    <Tool className="max-w-[min(100%,560px)]" defaultOpen={shouldOpenByDefault}>
-      <ToolHeader
-        description={presentation.description}
-        state={state as any}
-        title={presentation.title}
-        toolName={part.toolName}
-        type={part.type as any}
-      />
-      <ToolContent>
-        <div className="space-y-2 rounded-md bg-muted/35 px-3 py-2 text-sm leading-relaxed text-muted-foreground">
-          <ToolSummaryLine label="为什么" text={presentation.reason} />
-          <ToolSummaryLine label="执行" text={presentation.action} />
-          <ToolSummaryLine
-            label={presentation.errorSummary ? "状态" : "结果"}
-            text={presentation.summary}
-          />
-          {presentation.errorSummary ? (
-            <p className="text-destructive">{presentation.errorSummary}</p>
-          ) : null}
-        </div>
-      </ToolContent>
-    </Tool>
+    <>
+      {presentation.reason ? (
+        <ToolConversationText text={presentation.reason} />
+      ) : null}
+      <Tool className="max-w-[min(100%,560px)]" defaultOpen={shouldOpenByDefault}>
+        <ToolHeader
+          description={presentation.description}
+          state={state as any}
+          title={presentation.title}
+          toolName={part.toolName}
+          type={part.type as any}
+        />
+        <ToolContent>
+          <div className="space-y-2 rounded-md bg-muted/35 px-3 py-2 text-sm leading-relaxed text-muted-foreground">
+            {presentation.executionDetails.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+            {presentation.errorSummary ? (
+              <p className="text-destructive">{presentation.errorSummary}</p>
+            ) : null}
+          </div>
+        </ToolContent>
+      </Tool>
+      {shouldShowResult && presentation.result ? (
+        <ToolConversationText
+          tone={presentation.errorSummary ? "destructive" : "default"}
+          text={presentation.result}
+        />
+      ) : null}
+    </>
   );
 }
 
-function ToolSummaryLine({ label, text }: { label: string; text: string }) {
+function ToolConversationText({
+  text,
+  tone = "default",
+}: {
+  text: string;
+  tone?: "default" | "destructive";
+}) {
   return (
-    <p>
-      <span className="text-foreground/80">{label}：</span>
+    <div
+      className={cn(
+        "max-w-[min(100%,56ch)] text-[13px] leading-[1.65]",
+        tone === "destructive" ? "text-destructive" : "text-foreground/90"
+      )}
+    >
       {text}
-    </p>
+    </div>
   );
 }
 
@@ -511,20 +530,42 @@ function buildToolPresentation(input: {
   const errorSummary = input.errorText
     ? "这一步没有完成，系统已保留失败状态，后续可重新尝试。"
     : undefined;
+  const result = errorSummary ?? outputSummary ?? statusSummary;
+  const executionDetails = buildToolExecutionDetails({
+    actionSummary,
+    errorSummary,
+    outputSummary,
+    state: input.state,
+    statusSummary,
+  });
 
   return {
     title: action.title,
-    description:
-      input.state === "output-available"
-        ? reason
-        : actionSummary ?? reason ?? statusSummary,
+    description: actionSummary ?? statusSummary,
     reason,
-    action: actionSummary ?? statusSummary,
-    summary: input.errorText
-      ? statusSummary
-      : outputSummary ?? statusSummary,
+    result,
+    executionDetails,
     errorSummary,
   };
+}
+
+function buildToolExecutionDetails(input: {
+  actionSummary?: string;
+  errorSummary?: string;
+  outputSummary?: string;
+  state: string;
+  statusSummary: string;
+}) {
+  const lines = [
+    input.actionSummary,
+    input.state === "output-available" ? input.outputSummary : undefined,
+    input.state === "output-error" ? input.statusSummary : undefined,
+    input.state !== "output-available" && input.state !== "output-error"
+      ? input.statusSummary
+      : undefined,
+  ].filter(Boolean) as string[];
+
+  return Array.from(new Set(lines));
 }
 
 function toolActionCopy(name: string) {
@@ -609,10 +650,10 @@ function toolActionCopy(name: string) {
     };
   }
   return {
-    title: "处理任务步骤",
-    running: "正在处理任务步骤",
-    completed: "已完成任务步骤",
-    failed: "任务步骤失败",
+    title: "处理当前步骤",
+    running: "正在处理当前步骤",
+    completed: "已完成当前步骤",
+    failed: "当前步骤失败",
   };
 }
 
@@ -816,7 +857,15 @@ function formatUserRuntimeDetail(detail?: string) {
   if (looksTechnicalRuntimeText(text)) {
     return "已处理必要的信息，技术细节已隐藏。";
   }
-  return sanitizeRuntimeText(text).slice(0, 140);
+  const lines = text
+    .split(/\n+/)
+    .map((line) => sanitizeRuntimeText(line))
+    .filter(Boolean)
+    .filter((line) => !looksTechnicalRuntimeText(line));
+  if (lines.length === 0) {
+    return "已处理必要的信息，技术细节已隐藏。";
+  }
+  return lines.slice(0, 4).join("\n").slice(0, 260);
 }
 
 function toolActionFromText(text: string) {
