@@ -90,8 +90,7 @@ const PurePreviewMessage = ({
           {shouldDivideFromTool ? <Divider /> : null}
           <MessageContent
             className={cn("text-[13px] leading-[1.65]", {
-              "w-fit max-w-[min(80%,56ch)] overflow-hidden break-words rounded-2xl rounded-br-lg border border-border/70 bg-card/80 px-3.5 py-2 shadow-[var(--shadow-card)] backdrop-blur-xl":
-                message.role === "user",
+              "user-message-bubble": message.role === "user",
             })}
             data-testid="message-content"
           >
