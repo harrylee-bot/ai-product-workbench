@@ -73,7 +73,7 @@ export class ShareService {
     const needsPrototype = scope === ShareScope.prototype || scope === ShareScope.both;
 
     const prdDocument = needsPrd
-      ? (await this.documentService.getCurrentForConversation(input.conversationId)).document
+      ? (await this.documentService.getCurrentPersistedForConversation(input.conversationId)).document
       : null;
     if (needsPrd && !prdDocument) {
       throw new BadRequestException("SHARE_PRD_NOT_READY");

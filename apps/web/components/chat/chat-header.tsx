@@ -24,6 +24,7 @@ function PureChatHeader({
   return (
     <header className="sticky top-0 flex h-14 items-center gap-2 bg-sidebar px-3">
       <Button
+        aria-label="打开侧边栏"
         className="md:hidden"
         onClick={toggleSidebar}
         size="icon-sm"

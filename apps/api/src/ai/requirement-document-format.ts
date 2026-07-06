@@ -51,8 +51,8 @@ export function formatRequirementDocumentDraft(
 ): RequirementDocumentDraft {
   const sourceSections = [...(draft.sections ?? [])].sort((a, b) => a.order - b.order);
   const title = getRequirementDocumentTitle(draft.title, state, sourceSections);
-  const baseName = title.replace(/需求说明书$/, "") || "需求";
-  const author = options.author || state?.updatedBy || state?.createdBy || "待确认";
+  const baseName = cleanRequirementTitleBase(title.replace(/需求说明书$/, "")) || "需求";
+  const author = cleanDocumentAuthor(options.author || state?.updatedBy || state?.createdBy);
   const date = options.date || formatDate(state?.updatedAt);
   const sections: RequirementDocSection[] = [];
 
@@ -256,11 +256,28 @@ function isGenericRequirementTitle(value: string) {
 }
 
 function normalizeRequirementTitleBase(value: string) {
-  return value
+  return cleanRequirementTitleBase(value
     .replace(/\s+/g, " ")
     .replace(/(产品需求文档|需求说明书|需求文档|PRD|prd)$/i, "")
     .replace(/[－\-—_ ]+$/g, "")
+    .trim());
+}
+
+function cleanRequirementTitleBase(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/[的之关于围绕]+$/g, "")
+    .replace(/[－\-—_ ]+$/g, "")
     .trim();
+}
+
+function cleanDocumentAuthor(value: string | undefined) {
+  const author = value?.trim();
+  if (!author) return "待确认";
+  if (/^(cm|cl)[0-9a-z]{18,}$/i.test(author) || /^[0-9a-f-]{32,36}$/i.test(author)) {
+    return "待确认";
+  }
+  return author;
 }
 
 function buildTocMarkdown() {

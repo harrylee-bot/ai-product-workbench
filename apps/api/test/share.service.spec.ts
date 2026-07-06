@@ -17,7 +17,7 @@ describe("ShareService", () => {
     prototypeArtifact: { findFirst: vi.fn() },
   };
   const stateService = { getCurrentState: vi.fn() };
-  const documentService = { getCurrentForConversation: vi.fn() };
+  const documentService = { getCurrentPersistedForConversation: vi.fn() };
   const prototypeService = { getCurrentForConversation: vi.fn() };
   const service = new ShareService(
     prisma as never,
@@ -47,7 +47,7 @@ describe("ShareService", () => {
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "confirmed" });
-    documentService.getCurrentForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
+    documentService.getCurrentPersistedForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
     prototypeService.getCurrentForConversation.mockResolvedValue({
       artifact: { id: "artifact-1", status: PrototypeArtifactStatus.ready },
     });
@@ -90,7 +90,7 @@ describe("ShareService", () => {
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "doc_ready" });
-    documentService.getCurrentForConversation.mockResolvedValue({ document: { id: "prd-1", status: "ready" } });
+    documentService.getCurrentPersistedForConversation.mockResolvedValue({ document: { id: "prd-1", status: "ready" } });
 
     await expect(
       service.createForUser(user, { conversationId: "conversation-1", scope: ShareScope.prd }),
@@ -108,7 +108,7 @@ describe("ShareService", () => {
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "prototype_ready" });
-    documentService.getCurrentForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
+    documentService.getCurrentPersistedForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
     prototypeService.getCurrentForConversation.mockResolvedValue({
       artifact: { id: "artifact-1", status: PrototypeArtifactStatus.ready },
     });
@@ -129,7 +129,7 @@ describe("ShareService", () => {
       deletedAt: null,
     });
     stateService.getCurrentState.mockResolvedValue({ id: "state-1", title: "签到活动", status: "doc_confirmed" });
-    documentService.getCurrentForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
+    documentService.getCurrentPersistedForConversation.mockResolvedValue({ document: { id: "prd-1", status: "confirmed" } });
     prototypeService.getCurrentForConversation.mockResolvedValue({ artifact: null });
 
     await expect(

@@ -10,6 +10,7 @@ import type {
   ConversationDesignState,
   RequirementDocumentDraft,
 } from "../src/ai/ai-vibe.types";
+import { formatRequirementDocumentDraft } from "../src/ai/requirement-document-format";
 import { RequirementDocumentService } from "../src/ai/requirement-document.service";
 
 describe("PRD requirement document module", () => {
@@ -173,6 +174,45 @@ describe("PRD requirement document module", () => {
     expect(prisma.requirementDocument.findFirst).toHaveBeenCalledWith({
       where: { id: "prd-stale", conversationId: "conversation-1" },
     });
+  });
+
+  it("loads the persisted current PRD for share gating even when state snapshots moved on", async () => {
+    const draft = prdDraft(baseState());
+    stateService.getCurrentState.mockResolvedValue(
+      baseState({ id: "state-next", version: 5 }),
+    );
+    prisma.conversation.findUnique.mockResolvedValue(
+      baseProject({ currentPrdDocumentId: "prd-current" }),
+    );
+    prisma.requirementDocument.findFirst.mockResolvedValueOnce(
+      documentRecord({
+        id: "prd-current",
+        ...draft,
+        status: "ready",
+      }),
+    );
+
+    const result =
+      await service.getCurrentPersistedForConversation("conversation-1");
+
+    expect(result.document?.id).toBe("prd-current");
+    expect(result.document?.status).toBe("ready");
+    expect(result.conversationDesignState?.id).toBe("state-next");
+  });
+
+  it("cleans trailing particles and internal ids in formatted PRD drafts", () => {
+    const formatted = formatRequirementDocumentDraft(
+      prdDraft(baseState({ title: "营销日历的" })),
+      baseState({ title: "营销日历的", updatedBy: "cmr8idyeo0000cb5le0iqdqzx" }),
+      { author: "cmr8idyeo0000cb5le0iqdqzx", date: "2026-07-06" },
+    );
+    const body = formatted.sections.map((section) => section.content).join("\n");
+
+    expect(formatted.title).toBe("营销日历需求说明书");
+    expect(body).toContain("新增《营销日历需求说明书》");
+    expect(body).toContain("V1.0 | 待确认");
+    expect(body).not.toContain("营销日历的的");
+    expect(body).not.toContain("cmr8idyeo0000cb5le0iqdqzx");
   });
 
   it("updates a section, creates a version, and syncs the PRD back into ConversationDesignState", async () => {

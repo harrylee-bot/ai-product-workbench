@@ -85,6 +85,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
                   tooltip="聊天"
                 >
                   <Link
+                    aria-label="新建对话"
                     href={createNewChatHref()}
                     onClick={() => setOpenMobile(false)}
                   >
@@ -94,6 +95,7 @@ export function AppSidebar({ user: userProp }: { user?: NestUser | undefined }) 
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <SidebarMenuButton
+                      aria-label="展开侧边栏"
                       className="pointer-events-none absolute inset-0 size-8 opacity-0 group-data-[collapsible=icon]:pointer-events-auto group-data-[collapsible=icon]:group-hover/logo:opacity-100"
                       onClick={() => toggleSidebar()}
                     >

@@ -604,6 +604,7 @@ function PureAttachmentsButton({
 
   return (
     <Button
+      aria-label="添加附件"
       className={cn(
         "h-7 w-7 rounded-lg border border-border/40 p-1 transition-colors",
         hasVision
@@ -646,6 +647,7 @@ function PureModelSelectorCompact({
     <ModelSelector onOpenChange={setOpen} open={open}>
       <ModelSelectorTrigger asChild>
         <Button
+          aria-label={`当前模型：${selectedModel.name}，点击切换模型`}
           className="h-7 max-w-[200px] justify-between gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
           data-testid="model-selector"
           variant="ghost"

@@ -239,10 +239,18 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, state, isMobile, openMobile } = useSidebar()
+  const label = isMobile
+    ? openMobile
+      ? "关闭侧边栏"
+      : "打开侧边栏"
+    : state === "collapsed"
+      ? "展开侧边栏"
+      : "收起侧边栏"
 
   return (
     <Button
+      aria-label={label}
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       variant="ghost"
@@ -255,7 +263,7 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">{label}</span>
     </Button>
   )
 }
@@ -263,6 +271,7 @@ function SidebarTrigger({
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   const { toggleSidebar, state } = useSidebar()
   const isCollapsed = state === "collapsed"
+  const label = isCollapsed ? "展开侧边栏" : "收起侧边栏"
 
   return (
     <div
@@ -274,14 +283,14 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     >
       <button
         data-sidebar="rail"
-        aria-label="Toggle Sidebar"
+        aria-label={label}
         tabIndex={-1}
         onClick={toggleSidebar}
         className="absolute inset-y-0 left-0 w-4 cursor-w-resize [[data-side=left][data-state=collapsed]_&]:cursor-e-resize"
         {...props}
       />
       <button
-        aria-label="Toggle Sidebar"
+        aria-label={label}
         tabIndex={-1}
         onClick={toggleSidebar}
         className={cn(
@@ -290,7 +299,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
         )}
       />
       <button
-        aria-label="Toggle Sidebar"
+        aria-label={label}
         tabIndex={-1}
         onClick={toggleSidebar}
         className={cn(

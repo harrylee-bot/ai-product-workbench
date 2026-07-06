@@ -291,6 +291,20 @@ describe("aichat document stream router", () => {
 
     expect(raw.prdDocumentDraft?.title).toBe("会员积分商城需求说明书");
   });
+
+  it("cleans trailing particles from fallback PRD subjects", () => {
+    const finalAction = buildFallbackPrdFinalAction(
+      "帮我生成一个营销日历的需求文档，输出中文执行摘要和需求结构",
+    );
+    const raw = finalAction.raw as {
+      prdDocumentDraft?: { title?: string; sections?: Array<{ content: string }> };
+    };
+    const body = raw.prdDocumentDraft?.sections?.map((section) => section.content).join("\n") ?? "";
+
+    expect(raw.prdDocumentDraft?.title).toBe("营销日历需求说明书");
+    expect(body).toContain("营销日历的业务目标");
+    expect(body).not.toContain("营销日历的的");
+  });
 });
 
 function qaReport(status: "passed" | "warning" | "failed") {

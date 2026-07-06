@@ -36,6 +36,7 @@ export function SidebarUserNav({ user }: { user: NestUser }) {
 
   const displayName = user.displayName || user.email || user.username;
   const avatarSeed = user.email || user.username || user.id;
+  const isAdmin = user.role === "admin";
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -99,14 +100,16 @@ export function SidebarUserNav({ user }: { user: NestUser }) {
             >
               {`切换到${resolvedTheme === "light" ? "深色" : "浅色"}模式`}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className="cursor-pointer text-[13px]"
-              data-testid="user-nav-item-admin"
-              onSelect={() => router.push("/admin")}
-            >
-              <ShieldCheckIcon className="size-4" />
-              系统设置
-            </DropdownMenuItem>
+            {isAdmin && (
+              <DropdownMenuItem
+                className="cursor-pointer text-[13px]"
+                data-testid="user-nav-item-admin"
+                onSelect={() => router.push("/admin")}
+              >
+                <ShieldCheckIcon className="size-4" />
+                系统设置
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild data-testid="user-nav-item-auth">
               <button

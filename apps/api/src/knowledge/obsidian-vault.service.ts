@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -40,11 +41,52 @@ type MarkdownChunk = {
   categoryName: string;
 };
 
+type VaultHealth = {
+  state: "missing" | "empty" | "ready";
+  message: string;
+};
+
 type MarkdownMetadata = {
   title?: string;
   tags: string[];
   body: string;
 };
+
+function resolveKnowledgeVaultRoot() {
+  const explicit = process.env.KNOWLEDGE_VAULT_ROOT?.trim();
+  if (explicit) return path.resolve(explicit);
+
+  const cwd = process.cwd();
+  const repoVault = isApiWorkspaceCwd(cwd)
+    ? path.resolve(cwd, "..", "..", "knowledge-vault")
+    : path.resolve(cwd, "knowledge-vault");
+  const legacyApiVault = path.resolve(cwd, "storage", "knowledge-vault");
+
+  return [repoVault, legacyApiVault].find((candidate) => existsSync(candidate)) ?? repoVault;
+}
+
+function isApiWorkspaceCwd(cwd: string) {
+  return path.basename(cwd) === "api" && path.basename(path.dirname(cwd)) === "apps";
+}
+
+function getVaultHealth(rootExists: boolean, markdownCount: number): VaultHealth {
+  if (!rootExists) {
+    return {
+      state: "missing",
+      message: "知识库路径不存在，请检查 KNOWLEDGE_VAULT_ROOT 或仓库 knowledge-vault 目录。",
+    };
+  }
+  if (markdownCount === 0) {
+    return {
+      state: "empty",
+      message: "知识库路径存在，但没有可同步的 Markdown 文件。",
+    };
+  }
+  return {
+    state: "ready",
+    message: "知识库路径可用，已发现可同步 Markdown 文件。",
+  };
+}
 
 const VAULT_FOLDERS = [
   "00-知识库使用规范",
@@ -287,20 +329,22 @@ export class ObsidianVaultService {
     private readonly embeddings?: KnowledgeEmbeddingService,
   ) {}
 
-  private readonly root = path.resolve(
-    process.env.KNOWLEDGE_VAULT_ROOT?.trim() || path.join(process.cwd(), "storage", "knowledge-vault"),
-  );
+  private readonly root = resolveKnowledgeVaultRoot();
 
   async getStatus() {
     const initialized = await this.exists(path.join(this.root, ".obsidian"));
     const rootExists = await this.exists(this.root);
+    const markdownCount = rootExists ? await this.countMarkdownFiles(this.root) : 0;
+    const health = getVaultHealth(rootExists, markdownCount);
 
     return {
+      health: health.state,
+      message: health.message,
       initialized,
       rootExists,
       vaultRoot: this.root,
       folderCount: rootExists ? await this.countDirectories(this.root) : 0,
-      markdownCount: rootExists ? await this.countMarkdownFiles(this.root) : 0,
+      markdownCount,
       folders: rootExists ? await this.listRootFolders() : [],
       recentFiles: rootExists ? await this.listRecentMarkdownFiles() : [],
     };

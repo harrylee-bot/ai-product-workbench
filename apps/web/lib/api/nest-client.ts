@@ -37,6 +37,13 @@ export type SystemHealth = {
   modules: string[];
 };
 
+const friendlyApiErrors: Record<string, string> = {
+  SHARE_PRD_NOT_READY: "当前会话还没有可分享的 PRD 文档。",
+  SHARE_PRD_NOT_CONFIRMED: "PRD 已生成，但需要先在画布中确认后才能分享。",
+  SHARE_PROTOTYPE_NOT_READY: "当前会话还没有可分享的原型。",
+  SHARE_PROTOTYPE_NOT_CONFIRMED: "原型已生成，但需要先确认后才能分享。",
+};
+
 export function getSystemHealth() {
   return nestFetch<SystemHealth>("/system/health");
 }
@@ -62,6 +69,7 @@ export async function nestFetch<T>(
     } catch {
       // ignore
     }
+    message = friendlyApiErrors[message] ?? message;
     throw new Error(message);
   }
 

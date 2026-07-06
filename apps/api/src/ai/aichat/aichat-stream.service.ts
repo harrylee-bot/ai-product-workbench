@@ -1535,7 +1535,15 @@ function extractPrdSubject(userPrompt: string) {
     .replace(/只生成需求文档|只|仅|包含目标、用户流程、功能需求、验收标准|包含目标|用户流程|功能需求|验收标准|prd|需求文档|需求说明书/gi, "")
     .replace(/[，。,.;；:：]/g, " ")
     .trim();
-  return compact.slice(0, 40) || "产品需求方案";
+  return cleanPrdSubject(compact).slice(0, 40) || "产品需求方案";
+}
+
+function cleanPrdSubject(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/[的之关于围绕]+$/g, "")
+    .replace(/[－\-—_ ]+$/g, "")
+    .trim();
 }
 
 function isKnowledgeInventoryQuestion(value: string) {

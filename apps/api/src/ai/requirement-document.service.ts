@@ -142,6 +142,35 @@ export class RequirementDocumentService {
     return { document: item, conversationDesignState: state ?? null };
   }
 
+  async getCurrentPersistedForConversation(conversationId: string) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (
+      !conversation ||
+      conversation.deletedAt ||
+      conversation.status === ConversationStatus.deleted
+    ) {
+      throw new NotFoundException("会话不存在");
+    }
+    const state = await this.stateService.getCurrentState(conversationId);
+    const document = conversation.currentPrdDocumentId
+      ? await this.prisma.requirementDocument.findFirst({
+          where: { id: conversation.currentPrdDocumentId, conversationId },
+        })
+      : await this.prisma.requirementDocument.findFirst({
+          where: { conversationId },
+          orderBy: { updatedAt: "desc" },
+        });
+
+    return {
+      document: document
+        ? this.toDocumentItem(document as RequirementDocumentRecord)
+        : null,
+      conversationDesignState: state ?? null,
+    };
+  }
+
   async getDocumentForUser(user: AuthenticatedUser, documentId: string) {
     const document = await this.getAccessibleDocument(user, documentId);
     return {
