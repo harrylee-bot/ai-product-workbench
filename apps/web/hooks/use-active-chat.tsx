@@ -53,12 +53,12 @@ const DEFAULT_RUNTIME_MODEL: ChatRuntimeModel = {
   provider: "deerflow",
   description: "当前后端 DeerFlow 运行时模型",
 };
-const STREAM_RECOVERY_ATTEMPTS = 8;
+const STREAM_RECOVERY_ATTEMPTS = 3;  // Reduced from 8 to 3
 const STREAM_RECOVERY_INTERVAL_MS = 2000;
 const STREAM_RECOVERY_RATE_LIMIT_BACKOFF_MS = 10_000;
-const RUN_STATUS_REFRESH_MS = 12_000;
-const RUNNING_MESSAGES_REFRESH_MS = 12_000;
-const CHAT_DATA_DEDUPE_MS = 5_000;
+const ACTIVE_REFRESH_MS = 8_000;  // Active generation: 8 seconds
+const IDLE_REFRESH_MS = 30_000;   // Idle state: 30 seconds
+const CHAT_DATA_DEDUPE_MS = 8_000; // Increased from 5s to match active refresh
 
 type ActiveChatContextValue = {
   chatId: string;
@@ -114,6 +114,32 @@ function messagesSignature(messages: ChatMessage[]) {
       return `${message.id}:${message.role}:${partSignature}`;
     })
     .join("|");
+}
+
+// Optimized: quick check for message equality (avoids full serialization in common cases)
+function areMessagesEqual(local: ChatMessage[], server: ChatMessage[]): boolean {
+  // Fast path: different lengths means different
+  if (local.length !== server.length) return false;
+  if (local.length === 0) return true;
+
+  // For long conversations, only compare last message and count
+  // This avoids serializing entire history on every update
+  if (local.length > 5) {
+    const lastLocal = local[local.length - 1];
+    const lastServer = server[server.length - 1];
+
+    // Quick ID check first
+    if (lastLocal.id !== lastServer.id) return false;
+
+    // Only serialize last message if IDs match
+    const lastLocalSig = messagesSignature([lastLocal]);
+    const lastServerSig = messagesSignature([lastServer]);
+
+    return lastLocalSig === lastServerSig;
+  }
+
+  // For short conversations, use full comparison
+  return messagesSignature(local) === messagesSignature(server);
 }
 
 export function ActiveChatProvider({ children }: { children: ReactNode }) {
@@ -195,8 +221,11 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     () => getChatRuntimeStatus(chatId),
     {
       revalidateOnFocus: true,
-      refreshInterval: (latest) =>
-        latest?.latestRun?.status === "running" ? RUN_STATUS_REFRESH_MS : 0,
+      refreshInterval: (latest) => {
+        if (!latest) return 0;
+        const isRunning = latest.latestRun?.status === "running";
+        return isRunning ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS;
+      },
       dedupingInterval: CHAT_DATA_DEDUPE_MS,
     }
   );
@@ -211,7 +240,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     () => getChatMessages(chatId),
     {
       revalidateOnFocus: false,
-      refreshInterval: isServerRunRunning ? RUNNING_MESSAGES_REFRESH_MS : 0,
+      refreshInterval: isServerRunRunning ? ACTIVE_REFRESH_MS : 0,
       dedupingInterval: CHAT_DATA_DEDUPE_MS,
     }
   );
@@ -482,15 +511,13 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
     }
 
     const hasLoaded = loadedChatIds.current.has(chatId);
-    const serverSignature = messagesSignature(chatData.messages);
-    const localSignature = messagesSignature(messages);
     const canApplyServerMessages =
       status === "ready" || String(status) === "error";
 
     if (
       !hasLoaded ||
       (canApplyServerMessages &&
-        serverSignature !== localSignature &&
+        !areMessagesEqual(messages, chatData.messages) &&
         shouldApplyServerMessages(messages, chatData.messages))
     ) {
       setMessages(chatData.messages);
@@ -698,7 +725,7 @@ function shouldApplyServerMessages(
   if (localMessages.length === 0) {
     return true;
   }
-  if (messagesSignature(localMessages) === messagesSignature(serverMessages)) {
+  if (areMessagesEqual(localMessages, serverMessages)) {
     return false;
   }
 
@@ -752,6 +779,14 @@ async function recoverPersistedReply(input: {
   for (let attempt = 0; attempt < STREAM_RECOVERY_ATTEMPTS; attempt += 1) {
     if (attempt > 0) {
       await delay(STREAM_RECOVERY_INTERVAL_MS * Math.min(attempt, 4));
+    }
+
+    // Show recovery progress to user
+    if (attempt > 0) {
+      input.setRuntimeProcess((current) => ({
+        ...current,
+        title: `恢复中 (${attempt}/${STREAM_RECOVERY_ATTEMPTS})`,
+      }));
     }
 
     const [runtimeResult, chatResult, historyResult] = await Promise.all([
