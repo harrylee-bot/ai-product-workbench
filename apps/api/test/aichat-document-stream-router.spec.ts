@@ -144,6 +144,13 @@ describe("aichat document stream router", () => {
     ).toBe(false);
   });
 
+  it("does not treat completion summaries as PRD canvas body", () => {
+    const summary =
+      "已生成《营销日历需求说明书》，覆盖营销日历的运营排期、节点规划、资源占用、权益库存联动、审核发布、复盘归因、接口联动、降级方案与安全基线，可在右侧 PRD 画布中继续评审和修改。";
+
+    expect(looksLikeDocumentDraft(summary, summary)).toBe(false);
+  });
+
   it("suppresses forced document prelude instead of streaming it into canvas", () => {
     const { parts, writer } = captureWriter();
     const state = createDocumentStreamState("run-1", {
@@ -156,6 +163,28 @@ describe("aichat document stream router", () => {
         data: {},
         messageRole: "assistant",
         chunk: "我已加载技能文件。现在开始分析请求并生成PRD。思考过程：",
+      },
+      writer,
+      state,
+    );
+
+    expect(result).toEqual({ suppressChat: true });
+    expect(parts).toEqual([]);
+  });
+
+  it("suppresses forced completion summaries without opening the canvas", () => {
+    const { parts, writer } = captureWriter();
+    const state = createDocumentStreamState("run-1", {
+      forceDocumentStream: true,
+    });
+
+    const result = routeAssistantDocumentDelta(
+      {
+        event: "messages-tuple",
+        data: {},
+        messageRole: "assistant",
+        chunk:
+          "已生成《营销日历需求说明书》，覆盖营销日历的运营排期、节点规划、资源占用、权益库存联动、审核发布、复盘归因、接口联动、降级方案与安全基线，可在右侧 PRD 画布中继续评审和修改。",
       },
       writer,
       state,

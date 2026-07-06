@@ -1146,6 +1146,10 @@ export function looksLikeDocumentDraft(buffer: string, delta: string) {
   const current = normalizeDocumentDraftSample(delta);
   if (!sample || sample.length < 8) return false;
 
+  if (looksLikeCompletionSummary(sample)) {
+    return false;
+  }
+
   if (looksLikeRuntimeNarration(sample) && !hasStrongDocumentDraftStructure(sample)) {
     return false;
   }
@@ -1197,7 +1201,7 @@ function findDocumentTitleLineStart(value: string) {
     const start = match.index + (match[1] ? match[1].length : 0);
     const lineEnd = value.indexOf("\n", start);
     const line = value.slice(start, lineEnd === -1 ? undefined : lineEnd).trim();
-    if (!looksLikeRuntimeNarration(line)) return start;
+    if (!looksLikeRuntimeNarration(line) && !looksLikeCompletionSummary(line)) return start;
   }
   return undefined;
 }
@@ -1244,6 +1248,7 @@ function hasDocumentTitleLine(sample: string) {
     .filter(Boolean)
     .some((line) => {
       if (looksLikeRuntimeNarration(line)) return false;
+      if (looksLikeCompletionSummary(line)) return false;
       if (line.length > 96) return false;
       return /^(#\s*)?[^。！？!?]{2,80}(需求说明书|需求文档|产品需求文档|PRD)(\s*(#|\||$))?/i.test(line);
     });
@@ -1251,7 +1256,24 @@ function hasDocumentTitleLine(sample: string) {
 
 function looksLikeRuntimeNarration(sample: string) {
   const head = sample.slice(0, 240);
-  return /(我已|我将|现在开始|开始分析|分析请求|思考过程|用户明确|用户要求|请求中|已加载技能|调用\s*\w+|工具调用|read[_ ]?file|已完成|本轮)/i.test(head);
+  return /(我已|我将|现在开始|开始分析|分析请求|思考过程|用户明确|用户要求|请求中|已加载技能|调用\s*\w+|工具调用|read[_ ]?file|已完成|已生成|已写入|请在右侧|右侧\s*(PRD\s*)?画布|画布查看|本轮)/i.test(head);
+}
+
+function looksLikeCompletionSummary(sample: string) {
+  const firstLine = normalizeDocumentDraftSample(sample)
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  const head = (firstLine || sample).slice(0, 260);
+  if (!head) return false;
+
+  const hasArtifactSubject = /(需求说明书|需求文档|产品需求文档|PRD|原型|画布)/i.test(head);
+  if (!hasArtifactSubject) return false;
+
+  return (
+    /^(已生成|已完成|已写入|PRD\s*已生成|需求文档已生成|产品需求文档已生成|原型已生成)/i.test(head) ||
+    /(请在右侧|可在右侧|右侧\s*(PRD\s*)?画布|画布(中)?(查看|继续|评审|修改)|继续评审|继续修改)/i.test(head)
+  );
 }
 
 function normalizeDocumentDraftSample(value: string) {
@@ -1262,6 +1284,8 @@ function normalizeDocumentDraftSample(value: string) {
 }
 
 function inferDocumentTitle(value: string) {
+  if (looksLikeCompletionSummary(value)) return undefined;
+
   const heading = value.match(/^#\s+(.+)$/m)?.[1]?.trim();
   if (heading) {
     return heading.replace(/[#*`]/g, "").trim().slice(0, 80) || undefined;

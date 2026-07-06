@@ -200,14 +200,20 @@ export class FinalActionApplierService {
     userId?: string,
   ): RequirementDocumentDraft {
     const prdDraft = asRecord(raw?.prdDocumentDraft);
-    const title = toStringValue(prdDraft?.title) || "需求文档";
+    const rawTitle = toStringValue(prdDraft?.title);
+    const title =
+      rawTitle && !looksLikePrdCompletionSummary(rawTitle)
+        ? rawTitle
+        : state?.title || toStringValue(asRecord(raw?.designStateDraft)?.title) || "需求文档";
     let sections = toSections(prdDraft?.sections);
 
     if (sections.length === 0) {
       // DeerFlow 通常把 PRD 正文以 markdown artifact 形式产出；尝试从中解析段落。
       const markdown = findArtifactText(artifacts, ["prd_markdown", "prd", "markdown"], ["text/markdown", "text/plain"]);
       const body = markdown ?? fallbackMessage;
-      sections = markdownToSections(body, title);
+      sections = looksLikePrdCompletionSummary(body)
+        ? []
+        : markdownToSections(body, title);
     }
 
     if (!isSubstantialPrdSections(sections) && previousDocument) {
@@ -410,6 +416,19 @@ function looksLikeAdviceDocument(sections: RequirementDocSection[]) {
   const adviceHits = (text.match(/建议|可以补充|提升.*质量|评审更容易|研发更容易|运营更容易/g) ?? []).length;
   const prdBodyHits = (text.match(/项目概述|产品目标|需求范围|业务规则|功能需求|后台配置|验收标准|异常场景/g) ?? []).length;
   return adviceHits >= 4 && prdBodyHits < 4;
+}
+
+function looksLikePrdCompletionSummary(value: string | undefined) {
+  const text = value?.trim();
+  if (!text) return false;
+  const head = text.replace(/\s+/g, " ").slice(0, 320);
+  const hasArtifactSubject = /(需求说明书|需求文档|产品需求文档|PRD|画布)/i.test(head);
+  if (!hasArtifactSubject) return false;
+
+  return (
+    /^(已生成|已完成|已写入|PRD\s*已生成|需求文档已生成|产品需求文档已生成)/i.test(head) ||
+    /(请在右侧|可在右侧|右侧\s*(PRD\s*)?画布|画布(中)?(查看|继续|评审|修改)|继续评审|继续修改)/i.test(head)
+  );
 }
 
 function sectionsToPlainText(sections: RequirementDocSection[]) {

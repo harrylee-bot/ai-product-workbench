@@ -61,6 +61,24 @@ export function DataStreamHandler({ chatId }: { chatId: string }) {
           status: current.status === "idle" ? "running" : current.status,
           events: mergeRuntimeEvent(current.events ?? [], delta.data),
         }));
+        const runtimeArtifact = getRuntimeArtifact(delta.data);
+        if (runtimeArtifact) {
+          artifactStreamActiveRef.current = false;
+          currentArtifactKind = runtimeArtifact.kind;
+          setArtifact((currentArtifact) => {
+            const base = currentArtifact || initialArtifactData;
+            const isSameDocument = base.documentId === runtimeArtifact.id;
+            return {
+              ...base,
+              documentId: runtimeArtifact.id,
+              kind: runtimeArtifact.kind,
+              title: runtimeArtifact.title,
+              content: isSameDocument ? base.content : "",
+              isVisible: true,
+              status: "idle",
+            };
+          });
+        }
         continue;
       }
 
@@ -183,6 +201,25 @@ function mergeRuntimeEvent(
     return next.slice(-80);
   }
   return [...current, incoming].slice(-80);
+}
+
+function getRuntimeArtifact(event: RuntimeProcessEvent) {
+  const artifact = event.artifact;
+  if (!artifact?.id) return null;
+
+  const kind = normalizeRuntimeArtifactKind(artifact.kind);
+  if (!kind) return null;
+
+  return {
+    id: artifact.id,
+    kind,
+    title: artifact.title?.trim() || (kind === "prototype" ? "原型" : "产品需求文档"),
+  };
+}
+
+function normalizeRuntimeArtifactKind(value: unknown): ArtifactKind | null {
+  if (value === "prd") return "text";
+  return isArtifactKind(value) ? value : null;
 }
 
 function kindForStreamPart(
