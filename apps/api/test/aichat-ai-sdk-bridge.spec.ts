@@ -81,6 +81,25 @@ describe("aichat AI SDK bridge", () => {
     ]);
   });
 
+  it("uses a fresh text id after a text block has ended", () => {
+    const ctx = createBridgeContext();
+    const { parts, writer } = captureWriter();
+
+    emitStaticText("前置文本", writer, ctx);
+    finishText(writer, ctx);
+    emitStaticText("最终摘要", writer, ctx);
+    finishText(writer, ctx);
+
+    expect(parts).toEqual([
+      { type: "text-start", id: "text-1" },
+      { type: "text-delta", id: "text-1", delta: "前置文本" },
+      { type: "text-end", id: "text-1" },
+      { type: "text-start", id: "text-2" },
+      { type: "text-delta", id: "text-2", delta: "最终摘要" },
+      { type: "text-end", id: "text-2" },
+    ]);
+  });
+
   it("skips tool outputs that have no matching tool input", () => {
     const ctx = createBridgeContext();
     const { parts, writer } = captureWriter();

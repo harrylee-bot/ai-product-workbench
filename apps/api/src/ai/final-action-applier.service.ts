@@ -167,7 +167,7 @@ export class FinalActionApplierService {
     const knowledgeRefs = toKnowledgeRefRecords(raw?.knowledgeRefsUsed);
     return {
       conversationId,
-      title: toStringValue(stateDraft?.title) || "产品需求方案",
+      title: toRequirementTitleCandidate(stateDraft?.title) || "产品需求方案",
       summary: toStringValue(stateDraft?.summary),
       background: toStringValue(stateDraft?.background),
       businessGoal: toStringValue(stateDraft?.businessGoal) || toStringValue(stateDraft?.summary) || "待补充业务目标",
@@ -200,11 +200,14 @@ export class FinalActionApplierService {
     userId?: string,
   ): RequirementDocumentDraft {
     const prdDraft = asRecord(raw?.prdDocumentDraft);
-    const rawTitle = toStringValue(prdDraft?.title);
+    const rawTitle = toRequirementTitleCandidate(prdDraft?.title);
+    const fallbackTitle =
+      toRequirementTitleCandidate(state?.title) ||
+      toRequirementTitleCandidate(asRecord(raw?.designStateDraft)?.title);
     const title =
-      rawTitle && !looksLikePrdCompletionSummary(rawTitle)
-        ? rawTitle
-        : state?.title || toStringValue(asRecord(raw?.designStateDraft)?.title) || "需求文档";
+      rawTitle ||
+      fallbackTitle ||
+      "需求文档";
     let sections = toSections(prdDraft?.sections);
 
     if (sections.length === 0) {
@@ -335,6 +338,20 @@ function toStringValue(value: unknown): string | undefined {
   if (typeof value === "string") return value.trim() || undefined;
   if (typeof value === "number") return String(value);
   return undefined;
+}
+
+function toRequirementTitleCandidate(value: unknown): string | undefined {
+  const title = toStringValue(value);
+  if (!title) return undefined;
+  if (!looksLikePrdCompletionSummary(title)) return title;
+  return extractRequirementTitleFromCompletionSummary(title);
+}
+
+function extractRequirementTitleFromCompletionSummary(value: string) {
+  const quoted = value.match(/《([^》]{2,120}(?:需求说明书|需求文档|产品需求文档|PRD)?)》/i)?.[1]?.trim();
+  if (quoted) return quoted;
+
+  return value.match(/(?:已生成|已完成|已写入)\s*([^，。；\n]{2,80}(?:需求说明书|需求文档|产品需求文档|PRD))/i)?.[1]?.trim();
 }
 
 function toArray(value: unknown): Array<Record<string, unknown>> {

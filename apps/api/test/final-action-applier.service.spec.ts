@@ -214,10 +214,10 @@ describe("FinalActionApplierService", () => {
   });
 
   it("does not persist completion summaries as PRD body content", async () => {
-    const state = baseState({ title: "营销日历" });
-    const document = baseDocument();
     const completionSummary =
       "已生成《营销日历需求说明书》，覆盖营销日历的运营排期、节点规划、资源占用、权益库存联动、审核发布、复盘归因、接口联动、降级方案与安全基线，可在右侧 PRD 画布中继续评审和修改。";
+    const state = baseState({ title: completionSummary });
+    const document = baseDocument();
     stateService.createDraftInTransaction.mockResolvedValue(state);
     documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
     stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({ ...state, prdDocument: document });
@@ -231,7 +231,7 @@ describe("FinalActionApplierService", () => {
         message: completionSummary,
         raw: {
           type: "review_prd",
-          designStateDraft: { title: "营销日历" },
+          designStateDraft: { title: completionSummary },
           prdDocumentDraft: {
             title: completionSummary,
           },
@@ -247,6 +247,12 @@ describe("FinalActionApplierService", () => {
     };
     const body = savedDraft.sections.map((section) => `${section.title}\n${section.content}`).join("\n\n");
 
+    expect(stateService.createDraftInTransaction).toHaveBeenCalledWith(
+      prisma,
+      "conversation-1",
+      expect.objectContaining({ title: "营销日历需求说明书" }),
+      expect.any(Object),
+    );
     expect(savedDraft.title).toBe("营销日历需求说明书");
     expect(body).toContain("1.1 项目背景");
     expect(body).toContain("2.2 核心业务规则/功能说明");

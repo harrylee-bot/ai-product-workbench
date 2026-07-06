@@ -228,13 +228,40 @@ function getRequirementDocumentTitle(
     state?.title,
     title,
     inferRequirementTitleFromSections(sections),
-  ].filter((value): value is string => Boolean(value?.trim()));
+  ]
+    .map(normalizeRequirementTitleCandidate)
+    .filter((value): value is string => Boolean(value?.trim()));
   const preferred =
     candidates.find((candidate) => !isGenericRequirementTitle(candidate))
     ?? candidates[0]
     ?? "需求";
   const base = normalizeRequirementTitleBase(preferred);
   return `${base || "需求"}需求说明书`;
+}
+
+function normalizeRequirementTitleCandidate(value: string | undefined) {
+  const title = value?.trim();
+  if (!title) return undefined;
+  if (!looksLikeCompletionSummaryTitle(title)) return title;
+  return extractRequirementTitleFromSummary(title);
+}
+
+function looksLikeCompletionSummaryTitle(value: string) {
+  const head = value.replace(/\s+/g, " ").slice(0, 320);
+  const hasArtifactSubject = /(需求说明书|需求文档|产品需求文档|PRD|画布)/i.test(head);
+  if (!hasArtifactSubject) return false;
+
+  return (
+    /^(已生成|已完成|已写入|PRD\s*已生成|需求文档已生成|产品需求文档已生成)/i.test(head) ||
+    /(请在右侧|可在右侧|右侧\s*(PRD\s*)?画布|画布(中)?(查看|继续|评审|修改)|继续评审|继续修改)/i.test(head)
+  );
+}
+
+function extractRequirementTitleFromSummary(value: string) {
+  const quoted = value.match(/《([^》]{2,120}(?:需求说明书|需求文档|产品需求文档|PRD)?)》/i)?.[1]?.trim();
+  if (quoted) return quoted;
+
+  return value.match(/(?:已生成|已完成|已写入)\s*([^，。；\n]{2,80}(?:需求说明书|需求文档|产品需求文档|PRD))/i)?.[1]?.trim();
 }
 
 function inferRequirementTitleFromSections(sections: RequirementDocSection[]) {

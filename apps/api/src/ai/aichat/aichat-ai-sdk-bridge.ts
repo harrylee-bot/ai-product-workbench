@@ -63,6 +63,7 @@ export type BridgeContext = {
   hasEmittedText: boolean;
   textBuffer: string;
   textStarted: boolean;
+  textPartIndex: number;
   reasoningBuffer: string;
   reasoningStarted: boolean;
   emittedToolCallIds: Set<string>;
@@ -77,6 +78,7 @@ export function createBridgeContext(): BridgeContext {
     hasEmittedText: false,
     textBuffer: "",
     textStarted: false,
+    textPartIndex: 1,
     reasoningBuffer: "",
     reasoningStarted: false,
     emittedToolCallIds: new Set(),
@@ -302,8 +304,9 @@ export function getPersistedToolParts(ctx: BridgeContext): PersistedToolPart[] {
 export function finishText(writer: UIMessageStreamWriter, ctx: BridgeContext): void {
   emitTextDelta(flushAssistantDelta(ctx.assistantDeltaFilter), writer, ctx);
   if (ctx.textStarted) {
-    writer.write({ type: "text-end", id: "text-1" });
+    writer.write({ type: "text-end", id: currentTextPartId(ctx) });
     ctx.textStarted = false;
+    ctx.textPartIndex += 1;
   }
 }
 
@@ -435,12 +438,16 @@ export function emitStaticText(text: string, writer: UIMessageStreamWriter, ctx:
 function emitTextDelta(delta: string, writer: UIMessageStreamWriter, ctx: BridgeContext): void {
   if (!delta) return;
   if (!ctx.textStarted) {
-    writer.write({ type: "text-start", id: "text-1" });
+    writer.write({ type: "text-start", id: currentTextPartId(ctx) });
     ctx.textStarted = true;
   }
-  writer.write({ type: "text-delta", id: "text-1", delta });
+  writer.write({ type: "text-delta", id: currentTextPartId(ctx), delta });
   ctx.textBuffer += delta;
   ctx.hasEmittedText = true;
+}
+
+function currentTextPartId(ctx: BridgeContext) {
+  return `text-${ctx.textPartIndex}`;
 }
 
 function upsertToolPart(
