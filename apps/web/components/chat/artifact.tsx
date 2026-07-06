@@ -4,8 +4,19 @@ import { zhCN } from "date-fns/locale";
 import equal from "fast-deep-equal";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  CheckIcon,
+  CloudIcon,
+  CopyIcon,
+  DownloadIcon,
+  FileTextIcon,
+  MoreVerticalIcon,
+  Redo2Icon,
+  Undo2Icon,
+} from "lucide-react";
+import {
   type Dispatch,
   memo,
+  type ReactNode,
   type SetStateAction,
   useCallback,
   useEffect,
@@ -20,12 +31,15 @@ import { prototypeArtifact } from "@/artifacts/prototype/client";
 import { sheetArtifact } from "@/artifacts/sheet/client";
 import { textArtifact } from "@/artifacts/text/client";
 import { useArtifact } from "@/hooks/use-artifact";
+import { downloadApiFile } from "@/lib/api/download";
 import type { Document, Vote } from "@/lib/api/types";
 import {
   getDocumentsById,
   saveDocumentContent,
 } from "@/lib/api/nest-client";
 import type { Attachment, ChatMessage } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { ArtifactActions } from "./artifact-actions";
 import { ArtifactCloseButton } from "./artifact-close-button";
 import { LoaderIcon } from "./icons";
@@ -340,46 +354,68 @@ function PureArtifact({
       )
       .join("\n") || undefined;
 
+  const isCanvasDocumentArtifact =
+    artifact.kind === "text" || artifact.kind === "prd";
+  const canvasSaveState = isContentDirty
+    ? "saving"
+    : artifact.status === "streaming"
+      ? "generating"
+      : document
+        ? "saved"
+        : "ready";
+
   const artifactPanel = (
     <>
-      <div className="flex h-[calc(3.5rem+1px)] shrink-0 items-center justify-between border-b border-border/50 px-4">
-        <div className="flex items-center gap-3">
-          <ArtifactCloseButton />
-          <div className="flex flex-col gap-0.5">
-            <div className="text-sm font-semibold leading-tight tracking-tight">
-              {artifact.title}
-            </div>
-            <div className="flex items-center gap-2">
-              {isContentDirty ? (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <div className="size-1.5 animate-pulse rounded-full bg-amber-500" />
-                  保存中...
-                </div>
-              ) : document ? (
-                <div className="text-xs text-muted-foreground">
-                  {`${formatDistance(new Date(document.createdAt), new Date(), { addSuffix: true, locale: zhCN })}更新`}
-                </div>
-              ) : artifact.status === "streaming" ? (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <div className="animate-spin">
-                    <LoaderIcon size={12} />
+      {isCanvasDocumentArtifact ? (
+        <GeminiCanvasHeader
+          chatId={chatId}
+          content={artifact.content}
+          saveState={canvasSaveState}
+          title={artifact.title}
+        />
+      ) : (
+        <div className="flex h-[calc(3.5rem+1px)] shrink-0 items-center justify-between border-b border-border/70 bg-sidebar/70 px-4 backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <ArtifactCloseButton />
+            <div className="flex flex-col gap-0.5">
+              <div className="text-sm font-semibold leading-tight tracking-tight">
+                {artifact.title}
+              </div>
+              <div className="flex items-center gap-2">
+                {isContentDirty ? (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <div className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+                    保存中...
                   </div>
-                  生成中...
-                </div>
-              ) : (
-                <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/10" />
-              )}
-              {documents && documents.length > 1 && (
-                <div className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
-                  v{currentVersionIndex + 1}/{documents.length}
-                </div>
-              )}
+                ) : document ? (
+                  <div className="text-xs text-muted-foreground">
+                    {`${formatDistance(new Date(document.createdAt), new Date(), { addSuffix: true, locale: zhCN })}更新`}
+                  </div>
+                ) : artifact.status === "streaming" ? (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <div className="animate-spin">
+                      <LoaderIcon size={12} />
+                    </div>
+                    生成中...
+                  </div>
+                ) : (
+                  <div className="h-3 w-24 animate-pulse rounded bg-muted-foreground/10" />
+                )}
+                {documents && documents.length > 1 && (
+                  <div className="rounded-md border border-border/60 bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+                    v{currentVersionIndex + 1}/{documents.length}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
       <div
-        className="relative flex-1 overflow-y-auto bg-background"
+        className={cn(
+          "relative flex-1 overflow-y-auto",
+          isCanvasDocumentArtifact ? "bg-[#131314]" : "bg-background/75"
+        )}
         data-slot="artifact-content"
         onScroll={() => {
           const el = artifactContentRef.current;
@@ -412,7 +448,7 @@ function PureArtifact({
           title={artifact.title}
         />
         <AnimatePresence>
-          {isCurrentVersion && (
+          {!isCanvasDocumentArtifact && isCurrentVersion && (
             <Toolbar
               artifactActions={
                 <ArtifactActions
@@ -475,7 +511,7 @@ function PureArtifact({
           width: "100dvw",
           borderRadius: 0,
         }}
-        className="fixed inset-0 z-50 flex h-dvh flex-col overflow-hidden bg-sidebar"
+        className="fixed inset-0 z-50 flex h-dvh flex-col overflow-hidden bg-background"
         data-testid="artifact"
         exit={{ opacity: 0, scale: 0.95 }}
         initial={{
@@ -495,11 +531,133 @@ function PureArtifact({
 
   return (
     <div
-      className="flex h-dvh w-[60%] shrink-0 flex-col overflow-hidden border-l border-border/50 bg-sidebar transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+      className={cn(
+        "h-dvh w-[60%] shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+        isCanvasDocumentArtifact
+          ? "flex bg-background/70 p-3 pl-0"
+          : "flex flex-col overflow-hidden border-l border-border/70 bg-sidebar/90 shadow-[var(--shadow-float)] backdrop-blur-xl"
+      )}
       data-testid="artifact"
     >
-      {artifactPanel}
+      {isCanvasDocumentArtifact ? (
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#131314] shadow-[0_26px_80px_-30px_rgba(0,0,0,0.88)]">
+          {artifactPanel}
+        </div>
+      ) : (
+        artifactPanel
+      )}
     </div>
+  );
+}
+
+function GeminiCanvasHeader({
+  chatId,
+  content,
+  saveState,
+  title,
+}: {
+  chatId: string;
+  content: string;
+  saveState: "generating" | "ready" | "saved" | "saving";
+  title: string;
+}) {
+  const safeTitle = title?.trim() || "未命名文档";
+  const saveLabel =
+    saveState === "generating"
+      ? "正在生成"
+      : saveState === "saving"
+        ? "正在保存"
+        : saveState === "saved"
+          ? "已保存"
+          : "Canvas";
+
+  return (
+    <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#131314] px-3 text-[#e8eaed]">
+      <div className="flex min-w-0 items-center gap-2">
+        <ArtifactCloseButton />
+        <div className="flex min-w-0 items-center gap-2 rounded-full bg-white/[0.06] py-1.5 pr-3 pl-2 text-sm text-[#e8eaed] ring-1 ring-white/[0.08]">
+          <FileTextIcon className="size-4 shrink-0 text-[#c4c7c5]" />
+          <span className="max-w-[32vw] truncate font-medium leading-none">
+            {safeTitle}
+          </span>
+        </div>
+        <div className="hidden items-center gap-1.5 text-[12px] text-[#9aa0a6] md:flex">
+          {saveState === "generating" || saveState === "saving" ? (
+            <span className="animate-spin text-[#c4c7c5]">
+              <LoaderIcon size={12} />
+            </span>
+          ) : (
+            <CheckIcon className="size-3.5 text-[#9aa0a6]" />
+          )}
+          <span>{saveLabel}</span>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1">
+        <CanvasHeaderIconButton label={saveLabel}>
+          <CloudIcon className="size-4" />
+        </CanvasHeaderIconButton>
+        <CanvasHeaderIconButton disabled label="撤销">
+          <Undo2Icon className="size-4" />
+        </CanvasHeaderIconButton>
+        <CanvasHeaderIconButton disabled label="重做">
+          <Redo2Icon className="size-4" />
+        </CanvasHeaderIconButton>
+        <CanvasHeaderIconButton
+          disabled={!content.trim()}
+          label="复制"
+          onClick={() => {
+            navigator.clipboard.writeText(content);
+            toast.success("已复制到剪贴板");
+          }}
+        >
+          <CopyIcon className="size-4" />
+        </CanvasHeaderIconButton>
+        <button
+          className="ml-1 hidden h-8 items-center gap-1.5 rounded-full bg-[#e8eaed] px-3 text-[13px] font-medium text-[#202124] transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40 md:flex"
+          disabled={!content.trim()}
+          onClick={async () => {
+            await downloadApiFile(
+              `/conversations/${chatId}/export/word`,
+              "需求说明书.doc"
+            );
+            toast.success("已开始下载 Word");
+          }}
+          type="button"
+        >
+          <DownloadIcon className="size-4" />
+          导出
+        </button>
+        <CanvasHeaderIconButton label="更多">
+          <MoreVerticalIcon className="size-4" />
+        </CanvasHeaderIconButton>
+      </div>
+    </div>
+  );
+}
+
+function CanvasHeaderIconButton({
+  children,
+  disabled,
+  label,
+  onClick,
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  label: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className="flex size-8 items-center justify-center rounded-full text-[#c4c7c5] transition-colors hover:bg-white/[0.08] hover:text-[#e8eaed] disabled:pointer-events-none disabled:opacity-35"
+      disabled={disabled}
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      {children}
+    </button>
   );
 }
 

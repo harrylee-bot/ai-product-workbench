@@ -77,9 +77,13 @@ type ActiveChatContextValue = {
   votes: Vote[] | undefined;
   currentModelId: string;
   setCurrentModelId: (id: string) => void;
+  selectedArtifactMode: ChatArtifactMode;
+  setSelectedArtifactMode: (mode: ChatArtifactMode) => void;
   runtimeModel: ChatRuntimeModel;
   runtimeStatus?: ChatRuntimeStatus;
 };
+
+export type ChatArtifactMode = "chat" | "canvas";
 
 const ActiveChatContext = createContext<ActiveChatContextValue | null>(null);
 
@@ -164,6 +168,13 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setCurrentModelId(runtimeModel.id);
   }, [runtimeModel.id]);
+
+  const [selectedArtifactMode, setSelectedArtifactMode] =
+    useState<ChatArtifactMode>("chat");
+  const selectedArtifactModeRef = useRef<ChatArtifactMode>(selectedArtifactMode);
+  useEffect(() => {
+    selectedArtifactModeRef.current = selectedArtifactMode;
+  }, [selectedArtifactMode]);
 
   const [input, setInput] = useState("");
 
@@ -250,6 +261,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
               : { message: lastMessage }),
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibility,
+            selectedArtifactMode: selectedArtifactModeRef.current,
             ...request.body,
           },
         };
@@ -572,6 +584,8 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       votes,
       currentModelId,
       setCurrentModelId,
+      selectedArtifactMode,
+      setSelectedArtifactMode,
       runtimeModel,
       runtimeStatus,
     }),
@@ -590,6 +604,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       isLoading,
       votes,
       currentModelId,
+      selectedArtifactMode,
       runtimeModel,
       displayedStatus,
       runtimeProcess.status,

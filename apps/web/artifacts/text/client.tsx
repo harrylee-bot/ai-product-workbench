@@ -81,6 +81,10 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
       return <DocumentSkeleton artifactKind="text" />;
     }
 
+    if (status === "streaming" && !content.trim()) {
+      return <DocumentSkeleton artifactKind="text" />;
+    }
+
     if (mode === "diff") {
       const selectedContent = getDocumentContentById(currentVersionIndex);
       const prevContent =
@@ -89,14 +93,14 @@ export const textArtifact = new Artifact<"text", TextArtifactMetadata>({
           : selectedContent;
 
       return (
-        <div className="flex flex-row px-4 py-8 md:px-16 md:py-12 lg:px-20">
+        <div className="mx-auto flex w-full max-w-[820px] flex-row px-8 py-10 md:px-12 md:py-14">
           <DiffView newContent={selectedContent} oldContent={prevContent} />
         </div>
       );
     }
 
     return (
-      <div className="flex flex-row px-4 py-8 md:px-16 md:py-12 lg:px-20">
+      <div className="mx-auto flex w-full max-w-[820px] flex-row px-8 py-10 md:px-12 md:py-14">
         <Editor
           content={content}
           currentVersionIndex={currentVersionIndex}

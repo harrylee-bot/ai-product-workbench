@@ -3,6 +3,7 @@ import { UserRole, UserStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import {
   AichatStreamService,
+  buildCanvasDocumentRuntimePrompt,
   buildFallbackPrdFinalAction,
   createDocumentStreamState,
   formatQaOutcome,
@@ -37,6 +38,16 @@ describe("aichat document stream router", () => {
     expect(isDocumentGenerationRequest("这份需求文档有哪些风险？")).toBe(false);
     expect(isDocumentGenerationRequest("请用一句话说明当前系统是否在线，不要生成PRD。")).toBe(false);
     expect(isDocumentGenerationRequest("不要生成 PRD，只回答运行状态")).toBe(false);
+  });
+
+  it("turns canvas mode prompts into document generation requests without changing the visible prompt", () => {
+    const prompt = "做一个会员积分商城";
+    const runtimePrompt = buildCanvasDocumentRuntimePrompt(prompt);
+
+    expect(runtimePrompt).toContain(prompt);
+    expect(runtimePrompt).toContain("review_prd");
+    expect(isDocumentGenerationRequest(prompt)).toBe(false);
+    expect(isDocumentGenerationRequest(runtimePrompt)).toBe(true);
   });
 
   it("recognizes compact requirement specs with adjacent markdown headings", () => {

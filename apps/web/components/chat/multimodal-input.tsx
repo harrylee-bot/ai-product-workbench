@@ -5,6 +5,17 @@ import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
 import {
   ArrowUpIcon,
+  BookOpenIcon,
+  CloudIcon,
+  FileTextIcon,
+  GraduationCapIcon,
+  ImageIcon,
+  InfoIcon,
+  MusicIcon,
+  PlusIcon,
+  SparklesIcon,
+  VideoIcon,
+  XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -31,6 +42,8 @@ import {
   ModelSelectorName,
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
+import { useArtifact } from "@/hooks/use-artifact";
+import type { ChatArtifactMode } from "@/hooks/use-active-chat";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import {
   type ChatRuntimeModel,
@@ -49,7 +62,24 @@ import {
   PromptInputTools,
 } from "../ai-elements/prompt-input";
 import { Button } from "../ui/button";
-import { PaperclipIcon, StopIcon } from "./icons";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
+import { MoreHorizontalIcon, PaperclipIcon, StopIcon } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
 import {
   type SlashCommand,
@@ -79,6 +109,8 @@ function PureMultimodalInput({
   className,
   selectedVisibilityType,
   selectedModelId,
+  selectedArtifactMode,
+  onArtifactModeChange,
   onModelChange,
   runtimeModel,
   editingMessage,
@@ -100,6 +132,8 @@ function PureMultimodalInput({
   className?: string;
   selectedVisibilityType: VisibilityType;
   selectedModelId: string;
+  selectedArtifactMode: ChatArtifactMode;
+  onArtifactModeChange?: (mode: ChatArtifactMode) => void;
   onModelChange?: (modelId: string) => void;
   runtimeModel: ChatRuntimeModel;
   editingMessage?: ChatMessage | null;
@@ -108,6 +142,7 @@ function PureMultimodalInput({
 }) {
   const router = useRouter();
   const { setTheme, resolvedTheme } = useTheme();
+  const { setArtifact } = useArtifact();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
   const hasAutoFocused = useRef(false);
@@ -217,9 +252,22 @@ function PureMultimodalInput({
   const [slashQuery, setSlashQuery] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
   const isGenerating = status === "submitted" || status === "streaming";
+  const isCanvasMode = selectedArtifactMode === "canvas";
 
   const submitForm = useCallback(() => {
     router.replace(createChatHref(chatId));
+
+    if (isCanvasMode) {
+      setArtifact((currentArtifact) => ({
+        ...currentArtifact,
+        documentId: "init",
+        kind: "text",
+        title: inferCanvasDraftTitle(input),
+        content: "",
+        status: "streaming",
+        isVisible: true,
+      }));
+    }
 
     sendMessage({
       role: "user",
@@ -256,6 +304,8 @@ function PureMultimodalInput({
     width,
     chatId,
     router,
+    isCanvasMode,
+    setArtifact,
   ]);
 
   const uploadFile = useCallback(async (file: File) => {
@@ -380,7 +430,7 @@ function PureMultimodalInput({
         <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
           <span>正在编辑消息</span>
           <button
-            className="rounded px-1.5 py-0.5 text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+            className="rounded-md px-1.5 py-0.5 text-muted-foreground/60 transition-colors hover:bg-muted/70 hover:text-foreground"
             onMouseDown={(e) => {
               e.preventDefault();
               onCancelEdit();
@@ -425,7 +475,7 @@ function PureMultimodalInput({
       </div>
 
       <PromptInput
-        className="[&>div]:rounded-2xl [&>div]:border [&>div]:border-border/30 [&>div]:bg-card/70 [&>div]:shadow-[var(--shadow-composer)] [&>div]:transition-shadow [&>div]:duration-300 [&>div]:focus-within:shadow-[var(--shadow-composer-focus)]"
+        className="[&>div]:rounded-2xl [&>div]:border [&>div]:border-border/80 [&>div]:bg-card/80 [&>div]:shadow-[var(--shadow-composer)] [&>div]:backdrop-blur-2xl [&>div]:transition-all [&>div]:duration-300 [&>div]:focus-within:border-foreground/20 [&>div]:focus-within:shadow-[var(--shadow-composer-focus)]"
         onSubmit={() => {
           if (input.startsWith("/")) {
             const query = input.slice(1).trim();
@@ -479,7 +529,10 @@ function PureMultimodalInput({
           </div>
         )}
         <PromptInputTextarea
-          className="min-h-24 text-[13px] leading-relaxed px-4 pt-3.5 pb-1.5 placeholder:text-muted-foreground/35"
+          className={cn(
+            "px-4 text-[13px] leading-relaxed placeholder:text-muted-foreground/45",
+            isCanvasMode ? "min-h-24 pt-3.5 pb-1.5" : "min-h-16 py-3.5"
+          )}
           data-testid="multimodal-input"
           onChange={handleInput}
           onKeyDown={(e) => {
@@ -516,42 +569,67 @@ function PureMultimodalInput({
             }
           }}
           placeholder={
-            editingMessage ? "编辑你的消息..." : "请输入你的问题..."
+            editingMessage
+              ? "编辑你的消息..."
+              : isCanvasMode
+                ? "一起开始创作吧"
+                : "问问 Gemini"
           }
           ref={textareaRef}
           value={input}
         />
         <PromptInputFooter className="px-3 pb-3">
           <PromptInputTools>
-            <AttachmentsButton
+            <UploadAndToolsMenu
               fileInputRef={fileInputRef}
+              isCanvasMode={isCanvasMode}
+              onCanvasModeChange={(mode) => {
+                onArtifactModeChange?.(mode);
+                setTimeout(() => {
+                  textareaRef.current?.focus();
+                }, 50);
+              }}
               status={status}
             />
+            {isCanvasMode && (
+              <CanvasModeChip
+                onRemove={() => {
+                  onArtifactModeChange?.("chat");
+                  setTimeout(() => {
+                    textareaRef.current?.focus();
+                  }, 50);
+                }}
+                status={status}
+              />
+            )}
+          </PromptInputTools>
+
+          <div className="flex min-w-0 items-center gap-1">
             <ModelSelectorCompact
               onModelChange={onModelChange}
               runtimeModel={runtimeModel}
               selectedModelId={selectedModelId}
             />
-          </PromptInputTools>
 
-          {isGenerating ? (
-            <StopButton stop={stop} />
-          ) : (
-            <PromptInputSubmit
-              className={cn(
-                "h-7 w-7 rounded-xl transition-all duration-200",
-                input.trim()
-                  ? "bg-foreground text-background hover:opacity-85 active:scale-95"
-                  : "bg-muted text-muted-foreground/25 cursor-not-allowed"
-              )}
-              data-testid="send-button"
-              disabled={!input.trim() || uploadQueue.length > 0}
-              status={status}
-              variant="secondary"
-            >
-              <ArrowUpIcon className="size-4" />
-            </PromptInputSubmit>
-          )}
+            {isGenerating ? (
+              <StopButton stop={stop} />
+            ) : (
+              <PromptInputSubmit
+                className={cn(
+                  "h-7 w-7 rounded-xl transition-all duration-200",
+                  input.trim()
+                    ? "bg-primary text-primary-foreground shadow-[0_10px_28px_-18px_rgba(255,255,255,0.9)] hover:opacity-90 active:scale-95"
+                    : "cursor-not-allowed bg-muted/70 text-muted-foreground/30"
+                )}
+                data-testid="send-button"
+                disabled={!input.trim() || uploadQueue.length > 0}
+                status={status}
+                variant="secondary"
+              >
+                <ArrowUpIcon className="size-4" />
+              </PromptInputSubmit>
+            )}
+          </div>
         </PromptInputFooter>
       </PromptInput>
     </div>
@@ -576,6 +654,9 @@ export const MultimodalInput = memo(
     if (prevProps.selectedModelId !== nextProps.selectedModelId) {
       return false;
     }
+    if (prevProps.selectedArtifactMode !== nextProps.selectedArtifactMode) {
+      return false;
+    }
     if (prevProps.runtimeModel.id !== nextProps.runtimeModel.id) {
       return false;
     }
@@ -593,38 +674,210 @@ export const MultimodalInput = memo(
   }
 );
 
-function PureAttachmentsButton({
+function UploadAndToolsMenu({
   fileInputRef,
+  isCanvasMode,
+  onCanvasModeChange,
   status,
 }: {
   fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  isCanvasMode: boolean;
+  onCanvasModeChange: (mode: ChatArtifactMode) => void;
   status: UseChatHelpers<ChatMessage>["status"];
 }) {
-  const hasVision = true;
+  const [open, setOpen] = useState(false);
+  const disabled = status !== "ready";
+  const itemClassName =
+    "h-9 cursor-default rounded-xl px-3 text-[13px] text-popover-foreground/90 focus:bg-white/8 focus:text-popover-foreground";
+  const iconClassName = "size-4 text-popover-foreground/75";
+
+  const showUnsupportedToast = (label: string) => {
+    toast(`${label}暂未接入，当前可用的是 Canvas。`);
+  };
 
   return (
-    <Button
-      aria-label="添加附件"
-      className={cn(
-        "h-7 w-7 rounded-lg border border-border/40 p-1 transition-colors",
-        hasVision
-          ? "text-foreground hover:border-border hover:text-foreground"
-          : "text-muted-foreground/30 cursor-not-allowed"
-      )}
-      data-testid="attachments-button"
-      disabled={status !== "ready" || !hasVision}
-      onClick={(event) => {
-        event.preventDefault();
-        fileInputRef.current?.click();
-      }}
-      variant="ghost"
-    >
-      <PaperclipIcon size={14} style={{ width: 14, height: 14 }} />
-    </Button>
+    <DropdownMenu onOpenChange={setOpen} open={open}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={open ? "关闭上传和工具" : "上传和工具"}
+          aria-pressed={open}
+          className={cn(
+            "h-7 w-7 rounded-full border-0 bg-transparent p-0 text-foreground/75 transition-colors hover:bg-muted/70 hover:text-foreground",
+            open && "bg-muted/80 text-foreground"
+          )}
+          data-testid="attachments-button"
+          disabled={disabled}
+          type="button"
+          variant="ghost"
+        >
+          {open ? <XIcon className="size-4" /> : <PlusIcon className="size-4" />}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-[248px] rounded-[22px] border-white/10 bg-[#202124]/95 p-2 text-[#e8eaed] shadow-[0_20px_56px_-24px_rgba(0,0,0,0.88)] backdrop-blur-2xl"
+        data-testid="upload-tools-menu"
+        side="top"
+        sideOffset={10}
+      >
+        <DropdownMenuItem
+          className={itemClassName}
+          onSelect={() => fileInputRef.current?.click()}
+        >
+          <PaperclipIcon className={iconClassName} size={16} />
+          <span>上传文件</span>
+          <InfoIcon className="ml-auto size-4 text-popover-foreground/65" />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className={itemClassName}
+          onSelect={() => showUnsupportedToast("从云端硬盘添加")}
+        >
+          <CloudIcon className={iconClassName} />
+          <span>从云端硬盘添加</span>
+        </DropdownMenuItem>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className={itemClassName}>
+            <span className={iconClassName}>
+              <MoreHorizontalIcon size={16} />
+            </span>
+            <span>更多上传选项</span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuPortal>
+            <DropdownMenuSubContent className="w-[220px] rounded-[20px] border-white/10 bg-[#202124]/95 p-2 text-[#e8eaed] shadow-[0_20px_56px_-24px_rgba(0,0,0,0.88)] backdrop-blur-2xl">
+              <DropdownMenuItem
+                className={itemClassName}
+                onSelect={() => showUnsupportedToast("导入链接")}
+              >
+                <BookOpenIcon className={iconClassName} />
+                <span>导入链接</span>
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuPortal>
+        </DropdownMenuSub>
+
+        <DropdownMenuSeparator className="mx-2 my-2 bg-white/10" />
+
+        <DropdownMenuItem
+          className={itemClassName}
+          onSelect={() => showUnsupportedToast("制作图片")}
+        >
+          <ImageIcon className={iconClassName} />
+          <span>制作图片</span>
+          <span className="ml-auto rounded-full bg-white/12 px-2 py-0.5 text-[11px] text-popover-foreground/80">
+            新
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className={itemClassName}
+          onSelect={() => showUnsupportedToast("制作视频")}
+        >
+          <VideoIcon className={iconClassName} />
+          <span>制作视频</span>
+        </DropdownMenuItem>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className={itemClassName}>
+            <span className={iconClassName}>
+              <MoreHorizontalIcon size={16} />
+            </span>
+            <span>更多工具</span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuPortal>
+            <DropdownMenuSubContent
+              className="w-[220px] rounded-[20px] border-white/10 bg-[#202124]/95 p-2 text-[#e8eaed] shadow-[0_20px_56px_-24px_rgba(0,0,0,0.88)] backdrop-blur-2xl"
+              data-testid="more-tools-menu"
+            >
+              <TooltipProvider delayDuration={120}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuItem
+                      aria-pressed={isCanvasMode}
+                      className={cn(
+                        itemClassName,
+                        isCanvasMode && "bg-white/10 text-popover-foreground"
+                      )}
+                      data-testid="canvas-tool-menu-item"
+                      onSelect={() => onCanvasModeChange("canvas")}
+                    >
+                      <FileTextIcon className={iconClassName} />
+                      <span>Canvas</span>
+                    </DropdownMenuItem>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    className="max-w-[220px] rounded-xl bg-[#f1f3f4] px-3 py-2 text-[12px] leading-snug text-[#202124]"
+                    side="right"
+                    sideOffset={12}
+                  >
+                    编写代码、撰写内容或制作幻灯片
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <DropdownMenuItem
+                className={itemClassName}
+                onSelect={() => showUnsupportedToast("Deep Research")}
+              >
+                <SparklesIcon className={iconClassName} />
+                <span>Deep Research</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={itemClassName}
+                onSelect={() => showUnsupportedToast("制作音乐")}
+              >
+                <MusicIcon className={iconClassName} />
+                <span>制作音乐</span>
+                <span className="ml-auto rounded-full bg-white/12 px-2 py-0.5 text-[11px] text-popover-foreground/80">
+                  新
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={itemClassName}
+                onSelect={() => showUnsupportedToast("学习辅导")}
+              >
+                <GraduationCapIcon className={iconClassName} />
+                <span>学习辅导</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={itemClassName}
+                onSelect={() => showUnsupportedToast("个性化智能服务")}
+              >
+                <SparklesIcon className={iconClassName} />
+                <span className="min-w-0 flex-1 truncate">个性化智能服务</span>
+                <span className="rounded-full bg-primary/80 px-1.5 py-0.5 text-[10px] text-primary-foreground">
+                  Labs
+                </span>
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuPortal>
+        </DropdownMenuSub>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-const AttachmentsButton = memo(PureAttachmentsButton);
+function CanvasModeChip({
+  onRemove,
+  status,
+}: {
+  onRemove: () => void;
+  status: UseChatHelpers<ChatMessage>["status"];
+}) {
+  return (
+    <Button
+      aria-label="取消选择“Canvas”"
+      className="h-7 gap-1 rounded-full border-0 bg-muted/80 px-2 text-[12px] font-medium text-foreground/90 transition-colors hover:bg-muted hover:text-foreground"
+      data-testid="canvas-mode-chip"
+      disabled={status !== "ready"}
+      onClick={(event) => {
+        event.preventDefault();
+        onRemove();
+      }}
+      type="button"
+      variant="ghost"
+    >
+      <FileTextIcon className="size-3.5" />
+      <span>Canvas</span>
+    </Button>
+  );
+}
 
 function PureModelSelectorCompact({
   selectedModelId,
@@ -648,7 +901,7 @@ function PureModelSelectorCompact({
       <ModelSelectorTrigger asChild>
         <Button
           aria-label={`当前模型：${selectedModel.name}，点击切换模型`}
-          className="h-7 max-w-[200px] justify-between gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          className="h-7 max-w-[200px] justify-between gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-input/40 hover:text-foreground"
           data-testid="model-selector"
           variant="ghost"
         >
@@ -747,3 +1000,20 @@ function PureStopButton({
 }
 
 const StopButton = memo(PureStopButton);
+
+function inferCanvasDraftTitle(input: string) {
+  const firstLine = input
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return "生成中的文档";
+
+  const cleaned = firstLine
+    .replace(/^(请|帮我|给我|生成|创建|新建|写|撰写|编写|起草|输出|制定|整理)+/g, "")
+    .replace(/(需求文档|需求说明书|产品需求文档|PRD|prd|文档)$/g, "")
+    .replace(/[，。,.;；:：!?？]+$/g, "")
+    .trim();
+
+  const subject = cleaned || firstLine;
+  return `${subject.slice(0, 28)}${subject.length > 28 ? "..." : ""}需求说明书`;
+}

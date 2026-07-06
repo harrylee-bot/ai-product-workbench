@@ -38,6 +38,8 @@ export function ChatShell() {
     votes,
     currentModelId,
     setCurrentModelId,
+    selectedArtifactMode,
+    setSelectedArtifactMode,
     runtimeModel,
     runtimeStatus,
   } = useActiveChat();
@@ -47,9 +49,10 @@ export function ChatShell() {
   );
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
-  const { setArtifact } = useArtifact();
-  const { setRuntimeProcess } = useDataStream();
+  const { artifact, setArtifact } = useArtifact();
+  const { runtimeProcess, setRuntimeProcess } = useDataStream();
   const autoOpenedArtifactIdRef = useRef<string | null>(null);
+  const optimisticCanvasStartedAtRef = useRef<number | null>(null);
 
   const prevChatIdRef = useRef(chatId);
   useEffect(() => {
@@ -92,12 +95,92 @@ export function ChatShell() {
     });
   }, [messages, setArtifact]);
 
+  useEffect(() => {
+    if (
+      artifact.documentId === "init" &&
+      artifact.status === "streaming" &&
+      artifact.isVisible
+    ) {
+      optimisticCanvasStartedAtRef.current ??= Date.now();
+      return;
+    }
+
+    if (artifact.status !== "streaming") {
+      optimisticCanvasStartedAtRef.current = null;
+    }
+  }, [artifact.documentId, artifact.isVisible, artifact.status]);
+
+  useEffect(() => {
+    const shouldSettleOptimisticCanvas =
+      status === "error" ||
+      runtimeProcess.status === "failed" ||
+      runtimeProcess.status === "cancelled";
+    if (!shouldSettleOptimisticCanvas) {
+      return;
+    }
+
+    setArtifact((currentArtifact) => {
+      if (currentArtifact.status !== "streaming") {
+        return currentArtifact;
+      }
+      if (
+        currentArtifact.documentId === "init" &&
+        !currentArtifact.content.trim()
+      ) {
+        if (currentArtifact.isVisible) {
+          const startedAt = optimisticCanvasStartedAtRef.current ?? Date.now();
+          const minimumGeneratingMs = 2400;
+          const remainingMs =
+            minimumGeneratingMs - Math.max(0, Date.now() - startedAt);
+
+          if (remainingMs > 0) {
+            window.setTimeout(() => {
+              setArtifact((latestArtifact) => {
+                if (
+                  latestArtifact.documentId !== "init" ||
+                  latestArtifact.status !== "streaming" ||
+                  latestArtifact.content.trim()
+                ) {
+                  return latestArtifact;
+                }
+
+                optimisticCanvasStartedAtRef.current = null;
+                return {
+                  ...latestArtifact,
+                  status: "idle",
+                  content: "生成失败，请重试。",
+                  isVisible: true,
+                };
+              });
+            }, remainingMs);
+
+            return currentArtifact;
+          }
+        }
+
+        optimisticCanvasStartedAtRef.current = null;
+        return {
+          ...currentArtifact,
+          status: "idle",
+          content: "生成失败，请重试。",
+          isVisible: currentArtifact.isVisible,
+        };
+      }
+
+      optimisticCanvasStartedAtRef.current = null;
+      return {
+        ...currentArtifact,
+        status: "idle",
+      };
+    });
+  }, [runtimeProcess.status, setArtifact, status]);
+
   return (
     <>
-      <div className="flex h-dvh w-full flex-row overflow-hidden">
+      <div className="flex h-dvh w-full flex-row overflow-hidden bg-background">
         <div
           className={cn(
-            "flex min-w-0 flex-col bg-sidebar transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+            "flex min-w-0 flex-col bg-transparent transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
             isArtifactVisible ? "w-[40%]" : "w-full"
           )}
         >
@@ -107,15 +190,16 @@ export function ChatShell() {
             selectedVisibilityType={visibilityType}
           />
 
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background md:rounded-tl-[12px] md:border-t md:border-l md:border-border/40">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-border/70 bg-background/70 shadow-[inset_1px_1px_0_rgba(255,255,255,0.035)] backdrop-blur-xl md:rounded-tl-2xl md:border-t md:border-l">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-foreground/[0.03] to-transparent" />
             {isLoading && messages.length === 0 ? (
               <div className="flex flex-1 flex-col gap-4 p-4">
                 {[1, 2, 3].map((i) => (
                   <div key={i} className="flex gap-3 animate-pulse">
-                    <div className="size-8 shrink-0 rounded-full bg-muted" />
+                    <div className="size-8 shrink-0 rounded-lg bg-muted/70" />
                     <div className="flex flex-1 flex-col gap-2 pt-1">
-                      <div className="h-4 w-3/4 rounded bg-muted" />
-                      <div className="h-4 w-1/2 rounded bg-muted" />
+                      <div className="h-4 w-3/4 rounded bg-muted/70" />
+                      <div className="h-4 w-1/2 rounded bg-muted/50" />
                     </div>
                   </div>
                 ))}
@@ -145,7 +229,7 @@ export function ChatShell() {
               />
             )}
 
-            <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
+            <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-gradient-to-t from-background via-background/90 to-transparent px-2 pt-10 pb-3 md:px-4 md:pb-4">
               {!isReadonly && (
                 <MultimodalInput
                   attachments={attachments}
@@ -159,7 +243,9 @@ export function ChatShell() {
                     setInput("");
                   }}
                   onModelChange={setCurrentModelId}
+                  onArtifactModeChange={setSelectedArtifactMode}
                   runtimeModel={runtimeModel}
+                  selectedArtifactMode={selectedArtifactMode}
                   selectedModelId={currentModelId}
                   selectedVisibilityType={visibilityType}
                   sendMessage={

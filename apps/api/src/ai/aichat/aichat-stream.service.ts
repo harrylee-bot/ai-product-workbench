@@ -74,16 +74,20 @@ export class AichatStreamService {
     const conversationId = dto.id;
 
     // a) 抽取用户消息文本
-    const content = extractUserText(dto.message);
-    if (!content) {
+    const userContent = extractUserText(dto.message);
+    if (!userContent) {
       throw new BadRequestException("请求缺少用户消息文本");
     }
+    const forceCanvasDocument = isCanvasDocumentMode(dto.selectedArtifactMode);
+    const runtimeContent = forceCanvasDocument
+      ? buildCanvasDocumentRuntimePrompt(userContent)
+      : userContent;
 
     // b) 新对话页的 id 来自前端临时 UUID；首条消息到达时在后端落成真实会话。
     const session = await this.conversations.getOrCreateInternal(
       user,
       conversationId,
-      buildConversationTitle(content),
+      buildConversationTitle(userContent),
     );
     const { conversation } = session;
     const conversationContext = buildConversationContextForDeerFlow(session);
@@ -95,9 +99,12 @@ export class AichatStreamService {
     const userMessage = await this.messages.createUserMessage({
       conversationId,
       userId: user.id,
-      content,
+      content: userContent,
       attachments: fileParts.length ? toInputJson(fileParts) : undefined,
-      metadata: toInputJson({ source: "aichat" }),
+      metadata: toInputJson({
+        source: "aichat",
+        selectedArtifactMode: forceCanvasDocument ? "canvas" : "chat",
+      }),
     });
     await this.files.attachFilesToMessage(fileIds, userMessage.id, conversationId);
 
@@ -113,7 +120,7 @@ export class AichatStreamService {
         const run = await this.runLogs.createRun({
           conversationId,
           userId: user.id,
-          userInput: content,
+          userInput: userContent,
         });
         const controller = new AbortController();
         this.activeRunControllers.set(run.id, controller);
@@ -184,7 +191,8 @@ export class AichatStreamService {
           emitRuntimeFinish(streamWriter, snapshot);
         };
         const documentStream = createDocumentStreamState(run.id, {
-          forceDocumentStream: isDocumentGenerationRequest(content),
+          forceDocumentStream:
+            forceCanvasDocument || isDocumentGenerationRequest(runtimeContent),
         });
         res.on("close", markClientClosed);
 
@@ -200,9 +208,9 @@ export class AichatStreamService {
           emitRuntimeStart(streamWriter, startSnapshot);
           recordRuntimeEvent("runtime_start", startSnapshot);
 
-          if (isKnowledgeInventoryQuestion(content)) {
+          if (!forceCanvasDocument && isKnowledgeInventoryQuestion(userContent)) {
             await this.respondWithKnowledgeInventory({
-              content,
+              content: userContent,
               conversationId,
               ctx,
               runId: run.id,
@@ -223,7 +231,7 @@ export class AichatStreamService {
           const knowledgeContext = await this.retrieveKnowledge({
             conversationId,
             runId: run.id,
-            message: content,
+            message: runtimeContent,
           });
 
           // 知识库检索结果摘要事件——告诉用户检索了哪些知识
@@ -247,7 +255,7 @@ export class AichatStreamService {
             runId: run.id,
             conversationId,
             userId: user.id,
-            message: content,
+            message: runtimeContent,
             attachments: fileParts,
             attachmentFiles,
             previewMode: "prd",
@@ -280,8 +288,14 @@ export class AichatStreamService {
           let finalAction = result.finalAction;
           let artifacts = result.artifacts;
           let assistantText = result.assistantText;
-          if (!finalAction.parsed && isDocumentGenerationRequest(content)) {
-            finalAction = buildFallbackPrdFinalAction(content);
+          const shouldForcePrdFinalAction =
+            forceCanvasDocument && finalAction.type !== "review_prd";
+          if (
+            shouldForcePrdFinalAction ||
+            (!finalAction.parsed &&
+              (forceCanvasDocument || isDocumentGenerationRequest(runtimeContent)))
+          ) {
+            finalAction = buildFallbackPrdFinalAction(userContent);
             artifacts = [];
             assistantText = finalAction.message;
             publishRuntimeEvent(createRuntimeEvent({
@@ -296,7 +310,10 @@ export class AichatStreamService {
           const expectsArtifact =
             finalAction.type === "review_prd" ||
             finalAction.type === "review_prototype";
-          if (!finalAction.parsed && requiresExplicitFinalAction(content)) {
+          if (
+            !finalAction.parsed &&
+            (forceCanvasDocument || requiresExplicitFinalAction(runtimeContent))
+          ) {
             throw new BadRequestException("FINAL_ACTION_REQUIRED_FOR_ARTIFACT_INTENT");
           }
           if (expectsArtifact) {
@@ -1337,6 +1354,21 @@ function extractFileParts(message: ChatStreamDto["message"]) {
       mediaType: part.mediaType?.trim() || "application/octet-stream",
       size: typeof part.size === "number" ? part.size : undefined,
     }));
+}
+
+export function isCanvasDocumentMode(value: unknown): boolean {
+  return value === "canvas";
+}
+
+export function buildCanvasDocumentRuntimePrompt(userPrompt: string): string {
+  const trimmed = userPrompt.trim();
+  return [
+    trimmed,
+    "",
+    "请在 Canvas 模式下处理上述输入：直接生成一份结构完整、可评审的产品需求文档（PRD/需求说明书）。",
+    "要求最终动作必须是 review_prd，并将完整正文写入 prdDocumentDraft 或 prd_markdown artifact；不要只输出普通聊天建议。",
+    "除非用户明确要求原型，否则不要生成原型；不要把工具日志、运行过程或隐藏推理写进需求文档正文。",
+  ].join("\n");
 }
 
 function pickAssistantMessageType(

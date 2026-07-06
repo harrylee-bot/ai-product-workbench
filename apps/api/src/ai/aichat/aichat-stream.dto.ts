@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { ArrayMaxSize, IsArray, IsNotEmpty, IsObject, IsOptional, IsString, ValidateNested } from "class-validator";
+import { ArrayMaxSize, IsArray, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, ValidateNested } from "class-validator";
 
 /**
  * ai-chatbot 前端发来的 chat message part（最小子集）。
@@ -76,4 +76,9 @@ export class ChatStreamDto {
   @IsOptional()
   @IsString()
   selectedVisibilityType?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(["chat", "canvas"], { message: "selectedArtifactMode 不正确" })
+  selectedArtifactMode?: "chat" | "canvas";
 }
