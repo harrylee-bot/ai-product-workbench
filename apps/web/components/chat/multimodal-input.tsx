@@ -476,7 +476,7 @@ function PureMultimodalInput({
       </div>
 
       <PromptInput
-        className="[&>div]:rounded-2xl [&>div]:border [&>div]:border-border/80 [&>div]:bg-card/80 [&>div]:shadow-[var(--shadow-composer)] [&>div]:backdrop-blur-2xl [&>div]:transition-all [&>div]:duration-300 [&>div]:focus-within:border-foreground/20 [&>div]:focus-within:shadow-[var(--shadow-composer-focus)]"
+        className="composer-box"
         onSubmit={() => {
           if (input.startsWith("/")) {
             const query = input.slice(1).trim();
@@ -617,12 +617,7 @@ function PureMultimodalInput({
               <StopButton stop={stop} />
             ) : (
               <PromptInputSubmit
-                className={cn(
-                  "h-7 w-7 rounded-xl transition-all duration-200",
-                  input.trim()
-                    ? "bg-primary text-primary-foreground shadow-[0_10px_28px_-18px_rgba(255,255,255,0.9)] hover:opacity-90 active:scale-95"
-                    : "cursor-not-allowed bg-muted/70 text-muted-foreground/30"
-                )}
+                className="send-button"
                 data-testid="send-button"
                 disabled={!input.trim() || uploadQueue.length > 0}
                 status={status}
