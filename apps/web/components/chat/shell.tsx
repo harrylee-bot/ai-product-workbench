@@ -19,6 +19,7 @@ import {
 import { submitEditedMessage } from "./message-editor";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
+import { Rail } from "./rail";
 
 export function ChatShell() {
   const {
@@ -45,9 +46,7 @@ export function ChatShell() {
     runtimeStatus,
   } = useActiveChat();
 
-  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
-    null
-  );
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
   const { artifact, setArtifact } = useArtifact();
@@ -69,31 +68,22 @@ export function ChatShell() {
 
   useEffect(() => {
     const latestArtifact = findLatestMessageArtifact(messages);
-    if (!latestArtifact) {
-      return;
-    }
-    if (autoOpenedArtifactIdRef.current === latestArtifact.id) {
-      return;
-    }
+    if (!latestArtifact) return;
+    if (autoOpenedArtifactIdRef.current === latestArtifact.id) return;
 
     autoOpenedArtifactIdRef.current = latestArtifact.id;
-    setArtifact((currentArtifact) => {
-      // Removed streaming race guard: it dropped isVisible:true for a newly arrived
-      // document when a prior doc was still streaming. The autoOpenedArtifactIdRef
-      // dedup above already prevents re-opening the same doc.
-      return {
-        ...currentArtifact,
-        documentId: latestArtifact.id,
-        kind: latestArtifact.kind,
-        title: latestArtifact.title,
-        content:
-          currentArtifact.documentId === latestArtifact.id
-            ? currentArtifact.content
-            : "",
-        status: "idle",
-        isVisible: true,
-      };
-    });
+    setArtifact((currentArtifact) => ({
+      ...currentArtifact,
+      documentId: latestArtifact.id,
+      kind: latestArtifact.kind,
+      title: latestArtifact.title,
+      content:
+        currentArtifact.documentId === latestArtifact.id
+          ? currentArtifact.content
+          : "",
+      status: "idle",
+      isVisible: true,
+    }));
   }, [messages, setArtifact]);
 
   useEffect(() => {
@@ -105,34 +95,28 @@ export function ChatShell() {
       optimisticCanvasStartedAtRef.current ??= Date.now();
       return;
     }
-
     if (artifact.status !== "streaming") {
       optimisticCanvasStartedAtRef.current = null;
     }
   }, [artifact.documentId, artifact.isVisible, artifact.status]);
 
   useEffect(() => {
-    const shouldSettleOptimisticCanvas =
+    const shouldSettle =
       status === "error" ||
       runtimeProcess.status === "failed" ||
       runtimeProcess.status === "cancelled";
-    if (!shouldSettleOptimisticCanvas) {
-      return;
-    }
+    if (!shouldSettle) return;
 
     setArtifact((currentArtifact) => {
-      if (currentArtifact.status !== "streaming") {
-        return currentArtifact;
-      }
+      if (currentArtifact.status !== "streaming") return currentArtifact;
       if (
         currentArtifact.documentId === "init" &&
         !currentArtifact.content.trim()
       ) {
         if (currentArtifact.isVisible) {
           const startedAt = optimisticCanvasStartedAtRef.current ?? Date.now();
-          const minimumGeneratingMs = 2400;
           const remainingMs =
-            minimumGeneratingMs - Math.max(0, Date.now() - startedAt);
+            2400 - Math.max(0, Date.now() - startedAt);
 
           if (remainingMs > 0) {
             window.setTimeout(() => {
@@ -141,10 +125,7 @@ export function ChatShell() {
                   latestArtifact.documentId !== "init" ||
                   latestArtifact.status !== "streaming" ||
                   latestArtifact.content.trim()
-                ) {
-                  return latestArtifact;
-                }
-
+                ) return latestArtifact;
                 optimisticCanvasStartedAtRef.current = null;
                 return {
                   ...latestArtifact,
@@ -154,11 +135,9 @@ export function ChatShell() {
                 };
               });
             }, remainingMs);
-
             return currentArtifact;
           }
         }
-
         optimisticCanvasStartedAtRef.current = null;
         return {
           ...currentArtifact,
@@ -167,42 +146,41 @@ export function ChatShell() {
           isVisible: currentArtifact.isVisible,
         };
       }
-
       optimisticCanvasStartedAtRef.current = null;
-      return {
-        ...currentArtifact,
-        status: "idle",
-      };
+      return { ...currentArtifact, status: "idle" };
     });
   }, [runtimeProcess.status, setArtifact, status]);
 
   return (
     <>
-      <div className="relative flex h-dvh w-full flex-row overflow-hidden bg-background">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_52%_0%,rgba(255,255,255,0.08),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.025),transparent_38%)]" />
-        <div
-          className={cn(
-            "relative z-1 flex min-w-0 flex-col transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-            isArtifactVisible
-              ? "w-[40%] p-3 pr-0"
-              : "mx-auto w-full max-w-[980px] p-3"
-          )}
-        >
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#101112]/78 shadow-[0_28px_90px_-46px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.045)] backdrop-blur-2xl">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-white/[0.045] to-transparent" />
+      {/* ── Gemini three-column shell ── */}
+      <div
+        className={cn(
+          "gemini-shell",
+          !isArtifactVisible && "is-canvas-closed"
+        )}
+      >
+        {/* ── Rail column ── */}
+        <Rail />
+
+        {/* ── Chat column ── */}
+        <div className="chat-pane">
+          {/* scroll area */}
+          <div className="chat-scroll">
             <ChatHeader
               chatId={chatId}
               isReadonly={isReadonly}
               selectedVisibilityType={visibilityType}
             />
+
             {isLoading && messages.length === 0 ? (
-              <div className="flex flex-1 flex-col gap-4 p-4">
+              <div className="flex flex-1 flex-col gap-4 p-6">
                 {[1, 2, 3].map((i) => (
                   <div key={i} className="flex gap-3 animate-pulse">
-                    <div className="size-8 shrink-0 rounded-lg bg-muted/70" />
+                    <div className="size-8 shrink-0 rounded-lg bg-[#27282a]" />
                     <div className="flex flex-1 flex-col gap-2 pt-1">
-                      <div className="h-4 w-3/4 rounded bg-muted/70" />
-                      <div className="h-4 w-1/2 rounded bg-muted/50" />
+                      <div className="h-4 w-3/4 rounded bg-[#27282a]" />
+                      <div className="h-4 w-1/2 rounded bg-[#27282a]/70" />
                     </div>
                   </div>
                 ))}
@@ -231,53 +209,55 @@ export function ChatShell() {
                 votes={votes}
               />
             )}
+          </div>
 
-            <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-gradient-to-t from-[#101112] via-[#101112]/92 to-transparent px-2 pt-10 pb-3 md:px-4 md:pb-4">
-              {!isReadonly && (
-                <MultimodalInput
-                  attachments={attachments}
-                  chatId={chatId}
-                  editingMessage={editingMessage}
-                  input={input}
-                  isLoading={isLoading}
-                  messages={messages}
-                  onCancelEdit={() => {
-                    setEditingMessage(null);
-                    setInput("");
-                  }}
-                  onModelChange={setCurrentModelId}
-                  onArtifactModeChange={setSelectedArtifactMode}
-                  runtimeModel={runtimeModel}
-                  runtimeModels={runtimeModels}
-                  selectedArtifactMode={selectedArtifactMode}
-                  selectedModelId={currentModelId}
-                  selectedVisibilityType={visibilityType}
-                  sendMessage={
-                    editingMessage
-                      ? async () => {
-                          const msg = editingMessage;
-                          setEditingMessage(null);
-                          await submitEditedMessage({
-                            message: msg,
-                            text: input,
-                            setMessages,
-                            regenerate,
-                          });
-                          setInput("");
-                        }
-                      : sendMessage
-                  }
-                  setAttachments={setAttachments}
-                  setInput={setInput}
-                  setMessages={setMessages}
-                  status={status}
-                  stop={stop}
-                />
-              )}
-            </div>
+          {/* sticky prompt bar */}
+          <div className="prompt-row">
+            {!isReadonly && (
+              <MultimodalInput
+                attachments={attachments}
+                chatId={chatId}
+                editingMessage={editingMessage}
+                input={input}
+                isLoading={isLoading}
+                messages={messages}
+                onCancelEdit={() => {
+                  setEditingMessage(null);
+                  setInput("");
+                }}
+                onModelChange={setCurrentModelId}
+                onArtifactModeChange={setSelectedArtifactMode}
+                runtimeModel={runtimeModel}
+                runtimeModels={runtimeModels}
+                selectedArtifactMode={selectedArtifactMode}
+                selectedModelId={currentModelId}
+                selectedVisibilityType={visibilityType}
+                sendMessage={
+                  editingMessage
+                    ? async () => {
+                        const msg = editingMessage;
+                        setEditingMessage(null);
+                        await submitEditedMessage({
+                          message: msg,
+                          text: input,
+                          setMessages,
+                          regenerate,
+                        });
+                        setInput("");
+                      }
+                    : sendMessage
+                }
+                setAttachments={setAttachments}
+                setInput={setInput}
+                setMessages={setMessages}
+                status={status}
+                stop={stop}
+              />
+            )}
           </div>
         </div>
 
+        {/* ── Canvas column ── */}
         <Artifact
           addToolApprovalResponse={addToolApprovalResponse}
           attachments={attachments}
@@ -304,16 +284,12 @@ export function ChatShell() {
 }
 
 function findLatestMessageArtifact(messages: ChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
     if (message?.role !== "assistant") continue;
 
-    for (
-      let partIndex = (message.parts?.length ?? 0) - 1;
-      partIndex >= 0;
-      partIndex -= 1
-    ) {
-      const part = message.parts?.[partIndex] as
+    for (let pi = (message.parts?.length ?? 0) - 1; pi >= 0; pi--) {
+      const part = message.parts?.[pi] as
         | {
             type?: string;
             state?: string;
@@ -337,6 +313,5 @@ function findLatestMessageArtifact(messages: ChatMessage[]) {
       }
     }
   }
-
   return null;
 }

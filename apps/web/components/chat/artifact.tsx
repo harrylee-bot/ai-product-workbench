@@ -570,15 +570,16 @@ function PureArtifact({
   return (
     <div
       className={cn(
+        "artifact-panel",
         "h-dvh w-[60%] shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
         isWorkbenchCanvasArtifact
           ? "flex bg-background/70 p-3 pl-0"
-          : "flex flex-col overflow-hidden border-l border-border/70 bg-sidebar/90 shadow-[var(--shadow-float)] backdrop-blur-xl"
+          : "flex flex-col overflow-hidden"
       )}
       data-testid="artifact"
     >
       {isWorkbenchCanvasArtifact ? (
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#131314] shadow-[0_26px_80px_-30px_rgba(0,0,0,0.88)]">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[34px] border border-[#3c4043] bg-[#1f1f1f] shadow-[0_22px_58px_rgba(0,0,0,0.42)]">
           {artifactPanel}
         </div>
       ) : (
