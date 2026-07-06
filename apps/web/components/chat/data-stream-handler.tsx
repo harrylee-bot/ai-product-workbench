@@ -65,6 +65,7 @@ export function DataStreamHandler({ chatId }: { chatId: string }) {
         if (runtimeArtifact) {
           artifactStreamActiveRef.current = false;
           currentArtifactKind = runtimeArtifact.kind;
+          const nextStatus = delta.data.status === "running" ? "streaming" : "idle";
           setArtifact((currentArtifact) => {
             const base = currentArtifact || initialArtifactData;
             const isSameDocument = base.documentId === runtimeArtifact.id;
@@ -75,7 +76,7 @@ export function DataStreamHandler({ chatId }: { chatId: string }) {
               title: runtimeArtifact.title,
               content: isSameDocument ? base.content : "",
               isVisible: true,
-              status: "idle",
+              status: nextStatus,
             };
           });
         }
