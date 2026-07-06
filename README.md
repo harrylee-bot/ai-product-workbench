@@ -71,3 +71,26 @@ npm run build
 	APP_HOST=example.com \
 	bash deploy/server-deploy.sh
 	```
+
+### 线上模型配置
+
+生产环境只在服务器 `.env` / secret 中配置 provider key，不要把真实 key 写入仓库。Model Gateway 支持在同一个 provider key 下按任务阶段路由不同模型：
+
+```bash
+DEFAULT_MODEL_PROVIDER_NAME=datatoken
+DEFAULT_MODEL_BASE_URL=https://datatoken.shop
+DEFAULT_MODEL_API_KEY=REPLACE_WITH_PROVIDER_API_KEY
+DEFAULT_MODEL_NAME=gpt-5.5
+
+# 可选：按能力阶段覆盖
+DEFAULT_MODEL_FAST_NAME=
+DEFAULT_MODEL_REASONING_NAME=
+DEFAULT_MODEL_LONG_CONTEXT_NAME=
+DEFAULT_MODEL_CODE_NAME=
+
+# 可选：按具体任务覆盖阶段模型
+DEFAULT_MODEL_TASK_PROTOTYPE_CODE_GENERATION_NAME=
+DEFAULT_MODEL_TASK_QA_CHECK_NAME=
+```
+
+`DEFAULT_MODEL_NAME` 是兜底模型；阶段变量留空时自动回退。支持的具体任务名来自 Prisma `ModelTaskType`，变量格式为 `DEFAULT_MODEL_TASK_<TASK_TYPE 大写>_NAME`。

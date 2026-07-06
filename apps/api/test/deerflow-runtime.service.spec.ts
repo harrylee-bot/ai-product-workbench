@@ -242,6 +242,7 @@ describe("DeerFlowRuntimeService", () => {
       conversationId: "conversation-1",
       userId: "user-1",
       message: "你好",
+      selectedModelName: "gpt-selected",
       onEvent: (event) => {
         events.push({ content: event.content, toolName: event.toolName });
       },
@@ -265,6 +266,7 @@ describe("DeerFlowRuntimeService", () => {
       expect.objectContaining({ method: "POST" }),
     );
     const runRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(runRequest.config.configurable.model_name).toBe("gpt-selected");
     const prompt = String(runRequest.input.messages[0].content);
     expect(prompt).toContain("prototypeHtmlContract");
     expect(prompt).toContain("preview URL");

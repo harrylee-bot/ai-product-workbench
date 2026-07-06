@@ -1,16 +1,16 @@
 import { Controller, Get } from "@nestjs/common";
+import { buildRuntimeModelOptions } from "../../common/runtime-model-config";
 
 @Controller("system")
 export class SystemController {
   @Get("health")
   health() {
-    const modelName =
-      readEnv("DEERFLOW_MODEL_NAME") ??
-      readEnv("DEFAULT_MODEL_NAME") ??
-      "deerflow-runtime";
-    const modelDisplayName = readEnv("DEERFLOW_MODEL_DISPLAY_NAME") ?? modelName;
+    const models = buildRuntimeModelOptions();
+    const defaultModel = models[0];
+    const modelName = modelNameFromModelId(defaultModel.id);
+    const modelDisplayName = defaultModel.name;
     const runtimeName = readEnv("DEERFLOW_AGENT_NAME") ?? "lead_agent";
-    const provider = readEnv("DEERFLOW_MODEL_PROVIDER") ?? "deerflow";
+    const provider = defaultModel.provider;
 
     return {
       ok: true,
@@ -20,11 +20,12 @@ export class SystemController {
         // 使命关键开关：DEERFLOW_ENABLED=false 时自然语言→PRD→原型链路断开。
         // 部署监控应据此告警。
         enabled: process.env.DEERFLOW_ENABLED === "true",
-        modelId: `${provider}/${modelName}`,
+        modelId: defaultModel.id,
         modelName,
         modelDisplayName,
         runtimeName,
         provider,
+        models,
       },
       modules: [
         "auth",
@@ -53,4 +54,9 @@ export class SystemController {
 function readEnv(name: string) {
   const value = process.env[name]?.trim();
   return value || undefined;
+}
+
+function modelNameFromModelId(modelId: string) {
+  const separatorIndex = modelId.indexOf("/");
+  return separatorIndex >= 0 ? modelId.slice(separatorIndex + 1) : modelId;
 }

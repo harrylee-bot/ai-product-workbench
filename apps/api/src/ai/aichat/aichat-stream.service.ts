@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Response } from "express";
 import { createUIMessageStream, pipeUIMessageStreamToResponse } from "ai";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { resolveSelectedRuntimeModelName } from "../../common/runtime-model-config";
 import { ConversationService } from "../../modules/conversation/conversation.service";
 import { KnowledgeRetrievalService } from "../../knowledge/knowledge-retrieval.service";
 import { FileAssetService } from "../../files/file-asset.service";
@@ -83,6 +84,7 @@ export class AichatStreamService {
     const runtimeContent = forceCanvasDocument
       ? buildCanvasDocumentRuntimePrompt(userContent)
       : userContent;
+    const selectedModelName = resolveSelectedRuntimeModelName(dto.selectedChatModel);
 
     // b) 新对话页的 id 来自前端临时 UUID；首条消息到达时在后端落成真实会话。
     const session = await this.conversations.getOrCreateInternal(
@@ -104,6 +106,8 @@ export class AichatStreamService {
       attachments: fileParts.length ? toInputJson(fileParts) : undefined,
       metadata: toInputJson({
         source: "aichat",
+        selectedChatModel: dto.selectedChatModel,
+        selectedModelName,
         selectedArtifactMode: forceCanvasDocument ? "canvas" : "chat",
       }),
     });
@@ -259,6 +263,7 @@ export class AichatStreamService {
             message: runtimeContent,
             attachments: fileParts,
             attachmentFiles,
+            selectedModelName,
             previewMode: "prd",
             conversationDesignState: conversationContext,
             knowledgeContext,

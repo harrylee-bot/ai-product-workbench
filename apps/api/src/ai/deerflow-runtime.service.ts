@@ -95,6 +95,7 @@ type DeerFlowRunInput = {
   attachmentFiles?: RuntimeAttachmentFile[];
   deerFlowUploads?: DeerFlowUploadedFile[];
   selectedRegion?: unknown;
+  selectedModelName?: string;
   previewMode?: string;
   resumeReason?: string;
   conversationDesignState?: unknown;
@@ -491,7 +492,11 @@ function buildRunRequest(input: DeerFlowRunInput) {
         thinking_enabled: readBooleanEnv("DEERFLOW_THINKING_ENABLED", true),
         subagent_enabled: readBooleanEnv("DEERFLOW_SUBAGENT_ENABLED", true),
         max_concurrent_subagents: readNumberEnv("DEERFLOW_MAX_CONCURRENT_SUBAGENTS", 3),
-        model_name: process.env.DEERFLOW_MODEL_NAME || undefined,
+        model_name:
+          input.selectedModelName ||
+          process.env.DEERFLOW_MODEL_NAME ||
+          process.env.DEFAULT_MODEL_NAME ||
+          undefined,
         agent_name: process.env.DEERFLOW_AGENT_NAME || undefined,
       },
     },

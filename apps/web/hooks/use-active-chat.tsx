@@ -80,6 +80,7 @@ type ActiveChatContextValue = {
   selectedArtifactMode: ChatArtifactMode;
   setSelectedArtifactMode: (mode: ChatArtifactMode) => void;
   runtimeModel: ChatRuntimeModel;
+  runtimeModels: ChatRuntimeModel[];
   runtimeStatus?: ChatRuntimeStatus;
 };
 
@@ -155,19 +156,30 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const { data: systemHealth } = useSWR("system-health", getSystemHealth, {
     revalidateOnFocus: true,
   });
-  const runtimeModel = useMemo(
-    () => buildRuntimeModel(systemHealth),
+  const runtimeModels = useMemo(
+    () => buildRuntimeModels(systemHealth),
     [systemHealth],
   );
 
   const [currentModelId, setCurrentModelId] = useState(DEFAULT_RUNTIME_MODEL.id);
+  const runtimeModel = useMemo(
+    () =>
+      runtimeModels.find((model) => model.id === currentModelId) ??
+      runtimeModels[0] ??
+      DEFAULT_RUNTIME_MODEL,
+    [currentModelId, runtimeModels],
+  );
   const currentModelIdRef = useRef(currentModelId);
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
   useEffect(() => {
-    setCurrentModelId(runtimeModel.id);
-  }, [runtimeModel.id]);
+    setCurrentModelId((current) =>
+      runtimeModels.some((model) => model.id === current)
+        ? current
+        : (runtimeModels[0]?.id ?? DEFAULT_RUNTIME_MODEL.id),
+    );
+  }, [runtimeModels]);
 
   const [selectedArtifactMode, setSelectedArtifactMode] =
     useState<ChatArtifactMode>("chat");
@@ -529,10 +541,13 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
         .find((row) => row.startsWith("chat-model="))
         ?.split("=")[1];
       if (cookieModel) {
-        setCurrentModelId(decodeURIComponent(cookieModel));
+        const decodedModelId = decodeURIComponent(cookieModel);
+        if (runtimeModels.some((model) => model.id === decodedModelId)) {
+          setCurrentModelId(decodedModelId);
+        }
       }
     }
-  }, [chatData, isNewChat]);
+  }, [chatData, isNewChat, runtimeModels]);
 
   const hasAppendedQueryRef = useRef(false);
   useEffect(() => {
@@ -587,6 +602,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       selectedArtifactMode,
       setSelectedArtifactMode,
       runtimeModel,
+      runtimeModels,
       runtimeStatus,
     }),
     [
@@ -606,6 +622,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       currentModelId,
       selectedArtifactMode,
       runtimeModel,
+      runtimeModels,
       displayedStatus,
       runtimeProcess.status,
       runtimeStatus,
@@ -627,18 +644,19 @@ export function useActiveChat() {
   return context;
 }
 
-function buildRuntimeModel(
+function buildRuntimeModels(
   systemHealth: Awaited<ReturnType<typeof getSystemHealth>> | undefined,
-): ChatRuntimeModel {
+): ChatRuntimeModel[] {
   const deerflow = systemHealth?.deerflow;
-  if (!deerflow) return DEFAULT_RUNTIME_MODEL;
+  if (!deerflow) return [DEFAULT_RUNTIME_MODEL];
+  if (deerflow.models?.length) return deerflow.models;
 
-  return {
+  return [{
     id: deerflow.modelId,
     name: deerflow.modelDisplayName || deerflow.modelName,
     provider: deerflow.provider,
     description: `${deerflow.runtimeName} · ${deerflow.modelName}`,
-  };
+  }];
 }
 
 function isTerminalRuntimeStatus(

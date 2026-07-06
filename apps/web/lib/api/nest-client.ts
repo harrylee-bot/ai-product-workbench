@@ -33,6 +33,7 @@ export type SystemHealth = {
     modelDisplayName: string;
     runtimeName: string;
     provider: string;
+    models?: ChatRuntimeModel[];
   };
   modules: string[];
 };

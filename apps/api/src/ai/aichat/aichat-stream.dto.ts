@@ -51,7 +51,8 @@ export class ChatStreamMessageDto {
  * - id: 会话 id（必填，对应 conversationId）
  * - message: 当前轮用户消息（含 parts）
  * - messages: 历史消息数组（可选，后端从 DB 取，前端传了也忽略以防篡改）
- * - selectedChatModel / selectedVisibilityType: ai-chatbot 原生字段，透传忽略
+ * - selectedChatModel: 前端选择的运行模型，后端校验后透传给 DeerFlow
+ * - selectedVisibilityType: ai-chatbot 原生字段，透传忽略
  */
 export class ChatStreamDto {
   @IsString()
