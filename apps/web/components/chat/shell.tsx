@@ -41,6 +41,7 @@ export function ChatShell() {
     selectedArtifactMode,
     setSelectedArtifactMode,
     runtimeModel,
+    runtimeModels,
     runtimeStatus,
   } = useActiveChat();
 
@@ -177,21 +178,23 @@ export function ChatShell() {
 
   return (
     <>
-      <div className="flex h-dvh w-full flex-row overflow-hidden bg-background">
+      <div className="relative flex h-dvh w-full flex-row overflow-hidden bg-background">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_52%_0%,rgba(255,255,255,0.08),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.025),transparent_38%)]" />
         <div
           className={cn(
-            "flex min-w-0 flex-col bg-transparent transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-            isArtifactVisible ? "w-[40%]" : "w-full"
+            "relative z-1 flex min-w-0 flex-col transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+            isArtifactVisible
+              ? "w-[40%] p-3 pr-0"
+              : "mx-auto w-full max-w-[980px] p-3"
           )}
         >
-          <ChatHeader
-            chatId={chatId}
-            isReadonly={isReadonly}
-            selectedVisibilityType={visibilityType}
-          />
-
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-border/70 bg-background/70 shadow-[inset_1px_1px_0_rgba(255,255,255,0.035)] backdrop-blur-xl md:rounded-tl-2xl md:border-t md:border-l">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-foreground/[0.03] to-transparent" />
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#101112]/78 shadow-[0_28px_90px_-46px_rgba(0,0,0,0.95),inset_0_1px_0_rgba(255,255,255,0.045)] backdrop-blur-2xl">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-white/[0.045] to-transparent" />
+            <ChatHeader
+              chatId={chatId}
+              isReadonly={isReadonly}
+              selectedVisibilityType={visibilityType}
+            />
             {isLoading && messages.length === 0 ? (
               <div className="flex flex-1 flex-col gap-4 p-4">
                 {[1, 2, 3].map((i) => (
@@ -229,7 +232,7 @@ export function ChatShell() {
               />
             )}
 
-            <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-gradient-to-t from-background via-background/90 to-transparent px-2 pt-10 pb-3 md:px-4 md:pb-4">
+            <div className="sticky bottom-0 z-1 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-gradient-to-t from-[#101112] via-[#101112]/92 to-transparent px-2 pt-10 pb-3 md:px-4 md:pb-4">
               {!isReadonly && (
                 <MultimodalInput
                   attachments={attachments}
@@ -245,6 +248,7 @@ export function ChatShell() {
                   onModelChange={setCurrentModelId}
                   onArtifactModeChange={setSelectedArtifactMode}
                   runtimeModel={runtimeModel}
+                  runtimeModels={runtimeModels}
                   selectedArtifactMode={selectedArtifactMode}
                   selectedModelId={currentModelId}
                   selectedVisibilityType={visibilityType}

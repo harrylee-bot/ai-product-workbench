@@ -6,10 +6,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   CheckIcon,
   CloudIcon,
+  Code2Icon,
   CopyIcon,
   DownloadIcon,
   FileTextIcon,
   MoreVerticalIcon,
+  PanelRightOpenIcon,
   Redo2Icon,
   Undo2Icon,
 } from "lucide-react";
@@ -42,6 +44,10 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ArtifactActions } from "./artifact-actions";
 import { ArtifactCloseButton } from "./artifact-close-button";
+import type {
+  ArtifactActionContext,
+  ArtifactToolbarContext,
+} from "./create-artifact";
 import { LoaderIcon } from "./icons";
 import { Toolbar } from "./toolbar";
 import { VersionFooter } from "./version-footer";
@@ -107,6 +113,9 @@ function PureArtifact({
   selectedModelId: string;
 }) {
   const { artifact, setArtifact, metadata, setMetadata } = useArtifact();
+
+  const artifactKindForDefinition =
+    artifact.kind === "prd" ? "text" : artifact.kind;
 
   const documentsKey =
     artifact.documentId !== "init" && artifact.status !== "streaming"
@@ -317,7 +326,7 @@ function PureArtifact({
   const isMobile = windowWidth ? windowWidth < 768 : false;
 
   const artifactDefinition = artifactDefinitions.find(
-    (definition) => definition.kind === artifact.kind
+    (definition) => definition.kind === artifactKindForDefinition
   );
 
   if (!artifactDefinition) {
@@ -354,8 +363,10 @@ function PureArtifact({
       )
       .join("\n") || undefined;
 
-  const isCanvasDocumentArtifact =
-    artifact.kind === "text" || artifact.kind === "prd";
+  const isWorkbenchCanvasArtifact =
+    artifact.kind === "text" ||
+    artifact.kind === "prd" ||
+    artifact.kind === "prototype";
   const canvasSaveState = isContentDirty
     ? "saving"
     : artifact.status === "streaming"
@@ -366,10 +377,16 @@ function PureArtifact({
 
   const artifactPanel = (
     <>
-      {isCanvasDocumentArtifact ? (
-        <GeminiCanvasHeader
+      {isWorkbenchCanvasArtifact ? (
+        <WorkbenchCanvasHeader
           chatId={chatId}
           content={artifact.content}
+          currentVersionIndex={currentVersionIndex}
+          documentsCount={documents?.length ?? 0}
+          handleVersionChange={handleVersionChange}
+          isCurrentVersion={isCurrentVersion}
+          kind={artifact.kind}
+          mode={mode}
           saveState={canvasSaveState}
           title={artifact.title}
         />
@@ -413,8 +430,9 @@ function PureArtifact({
       )}
       <div
         className={cn(
-          "relative flex-1 overflow-y-auto",
-          isCanvasDocumentArtifact ? "bg-[#131314]" : "bg-background/75"
+          "relative flex-1",
+          artifact.kind === "prototype" ? "overflow-hidden" : "overflow-y-auto",
+          isWorkbenchCanvasArtifact ? "bg-[#131314]" : "bg-background/75"
         )}
         data-slot="artifact-content"
         onScroll={() => {
@@ -448,7 +466,27 @@ function PureArtifact({
           title={artifact.title}
         />
         <AnimatePresence>
-          {!isCanvasDocumentArtifact && isCurrentVersion && (
+          {isWorkbenchCanvasArtifact && isCurrentVersion ? (
+            <WorkbenchCanvasSideTools
+              artifact={artifact}
+              artifactDefinition={artifactDefinition}
+              chatId={chatId}
+              consoleError={consoleError}
+              currentVersionIndex={currentVersionIndex}
+              handleVersionChange={handleVersionChange}
+              isCurrentVersion={isCurrentVersion}
+              metadata={metadata}
+              mode={mode}
+              selectedText={
+                typeof metadata?.selectedText === "string"
+                  ? metadata.selectedText
+                  : undefined
+              }
+              sendMessage={sendMessage}
+              setMetadata={setMetadata}
+            />
+          ) : null}
+          {!isWorkbenchCanvasArtifact && isCurrentVersion && (
             <Toolbar
               artifactActions={
                 <ArtifactActions
@@ -533,13 +571,13 @@ function PureArtifact({
     <div
       className={cn(
         "h-dvh w-[60%] shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-        isCanvasDocumentArtifact
+        isWorkbenchCanvasArtifact
           ? "flex bg-background/70 p-3 pl-0"
           : "flex flex-col overflow-hidden border-l border-border/70 bg-sidebar/90 shadow-[var(--shadow-float)] backdrop-blur-xl"
       )}
       data-testid="artifact"
     >
-      {isCanvasDocumentArtifact ? (
+      {isWorkbenchCanvasArtifact ? (
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#131314] shadow-[0_26px_80px_-30px_rgba(0,0,0,0.88)]">
           {artifactPanel}
         </div>
@@ -550,18 +588,33 @@ function PureArtifact({
   );
 }
 
-function GeminiCanvasHeader({
+function WorkbenchCanvasHeader({
   chatId,
   content,
+  currentVersionIndex,
+  documentsCount,
+  handleVersionChange,
+  isCurrentVersion,
+  kind,
+  mode,
   saveState,
   title,
 }: {
   chatId: string;
   content: string;
+  currentVersionIndex: number;
+  documentsCount: number;
+  handleVersionChange: (type: "next" | "prev" | "toggle" | "latest") => void;
+  isCurrentVersion: boolean;
+  kind: ArtifactKind;
+  mode: "edit" | "diff";
   saveState: "generating" | "ready" | "saved" | "saving";
   title: string;
 }) {
-  const safeTitle = title?.trim() || "未命名文档";
+  const isPrototype = kind === "prototype";
+  const safeTitle =
+    title?.trim() || (isPrototype ? "未命名原型" : "未命名文档");
+  const kindLabel = isPrototype ? "原型" : "文档";
   const saveLabel =
     saveState === "generating"
       ? "正在生成"
@@ -570,16 +623,42 @@ function GeminiCanvasHeader({
         : saveState === "saved"
           ? "已保存"
           : "Canvas";
+  const exportEndpoint = isPrototype
+    ? `/conversations/${chatId}/export/html`
+    : `/conversations/${chatId}/export/word`;
+  const exportFilename = isPrototype ? "prototype.html" : "需求说明书.doc";
+  const copyContent = stripPrototypePreviewPrefix(content);
 
   return (
     <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#131314] px-3 text-[#e8eaed]">
       <div className="flex min-w-0 items-center gap-2">
         <ArtifactCloseButton />
         <div className="flex min-w-0 items-center gap-2 rounded-full bg-white/[0.06] py-1.5 pr-3 pl-2 text-sm text-[#e8eaed] ring-1 ring-white/[0.08]">
-          <FileTextIcon className="size-4 shrink-0 text-[#c4c7c5]" />
+          {isPrototype ? (
+            <PanelRightOpenIcon className="size-4 shrink-0 text-[#c4c7c5]" />
+          ) : (
+            <FileTextIcon className="size-4 shrink-0 text-[#c4c7c5]" />
+          )}
           <span className="max-w-[32vw] truncate font-medium leading-none">
             {safeTitle}
           </span>
+        </div>
+        <div className="hidden h-8 items-center rounded-full bg-white/[0.04] p-0.5 ring-1 ring-white/[0.08] lg:flex">
+          <span className="rounded-full bg-white/[0.08] px-2.5 py-1 text-[12px] leading-none text-[#e8eaed]">
+            {kindLabel}
+          </span>
+          {documentsCount > 1 ? (
+            <button
+              className={cn(
+                "rounded-full px-2.5 py-1 text-[12px] leading-none text-[#9aa0a6] transition-colors hover:bg-white/[0.08] hover:text-[#e8eaed]",
+                mode === "diff" && "bg-white/[0.08] text-[#e8eaed]"
+              )}
+              onClick={() => handleVersionChange("toggle")}
+              type="button"
+            >
+              v{Math.max(currentVersionIndex + 1, 1)}/{documentsCount}
+            </button>
+          ) : null}
         </div>
         <div className="hidden items-center gap-1.5 text-[12px] text-[#9aa0a6] md:flex">
           {saveState === "generating" || saveState === "saving" ? (
@@ -597,17 +676,25 @@ function GeminiCanvasHeader({
         <CanvasHeaderIconButton label={saveLabel}>
           <CloudIcon className="size-4" />
         </CanvasHeaderIconButton>
-        <CanvasHeaderIconButton disabled label="撤销">
+        <CanvasHeaderIconButton
+          disabled={currentVersionIndex <= 0}
+          label="上一版本"
+          onClick={() => handleVersionChange("prev")}
+        >
           <Undo2Icon className="size-4" />
         </CanvasHeaderIconButton>
-        <CanvasHeaderIconButton disabled label="重做">
+        <CanvasHeaderIconButton
+          disabled={isCurrentVersion}
+          label="下一版本"
+          onClick={() => handleVersionChange("next")}
+        >
           <Redo2Icon className="size-4" />
         </CanvasHeaderIconButton>
         <CanvasHeaderIconButton
-          disabled={!content.trim()}
+          disabled={!copyContent.trim()}
           label="复制"
           onClick={() => {
-            navigator.clipboard.writeText(content);
+            navigator.clipboard.writeText(copyContent);
             toast.success("已复制到剪贴板");
           }}
         >
@@ -615,13 +702,10 @@ function GeminiCanvasHeader({
         </CanvasHeaderIconButton>
         <button
           className="ml-1 hidden h-8 items-center gap-1.5 rounded-full bg-[#e8eaed] px-3 text-[13px] font-medium text-[#202124] transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40 md:flex"
-          disabled={!content.trim()}
+          disabled={!copyContent.trim()}
           onClick={async () => {
-            await downloadApiFile(
-              `/conversations/${chatId}/export/word`,
-              "需求说明书.doc"
-            );
-            toast.success("已开始下载 Word");
+            await downloadApiFile(exportEndpoint, exportFilename);
+            toast.success(isPrototype ? "已开始下载 HTML" : "已开始下载 Word");
           }}
           type="button"
         >
@@ -633,6 +717,157 @@ function GeminiCanvasHeader({
         </CanvasHeaderIconButton>
       </div>
     </div>
+  );
+}
+
+function WorkbenchCanvasSideTools({
+  artifact,
+  artifactDefinition,
+  chatId,
+  consoleError,
+  currentVersionIndex,
+  handleVersionChange,
+  isCurrentVersion,
+  metadata,
+  mode,
+  selectedText,
+  sendMessage,
+  setMetadata,
+}: {
+  artifact: UIArtifact;
+  artifactDefinition: (typeof artifactDefinitions)[number];
+  chatId: string;
+  consoleError?: string;
+  currentVersionIndex: number;
+  handleVersionChange: (type: "next" | "prev" | "toggle" | "latest") => void;
+  isCurrentVersion: boolean;
+  metadata: any;
+  mode: "edit" | "diff";
+  selectedText?: string;
+  sendMessage: UseChatHelpers<ChatMessage>["sendMessage"];
+  setMetadata: ArtifactActionContext["setMetadata"];
+}) {
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const actionContext: ArtifactActionContext = {
+    content: artifact.content,
+    conversationId: chatId,
+    documentId: artifact.documentId,
+    kind: artifact.kind,
+    handleVersionChange,
+    currentVersionIndex,
+    isCurrentVersion,
+    mode,
+    metadata,
+    setMetadata,
+  };
+  const toolbarContext: ArtifactToolbarContext = {
+    content: artifact.content,
+    documentId: artifact.documentId,
+    metadata,
+    selectedText,
+    sendMessage,
+  };
+  const isBusy = artifact.status === "streaming";
+
+  return (
+    <div
+      aria-label="Canvas 工具"
+      className="absolute top-4 right-3 z-20 hidden flex-col items-center gap-1 rounded-full border border-white/10 bg-[#171819]/95 p-1.5 shadow-[0_18px_44px_-24px_rgba(0,0,0,0.9)] backdrop-blur-xl md:flex"
+    >
+      {artifactDefinition.toolbar.map((tool) => (
+        <WorkbenchCanvasToolButton
+          disabled={isBusy}
+          key={tool.description}
+          label={tool.description}
+          onClick={() => tool.onClick(toolbarContext)}
+        >
+          {tool.icon}
+        </WorkbenchCanvasToolButton>
+      ))}
+
+      {artifactDefinition.actions.length > 0 ? (
+        <div className="my-1 h-px w-5 bg-white/10" />
+      ) : null}
+
+      {artifactDefinition.actions.map((action) => {
+        const disabled =
+          isBusy ||
+          (action.isDisabled ? action.isDisabled(actionContext) : false);
+        return (
+          <WorkbenchCanvasToolButton
+            disabled={disabled || pendingAction === action.description}
+            key={action.description}
+            label={action.description}
+            onClick={async () => {
+              setPendingAction(action.description);
+              try {
+                await Promise.resolve(action.onClick(actionContext));
+              } catch {
+                toast.error("操作执行失败");
+              } finally {
+                setPendingAction(null);
+              }
+            }}
+          >
+            {pendingAction === action.description ? (
+              <span className="animate-spin">
+                <LoaderIcon size={16} />
+              </span>
+            ) : (
+              action.icon
+            )}
+          </WorkbenchCanvasToolButton>
+        );
+      })}
+
+      {consoleError ? (
+        <>
+          <div className="my-1 h-px w-5 bg-white/10" />
+          <WorkbenchCanvasToolButton
+            disabled={isBusy}
+            label="修复错误"
+            onClick={() => {
+              sendMessage({
+                role: "user",
+                parts: [
+                  {
+                    type: "text",
+                    text: `请修复当前画布中的错误，不要创建新的产物。\n\n${consoleError}`,
+                  },
+                ],
+              });
+            }}
+          >
+            <Code2Icon className="size-4" />
+          </WorkbenchCanvasToolButton>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function WorkbenchCanvasToolButton({
+  children,
+  disabled,
+  label,
+  onClick,
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  label: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className="flex size-8 items-center justify-center rounded-full text-[#c4c7c5] transition-all hover:bg-white/[0.08] hover:text-[#e8eaed] active:scale-95 disabled:pointer-events-none disabled:opacity-30 [&_svg]:size-4"
+      disabled={disabled}
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -659,6 +894,13 @@ function CanvasHeaderIconButton({
       {children}
     </button>
   );
+}
+
+function stripPrototypePreviewPrefix(content: string) {
+  const previewPrefix = "preview:";
+  return content.startsWith(previewPrefix)
+    ? content.slice(previewPrefix.length)
+    : content;
 }
 
 export const Artifact = memo(PureArtifact, (prevProps, nextProps) => {

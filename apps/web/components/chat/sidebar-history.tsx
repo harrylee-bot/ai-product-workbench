@@ -26,6 +26,7 @@ import type { Chat } from "@/lib/api/types";
 import type { NestUser } from "@/lib/auth/nest-auth";
 import { deleteChat, getChats } from "@/lib/api/nest-client";
 import { createNewChatHref } from "@/lib/chat-navigation";
+import { cn } from "@/lib/utils";
 import { ChatItem } from "./sidebar-history-item";
 
 type GroupedChats = {
@@ -74,9 +75,15 @@ export const CHAT_HISTORY_KEY = "chat-history";
 export function SidebarHistory({
   user,
   isAuthLoading = false,
+  query = "",
+  flat = false,
+  hideLabel = false,
 }: {
   user: NestUser | undefined;
   isAuthLoading?: boolean;
+  query?: string;
+  flat?: boolean;
+  hideLabel?: boolean;
 }) {
   const { setOpenMobile } = useSidebar();
   const pathname = usePathname();
@@ -95,7 +102,15 @@ export function SidebarHistory({
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleChats = normalizedQuery
+    ? (chats ?? []).filter((chat) =>
+        chat.title.toLowerCase().includes(normalizedQuery)
+      )
+    : (chats ?? []);
   const hasEmptyChatHistory = chats ? chats.length === 0 : false;
+  const hasNoSearchResults =
+    Boolean(normalizedQuery) && !hasEmptyChatHistory && visibleChats.length === 0;
 
   const handleDelete = () => {
     const chatToDelete = deleteId;
@@ -127,9 +142,11 @@ export function SidebarHistory({
   if (isAuthLoading) {
     return (
       <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
-          历史
-        </SidebarGroupLabel>
+        {hideLabel ? null : (
+          <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
+            历史
+          </SidebarGroupLabel>
+        )}
         <SidebarGroupContent>
           <div className="flex flex-col gap-0.5 px-1">
             {[44, 32, 28].map((item) => (
@@ -168,9 +185,11 @@ export function SidebarHistory({
   if (isLoading) {
     return (
       <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
-          历史
-        </SidebarGroupLabel>
+        {hideLabel ? null : (
+          <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
+            历史
+          </SidebarGroupLabel>
+        )}
         <SidebarGroupContent>
           <div className="flex flex-col gap-0.5 px-1">
             {[44, 32, 28, 64, 52].map((item) => (
@@ -197,9 +216,11 @@ export function SidebarHistory({
   if (hasEmptyChatHistory) {
     return (
       <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
-          历史
-        </SidebarGroupLabel>
+        {hideLabel ? null : (
+          <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
+            历史
+          </SidebarGroupLabel>
+        )}
         <SidebarGroupContent>
           <div className="flex w-full flex-row items-center justify-center gap-2 px-2 text-[13px] text-sidebar-foreground/60">
             开始对话后，历史记录会显示在这里
@@ -209,17 +230,65 @@ export function SidebarHistory({
     );
   }
 
+  if (hasNoSearchResults) {
+    return (
+      <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+        {hideLabel ? null : (
+          <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
+            历史
+          </SidebarGroupLabel>
+        )}
+        <SidebarGroupContent>
+          <div className="flex w-full flex-col items-center justify-center gap-1 px-3 py-6 text-center">
+            <div className="text-[13px] text-sidebar-foreground/65">
+              没有匹配的对话
+            </div>
+            <div className="text-[11px] text-sidebar-foreground/35">
+              换个关键词试试
+            </div>
+          </div>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    );
+  }
+
   return (
     <>
-      <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
-          历史
-        </SidebarGroupLabel>
+      <SidebarGroup
+        className={cn(
+          "group-data-[collapsible=icon]:hidden",
+          flat && "px-3"
+        )}
+      >
+        {hideLabel ? null : (
+          <SidebarGroupLabel className="text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70">
+            历史
+          </SidebarGroupLabel>
+        )}
         <SidebarGroupContent>
           <SidebarMenu>
             {chats &&
               (() => {
-                const chatsFromHistory = chats;
+                const chatsFromHistory = visibleChats;
+
+                if (flat) {
+                  return (
+                    <div className="flex flex-col gap-1">
+                      {chatsFromHistory.map((chat) => (
+                        <ChatItem
+                          chat={chat}
+                          isActive={chat.id === id}
+                          key={chat.id}
+                          onDelete={(chatId) => {
+                            setDeleteId(chatId);
+                            setShowDeleteDialog(true);
+                          }}
+                          setOpenMobile={setOpenMobile}
+                        />
+                      ))}
+                    </div>
+                  );
+                }
 
                 const groupedChats = groupChatsByDate(chatsFromHistory);
 

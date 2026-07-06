@@ -7,11 +7,10 @@ import {
   ArrowUpIcon,
   BookOpenIcon,
   CloudIcon,
+  DatabaseIcon,
   FileTextIcon,
-  GraduationCapIcon,
   ImageIcon,
   InfoIcon,
-  MusicIcon,
   PlusIcon,
   SparklesIcon,
   VideoIcon,
@@ -113,6 +112,7 @@ function PureMultimodalInput({
   onArtifactModeChange,
   onModelChange,
   runtimeModel,
+  runtimeModels,
   editingMessage,
   onCancelEdit,
   isLoading,
@@ -136,6 +136,7 @@ function PureMultimodalInput({
   onArtifactModeChange?: (mode: ChatArtifactMode) => void;
   onModelChange?: (modelId: string) => void;
   runtimeModel: ChatRuntimeModel;
+  runtimeModels: ChatRuntimeModel[];
   editingMessage?: ChatMessage | null;
   onCancelEdit?: () => void;
   isLoading?: boolean;
@@ -573,7 +574,7 @@ function PureMultimodalInput({
               ? "编辑你的消息..."
               : isCanvasMode
                 ? "一起开始创作吧"
-                : "问问 Gemini"
+                : "向产品工作台提问"
           }
           ref={textareaRef}
           value={input}
@@ -608,6 +609,7 @@ function PureMultimodalInput({
             <ModelSelectorCompact
               onModelChange={onModelChange}
               runtimeModel={runtimeModel}
+              runtimeModels={runtimeModels}
               selectedModelId={selectedModelId}
             />
 
@@ -660,6 +662,9 @@ export const MultimodalInput = memo(
     if (prevProps.runtimeModel.id !== nextProps.runtimeModel.id) {
       return false;
     }
+    if (!equal(prevProps.runtimeModels, nextProps.runtimeModels)) {
+      return false;
+    }
     if (prevProps.editingMessage !== nextProps.editingMessage) {
       return false;
     }
@@ -692,7 +697,7 @@ function UploadAndToolsMenu({
   const iconClassName = "size-4 text-popover-foreground/75";
 
   const showUnsupportedToast = (label: string) => {
-    toast(`${label}暂未接入，当前可用的是 Canvas。`);
+    toast(`${label}暂未接入，当前可用的是 Canvas 与文件上传。`);
   };
 
   return (
@@ -733,7 +738,7 @@ function UploadAndToolsMenu({
           onSelect={() => showUnsupportedToast("从云端硬盘添加")}
         >
           <CloudIcon className={iconClassName} />
-          <span>从云端硬盘添加</span>
+          <span>从项目归档添加</span>
         </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className={itemClassName}>
@@ -759,20 +764,20 @@ function UploadAndToolsMenu({
 
         <DropdownMenuItem
           className={itemClassName}
-          onSelect={() => showUnsupportedToast("制作图片")}
+          onSelect={() => showUnsupportedToast("生成配图")}
         >
           <ImageIcon className={iconClassName} />
-          <span>制作图片</span>
+          <span>生成配图</span>
           <span className="ml-auto rounded-full bg-white/12 px-2 py-0.5 text-[11px] text-popover-foreground/80">
             新
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem
           className={itemClassName}
-          onSelect={() => showUnsupportedToast("制作视频")}
+          onSelect={() => showUnsupportedToast("生成演示视频")}
         >
           <VideoIcon className={iconClassName} />
-          <span>制作视频</span>
+          <span>生成演示视频</span>
         </DropdownMenuItem>
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className={itemClassName}>
@@ -799,7 +804,7 @@ function UploadAndToolsMenu({
                       onSelect={() => onCanvasModeChange("canvas")}
                     >
                       <FileTextIcon className={iconClassName} />
-                      <span>Canvas</span>
+                    <span>Canvas 创作</span>
                     </DropdownMenuItem>
                   </TooltipTrigger>
                   <TooltipContent
@@ -807,42 +812,42 @@ function UploadAndToolsMenu({
                     side="right"
                     sideOffset={12}
                   >
-                    编写代码、撰写内容或制作幻灯片
+                    编写 PRD、补充方案，或生成可预览原型
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
               <DropdownMenuItem
                 className={itemClassName}
-                onSelect={() => showUnsupportedToast("Deep Research")}
+                onSelect={() => showUnsupportedToast("引用知识库")}
               >
-                <SparklesIcon className={iconClassName} />
-                <span>Deep Research</span>
+                <DatabaseIcon className={iconClassName} />
+                <span>引用知识库</span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 className={itemClassName}
-                onSelect={() => showUnsupportedToast("制作音乐")}
+                onSelect={() => showUnsupportedToast("生成评审材料")}
               >
-                <MusicIcon className={iconClassName} />
-                <span>制作音乐</span>
+                <SparklesIcon className={iconClassName} />
+                <span>生成评审材料</span>
                 <span className="ml-auto rounded-full bg-white/12 px-2 py-0.5 text-[11px] text-popover-foreground/80">
                   新
                 </span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 className={itemClassName}
-                onSelect={() => showUnsupportedToast("学习辅导")}
+                onSelect={() => showUnsupportedToast("生成验收清单")}
               >
-                <GraduationCapIcon className={iconClassName} />
-                <span>学习辅导</span>
+                <FileTextIcon className={iconClassName} />
+                <span>生成验收清单</span>
               </DropdownMenuItem>
               <DropdownMenuItem
                 className={itemClassName}
-                onSelect={() => showUnsupportedToast("个性化智能服务")}
+                onSelect={() => showUnsupportedToast("生成原型任务")}
               >
                 <SparklesIcon className={iconClassName} />
-                <span className="min-w-0 flex-1 truncate">个性化智能服务</span>
+                <span className="min-w-0 flex-1 truncate">生成原型任务</span>
                 <span className="rounded-full bg-primary/80 px-1.5 py-0.5 text-[10px] text-primary-foreground">
-                  Labs
+                  Beta
                 </span>
               </DropdownMenuItem>
             </DropdownMenuSubContent>
@@ -862,7 +867,7 @@ function CanvasModeChip({
 }) {
   return (
     <Button
-      aria-label="取消选择“Canvas”"
+      aria-label="取消选择 Canvas 创作"
       className="h-7 gap-1 rounded-full border-0 bg-muted/80 px-2 text-[12px] font-medium text-foreground/90 transition-colors hover:bg-muted hover:text-foreground"
       data-testid="canvas-mode-chip"
       disabled={status !== "ready"}
@@ -874,7 +879,7 @@ function CanvasModeChip({
       variant="ghost"
     >
       <FileTextIcon className="size-3.5" />
-      <span>Canvas</span>
+      <span>Canvas 创作</span>
     </Button>
   );
 }
@@ -883,13 +888,15 @@ function PureModelSelectorCompact({
   selectedModelId,
   onModelChange,
   runtimeModel,
+  runtimeModels,
 }: {
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
   runtimeModel: ChatRuntimeModel;
+  runtimeModels: ChatRuntimeModel[];
 }) {
   const [open, setOpen] = useState(false);
-  const activeModels = [runtimeModel];
+  const activeModels = runtimeModels.length ? runtimeModels : [runtimeModel];
 
   const selectedModel =
     activeModels.find((m) => m.id === selectedModelId) ??

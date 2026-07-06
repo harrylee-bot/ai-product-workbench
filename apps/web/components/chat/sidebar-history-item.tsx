@@ -26,6 +26,7 @@ import {
   ShareIcon,
   TrashIcon,
 } from "./icons";
+import { cn } from "@/lib/utils";
 
 const PureChatItem = ({
   chat,
@@ -47,7 +48,10 @@ const PureChatItem = ({
     <SidebarMenuItem>
       <SidebarMenuButton
         asChild
-        className="h-8 rounded-lg pr-7 text-[13px] text-sidebar-foreground/55 transition-all duration-150 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground data-active:font-normal data-active:text-sidebar-accent-foreground data-[active=true]:border data-[active=true]:border-sidebar-border data-[active=true]:bg-sidebar-accent/70 data-[active=true]:font-medium data-[active=true]:text-sidebar-foreground"
+        className={cn(
+          "h-11 rounded-full px-4 pr-11 text-[18px] font-normal text-[#e8eaed]/82 transition-colors duration-150 hover:bg-white/8 hover:text-[#f1f3f4]",
+          "data-active:font-normal data-active:text-[#f1f3f4] data-[active=true]:bg-[#111111] data-[active=true]:font-semibold"
+        )}
         isActive={isActive}
       >
         <Link href={createChatHref(chat.id)} onClick={() => setOpenMobile(false)}>
@@ -58,7 +62,7 @@ const PureChatItem = ({
       <DropdownMenu modal={true}>
         <DropdownMenuTrigger asChild>
           <SidebarMenuAction
-            className="mr-0.5 rounded-md text-sidebar-foreground/50 ring-0 transition-colors duration-150 focus-visible:ring-0 hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+            className="right-3 top-2.5 rounded-full text-[#e8eaed]/60 ring-0 transition-colors duration-150 focus-visible:ring-0 hover:bg-white/10 hover:text-[#f1f3f4] data-[state=open]:bg-white/10 data-[state=open]:text-[#f1f3f4]"
           >
             <MoreHorizontalIcon />
             <span className="sr-only">更多</span>
