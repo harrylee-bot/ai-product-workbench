@@ -1,4 +1,6 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400;1,500;1,600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400;1,500;1,600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap");
+@import "@xyflow/react/dist/style.css";
+@config "../tailwind.config.mjs";
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
 
@@ -15,10 +17,10 @@
     "Segoe UI", "Microsoft YaHei", sans-serif;
   --font-mono:
     "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -52,56 +54,69 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* ─── Gemini-style design tokens ─── */
+/* ─── Stitch design tokens ─── */
 :root {
   color-scheme: dark;
 
-  /* Gemini raw palette */
-  --g-bg:            #0f0f0f;
-  --g-panel:         #1f1f1f;
-  --g-panel-soft:    #202124;
-  --g-panel-raised:  #27282a;
-  --g-line:          #3f4145;
-  --g-muted-text:    #a7a9ad;
-  --g-text:          #e8eaed;
-  --g-blue:          #1a73e8;
-  --g-blue-deep:     #1c2862;
-  --g-blue-card:     #1e2a67;
-  --g-btn-hover:     rgba(255,255,255,0.08);
+  /* Stitch raw palette */
+  --stitch-bg:            #131314;
+  --stitch-panel:         #1f2021;
+  --stitch-panel-soft:    #201f20;
+  --stitch-panel-raised:  #2a2a2b;
+  --stitch-line:          #494454;
+  --stitch-muted-text:    #cbc3d7;
+  --stitch-text:          #e5e2e3;
+  --stitch-primary:       #8b5cf6;
+  --stitch-blue:          #3b82f6;
+  --stitch-blue-deep:     #0566d9;
+  --stitch-blue-card:     #1f293f;
+  --stitch-cyan:          #00f0ff;
+  --stitch-btn-hover:     rgba(255,255,255,0.08);
+  --g-bg:                 var(--stitch-bg);
+  --g-panel:              var(--stitch-panel);
+  --g-panel-soft:         var(--stitch-panel-soft);
+  --g-panel-raised:       var(--stitch-panel-raised);
+  --g-line:               var(--stitch-line);
+  --g-muted-text:         var(--stitch-muted-text);
+  --g-text:               var(--stitch-text);
+  --g-blue:               var(--stitch-blue);
+  --g-blue-deep:          var(--stitch-blue-deep);
+  --g-blue-card:          var(--stitch-blue-card);
+  --g-btn-hover:          var(--stitch-btn-hover);
 
   /* Tailwind / Radix token mapping */
-  --radius: 0.75rem;
-  --background:                   var(--g-bg);
-  --foreground:                   var(--g-text);
-  --card:                         var(--g-panel);
-  --card-foreground:              var(--g-text);
-  --popover:                      var(--g-panel-soft);
-  --popover-foreground:           var(--g-text);
-  --primary:                      var(--g-text);
-  --primary-foreground:           var(--g-panel-soft);
-  --secondary:                    var(--g-panel-raised);
-  --secondary-foreground:         var(--g-text);
-  --muted:                        var(--g-panel-raised);
-  --muted-foreground:             var(--g-muted-text);
-  --accent:                       var(--g-blue-card);
-  --accent-foreground:            var(--g-text);
+  --radius: 12px;
+  --background:                   var(--stitch-bg);
+  --foreground:                   var(--stitch-text);
+  --card:                         var(--stitch-panel);
+  --card-foreground:              var(--stitch-text);
+  --popover:                      var(--stitch-panel-soft);
+  --popover-foreground:           var(--stitch-text);
+  --primary:                      var(--stitch-primary);
+  --primary-foreground:           #ffffff;
+  --secondary:                    var(--stitch-panel-raised);
+  --secondary-foreground:         var(--stitch-text);
+  --muted:                        var(--stitch-panel-raised);
+  --muted-foreground:             var(--stitch-muted-text);
+  --accent:                       var(--stitch-blue-card);
+  --accent-foreground:            var(--stitch-text);
   --destructive:                  #ea4335;
-  --border:                       var(--g-line);
-  --input:                        var(--g-panel-soft);
-  --ring:                         var(--g-blue);
+  --border:                       var(--stitch-line);
+  --input:                        var(--stitch-panel-soft);
+  --ring:                         var(--stitch-primary);
   --chart-1: oklch(0.68 0.13 54);
   --chart-2: oklch(0.68 0.09 155);
   --chart-3: oklch(0.64 0.08 235);
   --chart-4: oklch(0.72 0.1  92);
   --chart-5: oklch(0.7  0.11 20);
-  --sidebar:                      var(--g-panel);
-  --sidebar-foreground:           var(--g-text);
-  --sidebar-primary:              var(--g-text);
-  --sidebar-primary-foreground:   var(--g-panel);
+  --sidebar:                      var(--stitch-panel);
+  --sidebar-foreground:           var(--stitch-text);
+  --sidebar-primary:              var(--stitch-primary);
+  --sidebar-primary-foreground:   #ffffff;
   --sidebar-accent:               rgba(232,234,237,0.08);
-  --sidebar-accent-foreground:    var(--g-text);
-  --sidebar-border:               var(--g-line);
-  --sidebar-ring:                 var(--g-blue);
+  --sidebar-accent-foreground:    var(--stitch-text);
+  --sidebar-border:               var(--stitch-line);
+  --sidebar-ring:                 var(--stitch-primary);
 
   /* Shadows */
   --shadow-card:
@@ -117,7 +132,7 @@
     0 0 0 1px rgba(255,255,255,0.12),
     0 22px 72px -30px rgba(0,0,0,0.95);
   --shadow-inset: inset 0 1px 1px rgba(0,0,0,0.35);
-  --shadow-glow:  0 0 26px rgba(26,115,232,0.12);
+  --shadow-glow:  0 0 26px rgba(123,92,255,0.16);
 
   /* Canvas panel */
   --canvas-border-radius: 34px;
@@ -131,32 +146,32 @@
 
 /* dark class mirrors :root (already dark-first) */
 .dark {
-  --background:                   var(--g-bg);
-  --foreground:                   var(--g-text);
-  --card:                         var(--g-panel);
-  --card-foreground:              var(--g-text);
-  --popover:                      var(--g-panel-soft);
-  --popover-foreground:           var(--g-text);
-  --primary:                      var(--g-text);
-  --primary-foreground:           var(--g-panel-soft);
-  --secondary:                    var(--g-panel-raised);
-  --secondary-foreground:         var(--g-text);
-  --muted:                        var(--g-panel-raised);
-  --muted-foreground:             var(--g-muted-text);
-  --accent:                       var(--g-blue-card);
-  --accent-foreground:            var(--g-text);
+  --background:                   var(--stitch-bg);
+  --foreground:                   var(--stitch-text);
+  --card:                         var(--stitch-panel);
+  --card-foreground:              var(--stitch-text);
+  --popover:                      var(--stitch-panel-soft);
+  --popover-foreground:           var(--stitch-text);
+  --primary:                      var(--stitch-primary);
+  --primary-foreground:           #ffffff;
+  --secondary:                    var(--stitch-panel-raised);
+  --secondary-foreground:         var(--stitch-text);
+  --muted:                        var(--stitch-panel-raised);
+  --muted-foreground:             var(--stitch-muted-text);
+  --accent:                       var(--stitch-blue-card);
+  --accent-foreground:            var(--stitch-text);
   --destructive:                  #ea4335;
-  --border:                       var(--g-line);
-  --input:                        var(--g-panel-soft);
-  --ring:                         var(--g-blue);
-  --sidebar:                      var(--g-panel);
-  --sidebar-foreground:           var(--g-text);
-  --sidebar-primary:              var(--g-text);
-  --sidebar-primary-foreground:   var(--g-panel);
+  --border:                       var(--stitch-line);
+  --input:                        var(--stitch-panel-soft);
+  --ring:                         var(--stitch-primary);
+  --sidebar:                      var(--stitch-panel);
+  --sidebar-foreground:           var(--stitch-text);
+  --sidebar-primary:              var(--stitch-primary);
+  --sidebar-primary-foreground:   #ffffff;
   --sidebar-accent:               rgba(232,234,237,0.08);
-  --sidebar-accent-foreground:    var(--g-text);
-  --sidebar-border:               var(--g-line);
-  --sidebar-ring:                 var(--g-blue);
+  --sidebar-accent-foreground:    var(--stitch-text);
+  --sidebar-border:               var(--stitch-line);
+  --sidebar-ring:                 var(--stitch-primary);
 
   --shadow-card:
     0 10px 28px -18px rgba(0,0,0,0.9),
@@ -180,17 +195,17 @@
 
   body {
     @apply bg-background text-foreground;
-    background: var(--g-bg);
+    background: var(--stitch-bg);
     font-feature-settings: "ss01", "ss02", "cv01";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-    overflow-x: hidden;
+    overflow-x: auto;
     position: relative;
   }
 
   html {
-    overflow-x: hidden;
+    overflow-x: auto;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -704,4 +719,229 @@ textarea:focus-visible {
 .send-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@keyframes stitch-scan {
+  0% {
+    transform: translateX(-42%);
+    opacity: 0.42;
+  }
+  50% {
+    opacity: 0.72;
+  }
+  100% {
+    transform: translateX(42%);
+    opacity: 0.42;
+  }
+}
+
+@keyframes stitch-border-breathe {
+  0%, 100% {
+    box-shadow:
+      inset 0 0 0 4px rgba(116, 92, 255, 0.96),
+      0 0 0 1px rgba(166, 146, 255, 0.26),
+      0 22px 90px rgba(0, 0, 0, 0.55);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 4px rgba(116, 92, 255, 1),
+      0 0 0 1px rgba(166, 146, 255, 0.44),
+      0 0 34px rgba(116, 92, 255, 0.24),
+      0 22px 90px rgba(0, 0, 0, 0.55);
+  }
+}
+
+@keyframes stitch-card-edge {
+  0% {
+    opacity: 0.72;
+    transform: translate3d(-16%, -12%, 0);
+  }
+  50% {
+    opacity: 1;
+    transform: translate3d(14%, 10%, 0);
+  }
+  100% {
+    opacity: 0.72;
+    transform: translate3d(-16%, -12%, 0);
+  }
+}
+
+.stitch-agent-card::after {
+  position: absolute;
+  inset: -2px;
+  content: "";
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 0% 100%, rgba(24, 211, 191, 0.58), transparent 27%),
+    radial-gradient(circle at 0% 0%, rgba(123, 92, 255, 0.74), transparent 32%),
+    radial-gradient(circle at 100% 100%, rgba(24, 211, 191, 0.36), transparent 24%);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  padding: 1px;
+  animation: stitch-card-edge 5.4s ease-in-out infinite;
+}
+
+.stitch-generation-surface {
+  background:
+    linear-gradient(90deg, rgba(55, 83, 72, 0.74), rgba(46, 54, 66, 0.88) 46%, rgba(55, 53, 48, 0.76)),
+    #222326;
+}
+
+.stitch-generation-surface::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background:
+    linear-gradient(90deg, transparent, rgba(142, 119, 255, 0.16), transparent),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.026) 0 1px, transparent 1px 72px);
+  animation: stitch-scan 2.8s ease-in-out infinite;
+}
+
+.stitch-generation-surface::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background:
+    radial-gradient(circle at 0% 0%, rgba(116, 92, 255, 0.26), transparent 35%),
+    radial-gradient(circle at 100% 100%, rgba(24, 211, 191, 0.14), transparent 30%);
+}
+
+.stitch-selection-glow {
+  animation: stitch-border-breathe 2.8s ease-in-out infinite;
+}
+
+.stitch-workbench :where(button, [role="button"]) {
+  --tw-duration: 200ms !important;
+  --tw-ease: ease !important;
+  transition-property:
+    background-color,
+    border-color,
+    color,
+    box-shadow,
+    opacity,
+    transform !important;
+  transition-duration: 200ms !important;
+  transition-timing-function: ease !important;
+}
+
+.stitch-workbench :where(button, [role="button"]):hover {
+  transform: translateY(-2px) !important;
+}
+
+.stitch-workbench :where(button, [role="button"]):active {
+  transform: translateY(0) scale(0.98) !important;
+}
+
+.stitch-workbench :where(button, a, span, h1, h2, h3, p, label) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stitch-workbench .material-symbols-outlined {
+  direction: ltr;
+  display: inline-block;
+  font-family: "Material Symbols Outlined";
+  font-feature-settings: "liga";
+  font-style: normal;
+  font-weight: normal;
+  letter-spacing: normal;
+  line-height: 1;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+}
+
+.stitch-export-glass {
+  background-color: rgba(28, 27, 28, 0.6);
+  border: 1px solid rgba(73, 68, 84, 0.1);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+.stitch-glass {
+  background-color: rgba(24, 25, 27, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.02),
+    0 24px 74px -32px rgba(0,0,0,0.92);
+}
+
+.stitch-control {
+  align-items: center;
+  background-color: rgba(35,36,39,0.82);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 9999px;
+  color: #f1f3f4;
+  display: inline-flex;
+  font-weight: 600;
+  justify-content: center;
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    transform 200ms ease;
+}
+
+.stitch-icon-button {
+  align-items: center;
+  background-color: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 9999px;
+  color: #f1f3f4;
+  display: inline-flex;
+  justify-content: center;
+  transition:
+    background-color 200ms ease,
+    color 200ms ease,
+    transform 200ms ease;
+}
+
+.stitch-aurora {
+  animation: stitch-export-aurora-sweep 2s infinite linear;
+  background: linear-gradient(90deg, #d0bcff, #a078ff, #00dbe9, #d0bcff);
+  background-size: 300% 100%;
+}
+
+.stitch-pulse {
+  animation: stitch-export-pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+.stitch-export-aurora {
+  animation: stitch-export-aurora-sweep 2s infinite linear;
+  background: linear-gradient(90deg, #d0bcff, #a078ff, #00dbe9, #d0bcff);
+  background-size: 300% 100%;
+}
+
+.stitch-export-pulse {
+  animation: stitch-export-pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+@keyframes stitch-export-aurora-sweep {
+  0% {
+    background-position: 100% 0%;
+  }
+  100% {
+    background-position: -200% 0%;
+  }
+}
+
+@keyframes stitch-export-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(208, 188, 255, 0.7);
+    transform: scale(0.8);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(208, 188, 255, 0);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(208, 188, 255, 0);
+    transform: scale(0.8);
+  }
 }

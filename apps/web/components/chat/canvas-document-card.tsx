@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ChevronRightIcon,
   FileTextIcon,
   PanelRightOpenIcon,
   SquareStackIcon,

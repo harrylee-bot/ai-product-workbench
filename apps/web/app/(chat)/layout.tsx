@@ -3,18 +3,15 @@
 import { useRouter } from "next/navigation";
 import { Suspense, useEffect } from "react";
 import { Toaster } from "sonner";
-import { AppSidebar } from "@/components/chat/app-sidebar";
 import { DataStreamProvider } from "@/components/chat/data-stream-provider";
 import { ChatShell } from "@/components/chat/shell";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { ActiveChatProvider } from "@/hooks/use-active-chat";
 import { useAuth } from "@/lib/auth/nest-auth";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <DataStreamProvider>
-        <Suspense fallback={<div className="flex h-dvh bg-background" />}>
+        <Suspense fallback={<div className="flex h-[900px] bg-background" />}>
           <SidebarShell>{children}</SidebarShell>
         </Suspense>
       </DataStreamProvider>
@@ -27,43 +24,39 @@ function SidebarShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
 
   useEffect(() => {
+    const previousMinWidth = document.body.style.minWidth;
+    document.body.style.minWidth = "1440px";
+    return () => {
+      document.body.style.minWidth = previousMinWidth;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!loading && !user) {
       router.replace("/login");
     }
   }, [loading, router, user]);
 
   if (loading || !user) {
-    return <div className="flex h-dvh bg-background" />;
+    return <div className="flex h-[900px] bg-background" />;
   }
 
-  // 客户端读取 sidebar 折叠状态（原 next/headers cookies() 的替代）。
-  const isCollapsed =
-    typeof document !== "undefined" &&
-    document.cookie
-      .split("; ")
-      .find((row) => row.startsWith("sidebar_state="))
-      ?.split("=")[1] !== "true";
-
   return (
-    <SidebarProvider defaultOpen={!isCollapsed}>
-      {/* AppSidebar 内部用 useAuth() 取当前用户，无需服务端注入。 */}
-      <AppSidebar />
-      <SidebarInset>
-        <Toaster
-          position="top-center"
-          theme="dark"
-          toastOptions={{
-            className:
-              "!bg-card !text-foreground !border-border/70 !shadow-[var(--shadow-float)] !backdrop-blur-xl",
-          }}
-        />
-        <Suspense fallback={<div className="flex h-dvh" />}>
-          <ActiveChatProvider>
-            <ChatShell />
-          </ActiveChatProvider>
+    <div className="min-h-[900px] bg-[#1c1c1c] text-white">
+      <Toaster
+        position="top-center"
+        theme="dark"
+        toastOptions={{
+          className:
+            "!bg-card !text-foreground !border-border/70 !shadow-[var(--shadow-float)] !backdrop-blur-xl",
+        }}
+      />
+      <div className="mx-auto h-[900px] min-w-[1440px] max-w-[1440px] overflow-hidden bg-[#1f2022]">
+        <Suspense fallback={<div className="flex h-[900px]" />}>
+          <ChatShell />
         </Suspense>
         {children}
-      </SidebarInset>
-    </SidebarProvider>
+      </div>
+    </div>
   );
 }

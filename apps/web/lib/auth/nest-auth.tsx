@@ -36,10 +36,57 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const LOCAL_DEMO_EMAIL = "stitch@local.dev";
+const LOCAL_DEMO_PASSWORD = "stitch123456";
+const LOCAL_DEMO_COOKIE = "access_token";
+const LOCAL_DEMO_STORAGE_KEY = "stitch-local-demo-user";
+const LOCAL_DEMO_USER: NestUser = {
+  id: "local-stitch-preview",
+  username: "stitch-preview",
+  email: LOCAL_DEMO_EMAIL,
+  displayName: "Stitch Preview",
+  role: "user",
+  status: "active",
+};
 
 function normalizeSessionResponse(data: { user?: NestUser | null } | NestUser): NestUser | null {
   if ("user" in data) return data.user ?? null;
   return data as NestUser;
+}
+
+function isLocalDemoEnabled() {
+  return process.env.NODE_ENV !== "production";
+}
+
+function readLocalDemoUser(): NestUser | null {
+  if (!isLocalDemoEnabled() || typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(LOCAL_DEMO_STORAGE_KEY)
+      ? LOCAL_DEMO_USER
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalDemoUser() {
+  if (!isLocalDemoEnabled() || typeof window === "undefined") return;
+  window.localStorage.setItem(LOCAL_DEMO_STORAGE_KEY, "1");
+  document.cookie = `${LOCAL_DEMO_COOKIE}=local-stitch-preview; path=/; max-age=604800; SameSite=Lax`;
+}
+
+function clearLocalDemoUser() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LOCAL_DEMO_STORAGE_KEY);
+  document.cookie = `${LOCAL_DEMO_COOKIE}=; path=/; max-age=0; SameSite=Lax`;
+}
+
+function matchesLocalDemoLogin(input: { email: string; password: string }) {
+  return (
+    isLocalDemoEnabled() &&
+    input.email.trim().toLowerCase() === LOCAL_DEMO_EMAIL &&
+    input.password === LOCAL_DEMO_PASSWORD
+  );
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -75,6 +122,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    const localDemoUser = readLocalDemoUser();
+    if (localDemoUser) {
+      setUser(localDemoUser);
+      setLoading(false);
+      return;
+    }
+
     try {
       const data = await request<{ user?: NestUser | null } | NestUser>("/auth/session");
       setUser(normalizeSessionResponse(data));
@@ -91,12 +145,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (input: { email: string; password: string }) => {
-      const data = await request<{ user: NestUser }>("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email: input.email, password: input.password }),
-      });
-      setUser(data.user);
-      return data.user;
+      try {
+        const data = await request<{ user: NestUser }>("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email: input.email, password: input.password }),
+        });
+        setUser(data.user);
+        return data.user;
+      } catch (error) {
+        if (!matchesLocalDemoLogin(input)) throw error;
+        writeLocalDemoUser();
+        setUser(LOCAL_DEMO_USER);
+        return LOCAL_DEMO_USER;
+      }
     },
     [],
   );
@@ -124,6 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
+    clearLocalDemoUser();
     setUser(null);
   }, []);
 
