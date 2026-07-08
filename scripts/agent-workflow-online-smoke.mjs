@@ -600,8 +600,12 @@ function evaluatePrdDocument(document) {
     ["业务需求", /业务需求|核心业务规则|功能说明|验收标准/],
     ["降级方案", /降级|异常|补偿|重试/],
     ["安全基线", /安全基线|资损|权限|风控/],
+    ["无接口章节", /本需求涉及新增\/修改的接口/],
   ];
-  const structureHits = structureLabels.map(([label, pattern]) => ({ label, hit: pattern.test(text) }));
+  const structureHits = structureLabels.map(([label, pattern]) => ({
+    label,
+    hit: label === "无接口章节" ? !pattern.test(text) : pattern.test(text),
+  }));
   const knowledgeRefs = Array.isArray(document.knowledgeRefs) ? document.knowledgeRefs : [];
   const validationNotes = Array.isArray(document.validationNotes) ? document.validationNotes : [];
   const knowledgeHit = knowledgeRefs.length > 0 || /知识库|活动发布与模板配置|奖品券与资损核销|原型生成总规则|PRD标准结构/.test(text);

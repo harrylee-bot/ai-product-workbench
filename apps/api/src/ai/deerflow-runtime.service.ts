@@ -575,7 +575,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         assumptions: "optional inferred business facts, especially for one-sentence requirements",
         consistencyStrategy: "optional PRD/prototype consistency strategy",
         prdDocumentDraft:
-          "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }], validationNotes? }. Use the standard Chinese requirement-document section order: 1 引言 / 1.1 项目背景 / 1.2 文档范围 / 1.3 使用场景（必填） / 2 业务需求 / 2.1 页面链接 / core business sections / 本需求涉及新增/修改的接口 / 验收标准 / 3 业务降级方案（必填） / 4 需求安全基线要求（必填）. blocks may include paragraph, bullet_list, table, quote, warning, info, diagram, image, prototype_snapshot, asset_reference.",
+          "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }], validationNotes? }. Use the standard Chinese requirement-document section order: 1 引言 / 1.1 项目背景 / 1.2 文档范围 / 1.3 使用场景（必填） / 2 业务需求 / 2.1 页面链接 / core business sections / 验收标准 / 3 业务降级方案（必填） / 4 需求安全基线要求（必填）. Do not include a section named 本需求涉及新增/修改的接口. blocks may include paragraph, bullet_list, table, quote, warning, info, diagram, image, prototype_snapshot, asset_reference.",
         artifacts: [
           {
             kind: "optional artifact kind, for example prototype_html or prd_markdown",
@@ -603,7 +603,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",
         "For activity-configuration PRDs, include visual evidence blocks when knowledgeContext provides them: at least one business flow diagram, one configuration architecture diagram, and prototype_snapshot/image blocks for key Axure pages. Use Mermaid for diagram blocks and local visualAssets paths for prototype_snapshot/image blocks.",
         "If no suitable prototype snapshot, flow, architecture, or field-rule knowledge is available, do not invent visuals. Add a validationNotes item and an info/warning block that names the missing asset and the required follow-up.",
-        "For PRD/需求文档/需求说明书 generation, follow the requirement-document template from PRD标准结构 exactly: cover title should be <工单名称>需求说明书; body sections must include 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(2.1 页面链接, core rules/features, flow/state/page requirements, 2.4 接口能力/联动口径, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Section 2.4 may describe required interface capabilities, upstream/downstream linkage, trigger timing, data direction, and business error handling, but must not include real API URLs, secrets, credentials, or backend implementation specifications. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
+        "For PRD/需求文档/需求说明书 generation, follow the requirement-doc-template skill after the user's override: cover title should be <工单名称>需求说明书; body sections must include 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(2.1 页面链接, core rules/features, flow/state/page requirements, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not include 本需求涉及新增/修改的接口. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
         "For PRD tables, use explicit table blocks or markdown tables for version history, channel/使用场景, field/rule tables, acceptance tables, and the safety baseline self-check. Do not replace tables with prose.",
         "For PRD section content, every heading must have concrete content. If an exact route, author, participant, or date is unknown, write 待确认 or 以实际上线地址/联调结果为准, while still describing expected behavior from the business perspective.",
         "For PRD safety/degradation content, do not leave the section empty: write 不涉及 only when truly irrelevant; otherwise provide concrete fallback behavior and safety baseline self-check values using only 是, 否, or 不涉及.",
@@ -683,7 +683,7 @@ function buildKnowledgeWorkflowPolicy(
     userVisibleNoisePolicy:
       "不要把技能文件内容、工具输入输出、todo、read_file/search/fetch 日志、隐藏推理或运行调试信息写入聊天正文或 PRD 正文。",
     modelEnrichmentChecklist: [
-      "补齐目标用户、使用场景、页面/状态、异常/降级、接口联动口径、验收标准。",
+      "补齐目标用户、使用场景、页面/状态、异常/降级、系统联动口径、验收标准。",
       "对一两句话需求做合理业务推断，但把积分值、预算、活动周期、目标人群等不确定项写入 assumptions 或 待确认。",
       "PRD 与原型必须共享同一组核心规则、状态和页面结构，避免文档与原型各写各的。",
     ],

@@ -234,7 +234,7 @@ describe("PRD requirement document module", () => {
 
     expect(formatted.title).toBe("营销日历需求说明书");
     expect(body).toContain("新增《营销日历需求说明书》");
-    expect(body).toContain("V1.0 | 待确认");
+    expect(body).toContain("讨论稿 | 待确认");
     expect(body).not.toContain("营销日历的的");
     expect(body).not.toContain("cmr8idyeo0000cb5le0iqdqzx");
   });

@@ -330,9 +330,10 @@ function evaluateArtifacts({
       evidence: "1/2/3/4 section scan",
     },
     {
-      name: "PRD 包含知识库引用",
-      passed: /活动发布与模板配置[\s\S]*奖品券与资损核销/.test(prd),
-      evidence: "activity and reward/asset-loss references",
+      name: "知识库引用已留痕",
+      passed: hits.some((item) => /活动发布与模板配置/.test(item.title)) &&
+        hits.some((item) => /奖品券与资损核销/.test(item.title)),
+      evidence: "knowledge-hits artifact scan",
     },
     {
       name: "PRD 包含活动配置闭环",
@@ -345,13 +346,34 @@ function evaluateArtifacts({
       evidence: "points/dedup/risk/compensation scan",
     },
     {
-      name: "PRD 包含模型补齐说明",
-      passed: /模型补齐|默认活动服务|默认积分发放|待确认/.test(prd),
+      name: "PRD 符合需求文档模板基础结构",
+      passed: /版 本 历 史[\s\S]*版本\/状态[\s\S]*作者[\s\S]*参与者[\s\S]*起止日期[\s\S]*备注[\s\S]*目 录[\s\S]*1 引言[\s\S]*2 业务需求[\s\S]*3 业务降级方案（必填）[\s\S]*4 需求安全基线要求（必填）/.test(prd),
+      evidence: "requirement-doc-template structure scan",
+    },
+    {
+      name: "PRD 包含使用场景渠道表",
+      passed: /活动投放的可选渠道[\s\S]*是否投放[\s\S]*端内渠道[\s\S]*WAP\/H5端外渠道[\s\S]*小程序/.test(prd),
+      evidence: "channel table scan",
+    },
+    {
+      name: "PRD 不包含接口章节",
+      passed: !/本需求涉及新增\/修改的接口/.test(prd),
+      evidence: "forbidden interface section scan",
+    },
+    {
+      name: "PRD 包含 21 行安全基线",
+      passed: (prd.match(/\| \d+ \|/g) ?? []).length >= 21 && /需求安全基线内容[\s\S]*是否涉及/.test(prd),
+      evidence: "21-row safety baseline scan",
+    },
+    {
+      name: "模型补齐说明已留痕",
+      passed: enrichment.modelAssumptions.length >= 3,
       evidence: `${enrichment.modelAssumptions.length} model assumptions`,
     },
     {
-      name: "PRD 包含联网补齐计划",
-      passed: /联网补齐计划|签到积分活动 会员运营|积分权益 发放/.test(prd),
+      name: "联网补齐计划已留痕",
+      passed: enrichment.webSearchQueries.length >= 3 &&
+        enrichment.webSearchQueries.some((item) => /签到积分活动|积分权益/.test(item)),
       evidence: `${enrichment.webSearchQueries.length} web queries`,
     },
     {
@@ -360,8 +382,8 @@ function evaluateArtifacts({
       evidence: `${enrichment.externalRefsUsed.length} external refs, status=${enrichment.externalResearchStatus}`,
     },
     {
-      name: "PRD 包含联网证据来源",
-      passed: /联网补齐证据[\s\S]*https:\/\/(mailchimp\.com|docs\.stripe\.com|developer\.mozilla\.org)/.test(prd),
+      name: "联网证据来源已留痕",
+      passed: enrichment.externalEvidence.some((item) => /https:\/\/(mailchimp\.com|docs\.stripe\.com|developer\.mozilla\.org)/.test(item.url)),
       evidence: "external evidence source URL scan",
     },
     {
@@ -1103,24 +1125,9 @@ function buildConsistencyMatrix(prd, prototype, enrichment) {
       /数据报表|签到人数|签到次数/,
       /积分发放成功|发放失败/,
     ]),
-    consistencyRow("知识库和补齐证据", prd, prototype, [
-      /知识库引用|活动发布与模板配置|奖品券与资损核销/,
-      /模型补齐|联网补齐证据/,
-    ], [
-      /知识覆盖|活动发布与模板配置|奖品券与资损核销/,
-      /补齐策略|模型补齐|公开证据/,
-    ]),
   ];
 
-  const externalEvidenceRows = enrichment.externalEvidence.slice(0, 3).map((item) => ({
-    name: `公开证据：${item.title}`,
-    prdHit: prd.includes(item.title) || prd.includes(item.url),
-    prototypeHit: prototype.includes(item.title),
-    prdEvidence: item.url,
-    prototypeEvidence: item.title,
-  })).map((row) => ({ ...row, passed: row.prdHit && row.prototypeHit }));
-
-  const allRows = [...rows, ...externalEvidenceRows];
+  const allRows = rows;
   return {
     passed: allRows.every((item) => item.passed),
     rows: allRows,
@@ -1157,46 +1164,28 @@ ${consistency.passed ? "PRD 与原型核心规则一致。" : "PRD 与原型存�
 }
 
 function buildPrd(userTopic, hits, coverage, enrichment) {
-  const sources = hits.slice(0, 8).map((item) => `- ${item.title}：${item.relativePath}`).join("\n");
   const missing = coverage.filter((item) => !item.hit).map((item) => item.name);
-  const modelAssumptions = enrichment.modelAssumptions.map((item) => `- ${item}`).join("\n");
-  const webQueries = enrichment.webSearchQueries.map((item) => `- ${item}`).join("\n");
-  const externalEvidenceRows = enrichment.externalEvidence.length
-    ? enrichment.externalEvidence
-        .map((item) => `| ${markdownCell(item.query)} | ${markdownCell(item.title)} | ${markdownCell(item.insight)} | ${markdownCell(item.url)} |`)
-        .join("\n")
-    : "| 待补充 | 未取到外部资料 | 当前网络取证失败，按知识库和模型补齐继续 | 待确认 |";
   return `# 签到领积分活动需求说明书
 
 ## 版 本 历 史
 
-| 版本 | 作者 | 日期 | 变更说明 |
-| --- | --- | --- | --- |
-| V1.0 | AI Product Workbench 评估脚本 | 待确认 | 基于本地知识库命中结果生成评估稿。 |
+| 版本/状态 | 作者 | 参与者 | 起止日期 | 备注 |
+| --- | --- | --- | --- | --- |
+| 讨论稿 | AI Product Workbench 评估脚本 | 待确认 | 待确认 | 基于本地知识库命中结果生成评估稿。 |
 
-## 知识库引用
+## 目 录
 
-${sources}
-
-## 模型与联网补齐说明
-
-### 知识库命中后的模型补齐
-
-${modelAssumptions}
-
-### 知识库命中后的联网补齐计划
-
-状态：${enrichment.externalResearchStatus}
-
-${webQueries}
-
-约束：外部资料只补充行业惯例、体验参考和风险提醒，不覆盖本地知识库中的活动配置、权益资损、PRD 结构和原型规则。
-
-### 联网补齐证据
-
-| 查询词 | 来源 | 可用补充 | 链接 |
-| --- | --- | --- | --- |
-${externalEvidenceRows}
+1 引言
+1.1 项目背景
+1.2 文档范围
+1.3 使用场景（必填）
+2 业务需求
+2.1 页面链接
+2.2 核心业务规则/功能说明
+2.3 核心流程/状态/页面要求
+2.4 验收标准
+3 业务降级方案（必填）
+4 需求安全基线要求（必填）
 
 ## 1 引言
 
@@ -1215,11 +1204,13 @@ ${externalEvidenceRows}
 
 ### 1.3 使用场景（必填）
 
-| 场景 | 角色 | 入口 | 目标 |
-| --- | --- | --- | --- |
-| 创建活动 | 运营 | 活动发布后台 | 配置签到领积分活动并提交审核 |
-| 参与签到 | 用户 | 活动前台页 | 每日签到并领取积分 |
-| 复盘活动 | 运营/管理员 | 活动报表 | 查看签到与积分发放效果 |
+本活动用于端内活动运营与前台用户参与签到，投放渠道按业务评审确认后执行。
+
+| 序号 | 活动投放的可选渠道 | 是否投放 |
+| --- | --- | --- |
+| 1 | 端内渠道 | ☑是 □否 |
+| 2 | WAP/H5端外渠道 | ☑是 □否 |
+| 3 | 小程序 | □是 ☑否 |
 
 ## 2 业务需求
 
@@ -1253,18 +1244,7 @@ ${externalEvidenceRows}
 6. 前台展示成功、已签到、无资格、活动未开始/已结束、积分发放失败等状态。
 7. 报表沉淀签到、积分发放、失败原因、渠道来源和连续签到数据。
 
-### 2.4 本需求涉及新增/修改的接口
-
-| 能力 | 调用方 | 触发时机 | 入参/出参 | 失败处理 |
-| --- | --- | --- | --- | --- |
-| 查询签到状态 | 前台活动页 | 页面加载 | 用户标识、活动编码；返回今日状态、连续天数、积分规则 | 展示加载失败并允许重试 |
-| 提交签到 | 前台活动页 | 点击签到 | 用户标识、活动编码、渠道参数；返回签到结果和积分发放状态 | 幂等处理，重复提交不重复发奖 |
-| 积分发放 | 活动服务 | 签到成功后 | 用户标识、积分值、业务流水号 | 失败记录原因，进入补偿/对账 |
-| 活动报表 | 后台报表 | 查询/导出 | 活动编码、时间、渠道 | 无数据展示空态，导出受权限控制 |
-
-具体接口地址以技术方案和联调结果为准。
-
-### 2.5 验收标准
+### 2.4 验收标准
 
 | 编号 | 验收项 | 通过标准 |
 | --- | --- | --- |
@@ -1276,21 +1256,39 @@ ${externalEvidenceRows}
 
 ## 3 业务降级方案（必填）
 
-| 场景 | 降级方案 |
-| --- | --- |
-| 积分发放接口异常 | 签到记录先落库，前台提示“积分稍后到账”，后台进入补偿队列 |
-| 活动配置不完整 | 禁止提交审核，提示缺失字段 |
-| 报表延迟 | 展示最近更新时间，允许稍后重试 |
-| 额度不足 | 前台提示活动火爆，后台记录未发放原因 |
+如签到领积分活动的积分发放服务、活动配置保存、审核发布、状态查询或报表统计出现异常，前台应保留当前可用状态并展示明确提示，不允许出现空白页、重复发奖或错误成功态。签到记录可先进入待处理状态，提示“积分稍后到账”，后台记录失败原因、活动编码、用户标识、请求时间和处理状态，支持运营补偿、重试或回滚到上一版配置。若活动额度不足，应停止继续发放奖励并保留未发放原因；若报表延迟，应展示最近统计时间并提示稍后刷新，避免运营误判实时效果。
 
 ## 4 需求安全基线要求（必填）
 
-| 安全项 | 是否涉及 | 要求 |
-| --- | --- | --- |
-| 用户身份识别 | 是 | 签到和积分发放必须绑定用户标识 |
-| 权益资损 | 是 | 控制每日次数、总额度、重复发放、补偿和对账 |
-| 导出权限 | 是 | 报表导出需要权限控制和操作日志 |
-| 真实密钥/API | 不涉及 | PRD 不写真实接口地址、密钥或生产凭据 |
+该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：
+1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据
+2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；
+3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。
+建议：该表格请业务人员和开发人员共同参与自查并填写。
+
+| 序号 | 需求安全基线内容 | 范围 | 是否涉及 |
+| --- | --- | --- | --- |
+| 1 | 是否有新开发功能接口或现有功能接口逻辑变动 | 信息系统（包含前端、后端、管理后台） | 是 |
+| 2 | 业务功能是否面向公众用户 | 信息系统（包含前端、后端、管理后台） | 是 |
+| 3 | 是否涉及新开通公网暴露面 | 信息系统（包含前端、后端、管理后台） | 不涉及 |
+| 4 | 管理后台涉及个人信息的内容要求脱敏展示，原则上不做非脱敏个人信息的导出功能。 | 管理后台 | 不涉及 |
+| 5 | 管理后台所有操作页面要有水印功能，水印至少包括姓名、手机号、操作时间等信息 | 管理后台 | 是 |
+| 6 | 管理后台涉及查询的页面，不允许没有查询条件查询所有数据，必须输入查询条件后才可以查询数据； | 管理后台 | 是 |
+| 7 | 管理后台应接入4A统一管理，实现一点注销的功能，不允许有独立的账号体系；按4A要求实现日志留存，并实现风险预警功能； | 管理后台 | 不涉及 |
+| 8 | 如未接入4A系统统一管理，应满足通行字的18项安全要求；要求细则找安全中心要； | 管理后台 | 不涉及 |
+| 9 | 涉及后台配置内容的需要实现“敏感词过滤”能力； | 管理后台 | 是 |
+| 10 | 所有在前台展示的内容如为后台配置显示，均需要执行“先审后发”，具备先审后发能力，并同步发布数据。 | 前台展示 | 是 |
+| 11 | 是否涉及展示《隐私政策》 | 前端页面 | 不涉及 |
+| 12 | 如涉及加载到APP或小程序，APP、小程序业务应实现双清单功能。 | 前端展示 / 底层接口获取数据 | 不涉及 |
+| 13 | 前台页面涉及采集身份证号码、身份证照片、生物识别和银行卡信息时，应再次获取用户的主动授权同意。 | 前端页面 | 不涉及 |
+| 14 | 是否涉及免密登录。 | 前端页面 | 不涉及 |
+| 15 | 是否涉及跳转第三方页面或应用。 | 前端页面 | 不涉及 |
+| 16 | 如涉及与第三方公司接口对接进行数据交互，应先查看对应的《数据使用审批单》无误后，才可以正式上线； | 前台、后台 | 不涉及 |
+| 17 | API接口安全管理：如为新增API接口，需完成台账填报； | 信息系统（包含前端、后端、管理后台） | 不涉及 |
+| 18 | 涉及用户敏感信息或跨系统的API是否采用加密传输，具备接口鉴权、访问控制等措施； | 信息系统（包含前端、后端、管理后台） | 不涉及 |
+| 19 | 是否涉及用户信息或重要数据存储，是否进行加密存储； | 信息系统（包含前端、后端、管理后台） | 不涉及 |
+| 20 | 是否涉及数据采集，是否建立数据采集规范，明确数采集方式、渠道、数据格式、采集流程等； | 信息系统（包含前端、后端、管理后台） | 是 |
+| 21 | 是否对采集到的数据进行完整性和一致性校验； | 信息系统（包含前端、后端、管理后台） | 是 |
 
 ## 待确认
 
@@ -1532,8 +1530,8 @@ ${userTopic}
 | 最终用户提示 | ${markdownCell(onlineEvidence("线上最终助手提示清晰"))} | ${markdownCell(optimizedEvidence("最终用户提示清晰且无运行噪音"))} |
 | PRD 产出 | ${markdownCell(onlineEvidence("线上 PRD 已落库"))} | ${markdownCell(optimizedEvidence("PRD 包含固定章节"))} |
 | PRD 内容结构 | ${markdownCell(onlineEvidence("线上 PRD 内容结构合格"))} | ${markdownCell(optimizedEvidence("PRD 包含固定章节"))} |
-| PRD 知识和补齐 | ${markdownCell(onlineEvidence("线上 PRD 包含知识库和补齐说明"))} | ${markdownCell(`${optimizedEvidence("PRD 包含知识库引用")}；${optimizedEvidence("PRD 包含模型补齐说明")}；${optimizedEvidence("联网补齐有真实取证")}`)} |
-| PRD 外部证据和边界 | ${markdownCell(onlineEvidence("线上 PRD 包含外部证据和补齐边界"))} | ${markdownCell(`${optimizedEvidence("PRD 包含联网证据来源")}；${optimizedEvidence("补齐计划有隐私边界")}`)} |
+| 知识和补齐留痕 | ${markdownCell(onlineEvidence("线上 PRD 包含知识库和补齐说明"))} | ${markdownCell(`${optimizedEvidence("知识库引用已留痕")}；${optimizedEvidence("模型补齐说明已留痕")}；${optimizedEvidence("联网补齐有真实取证")}`)} |
+| 外部证据和边界留痕 | ${markdownCell(onlineEvidence("线上 PRD 包含外部证据和补齐边界"))} | ${markdownCell(`${optimizedEvidence("联网证据来源已留痕")}；${optimizedEvidence("补齐计划有隐私边界")}`)} |
 | PRD 内容噪音 | ${markdownCell(onlineEvidence("线上 PRD 不含运行噪音"))} | ${markdownCell(optimizedEvidence("产物不含运行噪音"))} |
 | 原型产出 | ${markdownCell(onlineEvidence("线上原型已落库"))} | ${markdownCell(optimizedEvidence("原型是完整 HTML"))} |
 | 原型核心文案 | ${markdownCell(onlineEvidence("线上原型包含核心页面文案"))} | ${markdownCell(`${optimizedEvidence("原型包含后台配置")}；${optimizedEvidence("原型包含前台签到状态")}`)} |

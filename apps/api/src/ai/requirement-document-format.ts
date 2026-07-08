@@ -67,7 +67,7 @@ export function formatRequirementDocumentDraft(
     level: 1,
     content: renderMarkdownTable(
       ["版本/状态", "作者", "参与者", "起止日期", "备注"],
-      [["V1.0", author, "待确认", date, `新增《${title}》，覆盖核心业务规则、接口、降级方案与安全基线。`]],
+      [["讨论稿", author, "待确认", date, `新增《${title}》，覆盖核心业务规则、降级方案与安全基线。`]],
     ),
     sourcePaths: [],
   });
@@ -159,21 +159,6 @@ export function formatRequirementDocumentDraft(
     });
   }
 
-  // 接口信息章节已移除（根据需求：PRD 不应包含接口类信息）
-  // 如果 DeerFlow 生成了 backend_configs 内容，仍保留但不强制生成
-  const backendConfigContent = findSectionContent(sourceSections, ["backend_configs"], /接口|API|能力调用|新增\/修改/);
-  if (backendConfigContent && backendConfigContent.trim().length > 0) {
-    const interfaceNumber = `2.${sections.filter((section) => /^2\./.test(section.title)).length + 1}`;
-    add({
-      id: "interface_requirements",
-      title: `${interfaceNumber} 本需求涉及新增/修改的接口`,
-      type: "backend_configs",
-      level: 2,
-      content: backendConfigContent,
-      sourcePaths: ["interfaces"],
-    });
-  }
-
   const acceptanceNumber = `2.${sections.filter((section) => /^2\./.test(section.title)).length + 1}`;
   add({
     id: "acceptance_criteria",
@@ -207,6 +192,11 @@ export function formatRequirementDocumentDraft(
     ].join("\n\n"),
     sourcePaths: ["safetyBaseline"],
   });
+
+  const tocSection = sections.find((section) => section.id === "manual_toc");
+  if (tocSection) {
+    tocSection.content = buildTocMarkdown(sections);
+  }
 
   return {
     ...draft,
@@ -307,19 +297,23 @@ function cleanDocumentAuthor(value: string | undefined) {
   return author;
 }
 
-function buildTocMarkdown() {
+function buildTocMarkdown(sections: RequirementDocSection[] = []) {
+  const titles = sections
+    .filter((section) => !["version_history", "manual_toc"].includes(section.id))
+    .map((section) => section.title.trim())
+    .filter(Boolean);
+  if (titles.length) return titles.join("\n");
   return [
     "1 引言",
-    "1.1 项目背景",
-    "1.2 文档范围",
-    "1.3 使用场景（必填）",
+    "1.1项目背景",
+    "1.2文档范围",
+    "1.3使用场景（必填）",
     "2 业务需求",
-    "2.1 页面链接",
-    "2.2 核心业务规则/功能说明",
-    "2.x 本需求涉及新增/修改的接口",
-    "2.x 验收标准",
-    "3 业务降级方案（必填）",
-    "4 需求安全基线要求（必填）",
+    "2.1页面链接",
+    "2.2核心业务规则/功能说明",
+    "2.3验收标准",
+    "3. 业务降级方案（必填）",
+    "4. 需求安全基线要求（必填）",
   ].join("\n");
 }
 
@@ -337,7 +331,7 @@ function findSectionContent(
 function buildBackgroundFallback(baseName: string, state?: ConversationDesignState) {
   return state?.background
     || state?.summary
-    || `${baseName}涉及活动配置平台相关业务能力。本次需求用于补充配置、页面展示、接口联动、结果校验和运营验收口径，支撑业务上线评审与测试用例编写。`;
+    || `${baseName}涉及活动配置平台相关业务能力。本次需求用于补充配置、页面展示、状态联动、结果校验和运营验收口径，支撑业务上线评审与测试用例编写。`;
 }
 
 function buildScopeFallback(baseName: string, state?: ConversationDesignState) {
@@ -349,7 +343,7 @@ function buildScopeFallback(baseName: string, state?: ConversationDesignState) {
   ];
   return rows.length
     ? rows.map((item) => `- ${item}`).join("\n")
-    : `- ${baseName}相关页面、配置项、业务流程、接口、验收标准、降级方案和安全基线。\n- 具体上线范围以业务评审、技术方案和联调结果为准。`;
+    : `- ${baseName}相关页面、配置项、业务流程、验收标准、降级方案和安全基线。\n- 具体上线范围以业务评审、技术方案和联调结果为准。`;
 }
 
 function buildChannelRows(sections: RequirementDocSection[], state?: ConversationDesignState) {
@@ -410,7 +404,7 @@ function buildAcceptanceFallback(baseName: string) {
     [
       ["1", "页面可见性", `${baseName}相关入口、页面标题、配置项和结果展示符合评审确认范围。`],
       ["2", "业务规则", "配置保存、查询、状态流转、重复操作、空态和异常提示均符合需求规则。"],
-      ["3", "接口处理", "接口成功、失败、超时和无权限场景均有明确返回、页面提示和日志记录。"],
+      ["3", "异常处理", "失败、超时和无权限场景均有明确页面提示、状态记录和后续处理方式。"],
       ["4", "存量影响", "存量活动、存量配置和历史页面不受本需求影响，新增能力可按权限和配置开关控制。"],
     ],
   );
@@ -418,7 +412,7 @@ function buildAcceptanceFallback(baseName: string) {
 
 function buildDegradationFallback(baseName: string) {
   return [
-    `如${baseName}涉及的配置保存、发布审核、查询接口、状态同步或页面跳转出现异常，前台页面应保留当前可用状态并展示明确失败提示，不允许出现空白页、重复提交或错误成功态。`,
+    `如${baseName}涉及的配置保存、发布审核、查询能力、状态同步或页面跳转出现异常，前台页面应保留当前可用状态并展示明确失败提示，不允许出现空白页、重复提交或错误成功态。`,
     "运营后台应记录失败原因、请求时间、关键配置编号和操作人，支持人工核对后重试或回滚到上一版已生效配置。",
     "下游系统或活动页面不可用时，平台应暂停继续发布或标记为待处理，待接口恢复后由运营重新触发同步，确保用户可见状态、后台配置状态和交易/活动结果保持一致。",
   ].join("\n");

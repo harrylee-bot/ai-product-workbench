@@ -461,13 +461,6 @@ function buildBusinessSections(
     });
   }
 
-  const interfaceNumber = `2.${result.length + 1}`;
-  result.push({
-    number: interfaceNumber,
-    title: "本需求涉及新增/修改的接口",
-    html: renderInterfaceTable(interfaceSection, document, state),
-    sourceSection: interfaceSection,
-  });
   result.push({
     number: `2.${result.length + 1}`,
     title: "验收标准",
@@ -494,7 +487,7 @@ function renderScope(
   const fallback = items.length
     ? items
     : [
-        `${getRequirementBaseName(document, state)}相关页面、配置项、业务流程、接口、验收标准、降级方案和安全基线。`,
+        `${getRequirementBaseName(document, state)}相关页面、配置项、业务流程、验收标准、降级方案和安全基线。`,
         "具体上线范围以业务评审、技术方案和联调结果为准。",
       ];
   return `<ul>${fallback.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
@@ -535,28 +528,6 @@ function renderCoreRulesFallback(document: RequirementDocument, state?: Conversa
   );
 }
 
-function renderInterfaceTable(
-  source: RequirementDocument["sections"][number] | undefined,
-  document: RequirementDocument,
-  state?: ConversationDesignState,
-) {
-  const sourceContent = source?.content?.trim();
-  if (sourceContent) {
-    const table = renderMarkdownTable(sourceContent);
-    if (table) return table;
-    return renderParagraphs(sourceContent);
-  }
-  const text = JSON.stringify({ sections: document.sections, state });
-  const type = /新增|新建|创建/.test(text) ? "新增/修改" : "修改";
-  return [
-    "<p>具体接口地址以技术方案和联调结果为准，需求侧建议如下：</p>",
-    renderTable(
-      ["类型", "接口/能力", "说明"],
-      [[type, `${getRequirementBaseName(document, state)}配置、查询或状态同步能力`, "调用方为前台页面、运营后台或活动配置平台；被调用方为对应业务服务。触发时机包括页面加载、配置保存、发布审核、结果查询和状态回调；成功时返回配置/状态/结果数据，失败时需要返回明确错误码和提示文案。"]],
-    ),
-  ].join("\n");
-}
-
 function renderAcceptanceTable(
   source: RequirementDocument["sections"][number] | undefined,
   document: RequirementDocument,
@@ -575,7 +546,7 @@ function renderAcceptanceTable(
     [
       ["1", "页面可见性", `${base}相关入口、页面标题、配置项和结果展示符合评审确认范围。`],
       ["2", "业务规则", "配置保存、查询、状态流转、重复操作、空态和异常提示均符合需求规则。"],
-      ["3", "接口处理", "接口成功、失败、超时和无权限场景均有明确返回、页面提示和日志记录。"],
+      ["3", "异常处理", "失败、超时和无权限场景均有明确页面提示、状态记录和后续处理方式。"],
       ["4", "存量影响", "存量活动、存量配置和历史页面不受本需求影响，新增能力可按权限和配置开关控制。"],
     ],
   );
@@ -591,7 +562,7 @@ function buildDegradationSection(
   if (source?.content?.trim()) return source.content;
   const base = getRequirementBaseName(document, state);
   return [
-    `如${base}涉及的配置保存、发布审核、查询接口、状态同步或页面跳转出现异常，前台页面应保留当前可用状态并展示明确失败提示，不允许出现空白页、重复提交或错误成功态。`,
+    `如${base}涉及的配置保存、发布审核、查询能力、状态同步或页面跳转出现异常，前台页面应保留当前可用状态并展示明确失败提示，不允许出现空白页、重复提交或错误成功态。`,
     "运营后台应记录失败原因、请求时间、关键配置编号和操作人，支持人工核对后重试或回滚到上一版已生效配置。",
     "下游系统或活动页面不可用时，平台应暂停继续发布或标记为待处理，待接口恢复后由运营重新触发同步，确保用户可见状态、后台配置状态和交易/活动结果保持一致。",
   ].join("\n");
@@ -640,7 +611,7 @@ function getBusinessGoal(document: RequirementDocument, state?: ConversationDesi
 function buildBackgroundFallback(document: RequirementDocument, state?: ConversationDesignState) {
   return state?.background
     || state?.summary
-    || `${getRequirementBaseName(document, state)}涉及活动配置平台相关业务能力。本次需求用于补充配置、页面展示、接口联动、结果校验和运营验收口径，支撑业务上线评审与测试用例编写。`;
+    || `${getRequirementBaseName(document, state)}涉及活动配置平台相关业务能力。本次需求用于补充配置、页面展示、状态联动、结果校验和运营验收口径，支撑业务上线评审与测试用例编写。`;
 }
 
 function buildScenarioFallback(document: RequirementDocument, state?: ConversationDesignState) {
