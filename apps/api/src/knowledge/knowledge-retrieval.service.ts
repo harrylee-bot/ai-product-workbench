@@ -120,7 +120,10 @@ export class KnowledgeRetrievalService {
       const vaultMatches = vaultPolicy === "never"
         ? []
         : await this.searchVaultFallback(query, preferredTypes, modeBoostTypes).catch(() => []);
-      const selected = vaultMatches.slice(0, limit);
+      const selected = selectKnowledgeResults(vaultMatches, limit, query, {
+        preferredTypes,
+        runtimeName: input.runtimeName,
+      });
       if (selected.length) {
         return {
           results: selected,

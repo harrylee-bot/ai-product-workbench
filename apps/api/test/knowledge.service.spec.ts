@@ -447,6 +447,41 @@ describe("Knowledge module services", () => {
     ]);
   });
 
+  it("keeps required knowledge groups when database retrieval fails and vault fallback is used", async () => {
+    const vaultRoot = findRepoKnowledgeVaultRoot();
+    expect(vaultRoot).toBeTruthy();
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+    prisma.knowledgeItem.findMany.mockRejectedValue(new Error("database unavailable"));
+
+    const result = await retrievalService.search({
+      conversationId: "conversation-1",
+      runId: "run-db-failure-vault",
+      runtimeName: "runtime_generation",
+      query: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
+      preferredTypes: [
+        KnowledgeType.strong_rule,
+        KnowledgeType.default_rule,
+        KnowledgeType.design_pattern,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+        KnowledgeType.business_concept,
+        KnowledgeType.product_architecture,
+      ],
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "always",
+      limit: 10,
+    });
+
+    expect(result.retrievalSource).toBe("vault_fallback");
+    expect(result.retrievalError).toMatch(/数据库知识检索失败/);
+    expect(result.references.slice(0, 4).map((item) => item.relatedPath)).toEqual([
+      "04-产品文档规范/PRD标准结构.md",
+      "05-原型设计规范/原型生成总规则.md",
+      "02-业务域知识/活动发布与模板配置.md",
+      "02-业务域知识/奖品券与资损核销.md",
+    ]);
+  });
+
   it("keeps preferredTypes as ranking hints unless strict filtering is requested", async () => {
     prisma.knowledgeItem.findMany.mockResolvedValue([
       itemRow({
