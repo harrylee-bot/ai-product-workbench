@@ -85,7 +85,10 @@ export class KnowledgeRetrievalService {
       const combined = mergeRetrievalResults(matched, vaultMatches).sort(
         (a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority),
       );
-      const selected = selectKnowledgeResults(combined, limit, query);
+      const selected = selectKnowledgeResults(combined, limit, query, {
+        preferredTypes,
+        runtimeName: input.runtimeName,
+      });
       let retrievalError: string | undefined;
 
       try {
@@ -315,8 +318,12 @@ function selectKnowledgeResults(
   ranked: KnowledgeRetrievalResult[],
   limit: number,
   query: string,
+  options: {
+    preferredTypes?: KnowledgeType[];
+    runtimeName?: string;
+  } = {},
 ) {
-  const requiredGroups = requiredKnowledgeGroups(query);
+  const requiredGroups = requiredKnowledgeGroups(query, options);
   if (!ranked.length || !requiredGroups.length) return ranked.slice(0, limit);
 
   const front: KnowledgeRetrievalResult[] = [];
@@ -349,18 +356,33 @@ type KnowledgeGroupRequirement = {
   preferredPattern?: RegExp;
 };
 
-function requiredKnowledgeGroups(query: string): KnowledgeGroupRequirement[] {
+function requiredKnowledgeGroups(
+  query: string,
+  options: {
+    preferredTypes?: KnowledgeType[];
+    runtimeName?: string;
+  } = {},
+): KnowledgeGroupRequirement[] {
   const normalized = normalizeText(query);
   const groups: KnowledgeGroupRequirement[] = [];
+  const isRuntimeGeneration = options.runtimeName === "runtime_generation";
+  const prefersPrdRules = options.preferredTypes?.includes(KnowledgeType.prd_writing_rule);
+  const prefersPrototypeRules = options.preferredTypes?.includes(KnowledgeType.prototype_rule);
 
-  if (/(需求文档|需求说明书|prd|产品文档|文档)/i.test(normalized)) {
+  if (
+    /(需求文档|需求说明书|prd|产品文档|文档)/i.test(normalized) ||
+    (isRuntimeGeneration && prefersPrdRules)
+  ) {
     groups.push({
       type: KnowledgeType.prd_writing_rule,
       pattern: /PRD标准结构|需求说明书|需求文档|产品文档规范/,
       preferredPattern: /PRD标准结构/,
     });
   }
-  if (/(原型|prototype|页面|界面|交互)/i.test(normalized)) {
+  if (
+    /(原型|prototype|页面|界面|交互)/i.test(normalized) ||
+    (isRuntimeGeneration && prefersPrototypeRules)
+  ) {
     groups.push({
       type: KnowledgeType.prototype_rule,
       pattern: /原型生成总规则|前后台页面框架|后台通用框架|前台通用框架|prototype/i,

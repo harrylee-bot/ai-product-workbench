@@ -412,6 +412,41 @@ describe("Knowledge module services", () => {
     });
   });
 
+  it("frontloads PRD and prototype rules for runtime generation even when the query is generic", async () => {
+    const vaultRoot = findRepoKnowledgeVaultRoot();
+    expect(vaultRoot).toBeTruthy();
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+    prisma.knowledgeItem.findMany.mockResolvedValue([]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      conversationId: "conversation-1",
+      runId: "run-generic-runtime-query",
+      runtimeName: "runtime_generation",
+      query: [
+        "需求模式:one_sentence_completion",
+        "产品能力地图 端到端业务流程 Agent任务分类与补全规则",
+      ].join("\n"),
+      preferredTypes: [
+        KnowledgeType.strong_rule,
+        KnowledgeType.default_rule,
+        KnowledgeType.design_pattern,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+        KnowledgeType.business_concept,
+        KnowledgeType.product_architecture,
+      ],
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "always",
+      limit: 10,
+    });
+
+    expect(result.references.slice(0, 2).map((item) => item.relatedPath)).toEqual([
+      "04-产品文档规范/PRD标准结构.md",
+      "05-原型设计规范/原型生成总规则.md",
+    ]);
+  });
+
   it("keeps preferredTypes as ranking hints unless strict filtering is requested", async () => {
     prisma.knowledgeItem.findMany.mockResolvedValue([
       itemRow({
