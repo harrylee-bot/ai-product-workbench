@@ -6,6 +6,7 @@ import {
   buildExternalResearchRuntimeEvent,
   buildModelEnrichmentRuntimeEvent,
   buildModelEnrichmentStartedRuntimeEvent,
+  buildTimeboxedFallbackTurnResult,
   buildCanvasDocumentRuntimePrompt,
   createDocumentStreamState,
   formatArtifactReadyMessage,
@@ -375,6 +376,57 @@ describe("aichat document stream router", () => {
       detail: "· 知识库给出活动配置闭环。\n· 模型补齐默认签到状态和异常处理。",
     }));
     expect(`${externalEvent.detail}\n${failedExternalEvent.detail}\n${modelStartedEvent.detail}\n${modelEvent.detail}`).not.toMatch(/read_file|Context from AI Product Workbench|tool-input|tool-output|Updated todo list/);
+  });
+
+  it("builds a usable PRD and prototype fallback when model generation exceeds the timebox", () => {
+    const result = buildTimeboxedFallbackTurnResult({
+      runId: "run-1",
+      message: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
+      knowledgeContext: [
+        {
+          id: "k1",
+          title: "活动发布与模板配置",
+          content: "活动配置、审核发布、数据报表。",
+          relatedPath: "02-业务域知识/活动发布与模板配置.md",
+        },
+        {
+          id: "k2",
+          title: "奖品券与资损核销",
+          content: "积分发放需要资损控制。",
+          relatedPath: "02-业务域知识/奖品券与资损核销.md",
+        },
+      ],
+      externalResearchContext: {
+        status: "completed",
+        fetchedAt: "2026-07-08T00:00:00.000Z",
+        searchQueries: ["签到积分活动 会员运营 最佳实践"],
+        refs: [
+          {
+            query: "签到积分活动 会员运营 最佳实践",
+            title: "Idempotent requests | Stripe API Reference",
+            url: "https://docs.stripe.com/api/idempotent_requests",
+            insight: "幂等请求可降低重复发放风险。",
+            source: "public_web_fetch",
+            contentLength: 1000,
+            fetchedAt: "2026-07-08T00:00:00.000Z",
+          },
+        ],
+        failures: [],
+        privacyBoundary: ["公开资料只补充通用经验，不发送内部路径、附件原文、真实接口或密钥。"],
+      },
+    });
+
+    const raw = result.finalAction.raw as { prdDocumentDraft: { sections: Array<{ title: string; content: string }> } };
+    const prdText = raw.prdDocumentDraft.sections.map((section) => `${section.title}\n${section.content}`).join("\n");
+    const html = result.artifacts[0]?.text ?? "";
+
+    expect(result.finalAction.type).toBe("review_prototype");
+    expect(result.finalAction.parsed).toBe(true);
+    expect(raw.prdDocumentDraft.sections).toHaveLength(4);
+    expect(prdText).toMatch(/1 引言|2 业务需求|3 业务降级方案|4 需求安全基线要求/);
+    expect(prdText).toMatch(/活动配置|每日|积分|资损|外部补充状态|https:\/\/docs\.stripe\.com/);
+    expect(html).toMatch(/活动配置|提交审核|立即签到|数据报表|补齐策略|积分失败补偿降级/);
+    expect(`${prdText}\n${html}`).not.toMatch(/read_file|Context from AI Product Workbench|tool-input|tool-output|Updated todo list/);
   });
 
   it("fails PRD generation instead of creating fallback content when the final action is missing", () => {
