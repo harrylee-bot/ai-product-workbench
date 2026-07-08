@@ -273,6 +273,12 @@ describe("Knowledge module services", () => {
       "PRD标准结构",
       "原型生成总规则",
     ]));
+    expect(result.references.slice(0, 4).map((item) => item.title)).toEqual([
+      "PRD标准结构",
+      "原型生成总规则",
+      "活动发布与模板配置",
+      "奖品券与资损核销",
+    ]);
     expect(result.references[0]?.relatedPath).toMatch(/^(02|04|05)-/);
     expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -315,6 +321,12 @@ describe("Knowledge module services", () => {
     expect(evidence).toMatch(/奖品券与资损核销/);
     expect(evidence).toMatch(/PRD标准结构|需求说明书/);
     expect(evidence).toMatch(/原型生成总规则|前后台页面框架/);
+    expect(result.references.slice(0, 4).map((item) => item.relatedPath)).toEqual(expect.arrayContaining([
+      "04-产品文档规范/PRD标准结构.md",
+      "05-原型设计规范/原型生成总规则.md",
+      "02-业务域知识/活动发布与模板配置.md",
+      "02-业务域知识/奖品券与资损核销.md",
+    ]));
   });
 
   it("can merge database hits with Markdown vault knowledge for runtime generation", async () => {

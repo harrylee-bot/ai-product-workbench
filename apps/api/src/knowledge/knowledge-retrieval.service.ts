@@ -316,50 +316,37 @@ function selectKnowledgeResults(
   limit: number,
   query: string,
 ) {
-  const selected = ranked.slice(0, limit);
   const requiredGroups = requiredKnowledgeGroups(query);
-  if (!selected.length || !requiredGroups.length) return selected;
+  if (!ranked.length || !requiredGroups.length) return ranked.slice(0, limit);
 
-  const originalRank = new Map(ranked.map((item, index) => [item.itemId, index]));
-  const selectedIds = new Set(selected.map((item) => item.itemId));
-
+  const front: KnowledgeRetrievalResult[] = [];
+  const frontIds = new Set<string>();
   for (const group of requiredGroups) {
-    if (selected.some((item) => matchesKnowledgeGroup(item, group))) continue;
-    const candidate = ranked.find((item) => !selectedIds.has(item.itemId) && matchesKnowledgeGroup(item, group));
+    const candidate = findRequiredGroupRepresentative(ranked, frontIds, group);
     if (!candidate) continue;
-
-    if (selected.length < limit) {
-      selected.push(candidate);
-      selectedIds.add(candidate.itemId);
-      continue;
-    }
-
-    const replaceIndex = findReplaceableKnowledgeIndex(selected, requiredGroups);
-    if (replaceIndex < 0) continue;
-    selectedIds.delete(selected[replaceIndex].itemId);
-    selected[replaceIndex] = candidate;
-    selectedIds.add(candidate.itemId);
+    front.push(candidate);
+    frontIds.add(candidate.itemId);
   }
 
-  return selected.sort((a, b) => (originalRank.get(a.itemId) ?? 0) - (originalRank.get(b.itemId) ?? 0));
+  const rest = ranked.filter((item) => !frontIds.has(item.itemId));
+  return [...front, ...rest].slice(0, limit);
 }
 
-function findReplaceableKnowledgeIndex(
-  selected: KnowledgeRetrievalResult[],
-  requiredGroups: KnowledgeGroupRequirement[],
+function findRequiredGroupRepresentative(
+  ranked: KnowledgeRetrievalResult[],
+  usedIds: Set<string>,
+  group: KnowledgeGroupRequirement,
 ) {
-  for (let index = selected.length - 1; index >= 0; index -= 1) {
-    const item = selected[index];
-    if (!requiredGroups.some((group) => matchesKnowledgeGroup(item, group))) {
-      return index;
-    }
-  }
-  return selected.length - 1;
+  const candidates = ranked.filter((item) => !usedIds.has(item.itemId) && matchesKnowledgeGroup(item, group));
+  if (!candidates.length) return undefined;
+  if (!group.preferredPattern) return candidates[0];
+  return candidates.find((item) => group.preferredPattern?.test(knowledgeGroupText(item))) ?? candidates[0];
 }
 
 type KnowledgeGroupRequirement = {
   type?: KnowledgeType;
   pattern: RegExp;
+  preferredPattern?: RegExp;
 };
 
 function requiredKnowledgeGroups(query: string): KnowledgeGroupRequirement[] {
@@ -370,24 +357,28 @@ function requiredKnowledgeGroups(query: string): KnowledgeGroupRequirement[] {
     groups.push({
       type: KnowledgeType.prd_writing_rule,
       pattern: /PRD标准结构|需求说明书|需求文档|产品文档规范/,
+      preferredPattern: /PRD标准结构/,
     });
   }
   if (/(原型|prototype|页面|界面|交互)/i.test(normalized)) {
     groups.push({
       type: KnowledgeType.prototype_rule,
       pattern: /原型生成总规则|前后台页面框架|后台通用框架|前台通用框架|prototype/i,
+      preferredPattern: /原型生成总规则/,
     });
   }
   if (/(活动|签到|打卡|营销)/.test(normalized)) {
     groups.push({
       type: KnowledgeType.business_concept,
       pattern: /活动发布与模板配置|活动配置|活动发布|模板配置/,
+      preferredPattern: /活动发布与模板配置/,
     });
   }
   if (/(积分|奖品|权益|奖励|资损|核销|券|库存)/.test(normalized)) {
     groups.push({
       type: KnowledgeType.business_concept,
       pattern: /奖品券与资损核销|权益|积分|资损|核销|库存/,
+      preferredPattern: /奖品券与资损核销/,
     });
   }
 
@@ -396,7 +387,11 @@ function requiredKnowledgeGroups(query: string): KnowledgeGroupRequirement[] {
 
 function matchesKnowledgeGroup(item: KnowledgeRetrievalResult, group: KnowledgeGroupRequirement) {
   if (group.type && item.type !== group.type) return false;
-  return group.pattern.test(`${item.title}\n${item.relatedPath ?? ""}\n${item.summary ?? ""}\n${item.content.slice(0, 800)}`);
+  return group.pattern.test(knowledgeGroupText(item));
+}
+
+function knowledgeGroupText(item: KnowledgeRetrievalResult) {
+  return `${item.title}\n${item.relatedPath ?? ""}\n${item.summary ?? ""}\n${item.content.slice(0, 800)}`;
 }
 
 async function loadVaultKnowledgeItems() {
