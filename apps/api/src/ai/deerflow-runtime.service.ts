@@ -343,7 +343,7 @@ export class DeerFlowRuntimeService {
     await readSse(response.body, async (event) => {
       if (input.signal?.aborted) return;
       await onEvent(normalizeDeerFlowEvent(event.event, event.data));
-    });
+    }, input.signal);
   }
 
   private async uploadAttachments(
@@ -1028,48 +1028,79 @@ function parseJsonObject(value: string) {
 async function readSse(
   body: ReadableStream<Uint8Array>,
   onEvent: (event: { event: string; data: unknown }) => Promise<void> | void,
+  signal?: AbortSignal,
 ) {
-	  const reader = body.getReader();
-	  const decoder = new TextDecoder();
-	  const idleTimeoutMs = readNumberEnv("DEERFLOW_IDLE_TIMEOUT_MS", 120_000);
-	  let buffer = "";
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const idleTimeoutMs = readNumberEnv("DEERFLOW_IDLE_TIMEOUT_MS", 120_000);
+  let buffer = "";
 
-	  while (true) {
-	    const { value, done } = await readStreamChunkWithIdleTimeout(reader, idleTimeoutMs);
-	    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split(/\r?\n\r?\n/);
-    buffer = parts.pop() ?? "";
-    for (const part of parts) {
-      const event = parseSseChunk(part);
-	  if (event) await onEvent(event);
-	}
+  if (signal?.aborted) {
+    await reader.cancel("DEERFLOW_STREAM_ABORTED").catch(() => undefined);
+    throw new Error("DEERFLOW_STREAM_ABORTED");
+  }
 
-	async function readStreamChunkWithIdleTimeout(
-	  reader: ReadableStreamDefaultReader<Uint8Array>,
-	  idleTimeoutMs: number,
-	) {
-	  if (idleTimeoutMs <= 0) return reader.read();
-	  let timer: ReturnType<typeof setTimeout> | undefined;
-	  try {
-	    return await Promise.race([
-	      reader.read(),
-	      new Promise<never>((_resolve, reject) => {
-	        timer = setTimeout(() => {
-	          void reader.cancel("DEERFLOW_STREAM_IDLE_TIMEOUT").catch(() => undefined);
-	          reject(new Error(`DEERFLOW_STREAM_IDLE_TIMEOUT: no stream chunk received within ${idleTimeoutMs}ms`));
-	        }, idleTimeoutMs);
-	      }),
-	    ]);
-	  } finally {
-	    if (timer) clearTimeout(timer);
-	  }
-	}
+  try {
+    while (true) {
+      const { value, done } = await readStreamChunkWithIdleTimeout(reader, idleTimeoutMs, signal);
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split(/\r?\n\r?\n/);
+      buffer = parts.pop() ?? "";
+      for (const part of parts) {
+        const event = parseSseChunk(part);
+        if (event) await onEvent(event);
+      }
+    }
+  } finally {
+    try {
+      (reader as { releaseLock?: () => void }).releaseLock?.();
+    } catch {
+      // 清理 reader 不能掩盖上游流错误。
+    }
   }
 
   buffer += decoder.decode();
   const event = parseSseChunk(buffer);
   if (event) await onEvent(event);
+}
+
+async function readStreamChunkWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number,
+  signal?: AbortSignal,
+) {
+  if (signal?.aborted) {
+    await reader.cancel("DEERFLOW_STREAM_ABORTED").catch(() => undefined);
+    throw new Error("DEERFLOW_STREAM_ABORTED");
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let removeAbortListener: (() => void) | undefined;
+  try {
+    const promises: Array<Promise<ReadableStreamReadResult<Uint8Array>> | Promise<never>> = [reader.read()];
+    if (idleTimeoutMs > 0) {
+      promises.push(new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          void reader.cancel("DEERFLOW_STREAM_IDLE_TIMEOUT").catch(() => undefined);
+          reject(new Error(`DEERFLOW_STREAM_IDLE_TIMEOUT: no stream chunk received within ${idleTimeoutMs}ms`));
+        }, idleTimeoutMs);
+      }));
+    }
+    if (signal) {
+      promises.push(new Promise<never>((_resolve, reject) => {
+        const onAbort = () => {
+          void reader.cancel("DEERFLOW_STREAM_ABORTED").catch(() => undefined);
+          reject(new Error("DEERFLOW_STREAM_ABORTED"));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+      }));
+    }
+    return await Promise.race(promises);
+  } finally {
+    if (timer) clearTimeout(timer);
+    removeAbortListener?.();
+  }
 }
 
 function parseSseChunk(chunk: string) {
