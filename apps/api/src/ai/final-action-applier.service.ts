@@ -17,7 +17,11 @@ import type {
   RequirementDocument,
   RequirementDocumentDraft,
 } from "./ai-vibe.types";
-import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "./deerflow-runtime.service";
+import type {
+  DeerFlowFinalAction,
+  DeerFlowKnowledgeReference,
+  DeerFlowResolvedArtifact,
+} from "./deerflow-runtime.service";
 import { formatRequirementDocumentDraft } from "./requirement-document-format";
 
 type CurrentRequirementDocumentRecord = {
@@ -59,6 +63,7 @@ export class FinalActionApplierService {
     finalAction: DeerFlowFinalAction;
     artifacts: DeerFlowResolvedArtifact[];
     assistantText?: string;
+    knowledgeContext?: DeerFlowKnowledgeReference[];
   }): Promise<{
     prdDocument?: RequirementDocument;
     prototypeArtifact?: PrototypeArtifact;
@@ -79,14 +84,27 @@ export class FinalActionApplierService {
   }
 
   private async applyReviewPrd(
-    input: { conversationId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[]; assistantText?: string },
+    input: {
+      conversationId: string;
+      userId: string;
+      runId: string;
+      finalAction: DeerFlowFinalAction;
+      artifacts: DeerFlowResolvedArtifact[];
+      assistantText?: string;
+      knowledgeContext?: DeerFlowKnowledgeReference[];
+    },
     raw: Record<string, unknown> | undefined,
   ) {
     // G1-1：将 createDraft → saveGeneratedDocument → attachGeneratedArtifacts 三步合并到一个事务中，
     // 避免中途失败留下不一致状态（state 已创建但 document 未保存，或 document 已保存但 state 未关联）。
     return this.prisma.$transaction(async (tx) => {
       const previousDocument = await this.getCurrentRequirementDocument(input.conversationId, tx);
-      const stateDraft = this.buildConversationDesignDraft(input.conversationId, raw, input.userId);
+      const stateDraft = this.buildConversationDesignDraft(
+        input.conversationId,
+        raw,
+        input.userId,
+        input.knowledgeContext,
+      );
       const state = await this.stateService.createDraftInTransaction(tx, input.conversationId, stateDraft, {
         userId: input.userId,
         runId: input.runId,
@@ -101,6 +119,7 @@ export class FinalActionApplierService {
         previousDocument,
         state,
         input.userId,
+        input.knowledgeContext,
       );
       const document = await this.documentService.saveGeneratedDocumentInTransaction(tx, state, documentDraft, {
         userId: input.userId,
@@ -143,7 +162,14 @@ export class FinalActionApplierService {
   }
 
   private async applyReviewPrototype(
-    input: { conversationId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[] },
+    input: {
+      conversationId: string;
+      userId: string;
+      runId: string;
+      finalAction: DeerFlowFinalAction;
+      artifacts: DeerFlowResolvedArtifact[];
+      knowledgeContext?: DeerFlowKnowledgeReference[];
+    },
     raw: Record<string, unknown> | undefined,
   ) {
     // G1-1：将 saveGeneratedPrototype → attachGeneratedArtifacts 两步合并到一个事务中。
@@ -170,10 +196,23 @@ export class FinalActionApplierService {
   private async savePrototypeForStateInTransaction(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
     state: ConversationDesignState,
-    input: { conversationId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[] },
+    input: {
+      conversationId: string;
+      userId: string;
+      runId: string;
+      finalAction: DeerFlowFinalAction;
+      artifacts: DeerFlowResolvedArtifact[];
+      knowledgeContext?: DeerFlowKnowledgeReference[];
+    },
     raw: Record<string, unknown> | undefined,
   ) {
-    const prototypeSpec = this.buildPrototypeSpec(state.conversationId, state.id, state.version, raw);
+    const prototypeSpec = this.buildPrototypeSpec(
+      state.conversationId,
+      state.id,
+      state.version,
+      raw,
+      input.knowledgeContext,
+    );
     const artifactDraft = this.buildPrototypeArtifactDraft(input.conversationId, raw, input.artifacts, input.finalAction.message);
 
     // 预先净化 HTML，以便在事务中使用
@@ -196,10 +235,11 @@ export class FinalActionApplierService {
     conversationId: string,
     raw: Record<string, unknown> | undefined,
     userId: string,
+    knowledgeContext?: DeerFlowKnowledgeReference[],
   ): ConversationDesignDraft {
     const stateDraft = asRecord(raw?.designStateDraft);
     const assumptions = toAssumptionReferences(raw?.assumptions);
-    const knowledgeRefs = toKnowledgeRefRecords(raw?.knowledgeRefsUsed);
+    const knowledgeRefs = buildKnowledgeRefRecords(raw?.knowledgeRefsUsed, knowledgeContext);
     return {
       conversationId,
       title: toRequirementTitleCandidate(stateDraft?.title) || "产品需求方案",
@@ -233,6 +273,7 @@ export class FinalActionApplierService {
     previousDocument?: CurrentRequirementDocumentRecord,
     state?: ConversationDesignState,
     userId?: string,
+    knowledgeContext?: DeerFlowKnowledgeReference[],
   ): RequirementDocumentDraft {
     const prdDraft = asRecord(raw?.prdDocumentDraft);
     const rawTitle = toRequirementTitleCandidate(prdDraft?.title);
@@ -266,7 +307,7 @@ export class FinalActionApplierService {
       conversationId,
       title,
       sections,
-      knowledgeRefs: toKnowledgeRefRecords(raw?.knowledgeRefsUsed),
+      knowledgeRefs: buildKnowledgeRefRecords(raw?.knowledgeRefsUsed, knowledgeContext),
       assumptions: toAssumptionReferences(raw?.assumptions),
       pendingQuestions: [],
       validationNotes: [
@@ -318,6 +359,7 @@ export class FinalActionApplierService {
     stateId: string,
     stateVersion: number,
     raw: Record<string, unknown> | undefined,
+    knowledgeContext?: DeerFlowKnowledgeReference[],
   ): PrototypeSpec {
     const spec = asRecord(raw?.prototypeSpec);
     const id = crypto.randomUUID();
@@ -333,7 +375,7 @@ export class FinalActionApplierService {
       navigation: toArray(spec?.navigation) as PrototypeSpec["navigation"],
       interactions: toArray(spec?.interactions) as PrototypeSpec["interactions"],
       assumptions: toAssumptionReferences(raw?.assumptions),
-      knowledgeRefs: toKnowledgeRefRecords(raw?.knowledgeRefsUsed),
+      knowledgeRefs: buildKnowledgeRefRecords(raw?.knowledgeRefsUsed, knowledgeContext),
       generatedByRunId: undefined,
     };
   }
@@ -454,12 +496,132 @@ function toAssumptionReferences(value: unknown): AssumptionReference[] {
   });
 }
 
-function toKnowledgeRefRecords(value: unknown): Array<Record<string, unknown>> {
+function buildKnowledgeRefRecords(
+  value: unknown,
+  knowledgeContext?: DeerFlowKnowledgeReference[],
+): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+
+  const add = (record: Record<string, unknown>) => {
+    const title = toStringValue(record.title);
+    const relatedPath = toStringValue(record.relatedPath);
+    const knowledgeId = toStringValue(record.knowledgeId);
+    const key = normalizeKnowledgeRefKey(knowledgeId || relatedPath || title || JSON.stringify(record));
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    records.push({
+      id: toStringValue(record.id) || `knowledge_ref_${records.length + 1}`,
+      title: title || `知识引用 ${records.length + 1}`,
+      knowledgeId: knowledgeId || toStringValue(record.sourceId) || `knowledge_${records.length + 1}`,
+      snippet: toStringValue(record.snippet),
+      type: toStringValue(record.type),
+      score: typeof record.score === "number" ? record.score : undefined,
+      semanticScore: typeof record.semanticScore === "number" ? record.semanticScore : undefined,
+      reason: toStringValue(record.reason),
+      relatedPath,
+      sourceType: "knowledge_base",
+      sourceId: knowledgeId || toStringValue(record.sourceId),
+      visualAssets: Array.isArray(record.visualAssets) ? record.visualAssets : undefined,
+    });
+  };
+
+  for (const item of knowledgeContext ?? []) {
+    add({
+      id: item.id,
+      knowledgeId: item.knowledgeId,
+      title: item.relatedPath ? `${item.title}（${item.relatedPath}）` : item.title,
+      snippet: item.snippet || summarizeKnowledgeContent(item.content),
+      type: item.type,
+      score: item.score,
+      semanticScore: item.semanticScore,
+      reason: item.reason,
+      relatedPath: item.relatedPath,
+      visualAssets: item.visualAssets,
+    });
+  }
+
+  for (const item of toRawKnowledgeRefRecords(value)) {
+    const matched = findKnowledgeContextMatch(item, knowledgeContext ?? []);
+    if (matched) {
+      add({
+        id: matched.id,
+        knowledgeId: matched.knowledgeId,
+        title: matched.relatedPath ? `${matched.title}（${matched.relatedPath}）` : matched.title,
+        snippet: matched.snippet || summarizeKnowledgeContent(matched.content),
+        type: matched.type,
+        score: matched.score,
+        semanticScore: matched.semanticScore,
+        reason: matched.reason,
+        relatedPath: matched.relatedPath,
+        visualAssets: matched.visualAssets,
+      });
+      continue;
+    }
+    add(item);
+  }
+
+  return records.map((record, index) => ({
+    ...record,
+    id: toStringValue(record.id) || `knowledge_ref_${index + 1}`,
+    knowledgeId: toStringValue(record.knowledgeId) || `knowledge_${index + 1}`,
+  }));
+}
+
+function toRawKnowledgeRefRecords(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.map((item, index) => {
-    const title = typeof item === "string" ? item : toStringValue(asRecord(item)?.title) ?? toStringValue(asRecord(item)?.path) ?? `知识引用 ${index + 1}`;
-    return { id: `knowledge_ref_${index + 1}`, title, knowledgeId: `knowledge_${index + 1}` };
+    if (typeof item === "string") {
+      return { id: `knowledge_ref_model_${index + 1}`, title: item, knowledgeId: `knowledge_model_${index + 1}` };
+    }
+    const record = asRecord(item) ?? {};
+    const title = toStringValue(record.title) ?? toStringValue(record.path) ?? `知识引用 ${index + 1}`;
+    return {
+      ...record,
+      id: toStringValue(record.id) || `knowledge_ref_model_${index + 1}`,
+      title,
+      knowledgeId: toStringValue(record.knowledgeId) || toStringValue(record.sourceId) || `knowledge_model_${index + 1}`,
+      relatedPath: toStringValue(record.relatedPath) || toStringValue(record.path),
+    };
   });
+}
+
+function findKnowledgeContextMatch(
+  record: Record<string, unknown>,
+  knowledgeContext: DeerFlowKnowledgeReference[],
+) {
+  const titleNeedle = normalizeKnowledgeRefKey(String(record.title ?? ""));
+  const pathNeedle = normalizeKnowledgeRefKey(String(record.relatedPath ?? ""));
+  const idNeedle = normalizeKnowledgeRefKey(String(record.knowledgeId ?? ""));
+  const needle = normalizeKnowledgeRefKey([titleNeedle, pathNeedle, idNeedle].join(" "));
+  if (!needle && !titleNeedle && !pathNeedle && !idNeedle) return undefined;
+  return knowledgeContext.find((item) => {
+    const itemId = normalizeKnowledgeRefKey(String(item.knowledgeId ?? item.id ?? ""));
+    const itemTitle = normalizeKnowledgeRefKey(item.title);
+    const itemPath = normalizeKnowledgeRefKey(item.relatedPath ?? "");
+    const haystack = normalizeKnowledgeRefKey([itemId, itemTitle, itemPath].join(" "));
+    return (
+      Boolean(idNeedle && itemId && (itemId.includes(idNeedle) || idNeedle.includes(itemId))) ||
+      Boolean(pathNeedle && itemPath && (itemPath.includes(pathNeedle) || pathNeedle.includes(itemPath))) ||
+      Boolean(titleNeedle && itemTitle && (titleNeedle.includes(itemTitle) || itemTitle.includes(titleNeedle))) ||
+      Boolean(needle && haystack && (haystack.includes(needle) || needle.includes(haystack)))
+    );
+  });
+}
+
+function normalizeKnowledgeRefKey(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[（）()[\]{}《》"'`~!@#$%^&*+=|\\:;，,。.?？/\s_-]+/g, "")
+    .trim();
+}
+
+function summarizeKnowledgeContent(content: string | undefined) {
+  const text = cleanPersistedText(String(content ?? ""))
+    .replace(/^来源文件[:：].*$/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.slice(0, 240);
 }
 
 function toTargetDevice(value: unknown): PrototypeTargetDevice {

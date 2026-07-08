@@ -474,6 +474,16 @@ function evaluateOnlineResult(rawStream, snapshotMap, result, renderResult) {
       evidence: prdQuality.traceMetadataEvidence,
     },
     {
+      name: "线上 PRD 知识引用可解释",
+      passed: prdQuality.knowledgeRefsExplainablePassed,
+      evidence: prdQuality.knowledgeRefsExplainableEvidence,
+    },
+    {
+      name: "线上 Agent 调用覆盖核心知识组",
+      passed: prdQuality.requiredKnowledgeGroupsPassed,
+      evidence: prdQuality.requiredKnowledgeGroupsEvidence,
+    },
+    {
       name: "线上 PRD 正文不写补齐证据章节",
       passed: prdQuality.noTraceBodyPassed,
       evidence: prdQuality.noTraceBodyEvidence,
@@ -586,6 +596,10 @@ function evaluatePrdDocument(document) {
       structureEvidence: "document null",
       traceMetadataPassed: false,
       traceMetadataEvidence: "document null",
+      knowledgeRefsExplainablePassed: false,
+      knowledgeRefsExplainableEvidence: "document null",
+      requiredKnowledgeGroupsPassed: false,
+      requiredKnowledgeGroupsEvidence: "document null",
       noTraceBodyPassed: false,
       noTraceBodyEvidence: "document null",
       noisePassed: false,
@@ -619,6 +633,17 @@ function evaluatePrdDocument(document) {
   const hasExternalUrl = /https:\/\/(mailchimp\.com|docs\.stripe\.com|developer\.mozilla\.org|[a-z0-9.-]+\.[a-z]{2,})/i.test(metadataText);
   const hasExternalStatus = /外部补充状态|externalResearchStatus|completed|failed_non_blocking|skipped_tools_unavailable/.test(metadataText);
   const hasBoundary = /不发送|不搜索|内部路径|附件原文|真实接口|密钥|不覆盖本地知识库|隐私边界|只补充|公开资料/.test(metadataText);
+  const explainableRefs = knowledgeRefs.filter((ref) => {
+    const text = flattenText(ref);
+    return /来源文件|relatedPath|00-|01-|02-|03-|04-|05-|06-|PRD标准结构|原型生成总规则|活动发布与模板配置|奖品券与资损核销/.test(text)
+      && /(snippet|摘要|score|reason|匹配|规则|流程|验收|状态|资损|原型|PRD|需求)/i.test(text);
+  });
+  const knowledgeGroupChecks = [
+    ["文档规范", /PRD标准结构|产品文档规范|需求说明书|prd_writing_rule/i],
+    ["原型规范", /原型生成总规则|前后台页面框架|字段接口状态表达|prototype_rule/i],
+    ["活动业务", /活动发布与模板配置|活动配置|审核发布|business_concept/i],
+    ["权益资损", /奖品券与资损核销|权益|积分|资损|库存|核销/],
+  ].map(([label, pattern]) => ({ label, hit: pattern.test(metadataText) }));
   const traceBodyHits = [
     /联网补齐证据/.test(sectionText) ? "联网补齐证据" : "",
     /模型与联网补齐/.test(sectionText) ? "模型与联网补齐" : "",
@@ -632,6 +657,10 @@ function evaluatePrdDocument(document) {
     structureEvidence: structureHits.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
     traceMetadataPassed: knowledgeHit && enrichmentHit && hasExternalUrl && hasExternalStatus && hasBoundary,
     traceMetadataEvidence: `knowledgeRefs=${knowledgeRefs.length}, validationNotes=${validationNotes.length}, knowledge=${knowledgeHit ? "hit" : "miss"}, enrichment=${enrichmentHit ? "hit" : "miss"}, url=${hasExternalUrl ? "hit" : "miss"}, status=${hasExternalStatus ? "hit" : "miss"}, boundary=${hasBoundary ? "hit" : "miss"}`,
+    knowledgeRefsExplainablePassed: knowledgeRefs.length >= 4 && explainableRefs.length >= Math.min(4, knowledgeRefs.length),
+    knowledgeRefsExplainableEvidence: `knowledgeRefs=${knowledgeRefs.length}, explainable=${explainableRefs.length}`,
+    requiredKnowledgeGroupsPassed: knowledgeGroupChecks.every((item) => item.hit),
+    requiredKnowledgeGroupsEvidence: knowledgeGroupChecks.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
     noTraceBodyPassed: traceBodyHits.length === 0,
     noTraceBodyEvidence: traceBodyHits.length ? `body contains ${traceBodyHits.join(", ")}` : "no trace/evidence section in PRD body",
     noisePassed: noiseHits.length === 0,
@@ -827,6 +856,8 @@ function runSelfTest() {
   assertCheck(allowedEvaluation, "线上流不暴露工具噪音", true);
   assertCheck(allowedEvaluation, "线上最终助手提示清晰", true);
   assertCheck(allowedEvaluation, "线上 PRD 元数据留存知识库和补齐证据", true);
+  assertCheck(allowedEvaluation, "线上 PRD 知识引用可解释", true);
+  assertCheck(allowedEvaluation, "线上 Agent 调用覆盖核心知识组", true);
   assertCheck(allowedEvaluation, "线上 PRD 正文不写补齐证据章节", true);
   assertCheck(allowedEvaluation, "线上运行状态展示知识库模型联网三段进度", true);
 
@@ -850,7 +881,8 @@ function runSelfTest() {
       "allowed createDocument protocol is not treated as internal tool noise",
       "internal read_file protocol is treated as tool noise",
       "final assistant message must be clear and clean",
-      "PRD metadata must retain external evidence and public-data boundary",
+      "PRD metadata must retain explainable knowledge refs, external evidence, and public-data boundary",
+      "agent retrieval must cover PRD, prototype, activity, and points/risk knowledge groups",
       "PRD body must not include trace/evidence sections",
       "runtime progress must show knowledge, model, and public evidence stages",
     ],
@@ -868,7 +900,40 @@ function assertCheck(evaluation, name, expected) {
 function samplePrdDocument() {
   return {
     title: "签到领积分活动需求说明书",
-    knowledgeRefs: [{ title: "活动发布与模板配置" }],
+    knowledgeRefs: [
+      {
+        title: "PRD标准结构（04-产品文档规范/PRD标准结构.md）",
+        snippet: "需求说明书必须包含引言、业务需求、降级方案和安全基线。",
+        type: "prd_writing_rule",
+        score: 0.95,
+        reason: "标题匹配 PRD",
+        relatedPath: "04-产品文档规范/PRD标准结构.md",
+      },
+      {
+        title: "原型生成总规则（05-原型设计规范/原型生成总规则.md）",
+        snippet: "原型必须覆盖前后台、字段、状态和异常。",
+        type: "prototype_rule",
+        score: 0.93,
+        reason: "标题匹配 原型",
+        relatedPath: "05-原型设计规范/原型生成总规则.md",
+      },
+      {
+        title: "活动发布与模板配置（02-业务域知识/活动发布与模板配置.md）",
+        snippet: "活动发布覆盖草稿、预览、审核、发布、下线和回滚。",
+        type: "business_concept",
+        score: 0.91,
+        reason: "标题匹配 活动",
+        relatedPath: "02-业务域知识/活动发布与模板配置.md",
+      },
+      {
+        title: "奖品券与资损核销（02-业务域知识/奖品券与资损核销.md）",
+        snippet: "权益发放需要库存、核销、对账、重复领取和资损控制。",
+        type: "business_concept",
+        score: 0.9,
+        reason: "标题匹配 积分",
+        relatedPath: "02-业务域知识/奖品券与资损核销.md",
+      },
+    ],
     validationNotes: [
       "补齐说明：知识库打底，模型补齐默认状态，联网补充公开资料。",
       "外部补充状态：completed",

@@ -130,6 +130,94 @@ describe("FinalActionApplierService", () => {
     expect(result).toEqual({ prdDocument: document, state: updatedState });
   });
 
+  it("persists retrieved knowledge metadata even when DeerFlow only echoes knowledge titles", async () => {
+    const state = baseState({ status: "design_ready" });
+    const document = baseDocument();
+    const updatedState = { ...state, status: "doc_ready", prdDocument: document };
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue(updatedState);
+
+    await service.apply({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-knowledge-refs",
+      finalAction: finalAction({
+        type: "review_prd",
+        message: "已生成 PRD。",
+        raw: {
+          type: "review_prd",
+          designStateDraft: {
+            title: "签到领积分活动",
+            summary: "用户每日签到领取积分奖励",
+            businessGoal: "提升活跃",
+          },
+          prdDocumentDraft: {
+            title: "签到领积分活动 PRD",
+            sections: [
+              {
+                id: "background",
+                title: "1.1 项目背景",
+                type: "overview",
+                level: 3,
+                order: 1,
+                content: "通过签到领积分提升用户每日活跃。",
+              },
+            ],
+          },
+          knowledgeRefsUsed: ["活动发布与模板配置", "PRD标准结构"],
+        },
+      }),
+      artifacts: [],
+      knowledgeContext: [
+        {
+          id: "knowledge_ref_activity",
+          knowledgeId: "vault:02-业务域知识/活动发布与模板配置.md",
+          title: "活动发布与模板配置",
+          snippet: "活动必须覆盖草稿、预览、审核、发布、下线和回滚。",
+          content: "活动必须覆盖草稿、预览、审核、发布、下线和回滚。",
+          type: "business_concept",
+          score: 0.98,
+          reason: "标题匹配 活动；高优先级知识",
+          relatedPath: "02-业务域知识/活动发布与模板配置.md",
+        },
+        {
+          id: "knowledge_ref_prd",
+          knowledgeId: "vault:04-产品文档规范/PRD标准结构.md",
+          title: "PRD标准结构",
+          snippet: "PRD 必须包含 1 引言、2 业务需求、3 业务降级方案、4 需求安全基线要求。",
+          content: "来源文件：04-产品文档规范/PRD标准结构.md\nPRD 必须包含 1 引言、2 业务需求、3 业务降级方案、4 需求安全基线要求。",
+          type: "prd_writing_rule",
+          score: 0.95,
+          reason: "标题匹配 PRD标准结构；符合调用方偏好类型",
+          relatedPath: "04-产品文档规范/PRD标准结构.md",
+        },
+      ],
+    });
+
+    const stateDraft = stateService.createDraftInTransaction.mock.calls[0]?.[2];
+    const savedDraft = documentService.saveGeneratedDocumentInTransaction.mock.calls[0]?.[2];
+    expect(stateDraft.knowledgeRefs).toEqual([
+      expect.objectContaining({
+        knowledgeId: "vault:02-业务域知识/活动发布与模板配置.md",
+        title: "活动发布与模板配置（02-业务域知识/活动发布与模板配置.md）",
+        snippet: "活动必须覆盖草稿、预览、审核、发布、下线和回滚。",
+        type: "business_concept",
+        score: 0.98,
+        reason: "标题匹配 活动；高优先级知识",
+        relatedPath: "02-业务域知识/活动发布与模板配置.md",
+      }),
+      expect.objectContaining({
+        knowledgeId: "vault:04-产品文档规范/PRD标准结构.md",
+        title: "PRD标准结构（04-产品文档规范/PRD标准结构.md）",
+        snippet: "PRD 必须包含 1 引言、2 业务需求、3 业务降级方案、4 需求安全基线要求。",
+        type: "prd_writing_rule",
+        relatedPath: "04-产品文档规范/PRD标准结构.md",
+      }),
+    ]);
+    expect(savedDraft.knowledgeRefs).toEqual(stateDraft.knowledgeRefs);
+  });
+
   it("builds PRD sections from DeerFlow markdown artifacts when structured sections are absent", async () => {
     const state = baseState();
     const document = baseDocument();

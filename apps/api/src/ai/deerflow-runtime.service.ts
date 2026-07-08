@@ -114,6 +114,7 @@ type DeerFlowRunInput = {
 /** 注入 DeerFlow 上下文的知识引用（与 knowledge.types 的 KnowledgeReference 对齐的最小子集）。 */
 export type DeerFlowKnowledgeReference = {
   id: string;
+  knowledgeId?: string;
   title: string;
   snippet?: string;
   content: string;

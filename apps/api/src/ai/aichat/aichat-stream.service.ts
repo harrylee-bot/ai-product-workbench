@@ -418,6 +418,7 @@ export class AichatStreamService {
             finalAction,
             artifacts,
             assistantText,
+            knowledgeContext,
           });
 
           if (applied.prdDocument && applied.prototypeArtifact) {
@@ -886,6 +887,7 @@ export class AichatStreamService {
     const retrieval = await this.searchKnowledgeForChat(input);
     return retrieval.references.map((ref) => ({
       id: ref.id,
+      knowledgeId: ref.knowledgeId,
       title: ref.title,
       snippet: ref.snippet,
       content: ref.content,
