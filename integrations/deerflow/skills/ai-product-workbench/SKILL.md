@@ -112,8 +112,7 @@ Default output is the user's requirement-document template, not a freeform light
 2.1 页面链接
 2.2 核心业务规则/功能说明
 2.3 核心流程/状态/页面要求
-2.4 接口能力/联动口径（不写真实 API 地址、密钥或后端实现规格）
-2.5 验收标准
+2.4 验收标准
 3 业务降级方案（必填）
 4 需求安全基线要求（必填）
 ```
@@ -121,8 +120,8 @@ Default output is the user's requirement-document template, not a freeform light
 Writing requirements:
 
 - Use title `<工单名称>需求说明书` when the output is a formal requirement document; if the UI title must stay short, keep the body structure above.
-- Include concrete page entry, channel, object, field, state, interface, exception, degradation, safety baseline, and acceptance details.
-- For interface-related requirements, include caller/callee, trigger condition, key inputs/outputs, success result, and failure handling. If exact API names are unknown, write `具体接口地址以技术方案和联调结果为准`.
+- Include concrete page entry, channel, object, field, state, exception, degradation, safety baseline, and acceptance details.
+- Do not include a section named `本需求涉及新增/修改的接口` or any standalone interface/API section. Express cross-system behavior only as business state, trigger, result, and exception handling when needed.
 - `3 业务降级方案（必填）` cannot be empty. Use `不涉及` only when no meaningful degradation exists; otherwise provide a concrete fallback plan.
 - `4 需求安全基线要求（必填）` must include safety baseline self-check content. Online canvas may use a compact table, but values in `是否涉及` may only be `是`, `否`, or `不涉及`.
 - Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
