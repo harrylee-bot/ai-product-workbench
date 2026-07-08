@@ -21,6 +21,21 @@ function looksLikeFullPrd(content: string): boolean {
   return mentionsPrd && headingCount >= 1;
 }
 const FINAL_ACTION_FENCE = "```ai_product_workbench_final_action";
+const RUNTIME_NOISE_PREFIXES = [
+  "我已加载",
+  "已加载",
+  "现在开始分析",
+  "接下来开始分析",
+  "开始分析",
+  "思考过程",
+  "Updated todo list",
+  "Context from AI Product Workbench",
+  "read_file",
+  "write_todos",
+  "tool-output",
+  "tool-input",
+  "messages-tuple",
+];
 
 export type AssistantDeltaFilterState = {
   pending: string;
@@ -57,6 +72,7 @@ function safePlainAssistantDelta(delta: string): string {
   }
   if (looksLikeFullPrd(trimmed)) return "";
   if (looksLikeStructuredJsonFragment(trimmed)) return "";
+  if (looksLikeRuntimeNoise(trimmed)) return "";
   return delta;
 }
 
@@ -70,6 +86,21 @@ function looksLikeStructuredJsonFragment(text: string): boolean {
   } catch {
     return false;
   }
+}
+
+function looksLikeRuntimeNoise(text: string): boolean {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (!compact) return true;
+  const noisePatterns = [
+    /^(我已|已)?加载/,
+    /^(现在|接下来)?开始分析/,
+    /^思考过程[:：]/,
+    /^Updated todo list/i,
+    /^Context from AI Product Workbench/i,
+    /^(调用|执行|读取)\s*(read_file|write_todos|task|search|fetch|bash)/i,
+    /^(read_file|write_todos|tool-output|tool-input|messages-tuple)\b/i,
+  ];
+  return noisePatterns.some((pattern) => pattern.test(compact));
 }
 
 function safeAssistantDeltaStreaming(delta: string, state: AssistantDeltaFilterState, flush: boolean): string {
@@ -88,6 +119,21 @@ function safeAssistantDeltaStreaming(delta: string, state: AssistantDeltaFilterS
       continue;
     }
 
+    const lineEndIndex = state.pending.search(/\r?\n/);
+    if (lineEndIndex !== -1) {
+      const firstLine = state.pending.slice(0, lineEndIndex);
+      if (startsLikeRuntimeNoise(firstLine) || looksLikeRuntimeNoise(firstLine)) {
+        const newlineLength =
+          state.pending[lineEndIndex] === "\r" && state.pending[lineEndIndex + 1] === "\n" ? 2 : 1;
+        state.pending = state.pending.slice(lineEndIndex + newlineLength);
+        continue;
+      }
+    }
+
+    if (!flush && lineEndIndex === -1 && startsLikeRuntimeNoise(state.pending)) {
+      break;
+    }
+
     const startIndex = state.pending.indexOf(FINAL_ACTION_FENCE);
     if (startIndex !== -1) {
       visible += safePlainAssistantDelta(state.pending.slice(0, startIndex));
@@ -97,7 +143,10 @@ function safeAssistantDeltaStreaming(delta: string, state: AssistantDeltaFilterS
     }
 
     if (!flush) {
-      const holdLength = longestSuffixMatchingFencePrefix(state.pending);
+      const holdLength = Math.max(
+        longestSuffixMatchingFencePrefix(state.pending),
+        longestSuffixMatchingRuntimeNoisePrefix(state.pending),
+      );
       if (holdLength > 0) {
         visible += safePlainAssistantDelta(state.pending.slice(0, -holdLength));
         state.pending = state.pending.slice(-holdLength);
@@ -123,6 +172,16 @@ function keepPotentialFenceSuffix(value: string) {
   return "";
 }
 
+function startsLikeRuntimeNoise(value: string) {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) return false;
+  const normalized = compact.toLowerCase();
+  return RUNTIME_NOISE_PREFIXES.some((prefix) => {
+    const normalizedPrefix = prefix.toLowerCase();
+    return normalizedPrefix.startsWith(normalized) || normalized.startsWith(normalizedPrefix);
+  });
+}
+
 function longestSuffixMatchingFencePrefix(value: string) {
   const maxLength = Math.min(value.length, FINAL_ACTION_FENCE.length - 1);
   for (let length = maxLength; length > 0; length -= 1) {
@@ -131,4 +190,19 @@ function longestSuffixMatchingFencePrefix(value: string) {
     }
   }
   return 0;
+}
+
+function longestSuffixMatchingRuntimeNoisePrefix(value: string) {
+  const normalized = value.replace(/\s+/g, " ");
+  let best = 0;
+  for (const prefix of RUNTIME_NOISE_PREFIXES) {
+    const maxLength = Math.min(normalized.length, prefix.length - 1);
+    for (let length = maxLength; length > best; length -= 1) {
+      if (prefix.startsWith(normalized.slice(-length))) {
+        best = length;
+        break;
+      }
+    }
+  }
+  return best;
 }

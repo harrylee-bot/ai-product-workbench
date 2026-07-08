@@ -51,6 +51,7 @@ COPY packages/db/package.json packages/db/package.json
 COPY --from=prod-deps /app/node_modules node_modules
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/packages/db/prisma packages/db/prisma
+COPY knowledge-vault knowledge-vault
 COPY scripts/assert-no-legacy-schema.mjs scripts/cleanup-smoke-data.mjs scripts/
 COPY deploy/api-entrypoint.sh deploy/api-entrypoint.sh
 RUN chmod +x deploy/api-entrypoint.sh

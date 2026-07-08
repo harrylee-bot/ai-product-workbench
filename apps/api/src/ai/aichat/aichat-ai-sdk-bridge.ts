@@ -131,6 +131,7 @@ export function runtimeEventsFromDeerFlow(
   event: DeerFlowRuntimeEvent,
   ctx: BridgeContext,
   runId: string,
+  options: { exposeToolEvents?: boolean } = {},
 ): RuntimeProcessEvent[] {
   const now = new Date().toISOString();
   const events: RuntimeProcessEvent[] = [];
@@ -159,37 +160,43 @@ export function runtimeEventsFromDeerFlow(
     });
   }
 
-  for (const call of event.toolCalls ?? []) {
-    if (!call.id || !call.name) continue;
-    const action = toolActionCopy(call.name);
-    ctx.toolCallNames.set(call.id, call.name);
-    events.push({
-      id: `${runId}:tool:${call.id}:input`,
-      runId,
-      kind: "tool",
-      label: action.running,
-      detail: summarizeToolEvent(call.name, call.args, "input"),
-      status: "running",
-      createdAt: now,
-    });
-  }
+  if (options.exposeToolEvents ?? true) {
+    for (const call of event.toolCalls ?? []) {
+      if (!call.id || !call.name) continue;
+      const action = toolActionCopy(call.name);
+      ctx.toolCallNames.set(call.id, call.name);
+      events.push({
+        id: `${runId}:tool:${call.id}:input`,
+        runId,
+        kind: "tool",
+        label: action.running,
+        detail: summarizeToolEvent(call.name, call.args, "input"),
+        status: "running",
+        createdAt: now,
+      });
+    }
 
-  if (event.messageRole === "tool" && event.toolCallId) {
-    const toolName = ctx.toolCallNames.get(event.toolCallId) ?? "工具";
-    const action = toolActionCopy(toolName);
-    events.push({
-      id: `${runId}:tool:${event.toolCallId}:output`,
-      runId,
-      kind: "tool",
-      label: action.completed,
-      detail: summarizeToolEvent(
-        toolName,
-        event.toolResult ?? event.content,
-        "output",
-      ),
-      status: "completed",
-      createdAt: now,
-    });
+    if (event.messageRole === "tool" && event.toolCallId) {
+      const toolName = ctx.toolCallNames.get(event.toolCallId) ?? "工具";
+      const action = toolActionCopy(toolName);
+      events.push({
+        id: `${runId}:tool:${event.toolCallId}:output`,
+        runId,
+        kind: "tool",
+        label: action.completed,
+        detail: summarizeToolEvent(
+          toolName,
+          event.toolResult ?? event.content,
+          "output",
+        ),
+        status: "completed",
+        createdAt: now,
+      });
+    }
+  } else {
+    for (const call of event.toolCalls ?? []) {
+      if (call.id && call.name) ctx.toolCallNames.set(call.id, call.name);
+    }
   }
 
   return events;
@@ -200,15 +207,15 @@ export function runtimeEventsFromDeerFlow(
  *
  * 映射规则：
  * - assistant chunk → safeAssistantDelta 过滤后 → 首次 text-start，后续 text-delta（id="text-1"）
- * - toolCalls → tool-input-start + tool-input-available
- * - toolResult（tool 角色，带 toolCallId）→ tool-output-available
+ * - toolCalls/toolResult → 默认只记录到内部持久化上下文，不暴露给用户流
  *
- * 注意：v6 无 "tool-call" part，用 tool-input-start + tool-input-available。
+ * 注意：只有确实需要前端协议卡片的场景才传 exposeToolParts=true。
  */
 export function emitDeerFlowEvent(
   event: DeerFlowRuntimeEvent,
   writer: UIMessageStreamWriter,
   ctx: BridgeContext,
+  options: { exposeToolParts?: boolean } = {},
 ): void {
   // 1) 助手增量文本
   if (event.messageRole === "assistant" && typeof event.chunk === "string") {
@@ -226,11 +233,15 @@ export function emitDeerFlowEvent(
       const toolCallId = call.id;
       const toolName = call.name;
       if (!toolCallId || !toolName) continue;
-      emitToolInputAvailable(
-        { input: call.args ?? {}, toolCallId, toolName },
-        writer,
-        ctx,
-      );
+      if (options.exposeToolParts ?? false) {
+        emitToolInputAvailable(
+          { input: call.args ?? {}, toolCallId, toolName },
+          writer,
+          ctx,
+        );
+      } else {
+        recordToolInputAvailable({ input: call.args ?? {}, toolCallId, toolName }, ctx);
+      }
     }
   }
 
@@ -239,14 +250,21 @@ export function emitDeerFlowEvent(
     if (!ctx.emittedToolCallIds.has(event.toolCallId)) {
       return;
     }
-    emitToolOutputAvailable(
-      {
-        toolCallId: event.toolCallId,
-        output: event.toolResult ?? event.content ?? "",
-      },
-      writer,
-      ctx,
-    );
+    if (options.exposeToolParts ?? false) {
+      emitToolOutputAvailable(
+        {
+          toolCallId: event.toolCallId,
+          output: event.toolResult ?? event.content ?? "",
+        },
+        writer,
+        ctx,
+      );
+    } else {
+      recordToolOutputAvailable(
+        { toolCallId: event.toolCallId, output: event.toolResult ?? event.content ?? "" },
+        ctx,
+      );
+    }
   }
 }
 
@@ -255,12 +273,7 @@ export function emitToolInputAvailable(
   writer: UIMessageStreamWriter,
   ctx: BridgeContext,
 ): void {
-  ctx.emittedToolCallIds.add(input.toolCallId);
-  ctx.toolCallNames.set(input.toolCallId, input.toolName);
-  upsertToolPart(ctx, input.toolCallId, input.toolName, {
-    input: input.input,
-    state: "input-available",
-  });
+  recordToolInputAvailable(input, ctx);
   writer.write({
     type: "tool-input-start",
     toolCallId: input.toolCallId,
@@ -279,15 +292,34 @@ export function emitToolOutputAvailable(
   writer: UIMessageStreamWriter,
   ctx: BridgeContext,
 ): void {
-  const toolName = ctx.toolCallNames.get(input.toolCallId) ?? "tool";
-  upsertToolPart(ctx, input.toolCallId, toolName, {
-    output: input.output,
-    state: "output-available",
-  });
+  recordToolOutputAvailable(input, ctx);
   writer.write({
     type: "tool-output-available",
     toolCallId: input.toolCallId,
     output: input.output,
+  });
+}
+
+export function recordToolInputAvailable(
+  input: { toolCallId: string; toolName: string; input: unknown },
+  ctx: BridgeContext,
+): void {
+  ctx.emittedToolCallIds.add(input.toolCallId);
+  ctx.toolCallNames.set(input.toolCallId, input.toolName);
+  upsertToolPart(ctx, input.toolCallId, input.toolName, {
+    input: input.input,
+    state: "input-available",
+  });
+}
+
+export function recordToolOutputAvailable(
+  input: { toolCallId: string; output: unknown },
+  ctx: BridgeContext,
+): void {
+  const toolName = ctx.toolCallNames.get(input.toolCallId) ?? "tool";
+  upsertToolPart(ctx, input.toolCallId, toolName, {
+    output: input.output,
+    state: "output-available",
   });
 }
 

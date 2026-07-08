@@ -38,6 +38,7 @@ import { VersionHistoryService } from "./version-history.service";
 import { ShareLinkController, AuthenticatedShareController } from "./share.controller";
 import { ShareService } from "./share.service";
 import { DeerFlowRuntimeService } from "./deerflow-runtime.service";
+import { ExternalResearchService } from "./external-research.service";
 import { FinalActionApplierService } from "./final-action-applier.service";
 import { ConversationModule } from "../modules/conversation/conversation.module";
 import { AichatStreamController } from "./aichat/aichat-stream.controller";
@@ -71,6 +72,7 @@ import { AichatStreamService } from "./aichat/aichat-stream.service";
   ],
   providers: [
     DeerFlowRuntimeService,
+    ExternalResearchService,
     FinalActionApplierService,
     RuntimeRunLogService,
     ConversationDesignStateService,
@@ -89,6 +91,7 @@ import { AichatStreamService } from "./aichat/aichat-stream.service";
   exports: [
     MessageService,
     DeerFlowRuntimeService,
+    ExternalResearchService,
     FinalActionApplierService,
     RuntimeRunLogService,
   ],

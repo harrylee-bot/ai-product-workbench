@@ -205,6 +205,9 @@ describe("DeerFlowRuntimeService", () => {
       intent: "general_question",
       requirementMode: "one_sentence_completion",
       knowledgeRefsUsed: ["01-产品架构/产品能力地图"],
+      externalRefsUsed: ["公开资料：会员运营签到活动最佳实践 https://example.com/signin"],
+      externalResearchStatus: "completed",
+      enrichmentNotes: ["知识库给出产品基线，模型补齐默认状态，联网补充行业活动表达。"],
       assumptions: ["普通问候不进入生成流程"],
       consistencyStrategy: "直接回答，不触发 PRD 或原型等待态。",
     };
@@ -269,6 +272,11 @@ describe("DeerFlowRuntimeService", () => {
     expect(runRequest.config.configurable.model_name).toBe("gpt-selected");
     const prompt = String(runRequest.input.messages[0].content);
     expect(prompt).toContain("prototypeHtmlContract");
+    expect(prompt).toContain("knowledgeWorkflowPolicy");
+    expect(prompt).toContain("externalSearchPolicy");
+    expect(prompt).toContain("externalRefsUsed");
+    expect(prompt).toContain("externalResearchStatus");
+    expect(prompt).toContain("skipped_tools_unavailable");
     expect(prompt).toContain("preview URL");
     expect(prompt).toContain("mnt/user-data/outputs/index.html");
     expect(prompt).toContain("Never output a bare HTML fragment");
@@ -282,6 +290,9 @@ describe("DeerFlowRuntimeService", () => {
         raw: expect.objectContaining({
           requirementMode: "one_sentence_completion",
           knowledgeRefsUsed: ["01-产品架构/产品能力地图"],
+          externalRefsUsed: ["公开资料：会员运营签到活动最佳实践 https://example.com/signin"],
+          externalResearchStatus: "completed",
+          enrichmentNotes: ["知识库给出产品基线，模型补齐默认状态，联网补充行业活动表达。"],
           assumptions: ["普通问候不进入生成流程"],
           consistencyStrategy: "直接回答，不触发 PRD 或原型等待态。",
         }),
@@ -292,6 +303,90 @@ describe("DeerFlowRuntimeService", () => {
       expect.objectContaining({ content: "收到。" }),
       expect.objectContaining({ content: expect.stringContaining("ai_product_workbench_final_action") }),
     ]));
+  });
+
+  it("injects a concrete model and web enrichment plan after knowledge hits", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages-tuple",
+          data: [
+            {
+              role: "assistant",
+              content: [
+                "已整理。",
+                "\n```ai_product_workbench_final_action\n",
+                JSON.stringify({
+                  type: "answer",
+                  message: "已整理。",
+                  knowledgeRefsUsed: ["02-业务域知识/活动发布与模板配置.md"],
+                  externalResearchStatus: "skipped_tools_unavailable",
+                  enrichmentNotes: ["已按知识库基线补齐活动配置、权益履约与状态。"],
+                }),
+                "\n```",
+              ].join(""),
+            },
+            { node: "lead_agent" },
+          ],
+        },
+        { event: "values", data: { done: true } },
+      ]));
+
+    const service = new DeerFlowRuntimeService(prisma as never);
+    const result = await service.runTurn({
+      runId: "run-knowledge-enrich",
+      conversationId: "conversation-knowledge-enrich",
+      userId: "user-1",
+      message: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
+      knowledgeContext: [
+        {
+          id: "knowledge_ref_1",
+          title: "活动发布与模板配置",
+          content: "签到领积分活动需要后台配置、审核发布和数据报表。",
+          relatedPath: "02-业务域知识/活动发布与模板配置.md",
+        },
+        {
+          id: "knowledge_ref_2",
+          title: "奖品券与资损核销",
+          content: "积分发放需要幂等、额度、库存和资损控制。",
+          relatedPath: "02-业务域知识/奖品券与资损核销.md",
+        },
+      ],
+      externalResearchContext: {
+        status: "completed",
+        fetchedAt: "2026-07-08T02:00:00.000Z",
+        searchQueries: ["签到积分活动 会员运营 最佳实践"],
+        refs: [
+          {
+            query: "签到积分活动 会员运营 最佳实践",
+            title: "Building an Effective Loyalty Program | Mailchimp",
+            url: "https://mailchimp.com/resources/loyalty-programs/",
+            insight: "会员体系可补充积分账户、奖励展示和兑换规则设计。",
+            source: "public_web_fetch",
+            contentLength: 1000,
+            fetchedAt: "2026-07-08T02:00:00.000Z",
+          },
+        ],
+        failures: [],
+        privacyBoundary: ["不发送内部路径和附件原文。"],
+      },
+    });
+
+    const runRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    const prompt = String(runRequest.input.messages[0].content);
+    expect(prompt).toContain('"localKnowledgeStatus":"hit"');
+    expect(prompt).toContain("签到积分活动 会员运营 最佳实践");
+    expect(prompt).toContain("积分权益 发放 幂等 风控 资损");
+    expect(prompt).toContain("externalSearchPolicy");
+    expect(prompt).toContain("只搜索通用领域词");
+    expect(prompt).toContain("externalResearchContext");
+    expect(prompt).toContain("Building an Effective Loyalty Program");
+    expect(prompt).toContain("If externalResearchContext.refs is non-empty");
+    expect(result.finalAction).toEqual(expect.objectContaining({
+      externalResearchStatus: "skipped_tools_unavailable",
+      enrichmentNotes: ["已按知识库基线补齐活动配置、权益履约与状态。"],
+    }));
   });
 
   it("parses DeerFlow messages stream chunks while hiding human and memory events", async () => {

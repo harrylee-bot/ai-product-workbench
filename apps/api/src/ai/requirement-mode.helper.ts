@@ -45,6 +45,18 @@ export const MODE_BOOST_TYPES: Record<RequirementMode, KnowledgeType[]> = {
 
 const NEW_CAPABILITY_SIGNALS = ["新模块", "新工作台", "新能力", "新对象", "新角色", "闭环", "新闭环"];
 const BRAND_NEW_SIGNALS = ["新系统", "从零", "全新", "新平台", "独立页面", "新项目", "从无到有"];
+const ONE_SENTENCE_GOAL_SIGNALS = [
+  "做一个",
+  "做个",
+  "生成一个",
+  "生成一份",
+  "写一个",
+  "写一份",
+  "我想做",
+  "我要做",
+  "帮我做",
+  "帮我生成",
+];
 
 /**
  * 预检索启发式分类（v1）。
@@ -61,8 +73,8 @@ export function classifyRequirementMode(
 ): RequirementMode {
   const text = (message ?? "").trim();
 
-  // 极短需求（如「做一个抽奖活动」）→ 一句话补全
-  if (text.length <= 12 || countTokens(text) <= 4) {
+  // 极短或一句话目标（如「做一个抽奖活动」「我想做一个签到领积分的活动」）→ 一句话补全
+  if (isOneSentenceGoal(text)) {
     return "one_sentence_completion";
   }
 
@@ -78,6 +90,35 @@ export function classifyRequirementMode(
 
   // 默认：扩展既有项目
   return "historical_extension";
+}
+
+function isOneSentenceGoal(text: string) {
+  if (!text) return true;
+  if (text.length <= 16 || countTokens(text) <= 8) return true;
+  const businessGoal = stripGenerationInstructions(text);
+  if (
+    businessGoal !== text &&
+    businessGoal.length <= 42 &&
+    !/[，,；;。！？!?]/.test(businessGoal) &&
+    ONE_SENTENCE_GOAL_SIGNALS.some((signal) => businessGoal.includes(signal))
+  ) {
+    return true;
+  }
+  if (text.length > 42) return false;
+  if (/[，,；;。！？!?]/.test(text)) return false;
+  return ONE_SENTENCE_GOAL_SIGNALS.some((signal) => text.includes(signal));
+}
+
+function stripGenerationInstructions(text: string) {
+  return text
+    .replace(/[，,；;。！？!?]\s*请?根据知识库内容/g, "")
+    .replace(/请?根据知识库内容/g, "")
+    .replace(/生成(一份|一个)?(完整)?(需求文档|需求说明书|PRD|prd)(和|及|与)?原型?/gi, "")
+    .replace(/生成(一份|一个)?(完整)?原型(和|及|与)?(需求文档|需求说明书|PRD|prd)?/gi, "")
+    .replace(/生成(一份|一个)?(完整)?(需求文档|需求说明书|PRD|prd)/gi, "")
+    .replace(/\s+/g, "")
+    .replace(/[，,；;。！？!?]+$/g, "")
+    .trim();
 }
 
 function countTokens(text: string): number {

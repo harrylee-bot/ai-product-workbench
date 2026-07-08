@@ -70,6 +70,9 @@ export class FinalActionApplierService {
       return this.applyReviewPrd(input, raw);
     }
     if (input.finalAction.type === "review_prototype") {
+      if (hasPrdPayload(raw, input.artifacts, input.assistantText)) {
+        return this.applyReviewPrd(input, raw);
+      }
       return this.applyReviewPrototype(input, raw);
     }
     return {};
@@ -113,6 +116,28 @@ export class FinalActionApplierService {
         reason: "DeerFlow 生成 PRD，写入 ConversationDesignState",
       });
 
+      if (hasPrototypePayload(raw, input.artifacts)) {
+        const prototypeResult = await this.savePrototypeForStateInTransaction(
+          tx,
+          updatedState,
+          input,
+          raw,
+        );
+        const stateWithPrototype = await this.stateService.attachGeneratedArtifactsInTransaction(tx, updatedState.id, {
+          prdDocument: document,
+          prototypeSpec: prototypeResult.prototypeSpec,
+          status: ConversationDesignStateStatus.prototype_ready,
+          userId: input.userId,
+          runId: input.runId,
+          reason: "DeerFlow 同轮生成 PRD 和原型，写入 ConversationDesignState",
+        });
+        return {
+          prdDocument: document,
+          prototypeArtifact: prototypeResult.artifact,
+          state: stateWithPrototype,
+        };
+      }
+
       return { prdDocument: document, state: updatedState };
     });
   }
@@ -128,22 +153,7 @@ export class FinalActionApplierService {
         throw new Error("PROTOTYPE_STATE_NOT_FOUND：生成原型前需要先有 ConversationDesignState（通常先 review_prd）。");
       }
 
-      const prototypeSpec = this.buildPrototypeSpec(state.conversationId, state.id, state.version, raw);
-      const artifactDraft = this.buildPrototypeArtifactDraft(input.conversationId, raw, input.artifacts, input.finalAction.message);
-
-      // 预先净化 HTML，以便在事务中使用
-      const rawHtml = artifactDraft.htmlContent ?? artifactDraft.html ?? "";
-      const htmlContent = sanitizePrototypeHtml(rawHtml);
-      const hasContent = htmlContent.trim().length > 0;
-
-      const result = await this.prototypeService.saveGeneratedPrototypeInTransaction(tx, state, prototypeSpec, artifactDraft, {
-        userId: input.userId,
-        runId: input.runId,
-        reason: "DeerFlow 生成原型",
-      }, htmlContent, hasContent);
-      if (!result.hasContent) {
-        throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
-      }
+      const result = await this.savePrototypeForStateInTransaction(tx, state, input, raw);
 
       const updatedState = await this.stateService.attachGeneratedArtifactsInTransaction(tx, state.id, {
         prototypeSpec: result.prototypeSpec,
@@ -155,6 +165,31 @@ export class FinalActionApplierService {
 
       return { prototypeArtifact: result.artifact, state: updatedState };
     });
+  }
+
+  private async savePrototypeForStateInTransaction(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+    state: ConversationDesignState,
+    input: { conversationId: string; userId: string; runId: string; finalAction: DeerFlowFinalAction; artifacts: DeerFlowResolvedArtifact[] },
+    raw: Record<string, unknown> | undefined,
+  ) {
+    const prototypeSpec = this.buildPrototypeSpec(state.conversationId, state.id, state.version, raw);
+    const artifactDraft = this.buildPrototypeArtifactDraft(input.conversationId, raw, input.artifacts, input.finalAction.message);
+
+    // 预先净化 HTML，以便在事务中使用
+    const rawHtml = artifactDraft.htmlContent ?? artifactDraft.html ?? "";
+    const htmlContent = sanitizePrototypeHtml(rawHtml);
+    const hasContent = htmlContent.trim().length > 0;
+
+    const result = await this.prototypeService.saveGeneratedPrototypeInTransaction(tx, state, prototypeSpec, artifactDraft, {
+      userId: input.userId,
+      runId: input.runId,
+      reason: "DeerFlow 生成原型",
+    }, htmlContent, hasContent);
+    if (!result.hasContent) {
+      throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
+    }
+    return result;
   }
 
   private buildConversationDesignDraft(
@@ -212,7 +247,7 @@ export class FinalActionApplierService {
 
     if (sections.length === 0) {
       // DeerFlow 通常把 PRD 正文以 markdown artifact 形式产出；尝试从中解析段落。
-      const markdown = findArtifactText(artifacts, ["prd_markdown", "prd", "markdown"], ["text/markdown", "text/plain"]);
+      const markdown = findPrdArtifactText(artifacts);
       const body = markdown ?? fallbackMessage;
       sections = looksLikePrdCompletionSummary(body)
         ? []
@@ -237,6 +272,7 @@ export class FinalActionApplierService {
       validationNotes: [
         ...toStringArray(raw?.validationNotes),
         ...toStringArray(prdDraft?.validationNotes),
+        ...externalEnrichmentValidationNotes(raw),
       ],
     }, state, { author: userId });
   }
@@ -330,12 +366,34 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
+function hasPrdPayload(
+  raw: Record<string, unknown> | undefined,
+  artifacts: DeerFlowResolvedArtifact[],
+  assistantText?: string,
+) {
+  const prdDraft = asRecord(raw?.prdDocumentDraft);
+  if (isSubstantialPrdSections(toSections(prdDraft?.sections))) return true;
+  if (findPrdArtifactText(artifacts)) return true;
+  if (assistantText && !looksLikePrdCompletionSummary(assistantText)) {
+    return isSubstantialPrdSections(markdownToSections(assistantText, toStringValue(prdDraft?.title) || "需求文档"));
+  }
+  return false;
+}
+
+function hasPrototypePayload(
+  raw: Record<string, unknown> | undefined,
+  artifacts: DeerFlowResolvedArtifact[],
+) {
+  return Boolean(asRecord(raw?.prototypeSpec))
+    && Boolean(findArtifactText(artifacts, ["prototype_html", "html", "prototype"], ["text/html"]));
+}
+
 function toRecord(value: unknown): Record<string, unknown> | undefined {
   return asRecord(value);
 }
 
 function toStringValue(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined;
+  if (typeof value === "string") return cleanPersistedText(value) || undefined;
   if (typeof value === "number") return String(value);
   return undefined;
 }
@@ -356,7 +414,11 @@ function extractRequirementTitleFromCompletionSummary(value: string) {
 
 function toArray(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
-  return value.map((item) => (item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : { value: String(item) }));
+  return value.map((item) => (
+    item && typeof item === "object" && !Array.isArray(item)
+      ? sanitizePersistedRecord(item as Record<string, unknown>)
+      : { value: cleanPersistedText(String(item)) }
+  ));
 }
 
 function toStringArray(value: unknown): string[] {
@@ -364,6 +426,19 @@ function toStringArray(value: unknown): string[] {
   return value
     .map((item) => toStringValue(item) ?? toStringValue(asRecord(item)?.content) ?? toStringValue(asRecord(item)?.message))
     .filter((item): item is string => Boolean(item));
+}
+
+function externalEnrichmentValidationNotes(raw: Record<string, unknown> | undefined): string[] {
+  if (!raw) return [];
+  const notes: string[] = [];
+  const status = toStringValue(raw.externalResearchStatus);
+  if (status) notes.push(`外部补充状态：${status}`);
+  for (const item of toStringArray(raw.enrichmentNotes).slice(0, 5)) {
+    notes.push(`补齐说明：${item}`);
+  }
+  const refs = toStringArray(raw.externalRefsUsed).slice(0, 5);
+  if (refs.length) notes.push(`外部参考：${refs.join("；")}`);
+  return notes;
 }
 
 function toAssumptionReferences(value: unknown): AssumptionReference[] {
@@ -408,11 +483,64 @@ function toSections(value: unknown): RequirementDocSection[] {
       level: (Number(record.level) || 1) as RequirementDocSection["level"],
       order: Number(record.order) || index + 1,
       content,
-      blocks: Array.isArray(record.blocks) ? (record.blocks as RequirementDocSection["blocks"]) : undefined,
+      blocks: Array.isArray(record.blocks)
+        ? (record.blocks.map((block) => sanitizePersistedRecord(asRecord(block) ?? { content: String(block) })) as RequirementDocSection["blocks"])
+        : undefined,
       sourcePaths: Array.isArray(record.sourcePaths) ? (record.sourcePaths as string[]) : [],
     });
   });
   return sections;
+}
+
+function sanitizePersistedRecord(record: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, sanitizePersistedValue(value)]));
+}
+
+function sanitizePersistedValue(value: unknown): unknown {
+  if (typeof value === "string") return cleanPersistedText(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizePersistedValue(item));
+  if (value && typeof value === "object") return sanitizePersistedRecord(value as Record<string, unknown>);
+  return value;
+}
+
+function cleanPersistedText(value: string): string {
+  const lines = String(value ?? "")
+    .replace(/\u0000/g, "")
+    .split(/\r?\n/);
+  let inFinalActionBlock = false;
+  const kept: string[] = [];
+
+  for (const line of lines) {
+    const compact = line.replace(/\s+/g, " ").trim();
+    if (compact.includes("```ai_product_workbench_final_action")) {
+      inFinalActionBlock = true;
+      continue;
+    }
+    if (inFinalActionBlock) {
+      if (compact.includes("```")) inFinalActionBlock = false;
+      continue;
+    }
+    if (looksLikePersistedRuntimeNoise(compact)) continue;
+    kept.push(line);
+  }
+
+  return kept
+    .join("\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
+
+function looksLikePersistedRuntimeNoise(text: string): boolean {
+  if (!text) return false;
+  return [
+    /Context from AI Product Workbench/i,
+    /Updated todo list/i,
+    /\b(tool-input|tool-output|messages-tuple)\b/i,
+    /\b(read_file|write_todos|write_file)\b/i,
+    /^调用\s*(read_file|write_todos|write_file|search|fetch|bash)/i,
+    /^执行\s*(read_file|write_todos|write_file|search|fetch|bash)/i,
+    /^读取\s*(read_file|write_todos|write_file|search|fetch|bash)/i,
+  ].some((pattern) => pattern.test(text));
 }
 
 function isSubstantialPrdSections(sections: RequirementDocSection[]) {
@@ -514,16 +642,34 @@ function findArtifactText(
   contentTypes: string[],
 ): string | undefined {
   const byKind = artifacts.find((item) => kinds.includes(String(item.kind ?? "").toLowerCase()));
-  if (byKind?.text) return byKind.text;
+  if (byKind?.text) return cleanPersistedText(byKind.text);
   const byContentType = artifacts.find((item) => contentTypes.includes(String(item.contentType ?? "").toLowerCase()));
-  if (byContentType?.text) return byContentType.text;
+  if (byContentType?.text) return cleanPersistedText(byContentType.text);
   // 兜底：任何带 text 的 HTML/markdown artifact
   const fallback = artifacts.find((item) => {
     const ct = String(item.contentType ?? "").toLowerCase();
     const kind = String(item.kind ?? "").toLowerCase();
     return ct.includes("html") || ct.includes("markdown") || kind.includes("html") || kind.includes("markdown");
   });
-  return fallback?.text;
+  return fallback?.text ? cleanPersistedText(fallback.text) : undefined;
+}
+
+function findPrdArtifactText(artifacts: DeerFlowResolvedArtifact[]): string | undefined {
+  const artifactText = artifacts.find((item) => {
+    if (!item.text?.trim() || item.status === "failed") return false;
+    const descriptor = [
+      item.kind,
+      item.title,
+      item.contentType,
+      item.path,
+      item.artifactUrl,
+    ].filter(Boolean).join(" ").toLowerCase();
+    return descriptor.includes("prd") ||
+      descriptor.includes("markdown") ||
+      descriptor.includes("text/markdown") ||
+      descriptor.endsWith(".md");
+  })?.text;
+  return artifactText ? cleanPersistedText(artifactText) : undefined;
 }
 
 function markdownToSections(markdown: string, title: string): RequirementDocSection[] {

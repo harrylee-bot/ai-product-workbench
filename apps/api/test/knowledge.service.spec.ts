@@ -12,13 +12,19 @@ import {
   UserStatus,
 } from "@prisma/client";
 import { BadRequestException, ForbiddenException } from "@nestjs/common";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { KnowledgeCandidateService } from "../src/knowledge/knowledge-candidate.service";
 import { KnowledgeItemService } from "../src/knowledge/knowledge-item.service";
 import { KnowledgeRetrievalService } from "../src/knowledge/knowledge-retrieval.service";
 
 describe("Knowledge module services", () => {
   const now = new Date("2026-06-21T08:00:00Z");
+  const envBackup = { ...process.env };
+  const tempPaths: string[] = [];
   const prisma = {
     knowledgeItem: {
       create: vi.fn(),
@@ -66,6 +72,7 @@ describe("Knowledge module services", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env = { ...envBackup };
     prisma.knowledgeVersion.findFirst.mockResolvedValue(null);
     prisma.knowledgeVersion.create.mockImplementation(async ({ data }) => ({
       id: `version-${data.version}`,
@@ -83,6 +90,11 @@ describe("Knowledge module services", () => {
       if (typeof input === "function") return input(prisma);
       return Promise.all(input);
     });
+  });
+
+  afterEach(async () => {
+    process.env = { ...envBackup };
+    await Promise.all(tempPaths.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
   it("creates knowledge items and writes version snapshots", async () => {
@@ -196,6 +208,196 @@ describe("Knowledge module services", () => {
       }),
     );
     expect(result.references[0]?.content).toContain("线索必须包含来源渠道");
+  });
+
+  it("falls back to the local Markdown knowledge vault when database knowledge misses", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "aipw-knowledge-vault-"));
+    tempPaths.push(vaultRoot);
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+    await writeVaultFile(
+      vaultRoot,
+      "02-业务域知识/活动发布与模板配置.md",
+      [
+        "---",
+        "title: 活动发布与模板配置",
+        "tags:",
+        "  - 活动发布",
+        "  - 模板配置",
+        "---",
+        "# 活动发布与模板配置",
+        "签到领积分活动必须放在活动配置、预览审核、发布上线和报表复盘闭环中处理。",
+      ].join("\n"),
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "02-业务域知识/奖品券与资损核销.md",
+      [
+        "---",
+        "title: 奖品券与资损核销",
+        "---",
+        "# 奖品券与资损核销",
+        "积分奖励属于权益履约，需要写库存、重复领取限制、发放失败、核销对账和资损控制。",
+      ].join("\n"),
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "04-产品文档规范/PRD标准结构.md",
+      "# PRD标准结构\n需求说明书必须包含引言、业务需求、业务降级方案和需求安全基线要求。",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "05-原型设计规范/原型生成总规则.md",
+      "# 原型生成总规则\n活动原型必须覆盖后台配置页、用户端签到页、审核发布状态和数据报表。",
+    );
+    prisma.knowledgeItem.findMany.mockResolvedValue([]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      conversationId: "conversation-1",
+      runId: "run-vault",
+      runtimeName: "runtime_generation",
+      query: "我想做一个签到领积分的活动，请生成需求文档和原型",
+      preferredTypes: [
+        KnowledgeType.business_concept,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+      ],
+      limit: 8,
+    });
+
+    expect(result.retrievalSource).toBe("vault_fallback");
+    expect(result.selectedCount).toBeGreaterThanOrEqual(3);
+    expect(result.references.map((item) => item.title)).toEqual(expect.arrayContaining([
+      "活动发布与模板配置",
+      "奖品券与资损核销",
+      "PRD标准结构",
+      "原型生成总规则",
+    ]));
+    expect(result.references[0]?.relatedPath).toMatch(/^(02|04|05)-/);
+    expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        matchedKnowledgeIds: expect.arrayContaining([
+          "vault:02-业务域知识/活动发布与模板配置.md",
+        ]),
+      }),
+    });
+  });
+
+  it("continues to repo Markdown vault when explicit production vault is empty", async () => {
+    const emptyVaultRoot = await mkdtemp(path.join(tmpdir(), "aipw-empty-production-vault-"));
+    tempPaths.push(emptyVaultRoot);
+    process.env.KNOWLEDGE_VAULT_ROOT = emptyVaultRoot;
+    prisma.knowledgeItem.findMany.mockResolvedValue([]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      conversationId: "conversation-1",
+      runId: "run-empty-production-vault",
+      runtimeName: "runtime_generation",
+      query: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
+      preferredTypes: [
+        KnowledgeType.business_concept,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+      ],
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "always",
+      limit: 10,
+    });
+
+    const evidence = result.references
+      .map((item) => `${item.title}\n${item.relatedPath}\n${item.snippet}`)
+      .join("\n\n");
+
+    expect(result.retrievalSource).toBe("vault_fallback");
+    expect(result.selectedCount).toBeGreaterThanOrEqual(4);
+    expect(evidence).toMatch(/活动发布与模板配置/);
+    expect(evidence).toMatch(/奖品券与资损核销/);
+    expect(evidence).toMatch(/PRD标准结构|需求说明书/);
+    expect(evidence).toMatch(/原型生成总规则|前后台页面框架/);
+  });
+
+  it("can merge database hits with Markdown vault knowledge for runtime generation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "aipw-knowledge-vault-"));
+    tempPaths.push(vaultRoot);
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+    await writeVaultFile(
+      vaultRoot,
+      "02-业务域知识/活动发布与模板配置.md",
+      "# 活动发布与模板配置\n签到领积分活动需要后台配置、预览审核、发布上线和数据报表。",
+    );
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "db-signin-rule",
+        title: "每日签到强规则",
+        content: "用户每日只能签到一次，重复签到不能重复发积分。",
+        type: KnowledgeType.strong_rule,
+        status: KnowledgeStatus.active,
+        priority: KnowledgePriority.high,
+        tags: ["签到", "积分"],
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      conversationId: "conversation-1",
+      runId: "run-merge",
+      runtimeName: "runtime_generation",
+      query: "签到领积分活动",
+      preferredTypes: [KnowledgeType.strong_rule, KnowledgeType.business_concept],
+      vaultPolicy: "always",
+      limit: 8,
+    });
+
+    expect(result.retrievalSource).toBe("database_and_vault");
+    expect(result.references.map((item) => item.knowledgeId)).toEqual(expect.arrayContaining([
+      "db-signin-rule",
+      "vault:02-业务域知识/活动发布与模板配置.md",
+    ]));
+  });
+
+  it("hits required real vault knowledge for the sign-in points runtime topic", async () => {
+    const vaultRoot = findRepoKnowledgeVaultRoot();
+    expect(vaultRoot).toBeTruthy();
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+    prisma.knowledgeItem.findMany.mockResolvedValue([]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      conversationId: "conversation-1",
+      runId: "run-real-vault-signin-points",
+      runtimeName: "runtime_generation",
+      query: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
+      preferredTypes: [
+        KnowledgeType.business_concept,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+      ],
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "always",
+      limit: 10,
+    });
+
+    const evidence = result.references
+      .map((item) => `${item.title}\n${item.relatedPath}\n${item.snippet}`)
+      .join("\n\n");
+
+    expect(result.retrievalSource).toBe("vault_fallback");
+    expect(result.selectedCount).toBeGreaterThanOrEqual(4);
+    expect(evidence).toMatch(/活动发布与模板配置/);
+    expect(evidence).toMatch(/奖品券与资损核销/);
+    expect(evidence).toMatch(/PRD标准结构|需求说明书/);
+    expect(evidence).toMatch(/原型生成总规则|前后台页面框架/);
+    expect(result.references.every((item) => item.knowledgeId.startsWith("vault:"))).toBe(true);
+    expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: "run-real-vault-signin-points",
+        selectedKnowledgeIds: expect.arrayContaining([
+          "vault:02-业务域知识/活动发布与模板配置.md",
+          "vault:02-业务域知识/奖品券与资损核销.md",
+        ]),
+      }),
+    });
   });
 
   it("keeps preferredTypes as ranking hints unless strict filtering is requested", async () => {
@@ -442,6 +644,19 @@ describe("Knowledge module services", () => {
     });
   });
 });
+
+async function writeVaultFile(root: string, relativePath: string, content: string) {
+  const target = path.join(root, relativePath);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, content, "utf8");
+}
+
+function findRepoKnowledgeVaultRoot() {
+  return [
+    path.resolve(process.cwd(), "knowledge-vault"),
+    path.resolve(process.cwd(), "..", "..", "knowledge-vault"),
+  ].find((candidate) => existsSync(candidate));
+}
 
 function itemRow(input: Record<string, unknown>) {
   return {

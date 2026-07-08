@@ -17,6 +17,7 @@ import type {
   DeerFlowRuntimeEvent,
 } from "../deerflow-runtime.service";
 import { FinalActionApplierService } from "../final-action-applier.service";
+import { ExternalResearchService, type ExternalResearchContext } from "../external-research.service";
 import { QaService } from "../qa.service";
 import { RuntimeRunLogService } from "../runtime-run-log.service";
 import { toInputJson } from "../ai-vibe.helpers";
@@ -35,11 +36,11 @@ import {
   emitRuntimeFinish,
   emitRuntimeStart,
   emitStaticText,
-  emitToolInputAvailable,
-  emitToolOutputAvailable,
   finishReasoning,
   finishText,
   getPersistedToolParts,
+  recordToolInputAvailable,
+  recordToolOutputAvailable,
   type PersistedToolPart,
   runtimeEventsFromDeerFlow,
   type RuntimeProcessEvent,
@@ -67,6 +68,7 @@ export class AichatStreamService {
     private readonly runLogs: RuntimeRunLogService,
     private readonly knowledgeRetrieval: KnowledgeRetrievalService,
     private readonly files: FileAssetService,
+    private readonly externalResearch: ExternalResearchService,
   ) {}
 
   /**
@@ -237,6 +239,7 @@ export class AichatStreamService {
             conversationId,
             runId: run.id,
             message: runtimeContent,
+            hasExistingState: hasExistingDesignContext(conversationContext),
           });
 
           // 知识库检索结果摘要事件——告诉用户检索了哪些知识
@@ -245,16 +248,33 @@ export class AichatStreamService {
             id: `${run.id}:knowledge-complete`,
             kind: "knowledge",
             label: knowledgeContext.length > 0
-              ? `知识库检索完成，命中 ${knowledgeContext.length} 条相关知识`
-              : "知识库未命中，将根据模型知识和行业经验补充",
+              ? `已用知识库打底，命中 ${knowledgeContext.length} 条`
+              : "知识库未命中，已停止伪装引用",
             detail: knowledgeContext.length > 0
               ? knowledgeContext
                   .slice(0, 5)
-                  .map((k) => `· ${k.title}${k.type ? ` [${k.type}]` : ""}`)
+                  .map((k) => `· ${k.title}${k.relatedPath ? `（${k.relatedPath}）` : ""}`)
                   .join("\n")
-              : "将参考行业最佳实践和产品设计经验",
+              : "本轮不会假装基于知识库；需要继续时会用模型能力和可用联网能力补齐通用信息。",
             status: "completed",
           }));
+
+          const externalResearchContext = await this.externalResearch.research({
+            message: runtimeContent,
+            knowledgeHitCount: knowledgeContext.length,
+            signal: controller.signal,
+          }).catch((error) => ({
+            status: "failed" as const,
+            fetchedAt: new Date().toISOString(),
+            searchQueries: [],
+            refs: [],
+            failures: [{ error: serializeError(error) }],
+            privacyBoundary: [],
+          }));
+          publishRuntimeEvent(createRuntimeEvent(buildExternalResearchRuntimeEvent({
+            runId: run.id,
+            context: externalResearchContext,
+          })));
 
           const result = await this.deerFlow.runTurn({
             runId: run.id,
@@ -267,24 +287,35 @@ export class AichatStreamService {
             previewMode: "prd",
             conversationDesignState: conversationContext,
             knowledgeContext,
+            externalResearchContext,
             signal: controller.signal,
             onEvent: (event) => {
               if (controller.signal.aborted) return;
               const previousTextLength = ctx.textBuffer.length;
-              for (const runtimeEvent of runtimeEventsFromDeerFlow(event, ctx, run.id)) {
+              for (const runtimeEvent of runtimeEventsFromDeerFlow(event, ctx, run.id, {
+                exposeToolEvents: false,
+              })) {
                 publishRuntimeEvent(runtimeEvent);
               }
               const routedDocumentDelta = routeAssistantDocumentDelta(event, streamWriter, documentStream);
               if (!routedDocumentDelta.suppressChat) {
-                emitDeerFlowEvent(event, streamWriter, ctx);
+                emitDeerFlowEvent(event, streamWriter, ctx, {
+                  exposeToolParts: false,
+                });
               } else {
-                emitDeerFlowEvent({ ...event, chunk: "", content: "" }, streamWriter, ctx);
+                emitDeerFlowEvent({ ...event, chunk: "", content: "" }, streamWriter, ctx, {
+                  exposeToolParts: false,
+                });
               }
               if (ctx.textBuffer.length > previousTextLength) {
                 void assistantDraft.persist();
               }
             },
           });
+          publishRuntimeEvent(createRuntimeEvent(buildModelEnrichmentRuntimeEvent({
+            runId: run.id,
+            finalAction: result.finalAction,
+          })));
 
           // 收尾文本/步骤 part
           finishReasoning(streamWriter, ctx);
@@ -338,14 +369,92 @@ export class AichatStreamService {
             assistantText,
           });
 
-          if (applied.prdDocument) {
+          if (applied.prdDocument && applied.prototypeArtifact) {
+            const qaReport = await this.qaService.runForConversation(conversationId, user.id, {
+              trigger: "initial_generation",
+              runId: run.id,
+              prdDocument: applied.prdDocument,
+              prototypeArtifact: applied.prototypeArtifact,
+            });
+            const combinedChatMessage = formatArtifactReadyMessage({
+              prdTitle: applied.prdDocument.title,
+              prototypeTitle: applied.prototypeArtifact.title,
+              qaReport,
+            });
+            publishRuntimeEvent(createRuntimeEvent({
+              runId: run.id,
+              id: "apply-final-action",
+              kind: "document",
+              label: "PRD 和原型已写入工作台",
+            }));
+            emitStaticText(combinedChatMessage, streamWriter, ctx);
+            finishReasoning(streamWriter, ctx);
+            finishText(streamWriter, ctx);
+            finishDocumentStream(streamWriter, documentStream);
+            emitPrdArtifact(applied.prdDocument, streamWriter);
+            emitPrdDocumentPreview(applied.prdDocument, streamWriter);
+            emitPrototypeArtifact(applied.prototypeArtifact, streamWriter);
+            emitPrototypeDocumentPreview(applied.prototypeArtifact, streamWriter);
+            publishRuntimeEvent(createRuntimeEvent({
+              runId: run.id,
+              id: "prd-and-prototype-ready",
+              kind: "document",
+              label: "PRD 和原型已生成，正在唤起右侧画布",
+              detail: `${applied.prdDocument.title} / ${applied.prototypeArtifact.title}`,
+              artifact: {
+                id: applied.prototypeArtifact.id,
+                title: applied.prototypeArtifact.title || "原型",
+                kind: "prototype",
+              },
+            }));
+            deliveredUserVisibleResult = true;
+            await assistantDraft.finalize({
+              conversationId,
+              userId: user.id,
+              content: combinedChatMessage,
+              type: MessageType.agent_summary,
+              metadata: toInputJson({
+                source: "aichat",
+                runId: run.id,
+                prdDocumentId: applied.prdDocument.id,
+                prdDocumentTitle: applied.prdDocument.title,
+                prototypeArtifactId: applied.prototypeArtifact.id,
+                prototypeArtifactTitle: applied.prototypeArtifact.title,
+                qaReportId: qaReport.id,
+                qaStatus: qaReport.status,
+                qaBlockingSummary: qaBlockingSummary(qaReport),
+                finalActionType: finalAction.type,
+                threadId: result.threadId,
+              }),
+              relatedRunId: run.id,
+              relatedPrdDocumentId: applied.prdDocument.id,
+              relatedPrototypeArtifactId: applied.prototypeArtifact.id,
+              relatedQaReportId: qaReport.id,
+            });
+            await this.completeRunBestEffort(
+              run.id,
+              {
+                status: "success",
+                threadId: result.threadId,
+                finalAction,
+                prdDocument: applied.prdDocument,
+                prototypeArtifact: applied.prototypeArtifact,
+                qaReport,
+              },
+              combinedChatMessage,
+            );
+            publishRuntimeFinish("succeeded");
+          } else if (applied.prdDocument) {
             const qaReport = await this.qaService.runForConversation(conversationId, user.id, {
               trigger: "initial_generation",
               runId: run.id,
               prdDocument: applied.prdDocument,
               checkTypes: PRD_GENERATION_QA_CHECK_TYPES,
             });
-            const prdChatMessage = `PRD 已生成，${formatQaOutcome(qaReport)}，请在右侧画布查看。`;
+            const prdChatMessage = formatArtifactReadyMessage({
+              prdTitle: applied.prdDocument.title,
+              qaReport,
+            });
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
@@ -411,7 +520,10 @@ export class AichatStreamService {
               runId: run.id,
               prototypeArtifact: applied.prototypeArtifact,
             });
-            const prototypeChatMessage = `原型已生成，${formatQaOutcome(qaReport)}，请在右侧画布查看。`;
+            const prototypeChatMessage = formatArtifactReadyMessage({
+              prototypeTitle: applied.prototypeArtifact.title,
+              qaReport,
+            });
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
@@ -718,6 +830,7 @@ export class AichatStreamService {
     conversationId: string;
     runId: string;
     message: string;
+    hasExistingState: boolean;
   }): Promise<DeerFlowKnowledgeReference[]> {
     const retrieval = await this.searchKnowledgeForChat(input);
     return retrieval.references.map((ref) => ({
@@ -729,6 +842,7 @@ export class AichatStreamService {
       score: ref.score,
       semanticScore: ref.semanticScore,
       reason: ref.reason,
+      relatedPath: ref.relatedPath,
       visualAssets: ref.visualAssets,
     }));
   }
@@ -752,13 +866,12 @@ export class AichatStreamService {
       limit: 20,
       scope: "current-conversation",
     };
-    emitToolInputAvailable(
+    recordToolInputAvailable(
       {
         toolCallId,
         toolName: "listKnowledgeBase",
         input: toolInput,
       },
-      input.streamWriter,
       input.ctx,
     );
 
@@ -783,7 +896,7 @@ export class AichatStreamService {
         snippet: ref.snippet,
       })),
     };
-    emitToolOutputAvailable({ toolCallId, output }, input.streamWriter, input.ctx);
+    recordToolOutputAvailable({ toolCallId, output }, input.ctx);
 
     const message = formatKnowledgeInventoryMessage(output);
     emitStaticText(message, input.streamWriter, input.ctx);
@@ -809,25 +922,31 @@ export class AichatStreamService {
     runId: string;
     message: string;
     limit?: number;
+    hasExistingState?: boolean;
   }) {
-    const requirementMode: RequirementMode = classifyRequirementMode(input.message, { hasExistingState: true });
+    const requirementMode: RequirementMode = classifyRequirementMode(input.message, {
+      hasExistingState: input.hasExistingState ?? false,
+    });
     return this.knowledgeRetrieval.search({
       conversationId: input.conversationId,
       runId: input.runId,
       runtimeName: "runtime_generation",
-      query: input.message,
-      limit: input.limit ?? 8,
+      query: buildKnowledgeSearchQuery(input.message, requirementMode),
+      limit: input.limit ?? 10,
       requirementMode,
+      vaultPolicy: "always",
       preferredTypes: [
         KnowledgeType.strong_rule,
         KnowledgeType.default_rule,
         KnowledgeType.design_pattern,
         KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
         KnowledgeType.business_concept,
         KnowledgeType.reference_case,
         KnowledgeType.product_architecture,
         KnowledgeType.page_inventory,
         KnowledgeType.ui_style_guide,
+        KnowledgeType.prototype_asset_ref,
       ],
     });
   }
@@ -1394,7 +1513,10 @@ export function getPrdGenerationFailureReason(input: {
 }): string | undefined {
   if (!input.expectsPrdDocument) return undefined;
   if (!input.finalAction.parsed) return "模型未返回可解析的最终动作";
-  if (input.finalAction.type !== "review_prd") return "模型未返回需求文档最终动作";
+  const canCarryPrd =
+    input.finalAction.type === "review_prd" ||
+    input.finalAction.type === "review_prototype";
+  if (!canCarryPrd) return "模型未返回需求文档最终动作";
   if (!hasUsablePrdDocumentPayload(input.finalAction, input.artifacts)) {
     return "模型未返回完整需求文档正文";
   }
@@ -1501,6 +1623,40 @@ function buildConversationContextForDeerFlow(session: {
   };
 }
 
+function hasExistingDesignContext(context: ReturnType<typeof buildConversationContextForDeerFlow>) {
+  return Boolean(
+    context.currentConversationDesignState ||
+      context.currentPrdDocument ||
+      context.currentPrototypeArtifact,
+  );
+}
+
+export function buildKnowledgeSearchQuery(message: string, requirementMode: RequirementMode) {
+  const compact = message.replace(/\s+/g, "");
+  const expansions = [
+    `需求模式:${requirementMode}`,
+    "产品能力地图 端到端业务流程 Agent任务分类与补全规则",
+  ];
+
+  if (/(需求文档|需求说明书|产品需求文档|prd)/i.test(compact)) {
+    expansions.push("PRD标准结构 按业务域写作规则 验收风险清单");
+  }
+
+  if (/(原型|prototype|页面|界面|交互)/i.test(compact)) {
+    expansions.push("原型生成总规则 前后台页面框架 字段接口状态表达");
+  }
+
+  if (/(活动|签到|打卡|积分|奖励|奖品|权益|领券|抽奖|模板|发布|审核|报表)/.test(compact)) {
+    expansions.push("活动发布与模板配置 奖品券与资损核销 权益履约 库存 核销 资损 审核发布 数据报表");
+  }
+
+  if (/(签到|打卡|连续|积分|每日)/.test(compact)) {
+    expansions.push("每日签到 连续签到 签到奖励 积分发放 重复领取限制 用户参与态 已签到 未签到 补签");
+  }
+
+  return [message, ...expansions].join("\n");
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -1535,6 +1691,102 @@ export function formatQaOutcome(report: QAReport) {
   if (report.status === "warning") return "QA 通过，有待补充项";
   if (report.status === "failed") return "QA 未通过";
   return `QA ${report.status}`;
+}
+
+export function formatArtifactReadyMessage(input: {
+  prdTitle?: string;
+  prototypeTitle?: string;
+  qaReport: QAReport;
+}) {
+  const parts = [
+    input.prdTitle ? `PRD《${cleanArtifactTitle(input.prdTitle, "需求文档")}》` : undefined,
+    input.prototypeTitle ? `原型《${cleanArtifactTitle(input.prototypeTitle, "原型")}》` : undefined,
+  ].filter(Boolean);
+  const subject = parts.length ? parts.join("和") : "产物";
+  return `${subject}已生成，${formatQaOutcome(input.qaReport)}。请在右侧画布查看和继续修改。`;
+}
+
+export function buildExternalResearchRuntimeEvent(input: {
+  runId: string;
+  context: ExternalResearchContext;
+}) {
+  const refs = input.context.refs.slice(0, 4);
+  if (refs.length) {
+    return {
+      runId: input.runId,
+      id: "external-research-complete",
+      kind: "knowledge" as const,
+      label: `已用公开资料补齐 ${input.context.refs.length} 条`,
+      detail: refs.map((item) => `· ${cleanRuntimeEventText(item.title)}`).join("\n"),
+      status: "completed" as const,
+    };
+  }
+
+  if (input.context.status === "skipped_not_needed") {
+    return {
+      runId: input.runId,
+      id: "external-research-skipped",
+      kind: "knowledge" as const,
+      label: "本轮未使用公开资料补齐",
+      detail: "知识库未命中或当前需求不需要联网补充；系统不会伪装外部引用。",
+      status: "completed" as const,
+    };
+  }
+
+  return {
+    runId: input.runId,
+    id: "external-research-unavailable",
+    kind: "knowledge" as const,
+    label: "公开资料补齐暂不可用，已继续生成",
+    detail: "联网失败不会阻塞生成；外部资料缺失时会按知识库和模型补齐继续，并在文档里标明状态。",
+    status: "completed" as const,
+  };
+}
+
+export function buildModelEnrichmentRuntimeEvent(input: {
+  runId: string;
+  finalAction: DeerFlowFinalAction;
+}) {
+  const raw = input.finalAction.raw && typeof input.finalAction.raw === "object" && !Array.isArray(input.finalAction.raw)
+    ? input.finalAction.raw as Record<string, unknown>
+    : {};
+  const notes = Array.isArray(raw.enrichmentNotes)
+    ? raw.enrichmentNotes
+        .map((item) => cleanRuntimeEventText(String(item ?? "")))
+        .filter(Boolean)
+        .slice(0, 3)
+    : [];
+  return {
+    runId: input.runId,
+    id: "model-enrichment-complete",
+    kind: "knowledge" as const,
+    label: "已用模型补齐业务细节",
+    detail: notes.length
+      ? notes.map((item) => `· ${item}`).join("\n")
+      : "已补齐默认流程、状态、异常处理和待确认项；本地知识库规则仍作为优先依据。",
+    status: "completed" as const,
+  };
+}
+
+function cleanArtifactTitle(value: string, fallback: string) {
+  const line = value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .find((item) => item && !looksLikeUserVisibleRuntimeNoise(item));
+  return (line || fallback).replace(/[《》]/g, "").slice(0, 80);
+}
+
+function looksLikeUserVisibleRuntimeNoise(value: string) {
+  return /Context from AI Product Workbench|Updated todo list|read_file|write_todos|write_file|tool-input|tool-output|messages-tuple/i.test(value);
+}
+
+function cleanRuntimeEventText(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !looksLikeUserVisibleRuntimeNoise(line))
+    .join(" ")
+    .slice(0, 160);
 }
 
 function qaBlockingSummary(report: QAReport) {

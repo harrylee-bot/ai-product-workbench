@@ -13,6 +13,12 @@ describe("classifyRequirementMode", () => {
   it("classifies very short prompts as one_sentence_completion regardless of existing state", () => {
     expect(classifyRequirementMode("做一个抽奖活动", { hasExistingState: false })).toBe("one_sentence_completion");
     expect(classifyRequirementMode("做一个抽奖活动", { hasExistingState: true })).toBe("one_sentence_completion");
+    expect(classifyRequirementMode("我想做一个签到领积分的活动", { hasExistingState: false })).toBe("one_sentence_completion");
+    expect(
+      classifyRequirementMode("我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型", {
+        hasExistingState: false,
+      }),
+    ).toBe("one_sentence_completion");
   });
 
   it("classifies a new conversation with no existing state and a detailed prompt as brand_new_system", () => {

@@ -1,10 +1,13 @@
 import { NotFoundException } from "@nestjs/common";
-import { UserRole, UserStatus } from "@prisma/client";
+import { KnowledgeType, UserRole, UserStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import {
   AichatStreamService,
+  buildExternalResearchRuntimeEvent,
+  buildModelEnrichmentRuntimeEvent,
   buildCanvasDocumentRuntimePrompt,
   createDocumentStreamState,
+  formatArtifactReadyMessage,
   formatQaOutcome,
   getPrdGenerationFailureReason,
   isDocumentGenerationRequest,
@@ -293,6 +296,80 @@ describe("aichat document stream router", () => {
     expect(formatQaOutcome(qaReport("failed"))).toBe("QA 未通过");
   });
 
+  it("formats final artifact messages with titles and without runtime noise", () => {
+    const message = formatArtifactReadyMessage({
+      prdTitle: "签到领积分活动需求说明书\nread_file SKILL.md",
+      prototypeTitle: "签到领积分活动原型\nContext from AI Product Workbench:",
+      qaReport: qaReport("passed"),
+    });
+
+    expect(message).toBe("PRD《签到领积分活动需求说明书》和原型《签到领积分活动原型》已生成，QA 通过。请在右侧画布查看和继续修改。");
+    expect(message).not.toMatch(/read_file|Context from AI Product Workbench|tool-input|tool-output|Updated todo list/);
+  });
+
+  it("formats model and public-research runtime events as clean user-facing progress", () => {
+    const externalEvent = buildExternalResearchRuntimeEvent({
+      runId: "run-1",
+      context: {
+        status: "completed",
+        fetchedAt: "2026-07-08T00:00:00.000Z",
+        searchQueries: ["签到积分活动 会员运营 最佳实践"],
+        refs: [
+          {
+            query: "签到积分活动 会员运营 最佳实践",
+            title: "Building an Effective Loyalty Program\nread_file secret.md",
+            url: "https://mailchimp.com/resources/loyalty-programs/",
+            insight: "会员体系可用积分承载奖励。",
+            source: "public_web_fetch",
+            contentLength: 1000,
+            fetchedAt: "2026-07-08T00:00:00.000Z",
+          },
+        ],
+        failures: [],
+        privacyBoundary: ["不发送内部路径。"],
+      },
+    });
+    const failedExternalEvent = buildExternalResearchRuntimeEvent({
+      runId: "run-1",
+      context: {
+        status: "failed_non_blocking",
+        fetchedAt: "2026-07-08T00:00:00.000Z",
+        searchQueries: ["积分权益 发放 幂等 风控 资损"],
+        refs: [],
+        failures: [{ error: "network timeout" }],
+        privacyBoundary: ["不发送内部路径。"],
+      },
+    });
+    const modelEvent = buildModelEnrichmentRuntimeEvent({
+      runId: "run-1",
+      finalAction: {
+        type: "review_prd",
+        parsed: true,
+        message: "PRD 已生成。",
+        raw: {
+          enrichmentNotes: [
+            "知识库给出活动配置闭环。",
+            "read_file SKILL.md",
+            "模型补齐默认签到状态和异常处理。",
+          ],
+        },
+      },
+    });
+
+    expect(externalEvent).toEqual(expect.objectContaining({
+      label: "已用公开资料补齐 1 条",
+      detail: "· Building an Effective Loyalty Program",
+    }));
+    expect(failedExternalEvent).toEqual(expect.objectContaining({
+      label: "公开资料补齐暂不可用，已继续生成",
+    }));
+    expect(modelEvent).toEqual(expect.objectContaining({
+      label: "已用模型补齐业务细节",
+      detail: "· 知识库给出活动配置闭环。\n· 模型补齐默认签到状态和异常处理。",
+    }));
+    expect(`${externalEvent.detail}\n${failedExternalEvent.detail}\n${modelEvent.detail}`).not.toMatch(/read_file|Context from AI Product Workbench|tool-input|tool-output|Updated todo list/);
+  });
+
   it("fails PRD generation instead of creating fallback content when the final action is missing", () => {
     expect(
       getPrdGenerationFailureReason({
@@ -366,6 +443,32 @@ describe("aichat document stream router", () => {
     expect(
       getPrdGenerationFailureReason({
         expectsPrdDocument: true,
+        artifacts: [],
+        finalAction: {
+          type: "review_prototype",
+          parsed: true,
+          message: "PRD 和原型已生成。",
+          raw: {
+            type: "review_prototype",
+            prdDocumentDraft: {
+              title: "签到领积分活动需求说明书",
+              sections: [
+                {
+                  id: "background",
+                  title: "1.1 项目背景",
+                  content: "签到领积分活动需要通过后台配置、用户每日签到、积分发放、重复领取限制、审核发布和数据报表形成完整闭环。",
+                },
+              ],
+            },
+            prototypeSpec: { title: "签到领积分活动原型" },
+          },
+        },
+      }),
+    ).toBeUndefined();
+
+    expect(
+      getPrdGenerationFailureReason({
+        expectsPrdDocument: true,
         finalAction: {
           type: "review_prd",
           parsed: true,
@@ -413,6 +516,7 @@ describe("AichatStreamService stop", () => {
       runLogs as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     const internals = service as unknown as {
       activeRunControllers: Map<string, AbortController>;
@@ -455,5 +559,62 @@ describe("AichatStreamService stop", () => {
 
     expect(abort).not.toHaveBeenCalled();
     expect(runLogs.cancelRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("AichatStreamService knowledge retrieval", () => {
+  function createServiceWithKnowledgeSearch(search = vi.fn().mockResolvedValue({
+    references: [],
+  })) {
+    return new AichatStreamService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { search } as never,
+      {} as never,
+      {} as never,
+    ) as unknown as {
+      searchKnowledgeForChat(input: {
+        conversationId: string;
+        runId: string;
+        message: string;
+        hasExistingState?: boolean;
+      }): Promise<unknown>;
+    };
+  }
+
+  it("uses the runtime-generation vault policy and expanded query for one-sentence PRD/prototype requests", async () => {
+    const search = vi.fn().mockResolvedValue({ references: [] });
+    const service = createServiceWithKnowledgeSearch(search);
+
+    await service.searchKnowledgeForChat({
+      conversationId: "conversation-1",
+      runId: "run-signin-points",
+      message: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
+      hasExistingState: false,
+    });
+
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: "conversation-1",
+      runId: "run-signin-points",
+      runtimeName: "runtime_generation",
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "always",
+      limit: 10,
+      preferredTypes: expect.arrayContaining([
+        KnowledgeType.business_concept,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+      ]),
+    }));
+    const query = search.mock.calls[0]?.[0].query;
+    expect(query).toContain("PRD标准结构");
+    expect(query).toContain("原型生成总规则");
+    expect(query).toContain("活动发布与模板配置");
+    expect(query).toContain("奖品券与资损核销");
+    expect(query).toContain("积分发放");
   });
 });

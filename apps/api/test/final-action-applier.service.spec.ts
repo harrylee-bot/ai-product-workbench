@@ -77,6 +77,9 @@ describe("FinalActionApplierService", () => {
             ],
           },
           knowledgeRefsUsed: ["01-业务规则/签到规则"],
+          externalRefsUsed: ["公开资料：积分权益风控 https://example.com/points-risk"],
+          externalResearchStatus: "completed",
+          enrichmentNotes: ["知识库定义活动配置闭环，模型补齐默认状态，联网补充积分风控表达。"],
           assumptions: ["默认每日只能签到一次"],
         },
       }),
@@ -103,6 +106,11 @@ describe("FinalActionApplierService", () => {
       state,
       expect.objectContaining({
         title: "签到活动需求说明书",
+        validationNotes: expect.arrayContaining([
+          "外部补充状态：completed",
+          "补齐说明：知识库定义活动配置闭环，模型补齐默认状态，联网补充积分风控表达。",
+          "外部参考：公开资料：积分权益风控 https://example.com/points-risk",
+        ]),
         sections: expect.arrayContaining([
           expect.objectContaining({ id: "version_history", title: "版 本 历 史" }),
           expect.objectContaining({ id: "manual_toc", title: "目 录" }),
@@ -369,6 +377,187 @@ describe("FinalActionApplierService", () => {
       runId: "run-2",
     }));
     expect(result).toEqual({ prototypeArtifact: artifact, state: updatedState });
+  });
+
+  it("persists PRD and prototype from a single review_prototype final action when both payloads exist", async () => {
+    const state = baseState({ status: "design_ready", version: 3 });
+    const document = baseDocument();
+    const stateWithPrd = { ...state, version: 4, status: "doc_ready", prdDocument: document };
+    const prototypeSpec = { id: "spec-1", pages: [{ id: "page_home", name: "签到页" }] };
+    const artifact = { id: "artifact-1", title: "签到活动原型", htmlContent: "<main>签到页</main>" };
+    const finalState = { ...stateWithPrd, version: 5, status: "prototype_ready", prototypeSpec };
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    stateService.attachGeneratedArtifactsInTransaction
+      .mockResolvedValueOnce(stateWithPrd)
+      .mockResolvedValueOnce(finalState);
+    prototypeService.saveGeneratedPrototypeInTransaction.mockResolvedValue({
+      prototypeSpec,
+      artifact,
+      hasContent: true,
+    });
+
+    const result = await service.apply({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-both",
+      finalAction: finalAction({
+        type: "review_prototype",
+        message: "PRD 和原型已生成。",
+        raw: {
+          type: "review_prototype",
+          designStateDraft: {
+            title: "签到领积分活动",
+            summary: "用户每日签到领取积分奖励",
+            businessGoal: "提升用户活跃",
+          },
+          prdDocumentDraft: {
+            title: "签到领积分活动需求说明书",
+            sections: [
+              {
+                id: "background",
+                title: "1.1 项目背景",
+                type: "overview",
+                level: 3,
+                order: 1,
+                content: "通过签到领积分提升用户每日活跃，并串联后台配置、审核发布、积分发放和数据报表。",
+              },
+            ],
+          },
+          prototypeSpec: {
+            title: "签到领积分活动原型",
+            targetDevice: "both",
+            pages: [{ id: "page_config", name: "后台配置页" }],
+          },
+        },
+      }),
+      artifacts: [prototypeHtmlArtifact()],
+    });
+
+    expect(documentService.saveGeneratedDocumentInTransaction).toHaveBeenCalled();
+    expect(prototypeService.saveGeneratedPrototypeInTransaction).toHaveBeenCalledWith(
+      prisma,
+      stateWithPrd,
+      expect.objectContaining({
+        conversationDesignStateVersion: 4,
+        title: "签到领积分活动原型",
+      }),
+      expect.objectContaining({
+        htmlContent: "<html><body>签到页</body></html>",
+      }),
+      expect.objectContaining({ userId: "user-1", runId: "run-both" }),
+      expect.any(String),
+      true,
+    );
+    expect(stateService.attachGeneratedArtifactsInTransaction).toHaveBeenNthCalledWith(
+      2,
+      prisma,
+      "state-1",
+      expect.objectContaining({
+        prdDocument: document,
+        prototypeSpec,
+        status: "prototype_ready",
+      }),
+    );
+    expect(result).toEqual({ prdDocument: document, prototypeArtifact: artifact, state: finalState });
+  });
+
+  it("strips runtime noise before persisting generated PRD and prototype artifacts", async () => {
+    const state = baseState({ status: "design_ready", version: 3 });
+    const document = baseDocument();
+    const stateWithPrd = { ...state, version: 4, status: "doc_ready", prdDocument: document };
+    const prototypeSpec = { id: "spec-1", pages: [{ id: "page_home", name: "签到页" }] };
+    const artifact = { id: "artifact-1", title: "签到活动原型", htmlContent: "<main>签到页</main>" };
+    const finalState = { ...stateWithPrd, version: 5, status: "prototype_ready", prototypeSpec };
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    stateService.attachGeneratedArtifactsInTransaction
+      .mockResolvedValueOnce(stateWithPrd)
+      .mockResolvedValueOnce(finalState);
+    prototypeService.saveGeneratedPrototypeInTransaction.mockResolvedValue({
+      prototypeSpec,
+      artifact,
+      hasContent: true,
+    });
+
+    await service.apply({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-clean",
+      finalAction: finalAction({
+        type: "review_prototype",
+        message: "PRD 和原型已生成。",
+        raw: {
+          type: "review_prototype",
+          designStateDraft: {
+            title: "签到领积分活动\nContext from AI Product Workbench:",
+            summary: "用户每日签到领取积分奖励。\nUpdated todo list",
+            businessGoal: "提升用户活跃。\nread_file SKILL.md",
+            pages: [{ id: "page_config", name: "后台配置页\nwrite_file draft.md" }],
+          },
+          prdDocumentDraft: {
+            title: "签到领积分活动需求说明书\ntool-output read_file",
+            validationNotes: ["知识库命中活动配置。\nContext from AI Product Workbench:"],
+            sections: [
+              {
+                id: "background",
+                title: "1.1 项目背景\nread_file source.md",
+                type: "overview",
+                level: 3,
+                order: 1,
+                content: [
+                  "通过签到领积分提升用户每日活跃。",
+                  "read_file /tmp/SKILL.md",
+                  "Updated todo list",
+                  "后台配置、审核发布、积分发放和数据报表必须闭环。",
+                ].join("\n"),
+              },
+            ],
+          },
+          prototypeSpec: {
+            title: "签到领积分活动原型\nContext from AI Product Workbench:",
+            targetDevice: "both",
+            pages: [{ id: "page_config", name: "后台配置页\nwrite_todos" }],
+          },
+          externalRefsUsed: ["公开资料：积分风控。\ntool-input read_file"],
+          enrichmentNotes: ["知识库打底，模型补齐，联网补充。\nUpdated todo list"],
+        },
+      }),
+      artifacts: [
+        {
+          ...prototypeHtmlArtifact(),
+          text: [
+            "Context from AI Product Workbench:",
+            "<html>",
+            "<body>",
+            "<main>签到页</main>",
+            "read_file SKILL.md",
+            "Updated todo list",
+            "</body>",
+            "</html>",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    const stateDraft = stateService.createDraftInTransaction.mock.calls[0]?.[2];
+    const savedDraft = documentService.saveGeneratedDocumentInTransaction.mock.calls[0]?.[2];
+    const prototypeCall = prototypeService.saveGeneratedPrototypeInTransaction.mock.calls[0];
+    const prototypeSpecDraft = prototypeCall?.[2];
+    const artifactDraft = prototypeCall?.[3];
+    const htmlContent = prototypeCall?.[5];
+    const persistedPayload = JSON.stringify({
+      stateDraft,
+      savedDraft,
+      prototypeSpecDraft,
+      artifactDraft,
+      htmlContent,
+    });
+
+    expect(persistedPayload).toContain("签到领积分活动");
+    expect(persistedPayload).toContain("后台配置、审核发布、积分发放和数据报表必须闭环");
+    expect(persistedPayload).toContain("<main>签到页</main>");
+    expect(persistedPayload).not.toMatch(/Context from AI Product Workbench|read_file|write_file|write_todos|tool-input|tool-output|Updated todo list/);
   });
 
   it("fails prototype bridge when no ConversationDesignState exists", async () => {

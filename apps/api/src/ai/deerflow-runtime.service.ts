@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import type { RuntimeAttachmentFile } from "../files/file.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
+import type { ExternalResearchContext } from "./external-research.service";
 
 type DeerFlowToolCall = {
   id: string;
@@ -34,6 +35,9 @@ export type DeerFlowFinalAction = {
   intent?: string;
   requirementMode?: "historical_extension" | "new_capability" | "brand_new_system" | "one_sentence_completion";
   knowledgeRefsUsed?: string[];
+  externalRefsUsed?: string[];
+  enrichmentNotes?: string[];
+  externalResearchStatus?: string;
   artifacts?: DeerFlowArtifactReference[];
   raw?: unknown;
   /** 是否成功解析出 final action JSON 块。false 表示 DeerFlow 未产出可识别动作（静默降级为 answer）。 */
@@ -101,6 +105,8 @@ type DeerFlowRunInput = {
   conversationDesignState?: unknown;
   /** knowledge-core-2：生成路径注入的知识库召回（标题/摘要/内容/类型），让 DeerFlow 按知识基线产出 */
   knowledgeContext?: DeerFlowKnowledgeReference[];
+  /** API 侧安全抓取的公开资料补充证据，只包含标题、URL、简短归纳和抓取状态，不包含网页全文。 */
+  externalResearchContext?: ExternalResearchContext;
   signal?: AbortSignal;
   onEvent?: (event: DeerFlowRuntimeEvent) => Promise<void> | void;
 };
@@ -531,6 +537,7 @@ function assertThreadBindingMatchesInput(
 }
 
 function buildUserPrompt(input: DeerFlowRunInput) {
+  const knowledgeContext = input.knowledgeContext ?? [];
   const context = {
     runtimeContract: "ai-product-workbench.deerflow-runtime.v1",
     runId: input.runId,
@@ -541,7 +548,16 @@ function buildUserPrompt(input: DeerFlowRunInput) {
     deerFlowUploads: input.deerFlowUploads ?? [],
     resumeReason: input.resumeReason,
     conversationDesignState: input.conversationDesignState,
-    knowledgeContext: input.knowledgeContext ?? [],
+    knowledgeContext,
+    externalResearchContext: input.externalResearchContext ?? {
+      status: "skipped_not_needed",
+      fetchedAt: new Date(0).toISOString(),
+      searchQueries: [],
+      refs: [],
+      failures: [],
+      privacyBoundary: [],
+    },
+    knowledgeWorkflowPolicy: buildKnowledgeWorkflowPolicy(input, knowledgeContext),
     finalActionContract: {
       instruction: "At the end, include one fenced block named ai_product_workbench_final_action with JSON.",
       schema: {
@@ -550,6 +566,12 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         intent: "optional intent label",
         requirementMode: "optional: historical_extension | new_capability | brand_new_system | one_sentence_completion",
         knowledgeRefsUsed: "optional array of knowledge paths or titles used for reasoning",
+        externalRefsUsed:
+          "optional array of public external references used after local knowledge was applied; use title + URL when available; leave [] when search tools are unavailable or not needed",
+        externalResearchStatus:
+          "optional: completed | skipped_not_needed | skipped_tools_unavailable | failed_non_blocking",
+        enrichmentNotes:
+          "optional user-safe notes that summarize what was filled by model inference and what was filled by external search/fetch",
         assumptions: "optional inferred business facts, especially for one-sentence requirements",
         consistencyStrategy: "optional PRD/prototype consistency strategy",
         prdDocumentDraft:
@@ -571,6 +593,12 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "new_capability means a new capability inside an existing conversation: reuse product_architecture and the platform page framework, then design a clearer local information architecture for the new capability.",
         "brand_new_system means a completely new system/page: if a tab bar is present in the target experience, follow the retrieved ui_style_guide tab style while allowing the rest of the page style to be redesigned; if no tab bar is present, you may redesign the page style from scratch.",
         "Use product_architecture/page_inventory/ui_style_guide/prototype_asset_ref knowledge items when available to decide reuse vs redesign; cite them in knowledgeRefsUsed.",
+        "Knowledge-first workflow: use knowledgeContext before general model knowledge. After the local knowledge baseline is applied, you may use model reasoning and available web search/fetch tools to fill missing current or general details, but local product rules win over web results.",
+        "When knowledgeContext is non-empty and the user asks for a PRD/prototype/方案, do not stop at copying local knowledge: first infer ordinary missing product details with the model, then use available web search/fetch for public, generic, current, or industry-practice details when helpful. If search/fetch tools are unavailable, set externalResearchStatus=skipped_tools_unavailable and continue with model inference.",
+        "If externalResearchContext.refs is non-empty, use those refs as already fetched public evidence and cite them in externalRefsUsed/enrichmentNotes; do not repeat search unless there is a clear missing public fact.",
+        "Never send private files, raw source assets, internal paths, conversation IDs, user IDs, credentials, or complete user documents to web search. Search only generic product/domain terms derived from the request, such as 签到积分活动 会员运营 最佳实践.",
+        "If external information is used, cite it only in externalRefsUsed/enrichmentNotes and relevant PRD source notes; do not paste long web excerpts into the chat or PRD.",
+        "If knowledgeContext is empty, do not claim the PRD/prototype is knowledge-base driven. Return a concise ask_clarification or answer that says the knowledge base missed and names the missing knowledge area.",
         "For one_sentence_completion, infer ordinary missing details from product_architecture knowledge, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
         "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",
         "For activity-configuration PRDs, include visual evidence blocks when knowledgeContext provides them: at least one business flow diagram, one configuration architecture diagram, and prototype_snapshot/image blocks for key Axure pages. Use Mermaid for diagram blocks and local visualAssets paths for prototype_snapshot/image blocks.",
@@ -588,6 +616,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "Return final action instead of asking NestJS to decide the workflow.",
         "For PRD/document generation, do not stream the full PRD body as ordinary chat prose. Put the complete body in prdDocumentDraft.sections or a prd_markdown artifact, then use a concise finalAction.message; AI Product Workbench will open the canvas from the saved PRD.",
         "Keep non-document progress notes, clarifying comments, and tool/coding updates outside the document body so they remain suitable for the chat transcript.",
+        "Keep the user-visible chat clean: never paste tool outputs, skill files, todo lists, JSON context, or execution logs as ordinary assistant text.",
       ],
     },
     prototypeHtmlContract: {
@@ -634,6 +663,71 @@ function buildUserPrompt(input: DeerFlowRunInput) {
     JSON.stringify(context),
     "```",
   ].join("\n");
+}
+
+function buildKnowledgeWorkflowPolicy(
+  input: DeerFlowRunInput,
+  knowledgeContext: DeerFlowKnowledgeReference[],
+) {
+  const hasKnowledgeHit = knowledgeContext.length > 0;
+  return {
+    localKnowledgeStatus: hasKnowledgeHit ? "hit" : "miss",
+    order: [
+      "1. Local knowledge baseline: apply knowledgeContext first and cite knowledgeRefsUsed.",
+      "2. Model enrichment: infer ordinary missing product details, defaults, states, and acceptance criteria; write them into assumptions/enrichmentNotes.",
+      "3. Web enrichment: after local knowledge is applied, use available search/fetch tools for public/current/general practice details when helpful; write externalRefsUsed/externalResearchStatus.",
+      "4. Conflict rule: local product knowledge and user-provided facts override model guesses and web results.",
+    ],
+    emptyKnowledgeBehavior:
+      "如果 knowledgeContext 为空，先说明知识库未命中并给出最小可继续方案；不要假装已经引用知识库。",
+    userVisibleNoisePolicy:
+      "不要把技能文件内容、工具输入输出、todo、read_file/search/fetch 日志、隐藏推理或运行调试信息写入聊天正文或 PRD 正文。",
+    modelEnrichmentChecklist: [
+      "补齐目标用户、使用场景、页面/状态、异常/降级、接口联动口径、验收标准。",
+      "对一两句话需求做合理业务推断，但把积分值、预算、活动周期、目标人群等不确定项写入 assumptions 或 待确认。",
+      "PRD 与原型必须共享同一组核心规则、状态和页面结构，避免文档与原型各写各的。",
+    ],
+    externalSearchPolicy: {
+      enabledAfterKnowledgeHit: hasKnowledgeHit,
+      mustAttemptWhen:
+        "knowledgeContext 非空，且用户要求 PRD/原型/方案；如果 DeerFlow 当前没有 search/fetch 工具，则继续生成并标记 externalResearchStatus=skipped_tools_unavailable。",
+      searchQueries: buildExternalSearchQueries(input.message, knowledgeContext),
+      privacyGuardrails: [
+        "只搜索通用领域词，不搜索内部文件名、知识库路径、会话 ID、用户 ID、附件原文、真实接口、密钥或客户资料。",
+        "外部资料只能补充行业惯例、现行概念、体验参考和风险提醒，不能覆盖本地知识库强规则。",
+        "不要把网页长段落原样粘进聊天正文、PRD 正文或原型。",
+      ],
+      outputRequirements: [
+        "externalResearchStatus 必须说明 completed/skipped_not_needed/skipped_tools_unavailable/failed_non_blocking。",
+        "externalRefsUsed 只列实际用过的公开来源；没有用就返回空数组。",
+        "enrichmentNotes 用用户能看懂的话说明：哪些来自知识库、哪些是模型合理补齐、哪些来自联网补充。",
+      ],
+    },
+  };
+}
+
+function buildExternalSearchQueries(message: string, knowledgeContext: DeerFlowKnowledgeReference[]) {
+  const compact = message.replace(/\s+/g, "");
+  const queries: string[] = [];
+
+  if (/(签到|打卡|积分|奖励|奖品|权益|活动)/.test(compact)) {
+    queries.push("签到积分活动 会员运营 最佳实践");
+    queries.push("积分权益 发放 幂等 风控 资损");
+    queries.push("营销活动 连续签到 奖励机制 用户体验");
+  }
+  if (/(需求文档|需求说明书|prd|PRD)/.test(message)) {
+    queries.push("产品需求文档 验收标准 风险 降级 规范");
+  }
+  if (/(原型|prototype|页面|界面|交互)/i.test(message)) {
+    queries.push("后台配置 前台活动页 原型 交互状态 设计模式");
+  }
+
+  for (const item of knowledgeContext.slice(0, 3)) {
+    const title = item.title.replace(/[^\p{Script=Han}a-z0-9 ]/giu, " ").replace(/\s+/g, " ").trim();
+    if (title) queries.push(`${title} 行业实践 风险控制`);
+  }
+
+  return [...new Set(queries)].slice(0, 6);
 }
 
 function normalizeDeerFlowEvent(event: string, data: unknown): DeerFlowRuntimeEvent {
@@ -855,6 +949,9 @@ function extractFinalAction(assistantText: string, finalState: unknown): DeerFlo
     intent: toOptionalString(parsed?.intent),
     requirementMode: normalizeRequirementMode(parsed?.requirementMode),
     knowledgeRefsUsed: toStringList(parsed?.knowledgeRefsUsed),
+    externalRefsUsed: toStringList(parsed?.externalRefsUsed),
+    enrichmentNotes: toStringList(parsed?.enrichmentNotes),
+    externalResearchStatus: toOptionalString(parsed?.externalResearchStatus),
     artifacts: extractArtifactReferences(parsed?.artifacts),
     raw: parsed ?? { finalState },
     // parsed 为 true 仅当成功解析出 JSON 块；否则为静默降级（pipe-6：不再无声失败）。
