@@ -276,6 +276,10 @@ export class AichatStreamService {
             context: externalResearchContext,
           })));
 
+          publishRuntimeEvent(createRuntimeEvent(buildModelEnrichmentStartedRuntimeEvent(run.id)));
+          const stopModelHeartbeat = startModelHeartbeat(streamWriter, run.id, () =>
+            clientClosed || controller.signal.aborted,
+          );
           const result = await this.deerFlow.runTurn({
             runId: run.id,
             conversationId,
@@ -311,6 +315,8 @@ export class AichatStreamService {
                 void assistantDraft.persist();
               }
             },
+          }).finally(() => {
+            stopModelHeartbeat();
           });
           publishRuntimeEvent(createRuntimeEvent(buildModelEnrichmentRuntimeEvent({
             runId: run.id,
@@ -1743,6 +1749,17 @@ export function buildExternalResearchRuntimeEvent(input: {
   };
 }
 
+export function buildModelEnrichmentStartedRuntimeEvent(runId: string) {
+  return {
+    runId,
+    id: "model-enrichment-start",
+    kind: "knowledge" as const,
+    label: "正在用模型补齐业务细节",
+    detail: "基于知识库和公开资料，补齐默认流程、页面状态、异常处理和验收口径。",
+    status: "running" as const,
+  };
+}
+
 export function buildModelEnrichmentRuntimeEvent(input: {
   runId: string;
   finalAction: DeerFlowFinalAction;
@@ -1766,6 +1783,34 @@ export function buildModelEnrichmentRuntimeEvent(input: {
       : "已补齐默认流程、状态、异常处理和待确认项；本地知识库规则仍作为优先依据。",
     status: "completed" as const,
   };
+}
+
+function startModelHeartbeat(
+  writer: UIMessageStreamWriter,
+  runId: string,
+  shouldStop: () => boolean,
+) {
+  let sequence = 0;
+  const timer = setInterval(() => {
+    if (shouldStop()) return;
+    try {
+      writer.write({
+        type: "data-runtime-heartbeat",
+        data: {
+          runId,
+          phase: "model_enrichment",
+          label: "模型仍在生成中",
+          sequence: ++sequence,
+          at: new Date().toISOString(),
+        },
+        transient: true,
+      });
+    } catch {
+      // heartbeat 只用于保持线上 SSE 活性，失败不影响主流程。
+    }
+  }, 10_000);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 function cleanArtifactTitle(value: string, fallback: string) {

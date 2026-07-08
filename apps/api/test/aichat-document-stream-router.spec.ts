@@ -5,6 +5,7 @@ import {
   AichatStreamService,
   buildExternalResearchRuntimeEvent,
   buildModelEnrichmentRuntimeEvent,
+  buildModelEnrichmentStartedRuntimeEvent,
   buildCanvasDocumentRuntimePrompt,
   createDocumentStreamState,
   formatArtifactReadyMessage,
@@ -340,6 +341,7 @@ describe("aichat document stream router", () => {
         privacyBoundary: ["不发送内部路径。"],
       },
     });
+    const modelStartedEvent = buildModelEnrichmentStartedRuntimeEvent("run-1");
     const modelEvent = buildModelEnrichmentRuntimeEvent({
       runId: "run-1",
       finalAction: {
@@ -363,11 +365,16 @@ describe("aichat document stream router", () => {
     expect(failedExternalEvent).toEqual(expect.objectContaining({
       label: "公开资料补齐暂不可用，已继续生成",
     }));
+    expect(modelStartedEvent).toEqual(expect.objectContaining({
+      label: "正在用模型补齐业务细节",
+      detail: expect.stringContaining("补齐默认流程"),
+      status: "running",
+    }));
     expect(modelEvent).toEqual(expect.objectContaining({
       label: "已用模型补齐业务细节",
       detail: "· 知识库给出活动配置闭环。\n· 模型补齐默认签到状态和异常处理。",
     }));
-    expect(`${externalEvent.detail}\n${failedExternalEvent.detail}\n${modelEvent.detail}`).not.toMatch(/read_file|Context from AI Product Workbench|tool-input|tool-output|Updated todo list/);
+    expect(`${externalEvent.detail}\n${failedExternalEvent.detail}\n${modelStartedEvent.detail}\n${modelEvent.detail}`).not.toMatch(/read_file|Context from AI Product Workbench|tool-input|tool-output|Updated todo list/);
   });
 
   it("fails PRD generation instead of creating fallback content when the final action is missing", () => {
