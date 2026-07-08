@@ -352,7 +352,7 @@ export class AichatStreamService {
           let finalAction = result.finalAction;
           let artifacts = result.artifacts;
           let assistantText = result.assistantText;
-          const prdGenerationFailureReason = getPrdGenerationFailureReason({
+          let prdGenerationFailureReason = getPrdGenerationFailureReason({
             finalAction,
             artifacts,
             expectsPrdDocument: forceCanvasDocument || isDocumentGenerationRequest(runtimeContent),
@@ -360,13 +360,37 @@ export class AichatStreamService {
           if (prdGenerationFailureReason) {
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
-              id: "prd-generation-failed",
-              kind: "error",
-              label: "需求文档生成失败",
-              detail: `${prdGenerationFailureReason}，请重试。`,
-              status: "failed",
+              id: "model-final-action-fallback",
+              kind: "knowledge",
+              label: "模型未返回完整产物，已先生成可编辑初稿",
+              detail: `${prdGenerationFailureReason}；系统已基于知识库命中和公开资料补齐生成 PRD 与原型初稿。`,
+              status: "completed",
             }));
-            throw new PrdGenerationFailedError(prdGenerationFailureReason);
+            result = buildTimeboxedFallbackTurnResult({
+              runId: run.id,
+              message: runtimeContent,
+              knowledgeContext,
+              externalResearchContext,
+            });
+            finalAction = result.finalAction;
+            artifacts = result.artifacts;
+            assistantText = result.assistantText;
+            prdGenerationFailureReason = getPrdGenerationFailureReason({
+              finalAction,
+              artifacts,
+              expectsPrdDocument: forceCanvasDocument || isDocumentGenerationRequest(runtimeContent),
+            });
+            if (prdGenerationFailureReason) {
+              publishRuntimeEvent(createRuntimeEvent({
+                runId: run.id,
+                id: "prd-generation-failed",
+                kind: "error",
+                label: "需求文档生成失败",
+                detail: `${prdGenerationFailureReason}，请重试。`,
+                status: "failed",
+              }));
+              throw new PrdGenerationFailedError(prdGenerationFailureReason);
+            }
           }
 
           const expectsArtifact =
