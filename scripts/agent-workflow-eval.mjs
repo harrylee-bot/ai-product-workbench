@@ -1530,8 +1530,8 @@ ${userTopic}
 | 最终用户提示 | ${markdownCell(onlineEvidence("线上最终助手提示清晰"))} | ${markdownCell(optimizedEvidence("最终用户提示清晰且无运行噪音"))} |
 | PRD 产出 | ${markdownCell(onlineEvidence("线上 PRD 已落库"))} | ${markdownCell(optimizedEvidence("PRD 包含固定章节"))} |
 | PRD 内容结构 | ${markdownCell(onlineEvidence("线上 PRD 内容结构合格"))} | ${markdownCell(optimizedEvidence("PRD 包含固定章节"))} |
-| 知识和补齐留痕 | ${markdownCell(onlineEvidence("线上 PRD 包含知识库和补齐说明"))} | ${markdownCell(`${optimizedEvidence("知识库引用已留痕")}；${optimizedEvidence("模型补齐说明已留痕")}；${optimizedEvidence("联网补齐有真实取证")}`)} |
-| 外部证据和边界留痕 | ${markdownCell(onlineEvidence("线上 PRD 包含外部证据和补齐边界"))} | ${markdownCell(`${optimizedEvidence("联网证据来源已留痕")}；${optimizedEvidence("补齐计划有隐私边界")}`)} |
+| 知识和补齐留痕 | ${markdownCell(onlineEvidence("线上 PRD 元数据留存知识库和补齐证据"))} | ${markdownCell(`${optimizedEvidence("知识库引用已留痕")}；${optimizedEvidence("模型补齐说明已留痕")}；${optimizedEvidence("联网补齐有真实取证")}`)} |
+| PRD 正文克制 | ${markdownCell(onlineEvidence("线上 PRD 正文不写补齐证据章节"))} | ${markdownCell("通过：知识库、模型和联网证据只在评测/元数据留痕，不写入 PRD 正文")} |
 | PRD 内容噪音 | ${markdownCell(onlineEvidence("线上 PRD 不含运行噪音"))} | ${markdownCell(optimizedEvidence("产物不含运行噪音"))} |
 | 原型产出 | ${markdownCell(onlineEvidence("线上原型已落库"))} | ${markdownCell(optimizedEvidence("原型是完整 HTML"))} |
 | 原型核心文案 | ${markdownCell(onlineEvidence("线上原型包含核心页面文案"))} | ${markdownCell(`${optimizedEvidence("原型包含后台配置")}；${optimizedEvidence("原型包含前台签到状态")}`)} |

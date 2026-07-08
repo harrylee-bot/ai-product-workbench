@@ -1949,7 +1949,6 @@ export function buildTimeboxedFallbackTurnResult(input: {
         "资损控制：积分发放必须有幂等键、额度校验、重复领取限制和对账记录。",
         "权限控制：活动配置、审核、发布、补偿和下线需要分角色授权。",
         "风控要求：异常频次、批量签到、设备/账号风险、积分发放失败率需要进入监控。",
-        `联网补齐证据：外部补充状态：${input.externalResearchContext.status}。\n${externalEvidenceText}\n边界：${boundary}`,
       ].join("\n"),
       sourcePaths: knowledgeRefsUsed,
     },
@@ -1978,6 +1977,9 @@ export function buildTimeboxedFallbackTurnResult(input: {
       sections,
       validationNotes: [
         "模型生成超过时间盒，本初稿用于保证用户可立即得到可编辑产物。",
+        `外部补充状态：${input.externalResearchContext.status}`,
+        `外部参考：${externalEvidenceText}`,
+        `补齐边界：${boundary}`,
       ],
     },
     prototypeSpec: {

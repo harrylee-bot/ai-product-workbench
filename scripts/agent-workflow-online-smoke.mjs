@@ -469,14 +469,14 @@ function evaluateOnlineResult(rawStream, snapshotMap, result, renderResult) {
       evidence: prdQuality.structureEvidence,
     },
     {
-      name: "线上 PRD 包含知识库和补齐说明",
-      passed: prdQuality.knowledgeAndEnrichmentPassed,
-      evidence: prdQuality.knowledgeAndEnrichmentEvidence,
+      name: "线上 PRD 元数据留存知识库和补齐证据",
+      passed: prdQuality.traceMetadataPassed,
+      evidence: prdQuality.traceMetadataEvidence,
     },
     {
-      name: "线上 PRD 包含外部证据和补齐边界",
-      passed: prdQuality.externalEvidenceBoundaryPassed,
-      evidence: prdQuality.externalEvidenceBoundaryEvidence,
+      name: "线上 PRD 正文不写补齐证据章节",
+      passed: prdQuality.noTraceBodyPassed,
+      evidence: prdQuality.noTraceBodyEvidence,
     },
     {
       name: "线上 PRD 不含运行噪音",
@@ -584,17 +584,23 @@ function evaluatePrdDocument(document) {
       textLength: 0,
       structurePassed: false,
       structureEvidence: "document null",
-      knowledgeAndEnrichmentPassed: false,
-      knowledgeAndEnrichmentEvidence: "document null",
-      externalEvidenceBoundaryPassed: false,
-      externalEvidenceBoundaryEvidence: "document null",
+      traceMetadataPassed: false,
+      traceMetadataEvidence: "document null",
+      noTraceBodyPassed: false,
+      noTraceBodyEvidence: "document null",
       noisePassed: false,
       noiseEvidence: "document null",
       conceptHits: {},
     };
   }
 
-  const text = flattenText(document);
+  const sectionText = flattenText({ sections: document.sections ?? [] });
+  const metadataText = flattenText({
+    knowledgeRefs: document.knowledgeRefs,
+    validationNotes: document.validationNotes,
+    assumptions: document.assumptions,
+  });
+  const text = `${sectionText}\n${metadataText}`;
   const structureLabels = [
     ["引言/背景", /引言|项目背景|背景/],
     ["业务需求", /业务需求|核心业务规则|功能说明|验收标准/],
@@ -608,21 +614,26 @@ function evaluatePrdDocument(document) {
   }));
   const knowledgeRefs = Array.isArray(document.knowledgeRefs) ? document.knowledgeRefs : [];
   const validationNotes = Array.isArray(document.validationNotes) ? document.validationNotes : [];
-  const knowledgeHit = knowledgeRefs.length > 0 || /知识库|活动发布与模板配置|奖品券与资损核销|原型生成总规则|PRD标准结构/.test(text);
-  const enrichmentHit = /模型补齐|联网|公开资料|外部补充|externalResearch|外部参考|补齐说明/.test(text) ||
-    validationNotes.some((item) => /模型|联网|外部|补齐|公开资料/.test(String(item)));
-  const hasExternalUrl = /https:\/\/(mailchimp\.com|docs\.stripe\.com|developer\.mozilla\.org|[a-z0-9.-]+\.[a-z]{2,})/i.test(text);
-  const hasExternalStatus = /外部补充状态|externalResearchStatus|completed|failed_non_blocking|skipped_tools_unavailable/.test(text);
-  const hasBoundary = /不发送|不搜索|内部路径|附件原文|真实接口|密钥|不覆盖本地知识库|隐私边界|只补充|公开资料/.test(text);
+  const knowledgeHit = knowledgeRefs.length > 0 || /知识库|活动发布与模板配置|奖品券与资损核销|原型生成总规则|PRD标准结构/.test(metadataText);
+  const enrichmentHit = validationNotes.some((item) => /模型|联网|外部|补齐|公开资料/.test(String(item)));
+  const hasExternalUrl = /https:\/\/(mailchimp\.com|docs\.stripe\.com|developer\.mozilla\.org|[a-z0-9.-]+\.[a-z]{2,})/i.test(metadataText);
+  const hasExternalStatus = /外部补充状态|externalResearchStatus|completed|failed_non_blocking|skipped_tools_unavailable/.test(metadataText);
+  const hasBoundary = /不发送|不搜索|内部路径|附件原文|真实接口|密钥|不覆盖本地知识库|隐私边界|只补充|公开资料/.test(metadataText);
+  const traceBodyHits = [
+    /联网补齐证据/.test(sectionText) ? "联网补齐证据" : "",
+    /模型与联网补齐/.test(sectionText) ? "模型与联网补齐" : "",
+    /外部补充状态/.test(sectionText) ? "外部补充状态" : "",
+    /https:\/\/(mailchimp\.com|docs\.stripe\.com|developer\.mozilla\.org|[a-z0-9.-]+\.[a-z]{2,})/i.test(sectionText) ? "外部URL" : "",
+  ].filter(Boolean);
   const noiseHits = findRuntimeNoise(text);
   return {
     textLength: text.length,
     structurePassed: structureHits.every((item) => item.hit),
     structureEvidence: structureHits.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
-    knowledgeAndEnrichmentPassed: knowledgeHit && enrichmentHit,
-    knowledgeAndEnrichmentEvidence: `knowledgeRefs=${knowledgeRefs.length}, validationNotes=${validationNotes.length}, knowledge=${knowledgeHit ? "hit" : "miss"}, enrichment=${enrichmentHit ? "hit" : "miss"}`,
-    externalEvidenceBoundaryPassed: hasExternalUrl && hasExternalStatus && hasBoundary,
-    externalEvidenceBoundaryEvidence: `url=${hasExternalUrl ? "hit" : "miss"}, status=${hasExternalStatus ? "hit" : "miss"}, boundary=${hasBoundary ? "hit" : "miss"}`,
+    traceMetadataPassed: knowledgeHit && enrichmentHit && hasExternalUrl && hasExternalStatus && hasBoundary,
+    traceMetadataEvidence: `knowledgeRefs=${knowledgeRefs.length}, validationNotes=${validationNotes.length}, knowledge=${knowledgeHit ? "hit" : "miss"}, enrichment=${enrichmentHit ? "hit" : "miss"}, url=${hasExternalUrl ? "hit" : "miss"}, status=${hasExternalStatus ? "hit" : "miss"}, boundary=${hasBoundary ? "hit" : "miss"}`,
+    noTraceBodyPassed: traceBodyHits.length === 0,
+    noTraceBodyEvidence: traceBodyHits.length ? `body contains ${traceBodyHits.join(", ")}` : "no trace/evidence section in PRD body",
     noisePassed: noiseHits.length === 0,
     noiseEvidence: noiseHits.length ? noiseHits.join(", ") : "no runtime noise patterns",
     conceptHits: buildConceptHits(text),
@@ -815,7 +826,8 @@ function runSelfTest() {
   );
   assertCheck(allowedEvaluation, "线上流不暴露工具噪音", true);
   assertCheck(allowedEvaluation, "线上最终助手提示清晰", true);
-  assertCheck(allowedEvaluation, "线上 PRD 包含外部证据和补齐边界", true);
+  assertCheck(allowedEvaluation, "线上 PRD 元数据留存知识库和补齐证据", true);
+  assertCheck(allowedEvaluation, "线上 PRD 正文不写补齐证据章节", true);
   assertCheck(allowedEvaluation, "线上运行状态展示知识库模型联网三段进度", true);
 
   const internalToolProtocol = [
@@ -838,7 +850,8 @@ function runSelfTest() {
       "allowed createDocument protocol is not treated as internal tool noise",
       "internal read_file protocol is treated as tool noise",
       "final assistant message must be clear and clean",
-      "PRD must include external evidence and public-data boundary",
+      "PRD metadata must retain external evidence and public-data boundary",
+      "PRD body must not include trace/evidence sections",
       "runtime progress must show knowledge, model, and public evidence stages",
     ],
   }, null, 2));
@@ -856,14 +869,15 @@ function samplePrdDocument() {
   return {
     title: "签到领积分活动需求说明书",
     knowledgeRefs: [{ title: "活动发布与模板配置" }],
-    validationNotes: ["补齐说明：知识库打底，模型补齐默认状态，联网补充公开资料。"],
+    validationNotes: [
+      "补齐说明：知识库打底，模型补齐默认状态，联网补充公开资料。",
+      "外部补充状态：completed",
+      "外部参考：https://developer.mozilla.org/en-US/docs/Glossary/Idempotent",
+      "补齐边界：外部资料只补充通用经验，不发送内部路径、附件原文、真实接口或密钥，不覆盖本地知识库规则。",
+    ],
     sections: [
       { title: "1.1 项目背景", content: "用户每日签到领取积分。" },
       { title: "2.2 核心业务规则", content: "每日签到、积分奖励、重复签到不重复发放。" },
-      {
-        title: "联网补齐证据",
-        content: "外部补充状态：completed。公开资料：https://developer.mozilla.org/en-US/docs/Glossary/Idempotent。边界：外部资料只补充通用经验，不发送内部路径、附件原文、真实接口或密钥，不覆盖本地知识库规则。",
-      },
       { title: "3 业务降级方案", content: "积分发放失败进入补偿重试。" },
       { title: "4 需求安全基线要求", content: "控制资损、风控、权限和报表。" },
     ],
