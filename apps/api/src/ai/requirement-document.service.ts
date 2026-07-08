@@ -136,7 +136,12 @@ export class RequirementDocumentService {
     const item = document
       ? this.toDocumentItem(document as RequirementDocumentRecord)
       : null;
-    if (state && item && !isDocumentFromCurrentState(item, state)) {
+    if (
+      !conversation.currentPrdDocumentId &&
+      state &&
+      item &&
+      !isDocumentFromCurrentState(item, state)
+    ) {
       return { document: null, conversationDesignState: state };
     }
     return { document: item, conversationDesignState: state ?? null };

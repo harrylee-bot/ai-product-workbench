@@ -147,6 +147,30 @@ describe("PRD requirement document module", () => {
     expect(result.document?.id).toBe("prd-current");
   });
 
+  it("returns the current PRD when later artifact attachment advances the design state", async () => {
+    const draft = prdDraft(baseState());
+    stateService.getCurrentState.mockResolvedValue(
+      baseState({ id: "state-next", version: 4 }),
+    );
+    prisma.conversation.findUnique.mockResolvedValue(
+      baseProject({ currentPrdDocumentId: "prd-current" }),
+    );
+    prisma.requirementDocument.findFirst.mockResolvedValueOnce(
+      documentRecord({
+        id: "prd-current",
+        ...draft,
+        conversationDesignStateId: "state-1",
+        conversationDesignStateVersion: 3,
+      }),
+    );
+
+    const result = await service.getCurrentForUser(user, "conversation-1");
+
+    expect(result.document?.id).toBe("prd-current");
+    expect(result.document?.conversationDesignStateVersion).toBe(3);
+    expect(result.conversationDesignState?.version).toBe(4);
+  });
+
   it("does not trust a stale PRD snapshot embedded in ConversationDesignState", async () => {
     const statePrd = documentRecord({
       id: "prd-state",
