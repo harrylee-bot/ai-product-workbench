@@ -5,6 +5,7 @@ import type { RuntimeAttachmentFile } from "../files/file.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { toInputJson } from "./ai-vibe.helpers";
 import type { ExternalResearchContext } from "./external-research.service";
+import { buildKnowledgeFrameworkChecklist } from "./knowledge-framework-checklist";
 
 type DeerFlowToolCall = {
   id: string;
@@ -718,6 +719,13 @@ function buildKnowledgeWorkflowPolicy(
   knowledgeContext: DeerFlowKnowledgeReference[],
 ) {
   const hasKnowledgeHit = knowledgeContext.length > 0;
+  const prototypeKnowledgeChecklist = buildKnowledgeFrameworkChecklist(
+    knowledgeContext.filter((item) =>
+      item.type === "prototype_asset_ref" ||
+      item.type === "prototype_rule" ||
+      /原型资产|高保真HTML原型框架|Axure|RP资产|HTML原型|页面框架/.test(`${item.title}\n${item.content}`),
+    ),
+  );
   return {
     localKnowledgeStatus: hasKnowledgeHit ? "hit" : "miss",
     order: [
@@ -735,6 +743,13 @@ function buildKnowledgeWorkflowPolicy(
       "对一两句话需求做合理业务推断，为常见业务参数给出可评审默认值。真正不确定且会改变业务决策的内容写入 assumptions，不要用大量 待确认 占位填充 PRD 正文或原型页面。",
       "PRD 与原型必须共享同一组核心规则、状态和页面结构，避免文档与原型各写各的。",
     ],
+    prototypeKnowledgeChecklist: {
+      instruction:
+        "生成 prototypeSpec 和 HTML 前逐组核对。requirements 只包含知识页定义的核心必选项；按需/可选表不会出现在这里。每组必须在真实产品界面中出现足够的可见字段、控件或状态，不能用评审说明代替。",
+      alignmentRule:
+        "designStateDraft、PRD、prototypeSpec 与 HTML 对同一页面、功能、规则和状态使用一致术语；prototypeSpec 只枚举 HTML 实际实现的页面、组件和状态。",
+      sources: prototypeKnowledgeChecklist,
+    },
     externalSearchPolicy: {
       enabledAfterKnowledgeHit: hasKnowledgeHit,
       mustAttemptWhen:

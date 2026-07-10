@@ -9,6 +9,7 @@ import type {
   QAIssue,
   RequirementDocument,
 } from "./ai-vibe.types";
+import { extractKnowledgeFrameworkRequirements } from "./knowledge-framework-checklist";
 
 export type QaRuleCheckInput = {
   conversationDesignState?: ConversationDesignState | null;
@@ -635,17 +636,21 @@ function findMissingDesignCoverage(
 ): MissingCoverageGroup[] {
   if (!state) return [];
   return keys.flatMap((key) => {
-    const names = (state[key] ?? [])
-      .map((item) => entityName(item))
-      .filter((name): name is string => Boolean(name) && name.length >= 2);
-    if (!names.length) return [];
-    const missing = names.filter((name) => !artifactContainsLabel(artifactText, name));
-    const hitRatio = (names.length - missing.length) / names.length;
+    const entities = (state[key] ?? [])
+      .map((item) => ({ item, name: entityName(item) }))
+      .filter((entity): entity is { item: Record<string, unknown>; name: string } =>
+        Boolean(entity.name) && entity.name.length >= 2,
+      );
+    if (!entities.length) return [];
+    const missing = entities
+      .filter(({ item }) => !artifactCoversEntity(artifactText, item))
+      .map(({ name }) => name);
+    const hitRatio = (entities.length - missing.length) / entities.length;
     return hitRatio >= 0.75 ? [] : [{
       key,
       label: DESIGN_COVERAGE_LABELS[key],
       missing,
-      total: names.length,
+      total: entities.length,
     }];
   });
 }
@@ -658,27 +663,34 @@ function formatMissingCoverageDescription(groups: MissingCoverageGroup[]) {
 
 function findMissingPrototypeSpecCoverage(spec: PrototypeSpec | null | undefined, html: string) {
   if (!spec) return [];
-  const labels: string[] = [];
+  const items: Array<{ name: string; evidence?: string }> = [];
   for (const page of spec.pages) {
-    if (page.name?.trim()) labels.push(page.name.trim());
+    if (page.name?.trim()) items.push({ name: page.name.trim(), evidence: page.layout });
     for (const state of page.states ?? []) {
-      if (state.name?.trim()) labels.push(state.name.trim());
+      if (state.name?.trim()) items.push({ name: state.name.trim(), evidence: state.description });
     }
-    collectPrototypeComponentLabels(page.components, labels);
+    collectPrototypeComponentCoverage(page.components, items);
   }
-  const unique = [...new Set(labels.filter((label) => label.length >= 2))];
+  const unique = [...new Map(
+    items.filter((item) => item.name.length >= 2).map((item) => [item.name, item]),
+  ).values()];
   if (!unique.length) return [];
-  const missing = unique.filter((label) => !artifactContainsLabel(html, label));
+  const missing = unique
+    .filter((item) =>
+      !artifactContainsLabel(html, item.name) &&
+      !artifactContainsEvidence(html, item.evidence),
+    )
+    .map((item) => item.name);
   return (unique.length - missing.length) / unique.length >= 0.75 ? [] : missing;
 }
 
-function collectPrototypeComponentLabels(
+function collectPrototypeComponentCoverage(
   components: PrototypeSpec["pages"][number]["components"],
-  output: string[],
+  output: Array<{ name: string; evidence?: string }>,
 ) {
   for (const component of components ?? []) {
-    if (component.name?.trim()) output.push(component.name.trim());
-    collectPrototypeComponentLabels(component.children ?? [], output);
+    if (component.name?.trim()) output.push({ name: component.name.trim() });
+    collectPrototypeComponentCoverage(component.children ?? [], output);
   }
 }
 
@@ -693,35 +705,6 @@ function findMissingKnowledgeFrameworkCoverage(
   }));
 }
 
-function extractKnowledgeFrameworkRequirements(content: string) {
-  const lines = content.split(/\r?\n/);
-  const results: Array<{ group: string; terms: string[] }> = [];
-  for (let index = 0; index < lines.length - 2; index += 1) {
-    const headers = markdownTableCells(lines[index]);
-    if (headers.length < 2 || !/^\s*\|?\s*:?-{3}/.test(lines[index + 1] ?? "")) continue;
-    const groupColumn = headers.findIndex((header) => /分组|状态|页面|模块|区域/.test(header));
-    const requirementColumn = headers.findIndex((header) => /必须|字段|控件|展示内容|必须展示/.test(header));
-    if (groupColumn < 0 || requirementColumn < 0) continue;
-    for (let rowIndex = index + 2; rowIndex < lines.length; rowIndex += 1) {
-      const cells = markdownTableCells(lines[rowIndex]);
-      if (cells.length !== headers.length) break;
-      const group = cleanKnowledgeTerm(cells[groupColumn]);
-      const terms = cells[requirementColumn]
-        .split(/、|，|；|;|<br\s*\/?>/i)
-        .map(cleanKnowledgeTerm)
-        .filter((term) => term.length >= 2 && term.length <= 24);
-      if (group && terms.length) results.push({ group, terms: [...new Set(terms)] });
-    }
-  }
-  return results;
-}
-
-function markdownTableCells(line: string) {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return [];
-  return trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
-}
-
 function cleanKnowledgeTerm(value: string) {
   return value
     .replace(/[`*_~]/g, "")
@@ -731,6 +714,15 @@ function cleanKnowledgeTerm(value: string) {
 }
 
 function artifactContainsLabel(artifactText: string, label: string) {
+  if (artifactContainsStrictLabel(artifactText, label)) return true;
+  const haystack = normalizeCoverageText(artifactText);
+  const tokens = coverageTokens(label);
+  if (!tokens.length) return false;
+  const hits = tokens.filter((token) => haystack.includes(token)).length;
+  return hits >= Math.max(1, Math.ceil(tokens.length * 0.6));
+}
+
+function artifactContainsStrictLabel(artifactText: string, label: string) {
   const haystack = normalizeCoverageText(artifactText);
   const needle = normalizeCoverageText(label);
   if (!needle) return true;
@@ -742,6 +734,67 @@ function artifactContainsLabel(artifactText: string, label: string) {
   return parts.length >= 2 && parts.filter((part) => haystack.includes(part)).length / parts.length >= 0.75;
 }
 
+function artifactCoversEntity(artifactText: string, entity: Record<string, unknown>) {
+  const name = entityName(entity);
+  if (name && artifactContainsLabel(artifactText, name)) return true;
+  return Object.entries(entity).some(([key, value]) =>
+    !["id", "name", "title", "label", "role", "sourcePaths"].includes(key) &&
+    artifactContainsEvidence(artifactText, typeof value === "string" ? value : undefined),
+  );
+}
+
+function artifactContainsEvidence(artifactText: string, evidence: string | undefined) {
+  if (!evidence) return false;
+  const haystack = normalizeCoverageText(artifactText);
+  const tokens = coverageTokens(evidence);
+  if (!tokens.length) return false;
+  const hits = tokens.filter((token) => haystack.includes(token)).length;
+  const requiredHits = tokens.length <= 3
+    ? Math.ceil(tokens.length * 0.6)
+    : Math.min(5, Math.max(2, Math.ceil(tokens.length * 0.35)));
+  return hits >= requiredHits;
+}
+
+type CoverageSegment = { segment: string; isWordLike?: boolean };
+type CoverageSegmenter = { segment(value: string): Iterable<CoverageSegment> };
+const CoverageSegmenterConstructor = (Intl as unknown as {
+  Segmenter: new (locale: string, options: { granularity: "word" }) => CoverageSegmenter;
+}).Segmenter;
+const COVERAGE_SEGMENTER = new CoverageSegmenterConstructor("zh-CN", { granularity: "word" });
+const COVERAGE_STOP_TOKENS = new Set([
+  "与", "和", "及", "或", "的", "了", "为", "并", "在", "后", "时", "中", "内", "按", "对", "将",
+  "可", "需", "应", "每个", "当前", "相关", "至少", "默认", "进行", "通过", "支持",
+]);
+
+function coverageTokens(value: string) {
+  const tokens: string[] = [];
+  let singleHanBuffer = "";
+  const flushSingleHanBuffer = () => {
+    if (singleHanBuffer.length >= 2) tokens.push(singleHanBuffer);
+    singleHanBuffer = "";
+  };
+
+  for (const segment of COVERAGE_SEGMENTER.segment(value.toLowerCase())) {
+    if (!segment.isWordLike) {
+      flushSingleHanBuffer();
+      continue;
+    }
+    const token = normalizeCoverageText(segment.segment);
+    if (!token || COVERAGE_STOP_TOKENS.has(token)) {
+      flushSingleHanBuffer();
+      continue;
+    }
+    if (/^[\u4e00-\u9fa5]$/.test(token)) {
+      singleHanBuffer += token;
+      continue;
+    }
+    flushSingleHanBuffer();
+    if (token.length >= 2) tokens.push(token);
+  }
+  flushSingleHanBuffer();
+  return [...new Set(tokens)];
+}
+
 function normalizeCoverageText(value: string) {
   return value.toLowerCase().replace(/<[^>]+>/g, "").replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "");
 }
@@ -750,7 +803,7 @@ function knowledgeRuleCovered(
   rule: ReturnType<typeof collectKnowledgeReferences>[number],
   artifactText: string,
 ) {
-  if (artifactContainsLabel(artifactText, rule.title)) return true;
+  if (artifactContainsStrictLabel(artifactText, rule.title)) return true;
   const terms = rule.content
     .split(/[，。；;、\n]|必须|需要|应当|不得|不可|并且|且/)
     .map(cleanKnowledgeTerm)

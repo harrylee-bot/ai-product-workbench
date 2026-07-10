@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { KnowledgeType } from "@prisma/client";
 import type { KnowledgeContext, ConversationDesignState, PrototypeArtifact, PrototypeSpec, RequirementDocument } from "../src/ai/ai-vibe.types";
+import { extractKnowledgeFrameworkRequirements } from "../src/ai/knowledge-framework-checklist";
 import { QaRuleCheckService } from "../src/ai/qa-rule-check.service";
 
 describe("QaRuleCheckService", () => {
@@ -49,6 +50,73 @@ describe("QaRuleCheckService", () => {
         relatedStatePaths: expect.arrayContaining(["pages.奖励明细页"]),
       }),
     ]));
+  });
+
+  it("accepts semantically aligned evidence without requiring identical entity labels", () => {
+    const state = baseState({
+      pages: [{ name: "签到活动配置页", description: "配置活动规则和页面素材。" }],
+      features: [{ name: "页面展示配置", description: "配置 banner、背景色和规则入口。" }],
+      backendConfigs: [{ name: "积分权益", fields: "单次积分、每日额度、总额度。" }],
+      businessRules: [{ name: "自然日规则", rule: "按北京时间自然日统计，每日一次。" }],
+      exceptionScenarios: [{ name: "积分账本超时", handling: "进入补偿中并支持重试。" }],
+      acceptanceCriteria: [{ name: "签到幂等验收", criteria: "重复点击只发放一次积分。" }],
+    });
+    const prd = basePrd({
+      sections: [section({
+        title: "业务方案",
+        content: "后台活动配置包含 Banner、背景色和规则入口，支持单次积分、每日额度和总额度。按北京时间每日限领一次；积分发放超时进入补偿队列并可重试，重复点击只产生一次积分发放。",
+      })],
+    });
+    const spec = baseSpec({
+      pages: [page({
+        name: "活动配置工作台",
+        components: [
+          { id: "display", name: "展示素材配置", type: "form_group", sourcePaths: [] },
+          { id: "points", name: "北京时间每日签到规则与积分额度表", type: "editable_table", sourcePaths: [] },
+          { id: "retry", name: "发放失败补偿队列", type: "data_table", sourcePaths: [] },
+        ],
+        states: [{ id: "timeout", name: "超时重试", description: "发放失败后进入补偿中并支持重试。", sourcePaths: [] }],
+      })],
+    });
+
+    const issues = service.run({
+      conversationDesignState: state,
+      prdDocument: prd,
+      prototypeSpec: spec,
+      checkTypes: ["state_prd_consistency", "state_prototype_consistency"],
+    });
+
+    expect(issues).toEqual([]);
+  });
+
+  it("matches PrototypeSpec against visible semantic evidence while retaining the coverage threshold", () => {
+    const issues = service.run({
+      conversationDesignState: baseState({ pages: [{ name: "活动配置工作台" }] }),
+      prototypeSpec: baseSpec({
+        pages: [page({
+          name: "活动配置工作台",
+          components: [
+            { id: "nav", name: "侧边导航", type: "navigation", sourcePaths: [] },
+            { id: "display", name: "展示配置上传位", type: "upload_panel", sourcePaths: [] },
+            { id: "filter", name: "报表筛选", type: "filter_form", sourcePaths: [] },
+            { id: "metrics", name: "指标卡", type: "metric_cards", sourcePaths: [] },
+          ],
+        })],
+      }),
+      prototypeArtifact: baseArtifact({
+        htmlContent: [
+          "<!doctype html><html><head><style>body{font-family:sans-serif}button,select{font-size:14px}</style></head><body>",
+          "<nav>活动工作台</nav><main><h1>后台活动配置</h1>",
+          "<section>页面展示素材 <button>上传 Banner</button></section>",
+          "<section>数据报表筛选条件 <select><option>全部</option></select><b>核心指标：访问人数</b></section>",
+          "<section>前台用户页面 <button>立即签到</button></section></main></body></html>",
+        ].join(""),
+      }),
+      knowledgeContext: emptyKnowledgeContext(),
+      checkTypes: ["prototype_completeness"],
+    });
+
+    expect(issues.map((item) => item.id)).not.toContain("qa_prototype_html_incomplete_spec_coverage");
   });
 
   it("checks strong knowledge rules against current artifacts only when enabled", () => {
@@ -219,6 +287,20 @@ describe("QaRuleCheckService", () => {
         description: expect.stringContaining("门店设置"),
       }),
     ]));
+  });
+
+  it("extracts core framework tables and ignores explicitly optional tables", () => {
+    expect(extractKnowledgeFrameworkRequirements([
+      "| 分组 | 必须字段/控件 | 页面表现 |",
+      "| --- | --- | --- |",
+      "| 活动设置 | 活动名称、活动时间 | 后台表单 |",
+      "",
+      "| 按需分组 | 按需字段/控件 | 适用条件 |",
+      "| --- | --- | --- |",
+      "| 跳转设置 | 第三方链接、小程序 | 配置跳转时 |",
+    ].join("\n"))).toEqual([
+      { group: "活动设置", terms: ["活动名称", "活动时间"] },
+    ]);
   });
 });
 

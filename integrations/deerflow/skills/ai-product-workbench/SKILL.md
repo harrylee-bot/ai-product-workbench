@@ -158,6 +158,9 @@ For `review_prd` and `review_prototype`, a chat summary is never enough:
 - Return a non-empty `qualitySelfCheck`; set `passed=true` only after every required payload and knowledge constraint has been checked.
 - Use one shared set of short, display-ready labels. Reuse the exact design-state names in PRD content, PrototypeSpec pages/components/states, and visible HTML instead of renaming the same concept in each artifact.
 - Map every design-state page one-to-one to a PrototypeSpec page and a visible HTML screen/section. Before returning, mechanically verify at least 75% exact-label coverage for every design-state group and for PrototypeSpec page/component/state labels; revise the complete artifact set when coverage is lower.
+- Read `knowledgeWorkflowPolicy.prototypeKnowledgeChecklist` before writing the prototype. Implement every core group as real visible fields, controls, or states; treat tables marked optional/conditional as scope-dependent.
+- Keep entity evidence aligned across `designStateDraft`, PRD, `prototypeSpec`, and HTML. `prototypeSpec` must describe only pages, components, and states that the HTML actually implements.
+- Before returning `qualitySelfCheck.passed=true`, compare the final HTML against the condensed checklist and revise the file in the same turn when a core group is missing.
 
 For full schema and examples, see `references/final-action-contract.md`.
 
