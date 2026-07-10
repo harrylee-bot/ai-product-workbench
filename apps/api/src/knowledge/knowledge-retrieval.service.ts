@@ -367,9 +367,20 @@ function selectKnowledgeResults(
     runtimeName?: string;
   } = {},
 ) {
+  const domainTypes = new Set<KnowledgeType>([
+    KnowledgeType.prototype_asset_ref,
+    KnowledgeType.business_concept,
+  ]);
+  const domainTypesWithTitleMatch = new Set(
+    ranked
+      .filter((item) => domainTypes.has(item.type) && queryOverlap(item, query).title > 0)
+      .map((item) => item.type),
+  );
   const eligible = ranked.filter((item) => {
-    if (item.type !== KnowledgeType.prototype_asset_ref && item.type !== KnowledgeType.business_concept) return true;
-    return queryTitleOverlap(item, query) > 0;
+    if (!domainTypes.has(item.type)) return true;
+    const overlap = queryOverlap(item, query);
+    if (overlap.total <= 0) return false;
+    return !domainTypesWithTitleMatch.has(item.type) || overlap.title > 0;
   });
   const requiredGroups = requiredKnowledgeGroups(query, options);
   if (!eligible.length || !requiredGroups.length) return eligible.slice(0, limit);
@@ -726,13 +737,30 @@ function priorityWeight(priority: KnowledgeRetrievalResult["priority"]) {
 }
 
 function queryTitleOverlap(item: KnowledgeRetrievalResult, query: string) {
+  return queryOverlap(item, query).total;
+}
+
+function queryOverlap(item: KnowledgeRetrievalResult, query: string) {
   const generic = new Set([
     "我想", "想做", "做一", "一个", "请帮", "帮我", "根据", "内容", "创建", "设计",
     "需求", "文档", "需求文档", "需求说明书", "prd", "原型", "页面", "界面", "生成", "功能", "知识库",
     "产品", "业务", "规则", "状态", "流程", "前台", "后台", "配置", "管理", "系统", "平台",
   ]);
-  const tokens = tokenize(query).filter((token) => !generic.has(token));
+  const tokens = expandDomainOverlapTerms(tokenize(query).filter((token) => !generic.has(token)));
   const title = normalizeText(item.title);
   const summary = normalizeText(item.summary ?? "");
-  return tokens.reduce((score, token) => score + (title.includes(token) ? 3 : 0) + (summary.includes(token) ? 1 : 0), 0);
+  const titleScore = tokens.reduce((score, token) => score + (title.includes(token) ? 3 : 0), 0);
+  const summaryScore = tokens.reduce((score, token) => score + (summary.includes(token) ? 1 : 0), 0);
+  return { title: titleScore, summary: summaryScore, total: titleScore + summaryScore };
+}
+
+function expandDomainOverlapTerms(tokens: string[]) {
+  const expanded = new Set(tokens);
+  const add = (...terms: string[]) => terms.forEach((term) => expanded.add(term));
+  if (tokens.some((token) => token.includes("积分"))) add("权益", "奖品", "资损", "核销");
+  if (tokens.some((token) => token.includes("签到") || token.includes("打卡"))) add("任务积分");
+  if (tokens.some((token) => token.includes("素材"))) add("营销资产");
+  if (tokens.some((token) => token.includes("报表") || token.includes("归因"))) add("渠道归因");
+  if (tokens.some((token) => token.includes("权限") || token.includes("审核"))) add("运营治理");
+  return [...expanded];
 }

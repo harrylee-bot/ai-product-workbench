@@ -970,8 +970,7 @@ function stripInlineReasoning(value: string) {
 }
 
 function extractFinalAction(assistantText: string, finalState: unknown): DeerFlowFinalAction {
-  const block = assistantText.match(/```ai_product_workbench_final_action\s*([\s\S]*?)```/i)?.[1];
-  const parsed = block ? parseJsonObject(block) : null;
+  const parsed = [...findFinalActionBlocks(assistantText)].reverse().find((block) => block.parsed)?.parsed ?? null;
   const message = toOptionalString(parsed?.message) || stripFinalActionBlock(assistantText).trim() || "DeerFlow 本轮已完成。";
   const type = normalizeFinalActionType(parsed?.type);
   return {
@@ -980,7 +979,7 @@ function extractFinalAction(assistantText: string, finalState: unknown): DeerFlo
     intent: toOptionalString(parsed?.intent),
     requirementMode: normalizeRequirementMode(parsed?.requirementMode),
     knowledgeRefsUsed: toStringList(parsed?.knowledgeRefsUsed),
-    externalRefsUsed: toStringList(parsed?.externalRefsUsed),
+    externalRefsUsed: toReferenceList(parsed?.externalRefsUsed),
     enrichmentNotes: toStringList(parsed?.enrichmentNotes),
     externalResearchStatus: toOptionalString(parsed?.externalResearchStatus),
     artifacts: extractArtifactReferences(parsed?.artifacts),
@@ -991,8 +990,70 @@ function extractFinalAction(assistantText: string, finalState: unknown): DeerFlo
 }
 
 function hasParsableFinalActionBlock(value: string) {
-  const block = value.match(/```ai_product_workbench_final_action\s*([\s\S]*?)```/i)?.[1];
-  return Boolean(block && parseJsonObject(block));
+  return findFinalActionBlocks(value).some((block) => Boolean(block.parsed));
+}
+
+function findFinalActionBlocks(value: string) {
+  const marker = /```ai_product_workbench_final_action\b/gi;
+  const blocks: Array<{
+    start: number;
+    end: number;
+    parsed: Record<string, unknown> | null;
+  }> = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = marker.exec(value))) {
+    let jsonStart = match.index + match[0].length;
+    while (jsonStart < value.length && /\s/.test(value[jsonStart] ?? "")) jsonStart += 1;
+    if (value[jsonStart] !== "{") continue;
+
+    const jsonEnd = findJsonObjectEnd(value, jsonStart);
+    if (jsonEnd === undefined) continue;
+
+    let blockEnd = jsonEnd;
+    while (blockEnd < value.length && /\s/.test(value[blockEnd] ?? "")) blockEnd += 1;
+    if (value.startsWith("```", blockEnd)) blockEnd += 3;
+
+    blocks.push({
+      start: match.index,
+      end: blockEnd,
+      parsed: parseJsonObject(value.slice(jsonStart, jsonEnd)),
+    });
+    marker.lastIndex = Math.max(marker.lastIndex, blockEnd);
+  }
+
+  return blocks;
+}
+
+function findJsonObjectEnd(value: string, start: number) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+
+  return undefined;
 }
 
 function extractArtifactReferences(value: unknown): DeerFlowArtifactReference[] | undefined {
@@ -1036,6 +1097,22 @@ function toStringList(value: unknown): string[] | undefined {
   return items.length ? items : undefined;
 }
 
+function toReferenceList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value
+    .map((item) => {
+      const direct = toOptionalString(item);
+      if (direct) return direct;
+      const record = asRecord(item);
+      const title = toOptionalString(record?.title) ?? toOptionalString(record?.name);
+      const url = toOptionalString(record?.url) ?? toOptionalString(record?.href);
+      if (title && url) return `${title} ${url}`;
+      return title ?? url;
+    })
+    .filter((item): item is string => Boolean(item));
+  return items.length ? items : undefined;
+}
+
 function normalizeFinalActionType(value: unknown): DeerFlowFinalAction["type"] {
   if (
     value === "review_prd" ||
@@ -1049,7 +1126,16 @@ function normalizeFinalActionType(value: unknown): DeerFlowFinalAction["type"] {
 }
 
 function stripFinalActionBlock(value: string) {
-  return value.replace(/```ai_product_workbench_final_action\s*[\s\S]*?```/gi, "").trim();
+  const blocks = findFinalActionBlocks(value);
+  if (!blocks.length) {
+    return value.replace(/```ai_product_workbench_final_action\b[\s\S]*```/gi, "").trim();
+  }
+
+  let visible = value;
+  for (const block of [...blocks].reverse()) {
+    visible = `${visible.slice(0, block.start)}${visible.slice(block.end)}`;
+  }
+  return visible.trim();
 }
 
 function parseJsonObject(value: string) {

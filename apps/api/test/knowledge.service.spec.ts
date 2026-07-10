@@ -294,8 +294,8 @@ describe("Knowledge module services", () => {
       "PRD标准结构",
       "原型生成总规则",
       "签到活动高保真HTML原型框架",
-      "活动发布与模板配置",
       "奖品券与资损核销",
+      "活动发布与模板配置",
     ]);
     expect(result.references[0]?.relatedPath).toMatch(/^(02|04|05)-/);
     expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
@@ -337,7 +337,8 @@ describe("Knowledge module services", () => {
     expect(result.retrievalSource).toBe("vault_fallback");
     expect(result.selectedCount).toBeGreaterThanOrEqual(4);
     expect(evidence).toMatch(/活动发布与模板配置/);
-    expect(evidence).toMatch(/签到与任务积分活动|奖品券与资损核销/);
+    expect(evidence).toMatch(/签到与任务积分活动/);
+    expect(evidence).toMatch(/奖品券与资损核销/);
     expect(evidence).toMatch(/PRD标准结构|需求说明书/);
     expect(evidence).toMatch(/原型生成总规则|前后台页面框架/);
     expect(evidence).toMatch(/签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/);
@@ -588,6 +589,10 @@ describe("Knowledge module services", () => {
     expect(evidence).toMatch(/签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/);
     expect(result.references.find((item) => /签到活动高保真HTML原型框架/.test(item.title))?.type)
       .toBe(KnowledgeType.prototype_asset_ref);
+    expect(result.references[3]?.relatedPath).toBe("02-业务域知识/签到与任务积分活动.md");
+    expect(result.references.map((item) => item.relatedPath)).not.toContain(
+      "02-业务域知识/号卡OAO与商机预约.md",
+    );
     expect(result.references.every((item) => item.knowledgeId.startsWith("vault:"))).toBe(true);
     expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

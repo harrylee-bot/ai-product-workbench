@@ -626,8 +626,17 @@ describe("DeerFlowRuntimeService", () => {
       },
       prdDocumentDraft: {
         title: "签到活动需求说明书",
-        sections: [],
+        sections: [
+          {
+            id: "2.3",
+            title: "核心流程",
+            content: "流程图：\n\n```mermaid\nflowchart TD\nA --> B\n```",
+          },
+        ],
       },
+      externalRefsUsed: [
+        { title: "幂等请求", url: "https://example.com/idempotency" },
+      ],
       artifacts: [
         {
           kind: "prototype_html",
@@ -682,6 +691,7 @@ describe("DeerFlowRuntimeService", () => {
       parsed: true,
       type: "review_prd",
       message: "完整 PRD 和原型已生成。",
+      externalRefsUsed: ["幂等请求 https://example.com/idempotency"],
       raw: expect.objectContaining({
         qualitySelfCheck: expect.objectContaining({ passed: true, missing: [] }),
         prdDocumentDraft: expect.objectContaining({ title: "签到活动需求说明书" }),
