@@ -400,7 +400,46 @@ sign-in regression eval: passed
 /Users/liyannong/ai-product-workbench/storage/agent-workflow-eval/2026-07-10T07-18-42-238Z
 ```
 
-生产环境尚未部署本轮代码，因此真正的线上模型烟测仍需在部署后执行。生产验证失败时不得恢复低质量兜底稿，应按失败信息修正知识、状态或模型产物后重试。
+生产验证失败时不得恢复低质量兜底稿，应按失败信息修正知识、状态或模型产物后重试。
+
+## 2026-07-10 生产部署与全流程验证
+
+本轮已只部署 Agent/API，未构建或重启前端。生产排障过程中确认并修复了以下问题：
+
+- API 与 DeerFlow gateway 的内部鉴权 token 曾不一致，导致用户级线程和产物请求无法稳定关联；现已统一鉴权配置。
+- 自定义 Agent 和 skill 原先只存在于个别用户目录；现改为共享目录同步，新注册用户也能加载 `ai-product-workbench-lead`，且首轮显示 `has_memory=false`，不会继承其他用户或历史样题记忆。
+- 流式生成取消总时长兜底，只保留 10 分钟无数据活动超时；模型持续返回时继续等待，彻底无响应时失败并提示重试。
+- DeerFlow artifact 路由原先按默认用户解析文件，真实用户会出现 404；现按受信任 owner 解析，并保留 `write_file` 文本恢复路径，线上 artifact 请求返回 200。
+- 候选产物未通过 blocking/major QA 时，在同一 DeerFlow 线程内按具体缺项最多修复两轮；事务在质量通过前不提交，不再生成“可编辑初稿”。
+- 生产 QA 与独立烟测统一为“实体名称或语义证据”覆盖，不要求模型逐字复制设计状态标签；覆盖率仍维持每组至少 75%，知识框架、完整 HTML、前后台、控件和数据结构门禁不降低。
+- PRD 格式化层稳定记录未确认项和敏感信息边界；外部检索隐私边界从运行上下文写入元数据，不进入 PRD 正文。
+
+最终生产烟测使用全新用户和真实线上模型完成，生成阶段在生产机持久运行，完成后将同一份 HTML 拉回本机 Chrome 做渲染与像素检查。产物目录：
+
+```text
+/Users/liyannong/ai-product-workbench/storage/agent-workflow-online-smoke/2026-07-10T10-34-remote
+```
+
+最终证据：
+
+```text
+流式生成: completed, HTTP 200, 416515 bytes, 5m18s
+PRD 固定结构/产品流程图/产品架构图/无独立接口章节: passed
+PRD 动态设计状态覆盖: targetUsers 4/4, userScenarios 4/4, pages 4/4,
+  features 6/6, backendConfigs 7/7, frontendRules 6/6,
+  businessRules 6/6, stateRules 6/6, exceptionScenarios 6/6,
+  acceptanceCriteria 6/6
+知识引用与补齐边界: knowledgeRefs 10, explainable 10, boundary hit
+原型完整 HTML/前后台/交互控件/数据结构: passed
+原型动态设计状态覆盖: all groups full hit
+PrototypeSpec: 38/42, above 75% gate
+PRD 与原型一致性: 41/41
+Chrome 渲染: 1440x1100, 278536 bytes, nonWhite 0.3884,
+  luminance stddev 81.3193, color buckets 196, passed
+运行噪音/生成过程文案: none
+```
+
+本机命令执行器会在约 10 分钟强制终止前台命令，曾因此中断一轮正在生成的 DeerFlow 请求。该现象不是线上 Agent 超时。后续长链路烟测应在生产机使用独立容器完成生成，再用 `AGENT_WORKFLOW_ONLINE_REPLAY_DIR` 在本机重放快照并执行 Chrome 检查，避免重复调用模型。
 
 ## 后续维护建议
 
