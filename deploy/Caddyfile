@@ -20,7 +20,7 @@ aionbench.com {
 	# SSE 流式生成端点（/api/chat/stream）——必须在通用 /api/* 规则前匹配
 	# flush_interval -1: 禁用缓冲，每个 SSE event 立即下发
 	# no gzip: SSE 不能被压缩
-	# transport 超时 600s: 与 DEERFLOW_TIMEOUT_MS 一致
+	# 不设总时长上限；API 自己按 DeerFlow 事件维护空闲超时。
 	handle /api/chat/stream {
 		header Cache-Control "no-store, no-cache, must-revalidate, private"
 		header Pragma "no-cache"
@@ -28,10 +28,6 @@ aionbench.com {
 		header X-Accel-Buffering "no"
 		reverse_proxy 127.0.0.1:4000 {
 			flush_interval -1
-			transport http {
-				read_timeout 600s
-				write_timeout 600s
-			}
 		}
 	}
 

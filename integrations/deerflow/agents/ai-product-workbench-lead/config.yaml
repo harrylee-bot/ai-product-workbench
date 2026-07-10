@@ -1,0 +1,6 @@
+name: ai-product-workbench-lead
+description: Lead agent for AI Product Workbench product reasoning and artifact generation.
+model: null
+tool_groups: null
+skills:
+  - ai-product-workbench

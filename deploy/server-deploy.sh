@@ -97,8 +97,11 @@ DEERFLOW_THINKING_ENABLED="${DEERFLOW_THINKING_ENABLED:-true}"
 DEERFLOW_SUBAGENT_ENABLED="${DEERFLOW_SUBAGENT_ENABLED:-true}"
 DEERFLOW_MAX_CONCURRENT_SUBAGENTS="${DEERFLOW_MAX_CONCURRENT_SUBAGENTS:-3}"
 DEERFLOW_TIMEOUT_MS="${DEERFLOW_TIMEOUT_MS:-600000}"
+AICHAT_MODEL_IDLE_TIMEOUT_MS="${AICHAT_MODEL_IDLE_TIMEOUT_MS:-600000}"
 DEERFLOW_UPLOADS_ENABLED="${DEERFLOW_UPLOADS_ENABLED:-true}"
 DEERFLOW_ARTIFACT_MAX_INLINE_BYTES="${DEERFLOW_ARTIFACT_MAX_INLINE_BYTES:-2000000}"
+DEERFLOW_SHARED_AGENT_DIR="${DEERFLOW_SHARED_AGENT_DIR:-}"
+DEERFLOW_SHARED_SKILL_DIR="${DEERFLOW_SHARED_SKILL_DIR:-}"
 
 # ===== 启动期密钥 fail-fast：拒绝以弱默认/空密钥部署生产 =====
 WEAK_SECRET_MARKERS="replace-with|change-me|change-before-production|dev-ai-product-workbench|ai_workbench"
@@ -125,6 +128,10 @@ case "$DEPLOY_TARGET" in
     fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
     if [ "$DEERFLOW_ENABLED" = "true" ]; then
       fail_if_weak "DEERFLOW_INTERNAL_AUTH_TOKEN" "$DEERFLOW_INTERNAL_AUTH_TOKEN"
+      if [ -n "$DEERFLOW_AGENT_NAME" ] && [ -z "$DEERFLOW_SHARED_AGENT_DIR" ]; then
+        echo "ERROR: DEERFLOW_SHARED_AGENT_DIR 未配置，按用户隔离后新用户无法加载自定义 Agent。" >&2
+        exit 1
+      fi
     fi
     fail_if_weak "JWT_SECRET" "$JWT_SECRET"
     fail_if_weak "MODEL_GATEWAY_ENCRYPTION_KEY" "$MODEL_GATEWAY_ENCRYPTION_KEY"
@@ -206,6 +213,7 @@ export DEERFLOW_THINKING_ENABLED
 export DEERFLOW_SUBAGENT_ENABLED
 export DEERFLOW_MAX_CONCURRENT_SUBAGENTS
 export DEERFLOW_TIMEOUT_MS
+export AICHAT_MODEL_IDLE_TIMEOUT_MS
 export DEERFLOW_UPLOADS_ENABLED
 export DEERFLOW_ARTIFACT_MAX_INLINE_BYTES
 export KNOWLEDGE_APP_PORT
@@ -224,6 +232,44 @@ if [ "${SKIP_GIT_PULL:-0}" != "1" ] && [ -d .git ]; then
 else
   echo "Using code already present in ${APP_DIR}"
 fi
+
+sync_deerflow_runtime_assets() {
+  local agent_source
+  local agent_target
+  local skill_source
+  local skill_target
+
+  case "$DEPLOY_TARGET" in
+    all | api) ;;
+    *) return 0 ;;
+  esac
+  if [ "$DEERFLOW_ENABLED" != "true" ]; then return 0; fi
+
+  if [ -n "$DEERFLOW_AGENT_NAME" ]; then
+    agent_source="${APP_DIR}/integrations/deerflow/agents/${DEERFLOW_AGENT_NAME}"
+    agent_target="${DEERFLOW_SHARED_AGENT_DIR}/${DEERFLOW_AGENT_NAME}"
+    if [ ! -f "${agent_source}/config.yaml" ] || [ ! -f "${agent_source}/SOUL.md" ]; then
+      echo "ERROR: DeerFlow shared agent source is incomplete: ${agent_source}" >&2
+      exit 1
+    fi
+    install -d -m 0755 "$agent_target"
+    install -m 0644 "${agent_source}/config.yaml" "${agent_target}/config.yaml"
+    install -m 0644 "${agent_source}/SOUL.md" "${agent_target}/SOUL.md"
+  fi
+
+  if [ -n "$DEERFLOW_SHARED_SKILL_DIR" ]; then
+    skill_source="${APP_DIR}/integrations/deerflow/skills/ai-product-workbench"
+    skill_target="${DEERFLOW_SHARED_SKILL_DIR}/ai-product-workbench"
+    if [ ! -f "${skill_source}/SKILL.md" ]; then
+      echo "ERROR: DeerFlow shared skill source is incomplete: ${skill_source}" >&2
+      exit 1
+    fi
+    install -d -m 0755 "$skill_target"
+    cp -R "${skill_source}/." "$skill_target/"
+  fi
+}
+
+sync_deerflow_runtime_assets
 
 docker network create ai-product-workbench >/dev/null 2>&1 || true
 docker volume create ai-product-workbench-postgres >/dev/null

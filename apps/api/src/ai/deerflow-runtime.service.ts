@@ -343,11 +343,12 @@ export class DeerFlowRuntimeService {
     input: DeerFlowRunInput,
     onEvent: (event: DeerFlowRuntimeEvent) => Promise<void> | void,
   ) {
-    const response = await fetchWithTimeout(langGraphUrl(runStreamPath(threadId)), {
+    const response = await fetch(langGraphUrl(runStreamPath(threadId)), {
       method: "POST",
       headers: jsonHeaders(input.userId),
       body: JSON.stringify(buildRunRequest(input)),
-    }, input.signal);
+      signal: input.signal,
+    });
     if (!response.ok) {
       throw new DeerFlowRunStreamError(response.status, await safeResponseText(response));
     }

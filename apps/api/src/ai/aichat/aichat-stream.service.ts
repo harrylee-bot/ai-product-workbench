@@ -1947,7 +1947,7 @@ function createChildAbortController(parentSignal: AbortSignal) {
 function readModelIdleTimeoutMs() {
   const raw = Number(process.env.AICHAT_MODEL_IDLE_TIMEOUT_MS ?? "");
   if (Number.isFinite(raw) && raw >= 10_000) return raw;
-  return 90_000;
+  return 600_000;
 }
 
 function cleanArtifactTitle(value: string, fallback: string) {
