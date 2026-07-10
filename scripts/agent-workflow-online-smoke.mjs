@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_TOPIC = "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型";
 const topic = process.argv.slice(2).join(" ").trim() || process.env.AGENT_WORKFLOW_ONLINE_TOPIC || DEFAULT_TOPIC;
 const baseUrl = normalizeBaseUrl(process.env.AGENT_WORKFLOW_ONLINE_BASE_URL || "https://aionbench.com/api");
+const forwardedProto = process.env.AGENT_WORKFLOW_ONLINE_FORWARDED_PROTO?.trim();
 const timeoutMs = numberFromEnv("AGENT_WORKFLOW_ONLINE_TIMEOUT_MS", 240_000);
 const strict = process.env.AGENT_WORKFLOW_ONLINE_STRICT !== "0";
 const keepConversation = process.env.AGENT_WORKFLOW_ONLINE_KEEP_CONVERSATION === "1";
@@ -106,6 +107,7 @@ async function streamChat() {
       headers: {
         "content-type": "application/json",
         accept: "text/event-stream, text/plain, */*",
+        ...(forwardedProto ? { "x-forwarded-proto": forwardedProto } : {}),
         ...(cookieHeader ? { cookie: cookieHeader } : {}),
       },
       body: JSON.stringify({
@@ -213,6 +215,7 @@ async function requestText(method, route) {
   const response = await fetch(`${baseUrl}${route}`, {
     method,
     headers: {
+      ...(forwardedProto ? { "x-forwarded-proto": forwardedProto } : {}),
       ...(cookieHeader ? { cookie: cookieHeader } : {}),
     },
   });
@@ -234,6 +237,7 @@ async function requestJson(method, route, body) {
     method,
     headers: {
       "content-type": "application/json",
+      ...(forwardedProto ? { "x-forwarded-proto": forwardedProto } : {}),
       ...(cookieHeader ? { cookie: cookieHeader } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
