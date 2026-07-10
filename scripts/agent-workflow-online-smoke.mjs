@@ -22,13 +22,24 @@ const forwardedProto = process.env.AGENT_WORKFLOW_ONLINE_FORWARDED_PROTO?.trim()
 const timeoutMs = numberFromEnv("AGENT_WORKFLOW_ONLINE_TIMEOUT_MS", 1_200_000);
 const strict = process.env.AGENT_WORKFLOW_ONLINE_STRICT !== "0";
 const keepConversation = process.env.AGENT_WORKFLOW_ONLINE_KEEP_CONVERSATION === "1";
+const replayDir = process.env.AGENT_WORKFLOW_ONLINE_REPLAY_DIR?.trim();
 const outputRoot = path.resolve(
-  process.env.AGENT_WORKFLOW_ONLINE_OUT || path.join(process.cwd(), "storage", "agent-workflow-online-smoke", safeStamp()),
+  process.env.AGENT_WORKFLOW_ONLINE_OUT || replayDir || path.join(process.cwd(), "storage", "agent-workflow-online-smoke", safeStamp()),
 );
 
 if (process.env.AGENT_WORKFLOW_ONLINE_SELF_TEST === "1") {
   runSelfTest();
   process.exit(0);
+}
+
+if (replayDir) {
+  const replay = await replayOnlineSmoke(path.resolve(replayDir));
+  console.log(JSON.stringify({
+    outputRoot,
+    replaySource: replay.replaySource,
+    evaluation: replay.evaluation,
+  }, null, 2));
+  process.exit(strict && !replay.evaluation.passed ? 1 : 0);
 }
 
 await mkdir(outputRoot, { recursive: true });
@@ -215,6 +226,57 @@ async function renderOnlinePrototype() {
 
   await writeFile(previewPath, html, "utf8");
   return renderPrototypeFile(previewPath, screenshotPath, artifact.id);
+}
+
+async function replayOnlineSmoke(inputRoot) {
+  await mkdir(outputRoot, { recursive: true });
+  const snapshotMap = {};
+  for (const name of ["runtimeStatus", "messages", "conversation", "prd", "prototype"]) {
+    const filePath = path.join(inputRoot, `${name}.json`);
+    const raw = await readTextFile(filePath);
+    const value = raw ? parseJson(raw) : undefined;
+    snapshotMap[name] = value
+      ? { ok: true, value }
+      : { ok: false, error: `snapshot missing or invalid: ${filePath}` };
+  }
+
+  const rawStream = await readTextFile(path.join(inputRoot, "stream.raw.txt"));
+  const previousSummary = parseJson(await readTextFile(path.join(inputRoot, "online-smoke-summary.json"))) ?? {};
+  const streamResult = previousSummary.streamResult ?? {
+    status: "completed",
+    httpStatus: 200,
+    bytes: Buffer.byteLength(rawStream),
+  };
+  const artifact = snapshotMap.prototype?.value?.artifact;
+  const html = typeof artifact?.htmlContent === "string"
+    ? artifact.htmlContent
+    : typeof artifact?.html === "string"
+      ? artifact.html
+      : "";
+  let prototypeRender = { status: "skipped", reason: "prototype artifact is not available" };
+  if (artifact?.id && html.trim()) {
+    const previewPath = path.join(outputRoot, "prototype-preview.html");
+    const screenshotPath = path.join(outputRoot, "prototype-preview.png");
+    await writeFile(previewPath, html, "utf8");
+    prototypeRender = await renderPrototypeFile(previewPath, screenshotPath, artifact.id);
+  }
+
+  const evaluation = evaluateOnlineResult(rawStream, snapshotMap, streamResult, prototypeRender);
+  const replay = {
+    replaySource: inputRoot,
+    outputRoot,
+    streamResult,
+    prototypeRender,
+    evaluation,
+    snapshots: snapshotMap,
+    createdAt: new Date().toISOString(),
+  };
+  await writeFile(
+    path.join(outputRoot, "online-smoke-replay-summary.json"),
+    JSON.stringify(replay, null, 2),
+    "utf8",
+  );
+  return replay;
 }
 
 async function requestText(method, route) {
