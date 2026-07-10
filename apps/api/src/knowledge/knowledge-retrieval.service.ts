@@ -81,12 +81,16 @@ export class KnowledgeRetrievalService {
       const matched = items
         .map((item) => scoreItem(item, query, preferredTypes, semanticScores.get(item.id), modeBoostTypes))
         .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority));
+        .sort((a, b) => b.score - a.score
+          || queryTitleOverlap(b, query) - queryTitleOverlap(a, query)
+          || priorityWeight(b.priority) - priorityWeight(a.priority));
       const vaultMatches = shouldSearchVault(vaultPolicy, matched, strictPreferredTypes)
         ? await this.searchVaultFallback(query, preferredTypes, modeBoostTypes, retrievalAudience)
         : [];
       const combined = mergeRetrievalResults(matched, vaultMatches).sort(
-        (a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority),
+        (a, b) => b.score - a.score
+          || queryTitleOverlap(b, query) - queryTitleOverlap(a, query)
+          || priorityWeight(b.priority) - priorityWeight(a.priority),
       );
       const selected = selectKnowledgeResults(combined, limit, query, {
         preferredTypes,
@@ -159,7 +163,9 @@ export class KnowledgeRetrievalService {
       .filter((item) => shouldUseKnowledgeItem(item, retrievalAudience))
       .map((item) => scoreItem(item, query, preferredTypes, undefined, modeBoostTypes))
       .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority));
+      .sort((a, b) => b.score - a.score
+        || queryTitleOverlap(b, query) - queryTitleOverlap(a, query)
+        || priorityWeight(b.priority) - priorityWeight(a.priority));
   }
 }
 
@@ -361,19 +367,23 @@ function selectKnowledgeResults(
     runtimeName?: string;
   } = {},
 ) {
+  const eligible = ranked.filter((item) => {
+    if (item.type !== KnowledgeType.prototype_asset_ref && item.type !== KnowledgeType.business_concept) return true;
+    return queryTitleOverlap(item, query) > 0;
+  });
   const requiredGroups = requiredKnowledgeGroups(query, options);
-  if (!ranked.length || !requiredGroups.length) return ranked.slice(0, limit);
+  if (!eligible.length || !requiredGroups.length) return eligible.slice(0, limit);
 
   const front: KnowledgeRetrievalResult[] = [];
   const frontIds = new Set<string>();
   for (const group of requiredGroups) {
-    const candidate = findRequiredGroupRepresentative(ranked, frontIds, group);
+    const candidate = findRequiredGroupRepresentative(eligible, frontIds, group, query);
     if (!candidate) continue;
     front.push(candidate);
     frontIds.add(candidate.itemId);
   }
 
-  const rest = ranked.filter((item) => !frontIds.has(item.itemId));
+  const rest = eligible.filter((item) => !frontIds.has(item.itemId));
   return [...front, ...rest].slice(0, limit);
 }
 
@@ -381,9 +391,16 @@ function findRequiredGroupRepresentative(
   ranked: KnowledgeRetrievalResult[],
   usedIds: Set<string>,
   group: KnowledgeGroupRequirement,
+  query: string,
 ) {
   const candidates = ranked.filter((item) => !usedIds.has(item.itemId) && matchesKnowledgeGroup(item, group));
   if (!candidates.length) return undefined;
+  if (group.preferQueryOverlap) {
+    const sorted = [...candidates].sort((a, b) => queryTitleOverlap(b, query) - queryTitleOverlap(a, query) || b.score - a.score);
+    const best = sorted[0];
+    if (group.requireQueryOverlap && queryTitleOverlap(best, query) <= 0) return undefined;
+    return best;
+  }
   if (!group.preferredPattern) return candidates[0];
   return candidates.find((item) => group.preferredPattern?.test(knowledgeGroupText(item))) ?? candidates[0];
 }
@@ -392,6 +409,8 @@ type KnowledgeGroupRequirement = {
   type?: KnowledgeType;
   pattern: RegExp;
   preferredPattern?: RegExp;
+  preferQueryOverlap?: boolean;
+  requireQueryOverlap?: boolean;
 };
 
 function requiredKnowledgeGroups(
@@ -426,32 +445,19 @@ function requiredKnowledgeGroups(
       pattern: /原型生成总规则|前后台页面框架|后台通用框架|前台通用框架|prototype/i,
       preferredPattern: /原型生成总规则/,
     });
-    if (/(签到|打卡|积分|连续任务)/.test(normalized)) {
-      groups.push({
-        type: KnowledgeType.prototype_asset_ref,
-        pattern: /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML|HTML原型|RP资产|Axure|原型资产|前台页面设计框架|后台管理设计框架/i,
-        preferredPattern: /签到活动高保真HTML原型框架/,
-      });
-    }
+    groups.push({
+      type: KnowledgeType.prototype_asset_ref,
+      pattern: /./,
+      preferQueryOverlap: true,
+      requireQueryOverlap: true,
+    });
   }
   if (/(需求文档|需求说明书|prd|原型|prototype|页面|界面|交互|方案)/i.test(normalized)) {
     groups.push({
       type: KnowledgeType.business_concept,
       pattern: /./,
-    });
-  }
-  if (/(活动|签到|打卡|营销)/.test(normalized)) {
-    groups.push({
-      type: KnowledgeType.business_concept,
-      pattern: /活动发布与模板配置|活动配置|活动发布|模板配置/,
-      preferredPattern: /活动发布与模板配置/,
-    });
-  }
-  if (/(积分|奖品|权益|奖励|资损|核销|券|库存)/.test(normalized)) {
-    groups.push({
-      type: KnowledgeType.business_concept,
-      pattern: /奖品券与资损核销|权益|积分|资损|核销|库存/,
-      preferredPattern: /奖品券与资损核销/,
+      preferQueryOverlap: true,
+      requireQueryOverlap: true,
     });
   }
 
@@ -597,7 +603,7 @@ function isPrototypeAssetReference(relativePath: string, content: string) {
   if (/原型生成总规则|字段接口状态表达|前后台页面框架/.test(relativePath)) return false;
   const titleAndPath = relativePath;
   const frontmatterAndIntro = content.slice(0, 1200);
-  return /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML|原型资产索引|RP资产到设计框架映射/i.test(titleAndPath)
+  return /高保真(?:HTML)?原型框架|原型转HTML|原型资产索引|RP资产到设计框架映射/i.test(titleAndPath)
     || /tags:\s*[\s\S]{0,400}(Axure|RP资产|prototype_asset_ref)/i.test(frontmatterAndIntro)
     || /source:\s*storage\/imports\/.*(?:axure|\.html|\.rp)/i.test(frontmatterAndIntro)
     || /prototype_asset_ref/i.test(frontmatterAndIntro);
@@ -673,45 +679,14 @@ function extractChineseTerms(segment: string) {
     "创新",
     "验收",
     "风险",
-    "客户",
-    "线索",
-    "销售",
-    "商机",
-    "合同",
-    "订单",
-    "活动",
-    "活动发布",
-    "活动配置",
-    "模板",
-    "素材",
-    "素材库",
-    "奖品",
-    "权益",
-    "奖励",
-    "积分",
-    "领积分",
-    "连续签到",
-    "打卡",
-    "补签",
-    "领取",
-    "重复领取",
-    "券",
-    "核销",
-    "库存",
-    "资损",
-    "渠道",
-    "归因",
+    "业务",
+    "对象",
+    "配置",
+    "操作",
+    "结果",
     "报表",
     "数据",
-    "oao",
-    "号卡",
-    "ai助手",
     "案例",
-    "签到",
-    "企业",
-    "官网",
-    "品牌",
-    "营销",
     "后台",
     "前台",
     "前后台",
@@ -748,4 +723,16 @@ function priorityWeight(priority: KnowledgeRetrievalResult["priority"]) {
   if (priority === "high") return 0.15;
   if (priority === "medium") return 0.08;
   return 0.03;
+}
+
+function queryTitleOverlap(item: KnowledgeRetrievalResult, query: string) {
+  const generic = new Set([
+    "我想", "想做", "做一", "一个", "请帮", "帮我", "根据", "内容", "创建", "设计",
+    "需求", "文档", "需求文档", "需求说明书", "prd", "原型", "页面", "界面", "生成", "功能", "知识库",
+    "产品", "业务", "规则", "状态", "流程", "前台", "后台", "配置", "管理", "系统", "平台",
+  ]);
+  const tokens = tokenize(query).filter((token) => !generic.has(token));
+  const title = normalizeText(item.title);
+  const summary = normalizeText(item.summary ?? "");
+  return tokens.reduce((score, token) => score + (title.includes(token) ? 3 : 0) + (summary.includes(token) ? 1 : 0), 0);
 }

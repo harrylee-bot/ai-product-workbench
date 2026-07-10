@@ -41,6 +41,17 @@ export class QaRuleCheckService {
           suggestion: "先通过对话生成或恢复 ConversationDesignState。",
         }));
       } else {
+        if (!state.businessGoal.trim() || /待补充|待确认|暂未明确|后续明确/.test(state.businessGoal)) {
+          issues.push(issue({
+            id: "qa_state_business_goal_missing",
+            checkType: "state_schema",
+            severity: "blocking",
+            title: "缺少可评审业务目标",
+            description: "ConversationDesignState.businessGoal 为空或仍是占位话术。",
+            relatedStatePaths: ["businessGoal"],
+            suggestion: "根据当前业务域明确目标对象、期望变化和可衡量结果，再继续生成产物。",
+          }));
+        }
         if (!state.pages.length) {
           issues.push(issue({
             id: "qa_state_pages_empty",
@@ -83,6 +94,20 @@ export class QaRuleCheckService {
             description: `缺少：${missingStateGroups.join("、")}。`,
             relatedStatePaths: missingStateGroups,
             suggestion: "先补齐目标用户、场景、前后台页面、功能、规则、状态、异常和验收，再生成正式 PRD 与原型。",
+          }));
+        }
+        const unlabeledStateGroups = stateGroups
+          .filter(([, items]) => items.some((item) => !entityName(item)))
+          .map(([label]) => label);
+        if (unlabeledStateGroups.length) {
+          issues.push(issue({
+            id: "qa_state_required_group_labels_missing",
+            checkType: "state_schema",
+            severity: "major",
+            title: "产品设计状态存在不可核验条目",
+            description: `以下分组存在缺少 name/title/label/role 的条目：${unlabeledStateGroups.join("、")}。`,
+            relatedStatePaths: unlabeledStateGroups,
+            suggestion: "为每个目标用户、场景、功能、配置、规则、状态、异常和验收项填写可识别名称。",
           }));
         }
       }
@@ -312,6 +337,9 @@ const GENERATION_TRACE_PATTERNS = [
 ];
 
 const VAGUE_PRD_PATTERNS = [
+  "待补充业务目标",
+  "以实际上线地址为准",
+  "待确认",
   "符合评审确认范围",
   "按业务评审确认后执行",
   "以本需求评审确认的配置和规则为准",
@@ -792,7 +820,7 @@ function text(value: unknown) {
 }
 
 function entityName(value: Record<string, unknown>) {
-  return text(value.name) || text(value.title) || text(value.label);
+  return text(value.name) || text(value.title) || text(value.label) || text(value.role);
 }
 
 function safeId(value: string) {

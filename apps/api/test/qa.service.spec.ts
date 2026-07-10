@@ -25,7 +25,7 @@ describe("Module 13 QA services", () => {
     );
   });
 
-  it("supports PRD-only QA without prototype blocking issues", () => {
+  it("runs PRD-only quality checks without adding prototype blocking issues", () => {
     const service = new QaRuleCheckService();
     const state = baseState({ pages: [], businessRules: [] });
     const prdDocument = toRequirementDocument(state, "prd-1");
@@ -44,12 +44,11 @@ describe("Module 13 QA services", () => {
       ],
     });
 
-    expect(issues).toEqual([
-      expect.objectContaining({
-        id: "qa_pending_assumptions",
-        severity: "info",
-      }),
-    ]);
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "qa_pending_assumptions", severity: "info" }),
+      expect.objectContaining({ id: "qa_prd_standard_sections_missing", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prd_required_diagrams_missing", severity: "blocking" }),
+    ]));
     expect(issues).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "qa_state_pages_empty" }),

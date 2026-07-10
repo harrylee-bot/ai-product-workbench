@@ -1,14 +1,16 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
-import { ConversationDesignStateStatus } from "@prisma/client";
+import { ConversationDesignStateStatus, KnowledgeType } from "@prisma/client";
 import crypto from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { ConversationDesignStateService } from "./conversation-design-state.service";
 import { PrototypeService, sanitizePrototypeDocumentHtml } from "./prototype.service";
+import { QaRuleCheckService } from "./qa-rule-check.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import type {
   AssumptionReference,
   ConversationDesignDraft,
   ConversationDesignState,
+  KnowledgeContext,
   PrototypeArtifact,
   PrototypeArtifactDraft,
   PrototypeSpec,
@@ -51,6 +53,7 @@ export class FinalActionApplierService {
     private readonly stateService: ConversationDesignStateService,
     private readonly documentService: RequirementDocumentService,
     private readonly prototypeService: PrototypeService,
+    private readonly qaRuleCheck: QaRuleCheckService,
   ) {}
 
   async apply(input: {
@@ -124,6 +127,15 @@ export class FinalActionApplierService {
         reason: "DeerFlow 生成 PRD",
       });
 
+      if (!hasPrototypePayload(raw, input.artifacts)) {
+        this.assertGenerationQuality({
+          conversationDesignState: state,
+          prdDocument: document,
+          knowledgeContext: buildQaKnowledgeContext(input.knowledgeContext),
+          checkTypes: ["state_schema", "prd_completeness", "state_prd_consistency", "knowledge_rule_compliance"],
+        });
+      }
+
       const updatedState = await this.stateService.attachGeneratedArtifactsInTransaction(tx, state.id, {
         prdDocument: document,
         status: ConversationDesignStateStatus.doc_ready,
@@ -139,6 +151,22 @@ export class FinalActionApplierService {
           input,
           raw,
         );
+        this.assertGenerationQuality({
+          conversationDesignState: updatedState,
+          prdDocument: document,
+          prototypeSpec: prototypeResult.prototypeSpec,
+          prototypeArtifact: prototypeResult.artifact,
+          knowledgeContext: buildQaKnowledgeContext(input.knowledgeContext),
+          checkTypes: [
+            "state_schema",
+            "prd_completeness",
+            "prototype_completeness",
+            "state_prd_consistency",
+            "state_prototype_consistency",
+            "prd_prototype_consistency",
+            "knowledge_rule_compliance",
+          ],
+        });
         const stateWithPrototype = await this.stateService.attachGeneratedArtifactsInTransaction(tx, updatedState.id, {
           prdDocument: document,
           prototypeSpec: prototypeResult.prototypeSpec,
@@ -177,6 +205,20 @@ export class FinalActionApplierService {
       }
 
       const result = await this.savePrototypeForStateInTransaction(tx, state, input, raw);
+      this.assertGenerationQuality({
+        conversationDesignState: state,
+        prdDocument: state.prdDocument,
+        prototypeSpec: result.prototypeSpec,
+        prototypeArtifact: result.artifact,
+        knowledgeContext: buildQaKnowledgeContext(input.knowledgeContext),
+        checkTypes: [
+          "state_schema",
+          "prototype_completeness",
+          "state_prototype_consistency",
+          "prd_prototype_consistency",
+          "knowledge_rule_compliance",
+        ],
+      });
 
       const updatedState = await this.stateService.attachGeneratedArtifactsInTransaction(tx, state.id, {
         prototypeSpec: result.prototypeSpec,
@@ -227,6 +269,14 @@ export class FinalActionApplierService {
       throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
     }
     return result;
+  }
+
+  private assertGenerationQuality(input: Parameters<QaRuleCheckService["run"]>[0]) {
+    const issues = this.qaRuleCheck.run(input);
+    const blockingIssues = issues.filter((item) => item.severity === "blocking" || item.severity === "major");
+    if (blockingIssues.length) {
+      throw new GeneratedArtifactQualityError(blockingIssues.map((item) => item.title));
+    }
   }
 
   private buildConversationDesignDraft(
@@ -397,6 +447,52 @@ export class FinalActionApplierService {
       errorMessage: html ? undefined : (fallbackMessage || "未取到原型 HTML 内容"),
     };
   }
+}
+
+export class GeneratedArtifactQualityError extends Error {
+  readonly userMessage = "生成结果未通过质量检查，请重试。";
+
+  constructor(issueTitles: string[]) {
+    super(`GENERATED_ARTIFACT_QUALITY_FAILED: ${issueTitles.slice(0, 6).join("；")}`);
+    this.name = "GeneratedArtifactQualityError";
+  }
+}
+
+function buildQaKnowledgeContext(
+  references?: DeerFlowKnowledgeReference[],
+): KnowledgeContext | undefined {
+  if (!references?.length) return undefined;
+  const normalized = references.map((reference) => ({
+    id: reference.id,
+    knowledgeId: reference.knowledgeId,
+    title: reference.title,
+    snippet: reference.snippet,
+    content: reference.content,
+    type: toKnowledgeType(reference.type),
+    relatedPath: reference.relatedPath,
+    sourceType: "knowledge_base" as const,
+    sourceId: reference.knowledgeId ?? reference.id,
+  }));
+  const byType = (...types: KnowledgeType[]) => normalized.filter((item) => item.type && types.includes(item.type));
+  return {
+    query: "generation_quality_preflight",
+    strongRules: byType(KnowledgeType.strong_rule),
+    defaultRules: byType(KnowledgeType.default_rule),
+    referenceCases: byType(KnowledgeType.reference_case),
+    designPatterns: byType(KnowledgeType.design_pattern, KnowledgeType.product_architecture),
+    prdWritingRules: byType(KnowledgeType.prd_writing_rule),
+    prototypeRules: byType(KnowledgeType.prototype_rule, KnowledgeType.prototype_asset_ref),
+    businessConcepts: byType(KnowledgeType.business_concept),
+    conflicts: [],
+    unknownAreas: [],
+    summary: `事务内质量预检使用 ${normalized.length} 条本轮知识引用。`,
+  };
+}
+
+function toKnowledgeType(value: string | undefined) {
+  return Object.values(KnowledgeType).includes(value as KnowledgeType)
+    ? value as KnowledgeType
+    : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

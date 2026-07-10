@@ -19,6 +19,9 @@ describe("FinalActionApplierService", () => {
     saveGeneratedPrototype: vi.fn(),
     saveGeneratedPrototypeInTransaction: vi.fn(),
   };
+  const qaRuleCheck = {
+    run: vi.fn((): Array<{ severity: string; title: string }> => []),
+  };
   const prisma = {
     conversation: { findUnique: vi.fn() },
     requirementDocument: { findMany: vi.fn() },
@@ -29,6 +32,7 @@ describe("FinalActionApplierService", () => {
     stateService as never,
     documentService as never,
     prototypeService as never,
+    qaRuleCheck as never,
   );
 
   beforeEach(() => {
@@ -36,6 +40,7 @@ describe("FinalActionApplierService", () => {
     prisma.conversation.findUnique.mockResolvedValue({ currentPrdDocumentId: null });
     prisma.requirementDocument.findMany.mockResolvedValue([]);
     prisma.$transaction.mockImplementation((callback) => callback(prisma));
+    qaRuleCheck.run.mockReturnValue([]);
   });
 
   it("bridges DeerFlow review_prd final actions into ConversationDesignState and PRD persistence", async () => {
@@ -137,6 +142,35 @@ describe("FinalActionApplierService", () => {
       runId: "run-1",
     }));
     expect(result).toEqual({ prdDocument: document, state: updatedState });
+  });
+
+  it("rejects generated artifacts inside the persistence transaction when deterministic QA finds a major issue", async () => {
+    const state = baseState({ status: "design_ready" });
+    const document = baseDocument();
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    qaRuleCheck.run.mockReturnValue([{ severity: "major", title: "PRD 未完整覆盖产品设计状态" }]);
+
+    await expect(service.apply({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-quality-fail",
+      finalAction: finalAction({
+        type: "review_prd",
+        message: "PRD 已生成。",
+        raw: {
+          type: "review_prd",
+          designStateDraft: { title: "门店预约", businessGoal: "提升预约转化" },
+          prdDocumentDraft: {
+            title: "门店预约需求说明书",
+            sections: [{ id: "background", title: "1.1 项目背景", content: "支持用户选择门店和时段后提交预约。" }],
+          },
+        },
+      }),
+      artifacts: [],
+    })).rejects.toThrow("GENERATED_ARTIFACT_QUALITY_FAILED");
+
+    expect(stateService.attachGeneratedArtifactsInTransaction).not.toHaveBeenCalled();
   });
 
   it("builds PRD sections from DeerFlow markdown artifacts when structured sections are absent", async () => {

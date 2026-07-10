@@ -17,7 +17,10 @@ import type {
   DeerFlowRuntimeEvent,
   DeerFlowTurnResult,
 } from "../deerflow-runtime.service";
-import { FinalActionApplierService } from "../final-action-applier.service";
+import {
+  FinalActionApplierService,
+  GeneratedArtifactQualityError,
+} from "../final-action-applier.service";
 import { ExternalResearchService, type ExternalResearchContext } from "../external-research.service";
 import { QaService } from "../qa.service";
 import { RuntimeRunLogService } from "../runtime-run-log.service";
@@ -406,6 +409,7 @@ export class AichatStreamService {
               prdDocument: applied.prdDocument,
               prototypeArtifact: applied.prototypeArtifact,
             });
+            assertGeneratedArtifactQaPassed(qaReport);
             const combinedChatMessage = formatArtifactReadyMessage({
               prdTitle: applied.prdDocument.title,
               prototypeTitle: applied.prototypeArtifact.title,
@@ -481,6 +485,7 @@ export class AichatStreamService {
               prdDocument: applied.prdDocument,
               checkTypes: PRD_GENERATION_QA_CHECK_TYPES,
             });
+            assertGeneratedArtifactQaPassed(qaReport);
             const prdChatMessage = formatArtifactReadyMessage({
               prdTitle: applied.prdDocument.title,
               qaReport,
@@ -550,6 +555,7 @@ export class AichatStreamService {
               runId: run.id,
               prototypeArtifact: applied.prototypeArtifact,
             });
+            assertGeneratedArtifactQaPassed(qaReport);
             const prototypeChatMessage = formatArtifactReadyMessage({
               prototypeTitle: applied.prototypeArtifact.title,
               qaReport,
@@ -1582,6 +1588,15 @@ export function getArtifactGenerationFailureReason(input: {
   if (!qualitySelfCheck || qualitySelfCheck.passed !== true || missing.length > 0) {
     return "模型未通过产物质量自检";
   }
+  const requiredSelfCheckGroups = [
+    "stateCoverage",
+    "knowledgeChecks",
+    ...(input.expectsPrdDocument ? ["prdChecks"] : []),
+    ...(input.expectsPrototype ? ["prototypeChecks"] : []),
+  ];
+  if (requiredSelfCheckGroups.some((key) => !Array.isArray(qualitySelfCheck[key]) || qualitySelfCheck[key].length === 0)) {
+    return "模型未返回完整产物质量自检明细";
+  }
   return undefined;
 }
 
@@ -1644,6 +1659,7 @@ function hasUsablePrdSections(value: unknown) {
 function userVisibleGenerationFailureMessage(error: unknown) {
   if (error instanceof PrdGenerationFailedError) return error.userMessage;
   if (error instanceof ModelGenerationTimeoutError) return error.userMessage;
+  if (error instanceof GeneratedArtifactQualityError) return error.userMessage;
   return undefined;
 }
 
@@ -1768,9 +1784,18 @@ function requiresExplicitFinalAction(value: string) {
 
 export function formatQaOutcome(report: QAReport) {
   if (report.status === "passed") return "QA 通过";
-  if (report.status === "warning") return "QA 通过，有待补充项";
+  if (report.status === "warning") return "QA 通过，存在非阻塞待确认项";
   if (report.status === "failed") return "QA 未通过";
   return `QA ${report.status}`;
+}
+
+export function assertGeneratedArtifactQaPassed(report: QAReport) {
+  if (report.status !== "failed") return;
+  throw new GeneratedArtifactQualityError(
+    report.issues
+      .filter((issue) => issue.severity === "blocking" || issue.severity === "major")
+      .map((issue) => issue.title),
+  );
 }
 
 export function formatArtifactReadyMessage(input: {

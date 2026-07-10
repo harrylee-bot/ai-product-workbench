@@ -337,10 +337,65 @@ describe("Knowledge module services", () => {
     expect(result.retrievalSource).toBe("vault_fallback");
     expect(result.selectedCount).toBeGreaterThanOrEqual(4);
     expect(evidence).toMatch(/活动发布与模板配置/);
-    expect(evidence).toMatch(/奖品券与资损核销/);
+    expect(evidence).toMatch(/签到与任务积分活动|奖品券与资损核销/);
     expect(evidence).toMatch(/PRD标准结构|需求说明书/);
     expect(evidence).toMatch(/原型生成总规则|前后台页面框架/);
     expect(evidence).toMatch(/签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/);
+  });
+
+  it("selects the prototype asset for the current domain instead of a hardcoded sign-in asset", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "aipw-domain-prototype-vault-"));
+    tempPaths.push(vaultRoot);
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+    await writeVaultFile(
+      vaultRoot,
+      "04-产品文档规范/PRD标准结构.md",
+      "# PRD标准结构\n需求说明书包含引言、业务需求、降级方案和安全基线。",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "05-原型设计规范/原型生成总规则.md",
+      "# 原型生成总规则\n原型覆盖前后台页面、状态、异常和数据治理。",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "05-原型设计规范/签到活动高保真HTML原型框架.md",
+      "---\ntitle: 签到活动高保真HTML原型框架\ntags:\n  - HTML原型\n---\n# 签到活动高保真HTML原型框架\n签到、积分、连续奖励。",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "05-原型设计规范/门店预约高保真HTML原型框架.md",
+      "---\ntitle: 门店预约高保真HTML原型框架\ntags:\n  - HTML原型\n  - 门店预约\n---\n# 门店预约高保真HTML原型框架\n门店配置、预约容量、预约提交、到店状态。",
+    );
+    prisma.knowledgeItem.findMany.mockResolvedValue([]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      conversationId: "conversation-store-booking",
+      runId: "run-store-booking",
+      runtimeName: "runtime_generation",
+      query: "门店预约功能，请生成需求文档和原型",
+      preferredTypes: [KnowledgeType.prd_writing_rule, KnowledgeType.prototype_rule, KnowledgeType.prototype_asset_ref],
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "always",
+      limit: 6,
+    });
+
+    const prototypeAssets = result.references.filter((item) => item.type === KnowledgeType.prototype_asset_ref);
+    expect(prototypeAssets[0]?.title).toBe("门店预约高保真HTML原型框架");
+    expect(prototypeAssets[0]?.content).toContain("预约容量");
+
+    const unrelated = await retrievalService.search({
+      conversationId: "conversation-inspection",
+      runId: "run-inspection",
+      runtimeName: "runtime_generation",
+      query: "设备巡检工单，请生成需求文档和原型",
+      preferredTypes: [KnowledgeType.prd_writing_rule, KnowledgeType.prototype_rule, KnowledgeType.prototype_asset_ref],
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "always",
+      limit: 6,
+    });
+    expect(unrelated.references.some((item) => item.type === KnowledgeType.prototype_asset_ref)).toBe(false);
   });
 
   it("can merge database hits with Markdown vault knowledge for runtime generation", async () => {
@@ -538,8 +593,8 @@ describe("Knowledge module services", () => {
       data: expect.objectContaining({
         runId: "run-real-vault-signin-points",
         selectedKnowledgeIds: expect.arrayContaining([
+          "vault:02-业务域知识/签到与任务积分活动.md",
           "vault:02-业务域知识/活动发布与模板配置.md",
-          "vault:02-业务域知识/奖品券与资损核销.md",
         ]),
       }),
     });

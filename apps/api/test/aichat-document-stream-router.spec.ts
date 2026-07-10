@@ -3,6 +3,7 @@ import { KnowledgeType, UserRole, UserStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import {
   AichatStreamService,
+  assertGeneratedArtifactQaPassed,
   buildExternalResearchRuntimeEvent,
   buildModelIdleTimeoutRuntimeEvent,
   buildModelEnrichmentRuntimeEvent,
@@ -302,10 +303,17 @@ describe("aichat document stream router", () => {
     expect(parts).toEqual([]);
   });
 
-  it("describes non-blocking QA warnings without failure wording", () => {
+  it("describes non-blocking QA warnings without calling them missing deliverables", () => {
     expect(formatQaOutcome(qaReport("passed"))).toBe("QA 通过");
-    expect(formatQaOutcome(qaReport("warning"))).toBe("QA 通过，有待补充项");
+    expect(formatQaOutcome(qaReport("warning"))).toBe("QA 通过，存在非阻塞待确认项");
     expect(formatQaOutcome(qaReport("failed"))).toBe("QA 未通过");
+  });
+
+  it("blocks delivery when deterministic post-persistence QA fails", () => {
+    expect(() => assertGeneratedArtifactQaPassed({
+      status: "failed",
+      issues: [{ severity: "major", title: "原型未完整覆盖产品设计状态" }],
+    } as never)).toThrow("GENERATED_ARTIFACT_QUALITY_FAILED");
   });
 
   it("formats final artifact messages with titles and without runtime noise", () => {
@@ -556,6 +564,24 @@ describe("aichat document stream router", () => {
         },
       },
     })).toBe("模型未通过产物质量自检");
+
+    expect(getPrdGenerationFailureReason({
+      expectsPrdDocument: true,
+      artifacts: [],
+      finalAction: {
+        type: "review_prd",
+        parsed: true,
+        message: "PRD 已生成。",
+        raw: {
+          type: "review_prd",
+          qualitySelfCheck: { passed: true, missing: [], stateCoverage: [], prdChecks: [], knowledgeChecks: [] },
+          prdDocumentDraft: {
+            title: "门店预约需求说明书",
+            sections: [{ id: "background", title: "1.1 项目背景", content: "门店预约需要覆盖后台门店配置、前台预约提交、容量限制、异常处理和数据查询。" }],
+          },
+        },
+      },
+    })).toBe("模型未返回完整产物质量自检明细");
   });
 
   it("fails combined PRD/prototype generation when the prototype HTML is missing", () => {

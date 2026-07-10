@@ -46,7 +46,7 @@ try {
   });
   const created = await requestJson("POST", "/conversations", {
     conversationId,
-    title: "Codex 线上冒烟：签到领积分活动",
+    title: `Codex 线上冒烟：${topicTitle(topic)}`,
   });
   conversationId = created?.conversation?.id ?? conversationId;
 
@@ -412,6 +412,7 @@ function evaluateOnlineResult(rawStream, snapshotMap, result, renderResult) {
   const runtimeStatus = snapshotMap.runtimeStatus?.value?.latestRun?.status;
   const prdPresent = Boolean(snapshotMap.prd?.value?.document);
   const prototypePresent = Boolean(snapshotMap.prototype?.value?.artifact);
+  const designState = snapshotMap.conversation?.value?.conversationDesignState;
   const streamEvents = parseStreamDataEvents(rawStream);
   const internalToolNoise = findInternalToolNoise(streamEvents);
   const visibleTextNoise = findVisibleTextNoise(streamEvents);
@@ -427,9 +428,18 @@ function evaluateOnlineResult(rawStream, snapshotMap, result, renderResult) {
   const noiseHits = [...new Set([...internalToolNoise, ...visibleTextNoise, ...rawNoiseHits])];
   const knowledgeHit = rawStream.includes("已用知识库打底") || rawStream.includes("知识库命中");
   const knowledgeMiss = rawStream.includes("知识库未命中");
-  const prdQuality = evaluatePrdDocument(snapshotMap.prd?.value?.document);
-  const prototypeQuality = evaluatePrototypeArtifact(snapshotMap.prototype?.value?.artifact, renderResult);
-  const consistency = evaluateOnlineConsistency(prdQuality, prototypeQuality);
+  const prdQuality = evaluatePrdDocument(snapshotMap.prd?.value?.document, designState);
+  const prototypeQuality = evaluatePrototypeArtifact(
+    snapshotMap.prototype?.value?.artifact,
+    renderResult,
+    designState,
+  );
+  const consistency = evaluateOnlineConsistency(
+    snapshotMap.prd?.value?.document,
+    snapshotMap.prototype?.value?.artifact,
+    renderResult,
+    designState,
+  );
   const finalAssistantMessage = evaluateFinalAssistantMessage(snapshotMap.messages?.value);
   const runtimeProgress = evaluateRuntimeProgress(snapshotMap.runtimeStatus?.value);
   const checks = [
@@ -499,7 +509,7 @@ function evaluateOnlineResult(rawStream, snapshotMap, result, renderResult) {
       evidence: prototypePresent ? "artifact present" : "artifact null",
     },
     {
-      name: "线上原型包含核心页面文案",
+      name: "线上原型动态业务覆盖和高保真合格",
       passed: prototypeQuality.coreLabelsPassed,
       evidence: prototypeQuality.coreLabelsEvidence,
     },
@@ -588,7 +598,7 @@ function evaluateFinalAssistantMessage(messagesSnapshot) {
   };
 }
 
-function evaluatePrdDocument(document) {
+function evaluatePrdDocument(document, designState) {
   if (!document) {
     return {
       textLength: 0,
@@ -604,7 +614,8 @@ function evaluatePrdDocument(document) {
       noTraceBodyEvidence: "document null",
       noisePassed: false,
       noiseEvidence: "document null",
-      conceptHits: {},
+      designCoveragePassed: false,
+      designCoverageEvidence: "document null",
     };
   }
 
@@ -620,9 +631,9 @@ function evaluatePrdDocument(document) {
     ["业务需求", /业务需求|核心业务规则|功能说明|验收标准/],
     ["核心流程", /核心流程\/状态\/页面要求|核心流程|状态流转|产品流程图/],
     ["产品流程图", /产品流程图|flowchart|sequenceDiagram|graph TD|graph LR/],
-    ["产品架构图", /产品架构图|配置中心|审核发布|数据报表|业务记录|flowchart LR|graph LR/],
+    ["产品架构图", /产品架构图|flowchart LR|graph LR/],
     ["降级方案", /降级|异常|补偿|重试/],
-    ["安全基线", /安全基线|资损|权限|风控/],
+    ["安全基线", /安全基线|权限|风控|安全/],
     ["无接口章节", /本需求涉及新增\/修改的接口/],
   ];
   const structureHits = structureLabels.map(([label, pattern]) => ({
@@ -631,23 +642,37 @@ function evaluatePrdDocument(document) {
   }));
   const knowledgeRefs = Array.isArray(document.knowledgeRefs) ? document.knowledgeRefs : [];
   const validationNotes = Array.isArray(document.validationNotes) ? document.validationNotes : [];
-  const knowledgeHit = knowledgeRefs.length > 0 || /知识库|活动发布与模板配置|奖品券与资损核销|原型生成总规则|PRD标准结构/.test(metadataText);
-  const enrichmentHit = validationNotes.some((item) => /模型|联网|外部|补齐|公开资料/.test(String(item)));
-  const hasExternalUrl = /https:\/\/(mailchimp\.com|docs\.stripe\.com|developer\.mozilla\.org|[a-z0-9.-]+\.[a-z]{2,})/i.test(metadataText);
-  const hasExternalStatus = /外部补充状态|externalResearchStatus|completed|failed_non_blocking|skipped_tools_unavailable/.test(metadataText);
+  const knowledgeHit = knowledgeRefs.length > 0;
+  const enrichmentHit = validationNotes.some((item) => /模型|联网|外部|补齐|公开资料|未使用公开资料/.test(String(item)));
+  const hasExternalStatus = /外部补充状态|externalResearchStatus|completed|failed_non_blocking|skipped_tools_unavailable|未使用公开资料/.test(metadataText);
   const hasBoundary = /不发送|不搜索|内部路径|附件原文|真实接口|密钥|不覆盖本地知识库|隐私边界|只补充|公开资料/.test(metadataText);
   const explainableRefs = knowledgeRefs.filter((ref) => {
-    const text = flattenText(ref);
-    return /来源文件|relatedPath|00-|01-|02-|03-|04-|05-|06-|PRD标准结构|原型生成总规则|签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|活动发布与模板配置|奖品券与资损核销/.test(text)
-      && /(snippet|摘要|score|reason|匹配|规则|流程|验收|状态|资损|原型|PRD|需求)/i.test(text);
+    if (!ref || typeof ref !== "object") return false;
+    const hasSource = Boolean(ref.relatedPath || ref.sourceId || ref.knowledgeId || ref.id);
+    const hasExcerpt = Boolean(ref.snippet || ref.summary || ref.content);
+    const hasReason = Boolean(ref.reason || ref.score !== undefined);
+    return hasSource && hasExcerpt && hasReason;
   });
+  const knowledgeTypes = new Set(knowledgeRefs.map((ref) => String(ref?.type ?? "").toLowerCase()));
+  const knowledgeText = flattenText(knowledgeRefs);
   const knowledgeGroupChecks = [
-    ["文档规范", /PRD标准结构|产品文档规范|需求说明书|prd_writing_rule/i],
-    ["原型规范", /原型生成总规则|前后台页面框架|字段接口状态表达|prototype_rule/i],
-    ["原型资产框架", /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产|prototype_asset_ref/i],
-    ["活动业务", /活动发布与模板配置|活动配置|审核发布|business_concept/i],
-    ["权益资损", /奖品券与资损核销|权益|积分|资损|库存|核销/],
-  ].map(([label, pattern]) => ({ label, hit: pattern.test(metadataText) }));
+    ["文档规范", knowledgeTypes.has("prd_writing_rule") || /PRD标准结构|产品文档规范/i.test(knowledgeText)],
+    ["原型规范", knowledgeTypes.has("prototype_rule") || /原型生成总规则|页面框架/i.test(knowledgeText)],
+    ["原型资产框架", knowledgeTypes.has("prototype_asset_ref") || /高保真HTML原型框架|Axure|RP资产|HTML原型/i.test(knowledgeText)],
+    ["当前业务知识", knowledgeTypes.has("business_concept") || knowledgeTypes.has("product_architecture") || knowledgeTypes.has("reference_case")],
+  ].map(([label, hit]) => ({ label, hit: Boolean(hit) }));
+  const designCoverage = evaluateDesignCoverage(designState, sectionText, [
+    "targetUsers",
+    "userScenarios",
+    "pages",
+    "features",
+    "backendConfigs",
+    "frontendRules",
+    "businessRules",
+    "stateRules",
+    "exceptionScenarios",
+    "acceptanceCriteria",
+  ]);
   const traceBodyHits = [
     /联网补齐证据/.test(sectionText) ? "联网补齐证据" : "",
     /模型与联网补齐/.test(sectionText) ? "模型与联网补齐" : "",
@@ -657,10 +682,10 @@ function evaluatePrdDocument(document) {
   const noiseHits = findRuntimeNoise(text);
   return {
     textLength: text.length,
-    structurePassed: structureHits.every((item) => item.hit),
-    structureEvidence: structureHits.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
-    traceMetadataPassed: knowledgeHit && enrichmentHit && hasExternalUrl && hasExternalStatus && hasBoundary,
-    traceMetadataEvidence: `knowledgeRefs=${knowledgeRefs.length}, validationNotes=${validationNotes.length}, knowledge=${knowledgeHit ? "hit" : "miss"}, enrichment=${enrichmentHit ? "hit" : "miss"}, url=${hasExternalUrl ? "hit" : "miss"}, status=${hasExternalStatus ? "hit" : "miss"}, boundary=${hasBoundary ? "hit" : "miss"}`,
+    structurePassed: structureHits.every((item) => item.hit) && designCoverage.passed,
+    structureEvidence: `${structureHits.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", ")}; ${designCoverage.evidence}`,
+    traceMetadataPassed: knowledgeHit && enrichmentHit && hasExternalStatus && hasBoundary,
+    traceMetadataEvidence: `knowledgeRefs=${knowledgeRefs.length}, validationNotes=${validationNotes.length}, knowledge=${knowledgeHit ? "hit" : "miss"}, enrichment=${enrichmentHit ? "hit" : "miss"}, status=${hasExternalStatus ? "hit" : "miss"}, boundary=${hasBoundary ? "hit" : "miss"}`,
     knowledgeRefsExplainablePassed: knowledgeRefs.length >= 4 && explainableRefs.length >= Math.min(4, knowledgeRefs.length),
     knowledgeRefsExplainableEvidence: `knowledgeRefs=${knowledgeRefs.length}, explainable=${explainableRefs.length}`,
     requiredKnowledgeGroupsPassed: knowledgeGroupChecks.every((item) => item.hit),
@@ -669,11 +694,12 @@ function evaluatePrdDocument(document) {
     noTraceBodyEvidence: traceBodyHits.length ? `body contains ${traceBodyHits.join(", ")}` : "no trace/evidence section in PRD body",
     noisePassed: noiseHits.length === 0,
     noiseEvidence: noiseHits.length ? noiseHits.join(", ") : "no runtime noise patterns",
-    conceptHits: buildConceptHits(text),
+    designCoveragePassed: designCoverage.passed,
+    designCoverageEvidence: designCoverage.evidence,
   };
 }
 
-function evaluatePrototypeArtifact(artifact, renderResult) {
+function evaluatePrototypeArtifact(artifact, renderResult, designState) {
   if (!artifact) {
     return {
       textLength: 0,
@@ -681,7 +707,8 @@ function evaluatePrototypeArtifact(artifact, renderResult) {
       coreLabelsEvidence: "artifact null",
       noisePassed: false,
       noiseEvidence: "artifact null",
-      conceptHits: {},
+      designCoveragePassed: false,
+      designCoverageEvidence: "artifact null",
     };
   }
 
@@ -691,63 +718,151 @@ function evaluatePrototypeArtifact(artifact, renderResult) {
     html: artifact.html,
     renderText: renderResult?.renderedText,
   });
-  const labels = [
-    ["活动配置", /活动配置|基础信息|规则配置|后台/],
-    ["提交审核", /提交审核|审核|发布/],
-    ["立即签到", /立即签到|签到|已签到|连续签到/],
-    ["积分/奖励", /积分|奖励|权益/],
-    ["异常状态", /失败|额度不足|无资格|补偿|稍后到账/],
-    ["表单控件", /<input|<select|<textarea|class="[^"]*(field|form|input|select)/i],
-    ["表格报表", /<table|<thead|<tbody|数据报表|指标卡|导出/i],
-    ["状态标签", /badge|status|tag|状态|草稿|待审核|已发布|已下线/i],
-  ];
-  const labelHits = labels.map(([label, pattern]) => ({ label, hit: pattern.test(text) }));
   const noiseHits = [
     ...findRuntimeNoise(text),
     ...findPrototypeTraceNoise(text),
   ];
   const html = `${artifact.htmlContent ?? ""}\n${artifact.html ?? ""}`;
+  const designCoverage = evaluateDesignCoverage(designState, text, [
+    "pages",
+    "features",
+    "backendConfigs",
+    "frontendRules",
+    "businessRules",
+    "stateRules",
+    "exceptionScenarios",
+  ]);
+  const specCoverage = evaluatePrototypeSpecCoverage(designState?.prototypeSpec, text);
   const highFidelityChecks = [
     ["完整HTML", /^<!doctype html>/i.test(html.trim()) && /<html[\s\S]*<style[\s\S]*<\/style>[\s\S]*<\/html>/i.test(html)],
     ["非裸HTML", /class=|data-page-id|data-component-id/i.test(html) && /border-radius|box-shadow|grid|flex|padding/i.test(html)],
     ["可评审密度", (html.match(/<(section|div|table|input|select|button)\b/gi) ?? []).length >= 25],
-    ["活动平台字段密度", /banner|海报|上传|跳转类型|隐私协议|每日库存|补偿重试|目标用户|活动集/.test(html)],
+    ["前后台视图", /(后台|运营|管理|配置中心|工作台)/.test(text) && /(前台|用户端|客户端|用户页面|用户入口|移动端)/.test(text)],
+    ["交互控件", /<(form|input|select|textarea|button)\b/i.test(html)],
+    ["数据结构", /<(table|ul|ol)\b|data-grid|列表|明细|报表|记录/i.test(html)],
   ].map(([label, hit]) => ({ label, hit: Boolean(hit) }));
   return {
     textLength: text.length,
-    coreLabelsPassed: labelHits.every((item) => item.hit) && highFidelityChecks.every((item) => item.hit),
+    coreLabelsPassed: highFidelityChecks.every((item) => item.hit) && designCoverage.passed && specCoverage.passed,
     coreLabelsEvidence: [
-      labelHits.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
       highFidelityChecks.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
+      designCoverage.evidence,
+      specCoverage.evidence,
     ].join("; "),
     noisePassed: noiseHits.length === 0,
     noiseEvidence: noiseHits.length ? noiseHits.join(", ") : "no runtime noise patterns",
-    conceptHits: buildConceptHits(text),
+    designCoveragePassed: designCoverage.passed,
+    designCoverageEvidence: designCoverage.evidence,
   };
 }
 
-function evaluateOnlineConsistency(prdQuality, prototypeQuality) {
-  const concepts = ["activityConfig", "dailySignIn", "pointsReward", "riskControl", "reporting"];
-  const rows = concepts.map((name) => ({
-    name,
-    prd: Boolean(prdQuality.conceptHits?.[name]),
-    prototype: Boolean(prototypeQuality.conceptHits?.[name]),
+function evaluateOnlineConsistency(document, artifact, renderResult, designState) {
+  const prdText = flattenText({ sections: document?.sections ?? [] });
+  const prototypeText = flattenText({
+    htmlContent: artifact?.htmlContent,
+    html: artifact?.html,
+    renderText: renderResult?.renderedText,
+  });
+  const requirements = collectDesignRequirements(designState, [
+    "pages",
+    "features",
+    "backendConfigs",
+    "frontendRules",
+    "businessRules",
+    "stateRules",
+    "exceptionScenarios",
+  ]);
+  const rows = requirements.map(({ group, label }) => ({
+    name: `${group}/${label}`,
+    prd: artifactContainsLabel(prdText, label),
+    prototype: artifactContainsLabel(prototypeText, label),
   }));
   const matched = rows.filter((row) => row.prd && row.prototype).length;
+  const ratio = rows.length ? matched / rows.length : 0;
   return {
-    passed: matched >= 4,
-    evidence: rows.map((row) => `${row.name}:PRD-${row.prd ? "hit" : "miss"}/Prototype-${row.prototype ? "hit" : "miss"}`).join(", "),
+    passed: rows.length >= 4 && ratio >= 0.75,
+    evidence: rows.length
+      ? `matched=${matched}/${rows.length}; ${rows.filter((row) => !row.prd || !row.prototype).slice(0, 8).map((row) => `${row.name}:PRD-${row.prd ? "hit" : "miss"}/Prototype-${row.prototype ? "hit" : "miss"}`).join(", ") || "all dynamic requirements matched"}`
+      : "conversation design state has no comparable requirements",
   };
 }
 
-function buildConceptHits(text) {
+function evaluateDesignCoverage(designState, artifactText, keys) {
+  const requirements = collectDesignRequirements(designState, keys);
+  if (!requirements.length) {
+    return { passed: false, evidence: "design-state requirements missing", groups: [] };
+  }
+  const groups = [...new Set(requirements.map((item) => item.group))].map((group) => {
+    const items = requirements.filter((item) => item.group === group);
+    const missing = items.filter((item) => !artifactContainsLabel(artifactText, item.label));
+    const hitCount = items.length - missing.length;
+    return { group, total: items.length, hitCount, missing: missing.map((item) => item.label) };
+  });
   return {
-    activityConfig: /活动配置|基础信息|规则配置|审核|发布/.test(text),
-    dailySignIn: /每日|自然日|签到|已签到|重复签到/.test(text),
-    pointsReward: /积分|奖励|权益|连续签到/.test(text),
-    riskControl: /资损|风控|额度|库存|补偿|重试|失败/.test(text),
-    reporting: /报表|数据|指标|签到人数|发放成功|发放失败/.test(text),
+    passed: groups.every((group) => group.hitCount / group.total >= 0.75),
+    evidence: groups.map((group) => `${group.group}:${group.hitCount}/${group.total}${group.missing.length ? ` missing=${group.missing.slice(0, 4).join("、")}` : ""}`).join("; "),
+    groups,
   };
+}
+
+function evaluatePrototypeSpecCoverage(spec, artifactText) {
+  const labels = [];
+  for (const page of Array.isArray(spec?.pages) ? spec.pages : []) {
+    addEntityLabel(labels, page);
+    for (const state of Array.isArray(page?.states) ? page.states : []) addEntityLabel(labels, state);
+    collectComponentLabels(page?.components, labels);
+  }
+  const unique = [...new Set(labels)];
+  if (!unique.length) return { passed: false, evidence: "prototype spec labels missing" };
+  const missing = unique.filter((label) => !artifactContainsLabel(artifactText, label));
+  const hitCount = unique.length - missing.length;
+  return {
+    passed: hitCount / unique.length >= 0.75,
+    evidence: `prototype-spec:${hitCount}/${unique.length}${missing.length ? ` missing=${missing.slice(0, 8).join("、")}` : ""}`,
+  };
+}
+
+function collectComponentLabels(components, output) {
+  for (const component of Array.isArray(components) ? components : []) {
+    addEntityLabel(output, component);
+    collectComponentLabels(component?.children, output);
+  }
+}
+
+function collectDesignRequirements(designState, keys) {
+  const results = [];
+  for (const key of keys) {
+    for (const item of Array.isArray(designState?.[key]) ? designState[key] : []) {
+      const label = entityLabel(item);
+      if (label.length >= 2) results.push({ group: key, label });
+    }
+  }
+  return [...new Map(results.map((item) => [`${item.group}:${item.label}`, item])).values()];
+}
+
+function addEntityLabel(output, item) {
+  const label = entityLabel(item);
+  if (label.length >= 2) output.push(label);
+}
+
+function entityLabel(item) {
+  if (!item || typeof item !== "object") return "";
+  return String(item.name ?? item.title ?? item.label ?? item.role ?? "").trim();
+}
+
+function artifactContainsLabel(artifactText, label) {
+  const haystack = normalizeCoverageText(artifactText);
+  const needle = normalizeCoverageText(label);
+  if (!needle || haystack.includes(needle)) return Boolean(needle);
+  const parts = String(label)
+    .split(/[：:、，；;\/\s]+/)
+    .map(normalizeCoverageText)
+    .filter((part) => part.length >= 2);
+  return parts.length >= 2 && parts.filter((part) => haystack.includes(part)).length / parts.length >= 0.75;
+}
+
+function normalizeCoverageText(value) {
+  return String(value ?? "").toLowerCase().replace(/<[^>]+>/g, "").replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "");
 }
 
 function findRuntimeNoise(text) {
@@ -883,6 +998,7 @@ function runSelfTest() {
     {
       runtimeStatus: { value: { latestRun: { status: "succeeded", events: sampleRuntimeEvents() } } },
       messages: { value: { items: [sampleAssistantMessage()] } },
+      conversation: { value: { conversationDesignState: sampleDesignState() } },
       prd: { value: { document: samplePrdDocument() } },
       prototype: { value: { artifact: samplePrototypeArtifact() } },
     },
@@ -895,6 +1011,9 @@ function runSelfTest() {
   assertCheck(allowedEvaluation, "线上 PRD 知识引用可解释", true);
   assertCheck(allowedEvaluation, "线上 Agent 调用覆盖核心知识组", true);
   assertCheck(allowedEvaluation, "线上 PRD 正文不写补齐证据章节", true);
+  assertCheck(allowedEvaluation, "线上 PRD 内容结构合格", true);
+  assertCheck(allowedEvaluation, "线上原型动态业务覆盖和高保真合格", true);
+  assertCheck(allowedEvaluation, "线上 PRD 与原型核心规则一致", true);
   assertCheck(allowedEvaluation, "线上运行状态展示知识库模型联网三段进度", true);
 
   const internalToolProtocol = [
@@ -918,7 +1037,8 @@ function runSelfTest() {
       "internal read_file protocol is treated as tool noise",
       "final assistant message must be clear and clean",
       "PRD metadata must retain explainable knowledge refs, external evidence, and public-data boundary",
-      "agent retrieval must cover PRD, prototype rules, prototype assets/design framework, activity, and points/risk knowledge groups",
+      "agent retrieval must cover PRD rules, prototype rules, a domain-relevant prototype asset, and current-domain knowledge",
+      "PRD and prototype must cover the dynamic design state and prototype specification",
       "PRD body must not include trace/evidence sections",
       "runtime progress must show knowledge, model, and public evidence stages",
     ],
@@ -931,6 +1051,40 @@ function assertCheck(evaluation, name, expected) {
   if (check.passed !== expected) {
     throw new Error(`Self-test failed for ${name}: expected ${expected}, got ${check.passed} (${check.evidence})`);
   }
+}
+
+function sampleDesignState() {
+  return {
+    targetUsers: [{ name: "用户" }],
+    userScenarios: [{ name: "每日签到" }],
+    pages: [{ name: "活动配置" }, { name: "前台签到" }, { name: "数据报表" }],
+    features: [{ name: "积分发放" }],
+    backendConfigs: [{ name: "活动配置" }],
+    frontendRules: [{ name: "重复签到" }],
+    businessRules: [{ name: "每日签到" }],
+    stateRules: [{ name: "已签到" }],
+    exceptionScenarios: [{ name: "发放失败" }],
+    acceptanceCriteria: [{ name: "数据报表" }],
+    prototypeSpec: {
+      pages: [
+        {
+          name: "活动配置",
+          components: [{ name: "提交审核" }],
+          states: [{ name: "待审核" }],
+        },
+        {
+          name: "前台签到",
+          components: [{ name: "立即签到" }],
+          states: [{ name: "已签到" }],
+        },
+        {
+          name: "数据报表",
+          components: [{ name: "发放失败" }],
+          states: [{ name: "补偿中" }],
+        },
+      ],
+    },
+  };
 }
 
 function samplePrdDocument() {
@@ -986,10 +1140,10 @@ function samplePrdDocument() {
     ],
     sections: [
       { title: "1.1 项目背景", content: "用户每日签到领取积分。" },
-      { title: "2.2 核心业务规则", content: "每日签到、积分奖励、重复签到不重复发放。" },
+      { title: "2.2 核心业务规则", content: "每日签到、已签到、积分奖励、重复签到不重复发放；发放失败进入补偿。" },
       {
         title: "2.3 核心流程/状态/页面要求",
-        content: "产品流程图和产品架构图覆盖运营配置、审核发布、前台签到、积分发放、异常补偿和数据报表。",
+        content: "产品流程图和产品架构图覆盖活动配置、审核发布、前台签到、积分发放、异常补偿和数据报表。",
         blocks: [
           { type: "diagram", title: "产品流程图", diagramSyntax: "mermaid", content: "flowchart TD\nA[运营配置] --> B[审核发布]\nB --> C[前台签到]\nC --> D[积分发放]\nD --> E[数据报表]" },
           { type: "diagram", title: "产品架构图", diagramSyntax: "mermaid", content: "flowchart LR\nOP[运营后台] --> CFG[配置中心]\nCFG --> PAGE[前台页面]\nPAGE --> REPORT[数据报表]" },
@@ -1020,7 +1174,7 @@ function samplePrototypeArtifact() {
       <div class="field">banner 上传位 分享海报 海报开关 隐私协议 目标用户 跳转类型</div>
       <table><thead><tr><th>状态</th><th>说明</th></tr></thead><tbody><tr><td><span class="badge status">待审核</span></td><td>积分奖励、每日库存、失败补偿、补偿重试、额度不足、无资格</td></tr></tbody></table>
     </section>
-    <section class="panel" data-page-id="frontend-preview"><div>立即签到</div><div>已签到</div><div>连续签到</div><div>积分奖励</div><div>异常状态</div><div>稍后到账</div></section>
+    <section class="panel" data-page-id="frontend-preview"><h2>前台用户页面 前台签到</h2><div>每日签到</div><div>立即签到</div><div>已签到</div><div>连续签到</div><div>重复签到</div><div>积分发放</div><div>积分奖励</div><div>异常状态</div><div>稍后到账</div></section>
     <section class="panel" data-page-id="report"><div>数据报表</div><div>签到人数</div><div>发放失败</div><div>补偿中</div><div>资损风险</div></section>
   </main>
 </body>
@@ -1094,6 +1248,17 @@ async function readTextFile(filePath) {
 
 function normalizeBaseUrl(value) {
   return String(value).replace(/\/+$/, "");
+}
+
+function topicTitle(value) {
+  return String(value)
+    .replace(/请?根据知识库内容?/g, "")
+    .replace(/生成需求文档和原型|生成需求文档|生成原型/g, "")
+    .replace(/我想做一个|我想做|请帮我|帮我/g, "")
+    .replace(/[，。！？,.!?]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 40) || "Agent 工作流";
 }
 
 function numberFromEnv(name, fallback) {

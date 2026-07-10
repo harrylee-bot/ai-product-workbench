@@ -441,7 +441,9 @@ export class QaService {
     state: ConversationDesignState | null,
     options: RunQaOptions,
   ): Promise<KnowledgeContext> {
-    const query = state ? `${state.title} ${state.summary ?? ""} ${state.businessGoal}` : `QA ${conversationId}`;
+    const query = state
+      ? `${state.title} ${state.summary ?? ""} ${state.businessGoal} 需求文档 原型`
+      : `QA ${conversationId} 需求文档 原型`;
     const search = await this.knowledgeRetrieval.search({
       conversationId,
       runId: options.runId,
@@ -453,17 +455,24 @@ export class QaService {
         KnowledgeType.default_rule,
         KnowledgeType.prd_writing_rule,
         KnowledgeType.prototype_rule,
+        KnowledgeType.prototype_asset_ref,
+        KnowledgeType.business_concept,
+        KnowledgeType.product_architecture,
       ],
-      limit: 10,
+      limit: 16,
     });
     return {
       query,
       strongRules: search.references.filter((item) => item.type === KnowledgeType.strong_rule),
       defaultRules: search.references.filter((item) => item.type === KnowledgeType.default_rule),
       referenceCases: search.references.filter((item) => item.type === KnowledgeType.reference_case),
-      designPatterns: search.references.filter((item) => item.type === KnowledgeType.design_pattern),
+      designPatterns: search.references.filter((item) =>
+        item.type === KnowledgeType.design_pattern || item.type === KnowledgeType.product_architecture,
+      ),
       prdWritingRules: search.references.filter((item) => item.type === KnowledgeType.prd_writing_rule),
-      prototypeRules: search.references.filter((item) => item.type === KnowledgeType.prototype_rule),
+      prototypeRules: search.references.filter((item) =>
+        item.type === KnowledgeType.prototype_rule || item.type === KnowledgeType.prototype_asset_ref,
+      ),
       businessConcepts: search.references.filter((item) => item.type === KnowledgeType.business_concept),
       conflicts: [],
       unknownAreas: search.retrievalError ? [search.retrievalError] : [],

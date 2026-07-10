@@ -67,7 +67,7 @@ export function formatRequirementDocumentDraft(
     level: 1,
     content: renderMarkdownTable(
       ["版本/状态", "作者", "参与者", "起止日期", "备注"],
-      [["讨论稿", author, "待确认", date, `新增《${title}》，覆盖核心业务规则、降级方案与安全基线。`]],
+      [["讨论稿", author, "业务、研发、测试评审人", date, `新增《${title}》，覆盖核心业务规则、降级方案与安全基线。`]],
     ),
     sourcePaths: [],
   });
@@ -178,7 +178,7 @@ export function formatRequirementDocumentDraft(
     type: "exception_scenarios",
     level: 1,
     content: findSectionContent(sourceSections, ["exception_scenarios"], /降级|异常|兜底|失败/)
-      || buildDegradationFallback(baseName),
+      || buildDegradationFallback(baseName, state),
     sourcePaths: ["exceptionScenarios"],
   });
   add({
@@ -293,9 +293,9 @@ function cleanRequirementTitleBase(value: string) {
 
 function cleanDocumentAuthor(value: string | undefined) {
   const author = value?.trim();
-  if (!author) return "待确认";
+  if (!author) return "产品经理";
   if (/^(cm|cl)[0-9a-z]{18,}$/i.test(author) || /^[0-9a-f-]{32,36}$/i.test(author)) {
-    return "待确认";
+    return "产品经理";
   }
   return author;
 }
@@ -358,7 +358,7 @@ function buildScopeFallback(baseName: string, state?: ConversationDesignState) {
   ];
   return rows.length
     ? rows.map((item) => `- ${item}`).join("\n")
-    : `- ${baseName}相关运营后台配置、前台页面展示、业务流程、验收标准、降级方案和安全基线。\n- 覆盖配置保存、预览审核、发布上线、用户参与、结果记录、异常处理和数据报表闭环。`;
+    : `- ${baseName}涉及的目标用户、业务场景、页面范围、核心功能、规则、状态、异常和验收口径。\n- 覆盖用户发起、系统校验、状态变化、结果反馈、异常处理和业务记录闭环。`;
 }
 
 function buildChannelRows(sections: RequirementDocSection[], state?: ConversationDesignState) {
@@ -381,9 +381,8 @@ function buildPageLinksFallback(baseName: string, state?: ConversationDesignStat
   const pages = arrayOfRecords(state?.pages);
   if (!pages.length) {
     return [
-      `- 后台入口：${baseName}管理入口，承载配置、审核、发布、查询和数据治理。`,
-      `- 前台入口：${baseName}用户入口，承载核心操作、结果反馈和异常状态。`,
-      "- 页面 URL / 路由：以实际上线地址为准；最终路由不得替代本文中的页面职责和状态要求。",
+      `- 管理入口：所属产品工作台 > ${baseName}，承载管理、配置、处理和查询。`,
+      `- 用户入口：所属产品用户端 > ${baseName}，承载核心操作、结果反馈和异常状态。`,
     ].join("\n");
   }
   return renderMarkdownTable(
@@ -391,7 +390,7 @@ function buildPageLinksFallback(baseName: string, state?: ConversationDesignStat
     pages.map((page, index) => [
       recordName(page, `页面${index + 1}`),
       recordValue(page, ["entry", "entryPath", "route", "url", "path", "menuPath", "navigation"])
-        || "由上级菜单或业务入口进入，路由以实际上线地址为准",
+        || `所属产品入口 > ${recordName(page, `页面${index + 1}`)}`,
       recordValue(page, ["description", "purpose", "summary", "responsibility", "content"])
         || "展示当前业务状态、可执行操作、结果反馈和异常处理入口",
     ]),
@@ -408,16 +407,20 @@ function buildCoreRulesFallback(baseName: string, state?: ConversationDesignStat
 }
 
 function buildProcessFallback(baseName: string, state?: ConversationDesignState) {
-  const pages = compactRecordItems(state?.pages, "页面").slice(0, 5);
-  const states = compactRecordItems(state?.stateRules, "状态").slice(0, 5);
-  const exceptions = compactRecordItems(state?.exceptionScenarios, "异常").slice(0, 5);
-  const pageText = pages.length ? pages.join("、") : "后台配置页、前台展示页、审核发布页、数据报表页";
-  const stateText = states.length ? states.join("、") : "草稿、待审核、已发布、已下线、失败待处理";
-  const exceptionText = exceptions.length ? exceptions.join("、") : "失败、重复、超时、无权限、空态";
+  const pages = recordNames(state?.pages, "页面").slice(0, 5);
+  const features = recordNames(state?.features, "功能").slice(0, 5);
+  const rules = recordNames(state?.businessRules, "规则").slice(0, 5);
+  const states = recordNames(state?.stateRules, "状态").slice(0, 5);
+  const exceptions = recordNames(state?.exceptionScenarios, "异常").slice(0, 5);
+  const pageText = pages.length ? pages.join("、") : `${baseName}业务入口与结果页面`;
+  const featureText = features.length ? features.join("、") : "核心业务操作";
+  const ruleText = rules.length ? rules.join("、") : "资格、边界和重复操作规则";
+  const stateText = states.length ? states.join("、") : "初始、处理中、成功和失败状态";
+  const exceptionText = exceptions.length ? exceptions.join("、") : "失败、重复、超时、无权限和空态";
   return [
-    `${baseName}流程需要覆盖${pageText}。业务从运营配置开始，经预览校验、提交审核、发布上线后进入用户参与或结果反馈，最终沉淀为数据报表和异常处理记录。`,
-    `状态要求：至少覆盖${stateText}，每个状态必须说明触发条件、可执行动作和页面表现。`,
-    `异常要求：至少覆盖${exceptionText}，不得出现无提示失败、重复提交、错误成功态或状态不一致。`,
+    `${baseName}主流程覆盖${pageText}，用户或管理人员发起${featureText}后，系统按${ruleText}完成校验，更新为${stateText}中的对应状态，并同步展示结果和业务记录。`,
+    `页面要求：每个步骤均明确入口、前置条件、可执行动作、成功结果和下一步去向；关键状态在相关页面保持一致。`,
+    `异常要求：覆盖${exceptionText}，明确提示文案、状态记录、可恢复动作和人工处理入口。`,
   ].join("\n");
 }
 
@@ -430,10 +433,16 @@ function ensureProcessDiagramBlocks(
   const hasFlow = existing.some((block) => block.type === "diagram" && /流程|flow/i.test(`${block.title ?? ""}\n${block.content}`));
   const hasArchitecture = existing.some((block) => block.type === "diagram" && /架构|architecture/i.test(`${block.title ?? ""}\n${block.content}`));
   const additions: NonNullable<RequirementDocSection["blocks"]> = [];
-  const pageNames = arrayOfRecords(state?.pages).map((item, index) => recordName(item, `页面${index + 1}`)).slice(0, 4);
-  const firstPage = mermaidLabel(pageNames[0] || "后台配置/管理页面");
-  const secondPage = mermaidLabel(pageNames[1] || "审核/处理页面");
-  const userPage = mermaidLabel(pageNames[2] || "前台用户页面");
+  const pageNames = recordNames(state?.pages, "页面").slice(0, 4);
+  const featureNames = recordNames(state?.features, "功能").slice(0, 4);
+  const configNames = recordNames(state?.backendConfigs, "配置").slice(0, 3);
+  const ruleNames = uniqueNames([
+    ...recordNames(state?.businessRules, "规则"),
+    ...recordNames(state?.frontendRules, "前台规则"),
+  ]).slice(0, 4);
+  const stateNames = recordNames(state?.stateRules, "状态").slice(0, 4);
+  const exceptionNames = recordNames(state?.exceptionScenarios, "异常").slice(0, 3);
+  const acceptanceNames = recordNames(state?.acceptanceCriteria, "验收项").slice(0, 3);
   if (!hasFlow) {
     additions.push({
       id: "product_flow_diagram",
@@ -442,18 +451,13 @@ function ensureProcessDiagramBlocks(
       diagramSyntax: "mermaid",
       content: [
         "flowchart TD",
-        `  A[进入${mermaidLabel(baseName)}] --> B[${firstPage}]`,
-        `  B --> C[${secondPage}]`,
-        "  C -->|通过| D[提交审核]",
-        "  C -->|失败| B",
-        "  D -->|审核通过| E[发布上线]",
-        "  D -->|审核驳回| B",
-        `  E --> F[${userPage}]`,
-        "  F --> G{资格/状态校验}",
-        "  G -->|通过| H[用户参与并生成记录]",
-        "  G -->|不通过| I[展示不可参与原因]",
-        "  H --> J[结果反馈/权益发放/状态更新]",
-        "  J --> K[数据报表与异常处理]",
+        `  A[${diagramGroupLabel("业务入口", pageNames.slice(0, 1), baseName)}] --> B[${diagramGroupLabel("核心操作", featureNames, "执行核心业务操作")}]`,
+        `  B --> C{${diagramGroupLabel("规则校验", ruleNames, "校验前置条件与边界")}}`,
+        `  C -->|通过| D[${diagramGroupLabel("状态更新", stateNames, "写入业务状态与记录")}]`,
+        `  C -->|不通过| E[${diagramGroupLabel("异常处理", exceptionNames, "展示原因与恢复动作")}]`,
+        `  D --> F[${diagramGroupLabel("结果页面", pageNames.slice(1), "展示结果与下一步")}]`,
+        "  E --> F",
+        `  F --> G[${diagramGroupLabel("验收与追踪", acceptanceNames, "查询结果并完成验收")}]`,
       ].join("\n"),
     });
   }
@@ -465,15 +469,13 @@ function ensureProcessDiagramBlocks(
       diagramSyntax: "mermaid",
       content: [
         "flowchart LR",
-        "  OP[运营后台] --> CFG[配置中心]",
-        "  CFG --> AUDIT[审核发布]",
-        "  AUDIT --> PAGE[前台页面]",
-        "  PAGE --> RULE[业务规则校验]",
-        "  RULE --> RECORD[业务记录/状态流水]",
-        "  RECORD --> BENEFIT[权益/结果处理]",
-        "  BENEFIT --> COMP[异常补偿/人工处理]",
-        "  RECORD --> REPORT[数据报表]",
-        "  COMP --> REPORT",
+        `  PAGE[${diagramGroupLabel("页面层", pageNames, "业务入口与结果页面")}] --> CAP[${diagramGroupLabel("能力层", featureNames, "核心业务能力")}]`,
+        `  CFG[${diagramGroupLabel("配置层", configNames, "业务参数与权限配置")}] --> CAP`,
+        `  CAP --> RULE[${diagramGroupLabel("规则层", ruleNames, "业务规则与前台规则")}]`,
+        `  RULE --> STATE[${diagramGroupLabel("状态与记录层", stateNames, "状态、流水与业务记录")}]`,
+        `  STATE --> EX[${diagramGroupLabel("异常治理层", exceptionNames, "失败恢复与人工处理")}]`,
+        `  STATE --> VERIFY[${diagramGroupLabel("验收追踪层", acceptanceNames, "查询、指标与验收")}]`,
+        "  EX --> VERIFY",
       ].join("\n"),
     });
   }
@@ -507,11 +509,15 @@ function buildAcceptanceFallback(baseName: string, state?: ConversationDesignSta
   );
 }
 
-function buildDegradationFallback(baseName: string) {
+function buildDegradationFallback(baseName: string, state?: ConversationDesignState) {
+  const operations = recordNames(state?.features, "功能").slice(0, 4);
+  const exceptions = recordNames(state?.exceptionScenarios, "异常").slice(0, 4);
+  const operationText = operations.length ? operations.join("、") : `${baseName}核心操作`;
+  const exceptionText = exceptions.length ? exceptions.join("、") : "失败、超时、重复操作和依赖不可用";
   return [
-    `如${baseName}涉及的配置保存、发布审核、查询能力、状态同步或页面跳转出现异常，前台页面应保留当前可用状态并展示明确失败提示，不允许出现空白页、重复提交或错误成功态。`,
-    "运营后台应记录失败原因、请求时间、关键配置编号和操作人，支持人工核对后重试或回滚到上一版已生效配置。",
-    "下游系统或目标页面不可用时，平台应暂停后续处理或标记为待处理，待依赖恢复后由管理人员重新触发同步，确保用户可见状态、后台配置状态和最终业务结果保持一致。",
+    `当${operationText}出现${exceptionText}时，页面保留最后一致状态并展示明确原因，不得出现空白页、重复提交、错误成功态或不可恢复的中间态。`,
+    "系统记录业务对象标识、操作人、操作时间、操作前后状态和失败原因；可安全重试的操作提供重试入口，不可自动恢复的操作进入人工处理。",
+    "依赖能力不可用时停止后续状态推进，避免产生重复记录或错误结果；依赖恢复后按业务记录继续处理，并校验页面状态、业务状态和最终结果一致。",
   ].join("\n");
 }
 
@@ -626,6 +632,21 @@ function recordValue(item: Record<string, unknown>, keys: string[]) {
     .map((key) => item[key])
     .map((value) => typeof value === "string" || typeof value === "number" ? String(value).trim() : "")
     .find(Boolean) || "";
+}
+
+function recordNames(value: unknown, prefix: string) {
+  return uniqueNames(
+    arrayOfRecords(value).map((item, index) => recordName(item, `${prefix}${index + 1}`)),
+  );
+}
+
+function uniqueNames(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function diagramGroupLabel(group: string, values: string[], fallback: string) {
+  const content = values.length ? values.join(" / ") : fallback;
+  return mermaidLabel(`${group}：${content}`);
 }
 
 function mermaidLabel(value: string) {
