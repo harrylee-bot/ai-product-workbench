@@ -210,7 +210,17 @@ export class DeerFlowRuntimeService {
       finalState = await this.getThreadState(threadId, input.userId, input.signal).catch(() => undefined);
     }
 
-    const visibleAssistantText = assistantText.trim() || extractAssistantTextFromFinalState(finalState);
+    // A long DeerFlow run can emit several assistant messages around tool calls. The
+    // streamed accumulator may therefore contain stale or partial action blocks.
+    // Prefer a valid block from the final state, while retaining compatibility with
+    // runtimes that only expose the action in the message stream.
+    const finalStateAssistantText = extractAssistantTextFromFinalState(finalState).trim();
+    const streamedAssistantText = assistantText.trim();
+    const visibleAssistantText = hasParsableFinalActionBlock(finalStateAssistantText)
+      ? finalStateAssistantText
+      : hasParsableFinalActionBlock(streamedAssistantText)
+        ? streamedAssistantText
+        : finalStateAssistantText || streamedAssistantText;
     const finalAction = extractFinalAction(visibleAssistantText, finalState);
     const userVisibleAssistantText = stripFinalActionBlock(visibleAssistantText).trim();
     const artifacts = await this.resolveArtifacts(threadId, input.userId, finalAction.artifacts ?? [], input.signal);
@@ -978,6 +988,11 @@ function extractFinalAction(assistantText: string, finalState: unknown): DeerFlo
     // parsed 为 true 仅当成功解析出 JSON 块；否则为静默降级（pipe-6：不再无声失败）。
     parsed: Boolean(parsed),
   };
+}
+
+function hasParsableFinalActionBlock(value: string) {
+  const block = value.match(/```ai_product_workbench_final_action\s*([\s\S]*?)```/i)?.[1];
+  return Boolean(block && parseJsonObject(block));
 }
 
 function extractArtifactReferences(value: unknown): DeerFlowArtifactReference[] | undefined {

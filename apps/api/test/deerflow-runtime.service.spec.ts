@@ -615,6 +615,80 @@ describe("DeerFlowRuntimeService", () => {
     }));
   });
 
+  it("prefers the final-state assistant message over stale streamed action blocks", async () => {
+    const finalActionPayload = {
+      type: "review_prd",
+      message: "完整 PRD 和原型已生成。",
+      intent: "generate_prd_and_prototype",
+      qualitySelfCheck: {
+        passed: true,
+        missing: [],
+      },
+      prdDocumentDraft: {
+        title: "签到活动需求说明书",
+        sections: [],
+      },
+      artifacts: [
+        {
+          kind: "prototype_html",
+          path: "/mnt/user-data/outputs/index.html",
+          contentType: "text/html",
+        },
+      ],
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages-tuple",
+          data: [
+            {
+              type: "ai",
+              content: "处理中。\n```ai_product_workbench_final_action\n{not-json}\n```",
+            },
+            { node: "lead_agent" },
+          ],
+        },
+        {
+          event: "values",
+          data: {
+            messages: [
+              { type: "tool", content: "OK" },
+              {
+                type: "ai",
+                content: [
+                  "已完成。",
+                  "\n```ai_product_workbench_final_action\n",
+                  JSON.stringify(finalActionPayload),
+                  "\n```",
+                ].join(""),
+              },
+            ],
+          },
+        },
+      ]));
+
+    const service = new DeerFlowRuntimeService(prisma as never);
+    const result = await service.runTurn({
+      runId: "run-final-state-authoritative",
+      conversationId: "conversation-final-state-authoritative",
+      userId: "user-1",
+      message: "生成签到活动 PRD 和原型",
+    });
+
+    expect(result.assistantText).toBe("已完成。");
+    expect(result.finalAction).toEqual(expect.objectContaining({
+      parsed: true,
+      type: "review_prd",
+      message: "完整 PRD 和原型已生成。",
+      raw: expect.objectContaining({
+        qualitySelfCheck: expect.objectContaining({ passed: true, missing: [] }),
+        prdDocumentDraft: expect.objectContaining({ title: "签到活动需求说明书" }),
+      }),
+    }));
+  });
+
   it("uploads local attachments and fetches final action artifacts through the Gateway", async () => {
     const tmp = await mkdtemp(path.join(tmpdir(), "deerflow-runtime-"));
     const storagePath = path.join(tmp, "brief.md");
