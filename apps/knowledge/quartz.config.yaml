@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=./quartz/plugins/quartz-plugins.schema.json
 configuration:
-  pageTitle: 业务需求知识库
+  pageTitle: 策划宝产品知识库
   pageTitleSuffix: ""
   enableSPA: true
   enablePopovers: true
@@ -10,6 +10,8 @@ configuration:
   ignorePatterns:
     - private
     - templates
+    - _templates
+    - 99-收件箱
     - .obsidian
     - .trash
   theme:
@@ -23,7 +25,7 @@ configuration:
       lightMode:
         light: "#fbfbfc"
         lightgray: "#e5e7eb"
-        gray: "#9ca3af"
+        gray: "#6b7280"
         darkgray: "#4b5563"
         dark: "#111827"
         secondary: "#2563eb"
@@ -33,7 +35,7 @@ configuration:
       darkMode:
         light: "#111827"
         lightgray: "#374151"
-        gray: "#6b7280"
+        gray: "#9ca3af"
         darkgray: "#d1d5db"
         dark: "#f9fafb"
         secondary: "#60a5fa"
@@ -83,6 +85,8 @@ plugins:
     order: 40
   - source: github:quartz-community/table-of-contents
     enabled: true
+    options:
+      layout: legacy
     order: 50
     layout:
       position: right

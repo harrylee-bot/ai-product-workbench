@@ -130,7 +130,7 @@ services:
       KNOWLEDGE_WEB_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
       QUARTZ_OUTPUT_DIR: /usr/share/nginx/html
     ports:
-      - "${KNOWLEDGE_APP_PORT:-3001}:3000"
+      - "127.0.0.1:${KNOWLEDGE_APP_PORT:-3001}:3000"
     volumes:
       - api-storage:/storage
 

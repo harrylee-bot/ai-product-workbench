@@ -2,6 +2,7 @@
 
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { analyzeMarkdown } from "./markdown-wikilinks.mjs";
 
 const root = path.resolve(process.env.KNOWLEDGE_VAULT_ROOT || "knowledge-vault");
 const requiredFiles = [
@@ -42,6 +43,7 @@ for (const required of requiredFiles) {
 for (const relativePath of files) {
   const raw = await readFile(path.join(root, relativePath), "utf8");
   const metadata = parseMarkdown(raw);
+  const markdownAnalysis = analyzeMarkdown(metadata.sourceBody);
   const tier = knowledgeTier(relativePath);
   tiers[tier].files += 1;
   tiers[tier].characters += metadata.body.length;
@@ -64,8 +66,16 @@ for (const relativePath of files) {
   if (metadata.body.trim().length < 100) warnings.push(`正文过短：${relativePath}`);
   if (metadata.body.length > 30_000) warnings.push(`单文件过长，建议拆成主题知识：${relativePath}`);
 
-  for (const match of metadata.body.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g)) {
-    links.push({ from: relativePath, to: match[1].trim() });
+  for (const link of markdownAnalysis.wikilinks) {
+    if (link.target) links.push({ from: relativePath, to: link.target });
+  }
+
+  if (markdownAnalysis.unescapedTableAliasPipes.length) {
+    const lines = [...new Set(markdownAnalysis.unescapedTableAliasPipes
+      .map((issue) => issue.line + metadata.bodyLineOffset))];
+    errors.push(
+      `表格内 Wiki 链接别名分隔符未转义：${relativePath}:${lines.join("、")}（${markdownAnalysis.unescapedTableAliasPipes.length} 处）`,
+    );
   }
 
   if (tier === "main") {
@@ -128,13 +138,16 @@ function parseMarkdown(raw) {
   const frontmatter = raw.match(/^---\n([\s\S]*?)\n---\n?/);
   const header = frontmatter?.[1] ?? "";
   const tagBlock = header.match(/^tags:\s*\n((?:\s+-\s*.+\n?)+)/m)?.[1] ?? "";
+  const sourceBody = frontmatter ? raw.slice(frontmatter[0].length) : raw;
   return {
     hasFrontmatter: Boolean(frontmatter),
     title: header.match(/^title:\s*(.+)$/m)?.[1]?.trim(),
     description: header.match(/^description:\s*(.+)$/m)?.[1]?.trim(),
     status: header.match(/^status:\s*(.+)$/m)?.[1]?.trim(),
     tags: [...tagBlock.matchAll(/^\s+-\s*(.+)$/gm)].map((match) => match[1].trim()),
-    body: frontmatter ? raw.slice(frontmatter[0].length).trim() : raw.trim(),
+    body: sourceBody.trim(),
+    sourceBody,
+    bodyLineOffset: frontmatter ? (frontmatter[0].match(/\n/g) ?? []).length : 0,
   };
 }
 

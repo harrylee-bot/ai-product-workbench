@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: AI Product Workbench <noreply@aionbench.com>
+Date: Fri, 10 Jul 2026 00:00:00 +0800
+Subject: [PATCH] security: sanitize knowledge Markdown HTML
+
+The public knowledge site shares an origin with the authenticated product.
+Remove raw HTML nodes created by remark-parse before external transformers
+run, then sanitize the final HAST after plugin-generated raw HTML is parsed.
+This preserves callouts, highlights, embeds, transclusions, and diagrams while
+blocking executable tags, event handlers, inline styles, and dangerous URLs.
+
+---
+ quartz/processors/parse.ts | 89 +++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 88 insertions(+), 1 deletion(-)
+
+diff --git a/quartz/processors/parse.ts b/quartz/processors/parse.ts
+index 582ff21..0182faf 100644
+--- a/quartz/processors/parse.ts
++++ b/quartz/processors/parse.ts
+@@ -3,7 +3,7 @@ import remarkParse from "remark-parse"
+ import remarkRehype from "remark-rehype"
+ import { Processor, unified } from "unified"
+ import { Root as MDRoot } from "remark-parse/lib"
+-import { Root as HTMLRoot } from "hast"
++import { Element, Root as HTMLRoot } from "hast"
+ import { MarkdownContent, ProcessedContent } from "../plugins/vfile"
+ import { PerfTimer } from "../util/perf"
+ import { read } from "to-vfile"
+@@ -14,10 +14,95 @@ import { QuartzLogger } from "../util/log"
+ import { trace } from "../util/trace"
+ import { BuildCtx, WorkerSerializableBuildCtx } from "../util/ctx"
+ import { styleText } from "util"
++import { SKIP, visit } from "unist-util-visit"
+ 
+ export type QuartzMdProcessor = Processor<MDRoot, MDRoot, MDRoot>
+ export type QuartzHtmlProcessor = Processor<undefined, MDRoot, HTMLRoot>
+ 
++function stripSourceRawHtml() {
++  return (tree: MDRoot) => {
++    visit(tree, "html", (_, index, parent) => {
++      if (parent === undefined || typeof index !== "number") return
++      parent.children.splice(index, 1)
++      return [SKIP, index]
++    })
++  }
++}
++
++const blockedHtmlTags = new Set([
++  "base",
++  "embed",
++  "form",
++  "frame",
++  "frameset",
++  "iframe",
++  "link",
++  "meta",
++  "object",
++  "script",
++  "style",
++  "template",
++])
++const urlProperties = new Set([
++  "action",
++  "background",
++  "cite",
++  "data",
++  "formaction",
++  "href",
++  "longdesc",
++  "poster",
++  "src",
++  "usemap",
++  "xlinkhref",
++])
++
++function sanitizeGeneratedHtml() {
++  return (tree: HTMLRoot) => sanitizeHtmlChildren(tree)
++}
++
++function sanitizeHtmlChildren(parent: HTMLRoot | Element) {
++  parent.children = parent.children.filter((child) => {
++    if (child.type === "raw") return false
++    if (child.type !== "element") return true
++    if (blockedHtmlTags.has(child.tagName.toLowerCase())) return false
++
++    for (const property of Object.keys(child.properties)) {
++      const normalized = property.toLowerCase()
++      if (
++        normalized.startsWith("on") ||
++        normalized === "srcdoc" ||
++        normalized === "srcset" ||
++        normalized === "style" ||
++        (urlProperties.has(normalized) && !isSafeUrl(child.properties[property]))
++      ) {
++        delete child.properties[property]
++      }
++    }
++
++    sanitizeHtmlChildren(child)
++    return true
++  })
++}
++
++function isSafeUrl(value: unknown): boolean {
++  if (typeof value !== "string") return false
++  const compact = value.replace(/[\u0000-\u0020\u007f]+/g, "").toLowerCase()
++  if (
++    !compact ||
++    compact.startsWith("#") ||
++    compact.startsWith("/") ||
++    compact.startsWith("./") ||
++    compact.startsWith("../") ||
++    compact.startsWith("?")
++  ) {
++    return true
++  }
++
++  const scheme = compact.match(/^[a-z][a-z0-9+.-]*:/)?.[0]
++  return scheme === undefined || ["http:", "https:", "mailto:", "tel:"].includes(scheme)
++}
++
+ export function createMdProcessor(ctx: BuildCtx): QuartzMdProcessor {
+   const transformers = ctx.cfg.plugins.transformers
+ 
+@@ -25,6 +110,7 @@ export function createMdProcessor(ctx: BuildCtx): QuartzMdProcessor {
+     unified()
+       // base Markdown -> MD AST
+       .use(remarkParse)
++      .use(stripSourceRawHtml)
+       // MD AST -> MD AST transforms
+       .use(
+         transformers.flatMap((plugin) => plugin.markdownPlugins?.(ctx) ?? []),
+@@ -41,6 +127,7 @@ export function createHtmlProcessor(ctx: BuildCtx): QuartzHtmlProcessor {
+       .use(remarkRehype, { allowDangerousHtml: true })
+       // HTML AST -> HTML AST transforms
+       .use(transformers.flatMap((plugin) => plugin.htmlPlugins?.(ctx) ?? []))
++      .use(sanitizeGeneratedHtml)
+   )
+ }
+ 
+-- 
+2.50.1

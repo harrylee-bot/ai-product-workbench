@@ -28,14 +28,23 @@ RUN git clone --depth 1 --branch "${QUARTZ_REF}" https://github.com/jackyzha0/qu
 
 COPY apps/knowledge/quartz.config.yaml /opt/quartz/quartz.config.yaml
 COPY apps/knowledge/quartz.lock.json /opt/quartz/quartz.lock.json
+COPY apps/knowledge/static/icon.png /opt/quartz/quartz/static/icon.png
+COPY apps/knowledge/static/og-image.png /opt/quartz/quartz/static/og-image.png
+COPY apps/knowledge/patches/0001-quartz-v5-prevent-duplicate-virtual-page-content.patch /opt/quartz-patches/0001-quartz-v5-prevent-duplicate-virtual-page-content.patch
+COPY apps/knowledge/patches/0002-quartz-v5-disable-dangerous-raw-html.patch /opt/quartz-patches/0002-quartz-v5-disable-dangerous-raw-html.patch
 
-RUN npm ci --no-audit --no-fund \
+RUN git apply --check /opt/quartz-patches/0001-quartz-v5-prevent-duplicate-virtual-page-content.patch \
+  && git apply /opt/quartz-patches/0001-quartz-v5-prevent-duplicate-virtual-page-content.patch \
+  && git apply --check /opt/quartz-patches/0002-quartz-v5-disable-dangerous-raw-html.patch \
+  && git apply /opt/quartz-patches/0002-quartz-v5-disable-dangerous-raw-html.patch \
+  && npm ci --no-audit --no-fund \
   && npx quartz plugin install \
   && mkdir -p /vault /usr/share/nginx/html /var/cache/nginx /var/run/nginx
 
 COPY apps/knowledge/nginx.conf /etc/nginx/conf.d/default.conf
 COPY apps/knowledge/docker-entrypoint.sh /usr/local/bin/knowledge-entrypoint
 COPY apps/knowledge/finalize-output.mjs /usr/local/lib/knowledge-finalize-output.mjs
+COPY scripts/assert-knowledge-output.mjs /usr/local/lib/knowledge-assert-output.mjs
 COPY knowledge-vault /seed-vault
 
 RUN chmod +x /usr/local/bin/knowledge-entrypoint

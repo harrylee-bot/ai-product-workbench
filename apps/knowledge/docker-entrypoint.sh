@@ -20,7 +20,7 @@ if [ ! -f "$BUILD_CONTENT_DIR/index.md" ]; then
   if [ -f "$BUILD_CONTENT_DIR/README.md" ]; then
     cp "$BUILD_CONTENT_DIR/README.md" "$BUILD_CONTENT_DIR/index.md"
   else
-    printf '# AI Product OS 知识库\n\n请在 Markdown Vault 中维护知识内容。\n' > "$BUILD_CONTENT_DIR/index.md"
+    printf '# 策划宝产品知识库\n\n请在 Markdown Vault 中维护知识内容。\n' > "$BUILD_CONTENT_DIR/index.md"
   fi
 fi
 
@@ -44,6 +44,7 @@ npx quartz build \
   --concurrency "${QUARTZ_CONCURRENCY:-2}"
 
 node /usr/local/lib/knowledge-finalize-output.mjs "$OUTPUT_DIR" "${QUARTZ_BASE_URL:-}"
+node /usr/local/lib/knowledge-assert-output.mjs "$OUTPUT_DIR" "${QUARTZ_BASE_URL:-}"
 
 printf 'ok\n' > "$OUTPUT_DIR/__health"
 
