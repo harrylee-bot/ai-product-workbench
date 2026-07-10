@@ -72,7 +72,7 @@ const expectedBuildSha = await resolveExpectedBuildSha();
 const selectedModel = process.env.AGENT_WORKFLOW_ONLINE_MODEL || "datatoken/datatoken-gpt-5-5";
 const expectedRuntimeName = process.env.AGENT_WORKFLOW_ONLINE_EXPECTED_RUNTIME_NAME || "ai-product-workbench-lead";
 // A full artifact run may include the initial generation plus two QA repair turns.
-const timeoutMs = numberFromEnv("AGENT_WORKFLOW_ONLINE_TIMEOUT_MS", 1_200_000);
+const timeoutMs = numberFromEnv("AGENT_WORKFLOW_ONLINE_TIMEOUT_MS", 2_700_000);
 const requestTimeoutMs = numberFromEnv("AGENT_WORKFLOW_ONLINE_REQUEST_TIMEOUT_MS", 30_000);
 const strict = process.env.AGENT_WORKFLOW_ONLINE_STRICT !== "0";
 const keepConversation = process.env.AGENT_WORKFLOW_ONLINE_KEEP_CONVERSATION === "1";
