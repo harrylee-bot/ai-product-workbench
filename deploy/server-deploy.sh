@@ -246,6 +246,9 @@ if ! APP_BUILD_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null)"; then
   exit 1
 fi
 export APP_BUILD_SHA
+# Pass the value explicitly through the `env ... docker compose` wrapper. This
+# wins even when a host `.env` still contains a stale APP_BUILD_SHA value.
+COMPOSE_ENV+=(APP_BUILD_SHA="$APP_BUILD_SHA")
 
 sync_deerflow_runtime_assets() {
   local agent_source
@@ -321,7 +324,7 @@ wait_for_postgres() {
 
 assert_api_build_sha() {
   local health
-  health="$(curl -fsS "http://127.0.0.1:4000/api/system/health")"
+  health="$(curl -fsS -H "x-forwarded-proto: https" "http://127.0.0.1:4000/api/system/health")"
   if ! grep -Eq "\"commitSha\"[[:space:]]*:[[:space:]]*\"${APP_BUILD_SHA}\"" <<<"$health"; then
     echo "ERROR: API build SHA does not match deployed Git HEAD (${APP_BUILD_SHA})" >&2
     echo "$health" >&2
