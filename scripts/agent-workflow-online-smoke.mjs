@@ -13,7 +13,8 @@ const DEFAULT_TOPIC = "我想做一个签到领积分的活动，请根据知识
 const topic = process.argv.slice(2).join(" ").trim() || process.env.AGENT_WORKFLOW_ONLINE_TOPIC || DEFAULT_TOPIC;
 const baseUrl = normalizeBaseUrl(process.env.AGENT_WORKFLOW_ONLINE_BASE_URL || "https://aionbench.com/api");
 const forwardedProto = process.env.AGENT_WORKFLOW_ONLINE_FORWARDED_PROTO?.trim();
-const timeoutMs = numberFromEnv("AGENT_WORKFLOW_ONLINE_TIMEOUT_MS", 240_000);
+// A full artifact run may include the initial generation plus two QA repair turns.
+const timeoutMs = numberFromEnv("AGENT_WORKFLOW_ONLINE_TIMEOUT_MS", 1_200_000);
 const strict = process.env.AGENT_WORKFLOW_ONLINE_STRICT !== "0";
 const keepConversation = process.env.AGENT_WORKFLOW_ONLINE_KEEP_CONVERSATION === "1";
 const outputRoot = path.resolve(
