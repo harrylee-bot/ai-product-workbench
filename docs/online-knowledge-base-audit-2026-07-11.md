@@ -46,7 +46,7 @@
 ### 安全与发布
 
 - 构建前移除源 Markdown 原始 HTML，构建后再清洗最终 HTML AST，覆盖插件生成内容和嵌入别名注入路径。
-- 增加 CSP、`nosniff`、Referrer Policy、Permissions Policy；禁用行内事件处理器。
+- 增加 CSP、`nosniff`、Referrer Policy、Permissions Policy；禁用行内事件处理器。Quartz Graph 所需的 `unsafe-eval` 仅保留在知识站脚本策略中。
 - 知识服务端口只绑定服务器回环地址，公网统一经 Caddy 的 `/knowledge` 入口访问。
 - HTML 与健康检查禁止缓存；CSS、JS、图标和分享图使用内容指纹及一年 immutable 缓存。
 - 正式构建后执行输出契约：隐藏路径、品牌、base path、重复列表、资源哈希、元数据任一异常都会使容器启动失败。

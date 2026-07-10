@@ -207,6 +207,11 @@ assertContains(
 );
 assertContains(
   knowledgeNginx,
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "Knowledge CSP must retain the Quartz Graph runtime compatibility allowance.",
+);
+assertContains(
+  knowledgeNginx,
   'Cache-Control "public, max-age=31536000, immutable"',
   "Knowledge Nginx must cache fingerprinted assets as immutable.",
 );
