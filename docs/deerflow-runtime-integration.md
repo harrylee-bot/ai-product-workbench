@@ -62,6 +62,25 @@ When `DEERFLOW_AGENT_NAME` is set, production also requires `DEERFLOW_SHARED_AGE
 
 The DeerFlow run stream has no wall-clock timeout. `AICHAT_MODEL_IDLE_TIMEOUT_MS` is only an inactivity limit: every DeerFlow event resets it, while a run that produces no event for the configured interval fails and asks the user to retry. No draft fallback is generated.
 
+## Gateway Owner Scope Patch
+
+The Workbench sends a trusted owner header for thread creation, memory, uploads, and artifact reads. Apply the tracked DeerFlow patch so the Gateway artifact route resolves files from the same isolated user directory as the run:
+
+```bash
+DEERFLOW_SOURCE_DIR=/path/to/deer-flow npm run deerflow:patch
+```
+
+Rebuild and restart the DeerFlow Gateway after applying it. The patch is idempotent and fails closed if the target DeerFlow source no longer matches, which forces an explicit review during future DeerFlow upgrades.
+
+When the full DeerFlow build cannot reach its base-image registry, build the tracked incremental image from the already-installed Gateway image:
+
+```bash
+docker build \
+  --file /path/to/ai-product-workbench/integrations/deerflow/Dockerfile.owner-scope-patch \
+  --tag deer-flow-gateway:owner-scope \
+  /path/to/deer-flow
+```
+
 ## Context And Compaction
 
 Context retention and compaction belong to DeerFlow, not to a custom NestJS summarizer.

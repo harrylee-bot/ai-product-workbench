@@ -26,7 +26,8 @@
     "db:seed": "npm --workspace @ai-product-workbench/db run seed",
     "cleanup:smoke": "node scripts/cleanup-smoke-data.mjs",
     "axure:export": "node scripts/axure-rp-export-html.mjs",
-    "deerflow:bootstrap": "node scripts/deerflow-bootstrap.mjs"
+    "deerflow:bootstrap": "node scripts/deerflow-bootstrap.mjs",
+    "deerflow:patch": "bash scripts/deerflow-apply-patches.sh"
   },
   "overrides": {
     "esbuild": "0.28.1",

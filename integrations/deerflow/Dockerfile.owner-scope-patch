@@ -1,0 +1,5 @@
+ARG DEERFLOW_BASE_IMAGE=deer-flow-gateway:latest
+FROM ${DEERFLOW_BASE_IMAGE}
+
+COPY backend/app/gateway/path_utils.py /app/backend/app/gateway/path_utils.py
+COPY backend/app/gateway/routers/artifacts.py /app/backend/app/gateway/routers/artifacts.py
