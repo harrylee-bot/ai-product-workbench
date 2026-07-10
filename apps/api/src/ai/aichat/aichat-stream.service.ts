@@ -283,11 +283,16 @@ export class AichatStreamService {
           );
           const modelController = createChildAbortController(controller.signal);
           let modelTimedOut = false;
-          const modelTimeout = setTimeout(() => {
-            modelTimedOut = true;
-            modelController.abort(new Error("MODEL_ENRICHMENT_TIMEBOX_EXCEEDED"));
-          }, readModelTimeboxMs());
-          modelTimeout.unref?.();
+          let modelTimeout: NodeJS.Timeout | undefined;
+          const resetModelIdleTimeout = () => {
+            if (modelTimeout) clearTimeout(modelTimeout);
+            modelTimeout = setTimeout(() => {
+              modelTimedOut = true;
+              modelController.abort(new ModelGenerationTimeoutError(readModelIdleTimeoutMs()));
+            }, readModelIdleTimeoutMs());
+            modelTimeout.unref?.();
+          };
+          resetModelIdleTimeout();
           let result: DeerFlowTurnResult;
           try {
             result = await this.deerFlow.runTurn({
@@ -304,6 +309,7 @@ export class AichatStreamService {
               externalResearchContext,
               signal: modelController.signal,
               onEvent: (event) => {
+                resetModelIdleTimeout();
                 if (controller.signal.aborted) return;
                 const previousTextLength = ctx.textBuffer.length;
                 for (const runtimeEvent of runtimeEventsFromDeerFlow(event, ctx, run.id, {
@@ -328,15 +334,10 @@ export class AichatStreamService {
             });
           } catch (error) {
             if (!modelTimedOut || controller.signal.aborted) throw error;
-            publishRuntimeEvent(createRuntimeEvent(buildModelTimeboxFallbackRuntimeEvent(run.id)));
-            result = buildTimeboxedFallbackTurnResult({
-              runId: run.id,
-              message: runtimeContent,
-              knowledgeContext,
-              externalResearchContext,
-            });
+            publishRuntimeEvent(createRuntimeEvent(buildModelIdleTimeoutRuntimeEvent(run.id)));
+            throw new ModelGenerationTimeoutError(readModelIdleTimeoutMs());
           } finally {
-            clearTimeout(modelTimeout);
+            if (modelTimeout) clearTimeout(modelTimeout);
             stopModelHeartbeat();
           }
           publishRuntimeEvent(createRuntimeEvent(buildModelEnrichmentRuntimeEvent({
@@ -352,45 +353,22 @@ export class AichatStreamService {
           let finalAction = result.finalAction;
           let artifacts = result.artifacts;
           let assistantText = result.assistantText;
-          let prdGenerationFailureReason = getPrdGenerationFailureReason({
+          let prdGenerationFailureReason = getArtifactGenerationFailureReason({
             finalAction,
             artifacts,
             expectsPrdDocument: forceCanvasDocument || isDocumentGenerationRequest(runtimeContent),
+            expectsPrototype: isPrototypeGenerationRequest(runtimeContent),
           });
           if (prdGenerationFailureReason) {
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
-              id: "model-final-action-fallback",
-              kind: "knowledge",
-              label: "模型未返回完整产物，已先生成可编辑初稿",
-              detail: `${prdGenerationFailureReason}；系统已基于知识库命中和公开资料补齐生成 PRD 与原型初稿。`,
-              status: "completed",
+              id: "model-final-action-missing",
+              kind: "error",
+              label: "模型未返回完整产物",
+              detail: `${prdGenerationFailureReason}，请重试。`,
+              status: "failed",
             }));
-            result = buildTimeboxedFallbackTurnResult({
-              runId: run.id,
-              message: runtimeContent,
-              knowledgeContext,
-              externalResearchContext,
-            });
-            finalAction = result.finalAction;
-            artifacts = result.artifacts;
-            assistantText = result.assistantText;
-            prdGenerationFailureReason = getPrdGenerationFailureReason({
-              finalAction,
-              artifacts,
-              expectsPrdDocument: forceCanvasDocument || isDocumentGenerationRequest(runtimeContent),
-            });
-            if (prdGenerationFailureReason) {
-              publishRuntimeEvent(createRuntimeEvent({
-                runId: run.id,
-                id: "prd-generation-failed",
-                kind: "error",
-                label: "需求文档生成失败",
-                detail: `${prdGenerationFailureReason}，请重试。`,
-                status: "failed",
-              }));
-              throw new PrdGenerationFailedError(prdGenerationFailureReason);
-            }
+            throw new PrdGenerationFailedError(prdGenerationFailureReason);
           }
 
           const expectsArtifact =
@@ -1175,6 +1153,7 @@ export class AichatStreamService {
 }
 
 const PRD_GENERATION_QA_CHECK_TYPES: QACheckType[] = [
+  "state_schema",
   "prd_completeness",
   "state_prd_consistency",
   "knowledge_rule_compliance",
@@ -1549,6 +1528,7 @@ export function buildCanvasDocumentRuntimePrompt(userPrompt: string): string {
 }
 
 const PRD_GENERATION_RETRY_MESSAGE = "生成失败，请重试";
+const MODEL_IDLE_TIMEOUT_RETRY_MESSAGE = "模型长时间无返回，请重试生成。";
 
 class PrdGenerationFailedError extends Error {
   readonly userMessage = PRD_GENERATION_RETRY_MESSAGE;
@@ -1559,19 +1539,48 @@ class PrdGenerationFailedError extends Error {
   }
 }
 
+class ModelGenerationTimeoutError extends Error {
+  readonly userMessage = MODEL_IDLE_TIMEOUT_RETRY_MESSAGE;
+
+  constructor(timeoutMs: number) {
+    super(`MODEL_GENERATION_IDLE_TIMEOUT: no model events for ${timeoutMs}ms`);
+    this.name = "ModelGenerationTimeoutError";
+  }
+}
+
 export function getPrdGenerationFailureReason(input: {
   finalAction: DeerFlowFinalAction;
   artifacts: DeerFlowResolvedArtifact[];
   expectsPrdDocument: boolean;
 }): string | undefined {
-  if (!input.expectsPrdDocument) return undefined;
+  return getArtifactGenerationFailureReason({
+    ...input,
+    expectsPrototype: false,
+  });
+}
+
+export function getArtifactGenerationFailureReason(input: {
+  finalAction: DeerFlowFinalAction;
+  artifacts: DeerFlowResolvedArtifact[];
+  expectsPrdDocument: boolean;
+  expectsPrototype: boolean;
+}): string | undefined {
+  if (!input.expectsPrdDocument && !input.expectsPrototype) return undefined;
   if (!input.finalAction.parsed) return "模型未返回可解析的最终动作";
-  const canCarryPrd =
+  const canCarryArtifact =
     input.finalAction.type === "review_prd" ||
     input.finalAction.type === "review_prototype";
-  if (!canCarryPrd) return "模型未返回需求文档最终动作";
-  if (!hasUsablePrdDocumentPayload(input.finalAction, input.artifacts)) {
+  if (!canCarryArtifact) return "模型未返回产物最终动作";
+  if (input.expectsPrdDocument && !hasUsablePrdDocumentPayload(input.finalAction, input.artifacts)) {
     return "模型未返回完整需求文档正文";
+  }
+  if (input.expectsPrototype && !hasUsablePrototypePayload(input.finalAction, input.artifacts)) {
+    return "模型未返回完整原型 HTML";
+  }
+  const qualitySelfCheck = asRecord(asRecord(input.finalAction.raw)?.qualitySelfCheck);
+  const missing = Array.isArray(qualitySelfCheck?.missing) ? qualitySelfCheck.missing.filter(Boolean) : [];
+  if (!qualitySelfCheck || qualitySelfCheck.passed !== true || missing.length > 0) {
+    return "模型未通过产物质量自检";
   }
   return undefined;
 }
@@ -1597,6 +1606,31 @@ function hasUsablePrdDocumentPayload(
   });
 }
 
+function hasUsablePrototypePayload(
+  finalAction: DeerFlowFinalAction,
+  artifacts: DeerFlowResolvedArtifact[],
+) {
+  const raw = asRecord(finalAction.raw);
+  if (!asRecord(raw?.prototypeSpec)) return false;
+  return artifacts.some((artifact) => {
+    if (artifact.status === "failed") return false;
+    const text = artifact.text?.trim();
+    if (!text || text.length < 400) return false;
+    const descriptor = [
+      artifact.kind,
+      artifact.title,
+      artifact.contentType,
+      artifact.path,
+      artifact.artifactUrl,
+    ].filter(Boolean).join(" ").toLowerCase();
+    const looksHtml = descriptor.includes("prototype") ||
+      descriptor.includes("html") ||
+      descriptor.includes("text/html") ||
+      descriptor.endsWith(".html");
+    return looksHtml && /<html[\s>]|<!doctype\s+html|<style[\s>]/i.test(text);
+  });
+}
+
 function hasUsablePrdSections(value: unknown) {
   if (!Array.isArray(value)) return false;
   return value.some((item) => {
@@ -1609,6 +1643,7 @@ function hasUsablePrdSections(value: unknown) {
 
 function userVisibleGenerationFailureMessage(error: unknown) {
   if (error instanceof PrdGenerationFailedError) return error.userMessage;
+  if (error instanceof ModelGenerationTimeoutError) return error.userMessage;
   return undefined;
 }
 
@@ -1688,7 +1723,7 @@ export function buildKnowledgeSearchQuery(message: string, requirementMode: Requ
   const compact = message.replace(/\s+/g, "");
   const expansions = [
     `需求模式:${requirementMode}`,
-    "产品能力地图 端到端业务流程 Agent任务分类与补全规则",
+    "产品能力地图 端到端业务流程 Agent任务分类与补全规则 当前业务域强规则 页面清单",
   ];
 
   if (/(需求文档|需求说明书|产品需求文档|prd)/i.test(compact)) {
@@ -1696,15 +1731,7 @@ export function buildKnowledgeSearchQuery(message: string, requirementMode: Requ
   }
 
   if (/(原型|prototype|页面|界面|交互)/i.test(compact)) {
-    expansions.push("原型生成总规则 前后台页面框架 字段接口状态表达");
-  }
-
-  if (/(活动|签到|打卡|积分|奖励|奖品|权益|领券|抽奖|模板|发布|审核|报表)/.test(compact)) {
-    expansions.push("活动发布与模板配置 奖品券与资损核销 权益履约 库存 核销 资损 审核发布 数据报表");
-  }
-
-  if (/(签到|打卡|连续|积分|每日)/.test(compact)) {
-    expansions.push("每日签到 连续签到 签到奖励 积分发放 重复领取限制 用户参与态 已签到 未签到 补签");
+    expansions.push("原型生成总规则 前后台页面框架 字段接口状态表达 高保真 HTML原型 Axure RP资产 原型转HTML 前台页面设计框架 后台管理设计框架");
   }
 
   return [message, ...expansions].join("\n");
@@ -1807,14 +1834,14 @@ export function buildModelEnrichmentStartedRuntimeEvent(runId: string) {
   };
 }
 
-export function buildModelTimeboxFallbackRuntimeEvent(runId: string) {
+export function buildModelIdleTimeoutRuntimeEvent(runId: string) {
   return {
     runId,
-    id: "model-enrichment-timebox-fallback",
+    id: "model-enrichment-idle-timeout",
     kind: "knowledge" as const,
-    label: "模型生成超时，已先生成可编辑初稿",
-    detail: "避免用户空等；初稿基于知识库命中、公开资料补齐和明确标注的默认假设生成，可继续让模型细化。",
-    status: "completed" as const,
+    label: "模型长时间无返回，已停止生成",
+    detail: "本轮不会生成兜底 PRD 或原型，避免低质量内容误写入工作台。请重试生成。",
+    status: "failed" as const,
   };
 }
 
@@ -1871,292 +1898,6 @@ function startModelHeartbeat(
   return () => clearInterval(timer);
 }
 
-export function buildTimeboxedFallbackTurnResult(input: {
-  runId: string;
-  message: string;
-  knowledgeContext: DeerFlowKnowledgeReference[];
-  externalResearchContext: ExternalResearchContext;
-}): DeerFlowTurnResult {
-  const title = inferFallbackActivityTitle(input.message);
-  const prdTitle = `${title}需求说明书`;
-  const prototypeTitle = `${title}原型`;
-  const knowledgeRefsUsed = input.knowledgeContext
-    .slice(0, 8)
-    .map((item) => item.relatedPath ? `${item.title}（${item.relatedPath}）` : item.title);
-  const externalRefsUsed = input.externalResearchContext.refs
-    .slice(0, 5)
-    .map((item) => `${item.title} ${item.url}`);
-  const boundary = input.externalResearchContext.privacyBoundary.length
-    ? input.externalResearchContext.privacyBoundary.join("；")
-    : "公开资料只补充通用经验，不发送内部路径、附件原文、真实接口或密钥，不覆盖本地知识库规则。";
-  const enrichmentNotes = [
-    "知识库命中后优先复用活动配置闭环、奖品券与资损核销、PRD结构和原型规范。",
-    "模型生成超过时间盒，系统先按通用产品推理补齐默认签到状态、异常处理、验收口径和待确认项。",
-    input.externalResearchContext.refs.length
-      ? `联网补齐使用 ${input.externalResearchContext.refs.length} 条公开资料；${boundary}`
-      : `联网补齐状态：${input.externalResearchContext.status}；${boundary}`,
-  ];
-  const externalEvidenceText = externalRefsUsed.length
-    ? externalRefsUsed.join("\n")
-    : "本轮未取得可引用公开来源，后续可继续补充。";
-  const sections = [
-    {
-      id: "intro",
-      title: "1 引言",
-      type: "overview",
-      level: 1,
-      order: 1,
-      content: [
-        `1.1 项目背景：面向活动运营人员和前台用户，建设${title}，通过每日签到发放积分，提升用户活跃和连续访问。`,
-        "1.2 文档范围：覆盖后台活动配置、审核发布、用户签到、积分发放、异常补偿、数据报表和安全风控。",
-        "1.3 使用场景：运营创建活动并配置积分规则；用户每日进入活动页完成签到；系统校验资格并发放积分；运营查看报表并处理异常。",
-      ].join("\n"),
-      sourcePaths: knowledgeRefsUsed,
-    },
-    {
-      id: "business",
-      title: "2 业务需求",
-      type: "requirement",
-      level: 1,
-      order: 2,
-      content: [
-        "2.1 页面链接：后台包含活动配置、规则配置、奖品/积分权益配置、审核发布、数据报表；前台包含活动首页、立即签到、已签到、连续签到奖励、失败补偿和无资格状态。",
-        "2.2 核心业务规则：同一用户按自然日每日只允许成功签到一次，重复签到不得重复发放积分；支持基础积分、连续签到阶梯奖励、活动周期、参与人群、每日总额度和用户领取上限。",
-        "2.3 状态与流程：草稿配置 -> 预览校验 -> 提交审核 -> 发布上线 -> 用户签到 -> 积分发放 -> 数据报表 -> 下线归档。签到状态包括未开始、可签到、已签到、连续奖励达成、额度不足、发放失败待补偿、活动结束。",
-        "2.4 验收标准：后台可完成活动配置和发布；前台能展示立即签到和已签到状态；重复签到不重复发积分；额度不足、发放失败、无资格均有明确提示；报表可查看签到人数、发放成功、发放失败、补偿中和资损风险。",
-      ].join("\n"),
-      sourcePaths: knowledgeRefsUsed,
-    },
-    {
-      id: "degrade",
-      title: "3 业务降级方案",
-      type: "risk",
-      level: 1,
-      order: 3,
-      content: [
-        "积分发放失败时先记录待补偿，不向用户展示成功到账；支持自动重试和人工补偿。",
-        "积分系统不可用时，签到记录可先落待处理状态，前台提示“积分稍后到账”。",
-        "活动额度或库存不足时停止发放奖励，保留签到记录并提示奖励已抢完或稍后处理。",
-        "报表延迟时展示最近一次统计时间，避免运营误判实时数据。",
-      ].join("\n"),
-      sourcePaths: knowledgeRefsUsed,
-    },
-    {
-      id: "security",
-      title: "4 需求安全基线要求",
-      type: "risk",
-      level: 1,
-      order: 4,
-      content: [
-        "资损控制：积分发放必须有幂等键、额度校验、重复领取限制和对账记录。",
-        "权限控制：活动配置、审核、发布、补偿和下线需要分角色授权。",
-        "风控要求：异常频次、批量签到、设备/账号风险、积分发放失败率需要进入监控。",
-      ].join("\n"),
-      sourcePaths: knowledgeRefsUsed,
-    },
-  ];
-  const html = buildFallbackPrototypeHtml({
-    title,
-    prototypeTitle,
-    externalTitles: input.externalResearchContext.refs.map((item) => item.title),
-  });
-  const raw = {
-    type: "review_prototype",
-    intent: "one_sentence_completion",
-    requirementMode: "one_sentence_completion",
-    designStateDraft: {
-      title,
-      summary: `${title}覆盖后台配置、前台签到、积分发放、异常补偿和数据报表。`,
-      businessGoal: "用签到激励提升活跃，同时控制积分资损和运营配置风险。",
-      targetUsers: [{ role: "运营人员" }, { role: "前台用户" }],
-      pages: [{ name: "活动配置" }, { name: "用户签到页" }, { name: "数据报表" }],
-      features: [{ name: "每日签到" }, { name: "积分发放" }, { name: "补偿重试" }],
-      businessRules: [{ name: "每日一次" }, { name: "幂等发放" }, { name: "额度库存控制" }],
-      exceptionScenarios: [{ name: "发放失败" }, { name: "额度不足" }, { name: "重复签到" }],
-    },
-    prdDocumentDraft: {
-      title: prdTitle,
-      sections,
-      validationNotes: [
-        "模型生成超过时间盒，本初稿用于保证用户可立即得到可编辑产物。",
-        `外部补充状态：${input.externalResearchContext.status}`,
-        `外部参考：${externalEvidenceText}`,
-        `补齐边界：${boundary}`,
-      ],
-    },
-    prototypeSpec: {
-      title: prototypeTitle,
-      targetDevice: "both",
-      pages: [
-        { name: "活动配置" },
-        { name: "用户签到页" },
-        { name: "数据报表" },
-      ],
-      interactions: [
-        { name: "提交审核" },
-        { name: "立即签到" },
-        { name: "补偿重试" },
-      ],
-    },
-    assumptions: [
-      "默认按自然日限制每日一次签到。",
-      "默认积分发放需要幂等、额度和补偿记录。",
-      "默认后台配置需要审核发布闭环。",
-    ],
-    knowledgeRefsUsed,
-    externalRefsUsed,
-    externalResearchStatus: input.externalResearchContext.status,
-    enrichmentNotes,
-    artifacts: [
-      {
-        kind: "prototype_html",
-        title: prototypeTitle,
-        path: "generated://timeboxed-fallback/index.html",
-        artifactUrl: "generated://timeboxed-fallback/index.html",
-        contentType: "text/html",
-      },
-    ],
-  };
-
-  return {
-    threadId: `timeboxed-fallback-${input.runId}`,
-    assistantText: `${prdTitle}和${prototypeTitle}已生成。`,
-    finalAction: {
-      type: "review_prototype",
-      message: `${prdTitle}和${prototypeTitle}已生成。`,
-      intent: "one_sentence_completion",
-      requirementMode: "one_sentence_completion",
-      knowledgeRefsUsed,
-      externalRefsUsed,
-      enrichmentNotes,
-      externalResearchStatus: input.externalResearchContext.status,
-      artifacts: raw.artifacts,
-      raw,
-      parsed: true,
-    },
-    uploads: [],
-    artifacts: [
-      {
-        kind: "prototype_html",
-        title: prototypeTitle,
-        path: "generated://timeboxed-fallback/index.html",
-        artifactUrl: "generated://timeboxed-fallback/index.html",
-        contentType: "text/html",
-        status: "fetched",
-        size: Buffer.byteLength(html),
-        text: html,
-      },
-    ],
-    rawEvents: [],
-    finalState: raw,
-  };
-}
-
-function buildFallbackPrototypeHtml(input: {
-  title: string;
-  prototypeTitle: string;
-  externalTitles: string[];
-}) {
-  const evidence = input.externalTitles.slice(0, 4).map((title) => `<li>${escapeHtml(title)}</li>`).join("");
-  return `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(input.prototypeTitle)}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f2937; background: #f4f7fb; }
-    main { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
-    aside { background: #102033; color: #f8fafc; padding: 28px 24px; }
-    h1, h2, h3 { margin: 0; letter-spacing: 0; }
-    h1 { font-size: 26px; line-height: 1.25; }
-    h2 { font-size: 18px; margin-bottom: 14px; }
-    h3 { font-size: 16px; margin-bottom: 8px; }
-    .side-note { margin-top: 18px; color: #cbd5e1; line-height: 1.7; font-size: 14px; }
-    .content { padding: 28px; display: grid; gap: 18px; }
-    .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-    .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
-    .tab, button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 6px; padding: 9px 12px; font-size: 14px; }
-    .tab.active, button.primary { background: #176b87; color: white; border-color: #176b87; }
-    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-    section, .panel { background: white; border: 1px solid #dbe3ef; border-radius: 8px; padding: 18px; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04); }
-    label { display: block; font-size: 13px; color: #64748b; margin: 10px 0 6px; }
-    input, select { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; font-size: 14px; }
-    .phone { width: 280px; min-height: 520px; border: 10px solid #111827; border-radius: 28px; background: #fff; margin: 0 auto; overflow: hidden; }
-    .phone-head { background: #176b87; color: white; padding: 18px; }
-    .sign-card { margin: 16px; padding: 18px; border-radius: 8px; background: #e8f7f4; border: 1px solid #9bd4c5; }
-    .status-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
-    .status { padding: 10px; border-radius: 6px; background: #f1f5f9; text-align: center; font-size: 12px; }
-    .metric { display: flex; justify-content: space-between; border-bottom: 1px solid #e2e8f0; padding: 10px 0; }
-    .warning { background: #fff7ed; border-color: #fed7aa; }
-    ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.7; }
-    @media (max-width: 920px) { main { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } .phone { width: 100%; max-width: 320px; } }
-  </style>
-</head>
-<body>
-  <main>
-    <aside>
-      <h1>${escapeHtml(input.title)}</h1>
-      <p class="side-note">知识库打底，公开资料补齐。模型生成超过时间盒时，系统先产出可编辑初稿，避免用户空等。</p>
-      <div class="side-note">核心闭环：活动配置 -> 提交审核 -> 发布上线 -> 立即签到 -> 积分发放 -> 数据报表。</div>
-    </aside>
-    <div class="content">
-      <div class="toolbar">
-        <div class="tabs"><span class="tab active">后台配置</span><span class="tab">前台签到</span><span class="tab">数据报表</span><span class="tab">补齐策略</span></div>
-        <button class="primary">提交审核</button>
-      </div>
-      <div class="grid">
-        <section>
-          <h2>活动配置</h2>
-          <label>活动名称</label><input value="${escapeHtml(input.title)}" />
-          <label>活动周期</label><input value="2026-07-10 至 2026-08-10" />
-          <label>参与人群</label><select><option>全部登录用户</option><option>指定标签用户</option></select>
-          <label>积分规则</label><input value="每日签到 +10，连续 7 天额外 +50" />
-        </section>
-        <section>
-          <h2>用户签到页</h2>
-          <div class="phone">
-            <div class="phone-head"><h3>签到领积分</h3><p>连续签到 3 天</p></div>
-            <div class="sign-card">
-              <h3>今日可领取 10 积分</h3>
-              <button class="primary">立即签到</button>
-              <div class="status-row"><div class="status">未签到</div><div class="status">已签到</div><div class="status">连续奖励</div></div>
-            </div>
-            <div class="sign-card warning">异常状态：额度不足、发放失败、无资格、积分稍后到账。</div>
-          </div>
-        </section>
-        <section>
-          <h2>数据报表</h2>
-          <div class="metric"><span>签到人数</span><strong>12,480</strong></div>
-          <div class="metric"><span>积分发放成功</span><strong>118,900</strong></div>
-          <div class="metric"><span>发放失败</span><strong>36</strong></div>
-          <div class="metric"><span>补偿中</span><strong>18</strong></div>
-          <div class="metric"><span>资损风险</span><strong>低</strong></div>
-        </section>
-      </div>
-      <section>
-        <h2>补齐策略</h2>
-        <ul>
-          <li>每日一次与重复签到幂等：同一用户同一自然日只发一次积分。</li>
-          <li>额度库存与资损控制：校验活动总额度、用户上限、发放流水和对账。</li>
-          <li>积分失败补偿降级：失败进入待补偿，前台展示稍后到账。</li>
-          ${evidence || "<li>公开资料未取得时，只使用知识库和默认假设，不伪装引用。</li>"}
-        </ul>
-      </section>
-    </div>
-  </main>
-</body>
-</html>`;
-}
-
-function inferFallbackActivityTitle(message: string) {
-  if (/签到|打卡/.test(message) && /积分/.test(message)) return "签到领积分活动";
-  const compact = message.replace(/请根据知识库内容生成需求文档和原型/g, "").replace(/[，。,.]/g, " ").trim();
-  const candidate = compact.match(/(?:我想做|做一个|生成一个|创建一个)?\s*([^\s]{2,24}(?:活动|系统|功能|工具|页面|应用))/)?.[1];
-  return candidate || "活动方案";
-}
-
 function createChildAbortController(parentSignal: AbortSignal) {
   const child = new AbortController();
   if (parentSignal.aborted) {
@@ -2167,18 +1908,10 @@ function createChildAbortController(parentSignal: AbortSignal) {
   return child;
 }
 
-function readModelTimeboxMs() {
-  const raw = Number(process.env.AICHAT_MODEL_TIMEBOX_MS ?? "");
+function readModelIdleTimeoutMs() {
+  const raw = Number(process.env.AICHAT_MODEL_IDLE_TIMEOUT_MS ?? "");
   if (Number.isFinite(raw) && raw >= 10_000) return raw;
   return 90_000;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function cleanArtifactTitle(value: string, fallback: string) {
@@ -2219,6 +1952,17 @@ export function isDocumentGenerationRequest(value: string) {
   if (/(生成|创建|新建|写|撰写|编写|起草|输出|制定|整理|完善|补全|给我)/.test(compact)) {
     return true;
   }
+  if (/(为什么|怎么|如何|哪些|有哪些|风险|问题|评价|检查|审查|对比|原因|吗|？|\?)/.test(compact)) {
+    return false;
+  }
+  return true;
+}
+
+export function isPrototypeGenerationRequest(value: string) {
+  const compact = value.replace(/\s+/g, "").toLowerCase();
+  if (!/(原型|prototype)/i.test(compact)) return false;
+  if (hasNegatedArtifactIntent(compact, PROTOTYPE_ARTIFACT_PATTERN)) return false;
+  if (/(生成|创建|新建|做|设计|输出|产出|给我)/.test(compact)) return true;
   if (/(为什么|怎么|如何|哪些|有哪些|风险|问题|评价|检查|审查|对比|原因|吗|？|\?)/.test(compact)) {
     return false;
   }

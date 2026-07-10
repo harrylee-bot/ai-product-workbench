@@ -573,10 +573,12 @@ function buildUserPrompt(input: DeerFlowRunInput) {
           "optional: completed | skipped_not_needed | skipped_tools_unavailable | failed_non_blocking",
         enrichmentNotes:
           "optional user-safe notes that summarize what was filled by model inference and what was filled by external search/fetch",
+        qualitySelfCheck:
+          "required for review_prd/review_prototype: { passed: boolean, missing: string[], stateCoverage: string[], prdChecks: string[], prototypeChecks: string[], knowledgeChecks: string[] }. Set passed=true only after revising all known gaps in the same turn.",
         assumptions: "optional inferred business facts, especially for one-sentence requirements",
         consistencyStrategy: "optional PRD/prototype consistency strategy",
         prdDocumentDraft:
-          "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }], validationNotes? }. Use the standard Chinese requirement-document section order: 1 引言 / 1.1 项目背景 / 1.2 文档范围 / 1.3 使用场景（必填） / 2 业务需求 / 2.1 页面链接 / core business sections / 验收标准 / 3 业务降级方案（必填） / 4 需求安全基线要求（必填）. Do not include a section named 本需求涉及新增/修改的接口. blocks may include paragraph, bullet_list, table, quote, warning, info, diagram, image, prototype_snapshot, asset_reference.",
+          "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }], validationNotes? }. Use the standard Chinese requirement-document section order: 1 引言 / 1.1 项目背景 / 1.2 文档范围 / 1.3 使用场景（必填） / 2 业务需求 / 2.1 页面链接 / 2.2 核心业务规则/功能说明 / 2.3 核心流程/状态/页面要求 / 2.4 验收标准 / 3 业务降级方案（必填） / 4 需求安全基线要求（必填）. Do not include a section named 本需求涉及新增/修改的接口. blocks may include paragraph, bullet_list, table, quote, warning, info, diagram, image, prototype_snapshot, asset_reference.",
         artifacts: [
           {
             kind: "optional artifact kind, for example prototype_html or prd_markdown",
@@ -597,16 +599,19 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "Knowledge-first workflow: use knowledgeContext before general model knowledge. After the local knowledge baseline is applied, you may use model reasoning and available web search/fetch tools to fill missing current or general details, but local product rules win over web results.",
         "When knowledgeContext is non-empty and the user asks for a PRD/prototype/方案, do not stop at copying local knowledge: first infer ordinary missing product details with the model, then use available web search/fetch for public, generic, current, or industry-practice details when helpful. If search/fetch tools are unavailable, set externalResearchStatus=skipped_tools_unavailable and continue with model inference.",
         "If externalResearchContext.refs is non-empty, use those refs as already fetched public evidence and cite them in externalRefsUsed/enrichmentNotes; do not repeat search unless there is a clear missing public fact.",
-        "Never send private files, raw source assets, internal paths, conversation IDs, user IDs, credentials, or complete user documents to web search. Search only generic product/domain terms derived from the request, such as 签到积分活动 会员运营 最佳实践.",
+        "Never send private files, raw source assets, internal paths, conversation IDs, user IDs, credentials, or complete user documents to web search. Search only generic product/domain terms dynamically derived from the current request.",
         "If external information is used, cite it only in externalRefsUsed/enrichmentNotes and relevant PRD source notes; do not paste long web excerpts into the chat or PRD.",
         "If knowledgeContext is empty, do not claim the PRD/prototype is knowledge-base driven. Return a concise ask_clarification or answer that says the knowledge base missed and names the missing knowledge area.",
         "For one_sentence_completion, infer ordinary missing details from product_architecture knowledge, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
+        "For one_sentence_completion that asks for PRD/prototype, the PRD quality target is the local requirement-doc-template skill standard: Chinese requirement document, <工单名称>需求说明书 title, version history, manual TOC, fixed 1/2/3/4 section order, channel table, concrete degradation plan, and 21-row safety baseline.",
         "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",
-        "For activity-configuration PRDs, include visual evidence blocks when knowledgeContext provides them: at least one business flow diagram, one configuration architecture diagram, and prototype_snapshot/image blocks for key Axure pages. Use Mermaid for diagram blocks and local visualAssets paths for prototype_snapshot/image blocks.",
-        "If no suitable prototype snapshot, flow, architecture, or field-rule knowledge is available, do not invent visuals. Add a validationNotes item and an info/warning block that names the missing asset and the required follow-up.",
-        "For PRD/需求文档/需求说明书 generation, follow the requirement-doc-template skill after the user's override: cover title should be <工单名称>需求说明书; body sections must include 1 引言(1.1 项目背景, 1.2 文档范围, 1.3 使用场景必填), 2 业务需求(2.1 页面链接, core rules/features, flow/state/page requirements, 验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not include 本需求涉及新增/修改的接口. Do not use a freeform lightweight PRD unless the user explicitly asks for it.",
-        "For PRD tables, use explicit table blocks or markdown tables for version history, channel/使用场景, field/rule tables, acceptance tables, and the safety baseline self-check. Do not replace tables with prose.",
-        "For PRD section content, every heading must have concrete content. If an exact route, author, participant, or date is unknown, write 待确认 or 以实际上线地址/联调结果为准, while still describing expected behavior from the business perspective.",
+        "For every generated PRD, include at least two diagram blocks in the relevant 2.x business section: one Mermaid product/business flow diagram and one Mermaid product architecture/information architecture diagram. If knowledgeContext provides prototype_snapshot/image visualAssets, also include prototype_snapshot/image blocks for the relevant reference pages.",
+        "If no suitable prototype snapshot or HTML visual asset is available, do not invent screenshots. Add a validationNotes item and an info/warning block that names the missing prototype visual asset and the required follow-up. Mermaid flow and architecture diagrams should still be generated from the product logic.",
+        "For PRD/需求文档/需求说明书 generation, follow the requirement-doc-template skill exactly after the user's override: cover title/file title should be <工单名称>需求说明书; section order must be Cover, 版 本 历 史, 目 录, 1 引言(1.1项目背景, 1.2文档范围, 1.3使用场景（必填）), 2 业务需求(2.1页面链接, 2.2核心业务规则/功能说明, 2.3核心流程/状态/页面要求 with product flow and product architecture diagrams, 2.4验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not include 本需求涉及新增/修改的接口.",
+        "For PRD tables, use explicit table blocks or markdown tables for version history columns 版本/状态、作者、参与者、起止日期、备注; channel table columns 序号、活动投放的可选渠道、是否投放; acceptance table columns 序号、验收项、验收标准; and the 21-row safety baseline table. Do not replace tables with prose.",
+        "For PRD section content, every heading must have concrete content. If an exact route, author, or participant is unknown, write 待确认 or 以实际上线地址/联调结果为准, while still describing expected behavior from the business perspective. Version history date must use the current date or a user-provided date; do not write 待确认 as the date.",
+        "Do not paste the raw user request into the PRD body with labels such as 用户输入/原始需求/用户原话. Rewrite it as business background and scope.",
+        "PRD acceptance criteria must be business-testable acceptance only: page visibility, configuration, permissions, core user actions, state transitions, resource or capacity constraints, exceptions, data/reporting, and degradation behavior. Do not include knowledge retrieval, model quality, prompt compliance, or system generation checks as acceptance rows.",
         "For PRD safety/degradation content, do not leave the section empty: write 不涉及 only when truly irrelevant; otherwise provide concrete fallback behavior and safety baseline self-check values using only 是, 否, or 不涉及.",
         "When updating an existing PRD, merge the requested change into the currentPrdDocument and preserve unaffected sections, title hierarchy, tables, state flows, acceptance criteria, and implementation details.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
@@ -614,6 +619,11 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "When knowledgeContext entries contain visualAssets, cite the asset path in blocks as { type: 'prototype_snapshot' | 'image', content: 'caption', assetPath, title?, sourcePaths? }.",
         "When you generate files, include their output artifact paths in finalActionContract.artifacts.",
         "For review_prototype, the prototype_html artifact must satisfy prototypeHtmlContract exactly. Never output a bare HTML fragment, unstyled semantic HTML, markdown, an image mock, or content that relies on browser default typography/table/button styles.",
+        "For review_prototype, when prototype_asset_ref, HTML原型, Axure, RP资产, 前台页面设计框架, or 后台管理设计框架 knowledge is present, explicitly reuse its information architecture, page density, form/table/status conventions, and front/back-office layout patterns. Do not create a generic demo page unrelated to the retrieved prototype knowledge.",
+        "For every prototype task, derive a knowledge compliance checklist from the retrieved prototype_rule/prototype_asset_ref/page framework. Every item described as 必须/至少/不得/禁止 must be implemented or explicitly excluded by a user-confirmed scope rule. Do not substitute a generic SaaS layout for the retrieved domain framework.",
+        "PrototypeSpec must enumerate all front-office and back-office pages, important components, normal states, empty states, permission states, failure states, review/processing states, and data/reporting views required by ConversationDesignState and retrieved knowledge. The HTML artifact must visibly implement at least 75% of named pages/components/states and all critical business rules.",
+        "Prototype HTML must be the product interface itself. Do not add explanatory scaffolding such as 当前原型用于评审, 业务覆盖, 知识覆盖, 生成依据, or notes that describe what the prototype covers. Use that screen space for real product panels, state lists, audit/review workflow, reports, or exception queues.",
+        "Before emitting review_prd/review_prototype, run an internal revision loop: verify required ConversationDesignState groups, fixed PRD structure and diagrams, business-testable acceptance, knowledge checklist, PrototypeSpec page/component/state coverage, complete front/back HTML, exceptions, and data governance. If anything is missing, revise the artifacts in the same turn. Emit qualitySelfCheck.passed=true only when missing is empty.",
         "Return final action instead of asking NestJS to decide the workflow.",
         "For PRD/document generation, do not stream the full PRD body as ordinary chat prose. Put the complete body in prdDocumentDraft.sections or a prd_markdown artifact, then use a concise finalAction.message; AI Product Workbench will open the canvas from the saved PRD.",
         "Keep non-document progress notes, clarifying comments, and tool/coding updates outside the document body so they remain suitable for the chat transcript.",
@@ -644,6 +654,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "Set explicit font sizes for h1/h2/h3/body/table/button/input so the iframe never falls back to oversized Times-style browser defaults.",
         "Style tables with width:100%, border-collapse, padded th/td, header background, and responsive overflow handling.",
         "Use Chinese labels and realistic sample data from the PRD/design state; keep columns and controls aligned at desktop width while remaining usable in the small inline preview.",
+        "For prototypes paired with requirement-doc-template PRDs, mirror the PRD's concrete business subsections, page entries, state/error handling, interface assumptions, acceptance criteria, degradation behavior, and safety/risk controls with visible app-like panels. Do not only show a decorative mobile preview.",
         "If interaction cannot use scripts because stored prototypes are sanitized, present the key states as visible static sections or CSS-only variants.",
       ],
       forbiddenOutput: [
@@ -685,7 +696,7 @@ function buildKnowledgeWorkflowPolicy(
       "不要把技能文件内容、工具输入输出、todo、read_file/search/fetch 日志、隐藏推理或运行调试信息写入聊天正文或 PRD 正文。",
     modelEnrichmentChecklist: [
       "补齐目标用户、使用场景、页面/状态、异常/降级、系统联动口径、验收标准。",
-      "对一两句话需求做合理业务推断，但把积分值、预算、活动周期、目标人群等不确定项写入 assumptions 或 待确认。",
+      "对一两句话需求做合理业务推断，为常见业务参数给出可评审默认值。真正不确定且会改变业务决策的内容写入 assumptions，不要用大量 待确认 占位填充 PRD 正文或原型页面。",
       "PRD 与原型必须共享同一组核心规则、状态和页面结构，避免文档与原型各写各的。",
     ],
     externalSearchPolicy: {
@@ -708,19 +719,18 @@ function buildKnowledgeWorkflowPolicy(
 }
 
 function buildExternalSearchQueries(message: string, knowledgeContext: DeerFlowKnowledgeReference[]) {
-  const compact = message.replace(/\s+/g, "");
+  const domainTerms = extractDomainSearchTerms(message);
   const queries: string[] = [];
 
-  if (/(签到|打卡|积分|奖励|奖品|权益|活动)/.test(compact)) {
-    queries.push("签到积分活动 会员运营 最佳实践");
-    queries.push("积分权益 发放 幂等 风控 资损");
-    queries.push("营销活动 连续签到 奖励机制 用户体验");
+  if (domainTerms) {
+    queries.push(`${domainTerms} 行业最佳实践`);
+    queries.push(`${domainTerms} 业务规则 风险控制 异常处理`);
   }
   if (/(需求文档|需求说明书|prd|PRD)/.test(message)) {
-    queries.push("产品需求文档 验收标准 风险 降级 规范");
+    queries.push(`${domainTerms || "产品需求"} 验收标准 风险 降级`);
   }
   if (/(原型|prototype|页面|界面|交互)/i.test(message)) {
-    queries.push("后台配置 前台活动页 原型 交互状态 设计模式");
+    queries.push(`${domainTerms || "产品"} 前后台页面 原型 交互状态 设计模式`);
   }
 
   for (const item of knowledgeContext.slice(0, 3)) {
@@ -729,6 +739,16 @@ function buildExternalSearchQueries(message: string, knowledgeContext: DeerFlowK
   }
 
   return [...new Set(queries)].slice(0, 6);
+}
+
+function extractDomainSearchTerms(message: string) {
+  return message
+    .replace(/请|帮我|我想|需要|根据知识库内容|生成|输出|创建|制作|需求文档|需求说明书|产品需求文档|PRD|原型|页面|界面|方案/gi, " ")
+    .replace(/做一个|一个|以及|并且|和/g, " ")
+    .replace(/[^\p{Script=Han}a-z0-9]+/giu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 48);
 }
 
 function normalizeDeerFlowEvent(event: string, data: unknown): DeerFlowRuntimeEvent {

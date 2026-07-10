@@ -202,7 +202,7 @@ describe("HTML prototype artifact module", () => {
       sanitizePrototypeHtml(
         "<script>window.parent.postMessage('x','*')</script>",
       ),
-    ).toBe("");
+    ).toBe("<html><head></head><body></body></html>");
   });
 
   it("sanitizePrototypeHtml strips script vectors: javascript:/data: URLs, on* handlers, nested escapes", () => {

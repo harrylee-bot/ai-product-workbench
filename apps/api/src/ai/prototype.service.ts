@@ -101,7 +101,7 @@ export class PrototypeService {
     // sec-1：用 DOMPurify allowlist 净化后再存储（替换可绕过的正则黑名单）。
     // 净化后总有内容则 ready；空内容（如仅含被剥离的脚本）才 failed。
     const rawHtml = draft.htmlContent ?? draft.html ?? "";
-    const htmlContent = sanitizePrototypeHtml(rawHtml);
+    const htmlContent = sanitizePrototypeDocumentHtml(rawHtml, draft.title ?? prototypeSpec.title);
     const hasContent = htmlContent.trim().length > 0;
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -758,6 +758,7 @@ function prototypePageKnowledgeContent(page: PrototypePageSpec) {
  */
 export function sanitizePrototypeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
+    WHOLE_DOCUMENT: true,
     ALLOWED_TAGS: [
       "html",
       "head",
@@ -889,12 +890,29 @@ export function sanitizePrototypeDocumentHtml(
   title = "prototype",
 ): string {
   const sanitized = sanitizePrototypeHtml(html).trim();
-  if (!sanitized) {
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body></body></html>`;
+  const fallbackTitle = escapeHtml(title);
+  const documentHtml = !sanitized
+    ? `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${fallbackTitle}</title></head><body></body></html>`
+    : /^<!doctype\s+html/i.test(sanitized)
+      ? sanitized
+      : /^<html[\s>]/i.test(sanitized)
+        ? `<!doctype html>${sanitized}`
+        : `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${fallbackTitle}</title></head><body>${sanitized}</body></html>`;
+  return ensurePrototypeDocumentHead(documentHtml, fallbackTitle);
+}
+
+function ensurePrototypeDocumentHead(html: string, escapedTitle: string) {
+  let output = html;
+  if (!/<head[\s>]/i.test(output)) {
+    output = output.replace(/<html([^>]*)>/i, `<html$1><head></head>`);
   }
-  if (/^<!doctype\s+html/i.test(sanitized)) return sanitized;
-  if (/^<html[\s>]/i.test(sanitized)) return `<!doctype html>${sanitized}`;
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body>${sanitized}</body></html>`;
+  if (!/<meta\s+charset=/i.test(output)) {
+    output = output.replace(/<head([^>]*)>/i, `<head$1><meta charset="utf-8">`);
+  }
+  if (!/<title[\s>]/i.test(output)) {
+    output = output.replace(/<head([^>]*)>/i, `<head$1><title>${escapedTitle}</title>`);
+  }
+  return output;
 }
 
 function escapeHtml(value: unknown) {

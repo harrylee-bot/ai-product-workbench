@@ -115,7 +115,16 @@ describe("FinalActionApplierService", () => {
           expect.objectContaining({ id: "version_history", title: "版 本 历 史" }),
           expect.objectContaining({ id: "manual_toc", title: "目 录" }),
           expect.objectContaining({ id: "background", title: "1.1 项目背景" }),
-          expect.objectContaining({ id: "core_1", title: "2.2 概览", content: "用户每日签到领取积分。" }),
+          expect.objectContaining({ id: "core_rules", title: "2.2 核心业务规则/功能说明" }),
+          expect.objectContaining({
+            id: "core_flow_state",
+            title: "2.3 核心流程/状态/页面要求",
+            blocks: expect.arrayContaining([
+              expect.objectContaining({ title: "产品流程图", type: "diagram" }),
+              expect.objectContaining({ title: "产品架构图", type: "diagram" }),
+            ]),
+          }),
+          expect.objectContaining({ id: "acceptance_criteria", title: "2.4 验收标准" }),
           expect.objectContaining({ id: "degradation_plan", title: "3 业务降级方案（必填）" }),
           expect.objectContaining({ id: "safety_baseline", title: "4 需求安全基线要求（必填）" }),
         ]),
@@ -128,94 +137,6 @@ describe("FinalActionApplierService", () => {
       runId: "run-1",
     }));
     expect(result).toEqual({ prdDocument: document, state: updatedState });
-  });
-
-  it("persists retrieved knowledge metadata even when DeerFlow only echoes knowledge titles", async () => {
-    const state = baseState({ status: "design_ready" });
-    const document = baseDocument();
-    const updatedState = { ...state, status: "doc_ready", prdDocument: document };
-    stateService.createDraftInTransaction.mockResolvedValue(state);
-    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
-    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue(updatedState);
-
-    await service.apply({
-      conversationId: "conversation-1",
-      userId: "user-1",
-      runId: "run-knowledge-refs",
-      finalAction: finalAction({
-        type: "review_prd",
-        message: "已生成 PRD。",
-        raw: {
-          type: "review_prd",
-          designStateDraft: {
-            title: "签到领积分活动",
-            summary: "用户每日签到领取积分奖励",
-            businessGoal: "提升活跃",
-          },
-          prdDocumentDraft: {
-            title: "签到领积分活动 PRD",
-            sections: [
-              {
-                id: "background",
-                title: "1.1 项目背景",
-                type: "overview",
-                level: 3,
-                order: 1,
-                content: "通过签到领积分提升用户每日活跃。",
-              },
-            ],
-          },
-          knowledgeRefsUsed: ["活动发布与模板配置", "PRD标准结构"],
-        },
-      }),
-      artifacts: [],
-      knowledgeContext: [
-        {
-          id: "knowledge_ref_activity",
-          knowledgeId: "vault:02-业务域知识/活动发布与模板配置.md",
-          title: "活动发布与模板配置",
-          snippet: "活动必须覆盖草稿、预览、审核、发布、下线和回滚。",
-          content: "活动必须覆盖草稿、预览、审核、发布、下线和回滚。",
-          type: "business_concept",
-          score: 0.98,
-          reason: "标题匹配 活动；高优先级知识",
-          relatedPath: "02-业务域知识/活动发布与模板配置.md",
-        },
-        {
-          id: "knowledge_ref_prd",
-          knowledgeId: "vault:04-产品文档规范/PRD标准结构.md",
-          title: "PRD标准结构",
-          snippet: "PRD 必须包含 1 引言、2 业务需求、3 业务降级方案、4 需求安全基线要求。",
-          content: "来源文件：04-产品文档规范/PRD标准结构.md\nPRD 必须包含 1 引言、2 业务需求、3 业务降级方案、4 需求安全基线要求。",
-          type: "prd_writing_rule",
-          score: 0.95,
-          reason: "标题匹配 PRD标准结构；符合调用方偏好类型",
-          relatedPath: "04-产品文档规范/PRD标准结构.md",
-        },
-      ],
-    });
-
-    const stateDraft = stateService.createDraftInTransaction.mock.calls[0]?.[2];
-    const savedDraft = documentService.saveGeneratedDocumentInTransaction.mock.calls[0]?.[2];
-    expect(stateDraft.knowledgeRefs).toEqual([
-      expect.objectContaining({
-        knowledgeId: "vault:02-业务域知识/活动发布与模板配置.md",
-        title: "活动发布与模板配置（02-业务域知识/活动发布与模板配置.md）",
-        snippet: "活动必须覆盖草稿、预览、审核、发布、下线和回滚。",
-        type: "business_concept",
-        score: 0.98,
-        reason: "标题匹配 活动；高优先级知识",
-        relatedPath: "02-业务域知识/活动发布与模板配置.md",
-      }),
-      expect.objectContaining({
-        knowledgeId: "vault:04-产品文档规范/PRD标准结构.md",
-        title: "PRD标准结构（04-产品文档规范/PRD标准结构.md）",
-        snippet: "PRD 必须包含 1 引言、2 业务需求、3 业务降级方案、4 需求安全基线要求。",
-        type: "prd_writing_rule",
-        relatedPath: "04-产品文档规范/PRD标准结构.md",
-      }),
-    ]);
-    expect(savedDraft.knowledgeRefs).toEqual(stateDraft.knowledgeRefs);
   });
 
   it("builds PRD sections from DeerFlow markdown artifacts when structured sections are absent", async () => {
@@ -252,14 +173,104 @@ describe("FinalActionApplierService", () => {
       expect.objectContaining({
         title: "签到活动需求说明书",
         sections: expect.arrayContaining([
-          expect.objectContaining({ title: "2.2 目标", content: "提升用户活跃。" }),
-          expect.objectContaining({ title: "2.3 页面", content: "签到页展示连续签到天数。" }),
+          expect.objectContaining({ title: "2 业务需求", content: "总体目标：提升用户活跃。" }),
+          expect.objectContaining({ title: "2.2 核心业务规则/功能说明" }),
+          expect.objectContaining({
+            title: "2.3 核心流程/状态/页面要求",
+            blocks: expect.arrayContaining([
+              expect.objectContaining({ title: "产品流程图" }),
+              expect.objectContaining({ title: "产品架构图" }),
+            ]),
+          }),
+          expect.objectContaining({ title: "2.4 验收标准" }),
           expect.objectContaining({ title: "3 业务降级方案（必填）" }),
           expect.objectContaining({ title: "4 需求安全基线要求（必填）" }),
         ]),
       }),
       expect.any(Object),
     );
+  });
+
+  it("persists full retrieved knowledge metadata even when DeerFlow only echoes titles", async () => {
+    const state = baseState();
+    const document = baseDocument();
+    stateService.createDraftInTransaction.mockResolvedValue(state);
+    documentService.saveGeneratedDocumentInTransaction.mockResolvedValue(document);
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({ ...state, prdDocument: document });
+
+    await service.apply({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-knowledge",
+      finalAction: finalAction({
+        type: "review_prd",
+        message: "已生成 PRD。",
+        raw: {
+          type: "review_prd",
+          knowledgeRefsUsed: ["活动发布与模板配置（02-业务域知识/活动发布与模板配置.md）"],
+          prdDocumentDraft: {
+            title: "签到领积分活动需求说明书",
+            sections: [
+              {
+                id: "background",
+                title: "1.1 项目背景",
+                type: "overview",
+                level: 3,
+                order: 1,
+                content: "通过签到领积分提升用户每日活跃。",
+              },
+            ],
+          },
+        },
+      }),
+      artifacts: [],
+      knowledgeContext: [
+        {
+          id: "knowledge_ref_vault_activity_1",
+          knowledgeId: "vault_activity",
+          title: "活动发布与模板配置",
+          snippet: "活动发布必须覆盖草稿、预览、审核、发布、下线和回滚。",
+          content: "来源文件：02-业务域知识/活动发布与模板配置.md\n活动发布必须覆盖草稿、预览、审核、发布、下线和回滚。",
+          type: "business_concept",
+          score: 0.98,
+          reason: "标题匹配 活动；高优先级知识",
+          relatedPath: "02-业务域知识/活动发布与模板配置.md",
+        },
+        {
+          id: "knowledge_ref_vault_prd_2",
+          knowledgeId: "vault_prd",
+          title: "PRD标准结构",
+          content: "来源文件：04-产品文档规范/PRD标准结构.md\nPRD 必须包含 1 引言、2 业务需求、3 业务降级方案、4 需求安全基线要求。",
+          type: "prd_writing_rule",
+          score: 0.91,
+          reason: "符合调用方偏好类型",
+          relatedPath: "04-产品文档规范/PRD标准结构.md",
+        },
+      ],
+    });
+
+    const stateDraft = stateService.createDraftInTransaction.mock.calls[0]?.[2];
+    const savedDraft = documentService.saveGeneratedDocumentInTransaction.mock.calls[0]?.[2];
+
+    expect(stateDraft.knowledgeRefs).toEqual([
+      expect.objectContaining({
+        knowledgeId: "vault_activity",
+        title: "活动发布与模板配置（02-业务域知识/活动发布与模板配置.md）",
+        snippet: "活动发布必须覆盖草稿、预览、审核、发布、下线和回滚。",
+        type: "business_concept",
+        score: 0.98,
+        reason: "标题匹配 活动；高优先级知识",
+        relatedPath: "02-业务域知识/活动发布与模板配置.md",
+      }),
+      expect.objectContaining({
+        knowledgeId: "vault_prd",
+        title: "PRD标准结构（04-产品文档规范/PRD标准结构.md）",
+        snippet: "PRD 必须包含 1 引言、2 业务需求、3 业务降级方案、4 需求安全基线要求。",
+        type: "prd_writing_rule",
+        relatedPath: "04-产品文档规范/PRD标准结构.md",
+      }),
+    ]);
+    expect(savedDraft.knowledgeRefs).toEqual(stateDraft.knowledgeRefs);
   });
 
   it("builds PRD sections from assistant markdown when DeerFlow only returns a summary final action", async () => {
@@ -299,10 +310,16 @@ describe("FinalActionApplierService", () => {
       expect.objectContaining({
         title: "签到活动需求说明书",
         sections: expect.arrayContaining([
-          expect.objectContaining({ title: "2.2 产品目标", content: "提升用户每日活跃和连续访问。" }),
-          expect.objectContaining({ title: "2.3 用户端功能", content: "用户可以每日签到、查看连续签到天数和奖励明细。" }),
-          // 接口章节已从强制列表中移除，验收标准编号相应调整
-          expect.objectContaining({ title: expect.stringMatching(/验收标准/), content: "签到成功后页面状态应更新为今日已签到。" }),
+          expect.objectContaining({ title: "2 业务需求", content: "总体目标：提升用户每日活跃和连续访问。" }),
+          expect.objectContaining({ title: "2.2 核心业务规则/功能说明" }),
+          expect.objectContaining({
+            title: "2.3 核心流程/状态/页面要求",
+            blocks: expect.arrayContaining([
+              expect.objectContaining({ title: "产品流程图" }),
+              expect.objectContaining({ title: "产品架构图" }),
+            ]),
+          }),
+          expect.objectContaining({ title: "2.4 验收标准", content: "签到成功后页面状态应更新为今日已签到。" }),
         ]),
       }),
       expect.any(Object),
@@ -448,13 +465,13 @@ describe("FinalActionApplierService", () => {
         targetDevice: "desktop",
         pages: [{ id: "page_home", name: "签到页", components: [] }],
       }),
-      expect.objectContaining({
-        conversationId: "conversation-1",
-        htmlContent: "<html><body>签到页</body></html>",
-        html: "<html><body>签到页</body></html>",
-        title: "签到活动原型",
-        targetDevice: "desktop",
-      }),
+	      expect.objectContaining({
+	        conversationId: "conversation-1",
+	        htmlContent: fullPrototypeHtml(),
+	        html: fullPrototypeHtml(),
+	        title: "签到活动原型",
+	        targetDevice: "desktop",
+	      }),
       expect.objectContaining({ userId: "user-1", runId: "run-2" }),
       expect.any(String), // htmlContent
       expect.any(Boolean), // hasContent
@@ -530,9 +547,9 @@ describe("FinalActionApplierService", () => {
         conversationDesignStateVersion: 4,
         title: "签到领积分活动原型",
       }),
-      expect.objectContaining({
-        htmlContent: "<html><body>签到页</body></html>",
-      }),
+	      expect.objectContaining({
+	        htmlContent: fullPrototypeHtml(),
+	      }),
       expect.objectContaining({ userId: "user-1", runId: "run-both" }),
       expect.any(String),
       true,
@@ -614,14 +631,16 @@ describe("FinalActionApplierService", () => {
       artifacts: [
         {
           ...prototypeHtmlArtifact(),
-          text: [
-            "Context from AI Product Workbench:",
-            "<html>",
-            "<body>",
-            "<main>签到页</main>",
-            "read_file SKILL.md",
-            "Updated todo list",
-            "</body>",
+	          text: [
+	            "Context from AI Product Workbench:",
+	            "<!doctype html>",
+	            "<html lang=\"zh-CN\">",
+	            "<head><style>body{font-family:sans-serif}.panel{display:grid;padding:16px}</style></head>",
+	            "<body>",
+	            "<main class=\"panel\">签到页</main>",
+	            "read_file SKILL.md",
+	            "Updated todo list",
+	            "</body>",
             "</html>",
           ].join("\n"),
         },
@@ -644,8 +663,40 @@ describe("FinalActionApplierService", () => {
 
     expect(persistedPayload).toContain("签到领积分活动");
     expect(persistedPayload).toContain("后台配置、审核发布、积分发放和数据报表必须闭环");
-    expect(persistedPayload).toContain("<main>签到页</main>");
-    expect(persistedPayload).not.toMatch(/Context from AI Product Workbench|read_file|write_file|write_todos|tool-input|tool-output|Updated todo list/);
+    expect(persistedPayload).toContain("<main class=\\\"panel\\\">签到页</main>");
+	    expect(persistedPayload).not.toMatch(/Context from AI Product Workbench|read_file|write_file|write_todos|tool-input|tool-output|Updated todo list/);
+	  });
+
+  it("rejects prototype HTML that exposes generation trace or external evidence", async () => {
+    const state = baseState({ status: "doc_confirmed" });
+    stateService.getCurrentStateInTransaction.mockResolvedValue(state);
+
+    await expect(service.apply({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-trace-prototype",
+      finalAction: finalAction({
+        type: "review_prototype",
+        message: "原型已生成。",
+        raw: {
+          type: "review_prototype",
+          prototypeSpec: {
+            title: "签到领积分活动原型",
+            targetDevice: "both",
+            pages: [{ id: "page_config", name: "后台配置页" }],
+          },
+        },
+      }),
+      artifacts: [{
+        ...prototypeHtmlArtifact(),
+        text: fullPrototypeHtml([
+          "<section>补齐策略：知识库打底，公开资料补齐。</section>",
+          "<section>Building an Effective Loyalty Program</section>",
+        ].join("")),
+      }],
+    })).rejects.toThrow("PROTOTYPE_HTML_CONTAINS_GENERATION_TRACE");
+
+    expect(prototypeService.saveGeneratedPrototypeInTransaction).not.toHaveBeenCalled();
   });
 
   it("fails prototype bridge when no ConversationDesignState exists", async () => {
@@ -680,8 +731,26 @@ function prototypeHtmlArtifact(): DeerFlowResolvedArtifact {
     artifactUrl: "/api/threads/thread-1/artifacts/mnt/user-data/outputs/index.html",
     contentType: "text/html",
     status: "fetched",
-    text: "<html><body>签到页</body></html>",
+    text: fullPrototypeHtml(),
   };
+}
+
+function fullPrototypeHtml(extraBody = "") {
+  return [
+    "<!doctype html>",
+    "<html lang=\"zh-CN\">",
+    "<head>",
+    "<meta charset=\"utf-8\">",
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    "<title>签到领积分活动原型</title>",
+    "<style>body{margin:0;font-family:sans-serif}.panel{display:grid;padding:16px}.btn{border-radius:6px}</style>",
+    "</head>",
+    "<body>",
+    "<main class=\"panel\"><button class=\"btn\">立即签到</button><table><tbody><tr><td>签到页</td></tr></tbody></table></main>",
+    extraBody,
+    "</body>",
+    "</html>",
+  ].join("");
 }
 
 function baseState(overrides: Record<string, unknown> = {}) {

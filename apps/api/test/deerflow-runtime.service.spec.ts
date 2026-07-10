@@ -377,7 +377,8 @@ describe("DeerFlowRuntimeService", () => {
     const prompt = String(runRequest.input.messages[0].content);
     expect(prompt).toContain('"localKnowledgeStatus":"hit"');
     expect(prompt).toContain("签到积分活动 会员运营 最佳实践");
-    expect(prompt).toContain("积分权益 发放 幂等 风控 资损");
+    expect(prompt).toContain("业务规则 风险控制 异常处理");
+    expect(prompt).toContain("前后台页面 原型 交互状态 设计模式");
     expect(prompt).toContain("externalSearchPolicy");
     expect(prompt).toContain("只搜索通用领域词");
     expect(prompt).toContain("externalResearchContext");

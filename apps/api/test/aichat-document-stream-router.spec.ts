@@ -4,13 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AichatStreamService,
   buildExternalResearchRuntimeEvent,
+  buildModelIdleTimeoutRuntimeEvent,
   buildModelEnrichmentRuntimeEvent,
   buildModelEnrichmentStartedRuntimeEvent,
-  buildTimeboxedFallbackTurnResult,
   buildCanvasDocumentRuntimePrompt,
   createDocumentStreamState,
   formatArtifactReadyMessage,
   formatQaOutcome,
+  getArtifactGenerationFailureReason,
   getPrdGenerationFailureReason,
   isDocumentGenerationRequest,
   looksLikeDocumentDraft,
@@ -18,6 +19,15 @@ import {
 } from "../src/ai/aichat/aichat-stream.service";
 import type { UIMessageStreamWriter } from "../src/ai/aichat/aichat-ai-sdk-bridge";
 import type { AuthenticatedUser } from "../src/auth/auth.types";
+
+const passedQualitySelfCheck = {
+  passed: true,
+  missing: [],
+  stateCoverage: ["complete"],
+  prdChecks: ["complete"],
+  prototypeChecks: ["complete"],
+  knowledgeChecks: ["complete"],
+};
 
 function captureWriter() {
   const parts: Record<string, unknown>[] = [];
@@ -378,55 +388,15 @@ describe("aichat document stream router", () => {
     expect(`${externalEvent.detail}\n${failedExternalEvent.detail}\n${modelStartedEvent.detail}\n${modelEvent.detail}`).not.toMatch(/read_file|Context from AI Product Workbench|tool-input|tool-output|Updated todo list/);
   });
 
-  it("builds a usable PRD and prototype fallback when model generation exceeds the timebox", () => {
-    const result = buildTimeboxedFallbackTurnResult({
-      runId: "run-1",
-      message: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
-      knowledgeContext: [
-        {
-          id: "k1",
-          title: "活动发布与模板配置",
-          content: "活动配置、审核发布、数据报表。",
-          relatedPath: "02-业务域知识/活动发布与模板配置.md",
-        },
-        {
-          id: "k2",
-          title: "奖品券与资损核销",
-          content: "积分发放需要资损控制。",
-          relatedPath: "02-业务域知识/奖品券与资损核销.md",
-        },
-      ],
-      externalResearchContext: {
-        status: "completed",
-        fetchedAt: "2026-07-08T00:00:00.000Z",
-        searchQueries: ["签到积分活动 会员运营 最佳实践"],
-        refs: [
-          {
-            query: "签到积分活动 会员运营 最佳实践",
-            title: "Idempotent requests | Stripe API Reference",
-            url: "https://docs.stripe.com/api/idempotent_requests",
-            insight: "幂等请求可降低重复发放风险。",
-            source: "public_web_fetch",
-            contentLength: 1000,
-            fetchedAt: "2026-07-08T00:00:00.000Z",
-          },
-        ],
-        failures: [],
-        privacyBoundary: ["公开资料只补充通用经验，不发送内部路径、附件原文、真实接口或密钥。"],
-      },
-    });
+  it("reports idle timeout instead of creating fallback PRD/prototype content", () => {
+    const event = buildModelIdleTimeoutRuntimeEvent("run-1");
 
-    const raw = result.finalAction.raw as { prdDocumentDraft: { sections: Array<{ title: string; content: string }> } };
-    const prdText = raw.prdDocumentDraft.sections.map((section) => `${section.title}\n${section.content}`).join("\n");
-    const html = result.artifacts[0]?.text ?? "";
-
-    expect(result.finalAction.type).toBe("review_prototype");
-    expect(result.finalAction.parsed).toBe(true);
-    expect(raw.prdDocumentDraft.sections).toHaveLength(4);
-    expect(prdText).toMatch(/1 引言|2 业务需求|3 业务降级方案|4 需求安全基线要求/);
-    expect(prdText).toMatch(/活动配置|每日|积分|资损|外部补充状态|https:\/\/docs\.stripe\.com/);
-    expect(html).toMatch(/活动配置|提交审核|立即签到|数据报表|补齐策略|积分失败补偿降级/);
-    expect(`${prdText}\n${html}`).not.toMatch(/read_file|Context from AI Product Workbench|tool-input|tool-output|Updated todo list/);
+    expect(event).toEqual(expect.objectContaining({
+      id: "model-enrichment-idle-timeout",
+      label: "模型长时间无返回，已停止生成",
+      status: "failed",
+    }));
+    expect(event.detail).toContain("不会生成兜底 PRD 或原型");
   });
 
   it("fails PRD generation instead of creating fallback content when the final action is missing", () => {
@@ -455,7 +425,7 @@ describe("aichat document stream router", () => {
           raw: { type: "answer" },
         },
       }),
-    ).toBe("模型未返回需求文档最终动作");
+    ).toBe("模型未返回产物最终动作");
   });
 
   it("fails PRD generation when review_prd has no document body", () => {
@@ -484,6 +454,7 @@ describe("aichat document stream router", () => {
           message: "PRD 已生成。",
           raw: {
             type: "review_prd",
+            qualitySelfCheck: passedQualitySelfCheck,
             prdDocumentDraft: {
               title: "营销日历需求说明书",
               sections: [
@@ -509,6 +480,7 @@ describe("aichat document stream router", () => {
           message: "PRD 和原型已生成。",
           raw: {
             type: "review_prototype",
+            qualitySelfCheck: passedQualitySelfCheck,
             prdDocumentDraft: {
               title: "签到领积分活动需求说明书",
               sections: [
@@ -532,7 +504,7 @@ describe("aichat document stream router", () => {
           type: "review_prd",
           parsed: true,
           message: "PRD 已生成。",
-          raw: { type: "review_prd" },
+          raw: { type: "review_prd", qualitySelfCheck: passedQualitySelfCheck },
         },
         artifacts: [
           {
@@ -545,6 +517,100 @@ describe("aichat document stream router", () => {
             text: "## 1 引言\n营销日历用于管理活动排期、渠道资源、审核发布和复盘归因。",
           },
         ],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("requires an artifact quality self-check before persistence", () => {
+    expect(getPrdGenerationFailureReason({
+      expectsPrdDocument: true,
+      artifacts: [],
+      finalAction: {
+        type: "review_prd",
+        parsed: true,
+        message: "PRD 已生成。",
+        raw: {
+          type: "review_prd",
+          prdDocumentDraft: {
+            title: "门店预约需求说明书",
+            sections: [{ id: "background", title: "1.1 项目背景", content: "门店预约需要覆盖后台门店配置、前台预约提交、容量限制、异常处理和数据查询。" }],
+          },
+        },
+      },
+    })).toBe("模型未通过产物质量自检");
+
+    expect(getPrdGenerationFailureReason({
+      expectsPrdDocument: true,
+      artifacts: [],
+      finalAction: {
+        type: "review_prd",
+        parsed: true,
+        message: "PRD 已生成。",
+        raw: {
+          type: "review_prd",
+          qualitySelfCheck: { ...passedQualitySelfCheck, passed: false, missing: ["异常场景"] },
+          prdDocumentDraft: {
+            title: "门店预约需求说明书",
+            sections: [{ id: "background", title: "1.1 项目背景", content: "门店预约需要覆盖后台门店配置、前台预约提交、容量限制、异常处理和数据查询。" }],
+          },
+        },
+      },
+    })).toBe("模型未通过产物质量自检");
+  });
+
+  it("fails combined PRD/prototype generation when the prototype HTML is missing", () => {
+    const finalAction = {
+      type: "review_prd" as const,
+      parsed: true,
+      message: "PRD 已生成。",
+      raw: {
+        type: "review_prd",
+        qualitySelfCheck: passedQualitySelfCheck,
+        prdDocumentDraft: {
+          title: "签到领积分活动需求说明书",
+          sections: [
+            {
+              id: "background",
+              title: "1.1 项目背景",
+              content: "签到领积分活动需要覆盖后台配置、前台签到、积分发放、异常补偿和数据报表。",
+            },
+          ],
+        },
+      },
+    };
+
+    expect(
+      getArtifactGenerationFailureReason({
+        expectsPrdDocument: true,
+        expectsPrototype: true,
+        artifacts: [],
+        finalAction,
+      }),
+    ).toBe("模型未返回完整原型 HTML");
+
+    expect(
+      getArtifactGenerationFailureReason({
+        expectsPrdDocument: true,
+        expectsPrototype: true,
+        finalAction: {
+          ...finalAction,
+          type: "review_prototype",
+          raw: {
+            ...finalAction.raw,
+            type: "review_prototype",
+            qualitySelfCheck: passedQualitySelfCheck,
+            prototypeSpec: { title: "签到领积分活动原型" },
+          },
+        },
+        artifacts: [{
+          kind: "prototype_html",
+          title: "index.html",
+          path: "mnt/user-data/outputs/index.html",
+          artifactUrl: "/api/artifacts/index.html",
+          contentType: "text/html",
+          status: "fetched",
+          text: `<!doctype html><html lang="zh-CN"><head><style>body{font-family:sans-serif}.panel{display:grid;padding:16px}</style></head><body><main class="panel">${"签到领积分活动".repeat(40)}</main></body></html>`,
+        }],
       }),
     ).toBeUndefined();
   });
@@ -651,14 +717,14 @@ describe("AichatStreamService knowledge retrieval", () => {
 
     await service.searchKnowledgeForChat({
       conversationId: "conversation-1",
-      runId: "run-signin-points",
-      message: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
+      runId: "run-store-booking",
+      message: "我想做一个门店预约功能，请根据知识库内容生成需求文档和原型",
       hasExistingState: false,
     });
 
     expect(search).toHaveBeenCalledWith(expect.objectContaining({
       conversationId: "conversation-1",
-      runId: "run-signin-points",
+      runId: "run-store-booking",
       runtimeName: "runtime_generation",
       requirementMode: "one_sentence_completion",
       vaultPolicy: "always",
@@ -667,13 +733,16 @@ describe("AichatStreamService knowledge retrieval", () => {
         KnowledgeType.business_concept,
         KnowledgeType.prd_writing_rule,
         KnowledgeType.prototype_rule,
+        KnowledgeType.prototype_asset_ref,
       ]),
     }));
     const query = search.mock.calls[0]?.[0].query;
+    expect(query).toContain("我想做一个门店预约功能");
     expect(query).toContain("PRD标准结构");
     expect(query).toContain("原型生成总规则");
-    expect(query).toContain("活动发布与模板配置");
-    expect(query).toContain("奖品券与资损核销");
-    expect(query).toContain("积分发放");
+    expect(query).toContain("当前业务域强规则");
+    expect(query).toContain("前后台页面框架");
+    expect(query).toContain("Axure");
+    expect(query).not.toContain("贵州签到打卡HTML原型");
   });
 });

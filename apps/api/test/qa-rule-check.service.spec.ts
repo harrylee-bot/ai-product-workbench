@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { KnowledgeType } from "@prisma/client";
 import type { KnowledgeContext, ConversationDesignState, PrototypeArtifact, PrototypeSpec, RequirementDocument } from "../src/ai/ai-vibe.types";
 import { QaRuleCheckService } from "../src/ai/qa-rule-check.service";
 
@@ -40,12 +41,12 @@ describe("QaRuleCheckService", () => {
 
     expect(issues).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: "qa_state_prd_missing_pages",
-        relatedStatePaths: ["pages.page_rewards"],
+        id: "qa_state_prd_incomplete_coverage",
+        relatedStatePaths: expect.arrayContaining(["pages.奖励明细页"]),
       }),
       expect.objectContaining({
-        id: "qa_state_prototype_missing_pages",
-        relatedStatePaths: ["pages.page_rewards"],
+        id: "qa_state_prototype_incomplete_coverage",
+        relatedStatePaths: expect.arrayContaining(["pages.奖励明细页"]),
       }),
     ]));
   });
@@ -93,6 +94,131 @@ describe("QaRuleCheckService", () => {
     });
 
     expect(issues).toEqual([]);
+  });
+
+  it("blocks PRD content that misses required diagrams or contains forbidden interface sections", () => {
+    const issues = service.run({
+      prdDocument: basePrd({
+        sections: [
+          section({
+            id: "intro",
+            title: "1 引言",
+            type: "overview",
+            content: "签到活动背景。",
+          }),
+          section({
+            id: "interfaces",
+            title: "2.4 本需求涉及新增/修改的接口",
+            type: "appendix",
+            content: "接口清单。",
+          }),
+        ],
+      }),
+      checkTypes: ["prd_completeness"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "qa_prd_standard_sections_missing", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prd_forbidden_interface_section", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prd_required_diagrams_missing", severity: "blocking" }),
+    ]));
+  });
+
+  it("accepts the standard PRD structure with flow and architecture diagrams", () => {
+    const issues = service.run({
+      prdDocument: basePrd({
+        sections: standardPrdSections(),
+      }),
+      checkTypes: ["prd_completeness"],
+    });
+
+    expect(issues).toEqual([]);
+  });
+
+  it("rejects prototype traces and incomplete design-state coverage without domain hardcoding", () => {
+    const issues = service.run({
+      conversationDesignState: baseState({
+        title: "签到领积分活动",
+        summary: "用户每日签到领取积分奖励。",
+      }),
+      prototypeSpec: baseSpec({
+        pages: [page({ name: "签到页" })],
+      }),
+      prototypeArtifact: baseArtifact({
+        htmlContent: [
+          "<!doctype html><html><head><style>body{font-family:sans-serif}</style></head><body>",
+          "<main>知识库打底：签到页</main>",
+          "<section>业务覆盖：当前原型用于评审后台配置和前台预览。</section>",
+          "</body></html>",
+        ].join(""),
+      }),
+      knowledgeContext: {
+        ...emptyKnowledgeContext(),
+        prototypeRules: [
+          {
+            id: "knowledge-prototype",
+            knowledgeId: "knowledge-prototype",
+            title: "签到活动高保真HTML原型框架",
+            content: "签到领积分活动原型必须复用 Axure HTML 原型的信息架构。",
+            sourceType: "knowledge_base",
+            type: KnowledgeType.prototype_asset_ref,
+          },
+        ],
+      },
+      checkTypes: ["prototype_completeness", "knowledge_rule_compliance"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "qa_prototype_contains_generation_trace", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prototype_contains_review_scaffold", severity: "major" }),
+      expect.objectContaining({ id: "qa_prototype_lacks_interactive_controls", severity: "major" }),
+      expect.objectContaining({ id: "qa_prototype_html_incomplete_state_coverage", severity: "major" }),
+      expect.objectContaining({ id: "qa_prototype_asset_ref_not_used", severity: "major" }),
+    ]));
+  });
+
+  it("derives prototype framework checks from non-sign-in knowledge tables", () => {
+    const issues = service.run({
+      conversationDesignState: baseState({
+        title: "门店预约",
+        summary: "用户选择门店并提交预约。",
+        pages: [{ id: "admin", name: "门店配置页" }, { id: "user", name: "预约提交页" }],
+        businessRules: [{ id: "rule_capacity", title: "预约容量限制" }],
+      }),
+      prototypeSpec: baseSpec({
+        title: "门店预约原型",
+        pages: [page({ id: "admin", name: "门店配置页" }), page({ id: "user", name: "预约提交页" })],
+        knowledgeRefs: [{ knowledgeId: "store-framework", title: "门店预约高保真框架" }],
+      }),
+      prototypeArtifact: baseArtifact({
+        title: "门店预约原型",
+        htmlContent: "<!doctype html><html><head><style>body{font-family:sans-serif}</style></head><body><main>后台门店配置页</main><section>前台预约提交页</section><button>提交预约</button></body></html>",
+      }),
+      knowledgeContext: {
+        ...emptyKnowledgeContext(),
+        prototypeRules: [{
+          id: "store-framework",
+          knowledgeId: "store-framework",
+          title: "门店预约高保真框架",
+          content: [
+            "| 分组 | 必须字段/控件 | 页面表现 |",
+            "| --- | --- | --- |",
+            "| 门店设置 | 门店名称、营业时间、预约容量 | 后台表单 |",
+            "| 用户预约 | 门店选择、预约日期、手机号 | 前台表单 |",
+          ].join("\n"),
+          sourceType: "knowledge_base",
+          type: KnowledgeType.prototype_asset_ref,
+        }],
+      },
+      checkTypes: ["prototype_completeness", "knowledge_rule_compliance"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "qa_prototype_knowledge_framework_incomplete",
+        description: expect.stringContaining("门店设置"),
+      }),
+    ]));
   });
 });
 
@@ -159,6 +285,35 @@ function section(overrides: Partial<RequirementDocument["sections"][number]> = {
     sourcePaths: ["pages"],
     ...overrides,
   };
+}
+
+function standardPrdSections(): RequirementDocument["sections"] {
+  const titles = [
+    ["intro", "1 引言", "本章说明项目背景、文档范围和使用场景。"],
+    ["background", "1.1 项目背景", "签到活动用于提升用户每日活跃。"],
+    ["scope", "1.2 文档范围", "覆盖后台配置、前台签到、积分发放、异常补偿和数据报表。"],
+    ["usage", "1.3 使用场景（必填）", "用户通过端内渠道参与签到，运营在后台配置活动。"],
+    ["business", "2 业务需求", "总体目标：通过签到领积分提升用户连续访问。"],
+    ["links", "2.1 页面链接", "后台入口和前台入口均需覆盖。"],
+    ["rules", "2.2 核心业务规则/功能说明", "同一用户同一自然日只能签到一次。"],
+    ["flow", "2.3 核心流程/状态/页面要求", "流程覆盖运营配置、审核发布、前台签到和报表。"],
+    ["acceptance", "2.4 验收标准", "重复签到不重复发积分。"],
+    ["degradation", "3 业务降级方案（必填）", "积分发放失败进入补偿队列，后台支持重试。"],
+    ["safety", "4 需求安全基线要求（必填）", "保留 21 行安全基线表。"],
+  ] as const;
+  return titles.map(([id, title, content], index) => section({
+    id,
+    title,
+    content,
+    order: index + 1,
+    type: id === "flow" ? "state_rules" : "overview",
+    blocks: id === "flow"
+      ? [
+          { id: "flow_diagram", type: "diagram", title: "产品流程图", diagramSyntax: "mermaid", content: "flowchart TD\nA[配置] --> B[签到]", sourcePaths: [] },
+          { id: "arch_diagram", type: "diagram", title: "产品架构图", diagramSyntax: "mermaid", content: "flowchart LR\nA[后台] --> B[前台]", sourcePaths: [] },
+        ]
+      : undefined,
+  }));
 }
 
 function baseSpec(overrides: Partial<PrototypeSpec> = {}): PrototypeSpec {

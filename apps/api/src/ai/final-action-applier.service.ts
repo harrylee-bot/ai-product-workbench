@@ -3,7 +3,7 @@ import { ConversationDesignStateStatus } from "@prisma/client";
 import crypto from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { ConversationDesignStateService } from "./conversation-design-state.service";
-import { PrototypeService, sanitizePrototypeHtml } from "./prototype.service";
+import { PrototypeService, sanitizePrototypeDocumentHtml } from "./prototype.service";
 import { RequirementDocumentService } from "./requirement-document.service";
 import type {
   AssumptionReference,
@@ -17,11 +17,8 @@ import type {
   RequirementDocument,
   RequirementDocumentDraft,
 } from "./ai-vibe.types";
-import type {
-  DeerFlowFinalAction,
-  DeerFlowKnowledgeReference,
-  DeerFlowResolvedArtifact,
-} from "./deerflow-runtime.service";
+import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "./deerflow-runtime.service";
+import type { DeerFlowKnowledgeReference } from "./deerflow-runtime.service";
 import { formatRequirementDocumentDraft } from "./requirement-document-format";
 
 type CurrentRequirementDocumentRecord = {
@@ -217,7 +214,8 @@ export class FinalActionApplierService {
 
     // 预先净化 HTML，以便在事务中使用
     const rawHtml = artifactDraft.htmlContent ?? artifactDraft.html ?? "";
-    const htmlContent = sanitizePrototypeHtml(rawHtml);
+    const htmlContent = sanitizePrototypeDocumentHtml(rawHtml, artifactDraft.title ?? prototypeSpec.title);
+    assertPersistablePrototypeHtml(htmlContent);
     const hasContent = htmlContent.trim().length > 0;
 
     const result = await this.prototypeService.saveGeneratedPrototypeInTransaction(tx, state, prototypeSpec, artifactDraft, {
@@ -430,6 +428,36 @@ function hasPrototypePayload(
     && Boolean(findArtifactText(artifacts, ["prototype_html", "html", "prototype"], ["text/html"]));
 }
 
+function assertPersistablePrototypeHtml(html: string) {
+  const compact = html.trim();
+  if (!compact) return;
+  const traceHits = findPrototypeGenerationTraceHits(compact);
+  if (traceHits.length) {
+    throw new BadRequestException(`PROTOTYPE_HTML_CONTAINS_GENERATION_TRACE:${traceHits.join(",")}`);
+  }
+  if (!/^<!doctype\s+html/i.test(compact) || !/<html[\s>]/i.test(compact) || !/<style[\s>][\s\S]*<\/style>/i.test(compact)) {
+    throw new BadRequestException("PROTOTYPE_HTML_NOT_COMPLETE_STANDALONE_DOCUMENT");
+  }
+}
+
+function findPrototypeGenerationTraceHits(html: string) {
+  const patterns = [
+    "知识库打底",
+    "公开资料补齐",
+    "模型补齐",
+    "联网补齐",
+    "补齐策略",
+    "外部参考",
+    "externalResearch",
+    "Building an Effective Loyalty Program",
+    "Idempotent requests",
+    "429 Too Many Requests",
+    "模型生成超过时间盒",
+    "可编辑初稿",
+  ];
+  return patterns.filter((pattern) => html.includes(pattern));
+}
+
 function toRecord(value: unknown): Record<string, unknown> | undefined {
   return asRecord(value);
 }
@@ -612,16 +640,19 @@ function findKnowledgeContextMatch(
 function normalizeKnowledgeRefKey(value: string) {
   return value
     .toLowerCase()
-    .replace(/[（）()[\]{}《》"'`~!@#$%^&*+=|\\:;，,。.?？/\s_-]+/g, "")
+    .replace(/[（）()[\]【】"'`]/g, "")
+    .replace(/\s+/g, "")
     .trim();
 }
 
-function summarizeKnowledgeContent(content: string | undefined) {
-  const text = cleanPersistedText(String(content ?? ""))
-    .replace(/^来源文件[:：].*$/gm, "")
+function summarizeKnowledgeContent(value: string) {
+  return value
+    .replace(/^来源文件：.+$/gm, "")
+    .replace(/^切片序号：.+$/gm, "")
+    .replace(/^#+\s+/gm, "")
     .replace(/\s+/g, " ")
-    .trim();
-  return text.slice(0, 240);
+    .trim()
+    .slice(0, 180);
 }
 
 function toTargetDevice(value: unknown): PrototypeTargetDevice {

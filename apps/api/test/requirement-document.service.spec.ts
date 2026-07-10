@@ -239,6 +239,56 @@ describe("PRD requirement document module", () => {
     expect(body).not.toContain("cmr8idyeo0000cb5le0iqdqzx");
   });
 
+  it("builds concrete PRD content from any complete design state without domain hardcoding", () => {
+    const appointmentState = baseState({
+      title: "门店预约",
+      summary: "用户选择门店和时段后提交预约，运营维护门店容量。",
+      businessGoal: "提升到店预约转化并控制门店接待容量。",
+      pages: [
+        { id: "page_store_config", name: "门店配置页", entryPath: "运营后台 > 门店管理", description: "维护门店、营业时间和预约容量" },
+        { id: "page_booking", name: "预约提交页", route: "/booking/store", description: "用户选择门店、日期和时段并提交预约" },
+      ],
+      features: [{ id: "feature_booking", name: "提交预约", description: "用户确认门店和时段后生成预约记录" }],
+      backendConfigs: [{ id: "config_capacity", name: "预约容量", description: "运营按门店和时段配置可预约人数" }],
+      frontendRules: [{ id: "front_result", title: "提交反馈", description: "成功展示预约编号，失败展示原因" }],
+      businessRules: [{ id: "rule_capacity", title: "容量限制", description: "时段已满时禁止继续提交预约" }],
+      stateRules: [{ id: "state_confirmed", name: "已预约", description: "预约成功后进入已预约状态" }],
+      exceptionScenarios: [{ id: "exception_full", title: "时段已满", expectedBehavior: "提示选择其他时段" }],
+      acceptanceCriteria: [{ id: "accept_capacity", title: "容量校验", description: "达到时段容量后新用户无法提交并看到明确提示" }],
+    });
+    const formatted = formatRequirementDocumentDraft(
+      {
+        ...prdDraft(appointmentState),
+        sections: [],
+      },
+      appointmentState,
+      { author: "张三", date: "2026-07-08" },
+    );
+    const body = formatted.sections.map((section) => [
+      section.title,
+      section.content,
+      ...(section.blocks ?? []).map((block) => `${block.title ?? ""}\n${block.content}`),
+    ].join("\n")).join("\n");
+    const coreRules = formatted.sections.find((section) => section.id === "core_rules")?.content ?? "";
+    const acceptance = formatted.sections.find((section) => section.id === "acceptance_criteria")?.content ?? "";
+
+    expect(formatted.title).toBe("门店预约需求说明书");
+    expect(coreRules).toContain("提交预约");
+    expect(coreRules).toContain("预约容量");
+    expect(coreRules).toContain("容量限制");
+    expect(coreRules).toContain("时段已满时禁止继续提交预约");
+    expect(acceptance).toContain("达到时段容量后新用户无法提交");
+    expect(body).toContain("门店配置页");
+    expect(body).toContain("预约提交页");
+    expect(body).toContain("产品流程图");
+    expect(body).toContain("产品架构图");
+    expect(body).not.toContain("签到");
+    expect(body).not.toContain("积分");
+    expect(body).not.toContain("本需求涉及新增/修改的接口");
+    expect(body).not.toContain("符合评审确认范围");
+    expect(body).not.toContain("具体上线范围以业务评审、技术方案和联调结果为准");
+  });
+
   it("updates a section, creates a version, and syncs the PRD back into ConversationDesignState", async () => {
     const draft = prdDraft(baseState());
     prisma.requirementDocument.findUnique.mockResolvedValue({

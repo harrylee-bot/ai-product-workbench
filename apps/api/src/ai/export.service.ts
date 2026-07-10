@@ -524,7 +524,11 @@ function renderCoreRulesFallback(document: RequirementDocument, state?: Conversa
   }
   return renderTable(
     ["功能点", "业务规则", "页面要求"],
-    rows.slice(0, 8).map((item) => [item, "以本需求评审确认的配置和规则为准。", "页面需展示清晰状态、操作入口和异常提示。"]),
+    rows.slice(0, 8).map((item) => [
+      item,
+      "需明确触发条件、前置校验、成功结果、失败处理、重复操作规则和数据记录口径。",
+      "页面需展示当前状态、可执行动作、必填校验、异常提示和处理入口。",
+    ]),
   );
 }
 

@@ -110,7 +110,7 @@ export function formatRequirementDocumentDraft(
     level: 2,
     content: [
       findSectionContent(sourceSections, ["user_scenarios"], /使用场景|用户场景/)
-        || `运营人员在活动配置平台完成${baseName}相关配置，用户或下游系统按配置完成页面访问、结果查询或状态反馈。`,
+        || `运营或管理人员在后台完成${baseName}相关配置与处理，目标用户在前台完成核心操作并获得明确结果反馈，管理人员可查询状态和数据记录。`,
       renderMarkdownTable(["序号", "活动投放的可选渠道", "是否投放"], buildChannelRows(sourceSections, state)),
     ].join("\n\n"),
     sourcePaths: ["userScenarios"],
@@ -133,40 +133,43 @@ export function formatRequirementDocumentDraft(
     sourcePaths: ["pages"],
   });
 
-  const coreSections = sourceSections
-    .filter((section) => !isStructuralSection(section))
-    .filter((section) => section.content.trim() || section.blocks?.length)
-    .slice(0, 6);
-  if (coreSections.length) {
-    coreSections.forEach((section, index) => {
-      add({
-        ...section,
-        id: `core_${index + 1}`,
-        title: `2.${index + 2} ${cleanHeadingTitle(section.title) || "核心业务规则/功能说明"}`,
-        type: section.type,
-        level: 2,
-        sourcePaths: section.sourcePaths ?? [],
-      });
-    });
-  } else {
-    add({
-      id: "core_rules",
-      title: "2.2 核心业务规则/功能说明",
-      type: "business_rules",
-      level: 2,
-      content: buildCoreRulesFallback(baseName, state),
-      sourcePaths: ["features", "businessRules"],
-    });
-  }
+  const coreRuleSection = findSectionWithContentOrBlocks(
+    sourceSections,
+    ["business_rules", "backend_configs", "frontend_rules"],
+    /核心业务规则|功能说明|业务规则|配置规则|字段|控件/,
+  );
+  add({
+    id: "core_rules",
+    title: "2.2 核心业务规则/功能说明",
+    type: "business_rules",
+    level: 2,
+    content: coreRuleSection?.content.trim() || buildCoreRulesFallback(baseName, state),
+    blocks: coreRuleSection?.blocks,
+    sourcePaths: coreRuleSection?.sourcePaths ?? ["features", "businessRules"],
+  });
 
-  const acceptanceNumber = `2.${sections.filter((section) => /^2\./.test(section.title)).length + 1}`;
+  const processSection = findSectionWithContentOrBlocks(
+    sourceSections,
+    ["state_rules"],
+    /核心流程|状态|页面要求|流程|流转|产品流程|产品架构/,
+  );
+  add({
+    id: "core_flow_state",
+    title: "2.3 核心流程/状态/页面要求",
+    type: "state_rules",
+    level: 2,
+    content: processSection?.content.trim() || buildProcessFallback(baseName, state),
+    blocks: ensureProcessDiagramBlocks(processSection?.blocks, baseName, state),
+    sourcePaths: processSection?.sourcePaths ?? ["process", "stateRules", "pages"],
+  });
+
   add({
     id: "acceptance_criteria",
-    title: `${acceptanceNumber} 验收标准`,
+    title: "2.4 验收标准",
     type: "acceptance_criteria",
     level: 2,
     content: findSectionContent(sourceSections, ["acceptance_criteria"], /验收/)
-      || buildAcceptanceFallback(baseName),
+      || buildAcceptanceFallback(baseName, state),
     sourcePaths: ["acceptanceCriteria"],
   });
   add({
@@ -204,7 +207,7 @@ export function formatRequirementDocumentDraft(
     sections,
     validationNotes: [
       ...(draft.validationNotes ?? []),
-      ...buildFormatValidationNotes(sourceSections),
+      ...buildFormatValidationNotes(sections),
     ],
   };
 }
@@ -311,7 +314,8 @@ function buildTocMarkdown(sections: RequirementDocSection[] = []) {
     "2 业务需求",
     "2.1页面链接",
     "2.2核心业务规则/功能说明",
-    "2.3验收标准",
+    "2.3核心流程/状态/页面要求",
+    "2.4验收标准",
     "3. 业务降级方案（必填）",
     "4. 需求安全基线要求（必填）",
   ].join("\n");
@@ -328,10 +332,21 @@ function findSectionContent(
   )?.content.trim();
 }
 
+function findSectionWithContentOrBlocks(
+  sections: RequirementDocSection[],
+  types: RequirementDocSection["type"][],
+  titlePattern: RegExp,
+) {
+  return sections.find((section) =>
+    (types.includes(section.type) || titlePattern.test(section.title))
+    && (section.content.trim() || section.blocks?.length),
+  );
+}
+
 function buildBackgroundFallback(baseName: string, state?: ConversationDesignState) {
   return state?.background
     || state?.summary
-    || `${baseName}涉及活动配置平台相关业务能力。本次需求用于补充配置、页面展示、状态联动、结果校验和运营验收口径，支撑业务上线评审与测试用例编写。`;
+    || `${baseName}涉及现有产品平台的前后台业务能力。本次需求用于补充配置、页面展示、状态联动、结果校验和验收口径，支撑业务评审、研发实现与测试用例编写。`;
 }
 
 function buildScopeFallback(baseName: string, state?: ConversationDesignState) {
@@ -343,7 +358,7 @@ function buildScopeFallback(baseName: string, state?: ConversationDesignState) {
   ];
   return rows.length
     ? rows.map((item) => `- ${item}`).join("\n")
-    : `- ${baseName}相关页面、配置项、业务流程、验收标准、降级方案和安全基线。\n- 具体上线范围以业务评审、技术方案和联调结果为准。`;
+    : `- ${baseName}相关运营后台配置、前台页面展示、业务流程、验收标准、降级方案和安全基线。\n- 覆盖配置保存、预览审核、发布上线、用户参与、结果记录、异常处理和数据报表闭环。`;
 }
 
 function buildChannelRows(sections: RequirementDocSection[], state?: ConversationDesignState) {
@@ -363,49 +378,131 @@ function getBusinessGoal(baseName: string, sections: RequirementDocSection[], st
 }
 
 function buildPageLinksFallback(baseName: string, state?: ConversationDesignState) {
-  const pageItems = compactRecordItems(state?.pages, "页面");
-  return [
-    `- 页面入口：${pageItems[0] || `${baseName}相关页面入口以活动配置平台实际菜单为准。`}`,
-    "- 页面 URL / 路由：以实际上线地址为准。",
-    "- 页面承载能力：配置、查询、展示、跳转、导出或结果反馈能力，不能只依赖链接说明。",
-  ].join("\n");
-}
-
-function buildCoreRulesFallback(baseName: string, state?: ConversationDesignState) {
-  const rows = [
-    ...compactRecordItems(state?.features, "功能点"),
-    ...compactRecordItems(state?.businessRules, "业务规则"),
-    ...compactRecordItems(state?.stateRules, "状态规则"),
-  ];
-  if (!rows.length) {
-    rows.push(`${baseName}需按业务配置完成展示、提交、查询、状态变更和结果反馈。`);
+  const pages = arrayOfRecords(state?.pages);
+  if (!pages.length) {
+    return [
+      `- 后台入口：${baseName}管理入口，承载配置、审核、发布、查询和数据治理。`,
+      `- 前台入口：${baseName}用户入口，承载核心操作、结果反馈和异常状态。`,
+      "- 页面 URL / 路由：以实际上线地址为准；最终路由不得替代本文中的页面职责和状态要求。",
+    ].join("\n");
   }
   return renderMarkdownTable(
-    ["功能点", "业务规则", "页面要求"],
-    rows.slice(0, 8).map((item) => [item, "以本需求评审确认的配置和规则为准。", "页面需展示清晰状态、操作入口和异常提示。"]),
+    ["页面/入口", "进入方式/路由", "页面职责"],
+    pages.map((page, index) => [
+      recordName(page, `页面${index + 1}`),
+      recordValue(page, ["entry", "entryPath", "route", "url", "path", "menuPath", "navigation"])
+        || "由上级菜单或业务入口进入，路由以实际上线地址为准",
+      recordValue(page, ["description", "purpose", "summary", "responsibility", "content"])
+        || "展示当前业务状态、可执行操作、结果反馈和异常处理入口",
+    ]),
   );
 }
 
-function buildInterfaceFallback(baseName: string, sections: RequirementDocSection[], state?: ConversationDesignState) {
-  const text = JSON.stringify({ sections, state });
-  const type = /新增|新建|创建/.test(text) ? "新增/修改" : "修改";
-  return [
-    "具体接口地址以技术方案和联调结果为准，需求侧建议如下：",
-    renderMarkdownTable(
-      ["类型", "接口/能力", "说明"],
-      [[type, `${baseName}配置、查询或状态同步能力`, "调用方为前台页面、运营后台或活动配置平台；被调用方为对应业务服务。触发时机包括页面加载、配置保存、发布审核、结果查询和状态回调；成功时返回配置/状态/结果数据，失败时需要返回明确错误码和提示文案。"]],
-    ),
-  ].join("\n\n");
+function buildCoreRulesFallback(baseName: string, state?: ConversationDesignState) {
+  const rows = collectRequirementRows(state);
+  if (!rows.length) return buildGenericCoreRules(baseName);
+  return renderMarkdownTable(
+    ["功能点", "业务规则", "页面要求"],
+    rows.slice(0, 12),
+  );
 }
 
-function buildAcceptanceFallback(baseName: string) {
+function buildProcessFallback(baseName: string, state?: ConversationDesignState) {
+  const pages = compactRecordItems(state?.pages, "页面").slice(0, 5);
+  const states = compactRecordItems(state?.stateRules, "状态").slice(0, 5);
+  const exceptions = compactRecordItems(state?.exceptionScenarios, "异常").slice(0, 5);
+  const pageText = pages.length ? pages.join("、") : "后台配置页、前台展示页、审核发布页、数据报表页";
+  const stateText = states.length ? states.join("、") : "草稿、待审核、已发布、已下线、失败待处理";
+  const exceptionText = exceptions.length ? exceptions.join("、") : "失败、重复、超时、无权限、空态";
+  return [
+    `${baseName}流程需要覆盖${pageText}。业务从运营配置开始，经预览校验、提交审核、发布上线后进入用户参与或结果反馈，最终沉淀为数据报表和异常处理记录。`,
+    `状态要求：至少覆盖${stateText}，每个状态必须说明触发条件、可执行动作和页面表现。`,
+    `异常要求：至少覆盖${exceptionText}，不得出现无提示失败、重复提交、错误成功态或状态不一致。`,
+  ].join("\n");
+}
+
+function ensureProcessDiagramBlocks(
+  blocks: RequirementDocSection["blocks"],
+  baseName: string,
+  state?: ConversationDesignState,
+) {
+  const existing = blocks ?? [];
+  const hasFlow = existing.some((block) => block.type === "diagram" && /流程|flow/i.test(`${block.title ?? ""}\n${block.content}`));
+  const hasArchitecture = existing.some((block) => block.type === "diagram" && /架构|architecture/i.test(`${block.title ?? ""}\n${block.content}`));
+  const additions: NonNullable<RequirementDocSection["blocks"]> = [];
+  const pageNames = arrayOfRecords(state?.pages).map((item, index) => recordName(item, `页面${index + 1}`)).slice(0, 4);
+  const firstPage = mermaidLabel(pageNames[0] || "后台配置/管理页面");
+  const secondPage = mermaidLabel(pageNames[1] || "审核/处理页面");
+  const userPage = mermaidLabel(pageNames[2] || "前台用户页面");
+  if (!hasFlow) {
+    additions.push({
+      id: "product_flow_diagram",
+      type: "diagram",
+      title: "产品流程图",
+      diagramSyntax: "mermaid",
+      content: [
+        "flowchart TD",
+        `  A[进入${mermaidLabel(baseName)}] --> B[${firstPage}]`,
+        `  B --> C[${secondPage}]`,
+        "  C -->|通过| D[提交审核]",
+        "  C -->|失败| B",
+        "  D -->|审核通过| E[发布上线]",
+        "  D -->|审核驳回| B",
+        `  E --> F[${userPage}]`,
+        "  F --> G{资格/状态校验}",
+        "  G -->|通过| H[用户参与并生成记录]",
+        "  G -->|不通过| I[展示不可参与原因]",
+        "  H --> J[结果反馈/权益发放/状态更新]",
+        "  J --> K[数据报表与异常处理]",
+      ].join("\n"),
+    });
+  }
+  if (!hasArchitecture) {
+    additions.push({
+      id: "product_architecture_diagram",
+      type: "diagram",
+      title: "产品架构图",
+      diagramSyntax: "mermaid",
+      content: [
+        "flowchart LR",
+        "  OP[运营后台] --> CFG[配置中心]",
+        "  CFG --> AUDIT[审核发布]",
+        "  AUDIT --> PAGE[前台页面]",
+        "  PAGE --> RULE[业务规则校验]",
+        "  RULE --> RECORD[业务记录/状态流水]",
+        "  RECORD --> BENEFIT[权益/结果处理]",
+        "  BENEFIT --> COMP[异常补偿/人工处理]",
+        "  RECORD --> REPORT[数据报表]",
+        "  COMP --> REPORT",
+      ].join("\n"),
+    });
+  }
+  return [...existing, ...additions];
+}
+
+function buildAcceptanceFallback(baseName: string, state?: ConversationDesignState) {
+  const criteria = arrayOfRecords(state?.acceptanceCriteria);
+  if (criteria.length) {
+    return renderMarkdownTable(
+      ["序号", "验收项", "验收标准"],
+      criteria.slice(0, 12).map((item, index) => [
+        String(index + 1),
+        recordName(item, `验收项${index + 1}`),
+        recordValue(item, ["description", "criterion", "standard", "expectedBehavior", "expectedResult", "content"])
+          || "触发条件、页面反馈、状态记录和最终业务结果均与本文规则一致",
+      ]),
+    );
+  }
+  const pageNames = arrayOfRecords(state?.pages).map((item, index) => recordName(item, `页面${index + 1}`)).slice(0, 4);
+  const ruleNames = arrayOfRecords(state?.businessRules).map((item, index) => recordName(item, `规则${index + 1}`)).slice(0, 4);
+  const exceptionNames = arrayOfRecords(state?.exceptionScenarios).map((item, index) => recordName(item, `异常${index + 1}`)).slice(0, 4);
   return renderMarkdownTable(
     ["序号", "验收项", "验收标准"],
     [
-      ["1", "页面可见性", `${baseName}相关入口、页面标题、配置项和结果展示符合评审确认范围。`],
-      ["2", "业务规则", "配置保存、查询、状态流转、重复操作、空态和异常提示均符合需求规则。"],
-      ["3", "异常处理", "失败、超时和无权限场景均有明确页面提示、状态记录和后续处理方式。"],
-      ["4", "存量影响", "存量活动、存量配置和历史页面不受本需求影响，新增能力可按权限和配置开关控制。"],
+      ["1", "页面可见性", `${pageNames.join("、") || `${baseName}前后台页面`}的入口、标题、操作权限和结果展示与本文一致。`],
+      ["2", "业务规则", `${ruleNames.join("、") || "核心业务规则"}在正常、重复操作和边界条件下均得到一致执行。`],
+      ["3", "异常处理", `${exceptionNames.join("、") || "失败、超时、无权限和空态"}均有明确页面提示、状态记录和后续处理方式。`],
+      ["4", "存量影响", "存量业务数据、既有配置和历史页面不受本需求影响，新增能力可按权限和配置开关控制。"],
     ],
   );
 }
@@ -414,7 +511,7 @@ function buildDegradationFallback(baseName: string) {
   return [
     `如${baseName}涉及的配置保存、发布审核、查询能力、状态同步或页面跳转出现异常，前台页面应保留当前可用状态并展示明确失败提示，不允许出现空白页、重复提交或错误成功态。`,
     "运营后台应记录失败原因、请求时间、关键配置编号和操作人，支持人工核对后重试或回滚到上一版已生效配置。",
-    "下游系统或活动页面不可用时，平台应暂停继续发布或标记为待处理，待接口恢复后由运营重新触发同步，确保用户可见状态、后台配置状态和交易/活动结果保持一致。",
+    "下游系统或目标页面不可用时，平台应暂停后续处理或标记为待处理，待依赖恢复后由管理人员重新触发同步，确保用户可见状态、后台配置状态和最终业务结果保持一致。",
   ].join("\n");
 }
 
@@ -463,6 +560,76 @@ function renderMarkdownTable(headers: string[], rows: string[][]) {
     `| ${headers.map(() => "---").join(" | ")} |`,
     ...rows.map((row) => `| ${row.map(escapeMarkdownCell).join(" | ")} |`),
   ].join("\n");
+}
+
+function collectRequirementRows(state?: ConversationDesignState) {
+  const groups: Array<{
+    label: string;
+    items: unknown;
+    defaultPageRequirement: string;
+  }> = [
+    { label: "功能", items: state?.features, defaultPageRequirement: "页面展示可执行操作、操作结果和下一步入口" },
+    { label: "后台配置", items: state?.backendConfigs, defaultPageRequirement: "后台展示字段、默认值、必填校验、权限和保存结果" },
+    { label: "前台规则", items: state?.frontendRules, defaultPageRequirement: "前台展示正常、空态、禁用、失败和结果反馈" },
+    { label: "业务规则", items: state?.businessRules, defaultPageRequirement: "相关页面按规则控制操作可用性、状态和提示文案" },
+    { label: "状态规则", items: state?.stateRules, defaultPageRequirement: "页面明确展示当前状态、允许操作和状态变更结果" },
+  ];
+
+  return groups.flatMap((group) => arrayOfRecords(group.items).map((item, index) => {
+    const name = recordName(item, `${group.label}${index + 1}`);
+    const rule = recordValue(item, [
+      "rule",
+      "description",
+      "content",
+      "summary",
+      "triggerCondition",
+      "precondition",
+      "expectedBehavior",
+      "expectedResult",
+      "defaultValue",
+    ]) || `${name}在满足前置条件时执行，成功后写入业务状态和操作记录，失败时保留原因并允许后续处理`;
+    const pageRequirement = recordValue(item, [
+      "pageRequirement",
+      "uiRequirement",
+      "displayRule",
+      "frontendBehavior",
+      "pageBehavior",
+    ]) || group.defaultPageRequirement;
+    return [`${group.label}：${name}`, rule, pageRequirement];
+  }));
+}
+
+function buildGenericCoreRules(baseName: string) {
+  return renderMarkdownTable(
+    ["功能点", "业务规则", "页面要求"],
+    [
+      ["后台配置", `${baseName}后台提供创建、编辑、保存、查询和权限控制，保存成功后形成可追踪版本。`, "必填项、默认值、权限、保存成功和保存失败状态均需可见。"],
+      ["前台使用", `${baseName}前台按用户资格和当前业务状态展示可执行操作，成功后立即反馈结果。`, "覆盖正常态、空态、禁用态、无权限态和失败态。"],
+      ["状态流转", `${baseName}每次关键操作均记录操作前状态、操作后状态、操作时间和操作结果。`, "当前状态、允许操作和不可操作原因必须清晰展示。"],
+      ["数据治理", `${baseName}关键结果可查询、筛选和审计，失败记录可定位原因并进入后续处理。`, "后台提供筛选、明细、状态标签和处理入口。"],
+    ],
+  );
+}
+
+function arrayOfRecords(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    : [];
+}
+
+function recordName(item: Record<string, unknown>, fallback: string) {
+  return recordValue(item, ["name", "title", "label", "id"]) || fallback;
+}
+
+function recordValue(item: Record<string, unknown>, keys: string[]) {
+  return keys
+    .map((key) => item[key])
+    .map((value) => typeof value === "string" || typeof value === "number" ? String(value).trim() : "")
+    .find(Boolean) || "";
+}
+
+function mermaidLabel(value: string) {
+  return value.replace(/[\[\]{}()<>"'`|]/g, " ").replace(/\s+/g, " ").trim().slice(0, 36) || "业务页面";
 }
 
 function escapeMarkdownCell(value: string) {
