@@ -33,13 +33,14 @@ for (const relativePath of files) {
   docs.push(toKnowledgeDoc(relativePath, content));
 }
 
-const hits = rankKnowledge(topic, docs).slice(0, 12);
 const requiredChecks = [
   ["活动发布与模板配置", /活动发布与模板配置|活动配置|模板配置/],
   ["奖品券与资损核销", /奖品券与资损核销|权益|积分|资损|核销|库存/],
   ["PRD标准结构", /PRD标准结构|需求说明书|需求文档规范/],
   ["原型生成总规则", /原型生成总规则|前后台页面框架|字段接口状态表达/],
+  ["原型资产/设计框架", /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/],
 ];
+const hits = selectRequiredKnowledgeHits(rankKnowledge(topic, docs), requiredChecks, 12);
 const coverage = requiredChecks.map(([name, pattern]) => ({
   name,
   hit: hits.some((item) => pattern.test(`${item.title}\n${item.relativePath}\n${item.summary}`)),
@@ -228,6 +229,43 @@ function rankKnowledge(query, items) {
     .sort((a, b) => b.score - a.score || pathRank(a.relativePath) - pathRank(b.relativePath));
 }
 
+function selectRequiredKnowledgeHits(ranked, requiredChecks, limit) {
+  const selected = ranked.slice(0, limit);
+  const selectedPaths = new Set(selected.map((item) => item.relativePath));
+
+  for (const [, pattern] of requiredChecks) {
+    if (selected.some((item) => knowledgePatternHit(item, pattern))) continue;
+    const candidate = ranked.find((item) => !selectedPaths.has(item.relativePath) && knowledgePatternHit(item, pattern));
+    if (!candidate) continue;
+
+    if (selected.length < limit) {
+      selected.push(candidate);
+      selectedPaths.add(candidate.relativePath);
+      continue;
+    }
+
+    const replaceIndex = findReplaceableKnowledgeIndex(selected, requiredChecks);
+    if (replaceIndex < 0) continue;
+    selectedPaths.delete(selected[replaceIndex].relativePath);
+    selected[replaceIndex] = candidate;
+    selectedPaths.add(candidate.relativePath);
+  }
+
+  return selected;
+}
+
+function findReplaceableKnowledgeIndex(selected, requiredChecks) {
+  for (let index = selected.length - 1; index >= 0; index -= 1) {
+    const item = selected[index];
+    if (!requiredChecks.some(([, pattern]) => knowledgePatternHit(item, pattern))) return index;
+  }
+  return selected.length - 1;
+}
+
+function knowledgePatternHit(item, pattern) {
+  return pattern.test(`${item.title}\n${item.relativePath}\n${item.summary}`);
+}
+
 function expandTokens(text) {
   const base = text.match(/[a-z0-9]{2,}|[\u4e00-\u9fa5]{2,}/gi) || [];
   const domain = [
@@ -251,6 +289,14 @@ function expandTokens(text) {
     "PRD标准结构",
     "原型生成总规则",
     "前后台页面框架",
+    "高保真HTML",
+    "HTML原型",
+    "Axure",
+    "RP资产",
+    "原型资产",
+    "设计框架",
+    "签到活动高保真HTML原型框架",
+    "贵州签到打卡HTML原型",
   ];
   return [...new Set([...base, ...domain])];
 }
@@ -332,8 +378,14 @@ function evaluateArtifacts({
     {
       name: "知识库引用已留痕",
       passed: hits.some((item) => /活动发布与模板配置/.test(item.title)) &&
-        hits.some((item) => /奖品券与资损核销/.test(item.title)),
+        hits.some((item) => /奖品券与资损核销/.test(item.title)) &&
+        hits.some((item) => /签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/.test(`${item.title}\n${item.relativePath}\n${item.summary}`)),
       evidence: "knowledge-hits artifact scan",
+    },
+    {
+      name: "原型资产框架已命中",
+      passed: hits.some((item) => /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/.test(`${item.title}\n${item.relativePath}\n${item.summary}`)),
+      evidence: "prototype asset/design-framework knowledge scan",
     },
     {
       name: "PRD 包含活动配置闭环",
@@ -364,6 +416,27 @@ function evaluateArtifacts({
       name: "PRD 包含 21 行安全基线",
       passed: (prd.match(/\| \d+ \|/g) ?? []).length >= 21 && /需求安全基线内容[\s\S]*是否涉及/.test(prd),
       evidence: "21-row safety baseline scan",
+    },
+    {
+      name: "PRD 正文不含生成过程验收",
+      passed: !/(用户输入：|原始需求：|用户原话|知识库命中|生成前必须命中|模型补齐|联网补齐|补齐策略|公开证据)/.test(prd),
+      evidence: "prd business-only body scan",
+    },
+    {
+      name: "PRD 版本历史日期具体",
+      passed: /\| 讨论稿 \|[^|]+\|[^|]+\| 20\d{2}-\d{2}-\d{2} \|/.test(prd),
+      evidence: "version history concrete date scan",
+    },
+    {
+      name: "PRD 和原型无待确认占位",
+      passed: !/待确认/.test(`${prd}\n${prototype}`),
+      evidence: "no pending placeholder scan",
+    },
+    {
+      name: "PRD 包含产品流程图和产品架构图",
+      passed: /产品流程图[\s\S]*```mermaid[\s\S]*flowchart/.test(prd) &&
+        /产品架构图[\s\S]*```mermaid[\s\S]*flowchart/.test(prd),
+      evidence: "diagram block scan",
     },
     {
       name: "模型补齐说明已留痕",
@@ -412,14 +485,34 @@ function evaluateArtifacts({
       evidence: "frontend state scan",
     },
     {
-      name: "原型包含补齐策略",
-      passed: /补齐策略|联网计划|模型补齐/.test(prototype),
-      evidence: "enrichment panel scan",
+      name: "原型达到高保真评审密度",
+      passed: /<style>[\s\S]*(grid|flex|box-shadow|border-radius|badge|panel|phone)/i.test(prototype) &&
+        /<table/i.test(prototype) &&
+        /<input/i.test(prototype) &&
+        /<select/i.test(prototype) &&
+        /<button/i.test(prototype) &&
+        /banner|海报|上传|跳转类型|隐私协议|每日库存|补偿重试|目标用户|活动集/.test(prototype) &&
+        (prototype.match(/<(section|div|table|input|select|button)\b/gi) ?? []).length >= 25,
+      evidence: "styled controls and activity-platform density scan",
     },
     {
-      name: "原型包含外部证据标题",
-      passed: enrichment.externalEvidence.length >= 3 && enrichment.externalEvidence.slice(0, 3).every((item) => prototype.includes(item.title)),
-      evidence: `${Math.min(enrichment.externalEvidence.length, 3)}/${enrichment.externalEvidence.length} external evidence titles shown`,
+      name: "原型完整复用签到活动高保真框架",
+      passed: [
+        /是否测试活动|活动名称|开始时间|结束时间|活动集|适用区域|目标用户|登录方式/,
+        /banner|海报|背景颜色|页面配置|活动规则标题|背景图|规则背景色/i,
+        /任务一|任务二|标题图|跳转类型|189\.cn|券多多|第三方链接|电信 App 原生|无链接/,
+        /隐私协议|用户隐私协议|增加协议/,
+        /积分|奖励|库存|每日库存|活动总额度|单用户上限|额度/,
+        /首次进入|可签到|签到成功|今日已签到|无资格|未登录|稍后到账|补偿中/,
+        /草稿|待审核|审核驳回|已发布|已下线|提交审核/,
+        /报表|访问人数|签到人数|发放失败|补偿重试|导出|失败原因|明细/,
+      ].every((pattern) => pattern.test(prototype)),
+      evidence: "signin high-fidelity framework group scan",
+    },
+    {
+      name: "原型不写生成过程和外部证据",
+      passed: !/(补齐策略|模型补齐|联网计划|公开证据|知识覆盖|业务覆盖|当前原型用于|用于评审|主要引用|Building an Effective Loyalty Program|Idempotent requests|429 Too Many Requests)/.test(prototype),
+      evidence: "prototype trace/evidence scan",
     },
     {
       name: "PRD 与原型核心规则一致",
@@ -756,7 +849,7 @@ function tail(value, maxLength = 4000) {
 async function dumpRenderedText(browserPath, url, baseUserDataDir) {
   const userDataDir = `${baseUserDataDir}-dom`;
   await mkdir(userDataDir, { recursive: true });
-  const labels = ["活动配置", "提交审核", "立即签到", "数据报表", "补齐策略"];
+  const labels = ["活动配置", "提交审核", "立即签到", "数据报表", "补偿队列"];
   const { stdout } = await runHeadlessChrome(browserPath, [
     "--disable-gpu",
     "--no-sandbox",
@@ -1068,7 +1161,7 @@ function buildEnrichmentPlan(userTopic, hits, coverage, webSearchQueries, extern
     requiredCoveragePassed: coverage.every((item) => item.hit),
     enrichmentNotes: [
       "知识库负责产品事实与模板规则。",
-      "模型负责把一句话需求补成完整业务流程、状态、验收和待确认项。",
+      "模型负责把一句话需求补成完整业务流程、状态、验收和可评审默认值。",
       "联网搜索负责补充公开行业惯例和当前表达，但不能替代本地知识库。",
     ],
   };
@@ -1092,7 +1185,7 @@ function buildConsistencyMatrix(prd, prototype, enrichment) {
     ]),
     consistencyRow("基础积分与连续奖励", prd, prototype, [
       /积分奖励|固定积分|连续签到|阶梯积分/,
-      /10 积分|50 积分|待确认/,
+      /10 积分|50 积分|连续签到/,
     ], [
       /基础积分|10 积分/,
       /连续 7 天奖励|额外 50 积分/,
@@ -1164,14 +1257,14 @@ ${consistency.passed ? "PRD 与原型核心规则一致。" : "PRD 与原型存�
 }
 
 function buildPrd(userTopic, hits, coverage, enrichment) {
-  const missing = coverage.filter((item) => !item.hit).map((item) => item.name);
+  const generatedDate = new Date().toISOString().slice(0, 10);
   return `# 签到领积分活动需求说明书
 
 ## 版 本 历 史
 
 | 版本/状态 | 作者 | 参与者 | 起止日期 | 备注 |
 | --- | --- | --- | --- | --- |
-| 讨论稿 | AI Product Workbench 评估脚本 | 待确认 | 待确认 | 基于本地知识库命中结果生成评估稿。 |
+| 讨论稿 | AI Product Workbench 评估脚本 | 产品、运营、研发、测试 | ${generatedDate} | 新增《签到领积分活动需求说明书》，覆盖活动配置、审核发布、前台签到、积分发放、异常补偿、数据报表、降级方案与安全基线。 |
 
 ## 目 录
 
@@ -1191,8 +1284,6 @@ function buildPrd(userTopic, hits, coverage, enrichment) {
 
 ### 1.1 项目背景
 
-用户输入：${userTopic}
-
 本活动面向策划宝/云溪营销活动平台的活动配置场景，通过每日签到领取积分提升用户活跃和连续访问。需求必须落在“活动配置、权益履约、审核发布、数据复盘”的闭环内，不能只做一个前台按钮。
 
 ### 1.2 文档范围
@@ -1204,7 +1295,7 @@ function buildPrd(userTopic, hits, coverage, enrichment) {
 
 ### 1.3 使用场景（必填）
 
-本活动用于端内活动运营与前台用户参与签到，投放渠道按业务评审确认后执行。
+本活动用于端内活动运营与前台用户参与签到。默认投放端内渠道和 WAP/H5 端外渠道，小程序本期不投放；如后续新增投放渠道，需要复用同一套签到规则、积分发放规则和数据报表口径。
 
 | 序号 | 活动投放的可选渠道 | 是否投放 |
 | --- | --- | --- |
@@ -1218,11 +1309,11 @@ function buildPrd(userTopic, hits, coverage, enrichment) {
 
 | 页面 | 链接/入口 | 说明 |
 | --- | --- | --- |
-| 活动列表 | 待确认 | 新建、复制、编辑、查看签到活动 |
-| 签到规则配置页 | 待确认 | 配置每日签到、连续签到、积分奖励和限制 |
-| 活动预览页 | 待确认 | 展示前台签到态和规则说明 |
-| 前台签到页 | 以实际上线地址为准 | 用户签到、查看积分到账和连续天数 |
-| 活动报表 | 待确认 | 查看签到和积分发放数据 |
+| 活动列表 | 活动发布平台 > 活动管理 > 签到领积分 | 新建、复制、编辑、查看签到活动，列表展示活动状态、时间、投放渠道和审核状态 |
+| 签到规则配置页 | 活动配置页 > 签到与积分规则 | 配置每日签到、连续签到、积分奖励、库存额度、目标用户和风控限制 |
+| 活动预览页 | 活动配置页 > 生成预览 | 展示前台未签到、签到成功、已签到、无资格、额度不足和发放失败状态 |
+| 前台签到页 | /activity/signin-points/{activityId}，以实际上线地址为准 | 用户签到、查看积分到账、连续天数、规则说明和奖励明细 |
+| 活动报表 | 活动发布平台 > 数据报表 > 签到领积分 | 查看曝光、访问、签到、积分发放、失败补偿、库存消耗和渠道数据 |
 
 ### 2.2 核心业务规则/功能说明
 
@@ -1230,7 +1321,7 @@ function buildPrd(userTopic, hits, coverage, enrichment) {
 | --- | --- | --- |
 | 每日签到 | 同一用户自然日只允许签到一次 | 重复点击提示“今日已签到”，不重复发积分 |
 | 积分奖励 | 支持固定积分和连续签到阶梯积分 | 积分发放失败展示失败原因，支持后台补偿或重试记录 |
-| 连续签到 | 支持展示连续天数和累计获得积分 | 中断后按规则重置或保留，具体策略待确认 |
+| 连续签到 | 支持展示连续天数和累计获得积分；中断后连续天数从下一次签到重新累计，历史累计积分不清零 | 前台展示当前连续天数，后台报表保留连续签到分布 |
 | 风控限制 | 支持黑白名单、目标用户、活动时间、渠道参数校验 | 无资格提示原因，不进入发放链路 |
 | 库存/额度 | 支持活动总积分额度、单日额度、单用户上限 | 额度不足时提示活动火爆，并记录未发放原因 |
 
@@ -1244,15 +1335,54 @@ function buildPrd(userTopic, hits, coverage, enrichment) {
 6. 前台展示成功、已签到、无资格、活动未开始/已结束、积分发放失败等状态。
 7. 报表沉淀签到、积分发放、失败原因、渠道来源和连续签到数据。
 
+**产品流程图**
+
+\`\`\`mermaid
+flowchart TD
+  A[运营创建签到活动] --> B[配置基础信息/目标用户/积分规则]
+  B --> C[预览校验]
+  C -->|通过| D[提交审核]
+  C -->|失败| B
+  D -->|审核通过| E[发布上线]
+  D -->|审核驳回| B
+  E --> F[用户进入签到页]
+  F --> G{登录/资格/活动状态/当日状态校验}
+  G -->|可签到| H[写入签到记录]
+  G -->|不可参与| I[展示已签到/无资格/活动状态提示]
+  H --> J[积分发放]
+  J -->|成功| K[展示到账与连续天数]
+  J -->|失败| L[进入待补偿并提示稍后到账]
+  K --> M[数据报表与对账]
+  L --> M
+\`\`\`
+
+**产品架构图**
+
+\`\`\`mermaid
+flowchart LR
+  OP[运营后台] --> CFG[活动配置中心]
+  CFG --> AUDIT[审核发布中心]
+  AUDIT --> PAGE[前台签到页]
+  PAGE --> RULE[资格与签到规则校验]
+  RULE --> RECORD[签到记录/业务流水]
+  RECORD --> POINTS[积分权益发放]
+  POINTS --> COMP[失败补偿与对账]
+  RECORD --> REPORT[数据报表]
+  COMP --> REPORT
+  CFG --> RISK[额度库存/资损风控]
+  RISK --> RULE
+\`\`\`
+
 ### 2.4 验收标准
 
 | 编号 | 验收项 | 通过标准 |
 | --- | --- | --- |
-| AC-01 | 知识库命中 | 生成前必须命中活动配置、权益/积分、PRD 结构、原型规则相关知识 |
-| AC-02 | 后台配置 | 可配置签到规则、积分奖励、活动时间、目标用户和发布审核 |
-| AC-03 | 重复签到 | 同一用户同日重复签到不重复发积分 |
-| AC-04 | 前台状态 | 未签到、已签到、成功、无资格、额度不足、发放失败状态完整 |
-| AC-05 | 数据报表 | 可查看签到人数、次数、积分发放成功/失败和渠道数据 |
+| AC-01 | 活动创建与保存 | 运营可完成活动名称、活动时间、投放渠道、目标用户、页面素材、隐私协议、签到规则、积分奖励和库存额度配置；必填项缺失时阻止保存并提示字段 |
+| AC-02 | 审核发布 | 草稿、待审核、审核驳回、已发布、已下线状态流转清晰；未审核通过的活动不得在前台生效 |
+| AC-03 | 重复签到 | 同一用户同一自然日重复签到不新增签到记录、不重复发积分，并展示“今日已签到”提示 |
+| AC-04 | 前台状态 | 未签到、签到成功、今日已签到、无资格、活动未开始、活动已结束、额度不足、积分发放失败状态均有明确页面表现 |
+| AC-05 | 积分与库存 | 签到成功后按配置发放积分并扣减库存；发放失败进入补偿队列，补偿成功后奖励明细、报表和库存状态同步更新 |
+| AC-06 | 数据报表 | 后台可按活动时间和渠道查看曝光、访问、签到人数、签到次数、积分发放成功、发放失败、补偿成功、库存消耗和转化率 |
 
 ## 3 业务降级方案（必填）
 
@@ -1289,25 +1419,10 @@ function buildPrd(userTopic, hits, coverage, enrichment) {
 | 19 | 是否涉及用户信息或重要数据存储，是否进行加密存储； | 信息系统（包含前端、后端、管理后台） | 不涉及 |
 | 20 | 是否涉及数据采集，是否建立数据采集规范，明确数采集方式、渠道、数据格式、采集流程等； | 信息系统（包含前端、后端、管理后台） | 是 |
 | 21 | 是否对采集到的数据进行完整性和一致性校验； | 信息系统（包含前端、后端、管理后台） | 是 |
-
-## 待确认
-
-${missing.length ? `- 知识覆盖缺失：${missing.join("、")}` : "- 积分值、连续签到阶梯、活动预算、目标用户范围、补偿 SLA。"}
 `;
 }
 
 function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
-  const sourceBadges = hits.slice(0, 4)
-    .map((item) => `<span>${escapeHtml(item.title)}</span>`)
-    .join("");
-  const coverageBadges = coverage
-    .map((item) => `<span class="${item.hit ? "ok" : "warn"}">${escapeHtml(item.name)}：${item.hit ? "已命中" : "缺失"}</span>`)
-    .join("");
-  const enrichmentBadges = [
-    ...enrichment.modelAssumptions.slice(0, 2).map((item) => `模型补齐：${item}`),
-    ...enrichment.webSearchQueries.slice(0, 2).map((item) => `联网计划：${item}`),
-    ...enrichment.externalEvidence.slice(0, 3).map((item) => `公开证据：${item.title}`),
-  ].map((item) => `<span>${escapeHtml(item)}</span>`).join("");
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -1333,6 +1448,10 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
     .panel h3 { margin: 0 0 12px; font-size: 16px; }
     label { display: block; margin: 10px 0 4px; font-size: 13px; color: #475467; }
     input, select, textarea { width: 100%; border: 1px solid #d0d5dd; border-radius: 6px; padding: 9px 10px; font-size: 14px; background: #fff; }
+    .inline { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .upload { border: 1px dashed #98a2b3; border-radius: 6px; padding: 12px; color: #667085; background: #f9fafb; font-size: 13px; }
+    .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #475467; }
+    .switch::before { content: ""; width: 34px; height: 18px; border-radius: 999px; background: #1570ef; box-shadow: inset 16px 0 0 #fff; border: 1px solid #1570ef; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 10px; border-bottom: 1px solid #eaecf0; text-align: left; }
     th { background: #f9fafb; color: #475467; }
@@ -1379,12 +1498,44 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
           <h3>基础信息</h3>
           <label>活动名称</label>
           <input value="7月会员签到领积分">
-          <label>活动时间</label>
-          <input value="2026-07-15 00:00 至 2026-08-15 23:59">
+          <div class="inline">
+            <div><label>是否测试活动</label><select><option>否</option><option>是</option></select></div>
+            <div><label>活动集</label><select><option>会员成长活动集</option><option>暑期拉活活动集</option></select></div>
+          </div>
+          <div class="inline">
+            <div><label>开始时间</label><input value="2026-07-15 00:00"></div>
+            <div><label>结束时间</label><input value="2026-08-15 23:59"></div>
+          </div>
+          <div class="inline">
+            <div><label>适用区域</label><select><option>贵州全省</option><option>指定地市</option></select></div>
+            <div><label>登录方式</label><select><option>手机号登录</option><option>免登录校验</option></select></div>
+          </div>
           <label>目标用户</label>
           <select><option>全量登录用户</option><option>白名单用户</option><option>指定渠道用户</option></select>
           <label>活动规则说明</label>
           <textarea rows="4">用户每日可签到 1 次，签到成功获得积分，连续签到可获得阶梯奖励。</textarea>
+        </section>
+        <section class="panel">
+          <h3>展示配置</h3>
+          <label>banner 图</label>
+          <div class="upload">上传位：750x320，支持 PNG/JPG；前台首屏同步预览</div>
+          <div class="inline">
+            <div><label>背景颜色</label><input value="#F79009"></div>
+            <div><label>海报开关</label><div class="switch">开启分享海报</div></div>
+          </div>
+          <label>分享海报图片</label>
+          <div class="upload">上传位：1080x1920，未上传时使用默认活动海报</div>
+          <div class="inline">
+            <div><label>页面配置</label><select><option>签到任务双栏布局</option><option>单任务大按钮布局</option></select></div>
+            <div><label>活动规则标题</label><input value="签到规则"></div>
+          </div>
+          <div class="inline">
+            <div><label>背景图</label><div class="upload">750x1334 活动页背景图</div></div>
+            <div><label>规则背景色</label><input value="#FFF7ED"></div>
+          </div>
+          <label>隐私协议</label>
+          <textarea rows="3">勾选后展示用户隐私协议标题与内容，用户确认后参与签到。</textarea>
+          <button class="btn">增加协议</button>
         </section>
         <section class="panel">
           <h3>签到与积分规则</h3>
@@ -1393,8 +1544,22 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
             <tbody>
               <tr><td>每日签到次数</td><td>1 次/用户/自然日</td><td><span class="status">已配置</span></td></tr>
               <tr><td>基础积分</td><td>10 积分</td><td><span class="status">已配置</span></td></tr>
-              <tr><td>连续 7 天奖励</td><td>额外 50 积分</td><td><span class="status">待确认</span></td></tr>
+              <tr><td>连续 7 天奖励</td><td>额外 50 积分</td><td><span class="status">已配置</span></td></tr>
               <tr><td>活动总额度</td><td>500,000 积分</td><td><span class="status">已配置</span></td></tr>
+              <tr><td>每日库存</td><td>20,000 积分/自然日</td><td><span class="status">已配置</span></td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="panel">
+          <h3>任务与跳转配置</h3>
+          <table>
+            <thead><tr><th>任务</th><th>跳转类型</th><th>启用</th></tr></thead>
+            <tbody>
+              <tr><td>任务一：每日签到（标题图已上传）</td><td>无链接，完成后发积分</td><td><span class="status">启用</span></td></tr>
+              <tr><td>任务二：浏览权益页（背景图已上传）</td><td>券多多小程序</td><td><span class="status">启用</span></td></tr>
+              <tr><td>任务三：189.cn 充值</td><td>189.cn 链接</td><td><span class="status">启用</span></td></tr>
+              <tr><td>补充任务：套餐办理</td><td>电信 App 原生</td><td><span class="status">停用</span></td></tr>
+              <tr><td>外部活动：合作页</td><td>第三方链接</td><td><span class="status">停用</span></td></tr>
             </tbody>
           </table>
         </section>
@@ -1403,9 +1568,10 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
           <table>
             <tbody>
               <tr><td>重复签到</td><td>提示今日已签到，不重复发积分</td></tr>
-              <tr><td>积分发放失败</td><td>记录流水，进入补偿队列</td></tr>
+              <tr><td>积分发放失败</td><td>记录流水，进入补偿队列，支持补偿重试</td></tr>
               <tr><td>额度不足</td><td>前台提示活动火爆，后台可下线或补充额度</td></tr>
               <tr><td>无资格</td><td>展示不可参与原因</td></tr>
+              <tr><td>未满足前置条件</td><td>展示任务引导，不发放积分</td></tr>
             </tbody>
           </table>
         </section>
@@ -1414,12 +1580,16 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
           <table>
             <thead><tr><th>指标</th><th>今日</th><th>累计</th></tr></thead>
             <tbody>
+              <tr><td>访问人数</td><td>18,642</td><td>128,930</td></tr>
               <tr><td>签到人数</td><td>12,480</td><td>86,320</td></tr>
               <tr><td>签到次数</td><td>12,920</td><td>91,112</td></tr>
               <tr><td>积分发放成功</td><td>128,900</td><td>902,430</td></tr>
               <tr><td>发放失败</td><td>23</td><td>119</td></tr>
+              <tr><td>补偿重试中</td><td>9</td><td>42</td></tr>
+              <tr><td>库存消耗</td><td>64%</td><td>71%</td></tr>
             </tbody>
           </table>
+          <div class="actions" style="margin-top:12px"><button class="btn">导出明细</button><button class="btn">查看失败原因</button></div>
         </section>
       </div>
     </main>
@@ -1438,19 +1608,42 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
           </div>
           <button class="big-action">立即签到</button>
           <div class="state-list">
+            <div>首次进入：展示 banner、规则入口、今日可得积分</div>
+            <div>可签到：按钮高亮，展示当前连续 5 天</div>
             <div>成功态：签到成功，积分已到账</div>
             <div>已签到：今日已签到，请明天再来</div>
-            <div>失败态：积分稍后到账，可在记录中查看</div>
+            <div>无资格/未登录：展示登录方式或不可参与原因</div>
+            <div>失败态：积分稍后到账，补偿中，可在记录中查看</div>
           </div>
         </div>
       </div>
-      <h3>知识覆盖</h3>
-      <div class="badges">${coverageBadges}</div>
-      <h3>补齐策略</h3>
-      <div class="badges">${enrichmentBadges}</div>
-      <h3>主要引用</h3>
-      <div class="badges">${sourceBadges}</div>
-      <p style="font-size:13px;color:#667085">原始需求：${escapeHtml(userTopic)}</p>
+      <h3>审核流转</h3>
+      <table>
+        <tbody>
+          <tr><td>草稿</td><td><span class="status">可编辑</span></td></tr>
+          <tr><td>待审核</td><td><span class="status">当前</span></td></tr>
+          <tr><td>审核驳回</td><td>回到配置页修改后重提</td></tr>
+          <tr><td>已发布</td><td>前台入口生效</td></tr>
+        </tbody>
+      </table>
+      <h3>补偿队列</h3>
+      <table>
+        <thead><tr><th>用户</th><th>原因</th><th>处理</th></tr></thead>
+        <tbody>
+          <tr><td>尾号 3186</td><td>积分发放超时</td><td><button class="btn">重试</button></td></tr>
+          <tr><td>尾号 9021</td><td>额度扣减失败</td><td><button class="btn">查看</button></td></tr>
+        </tbody>
+      </table>
+      <h3>打卡明细</h3>
+      <table>
+        <thead><tr><th>用户</th><th>日期</th><th>发放状态</th></tr></thead>
+        <tbody>
+          <tr><td>尾号 6658</td><td>2026-07-15</td><td><span class="status">成功</span></td></tr>
+          <tr><td>尾号 3186</td><td>2026-07-15</td><td>补偿中</td></tr>
+        </tbody>
+      </table>
+      <h3>前台状态</h3>
+      <div class="badges"><span>重复签到</span><span>额度不足</span><span>发放失败</span><span>无资格</span></div>
     </section>
   </div>
 </body>

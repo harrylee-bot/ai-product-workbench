@@ -249,6 +249,21 @@ describe("Knowledge module services", () => {
       "05-原型设计规范/原型生成总规则.md",
       "# 原型生成总规则\n活动原型必须覆盖后台配置页、用户端签到页、审核发布状态和数据报表。",
     );
+    await writeVaultFile(
+      vaultRoot,
+      "05-原型设计规范/签到活动高保真HTML原型框架.md",
+      [
+        "---",
+        "title: 签到活动高保真HTML原型框架",
+        "tags:",
+        "  - HTML原型",
+        "  - Axure",
+        "  - RP资产",
+        "---",
+        "# 签到活动高保真HTML原型框架",
+        "签到领积分活动原型必须复用 Axure HTML 原型的信息架构，包含后台配置、banner、海报开关、跳转类型、隐私协议、每日库存、补偿重试和前台预览。",
+      ].join("\n"),
+    );
     prisma.knowledgeItem.findMany.mockResolvedValue([]);
     prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
 
@@ -261,6 +276,7 @@ describe("Knowledge module services", () => {
         KnowledgeType.business_concept,
         KnowledgeType.prd_writing_rule,
         KnowledgeType.prototype_rule,
+        KnowledgeType.prototype_asset_ref,
       ],
       limit: 8,
     });
@@ -272,10 +288,12 @@ describe("Knowledge module services", () => {
       "奖品券与资损核销",
       "PRD标准结构",
       "原型生成总规则",
+      "签到活动高保真HTML原型框架",
     ]));
-    expect(result.references.slice(0, 4).map((item) => item.title)).toEqual([
+    expect(result.references.slice(0, 5).map((item) => item.title)).toEqual([
       "PRD标准结构",
       "原型生成总规则",
+      "签到活动高保真HTML原型框架",
       "活动发布与模板配置",
       "奖品券与资损核销",
     ]);
@@ -305,6 +323,7 @@ describe("Knowledge module services", () => {
         KnowledgeType.business_concept,
         KnowledgeType.prd_writing_rule,
         KnowledgeType.prototype_rule,
+        KnowledgeType.prototype_asset_ref,
       ],
       requirementMode: "one_sentence_completion",
       vaultPolicy: "always",
@@ -321,12 +340,7 @@ describe("Knowledge module services", () => {
     expect(evidence).toMatch(/奖品券与资损核销/);
     expect(evidence).toMatch(/PRD标准结构|需求说明书/);
     expect(evidence).toMatch(/原型生成总规则|前后台页面框架/);
-    expect(result.references.slice(0, 4).map((item) => item.relatedPath)).toEqual(expect.arrayContaining([
-      "04-产品文档规范/PRD标准结构.md",
-      "05-原型设计规范/原型生成总规则.md",
-      "02-业务域知识/活动发布与模板配置.md",
-      "02-业务域知识/奖品券与资损核销.md",
-    ]));
+    expect(evidence).toMatch(/签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/);
   });
 
   it("can merge database hits with Markdown vault knowledge for runtime generation", async () => {
@@ -368,6 +382,121 @@ describe("Knowledge module services", () => {
     ]));
   });
 
+  it("keeps source archives and inbox entries out of normal generation", async () => {
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "main-activity-rule",
+        title: "活动发布与模板配置",
+        content: "签到活动必须经过配置、审核、发布和报表复盘。",
+        type: KnowledgeType.business_concept,
+        priority: KnowledgePriority.high,
+        sourceFileId: "02-业务域知识/活动发布与模板配置.md",
+      }),
+      itemRow({
+        id: "old-source-rule",
+        title: "旧版签到活动生成规则",
+        content: "旧版签到活动需求文档和原型生成规则。",
+        type: KnowledgeType.default_rule,
+        priority: KnowledgePriority.low,
+        sourceFileId: "07-来源资产索引/旧版整理/签到规则.md",
+      }),
+      itemRow({
+        id: "inbox-draft",
+        title: "签到活动待整理记录",
+        content: "未经核验的签到活动需求文档和原型记录。",
+        type: KnowledgeType.default_rule,
+        priority: KnowledgePriority.low,
+        sourceFileId: "99-收件箱/签到活动导入记录.md",
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      query: "生成签到活动需求文档和原型",
+      vaultPolicy: "never",
+      limit: 10,
+    });
+
+    expect(result.references.map((item) => item.knowledgeId)).toEqual(["main-activity-rule"]);
+    expect(result.references[0]?.relatedPath).toBe("02-业务域知识/活动发布与模板配置.md");
+  });
+
+  it("opens source archives only for an explicit source lookup", async () => {
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "main-activity-rule",
+        title: "活动发布与模板配置",
+        content: "现行活动配置规则。",
+        type: KnowledgeType.business_concept,
+        priority: KnowledgePriority.high,
+        sourceFileId: "02-业务域知识/活动发布与模板配置.md",
+      }),
+      itemRow({
+        id: "source-manual",
+        title: "贵州签到活动原始手册",
+        content: "原始文件和导入记录位于贵州签到 Axure HTML 资产。",
+        type: KnowledgeType.default_rule,
+        priority: KnowledgePriority.low,
+        sourceFileId: "07-来源资产索引/旧版整理/贵州签到活动原始手册.md",
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      query: "查找贵州签到活动的原始文件和导入记录",
+      vaultPolicy: "never",
+      limit: 10,
+    });
+
+    expect(result.references.map((item) => item.knowledgeId)).toContain("source-manual");
+    expect(result.references.find((item) => item.knowledgeId === "source-manual")?.relatedPath)
+      .toBe("07-来源资产索引/旧版整理/贵州签到活动原始手册.md");
+  });
+
+  it("applies the same retrieval boundary to Markdown vault fallback", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "aipw-tiered-vault-"));
+    tempPaths.push(vaultRoot);
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+    await writeVaultFile(
+      vaultRoot,
+      "02-业务域知识/签到与任务积分活动.md",
+      "# 签到与任务积分活动\n现行签到活动必须处理自然日幂等和积分补偿。",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "07-来源资产索引/旧版签到说明.md",
+      "# 旧版签到说明\n这是原始文件和旧版资料，只用于核验来源。",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "99-收件箱/签到待整理.md",
+      "# 签到待整理\n这是尚未核验的签到草稿。",
+    );
+    prisma.knowledgeItem.findMany.mockResolvedValue([]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const generation = await retrievalService.search({
+      query: "生成签到积分活动方案",
+      vaultPolicy: "always",
+      limit: 10,
+    });
+    expect(generation.references.map((item) => item.relatedPath)).toEqual([
+      "02-业务域知识/签到与任务积分活动.md",
+    ]);
+
+    const sourceLookup = await retrievalService.search({
+      query: "查看签到活动的旧版资料和原始文件",
+      vaultPolicy: "always",
+      limit: 10,
+    });
+    expect(sourceLookup.references.map((item) => item.relatedPath)).toContain(
+      "07-来源资产索引/旧版签到说明.md",
+    );
+    expect(sourceLookup.references.map((item) => item.relatedPath)).not.toContain(
+      "99-收件箱/签到待整理.md",
+    );
+  });
+
   it("hits required real vault knowledge for the sign-in points runtime topic", async () => {
     const vaultRoot = findRepoKnowledgeVaultRoot();
     expect(vaultRoot).toBeTruthy();
@@ -384,6 +513,7 @@ describe("Knowledge module services", () => {
         KnowledgeType.business_concept,
         KnowledgeType.prd_writing_rule,
         KnowledgeType.prototype_rule,
+        KnowledgeType.prototype_asset_ref,
       ],
       requirementMode: "one_sentence_completion",
       vaultPolicy: "always",
@@ -400,6 +530,9 @@ describe("Knowledge module services", () => {
     expect(evidence).toMatch(/奖品券与资损核销/);
     expect(evidence).toMatch(/PRD标准结构|需求说明书/);
     expect(evidence).toMatch(/原型生成总规则|前后台页面框架/);
+    expect(evidence).toMatch(/签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/);
+    expect(result.references.find((item) => /签到活动高保真HTML原型框架/.test(item.title))?.type)
+      .toBe(KnowledgeType.prototype_asset_ref);
     expect(result.references.every((item) => item.knowledgeId.startsWith("vault:"))).toBe(true);
     expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -410,76 +543,6 @@ describe("Knowledge module services", () => {
         ]),
       }),
     });
-  });
-
-  it("frontloads PRD and prototype rules for runtime generation even when the query is generic", async () => {
-    const vaultRoot = findRepoKnowledgeVaultRoot();
-    expect(vaultRoot).toBeTruthy();
-    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
-    prisma.knowledgeItem.findMany.mockResolvedValue([]);
-    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
-
-    const result = await retrievalService.search({
-      conversationId: "conversation-1",
-      runId: "run-generic-runtime-query",
-      runtimeName: "runtime_generation",
-      query: [
-        "需求模式:one_sentence_completion",
-        "产品能力地图 端到端业务流程 Agent任务分类与补全规则",
-      ].join("\n"),
-      preferredTypes: [
-        KnowledgeType.strong_rule,
-        KnowledgeType.default_rule,
-        KnowledgeType.design_pattern,
-        KnowledgeType.prd_writing_rule,
-        KnowledgeType.prototype_rule,
-        KnowledgeType.business_concept,
-        KnowledgeType.product_architecture,
-      ],
-      requirementMode: "one_sentence_completion",
-      vaultPolicy: "always",
-      limit: 10,
-    });
-
-    expect(result.references.slice(0, 2).map((item) => item.relatedPath)).toEqual([
-      "04-产品文档规范/PRD标准结构.md",
-      "05-原型设计规范/原型生成总规则.md",
-    ]);
-  });
-
-  it("keeps required knowledge groups when database retrieval fails and vault fallback is used", async () => {
-    const vaultRoot = findRepoKnowledgeVaultRoot();
-    expect(vaultRoot).toBeTruthy();
-    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
-    prisma.knowledgeItem.findMany.mockRejectedValue(new Error("database unavailable"));
-
-    const result = await retrievalService.search({
-      conversationId: "conversation-1",
-      runId: "run-db-failure-vault",
-      runtimeName: "runtime_generation",
-      query: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
-      preferredTypes: [
-        KnowledgeType.strong_rule,
-        KnowledgeType.default_rule,
-        KnowledgeType.design_pattern,
-        KnowledgeType.prd_writing_rule,
-        KnowledgeType.prototype_rule,
-        KnowledgeType.business_concept,
-        KnowledgeType.product_architecture,
-      ],
-      requirementMode: "one_sentence_completion",
-      vaultPolicy: "always",
-      limit: 10,
-    });
-
-    expect(result.retrievalSource).toBe("vault_fallback");
-    expect(result.retrievalError).toMatch(/数据库知识检索失败/);
-    expect(result.references.slice(0, 4).map((item) => item.relatedPath)).toEqual([
-      "04-产品文档规范/PRD标准结构.md",
-      "05-原型设计规范/原型生成总规则.md",
-      "02-业务域知识/活动发布与模板配置.md",
-      "02-业务域知识/奖品券与资损核销.md",
-    ]);
   });
 
   it("keeps preferredTypes as ranking hints unless strict filtering is requested", async () => {

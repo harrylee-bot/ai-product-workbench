@@ -24,6 +24,7 @@ type ScorableKnowledgeItem = {
   priority: KnowledgePriority;
   tags?: unknown;
   category?: { name?: string | null } | null;
+  sourceFileId?: string | null;
   relatedPath?: string;
 };
 
@@ -55,9 +56,10 @@ export class KnowledgeRetrievalService {
     const strictPreferredTypes = Boolean(input.strictPreferredTypes && preferredTypes?.length);
     const modeBoostTypes = input.requirementMode ? MODE_BOOST_TYPES[input.requirementMode] : undefined;
     const vaultPolicy = input.vaultPolicy ?? "on_miss";
+    const retrievalAudience = resolveRetrievalAudience(query);
 
     try {
-      const items = await this.prisma.knowledgeItem.findMany({
+      const databaseItems = await this.prisma.knowledgeItem.findMany({
         where: {
           status: KnowledgeStatus.active,
           ...(strictPreferredTypes ? { type: { in: preferredTypes } } : {}),
@@ -71,6 +73,7 @@ export class KnowledgeRetrievalService {
         include: { category: true },
         orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
       });
+      const items = databaseItems.filter((item) => shouldUseKnowledgeItem(item, retrievalAudience));
 
       const semanticScores = this.embeddings
         ? await this.embeddings.scoreItems(query, items)
@@ -80,7 +83,7 @@ export class KnowledgeRetrievalService {
         .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority));
       const vaultMatches = shouldSearchVault(vaultPolicy, matched, strictPreferredTypes)
-        ? await this.searchVaultFallback(query, preferredTypes, modeBoostTypes)
+        ? await this.searchVaultFallback(query, preferredTypes, modeBoostTypes, retrievalAudience)
         : [];
       const combined = mergeRetrievalResults(matched, vaultMatches).sort(
         (a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority),
@@ -119,7 +122,7 @@ export class KnowledgeRetrievalService {
     } catch (error) {
       const vaultMatches = vaultPolicy === "never"
         ? []
-        : await this.searchVaultFallback(query, preferredTypes, modeBoostTypes).catch(() => []);
+        : await this.searchVaultFallback(query, preferredTypes, modeBoostTypes, retrievalAudience).catch(() => []);
       const selected = selectKnowledgeResults(vaultMatches, limit, query, {
         preferredTypes,
         runtimeName: input.runtimeName,
@@ -149,13 +152,40 @@ export class KnowledgeRetrievalService {
     query: string,
     preferredTypes?: KnowledgeType[],
     modeBoostTypes?: KnowledgeType[],
+    retrievalAudience: KnowledgeRetrievalAudience = "main",
   ): Promise<KnowledgeRetrievalResult[]> {
     const items = await loadVaultKnowledgeItems();
     return items
+      .filter((item) => shouldUseKnowledgeItem(item, retrievalAudience))
       .map((item) => scoreItem(item, query, preferredTypes, undefined, modeBoostTypes))
       .filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score || priorityWeight(b.priority) - priorityWeight(a.priority));
   }
+}
+
+type KnowledgeRetrievalAudience = "main" | "source" | "inbox";
+
+function resolveRetrievalAudience(query: string): KnowledgeRetrievalAudience {
+  const normalized = normalizeText(query);
+  if (/(收件箱|待整理资料|未整理资料|待处理资料)/.test(normalized)) return "inbox";
+  if (/(来源资产|原始资料|原始文件|导入记录|资产清单|资料出处|内容出处|旧版资料|历史资料|核验来源|追溯来源|查找来源|查看来源)/.test(normalized)) {
+    return "source";
+  }
+  return "main";
+}
+
+function shouldUseKnowledgeItem(item: ScorableKnowledgeItem, audience: KnowledgeRetrievalAudience) {
+  const relatedPath = normalizeKnowledgePath(item.relatedPath ?? item.sourceFileId);
+  if (!relatedPath) return audience !== "inbox";
+  if (relatedPath.startsWith("_templates/") || relatedPath.includes("/_templates/")) return false;
+  if (relatedPath.startsWith("99-收件箱/")) return audience === "inbox";
+  if (audience === "inbox") return false;
+  if (relatedPath.startsWith("07-来源资产索引/")) return audience === "source";
+  return true;
+}
+
+function normalizeKnowledgePath(value: string | null | undefined) {
+  return value?.replaceAll("\\", "/").trim() ?? "";
 }
 
 function shouldSearchVault(
@@ -251,7 +281,7 @@ function scoreItem(
     keywordScore: Number(normalizedKeywordScore.toFixed(3)),
     semanticScore,
     reason: [...new Set(reasons)].slice(0, 5).join("；") || "按知识优先级命中",
-    relatedPath: item.relatedPath,
+    relatedPath: item.relatedPath ?? item.sourceFileId ?? undefined,
     visualAssets: extractVisualAssets(item),
   };
 }
@@ -298,10 +328,15 @@ function mergeRetrievalResults(
   vaultResults: KnowledgeRetrievalResult[],
 ) {
   if (!vaultResults.length) return databaseResults;
+  const databasePaths = new Set(
+    databaseResults.map((item) => normalizeKnowledgePath(item.relatedPath)).filter(Boolean),
+  );
   const seen = new Set<string>();
   const merged: KnowledgeRetrievalResult[] = [];
   for (const item of [...databaseResults, ...vaultResults]) {
-    const key = `${item.title}\n${item.relatedPath ?? item.itemId}`;
+    const relatedPath = normalizeKnowledgePath(item.relatedPath);
+    if (item.itemId.startsWith("vault:") && relatedPath && databasePaths.has(relatedPath)) continue;
+    const key = item.itemId.startsWith("vault:") ? `vault:${relatedPath || item.title}` : item.itemId;
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(item);
@@ -390,6 +425,19 @@ function requiredKnowledgeGroups(
       type: KnowledgeType.prototype_rule,
       pattern: /原型生成总规则|前后台页面框架|后台通用框架|前台通用框架|prototype/i,
       preferredPattern: /原型生成总规则/,
+    });
+    if (/(签到|打卡|积分|连续任务)/.test(normalized)) {
+      groups.push({
+        type: KnowledgeType.prototype_asset_ref,
+        pattern: /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML|HTML原型|RP资产|Axure|原型资产|前台页面设计框架|后台管理设计框架/i,
+        preferredPattern: /签到活动高保真HTML原型框架/,
+      });
+    }
+  }
+  if (/(需求文档|需求说明书|prd|原型|prototype|页面|界面|交互|方案)/i.test(normalized)) {
+    groups.push({
+      type: KnowledgeType.business_concept,
+      pattern: /./,
     });
   }
   if (/(活动|签到|打卡|营销)/.test(normalized)) {
@@ -494,6 +542,7 @@ function toVaultKnowledgeItem(relativePath: string, rawContent: string): VaultKn
     priority: inferVaultPriority(relativePath),
     tags: extractMarkdownTags(rawContent),
     category: { name: relativePath.split("/")[0] ?? "knowledge-vault" },
+    sourceFileId: relativePath,
     relatedPath: relativePath,
   };
 }
@@ -532,6 +581,7 @@ function extractMarkdownTags(content: string) {
 }
 
 function inferVaultKnowledgeType(relativePath: string, content: string): KnowledgeType {
+  if (isPrototypeAssetReference(relativePath, content)) return KnowledgeType.prototype_asset_ref;
   if (relativePath.startsWith("00-")) return KnowledgeType.strong_rule;
   if (relativePath.startsWith("01-")) return KnowledgeType.product_architecture;
   if (relativePath.startsWith("02-")) return KnowledgeType.business_concept;
@@ -539,11 +589,18 @@ function inferVaultKnowledgeType(relativePath: string, content: string): Knowled
   if (relativePath.startsWith("04-")) return KnowledgeType.prd_writing_rule;
   if (relativePath.startsWith("05-")) return KnowledgeType.prototype_rule;
   if (relativePath.startsWith("06-")) return KnowledgeType.reference_case;
-  if (/原型|PrototypeSpec|Axure|prototype/i.test(relativePath + content.slice(0, 500))) {
-    return KnowledgeType.prototype_asset_ref;
-  }
   if (/案例|历史/.test(relativePath)) return KnowledgeType.reference_case;
   return KnowledgeType.default_rule;
+}
+
+function isPrototypeAssetReference(relativePath: string, content: string) {
+  if (/原型生成总规则|字段接口状态表达|前后台页面框架/.test(relativePath)) return false;
+  const titleAndPath = relativePath;
+  const frontmatterAndIntro = content.slice(0, 1200);
+  return /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML|原型资产索引|RP资产到设计框架映射/i.test(titleAndPath)
+    || /tags:\s*[\s\S]{0,400}(Axure|RP资产|prototype_asset_ref)/i.test(frontmatterAndIntro)
+    || /source:\s*storage\/imports\/.*(?:axure|\.html|\.rp)/i.test(frontmatterAndIntro)
+    || /prototype_asset_ref/i.test(frontmatterAndIntro);
 }
 
 function inferVaultPriority(relativePath: string): KnowledgePriority {

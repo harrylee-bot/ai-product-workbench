@@ -41,6 +41,8 @@ type MarkdownChunk = {
   categoryName: string;
 };
 
+type KnowledgeRetrievalTier = "main" | "source";
+
 type VaultHealth = {
   state: "missing" | "empty" | "ready";
   message: string;
@@ -531,17 +533,23 @@ export class ObsidianVaultService {
       const type = inferKnowledgeType(file.path, title, metadata.tags);
       const priority = inferPriority(file.path, title, type);
       const categoryName = inferCategoryName(file.path);
+      const retrievalTier = inferRetrievalTier(file.path);
       const tags = normalizeTags([
         "vault-sync",
         "knowledge-vault",
+        `vault-tier:${retrievalTier}`,
         ...metadata.tags,
         categoryName,
         type,
       ]);
       const fileChunks = splitMarkdownBody(metadata.body);
+      const chunkTitleCounts = new Map<string, number>();
 
       for (const [index, body] of fileChunks.entries()) {
-        const totalTitle = fileChunks.length > 1 ? `${title} #${index + 1}` : title;
+        const baseChunkTitle = buildChunkTitle(title, body);
+        const occurrence = (chunkTitleCounts.get(baseChunkTitle) ?? 0) + 1;
+        chunkTitleCounts.set(baseChunkTitle, occurrence);
+        const totalTitle = occurrence > 1 ? `${baseChunkTitle} (${occurrence})` : baseChunkTitle;
         const chunkContent = [
           `来源文件：${file.path}`,
           `切片序号：${index + 1}`,
@@ -634,7 +642,9 @@ export class ObsidianVaultService {
 }
 
 function shouldIndexMarkdown(relativePath: string) {
-  return !relativePath.startsWith("_templates/") && !relativePath.includes("/_templates/");
+  return !relativePath.startsWith("_templates/")
+    && !relativePath.includes("/_templates/")
+    && !relativePath.startsWith("99-收件箱/");
 }
 
 function parseMarkdown(raw: string): MarkdownMetadata {
@@ -676,12 +686,15 @@ function splitMarkdownBody(body: string) {
       continue;
     }
 
+    const sectionHeading = section.match(/^#{1,3}\s+.+$/m)?.[0]?.trim();
     const paragraphs = section.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
     let current = "";
     for (const paragraph of paragraphs) {
       if ((current + "\n\n" + paragraph).trim().length > 2600 && current) {
         chunks.push(current.trim());
-        current = paragraph;
+        current = sectionHeading && paragraph !== sectionHeading
+          ? `${sectionHeading}\n\n${paragraph}`
+          : paragraph;
       } else {
         current = (current ? `${current}\n\n${paragraph}` : paragraph).trim();
       }
@@ -695,7 +708,17 @@ function splitMarkdownBody(body: string) {
 function inferKnowledgeType(relativePath: string, title: string, tags: string[]) {
   const text = `${relativePath} ${title} ${tags.join(" ")}`;
   if (relativePath === "README.md") return KnowledgeType.default_rule;
-  if (/^99-收件箱\//.test(relativePath)) return KnowledgeType.default_rule;
+  if (/^00-知识库使用规范\//.test(relativePath)) return KnowledgeType.strong_rule;
+  if (/^01-产品架构\//.test(relativePath)) return KnowledgeType.product_architecture;
+  if (/^02-业务域知识\//.test(relativePath)) return KnowledgeType.business_concept;
+  if (/^03-产品进化规划\//.test(relativePath)) return KnowledgeType.design_pattern;
+  if (/^04-产品文档规范\//.test(relativePath)) return KnowledgeType.prd_writing_rule;
+  if (/^05-原型设计规范\//.test(relativePath)) {
+    return isPrototypeAssetKnowledge(relativePath, `${title}\n${tags.join(" ")}`)
+      ? KnowledgeType.prototype_asset_ref
+      : KnowledgeType.prototype_rule;
+  }
+  if (/^06-历史案例库\//.test(relativePath)) return KnowledgeType.reference_case;
   if (/^07-来源资产索引\//.test(relativePath)) {
     if (/案例库|案例/.test(text)) return KnowledgeType.reference_case;
     if (/原型模式|页面|后台模式|配置化|交互|Prototype|OpenPencil|HTML 原型/i.test(text)) {
@@ -711,11 +734,6 @@ function inferKnowledgeType(relativePath: string, title: string, tags: string[])
   if (/^03-案例库\//.test(relativePath)) return KnowledgeType.reference_case;
   if (/^02-规则约束\//.test(relativePath)) return KnowledgeType.strong_rule;
   if (/^01-产品知识\//.test(relativePath)) return KnowledgeType.business_concept;
-  if (/^05-原型设计规范\//.test(relativePath)) return KnowledgeType.prototype_rule;
-  if (/^04-产品文档规范\//.test(relativePath)) return KnowledgeType.prd_writing_rule;
-  if (/^06-历史案例库\//.test(relativePath)) return KnowledgeType.reference_case;
-  if (/^02-业务域知识\//.test(relativePath)) return KnowledgeType.business_concept;
-  if (/^(00-知识库使用规范|01-产品架构|03-产品进化规划)\//.test(relativePath)) return KnowledgeType.default_rule;
   if (/05-原型设计规范|原型规则|前后端设计框架|前台页面设计框架|后台管理设计框架|字段与接口|RP资产|PrototypeSpec|OpenPencil|HTML 原型/i.test(text)) return KnowledgeType.prototype_rule;
   if (/04-产品文档规范|产品文档规范|PRD|需求文档|写作/.test(text)) return KnowledgeType.prd_writing_rule;
   if (/06-历史案例库|案例库|案例/.test(text)) return KnowledgeType.reference_case;
@@ -731,7 +749,8 @@ function inferPriority(relativePath: string, title: string, type: KnowledgeType)
   if (isSourceOrInboxPath(relativePath) || /旧版整理|需求文档导入记录|需求资产清单|业务域索引|导入清单|来源台账/.test(text)) {
     return KnowledgePriority.low;
   }
-  if (/01-产品知识|02-规则约束|03-案例库|04-原型模式|05-原型设计规范|06-历史案例库|04-产品文档规范|03-产品进化规划|02-业务域知识|00-知识库使用规范|01-产品架构|08-产品架构|09-页面清单|10-UI样式规范|11-原型资产/.test(text))
+  if (/^06-历史案例库\//.test(relativePath)) return KnowledgePriority.medium;
+  if (/01-产品知识|02-规则约束|03-案例库|04-原型模式|05-原型设计规范|04-产品文档规范|03-产品进化规划|02-业务域知识|00-知识库使用规范|01-产品架构|08-产品架构|09-页面清单|10-UI样式规范|11-原型资产/.test(text))
     return KnowledgePriority.high;
   if (type === KnowledgeType.strong_rule) return KnowledgePriority.high;
   if (/知识库使用规范|产品架构|能力地图|产品进化|产品逻辑|产品文档规范|原型设计规范|历史业务增量|新产品创新|runtime|AI营销助手|Dify|配置化页面|通用约束|资损/.test(text)) return KnowledgePriority.high;
@@ -739,8 +758,24 @@ function inferPriority(relativePath: string, title: string, type: KnowledgeType)
   return KnowledgePriority.medium;
 }
 
+function isPrototypeAssetKnowledge(relativePath: string, metadataText: string) {
+  if (/原型生成总规则|字段接口状态表达|前后台页面框架/.test(relativePath)) return false;
+  return /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML资产|RP资产到设计框架映射|prototype_asset_ref/i
+    .test(`${relativePath}\n${metadataText}`);
+}
+
 function isSourceOrInboxPath(relativePath: string) {
   return /^07-来源资产索引(\/|$)/.test(relativePath) || /^99-收件箱(\/|$)/.test(relativePath);
+}
+
+function inferRetrievalTier(relativePath: string): KnowledgeRetrievalTier {
+  return relativePath.startsWith("07-来源资产索引/") ? "source" : "main";
+}
+
+function buildChunkTitle(documentTitle: string, body: string) {
+  const heading = body.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
+  if (!heading || normalizeTitle(heading) === documentTitle) return documentTitle;
+  return truncate(`${documentTitle} / ${normalizeTitle(heading)}`, 110);
 }
 
 function inferCategoryName(relativePath: string) {

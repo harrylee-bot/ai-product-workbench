@@ -618,6 +618,9 @@ function evaluatePrdDocument(document) {
   const structureLabels = [
     ["引言/背景", /引言|项目背景|背景/],
     ["业务需求", /业务需求|核心业务规则|功能说明|验收标准/],
+    ["核心流程", /核心流程\/状态\/页面要求|核心流程|状态流转|产品流程图/],
+    ["产品流程图", /产品流程图|flowchart|sequenceDiagram|graph TD|graph LR/],
+    ["产品架构图", /产品架构图|配置中心|审核发布|数据报表|业务记录|flowchart LR|graph LR/],
     ["降级方案", /降级|异常|补偿|重试/],
     ["安全基线", /安全基线|资损|权限|风控/],
     ["无接口章节", /本需求涉及新增\/修改的接口/],
@@ -635,12 +638,13 @@ function evaluatePrdDocument(document) {
   const hasBoundary = /不发送|不搜索|内部路径|附件原文|真实接口|密钥|不覆盖本地知识库|隐私边界|只补充|公开资料/.test(metadataText);
   const explainableRefs = knowledgeRefs.filter((ref) => {
     const text = flattenText(ref);
-    return /来源文件|relatedPath|00-|01-|02-|03-|04-|05-|06-|PRD标准结构|原型生成总规则|活动发布与模板配置|奖品券与资损核销/.test(text)
+    return /来源文件|relatedPath|00-|01-|02-|03-|04-|05-|06-|PRD标准结构|原型生成总规则|签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|活动发布与模板配置|奖品券与资损核销/.test(text)
       && /(snippet|摘要|score|reason|匹配|规则|流程|验收|状态|资损|原型|PRD|需求)/i.test(text);
   });
   const knowledgeGroupChecks = [
     ["文档规范", /PRD标准结构|产品文档规范|需求说明书|prd_writing_rule/i],
     ["原型规范", /原型生成总规则|前后台页面框架|字段接口状态表达|prototype_rule/i],
+    ["原型资产框架", /签到活动高保真HTML原型框架|签到打卡高保真原型|签到积分活动原型框架|贵州签到打卡HTML原型|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产|prototype_asset_ref/i],
     ["活动业务", /活动发布与模板配置|活动配置|审核发布|business_concept/i],
     ["权益资损", /奖品券与资损核销|权益|积分|资损|库存|核销/],
   ].map(([label, pattern]) => ({ label, hit: pattern.test(metadataText) }));
@@ -693,13 +697,29 @@ function evaluatePrototypeArtifact(artifact, renderResult) {
     ["立即签到", /立即签到|签到|已签到|连续签到/],
     ["积分/奖励", /积分|奖励|权益/],
     ["异常状态", /失败|额度不足|无资格|补偿|稍后到账/],
+    ["表单控件", /<input|<select|<textarea|class="[^"]*(field|form|input|select)/i],
+    ["表格报表", /<table|<thead|<tbody|数据报表|指标卡|导出/i],
+    ["状态标签", /badge|status|tag|状态|草稿|待审核|已发布|已下线/i],
   ];
   const labelHits = labels.map(([label, pattern]) => ({ label, hit: pattern.test(text) }));
-  const noiseHits = findRuntimeNoise(text);
+  const noiseHits = [
+    ...findRuntimeNoise(text),
+    ...findPrototypeTraceNoise(text),
+  ];
+  const html = `${artifact.htmlContent ?? ""}\n${artifact.html ?? ""}`;
+  const highFidelityChecks = [
+    ["完整HTML", /^<!doctype html>/i.test(html.trim()) && /<html[\s\S]*<style[\s\S]*<\/style>[\s\S]*<\/html>/i.test(html)],
+    ["非裸HTML", /class=|data-page-id|data-component-id/i.test(html) && /border-radius|box-shadow|grid|flex|padding/i.test(html)],
+    ["可评审密度", (html.match(/<(section|div|table|input|select|button)\b/gi) ?? []).length >= 25],
+    ["活动平台字段密度", /banner|海报|上传|跳转类型|隐私协议|每日库存|补偿重试|目标用户|活动集/.test(html)],
+  ].map(([label, hit]) => ({ label, hit: Boolean(hit) }));
   return {
     textLength: text.length,
-    coreLabelsPassed: labelHits.every((item) => item.hit),
-    coreLabelsEvidence: labelHits.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
+    coreLabelsPassed: labelHits.every((item) => item.hit) && highFidelityChecks.every((item) => item.hit),
+    coreLabelsEvidence: [
+      labelHits.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
+      highFidelityChecks.map((item) => `${item.label}:${item.hit ? "hit" : "miss"}`).join(", "),
+    ].join("; "),
     noisePassed: noiseHits.length === 0,
     noiseEvidence: noiseHits.length ? noiseHits.join(", ") : "no runtime noise patterns",
     conceptHits: buildConceptHits(text),
@@ -740,6 +760,22 @@ function findRuntimeNoise(text) {
     "messages-tuple",
     "Updated todo list",
     "Context from AI Product Workbench",
+  ];
+  return patterns.filter((pattern) => text.includes(pattern));
+}
+
+function findPrototypeTraceNoise(text) {
+  const patterns = [
+    "知识库打底",
+    "公开资料补齐",
+    "模型补齐",
+    "联网补齐",
+    "补齐策略",
+    "外部参考",
+    "externalResearch",
+    "Building an Effective Loyalty Program",
+    "Idempotent requests",
+    "429 Too Many Requests",
   ];
   return patterns.filter((pattern) => text.includes(pattern));
 }
@@ -882,7 +918,7 @@ function runSelfTest() {
       "internal read_file protocol is treated as tool noise",
       "final assistant message must be clear and clean",
       "PRD metadata must retain explainable knowledge refs, external evidence, and public-data boundary",
-      "agent retrieval must cover PRD, prototype, activity, and points/risk knowledge groups",
+      "agent retrieval must cover PRD, prototype rules, prototype assets/design framework, activity, and points/risk knowledge groups",
       "PRD body must not include trace/evidence sections",
       "runtime progress must show knowledge, model, and public evidence stages",
     ],
@@ -918,6 +954,14 @@ function samplePrdDocument() {
         relatedPath: "05-原型设计规范/原型生成总规则.md",
       },
       {
+        title: "签到活动高保真HTML原型框架（05-原型设计规范/签到活动高保真HTML原型框架.md）",
+        snippet: "签到积分原型必须复用 Axure HTML 原型的信息架构、字段密度、状态表达和前后台联动方式。",
+        type: "prototype_asset_ref",
+        score: 0.92,
+        reason: "标题匹配 原型资产",
+        relatedPath: "05-原型设计规范/签到活动高保真HTML原型框架.md",
+      },
+      {
         title: "活动发布与模板配置（02-业务域知识/活动发布与模板配置.md）",
         snippet: "活动发布覆盖草稿、预览、审核、发布、下线和回滚。",
         type: "business_concept",
@@ -943,6 +987,14 @@ function samplePrdDocument() {
     sections: [
       { title: "1.1 项目背景", content: "用户每日签到领取积分。" },
       { title: "2.2 核心业务规则", content: "每日签到、积分奖励、重复签到不重复发放。" },
+      {
+        title: "2.3 核心流程/状态/页面要求",
+        content: "产品流程图和产品架构图覆盖运营配置、审核发布、前台签到、积分发放、异常补偿和数据报表。",
+        blocks: [
+          { type: "diagram", title: "产品流程图", diagramSyntax: "mermaid", content: "flowchart TD\nA[运营配置] --> B[审核发布]\nB --> C[前台签到]\nC --> D[积分发放]\nD --> E[数据报表]" },
+          { type: "diagram", title: "产品架构图", diagramSyntax: "mermaid", content: "flowchart LR\nOP[运营后台] --> CFG[配置中心]\nCFG --> PAGE[前台页面]\nPAGE --> REPORT[数据报表]" },
+        ],
+      },
       { title: "3 业务降级方案", content: "积分发放失败进入补偿重试。" },
       { title: "4 需求安全基线要求", content: "控制资损、风控、权限和报表。" },
     ],
@@ -952,7 +1004,27 @@ function samplePrdDocument() {
 function samplePrototypeArtifact() {
   return {
     title: "签到领积分活动原型",
-    htmlContent: "<main>活动配置 提交审核 立即签到 积分奖励 失败 额度不足 数据报表</main>",
+    htmlContent: `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <style>
+    *{box-sizing:border-box}.app{display:grid;grid-template-columns:220px 1fr;gap:16px;padding:20px}.panel{border-radius:8px;box-shadow:0 8px 18px #ddd;padding:16px}.badge{border-radius:999px;padding:4px 8px}.status{color:#027a48}
+  </style>
+</head>
+<body>
+  <main class="app">
+    <aside class="panel">后台导航 活动配置 审核发布 数据报表</aside>
+    <section class="panel" data-page-id="backend-config">
+      <h1>活动配置</h1>
+      <div class="field"><input value="签到领积分活动"></div><div class="field"><select><option>全部登录用户</option></select></div><div class="field"><select><option>会员成长活动集</option></select></div><button>提交审核</button><button>保存草稿</button><button>预览活动</button>
+      <div class="field">banner 上传位 分享海报 海报开关 隐私协议 目标用户 跳转类型</div>
+      <table><thead><tr><th>状态</th><th>说明</th></tr></thead><tbody><tr><td><span class="badge status">待审核</span></td><td>积分奖励、每日库存、失败补偿、补偿重试、额度不足、无资格</td></tr></tbody></table>
+    </section>
+    <section class="panel" data-page-id="frontend-preview"><div>立即签到</div><div>已签到</div><div>连续签到</div><div>积分奖励</div><div>异常状态</div><div>稍后到账</div></section>
+    <section class="panel" data-page-id="report"><div>数据报表</div><div>签到人数</div><div>发放失败</div><div>补偿中</div><div>资损风险</div></section>
+  </main>
+</body>
+</html>`,
   };
 }
 
