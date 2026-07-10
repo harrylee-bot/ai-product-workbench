@@ -8,6 +8,11 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const COVERAGE_SEGMENTER = new Intl.Segmenter("zh-CN", { granularity: "word" });
+const COVERAGE_STOP_TOKENS = new Set([
+  "与", "和", "及", "或", "的", "了", "为", "并", "在", "后", "时", "中", "内", "按", "对", "将",
+  "可", "需", "应", "每个", "当前", "相关", "至少", "默认", "进行", "通过", "支持",
+]);
 
 const DEFAULT_TOPIC = "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型";
 const topic = process.argv.slice(2).join(" ").trim() || process.env.AGENT_WORKFLOW_ONLINE_TOPIC || DEFAULT_TOPIC;
@@ -777,10 +782,10 @@ function evaluateOnlineConsistency(document, artifact, renderResult, designState
     "stateRules",
     "exceptionScenarios",
   ]);
-  const rows = requirements.map(({ group, label }) => ({
+  const rows = requirements.map(({ group, label, item }) => ({
     name: `${group}/${label}`,
-    prd: artifactContainsLabel(prdText, label),
-    prototype: artifactContainsLabel(prototypeText, label),
+    prd: artifactCoversEntity(prdText, item),
+    prototype: artifactCoversEntity(prototypeText, item),
   }));
   const matched = rows.filter((row) => row.prd && row.prototype).length;
   const ratio = rows.length ? matched / rows.length : 0;
@@ -799,7 +804,7 @@ function evaluateDesignCoverage(designState, artifactText, keys) {
   }
   const groups = [...new Set(requirements.map((item) => item.group))].map((group) => {
     const items = requirements.filter((item) => item.group === group);
-    const missing = items.filter((item) => !artifactContainsLabel(artifactText, item.label));
+    const missing = items.filter((item) => !artifactCoversEntity(artifactText, item.item));
     const hitCount = items.length - missing.length;
     return { group, total: items.length, hitCount, missing: missing.map((item) => item.label) };
   });
@@ -811,26 +816,26 @@ function evaluateDesignCoverage(designState, artifactText, keys) {
 }
 
 function evaluatePrototypeSpecCoverage(spec, artifactText) {
-  const labels = [];
+  const items = [];
   for (const page of Array.isArray(spec?.pages) ? spec.pages : []) {
-    addEntityLabel(labels, page);
-    for (const state of Array.isArray(page?.states) ? page.states : []) addEntityLabel(labels, state);
-    collectComponentLabels(page?.components, labels);
+    addEntityCoverage(items, page);
+    for (const state of Array.isArray(page?.states) ? page.states : []) addEntityCoverage(items, state);
+    collectComponentCoverage(page?.components, items);
   }
-  const unique = [...new Set(labels)];
+  const unique = [...new Map(items.map((item) => [item.label, item])).values()];
   if (!unique.length) return { passed: false, evidence: "prototype spec labels missing" };
-  const missing = unique.filter((label) => !artifactContainsLabel(artifactText, label));
+  const missing = unique.filter((item) => !artifactCoversEntity(artifactText, item.entity));
   const hitCount = unique.length - missing.length;
   return {
     passed: hitCount / unique.length >= 0.75,
-    evidence: `prototype-spec:${hitCount}/${unique.length}${missing.length ? ` missing=${missing.slice(0, 8).join("、")}` : ""}`,
+    evidence: `prototype-spec:${hitCount}/${unique.length}${missing.length ? ` missing=${missing.slice(0, 8).map((item) => item.label).join("、")}` : ""}`,
   };
 }
 
-function collectComponentLabels(components, output) {
+function collectComponentCoverage(components, output) {
   for (const component of Array.isArray(components) ? components : []) {
-    addEntityLabel(output, component);
-    collectComponentLabels(component?.children, output);
+    addEntityCoverage(output, component);
+    collectComponentCoverage(component?.children, output);
   }
 }
 
@@ -839,15 +844,15 @@ function collectDesignRequirements(designState, keys) {
   for (const key of keys) {
     for (const item of Array.isArray(designState?.[key]) ? designState[key] : []) {
       const label = entityLabel(item);
-      if (label.length >= 2) results.push({ group: key, label });
+      if (label.length >= 2) results.push({ group: key, label, item });
     }
   }
   return [...new Map(results.map((item) => [`${item.group}:${item.label}`, item])).values()];
 }
 
-function addEntityLabel(output, item) {
+function addEntityCoverage(output, item) {
   const label = entityLabel(item);
-  if (label.length >= 2) output.push(label);
+  if (label.length >= 2) output.push({ label, entity: item });
 }
 
 function entityLabel(item) {
@@ -856,14 +861,74 @@ function entityLabel(item) {
 }
 
 function artifactContainsLabel(artifactText, label) {
+  if (artifactContainsStrictLabel(artifactText, label)) return true;
+  const haystack = normalizeCoverageText(artifactText);
+  const tokens = coverageTokens(label);
+  if (!tokens.length) return false;
+  const hits = tokens.filter((token) => haystack.includes(token)).length;
+  return hits >= Math.max(1, Math.ceil(tokens.length * 0.6));
+}
+
+function artifactContainsStrictLabel(artifactText, label) {
   const haystack = normalizeCoverageText(artifactText);
   const needle = normalizeCoverageText(label);
-  if (!needle || haystack.includes(needle)) return Boolean(needle);
+  if (!needle) return true;
+  if (haystack.includes(needle)) return true;
   const parts = String(label)
     .split(/[：:、，；;\/\s]+/)
     .map(normalizeCoverageText)
     .filter((part) => part.length >= 2);
   return parts.length >= 2 && parts.filter((part) => haystack.includes(part)).length / parts.length >= 0.75;
+}
+
+function artifactCoversEntity(artifactText, entity) {
+  const label = entityLabel(entity);
+  if (label && artifactContainsLabel(artifactText, label)) return true;
+  return Object.entries(entity ?? {}).some(([key, value]) =>
+    !["id", "name", "title", "label", "role", "sourcePaths"].includes(key) &&
+    artifactContainsEvidence(artifactText, typeof value === "string" ? value : undefined),
+  );
+}
+
+function artifactContainsEvidence(artifactText, evidence) {
+  if (!evidence) return false;
+  const haystack = normalizeCoverageText(artifactText);
+  const tokens = coverageTokens(evidence);
+  if (!tokens.length) return false;
+  const hits = tokens.filter((token) => haystack.includes(token)).length;
+  const requiredHits = tokens.length <= 3
+    ? Math.ceil(tokens.length * 0.6)
+    : Math.min(5, Math.max(2, Math.ceil(tokens.length * 0.35)));
+  return hits >= requiredHits;
+}
+
+function coverageTokens(value) {
+  const tokens = [];
+  let singleHanBuffer = "";
+  const flushSingleHanBuffer = () => {
+    if (singleHanBuffer.length >= 2) tokens.push(singleHanBuffer);
+    singleHanBuffer = "";
+  };
+
+  for (const segment of COVERAGE_SEGMENTER.segment(String(value ?? "").toLowerCase())) {
+    if (!segment.isWordLike) {
+      flushSingleHanBuffer();
+      continue;
+    }
+    const token = normalizeCoverageText(segment.segment);
+    if (!token || COVERAGE_STOP_TOKENS.has(token)) {
+      flushSingleHanBuffer();
+      continue;
+    }
+    if (/^[\u4e00-\u9fa5]$/.test(token)) {
+      singleHanBuffer += token;
+      continue;
+    }
+    flushSingleHanBuffer();
+    if (token.length >= 2) tokens.push(token);
+  }
+  flushSingleHanBuffer();
+  return [...new Set(tokens)];
 }
 
 function normalizeCoverageText(value) {
@@ -1021,6 +1086,23 @@ function runSelfTest() {
   assertCheck(allowedEvaluation, "线上 PRD 与原型核心规则一致", true);
   assertCheck(allowedEvaluation, "线上运行状态展示知识库模型联网三段进度", true);
 
+  const semanticCoverage = evaluateDesignCoverage({
+    features: [{
+      name: "自然日次数控制",
+      description: "默认按北京时间自然日统计，每个用户每日成功一次。",
+    }],
+    businessRules: [{
+      name: "幂等防重复发放",
+      description: "活动ID、用户ID和业务日期组成幂等键，重复点击不重复记账。",
+    }],
+  }, "北京时间 00:00 重置，每日次数上限 1 次。幂等规则为活动ID+用户ID+业务日期，重复点击返回已有结果，不重复发放。", [
+    "features",
+    "businessRules",
+  ]);
+  if (!semanticCoverage.passed) {
+    throw new Error(`Self-test failed for semantic design coverage: ${semanticCoverage.evidence}`);
+  }
+
   const internalToolProtocol = [
     "data: " + JSON.stringify({ type: "tool-input-start", toolCallId: "call-1", toolName: "read_file" }),
     "data: " + JSON.stringify({ type: "tool-output-available", toolCallId: "call-1", toolName: "read_file", output: "Context from AI Product Workbench" }),
@@ -1044,6 +1126,7 @@ function runSelfTest() {
       "PRD metadata must retain explainable knowledge refs, external evidence, and public-data boundary",
       "agent retrieval must cover PRD rules, prototype rules, a domain-relevant prototype asset, and current-domain knowledge",
       "PRD and prototype must cover the dynamic design state and prototype specification",
+      "semantic design evidence is accepted without copying entity labels verbatim",
       "PRD body must not include trace/evidence sections",
       "runtime progress must show knowledge, model, and public evidence stages",
     ],

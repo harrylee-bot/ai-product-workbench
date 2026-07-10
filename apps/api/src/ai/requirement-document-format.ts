@@ -205,10 +205,10 @@ export function formatRequirementDocumentDraft(
     ...draft,
     title,
     sections,
-    validationNotes: [
+    validationNotes: [...new Set([
       ...(draft.validationNotes ?? []),
       ...buildFormatValidationNotes(sections),
-    ],
+    ])],
   };
 }
 
@@ -550,7 +550,9 @@ function isStructuralSection(section: RequirementDocSection) {
 }
 
 function buildFormatValidationNotes(sections: RequirementDocSection[]) {
-  const notes: string[] = [];
+  const notes = [
+    "补齐边界：未确认内容仅记录为假设或待确认项；不臆造生产地址、真实接口、密钥或内部敏感信息；知识库规则优先于模型推断和外部资料。",
+  ];
   const hasVisual = sections.some((section) => section.blocks?.some((block) =>
     ["diagram", "image", "prototype_snapshot", "asset_reference"].includes(block.type),
   ));
