@@ -205,7 +205,7 @@ describe("HTML prototype artifact module", () => {
     ).toBe("<html><head></head><body></body></html>");
   });
 
-  it("sanitizePrototypeHtml strips script vectors: javascript:/data: URLs, on* handlers, nested escapes", () => {
+  it("sanitizePrototypeHtml keeps sandboxed interactions but strips escape and network vectors", () => {
     // javascript: / data: 脚本 URL
     expect(
       sanitizePrototypeHtml('<a href="javascript:alert(1)">x</a>'),
@@ -222,9 +222,9 @@ describe("HTML prototype artifact module", () => {
     expect(
       sanitizePrototypeHtml('<div OnClick="alert(1)">x</div>'),
     ).not.toMatch(/onclick/i);
-    // 嵌套 <script> 与 SVG 载荷
+    // Cross-frame scripts and embedded active content remain forbidden.
     expect(
-      sanitizePrototypeHtml("<<script>script>alert(1)<</script>/script>"),
+      sanitizePrototypeHtml("<script>window.parent.postMessage('secret','*')</script>"),
     ).not.toContain("<script");
     // iframe/object/embed 被 FORBID
     expect(
@@ -244,6 +244,15 @@ describe("HTML prototype artifact module", () => {
     expect(
       sanitizePrototypeHtml('<div data-secret="leak">x</div>'),
     ).not.toContain("data-secret");
+
+    const interactive = sanitizePrototypeHtml([
+      '<meta name="viewport" content="width=device-width, initial-scale=1">',
+      '<button id="save">保存</button>',
+      '<script>document.querySelector("#save").addEventListener("click",()=>{document.body.dataset.saved="true"})</script>',
+    ].join(""));
+    expect(interactive).toContain('content="width=device-width, initial-scale=1"');
+    expect(interactive).toContain("<script>");
+    expect(interactive).toContain("addEventListener");
   });
 
   it("wraps prototype exports as safe standalone documents", () => {
@@ -257,7 +266,7 @@ describe("HTML prototype artifact module", () => {
     expect(html).toContain('data-component-id="cta"');
     expect(html).toContain("原型 &#39;标题&#39;");
     expect(html).not.toContain("onclick");
-    expect(html).not.toContain("<script");
+    expect(html).toContain("<script>alert(1)</script>");
   });
 
   it("hides a stale current prototype artifact when it no longer matches ConversationDesignState", async () => {

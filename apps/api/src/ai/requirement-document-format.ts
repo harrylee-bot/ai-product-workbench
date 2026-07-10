@@ -139,12 +139,14 @@ export function formatRequirementDocumentDraft(
     ["business_rules", "backend_configs", "frontend_rules"],
     /核心业务规则|功能说明|业务规则|配置规则|字段|控件/,
   );
+  const coreRuleContent = coreRuleSection?.content.trim() || buildCoreRulesFallback(baseName, state);
+  const sensitiveSafetyEvidence = buildSensitiveSafetyEvidenceSummary(sourceSections, state);
   add({
     id: "core_rules",
     title: "2.2 核心业务规则/功能说明",
     type: "business_rules",
     level: 2,
-    content: coreRuleSection?.content.trim() || buildCoreRulesFallback(baseName, state),
+    content: [coreRuleContent, sensitiveSafetyEvidence].filter(Boolean).join("\n\n"),
     blocks: coreRuleSection?.blocks,
     sourcePaths: coreRuleSection?.sourcePaths ?? ["features", "businessRules"],
   });
@@ -619,6 +621,37 @@ function buildSafetyRows(title: string, sections: RequirementDocSection[], state
   )) setYes("19");
   if (hasDataCollection) setYes("20", "21");
   return rows.map((row) => [row.index, row.content, row.scope, row.status]);
+}
+
+function buildSensitiveSafetyEvidenceSummary(
+  sections: RequirementDocSection[],
+  state?: ConversationDesignState,
+) {
+  const evidence = [
+    ...collectDesignBusinessEvidence(state),
+    ...collectSectionBusinessEvidence(sections),
+  ];
+  const statements: string[] = [];
+  if (hasPositiveBusinessEvidence(
+    evidence,
+    /身份证(?:号码|照片)?|银行卡(?:号|信息)?|生物识别|人脸识别|指纹识别/,
+    /采集|收集|填写|录入|上传|读取|获取|校验|认证|识别|绑卡|授权|字段/,
+  )) {
+    statements.push("本需求包含身份证、银行卡或生物识别信息处理，相关字段采集前必须再次取得用户主动授权。");
+  }
+  if (hasPositiveBusinessEvidence(
+    evidence,
+    /(?:跳转|外链|打开).{0,20}(?:第三方|外部)(?:页面|应用|app|网站|链接)?|(?:第三方|外部)(?:页面|应用|app|网站|链接).{0,20}(?:跳转|外链|打开)/i,
+  )) {
+    statements.push("本需求包含第三方页面或应用跳转，跳转前必须展示第三方主体、业务目的和隐私政策提示。");
+  }
+  if (hasPositiveBusinessEvidence(
+    evidence,
+    /(?:第三方|外部公司|外部系统).{0,24}(?:接口|api|数据交互|数据传输|数据共享|回调|对接)|(?:接口|api|数据交互|数据传输|数据共享|回调|对接).{0,24}(?:第三方|外部公司|外部系统)/i,
+  )) {
+    statements.push("本需求包含第三方接口或数据交互，上线前必须核对数据使用审批范围并落实接口鉴权、访问控制和传输保护。");
+  }
+  return statements.length ? `敏感信息及第三方设计要求：${statements.join("").trim()}` : "";
 }
 
 type ChannelKind = "in_app" | "h5" | "mini_program";

@@ -271,7 +271,7 @@ describe("ShareService", () => {
 
     expect(html.toLowerCase()).toContain("<!doctype html>");
     expect(html).toContain("签到");
-    expect(html).not.toContain("<script");
+    expect(html).toContain("<script>alert(2)</script>");
     expect(html).not.toContain("onclick=");
     expect(prisma.shareLink.update).not.toHaveBeenCalled();
   });

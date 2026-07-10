@@ -98,6 +98,7 @@ describe("requirement document fixed-format evidence handling", () => {
     });
     const formatted = formatRequirementDocumentDraft(emptyDraft(state), state);
     const usage = sectionContent(formatted, "usage_scenarios");
+    const coreRules = sectionContent(formatted, "core_rules");
     const safetyRows = tableRows(sectionContent(formatted, "safety_baseline"));
 
     expect(usage).toContain("| 1 | 端内渠道 | □是 ☑否 |");
@@ -106,6 +107,9 @@ describe("requirement document fixed-format evidence handling", () => {
     for (const index of ["12", "13", "15", "16", "17", "18"]) {
       expect(statusOf(safetyRows, index)).toBe("是");
     }
+    expect(coreRules).toContain("再次取得用户主动授权");
+    expect(coreRules).toContain("第三方页面或应用跳转");
+    expect(coreRules).toContain("第三方接口或数据交互");
   });
 
   it("honors explicit structured channel selections without treating option lists as selections", () => {

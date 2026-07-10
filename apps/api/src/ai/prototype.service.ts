@@ -752,12 +752,22 @@ function prototypePageKnowledgeContent(page: PrototypePageSpec) {
 }
 
 /**
- * sec-1：用 DOMPurify allowlist 净化原型 HTML，替换此前可绕过的正则黑名单。
- * 默认剥离 <script>、on* 事件处理器、javascript:/data: 脚本 URL；allowlist 进一步收紧标签/属性。
- * 允许 data-component-id/data-page-id（原型选区标记用）。
+ * Use a DOMPurify allowlist for generated prototype HTML. Inline scripts are
+ * allowed only inside the opaque preview sandbox; cross-frame, network, and
+ * external-script capabilities remain blocked here and by CSP.
  */
 export function sanitizePrototypeHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
+  const removeUnsafeScript = (currentNode: Node, hookEvent: { tagName: string }) => {
+    if (hookEvent.tagName !== "script") return;
+    const element = currentNode as Element;
+    const source = element.textContent ?? "";
+    const unsafe = element.hasAttribute("src")
+      || /(?:\b(?:window\.)?(?:parent|top|opener)\b|postMessage\s*\(|\b(?:fetch|XMLHttpRequest|WebSocket|EventSource)\b|\bimport\s*\(|\beval\s*\(|\bFunction\s*\()/i.test(source);
+    if (unsafe) element.parentNode?.removeChild(element);
+  };
+  DOMPurify.addHook("uponSanitizeElement", removeUnsafeScript);
+  try {
+    return DOMPurify.sanitize(html, {
     WHOLE_DOCUMENT: true,
     ALLOWED_TAGS: [
       "html",
@@ -767,6 +777,7 @@ export function sanitizePrototypeHtml(html: string): string {
       "meta",
       "link",
       "style",
+      "script",
       "a",
       "abbr",
       "b",
@@ -841,6 +852,8 @@ export function sanitizePrototypeHtml(html: string): string {
       "class",
       "id",
       "style",
+      "charset",
+      "content",
       "href",
       "src",
       "alt",
@@ -869,7 +882,7 @@ export function sanitizePrototypeHtml(html: string): string {
     ],
     ALLOW_DATA_ATTR: false,
     ADD_ATTR: ["data-component-id", "data-page-id", "data-action"],
-    FORBID_TAGS: ["script", "iframe", "object", "embed", "base", "form"],
+    FORBID_TAGS: ["iframe", "object", "embed", "base", "form"],
     FORBID_ATTR: [
       "onerror",
       "onclick",
@@ -882,7 +895,10 @@ export function sanitizePrototypeHtml(html: string): string {
       "onfocus",
       "onblur",
     ],
-  });
+    });
+  } finally {
+    DOMPurify.removeHook("uponSanitizeElement", removeUnsafeScript);
+  }
 }
 
 export function sanitizePrototypeDocumentHtml(
