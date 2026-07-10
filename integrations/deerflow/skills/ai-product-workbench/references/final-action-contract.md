@@ -11,13 +11,24 @@ The final action is the only instruction AI Product Workbench will persist from 
   "intent": "optional UserIntent label",
   "requirementMode": "historical_extension | new_capability | brand_new_system | one_sentence_completion",
   "knowledgeRefsUsed": ["optional knowledge paths or titles used for reasoning"],
+  "externalRefsUsed": ["optional public reference title + URL strings"],
+  "externalResearchStatus": "completed | skipped_not_needed | skipped_tools_unavailable | failed_non_blocking",
+  "enrichmentNotes": ["user-safe knowledge/model/web enrichment notes"],
   "assumptions": ["optional inferred product facts, especially for one-sentence requirements"],
   "consistencyStrategy": "optional prototype/PRD consistency strategy",
+  "qualitySelfCheck": {
+    "passed": true,
+    "missing": [],
+    "stateCoverage": ["checked design-state groups"],
+    "prdChecks": ["checked PRD requirements"],
+    "prototypeChecks": ["checked prototype requirements"],
+    "knowledgeChecks": ["checked knowledge requirements"]
+  },
   "artifacts": []
 }
 ```
 
-The backend currently stores unknown extra fields in `raw`; future appliers can use them. Include structured product payloads when useful, but do not rely on Nest to infer missing intent.
+For every `review_prd` or `review_prototype`, `designStateDraft` is mandatory. When PRD and prototype are requested together, the same final action must also include `prdDocumentDraft`, `prototypeSpec`, and one `prototype_html` artifact. The backend rejects missing structured payloads; do not rely on Nest to infer them from prose or HTML.
 
 ## Direct Answer
 
@@ -34,11 +45,11 @@ Use when product output would require guessing.
 ```ai_product_workbench_final_action
 {
   "type": "ask_clarification",
-  "message": "还缺少两个关键信息：目标用户是谁？活动奖励规则是什么？",
+  "message": "还缺少两个会改变业务方案的关键信息，请补充后继续生成。",
   "intent": "new_requirement",
   "questions": [
     "目标用户是谁？",
-    "活动奖励规则是什么？"
+    "决定核心操作成功结果的业务条件是什么？"
   ]
 }
 ```
@@ -50,57 +61,56 @@ Use when a requirement or PRD should be reviewed before prototype work.
 ```ai_product_workbench_final_action
 {
   "type": "review_prd",
-  "message": "已整理签到活动 PRD，请先确认需求范围。",
+  "message": "已生成完整需求说明书，请查看并评审。",
   "intent": "generate_prd",
   "requirementMode": "one_sentence_completion",
-  "knowledgeRefsUsed": ["01-产品架构/产品能力地图", "02-业务域知识/活动发布与模板配置"],
-  "assumptions": ["默认使用活动发布后台、前台活动页、预览审核和活动报表闭环"],
+  "knowledgeRefsUsed": ["<文档规范>", "<当前业务知识>"],
+  "assumptions": ["<可评审业务假设>"],
+  "qualitySelfCheck": {
+    "passed": true,
+    "missing": [],
+    "stateCoverage": ["全部设计状态分组已检查"],
+    "prdChecks": ["固定结构、流程图、架构图、验收、降级、安全基线已检查"],
+    "prototypeChecks": ["本轮未要求原型"],
+    "knowledgeChecks": ["文档规范和当前业务知识已落实"]
+  },
   "designStateDraft": {
-    "title": "签到活动",
-    "summary": "通过每日签到提升活跃和留存"
+    "title": "<需求名称>",
+    "summary": "<本次需求范围和业务闭环>",
+    "businessGoal": "<目标对象、期望变化和可衡量结果>",
+    "targetUsers": [{"id":"target-1","name":"<目标用户>","description":"<用户职责>"}],
+    "userScenarios": [{"id":"scenario-1","title":"<核心场景>","description":"<触发和结果>"}],
+    "pages": [{"id":"page-1","name":"<页面名称>","description":"<页面职责>"}],
+    "features": [{"id":"feature-1","name":"<功能名称>","description":"<成功结果>"}],
+    "backendConfigs": [{"id":"config-1","name":"<后台配置>","description":"<字段和校验>"}],
+    "frontendRules": [{"id":"front-rule-1","title":"<前台规则>","description":"<页面反馈>"}],
+    "businessRules": [{"id":"business-rule-1","title":"<业务规则>","description":"<触发和边界>"}],
+    "stateRules": [{"id":"state-1","name":"<关键状态>","description":"<进入条件和允许动作>"}],
+    "exceptionScenarios": [{"id":"exception-1","title":"<异常场景>","expectedBehavior":"<提示和恢复动作>"}],
+    "acceptanceCriteria": [{"id":"acceptance-1","title":"<验收项>","description":"<可测试标准>"}]
   },
   "prdDocumentDraft": {
-    "title": "签到活动需求说明书",
+    "title": "<需求名称>需求说明书",
     "sections": [
-      {
-        "id": "intro",
-        "title": "1 引言",
-        "type": "overview",
-        "level": 2,
-        "order": 1,
-        "content": ""
-      },
       {
         "id": "background",
         "title": "1.1 项目背景",
-        "type": "overview",
-        "level": 3,
-        "order": 2,
-        "content": "说明涉及系统、当前现状、变更原因、影响模块和业务目的。"
+        "type": "background",
+        "level": 2,
+        "order": 1,
+        "content": "<具体业务背景>"
       },
       {
-        "id": "business_requirements",
-        "title": "2 业务需求",
-        "type": "overview",
+        "id": "core_flow_state",
+        "title": "2.3 核心流程/状态/页面要求",
+        "type": "flow",
         "level": 2,
-        "order": 5,
-        "content": "按页面链接、核心规则、流程状态、接口和验收标准组织。"
-      },
-      {
-        "id": "degradation",
-        "title": "3 业务降级方案（必填）",
-        "type": "overview",
-        "level": 2,
-        "order": 20,
-        "content": "不涉及，或写具体降级方案。"
-      },
-      {
-        "id": "security_baseline",
-        "title": "4 需求安全基线要求（必填）",
-        "type": "overview",
-        "level": 2,
-        "order": 21,
-        "content": "用安全基线自查表描述是否涉及。"
+        "order": 10,
+        "content": "<页面、流程、状态和异常要求>",
+        "blocks": [
+          {"id":"flow","type":"diagram","title":"产品流程图","diagramSyntax":"mermaid","content":"flowchart TD\n  A[<开始>] --> B[<结果>]"},
+          {"id":"architecture","type":"diagram","title":"产品架构图","diagramSyntax":"mermaid","content":"flowchart LR\n  A[<页面层>] --> B[<能力层>]"}
+        ]
       }
     ]
   }
@@ -109,24 +119,32 @@ Use when a requirement or PRD should be reviewed before prototype work.
 
 ## Prototype Review
 
-Use when generated artifacts should be shown to the user.
+Use when generated artifacts should be shown to the user. Include the full `designStateDraft` above. When PRD and prototype are generated together, include the complete `prdDocumentDraft` in this same action as well.
 
 ```ai_product_workbench_final_action
 {
   "type": "review_prototype",
-  "message": "已生成签到活动原型，请查看页面和交互。",
-  "intent": "generate_prototype",
-  "requirementMode": "historical_extension",
-  "consistencyStrategy": "沿用历史活动配置页导航、字段分组和预览审核流程，只新增签到规则配置区和前台签到反馈态。",
+  "message": "已生成完整需求说明书和高保真原型，请查看。",
+  "intent": "generate_prd_and_prototype",
+  "requirementMode": "one_sentence_completion",
+  "designStateDraft": {"title":"<需求名称>","summary":"<范围>","businessGoal":"<目标>","targetUsers":[{"id":"target-1","name":"<目标用户>"}],"userScenarios":[{"id":"scenario-1","title":"<场景>"}],"pages":[{"id":"page-1","name":"<后台页面>"},{"id":"page-2","name":"<前台页面>"}],"features":[{"id":"feature-1","name":"<功能>"}],"backendConfigs":[{"id":"config-1","name":"<配置>"}],"frontendRules":[{"id":"front-1","title":"<前台规则>"}],"businessRules":[{"id":"rule-1","title":"<业务规则>"}],"stateRules":[{"id":"state-1","name":"<状态>"}],"exceptionScenarios":[{"id":"exception-1","title":"<异常>"}],"acceptanceCriteria":[{"id":"acceptance-1","title":"<验收项>"}]},
+  "prdDocumentDraft": {"title":"<需求名称>需求说明书","sections":["<完整固定结构章节对象>"]},
   "prototypeSpec": {
-    "title": "签到活动原型",
-    "targetDevice": "mobile"
+    "title": "<需求名称>原型",
+    "targetDevice": "both",
+    "styleGuide": {"tone":"business","layoutDensity":"compact","borderRadius":"small"},
+    "pages": [
+      {"id":"page-1","name":"<后台页面>","device":"responsive","layout":"dashboard","components":[{"id":"component-1","name":"<配置表单>","type":"form","sourcePaths":["backendConfigs"]}],"states":[{"id":"state-1","name":"<正常/异常状态>","description":"<页面表现>","sourcePaths":["stateRules"]}],"sourcePaths":["pages"],"order":1},
+      {"id":"page-2","name":"<前台页面>","device":"responsive","layout":"mobile_page","components":[{"id":"component-2","name":"<核心操作>","type":"button","sourcePaths":["features"]}],"states":[{"id":"state-2","name":"<结果状态>","description":"<结果反馈>","sourcePaths":["exceptionScenarios"]}],"sourcePaths":["pages"],"order":2}
+    ],
+    "navigation": [],
+    "interactions": []
   },
   "artifacts": [
     {
       "kind": "prototype_html",
-      "title": "签到活动原型",
-      "path": "mnt/user-data/outputs/checkin-prototype/index.html",
+      "title": "<需求名称>高保真原型",
+      "path": "mnt/user-data/outputs/index.html",
       "contentType": "text/html"
     }
   ]

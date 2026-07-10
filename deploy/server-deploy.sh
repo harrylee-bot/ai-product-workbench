@@ -123,6 +123,9 @@ fail_if_weak() {
 case "$DEPLOY_TARGET" in
   all | api)
     fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+    if [ "$DEERFLOW_ENABLED" = "true" ]; then
+      fail_if_weak "DEERFLOW_INTERNAL_AUTH_TOKEN" "$DEERFLOW_INTERNAL_AUTH_TOKEN"
+    fi
     fail_if_weak "JWT_SECRET" "$JWT_SECRET"
     fail_if_weak "MODEL_GATEWAY_ENCRYPTION_KEY" "$MODEL_GATEWAY_ENCRYPTION_KEY"
 

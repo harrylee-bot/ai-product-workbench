@@ -37,7 +37,7 @@ Classify the turn before doing work:
 
 ### historical_extension
 
-Use this when the turn references an existing ConversationDesignState, PRD, prototype, page, activity, template, material, prize, report, or current project history.
+Use this when the turn references an existing ConversationDesignState, PRD, prototype, page, business object, report, or current project history.
 
 Required behavior:
 
@@ -52,10 +52,10 @@ Use this when there is no historical page to inherit, or the user asks for a new
 
 Required behavior:
 
-- Place the capability inside the product architecture: activity, material, prize, channel, report, permission, audit/publish, or AI generation layer.
-- Reuse common platform frames such as login/permissions, list/configuration/preview/audit/publish/reporting.
+- Place the capability inside the product architecture retrieved for the current domain; do not force it into a fixed activity or marketing taxonomy.
+- Reuse the relevant platform frames, permissions, object lifecycle, operational pages, user pages, and reporting patterns found in current state and knowledge.
 - You may redesign information architecture when it creates a clearer capability loop.
-- State how the new capability connects to existing assets, activity configuration, audit, reporting, and AI generation.
+- State how the new capability connects to existing business objects, configuration, governance, reporting, and AI generation where applicable.
 
 ### brand_new_system
 
@@ -70,7 +70,7 @@ Required behavior:
 
 ### one_sentence_completion
 
-Use this when the user gives only a brief goal such as "做一个抽奖活动" or "加一个 AI 营销助手".
+Use this when the user gives only a brief goal such as "做一个门店预约能力" or "增加合同审批提醒".
 
 Required behavior:
 
@@ -139,6 +139,8 @@ Read the `Context from AI Product Workbench` JSON from the user message. Importa
 
 Use `deerFlowUploads[].deerFlowFile.markdownVirtualPath` for Office/PDF files when available; otherwise use `virtualPath`.
 
+Treat the current request, `conversationDesignState`, attachments, and `knowledgeContext` as the authoritative business context for the turn. DeerFlow long-term memory may preserve user preferences, but it must never supply business features, fields, values, dates, state transitions, pages, or rules unless the current inputs independently support them. Ignore stale or unrelated memory instead of blending it into a new requirement.
+
 ## Final Action
 
 Always finish with one fenced block:
@@ -146,6 +148,14 @@ Always finish with one fenced block:
 ```ai_product_workbench_final_action
 {"type":"answer","message":"..."}
 ```
+
+For `review_prd` and `review_prototype`, a chat summary is never enough:
+
+- Always include a complete `designStateDraft` with named records in `targetUsers`, `userScenarios`, `pages`, `features`, `backendConfigs`, `frontendRules`, `businessRules`, `stateRules`, `exceptionScenarios`, and `acceptanceCriteria`.
+- Include `prdDocumentDraft` whenever a PRD is requested.
+- Include `prototypeSpec` and the `prototype_html` artifact whenever a prototype is requested.
+- For a combined PRD/prototype request, include all four payloads in the same final action: `designStateDraft`, `prdDocumentDraft`, `prototypeSpec`, and `artifacts`.
+- Return a non-empty `qualitySelfCheck`; set `passed=true` only after every required payload and knowledge constraint has been checked.
 
 For full schema and examples, see `references/final-action-contract.md`.
 

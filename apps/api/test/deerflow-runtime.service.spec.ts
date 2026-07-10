@@ -276,6 +276,11 @@ describe("DeerFlowRuntimeService", () => {
     expect(prompt).toContain("externalSearchPolicy");
     expect(prompt).toContain("externalRefsUsed");
     expect(prompt).toContain("externalResearchStatus");
+    expect(prompt).toContain("designStateDraft");
+    expect(prompt).toContain("prototypeSpec");
+    expect(prompt).toContain("Long-term memory is preference-only context");
+    expect(prompt).toContain("never import a feature, field, number, date, state transition, page, or business rule from memory");
+    expect(prompt).toContain("The persistence layer rejects omitted or unnamed groups");
     expect(prompt).toContain("skipped_tools_unavailable");
     expect(prompt).toContain("preview URL");
     expect(prompt).toContain("mnt/user-data/outputs/index.html");
@@ -615,7 +620,7 @@ describe("DeerFlowRuntimeService", () => {
     }));
   });
 
-  it("prefers the final-state assistant message over stale streamed action blocks", async () => {
+  it("prefers the nested Gateway final-state assistant message over stale streamed action blocks", async () => {
     const finalActionPayload = {
       type: "review_prd",
       message: "完整 PRD 和原型已生成。",
@@ -624,6 +629,7 @@ describe("DeerFlowRuntimeService", () => {
         passed: true,
         missing: [],
       },
+      enrichmentNotes: "已补齐通用业务状态。",
       prdDocumentDraft: {
         title: "签到活动需求说明书",
         sections: [
@@ -662,18 +668,20 @@ describe("DeerFlowRuntimeService", () => {
         {
           event: "values",
           data: {
-            messages: [
-              { type: "tool", content: "OK" },
-              {
-                type: "ai",
-                content: [
-                  "已完成。",
-                  "\n```ai_product_workbench_final_action\n",
-                  JSON.stringify(finalActionPayload),
-                  "\n```",
-                ].join(""),
-              },
-            ],
+            values: {
+              messages: [
+                { type: "tool", content: "OK" },
+                {
+                  type: "ai",
+                  content: [
+                    "已完成。",
+                    "\n```ai_product_workbench_final_action\n",
+                    JSON.stringify(finalActionPayload),
+                    "\n```",
+                  ].join(""),
+                },
+              ],
+            },
           },
         },
       ]));
@@ -692,6 +700,7 @@ describe("DeerFlowRuntimeService", () => {
       type: "review_prd",
       message: "完整 PRD 和原型已生成。",
       externalRefsUsed: ["幂等请求 https://example.com/idempotency"],
+      enrichmentNotes: ["已补齐通用业务状态。"],
       raw: expect.objectContaining({
         qualitySelfCheck: expect.objectContaining({ passed: true, missing: [] }),
         prdDocumentDraft: expect.objectContaining({ title: "签到活动需求说明书" }),

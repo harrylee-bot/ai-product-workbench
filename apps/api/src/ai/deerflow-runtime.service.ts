@@ -206,16 +206,20 @@ export class DeerFlowRuntimeService {
       }
     }
 
-    if (!finalState) {
-      finalState = await this.getThreadState(threadId, input.userId, input.signal).catch(() => undefined);
-    }
-
     // A long DeerFlow run can emit several assistant messages around tool calls. The
     // streamed accumulator may therefore contain stale or partial action blocks.
-    // Prefer a valid block from the final state, while retaining compatibility with
-    // runtimes that only expose the action in the message stream.
-    const finalStateAssistantText = extractAssistantTextFromFinalState(finalState).trim();
+    // Prefer the authoritative final state and use the stream only while that state
+    // has not been persisted yet.
+    let finalStateAssistantText = extractAssistantTextFromFinalState(finalState).trim();
     const streamedAssistantText = assistantText.trim();
+    if (!hasParsableFinalActionBlock(finalStateAssistantText) && !hasParsableFinalActionBlock(streamedAssistantText)) {
+      const persistedFinalState = await this.getThreadState(threadId, input.userId, input.signal).catch(() => undefined);
+      const persistedAssistantText = extractAssistantTextFromFinalState(persistedFinalState).trim();
+      if (persistedAssistantText) {
+        finalState = persistedFinalState;
+        finalStateAssistantText = persistedAssistantText;
+      }
+    }
     const visibleAssistantText = hasParsableFinalActionBlock(finalStateAssistantText)
       ? finalStateAssistantText
       : hasParsableFinalActionBlock(streamedAssistantText)
@@ -587,8 +591,12 @@ function buildUserPrompt(input: DeerFlowRunInput) {
           "required for review_prd/review_prototype: { passed: boolean, missing: string[], stateCoverage: string[], prdChecks: string[], prototypeChecks: string[], knowledgeChecks: string[] }. Set passed=true only after revising all known gaps in the same turn.",
         assumptions: "optional inferred business facts, especially for one-sentence requirements",
         consistencyStrategy: "optional PRD/prototype consistency strategy",
+        designStateDraft:
+          "required for every review_prd/review_prototype: { title, summary, businessGoal, targetUsers[], userScenarios[], pages[], features[], backendConfigs[], frontendRules[], businessRules[], stateRules[], exceptionScenarios[], acceptanceCriteria[] }. Every array must contain named, concrete, reviewable records; do not omit groups or use placeholders.",
         prdDocumentDraft:
           "required for review_prd when possible: full PRD document, not a summary; shape { title, sections: [{ id, title, type, level, order, content, blocks?, sourcePaths? }], validationNotes? }. Use the standard Chinese requirement-document section order: 1 引言 / 1.1 项目背景 / 1.2 文档范围 / 1.3 使用场景（必填） / 2 业务需求 / 2.1 页面链接 / 2.2 核心业务规则/功能说明 / 2.3 核心流程/状态/页面要求 / 2.4 验收标准 / 3 业务降级方案（必填） / 4 需求安全基线要求（必填）. Do not include a section named 本需求涉及新增/修改的接口. blocks may include paragraph, bullet_list, table, quote, warning, info, diagram, image, prototype_snapshot, asset_reference.",
+        prototypeSpec:
+          "required whenever the user asks for a prototype: { title, targetDevice, styleGuide, pages: [{ id, name, device, layout, components: [{ id, name, type, sourcePaths, children? }], states: [{ id, name, description, sourcePaths }], sourcePaths, order }], navigation[], interactions[] }. Enumerate the front-office and back-office pages, components, normal/empty/permission/failure states, and data views actually implemented by the HTML artifact.",
         artifacts: [
           {
             kind: "optional artifact kind, for example prototype_html or prd_markdown",
@@ -607,6 +615,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "brand_new_system means a completely new system/page: if a tab bar is present in the target experience, follow the retrieved ui_style_guide tab style while allowing the rest of the page style to be redesigned; if no tab bar is present, you may redesign the page style from scratch.",
         "Use product_architecture/page_inventory/ui_style_guide/prototype_asset_ref knowledge items when available to decide reuse vs redesign; cite them in knowledgeRefsUsed.",
         "Knowledge-first workflow: use knowledgeContext before general model knowledge. After the local knowledge baseline is applied, you may use model reasoning and available web search/fetch tools to fill missing current or general details, but local product rules win over web results.",
+        "Treat the current user request, conversationDesignState, attachments, and knowledgeContext as the only authoritative sources for this turn's business scope and rules. Long-term memory is preference-only context: never import a feature, field, number, date, state transition, page, or business rule from memory unless the current inputs independently support it. If memory conflicts with or is irrelevant to the current inputs, ignore it completely.",
         "When knowledgeContext is non-empty and the user asks for a PRD/prototype/方案, do not stop at copying local knowledge: first infer ordinary missing product details with the model, then use available web search/fetch for public, generic, current, or industry-practice details when helpful. If search/fetch tools are unavailable, set externalResearchStatus=skipped_tools_unavailable and continue with model inference.",
         "If externalResearchContext.refs is non-empty, use those refs as already fetched public evidence and cite them in externalRefsUsed/enrichmentNotes; do not repeat search unless there is a clear missing public fact.",
         "Never send private files, raw source assets, internal paths, conversation IDs, user IDs, credentials, or complete user documents to web search. Search only generic product/domain terms dynamically derived from the current request.",
@@ -615,10 +624,12 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "For one_sentence_completion, infer ordinary missing details from product_architecture knowledge, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
         "For one_sentence_completion that asks for PRD/prototype, the PRD quality target is the local requirement-doc-template skill standard: Chinese requirement document, <工单名称>需求说明书 title, version history, manual TOC, fixed 1/2/3/4 section order, channel table, concrete degradation plan, and 21-row safety baseline.",
         "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",
+        "For every review_prd/review_prototype, designStateDraft is mandatory and must fully populate targetUsers, userScenarios, pages, features, backendConfigs, frontendRules, businessRules, stateRules, exceptionScenarios, and acceptanceCriteria. The persistence layer rejects omitted or unnamed groups.",
+        "When the user requests both PRD and prototype, the same final action must include designStateDraft, prdDocumentDraft, prototypeSpec, and the prototype_html artifact. Do not return the HTML artifact without PrototypeSpec.",
         "For every generated PRD, include at least two diagram blocks in the relevant 2.x business section: one Mermaid product/business flow diagram and one Mermaid product architecture/information architecture diagram. If knowledgeContext provides prototype_snapshot/image visualAssets, also include prototype_snapshot/image blocks for the relevant reference pages.",
         "If no suitable prototype snapshot or HTML visual asset is available, do not invent screenshots. Add a validationNotes item and an info/warning block that names the missing prototype visual asset and the required follow-up. Mermaid flow and architecture diagrams should still be generated from the product logic.",
         "For PRD/需求文档/需求说明书 generation, follow the requirement-doc-template skill exactly after the user's override: cover title/file title should be <工单名称>需求说明书; section order must be Cover, 版 本 历 史, 目 录, 1 引言(1.1项目背景, 1.2文档范围, 1.3使用场景（必填）), 2 业务需求(2.1页面链接, 2.2核心业务规则/功能说明, 2.3核心流程/状态/页面要求 with product flow and product architecture diagrams, 2.4验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not include 本需求涉及新增/修改的接口.",
-        "For PRD tables, use explicit table blocks or markdown tables for version history columns 版本/状态、作者、参与者、起止日期、备注; channel table columns 序号、活动投放的可选渠道、是否投放; acceptance table columns 序号、验收项、验收标准; and the 21-row safety baseline table. Do not replace tables with prose.",
+        "For PRD tables, use explicit table blocks or markdown tables for version history columns 版本/状态、作者、参与者、起止日期、备注; the canonical channel table columns 序号、活动投放的可选渠道、是否投放 when that template table applies; acceptance table columns 序号、验收项、验收标准; and the 21-row safety baseline table. Populate channel rows from the current requirement and never infer activity-specific rules merely because the template uses that column title. Do not replace required tables with prose.",
         "For PRD section content, every heading must have concrete content. When an exact physical route, author, or participant name is unknown, write a logical product entry or responsible role and keep high-risk unknowns in assumptions; never put 待确认, 待补充, 以实际上线地址为准, or 以评审为准 placeholders in the PRD body. Version history date must use the current date or a user-provided date.",
         "Do not paste the raw user request into the PRD body with labels such as 用户输入/原始需求/用户原话. Rewrite it as business background and scope.",
         "PRD acceptance criteria must be business-testable acceptance only: page visibility, configuration, permissions, core user actions, state transitions, resource or capacity constraints, exceptions, data/reporting, and degradation behavior. Do not include knowledge retrieval, model quality, prompt compliance, or system generation checks as acceptance rows.",
@@ -922,7 +933,8 @@ function isHiddenRuntimeMessage(record: Record<string, unknown>) {
 }
 
 function extractAssistantTextFromFinalState(finalState: unknown) {
-  const messages = asRecord(finalState)?.messages;
+  const state = asRecord(finalState);
+  const messages = state?.messages ?? asRecord(state?.values)?.messages;
   if (!Array.isArray(messages)) return "";
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const record = asRecord(messages[index]);
@@ -971,19 +983,26 @@ function stripInlineReasoning(value: string) {
 
 function extractFinalAction(assistantText: string, finalState: unknown): DeerFlowFinalAction {
   const parsed = [...findFinalActionBlocks(assistantText)].reverse().find((block) => block.parsed)?.parsed ?? null;
-  const message = toOptionalString(parsed?.message) || stripFinalActionBlock(assistantText).trim() || "DeerFlow 本轮已完成。";
-  const type = normalizeFinalActionType(parsed?.type);
+  const normalizedParsed: Record<string, unknown> | null = parsed
+    ? {
+        ...parsed,
+        externalRefsUsed: toStringList(parsed.externalRefsUsed) ?? [],
+        enrichmentNotes: toStringList(parsed.enrichmentNotes) ?? [],
+      }
+    : null;
+  const message = toOptionalString(normalizedParsed?.message) || stripFinalActionBlock(assistantText).trim() || "DeerFlow 本轮已完成。";
+  const type = normalizeFinalActionType(normalizedParsed?.type);
   return {
     type,
     message,
-    intent: toOptionalString(parsed?.intent),
-    requirementMode: normalizeRequirementMode(parsed?.requirementMode),
-    knowledgeRefsUsed: toStringList(parsed?.knowledgeRefsUsed),
-    externalRefsUsed: toReferenceList(parsed?.externalRefsUsed),
-    enrichmentNotes: toStringList(parsed?.enrichmentNotes),
-    externalResearchStatus: toOptionalString(parsed?.externalResearchStatus),
-    artifacts: extractArtifactReferences(parsed?.artifacts),
-    raw: parsed ?? { finalState },
+    intent: toOptionalString(normalizedParsed?.intent),
+    requirementMode: normalizeRequirementMode(normalizedParsed?.requirementMode),
+    knowledgeRefsUsed: toStringList(normalizedParsed?.knowledgeRefsUsed),
+    externalRefsUsed: toStringList(normalizedParsed?.externalRefsUsed),
+    enrichmentNotes: toStringList(normalizedParsed?.enrichmentNotes),
+    externalResearchStatus: toOptionalString(normalizedParsed?.externalResearchStatus),
+    artifacts: extractArtifactReferences(normalizedParsed?.artifacts),
+    raw: normalizedParsed ?? { finalState },
     // parsed 为 true 仅当成功解析出 JSON 块；否则为静默降级（pipe-6：不再无声失败）。
     parsed: Boolean(parsed),
   };
@@ -1092,24 +1111,15 @@ function normalizeRequirementMode(value: unknown): DeerFlowFinalAction["requirem
 }
 
 function toStringList(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const items = value.map((item) => toOptionalString(item)).filter((item): item is string => Boolean(item));
-  return items.length ? items : undefined;
-}
-
-function toReferenceList(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const items = value
-    .map((item) => {
-      const direct = toOptionalString(item);
-      if (direct) return direct;
-      const record = asRecord(item);
-      const title = toOptionalString(record?.title) ?? toOptionalString(record?.name);
-      const url = toOptionalString(record?.url) ?? toOptionalString(record?.href);
-      if (title && url) return `${title} ${url}`;
-      return title ?? url;
-    })
-    .filter((item): item is string => Boolean(item));
+  const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  const items = values.map((item) => {
+    const direct = toOptionalString(item);
+    if (direct) return direct;
+    const record = asRecord(item);
+    const title = toOptionalString(record?.title) ?? toOptionalString(record?.name);
+    const url = toOptionalString(record?.url) ?? toOptionalString(record?.href);
+    return [title, url].filter(Boolean).join(" ") || undefined;
+  }).filter((item): item is string => Boolean(item));
   return items.length ? items : undefined;
 }
 

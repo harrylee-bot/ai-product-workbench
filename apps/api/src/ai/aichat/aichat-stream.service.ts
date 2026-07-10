@@ -1838,6 +1838,17 @@ export function buildExternalResearchRuntimeEvent(input: {
     };
   }
 
+  if (input.context.status === "delegated_to_agent") {
+    return {
+      runId: input.runId,
+      id: "external-research-delegated",
+      kind: "knowledge" as const,
+      label: "联网资料由 Agent 按当前需求动态检索",
+      detail: "不预置任何样题来源；Agent 只在有帮助时搜索当前业务的公开资料，并保留实际使用的来源。",
+      status: "completed" as const,
+    };
+  }
+
   return {
     runId: input.runId,
     id: "external-research-unavailable",
