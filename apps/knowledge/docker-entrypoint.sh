@@ -43,6 +43,8 @@ npx quartz build \
   --output "$OUTPUT_DIR" \
   --concurrency "${QUARTZ_CONCURRENCY:-2}"
 
+node /usr/local/lib/knowledge-finalize-output.mjs "$OUTPUT_DIR" "${QUARTZ_BASE_URL:-}"
+
 printf 'ok\n' > "$OUTPUT_DIR/__health"
 
 exec nginx -g "daemon off;"

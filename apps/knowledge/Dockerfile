@@ -35,6 +35,7 @@ RUN npm ci --no-audit --no-fund \
 
 COPY apps/knowledge/nginx.conf /etc/nginx/conf.d/default.conf
 COPY apps/knowledge/docker-entrypoint.sh /usr/local/bin/knowledge-entrypoint
+COPY apps/knowledge/finalize-output.mjs /usr/local/lib/knowledge-finalize-output.mjs
 COPY knowledge-vault /seed-vault
 
 RUN chmod +x /usr/local/bin/knowledge-entrypoint
