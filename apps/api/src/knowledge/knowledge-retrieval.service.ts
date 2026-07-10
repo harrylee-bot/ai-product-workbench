@@ -92,7 +92,8 @@ export class KnowledgeRetrievalService {
           || queryTitleOverlap(b, query) - queryTitleOverlap(a, query)
           || priorityWeight(b.priority) - priorityWeight(a.priority),
       );
-      const selected = selectKnowledgeResults(combined, limit, query, {
+      const consolidated = consolidateKnowledgeResults(combined);
+      const selected = selectKnowledgeResults(consolidated, limit, query, {
         preferredTypes,
         runtimeName: input.runtimeName,
       });
@@ -348,6 +349,69 @@ function mergeRetrievalResults(
     merged.push(item);
   }
   return merged;
+}
+
+function consolidateKnowledgeResults(ranked: KnowledgeRetrievalResult[]) {
+  const groups = new Map<string, KnowledgeRetrievalResult[]>();
+  for (const item of ranked) {
+    const relatedPath = normalizeKnowledgePath(item.relatedPath);
+    if (!relatedPath) continue;
+    const group = groups.get(relatedPath) ?? [];
+    group.push(item);
+    groups.set(relatedPath, group);
+  }
+
+  const emittedPaths = new Set<string>();
+  const consolidated: KnowledgeRetrievalResult[] = [];
+  for (const item of ranked) {
+    const relatedPath = normalizeKnowledgePath(item.relatedPath);
+    if (!relatedPath) {
+      consolidated.push(item);
+      continue;
+    }
+    if (emittedPaths.has(relatedPath)) continue;
+    emittedPaths.add(relatedPath);
+
+    const chunks = groups.get(relatedPath) ?? [item];
+    consolidated.push(chunks.length === 1 ? item : mergeKnowledgeChunks(chunks));
+  }
+  return consolidated;
+}
+
+function mergeKnowledgeChunks(chunks: KnowledgeRetrievalResult[]): KnowledgeRetrievalResult {
+  const ordered = [...chunks].sort(
+    (a, b) => knowledgeChunkSequence(a) - knowledgeChunkSequence(b),
+  );
+  const canonical = ordered.find((item) => !item.title.includes(" / ")) ?? ordered[0];
+  const content = [...new Set(ordered.map((item) => item.content.trim()).filter(Boolean))]
+    .join("\n\n")
+    .slice(0, 12_000);
+  const reasons = [...new Set(
+    ordered.flatMap((item) => item.reason.split("；").map((reason) => reason.trim()).filter(Boolean)),
+  )].slice(0, 5);
+  const visualAssets = [...new Map(
+    ordered
+      .flatMap((item) => item.visualAssets ?? [])
+      .map((asset) => [asset.path, asset] as const),
+  ).values()];
+  const semanticScores = ordered
+    .map((item) => item.semanticScore)
+    .filter((score): score is number => score !== undefined);
+
+  return {
+    ...canonical,
+    content,
+    score: Math.max(...ordered.map((item) => item.score)),
+    keywordScore: Math.max(...ordered.map((item) => item.keywordScore ?? 0)),
+    semanticScore: semanticScores.length ? Math.max(...semanticScores) : undefined,
+    reason: reasons.join("；") || canonical.reason,
+    visualAssets: visualAssets.length ? visualAssets : undefined,
+  };
+}
+
+function knowledgeChunkSequence(item: KnowledgeRetrievalResult) {
+  const sequence = item.content.match(/切片序号[:：]\s*(\d+)/)?.[1];
+  return sequence ? Number(sequence) : item.title.includes(" / ") ? 2 : 1;
 }
 
 function resolveRetrievalSource(selected: KnowledgeRetrievalResult[]): KnowledgeSearchOutput["retrievalSource"] {

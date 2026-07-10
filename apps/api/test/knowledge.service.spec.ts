@@ -438,6 +438,55 @@ describe("Knowledge module services", () => {
     ]));
   });
 
+  it("consolidates chunks from one knowledge file before applying the result limit", async () => {
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "signin-root",
+        title: "签到与任务积分活动",
+        content: "来源文件：02-业务域知识/签到与任务积分活动.md\n切片序号：1\n签到活动现行规则。",
+        summary: "签到与积分活动。",
+        type: KnowledgeType.business_concept,
+        sourceFileId: "02-业务域知识/签到与任务积分活动.md",
+      }),
+      itemRow({
+        id: "signin-states",
+        title: "签到与任务积分活动 / 状态与异常",
+        content: "来源文件：02-业务域知识/签到与任务积分活动.md\n切片序号：2\n覆盖未登录、重复签到和发放补偿。",
+        summary: "签到异常与积分补偿。",
+        type: KnowledgeType.business_concept,
+        sourceFileId: "02-业务域知识/签到与任务积分活动.md",
+      }),
+      itemRow({
+        id: "rights-risk",
+        title: "奖品券与资损核销",
+        content: "积分权益需要防重复、额度和资损控制。",
+        summary: "积分权益与资损。",
+        type: KnowledgeType.business_concept,
+        sourceFileId: "02-业务域知识/奖品券与资损核销.md",
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      query: "签到领积分活动需求文档",
+      vaultPolicy: "never",
+      limit: 10,
+    });
+
+    const signInReferences = result.references.filter(
+      (item) => item.relatedPath === "02-业务域知识/签到与任务积分活动.md",
+    );
+    expect(signInReferences).toHaveLength(1);
+    expect(signInReferences[0]).toEqual(expect.objectContaining({
+      knowledgeId: "signin-root",
+      title: "签到与任务积分活动",
+      content: expect.stringContaining("覆盖未登录、重复签到和发放补偿"),
+    }));
+    expect(result.references.map((item) => item.relatedPath)).toContain(
+      "02-业务域知识/奖品券与资损核销.md",
+    );
+  });
+
   it("keeps source archives and inbox entries out of normal generation", async () => {
     prisma.knowledgeItem.findMany.mockResolvedValue([
       itemRow({
