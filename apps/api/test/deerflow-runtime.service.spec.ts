@@ -837,6 +837,82 @@ describe("DeerFlowRuntimeService", () => {
     }
   });
 
+  it("recovers a text artifact from the owner-scoped write_file call when the Gateway path returns 404", async () => {
+    const prototypeHtml = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>签到原型</title></head><body>签到活动</body></html>";
+    const finalText = [
+      "原型已生成。",
+      "\n```ai_product_workbench_final_action\n",
+      JSON.stringify({
+        type: "review_prototype",
+        message: "请查看原型。",
+        artifacts: [
+          {
+            kind: "prototype_html",
+            path: "/mnt/user-data/outputs/index.html",
+            contentType: "text/html",
+          },
+        ],
+      }),
+      "\n```",
+    ].join("");
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
+      .mockResolvedValueOnce(sseResponse([
+        {
+          event: "messages-tuple",
+          data: [{ type: "ai", content: finalText }, { node: "lead_agent" }],
+        },
+        {
+          event: "values",
+          data: {
+            values: {
+              messages: [
+                {
+                  type: "ai",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "write-prototype",
+                      name: "write_file",
+                      args: {
+                        path: "/mnt/user-data/outputs/index.html",
+                        content: prototypeHtml,
+                      },
+                    },
+                  ],
+                },
+                { type: "tool", name: "write_file", content: "OK" },
+                { type: "ai", content: finalText },
+              ],
+            },
+          },
+        },
+      ]))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: "Artifact not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      }));
+
+    const service = new DeerFlowRuntimeService(prisma as never);
+    const result = await service.runTurn({
+      runId: "run-owner-artifact-fallback",
+      conversationId: "conversation-owner-artifact-fallback",
+      userId: "user-1",
+      message: "生成原型",
+    });
+
+    expect(result.artifacts).toEqual([
+      expect.objectContaining({
+        path: "mnt/user-data/outputs/index.html",
+        contentType: "text/html",
+        status: "fetched",
+        size: Buffer.byteLength(prototypeHtml),
+        text: prototypeHtml,
+      }),
+    ]);
+  });
+
 	  it("replaces the bound thread and retries once when DeerFlow reports an active run", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))

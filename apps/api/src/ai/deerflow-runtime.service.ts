@@ -227,7 +227,13 @@ export class DeerFlowRuntimeService {
         : finalStateAssistantText || streamedAssistantText;
     const finalAction = extractFinalAction(visibleAssistantText, finalState);
     const userVisibleAssistantText = stripFinalActionBlock(visibleAssistantText).trim();
-    const artifacts = await this.resolveArtifacts(threadId, input.userId, finalAction.artifacts ?? [], input.signal);
+    const artifacts = await this.resolveArtifacts(
+      threadId,
+      input.userId,
+      finalAction.artifacts ?? [],
+      finalState,
+      input.signal,
+    );
     if (artifacts.length) {
       await input.onEvent?.({
         event: "gateway-artifacts",
@@ -412,9 +418,11 @@ export class DeerFlowRuntimeService {
     threadId: string,
     userId: string,
     artifacts: DeerFlowArtifactReference[],
+    finalState: unknown,
     signal?: AbortSignal,
   ) {
     const limit = readNumberEnv("DEERFLOW_ARTIFACT_MAX_INLINE_BYTES", 2_000_000);
+    const writtenTextArtifacts = extractWrittenTextArtifacts(finalState);
     const resolved: DeerFlowResolvedArtifact[] = [];
     for (const artifact of artifacts) {
       const artifactPath = normalizeArtifactPath(artifact.path ?? artifact.artifactUrl);
@@ -426,13 +434,15 @@ export class DeerFlowRuntimeService {
           headers: deerFlowIdentityHeaders(userId),
         }, signal);
         if (!response.ok) {
-          resolved.push({
-            ...artifact,
-            path: artifactPath,
+          const errorMessage = `${response.status} ${await safeResponseText(response)}`;
+          resolved.push(resolveWrittenArtifactFallback({
+            artifact,
+            artifactPath,
             artifactUrl,
-            status: "failed",
-            errorMessage: `${response.status} ${await safeResponseText(response)}`,
-          });
+            text: writtenTextArtifacts.get(artifactPath),
+            limit,
+            errorMessage,
+          }));
           continue;
         }
         const contentType = response.headers.get("content-type") ?? artifact.contentType;
@@ -460,13 +470,14 @@ export class DeerFlowRuntimeService {
           text: buffer.byteLength <= limit ? buffer.toString("utf8") : undefined,
         });
       } catch (error) {
-        resolved.push({
-          ...artifact,
-          path: artifactPath,
+        resolved.push(resolveWrittenArtifactFallback({
+          artifact,
+          artifactPath,
           artifactUrl,
-          status: "failed",
+          text: writtenTextArtifacts.get(artifactPath),
+          limit,
           errorMessage: error instanceof Error ? error.message : "artifact fetch failed",
-        });
+        }));
       }
     }
     return resolved;
@@ -934,9 +945,7 @@ function isHiddenRuntimeMessage(record: Record<string, unknown>) {
 }
 
 function extractAssistantTextFromFinalState(finalState: unknown) {
-  const state = asRecord(finalState);
-  const messages = state?.messages ?? asRecord(state?.values)?.messages;
-  if (!Array.isArray(messages)) return "";
+  const messages = finalStateMessages(finalState);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const record = asRecord(messages[index]);
     if (!isAssistantMessageRecord(record)) continue;
@@ -944,6 +953,30 @@ function extractAssistantTextFromFinalState(finalState: unknown) {
     if (content) return content;
   }
   return "";
+}
+
+function finalStateMessages(finalState: unknown) {
+  const state = asRecord(finalState);
+  const messages = state?.messages ?? asRecord(state?.values)?.messages;
+  return Array.isArray(messages) ? messages : [];
+}
+
+function extractWrittenTextArtifacts(finalState: unknown) {
+  const artifacts = new Map<string, string>();
+  for (const message of finalStateMessages(finalState)) {
+    for (const call of extractToolCalls(asRecord(message))) {
+      if (call.name !== "write_file") continue;
+      const args = asRecord(call.args);
+      const artifactPath = normalizeArtifactPath(
+        toOptionalString(args?.path) ??
+        toOptionalString(args?.file_path) ??
+        toOptionalString(args?.filePath),
+      );
+      const content = toOptionalString(args?.content) ?? toOptionalString(args?.contents) ?? toOptionalString(args?.text);
+      if (artifactPath && content !== undefined) artifacts.set(artifactPath, content);
+    }
+  }
+  return artifacts;
 }
 
 function extractToolName(record: Record<string, unknown> | null) {
@@ -1293,6 +1326,36 @@ function normalizeArtifactPath(value: string | undefined) {
   const markerIndex = withoutQuery.indexOf(marker);
   const rawPath = markerIndex >= 0 ? withoutQuery.slice(markerIndex + marker.length) : withoutQuery;
   return rawPath.replace(/^\/+/, "");
+}
+
+function resolveWrittenArtifactFallback(input: {
+  artifact: DeerFlowArtifactReference;
+  artifactPath: string;
+  artifactUrl: string;
+  text?: string;
+  limit: number;
+  errorMessage: string;
+}): DeerFlowResolvedArtifact {
+  if (input.text === undefined) {
+    return {
+      ...input.artifact,
+      path: input.artifactPath,
+      artifactUrl: input.artifactUrl,
+      status: "failed",
+      errorMessage: input.errorMessage,
+    };
+  }
+
+  const size = Buffer.byteLength(input.text, "utf8");
+  return {
+    ...input.artifact,
+    path: input.artifactPath,
+    artifactUrl: input.artifactUrl,
+    status: size <= input.limit ? "fetched" : "skipped",
+    size,
+    text: size <= input.limit ? input.text : undefined,
+    errorMessage: size <= input.limit ? undefined : `artifact exceeds inline limit (${size}/${input.limit})`,
+  };
 }
 
 function primaryPayload(data: unknown) {
