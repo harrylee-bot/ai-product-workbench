@@ -348,6 +348,63 @@ const VAGUE_PRD_PATTERNS = [
   "需明确触发条件、前置校验、成功结果、失败处理、重复操作规则和数据记录口径",
 ];
 
+type MarkdownTable = {
+  headers: string[];
+  rows: string[][];
+  raw: string;
+};
+
+const CHANNEL_DEFINITIONS = [
+  {
+    label: "端内渠道",
+    aliases: /^(?:端内渠道|端内|APP|客户端)$/i,
+    positive: /端内(?:渠道|入口|页面|投放)|(?:APP|客户端)(?:渠道|入口|页面|投放)/i,
+    negative: /(?:不|未)(?:支持|覆盖|投放|发布到|包含).{0,10}(?:端内|APP|客户端)|(?:端内|APP|客户端).{0,10}(?:不|未)(?:支持|覆盖|投放|发布到|包含)|仅(?:支持|投放|发布到).{0,8}(?:H5|WAP|小程序)/i,
+  },
+  {
+    label: "WAP/H5端外渠道",
+    aliases: /^(?:WAP\/H5端外渠道|H5\/WAP端外渠道|WAP|H5|端外渠道)$/i,
+    positive: /(?:WAP|H5)(?:端外)?(?:渠道|入口|页面|投放|上线)|端外(?:渠道|入口|页面|投放|上线)|(?:通过|发布到|投放到|覆盖|进入|访问|上线|支持).{0,12}(?:WAP|H5|端外)/i,
+    negative: /(?:不|未)(?:支持|覆盖|投放|发布到|包含).{0,10}(?:WAP|H5|端外)|(?:WAP|H5|端外).{0,10}(?:不|未)(?:支持|覆盖|投放|发布到|包含)|仅(?:支持|投放|发布到).{0,8}(?:端内|小程序)/i,
+  },
+  {
+    label: "小程序",
+    aliases: /^小程序(?:渠道)?$/,
+    positive: /小程序(?:渠道|入口|页面|投放|上线)|(?:通过|发布到|投放到|覆盖|进入|访问|上线|支持).{0,12}小程序/,
+    negative: /(?:不|未)(?:支持|覆盖|投放|发布到|包含).{0,10}小程序|小程序.{0,10}(?:不|未)(?:支持|覆盖|投放|发布到|包含)|仅(?:支持|投放|发布到).{0,8}(?:端内|H5|WAP)/i,
+  },
+] as const;
+
+const SENSITIVE_SAFETY_ROWS = [
+  { index: 13, label: "身份证/生物识别/银行卡", evidence: /身份证(?:号码|照片)?|生物识别|银行卡/ },
+  { index: 15, label: "第三方页面或应用跳转", evidence: /跳转.{0,12}第三方|第三方(?:页面|应用|链接)/ },
+  { index: 16, label: "第三方接口数据交互", evidence: /第三方(?:公司|系统|平台).{0,24}(?:接口|数据交互|对接)|(?:接口|数据交互|对接).{0,24}第三方(?:公司|系统|平台)/ },
+] as const;
+
+const SAFETY_BASELINE_ROW_PATTERNS = [
+  /新开发功能接口|现有功能接口逻辑变动/,
+  /面向公众用户/,
+  /公网暴露面/,
+  /个人信息.*脱敏|脱敏展示/,
+  /水印/,
+  /查询条件/,
+  /4A统一管理|4A要求/i,
+  /未接入4A.*安全要求|通行字.*18|18项安全/i,
+  /敏感词过滤/,
+  /先审后发/,
+  /隐私政策/,
+  /双清单/,
+  /身份证|生物识别|银行卡/,
+  /免密登录/,
+  /第三方页面|第三方应用/,
+  /第三方公司.*接口|数据交互/,
+  /API接口.*台账|台账填报/i,
+  /加密传输|接口鉴权|访问控制/,
+  /加密存储/,
+  /数据采集规范/,
+  /完整性和一致性校验/,
+] as const;
+
 function checkPrdContentQuality(prd: RequirementDocument): QAIssue[] {
   const issues: QAIssue[] = [];
   const titleText = prd.sections.map((section) => section.title).join("\n");
@@ -443,7 +500,278 @@ function checkPrdContentQuality(prd: RequirementDocument): QAIssue[] {
     }));
   }
 
+  const channelValidation = validateChannelTable(prd);
+  if (!channelValidation.structurePassed) {
+    issues.push(issue({
+      id: "qa_prd_channel_table_invalid",
+      checkType: "prd_completeness",
+      severity: "blocking",
+      title: "PRD 渠道表不唯一或格式无效",
+      description: channelValidation.structureEvidence,
+      relatedPrdSectionIds: prd.sections
+        .filter((section) => /使用场景|渠道/.test(`${section.title}\n${section.content}`))
+        .map((section) => section.id),
+      suggestion: "仅保留一张端内、WAP/H5 端外、小程序三行渠道表，并为每行填写唯一的是/否选择。",
+    }));
+  }
+  if (!channelValidation.semanticPassed) {
+    issues.push(issue({
+      id: "qa_prd_channel_scope_conflict",
+      checkType: "prd_completeness",
+      severity: "blocking",
+      title: "PRD 渠道选择与业务范围冲突",
+      description: channelValidation.semanticEvidence,
+      relatedPrdSectionIds: prd.sections
+        .filter((section) => /使用场景|渠道|页面入口|文档范围/.test(`${section.title}\n${section.content}`))
+        .map((section) => section.id),
+      suggestion: "根据渠道表之外的明确业务证据逐项勾选；未设计的渠道必须选择否，不得从候选项或安全模板反推为是。",
+    }));
+  }
+
+  const safetyValidation = validateSafetyBaseline(prd);
+  if (!safetyValidation.structurePassed) {
+    issues.push(issue({
+      id: "qa_prd_safety_baseline_invalid",
+      checkType: "prd_completeness",
+      severity: "blocking",
+      title: "安全基线表未完整保留 21 行",
+      description: safetyValidation.structureEvidence,
+      relatedPrdSectionIds: prd.sections
+        .filter((section) => /安全基线/.test(`${section.title}\n${section.content}`))
+        .map((section) => section.id),
+      suggestion: "保留唯一一张序号 1-21 连续且状态仅为是、否、不涉及的安全基线表。",
+    }));
+  }
+  if (!safetyValidation.evidencePassed) {
+    issues.push(issue({
+      id: "qa_prd_safety_evidence_conflict",
+      checkType: "prd_completeness",
+      severity: "blocking",
+      title: "敏感信息或第三方安全项缺少设计证据",
+      description: safetyValidation.evidenceEvidence,
+      relatedPrdSectionIds: prd.sections
+        .filter((section) => /安全基线/.test(`${section.title}\n${section.content}`))
+        .map((section) => section.id),
+      suggestion: "仅当安全表之外明确设计了身份证/生物识别/银行卡采集、第三方跳转或第三方接口交互时，对应行才可填写是。",
+    }));
+  }
+
   return issues;
+}
+
+function validateChannelTable(prd: RequirementDocument) {
+  const bodyText = stringifyPrdSections(prd);
+  const channelTables = parseMarkdownTables(bodyText).filter(isChannelTable);
+  if (channelTables.length !== 1) {
+    return {
+      structurePassed: false,
+      structureEvidence: `渠道表数量=${channelTables.length}，要求恰好 1 张。`,
+      semanticPassed: false,
+      semanticEvidence: "渠道表结构无效，无法核对渠道范围。",
+    };
+  }
+
+  const table = channelTables[0];
+  const channelIndex = table.headers.findIndex((header) => /渠道/.test(normalizeTableCell(header)));
+  const statusIndex = table.headers.findIndex((header) => /是否投放|投放状态/.test(normalizeTableCell(header)));
+  const rows = CHANNEL_DEFINITIONS.map((definition) => {
+    const matches = table.rows.filter((row) => definition.aliases.test(normalizeTableCell(row[channelIndex] ?? "")));
+    const selection = matches.length === 1 ? parseBinarySelection(matches[0][statusIndex] ?? "") : "invalid";
+    return { definition, matches, selection };
+  });
+  const structurePassed = table.rows.length === 3
+    && channelIndex >= 0
+    && statusIndex >= 0
+    && rows.every((row) => row.matches.length === 1 && row.selection !== "invalid");
+  const structureEvidence = structurePassed
+    ? "渠道表唯一，三类渠道行与是/否选择均有效。"
+    : `渠道表 rows=${table.rows.length}；${rows.map((row) => `${row.definition.label}:count=${row.matches.length},status=${row.selection}`).join("；")}。`;
+
+  if (!structurePassed) {
+    return {
+      structurePassed,
+      structureEvidence,
+      semanticPassed: false,
+      semanticEvidence: "渠道表结构无效，无法核对渠道范围。",
+    };
+  }
+
+  const evidenceText = prdBusinessEvidenceText(prd);
+  const conflicts = rows.flatMap(({ definition, selection }) => {
+    const expected = channelExpectedSelection(evidenceText, definition.positive, definition.negative);
+    const evidenceStatus = expected === "conflict" ? "正负冲突" : expected === "yes" ? "是" : "否";
+    return selection === expected ? [] : [`${definition.label}:表=${selection === "yes" ? "是" : "否"},正文证据=${evidenceStatus}`];
+  });
+  return {
+    structurePassed,
+    structureEvidence,
+    semanticPassed: conflicts.length === 0,
+    semanticEvidence: conflicts.length ? `渠道范围冲突：${conflicts.join("；")}。` : "渠道选择与渠道表之外的业务范围一致。",
+  };
+}
+
+function validateSafetyBaseline(prd: RequirementDocument) {
+  const bodyText = stringifyPrdSections(prd);
+  const safetyTables = parseMarkdownTables(bodyText).filter(isSafetyBaselineTable);
+  if (safetyTables.length !== 1) {
+    return {
+      structurePassed: false,
+      structureEvidence: `安全基线表数量=${safetyTables.length}，要求恰好 1 张。`,
+      evidencePassed: false,
+      evidenceEvidence: "安全基线表结构无效，无法核对敏感与第三方设计证据。",
+    };
+  }
+
+  const table = safetyTables[0];
+  const indexColumn = table.headers.findIndex((header) => normalizeTableCell(header) === "序号");
+  const contentColumn = table.headers.findIndex((header) => /需求安全基线内容|安全基线内容/.test(normalizeTableCell(header)));
+  const statusColumn = table.headers.findIndex((header) => /是否涉及/.test(normalizeTableCell(header)));
+  const indexes = table.rows.map((row) => Number(normalizeTableCell(row[indexColumn] ?? "")));
+  const statuses = table.rows.map((row) => parseSafetyStatus(row[statusColumn] ?? ""));
+  const rowDefinitionsMatch = SAFETY_BASELINE_ROW_PATTERNS.every((pattern, offset) => {
+    const row = table.rows.find((candidate) => Number(normalizeTableCell(candidate[indexColumn] ?? "")) === offset + 1);
+    return Boolean(row && pattern.test(normalizeTableCell(row[contentColumn] ?? "")));
+  });
+  const structurePassed = table.rows.length === 21
+    && indexColumn >= 0
+    && contentColumn >= 0
+    && statusColumn >= 0
+    && indexes.every((value, offset) => value === offset + 1)
+    && statuses.every((status) => status !== "invalid")
+    && rowDefinitionsMatch;
+  const structureEvidence = structurePassed
+    ? "安全基线表唯一，序号 1-21 连续且状态值有效。"
+    : `安全基线 rows=${table.rows.length}, indexes=${indexes.join(",") || "missing"}, invalidStatus=${statuses.filter((status) => status === "invalid").length}, rowDefinitions=${rowDefinitionsMatch ? "valid" : "invalid"}。`;
+
+  if (!structurePassed) {
+    return {
+      structurePassed,
+      structureEvidence,
+      evidencePassed: false,
+      evidenceEvidence: "安全基线表结构无效，无法核对敏感与第三方设计证据。",
+    };
+  }
+
+  const evidenceText = prdBusinessEvidenceText(prd);
+  const conflicts = SENSITIVE_SAFETY_ROWS.flatMap(({ index, label, evidence }) => {
+    const rowOffset = indexes.indexOf(index);
+    const status = statuses[rowOffset];
+    const bodyIncludesBehavior = hasAffirmativeEvidence(evidenceText, evidence);
+    if (status === "yes" && !bodyIncludesBehavior) {
+      return [`第${index}行 ${label}:表=是,正文=未设计`];
+    }
+    if (status !== "yes" && bodyIncludesBehavior) {
+      return [`第${index}行 ${label}:表=${status === "no" ? "否" : "不涉及"},正文=已设计`];
+    }
+    return [];
+  });
+  return {
+    structurePassed,
+    structureEvidence,
+    evidencePassed: conflicts.length === 0,
+    evidenceEvidence: conflicts.length
+      ? `以下项目与安全表之外的设计证据不一致：${conflicts.join("、")}。`
+      : "敏感信息与第三方项目的表格状态和正文设计证据双向一致。",
+  };
+}
+
+function parseMarkdownTables(value: string): MarkdownTable[] {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  const tables: MarkdownTable[] = [];
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const headers = parseMarkdownRow(lines[index]);
+    const separator = parseMarkdownRow(lines[index + 1]);
+    if (!headers || !separator || separator.length !== headers.length || !separator.every((cell) => /^:?-{3,}:?$/.test(cell.trim()))) {
+      continue;
+    }
+    const rows: string[][] = [];
+    let cursor = index + 2;
+    while (cursor < lines.length) {
+      const row = parseMarkdownRow(lines[cursor]);
+      if (!row) break;
+      rows.push(row);
+      cursor += 1;
+    }
+    tables.push({ headers, rows, raw: lines.slice(index, cursor).join("\n") });
+    index = cursor - 1;
+  }
+  return tables;
+}
+
+function parseMarkdownRow(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.includes("|") || !/^\|?.+\|?$/.test(trimmed)) return null;
+  const content = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  const cells = content.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
+  return cells.length >= 2 ? cells : null;
+}
+
+function isChannelTable(table: MarkdownTable) {
+  const headers = table.headers.map(normalizeTableCell);
+  return headers.some((header) => /活动投放的可选渠道|投放渠道/.test(header))
+    && headers.some((header) => /是否投放|投放状态/.test(header));
+}
+
+function isSafetyBaselineTable(table: MarkdownTable) {
+  const headers = table.headers.map(normalizeTableCell);
+  return headers.some((header) => /需求安全基线内容|安全基线内容/.test(header))
+    && headers.some((header) => /是否涉及/.test(header));
+}
+
+function normalizeTableCell(value: string) {
+  return value.replace(/<[^>]+>/g, "").replace(/[`*_]/g, "").replace(/\s+/g, "").trim();
+}
+
+function parseBinarySelection(value: string): "yes" | "no" | "invalid" {
+  const normalized = normalizeTableCell(value);
+  const checkedYes = /(?:☑|☒|✅|\[[xX]\])是/.test(normalized);
+  const checkedNo = /(?:☑|☒|✅|\[[xX]\])否/.test(normalized);
+  if (checkedYes !== checkedNo) return checkedYes ? "yes" : "no";
+  if (normalized === "是") return "yes";
+  if (normalized === "否" || normalized === "不涉及") return "no";
+  return "invalid";
+}
+
+function parseSafetyStatus(value: string): "yes" | "no" | "not_applicable" | "invalid" {
+  const normalized = normalizeTableCell(value);
+  if (normalized === "是") return "yes";
+  if (normalized === "否") return "no";
+  if (normalized === "不涉及") return "not_applicable";
+  return "invalid";
+}
+
+function prdBusinessEvidenceText(prd: RequirementDocument) {
+  return prd.sections
+    .filter((section) => !/安全基线/.test(`${section.id}\n${section.title}`))
+    .map((section) => [
+      section.title,
+      stripContractTables(section.content),
+      ...(section.blocks ?? []).map((block) => stripContractTables(block.content)),
+    ].join("\n"))
+    .join("\n");
+}
+
+function stripContractTables(value: string) {
+  return parseMarkdownTables(value)
+    .filter((table) => isChannelTable(table) || isSafetyBaselineTable(table))
+    .reduce((textValue, table) => textValue.replace(table.raw, ""), value);
+}
+
+function channelExpectedSelection(textValue: string, positive: RegExp, negative: RegExp): "yes" | "no" | "conflict" {
+  const clauses = splitEvidenceClauses(textValue);
+  const positiveHit = clauses.some((clause) => hasAffirmativeEvidence(clause, positive));
+  const negativeHit = clauses.some((clause) => negative.test(clause));
+  if (positiveHit && negativeHit) return "conflict";
+  return positiveHit ? "yes" : "no";
+}
+
+function hasAffirmativeEvidence(textValue: string, pattern: RegExp) {
+  return splitEvidenceClauses(textValue)
+    .some((clause) => pattern.test(clause) && !/(?:不涉及|不包含|不采集|不获取|不跳转|不对接|不支持|不覆盖|不在本期|无需|未设计|可选|候选|如需|如涉及|若涉及|按需)/.test(clause));
+}
+
+function splitEvidenceClauses(value: string) {
+  return value.split(/[，,。！？；;\n]/).map((clause) => clause.trim()).filter(Boolean);
 }
 
 function checkPrototypeContentQuality(input: {
@@ -469,6 +797,50 @@ function checkPrototypeContentQuality(input: {
         title: "原型不是完整高保真 HTML 文档",
         description: "HTML 原型必须包含 doctype、html 根节点和内联样式，不能只是片段。",
         suggestion: "重新生成完整 standalone HTML 原型。",
+      }));
+    }
+
+    const responsiveContract = evaluateResponsivePrototypeContract(html);
+    if (!responsiveContract.viewportPassed) {
+      issues.push(issue({
+        id: "qa_prototype_invalid_viewport",
+        checkType: "prototype_completeness",
+        severity: "blocking",
+        title: "原型缺少有效移动端 viewport",
+        description: responsiveContract.viewportEvidence,
+        suggestion: "在 head 中加入 name=viewport 且 content 同时包含 width=device-width 和有效 initial-scale 的 meta 标签。",
+      }));
+    }
+    if (!responsiveContract.mobileCssPassed) {
+      issues.push(issue({
+        id: "qa_prototype_mobile_css_missing",
+        checkType: "prototype_completeness",
+        severity: "blocking",
+        title: "原型缺少移动端专用响应式样式",
+        description: responsiveContract.mobileCssEvidence,
+        suggestion: "增加 max-width 不大于 768px 的媒体查询，并在窄屏下重排导航、工具栏、表单、表格和内容网格。",
+      }));
+    }
+    if (!responsiveContract.overflowGuardPassed) {
+      issues.push(issue({
+        id: "qa_prototype_horizontal_overflow_unprotected",
+        checkType: "prototype_completeness",
+        severity: "blocking",
+        title: "原型缺少横向溢出防护",
+        description: responsiveContract.overflowGuardEvidence,
+        suggestion: "为页面根节点设置 overflow-x 防护，并让表格/宽内容使用 max-width:100% 或可控的横向滚动容器。",
+      }));
+    }
+
+    const interactionContract = evaluatePrototypeInteractionContract(html);
+    if (!interactionContract.passed) {
+      issues.push(issue({
+        id: "qa_prototype_key_actions_not_interactive",
+        checkType: "prototype_completeness",
+        severity: "blocking",
+        title: "原型关键按钮没有实际交互",
+        description: interactionContract.evidence,
+        suggestion: "为保存、预览、提交、发布、签到、重试、导出等关键按钮绑定 click 事件，并产生可见状态、文案、弹层或页面变化。",
       }));
     }
 
@@ -586,6 +958,78 @@ function checkPrototypeContentQuality(input: {
   }
 
   return issues;
+}
+
+function evaluateResponsivePrototypeContract(html: string) {
+  const metaTags = html.match(/<meta\b[^>]*>/gi) ?? [];
+  const viewportTag = metaTags.find((tag) => readHtmlAttribute(tag, "name").toLowerCase() === "viewport");
+  const viewportContent = viewportTag ? readHtmlAttribute(viewportTag, "content") : "";
+  const initialScale = viewportContent.match(/(?:^|,)\s*initial-scale\s*=\s*([0-9.]+)/i)?.[1];
+  const viewportPassed = /(?:^|,)\s*width\s*=\s*device-width\s*(?:,|$)/i.test(viewportContent)
+    && Boolean(initialScale && Number(initialScale) > 0);
+
+  const styleText = (html.match(/<style\b[^>]*>[\s\S]*?<\/style>/gi) ?? []).join("\n");
+  const mobileBreakpoints = [...styleText.matchAll(/@media[^\{]*max-width\s*:\s*(\d+)px/gi)]
+    .map((match) => Number(match[1]));
+  const mobileCssPassed = mobileBreakpoints.some((width) => width > 0 && width <= 768);
+  const rootOverflowGuard = /(?:html\s*,\s*body|body\s*,\s*html|html|body)[^{]*\{[^}]*overflow-x\s*:\s*(?:hidden|clip)/i.test(styleText);
+  const wideContentGuard = /overflow-x\s*:\s*auto|max-width\s*:\s*100%/i.test(styleText);
+  const overflowGuardPassed = rootOverflowGuard && wideContentGuard;
+
+  return {
+    viewportPassed,
+    viewportEvidence: viewportPassed
+      ? `viewport=${viewportContent}`
+      : `viewport=${viewportContent || "missing"}，要求 width=device-width, initial-scale>0。`,
+    mobileCssPassed,
+    mobileCssEvidence: mobileCssPassed
+      ? `mobile breakpoints=${mobileBreakpoints.join(",")}px`
+      : `breakpoints=${mobileBreakpoints.join(",") || "missing"}，要求至少一个 max-width<=768px。`,
+    overflowGuardPassed,
+    overflowGuardEvidence: `root=${rootOverflowGuard ? "guarded" : "missing"}, wide-content=${wideContentGuard ? "guarded" : "missing"}。`,
+  };
+}
+
+function readHtmlAttribute(tag: string, name: string) {
+  const pattern = new RegExp(`\\b${name}\\s*=\\s*(?:(["'])(.*?)\\1|([^\\s>]+))`, "i");
+  const match = tag.match(pattern);
+  return String(match?.[2] ?? match?.[3] ?? "");
+}
+
+function evaluatePrototypeInteractionContract(html: string) {
+  const scripts = (html.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) ?? [])
+    .map((script) => script.replace(/^<script\b[^>]*>|<\/script>$/gi, ""))
+    .join("\n");
+  const keyActionPattern = /保存|预览|提交|审核|发布|下线|签到|领取|登录|确认|重试|补偿|导出|上传|删除|新增|创建|发送|搜索|查询/;
+  const buttons = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/gi)]
+    .map((match) => ({
+      attributes: match[1],
+      label: match[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim(),
+    }));
+  const keyButtons = buttons.filter((button) =>
+    keyActionPattern.test(button.label)
+    && !/(?:^|\s)disabled(?:\s|=|$)|aria-disabled\s*=\s*(["'])?true\1/i.test(button.attributes),
+  );
+  const hasClickBinding = /addEventListener\s*\(\s*["']click["']|\.onclick\s*=|\bonclick\s*=|\.on\s*\(\s*["']click["']/i.test(`${scripts}\n${html}`);
+  const hasVisibleEffect = /classList\.|textContent\s*=|innerHTML\s*=|\.hidden\s*=|style\.[a-z-]+\s*=|setAttribute\s*\(|showModal\s*\(|\balert\s*\(|\bconfirm\s*\(|location\.(?:href|assign)|\.value\s*=/i.test(`${scripts}\n${keyButtons.map((button) => button.attributes).join("\n")}`);
+  const genericButtonBinding = /querySelectorAll\s*\(\s*["'][^"']*button[^"']*["']\s*\)[\s\S]{0,240}addEventListener\s*\(\s*["']click["']/i.test(scripts);
+  const unbound = keyButtons.filter((button) => {
+    if (/\bonclick\s*=/i.test(button.attributes) || genericButtonBinding) return false;
+    const references = [
+      button.attributes.match(/\bid\s*=\s*(["'])(.*?)\1/i)?.[2],
+      button.attributes.match(/\bdata-action\s*=\s*(["'])(.*?)\1/i)?.[2],
+      ...(button.attributes.match(/\bclass\s*=\s*(["'])(.*?)\1/i)?.[2].split(/\s+/) ?? []),
+    ].filter((value): value is string => Boolean(value && value.length >= 2));
+    return !references.some((reference) => scripts.includes(reference));
+  });
+  const hasExecutableScript = scripts.trim().length > 0 || keyButtons.some((button) => /\bonclick\s*=/i.test(button.attributes));
+  const passed = keyButtons.length > 0 && hasExecutableScript && hasClickBinding && hasVisibleEffect && unbound.length === 0;
+  return {
+    passed,
+    evidence: passed
+      ? `关键按钮 ${keyButtons.length} 个均有 click 绑定和可见状态变化。`
+      : `keyButtons=${keyButtons.length}, script=${hasExecutableScript ? "present" : "missing"}, click=${hasClickBinding ? "bound" : "missing"}, effect=${hasVisibleEffect ? "present" : "missing"}, unbound=${unbound.map((button) => button.label).slice(0, 8).join("、") || "none"}。`,
+  };
 }
 
 function stringifyPrdSections(prd?: RequirementDocument | null) {

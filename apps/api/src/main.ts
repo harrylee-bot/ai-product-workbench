@@ -58,7 +58,7 @@ async function bootstrap() {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          // API 不提供可执行 HTML；原型预览走专用 preview 响应，不放宽全局 script-src。
+          // 仅原型预览在无同源权限的 sandbox 中执行内联交互脚本。
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:"],

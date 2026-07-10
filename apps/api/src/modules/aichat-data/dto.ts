@@ -15,6 +15,7 @@ import {
   ValidateNested,
 } from "class-validator";
 import { Prisma } from "@prisma/client";
+import { sanitizeAssistantParts } from "../../conversations/message-metadata";
 
 /**
  * ai-chatbot 数据持久化所需 DTO。
@@ -137,8 +138,10 @@ export function buildMessagePayload(
   metadata: Prisma.InputJsonValue;
   createdAt: Date | undefined;
 } {
-  // metadata.parts 存原始 parts 数组；content 从 parts 里抽取纯文本兜底展示。
-  const text = extractTextFromParts(item.parts);
+  // Assistant parts are a server-side allowlist; user-authored parts remain lossless.
+  const persistedParts =
+    item.role === "assistant" ? sanitizeAssistantParts(item.parts) : item.parts;
+  const text = extractTextFromParts(persistedParts);
   const content = text.length > 0 ? text : "(empty)";
 
   const attachments: Prisma.MessageCreateInput["attachments"] =
@@ -146,7 +149,7 @@ export function buildMessagePayload(
       ? (item.attachments as Prisma.InputJsonValue)
       : Prisma.JsonNull;
 
-  const metadata = { parts: item.parts } as Prisma.InputJsonObject;
+  const metadata = { parts: persistedParts } as Prisma.InputJsonObject;
 
   return {
     role: item.role,

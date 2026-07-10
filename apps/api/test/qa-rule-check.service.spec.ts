@@ -203,6 +203,159 @@ describe("QaRuleCheckService", () => {
     expect(issues).toEqual([]);
   });
 
+  it("rejects duplicate or semantically unsupported channel selections and unsupported safety claims", () => {
+    const sections = standardPrdSections();
+    const usage = sections.find((item) => item.id === "usage");
+    const safety = sections.find((item) => item.id === "safety");
+    if (!usage || !safety) throw new Error("standard PRD fixtures are incomplete");
+    usage.content = [
+      usage.content.replace("| 2 | WAP/H5端外渠道 | □是 ☑否 |", "| 2 | WAP/H5端外渠道 | ☑是 □否 |"),
+      channelTable({ endpoint: true, h5: true, miniProgram: true }),
+    ].join("\n\n");
+    safety.content = safety.content.replace(
+      /\| 13 \| (前台页面采集身份证号码、身份证照片、生物识别或银行卡信息) \| ([^|]+) \| 不涉及 \|/,
+      "| 13 | $1 | $2 | 是 |",
+    );
+
+    const issues = service.run({
+      prdDocument: basePrd({ sections }),
+      checkTypes: ["prd_completeness"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "qa_prd_channel_table_invalid", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prd_channel_scope_conflict", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prd_safety_evidence_conflict", severity: "blocking" }),
+    ]));
+  });
+
+  it("rejects sensitive behavior that the safety table marks as not applicable", () => {
+    const sections = standardPrdSections();
+    const rules = sections.find((item) => item.id === "rules");
+    if (!rules) throw new Error("rules fixture is missing");
+    rules.content += "\n前台页面采集身份证号码，并在用户主动授权后提交。";
+
+    const issues = service.run({
+      prdDocument: basePrd({ sections }),
+      checkTypes: ["prd_completeness"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "qa_prd_safety_evidence_conflict", severity: "blocking" }),
+    ]));
+  });
+
+  it("evaluates channel evidence per clause instead of letting another channel's negative text win", () => {
+    const sections = standardPrdSections();
+    const usage = sections.find((item) => item.id === "usage");
+    if (!usage) throw new Error("usage fixture is missing");
+    usage.content = [
+      "端内渠道支持本期投放，H5 和小程序不支持。",
+      channelTable({ endpoint: true, h5: false, miniProgram: false }),
+    ].join("\n\n");
+
+    const issues = service.run({
+      prdDocument: basePrd({ sections }),
+      checkTypes: ["prd_completeness"],
+    });
+
+    expect(issues.map((item) => item.id)).not.toContain("qa_prd_channel_scope_conflict");
+  });
+
+  it("rejects a 21-row table whose row meanings do not match the canonical baseline", () => {
+    const sections = standardPrdSections();
+    const safety = sections.find((item) => item.id === "safety");
+    if (!safety) throw new Error("safety fixture is missing");
+    safety.content = safety.content.replace(
+      "| 8 | 未接入4A时满足安全要求 | 信息系统 | 不涉及 |",
+      "| 8 | 任意占位安全条目 | 信息系统 | 不涉及 |",
+    );
+
+    const issues = service.run({
+      prdDocument: basePrd({ sections }),
+      checkTypes: ["prd_completeness"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "qa_prd_safety_baseline_invalid", severity: "blocking" }),
+    ]));
+  });
+
+  it("requires all 21 safety rows in sequence", () => {
+    const sections = standardPrdSections();
+    const safety = sections.find((item) => item.id === "safety");
+    if (!safety) throw new Error("safety fixture is missing");
+    safety.content = safety.content.replace(/\n\| 21 \|[^\n]+$/, "");
+
+    const issues = service.run({
+      prdDocument: basePrd({ sections }),
+      checkTypes: ["prd_completeness"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "qa_prd_safety_baseline_invalid", severity: "blocking" }),
+    ]));
+  });
+
+  it("rejects a selected channel when the non-table PRD body has no design evidence", () => {
+    const sections = standardPrdSections();
+    const usage = sections.find((item) => item.id === "usage");
+    if (!usage) throw new Error("usage fixture is missing");
+    usage.content = usage.content.replace(
+      "| 2 | WAP/H5端外渠道 | □是 ☑否 |",
+      "| 2 | WAP/H5端外渠道 | ☑是 □否 |",
+    );
+
+    const issues = service.run({
+      prdDocument: basePrd({ sections }),
+      checkTypes: ["prd_completeness"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "qa_prd_channel_scope_conflict",
+        severity: "blocking",
+        description: expect.stringContaining("WAP/H5端外渠道"),
+      }),
+    ]));
+    expect(issues.map((item) => item.id)).not.toContain("qa_prd_channel_table_invalid");
+  });
+
+  it("blocks standalone-looking prototypes that have no mobile or interaction contract", () => {
+    const issues = service.run({
+      conversationDesignState: baseState(),
+      prototypeSpec: baseSpec(),
+      prototypeArtifact: baseArtifact({
+        htmlContent: "<!doctype html><html><head><meta name=\"viewport\"><style>body{display:grid}</style></head><body><main>后台签到页</main><section>前台用户页面</section><button>立即签到</button></body></html>",
+      }),
+      knowledgeContext: emptyKnowledgeContext(),
+      checkTypes: ["prototype_completeness"],
+    });
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "qa_prototype_invalid_viewport", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prototype_mobile_css_missing", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prototype_horizontal_overflow_unprotected", severity: "blocking" }),
+      expect.objectContaining({ id: "qa_prototype_key_actions_not_interactive", severity: "blocking" }),
+    ]));
+  });
+
+  it("accepts valid viewport, mobile overflow guards, and script-backed key actions", () => {
+    const issues = service.run({
+      conversationDesignState: baseState(),
+      prototypeSpec: baseSpec(),
+      prototypeArtifact: baseArtifact({ htmlContent: responsiveInteractivePrototypeHtml() }),
+      knowledgeContext: emptyKnowledgeContext(),
+      checkTypes: ["prototype_completeness"],
+    });
+    const issueIds = issues.map((item) => item.id);
+
+    expect(issueIds).not.toContain("qa_prototype_invalid_viewport");
+    expect(issueIds).not.toContain("qa_prototype_mobile_css_missing");
+    expect(issueIds).not.toContain("qa_prototype_horizontal_overflow_unprotected");
+    expect(issueIds).not.toContain("qa_prototype_key_actions_not_interactive");
+  });
+
   it("rejects prototype traces and incomplete design-state coverage without domain hardcoding", () => {
     const issues = service.run({
       conversationDesignState: baseState({
@@ -374,14 +527,14 @@ function standardPrdSections(): RequirementDocument["sections"] {
     ["intro", "1 引言", "本章说明项目背景、文档范围和使用场景。"],
     ["background", "1.1 项目背景", "签到活动用于提升用户每日活跃。"],
     ["scope", "1.2 文档范围", "覆盖后台配置、前台签到、积分发放、异常补偿和数据报表。"],
-    ["usage", "1.3 使用场景（必填）", "用户通过端内渠道参与签到，运营在后台配置活动。"],
+    ["usage", "1.3 使用场景（必填）", `用户通过端内渠道参与签到，运营在后台配置活动。\n\n${channelTable({ endpoint: true, h5: false, miniProgram: false })}`],
     ["business", "2 业务需求", "总体目标：通过签到领积分提升用户连续访问。"],
     ["links", "2.1 页面链接", "后台入口和前台入口均需覆盖。"],
     ["rules", "2.2 核心业务规则/功能说明", "同一用户同一自然日只能签到一次。"],
     ["flow", "2.3 核心流程/状态/页面要求", "流程覆盖运营配置、审核发布、前台签到和报表。"],
     ["acceptance", "2.4 验收标准", "重复签到不重复发积分。"],
     ["degradation", "3 业务降级方案（必填）", "积分发放失败进入补偿队列，后台支持重试。"],
-    ["safety", "4 需求安全基线要求（必填）", "保留 21 行安全基线表。"],
+    ["safety", "4 需求安全基线要求（必填）", safetyBaselineTable()],
   ] as const;
   return titles.map(([id, title, content], index) => section({
     id,
@@ -396,6 +549,62 @@ function standardPrdSections(): RequirementDocument["sections"] {
         ]
       : undefined,
   }));
+}
+
+function channelTable(input: { endpoint: boolean; h5: boolean; miniProgram: boolean }) {
+  const selection = (selected: boolean) => selected ? "☑是 □否" : "□是 ☑否";
+  return [
+    "| 序号 | 活动投放的可选渠道 | 是否投放 |",
+    "| --- | --- | --- |",
+    `| 1 | 端内渠道 | ${selection(input.endpoint)} |`,
+    `| 2 | WAP/H5端外渠道 | ${selection(input.h5)} |`,
+    `| 3 | 小程序 | ${selection(input.miniProgram)} |`,
+  ].join("\n");
+}
+
+function safetyBaselineTable() {
+  const labels = [
+    "新开发功能接口或现有功能接口逻辑变动",
+    "业务功能面向公众用户",
+    "新开通公网暴露面",
+    "管理后台个人信息脱敏展示",
+    "管理后台水印功能",
+    "管理后台查询条件限制",
+    "管理后台接入4A统一管理",
+    "未接入4A时满足安全要求",
+    "后台配置内容敏感词过滤",
+    "前台展示内容先审后发",
+    "展示隐私政策并获取用户同意",
+    "APP或小程序双清单",
+    "前台页面采集身份证号码、身份证照片、生物识别或银行卡信息",
+    "免密登录需用户同意隐私政策",
+    "跳转第三方页面或应用",
+    "与第三方公司接口对接进行数据交互",
+    "新增API接口台账填报",
+    "用户敏感信息或跨系统API加密传输",
+    "用户信息或重要数据加密存储",
+    "数据采集规范",
+    "采集数据完整性和一致性校验",
+  ];
+  return [
+    "安全基线自查如下。",
+    "",
+    "| 序号 | 需求安全基线内容 | 范围 | 是否涉及 |",
+    "| --- | --- | --- | --- |",
+    ...labels.map((label, index) => `| ${index + 1} | ${label} | 信息系统 | ${index < 2 ? "是" : "不涉及"} |`),
+  ].join("\n");
+}
+
+function responsiveInteractivePrototypeHtml() {
+  return [
+    "<!doctype html><html><head>",
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    "<style>html,body{overflow-x:hidden}.table-wrap{max-width:100%;overflow-x:auto}.app{display:grid}@media(max-width:768px){.app{display:block}}</style>",
+    "</head><body><main class=\"app\"><section>后台签到页 每日一次</section><section>前台用户页面</section>",
+    "<div class=\"table-wrap\"><table><tr><td>签到记录</td></tr></table></div><button>立即签到</button></main>",
+    "<script>document.querySelectorAll(\"button\").forEach((button)=>button.addEventListener(\"click\",()=>{button.textContent=\"今日已签到\";}));</script>",
+    "</body></html>",
+  ].join("");
 }
 
 function baseSpec(overrides: Partial<PrototypeSpec> = {}): PrototypeSpec {

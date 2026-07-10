@@ -1,9 +1,10 @@
 import "reflect-metadata";
 import { RequestMethod } from "@nestjs/common";
 import { GUARDS_METADATA, HTTP_CODE_METADATA, METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AuthController } from "../src/auth/auth.controller";
 import { JwtAuthGuard } from "../src/auth/jwt-auth.guard";
+import { UserRole, UserStatus } from "@prisma/client";
 import { AuthenticatedShareController, ShareLinkController } from "../src/ai/share.controller";
 
 describe("API route boundaries", () => {
@@ -28,6 +29,32 @@ describe("API route boundaries", () => {
 
   it("still protects routes that require an authenticated user object", () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, AuthController.prototype.me)).toEqual([JwtAuthGuard]);
+    expect(Reflect.getMetadata(PATH_METADATA, AuthController.prototype.deleteMe)).toBe("me");
+    expect(Reflect.getMetadata(METHOD_METADATA, AuthController.prototype.deleteMe)).toBe(RequestMethod.DELETE);
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, AuthController.prototype.deleteMe)).toBe(200);
+    expect(Reflect.getMetadata(GUARDS_METADATA, AuthController.prototype.deleteMe)).toEqual([JwtAuthGuard]);
     expect(Reflect.getMetadata(GUARDS_METADATA, ShareLinkController)).toEqual([JwtAuthGuard]);
+  });
+
+  it("clears the auth cookie only after self-deletion succeeds", async () => {
+    const auth = { deleteMe: vi.fn().mockResolvedValue({ success: true }) };
+    const response = { clearCookie: vi.fn() };
+    const controller = new AuthController(auth as never);
+    const user = {
+      id: "user-1",
+      username: "smoke-user",
+      displayName: "Smoke",
+      role: UserRole.user,
+      status: UserStatus.active,
+    };
+
+    await expect(controller.deleteMe(user, response as never)).resolves.toEqual({
+      success: true,
+    });
+    expect(auth.deleteMe).toHaveBeenCalledWith(user);
+    expect(response.clearCookie).toHaveBeenCalledWith(
+      "access_token",
+      expect.objectContaining({ httpOnly: true, path: "/" }),
+    );
   });
 });

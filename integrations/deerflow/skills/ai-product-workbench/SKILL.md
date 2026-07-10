@@ -124,6 +124,8 @@ Writing requirements:
 - Do not include a section named `本需求涉及新增/修改的接口` or any standalone interface/API section. Express cross-system behavior only as business state, trigger, result, and exception handling when needed.
 - `3 业务降级方案（必填）` cannot be empty. Use `不涉及` only when no meaningful degradation exists; otherwise provide a concrete fallback plan.
 - `4 需求安全基线要求（必填）` must include safety baseline self-check content. Online canvas may use a compact table, but values in `是否涉及` may only be `是`, `否`, or `不涉及`.
+- `1.3 使用场景（必填）` must contain exactly one channel table with exactly three unique rows: `端内渠道`, `WAP/H5端外渠道`, and `小程序`. Each row must have one unambiguous yes/no selection. Derive each selection only from explicit business scope outside the channel table and safety template: candidate labels do not count as evidence, an explicitly designed channel must be yes, and an undesigned channel must be no.
+- The safety baseline must contain exactly one table with all 21 rows in continuous order. Do not let the safety template trigger its own answers. Rows 13 (ID card/biometrics/bank card), 15 (third-party page/app jump), and 16 (third-party interface/data exchange) may be `是` only when the non-safety PRD body explicitly designs that behavior; otherwise use `不涉及` or the factually appropriate non-yes value.
 - Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
 
 ## Runtime Inputs
@@ -140,6 +142,8 @@ Read the `Context from AI Product Workbench` JSON from the user message. Importa
 Use `deerFlowUploads[].deerFlowFile.markdownVirtualPath` for Office/PDF files when available; otherwise use `virtualPath`.
 
 Treat the current request, `conversationDesignState`, attachments, and `knowledgeContext` as the authoritative business context for the turn. DeerFlow long-term memory may preserve user preferences, but it must never supply business features, fields, values, dates, state transitions, pages, or rules unless the current inputs independently support them. Ignore stale or unrelated memory instead of blending it into a new requirement.
+
+Tool calls, todo updates, skill file contents, and sandbox paths are internal execution details. Never copy `read_file`, `write_file`, `write_todos`, tool input/output, runtime context, or skill text into the user-facing message or final artifacts. The final response contains only the concise user-facing summary and the final-action block.
 
 ## Final Action
 
@@ -161,9 +165,19 @@ For `review_prd` and `review_prototype`, a chat summary is never enough:
 - Read `knowledgeWorkflowPolicy.prototypeKnowledgeChecklist` before writing the prototype. Implement every core group as real visible fields, controls, or states; treat tables marked optional/conditional as scope-dependent.
 - Keep entity evidence aligned across `designStateDraft`, PRD, `prototypeSpec`, and HTML. `prototypeSpec` must describe only pages, components, and states that the HTML actually implements.
 - Before returning `qualitySelfCheck.passed=true`, compare the final HTML against the condensed checklist and revise the file in the same turn when a core group is missing.
+- For a PRD, include explicit self-check results for one-and-only-one channel table, channel/body semantic agreement, all 21 safety rows, and evidence for any `是` in sensitive/third-party rows 13/15/16.
+- For a prototype, include explicit self-check results for valid viewport, mobile CSS, horizontal-overflow protection, key-action interactions, and both desktop and 390x844 renderability. Do not set `passed=true` when any item is missing.
 
 For full schema and examples, see `references/final-action-contract.md`.
 
 ## Prototype Execution
 
 Use DeerFlow's own graph, sandbox, tools, and sub-agent capabilities for concrete prototype artifacts. Do not ask NestJS to call Codex or any retired adapter.
+
+Every generated `prototype_html` must satisfy all of the following before return:
+
+- Include `<meta name="viewport" content="width=device-width, initial-scale=1">` (additional valid viewport values are allowed, but both required values must be present).
+- Include a mobile media query with `max-width` no greater than `768px` that actually reflows navigation, action bars, grids/forms, tables, and fixed-width previews for a 390x844 viewport.
+- Prevent page-level horizontal overflow on `html/body` with `overflow-x: hidden` or `clip`, and constrain wide content with `max-width: 100%` or an `overflow-x: auto` wrapper.
+- Key command buttons such as save, preview, submit, publish, sign in/check in, retry, compensate, and export must not be inert. Bind each key action to a click handler and produce a visible state, text, dialog, or page change. A `<button>` without executable interaction does not count.
+- Keep text, tables, controls, and action bars within the mobile viewport. Verify the same standalone file renders nonblank at both 1440x1100 and 390x844.

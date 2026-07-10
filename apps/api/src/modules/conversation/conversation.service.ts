@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Conversation, ConversationStatus, UserRole } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { AuthenticatedUser } from "../../auth/auth.types";
@@ -10,9 +10,12 @@ export class ConversationService {
 
   async create(user: AuthenticatedUser, dto: CreateConversationDto) {
     const title = dto.title?.trim() || "新对话";
+    const conversationId = dto.conversationId
+      ? normalizeConversationId(dto.conversationId)
+      : undefined;
     const conversation = await this.prisma.conversation.create({
       data: {
-        ...(dto.conversationId ? { id: dto.conversationId.trim() } : {}),
+        ...(conversationId ? { id: conversationId } : {}),
         ownerId: user.id,
         title,
         status: ConversationStatus.active,
@@ -22,18 +25,19 @@ export class ConversationService {
   }
 
   async getOrCreateInternal(user: AuthenticatedUser, conversationId: string, title: string) {
-    const existing = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
+    const safeConversationId = normalizeConversationId(conversationId);
+    const existing = await this.prisma.conversation.findUnique({ where: { id: safeConversationId } });
     if (!existing) {
       await this.prisma.conversation.create({
         data: {
-          id: conversationId,
+          id: safeConversationId,
           ownerId: user.id,
           title: title.trim() || "新对话",
           status: ConversationStatus.active,
         },
       });
     }
-    return this.get(user, conversationId);
+    return this.get(user, safeConversationId);
   }
 
   async list(user: AuthenticatedUser) {
@@ -143,4 +147,12 @@ export class ConversationService {
       updatedAt: conversation.updatedAt.toISOString(),
     };
   }
+}
+
+function normalizeConversationId(value: string) {
+  const conversationId = value.trim();
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(conversationId)) {
+    throw new BadRequestException("conversationId 格式不正确");
+  }
+  return conversationId;
 }

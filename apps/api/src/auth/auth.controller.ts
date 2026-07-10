@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Inject, Post, Req, Res, UseGuards } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { Throttle } from "@nestjs/throttler";
 import { AuthService } from "./auth.service";
@@ -26,6 +26,18 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthenticatedUser) {
     return { user: this.auth.me(user) };
+  }
+
+  @Delete("me")
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async deleteMe(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.deleteMe(user);
+    response.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
+    return result;
   }
 
   @Get("session")

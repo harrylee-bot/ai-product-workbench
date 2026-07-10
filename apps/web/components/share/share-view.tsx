@@ -154,7 +154,7 @@ export function ShareView({ shareData, token }: ShareViewProps) {
             <div className="overflow-hidden rounded-lg border border-border/70 bg-background/70 shadow-[var(--shadow-inset)]">
               <iframe
                 title="原型预览"
-                sandbox=""
+                sandbox="allow-scripts"
                 src={prototypePreviewUrl}
                 className="h-[70vh] min-h-[520px] w-full border-0"
               />

@@ -208,13 +208,13 @@ function scenario(input: {
     knowledgeRefs: [{ knowledgeId, title: `${input.name}高保真框架` }],
   };
   const html = [
-    "<!doctype html><html lang=\"zh-CN\"><head><style>",
-    "*{box-sizing:border-box}body{font-family:sans-serif;margin:0}.layout{display:grid;grid-template-columns:220px 1fr}.panel{padding:16px;border:1px solid #ddd}table{width:100%}",
+    "<!doctype html><html lang=\"zh-CN\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>",
+    "*{box-sizing:border-box}html,body{overflow-x:hidden}body{font-family:sans-serif;margin:0}.layout{display:grid;grid-template-columns:220px 1fr}.panel{padding:16px;border:1px solid #ddd;max-width:100%}.table-wrap{max-width:100%;overflow-x:auto}table{width:100%}@media(max-width:768px){.layout{display:block}.panel{padding:12px}}",
     "</style></head><body><div class=\"layout\"><aside>运营后台 管理导航</aside><main>",
     `<section class="panel"><h1>${input.pages[0]}</h1><form><label>${input.backendConfig}</label><input><select><option>${input.stateRule}</option></select><button>保存</button></form><div>${input.businessRule}</div></section>`,
     `<section class="panel"><h2>前台用户页面 ${input.pages[1]}</h2><button>${input.feature}</button><div>${input.frontendRule}</div><div>${input.exception}</div></section>`,
-    `<section class="panel"><table><tr><th>数据明细</th></tr><tr><td>${input.acceptance}</td></tr></table>${input.extraHtml}</section>`,
-    "</main></div></body></html>",
+    `<section class="panel"><div class="table-wrap"><table><tr><th>数据明细</th></tr><tr><td>${input.acceptance}</td></tr></table></div>${input.extraHtml}</section>`,
+    "</main></div><script>document.querySelectorAll(\"button\").forEach((button)=>button.addEventListener(\"click\",()=>{button.textContent=\"操作已完成\";}));</script></body></html>",
   ].join("");
   const artifact: PrototypeArtifact = {
     id: `artifact-${input.slug}`,

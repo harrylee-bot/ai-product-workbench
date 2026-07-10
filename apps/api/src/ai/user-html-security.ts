@@ -5,10 +5,15 @@ export const USER_HTML_CSP = buildUserHtmlCsp();
 export function buildUserHtmlCsp() {
   const frameAncestors = ["'self'", ...readWebFrameAncestors()].join(" ");
   return [
-    "sandbox",
+    "sandbox allow-scripts",
     "default-src 'none'",
+    "script-src 'unsafe-inline'",
     "style-src 'unsafe-inline'",
     "img-src data:",
+    "connect-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
     `frame-ancestors ${frameAncestors}`,
   ].join("; ");
 }

@@ -9,12 +9,14 @@ describe("SystemController", () => {
   it("reports the real workbench API, conversation module, and DeerFlow enabled flag", () => {
     vi.stubEnv("DEERFLOW_ENABLED", "true");
     vi.stubEnv("DEERFLOW_MODEL_NAME", "workbench-claude");
+    vi.stubEnv("APP_BUILD_SHA", "abc123def456");
     const result = new SystemController().health();
 
     expect(result).toMatchObject({
       ok: true,
       service: "ai-product-workbench-api",
       phase: "deerflow-first-runtime",
+      build: { commitSha: "abc123def456" },
       deerflow: {
         enabled: true,
         modelId: "deerflow/workbench-claude",
@@ -41,6 +43,10 @@ describe("SystemController", () => {
     vi.stubEnv("DEERFLOW_ENABLED", "false");
 
     expect(new SystemController().health().deerflow.enabled).toBe(false);
+  });
+
+  it("uses an explicit unknown build marker outside a versioned deployment", () => {
+    expect(new SystemController().health().build).toEqual({ commitSha: "unknown" });
   });
 
   it("returns runtime model choices from stage model environment variables", () => {

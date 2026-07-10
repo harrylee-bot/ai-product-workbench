@@ -192,6 +192,38 @@ describe("FileAssetService", () => {
     await expect(stat(files[1].path)).rejects.toThrow();
     await expect(stat(files[2].path)).rejects.toThrow();
   });
+
+  it("never writes uploads outside the configured root for a legacy unsafe conversation id", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "workbench-upload-root-"));
+    const tempDir = await mkdtemp(path.join(tmpdir(), "workbench-upload-tmp-"));
+    const file = await multerFile(tempDir, "brief.md", "需求正文");
+    const localPrisma = {
+      ...prisma,
+      conversation: {
+        findUnique: vi.fn().mockResolvedValue(conversationRecord({ id: "../../outside" })),
+      },
+      fileAsset: {
+        ...prisma.fileAsset,
+        create: vi.fn(),
+        deleteMany: vi.fn(),
+      },
+    };
+    const localService = new FileAssetService(
+      localPrisma as never,
+      parser as never,
+      { get: vi.fn((key: string) => key === "FILE_UPLOAD_ROOT" ? root : undefined) } as never,
+    );
+
+    await expect(localService.uploadConversationFiles(
+      user,
+      "../../outside",
+      {},
+      [file],
+    )).rejects.toThrow("文件存储路径非法");
+
+    expect(localPrisma.fileAsset.create).not.toHaveBeenCalled();
+    await expect(stat(file.path)).rejects.toThrow();
+  });
 });
 
 async function multerFile(dir: string, originalname: string, content: string): Promise<Express.Multer.File> {

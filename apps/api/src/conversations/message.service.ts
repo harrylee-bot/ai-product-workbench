@@ -2,6 +2,10 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import { ConversationStatus, Message, MessageRole, MessageType, Prisma, UserRole } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import {
+  sanitizeAssistantMetadataForOutput,
+  sanitizeAssistantMetadataForPersistence,
+} from "./message-metadata";
 
 type CreateMessageInput = {
   conversationId: string;
@@ -55,7 +59,7 @@ export class MessageService {
         content: input.content,
         type: input.type ?? MessageType.text,
         attachments: input.attachments,
-        metadata: input.metadata,
+        metadata: sanitizeAssistantMetadataForPersistence(input.metadata),
         relatedRunId: input.relatedRunId,
         relatedPrdDocumentId: input.relatedPrdDocumentId,
         relatedPrototypeArtifactId: input.relatedPrototypeArtifactId,
@@ -102,7 +106,10 @@ export class MessageService {
           type: input.type ?? MessageType.text,
           content: input.content,
           attachments: input.attachments,
-          metadata: input.metadata,
+          metadata:
+            role === MessageRole.assistant
+              ? sanitizeAssistantMetadataForPersistence(input.metadata)
+              : input.metadata,
           relatedRunId: input.relatedRunId,
           relatedPrdDocumentId: input.relatedPrdDocumentId,
           relatedPrototypeArtifactId: input.relatedPrototypeArtifactId,
@@ -165,7 +172,10 @@ export class MessageService {
       type: message.type,
       content: message.content,
       attachments: message.attachments,
-      metadata: message.metadata,
+      metadata:
+        message.role === MessageRole.assistant
+          ? sanitizeAssistantMetadataForOutput(message.metadata)
+          : message.metadata,
       relatedRunId: message.relatedRunId,
       relatedPrdDocumentId: message.relatedPrdDocumentId,
       relatedPrototypeArtifactId: message.relatedPrototypeArtifactId,

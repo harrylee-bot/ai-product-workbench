@@ -42,6 +42,20 @@ describe("ConversationService", () => {
     expect(result.conversation.title).toBe("新需求对话");
   });
 
+  it("rejects unsafe client and internal conversation identifiers", async () => {
+    await expect(service.create(user, {
+      conversationId: "../../outside",
+      title: "非法会话",
+    })).rejects.toThrow("conversationId 格式不正确");
+    await expect(service.getOrCreateInternal(
+      user,
+      "../outside",
+      "非法会话",
+    )).rejects.toThrow("conversationId 格式不正确");
+    expect(prisma.conversation.create).not.toHaveBeenCalled();
+    expect(prisma.conversation.findUnique).not.toHaveBeenCalled();
+  });
+
   it("lists only accessible non-deleted conversations for normal users", async () => {
     prisma.conversation.findMany.mockResolvedValue([baseConversation()]);
 

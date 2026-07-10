@@ -24,6 +24,7 @@
     "test:knowledge-vault-markdown": "node --test scripts/markdown-wikilinks.test.mjs",
     "test:knowledge-output-finalizer": "node --test scripts/knowledge-output-finalizer.test.mjs",
     "test:knowledge-output-contract": "node --test scripts/knowledge-output-contract.test.mjs",
+    "audit:requirement-policy": "node scripts/requirement-policy-audit.mjs",
     "eval:agent-workflow": "node scripts/agent-workflow-eval.mjs",
     "eval:agent-workflow:generalization": "npm --workspace @ai-product-workbench/api exec vitest run test/agent-workflow-generalization.spec.ts",
     "smoke:agent-workflow:online": "node scripts/agent-workflow-online-smoke.mjs",

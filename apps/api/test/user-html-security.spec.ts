@@ -12,7 +12,11 @@ describe("user HTML security headers", () => {
 
     const csp = buildUserHtmlCsp();
 
-    expect(csp).toContain("sandbox");
+    expect(csp).toContain("sandbox allow-scripts");
+    expect(csp).toContain("script-src 'unsafe-inline'");
+    expect(csp).toContain("connect-src 'none'");
+    expect(csp).toContain("form-action 'none'");
+    expect(csp).not.toContain("allow-same-origin");
     expect(csp).toContain("frame-ancestors 'self' https://aionbench.com");
     expect(csp).not.toContain("localhost");
     expect(csp).not.toContain("127.0.0.1");

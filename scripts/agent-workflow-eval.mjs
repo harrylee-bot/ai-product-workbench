@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -537,8 +537,25 @@ function evaluateArtifacts({
     },
     {
       name: "原型无外部资源依赖",
-      passed: !/(https?:\/\/|<script\b|@import\b)/i.test(prototype),
+      passed: !/(https?:\/\/|<script\b[^>]*\bsrc\s*=|@import\b)/i.test(prototype),
       evidence: "external dependency scan",
+    },
+    {
+      name: "原型具备移动端 viewport 与响应式样式",
+      passed: /<meta\b[^>]*name=["']viewport["'][^>]*content=["'][^"']*width=device-width[^"']*initial-scale\s*=\s*[0-9.]+[^"']*["']/i.test(prototype)
+        && [...prototype.matchAll(/@media[^\{]*max-width\s*:\s*(\d+)px/gi)].some((match) => Number(match[1]) <= 768),
+      evidence: "viewport and max-width<=768px scan",
+    },
+    {
+      name: "原型具备横向溢出防护",
+      passed: /(?:html\s*,\s*body|body\s*,\s*html|html|body)[^{]*\{[^}]*overflow-x\s*:\s*(?:hidden|clip)/i.test(prototype)
+        && /overflow-x\s*:\s*auto|max-width\s*:\s*100%/i.test(prototype),
+      evidence: "root and wide-content overflow guard scan",
+    },
+    {
+      name: "原型关键按钮具备可见交互",
+      passed: /<script\b[^>]*>[\s\S]*addEventListener\s*\(\s*["']click["'][\s\S]*(?:textContent\s*=|classList\.|setAttribute\s*\()/i.test(prototype),
+      evidence: "inline click handler and visible state scan",
     },
     {
       name: "原型可被浏览器渲染截图",
@@ -549,9 +566,9 @@ function evaluateArtifacts({
     },
     {
       name: "原型截图非空白",
-      passed: prototypeRender?.nonBlankCheck?.passed === true,
+      passed: prototypeRender?.nonBlankCheck?.passed === true && prototypeRender?.mobileNonBlankCheck?.passed === true,
       evidence: prototypeRender?.nonBlankCheck
-        ? `nonWhite=${prototypeRender.nonBlankCheck.nonWhiteRatio}, stddev=${prototypeRender.nonBlankCheck.luminanceStdDev}, buckets=${prototypeRender.nonBlankCheck.colorBucketCount}`
+        ? `desktop nonWhite=${prototypeRender.nonBlankCheck.nonWhiteRatio}, mobile nonWhite=${prototypeRender.mobileNonBlankCheck?.nonWhiteRatio ?? "missing"}`
         : "no screenshot analysis",
     },
     {
@@ -570,59 +587,108 @@ function evaluateArtifacts({
 
 async function renderPrototype(prototypePath, outputDir) {
   const screenshotPath = path.join(outputDir, "prototype-render.png");
+  const mobileScreenshotPath = path.join(outputDir, "prototype-mobile-390x844.png");
+  const mobileHarnessPath = path.join(outputDir, "prototype-mobile-viewport.html");
   const browserPath = findChromeBinary();
   const viewport = { width: 1440, height: 1100 };
+  const mobileViewport = { width: 390, height: 844 };
 
   if (!browserPath) {
     return {
       status: "failed",
       screenshotPath,
+      mobileScreenshotPath,
       browserPath: null,
       viewport,
+      mobileViewport,
       error: "No Chrome/Chromium binary found for prototype render check.",
     };
   }
 
   const url = pathToFileURL(prototypePath).href;
-  const userDataDir = path.join(outputDir, ".chrome-profile");
-  await mkdir(userDataDir, { recursive: true });
+  const sourceHtml = await readFile(prototypePath, "utf8");
+  await writeFile(mobileHarnessPath, viewportHarnessHtml(sourceHtml), "utf8");
+  const desktopProfile = path.join(outputDir, ".chrome-profile-desktop");
+  const mobileProfile = path.join(outputDir, ".chrome-profile-mobile");
+  await Promise.all([
+    mkdir(desktopProfile, { recursive: true }),
+    mkdir(mobileProfile, { recursive: true }),
+  ]);
 
   try {
-    await runHeadlessChrome(browserPath, [
-      "--disable-gpu",
-      "--no-sandbox",
-      "--hide-scrollbars",
-      `--user-data-dir=${userDataDir}`,
-      `--window-size=${viewport.width},${viewport.height}`,
-      `--screenshot=${screenshotPath}`,
-      url,
+    await Promise.all([
+      runHeadlessChrome(browserPath, [
+        "--disable-gpu",
+        "--no-sandbox",
+        "--hide-scrollbars",
+        "--force-device-scale-factor=1",
+        `--user-data-dir=${desktopProfile}`,
+        `--window-size=${viewport.width},${viewport.height}`,
+        `--screenshot=${screenshotPath}`,
+        url,
+      ]),
+      runHeadlessChrome(browserPath, [
+        "--disable-gpu",
+        "--no-sandbox",
+        "--hide-scrollbars",
+        "--force-device-scale-factor=1",
+        `--user-data-dir=${mobileProfile}`,
+        `--window-size=${mobileViewport.width},${mobileViewport.height}`,
+        `--screenshot=${mobileScreenshotPath}`,
+        pathToFileURL(mobileHarnessPath).href,
+      ]),
     ]);
 
-    const [image, renderedTextCheck] = await Promise.all([
+    const [image, mobileImage, renderedTextCheck] = await Promise.all([
       analyzeScreenshot(screenshotPath),
-      dumpRenderedText(browserPath, url, userDataDir),
+      analyzeScreenshot(mobileScreenshotPath),
+      dumpRenderedText(browserPath, url, desktopProfile),
     ]);
-    const nonBlankCheck = buildNonBlankCheck(image);
-    const status = nonBlankCheck.passed && renderedTextCheck.passed ? "passed" : "failed";
+    const nonBlankCheck = buildNonBlankCheck(image, viewport);
+    const mobileNonBlankCheck = buildNonBlankCheck(mobileImage, mobileViewport);
+    const status = nonBlankCheck.passed && mobileNonBlankCheck.passed && renderedTextCheck.passed
+      ? "passed"
+      : "failed";
 
     return {
       status,
       screenshotPath,
+      mobileScreenshotPath,
       browserPath,
       viewport,
+      mobileViewport,
       image,
+      mobileImage,
       nonBlankCheck,
+      mobileNonBlankCheck,
       renderedTextCheck,
     };
   } catch (error) {
     return {
       status: "failed",
       screenshotPath,
+      mobileScreenshotPath,
       browserPath,
       viewport,
+      mobileViewport,
       error: summarizeCommandError(error),
     };
+  } finally {
+    await Promise.all([
+      rm(desktopProfile, { recursive: true, force: true }),
+      rm(mobileProfile, { recursive: true, force: true }),
+      rm(mobileHarnessPath, { force: true }),
+    ]).catch(() => undefined);
   }
+}
+
+function viewportHarnessHtml(sourceHtml) {
+  const srcdoc = String(sourceHtml)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0;overflow:hidden;background:#fff}iframe{display:block;width:390px;height:844px;border:0}</style></head><body><iframe srcdoc="${srcdoc}"></iframe></body></html>`;
 }
 
 async function analyzeScreenshot(screenshotPath) {
@@ -669,20 +735,25 @@ async function analyzeScreenshot(screenshotPath) {
   };
 }
 
-function buildNonBlankCheck(image) {
+function buildNonBlankCheck(image, viewport) {
+  const desktop = viewport.width >= 1000;
+  const minimumFileSize = desktop ? 25_000 : 8_000;
   const passed =
-    image.width >= 1000 &&
-    image.height >= 800 &&
-    image.fileSize >= 25_000 &&
+    image.width >= viewport.width &&
+    image.height >= viewport.height &&
+    image.fileSize >= minimumFileSize &&
     image.nonWhiteRatio >= 0.08 &&
     image.luminanceStdDev >= 8 &&
     image.colorBucketCount >= 12;
 
   return {
     passed,
-    widthOk: image.width >= 1000,
-    heightOk: image.height >= 800,
-    fileSizeOk: image.fileSize >= 25_000,
+    widthOk: image.width >= viewport.width,
+    heightOk: image.height >= viewport.height,
+    fileSizeOk: image.fileSize >= minimumFileSize,
+    expectedWidth: viewport.width,
+    expectedHeight: viewport.height,
+    minimumFileSize,
     nonWhiteRatio: image.nonWhiteRatio,
     luminanceStdDev: image.luminanceStdDev,
     colorBucketCount: image.colorBucketCount,
@@ -1431,6 +1502,7 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
   <title>签到领积分活动原型</title>
   <style>
     * { box-sizing: border-box; }
+    html, body { max-width: 100%; overflow-x: hidden; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #f5f7fb; line-height: 1.5; }
     .app { display: grid; grid-template-columns: 240px 1fr 360px; min-height: 100vh; }
     aside { background: #101828; color: #d0d5dd; padding: 24px 18px; }
@@ -1452,7 +1524,7 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
     .upload { border: 1px dashed #98a2b3; border-radius: 6px; padding: 12px; color: #667085; background: #f9fafb; font-size: 13px; }
     .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #475467; }
     .switch::before { content: ""; width: 34px; height: 18px; border-radius: 999px; background: #1570ef; box-shadow: inset 16px 0 0 #fff; border: 1px solid #1570ef; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table { width: 100%; max-width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 10px; border-bottom: 1px solid #eaecf0; text-align: left; }
     th { background: #f9fafb; color: #475467; }
     .status { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; background: #ecfdf3; color: #027a48; }
@@ -1470,7 +1542,21 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
     .badges span { border-radius: 999px; background: #eef4ff; color: #3538cd; padding: 5px 9px; font-size: 12px; }
     .badges span.ok { background: #ecfdf3; color: #027a48; }
     .badges span.warn { background: #fffaeb; color: #b54708; }
+    .interaction-status { min-height: 20px; margin: -8px 0 14px; color: #175cd3; font-size: 13px; font-weight: 600; }
     @media (max-width: 980px) { .app { grid-template-columns: 1fr; } aside, .side { border: 0; } .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 768px) {
+      .app { display: block; width: 100%; }
+      aside, main, .side { width: 100%; padding: 16px; border: 0; }
+      nav { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      nav button { margin: 0; }
+      .topbar { align-items: stretch; flex-direction: column; }
+      .actions { width: 100%; flex-wrap: wrap; }
+      .actions .btn { flex: 1 1 120px; }
+      .grid, .inline { grid-template-columns: minmax(0, 1fr); }
+      .panel { min-width: 0; padding: 14px; }
+      table { display: block; max-width: 100%; overflow-x: auto; }
+      .phone { width: min(310px, 100%); max-width: 100%; border-width: 7px; }
+    }
   </style>
 </head>
 <body>
@@ -1493,6 +1579,7 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
           <button class="btn primary">提交审核</button>
         </div>
       </div>
+      <p id="interaction-status" class="interaction-status" aria-live="polite"></p>
       <div class="grid">
         <section class="panel">
           <h3>基础信息</h3>
@@ -1646,6 +1733,22 @@ function buildPrototypeHtml(userTopic, hits, coverage, enrichment) {
       <div class="badges"><span>重复签到</span><span>额度不足</span><span>发放失败</span><span>无资格</span></div>
     </section>
   </div>
+  <script>
+    const interactionStatus = document.getElementById("interaction-status");
+    document.querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
+      if (button.closest("nav")) {
+        document.querySelectorAll("nav button").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+      }
+      if (button.classList.contains("big-action")) {
+        button.textContent = "今日已签到";
+        button.setAttribute("aria-pressed", "true");
+      } else {
+        button.setAttribute("aria-pressed", "true");
+      }
+      interactionStatus.textContent = button.textContent.trim() + "操作已执行";
+    }));
+  </script>
 </body>
 </html>`;
 }

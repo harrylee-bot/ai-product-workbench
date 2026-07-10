@@ -644,11 +644,11 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "For every generated PRD, include at least two diagram blocks in the relevant 2.x business section: one Mermaid product/business flow diagram and one Mermaid product architecture/information architecture diagram. If knowledgeContext provides prototype_snapshot/image visualAssets, also include prototype_snapshot/image blocks for the relevant reference pages.",
         "If no suitable prototype snapshot or HTML visual asset is available, do not invent screenshots. Add a validationNotes item and an info/warning block that names the missing prototype visual asset and the required follow-up. Mermaid flow and architecture diagrams should still be generated from the product logic.",
         "For PRD/需求文档/需求说明书 generation, follow the requirement-doc-template skill exactly after the user's override: cover title/file title should be <工单名称>需求说明书; section order must be Cover, 版 本 历 史, 目 录, 1 引言(1.1项目背景, 1.2文档范围, 1.3使用场景（必填）), 2 业务需求(2.1页面链接, 2.2核心业务规则/功能说明, 2.3核心流程/状态/页面要求 with product flow and product architecture diagrams, 2.4验收标准), 3 业务降级方案（必填）, 4 需求安全基线要求（必填）. Do not include 本需求涉及新增/修改的接口.",
-        "For PRD tables, use explicit table blocks or markdown tables for version history columns 版本/状态、作者、参与者、起止日期、备注; the canonical channel table columns 序号、活动投放的可选渠道、是否投放 when that template table applies; acceptance table columns 序号、验收项、验收标准; and the 21-row safety baseline table. Populate channel rows from the current requirement and never infer activity-specific rules merely because the template uses that column title. Do not replace required tables with prose.",
+        "For PRD tables, use explicit table blocks or markdown tables for version history columns 版本/状态、作者、参与者、起止日期、备注; exactly one canonical channel table with columns 序号、活动投放的可选渠道、是否投放 and exactly three unique rows 端内渠道、WAP/H5端外渠道、小程序; acceptance table columns 序号、验收项、验收标准; and exactly one 21-row safety baseline table. Populate channel rows only from explicit current business scope outside the channel/safety templates. Candidate, disabled, pending, and future channel mentions are not positive evidence. Do not replace required tables with prose.",
         "For PRD section content, every heading must have concrete content. When an exact physical route, author, or participant name is unknown, write a logical product entry or responsible role and keep high-risk unknowns in assumptions; never put 待确认, 待补充, 以实际上线地址为准, or 以评审为准 placeholders in the PRD body. Version history date must use the current date or a user-provided date.",
         "Do not paste the raw user request into the PRD body with labels such as 用户输入/原始需求/用户原话. Rewrite it as business background and scope.",
         "PRD acceptance criteria must be business-testable acceptance only: page visibility, configuration, permissions, core user actions, state transitions, resource or capacity constraints, exceptions, data/reporting, and degradation behavior. Do not include knowledge retrieval, model quality, prompt compliance, or system generation checks as acceptance rows.",
-        "For PRD safety/degradation content, do not leave the section empty: write 不涉及 only when truly irrelevant; otherwise provide concrete fallback behavior and safety baseline self-check values using only 是, 否, or 不涉及.",
+        "For PRD safety/degradation content, do not leave the section empty: write 不涉及 only when truly irrelevant; otherwise provide concrete fallback behavior and safety baseline self-check values using only 是, 否, or 不涉及. The safety template cannot trigger its own answers; sensitive collection, third-party jump, and third-party interface/data-exchange rows may be 是 only when the non-safety PRD body explicitly designs that behavior.",
         "When updating an existing PRD, merge the requested change into the currentPrdDocument and preserve unaffected sections, title hierarchy, tables, state flows, acceptance criteria, and implementation details.",
         "If coding or prototype execution is needed, use DeerFlow coding/prototype execution capability inside the graph.",
         "Use deerFlowUploads virtualPath or markdownVirtualPath when reading uploaded files.",
@@ -660,7 +660,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "PrototypeSpec must enumerate all front-office and back-office pages, important components, normal states, empty states, permission states, failure states, review/processing states, and data/reporting views required by ConversationDesignState and retrieved knowledge. The HTML artifact must visibly implement at least 75% of named pages/components/states and all critical business rules.",
         "Before final output, mechanically compare the exact designStateDraft labels against prdDocumentDraft, prototypeSpec, and visible HTML, and compare PrototypeSpec page/component/state labels against visible HTML. Revise until every per-group coverage ratio is at least 75%; never use hidden text or a coverage checklist to satisfy this requirement.",
         "Prototype HTML must be the product interface itself. Do not add explanatory scaffolding such as 当前原型用于评审, 业务覆盖, 知识覆盖, 生成依据, or notes that describe what the prototype covers. Use that screen space for real product panels, state lists, audit/review workflow, reports, or exception queues.",
-        "Before emitting review_prd/review_prototype, run an internal revision loop: verify required ConversationDesignState groups, fixed PRD structure and diagrams, business-testable acceptance, knowledge checklist, PrototypeSpec page/component/state coverage, complete front/back HTML, exceptions, and data governance. If anything is missing, revise the artifacts in the same turn. Emit qualitySelfCheck.passed=true only when missing is empty.",
+        "Before emitting review_prd/review_prototype, run an internal revision loop: verify required ConversationDesignState groups, fixed PRD structure and diagrams, one semantically correct channel table, all 21 safety rows with external evidence for sensitive yes values, business-testable acceptance, knowledge checklist, PrototypeSpec page/component/state coverage, complete front/back HTML, valid mobile viewport, max-width<=768px reflow, horizontal-overflow protection, executable key-action clicks, desktop and 390x844 rendering, exceptions, and data governance. If anything is missing, revise the artifacts in the same turn. Emit qualitySelfCheck.passed=true only when missing is empty.",
         "Return final action instead of asking NestJS to decide the workflow.",
         "For PRD/document generation, do not stream the full PRD body as ordinary chat prose. Put the complete body in prdDocumentDraft.sections or a prd_markdown artifact, then use a concise finalAction.message; AI Product Workbench will open the canvas from the saved PRD.",
         "Keep non-document progress notes, clarifying comments, and tool/coding updates outside the document body so they remain suitable for the chat transcript.",
@@ -669,7 +669,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
     },
     prototypeHtmlContract: {
       previewEnvironment:
-        "AI Product Workbench renders saved prototype_html through a preview URL in a sandboxed iframe. The prototype must be a complete standalone HTML document that does not rely on parent app CSS, fonts, layout, or resets.",
+        "AI Product Workbench renders saved prototype_html through a preview URL in a sandboxed iframe that allows inline scripts but does not grant same-origin access, forms, downloads, or network connections. The prototype must be a complete standalone HTML document that does not rely on parent app CSS, fonts, layout, resets, remote APIs, or external assets.",
       requiredArtifact:
         "For review_prototype, create exactly one text/html artifact at mnt/user-data/outputs/index.html and reference it in finalActionContract.artifacts with kind=prototype_html and contentType=text/html.",
       requiredDocumentShape: [
@@ -681,7 +681,8 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "<title>...</title>",
         "<style>...complete CSS reset, layout, typography, tables, forms, buttons, tabs, cards, states...</style>",
         "</head>",
-        "<body>...prototype screens...</body>",
+        "<body>...prototype screens and visible interaction feedback...</body>",
+        "<script>...key buttons use click handlers and update visible state...</script>",
         "</html>",
       ],
       stylingRequirements: [
@@ -690,9 +691,10 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "Use app-like operational UI, not a document outline: constrained page shell, header/navigation, tabs/filter chips, tables/lists/forms/cards/status badges/actions, empty/error states, and realistic spacing.",
         "Set explicit font sizes for h1/h2/h3/body/table/button/input so the iframe never falls back to oversized Times-style browser defaults.",
         "Style tables with width:100%, border-collapse, padded th/td, header background, and responsive overflow handling.",
+        "Set overflow-x:hidden or clip on html/body, constrain wide content with max-width:100% or overflow-x:auto, and add a real max-width media query no wider than 768px that reflows navigation, action bars, forms, grids, tables, and fixed-width previews for a 390x844 viewport.",
         "Use Chinese labels and realistic sample data from the PRD/design state; keep columns and controls aligned at desktop width while remaining usable in the small inline preview.",
         "For prototypes paired with requirement-doc-template PRDs, mirror the PRD's concrete business subsections, page entries, state/error handling, interface assumptions, acceptance criteria, degradation behavior, and safety/risk controls with visible app-like panels. Do not only show a decorative mobile preview.",
-        "If interaction cannot use scripts because stored prototypes are sanitized, present the key states as visible static sections or CSS-only variants.",
+        "Use inline JavaScript for key commands such as save, preview, submit, publish, sign in/check in, retry, compensate, and export. Every visible key command must have a click handler that produces a visible state, text, dialog, or page change; static state examples do not replace executable interaction.",
       ],
       forbiddenOutput: [
         "裸 <h1>/<table>/<button> 片段",

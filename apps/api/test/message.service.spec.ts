@@ -133,6 +133,97 @@ describe("MessageService", () => {
     });
     expect(result).toMatchObject({ id: "message-1", content: "PRD 已生成" });
   });
+
+  it("sanitizes assistant metadata at the shared message write boundary", async () => {
+    prisma.message.create.mockImplementation(async ({ data }) =>
+      baseMessage("message-1", data),
+    );
+    prisma.message.count.mockResolvedValue(1);
+
+    await service.createAssistantMessage({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      content: "已完成",
+      metadata: {
+        reasoningText: "hidden reasoning",
+        parts: [
+          { type: "reasoning", text: "hidden reasoning" },
+          {
+            type: "dynamic-tool",
+            toolCallId: "read-1",
+            toolName: "read_file",
+            state: "output-available",
+            output: "runtime skill",
+          },
+          { type: "text", text: "已完成" },
+        ],
+      },
+    });
+
+    const createInput = prisma.message.create.mock.calls[0]?.[0];
+    expect(createInput.data.metadata).toEqual({
+      parts: [{ type: "text", text: "已完成" }],
+    });
+  });
+
+  it("does not sanitize user metadata at the shared message write boundary", async () => {
+    const metadata = {
+      parts: [
+        { type: "text", text: "请读取附件" },
+        { type: "file", url: "/files/1", mediaType: "text/plain" },
+      ],
+    };
+    prisma.message.create.mockImplementation(async ({ data }) =>
+      baseMessage("message-1", data),
+    );
+    prisma.message.count.mockResolvedValue(1);
+
+    await service.createUserMessage({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      content: "请读取附件",
+      metadata,
+    });
+
+    expect(prisma.message.create.mock.calls[0]?.[0].data.metadata).toEqual(metadata);
+  });
+
+  it("does not expose unsafe parts from historical assistant rows", async () => {
+    prisma.message.findMany.mockResolvedValue([
+      baseMessage("message-1", {
+        role: MessageRole.assistant,
+        content: "已完成",
+        metadata: {
+          reasoningText: "hidden reasoning",
+          parts: [
+            {
+              type: "dynamic-tool",
+              toolCallId: "read-1",
+              toolName: "read_file",
+              state: "output-available",
+              output: "complete runtime skill",
+            },
+            { type: "text", text: "已完成" },
+          ],
+        },
+      }),
+    ]);
+
+    const result = await service.listByConversation(
+      {
+        id: "user-1",
+        username: "zhangsan",
+        displayName: "张三",
+        role: UserRole.user,
+        status: UserStatus.active,
+      },
+      "conversation-1",
+    );
+
+    expect(result.items[0]?.metadata).toEqual({
+      parts: [{ type: "text", text: "已完成" }],
+    });
+  });
 });
 
 function baseConversation(overrides: Record<string, unknown> = {}) {

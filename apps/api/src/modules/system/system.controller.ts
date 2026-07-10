@@ -11,11 +11,13 @@ export class SystemController {
     const modelDisplayName = defaultModel.name;
     const runtimeName = readEnv("DEERFLOW_AGENT_NAME") ?? "lead_agent";
     const provider = defaultModel.provider;
+    const commitSha = readEnv("APP_BUILD_SHA") ?? "unknown";
 
     return {
       ok: true,
       service: "ai-product-workbench-api",
       phase: "deerflow-first-runtime",
+      build: { commitSha },
       deerflow: {
         // 使命关键开关：DEERFLOW_ENABLED=false 时自然语言→PRD→原型链路断开。
         // 部署监控应据此告警。

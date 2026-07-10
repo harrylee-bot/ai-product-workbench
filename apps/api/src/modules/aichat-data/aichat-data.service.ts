@@ -13,6 +13,10 @@ import {
 import { PrismaService } from "../../prisma/prisma.service";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import {
+  sanitizeAssistantMetadataForPersistence,
+  sanitizeAssistantParts,
+} from "../../conversations/message-metadata";
+import {
   buildMessagePayload,
   BulkCreateMessagesDto,
   CreateSuggestionsDto,
@@ -109,11 +113,19 @@ export class AichatDataService {
 
     const existingMetadata =
       (message.metadata as Record<string, unknown> | null) ?? {};
-    const nextMetadata = {
+    const persistedParts =
+      message.role === MessageRole.assistant
+        ? sanitizeAssistantParts(dto.parts)
+        : dto.parts;
+    const mergedMetadata = {
       ...existingMetadata,
-      parts: dto.parts,
+      parts: persistedParts,
     } as Prisma.InputJsonObject;
-    const content = extractTextFromParts(dto.parts) || "(empty)";
+    const nextMetadata =
+      message.role === MessageRole.assistant
+        ? sanitizeAssistantMetadataForPersistence(mergedMetadata)
+        : mergedMetadata;
+    const content = extractTextFromParts(persistedParts) || "(empty)";
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const nextMessage = await tx.message.update({

@@ -14,7 +14,7 @@ type SafetyBaselineRow = {
 
 const SAFETY_BASELINE_ROWS: SafetyBaselineRow[] = [
   { index: "1", content: "是否有新开发功能接口或现有功能接口逻辑变动", scope: "信息系统（包含前端、后端、管理后台）", status: "是" },
-  { index: "2", content: "业务功能是否面向公众用户", scope: "信息系统（包含前端、后端、管理后台）", status: "是" },
+  { index: "2", content: "业务功能是否面向公众用户", scope: "信息系统（包含前端、后端、管理后台）", status: "不涉及" },
   { index: "3", content: "是否涉及新开通公网暴露面", scope: "信息系统（包含前端、后端、管理后台）", status: "不涉及" },
   { index: "4", content: "管理后台涉及个人信息的内容要求脱敏展示，原则上不做非脱敏个人信息的导出功能。", scope: "管理后台", status: "不涉及" },
   { index: "5", content: "管理后台所有操作页面要有水印功能，水印至少包括姓名、手机号、操作时间等信息", scope: "管理后台", status: "不涉及" },
@@ -55,6 +55,7 @@ export function formatRequirementDocumentDraft(
   const author = cleanDocumentAuthor(options.author || state?.updatedBy || state?.createdBy);
   const date = options.date || formatDate(state?.updatedAt);
   const sections: RequirementDocSection[] = [];
+  const channelRows = buildChannelRows(state);
 
   const add = (section: Omit<RequirementDocSection, "order">) => {
     sections.push({ ...section, order: sections.length + 1 });
@@ -109,9 +110,9 @@ export function formatRequirementDocumentDraft(
     type: "user_scenarios",
     level: 2,
     content: [
-      findSectionContent(sourceSections, ["user_scenarios"], /使用场景|用户场景/)
-        || `运营或管理人员在后台完成${baseName}相关配置与处理，目标用户在前台完成核心操作并获得明确结果反馈，管理人员可查询状态和数据记录。`,
-      renderMarkdownTable(["序号", "活动投放的可选渠道", "是否投放"], buildChannelRows(sourceSections, state)),
+      buildUsageScenarioContent(baseName, sourceSections),
+      buildChannelScopeSummary(channelRows),
+      renderMarkdownTable(["序号", "活动投放的可选渠道", "是否投放"], channelRows),
     ].join("\n\n"),
     sourcePaths: ["userScenarios"],
   });
@@ -361,13 +362,34 @@ function buildScopeFallback(baseName: string, state?: ConversationDesignState) {
     : `- ${baseName}涉及的目标用户、业务场景、页面范围、核心功能、规则、状态、异常和验收口径。\n- 覆盖用户发起、系统校验、状态变化、结果反馈、异常处理和业务记录闭环。`;
 }
 
-function buildChannelRows(sections: RequirementDocSection[], state?: ConversationDesignState) {
-  const text = JSON.stringify({ sections, state });
-  return [
-    ["1", "端内渠道", "☑是 □否"],
-    ["2", "WAP/H5端外渠道", /H5|WAP|端外|wap|h5/.test(text) ? "☑是 □否" : "□是 ☑否"],
-    ["3", "小程序", /小程序/.test(text) ? "☑是 □否" : "□是 ☑否"],
-  ];
+function buildUsageScenarioContent(baseName: string, sections: RequirementDocSection[]) {
+  const fallback = `运营或管理人员在后台完成${baseName}相关配置与处理，目标用户在前台完成核心操作并获得明确结果反馈，管理人员可查询状态和数据记录。`;
+  return stripChannelTables(
+    findSectionContent(sections, ["user_scenarios"], /使用场景|用户场景/) || fallback,
+  ) || fallback;
+}
+
+function buildChannelRows(state?: ConversationDesignState) {
+  const evidence = collectDesignBusinessEvidence(state);
+  const selected = (kind: ChannelKind) => hasExplicitChannelEvidence(state, evidence, kind);
+  return ([
+    ["1", "端内渠道", selected("in_app")],
+    ["2", "WAP/H5端外渠道", selected("h5")],
+    ["3", "小程序", selected("mini_program")],
+  ] as Array<[string, string, boolean]>).map(([index, channel, isSelected]) => [
+    index,
+    channel,
+    isSelected ? "☑是 □否" : "□是 ☑否",
+  ]);
+}
+
+function buildChannelScopeSummary(rows: string[][]) {
+  const selected = rows
+    .filter((row) => row[2] === "☑是 □否")
+    .map((row) => row[1]);
+  return selected.length
+    ? `本期明确投放渠道：${selected.join("、")}。`
+    : "本期未设计端内、WAP/H5 端外或小程序投放渠道。";
 }
 
 function getBusinessGoal(baseName: string, sections: RequirementDocSection[], state?: ConversationDesignState) {
@@ -522,7 +544,11 @@ function buildDegradationFallback(baseName: string, state?: ConversationDesignSt
 }
 
 function buildSafetyRows(title: string, sections: RequirementDocSection[], state?: ConversationDesignState) {
-  const text = JSON.stringify({ title, sections, state }).toLowerCase();
+  const evidence = [
+    title,
+    ...collectDesignBusinessEvidence(state),
+    ...collectSectionBusinessEvidence(sections),
+  ];
   const rows = SAFETY_BASELINE_ROWS.map((row) => ({ ...row }));
   const setYes = (...indexes: string[]) => {
     indexes.forEach((index) => {
@@ -531,15 +557,245 @@ function buildSafetyRows(title: string, sections: RequirementDocSection[], state
     });
   };
 
-  if (/后台|管理|配置|运营/.test(text)) setYes("5", "6");
-  if (/敏感词|后台配置|配置.*展示|前台展示|发布|上线|审核/.test(text)) setYes("9", "10");
-  if (/隐私|个人信息|手机号|证件|身份证|银行卡|用户信息/.test(text)) setYes("4", "11", "12", "18", "19");
-  if (/身份证|银行卡|生物识别/.test(text)) setYes("13");
-  if (/免密|一键登录|登录/.test(text)) setYes("14");
-  if (/第三方|外链|跳转.*app|跳转.*应用|跳转.*页面/.test(text)) setYes("15", "16");
-  if (/接口|api|回调|联调|调用|新增|修改/.test(text)) setYes("17", "18");
-  if (/埋点|采集|统计|pv|uv|快照|交易|数据|报表/.test(text)) setYes("20", "21");
+  const hasAdmin = Boolean(state?.backendConfigs?.length)
+    || hasPositiveBusinessEvidence(evidence, /后台|管理端|运营工作台|管理页面/);
+  const hasPublicUser = hasPositiveBusinessEvidence(
+    evidence,
+    /公众用户|C端用户|用户端|客户端用户|消费者|会员|客户|前台(?:页面|入口|展示|操作)/i,
+  );
+  const hasPersonalInformation = hasPositiveBusinessEvidence(
+    evidence,
+    /个人信息|用户信息|手机号|手机号码|姓名|证件|身份证|银行卡|生物识别/,
+    /采集|收集|填写|录入|上传|读取|获取|查询|展示|导出|存储|保存|校验|认证|授权|传输|共享|字段/,
+  );
+  const hasDataCollection = hasPositiveBusinessEvidence(
+    evidence,
+    /埋点|数据采集|采集数据|行为数据|访问人数|访问量|参与人数|转化率|统计指标|指标统计|数据报表|\b(?:pv|uv)\b/i,
+  );
+  const hasNewApi = hasPositiveBusinessEvidence(
+    evidence,
+    /(?:新增|新建|开发|改造|修改|变更|调整|对接).{0,18}(?:接口|api)|(?:接口|api).{0,18}(?:新增|新建|开发|改造|修改|变更|调整|对接)/i,
+  );
+  const hasThirdPartyIntegration = hasPositiveBusinessEvidence(
+    evidence,
+    /(?:第三方|外部公司|外部系统).{0,24}(?:接口|api|数据交互|数据传输|数据共享|回调|对接)|(?:接口|api|数据交互|数据传输|数据共享|回调|对接).{0,24}(?:第三方|外部公司|外部系统)/i,
+  );
+
+  if (hasPositiveBusinessEvidence(evidence, /公网|互联网公开/, /新增|开放|暴露|部署|访问/)) setYes("3");
+  if (hasPublicUser) setYes("2");
+  if (hasAdmin && hasPersonalInformation) setYes("4");
+  if (hasAdmin) setYes("5", "6");
+  if (hasPositiveBusinessEvidence(evidence, /4a统一管理|接入4a|4a登录/i)) setYes("7");
+  if (hasPositiveBusinessEvidence(evidence, /未接入4a|独立账号体系|通行字18项/i)) setYes("8");
+  if (hasPositiveBusinessEvidence(evidence, /敏感词|后台配置.{0,16}(?:文案|内容|素材|标题|文本)|配置(?:文案|内容|素材|标题|文本)/)) setYes("9");
+  if (hasPositiveBusinessEvidence(evidence, /先审后发|审核发布|发布审核|后台配置.{0,24}前台展示|前台展示.{0,24}后台配置/)) setYes("10");
+  if (hasPositiveBusinessEvidence(evidence, /隐私政策|个人信息授权|用户信息授权/) || hasPersonalInformation) setYes("11");
+  if (
+    hasExplicitChannelEvidence(state, evidence, "mini_program")
+    || hasPositiveBusinessEvidence(evidence, /\bapp\b|客户端|原生应用/i, /加载|投放|发布|上线|接入|页面|活动|入口/)
+  ) setYes("12");
+  if (hasPositiveBusinessEvidence(
+    evidence,
+    /身份证(?:号码|照片)?|银行卡(?:号|信息)?|生物识别|人脸识别|指纹识别/,
+    /采集|收集|填写|录入|上传|读取|获取|校验|认证|识别|绑卡|授权|字段/,
+  )) setYes("13");
+  if (hasPositiveBusinessEvidence(evidence, /免密登录|一键登录|本机号码登录|手机号快捷登录/)) setYes("14");
+  if (hasPositiveBusinessEvidence(
+    evidence,
+    /(?:跳转|外链|打开).{0,20}(?:第三方|外部)(?:页面|应用|app|网站|链接)?|(?:第三方|外部)(?:页面|应用|app|网站|链接).{0,20}(?:跳转|外链|打开)/i,
+  )) setYes("15");
+  if (hasThirdPartyIntegration) setYes("16");
+  if (hasNewApi) setYes("17");
+  if (
+    hasThirdPartyIntegration
+    || hasPositiveBusinessEvidence(
+      evidence,
+      /(?:个人信息|用户信息|敏感信息|身份证|银行卡).{0,24}(?:接口|api|传输|共享)|(?:接口|api|传输|共享).{0,24}(?:个人信息|用户信息|敏感信息|身份证|银行卡)/i,
+    )
+  ) setYes("18");
+  if (hasPositiveBusinessEvidence(
+    evidence,
+    /(?:个人信息|用户信息|敏感信息|重要数据).{0,24}(?:存储|保存|落库|持久化)|(?:存储|保存|落库|持久化).{0,24}(?:个人信息|用户信息|敏感信息|重要数据)/,
+  )) setYes("19");
+  if (hasDataCollection) setYes("20", "21");
   return rows.map((row) => [row.index, row.content, row.scope, row.status]);
+}
+
+type ChannelKind = "in_app" | "h5" | "mini_program";
+
+const CHANNEL_PATTERNS: Record<ChannelKind, RegExp> = {
+  in_app: /端内(?:渠道|活动页|页面|入口)?|\bapp\b/i,
+  h5: /wap|h5|端外(?:渠道|活动页|页面|入口)?/i,
+  mini_program: /小程序|mini[\s_-]?program/i,
+};
+
+const CHANNEL_ACTION_PATTERN = /投放|发布|上线|接入|加载|覆盖|部署|活动页|页面|入口|进入|访问|打开|运行于|渠道(?:为|是|包括|包含|覆盖|[:：])/i;
+const NON_CURRENT_EVIDENCE_PATTERN = /(?:不|未|无需).{0,30}(?:投放|发布|上线|接入|加载|支持|启用|涉及|采集|收集|填写|录入|上传|读取|获取|存储|保存|传输|共享|跳转|对接|新增|开发|修改|变更)|暂不|禁止|关闭|禁用|取消|可后续|后续.{0,12}(?:扩展|支持|投放|接入|上线)|按实际.{0,20}(?:扩展|选择|启用)|配置扩展|候选|备选|可选|待确认|待定|预留|二期|未来|如(?:涉及|需|需要)|若(?:涉及|需|需要)|如果(?:涉及|需|需要)|视情况|可能支持|计划后续/i;
+const EVIDENCE_IGNORED_KEYS = /^(?:id|source|sourcePaths|sourceStatePaths|createdAt|updatedAt|confidence|reason|status)$/i;
+
+function stripChannelTables(content: string) {
+  return stripMarkdownTables(content, /活动投放的可选渠道|WAP\/H5端外渠道/);
+}
+
+function stripSafetyTables(content: string) {
+  return stripMarkdownTables(content, /需求安全基线内容|是否有新开发功能接口或现有功能接口逻辑变动/);
+}
+
+function stripMarkdownTables(content: string, marker: RegExp) {
+  const lines = content.split("\n");
+  const result: string[] = [];
+  for (let index = 0; index < lines.length;) {
+    if (!/^\s*\|.*\|\s*$/.test(lines[index] ?? "")) {
+      result.push(lines[index] ?? "");
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (end < lines.length && /^\s*\|.*\|\s*$/.test(lines[end] ?? "")) end += 1;
+    const table = lines.slice(index, end);
+    if (!marker.test(table.join("\n"))) result.push(...table);
+    index = end;
+  }
+  return result.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function collectDesignBusinessEvidence(state?: ConversationDesignState) {
+  if (!state) return [];
+  return collectEvidenceStrings([
+    state.title,
+    state.summary,
+    state.businessGoal,
+    state.background,
+    state.targetUsers,
+    state.userScenarios,
+    state.pages,
+    state.features,
+    state.backendConfigs,
+    state.frontendRules,
+    state.businessRules,
+    state.stateRules,
+    state.exceptionScenarios,
+    state.acceptanceCriteria,
+    Array.isArray(state.assumptions) ? state.assumptions.filter(isConfirmedAssumption) : [],
+    state.confirmedFacts,
+  ]);
+}
+
+function collectSectionBusinessEvidence(sections: RequirementDocSection[]) {
+  return sections.flatMap((section) => {
+    if (section.id === "safety_baseline" || section.type === "appendix" || /安全基线|安全自查/.test(section.title)) {
+      return [];
+    }
+    return [
+      stripSafetyTables(stripChannelTables(section.content)),
+      ...(section.blocks ?? []).map((block) => stripSafetyTables(stripChannelTables(block.content ?? ""))),
+    ].map((value) => value.trim()).filter(Boolean);
+  });
+}
+
+function collectEvidenceStrings(values: unknown[]): string[] {
+  return values.flatMap((value) => {
+    if (typeof value === "string" || typeof value === "number") {
+      const text = String(value).trim();
+      return text ? [text] : [];
+    }
+    if (Array.isArray(value)) return value.flatMap((item) => collectEvidenceStrings([item]));
+    if (!value || typeof value !== "object") return [];
+    const text = Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !EVIDENCE_IGNORED_KEYS.test(key))
+      .flatMap(([, item]) => collectEvidenceStrings([item]))
+      .join(" ")
+      .trim();
+    return text ? [text] : [];
+  });
+}
+
+function hasExplicitChannelEvidence(
+  state: ConversationDesignState | undefined,
+  evidence: string[],
+  kind: ChannelKind,
+) {
+  if (hasStructuredChannelSelection(state, kind)) return true;
+  const channelPattern = CHANNEL_PATTERNS[kind];
+  return evidence.some((text) => splitEvidenceClauses(text).some((clause) =>
+    channelPattern.test(clause)
+    && CHANNEL_ACTION_PATTERN.test(clause)
+    && !NON_CURRENT_EVIDENCE_PATTERN.test(clause),
+  ));
+}
+
+function hasStructuredChannelSelection(state: ConversationDesignState | undefined, kind: ChannelKind) {
+  if (!state) return false;
+  const values = [
+    state.userScenarios,
+    state.pages,
+    state.features,
+    state.backendConfigs,
+    state.frontendRules,
+    state.businessRules,
+    state.stateRules,
+    Array.isArray(state.assumptions) ? state.assumptions.filter(isConfirmedAssumption) : [],
+    state.confirmedFacts,
+  ];
+  return values.some((value) => findStructuredChannelSelection(value, kind));
+}
+
+function findStructuredChannelSelection(value: unknown, kind: ChannelKind): boolean {
+  if (Array.isArray(value)) return value.some((item) => findStructuredChannelSelection(item, kind));
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  const explicitStatus = Object.entries(record).find(([key]) =>
+    /^(?:enabled|selected|active|published|launched|isEnabled|isSelected|status|是否投放|是否发布)$/i.test(key),
+  )?.[1];
+  if (isExplicitNegativeValue(explicitStatus) || isExplicitNonCurrentValue(explicitStatus)) return false;
+
+  return Object.entries(record).some(([key, item]) => {
+    if (/可选|候选|备选|available|candidate|option/i.test(key)) return false;
+    if (/^(?:channel|channels|deliveryChannel|deliveryChannels|publishChannel|publishChannels|launchChannel|launchChannels|platform|platforms|投放渠道|发布渠道|上线渠道)$/i.test(key)) {
+      const text = collectEvidenceStrings([item]).join(" ");
+      return CHANNEL_PATTERNS[kind].test(text)
+        && !NON_CURRENT_EVIDENCE_PATTERN.test(text)
+        && !isExplicitNegativeValue(explicitStatus);
+    }
+    if (keyNamesChannel(key, kind)) return isExplicitPositiveValue(item);
+    return findStructuredChannelSelection(item, kind);
+  });
+}
+
+function keyNamesChannel(key: string, kind: ChannelKind) {
+  if (kind === "in_app") return /^(?:app|inApp|appChannel|端内|端内渠道)$/i.test(key);
+  if (kind === "h5") return /^(?:h5|wap|h5Channel|wapChannel|端外|端外渠道)$/i.test(key);
+  return /^(?:miniProgram|mini_program|wechatMiniProgram|小程序|小程序渠道)$/i.test(key);
+}
+
+function isExplicitPositiveValue(value: unknown) {
+  if (value === true || value === 1) return true;
+  return typeof value === "string" && /^(?:true|yes|on|enabled|selected|active|是|启用|投放|发布)$/i.test(value.trim());
+}
+
+function isExplicitNegativeValue(value: unknown) {
+  if (value === false || value === 0) return true;
+  return typeof value === "string" && /^(?:false|no|off|disabled|unselected|inactive|否|不启用|不投放|不发布)$/i.test(value.trim());
+}
+
+function isExplicitNonCurrentValue(value: unknown) {
+  return typeof value === "string" && /^(?:pending|draft|candidate|future|待确认|待定|候选|草稿|后续)$/i.test(value.trim());
+}
+
+function isConfirmedAssumption(value: Record<string, unknown>) {
+  return /^(?:confirmed|accepted|approved|已确认|已接受|已批准)$/i.test(String(value.status ?? "").trim());
+}
+
+function splitEvidenceClauses(text: string) {
+  return text.split(/[，,；;。！？!?\n]+/).map((item) => item.trim()).filter(Boolean);
+}
+
+function hasPositiveBusinessEvidence(evidence: string[], subject: RegExp, action?: RegExp) {
+  return evidence.some((text) => splitEvidenceClauses(text).some((clause) =>
+    subject.test(clause)
+    && (!action || action.test(clause))
+    && !NON_CURRENT_EVIDENCE_PATTERN.test(clause),
+  ));
 }
 
 function isStructuralSection(section: RequirementDocSection) {

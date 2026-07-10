@@ -241,6 +241,12 @@ else
   echo "Using code already present in ${APP_DIR}"
 fi
 
+if ! APP_BUILD_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null)"; then
+  echo "ERROR: unable to determine deployed Git commit" >&2
+  exit 1
+fi
+export APP_BUILD_SHA
+
 sync_deerflow_runtime_assets() {
   local agent_source
   local agent_target
@@ -261,29 +267,32 @@ sync_deerflow_runtime_assets() {
       exit 1
     fi
     install -d -m 0755 "$agent_target"
-    install -m 0644 "${agent_source}/config.yaml" "${agent_target}/config.yaml"
-    install -m 0644 "${agent_source}/SOUL.md" "${agent_target}/SOUL.md"
+    install -m 0644 "${agent_source}/SOUL.md" "${agent_target}/.SOUL.md.$$"
+    mv -f "${agent_target}/.SOUL.md.$$" "${agent_target}/SOUL.md"
+    install -m 0644 "${agent_source}/config.yaml" "${agent_target}/.config.yaml.$$"
+    mv -f "${agent_target}/.config.yaml.$$" "${agent_target}/config.yaml"
   fi
 
   if [ -n "$DEERFLOW_SHARED_SKILL_DIR" ]; then
     skill_source="${APP_DIR}/integrations/deerflow/skills/ai-product-workbench"
     skill_target="${DEERFLOW_SHARED_SKILL_DIR}/ai-product-workbench"
-    if [ ! -f "${skill_source}/SKILL.md" ]; then
+    if [ ! -f "${skill_source}/SKILL.md" ] || [ ! -f "${skill_source}/references/final-action-contract.md" ]; then
       echo "ERROR: DeerFlow shared skill source is incomplete: ${skill_source}" >&2
       exit 1
     fi
-    install -d -m 0755 "$skill_target"
-    cp -R "${skill_source}/." "$skill_target/"
+    install -d -m 0755 "${skill_target}/references"
+    install -m 0644 "${skill_source}/references/final-action-contract.md" "${skill_target}/references/.final-action-contract.md.$$"
+    mv -f "${skill_target}/references/.final-action-contract.md.$$" "${skill_target}/references/final-action-contract.md"
+    install -m 0644 "${skill_source}/SKILL.md" "${skill_target}/.SKILL.md.$$"
+    mv -f "${skill_target}/.SKILL.md.$$" "${skill_target}/SKILL.md"
   fi
 }
-
-sync_deerflow_runtime_assets
 
 docker network create ai-product-workbench >/dev/null 2>&1 || true
 docker volume create ai-product-workbench-postgres >/dev/null
 docker volume create ai-product-workbench-storage >/dev/null
 
-if [ "${PRUNE_DOCKER_BEFORE_BUILD:-1}" != "0" ]; then
+if [ "${PRUNE_DOCKER_BEFORE_BUILD:-0}" != "0" ]; then
   docker container prune -f >/dev/null 2>&1 || true
   docker image prune -f >/dev/null 2>&1 || true
   docker builder prune -af >/dev/null 2>&1 || true
@@ -308,6 +317,16 @@ wait_for_postgres() {
 
   echo "Postgres did not become ready" >&2
   return 1
+}
+
+assert_api_build_sha() {
+  local health
+  health="$(curl -fsS "http://127.0.0.1:4000/api/system/health")"
+  if ! grep -Eq "\"commitSha\"[[:space:]]*:[[:space:]]*\"${APP_BUILD_SHA}\"" <<<"$health"; then
+    echo "ERROR: API build SHA does not match deployed Git HEAD (${APP_BUILD_SHA})" >&2
+    echo "$health" >&2
+    return 1
+  fi
 }
 
 remove_existing_container_outside_compose() {
@@ -336,9 +355,11 @@ case "$DEPLOY_TARGET" in
     ;;
   api)
     "${COMPOSE[@]}" build api
+    sync_deerflow_runtime_assets
     remove_existing_container_outside_compose ai-product-workbench-api
     "${COMPOSE[@]}" up -d --no-deps api
     wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
+    assert_api_build_sha
     ;;
   knowledge)
     ensure_storage_dirs
@@ -358,9 +379,12 @@ case "$DEPLOY_TARGET" in
     remove_existing_container_outside_compose ai-product-workbench-api
     remove_existing_container_outside_compose ai-product-workbench-web
     remove_existing_container_outside_compose ai-product-knowledge
-    "${COMPOSE[@]}" up -d --build
+    "${COMPOSE[@]}" build
+    sync_deerflow_runtime_assets
+    "${COMPOSE[@]}" up -d
     wait_for_postgres
     wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
+    assert_api_build_sha
     wait_for_http "http://127.0.0.1:3000/login" "Web"
     wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
     ;;
@@ -371,7 +395,7 @@ echo "  Web: ${APP_PUBLIC_URL}/login"
 echo "  API: ${API_PUBLIC_BASE_URL%/}/system/health"
 echo "  Knowledge: ${KNOWLEDGE_APP_PUBLIC_URL}"
 
-if [ "${PRUNE_DOCKER_AFTER_DEPLOY:-1}" != "0" ]; then
+if [ "${PRUNE_DOCKER_AFTER_DEPLOY:-0}" != "0" ]; then
   docker image prune -f >/dev/null 2>&1 || true
   docker builder prune -af >/dev/null 2>&1 || true
 fi

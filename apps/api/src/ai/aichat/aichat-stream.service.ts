@@ -42,10 +42,8 @@ import {
   emitStaticText,
   finishReasoning,
   finishText,
-  getPersistedToolParts,
   recordToolInputAvailable,
   recordToolOutputAvailable,
-  type PersistedToolPart,
   runtimeEventsFromDeerFlow,
   type RuntimeProcessEvent,
   type RuntimeProcessSnapshot,
@@ -155,9 +153,7 @@ export class AichatStreamService {
           userId: user.id,
           runId: run.id,
           getContent: () => ctx.textBuffer.trim(),
-          getReasoning: () => ctx.reasoningBuffer.trim(),
           getRuntimeEvents: () => runtimeEvents,
-          getToolParts: () => getPersistedToolParts(ctx),
         });
         const recordRuntimeEvent = (eventType: string, payload: unknown) => {
           void this.runLogs.recordStreamEvent({
@@ -1039,29 +1035,18 @@ export class AichatStreamService {
     userId: string;
     runId: string;
     getContent: () => string;
-    getReasoning: () => string;
     getRuntimeEvents: () => RuntimeProcessEvent[];
-    getToolParts: () => PersistedToolPart[];
   }) {
-    const thinkingMetadata = () => {
+    const thinkingMetadata = (visibleContent = input.getContent()) => {
       const metadata: Record<string, unknown> = {};
-      const reasoningText = input.getReasoning().trim();
-      if (reasoningText) {
-        metadata.reasoningText = reasoningText;
-      }
-
       const runtimeEvents = input.getRuntimeEvents().filter(isRuntimeProcessEvent).slice(-80);
       if (runtimeEvents.length > 0) {
         metadata.runtimeEvents = runtimeEvents;
       }
 
-      const toolParts = input.getToolParts();
-      if (reasoningText || toolParts.length > 0) {
-        metadata.parts = buildPersistedAssistantParts({
-          content: input.getContent(),
-          reasoningText,
-          toolParts,
-        });
+      const content = visibleContent.trim();
+      if (content) {
+        metadata.parts = buildPersistedAssistantParts(content);
       }
 
       return metadata;
@@ -1076,17 +1061,17 @@ export class AichatStreamService {
         ...thinkingMetadata(),
       });
 
-    const mergeFinalMetadata = (metadata: unknown) =>
+    const mergeFinalMetadata = (metadata: unknown, visibleContent: string) =>
       toInputJson({
         ...recordFromJson(metadata),
-        ...thinkingMetadata(),
+        ...thinkingMetadata(visibleContent),
       });
 
     const toUpdateInput = (message: Parameters<MessageService["createAssistantMessage"]>[0]) => ({
       content: message.content,
       type: message.type,
       attachments: message.attachments,
-      metadata: mergeFinalMetadata(message.metadata),
+      metadata: message.metadata,
       relatedRunId: message.relatedRunId,
       relatedPrdDocumentId: message.relatedPrdDocumentId,
       relatedPrototypeArtifactId: message.relatedPrototypeArtifactId,
@@ -1164,7 +1149,7 @@ export class AichatStreamService {
         await pending.catch(() => undefined);
         const finalMessage = {
           ...message,
-          metadata: mergeFinalMetadata(message.metadata),
+          metadata: mergeFinalMetadata(message.metadata, message.content),
         };
 
         try {
@@ -2143,29 +2128,14 @@ function formatKnowledgeInventoryMessage(output: {
   ].join("\n");
 }
 
-function buildPersistedAssistantParts(input: {
-  content: string;
-  reasoningText: string;
-  toolParts: PersistedToolPart[];
-}) {
-  const parts: unknown[] = [];
-  const reasoningText = input.reasoningText.trim();
-  if (reasoningText) {
-    parts.push({ type: "reasoning", text: reasoningText });
-  }
-  parts.push(...input.toolParts.map((part) => ({ ...part })));
-  const content = input.content.trim();
-  if (content) {
-    parts.push({ type: "text", text: content });
-  }
-  return parts;
+function buildPersistedAssistantParts(content: string) {
+  return [{ type: "text", text: content }];
 }
 
 function hasPersistableMetadata(metadata: Prisma.InputJsonValue) {
   const record = recordFromJson(metadata);
   return Boolean(
-    record.reasoningText ||
-      (Array.isArray(record.runtimeEvents) && record.runtimeEvents.length > 0) ||
+    (Array.isArray(record.runtimeEvents) && record.runtimeEvents.length > 0) ||
       (Array.isArray(record.parts) && record.parts.length > 0),
   );
 }

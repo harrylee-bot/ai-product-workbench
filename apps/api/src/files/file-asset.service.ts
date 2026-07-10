@@ -338,7 +338,11 @@ export class FileAssetService {
     file: Express.Multer.File,
     extension: string,
   ) {
-    const projectDir = path.join(this.uploadRoot, conversationId);
+    const uploadRoot = path.resolve(this.uploadRoot);
+    const projectDir = path.resolve(uploadRoot, conversationId);
+    if (projectDir === uploadRoot || !projectDir.startsWith(`${uploadRoot}${path.sep}`)) {
+      throw new BadRequestException("文件存储路径非法");
+    }
     const storedName = `${randomUUID()}.${extension}`;
     const storagePath = path.join(projectDir, storedName);
     await mkdir(projectDir, { recursive: true });

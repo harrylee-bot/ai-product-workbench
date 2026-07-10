@@ -30,6 +30,8 @@ The final action is the only instruction AI Product Workbench will persist from 
 
 For every `review_prd` or `review_prototype`, `designStateDraft` is mandatory. When PRD and prototype are requested together, the same final action must also include `prdDocumentDraft`, `prototypeSpec`, and one `prototype_html` artifact. The backend rejects missing structured payloads; do not rely on Nest to infer them from prose or HTML.
 
+For every `prototype_html`, `prototypeChecks` must explicitly cover a valid viewport, a mobile breakpoint no wider than 768px, page-level overflow protection, real click behavior for key actions, and successful desktop plus 390x844 rendering. The standalone HTML must implement those checks; listing them in JSON without executable behavior does not count.
+
 ## Direct Answer
 
 Use for greetings, status, and general questions.
@@ -70,7 +72,7 @@ Use when a requirement or PRD should be reviewed before prototype work.
     "passed": true,
     "missing": [],
     "stateCoverage": ["全部设计状态分组已检查"],
-    "prdChecks": ["固定结构、流程图、架构图、验收、降级、安全基线已检查"],
+    "prdChecks": ["固定结构、唯一渠道表与正文一致性、流程图、架构图、验收、降级、21 行安全基线及敏感项证据已检查"],
     "prototypeChecks": ["本轮未要求原型"],
     "knowledgeChecks": ["文档规范和当前业务知识已落实"]
   },
@@ -138,7 +140,10 @@ Use when generated artifacts should be shown to the user. Include the full `desi
       {"id":"page-2","name":"<前台页面>","device":"responsive","layout":"mobile_page","components":[{"id":"component-2","name":"<核心操作>","type":"button","sourcePaths":["features"]}],"states":[{"id":"state-2","name":"<结果状态>","description":"<结果反馈>","sourcePaths":["exceptionScenarios"]}],"sourcePaths":["pages"],"order":2}
     ],
     "navigation": [],
-    "interactions": []
+    "interactions": [
+      {"id":"interaction-save","trigger":"点击保存","action":"校验表单并显示保存成功或字段错误"},
+      {"id":"interaction-primary","trigger":"点击核心操作","action":"更新按钮、状态文案或页面内容并提供可见反馈"}
+    ]
   },
   "artifacts": [
     {
