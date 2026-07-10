@@ -43,6 +43,7 @@ DEERFLOW_INTERNAL_AUTH_TOKEN=<same strong token as DeerFlow DEER_FLOW_INTERNAL_A
 DEERFLOW_SHARED_AGENT_DIR=<DeerFlow .deer-flow/agents host path>
 DEERFLOW_SHARED_SKILL_DIR=<DeerFlow skills/custom host path>
 AICHAT_MODEL_IDLE_TIMEOUT_MS=600000
+AICHAT_ARTIFACT_REPAIR_ATTEMPTS=2
 DEERFLOW_UPLOADS_ENABLED=true
 DEERFLOW_ARTIFACT_MAX_INLINE_BYTES=2000000
 ```
@@ -61,6 +62,8 @@ Production deployment fails fast when DeerFlow is enabled and this token is empt
 When `DEERFLOW_AGENT_NAME` is set, production also requires `DEERFLOW_SHARED_AGENT_DIR`. The API deploy copies the tracked `config.yaml` and `SOUL.md` into DeerFlow's shared agent directory so every isolated Workbench user can load the same runtime agent. `DEERFLOW_SHARED_SKILL_DIR` keeps the tracked Workbench skill files synchronized with DeerFlow's shared custom-skill directory.
 
 The DeerFlow run stream has no wall-clock timeout. `AICHAT_MODEL_IDLE_TIMEOUT_MS` is only an inactivity limit: every DeerFlow event resets it, while a run that produces no event for the configured interval fails and asks the user to retry. No draft fallback is generated.
+
+After deterministic artifact QA, `AICHAT_ARTIFACT_REPAIR_ATTEMPTS` controls how many complete repair turns run in the same DeerFlow thread. Each repair receives the concrete QA issues and must replace the design state, PRD, PrototypeSpec, and HTML as a consistent set. Nothing is persisted until the quality gate passes.
 
 ## Gateway Owner Scope Patch
 

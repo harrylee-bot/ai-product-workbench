@@ -156,6 +156,8 @@ For `review_prd` and `review_prototype`, a chat summary is never enough:
 - Include `prototypeSpec` and the `prototype_html` artifact whenever a prototype is requested.
 - For a combined PRD/prototype request, include all four payloads in the same final action: `designStateDraft`, `prdDocumentDraft`, `prototypeSpec`, and `artifacts`.
 - Return a non-empty `qualitySelfCheck`; set `passed=true` only after every required payload and knowledge constraint has been checked.
+- Use one shared set of short, display-ready labels. Reuse the exact design-state names in PRD content, PrototypeSpec pages/components/states, and visible HTML instead of renaming the same concept in each artifact.
+- Map every design-state page one-to-one to a PrototypeSpec page and a visible HTML screen/section. Before returning, mechanically verify at least 75% exact-label coverage for every design-state group and for PrototypeSpec page/component/state labels; revise the complete artifact set when coverage is lower.
 
 For full schema and examples, see `references/final-action-contract.md`.
 

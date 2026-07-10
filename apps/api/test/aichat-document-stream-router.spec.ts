@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AichatStreamService,
   assertGeneratedArtifactQaPassed,
+  buildArtifactRepairPrompt,
   buildExternalResearchRuntimeEvent,
   buildModelIdleTimeoutRuntimeEvent,
   buildModelEnrichmentRuntimeEvent,
@@ -18,6 +19,7 @@ import {
   looksLikeDocumentDraft,
   routeAssistantDocumentDelta,
 } from "../src/ai/aichat/aichat-stream.service";
+import { GeneratedArtifactQualityError } from "../src/ai/final-action-applier.service";
 import type { UIMessageStreamWriter } from "../src/ai/aichat/aichat-ai-sdk-bridge";
 import type { AuthenticatedUser } from "../src/auth/auth.types";
 
@@ -41,6 +43,21 @@ function captureWriter() {
 }
 
 describe("aichat document stream router", () => {
+  it("builds a domain-neutral full-artifact QA repair turn with exact-label invariants", () => {
+    const prompt = buildArtifactRepairPrompt(
+      new GeneratedArtifactQualityError(["HTML 原型未完整覆盖产品设计状态"]),
+      1,
+      2,
+    );
+
+    expect(prompt).toContain("complete replacement final action");
+    expect(prompt).toContain("one shared label dictionary");
+    expect(prompt).toContain("At least 75%");
+    expect(prompt).toContain("/mnt/user-data/outputs/index.html");
+    expect(prompt).toContain("HTML 原型未完整覆盖产品设计状态");
+    expect(prompt).not.toMatch(/签到|积分|奖品|预约|素材/);
+  });
+
   it("detects Chinese requirement document requests", () => {
     expect(isDocumentGenerationRequest("给我生成一个问卷活动的需求文档")).toBe(true);
     expect(isDocumentGenerationRequest("请编写签到活动 PRD")).toBe(true);

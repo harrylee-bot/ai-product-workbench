@@ -15,6 +15,7 @@ import type {
   PrototypeArtifactDraft,
   PrototypeSpec,
   PrototypeTargetDevice,
+  QAIssue,
   RequirementDocSection,
   RequirementDocument,
   RequirementDocumentDraft,
@@ -275,7 +276,7 @@ export class FinalActionApplierService {
     const issues = this.qaRuleCheck.run(input);
     const blockingIssues = issues.filter((item) => item.severity === "blocking" || item.severity === "major");
     if (blockingIssues.length) {
-      throw new GeneratedArtifactQualityError(blockingIssues.map((item) => item.title));
+      throw new GeneratedArtifactQualityError(blockingIssues);
     }
   }
 
@@ -451,10 +452,26 @@ export class FinalActionApplierService {
 
 export class GeneratedArtifactQualityError extends Error {
   readonly userMessage = "生成结果未通过质量检查，请重试。";
+  readonly issues: QAIssue[];
 
-  constructor(issueTitles: string[]) {
-    super(`GENERATED_ARTIFACT_QUALITY_FAILED: ${issueTitles.slice(0, 6).join("；")}`);
+  constructor(issues: QAIssue[] | string[]) {
+    const normalizedIssues = issues.map((item, index) => typeof item === "string"
+      ? {
+          id: `generated-artifact-quality-${index + 1}`,
+          checkType: "prototype_completeness" as const,
+          severity: "major" as const,
+          title: item,
+          description: item,
+          suggestion: "根据质量检查结果重新生成完整产物。",
+          status: "open" as const,
+          autoFixable: false,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        }
+      : item);
+    super(`GENERATED_ARTIFACT_QUALITY_FAILED: ${normalizedIssues.slice(0, 6).map((item) => item.title).join("；")}`);
     this.name = "GeneratedArtifactQualityError";
+    this.issues = normalizedIssues;
   }
 }
 

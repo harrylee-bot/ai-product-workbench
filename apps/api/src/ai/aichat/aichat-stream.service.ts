@@ -281,68 +281,75 @@ export class AichatStreamService {
           })));
 
           publishRuntimeEvent(createRuntimeEvent(buildModelEnrichmentStartedRuntimeEvent(run.id)));
-          const stopModelHeartbeat = startModelHeartbeat(streamWriter, run.id, () =>
-            clientClosed || controller.signal.aborted,
-          );
-          const modelController = createChildAbortController(controller.signal);
-          let modelTimedOut = false;
-          let modelTimeout: NodeJS.Timeout | undefined;
-          const resetModelIdleTimeout = () => {
-            if (modelTimeout) clearTimeout(modelTimeout);
-            modelTimeout = setTimeout(() => {
-              modelTimedOut = true;
-              modelController.abort(new ModelGenerationTimeoutError(readModelIdleTimeoutMs()));
-            }, readModelIdleTimeoutMs());
-            modelTimeout.unref?.();
+          let generationAttempt = 0;
+          const runGenerationTurn = async (message: string, resumeReason?: string) => {
+            const stopModelHeartbeat = startModelHeartbeat(streamWriter, run.id, () =>
+              clientClosed || controller.signal.aborted,
+            );
+            const modelController = createChildAbortController(controller.signal);
+            let modelTimedOut = false;
+            let modelTimeout: NodeJS.Timeout | undefined;
+            const resetModelIdleTimeout = () => {
+              if (modelTimeout) clearTimeout(modelTimeout);
+              modelTimeout = setTimeout(() => {
+                modelTimedOut = true;
+                modelController.abort(new ModelGenerationTimeoutError(readModelIdleTimeoutMs()));
+              }, readModelIdleTimeoutMs());
+              modelTimeout.unref?.();
+            };
+            resetModelIdleTimeout();
+            try {
+              const includeAttachments = generationAttempt === 0;
+              generationAttempt += 1;
+              return await this.deerFlow.runTurn({
+                runId: run.id,
+                conversationId,
+                userId: user.id,
+                message,
+                attachments: includeAttachments ? fileParts : [],
+                attachmentFiles: includeAttachments ? attachmentFiles : [],
+                selectedModelName,
+                previewMode: "prd",
+                conversationDesignState: conversationContext,
+                knowledgeContext,
+                externalResearchContext,
+                resumeReason,
+                signal: modelController.signal,
+                onEvent: (event) => {
+                  resetModelIdleTimeout();
+                  if (controller.signal.aborted) return;
+                  const previousTextLength = ctx.textBuffer.length;
+                  for (const runtimeEvent of runtimeEventsFromDeerFlow(event, ctx, run.id, {
+                    exposeToolEvents: false,
+                  })) {
+                    publishRuntimeEvent(runtimeEvent);
+                  }
+                  const routedDocumentDelta = routeAssistantDocumentDelta(event, streamWriter, documentStream);
+                  if (!routedDocumentDelta.suppressChat) {
+                    emitDeerFlowEvent(event, streamWriter, ctx, {
+                      exposeToolParts: false,
+                    });
+                  } else {
+                    emitDeerFlowEvent({ ...event, chunk: "", content: "" }, streamWriter, ctx, {
+                      exposeToolParts: false,
+                    });
+                  }
+                  if (ctx.textBuffer.length > previousTextLength) {
+                    void assistantDraft.persist();
+                  }
+                },
+              });
+            } catch (error) {
+              if (!modelTimedOut || controller.signal.aborted) throw error;
+              publishRuntimeEvent(createRuntimeEvent(buildModelIdleTimeoutRuntimeEvent(run.id)));
+              throw new ModelGenerationTimeoutError(readModelIdleTimeoutMs());
+            } finally {
+              if (modelTimeout) clearTimeout(modelTimeout);
+              stopModelHeartbeat();
+            }
           };
-          resetModelIdleTimeout();
-          let result: DeerFlowTurnResult;
-          try {
-            result = await this.deerFlow.runTurn({
-              runId: run.id,
-              conversationId,
-              userId: user.id,
-              message: runtimeContent,
-              attachments: fileParts,
-              attachmentFiles,
-              selectedModelName,
-              previewMode: "prd",
-              conversationDesignState: conversationContext,
-              knowledgeContext,
-              externalResearchContext,
-              signal: modelController.signal,
-              onEvent: (event) => {
-                resetModelIdleTimeout();
-                if (controller.signal.aborted) return;
-                const previousTextLength = ctx.textBuffer.length;
-                for (const runtimeEvent of runtimeEventsFromDeerFlow(event, ctx, run.id, {
-                  exposeToolEvents: false,
-                })) {
-                  publishRuntimeEvent(runtimeEvent);
-                }
-                const routedDocumentDelta = routeAssistantDocumentDelta(event, streamWriter, documentStream);
-                if (!routedDocumentDelta.suppressChat) {
-                  emitDeerFlowEvent(event, streamWriter, ctx, {
-                    exposeToolParts: false,
-                  });
-                } else {
-                  emitDeerFlowEvent({ ...event, chunk: "", content: "" }, streamWriter, ctx, {
-                    exposeToolParts: false,
-                  });
-                }
-                if (ctx.textBuffer.length > previousTextLength) {
-                  void assistantDraft.persist();
-                }
-              },
-            });
-          } catch (error) {
-            if (!modelTimedOut || controller.signal.aborted) throw error;
-            publishRuntimeEvent(createRuntimeEvent(buildModelIdleTimeoutRuntimeEvent(run.id)));
-            throw new ModelGenerationTimeoutError(readModelIdleTimeoutMs());
-          } finally {
-            if (modelTimeout) clearTimeout(modelTimeout);
-            stopModelHeartbeat();
-          }
+
+          let result: DeerFlowTurnResult = await runGenerationTurn(runtimeContent);
           publishRuntimeEvent(createRuntimeEvent(buildModelEnrichmentRuntimeEvent({
             runId: run.id,
             finalAction: result.finalAction,
@@ -356,33 +363,36 @@ export class AichatStreamService {
           let finalAction = result.finalAction;
           let artifacts = result.artifacts;
           let assistantText = result.assistantText;
-          let prdGenerationFailureReason = getArtifactGenerationFailureReason({
-            finalAction,
-            artifacts,
-            expectsPrdDocument: forceCanvasDocument || isDocumentGenerationRequest(runtimeContent),
-            expectsPrototype: isPrototypeGenerationRequest(runtimeContent),
-          });
-          if (prdGenerationFailureReason) {
-            publishRuntimeEvent(createRuntimeEvent({
-              runId: run.id,
-              id: "model-final-action-missing",
-              kind: "error",
-              label: "模型未返回完整产物",
-              detail: `${prdGenerationFailureReason}，请重试。`,
-              status: "failed",
-            }));
-            throw new PrdGenerationFailedError(prdGenerationFailureReason);
-          }
+          const validateGenerationResult = () => {
+            const failureReason = getArtifactGenerationFailureReason({
+              finalAction,
+              artifacts,
+              expectsPrdDocument: forceCanvasDocument || isDocumentGenerationRequest(runtimeContent),
+              expectsPrototype: isPrototypeGenerationRequest(runtimeContent),
+            });
+            if (failureReason) {
+              publishRuntimeEvent(createRuntimeEvent({
+                runId: run.id,
+                id: "model-final-action-missing",
+                kind: "error",
+                label: "模型未返回完整产物",
+                detail: `${failureReason}，请重试。`,
+                status: "failed",
+              }));
+              throw new PrdGenerationFailedError(failureReason);
+            }
+            if (
+              !finalAction.parsed &&
+              (forceCanvasDocument || requiresExplicitFinalAction(runtimeContent))
+            ) {
+              throw new BadRequestException("FINAL_ACTION_REQUIRED_FOR_ARTIFACT_INTENT");
+            }
+          };
+          validateGenerationResult();
 
           const expectsArtifact =
             finalAction.type === "review_prd" ||
             finalAction.type === "review_prototype";
-          if (
-            !finalAction.parsed &&
-            (forceCanvasDocument || requiresExplicitFinalAction(runtimeContent))
-          ) {
-            throw new BadRequestException("FINAL_ACTION_REQUIRED_FOR_ARTIFACT_INTENT");
-          }
           if (expectsArtifact) {
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
@@ -392,15 +402,50 @@ export class AichatStreamService {
               status: "running",
             }));
           }
-          const applied = await this.finalActionApplier.apply({
-            conversationId,
-            userId: user.id,
-            runId: run.id,
-            finalAction,
-            artifacts,
-            assistantText,
-            knowledgeContext,
-          });
+          let applied: Awaited<ReturnType<FinalActionApplierService["apply"]>>;
+          const maxRepairAttempts = readArtifactRepairAttempts();
+          for (let repairAttempt = 0; ; repairAttempt += 1) {
+            try {
+              applied = await this.finalActionApplier.apply({
+                conversationId,
+                userId: user.id,
+                runId: run.id,
+                finalAction,
+                artifacts,
+                assistantText,
+                knowledgeContext,
+              });
+              break;
+            } catch (error) {
+              if (!(error instanceof GeneratedArtifactQualityError) || repairAttempt >= maxRepairAttempts) {
+                throw error;
+              }
+
+              const nextAttempt = repairAttempt + 1;
+              publishRuntimeEvent(createRuntimeEvent({
+                runId: run.id,
+                id: `artifact-quality-repair-${nextAttempt}`,
+                kind: "document",
+                label: `质量检查未通过，正在自动修订（${nextAttempt}/${maxRepairAttempts}）`,
+                detail: error.issues.slice(0, 6).map((issue) => `· ${issue.title}：${issue.description}`).join("\n"),
+                status: "running",
+              }));
+
+              result = await runGenerationTurn(
+                buildArtifactRepairPrompt(error, nextAttempt, maxRepairAttempts),
+                `artifact_quality_repair_${nextAttempt}`,
+              );
+              finalAction = result.finalAction;
+              artifacts = result.artifacts;
+              assistantText = result.assistantText;
+              validateGenerationResult();
+              publishRuntimeEvent(createRuntimeEvent(buildModelEnrichmentRuntimeEvent({
+                runId: run.id,
+                finalAction,
+              })));
+              await assistantDraft.persist(true);
+            }
+          }
 
           if (applied.prdDocument && applied.prototypeArtifact) {
             const qaReport = await this.qaService.runForConversation(conversationId, user.id, {
@@ -1793,8 +1838,7 @@ export function assertGeneratedArtifactQaPassed(report: QAReport) {
   if (report.status !== "failed") return;
   throw new GeneratedArtifactQualityError(
     report.issues
-      .filter((issue) => issue.severity === "blocking" || issue.severity === "major")
-      .map((issue) => issue.title),
+      .filter((issue) => issue.severity === "blocking" || issue.severity === "major"),
   );
 }
 
@@ -1948,6 +1992,41 @@ function readModelIdleTimeoutMs() {
   const raw = Number(process.env.AICHAT_MODEL_IDLE_TIMEOUT_MS ?? "");
   if (Number.isFinite(raw) && raw >= 10_000) return raw;
   return 600_000;
+}
+
+function readArtifactRepairAttempts() {
+  const raw = Number(process.env.AICHAT_ARTIFACT_REPAIR_ATTEMPTS ?? "");
+  if (Number.isInteger(raw) && raw >= 0 && raw <= 3) return raw;
+  return 2;
+}
+
+export function buildArtifactRepairPrompt(
+  error: GeneratedArtifactQualityError,
+  attempt: number,
+  maxAttempts: number,
+) {
+  const issues = error.issues.map((issue) => ({
+    checkType: issue.checkType,
+    title: issue.title,
+    description: issue.description,
+    suggestion: issue.suggestion,
+    relatedStatePaths: issue.relatedStatePaths ?? [],
+    relatedPrototypePageIds: issue.relatedPrototypePageIds ?? [],
+    relatedKnowledgeIds: issue.relatedKnowledgeIds ?? [],
+  }));
+  return [
+    `This is internal artifact QA repair turn ${attempt}/${maxAttempts}. Do not ask the user to retry or clarify.`,
+    "Revise the previous result as one coherent set and return a complete replacement final action, not a patch or summary.",
+    "The replacement must include complete designStateDraft, prdDocumentDraft, prototypeSpec, qualitySelfCheck, and the overwritten /mnt/user-data/outputs/index.html prototype_html artifact.",
+    "Use one shared label dictionary across all artifacts. Keep design-state entity names short, concrete, and suitable for visible UI text.",
+    "Every designStateDraft page name must map one-to-one to a PrototypeSpec page and appear verbatim as a visible HTML heading or navigation label.",
+    "At least 75% of every design-state group must appear verbatim in the PRD; at least 75% of pages, features, configurations, rules, states, and exceptions must appear verbatim in PrototypeSpec and visible HTML.",
+    "At least 75% of PrototypeSpec page, component, and state names must appear verbatim in visible HTML. Implement the actual pages and states instead of adding a coverage note or hidden checklist.",
+    "Re-read the retrieved prototype framework tables and visibly implement every required group with enough of its named fields, controls, and states. Do not drop a user or knowledge requirement merely to pass QA; merge only true duplicates.",
+    "Keep the PRD fixed structure, product flow diagram, product architecture diagram, business-testable acceptance, degradation plan, and safety baseline. Keep generation traces out of the PRD and HTML.",
+    "Before returning, mechanically compare the exact labels in all four payloads, revise any mismatch, and set qualitySelfCheck.passed=true only when missing is empty.",
+    `QA_ISSUES=${JSON.stringify(issues)}`,
+  ].join("\n");
 }
 
 function cleanArtifactTitle(value: string, fallback: string) {
