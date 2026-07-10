@@ -498,8 +498,10 @@ function requiredKnowledgeGroups(
   const normalized = normalizeText(query);
   const groups: KnowledgeGroupRequirement[] = [];
   const isRuntimeGeneration = options.runtimeName === "runtime_generation";
+  const prefersStrongRules = options.preferredTypes?.includes(KnowledgeType.strong_rule);
   const prefersPrdRules = options.preferredTypes?.includes(KnowledgeType.prd_writing_rule);
   const prefersPrototypeRules = options.preferredTypes?.includes(KnowledgeType.prototype_rule);
+  const prefersProductArchitecture = options.preferredTypes?.includes(KnowledgeType.product_architecture);
 
   if (
     /(需求文档|需求说明书|prd|产品文档|文档)/i.test(normalized) ||
@@ -533,6 +535,20 @@ function requiredKnowledgeGroups(
       pattern: /./,
       preferQueryOverlap: true,
       requireQueryOverlap: true,
+    });
+  }
+  if (isRuntimeGeneration && prefersStrongRules) {
+    groups.push({
+      type: KnowledgeType.strong_rule,
+      pattern: /./,
+      preferredPattern: /Agent任务分类与补全规则|知识分层与冲突裁决/,
+    });
+  }
+  if (isRuntimeGeneration && prefersProductArchitecture) {
+    groups.push({
+      type: KnowledgeType.product_architecture,
+      pattern: /./,
+      preferredPattern: /产品能力地图/,
     });
   }
 

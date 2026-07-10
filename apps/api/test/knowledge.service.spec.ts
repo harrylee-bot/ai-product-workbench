@@ -273,7 +273,9 @@ describe("Knowledge module services", () => {
       runtimeName: "runtime_generation",
       query: "我想做一个签到领积分的活动，请生成需求文档和原型",
       preferredTypes: [
+        KnowledgeType.strong_rule,
         KnowledgeType.business_concept,
+        KnowledgeType.product_architecture,
         KnowledgeType.prd_writing_rule,
         KnowledgeType.prototype_rule,
         KnowledgeType.prototype_asset_ref,
@@ -320,7 +322,9 @@ describe("Knowledge module services", () => {
       runtimeName: "runtime_generation",
       query: "我想做一个签到领积分的活动，请根据知识库内容生成需求文档和原型",
       preferredTypes: [
+        KnowledgeType.strong_rule,
         KnowledgeType.business_concept,
+        KnowledgeType.product_architecture,
         KnowledgeType.prd_writing_rule,
         KnowledgeType.prototype_rule,
         KnowledgeType.prototype_asset_ref,
@@ -342,6 +346,8 @@ describe("Knowledge module services", () => {
     expect(evidence).toMatch(/PRD标准结构|需求说明书/);
     expect(evidence).toMatch(/原型生成总规则|前后台页面框架/);
     expect(evidence).toMatch(/签到活动高保真HTML原型框架|原型转HTML资产索引|RP资产到设计框架映射|前台页面设计框架|后台管理设计框架|HTML原型|Axure|RP资产/);
+    expect(evidence).toMatch(/Agent任务分类与补全规则|知识分层与冲突裁决/);
+    expect(evidence).toMatch(/产品能力地图/);
   });
 
   it("selects the prototype asset for the current domain instead of a hardcoded sign-in asset", async () => {
