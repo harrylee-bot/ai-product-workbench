@@ -414,6 +414,7 @@ export class AichatStreamService {
                 artifacts,
                 assistantText,
                 knowledgeContext,
+                externalResearchContext,
               });
               break;
             } catch (error) {

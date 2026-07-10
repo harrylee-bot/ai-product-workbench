@@ -89,6 +89,14 @@ describe("FinalActionApplierService", () => {
         },
       }),
       artifacts: [],
+      externalResearchContext: {
+        status: "delegated_to_agent",
+        fetchedAt: "2026-07-10T00:00:00.000Z",
+        searchQueries: [],
+        refs: [],
+        failures: [],
+        privacyBoundary: ["只搜索通用领域词，不发送内部路径、附件原文、真实接口或密钥。"],
+      },
     });
 
     expect(stateService.createDraftInTransaction).toHaveBeenCalledWith(
@@ -116,6 +124,7 @@ describe("FinalActionApplierService", () => {
           "补齐说明：知识库定义活动配置闭环，模型补齐默认状态，联网补充积分风控表达。",
           "外部参考：公开资料：积分权益风控 https://example.com/points-risk",
           expect.stringContaining("补齐边界：未确认内容仅记录为假设或待确认项"),
+          "联网隐私边界：只搜索通用领域词，不发送内部路径、附件原文、真实接口或密钥。",
         ]),
         sections: expect.arrayContaining([
           expect.objectContaining({ id: "version_history", title: "版 本 历 史" }),

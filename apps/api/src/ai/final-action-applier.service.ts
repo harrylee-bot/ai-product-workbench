@@ -22,6 +22,7 @@ import type {
 } from "./ai-vibe.types";
 import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "./deerflow-runtime.service";
 import type { DeerFlowKnowledgeReference } from "./deerflow-runtime.service";
+import type { ExternalResearchContext } from "./external-research.service";
 import { formatRequirementDocumentDraft } from "./requirement-document-format";
 
 type CurrentRequirementDocumentRecord = {
@@ -65,6 +66,7 @@ export class FinalActionApplierService {
     artifacts: DeerFlowResolvedArtifact[];
     assistantText?: string;
     knowledgeContext?: DeerFlowKnowledgeReference[];
+    externalResearchContext?: ExternalResearchContext;
   }): Promise<{
     prdDocument?: RequirementDocument;
     prototypeArtifact?: PrototypeArtifact;
@@ -93,6 +95,7 @@ export class FinalActionApplierService {
       artifacts: DeerFlowResolvedArtifact[];
       assistantText?: string;
       knowledgeContext?: DeerFlowKnowledgeReference[];
+      externalResearchContext?: ExternalResearchContext;
     },
     raw: Record<string, unknown> | undefined,
   ) {
@@ -121,6 +124,7 @@ export class FinalActionApplierService {
         state,
         input.userId,
         input.knowledgeContext,
+        input.externalResearchContext,
       );
       const document = await this.documentService.saveGeneratedDocumentInTransaction(tx, state, documentDraft, {
         userId: input.userId,
@@ -323,6 +327,7 @@ export class FinalActionApplierService {
     state?: ConversationDesignState,
     userId?: string,
     knowledgeContext?: DeerFlowKnowledgeReference[],
+    externalResearchContext?: ExternalResearchContext,
   ): RequirementDocumentDraft {
     const prdDraft = asRecord(raw?.prdDocumentDraft);
     const rawTitle = toRequirementTitleCandidate(prdDraft?.title);
@@ -362,7 +367,7 @@ export class FinalActionApplierService {
       validationNotes: [
         ...toStringArray(raw?.validationNotes),
         ...toStringArray(prdDraft?.validationNotes),
-        ...externalEnrichmentValidationNotes(raw),
+        ...externalEnrichmentValidationNotes(raw, externalResearchContext),
       ],
     }, state, { author: userId });
   }
@@ -611,16 +616,23 @@ function toStringArray(value: unknown): string[] {
     .filter((item): item is string => Boolean(item));
 }
 
-function externalEnrichmentValidationNotes(raw: Record<string, unknown> | undefined): string[] {
-  if (!raw) return [];
+function externalEnrichmentValidationNotes(
+  raw: Record<string, unknown> | undefined,
+  externalResearchContext?: ExternalResearchContext,
+): string[] {
   const notes: string[] = [];
-  const status = toStringValue(raw.externalResearchStatus);
-  if (status) notes.push(`外部补充状态：${status}`);
-  for (const item of toStringArray(raw.enrichmentNotes).slice(0, 5)) {
-    notes.push(`补齐说明：${item}`);
+  if (raw) {
+    const status = toStringValue(raw.externalResearchStatus);
+    if (status) notes.push(`外部补充状态：${status}`);
+    for (const item of toStringArray(raw.enrichmentNotes).slice(0, 5)) {
+      notes.push(`补齐说明：${item}`);
+    }
+    const refs = toStringArray(raw.externalRefsUsed).slice(0, 5);
+    if (refs.length) notes.push(`外部参考：${refs.join("；")}`);
   }
-  const refs = toStringArray(raw.externalRefsUsed).slice(0, 5);
-  if (refs.length) notes.push(`外部参考：${refs.join("；")}`);
+  for (const item of externalResearchContext?.privacyBoundary.slice(0, 3) ?? []) {
+    notes.push(`联网隐私边界：${item}`);
+  }
   return notes;
 }
 
