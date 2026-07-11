@@ -86,6 +86,7 @@ start_entrypoint() {
   local watch_enabled="$1"
   rm -f "$NGINX_PID_FILE"
   env \
+    NODE_ENV=test \
     PATH="$FIXTURE_BIN:$PATH" \
     QUARTZ_CONTENT_DIR="$CONTENT_DIR" \
     QUARTZ_OUTPUT_DIR="$OUTPUT_DIR" \
@@ -103,6 +104,7 @@ start_entrypoint() {
     QUARTZ_TEST_FAIL_FILE="$FAIL_FILE" \
     QUARTZ_TEST_NGINX_PID_FILE="$NGINX_PID_FILE" \
     QUARTZ_TEST_DELAY_FILE="$DELAY_FILE" \
+    QUARTZ_TEST_FORCE_LEGACY_RENAME_EXDEV=true \
     bash "$ENTRYPOINT" > "$LOG_FILE" 2>&1 &
   ENTRYPOINT_PID=$!
 }
@@ -125,6 +127,7 @@ wait_for_file "$NGINX_PID_FILE"
 nginx_pid="$(cat "$NGINX_PID_FILE")"
 [ -L "$OUTPUT_DIR" ] || fail "output is not an atomic generation symlink"
 [ -f "$OUTPUT_DIR/__health" ] || fail "first generation has no health marker"
+grep -q '"legacyMigration":"copy"' "$LOG_FILE" || fail "cross-device legacy fallback was not exercised"
 grep -q 'seed-home' "$CONTENT_DIR/README.md" || fail "seed vault was not initialized"
 first_target="$(readlink "$OUTPUT_DIR")"
 first_count="$(read_count)"

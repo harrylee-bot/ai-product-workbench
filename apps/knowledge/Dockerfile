@@ -39,7 +39,8 @@ RUN git apply --check /opt/quartz-patches/0001-quartz-v5-prevent-duplicate-virtu
   && git apply /opt/quartz-patches/0002-quartz-v5-disable-dangerous-raw-html.patch \
   && npm ci --no-audit --no-fund \
   && npx quartz plugin install \
-  && mkdir -p /vault /usr/share/nginx/html /var/cache/nginx /var/run/nginx
+  && mkdir -p /vault /usr/share/nginx /var/cache/nginx /var/run/nginx \
+  && rm -rf /usr/share/nginx/html
 
 COPY apps/knowledge/nginx.conf /etc/nginx/conf.d/default.conf
 COPY apps/knowledge/docker-entrypoint.sh /usr/local/bin/knowledge-entrypoint

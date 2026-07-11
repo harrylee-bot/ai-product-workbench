@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
+  cp,
   lstat,
   mkdir,
   readlink,
@@ -107,6 +108,7 @@ async function activateGeneratedOutput(generationRoot, outputRoot, generationPre
   await symlink(relativeTarget, temporaryLink, "dir");
   let previousRoot;
   let migratedLegacyDirectory = false;
+  let legacyMigration;
 
   try {
     const outputStat = await lstat(outputRoot).catch((error) => {
@@ -117,7 +119,7 @@ async function activateGeneratedOutput(generationRoot, outputRoot, generationPre
       const target = await readlink(outputRoot);
       previousRoot = path.resolve(path.dirname(outputRoot), target);
     } else if (outputStat) {
-      await rename(outputRoot, legacyRoot);
+      legacyMigration = await migrateLegacyOutput(outputRoot, legacyRoot);
       previousRoot = legacyRoot;
       migratedLegacyDirectory = true;
     }
@@ -149,8 +151,57 @@ async function activateGeneratedOutput(generationRoot, outputRoot, generationPre
     outputRoot,
     previousRoot,
     atomic: !migratedLegacyDirectory,
+    legacyMigration,
     cleanupWarning,
   };
+}
+
+async function migrateLegacyOutput(outputRoot, legacyRoot) {
+  try {
+    if (process.env.NODE_ENV === "test"
+      && process.env.QUARTZ_TEST_FORCE_LEGACY_RENAME_EXDEV === "true") {
+      const error = new Error("Forced cross-device rename for test coverage");
+      error.code = "EXDEV";
+      throw error;
+    }
+    await rename(outputRoot, legacyRoot);
+    return "rename";
+  } catch (error) {
+    if (error?.code !== "EXDEV") throw error;
+  }
+
+  // OverlayFS cannot rename a directory inherited from a lower image layer.
+  // Preserve it first, then remove the lower-layer path before installing the
+  // managed output symlink. Subsequent generation switches remain atomic.
+  let copied = false;
+  try {
+    await cp(outputRoot, legacyRoot, {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+      preserveTimestamps: true,
+    });
+    copied = true;
+    await rm(outputRoot, { recursive: true, force: true });
+    return "copy";
+  } catch (error) {
+    if (!copied) {
+      await rm(legacyRoot, { recursive: true, force: true });
+      throw error;
+    }
+    if (!await pathExists(outputRoot)) return "copy";
+    try {
+      await cp(legacyRoot, outputRoot, {
+        recursive: true,
+        force: true,
+        preserveTimestamps: true,
+      });
+      await rm(legacyRoot, { recursive: true, force: true });
+    } catch {
+      // Keep the complete legacy copy for operator recovery.
+    }
+    throw error;
+  }
 }
 
 async function cleanupManagedGenerations(outputRoot, generationPrefix, retainedRoots) {
