@@ -109,7 +109,7 @@ describe("requirement document fixed-format evidence handling", () => {
     }
     expect(coreRules).toContain("再次取得用户主动授权");
     expect(coreRules).toContain("第三方页面或应用跳转");
-    expect(coreRules).toContain("第三方接口或数据交互");
+    expect(coreRules).toContain("第三方公司或外部系统的接口对接和数据交互");
   });
 
   it("honors explicit structured channel selections without treating option lists as selections", () => {

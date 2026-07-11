@@ -763,7 +763,10 @@ export function sanitizePrototypeHtml(html: string): string {
     const source = element.textContent ?? "";
     const unsafe = element.hasAttribute("src")
       || /(?:\b(?:window\.)?(?:parent|top|opener)\b|postMessage\s*\(|\b(?:fetch|XMLHttpRequest|WebSocket|EventSource)\b|\bimport\s*\(|\beval\s*\(|\bFunction\s*\()/i.test(source);
-    if (unsafe) element.parentNode?.removeChild(element);
+    if (unsafe) {
+      element.removeAttribute("src");
+      element.textContent = "";
+    }
   };
   DOMPurify.addHook("uponSanitizeElement", removeUnsafeScript);
   try {
@@ -914,7 +917,9 @@ export function sanitizePrototypeDocumentHtml(
       : /^<html[\s>]/i.test(sanitized)
         ? `<!doctype html>${sanitized}`
         : `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${fallbackTitle}</title></head><body>${sanitized}</body></html>`;
-  return ensurePrototypeDocumentHead(documentHtml, fallbackTitle);
+  return ensurePrototypeInteractionFallback(
+    ensurePrototypeDocumentHead(documentHtml, fallbackTitle),
+  );
 }
 
 function ensurePrototypeDocumentHead(html: string, escapedTitle: string) {
@@ -929,6 +934,47 @@ function ensurePrototypeDocumentHead(html: string, escapedTitle: string) {
     output = output.replace(/<head([^>]*)>/i, `<head$1><title>${escapedTitle}</title>`);
   }
   return output;
+}
+
+function ensurePrototypeInteractionFallback(html: string) {
+  if (/<script\b[^>]*id=["']aipw-prototype-interaction-fallback["']/i.test(html)) {
+    return html;
+  }
+  const script = `<script id="aipw-prototype-interaction-fallback">
+(() => {
+  const keyAction = /保存|预览|提交|审核|发布|下线|签到|领取|登录|确认|重试|补偿|导出|上传|删除|新增|创建|发送|搜索|查询/;
+  const messages = [["保存","草稿已保存"],["预览","预览已更新"],["提交","已提交审核"],["审核","审核操作已完成"],["发布","已发布"],["下线","已下线"],["签到","签到成功"],["领取","领取成功"],["登录","登录操作已完成"],["确认","已确认"],["重试","重试已发起"],["补偿","补偿任务已发起"],["导出","导出任务已创建"],["上传","上传操作已完成"],["删除","删除操作已完成"],["新增","已新增"],["创建","已创建"],["发送","已发送"],["搜索","搜索已完成"],["查询","查询已完成"]];
+  let status = document.getElementById("aipw-prototype-action-status");
+  if (!status) {
+    status = document.createElement("div");
+    status.id = "aipw-prototype-action-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.style.position = "fixed";
+    status.style.right = "16px";
+    status.style.bottom = "16px";
+    status.style.zIndex = "2147483647";
+    status.style.padding = "10px 14px";
+    status.style.borderRadius = "6px";
+    status.style.background = "#1f2937";
+    status.style.color = "#ffffff";
+    status.style.boxShadow = "0 6px 20px rgba(0,0,0,.18)";
+    status.style.display = "none";
+    document.body.appendChild(status);
+  }
+  document.querySelectorAll("button").forEach((button) => {
+    const label = (button.textContent || "").trim();
+    if (!keyAction.test(label) || button.disabled || button.getAttribute("aria-disabled") === "true") return;
+    button.addEventListener("click", () => {
+      const match = messages.find(([keyword]) => label.includes(keyword));
+      status.textContent = match ? match[1] : label + "操作已完成";
+      status.style.display = "block";
+    });
+  });
+})();
+</script>`;
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${script}</body>`);
+  return `${html}${script}`;
 }
 
 function escapeHtml(value: unknown) {

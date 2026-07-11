@@ -196,13 +196,14 @@ describe("HTML prototype artifact module", () => {
     expect(result.artifact.htmlContent).toContain('data-component-id="cta"');
     expect(result.artifact.htmlContent).not.toContain("onclick");
     expect(result.artifact.htmlContent).not.toContain("data-secret");
-    expect(result.artifact.htmlContent).not.toContain("<script");
+    expect(result.artifact.htmlContent).not.toContain("tracker.js");
+    expect(result.artifact.htmlContent).toContain('id="aipw-prototype-interaction-fallback"');
     expect(prisma.conversation.update).toHaveBeenCalled();
-    expect(
-      sanitizePrototypeHtml(
-        "<script>window.parent.postMessage('x','*')</script>",
-      ),
-    ).toBe("<html><head></head><body></body></html>");
+    const crossFrameScript = sanitizePrototypeHtml(
+      "<script>window.parent.postMessage('x','*')</script>",
+    );
+    expect(crossFrameScript).not.toContain("postMessage");
+    expect(crossFrameScript).not.toContain("window.parent");
   });
 
   it("sanitizePrototypeHtml keeps sandboxed interactions but strips escape and network vectors", () => {
@@ -223,9 +224,11 @@ describe("HTML prototype artifact module", () => {
       sanitizePrototypeHtml('<div OnClick="alert(1)">x</div>'),
     ).not.toMatch(/onclick/i);
     // Cross-frame scripts and embedded active content remain forbidden.
-    expect(
-      sanitizePrototypeHtml("<script>window.parent.postMessage('secret','*')</script>"),
-    ).not.toContain("<script");
+    const crossFrameScript = sanitizePrototypeHtml(
+      "<script>window.parent.postMessage('secret','*')</script>",
+    );
+    expect(crossFrameScript).not.toContain("postMessage");
+    expect(crossFrameScript).not.toContain("window.parent");
     // iframe/object/embed 被 FORBID
     expect(
       sanitizePrototypeHtml('<iframe src="https://evil"></iframe>'),
@@ -267,6 +270,20 @@ describe("HTML prototype artifact module", () => {
     expect(html).toContain("原型 &#39;标题&#39;");
     expect(html).not.toContain("onclick");
     expect(html).toContain("<script>alert(1)</script>");
+  });
+
+  it("adds one idempotent visible interaction fallback for key action buttons", () => {
+    const html = sanitizePrototypeDocumentHtml(
+      '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><button>保存草稿</button><button>提交审核</button></body></html>',
+      "交互原型",
+    );
+    const resanitized = sanitizePrototypeDocumentHtml(html, "交互原型");
+
+    expect(html).toContain('id="aipw-prototype-interaction-fallback"');
+    expect(html).toContain('document.querySelectorAll("button")');
+    expect(html).toContain('addEventListener("click"');
+    expect(html).toContain("status.textContent =");
+    expect(resanitized.match(/aipw-prototype-interaction-fallback/g)).toHaveLength(1);
   });
 
   it("hides a stale current prototype artifact when it no longer matches ConversationDesignState", async () => {

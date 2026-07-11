@@ -649,7 +649,7 @@ function buildSensitiveSafetyEvidenceSummary(
     evidence,
     /(?:第三方|外部公司|外部系统).{0,24}(?:接口|api|数据交互|数据传输|数据共享|回调|对接)|(?:接口|api|数据交互|数据传输|数据共享|回调|对接).{0,24}(?:第三方|外部公司|外部系统)/i,
   )) {
-    statements.push("本需求包含第三方接口或数据交互，上线前必须核对数据使用审批范围并落实接口鉴权、访问控制和传输保护。");
+    statements.push("本需求包含与第三方公司或外部系统的接口对接和数据交互，上线前必须核对数据使用审批范围并落实接口鉴权、访问控制和传输保护。");
   }
   return statements.length ? `敏感信息及第三方设计要求：${statements.join("").trim()}` : "";
 }

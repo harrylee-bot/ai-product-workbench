@@ -2004,6 +2004,7 @@ export function buildArtifactRepairPrompt(
     `This is internal artifact QA repair turn ${attempt}/${maxAttempts}. Do not ask the user to retry or clarify.`,
     "Revise the previous result as one coherent set and return a complete replacement final action, not a patch or summary.",
     "The replacement must include complete designStateDraft, prdDocumentDraft, prototypeSpec, qualitySelfCheck, and the overwritten /mnt/user-data/outputs/index.html prototype_html artifact.",
+    "Actually call write_file to replace /mnt/user-data/outputs/index.html during this repair turn. Referencing the old artifact path or claiming it was overwritten does not update the file.",
     "Use one shared label dictionary across all artifacts. Keep design-state entity names short, concrete, and suitable for visible UI text.",
     "Every designStateDraft page name must map one-to-one to a PrototypeSpec page and appear verbatim as a visible HTML heading or navigation label.",
     "At least 75% of every design-state group must appear verbatim in the PRD; at least 75% of pages, features, configurations, rules, states, and exceptions must appear verbatim in PrototypeSpec and visible HTML.",

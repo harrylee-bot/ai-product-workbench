@@ -54,6 +54,7 @@ describe("aichat document stream router", () => {
     expect(prompt).toContain("one shared label dictionary");
     expect(prompt).toContain("At least 75%");
     expect(prompt).toContain("/mnt/user-data/outputs/index.html");
+    expect(prompt).toContain("Actually call write_file");
     expect(prompt).toContain("HTML 原型未完整覆盖产品设计状态");
     expect(prompt).not.toMatch(/签到|积分|奖品|预约|素材/);
   });
