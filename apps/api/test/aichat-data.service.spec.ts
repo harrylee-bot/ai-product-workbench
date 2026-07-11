@@ -12,6 +12,11 @@ describe("AichatDataService", () => {
     role: UserRole.user,
     status: UserStatus.active,
   };
+  const admin: AuthenticatedUser = {
+    ...user,
+    id: "admin-1",
+    role: UserRole.admin,
+  };
   const prisma = {
     $transaction: vi.fn(),
     conversation: {
@@ -140,5 +145,12 @@ describe("AichatDataService", () => {
         },
       },
     });
+  });
+
+  it("does not let an admin mutate another user's conversation through user routes", async () => {
+    await expect(
+      service.registerStream(admin, "conversation-1", { streamId: "stream-1" }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.stream.create).not.toHaveBeenCalled();
   });
 });

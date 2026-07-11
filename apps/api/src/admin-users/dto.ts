@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MinLength,
   Min,
 } from "class-validator";
 import { UserRole, UserStatus } from "@prisma/client";
@@ -63,6 +64,7 @@ export class CreateUserDto {
 
   @IsString({ message: "密码不能为空" })
   @IsNotEmpty({ message: "密码不能为空" })
+  @MinLength(8, { message: "密码至少 8 位" })
   password!: string;
 
   @IsEnum(UserRole, { message: "角色不正确" })
@@ -96,5 +98,6 @@ export class UpdateUserDto {
 export class ResetPasswordDto {
   @IsString({ message: "密码不能为空" })
   @IsNotEmpty({ message: "密码不能为空" })
+  @MinLength(8, { message: "密码至少 8 位" })
   password!: string;
 }

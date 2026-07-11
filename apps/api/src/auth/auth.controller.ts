@@ -6,7 +6,8 @@ import { AUTH_COOKIE_NAME, authCookieOptions, clearAuthCookieOptions } from "../
 import { CurrentUser } from "./current-user.decorator";
 import { LoginDto, RegisterDto } from "./dto";
 import { JwtAuthGuard } from "./jwt-auth.guard";
-import type { AuthenticatedUser } from "./auth.types";
+import type { AuthenticatedUser, RequestMeta } from "./auth.types";
+import { CurrentRequestMeta } from "../common/request-meta.decorator";
 
 @Controller("auth")
 export class AuthController {
@@ -15,8 +16,12 @@ export class AuthController {
   @Post("login")
   // sec-3：登录接口严格限流防暴破（10 次/分钟/IP）。
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  login(@Body() dto: LoginDto, @Res({ passthrough: true }) response: Response) {
-    return this.auth.login(dto).then(({ accessToken, user }) => {
+  login(
+    @Body() dto: LoginDto,
+    @CurrentRequestMeta() meta: RequestMeta,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    return this.auth.login(dto, meta).then(({ accessToken, user }) => {
       response.cookie(AUTH_COOKIE_NAME, accessToken, authCookieOptions());
       return { user };
     });
@@ -51,6 +56,11 @@ export class AuthController {
     });
   }
 
+  @Get("registration-status")
+  registrationStatus() {
+    return this.auth.registrationStatus();
+  }
+
   @Post("register")
   // sec-3：注册接口限流防刷（5 次/分钟/IP）。
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
@@ -66,6 +76,18 @@ export class AuthController {
   logout(@Res({ passthrough: true }) response: Response) {
     response.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
     return this.auth.logout();
+  }
+
+  @Post("logout-all")
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async logoutAll(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.logoutAll(user.id);
+    response.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
+    return result;
   }
 }
 

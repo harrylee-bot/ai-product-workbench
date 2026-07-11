@@ -15,12 +15,12 @@ export class KnowledgeMaintenanceService implements OnModuleInit, OnModuleDestro
     if (!readBooleanEnv("KNOWLEDGE_DAILY_SYNC_ENABLED", false)) return;
     const intervalMs = readNumberEnv("KNOWLEDGE_DAILY_SYNC_INTERVAL_MS", 86_400_000);
     this.timer = setInterval(() => {
-      void this.runDailySync();
+      void this.runDailySync().catch(() => undefined);
     }, intervalMs);
     this.timer.unref?.();
 
     if (readBooleanEnv("KNOWLEDGE_DAILY_SYNC_ON_STARTUP", false)) {
-      const startupTimer = setTimeout(() => void this.runDailySync(), 1_000);
+      const startupTimer = setTimeout(() => void this.runDailySync().catch(() => undefined), 1_000);
       startupTimer.unref?.();
     }
   }

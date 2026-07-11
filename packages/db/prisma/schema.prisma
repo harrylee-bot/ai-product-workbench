@@ -301,6 +301,7 @@ model User {
   displayName      String                  @map("display_name")
   role             UserRole                @default(user)
   status           UserStatus              @default(active)
+  authVersion      Int                     @default(0) @map("auth_version")
   lastLoginAt      DateTime?               @map("last_login_at")
   createdAt        DateTime                @default(now()) @map("created_at")
   updatedAt        DateTime                @updatedAt @map("updated_at")
@@ -669,6 +670,7 @@ model ConversationDesignVersion {
   @@index([conversationId])
   @@index([stateId])
   @@index([version])
+  @@unique([stateId, version])
   @@map("conversation_design_versions")
 }
 
@@ -738,6 +740,7 @@ model RequirementDocumentVersion {
   @@index([documentId])
   @@index([conversationId])
   @@index([version])
+  @@unique([documentId, version])
   @@map("requirement_document_versions")
 }
 
@@ -815,6 +818,7 @@ model PrototypeVersion {
   @@index([conversationId])
   @@index([artifactId])
   @@index([version])
+  @@unique([artifactId, version])
   @@map("prototype_versions")
 }
 
@@ -1063,6 +1067,11 @@ model RuntimeRunLog {
   id             String           @id @default(uuid())
   conversationId String           @map("conversation_id")
   userId         String           @map("user_id")
+  requestId      String?          @map("request_id")
+  leaseToken     String?          @map("lease_token")
+  heartbeatAt    DateTime?        @map("heartbeat_at")
+  leaseExpiresAt DateTime?        @map("lease_expires_at")
+  externalRunId  String?          @map("external_run_id")
   intent         UserIntent?
   status         RuntimeRunStatus @default(running)
   inputSummary   String           @map("input_summary")
@@ -1083,6 +1092,9 @@ model RuntimeRunLog {
   @@index([traceId])
   @@index([startedAt])
   @@index([conversationId])
+  @@index([conversationId, status])
+  @@index([leaseExpiresAt])
+  @@unique([conversationId, requestId])
   @@map("agent_run_logs")
 }
 

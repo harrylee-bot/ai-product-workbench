@@ -160,6 +160,14 @@ describe("Module 13 QA services", () => {
         status: ConversationStatus.active,
       }),
     });
+
+    prisma.conversation.update.mockClear();
+    await service.runForConversation("conversation-1", "user-1", {
+      trigger: "initial_generation",
+      runId: "run-deferred",
+      deferLatest: true,
+    });
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
   });
 
   it("runs QA from ConversationDesignState snapshots instead of stale conversation pointers", async () => {
@@ -214,6 +222,7 @@ describe("Module 13 QA services", () => {
       ownerId: "user-1",
       status: ConversationStatus.active,
       deletedAt: null,
+      currentDesignStateId: state.id,
       currentPrdDocumentId: "prd-stale",
       currentPrototypeArtifactId: "artifact-stale",
     });

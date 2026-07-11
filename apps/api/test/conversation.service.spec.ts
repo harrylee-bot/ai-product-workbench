@@ -1,3 +1,4 @@
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { ConversationStatus, UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConversationService } from "../src/modules/conversation/conversation.service";
@@ -46,12 +47,12 @@ describe("ConversationService", () => {
     await expect(service.create(user, {
       conversationId: "../../outside",
       title: "非法会话",
-    })).rejects.toThrow("conversationId 格式不正确");
+    })).rejects.toThrow("conversationId 只能包含字母、数字、下划线和连字符");
     await expect(service.getOrCreateInternal(
       user,
       "../outside",
       "非法会话",
-    )).rejects.toThrow("conversationId 格式不正确");
+    )).rejects.toThrow("conversationId 只能包含字母、数字、下划线和连字符");
     expect(prisma.conversation.create).not.toHaveBeenCalled();
     expect(prisma.conversation.findUnique).not.toHaveBeenCalled();
   });
@@ -88,14 +89,35 @@ describe("ConversationService", () => {
       where: { id: "state-1", conversationId: "conversation-1" },
     });
     expect(prisma.requirementDocument.findFirst).toHaveBeenCalledWith({
-      where: { id: "prd-1", conversationId: "conversation-1" },
+      where: {
+        id: "prd-1",
+        conversationId: "conversation-1",
+        status: { in: ["ready", "confirmed"] },
+      },
     });
     expect(prisma.prototypeArtifact.findFirst).toHaveBeenCalledWith({
-      where: { id: "prototype-1", conversationId: "conversation-1" },
+      where: {
+        id: "prototype-1",
+        conversationId: "conversation-1",
+        status: "ready",
+      },
     });
     expect(result.conversationDesignState).toEqual({ id: "state-1" });
     expect(result.prd).toEqual({ id: "prd-1" });
     expect(result.prototype).toEqual({ id: "prototype-1" });
+  });
+
+  it("does not fall back to provisional rows when all current pointers are null", async () => {
+    prisma.conversation.findUnique.mockResolvedValue(baseConversation());
+
+    const result = await service.get(user, "conversation-1");
+
+    expect(result.conversationDesignState).toBeNull();
+    expect(result.prd).toBeNull();
+    expect(result.prototype).toBeNull();
+    expect(prisma.conversationDesignState.findFirst).not.toHaveBeenCalled();
+    expect(prisma.requirementDocument.findFirst).not.toHaveBeenCalled();
+    expect(prisma.prototypeArtifact.findFirst).not.toHaveBeenCalled();
   });
 
   it("soft deletes a conversation without conversation delete behavior", async () => {
@@ -113,6 +135,48 @@ describe("ConversationService", () => {
         deletedAt: expect.any(Date),
       },
     });
+  });
+
+  it("rejects unsafe client-provided conversation ids before touching the database", async () => {
+    await expect(service.create(user, { conversationId: "../../outside", title: "bad" }))
+      .rejects.toThrow(BadRequestException);
+    expect(prisma.conversation.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps admin bulk deletion scoped to the admin's own conversations", async () => {
+    prisma.conversation.updateMany.mockResolvedValue({ count: 2 });
+    const admin = { ...user, id: "admin-1", role: UserRole.admin };
+
+    await service.deleteAll(admin);
+
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: {
+        ownerId: "admin-1",
+        deletedAt: null,
+        status: { not: ConversationStatus.deleted },
+      },
+      data: {
+        status: ConversationStatus.deleted,
+        deletedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it("does not let an admin delete another user's conversation through the ordinary endpoint", async () => {
+    prisma.conversation.findUnique.mockResolvedValue(baseConversation({ ownerId: "other-user" }));
+    const admin = { ...user, id: "admin-1", role: UserRole.admin };
+
+    await expect(service.delete(admin, "conversation-1")).rejects.toThrow(ForbiddenException);
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it("does not let an admin reuse another user's conversation as an internal chat target", async () => {
+    prisma.conversation.findUnique.mockResolvedValue(baseConversation({ ownerId: "other-user" }));
+    const admin = { ...user, id: "admin-1", role: UserRole.admin };
+
+    await expect(service.getOrCreateInternal(admin, "conversation-1", "title"))
+      .rejects.toThrow(ForbiddenException);
+    expect(prisma.conversation.create).not.toHaveBeenCalled();
   });
 });
 

@@ -4,6 +4,7 @@ export type AuthJwtPayload = {
   sub: string;
   userId: string;
   role: UserRole;
+  authVersion?: number;
 };
 
 type PublicUser = {

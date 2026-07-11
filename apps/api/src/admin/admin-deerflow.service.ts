@@ -39,6 +39,7 @@ export class AdminDeerflowService {
         headers: {
           accept: "application/json",
           "content-type": "application/json",
+          ...deerFlowAuthHeaders(),
           ...(init?.headers ?? {}),
         },
       });
@@ -54,6 +55,12 @@ export class AdminDeerflowService {
 
     return response.json() as Promise<T>;
   }
+}
+
+function deerFlowAuthHeaders(): Record<string, string> {
+  const token = process.env.DEERFLOW_INTERNAL_AUTH_TOKEN?.trim()
+    || process.env.DEER_FLOW_INTERNAL_AUTH_TOKEN?.trim();
+  return token ? { "X-DeerFlow-Internal-Token": token } : {};
 }
 
 function isDeerFlowEnabled() {

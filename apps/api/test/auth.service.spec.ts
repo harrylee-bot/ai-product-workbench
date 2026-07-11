@@ -7,26 +7,29 @@ import { AuthService } from "../src/auth/auth.service";
 
 describe("AuthService", () => {
   const prisma = {
-    $transaction: vi.fn(),
     user: {
       findFirst: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      create: vi.fn(),
     },
+    loginAuditLog: { create: vi.fn() },
+    $transaction: vi.fn(),
   };
   const jwtService = {
     signAsync: vi.fn(),
     verifyAsync: vi.fn(),
   };
-  const configService = { get: vi.fn() };
-  const service = new AuthService(
-    prisma as never,
-    jwtService as never,
-    configService as never,
-  );
+  const configValues = new Map<string, string>();
+  const configService = { get: vi.fn((key: string) => configValues.get(key)) };
+  const service = new AuthService(prisma as never, jwtService as never, configService as never);
 
   beforeEach(() => {
     vi.clearAllMocks();
+    configValues.clear();
+    configService.get.mockImplementation((key: string) => configValues.get(key));
+    prisma.loginAuditLog.create.mockResolvedValue({ id: "audit-1" });
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof prisma) => unknown) => callback(prisma));
   });
 
   afterEach(() => {
@@ -43,6 +46,7 @@ describe("AuthService", () => {
       passwordHash,
       role: UserRole.user,
       status: UserStatus.active,
+      authVersion: 3,
       lastLoginAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -54,6 +58,7 @@ describe("AuthService", () => {
 
     const result = await service.login(
       { account: "zhangsan", password: "User123456" },
+      { ip: "127.0.0.1", userAgent: "vitest" },
     );
 
     expect(result.accessToken).toBe("signed-token");
@@ -64,6 +69,23 @@ describe("AuthService", () => {
       status: UserStatus.active,
     });
     expect(result.user).not.toHaveProperty("passwordHash");
+    expect(jwtService.signAsync).toHaveBeenCalledWith({
+      sub: "user-1",
+      userId: "user-1",
+      role: UserRole.user,
+      authVersion: 3,
+    });
+    expect(prisma.loginAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        account: "zhangsan",
+        success: true,
+        ip: "127.0.0.1",
+        userAgent: "vitest",
+      }),
+    });
+    expect(JSON.stringify(prisma.loginAuditLog.create.mock.calls)).not.toContain("User123456");
+    expect(JSON.stringify(prisma.loginAuditLog.create.mock.calls)).not.toContain("signed-token");
   });
 
   it("rejects disabled users with the required message", async () => {
@@ -75,6 +97,7 @@ describe("AuthService", () => {
       passwordHash: await bcrypt.hash("User123456", 4),
       role: UserRole.user,
       status: UserStatus.disabled,
+      authVersion: 1,
       lastLoginAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -83,6 +106,13 @@ describe("AuthService", () => {
     await expect(
       service.login({ account: "zhangsan", password: "User123456" }),
     ).rejects.toThrow(ForbiddenException);
+    expect(prisma.loginAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-disabled",
+        success: false,
+        failReason: "account_disabled",
+      }),
+    });
   });
 
   it("uses one message for missing account and bad password", async () => {
@@ -91,6 +121,30 @@ describe("AuthService", () => {
     await expect(
       service.login({ account: "missing", password: "bad" }),
     ).rejects.toThrow("账号或密码错误");
+    expect(prisma.loginAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        account: "missing",
+        success: false,
+        failReason: "account_not_found",
+      }),
+    });
+  });
+
+  it("audits an invalid password without persisting the password", async () => {
+    prisma.user.findFirst.mockResolvedValue(userRecord({
+      passwordHash: await bcrypt.hash("Correct123", 4),
+    }));
+
+    await expect(service.login({ account: "zhangsan", password: "Wrong123" }))
+      .rejects.toThrow("账号或密码错误");
+    expect(prisma.loginAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        success: false,
+        failReason: "invalid_password",
+      }),
+    });
+    expect(JSON.stringify(prisma.loginAuditLog.create.mock.calls)).not.toContain("Wrong123");
   });
 
   it("returns an empty session without token or invalid token", async () => {
@@ -110,6 +164,7 @@ describe("AuthService", () => {
       passwordHash: "hidden",
       role: UserRole.user,
       status: UserStatus.active,
+      authVersion: 0,
       lastLoginAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -286,7 +341,78 @@ describe("AuthService", () => {
     expect(tx.deerFlowThreadBinding.deleteMany).not.toHaveBeenCalled();
     expect(tx.user.delete).not.toHaveBeenCalled();
   });
+
+  it("rejects a session whose token auth version is stale", async () => {
+    jwtService.verifyAsync.mockResolvedValue({
+      sub: "user-1",
+      userId: "user-1",
+      role: UserRole.user,
+      authVersion: 2,
+    });
+    prisma.user.findUnique.mockResolvedValue(userRecord({ authVersion: 3 }));
+
+    await expect(service.session("stale-token")).resolves.toBeNull();
+  });
+
+  it("increments authVersion for logout-all", async () => {
+    prisma.user.update.mockResolvedValue(userRecord({ authVersion: 4 }));
+
+    await expect(service.logoutAll("user-1")).resolves.toEqual({ success: true });
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { authVersion: { increment: 1 } },
+    });
+  });
+
+  it("keeps public registration closed by default in production", async () => {
+    configValues.set("NODE_ENV", "production");
+
+    expect(service.registrationStatus()).toEqual({ enabled: false });
+
+    await expect(service.register({
+      username: "new-user",
+      password: "User123456",
+    })).rejects.toThrow("公开注册未启用");
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("allows public registration only when the explicit switch is enabled", async () => {
+    configValues.set("NODE_ENV", "production");
+    configValues.set("PUBLIC_REGISTRATION_ENABLED", "true");
+    expect(service.registrationStatus()).toEqual({ enabled: true });
+    prisma.user.findFirst.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue(userRecord({
+      id: "new-user",
+      username: "new-user",
+      authVersion: 0,
+    }));
+    prisma.user.update.mockResolvedValue(userRecord({ id: "new-user", username: "new-user" }));
+    jwtService.signAsync.mockResolvedValue("registered-token");
+
+    await expect(service.register({
+      username: "new-user",
+      password: "User123456",
+    })).resolves.toMatchObject({ accessToken: "registered-token" });
+    expect(jwtService.signAsync).toHaveBeenCalledWith(expect.objectContaining({ authVersion: 0 }));
+  });
 });
+
+function userRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "user-1",
+    username: "zhangsan",
+    email: "zhangsan@example.local",
+    displayName: "张三",
+    passwordHash: "hidden",
+    role: UserRole.user,
+    status: UserStatus.active,
+    authVersion: 0,
+    lastLoginAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
 
 function accountDeletionTransaction() {
   const deleteOnlyDelegates = [

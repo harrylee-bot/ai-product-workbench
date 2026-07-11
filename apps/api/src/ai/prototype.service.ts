@@ -96,7 +96,7 @@ export class PrototypeService {
     state: ConversationDesignState,
     prototypeSpec: PrototypeSpec,
     draft: PrototypeArtifactDraft,
-    options: { userId: string; runId?: string; reason?: string },
+    options: { userId: string; runId?: string; reason?: string; deferPublish?: boolean },
   ) {
     // sec-1：用 DOMPurify allowlist 净化后再存储（替换可绕过的正则黑名单）。
     // 净化后总有内容则 ready；空内容（如仅含被剥离的脚本）才 failed。
@@ -130,7 +130,7 @@ export class PrototypeService {
     state: ConversationDesignState,
     prototypeSpec: PrototypeSpec,
     draft: PrototypeArtifactDraft,
-    options: { userId: string; runId?: string; reason?: string },
+    options: { userId: string; runId?: string; reason?: string; deferPublish?: boolean },
     htmlContent: string,
     hasContent: boolean,
   ) {
@@ -160,7 +160,9 @@ export class PrototypeService {
         conversationDesignStateVersion: state.version,
         title: draft.title ?? prototypeSpec.title,
         status: hasContent
-          ? PrototypeArtifactStatus.ready
+          ? options.deferPublish
+            ? PrototypeArtifactStatus.generating
+            : PrototypeArtifactStatus.ready
           : PrototypeArtifactStatus.failed,
         htmlContent: hasContent ? htmlContent : null,
         entryFilePath: draft.entryFilePath ?? draft.entryFile ?? "index.html",
@@ -193,10 +195,12 @@ export class PrototypeService {
       return { prototypeSpec: spec, artifact, version, hasContent };
     }
 
-    await tx.conversation.update({
-      where: { id: state.conversationId },
-      data: { currentPrototypeArtifactId: artifact.id },
-    });
+    if (!options.deferPublish) {
+      await tx.conversation.update({
+        where: { id: state.conversationId },
+        data: { currentPrototypeArtifactId: artifact.id },
+      });
+    }
     const version = await this.createVersion(
       spec,
       artifact,
@@ -446,12 +450,13 @@ export class PrototypeService {
   ) {
     const artifact = currentPrototypeArtifactId
       ? await this.prisma.prototypeArtifact.findFirst({
-          where: { id: currentPrototypeArtifactId, conversationId },
+          where: {
+            id: currentPrototypeArtifactId,
+            conversationId,
+            status: PrototypeArtifactStatus.ready,
+          },
         })
-      : await this.prisma.prototypeArtifact.findFirst({
-          where: { conversationId },
-          orderBy: { updatedAt: "desc" },
-        });
+      : null;
 
     if (!artifact || !state) return artifact;
     if (isArtifactFromCurrentState(artifact as PrototypeArtifactRecord, state))

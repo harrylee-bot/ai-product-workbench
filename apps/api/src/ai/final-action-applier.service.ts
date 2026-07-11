@@ -1,8 +1,19 @@
-import { BadRequestException, Injectable, Logger } from "@nestjs/common";
-import { ConversationDesignStateStatus, KnowledgeType } from "@prisma/client";
+import { BadRequestException, ConflictException, Injectable, Logger } from "@nestjs/common";
+import {
+  ConversationDesignStateStatus,
+  KnowledgeType,
+  Prisma,
+  PrototypeArtifactStatus,
+  QAReportStatus,
+  RequirementDocumentStatus,
+  RuntimeRunStatus,
+} from "@prisma/client";
 import crypto from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
-import { ConversationDesignStateService } from "./conversation-design-state.service";
+import {
+  ConversationDesignStateService,
+  type ConversationPublishFence,
+} from "./conversation-design-state.service";
 import { PrototypeService, sanitizePrototypeDocumentHtml } from "./prototype.service";
 import { QaRuleCheckService } from "./qa-rule-check.service";
 import { RequirementDocumentService } from "./requirement-document.service";
@@ -24,6 +35,15 @@ import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "./deerflow-r
 import type { DeerFlowKnowledgeReference } from "./deerflow-runtime.service";
 import type { ExternalResearchContext } from "./external-research.service";
 import { formatRequirementDocumentDraft } from "./requirement-document-format";
+import { summarizeText, toInputJson } from "./ai-vibe.helpers";
+import { conversationStatusFromDesignState } from "./workspace-state-machine";
+
+export type AppliedGeneratedArtifacts = {
+  prdDocument?: RequirementDocument;
+  prototypeArtifact?: PrototypeArtifact;
+  state?: ConversationDesignState;
+  publishFence?: ConversationPublishFence;
+};
 
 type CurrentRequirementDocumentRecord = {
   id: string;
@@ -62,16 +82,13 @@ export class FinalActionApplierService {
     conversationId: string;
     userId: string;
     runId: string;
+    commitToken?: string;
     finalAction: DeerFlowFinalAction;
     artifacts: DeerFlowResolvedArtifact[];
     assistantText?: string;
     knowledgeContext?: DeerFlowKnowledgeReference[];
     externalResearchContext?: ExternalResearchContext;
-  }): Promise<{
-    prdDocument?: RequirementDocument;
-    prototypeArtifact?: PrototypeArtifact;
-    state?: unknown;
-  }> {
+  }): Promise<AppliedGeneratedArtifacts> {
     const raw = asRecord(input.finalAction.raw);
 
     if (input.finalAction.type === "review_prd") {
@@ -91,6 +108,7 @@ export class FinalActionApplierService {
       conversationId: string;
       userId: string;
       runId: string;
+      commitToken?: string;
       finalAction: DeerFlowFinalAction;
       artifacts: DeerFlowResolvedArtifact[];
       assistantText?: string;
@@ -102,6 +120,7 @@ export class FinalActionApplierService {
     // G1-1：将 createDraft → saveGeneratedDocument → attachGeneratedArtifacts 三步合并到一个事务中，
     // 避免中途失败留下不一致状态（state 已创建但 document 未保存，或 document 已保存但 state 未关联）。
     return this.prisma.$transaction(async (tx) => {
+      await this.assertRunCommitLeaseInTransaction(tx, input.runId, input.commitToken);
       const previousDocument = await this.getCurrentRequirementDocument(input.conversationId, tx);
       const stateDraft = this.buildConversationDesignDraft(
         input.conversationId,
@@ -109,11 +128,16 @@ export class FinalActionApplierService {
         input.userId,
         input.knowledgeContext,
       );
-      const state = await this.stateService.createDraftInTransaction(tx, input.conversationId, stateDraft, {
-        userId: input.userId,
-        runId: input.runId,
-        reason: "DeerFlow review_prd：生成 PRD 前更新产品设计状态",
-      });
+      const provisional = await this.stateService.createProvisionalDraftInTransaction(
+        tx,
+        input.conversationId,
+        stateDraft,
+        {
+          userId: input.userId,
+          runId: input.runId,
+        },
+      );
+      const state = provisional.state;
 
       const documentDraft = this.buildRequirementDocumentDraft(
         input.conversationId,
@@ -130,6 +154,7 @@ export class FinalActionApplierService {
         userId: input.userId,
         runId: input.runId,
         reason: "DeerFlow 生成 PRD",
+        deferPublish: true,
       });
 
       if (!hasPrototypePayload(raw, input.artifacts)) {
@@ -143,10 +168,10 @@ export class FinalActionApplierService {
 
       const updatedState = await this.stateService.attachGeneratedArtifactsInTransaction(tx, state.id, {
         prdDocument: document,
-        status: ConversationDesignStateStatus.doc_ready,
         userId: input.userId,
         runId: input.runId,
         reason: "DeerFlow 生成 PRD，写入 ConversationDesignState",
+        mode: "provisional",
       });
 
       if (hasPrototypePayload(raw, input.artifacts)) {
@@ -175,19 +200,24 @@ export class FinalActionApplierService {
         const stateWithPrototype = await this.stateService.attachGeneratedArtifactsInTransaction(tx, updatedState.id, {
           prdDocument: document,
           prototypeSpec: prototypeResult.prototypeSpec,
-          status: ConversationDesignStateStatus.prototype_ready,
           userId: input.userId,
           runId: input.runId,
           reason: "DeerFlow 同轮生成 PRD 和原型，写入 ConversationDesignState",
+          mode: "provisional",
         });
         return {
           prdDocument: document,
           prototypeArtifact: prototypeResult.artifact,
           state: stateWithPrototype,
+          publishFence: provisional.publishFence,
         };
       }
 
-      return { prdDocument: document, state: updatedState };
+      return {
+        prdDocument: document,
+        state: updatedState,
+        publishFence: provisional.publishFence,
+      };
     });
   }
 
@@ -196,6 +226,7 @@ export class FinalActionApplierService {
       conversationId: string;
       userId: string;
       runId: string;
+      commitToken?: string;
       finalAction: DeerFlowFinalAction;
       artifacts: DeerFlowResolvedArtifact[];
       knowledgeContext?: DeerFlowKnowledgeReference[];
@@ -204,7 +235,12 @@ export class FinalActionApplierService {
   ) {
     // G1-1：将 saveGeneratedPrototype → attachGeneratedArtifacts 两步合并到一个事务中。
     return this.prisma.$transaction(async (tx) => {
-      const state = await this.stateService.getCurrentStateInTransaction(tx, input.conversationId);
+      await this.assertRunCommitLeaseInTransaction(tx, input.runId, input.commitToken);
+      const current = await this.stateService.getCurrentStateWithPublishFenceInTransaction(
+        tx,
+        input.conversationId,
+      );
+      const state = current.state;
       if (!state) {
         throw new Error("PROTOTYPE_STATE_NOT_FOUND：生成原型前需要先有 ConversationDesignState（通常先 review_prd）。");
       }
@@ -225,15 +261,15 @@ export class FinalActionApplierService {
         ],
       });
 
-      const updatedState = await this.stateService.attachGeneratedArtifactsInTransaction(tx, state.id, {
-        prototypeSpec: result.prototypeSpec,
-        status: ConversationDesignStateStatus.prototype_ready,
-        userId: input.userId,
-        runId: input.runId,
-        reason: "DeerFlow 生成原型，写入 ConversationDesignState",
-      });
-
-      return { prototypeArtifact: result.artifact, state: updatedState };
+      return {
+        prototypeArtifact: result.artifact,
+        state: {
+          ...state,
+          prototypeSpec: result.prototypeSpec,
+          status: "prototype_ready" as const,
+        },
+        publishFence: current.publishFence,
+      };
     });
   }
 
@@ -244,6 +280,7 @@ export class FinalActionApplierService {
       conversationId: string;
       userId: string;
       runId: string;
+      commitToken?: string;
       finalAction: DeerFlowFinalAction;
       artifacts: DeerFlowResolvedArtifact[];
       knowledgeContext?: DeerFlowKnowledgeReference[];
@@ -269,11 +306,309 @@ export class FinalActionApplierService {
       userId: input.userId,
       runId: input.runId,
       reason: "DeerFlow 生成原型",
+      deferPublish: true,
     }, htmlContent, hasContent);
     if (!result.hasContent) {
       throw new BadRequestException("PROTOTYPE_HTML_EMPTY_AFTER_SANITIZE");
     }
     return result;
+  }
+
+  async publishAppliedArtifacts(input: {
+    conversationId: string;
+    userId: string;
+    runId: string;
+    commitToken: string;
+    qaReportId: string;
+    applied: AppliedGeneratedArtifacts;
+    runResult: unknown;
+    outputSummary: string;
+  }): Promise<AppliedGeneratedArtifacts> {
+    return this.prisma.$transaction(async (tx) => {
+      const run = await this.assertRunCommitLeaseInTransaction(
+        tx,
+        input.runId,
+        input.commitToken,
+      );
+      const publishFence = input.applied.publishFence;
+      if (!publishFence || !input.applied.state) {
+        throw new ConflictException("ARTIFACT_PUBLISH_FENCE_MISSING");
+      }
+      await this.assertPublishBaselineInTransaction(
+        tx,
+        input.conversationId,
+        publishFence,
+      );
+      const now = new Date();
+      const prdDocument = input.applied.prdDocument
+        ? {
+            ...input.applied.prdDocument,
+            status: "ready" as const,
+            updatedAt: now.toISOString(),
+          }
+        : undefined;
+      const prototypeArtifact = input.applied.prototypeArtifact
+        ? {
+            ...input.applied.prototypeArtifact,
+            status: "ready" as const,
+            updatedAt: now.toISOString(),
+          }
+        : undefined;
+
+      const qaReport = await tx.qAReport.findFirst({
+        where: {
+          id: input.qaReportId,
+          conversationId: input.conversationId,
+          generatedByRunId: input.runId,
+          status: { in: [QAReportStatus.passed, QAReportStatus.warning] },
+        },
+        select: {
+          id: true,
+          conversationDesignStateId: true,
+          conversationDesignStateVersion: true,
+          prdDocumentId: true,
+          prototypeArtifactId: true,
+        },
+      });
+      if (!qaReport) throw new ConflictException("QA_REPORT_PUBLISH_FENCE_REJECTED");
+      if (prdDocument && qaReport.prdDocumentId !== prdDocument.id) {
+        throw new ConflictException("QA_REPORT_PRD_MISMATCH");
+      }
+      if (prototypeArtifact && qaReport.prototypeArtifactId !== prototypeArtifact.id) {
+        throw new ConflictException("QA_REPORT_PROTOTYPE_MISMATCH");
+      }
+      if (
+        input.applied.state &&
+        (
+          qaReport.conversationDesignStateId !== input.applied.state.id ||
+          qaReport.conversationDesignStateVersion !== input.applied.state.version
+        )
+      ) {
+        throw new ConflictException("QA_REPORT_STATE_MISMATCH");
+      }
+
+      if (prdDocument) {
+        const updated = await tx.requirementDocument.updateMany({
+          where: {
+            id: prdDocument.id,
+            generatedByRunId: input.runId,
+            status: RequirementDocumentStatus.generating,
+          },
+          data: { status: RequirementDocumentStatus.ready, updatedBy: input.userId },
+        });
+        if (updated.count !== 1) throw new ConflictException("PRD_PUBLISH_FENCE_REJECTED");
+      }
+      if (prototypeArtifact) {
+        const updated = await tx.prototypeArtifact.updateMany({
+          where: {
+            id: prototypeArtifact.id,
+            generatedByRunId: input.runId,
+            status: PrototypeArtifactStatus.generating,
+          },
+          data: { status: PrototypeArtifactStatus.ready, updatedBy: input.userId },
+        });
+        if (updated.count !== 1) throw new ConflictException("PROTOTYPE_PUBLISH_FENCE_REJECTED");
+      }
+
+      const stateId = input.applied.state.id;
+      const state = await this.stateService.attachGeneratedArtifactsInTransaction(tx, stateId, {
+        prdDocument,
+        prototypeSpec: input.applied.state.prototypeSpec,
+        status: prototypeArtifact
+          ? ConversationDesignStateStatus.prototype_ready
+          : ConversationDesignStateStatus.doc_ready,
+        userId: input.userId,
+        runId: input.runId,
+        reason: "QA 通过，发布本轮生成产物",
+        createVersion: stateId !== publishFence.currentDesignStateId,
+        mode: "fenced_publish",
+        expectedUpdatedAt: stateId === publishFence.currentDesignStateId
+          ? publishFence.currentDesignStateUpdatedAt ?? undefined
+          : input.applied.state.updatedAt,
+      });
+
+      const promoted = await tx.conversation.updateMany({
+        where: {
+          id: input.conversationId,
+          currentDesignStateId: publishFence.currentDesignStateId,
+          currentPrdDocumentId: publishFence.currentPrdDocumentId,
+          currentPrototypeArtifactId: publishFence.currentPrototypeArtifactId,
+          latestQaReportId: publishFence.latestQaReportId,
+        },
+        data: {
+          currentDesignStateId: state.id,
+          currentPrdDocumentId: prdDocument?.id,
+          currentPrototypeArtifactId: prototypeArtifact
+            ? prototypeArtifact.id
+            : prdDocument
+              ? null
+              : publishFence.currentPrototypeArtifactId,
+          latestQaReportId: qaReport.id,
+          status: conversationStatusFromDesignState(state),
+          lastActivityAt: now,
+        },
+      });
+      if (promoted.count !== 1) {
+        throw new ConflictException("CONVERSATION_PUBLISH_FENCE_REJECTED");
+      }
+
+      const completed = await tx.runtimeRunLog.updateMany({
+        where: {
+          id: input.runId,
+          status: RuntimeRunStatus.running,
+          leaseToken: input.commitToken,
+        },
+        data: {
+          status: RuntimeRunStatus.succeeded,
+          outputSummary: summarizeText(input.outputSummary),
+          result: toInputJson(input.runResult),
+          endedAt: now,
+          durationMs: Math.max(0, now.getTime() - run.startedAt.getTime()),
+        },
+      });
+      if (completed.count !== 1) throw new ConflictException("RUN_COMMIT_FENCE_REJECTED");
+
+      return { prdDocument, prototypeArtifact, state, publishFence };
+    });
+  }
+
+  async rejectAppliedArtifacts(input: {
+    runId: string;
+    applied: AppliedGeneratedArtifacts;
+    error: unknown;
+  }) {
+    const errorMessage = summarizeText(
+      input.error instanceof Error ? input.error.message : "生成产物未通过 QA",
+    );
+    return this.prisma.$transaction(async (tx) => {
+      let rejectedArtifactCount = 0;
+      if (input.applied.prdDocument) {
+        const rejected = await tx.requirementDocument.updateMany({
+          where: {
+            id: input.applied.prdDocument.id,
+            generatedByRunId: input.runId,
+            status: RequirementDocumentStatus.generating,
+          },
+          data: { status: RequirementDocumentStatus.failed },
+        });
+        rejectedArtifactCount += rejected.count;
+      }
+      if (input.applied.prototypeArtifact) {
+        const rejected = await tx.prototypeArtifact.updateMany({
+          where: {
+            id: input.applied.prototypeArtifact.id,
+            generatedByRunId: input.runId,
+            status: PrototypeArtifactStatus.generating,
+          },
+          data: {
+            status: PrototypeArtifactStatus.failed,
+            errorMessage,
+          },
+        });
+        rejectedArtifactCount += rejected.count;
+      }
+      // A transaction can commit successfully while the client loses the
+      // acknowledgement. In that ambiguous case the artifacts are already
+      // ready, both updateMany calls above return zero, and compensation must
+      // not downgrade the published state.
+      if (input.applied.state && rejectedArtifactCount > 0) {
+        const conversation = await tx.conversation.findUnique({
+          where: { id: input.applied.state.conversationId },
+          select: { currentDesignStateId: true },
+        });
+        if (conversation?.currentDesignStateId !== input.applied.state.id) {
+          await tx.conversationDesignState.updateMany({
+            where: {
+              id: input.applied.state.id,
+              version: input.applied.state.version,
+              updatedAt: new Date(input.applied.state.updatedAt),
+            },
+            data: { status: ConversationDesignStateStatus.qa_failed },
+          });
+        }
+      }
+    });
+  }
+
+  private async assertRunCommitLeaseInTransaction(
+    tx: Prisma.TransactionClient,
+    runId: string,
+    commitToken?: string,
+  ) {
+    if (!commitToken) return { startedAt: new Date() };
+    const rows = await tx.$queryRaw<Array<{ started_at: Date }>>(Prisma.sql`
+      SELECT "started_at"
+      FROM "agent_run_logs"
+      WHERE "id" = ${runId}
+        AND "status"::text = 'running'
+        AND "lease_token" = ${commitToken}
+      FOR UPDATE
+    `);
+    const run = rows[0];
+    if (!run) throw new ConflictException("RUN_COMMIT_FENCE_REJECTED");
+    return { startedAt: run.started_at };
+  }
+
+  private async assertPublishBaselineInTransaction(
+    tx: Prisma.TransactionClient,
+    conversationId: string,
+    fence: ConversationPublishFence,
+  ) {
+    if (fence.currentDesignStateId) {
+      const states = await tx.$queryRaw<Array<{
+        version: number;
+        updatedAt: Date;
+      }>>(Prisma.sql`
+        SELECT "version", "updated_at" AS "updatedAt"
+        FROM "conversation_design_states"
+        WHERE "id" = ${fence.currentDesignStateId}
+          AND "conversation_id" = ${conversationId}
+        FOR UPDATE
+      `);
+      const state = states[0];
+      const expectedUpdatedAt = fence.currentDesignStateUpdatedAt
+        ? new Date(fence.currentDesignStateUpdatedAt)
+        : null;
+      if (
+        !state ||
+        state.version !== fence.currentDesignStateVersion ||
+        !expectedUpdatedAt ||
+        state.updatedAt.getTime() !== expectedUpdatedAt.getTime()
+      ) {
+        throw new ConflictException("CURRENT_STATE_PUBLISH_FENCE_REJECTED");
+      }
+    } else if (
+      fence.currentDesignStateVersion !== null ||
+      fence.currentDesignStateUpdatedAt !== null
+    ) {
+      throw new ConflictException("CURRENT_STATE_PUBLISH_FENCE_INVALID");
+    }
+
+    const conversations = await tx.$queryRaw<Array<{
+      currentDesignStateId: string | null;
+      currentPrdDocumentId: string | null;
+      currentPrototypeArtifactId: string | null;
+      latestQaReportId: string | null;
+    }>>(Prisma.sql`
+      SELECT
+        "current_design_state_id" AS "currentDesignStateId",
+        "current_prd_document_id" AS "currentPrdDocumentId",
+        "current_prototype_artifact_id" AS "currentPrototypeArtifactId",
+        "latest_qa_report_id" AS "latestQaReportId"
+      FROM "conversations"
+      WHERE "id" = ${conversationId}
+      FOR UPDATE
+    `);
+    const conversation = conversations[0];
+    if (
+      !conversation ||
+      conversation.currentDesignStateId !== fence.currentDesignStateId ||
+      conversation.currentPrdDocumentId !== fence.currentPrdDocumentId ||
+      conversation.currentPrototypeArtifactId !== fence.currentPrototypeArtifactId ||
+      conversation.latestQaReportId !== fence.latestQaReportId
+    ) {
+      throw new ConflictException("CONVERSATION_PUBLISH_FENCE_REJECTED");
+    }
   }
 
   private assertGenerationQuality(input: Parameters<QaRuleCheckService["run"]>[0]) {
@@ -378,6 +713,7 @@ export class FinalActionApplierService {
       where: { id: conversationId },
       select: { currentPrdDocumentId: true },
     });
+    if (!conversation?.currentPrdDocumentId) return undefined;
 
     const select = {
       id: true,
@@ -387,25 +723,21 @@ export class FinalActionApplierService {
       knowledgeRefs: true,
       pendingQuestions: true,
       validationNotes: true,
+      status: true,
     } as const;
 
     const documents = await prisma.requirementDocument.findMany({
-      where: { conversationId },
-      orderBy: { updatedAt: "desc" },
-      take: 20,
+      where: {
+        id: conversation.currentPrdDocumentId,
+        conversationId,
+        status: {
+          in: [RequirementDocumentStatus.ready, RequirementDocumentStatus.confirmed],
+        },
+      },
+      take: 1,
       select,
     });
-    const current = conversation?.currentPrdDocumentId
-      ? documents.find((document) => document.id === conversation.currentPrdDocumentId)
-      : undefined;
-    const candidates = current
-      ? [current, ...documents.filter((document) => document.id !== current.id)]
-      : documents;
-
-    return candidates.find((document) => isSubstantialPrdSections(toSections(document.sections)))
-      ?? current
-      ?? documents[0]
-      ?? undefined;
+    return documents[0];
   }
 
   private buildPrototypeSpec(

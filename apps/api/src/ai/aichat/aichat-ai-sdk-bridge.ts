@@ -325,9 +325,29 @@ export function recordToolOutputAvailable(
 
 export function getPersistedToolParts(ctx: BridgeContext): PersistedToolPart[] {
   return ctx.toolPartOrder
+    .slice(-40)
     .map((toolCallId) => ctx.toolParts.get(toolCallId))
     .filter((part): part is PersistedToolPart => Boolean(part))
-    .map((part) => ({ ...part }));
+    .map((part) => ({
+      type: part.type,
+      toolCallId: part.toolCallId,
+      toolName: part.toolName,
+      state: part.state,
+      input: part.input === undefined ? undefined : boundedToolAuditValue(part.input),
+      output: part.output === undefined ? undefined : boundedToolAuditValue(part.output),
+      errorText: part.errorText?.slice(0, 1_000),
+    }));
+}
+
+function boundedToolAuditValue(value: unknown) {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized.length <= 2_000
+      ? value
+      : `${serialized.slice(0, 2_000)}...[truncated]`;
+  } catch {
+    return String(value).slice(0, 2_000);
+  }
 }
 
 /**

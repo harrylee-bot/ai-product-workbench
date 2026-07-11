@@ -34,6 +34,11 @@ export class ChatStreamPartDto {
  * ai-chatbot 当前消息（message 字段）。
  */
 export class ChatStreamMessageDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty({ message: "message.id 不能为空" })
+  id?: string;
+
   @IsString()
   @IsNotEmpty({ message: "message.role 不能为空" })
   role!: string;
@@ -58,6 +63,11 @@ export class ChatStreamDto {
   @IsString()
   @IsNotEmpty({ message: "id（会话 id）不能为空" })
   id!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty({ message: "requestId 不能为空" })
+  requestId?: string;
 
   @IsOptional()
   @IsObject()

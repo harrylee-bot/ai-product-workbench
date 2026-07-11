@@ -12,6 +12,7 @@ export type EmbeddingSyncStats = {
 };
 
 type ScorableKnowledgeItem = Pick<KnowledgeItem, "id" | "title" | "summary" | "content" | "tags" | "embedding">;
+type EmbeddableKnowledgeItem = ScorableKnowledgeItem & Pick<KnowledgeItem, "updatedAt">;
 
 /**
  * 真实向量嵌入（knowledge-core-3，已定决策）。
@@ -65,6 +66,7 @@ export class KnowledgeEmbeddingService {
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({ model, input }),
+        signal: AbortSignal.timeout(readEmbeddingTimeoutMs()),
       });
       if (!response.ok) {
         this.logger.warn(`embedding 请求失败：${response.status} ${response.statusText}`);
@@ -72,14 +74,14 @@ export class KnowledgeEmbeddingService {
       }
       const data = (await response.json()) as { data?: Array<{ embedding?: number[] }> };
       const vector = data.data?.[0]?.embedding;
-      return Array.isArray(vector) ? vector : null;
+      return isValidEmbeddingVector(vector) ? vector : null;
     } catch (error) {
       this.logger.warn(`embedding 调用异常：${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
 
-  async syncItem(item: ScorableKnowledgeItem): Promise<EmbeddingSyncStats> {
+  async syncItem(item: EmbeddableKnowledgeItem): Promise<EmbeddingSyncStats> {
     const stats = this.emptyStats();
     if (!this.config.enabled) {
       stats.skipped = 1;
@@ -91,11 +93,18 @@ export class KnowledgeEmbeddingService {
       stats.failed = 1;
       return stats;
     }
-    await this.prisma.knowledgeItem.update({
-      where: { id: item.id },
+    const update = await this.prisma.knowledgeItem.updateMany({
+      where: {
+        id: item.id,
+        title: item.title,
+        content: item.content,
+        summary: item.summary,
+        updatedAt: item.updatedAt,
+      },
       data: { embedding: vector as unknown as never },
     });
-    stats.updated = 1;
+    if (update.count === 0) stats.skipped = 1;
+    else stats.updated = 1;
     return stats;
   }
 
@@ -115,9 +124,20 @@ export class KnowledgeEmbeddingService {
   }
 }
 
+function readEmbeddingTimeoutMs() {
+  const configured = Number(process.env.EMBEDDING_REQUEST_TIMEOUT_MS);
+  if (!Number.isFinite(configured) || configured < 1_000) return 15_000;
+  return Math.min(configured, 120_000);
+}
+
 function toNumberArray(value: unknown): number[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+  return isValidEmbeddingVector(value) ? value : [];
+}
+
+function isValidEmbeddingVector(value: unknown): value is number[] {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
 function cosineSimilarity(left: number[], right: number[]): number {

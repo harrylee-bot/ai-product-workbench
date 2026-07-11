@@ -27,6 +27,9 @@ describe("ConversationDesignStateService", () => {
       create: vi.fn(),
       findMany: vi.fn(),
     },
+    requirementDocument: {
+      updateMany: vi.fn(),
+    },
 	    conversation: {
 	      findUnique: vi.fn(),
 	      update: vi.fn(),
@@ -67,6 +70,7 @@ describe("ConversationDesignStateService", () => {
     }));
 	    prisma.conversation.update.mockResolvedValue({});
 	    prisma.conversationDesignState.updateMany.mockResolvedValue({ count: 1 });
+	    prisma.requirementDocument.updateMany.mockResolvedValue({ count: 1 });
 	    prisma.rollbackRecord.create.mockImplementation(async ({ data }) => ({
 	      id: "rollback-1",
 	      ...data,
@@ -122,6 +126,50 @@ describe("ConversationDesignStateService", () => {
         createdBy: "user-1",
       }),
     });
+  });
+
+  it("attaches generated artifacts without advancing the semantic state version", async () => {
+    const current = baseState({ version: 3, status: "design_ready" });
+    const document = {
+      id: "prd-1",
+      conversationId: "conversation-1",
+      conversationDesignStateId: "state-1",
+      conversationDesignStateVersion: 3,
+      title: "签到活动 PRD",
+      status: "ready" as const,
+      sections: [],
+      assumptions: [],
+      knowledgeRefs: [],
+      pendingQuestions: [],
+      validationNotes: [],
+      createdBy: "user-1",
+      updatedBy: "user-1",
+      createdAt: "2026-06-20T08:00:00.000Z",
+      updatedAt: "2026-06-20T09:00:00.000Z",
+    };
+    const before = stateRecord(current);
+    const after = stateRecord({
+      ...current,
+      status: "doc_ready",
+      prdDocument: document,
+      updatedAt: new Date("2026-06-20T09:00:01.000Z"),
+    });
+    prisma.conversationDesignState.findUnique
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+
+    const result = await service.attachGeneratedArtifacts("state-1", {
+      prdDocument: document,
+      status: ConversationDesignStateStatus.doc_ready,
+      userId: "user-1",
+    });
+
+    expect(result.version).toBe(3);
+    expect(prisma.conversationDesignState.updateMany).toHaveBeenCalledWith({
+      where: { id: "state-1", version: 3, updatedAt: before.updatedAt },
+      data: expect.not.objectContaining({ version: expect.anything() }),
+    });
+    expect(prisma.conversationDesignVersion.create).not.toHaveBeenCalled();
   });
 
   it("confirms assumptions and records confirmed facts", async () => {
@@ -246,17 +294,19 @@ describe("ConversationDesignStateService", () => {
       createdAt: "2026-06-20T08:00:00.000Z",
       updatedAt: "2026-06-20T09:00:00.000Z",
     };
-    prisma.conversationDesignState.findUnique.mockResolvedValue(stateRecord(current));
-    prisma.conversationDesignState.update.mockImplementation(async ({ data }) =>
-      stateRecord({
+    let persistedState = stateRecord(current);
+    prisma.conversationDesignState.findUnique.mockImplementation(async () => persistedState);
+    prisma.conversationDesignState.updateMany.mockImplementation(async ({ data }) => {
+      persistedState = stateRecord({
         ...current,
         ...data,
         prototypeSpec: undefined,
         prdDocument: data.prdDocument,
         createdAt: new Date(current.createdAt),
         updatedAt: new Date("2026-06-20T09:00:00Z"),
-      }),
-    );
+      });
+      return { count: 1 };
+    });
 
     const result = await service.syncRequirementDocumentEdit({
       document,
@@ -325,17 +375,19 @@ describe("ConversationDesignStateService", () => {
       createdAt: "2026-06-20T08:00:00.000Z",
       updatedAt: "2026-06-20T09:00:00.000Z",
     };
-    prisma.conversationDesignState.findUnique.mockResolvedValue(stateRecord(current));
-    prisma.conversationDesignState.update.mockImplementation(async ({ data }) =>
-      stateRecord({
+    let persistedState = stateRecord(current);
+    prisma.conversationDesignState.findUnique.mockImplementation(async () => persistedState);
+    prisma.conversationDesignState.updateMany.mockImplementation(async ({ data }) => {
+      persistedState = stateRecord({
         ...current,
         ...data,
         prototypeSpec: undefined,
         prdDocument: data.prdDocument,
         createdAt: new Date(current.createdAt),
         updatedAt: new Date("2026-06-20T09:00:00Z"),
-      }),
-    );
+      });
+      return { count: 1 };
+    });
 
     const result = await service.syncRequirementDocumentEdit({
       document,
@@ -429,7 +481,125 @@ describe("ConversationDesignStateService", () => {
 	        createdBy: "user-1",
 	      }),
 	    });
-	  });
+		  });
+
+  it("treats a null current pointer as no current state even when newer rows exist", async () => {
+    prisma.conversation.findUnique.mockResolvedValue({ currentDesignStateId: null });
+
+    await expect(service.getCurrentState("conversation-1")).resolves.toBeUndefined();
+
+    expect(prisma.conversationDesignState.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("creates an invisible provisional state after the highest abandoned version", async () => {
+    const current = baseState({
+      id: "state-current",
+      version: 3,
+      updatedAt: "2026-06-20T08:30:00.000Z",
+    });
+    prisma.conversation.findUnique.mockResolvedValue({
+      currentDesignStateId: current.id,
+      currentPrdDocumentId: "prd-current",
+      currentPrototypeArtifactId: "prototype-current",
+      latestQaReportId: "qa-current",
+    });
+    prisma.conversationDesignState.findFirst
+      .mockResolvedValueOnce(stateRecord(current))
+      .mockResolvedValueOnce({ version: 7 });
+    prisma.conversationDesignState.create.mockImplementation(async ({ data }) =>
+      stateRecord({
+        ...current,
+        ...data,
+        id: "state-provisional",
+        prototypeSpec: undefined,
+        prdDocument: undefined,
+        createdAt: new Date("2026-06-20T09:00:00.000Z"),
+        updatedAt: new Date("2026-06-20T09:00:00.000Z"),
+      }),
+    );
+    const {
+      id: _id,
+      version: _version,
+      prototypeSpec: _prototypeSpec,
+      prdDocument: _prdDocument,
+      status: _status,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      ...draft
+    } = baseState({ title: "新一轮需求" });
+
+    const result = await service.createProvisionalDraftInTransaction(
+      prisma as never,
+      "conversation-1",
+      draft,
+      { userId: "user-1", runId: "run-new" },
+    );
+
+    expect(result.state).toEqual(expect.objectContaining({
+      id: "state-provisional",
+      version: 8,
+      title: "新一轮需求",
+    }));
+    expect(result.publishFence).toEqual({
+      currentDesignStateId: "state-current",
+      currentDesignStateVersion: 3,
+      currentDesignStateUpdatedAt: "2026-06-20T08:30:00.000Z",
+      currentPrdDocumentId: "prd-current",
+      currentPrototypeArtifactId: "prototype-current",
+      latestQaReportId: "qa-current",
+    });
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+    expect(prisma.conversationDesignVersion.create).not.toHaveBeenCalled();
+    expect(prisma.conversationDesignChangeLog.create).not.toHaveBeenCalled();
+  });
+
+  it("attaches provisional artifacts without changing current pointers or formal history", async () => {
+    const provisional = baseState({
+      id: "state-provisional",
+      version: 4,
+      status: "design_ready",
+      updatedAt: "2026-06-20T09:00:00.000Z",
+    });
+    const document = {
+      id: "prd-provisional",
+      conversationId: "conversation-1",
+      conversationDesignStateId: provisional.id,
+      conversationDesignStateVersion: provisional.version,
+      title: "待 QA PRD",
+      status: "generating" as const,
+      sections: [],
+      assumptions: [],
+      knowledgeRefs: [],
+      pendingQuestions: [],
+      validationNotes: [],
+      createdBy: "user-1",
+      createdAt: "2026-06-20T09:00:00.000Z",
+      updatedAt: "2026-06-20T09:00:00.000Z",
+    };
+    const before = stateRecord(provisional);
+    const after = stateRecord({
+      ...provisional,
+      prdDocument: document,
+      updatedAt: new Date("2026-06-20T09:00:01.000Z"),
+    });
+    prisma.conversationDesignState.findUnique
+      .mockResolvedValueOnce(before)
+      .mockResolvedValueOnce(after);
+    prisma.conversation.findUnique.mockResolvedValue({
+      currentDesignStateId: "state-current",
+    });
+
+    const result = await service.attachGeneratedArtifactsInTransaction(
+      prisma as never,
+      provisional.id,
+      { prdDocument: document, mode: "provisional", userId: "user-1" },
+    );
+
+    expect(result.prdDocument?.id).toBe("prd-provisional");
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+    expect(prisma.conversationDesignVersion.create).not.toHaveBeenCalled();
+    expect(prisma.conversationDesignChangeLog.create).not.toHaveBeenCalled();
+  });
 
 });
 

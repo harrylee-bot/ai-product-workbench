@@ -8,6 +8,12 @@ import { MODE_BOOST_TYPES } from "../ai/requirement-mode.helper";
 import { PrismaService } from "../prisma/prisma.service";
 import { KnowledgeEmbeddingService } from "./knowledge-embedding.service";
 import { jsonArray } from "./knowledge-item.service";
+import {
+  frontmatterString,
+  frontmatterStringArray,
+  isActiveVaultDocument,
+  parseMarkdownFrontmatter,
+} from "./markdown-frontmatter";
 import type {
   KnowledgeReference,
   KnowledgeRetrievalResult,
@@ -31,6 +37,14 @@ type ScorableKnowledgeItem = {
 type VaultKnowledgeItem = ScorableKnowledgeItem & {
   relatedPath: string;
 };
+
+type RankedKnowledgeResult = KnowledgeRetrievalResult & {
+  eligible: boolean;
+  rankingScore: number;
+};
+
+const SEMANTIC_ELIGIBILITY_THRESHOLD = 0.3;
+const LEXICAL_ELIGIBILITY_THRESHOLD = 0.2;
 
 let vaultCache:
   | {
@@ -80,23 +94,24 @@ export class KnowledgeRetrievalService {
         : new Map<string, number>();
       const matched = items
         .map((item) => scoreItem(item, query, preferredTypes, semanticScores.get(item.id), modeBoostTypes))
-        .filter((item) => item.score > 0)
-        .sort((a, b) => b.score - a.score
+        .filter((item) => item.eligible)
+        .sort((a, b) => b.rankingScore - a.rankingScore
           || queryTitleOverlap(b, query) - queryTitleOverlap(a, query)
           || priorityWeight(b.priority) - priorityWeight(a.priority));
       const vaultMatches = shouldSearchVault(vaultPolicy, matched, strictPreferredTypes)
         ? await this.searchVaultFallback(query, preferredTypes, modeBoostTypes, retrievalAudience)
         : [];
       const combined = mergeRetrievalResults(matched, vaultMatches).sort(
-        (a, b) => b.score - a.score
+        (a, b) => b.rankingScore - a.rankingScore
           || queryTitleOverlap(b, query) - queryTitleOverlap(a, query)
           || priorityWeight(b.priority) - priorityWeight(a.priority),
       );
       const consolidated = consolidateKnowledgeResults(combined);
-      const selected = selectKnowledgeResults(consolidated, limit, query, {
+      const selectedRanked = selectKnowledgeResults(consolidated, limit, query, {
         preferredTypes,
         runtimeName: input.runtimeName,
       });
+      const selected = selectedRanked.map(toPublicResult);
       let retrievalError: string | undefined;
 
       try {
@@ -131,7 +146,7 @@ export class KnowledgeRetrievalService {
       const selected = selectKnowledgeResults(vaultMatches, limit, query, {
         preferredTypes,
         runtimeName: input.runtimeName,
-      });
+      }).map(toPublicResult);
       if (selected.length) {
         return {
           results: selected,
@@ -158,13 +173,13 @@ export class KnowledgeRetrievalService {
     preferredTypes?: KnowledgeType[],
     modeBoostTypes?: KnowledgeType[],
     retrievalAudience: KnowledgeRetrievalAudience = "main",
-  ): Promise<KnowledgeRetrievalResult[]> {
+  ): Promise<RankedKnowledgeResult[]> {
     const items = await loadVaultKnowledgeItems();
     return items
       .filter((item) => shouldUseKnowledgeItem(item, retrievalAudience))
       .map((item) => scoreItem(item, query, preferredTypes, undefined, modeBoostTypes))
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score
+      .filter((item) => item.eligible)
+      .sort((a, b) => b.rankingScore - a.rankingScore
         || queryTitleOverlap(b, query) - queryTitleOverlap(a, query)
         || priorityWeight(b.priority) - priorityWeight(a.priority));
   }
@@ -211,8 +226,8 @@ function scoreItem(
   preferredTypes?: KnowledgeType[],
   semanticScore?: number,
   modeBoostTypes?: KnowledgeType[],
-): KnowledgeRetrievalResult {
-  const tokens = tokenize(query);
+): RankedKnowledgeResult {
+  const tokens = expandDomainOverlapTerms(tokenize(query));
   const tags = jsonArray(item.tags);
   const fields = {
     title: normalizeText(item.title),
@@ -225,10 +240,6 @@ function scoreItem(
 
   const reasons: string[] = [];
   let keywordScore = 0;
-  if (!tokens.length) {
-    keywordScore += 0.1;
-    reasons.push("无关键词时按最近活跃知识兜底");
-  }
 
   for (const token of tokens) {
     if (fields.title.includes(token)) {
@@ -257,25 +268,24 @@ function scoreItem(
     }
   }
 
-  if (preferredTypes?.includes(item.type)) {
-    keywordScore += 0.16;
-    reasons.push("符合调用方偏好类型");
-  }
-  if (modeBoostTypes?.includes(item.type)) {
-    // requirementMode 驱动：模式偏重类型额外加权，仅影响排序不收缩召回。
-    keywordScore += 0.12;
-    reasons.push("符合需求模式偏重");
-  }
-  keywordScore += priorityWeight(item.priority);
-  if (item.priority === "high") reasons.push("高优先级知识");
-  if (semanticScore !== undefined && semanticScore >= 0.18) {
+  const normalizedKeywordScore = Math.min(keywordScore, 1);
+  const semanticEligible = semanticScore !== undefined
+    && semanticScore >= SEMANTIC_ELIGIBILITY_THRESHOLD;
+  const lexicalEligible = normalizedKeywordScore >= LEXICAL_ELIGIBILITY_THRESHOLD;
+  const eligible = lexicalEligible || semanticEligible;
+  if (semanticEligible) {
     reasons.push(`语义相似度 ${semanticScore.toFixed(2)}`);
   }
+  if (eligible && preferredTypes?.includes(item.type)) reasons.push("符合调用方偏好类型");
+  if (eligible && modeBoostTypes?.includes(item.type)) reasons.push("符合需求模式偏重");
+  if (eligible && item.priority === "high") reasons.push("高优先级知识");
 
-  const normalizedKeywordScore = Math.min(keywordScore, 1);
-  const score = semanticScore === undefined
+  const relevanceScore = semanticScore === undefined
     ? normalizedKeywordScore
-    : Math.min(1, normalizedKeywordScore * 0.62 + semanticScore * 0.48);
+    : Math.min(1, normalizedKeywordScore * 0.68 + semanticScore * 0.32);
+  const rankingBoost = (preferredTypes?.includes(item.type) ? 0.08 : 0)
+    + (modeBoostTypes?.includes(item.type) ? 0.06 : 0)
+    + priorityWeight(item.priority);
 
   return {
     itemId: item.id,
@@ -284,13 +294,20 @@ function scoreItem(
     summary: item.summary ?? undefined,
     type: item.type,
     priority: item.priority,
-    score: Number(score.toFixed(3)),
+    score: Number((eligible ? relevanceScore : 0).toFixed(3)),
     keywordScore: Number(normalizedKeywordScore.toFixed(3)),
     semanticScore,
-    reason: [...new Set(reasons)].slice(0, 5).join("；") || "按知识优先级命中",
+    reason: [...new Set(reasons)].slice(0, 5).join("；") || "未达到字面或语义命中门槛",
     relatedPath: item.relatedPath ?? item.sourceFileId ?? undefined,
     visualAssets: extractVisualAssets(item),
+    eligible,
+    rankingScore: eligible ? relevanceScore + rankingBoost : 0,
   };
+}
+
+function toPublicResult(result: RankedKnowledgeResult): KnowledgeRetrievalResult {
+  const { eligible: _eligible, rankingScore: _rankingScore, ...publicResult } = result;
+  return publicResult;
 }
 
 function toReference(
@@ -331,15 +348,15 @@ function extractVisualAssets(item: ScorableKnowledgeItem) {
 }
 
 function mergeRetrievalResults(
-  databaseResults: KnowledgeRetrievalResult[],
-  vaultResults: KnowledgeRetrievalResult[],
+  databaseResults: RankedKnowledgeResult[],
+  vaultResults: RankedKnowledgeResult[],
 ) {
   if (!vaultResults.length) return databaseResults;
   const databasePaths = new Set(
     databaseResults.map((item) => normalizeKnowledgePath(item.relatedPath)).filter(Boolean),
   );
   const seen = new Set<string>();
-  const merged: KnowledgeRetrievalResult[] = [];
+  const merged: RankedKnowledgeResult[] = [];
   for (const item of [...databaseResults, ...vaultResults]) {
     const relatedPath = normalizeKnowledgePath(item.relatedPath);
     if (item.itemId.startsWith("vault:") && relatedPath && databasePaths.has(relatedPath)) continue;
@@ -351,8 +368,8 @@ function mergeRetrievalResults(
   return merged;
 }
 
-function consolidateKnowledgeResults(ranked: KnowledgeRetrievalResult[]) {
-  const groups = new Map<string, KnowledgeRetrievalResult[]>();
+function consolidateKnowledgeResults(ranked: RankedKnowledgeResult[]) {
+  const groups = new Map<string, RankedKnowledgeResult[]>();
   for (const item of ranked) {
     const relatedPath = normalizeKnowledgePath(item.relatedPath);
     if (!relatedPath) continue;
@@ -362,7 +379,7 @@ function consolidateKnowledgeResults(ranked: KnowledgeRetrievalResult[]) {
   }
 
   const emittedPaths = new Set<string>();
-  const consolidated: KnowledgeRetrievalResult[] = [];
+  const consolidated: RankedKnowledgeResult[] = [];
   for (const item of ranked) {
     const relatedPath = normalizeKnowledgePath(item.relatedPath);
     if (!relatedPath) {
@@ -378,7 +395,7 @@ function consolidateKnowledgeResults(ranked: KnowledgeRetrievalResult[]) {
   return consolidated;
 }
 
-function mergeKnowledgeChunks(chunks: KnowledgeRetrievalResult[]): KnowledgeRetrievalResult {
+function mergeKnowledgeChunks(chunks: RankedKnowledgeResult[]): RankedKnowledgeResult {
   const ordered = [...chunks].sort(
     (a, b) => knowledgeChunkSequence(a) - knowledgeChunkSequence(b),
   );
@@ -406,10 +423,12 @@ function mergeKnowledgeChunks(chunks: KnowledgeRetrievalResult[]): KnowledgeRetr
     semanticScore: semanticScores.length ? Math.max(...semanticScores) : undefined,
     reason: reasons.join("；") || canonical.reason,
     visualAssets: visualAssets.length ? visualAssets : undefined,
+    eligible: true,
+    rankingScore: Math.max(...ordered.map((item) => item.rankingScore)),
   };
 }
 
-function knowledgeChunkSequence(item: KnowledgeRetrievalResult) {
+function knowledgeChunkSequence(item: RankedKnowledgeResult) {
   const sequence = item.content.match(/切片序号[:：]\s*(\d+)/)?.[1];
   return sequence ? Number(sequence) : item.title.includes(" / ") ? 2 : 1;
 }
@@ -423,7 +442,7 @@ function resolveRetrievalSource(selected: KnowledgeRetrievalResult[]): Knowledge
 }
 
 function selectKnowledgeResults(
-  ranked: KnowledgeRetrievalResult[],
+  ranked: RankedKnowledgeResult[],
   limit: number,
   query: string,
   options: {
@@ -449,7 +468,7 @@ function selectKnowledgeResults(
   const requiredGroups = requiredKnowledgeGroups(query, options);
   if (!eligible.length || !requiredGroups.length) return eligible.slice(0, limit);
 
-  const front: KnowledgeRetrievalResult[] = [];
+  const front: RankedKnowledgeResult[] = [];
   const frontIds = new Set<string>();
   for (const group of requiredGroups) {
     const candidate = findRequiredGroupRepresentative(eligible, frontIds, group, query);
@@ -463,7 +482,7 @@ function selectKnowledgeResults(
 }
 
 function findRequiredGroupRepresentative(
-  ranked: KnowledgeRetrievalResult[],
+  ranked: RankedKnowledgeResult[],
   usedIds: Set<string>,
   group: KnowledgeGroupRequirement,
   query: string,
@@ -578,7 +597,8 @@ async function loadVaultKnowledgeItems() {
     const absolutePath = path.join(root, relativePath);
     const content = await readFile(absolutePath, "utf8").catch(() => "");
     if (!content.trim()) continue;
-    items.push(toVaultKnowledgeItem(relativePath, content));
+    const item = toVaultKnowledgeItem(relativePath, content);
+    if (item) items.push(item);
   }
 
   vaultCache = { root, loadedAt: now, items };
@@ -627,9 +647,13 @@ async function walkVault(root: string, dir: string, results: string[]) {
   }
 }
 
-function toVaultKnowledgeItem(relativePath: string, rawContent: string): VaultKnowledgeItem {
-  const title = extractMarkdownTitle(relativePath, rawContent);
-  const content = trimVaultContent(rawContent, relativePath);
+function toVaultKnowledgeItem(relativePath: string, rawContent: string): VaultKnowledgeItem | undefined {
+  const markdown = parseMarkdownFrontmatter(rawContent, relativePath);
+  if (!isActiveVaultDocument(markdown.attributes)) return undefined;
+  const title = frontmatterString(markdown.attributes, "title", "标题")
+    ?? markdown.body.match(/^#\s+(.+)$/m)?.[1]?.trim()
+    ?? path.basename(relativePath, ".md");
+  const content = trimVaultContent(markdown.body, relativePath);
   return {
     id: `vault:${relativePath}`,
     title,
@@ -637,19 +661,11 @@ function toVaultKnowledgeItem(relativePath: string, rawContent: string): VaultKn
     summary: summarizeMarkdown(content),
     type: inferVaultKnowledgeType(relativePath, rawContent),
     priority: inferVaultPriority(relativePath),
-    tags: extractMarkdownTags(rawContent),
+    tags: frontmatterStringArray(markdown.attributes, "tags", "标签"),
     category: { name: relativePath.split("/")[0] ?? "knowledge-vault" },
     sourceFileId: relativePath,
     relatedPath: relativePath,
   };
-}
-
-function extractMarkdownTitle(relativePath: string, content: string) {
-  const frontmatterTitle = content.match(/(?:^|\n)title:\s*["']?([^"'\n]+)["']?/)?.[1]?.trim();
-  if (frontmatterTitle) return frontmatterTitle;
-  const heading = content.match(/^#\s+(.+)$/m)?.[1]?.trim();
-  if (heading) return heading;
-  return path.basename(relativePath, ".md");
 }
 
 function trimVaultContent(content: string, relativePath: string) {
@@ -660,21 +676,10 @@ function trimVaultContent(content: string, relativePath: string) {
 
 function summarizeMarkdown(content: string) {
   return content
-    .replace(/^---[\s\S]*?---\s*/m, "")
     .replace(/^#+\s+/gm, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 180);
-}
-
-function extractMarkdownTags(content: string) {
-  const tags: string[] = [];
-  const tagBlock = content.match(/tags:\s*([\s\S]*?)(?:\n[a-zA-Z\u4e00-\u9fa5_-]+:|\n---|\n#|$)/)?.[1] ?? "";
-  for (const line of tagBlock.split("\n")) {
-    const tag = line.replace(/^[-\s]+/, "").trim();
-    if (tag) tags.push(tag);
-  }
-  return tags;
 }
 
 function inferVaultKnowledgeType(relativePath: string, content: string): KnowledgeType {

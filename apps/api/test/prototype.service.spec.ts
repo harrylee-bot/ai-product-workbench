@@ -170,6 +170,18 @@ describe("HTML prototype artifact module", () => {
     expect(prisma.conversation.update).not.toHaveBeenCalled();
   });
 
+  it("does not expose a provisional prototype when the current pointer is null", async () => {
+    prisma.conversation.findUnique.mockResolvedValue(
+      baseProject({ currentPrototypeArtifactId: null }),
+    );
+    stateService.getCurrentState.mockResolvedValue(undefined);
+
+    const result = await service.getCurrentForUser(user, "conversation-1");
+
+    expect(result).toEqual({ artifact: null, conversationDesignState: null });
+    expect(prisma.prototypeArtifact.findFirst).not.toHaveBeenCalled();
+  });
+
   it("sanitizes unsafe HTML before storing and previewing", async () => {
     const state = baseState();
     const spec = prototypeSpec(state);

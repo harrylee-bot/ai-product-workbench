@@ -29,6 +29,8 @@ const errors = [];
 const warnings = [];
 const legacyMetadataGaps = [];
 const links = [];
+const internalPathFindings = [];
+const publicationStatusByFile = new Map();
 const tiers = {
   main: { files: 0, characters: 0 },
   source: { files: 0, characters: 0 },
@@ -45,6 +47,7 @@ for (const relativePath of files) {
   const metadata = parseMarkdown(raw);
   const markdownAnalysis = analyzeMarkdown(metadata.sourceBody);
   const tier = knowledgeTier(relativePath);
+  publicationStatusByFile.set(relativePath, isPublicationActive(metadata));
   tiers[tier].files += 1;
   tiers[tier].characters += metadata.body.length;
 
@@ -65,6 +68,16 @@ for (const relativePath of files) {
 
   if (metadata.body.trim().length < 100) warnings.push(`正文过短：${relativePath}`);
   if (metadata.body.length > 30_000) warnings.push(`单文件过长，建议拆成主题知识：${relativePath}`);
+
+  const internalPathLines = findInternalAbsolutePathLines(raw);
+  if (internalPathLines.length) {
+    const publishable = (tier === "main" || tier === "source")
+      && isPublicationActive(metadata);
+    internalPathFindings.push({ file: relativePath, lines: internalPathLines, publishable });
+    const message = `检测到本机绝对路径：${relativePath}（行 ${internalPathLines.join("、")}）`;
+    if (publishable) errors.push(message);
+    else warnings.push(`${message}；该文件不在发布快照中。`);
+  }
 
   for (const link of markdownAnalysis.wikilinks) {
     if (link.target) links.push({ from: relativePath, to: link.target });
@@ -104,12 +117,22 @@ for (const link of links) {
 }
 
 const indexedFiles = tiers.main.files + tiers.source.files;
+const publishedFiles = files.filter((relativePath) => {
+  const tier = knowledgeTier(relativePath);
+  if (tier !== "main" && tier !== "source") return false;
+  return publicationStatusByFile.get(relativePath) === true
+    && !internalPathFindings.some((finding) => (
+      finding.file === relativePath && finding.publishable
+    ));
+}).length;
 const report = {
   passed: errors.length === 0,
   root,
   markdownFiles: files.length,
   indexedFiles,
+  publishedFiles,
   excludedFiles: tiers.inbox.files + tiers.template.files,
+  internalPathFindings,
   tiers,
   errors,
   warnings,
@@ -144,11 +167,39 @@ function parseMarkdown(raw) {
     title: header.match(/^title:\s*(.+)$/m)?.[1]?.trim(),
     description: header.match(/^description:\s*(.+)$/m)?.[1]?.trim(),
     status: header.match(/^status:\s*(.+)$/m)?.[1]?.trim(),
+    draft: parseBoolean(header.match(/^draft:\s*(.+)$/m)?.[1]?.trim()),
     tags: [...tagBlock.matchAll(/^\s+-\s*(.+)$/gm)].map((match) => match[1].trim()),
     body: sourceBody.trim(),
     sourceBody,
     bodyLineOffset: frontmatter ? (frontmatter[0].match(/\n/g) ?? []).length : 0,
   };
+}
+
+function isPublicationActive(metadata) {
+  if (metadata.draft === true) return false;
+  const status = metadata.status?.replace(/^['"]|['"]$/g, "").trim().toLowerCase();
+  if (!status) return false;
+  return !/^(?:draft|草稿|待审核|待发布|未发布|待整理|disabled|inactive|停用|已停用|禁用|已禁用|不参与检索|archived|archive|归档|已归档)$/.test(status);
+}
+
+function parseBoolean(value) {
+  if (!value) return undefined;
+  if (/^(?:true|yes|1|是)$/i.test(value)) return true;
+  if (/^(?:false|no|0|否)$/i.test(value)) return false;
+  return undefined;
+}
+
+function findInternalAbsolutePathLines(raw) {
+  const patterns = [
+    /(?:^|[\s(`'"：])\/(?:Users|home|private|tmp|Volumes|var\/(?:folders|tmp))\/[\w./~@%+,:=\-\u4e00-\u9fff]+/,
+    /(?:^|[\s(`'"：])[A-Za-z]:\\[^\s)`'"，。]+/,
+    /\bfile:\/\/[^\s)`'"，。]+/i,
+  ];
+  const lines = [];
+  for (const [index, line] of raw.split(/\r?\n/).entries()) {
+    if (patterns.some((pattern) => pattern.test(line))) lines.push(index + 1);
+  }
+  return lines;
 }
 
 function knowledgeTier(relativePath) {

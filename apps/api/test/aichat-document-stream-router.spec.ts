@@ -674,7 +674,7 @@ describe("AichatStreamService stop", () => {
   };
 
   function createService() {
-    const conversations = { get: vi.fn().mockResolvedValue({}) };
+    const conversations = { getOwnedConversation: vi.fn().mockResolvedValue({}) };
     const runLogs = { cancelRun: vi.fn().mockResolvedValue({ changed: true }) };
     const service = new AichatStreamService(
       conversations as never,
@@ -707,7 +707,7 @@ describe("AichatStreamService stop", () => {
       canceled: true,
     });
 
-    expect(conversations.get).toHaveBeenCalledWith(user, "conversation-1");
+    expect(conversations.getOwnedConversation).toHaveBeenCalledWith("user-1", "conversation-1");
     expect(abort).toHaveBeenCalledTimes(1);
     expect(runLogs.cancelRun).toHaveBeenCalledWith({
       runId: "run-1",
@@ -720,7 +720,7 @@ describe("AichatStreamService stop", () => {
     const { conversations, internals, runLogs, service } = createService();
     const controller = new AbortController();
     const abort = vi.spyOn(controller, "abort");
-    conversations.get.mockRejectedValueOnce(new Error("forbidden"));
+    conversations.getOwnedConversation.mockRejectedValueOnce(new Error("forbidden"));
     internals.activeRunControllers.set("run-1", controller);
     internals.activeRunConversationIds.set("run-1", "conversation-2");
 
@@ -728,6 +728,86 @@ describe("AichatStreamService stop", () => {
 
     expect(abort).not.toHaveBeenCalled();
     expect(runLogs.cancelRun).not.toHaveBeenCalled();
+  });
+
+  it("does not let an admin stop another user's run through an ordinary route", async () => {
+    const { conversations, internals, runLogs, service } = createService();
+    const controller = new AbortController();
+    const abort = vi.spyOn(controller, "abort");
+    const admin: AuthenticatedUser = {
+      ...user,
+      id: "admin-1",
+      role: UserRole.admin,
+    };
+    conversations.getOwnedConversation.mockRejectedValueOnce(new Error("forbidden"));
+    internals.activeRunControllers.set("run-1", controller);
+    internals.activeRunConversationIds.set("run-1", "conversation-2");
+
+    await expect(service.stop(admin, "run-1")).rejects.toThrow(NotFoundException);
+
+    expect(conversations.getOwnedConversation).toHaveBeenCalledWith("admin-1", "conversation-2");
+    expect(abort).not.toHaveBeenCalled();
+    expect(runLogs.cancelRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("AichatStreamService knowledge retrieval", () => {
+  function createServiceWithKnowledgeSearch(search = vi.fn().mockResolvedValue({
+    references: [],
+  })) {
+    return new AichatStreamService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { search } as never,
+      {} as never,
+      {} as never,
+    ) as unknown as {
+      searchKnowledgeForChat(input: {
+        conversationId: string;
+        runId: string;
+        message: string;
+        hasExistingState?: boolean;
+      }): Promise<unknown>;
+    };
+  }
+
+  it("uses the runtime-generation vault policy and expanded query for one-sentence PRD/prototype requests", async () => {
+    const search = vi.fn().mockResolvedValue({ references: [] });
+    const service = createServiceWithKnowledgeSearch(search);
+
+    await service.searchKnowledgeForChat({
+      conversationId: "conversation-1",
+      runId: "run-store-booking",
+      message: "我想做一个门店预约功能，请根据知识库内容生成需求文档和原型",
+      hasExistingState: false,
+    });
+
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: "conversation-1",
+      runId: "run-store-booking",
+      runtimeName: "runtime_generation",
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "always",
+      limit: 10,
+      preferredTypes: expect.arrayContaining([
+        KnowledgeType.business_concept,
+        KnowledgeType.prd_writing_rule,
+        KnowledgeType.prototype_rule,
+        KnowledgeType.prototype_asset_ref,
+      ]),
+    }));
+    const query = search.mock.calls[0]?.[0].query;
+    expect(query).toContain("我想做一个门店预约功能");
+    expect(query).toContain("PRD标准结构");
+    expect(query).toContain("原型生成总规则");
+    expect(query).toContain("当前业务域强规则");
+    expect(query).toContain("前后台页面框架");
+    expect(query).toContain("Axure");
+    expect(query).not.toContain("贵州签到打卡HTML原型");
   });
 });
 

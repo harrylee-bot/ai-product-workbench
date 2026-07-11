@@ -7,7 +7,10 @@ import {
   UserStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import path from "node:path";
 import { PrototypeConversionService } from "../src/files/prototype-conversion.service";
+
+const uploadRoot = path.resolve(process.cwd(), "storage/uploads");
 
 describe("PrototypeConversionService", () => {
   const prisma = {
@@ -15,8 +18,10 @@ describe("PrototypeConversionService", () => {
       findMany: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     prototypeConversionJob: {
+      findMany: vi.fn(),
       findUnique: vi.fn(),
       upsert: vi.fn(),
       update: vi.fn(),
@@ -41,6 +46,8 @@ describe("PrototypeConversionService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.fileAsset.updateMany.mockResolvedValue({ count: 1 });
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof prisma) => unknown) => callback(prisma));
     config.get.mockImplementation((key: string) => {
       if (key === "FILE_UPLOAD_ROOT") return "/tmp/uploads";
       return undefined;
@@ -79,17 +86,23 @@ describe("PrototypeConversionService", () => {
 
   it("keeps manual conversion runs queued when no converter command is configured", async () => {
     prisma.fileAsset.findUnique.mockResolvedValue(fileRecord({ conversation: conversationRecord() }));
-    prisma.prototypeConversionJob.findUnique.mockResolvedValue(null);
+    prisma.prototypeConversionJob.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        ...jobRecord(),
+        fileAsset: fileRecord({ conversation: conversationRecord() }),
+      })
+      .mockResolvedValueOnce(jobRecord({
+        stage: "waiting_for_worker",
+        errorMessage: "AXURE_RP_CONVERTER_BIN 未配置，等待 macOS Axure Worker 处理。",
+      }));
     prisma.prototypeConversionJob.upsert.mockResolvedValue(jobRecord());
-    prisma.prototypeConversionJob.update.mockResolvedValue(jobRecord({
-      stage: "waiting_for_worker",
-      errorMessage: "AXURE_RP_CONVERTER_BIN 未配置，等待 macOS Axure Worker 处理。",
-    }));
+    prisma.prototypeConversionJob.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.runConversionForFile(user, "file-rp");
 
-    expect(prisma.prototypeConversionJob.update).toHaveBeenCalledWith({
-      where: { id: "job-1" },
+    expect(prisma.prototypeConversionJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: PrototypeConversionStatus.queued, stage: "queued" },
       data: expect.objectContaining({
         status: PrototypeConversionStatus.queued,
         stage: "waiting_for_worker",
@@ -140,11 +153,8 @@ describe("PrototypeConversionService", () => {
     expect(prisma.prototypeConversionJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         id: "job-1",
-        status: { in: [
-          PrototypeConversionStatus.queued,
-          PrototypeConversionStatus.failed,
-          PrototypeConversionStatus.canceled,
-        ] },
+        status: PrototypeConversionStatus.queued,
+        stage: "queued",
       }),
     }));
     expect(parser.parseAxureHtmlDirectory).not.toHaveBeenCalled();
@@ -200,19 +210,18 @@ describe("PrototypeConversionService", () => {
     prisma.prototypeConversionJob.upsert.mockResolvedValue(jobRecord({ id: "job-1", fileAssetId: "file-rp-1" }));
     prisma.prototypeConversionJob.findUnique.mockResolvedValue({
       ...jobRecord({ id: "job-1", fileAssetId: "file-rp-1" }),
-      fileAsset: fileRecord({ id: "file-rp-1", conversation: conversationRecord() }),
+      fileAsset: fileRecord({
+        id: "file-rp-1",
+        storagePath: path.join(uploadRoot, "conversation-1", "file-rp-1.rp"),
+        conversation: conversationRecord(),
+      }),
     });
-    prisma.prototypeConversionJob.update.mockResolvedValue(jobRecord({
-      id: "job-1",
-      fileAssetId: "file-rp-1",
-      stage: "waiting_for_worker",
-      errorMessage: "AXURE_RP_CONVERTER_BIN 未配置，等待 macOS Axure Worker 处理。",
-    }));
+    prisma.prototypeConversionJob.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.backfillRpConversions({ run: true, background: false });
 
-    expect(prisma.prototypeConversionJob.update).toHaveBeenCalledWith({
-      where: { id: "job-1" },
+    expect(prisma.prototypeConversionJob.updateMany).toHaveBeenCalledWith({
+      where: { id: "job-1", status: PrototypeConversionStatus.queued, stage: "queued" },
       data: expect.objectContaining({
         status: PrototypeConversionStatus.queued,
         stage: "waiting_for_worker",
@@ -223,6 +232,84 @@ describe("PrototypeConversionService", () => {
       completed: 1,
       failed: 0,
     });
+  });
+
+  it("fails interrupted jobs and leaves queued work explicitly retryable when no worker is configured", async () => {
+    prisma.prototypeConversionJob.updateMany
+      .mockResolvedValueOnce({ count: 2 })
+      .mockResolvedValueOnce({ count: 3 })
+      .mockResolvedValueOnce({ count: 0 });
+    prisma.prototypeConversionJob.findMany.mockResolvedValue([
+      { id: "job-1" },
+      { id: "job-2" },
+      { id: "job-3" },
+    ]);
+
+    await expect(service.recoverInterruptedJobs(3)).resolves.toEqual({
+      interruptedCount: 2,
+      queuedCount: 3,
+      resumedCount: 0,
+      waitingCount: 3,
+      deferredCount: 0,
+    });
+    expect(prisma.prototypeConversionJob.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { status: PrototypeConversionStatus.running },
+      data: {
+        status: PrototypeConversionStatus.failed,
+        stage: "interrupted_by_restart",
+        errorMessage: "原型转换因服务重启中断，可重新执行。",
+        completedAt: expect.any(Date),
+      },
+    });
+    expect(prisma.prototypeConversionJob.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: { in: ["job-1", "job-2", "job-3"] },
+        status: PrototypeConversionStatus.queued,
+      },
+      data: {
+        stage: "waiting_for_worker",
+        errorMessage: "AXURE_RP_CONVERTER_BIN 未配置，等待转换 Worker。",
+      },
+    });
+    expect(prisma.prototypeConversionJob.updateMany).toHaveBeenNthCalledWith(3, {
+      where: {
+        status: PrototypeConversionStatus.queued,
+        id: { notIn: ["job-1", "job-2", "job-3"] },
+        fileAsset: {
+          deletedAt: null,
+          status: { not: FileAssetStatus.deleted },
+        },
+      },
+      data: {
+        stage: "recovery_deferred",
+        errorMessage: "启动恢复批次已达上限，可手动重新执行或等待下次恢复。",
+      },
+    });
+  });
+
+  it("resumes a bounded queued batch when the local converter is available", async () => {
+    config.get.mockImplementation((key: string) => {
+      if (key === "AXURE_RP_CONVERTER_BIN") return "/bin/true";
+      return undefined;
+    });
+    prisma.prototypeConversionJob.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 });
+    prisma.prototypeConversionJob.findMany.mockResolvedValue([{ id: "job-1" }]);
+    const runInBackground = vi.spyOn(
+      service as unknown as { runJobsInBackground(jobIds: string[]): void },
+      "runJobsInBackground",
+    ).mockImplementation(() => undefined);
+
+    await expect(service.recoverInterruptedJobs(1)).resolves.toEqual({
+      interruptedCount: 0,
+      queuedCount: 1,
+      resumedCount: 1,
+      waitingCount: 0,
+      deferredCount: 0,
+    });
+    expect(runInBackground).toHaveBeenCalledWith(["job-1"]);
+    runInBackground.mockRestore();
   });
 });
 
@@ -248,7 +335,7 @@ function fileRecord(overrides: Record<string, unknown> = {}) {
     extension: "rp",
     size: 128,
     storageProvider: FileStorageProvider.local,
-    storagePath: "/tmp/prototype.rp",
+    storagePath: path.join(uploadRoot, "conversation-1", "prototype.rp"),
     publicUrl: null,
     status: FileAssetStatus.parsed,
     parseError: null,

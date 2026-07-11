@@ -8,7 +8,6 @@ import {
   MessageRole,
   MessageType,
   Prisma,
-  UserRole,
 } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { AuthenticatedUser } from "../../auth/auth.types";
@@ -25,6 +24,7 @@ import {
   RenameConversationDto,
   UpdateMessagePartsDto,
 } from "./dto";
+import { assertConversationId } from "../conversation/conversation-id";
 
 /**
  * ai-chatbot 数据持久化服务。
@@ -37,8 +37,8 @@ import {
  * - 用户消息计数
  * - 投票 / 建议 / stream id 记录
  *
- * 所有权校验统一：会话或其消息所属会话的 ownerId 必须等于当前用户，
- * 或当前用户为 admin。
+ * 普通业务路由始终要求 ownerId 等于当前用户。管理员跨用户操作必须走
+ * 独立的 admin API，以便保留明确授权和审计边界。
  */
 @Injectable()
 export class AichatDataService {
@@ -419,6 +419,7 @@ export class AichatDataService {
   // ---------- 归属校验工具 ----------
 
   private async getOwnedConversation(user: AuthenticatedUser, conversationId: string) {
+    assertConversationId(conversationId);
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
     });
@@ -426,7 +427,7 @@ export class AichatDataService {
     if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
       throw new NotFoundException("会话不存在");
     }
-    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+    if (conversation.ownerId !== user.id) {
       throw new ForbiddenException("无权访问该会话");
     }
     return conversation;
@@ -448,7 +449,7 @@ export class AichatDataService {
     ) {
       throw new NotFoundException("会话不存在");
     }
-    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+    if (conversation.ownerId !== user.id) {
       throw new ForbiddenException("无权访问该消息");
     }
     return message;
@@ -468,7 +469,7 @@ export class AichatDataService {
     ) {
       throw new NotFoundException("会话不存在");
     }
-    if (user.role !== UserRole.admin && document.conversation.ownerId !== user.id) {
+    if (document.conversation.ownerId !== user.id) {
       throw new ForbiddenException("无权访问该文档");
     }
     return document;

@@ -441,7 +441,6 @@ describe("QaRuleCheckService", () => {
       }),
     ]));
   });
-
   it("extracts core framework tables and ignores explicitly optional tables", () => {
     expect(extractKnowledgeFrameworkRequirements([
       "| 分组 | 必须字段/控件 | 页面表现 |",

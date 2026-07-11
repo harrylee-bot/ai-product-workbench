@@ -35,10 +35,13 @@ services:
       DATABASE_URL: postgresql://ai_workbench:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ai_product_workbench?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      PUBLIC_REGISTRATION_ENABLED: ${PUBLIC_REGISTRATION_ENABLED:-false}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
       AUTH_COOKIE_SAME_SITE: ${AUTH_COOKIE_SAME_SITE:-lax}
       FORCE_HTTPS: ${FORCE_HTTPS:-true}
       API_PORT: 4000
+      API_HOST: 0.0.0.0
+      TRUST_PROXY: ${DOCKER_TRUST_PROXY:-loopback,linklocal,uniquelocal}
       APP_BUILD_SHA: ${APP_BUILD_SHA:-unknown}
       WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN must be set}
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://aionbench.com/api}
@@ -46,6 +49,10 @@ services:
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.local}
       FILE_UPLOAD_ROOT: /app/apps/api/storage/uploads
+      CHAT_ATTACHMENT_MAX_FILES: ${CHAT_ATTACHMENT_MAX_FILES:-8}
+      CHAT_ATTACHMENT_MAX_TOTAL_BYTES: ${CHAT_ATTACHMENT_MAX_TOTAL_BYTES:-67108864}
+      FILE_RECOVERY_ENABLED: ${FILE_RECOVERY_ENABLED:-true}
+      FILE_RECOVERY_MAX_QUEUED_CONVERSIONS: ${FILE_RECOVERY_MAX_QUEUED_CONVERSIONS:-20}
       KNOWLEDGE_VAULT_ROOT: ${DOCKER_KNOWLEDGE_VAULT_ROOT:-/app/apps/api/storage/knowledge-vault}
       KNOWLEDGE_DAILY_SYNC_ENABLED: ${KNOWLEDGE_DAILY_SYNC_ENABLED:-true}
       KNOWLEDGE_DAILY_SYNC_ON_STARTUP: ${KNOWLEDGE_DAILY_SYNC_ON_STARTUP:-true}
@@ -75,6 +82,9 @@ services:
       DEERFLOW_ENABLED: ${DEERFLOW_ENABLED:-false}
       DEERFLOW_LANGGRAPH_URL: ${DEERFLOW_LANGGRAPH_URL:-http://host.docker.internal:8001/api}
       DEERFLOW_GATEWAY_URL: ${DEERFLOW_GATEWAY_URL:-http://host.docker.internal:8001}
+      DEERFLOW_READINESS_REQUIRED: ${DEERFLOW_READINESS_REQUIRED:-false}
+      DEERFLOW_HEALTH_URL: ${DEERFLOW_HEALTH_URL:-}
+      DEERFLOW_HEALTH_TIMEOUT_MS: ${DEERFLOW_HEALTH_TIMEOUT_MS:-2000}
       DEERFLOW_ASSISTANT_ID: ${DEERFLOW_ASSISTANT_ID:-lead_agent}
       DEERFLOW_AGENT_NAME: ${DEERFLOW_AGENT_NAME:-}
       DEERFLOW_MODEL_NAME: ${DEERFLOW_MODEL_NAME:-}
@@ -89,12 +99,24 @@ services:
       DEERFLOW_TIMEOUT_MS: ${DEERFLOW_TIMEOUT_MS:-600000}
       AICHAT_MODEL_IDLE_TIMEOUT_MS: ${AICHAT_MODEL_IDLE_TIMEOUT_MS:-600000}
       AICHAT_ARTIFACT_REPAIR_ATTEMPTS: ${AICHAT_ARTIFACT_REPAIR_ATTEMPTS:-2}
+      AGENT_RUN_LEASE_MS: ${AGENT_RUN_LEASE_MS:-45000}
+      AGENT_RUN_HEARTBEAT_MS: ${AGENT_RUN_HEARTBEAT_MS:-15000}
+      DEERFLOW_REPLACE_THREAD_ON_ACTIVE_RUN: ${DEERFLOW_REPLACE_THREAD_ON_ACTIVE_RUN:-false}
       DEERFLOW_UPLOADS_ENABLED: ${DEERFLOW_UPLOADS_ENABLED:-true}
       DEERFLOW_ARTIFACT_MAX_INLINE_BYTES: ${DEERFLOW_ARTIFACT_MAX_INLINE_BYTES:-2000000}
+      EXTERNAL_RESEARCH_ENABLED: ${EXTERNAL_RESEARCH_ENABLED:-false}
+      EXTERNAL_RESEARCH_TIMEOUT_MS: ${EXTERNAL_RESEARCH_TIMEOUT_MS:-10000}
+      EXTERNAL_RESEARCH_CACHE_TTL_MS: ${EXTERNAL_RESEARCH_CACHE_TTL_MS:-21600000}
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     volumes:
       - api-storage:/app/apps/api/storage
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/ready',{headers:{'x-forwarded-proto':'https'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   web:
     build:
@@ -107,7 +129,8 @@ services:
     container_name: ai-product-workbench-web
     restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://aionbench.com/api}
       NEXT_PUBLIC_KNOWLEDGE_APP_URL: ${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-https://aionbench.com/knowledge}
@@ -124,10 +147,15 @@ services:
         QUARTZ_COMMIT: ${QUARTZ_COMMIT:-ab346fa66a895e12d63a308e70ce330ba795822a}
     container_name: ai-product-knowledge
     restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
     environment:
       QUARTZ_BASE_URL: ${QUARTZ_BASE_URL:-localhost:3001}
       QUARTZ_CONTENT_DIR: /storage/knowledge-vault
       QUARTZ_CONCURRENCY: ${QUARTZ_CONCURRENCY:-2}
+      QUARTZ_WATCH_ENABLED: ${QUARTZ_WATCH_ENABLED:-true}
+      QUARTZ_WATCH_INTERVAL_SECONDS: ${QUARTZ_WATCH_INTERVAL_SECONDS:-30}
       KNOWLEDGE_WEB_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
       QUARTZ_OUTPUT_DIR: /usr/share/nginx/html
     ports:

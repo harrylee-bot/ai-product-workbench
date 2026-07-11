@@ -7,6 +7,7 @@ import {
   PrototypeTargetDevice,
   QAReportStatus as PrismaQAReportStatus,
   QAReportTrigger as PrismaQAReportTrigger,
+  RequirementDocumentStatus,
   UserRole,
 } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -40,6 +41,13 @@ type RunQaOptions = {
   prdDocument?: RequirementDocument;
   prototypeSpec?: PrototypeSpec;
   prototypeArtifact?: PrototypeArtifact;
+  conversationDesignState?: ConversationDesignState;
+  /**
+   * Generated artifacts are written in a provisional state. Their QA report is
+   * only promoted to the conversation's active gate by the fenced publish
+   * transaction after the run lease is checked again.
+   */
+  deferLatest?: boolean;
 };
 
 type ConversationDesignStateRecord = {
@@ -181,7 +189,8 @@ export class QaService {
       throw new NotFoundException("会话不存在");
     }
 
-    const state = await this.getCurrentState(conversationId);
+    const state = options.conversationDesignState
+      ?? await this.getCurrentState(conversationId, conversation.currentDesignStateId);
     const prdDocument = options.prdDocument
       ?? state?.prdDocument
       ?? await this.getCurrentPrdForState(conversationId, conversation.currentPrdDocumentId, state);
@@ -230,20 +239,23 @@ export class QaService {
         },
       });
 
-      // txn-2：QAReport.create + conversation.update 原子化，避免 create 成功而 latestQaReportId 更新失败
-      // 留下孤儿报告 + 门禁状态漂移。
-      await tx.conversation.update({
-        where: { id: conversationId },
-        data: {
-          latestQaReportId: created.id,
-          status: conversationStatusAfterQa({
-            qaStatus: status,
-            currentConversationStatus: conversation.status,
-            conversationDesignState: state,
-          }),
-          lastActivityAt: new Date(),
-        },
-      });
+      if (!options.deferLatest) {
+        // QAReport.create + conversation.update stays atomic for manual,
+        // rollback and pre-confirm QA. Initial-generation QA is promoted by
+        // FinalActionApplierService together with artifact publication.
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: {
+            latestQaReportId: created.id,
+            status: conversationStatusAfterQa({
+              qaStatus: status,
+              currentConversationStatus: conversation.status,
+              conversationDesignState: state,
+            }),
+            lastActivityAt: new Date(),
+          },
+        });
+      }
 
       return created;
     });
@@ -255,7 +267,7 @@ export class QaService {
     const conversation = await this.assertConversationAccess(user, conversationId, { allowArchived: true });
     const report = conversation.latestQaReportId
       ? await this.prisma.qAReport.findFirst({ where: { id: conversation.latestQaReportId, conversationId } })
-      : await this.prisma.qAReport.findFirst({ where: { conversationId }, orderBy: { createdAt: "desc" } });
+      : null;
     const qaReport = report ? this.toQaReport(report as QAReportRecord) : null;
     return { qaReport, qaGate: this.evaluateGate(qaReport) };
   }
@@ -270,7 +282,7 @@ export class QaService {
     const conversation = await this.assertConversationAccess(user, conversationId, { allowArchived: true });
     const report = conversation.latestQaReportId
       ? await this.prisma.qAReport.findFirst({ where: { id: conversation.latestQaReportId, conversationId } })
-      : await this.prisma.qAReport.findFirst({ where: { conversationId }, orderBy: { createdAt: "desc" } });
+      : null;
     const qaReport = report ? this.toQaReport(report as QAReportRecord) : null;
     return { qaGate: this.evaluateGate(qaReport), qaReport };
   }
@@ -282,7 +294,7 @@ export class QaService {
     }
     const report = conversation.latestQaReportId
       ? await this.prisma.qAReport.findFirst({ where: { id: conversation.latestQaReportId, conversationId } })
-      : await this.prisma.qAReport.findFirst({ where: { conversationId }, orderBy: { createdAt: "desc" } });
+      : null;
     const qaReport = report ? this.toQaReport(report as QAReportRecord) : null;
     return { qaGate: this.evaluateGate(qaReport), qaReport };
   }
@@ -391,10 +403,13 @@ export class QaService {
     return isQaGateActionAllowed(gate, action);
   }
 
-  private async getCurrentState(conversationId: string) {
+  private async getCurrentState(
+    conversationId: string,
+    currentDesignStateId: string | null | undefined,
+  ) {
+    if (!currentDesignStateId) return null;
     const row = await this.prisma.conversationDesignState.findFirst({
-      where: { conversationId },
-      orderBy: { version: "desc" },
+      where: { id: currentDesignStateId, conversationId },
     });
     return row ? toStateItem(row as ConversationDesignStateRecord) : null;
   }
@@ -404,9 +419,16 @@ export class QaService {
     currentPrdDocumentId: string | null | undefined,
     state: ConversationDesignState | null,
   ) {
-    const row = currentPrdDocumentId
-      ? await this.prisma.requirementDocument.findFirst({ where: { id: currentPrdDocumentId, conversationId } })
-      : await this.prisma.requirementDocument.findFirst({ where: { conversationId }, orderBy: { updatedAt: "desc" } });
+    if (!currentPrdDocumentId) return null;
+    const row = await this.prisma.requirementDocument.findFirst({
+      where: {
+        id: currentPrdDocumentId,
+        conversationId,
+        status: {
+          in: [RequirementDocumentStatus.ready, RequirementDocumentStatus.confirmed],
+        },
+      },
+    });
     const document = row ? toRequirementDocument(row as RequirementDocumentRecord) : null;
     if (!document || !state) return document;
     return document.conversationDesignStateId === state.id && document.conversationDesignStateVersion === state.version
@@ -419,9 +441,14 @@ export class QaService {
     currentPrototypeArtifactId: string | null | undefined,
     state: ConversationDesignState | null,
   ) {
-    const row = currentPrototypeArtifactId
-      ? await this.prisma.prototypeArtifact.findFirst({ where: { id: currentPrototypeArtifactId, conversationId } })
-      : await this.prisma.prototypeArtifact.findFirst({ where: { conversationId }, orderBy: { updatedAt: "desc" } });
+    if (!currentPrototypeArtifactId) return null;
+    const row = await this.prisma.prototypeArtifact.findFirst({
+      where: {
+        id: currentPrototypeArtifactId,
+        conversationId,
+        status: PrototypeArtifactStatus.ready,
+      },
+    });
     const artifact = row ? toPrototypeArtifact(row as PrototypeArtifactRecord) : null;
     if (!artifact || !state) return artifact;
     if (artifact.conversationDesignStateId !== state.id) return null;

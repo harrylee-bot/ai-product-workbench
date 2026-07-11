@@ -48,4 +48,13 @@ export function validateSecrets(): void {
   // MODEL_GATEWAY_ENCRYPTION_KEY 仅在模型网关被使用时必需；admin 配置 provider key 时需要它。
   // 这里不强制（避免不用模型网关的部署被卡），但 api-key-encryption.service 会在使用时 fail-fast。
   // 生产建议显式设置。
+  if (process.env.NODE_ENV === "production" && process.env.DEERFLOW_ENABLED === "true") {
+    const deerFlowToken = process.env.DEERFLOW_INTERNAL_AUTH_TOKEN?.trim()
+      || process.env.DEER_FLOW_INTERNAL_AUTH_TOKEN?.trim();
+    if (!deerFlowToken || deerFlowToken.length < 32) {
+      throw new Error(
+        "DEERFLOW_INTERNAL_AUTH_TOKEN must contain at least 32 characters when DeerFlow is enabled in production.",
+      );
+    }
+  }
 }

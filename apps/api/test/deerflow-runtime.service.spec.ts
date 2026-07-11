@@ -914,6 +914,7 @@ describe("DeerFlowRuntimeService", () => {
   });
 
 	  it("replaces the bound thread and retries once when DeerFlow reports an active run", async () => {
+    process.env.DEERFLOW_REPLACE_THREAD_ON_ACTIVE_RUN = "true";
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ thread_id: "deerflow-thread-1" }))
       .mockResolvedValueOnce(new Response(JSON.stringify({

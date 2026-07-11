@@ -26,6 +26,7 @@ import { CurrentUser } from "../auth/current-user.decorator";
 import { FileAssetService } from "./file-asset.service";
 import { ListConversationFilesQueryDto, UploadFilesDto } from "./dto";
 import { PrototypeConversionService } from "./prototype-conversion.service";
+import { TempFileCleanupInterceptor } from "./temp-file-cleanup.interceptor";
 
 const tempUploadDir = path.resolve(process.cwd(), "storage/tmp");
 mkdirSync(tempUploadDir, { recursive: true });
@@ -41,6 +42,7 @@ export class FileController {
   @Post("conversations/:conversationId/files")
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseInterceptors(
+    TempFileCleanupInterceptor,
     FilesInterceptor("files", 10, {
       storage: diskStorage({
         destination: (_request, _file, callback) => callback(null, tempUploadDir),

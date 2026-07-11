@@ -24,6 +24,10 @@ describe("PRD requirement document module", () => {
       create: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
+      findUnique: vi.fn(),
+    },
+    conversationDesignState: {
       findUnique: vi.fn(),
     },
     requirementDocumentVersion: {
@@ -39,7 +43,9 @@ describe("PRD requirement document module", () => {
     getCurrentState: vi.fn(),
     getStateByIdForConversation: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
+    attachGeneratedArtifactsInTransaction: vi.fn(),
     syncRequirementDocumentEdit: vi.fn(),
+    syncRequirementDocumentEditInTransaction: vi.fn(),
   };
   const qaService = {
     assertGateAllows: vi.fn(),
@@ -65,6 +71,11 @@ describe("PRD requirement document module", () => {
     vi.clearAllMocks();
     prisma.conversation.findUnique.mockResolvedValue(baseProject());
     prisma.conversation.update.mockResolvedValue({});
+    prisma.requirementDocument.updateMany.mockResolvedValue({ count: 1 });
+    prisma.conversationDesignState.findUnique.mockResolvedValue({
+      ...baseState(),
+      prototypeSpec: null,
+    });
     prisma.requirementDocumentVersion.findFirst.mockResolvedValue(null);
     prisma.requirementDocumentVersion.create.mockImplementation(
       async ({ data }) => ({
@@ -82,8 +93,24 @@ describe("PRD requirement document module", () => {
         prdDocument: input.prdDocument,
       }),
     );
+    stateService.attachGeneratedArtifactsInTransaction.mockImplementation(
+      async (_tx, _stateId, input) => ({
+        ...baseState(),
+        status: input.status,
+        prdDocument: input.prdDocument,
+      }),
+    );
     stateService.syncRequirementDocumentEdit.mockImplementation(
       async (input) => ({
+        ...baseState(),
+        version: 4,
+        status: "doc_ready",
+        prdDocument: input.document,
+        prototypeSpec: undefined,
+      }),
+    );
+    stateService.syncRequirementDocumentEditInTransaction.mockImplementation(
+      async (_tx, input) => ({
         ...baseState(),
         version: 4,
         status: "doc_ready",
@@ -142,9 +169,25 @@ describe("PRD requirement document module", () => {
     const result = await service.getCurrentForUser(user, "conversation-1");
 
     expect(prisma.requirementDocument.findFirst).toHaveBeenCalledWith({
-      where: { id: "prd-current", conversationId: "conversation-1" },
+      where: {
+        id: "prd-current",
+        conversationId: "conversation-1",
+        status: { in: ["ready", "confirmed"] },
+      },
     });
     expect(result.document?.id).toBe("prd-current");
+  });
+
+  it("does not expose a provisional PRD when the current pointer is null", async () => {
+    prisma.conversation.findUnique.mockResolvedValue(
+      baseProject({ currentPrdDocumentId: null }),
+    );
+    stateService.getCurrentState.mockResolvedValue(undefined);
+
+    const result = await service.getCurrentForUser(user, "conversation-1");
+
+    expect(result).toEqual({ document: null, conversationDesignState: null });
+    expect(prisma.requirementDocument.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns the current PRD when later artifact attachment advances the design state", async () => {
@@ -196,7 +239,11 @@ describe("PRD requirement document module", () => {
 
     expect(result.document).toBeNull();
     expect(prisma.requirementDocument.findFirst).toHaveBeenCalledWith({
-      where: { id: "prd-stale", conversationId: "conversation-1" },
+      where: {
+        id: "prd-stale",
+        conversationId: "conversation-1",
+        status: { in: ["ready", "confirmed"] },
+      },
     });
   });
 
@@ -291,23 +338,19 @@ describe("PRD requirement document module", () => {
 
   it("updates a section, creates a version, and syncs the PRD back into ConversationDesignState", async () => {
     const draft = prdDraft(baseState());
-    prisma.requirementDocument.findUnique.mockResolvedValue({
+    let persistedDocument = {
       ...documentRecord({
         id: "prd-1",
         ...draft,
         status: "confirmed",
       }),
       conversation: baseProject(),
+    };
+    prisma.requirementDocument.findUnique.mockImplementation(async () => persistedDocument);
+    prisma.requirementDocument.updateMany.mockImplementation(async ({ data }) => {
+      persistedDocument = { ...persistedDocument, ...data };
+      return { count: 1 };
     });
-    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
-      documentRecord({
-        id: "prd-1",
-        ...draft,
-        status: data.status,
-        sections: data.sections,
-        updatedBy: data.updatedBy,
-      }),
-    );
 
     const result = await service.updateSectionForUser(
       user,
@@ -331,7 +374,8 @@ describe("PRD requirement document module", () => {
         content: "提升签到转化率，并让运营能清楚追踪连续签到效果。",
       }),
     );
-    expect(stateService.syncRequirementDocumentEdit).toHaveBeenCalledWith(
+    expect(stateService.syncRequirementDocumentEditInTransaction).toHaveBeenCalledWith(
+      prisma,
       expect.objectContaining({
         document: expect.objectContaining({ id: "prd-1", status: "ready" }),
         section: expect.objectContaining({ id: "business_goal" }),
@@ -342,24 +386,19 @@ describe("PRD requirement document module", () => {
 
   it("updates the whole PRD markdown and creates a restorable version", async () => {
     const draft = prdDraft(baseState());
-    prisma.requirementDocument.findUnique.mockResolvedValue({
+    let persistedDocument = {
       ...documentRecord({
         id: "prd-1",
         ...draft,
         status: "confirmed",
       }),
       conversation: baseProject(),
+    };
+    prisma.requirementDocument.findUnique.mockImplementation(async () => persistedDocument);
+    prisma.requirementDocument.updateMany.mockImplementation(async ({ data }) => {
+      persistedDocument = { ...persistedDocument, ...data };
+      return { count: 1 };
     });
-    prisma.requirementDocument.update.mockImplementation(async ({ data }) =>
-      documentRecord({
-        id: "prd-1",
-        ...draft,
-        title: data.title,
-        status: data.status,
-        sections: data.sections,
-        updatedBy: data.updatedBy,
-      }),
-    );
 
     const result = await service.updateDocumentContentForUser(user, "prd-1", {
       content: [
@@ -397,7 +436,8 @@ describe("PRD requirement document module", () => {
         createdBy: "user-1",
       }),
     });
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith(
+    expect(stateService.attachGeneratedArtifactsInTransaction).toHaveBeenCalledWith(
+      prisma,
       "state-1",
       expect.objectContaining({
         prdDocument: expect.objectContaining({ id: "prd-1", status: "ready" }),
@@ -432,7 +472,8 @@ describe("PRD requirement document module", () => {
     const result = await service.confirmForPrototypeGate(user, "prd-1");
 
     expect(result.document.status).toBe("confirmed");
-    expect(stateService.attachGeneratedArtifacts).toHaveBeenCalledWith(
+    expect(stateService.attachGeneratedArtifactsInTransaction).toHaveBeenCalledWith(
+      prisma,
       "state-1",
       expect.objectContaining({
         prdDocument: expect.objectContaining({

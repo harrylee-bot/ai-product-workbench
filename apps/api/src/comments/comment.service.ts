@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { ConversationStatus, UserRole } from "@prisma/client";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -70,7 +71,7 @@ export class CommentService {
     }
   ): Promise<Comment> {
     // 验证会话访问权限
-    await this.assertConversationAccess(user, input.conversationId);
+    await this.assertConversationAccess(user, input.conversationId, { requireOwner: true });
     if (input.parentCommentId) {
       const parent = await this.prisma.comment.findFirst({
         where: {
@@ -178,6 +179,8 @@ export class CommentService {
       throw new NotFoundException("评论不存在");
     }
 
+    await this.assertConversationAccess(user, comment.conversationId, { requireOwner: true });
+
     if (comment.userId !== user.id) {
       throw new ForbiddenException("只能编辑自己的评论");
     }
@@ -211,14 +214,7 @@ export class CommentService {
       throw new NotFoundException("评论不存在");
     }
 
-    const conversation = await this.prisma.conversation.findUnique({
-      where: { id: comment.conversationId },
-    });
-
-    // 只有评论作者或会话所有者可以删除
-    if (comment.userId !== user.id && conversation?.ownerId !== user.id) {
-      throw new ForbiddenException("无权删除此评论");
-    }
+    await this.assertConversationAccess(user, comment.conversationId, { requireOwner: true });
 
     await this.prisma.comment.update({
       where: { id: commentId },
@@ -238,7 +234,7 @@ export class CommentService {
       throw new NotFoundException("评论不存在");
     }
 
-    await this.assertConversationAccess(user, comment.conversationId);
+    await this.assertConversationAccess(user, comment.conversationId, { requireOwner: true });
 
     const updated = await this.prisma.comment.update({
       where: { id: commentId },
@@ -279,7 +275,7 @@ export class CommentService {
       throw new NotFoundException("评论不存在");
     }
 
-    await this.assertConversationAccess(user, comment.conversationId);
+    await this.assertConversationAccess(user, comment.conversationId, { requireOwner: true });
 
     const updated = await this.prisma.comment.update({
       where: { id: commentId },
@@ -304,18 +300,23 @@ export class CommentService {
 
   private async assertConversationAccess(
     user: AuthenticatedUser,
-    conversationId: string
+    conversationId: string,
+    options: { requireOwner?: boolean } = {},
   ) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
     });
 
-    if (!conversation) {
+    if (
+      !conversation ||
+      conversation.deletedAt ||
+      conversation.status === ConversationStatus.deleted
+    ) {
       throw new NotFoundException("会话不存在");
     }
 
-    // Admin 可以访问所有会话
-    if (user.role === "admin") {
+    // Admin cross-owner access is read-only on ordinary business routes.
+    if (!options.requireOwner && user.role === UserRole.admin) {
       return;
     }
 

@@ -161,6 +161,7 @@ async function uploadSkillArchive(gatewayUrl, threadId, archivePath) {
   formData.append("files", new Blob([new Uint8Array(buffer)], { type: "application/zip" }), path.basename(archivePath));
   const result = await fetchJson(`${gatewayUrl}/api/threads/${encodeURIComponent(threadId)}/uploads`, {
     method: "POST",
+    headers: authHeaders(),
     body: formData,
   });
   const first = Array.isArray(result.data?.files) ? result.data.files[0] : null;
@@ -251,7 +252,17 @@ function normalizeBaseUrl(value) {
 }
 
 function jsonHeaders() {
-  return { "content-type": "application/json", accept: "application/json" };
+  return {
+    ...authHeaders(),
+    "content-type": "application/json",
+    accept: "application/json",
+  };
+}
+
+function authHeaders() {
+  const token = process.env.DEERFLOW_INTERNAL_AUTH_TOKEN?.trim()
+    || process.env.DEER_FLOW_INTERNAL_AUTH_TOKEN?.trim();
+  return token ? { "X-DeerFlow-Internal-Token": token } : {};
 }
 
 function assertPath(targetPath, label) {

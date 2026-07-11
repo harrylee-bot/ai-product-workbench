@@ -9,12 +9,12 @@ import {
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import bcrypt from "bcryptjs";
-import { FileStorageProvider, RuntimeRunStatus, User, UserRole, UserStatus } from "@prisma/client";
+import { FileStorageProvider, Prisma, RuntimeRunStatus, User, UserRole, UserStatus } from "@prisma/client";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { PrismaService } from "../prisma/prisma.service";
 import type { LoginDto, RegisterDto } from "./dto";
-import type { AuthJwtPayload, AuthenticatedUser } from "./auth.types";
+import type { AuthJwtPayload, AuthenticatedUser, RequestMeta } from "./auth.types";
 
 @Injectable()
 export class AuthService {
@@ -26,32 +26,60 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, meta?: RequestMeta) {
     const account = (dto.email ?? dto.account ?? "").trim();
-    if (!account || !dto.password) throw new BadRequestException("请输入邮箱和密码");
+    if (!account || !dto.password) {
+      await this.recordLoginAttempt({ account, success: false, failReason: "missing_credentials", meta });
+      throw new BadRequestException("请输入邮箱和密码");
+    }
 
     const user = await this.prisma.user.findFirst({
       where: {
         OR: [{ email: account }, { username: account }],
       },
     });
-    if (!user) throw new BadRequestException("账号或密码错误");
+    if (!user) {
+      await this.recordLoginAttempt({ account, success: false, failReason: "account_not_found", meta });
+      throw new BadRequestException("账号或密码错误");
+    }
     if (user.status === UserStatus.disabled) {
+      await this.recordLoginAttempt({
+        account,
+        userId: user.id,
+        success: false,
+        failReason: "account_disabled",
+        meta,
+      });
       throw new ForbiddenException("当前账号已被禁用");
     }
 
-    const valid = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!valid) throw new BadRequestException("账号或密码错误");
+    const valid = await bcrypt.compare(dto.password, user.passwordHash).catch(() => false);
+    if (!valid) {
+      await this.recordLoginAttempt({
+        account,
+        userId: user.id,
+        success: false,
+        failReason: "invalid_password",
+        meta,
+      });
+      throw new BadRequestException("账号或密码错误");
+    }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+      });
+      await tx.loginAuditLog.create({
+        data: this.loginAuditData({ account, userId: user.id, success: true, meta }),
+      });
     });
 
     const payload: AuthJwtPayload = {
       sub: user.id,
       userId: user.id,
       role: user.role,
+      authVersion: user.authVersion,
     };
 
     return {
@@ -74,6 +102,7 @@ export class AuthService {
 
       const user = await this.prisma.user.findUnique({ where: { id: userId } });
       if (!user || user.status !== UserStatus.active) return null;
+      if (user.authVersion !== tokenAuthVersion(payload)) return null;
 
       return this.toPublicUser(user);
     } catch {
@@ -82,6 +111,9 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
+    if (!this.publicRegistrationEnabled()) {
+      throw new ForbiddenException("公开注册未启用");
+    }
     const username = dto.username.trim();
     if (!username) throw new BadRequestException("username 不能为空");
 
@@ -124,12 +156,17 @@ export class AuthService {
       sub: user.id,
       userId: user.id,
       role: user.role,
+      authVersion: user.authVersion,
     };
 
     return {
       accessToken: await this.jwt.signAsync(payload),
       user: this.toPublicUser(user),
     };
+  }
+
+  registrationStatus() {
+    return { enabled: this.publicRegistrationEnabled() };
   }
 
   logout() {
@@ -455,6 +492,47 @@ export class AuthService {
     return { attempted: results.length, completed, failed: results.length - completed };
   }
 
+  async logoutAll(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { authVersion: { increment: 1 } },
+    });
+    return { success: true };
+  }
+
+  private async recordLoginAttempt(input: {
+    account: string;
+    userId?: string;
+    success: boolean;
+    failReason?: string;
+    meta?: RequestMeta;
+  }) {
+    await this.prisma.loginAuditLog.create({ data: this.loginAuditData(input) });
+  }
+
+  private loginAuditData(input: {
+    account: string;
+    userId?: string;
+    success: boolean;
+    failReason?: string;
+    meta?: RequestMeta;
+  }): Prisma.LoginAuditLogUncheckedCreateInput {
+    return {
+      ...(input.userId ? { userId: input.userId } : {}),
+      account: sanitizeAuditText(input.account || "(missing)", 320) ?? "(missing)",
+      success: input.success,
+      failReason: input.failReason,
+      ip: sanitizeAuditText(input.meta?.ip, 128),
+      userAgent: sanitizeAuditText(input.meta?.userAgent, 1000),
+    };
+  }
+
+  private publicRegistrationEnabled() {
+    const configured = this.config.get<string>("PUBLIC_REGISTRATION_ENABLED")?.trim().toLowerCase();
+    if (configured) return configured === "true" || configured === "1";
+    return this.config.get<string>("NODE_ENV") !== "production";
+  }
+
   private toPublicUser(user: User): AuthenticatedUser {
     return {
       id: user.id,
@@ -482,4 +560,13 @@ function addPathWithinRoot(targets: Set<string>, root: string, candidate: string
 
 function emptyCleanupResult() {
   return { attempted: 0, completed: 0, failed: 0 };
+}
+
+function tokenAuthVersion(payload: AuthJwtPayload) {
+  return Number.isSafeInteger(payload.authVersion) ? payload.authVersion! : 0;
+}
+
+function sanitizeAuditText(value: string | undefined, maxLength: number) {
+  const normalized = value?.replace(/[\r\n\0]/g, " ").trim();
+  return normalized ? normalized.slice(0, maxLength) : undefined;
 }

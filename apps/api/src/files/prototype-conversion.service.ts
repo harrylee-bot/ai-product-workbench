@@ -28,6 +28,7 @@ import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { toInputJson } from "../ai/ai-vibe.helpers";
+import { assertConversationId } from "../modules/conversation/conversation-id";
 import { PrismaService } from "../prisma/prisma.service";
 import { FileParserService } from "./file-parser.service";
 import type {
@@ -36,6 +37,7 @@ import type {
   PrototypeConversionPlan,
   VisualAttachmentContext,
 } from "./file.types";
+import { assertStoragePath, resolveExistingStorageFile, resolveStoragePath } from "./storage-path";
 
 type FileWithConversation = FileAsset & {
   conversation: {
@@ -69,9 +71,10 @@ export class PrototypeConversionService {
     @Inject(FileParserService) private readonly parser: FileParserService,
     @Inject(ConfigService) private readonly config: ConfigService,
   ) {
-    this.uploadRoot =
+    this.uploadRoot = path.resolve(
       this.config.get<string>("FILE_UPLOAD_ROOT") ??
-      path.resolve(process.cwd(), "storage/uploads");
+      path.resolve(process.cwd(), "storage/uploads"),
+    );
   }
 
   async enqueueForFile(file: FileAsset, plan: PrototypeConversionPlan) {
@@ -84,28 +87,43 @@ export class PrototypeConversionService {
     options: { autoRun?: boolean } = {},
   ) {
     if (file.extension !== "rp") return null;
-    const job = await this.prisma.prototypeConversionJob.upsert({
-      where: { fileAssetId: file.id },
-      create: {
-        fileAssetId: file.id,
-        conversationId: file.conversationId,
-        status: PrototypeConversionStatus.queued,
-        stage: plan.stage,
-        sourceFilePath: plan.sourceFilePath,
-        converterName: "axure-rp-html-worker",
-        converterVersion: this.config.get<string>("AXURE_RP_CONVERTER_VERSION"),
-        metadata: toInputJson(plan),
-      },
-      update: {
-        status: PrototypeConversionStatus.queued,
-        stage: plan.stage,
-        sourceFilePath: plan.sourceFilePath,
-        errorMessage: null,
-        completedAt: null,
-        converterVersion: this.config.get<string>("AXURE_RP_CONVERTER_VERSION"),
-        metadata: toInputJson(plan),
-      },
+    assertConversationId(file.conversationId);
+    assertStoragePath(this.uploadRoot, file.storagePath);
+    const job = await this.prisma.$transaction(async (tx) => {
+      const activeSource = await tx.fileAsset.updateMany({
+        where: {
+          id: file.id,
+          conversationId: file.conversationId,
+          deletedAt: null,
+          status: { not: FileAssetStatus.deleted },
+        },
+        data: { updatedAt: new Date() },
+      });
+      if (activeSource.count !== 1) return null;
+      return tx.prototypeConversionJob.upsert({
+        where: { fileAssetId: file.id },
+        create: {
+          fileAssetId: file.id,
+          conversationId: file.conversationId,
+          status: PrototypeConversionStatus.queued,
+          stage: plan.stage,
+          sourceFilePath: plan.sourceFilePath,
+          converterName: "axure-rp-html-worker",
+          converterVersion: this.config.get<string>("AXURE_RP_CONVERTER_VERSION"),
+          metadata: toInputJson(plan),
+        },
+        update: {
+          status: PrototypeConversionStatus.queued,
+          stage: plan.stage,
+          sourceFilePath: plan.sourceFilePath,
+          errorMessage: null,
+          completedAt: null,
+          converterVersion: this.config.get<string>("AXURE_RP_CONVERTER_VERSION"),
+          metadata: toInputJson(plan),
+        },
+      });
     });
+    if (!job) return null;
 
     if ((options.autoRun ?? true) && this.hasConverterCommand() && this.shouldAutoRun()) {
       queueMicrotask(() => {
@@ -234,51 +252,51 @@ export class PrototypeConversionService {
   }
 
   async runConversionForFile(user: AuthenticatedUser, fileId: string) {
-    const file = await this.getAccessibleFile(user, fileId);
+    const file = await this.getAccessibleFile(user, fileId, { requireOwner: true });
     if (file.extension !== "rp") throw new BadRequestException("PROTOTYPE_CONVERSION_REQUIRES_RP_FILE");
-    const existingJob = await this.prisma.prototypeConversionJob.findUnique({
-      where: { fileAssetId: file.id },
+    const job = await this.prisma.$transaction(async (tx) => {
+      const activeSource = await tx.fileAsset.updateMany({
+        where: {
+          id: file.id,
+          conversationId: file.conversationId,
+          deletedAt: null,
+          status: { not: FileAssetStatus.deleted },
+        },
+        data: { updatedAt: new Date() },
+      });
+      if (activeSource.count !== 1) throw new NotFoundException("文件不存在");
+      const existingJob = await tx.prototypeConversionJob.findUnique({
+        where: { fileAssetId: file.id },
+      });
+      if (existingJob?.status === PrototypeConversionStatus.running) return existingJob;
+      return tx.prototypeConversionJob.upsert({
+        where: { fileAssetId: file.id },
+        create: {
+          fileAssetId: file.id,
+          conversationId: file.conversationId,
+          status: PrototypeConversionStatus.queued,
+          stage: "queued",
+          sourceFilePath: file.storagePath,
+          converterName: "axure-rp-html-worker",
+          converterVersion: this.config.get<string>("AXURE_RP_CONVERTER_VERSION"),
+        },
+        update: {
+          status: PrototypeConversionStatus.queued,
+          stage: "queued",
+          errorMessage: null,
+          startedAt: null,
+          completedAt: null,
+        },
+      });
     });
-    if (existingJob?.status === PrototypeConversionStatus.running) {
-      return { job: this.toJobItem(existingJob) };
+    if (job.status === PrototypeConversionStatus.running) {
+      return { job: this.toJobItem(job) };
     }
-
-    const job = await this.prisma.prototypeConversionJob.upsert({
-      where: { fileAssetId: file.id },
-      create: {
-        fileAssetId: file.id,
-        conversationId: file.conversationId,
-        status: PrototypeConversionStatus.queued,
-        stage: "queued",
-        sourceFilePath: file.storagePath,
-        converterName: "axure-rp-html-worker",
-        converterVersion: this.config.get<string>("AXURE_RP_CONVERTER_VERSION"),
-      },
-      update: {
-        status: PrototypeConversionStatus.queued,
-        stage: "queued",
-        errorMessage: null,
-        startedAt: null,
-        completedAt: null,
-      },
-    });
     return { job: this.toJobItem(await this.runConversionJob(job.id)) };
   }
 
   async runConversionJob(jobId: string) {
     const command = this.getConverterCommand();
-    if (!command) {
-      const job = await this.prisma.prototypeConversionJob.update({
-        where: { id: jobId },
-        data: {
-          status: PrototypeConversionStatus.queued,
-          stage: "waiting_for_worker",
-          errorMessage: "AXURE_RP_CONVERTER_BIN 未配置，等待 macOS Axure Worker 处理。",
-        },
-      });
-      return job;
-    }
-
     const job = await this.prisma.prototypeConversionJob.findUnique({
       where: { id: jobId },
       include: { fileAsset: { include: { conversation: true } } },
@@ -289,6 +307,8 @@ export class PrototypeConversionService {
     if (job.fileAsset.extension !== "rp") {
       throw new BadRequestException("PROTOTYPE_CONVERSION_REQUIRES_RP_FILE");
     }
+    assertConversationId(job.conversationId);
+    assertStoragePath(this.uploadRoot, job.fileAsset.storagePath);
 
     const runnableStatuses: PrototypeConversionStatus[] = [
       PrototypeConversionStatus.queued,
@@ -298,13 +318,30 @@ export class PrototypeConversionService {
     if (!runnableStatuses.includes(job.status)) {
       return job;
     }
+    if (!command) {
+      await this.prisma.prototypeConversionJob.updateMany({
+        where: { id: job.id, status: job.status, stage: job.stage },
+        data: {
+          status: PrototypeConversionStatus.queued,
+          stage: "waiting_for_worker",
+          errorMessage: "AXURE_RP_CONVERTER_BIN 未配置，等待 macOS Axure Worker 处理。",
+        },
+      });
+      return await this.prisma.prototypeConversionJob.findUnique({ where: { id: job.id } }) ?? job;
+    }
 
     const attemptId = randomUUID();
-    const outputDir = path.join(this.uploadRoot, job.conversationId, `${job.fileAssetId}_axure_html`, attemptId);
+    const outputDir = resolveStoragePath(
+      this.uploadRoot,
+      job.conversationId,
+      `${job.fileAssetId}_axure_html`,
+      attemptId,
+    );
     const lock = await this.prisma.prototypeConversionJob.updateMany({
       where: {
         id: job.id,
-        status: { in: [PrototypeConversionStatus.queued, PrototypeConversionStatus.failed, PrototypeConversionStatus.canceled] },
+        status: job.status,
+        stage: job.stage,
       },
       data: {
         status: PrototypeConversionStatus.running,
@@ -326,10 +363,11 @@ export class PrototypeConversionService {
     await mkdir(outputDir, { recursive: true });
 
     try {
+      const sourcePath = (await resolveExistingStorageFile(this.uploadRoot, job.fileAsset.storagePath)).path;
       const result = await runConverterCommand({
         bin: command.bin,
         args: command.args.map((arg) =>
-          arg.replaceAll("{input}", job.fileAsset.storagePath).replaceAll("{output}", outputDir),
+          arg.replaceAll("{input}", sourcePath).replaceAll("{output}", outputDir),
         ),
         timeoutMs: command.timeoutMs,
       });
@@ -412,6 +450,74 @@ export class PrototypeConversionService {
       });
       return updated;
     }
+  }
+
+  async recoverInterruptedJobs(maxQueuedJobs = 20) {
+    const interrupted = await this.prisma.prototypeConversionJob.updateMany({
+      where: { status: PrototypeConversionStatus.running },
+      data: {
+        status: PrototypeConversionStatus.failed,
+        stage: "interrupted_by_restart",
+        errorMessage: "原型转换因服务重启中断，可重新执行。",
+        completedAt: new Date(),
+      },
+    });
+
+    const limit = Math.min(Math.max(maxQueuedJobs, 1), 100);
+    const queued = await this.prisma.prototypeConversionJob.findMany({
+      where: {
+        status: PrototypeConversionStatus.queued,
+        fileAsset: {
+          deletedAt: null,
+          status: { not: FileAssetStatus.deleted },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+      take: limit,
+      select: { id: true },
+    });
+    const queuedIds = queued.map((job) => job.id);
+    const canAutoResume = this.hasConverterCommand() && this.shouldAutoRun();
+
+    if (queuedIds.length && !canAutoResume) {
+      await this.prisma.prototypeConversionJob.updateMany({
+        where: {
+          id: { in: queuedIds },
+          status: PrototypeConversionStatus.queued,
+        },
+        data: {
+          stage: this.hasConverterCommand() ? "waiting_for_manual_retry" : "waiting_for_worker",
+          errorMessage: this.hasConverterCommand()
+            ? "自动转换已关闭，可手动重新执行。"
+            : "AXURE_RP_CONVERTER_BIN 未配置，等待转换 Worker。",
+        },
+      });
+    } else if (queuedIds.length) {
+      this.runJobsInBackground(queuedIds);
+    }
+
+    const deferred = await this.prisma.prototypeConversionJob.updateMany({
+      where: {
+        status: PrototypeConversionStatus.queued,
+        ...(queuedIds.length ? { id: { notIn: queuedIds } } : {}),
+        fileAsset: {
+          deletedAt: null,
+          status: { not: FileAssetStatus.deleted },
+        },
+      },
+      data: {
+        stage: "recovery_deferred",
+        errorMessage: "启动恢复批次已达上限，可手动重新执行或等待下次恢复。",
+      },
+    });
+
+    return {
+      interruptedCount: interrupted.count,
+      queuedCount: queuedIds.length + deferred.count,
+      resumedCount: canAutoResume ? queuedIds.length : 0,
+      waitingCount: canAutoResume ? 0 : queuedIds.length,
+      deferredCount: deferred.count,
+    };
   }
 
   toJobItem(job: PrototypeConversionJob) {
@@ -727,7 +833,11 @@ export class PrototypeConversionService {
     });
   }
 
-  private async getAccessibleFile(user: AuthenticatedUser, fileId: string): Promise<FileWithConversation> {
+  private async getAccessibleFile(
+    user: AuthenticatedUser,
+    fileId: string,
+    options: { requireOwner?: boolean } = {},
+  ): Promise<FileWithConversation> {
     const file = await this.prisma.fileAsset.findUnique({
       where: { id: fileId },
       include: { conversation: true },
@@ -741,9 +851,11 @@ export class PrototypeConversionService {
     ) {
       throw new NotFoundException("文件不存在");
     }
-    if (user.role !== UserRole.admin && file.conversation.ownerId !== user.id) {
+    if ((options.requireOwner || user.role !== UserRole.admin) && file.conversation.ownerId !== user.id) {
       throw new ForbiddenException("你无权访问该文件");
     }
+    assertConversationId(file.conversationId);
+    assertStoragePath(this.uploadRoot, file.storagePath);
     return file as FileWithConversation;
   }
 

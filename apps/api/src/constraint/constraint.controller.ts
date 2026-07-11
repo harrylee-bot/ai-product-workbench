@@ -17,7 +17,7 @@ export class ConstraintController {
 
   @Post("build")
   async build(@CurrentUser() user: AuthenticatedUser, @Body() dto: BuildConstraintDto) {
-    await this.assertConversationAccess(user, dto.conversationId);
+    await this.assertConversationAccess(user, dto.conversationId, { requireOwner: true });
     return this.constraints.build({
       conversationId: dto.conversationId,
       userInput: dto.input,
@@ -31,12 +31,16 @@ export class ConstraintController {
     return this.constraints.context(conversationId);
   }
 
-  private async assertConversationAccess(user: AuthenticatedUser, conversationId: string) {
+  private async assertConversationAccess(
+    user: AuthenticatedUser,
+    conversationId: string,
+    options: { requireOwner?: boolean } = {},
+  ) {
     const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     if (!conversation || conversation.deletedAt || conversation.status === ConversationStatus.deleted) {
       throw new NotFoundException("会话不存在");
     }
-    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+    if (conversation.ownerId !== user.id && (options.requireOwner || user.role !== UserRole.admin)) {
       throw new ForbiddenException("无权访问该会话");
     }
   }

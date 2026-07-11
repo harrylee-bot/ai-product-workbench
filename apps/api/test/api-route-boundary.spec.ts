@@ -25,6 +25,14 @@ describe("API route boundaries", () => {
     expect(Reflect.getMetadata(METHOD_METADATA, AuthController.prototype.logout)).toBe(RequestMethod.POST);
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, AuthController.prototype.logout)).toBe(200);
     expect(Reflect.getMetadata(GUARDS_METADATA, AuthController.prototype.logout)).toBeUndefined();
+    expect(Reflect.getMetadata(PATH_METADATA, AuthController.prototype.logoutAll)).toBe("logout-all");
+    expect(Reflect.getMetadata(GUARDS_METADATA, AuthController.prototype.logoutAll)).toEqual([JwtAuthGuard]);
+  });
+
+  it("exposes registration capability without requiring a session", () => {
+    expect(Reflect.getMetadata(PATH_METADATA, AuthController.prototype.registrationStatus)).toBe("registration-status");
+    expect(Reflect.getMetadata(METHOD_METADATA, AuthController.prototype.registrationStatus)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(GUARDS_METADATA, AuthController.prototype.registrationStatus)).toBeUndefined();
   });
 
   it("still protects routes that require an authenticated user object", () => {

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -15,6 +15,12 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { KnowledgeEmbeddingService, type EmbeddingSyncStats } from "./knowledge-embedding.service";
 import { jsonArray } from "./knowledge-item.service";
+import {
+  frontmatterString,
+  frontmatterStringArray,
+  parseMarkdownFrontmatter,
+  resolveVaultDocumentStatus,
+} from "./markdown-frontmatter";
 
 type VaultSeedFile = {
   path: string;
@@ -38,6 +44,7 @@ type MarkdownChunk = {
   tags: string[];
   type: KnowledgeType;
   priority: KnowledgePriority;
+  status: KnowledgeStatus;
   categoryName: string;
 };
 
@@ -52,6 +59,7 @@ type MarkdownMetadata = {
   title?: string;
   tags: string[];
   body: string;
+  status: KnowledgeStatus;
 };
 
 function resolveKnowledgeVaultRoot() {
@@ -332,6 +340,7 @@ export class ObsidianVaultService {
   ) {}
 
   private readonly root = resolveKnowledgeVaultRoot();
+  private syncInFlight: Promise<Awaited<ReturnType<ObsidianVaultService["runVaultSync"]>>> | undefined;
 
   async getStatus() {
     const initialized = await this.exists(path.join(this.root, ".obsidian"));
@@ -370,91 +379,170 @@ export class ObsidianVaultService {
   }
 
   async syncToKnowledgeBase(user: AuthenticatedUser) {
+    if (this.syncInFlight) return this.syncInFlight;
+    const operation = this.runVaultSync(user);
+    this.syncInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.syncInFlight === operation) this.syncInFlight = undefined;
+    }
+  }
+
+  private async runVaultSync(user: AuthenticatedUser) {
     await this.initialize();
 
-    const files = (await this.collectMarkdownFiles(this.root)).filter((file) => shouldIndexMarkdown(file.path));
-    const categories = await this.ensureCategories(files);
+    const files = (await this.collectMarkdownFiles(this.root))
+      .filter((file) => shouldIndexMarkdown(file.path))
+      .sort((left, right) => left.path.localeCompare(right.path, "zh-CN"));
     const chunks = await this.buildChunks(files);
-    const activeIds = new Set(chunks.map((chunk) => chunk.id));
-
-    let created = 0;
-    let updated = 0;
-    let unchanged = 0;
-    let archived = 0;
+    const currentIds = new Set(chunks.map((chunk) => chunk.id));
+    const generation = buildVaultGeneration(chunks);
+    const verificationFiles = (await this.collectMarkdownFiles(this.root))
+      .filter((file) => shouldIndexMarkdown(file.path))
+      .sort((left, right) => left.path.localeCompare(right.path, "zh-CN"));
+    const verificationGeneration = buildVaultGeneration(await this.buildChunks(verificationFiles));
+    if (generation !== verificationGeneration
+      || files.some((file, index) => file.path !== verificationFiles[index]?.path)) {
+      throw new ConflictException("知识库文件在同步读取期间发生变化，请重试。");
+    }
     const embeddingStats = this.embeddings?.emptyStats() ?? emptyEmbeddingStats();
+    const embeddingEnabled = Boolean(this.embeddings && embeddingStats.enabled);
+    const transactionResult = await this.prisma.$transaction(async (transaction) => {
+      const lockRows = await transaction.$queryRaw<Array<{ acquired: boolean }>>(
+        Prisma.sql`SELECT pg_try_advisory_xact_lock(1095784523, 1263945812) AS acquired`,
+      );
+      if (!lockRows[0]?.acquired) {
+        throw new ConflictException("知识库正在同步，请稍后重试。");
+      }
 
-    for (const chunk of chunks) {
-      const existing = await this.prisma.knowledgeItem.findUnique({ where: { id: chunk.id } });
-      const categoryId = categories.get(chunk.categoryName)?.id;
-      const data = {
-        title: chunk.title,
-        content: chunk.content,
-        summary: chunk.summary,
-        type: chunk.type,
-        status: KnowledgeStatus.active,
-        scope: "global" as const,
-        categoryId,
-        tags: toInputJson(chunk.tags),
-        priority: chunk.priority,
-        source: KnowledgeSource.file_extraction,
-        sourceFileId: chunk.filePath,
-        updatedBy: user.id,
-      };
+      const categories = await this.ensureCategories(files, transaction);
+      const embeddingItems: Prisma.KnowledgeItemGetPayload<Record<string, never>>[] = [];
+      let created = 0;
+      let updated = 0;
+      let unchanged = 0;
+      let archived = 0;
+      let conflicts = 0;
+      let embeddingUnchanged = 0;
 
-      if (!existing) {
-        const item = await this.prisma.knowledgeItem.create({
+      for (const chunk of chunks) {
+        const existing = await transaction.knowledgeItem.findUnique({ where: { id: chunk.id } });
+        const categoryId = categories.get(chunk.categoryName)?.id;
+        const data = {
+          title: chunk.title,
+          content: chunk.content,
+          summary: chunk.summary,
+          type: chunk.type,
+          status: chunk.status,
+          scope: "global" as const,
+          categoryId,
+          tags: toInputJson(chunk.tags),
+          priority: chunk.priority,
+          source: KnowledgeSource.file_extraction,
+          sourceFileId: chunk.filePath,
+          updatedBy: user.id,
+        };
+
+        if (!existing) {
+          const item = await transaction.knowledgeItem.create({
+            data: {
+              id: chunk.id,
+              ...data,
+              createdBy: user.id,
+            },
+          });
+          await this.createVersionSnapshot(transaction, item, user.id, "从知识库 Markdown 导入");
+          if (embeddingEnabled) embeddingItems.push(item);
+          created += 1;
+          continue;
+        }
+
+        if (!isVaultManagedItem(existing, chunk.filePath)) {
+          conflicts += 1;
+          continue;
+        }
+
+        if (hasKnowledgeChanged(existing, data)) {
+          const shouldRefreshEmbedding = hasEmbeddingContentChanged(existing, data);
+          const hasValidEmbedding = isValidKnowledgeEmbedding(existing.embedding);
+          const item = await transaction.knowledgeItem.update({
+            where: { id: existing.id },
+            data: {
+              ...data,
+              embedding: shouldRefreshEmbedding || (embeddingEnabled && !hasValidEmbedding)
+                ? Prisma.JsonNull
+                : undefined,
+            },
+          });
+          await this.createVersionSnapshot(transaction, item, user.id, "同步知识库 Markdown 更新");
+          if (embeddingEnabled) {
+            if (shouldRefreshEmbedding || !hasValidEmbedding) embeddingItems.push(item);
+            else embeddingUnchanged += 1;
+          }
+          updated += 1;
+        } else {
+          if (embeddingEnabled) {
+            if (isValidKnowledgeEmbedding(existing.embedding)) {
+              embeddingUnchanged += 1;
+            } else {
+              const item = existing.embedding === null || existing.embedding === undefined
+                ? existing
+                : await transaction.knowledgeItem.update({
+                    where: { id: existing.id },
+                    data: { embedding: Prisma.JsonNull },
+                  });
+              embeddingItems.push(item);
+            }
+          }
+          unchanged += 1;
+        }
+      }
+
+      const previousItems = await transaction.knowledgeItem.findMany({
+        where: { source: KnowledgeSource.file_extraction },
+      });
+      for (const item of previousItems) {
+        if (!isVaultManagedItem(item, item.sourceFileId) || currentIds.has(item.id) || item.status === KnowledgeStatus.archived) {
+          continue;
+        }
+        const archivedItem = await transaction.knowledgeItem.update({
+          where: { id: item.id },
           data: {
-            id: chunk.id,
-            ...data,
-            createdBy: user.id,
+            status: KnowledgeStatus.archived,
+            updatedBy: user.id,
           },
         });
-        await this.createVersionSnapshot(item, user.id, "从知识库 Markdown 导入");
-        if (this.embeddings) mergeEmbeddingStats(embeddingStats, await this.embeddings.syncItem(item));
-        created += 1;
-        continue;
+        await this.createVersionSnapshot(transaction, archivedItem, user.id, "知识库 Markdown 已移除，归档切片");
+        archived += 1;
       }
 
-      if (hasKnowledgeChanged(existing, data)) {
-        const item = await this.prisma.knowledgeItem.update({
-          where: { id: existing.id },
-          data,
-        });
-        await this.createVersionSnapshot(item, user.id, "同步知识库 Markdown 更新");
-        if (this.embeddings) mergeEmbeddingStats(embeddingStats, await this.embeddings.syncItem(item));
-        updated += 1;
-      } else {
-        if (this.embeddings) mergeEmbeddingStats(embeddingStats, await this.embeddings.syncItem(existing));
-        unchanged += 1;
-      }
-    }
+      return {
+        created,
+        updated,
+        unchanged,
+        archived,
+        conflicts,
+        embeddingItems,
+        embeddingUnchanged,
+      };
+    }, { maxWait: 5_000, timeout: 60_000 });
 
-    const previousItems = await this.prisma.knowledgeItem.findMany({
-      where: { source: KnowledgeSource.file_extraction },
-    });
-    for (const item of previousItems) {
-      const tags = jsonArray(item.tags);
-      if (!tags.includes("vault-sync") || activeIds.has(item.id) || item.status === KnowledgeStatus.archived) {
-        continue;
+    if (this.embeddings) {
+      embeddingStats.unchanged += transactionResult.embeddingUnchanged;
+      for (const item of transactionResult.embeddingItems) {
+        mergeEmbeddingStats(embeddingStats, await this.embeddings.syncItem(item));
       }
-      const archivedItem = await this.prisma.knowledgeItem.update({
-        where: { id: item.id },
-        data: {
-          status: KnowledgeStatus.archived,
-          updatedBy: user.id,
-        },
-      });
-      await this.createVersionSnapshot(archivedItem, user.id, "知识库 Markdown 已移除，归档切片");
-      archived += 1;
     }
 
     return {
+      generation,
       markdownFiles: files.length,
       chunks: chunks.length,
-      created,
-      updated,
-      unchanged,
-      archived,
+      created: transactionResult.created,
+      updated: transactionResult.updated,
+      unchanged: transactionResult.unchanged,
+      archived: transactionResult.archived,
+      conflicts: transactionResult.conflicts,
       categories: [...new Set(chunks.map((chunk) => chunk.categoryName))],
       embeddings: embeddingStats,
     };
@@ -528,7 +616,7 @@ export class ObsidianVaultService {
     for (const file of files) {
       const fullPath = path.join(this.root, file.path);
       const raw = await readFile(fullPath, "utf8");
-      const metadata = parseMarkdown(raw);
+      const metadata = parseMarkdown(raw, file.path);
       const title = normalizeTitle(metadata.title ?? path.basename(file.path, ".md"));
       const type = inferKnowledgeType(file.path, title, metadata.tags);
       const priority = inferPriority(file.path, title, type);
@@ -566,6 +654,7 @@ export class ObsidianVaultService {
           tags,
           type,
           priority,
+          status: metadata.status,
           categoryName,
         });
       }
@@ -574,17 +663,17 @@ export class ObsidianVaultService {
     return chunks;
   }
 
-  private async ensureCategories(files: VaultEntry[]) {
+  private async ensureCategories(files: VaultEntry[], database: Prisma.TransactionClient) {
     const names = [...new Set(files.map((file) => inferCategoryName(file.path)))];
     const result = new Map<string, Prisma.KnowledgeCategoryGetPayload<Record<string, never>>>();
 
     for (const [index, name] of names.entries()) {
-      const existing = await this.prisma.knowledgeCategory.findFirst({ where: { name } });
+      const existing = await database.knowledgeCategory.findFirst({ where: { name } });
       if (existing) {
         result.set(name, existing);
         continue;
       }
-      const created = await this.prisma.knowledgeCategory.create({
+      const created = await database.knowledgeCategory.create({
         data: {
           name,
           description: `由 Markdown Vault 知识库目录 ${name} 自动同步`,
@@ -598,16 +687,17 @@ export class ObsidianVaultService {
   }
 
   private async createVersionSnapshot(
+    database: Prisma.TransactionClient,
     item: Prisma.KnowledgeItemGetPayload<Record<string, never>>,
     userId: string,
     changeSummary: string,
   ) {
-    const latest = await this.prisma.knowledgeVersion.findFirst({
+    const latest = await database.knowledgeVersion.findFirst({
       where: { knowledgeItemId: item.id },
       orderBy: { version: "desc" },
     });
 
-    await this.prisma.knowledgeVersion.create({
+    await database.knowledgeVersion.create({
       data: {
         knowledgeItemId: item.id,
         version: (latest?.version ?? 0) + 1,
@@ -647,26 +737,21 @@ function shouldIndexMarkdown(relativePath: string) {
     && !relativePath.startsWith("99-收件箱/");
 }
 
-function parseMarkdown(raw: string): MarkdownMetadata {
-  const frontmatter = raw.match(/^---\n([\s\S]*?)\n---\n?/);
-  if (!frontmatter) return { tags: [], body: raw.trim() };
-
-  const metadata = frontmatter[1];
-  const title = metadata.match(/^title:\s*(.+)$/m)?.[1]?.trim();
-  const tags: string[] = [];
-  const tagBlock = metadata.match(/^tags:\s*\n((?:\s+-\s*.+\n?)+)/m)?.[1];
-  if (tagBlock) {
-    for (const line of tagBlock.split("\n")) {
-      const tag = line.match(/^\s+-\s*(.+)$/)?.[1]?.trim();
-      if (tag) tags.push(tag);
-    }
-  }
-
+function parseMarkdown(raw: string, sourceName = "Markdown document"): MarkdownMetadata {
+  const parsed = parseMarkdownFrontmatter(raw, sourceName);
   return {
-    title,
-    tags,
-    body: raw.slice(frontmatter[0].length).trim(),
+    title: frontmatterString(parsed.attributes, "title", "标题"),
+    tags: frontmatterStringArray(parsed.attributes, "tags", "标签"),
+    body: parsed.body,
+    status: toKnowledgeStatus(resolveVaultDocumentStatus(parsed.attributes)),
   };
+}
+
+function toKnowledgeStatus(status: ReturnType<typeof resolveVaultDocumentStatus>) {
+  if (status === "draft") return KnowledgeStatus.draft;
+  if (status === "disabled") return KnowledgeStatus.disabled;
+  if (status === "archived") return KnowledgeStatus.archived;
+  return KnowledgeStatus.active;
 }
 
 function splitMarkdownBody(body: string) {
@@ -788,6 +873,26 @@ function stableKnowledgeId(relativePath: string, chunkIndex: number) {
   return `vault_${createHash("sha1").update(`${relativePath}::${chunkIndex}`).digest("hex").slice(0, 32)}`;
 }
 
+function buildVaultGeneration(chunks: MarkdownChunk[]) {
+  const hash = createHash("sha256");
+  for (const chunk of chunks) {
+    hash.update(JSON.stringify([
+      chunk.id,
+      chunk.filePath,
+      chunk.title,
+      chunk.content,
+      chunk.summary,
+      chunk.tags,
+      chunk.type,
+      chunk.priority,
+      chunk.status,
+      chunk.categoryName,
+    ]));
+    hash.update("\n");
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
 function normalizeTitle(value: string) {
   return value.replace(/^#+\s*/, "").replace(/\s+/g, " ").trim();
 }
@@ -838,6 +943,32 @@ function hasKnowledgeChanged(
     existing.source !== data.source ||
     existing.sourceFileId !== data.sourceFileId
   );
+}
+
+function hasEmbeddingContentChanged(
+  existing: Prisma.KnowledgeItemGetPayload<Record<string, never>>,
+  data: { title: string; content: string; summary: string },
+) {
+  return existing.title !== data.title
+    || existing.content !== data.content
+    || existing.summary !== data.summary;
+}
+
+function isValidKnowledgeEmbedding(value: unknown) {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((item) => typeof item === "number" && Number.isFinite(item));
+}
+
+function isVaultManagedItem(
+  item: Prisma.KnowledgeItemGetPayload<Record<string, never>>,
+  expectedSourceFileId: string | null | undefined,
+) {
+  // Vault is authoritative only for rows previously created from the same vault path.
+  return item.source === KnowledgeSource.file_extraction
+    && Boolean(expectedSourceFileId)
+    && item.sourceFileId === expectedSourceFileId
+    && jsonArray(item.tags).includes("vault-sync");
 }
 
 function emptyEmbeddingStats(): EmbeddingSyncStats {

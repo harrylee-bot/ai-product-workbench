@@ -186,6 +186,7 @@ export class DeerFlowRuntimeService {
             eventForUi = { ...eventForUi, reasoning: undefined };
           }
           rawEvents.push(eventForUi);
+          if (rawEvents.length > 500) rawEvents.splice(0, rawEvents.length - 500);
           if (eventForUi.event === "values") {
             finalState = eventForUi.data;
           }
@@ -193,7 +194,11 @@ export class DeerFlowRuntimeService {
         });
         break;
       } catch (error) {
-        if (attempt === 0 && isActiveRunConflict(error)) {
+        if (
+          attempt === 0 &&
+          isActiveRunConflict(error) &&
+          readBooleanEnv("DEERFLOW_REPLACE_THREAD_ON_ACTIVE_RUN", false)
+        ) {
           threadId = await this.replaceThreadBinding(input, threadId, "active_run_conflict");
           uploads = await this.uploadAttachments(threadId, input.userId, input.attachmentFiles ?? [], input.signal);
           runInput = { ...input, deerFlowUploads: uploads };
@@ -378,41 +383,45 @@ export class DeerFlowRuntimeService {
     if (!attachments.length) return [];
     if (!readBooleanEnv("DEERFLOW_UPLOADS_ENABLED", true)) return [];
 
-    const formData = new FormData();
+    const uploaded: Array<{
+      fileId: string;
+      fileName: string;
+      fileType: string;
+      size: number;
+      deerFlowFile: ReturnType<typeof normalizeUploadedFile>;
+    }> = [];
     for (const attachment of attachments) {
+      if (signal?.aborted) throw signal.reason ?? new Error("UPLOAD_ABORTED");
       const buffer = await readFile(attachment.storagePath);
+      const formData = new FormData();
       formData.append(
         "files",
         new Blob([new Uint8Array(buffer)], { type: attachment.mimeType || "application/octet-stream" }),
         attachment.fileName,
       );
-    }
+      const response = await fetchWithTimeout(gatewayUrl(uploadPath(threadId)), {
+        method: "POST",
+        headers: deerFlowIdentityHeaders(userId),
+        body: formData,
+      }, signal);
+      if (!response.ok) {
+        throw new Error(`DeerFlow upload 请求失败：${response.status} ${await safeResponseText(response)}`);
+      }
 
-    const response = await fetchWithTimeout(gatewayUrl(uploadPath(threadId)), {
-      method: "POST",
-      headers: deerFlowIdentityHeaders(userId),
-      body: formData,
-    }, signal);
-    if (!response.ok) {
-      throw new Error(`DeerFlow upload 请求失败：${response.status} ${await safeResponseText(response)}`);
+      const payload = await response.json() as UploadFilesResponse;
+      const file = Array.isArray(payload.files) ? payload.files[0] : undefined;
+      if (!file) {
+        throw new Error(`DeerFlow upload 未返回文件信息：${payload.message ?? "unknown error"}`);
+      }
+      uploaded.push({
+        fileId: attachment.fileId,
+        fileName: attachment.fileName,
+        fileType: attachment.fileType,
+        size: attachment.size,
+        deerFlowFile: normalizeUploadedFile(file),
+      });
     }
-
-    const payload = await response.json() as UploadFilesResponse;
-    const files = Array.isArray(payload.files) ? payload.files : [];
-    if (!payload.success && !files.length) {
-      throw new Error(`DeerFlow upload 未返回文件信息：${payload.message ?? "unknown error"}`);
-    }
-    if (files.length < attachments.length) {
-      throw new Error(`DeerFlow upload 返回文件数量不完整：${files.length}/${attachments.length}`);
-    }
-
-    return attachments.map((attachment, index) => ({
-      fileId: attachment.fileId,
-      fileName: attachment.fileName,
-      fileType: attachment.fileType,
-      size: attachment.size,
-      deerFlowFile: normalizeUploadedFile(files[index]),
-    }));
+    return uploaded;
   }
 
   private async resolveArtifacts(
@@ -526,6 +535,8 @@ function buildRunRequest(input: DeerFlowRunInput) {
         thinking_enabled: readBooleanEnv("DEERFLOW_THINKING_ENABLED", true),
         subagent_enabled: readBooleanEnv("DEERFLOW_SUBAGENT_ENABLED", true),
         max_concurrent_subagents: readNumberEnv("DEERFLOW_MAX_CONCURRENT_SUBAGENTS", 3),
+        workbench_run_id: input.runId,
+        workbench_conversation_id: input.conversationId,
         model_name:
           input.selectedModelName ||
           process.env.DEERFLOW_MODEL_NAME ||
@@ -547,7 +558,6 @@ function assertThreadBindingMatchesInput(
 ) {
   if (
     binding.conversationId === input.conversationId &&
-    binding.conversationId === input.conversationId &&
     binding.userId === input.userId
   ) {
     return;
@@ -556,7 +566,6 @@ function assertThreadBindingMatchesInput(
   throw new ConflictException(
     [
       "DeerFlow thread 绑定与当前会话不一致，已拒绝复用旧上下文。",
-      `conversationId=${input.conversationId}`,
       `conversationId=${input.conversationId}`,
       `userId=${input.userId}`,
       `boundThreadId=${binding.deerFlowThreadId}`,
@@ -633,7 +642,7 @@ function buildUserPrompt(input: DeerFlowRunInput) {
         "If externalResearchContext.refs is non-empty, use those refs as already fetched public evidence and cite them in externalRefsUsed/enrichmentNotes; do not repeat search unless there is a clear missing public fact.",
         "Never send private files, raw source assets, internal paths, conversation IDs, user IDs, credentials, or complete user documents to web search. Search only generic product/domain terms dynamically derived from the current request.",
         "If external information is used, cite it only in externalRefsUsed/enrichmentNotes and relevant PRD source notes; do not paste long web excerpts into the chat or PRD.",
-        "If knowledgeContext is empty, do not claim the PRD/prototype is knowledge-base driven. Return a concise ask_clarification or answer that says the knowledge base missed and names the missing knowledge area.",
+        "If knowledgeContext is empty, do not claim the PRD/prototype is knowledge-base driven. Continue with model knowledge for ordinary low-risk details and disclose the miss; use ask_clarification only when a missing fact is blocking or high-risk.",
         "For one_sentence_completion, infer ordinary missing details from product_architecture knowledge, business-domain knowledge, and historical cases; ask clarification only for blocking or high-risk facts.",
         "For one_sentence_completion that asks for PRD/prototype, the PRD quality target is the local requirement-doc-template skill standard: Chinese requirement document, <工单名称>需求说明书 title, version history, manual TOC, fixed 1/2/3/4 section order, channel table, concrete degradation plan, and 21-row safety baseline.",
         "For review_prd, return the complete PRD body in prdDocumentDraft.sections or a complete prd_markdown artifact. Never return only a change summary as the PRD document.",

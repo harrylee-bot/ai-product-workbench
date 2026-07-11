@@ -1,27 +1,85 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { RuntimeRunStatus, UserIntent } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { summarizeText, toInputJson } from "./ai-vibe.helpers";
 
 @Injectable()
-export class RuntimeRunLogService {
+export class RuntimeRunLogService implements OnModuleInit {
+  private readonly logger = new Logger(RuntimeRunLogService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  async onModuleInit() {
+    await this.recoverExpiredRuns().catch((error) => {
+      this.logger.error(`恢复过期 Agent run 失败：${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
 
   async createRun(input: {
     conversationId: string;
     userId: string;
     userInput: string;
+    requestId?: string;
   }) {
-    return this.prisma.runtimeRunLog.create({
+    const requestId = input.requestId?.trim() || undefined;
+    if (requestId) {
+      const existing = await this.prisma.runtimeRunLog.findFirst({
+        where: { conversationId: input.conversationId, requestId },
+      });
+      if (existing) throw runConflict("RUN_REQUEST_ALREADY_EXISTS", existing);
+    }
+
+    await this.recoverExpiredRuns(input.conversationId);
+    const now = new Date();
+    const leaseToken = randomUUID();
+    try {
+      return await this.prisma.runtimeRunLog.create({
+        data: {
+          conversationId: input.conversationId,
+          userId: input.userId,
+          requestId,
+          leaseToken,
+          heartbeatAt: now,
+          leaseExpiresAt: new Date(now.getTime() + readRunLeaseMs()),
+          status: RuntimeRunStatus.running,
+          inputSummary: summarizeText(input.userInput),
+          traceId: randomUUID(),
+        },
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const existing = requestId
+        ? await this.prisma.runtimeRunLog.findFirst({
+            where: { conversationId: input.conversationId, requestId },
+          })
+        : null;
+      const active = existing ?? await this.prisma.runtimeRunLog.findFirst({
+        where: { conversationId: input.conversationId, status: RuntimeRunStatus.running },
+        orderBy: { startedAt: "desc" },
+      });
+      throw runConflict(existing ? "RUN_REQUEST_ALREADY_EXISTS" : "CONVERSATION_RUN_ACTIVE", active);
+    }
+  }
+
+  async renewLease(runId: string, leaseToken: string) {
+    const now = new Date();
+    const update = await this.prisma.runtimeRunLog.updateMany({
+      where: { id: runId, status: RuntimeRunStatus.running, leaseToken },
       data: {
-        conversationId: input.conversationId,
-        userId: input.userId,
-        status: RuntimeRunStatus.running,
-        inputSummary: summarizeText(input.userInput),
-        traceId: randomUUID(),
+        heartbeatAt: now,
+        leaseExpiresAt: new Date(now.getTime() + readRunLeaseMs()),
       },
     });
+    return update.count > 0;
+  }
+
+  async setExternalRunId(runId: string, leaseToken: string, externalRunId: string) {
+    const update = await this.prisma.runtimeRunLog.updateMany({
+      where: { id: runId, status: RuntimeRunStatus.running, leaseToken },
+      data: { externalRunId },
+    });
+    return update.count > 0;
   }
 
   async markRunIntent(runId: string, intent: UserIntent) {
@@ -31,12 +89,16 @@ export class RuntimeRunLogService {
     });
   }
 
-  async completeRun(runId: string, result: unknown, outputSummary: string) {
+  async completeRun(runId: string, result: unknown, outputSummary: string, leaseToken?: string) {
     const run = await this.prisma.runtimeRunLog.findUnique({ where: { id: runId } });
     const endedAt = new Date();
 
     const update = await this.prisma.runtimeRunLog.updateMany({
-      where: { id: runId, status: RuntimeRunStatus.running },
+      where: {
+        id: runId,
+        status: RuntimeRunStatus.running,
+        ...(leaseToken ? { leaseToken } : {}),
+      },
       data: {
         status: RuntimeRunStatus.succeeded,
         outputSummary: summarizeText(outputSummary),
@@ -48,12 +110,16 @@ export class RuntimeRunLogService {
     return update.count > 0;
   }
 
-  async failRun(runId: string, error: unknown) {
+  async failRun(runId: string, error: unknown, leaseToken?: string) {
     const run = await this.prisma.runtimeRunLog.findUnique({ where: { id: runId } });
     const endedAt = new Date();
 
     const update = await this.prisma.runtimeRunLog.updateMany({
-      where: { id: runId, status: RuntimeRunStatus.running },
+      where: {
+        id: runId,
+        status: RuntimeRunStatus.running,
+        ...(leaseToken ? { leaseToken } : {}),
+      },
       data: {
         status: RuntimeRunStatus.failed,
         errorMessage: summarizeText(error instanceof Error ? error.message : "AI 执行失败"),
@@ -140,6 +206,26 @@ export class RuntimeRunLogService {
     return run?.status === RuntimeRunStatus.running;
   }
 
+  async recoverExpiredRuns(conversationId?: string) {
+    const endedAt = new Date();
+    const update = await this.prisma.runtimeRunLog.updateMany({
+      where: {
+        status: RuntimeRunStatus.running,
+        ...(conversationId ? { conversationId } : {}),
+        OR: [
+          { leaseExpiresAt: { lt: endedAt } },
+          { leaseExpiresAt: null },
+        ],
+      },
+      data: {
+        status: RuntimeRunStatus.failed,
+        errorMessage: "RUN_LEASE_EXPIRED",
+        endedAt,
+      },
+    });
+    return update?.count ?? 0;
+  }
+
   async recordStreamEvent(input: {
     runId: string;
     conversationId: string;
@@ -167,6 +253,10 @@ export class RuntimeRunLogService {
       id: run.id,
       conversationId: run.conversationId,
       userId: run.userId,
+      requestId: run.requestId,
+      heartbeatAt: run.heartbeatAt?.toISOString(),
+      leaseExpiresAt: run.leaseExpiresAt?.toISOString(),
+      externalRunId: run.externalRunId,
       intent: run.intent,
       status: run.status,
       inputSummary: run.inputSummary,
@@ -179,4 +269,27 @@ export class RuntimeRunLogService {
       durationMs: run.durationMs,
     };
   }
+}
+
+function readRunLeaseMs() {
+  const parsed = Number(process.env.AGENT_RUN_LEASE_MS ?? 45_000);
+  return Number.isFinite(parsed) && parsed >= 15_000 ? parsed : 45_000;
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
+}
+
+function runConflict(
+  code: "RUN_REQUEST_ALREADY_EXISTS" | "CONVERSATION_RUN_ACTIVE",
+  run: { id: string; status: RuntimeRunStatus } | null,
+) {
+  return new ConflictException({
+    code,
+    message: code === "RUN_REQUEST_ALREADY_EXISTS"
+      ? "该请求已经提交，请刷新会话查看现有结果。"
+      : "当前会话已有运行中的任务，请等待完成或先停止。",
+    runId: run?.id,
+    status: run?.status,
+  });
 }

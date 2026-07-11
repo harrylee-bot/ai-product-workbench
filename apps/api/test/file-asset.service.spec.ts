@@ -1,15 +1,18 @@
-import { ForbiddenException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException } from "@nestjs/common";
 import {
   FileAssetStatus,
   FileParserType,
   FileStorageProvider,
   ParseResultStatus,
+  KnowledgeSource,
+  KnowledgeStatus,
+  PrototypeConversionStatus,
   ConversationStatus,
   UserRole,
   UserStatus,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { FileAssetService } from "../src/files/file-asset.service";
@@ -25,6 +28,15 @@ describe("FileAssetService", () => {
       findUnique: vi.fn(),
       create: vi.fn(),
       deleteMany: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    prototypeConversionJob: {
+      findUnique: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    knowledgeItem: {
+      updateMany: vi.fn(),
     },
     fileParseResult: {
       findUnique: vi.fn(),
@@ -51,6 +63,10 @@ describe("FileAssetService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.fileAsset.updateMany.mockResolvedValue({ count: 1 });
+    prisma.prototypeConversionJob.updateMany.mockResolvedValue({ count: 1 });
+    prisma.knowledgeItem.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction.mockImplementation(async (callback: (client: typeof prisma) => unknown) => callback(prisma));
   });
 
   it("rejects normal users from listing files in conversations they do not own", async () => {
@@ -130,12 +146,22 @@ describe("FileAssetService", () => {
   });
 
   it("returns local runtime attachment files in requested order", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "workbench-runtime-files-"));
+    const briefPath = path.join(root, "brief.md");
+    const rulesPath = path.join(root, "rules.pdf");
+    await Promise.all([writeFile(briefPath, "brief"), writeFile(rulesPath, "rules")]);
+    const [safeBriefPath, safeRulesPath] = await Promise.all([realpath(briefPath), realpath(rulesPath)]);
+    const localService = new FileAssetService(
+      prisma as never,
+      parser as never,
+      { get: vi.fn((key: string) => key === "FILE_UPLOAD_ROOT" ? root : undefined) } as never,
+    );
     prisma.fileAsset.findMany.mockResolvedValue([
-      fileRecord({ id: "file-2", originalName: "rules.pdf", extension: "pdf", storagePath: "/tmp/rules.pdf" }),
-      fileRecord({ id: "file-1", originalName: "brief.md", extension: "md", storagePath: "/tmp/brief.md" }),
+      fileRecord({ id: "file-2", originalName: "rules.pdf", extension: "pdf", storagePath: rulesPath }),
+      fileRecord({ id: "file-1", originalName: "brief.md", extension: "md", storagePath: briefPath }),
     ]);
 
-    const result = await service.getRuntimeAttachmentFiles(["file-1", "file-2"], "conversation-1");
+    const result = await localService.getRuntimeAttachmentFiles(["file-1", "file-2"], "conversation-1");
 
     expect(prisma.fileAsset.findMany).toHaveBeenCalledWith({
       where: {
@@ -150,13 +176,13 @@ describe("FileAssetService", () => {
         fileId: "file-1",
         fileName: "brief.md",
         fileType: "md",
-        storagePath: "/tmp/brief.md",
+        storagePath: safeBriefPath,
       }),
       expect.objectContaining({
         fileId: "file-2",
         fileName: "rules.pdf",
         fileType: "pdf",
-        storagePath: "/tmp/rules.pdf",
+        storagePath: safeRulesPath,
       }),
     ]);
   });
@@ -193,20 +219,119 @@ describe("FileAssetService", () => {
     await expect(stat(files[2].path)).rejects.toThrow();
   });
 
-  it("never writes uploads outside the configured root for a legacy unsafe conversation id", async () => {
+  it("cleans Multer temp files before rejecting an unsafe conversation id", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "workbench-upload-root-"));
     const tempDir = await mkdtemp(path.join(tmpdir(), "workbench-upload-tmp-"));
-    const file = await multerFile(tempDir, "brief.md", "需求正文");
+    const file = await multerFile(tempDir, "brief.md", "safe content");
+    const localService = new FileAssetService(
+      prisma as never,
+      parser as never,
+      { get: vi.fn((key: string) => key === "FILE_UPLOAD_ROOT" ? root : undefined) } as never,
+    );
+
+    await expect(localService.uploadConversationFiles(user, "../outside", {}, [file]))
+      .rejects.toThrow(BadRequestException);
+    expect(prisma.conversation.findUnique).not.toHaveBeenCalled();
+    await expect(stat(file.path)).rejects.toThrow();
+  });
+
+  it("enforces the per-chat attachment count and byte budget before runtime upload", async () => {
+    const countLimited = new FileAssetService(
+      prisma as never,
+      parser as never,
+      { get: vi.fn((key: string) => key === "CHAT_ATTACHMENT_MAX_FILES" ? "1" : undefined) } as never,
+    );
+    await expect(countLimited.getRuntimeAttachmentFiles(["file-1", "file-2"], "conversation-1"))
+      .rejects.toThrow("单次对话最多引用 1 个附件");
+    expect(prisma.fileAsset.findMany).not.toHaveBeenCalled();
+
+    const byteLimited = new FileAssetService(
+      prisma as never,
+      parser as never,
+      { get: vi.fn((key: string) => key === "CHAT_ATTACHMENT_MAX_TOTAL_BYTES" ? "100" : undefined) } as never,
+    );
+    prisma.fileAsset.findMany.mockResolvedValue([fileRecord({ size: 101 })]);
+    await expect(byteLimited.getRuntimeAttachmentFiles(["file-1"], "conversation-1"))
+      .rejects.toThrow("单次对话附件总大小不能超过 1MB");
+  });
+
+  it("rejects a stored-file symlink that resolves outside the upload root", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "workbench-runtime-root-"));
+    const outsideDir = await mkdtemp(path.join(tmpdir(), "workbench-runtime-outside-"));
+    const outsidePath = path.join(outsideDir, "outside.md");
+    const linkedPath = path.join(root, "linked.md");
+    await writeFile(outsidePath, "outside");
+    await symlink(outsidePath, linkedPath);
+    const localService = new FileAssetService(
+      prisma as never,
+      parser as never,
+      { get: vi.fn((key: string) => key === "FILE_UPLOAD_ROOT" ? root : undefined) } as never,
+    );
+    prisma.fileAsset.findMany.mockResolvedValue([fileRecord({ storagePath: linkedPath, size: 7 })]);
+
+    await expect(localService.getRuntimeAttachmentFiles(["file-1"], "conversation-1"))
+      .rejects.toThrow("附件文件不存在：brief.md");
+  });
+
+  it("rejects deleting a conversion that is running", async () => {
+    prisma.fileAsset.findUnique.mockResolvedValue({
+      ...fileRecord(),
+      conversation: conversationRecord(),
+    });
+    prisma.prototypeConversionJob.findUnique.mockResolvedValue({
+      id: "job-1",
+      status: PrototypeConversionStatus.running,
+    });
+    prisma.prototypeConversionJob.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.deleteFile(user, "file-1")).rejects.toThrow(ConflictException);
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+  });
+
+  it("marks parsing files as failed and retryable during startup recovery", async () => {
+    prisma.fileAsset.updateMany.mockResolvedValue({ count: 2 });
+
+    await expect(service.failInterruptedParsingFiles()).resolves.toEqual({ count: 2 });
+    expect(prisma.fileAsset.updateMany).toHaveBeenCalledWith({
+      where: {
+        status: FileAssetStatus.parsing,
+        deletedAt: null,
+      },
+      data: {
+        status: FileAssetStatus.parse_failed,
+        parseError: "文件解析因服务重启中断，请重新解析。",
+      },
+    });
+  });
+
+  it("soft deletes, disables derived knowledge, and removes source and conversion directories", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "workbench-delete-file-"));
+    const conversationDir = path.join(root, "conversation-1");
+    const sourcePath = path.join(conversationDir, "stored.md");
+    const extractedPath = path.join(conversationDir, "file-1_extracted", "page.txt");
+    const conversionPath = path.join(conversationDir, "file-1_axure_html", "attempt", "index.html");
+    await Promise.all([
+      writeNestedFile(sourcePath, "source"),
+      writeNestedFile(extractedPath, "parsed"),
+      writeNestedFile(conversionPath, "html"),
+    ]);
+    const record = fileRecord({ storagePath: sourcePath });
+    const tx = {
+      fileAsset: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      prototypeConversionJob: {
+        findUnique: vi.fn().mockResolvedValue({ id: "job-1", status: PrototypeConversionStatus.succeeded }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      knowledgeItem: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
+    };
     const localPrisma = {
       ...prisma,
-      conversation: {
-        findUnique: vi.fn().mockResolvedValue(conversationRecord({ id: "../../outside" })),
+      fileAsset: { ...prisma.fileAsset, findUnique: vi.fn().mockResolvedValue({ ...record, conversation: conversationRecord() }) },
+      prototypeConversionJob: {
+        ...prisma.prototypeConversionJob,
+        findUnique: vi.fn().mockResolvedValue({ id: "job-1", status: PrototypeConversionStatus.succeeded }),
       },
-      fileAsset: {
-        ...prisma.fileAsset,
-        create: vi.fn(),
-        deleteMany: vi.fn(),
-      },
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     };
     const localService = new FileAssetService(
       localPrisma as never,
@@ -214,15 +339,21 @@ describe("FileAssetService", () => {
       { get: vi.fn((key: string) => key === "FILE_UPLOAD_ROOT" ? root : undefined) } as never,
     );
 
-    await expect(localService.uploadConversationFiles(
-      user,
-      "../../outside",
-      {},
-      [file],
-    )).rejects.toThrow("文件存储路径非法");
-
-    expect(localPrisma.fileAsset.create).not.toHaveBeenCalled();
-    await expect(stat(file.path)).rejects.toThrow();
+    await expect(localService.deleteFile(user, "file-1")).resolves.toEqual({
+      success: true,
+      storageCleanupPending: false,
+    });
+    expect(tx.knowledgeItem.updateMany).toHaveBeenCalledWith({
+      where: {
+        sourceFileId: "file-1",
+        source: KnowledgeSource.file_extraction,
+        status: { in: [KnowledgeStatus.active, KnowledgeStatus.draft] },
+      },
+      data: { status: KnowledgeStatus.disabled, updatedBy: "user-1" },
+    });
+    await expect(stat(sourcePath)).rejects.toThrow();
+    await expect(stat(path.dirname(extractedPath))).rejects.toThrow();
+    await expect(stat(path.join(conversationDir, "file-1_axure_html"))).rejects.toThrow();
   });
 });
 
@@ -242,6 +373,12 @@ async function multerFile(dir: string, originalname: string, content: string): P
     buffer: Buffer.from(content),
     stream: undefined as never,
   };
+}
+
+async function writeNestedFile(filePath: string, content: string) {
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, content);
 }
 
 function conversationRecord(overrides: Record<string, unknown> = {}) {

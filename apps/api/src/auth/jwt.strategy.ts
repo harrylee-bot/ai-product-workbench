@@ -34,6 +34,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (user.status === UserStatus.disabled) {
       throw new ForbiddenException("当前账号已被禁用，请联系管理员");
     }
+    const authVersion = Number.isSafeInteger(payload.authVersion) ? payload.authVersion! : 0;
+    if (user.authVersion !== authVersion) {
+      throw new UnauthorizedException("登录状态已失效，请重新登录");
+    }
 
     return {
       id: user.id,

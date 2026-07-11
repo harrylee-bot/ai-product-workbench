@@ -98,6 +98,7 @@ export class AdminUsersService {
           displayName: dto.displayName?.trim(),
           role: dto.role,
           status: dto.status,
+          authVersion: dto.role !== undefined || dto.status !== undefined ? { increment: 1 } : undefined,
         },
       });
 
@@ -140,7 +141,10 @@ export class AdminUsersService {
       const passwordHash = await bcrypt.hash(password, 12);
       await this.prisma.user.update({
         where: { id },
-        data: { passwordHash },
+        data: {
+          passwordHash,
+          authVersion: { increment: 1 },
+        },
       });
       if (admin) {
         await this.recordAudit(admin, "user.reset_password", AdminAuditTargetType.user, id, meta);
@@ -156,7 +160,10 @@ export class AdminUsersService {
     try {
       await this.prisma.user.update({
         where: { id },
-        data: { status },
+        data: {
+          status,
+          authVersion: { increment: 1 },
+        },
       });
     } catch (error) {
       this.throwNotFoundError(error);

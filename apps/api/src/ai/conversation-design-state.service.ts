@@ -99,6 +99,28 @@ type ConversationDesignStateRecord = {
   updatedAt: Date;
 };
 
+export type ConversationPublishFence = {
+  currentDesignStateId: string | null;
+  currentDesignStateVersion: number | null;
+  currentDesignStateUpdatedAt: string | null;
+  currentPrdDocumentId: string | null;
+  currentPrototypeArtifactId: string | null;
+  latestQaReportId: string | null;
+};
+
+type AttachGeneratedArtifactsInput = {
+  prdDocument?: RequirementDocument;
+  prototypeSpec?: PrototypeSpec;
+  status?: ConversationDesignStateStatus;
+  userId?: string;
+  reason?: string;
+  runId?: string;
+  messageId?: string;
+  createVersion?: boolean;
+  mode?: "current" | "provisional" | "fenced_publish";
+  expectedUpdatedAt?: string;
+};
+
 @Injectable()
 export class ConversationDesignStateService {
   constructor(private readonly prisma: PrismaService) {}
@@ -106,15 +128,15 @@ export class ConversationDesignStateService {
   async getCurrentState(conversationId: string): Promise<ConversationDesignState | undefined> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: {
-        conversationDesignStates: {
-          orderBy: { version: "desc" },
-          take: 1,
-        },
+      select: { currentDesignStateId: true },
+    });
+    if (!conversation?.currentDesignStateId) return undefined;
+    const state = await this.prisma.conversationDesignState.findFirst({
+      where: {
+        id: conversation.currentDesignStateId,
+        conversationId,
       },
     });
-
-    const state = conversation?.conversationDesignStates[0];
     return state ? this.toStateItem(state as ConversationDesignStateRecord) : undefined;
   }
 
@@ -124,16 +146,60 @@ export class ConversationDesignStateService {
   ): Promise<ConversationDesignState | undefined> {
     const conversation = await tx.conversation.findUnique({
       where: { id: conversationId },
-      include: {
-        conversationDesignStates: {
-          orderBy: { version: "desc" },
-          take: 1,
-        },
+      select: { currentDesignStateId: true },
+    });
+    if (!conversation?.currentDesignStateId) return undefined;
+    const state = await tx.conversationDesignState.findFirst({
+      where: {
+        id: conversation.currentDesignStateId,
+        conversationId,
       },
     });
-
-    const state = conversation?.conversationDesignStates[0];
     return state ? this.toStateItem(state as ConversationDesignStateRecord) : undefined;
+  }
+
+  async getCurrentStateWithPublishFenceInTransaction(
+    tx: Prisma.TransactionClient,
+    conversationId: string,
+  ): Promise<{
+    state: ConversationDesignState | undefined;
+    publishFence: ConversationPublishFence;
+  }> {
+    const conversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        currentDesignStateId: true,
+        currentPrdDocumentId: true,
+        currentPrototypeArtifactId: true,
+        latestQaReportId: true,
+      },
+    });
+    if (!conversation) throw new NotFoundException("CONVERSATION_NOT_FOUND");
+    const record = conversation.currentDesignStateId
+      ? await tx.conversationDesignState.findFirst({
+          where: {
+            id: conversation.currentDesignStateId,
+            conversationId,
+          },
+        })
+      : null;
+    if (conversation.currentDesignStateId && !record) {
+      throw new ConflictException("CONVERSATION_CURRENT_STATE_POINTER_INVALID");
+    }
+    const state = record
+      ? this.toStateItem(record as ConversationDesignStateRecord)
+      : undefined;
+    return {
+      state,
+      publishFence: {
+        currentDesignStateId: conversation.currentDesignStateId,
+        currentDesignStateVersion: state?.version ?? null,
+        currentDesignStateUpdatedAt: state?.updatedAt ?? null,
+        currentPrdDocumentId: conversation.currentPrdDocumentId,
+        currentPrototypeArtifactId: conversation.currentPrototypeArtifactId,
+        latestQaReportId: conversation.latestQaReportId,
+      },
+    };
   }
 
   async getStateByIdForConversation(stateId: string, conversationId: string): Promise<ConversationDesignState | undefined> {
@@ -267,12 +333,8 @@ export class ConversationDesignStateService {
     targetVersion: number,
     options: { userId: string; reason?: string; runId?: string; messageId?: string },
   ) {
-    const currentRecord = await this.prisma.conversationDesignState.findFirst({
-      where: { conversationId },
-      orderBy: { version: "desc" },
-    });
-    if (!currentRecord) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
-    const current = this.toStateItem(currentRecord as ConversationDesignStateRecord);
+    const current = await this.getCurrentState(conversationId);
+    if (!current) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
     const version = await this.prisma.conversationDesignVersion.findFirst({
       where: { conversationId, version: targetVersion },
       orderBy: { createdAt: "desc" },
@@ -282,7 +344,10 @@ export class ConversationDesignStateService {
     const snapshot = this.normalizeStatePayload(version.snapshot);
     if (!snapshot) throw new BadRequestException("ROLLBACK_VERSION_INVALID");
 
-    const nextVersion = current.version + 1;
+    const nextVersion = Math.max(
+      current.version + 1,
+      await this.getNextStateVersion(conversationId),
+    );
     const restored: ConversationDesignState = {
       ...this.cloneState(snapshot),
       id: current.id,
@@ -514,16 +579,87 @@ export class ConversationDesignStateService {
     return this.createDraftInTransactionImpl(tx, conversationId, draft, options);
   }
 
+  async createProvisionalDraftInTransaction(
+    tx: Prisma.TransactionClient,
+    conversationId: string,
+    draft: ConversationDesignDraft,
+    options: { userId?: string; runId?: string },
+  ): Promise<{ state: ConversationDesignState; publishFence: ConversationPublishFence }> {
+    const conversation = await tx.conversation.findUnique({
+      where: { id: conversationId },
+      select: {
+        currentDesignStateId: true,
+        currentPrdDocumentId: true,
+        currentPrototypeArtifactId: true,
+        latestQaReportId: true,
+      },
+    });
+    if (!conversation) throw new NotFoundException("CONVERSATION_NOT_FOUND");
+
+    const currentRecord = conversation.currentDesignStateId
+      ? await tx.conversationDesignState.findFirst({
+          where: {
+            id: conversation.currentDesignStateId,
+            conversationId,
+          },
+        })
+      : null;
+    if (conversation.currentDesignStateId && !currentRecord) {
+      throw new ConflictException("CONVERSATION_CURRENT_STATE_POINTER_INVALID");
+    }
+    const current = currentRecord
+      ? this.toStateItem(currentRecord as ConversationDesignStateRecord)
+      : undefined;
+    const nextVersion = await this.getNextStateVersion(conversationId, tx);
+    const now = new Date().toISOString();
+    const provisional = this.normalizeDraft(conversationId, draft, current);
+    provisional.id = "";
+    provisional.version = nextVersion;
+    provisional.createdBy = options.userId ?? current?.createdBy ?? "system";
+    provisional.updatedBy = options.userId;
+    provisional.createdAt = now;
+    provisional.updatedAt = now;
+
+    const created = await tx.conversationDesignState.create({
+      data: {
+        conversationId,
+        version: nextVersion,
+        ...this.toPrismaStateData(provisional),
+        prototypeSpec: provisional.prototypeSpec
+          ? toInputJson(provisional.prototypeSpec)
+          : Prisma.JsonNull,
+        prdDocument: provisional.prdDocument
+          ? toInputJson(provisional.prdDocument)
+          : Prisma.JsonNull,
+        createdBy: provisional.createdBy,
+        updatedBy: provisional.updatedBy,
+      },
+    });
+
+    return {
+      state: this.toStateItem(created as ConversationDesignStateRecord),
+      publishFence: {
+        currentDesignStateId: conversation.currentDesignStateId,
+        currentDesignStateVersion: current?.version ?? null,
+        currentDesignStateUpdatedAt: current?.updatedAt ?? null,
+        currentPrdDocumentId: conversation.currentPrdDocumentId,
+        currentPrototypeArtifactId: conversation.currentPrototypeArtifactId,
+        latestQaReportId: conversation.latestQaReportId,
+      },
+    };
+  }
+
   private async createDraftInTransactionImpl(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
     conversationId: string,
     draft: ConversationDesignDraft,
     options: { userId?: string; reason?: string; runId?: string; messageId?: string },
   ): Promise<ConversationDesignState> {
+    const nextVersion = await this.getNextStateVersion(conversationId, tx);
     const state = await tx.conversationDesignState.create({
       data: {
         conversationId,
-        version: 1,
+        version: nextVersion,
         ...this.toPrismaStateData(this.normalizeDraft(conversationId, draft)),
         createdBy: options.userId ?? "system",
         updatedBy: options.userId,
@@ -556,16 +692,7 @@ export class ConversationDesignStateService {
 
   async attachGeneratedArtifacts(
     stateId: string,
-    input: {
-      prdDocument?: RequirementDocument;
-      prototypeSpec?: PrototypeSpec;
-      status?: ConversationDesignStateStatus;
-      userId?: string;
-      reason?: string;
-      runId?: string;
-      messageId?: string;
-      createVersion?: boolean;
-    },
+    input: AttachGeneratedArtifactsInput,
   ) {
     // txn-1 + race-1：读取、版本校验、写入、changeLog、versionSnapshot 在同一事务内原子完成；
     // 用乐观锁（where id AND version=expected）防止并发覆盖。
@@ -577,30 +704,38 @@ export class ConversationDesignStateService {
   async attachGeneratedArtifactsInTransaction(
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
     stateId: string,
-    input: {
-      prdDocument?: RequirementDocument;
-      prototypeSpec?: PrototypeSpec;
-      status?: ConversationDesignStateStatus;
-      userId?: string;
-      reason?: string;
-      runId?: string;
-      messageId?: string;
-      createVersion?: boolean;
-    },
+    input: AttachGeneratedArtifactsInput,
   ) {
     const current = await tx.conversationDesignState.findUnique({ where: { id: stateId } });
     if (!current) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
     const before = this.toStateItem(current as ConversationDesignStateRecord);
+    const mode = input.mode ?? "current";
+    if (mode === "provisional") {
+      const conversation = await tx.conversation.findUnique({
+        where: { id: before.conversationId },
+        select: { currentDesignStateId: true },
+      });
+      if (!conversation || conversation.currentDesignStateId === stateId) {
+        throw new ConflictException("PROVISIONAL_STATE_VISIBILITY_FENCE_REJECTED");
+      }
+    }
 
     const prototypeOutline = input.prototypeSpec
       ? toPrototypeOutline(input.prototypeSpec, before.prototypeOutline)
       : before.prototypeOutline;
 
-    // race-1：乐观锁——仅当库中 version 仍为读取时的 before.version 才更新，防止并发覆盖。
+    // Generated artifacts are derived from this exact semantic state version.
+    // Attaching them must not advance the version, otherwise a freshly created
+    // PRD/prototype is stale the moment it is saved.
     const result = await tx.conversationDesignState.updateMany({
-      where: { id: stateId, version: before.version },
+      where: {
+        id: stateId,
+        version: before.version,
+        updatedAt: input.expectedUpdatedAt
+          ? new Date(input.expectedUpdatedAt)
+          : current.updatedAt,
+      },
       data: {
-        version: before.version + 1,
         prdDocument: input.prdDocument ? toInputJson(input.prdDocument) : undefined,
         prototypeSpec: input.prototypeSpec ? toInputJson(input.prototypeSpec) : undefined,
         prototypeOutline: prototypeOutline ? toInputJson(prototypeOutline) : undefined,
@@ -615,14 +750,17 @@ export class ConversationDesignStateService {
     if (!updated) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
 
     const after = this.toStateItem(updated as ConversationDesignStateRecord);
-    await tx.conversation.update({
-      where: { id: after.conversationId },
-      data: {
-        currentDesignStateId: after.id,
-        status: conversationStatusFromDesignState(after),
-        lastActivityAt: new Date(),
-      },
-    });
+    if (mode === "provisional") return after;
+    if (mode === "current") {
+      await tx.conversation.update({
+        where: { id: after.conversationId },
+        data: {
+          currentDesignStateId: after.id,
+          status: conversationStatusFromDesignState(after),
+          lastActivityAt: new Date(),
+        },
+      });
+    }
     await this.writeChangeLog(
       {
         conversationId: after.conversationId,
@@ -648,7 +786,7 @@ export class ConversationDesignStateService {
       },
       tx,
     );
-    if (input.createVersion ?? true) {
+    if (input.createVersion ?? mode === "fenced_publish") {
       await this.createVersionSnapshot(after, input.userId ?? "system", input.reason ?? "生成物更新后保存版本", tx);
     }
     return after;
@@ -660,8 +798,20 @@ export class ConversationDesignStateService {
     userId: string;
     reason?: string;
   }) {
-    // txn-1：读取 + 更新 + changeLog + versionSnapshot 原子化。
     return this.prisma.$transaction(async (tx) => {
+      return this.syncRequirementDocumentEditInTransaction(tx, input);
+    });
+  }
+
+  async syncRequirementDocumentEditInTransaction(
+    tx: Prisma.TransactionClient,
+    input: {
+      document: RequirementDocument;
+      section: RequirementDocSection;
+      userId: string;
+      reason?: string;
+    },
+  ) {
       const currentRecord = await tx.conversationDesignState.findUnique({
         where: { id: input.document.conversationDesignStateId },
       });
@@ -675,9 +825,16 @@ export class ConversationDesignStateService {
         ? syncPrdSectionContent(next, input.section, content, input.userId, now)
         : [];
 
-      next.version = before.version + 1;
+      next.version = Math.max(
+        before.version + 1,
+        await this.getNextStateVersion(before.conversationId, tx),
+      );
       next.status = "doc_ready";
-      next.prdDocument = input.document;
+      const versionedDocument: RequirementDocument = {
+        ...input.document,
+        conversationDesignStateVersion: next.version,
+      };
+      next.prdDocument = versionedDocument;
       next.prototypeSpec = undefined;
       next.updatedBy = input.userId;
       for (const path of changedPaths) {
@@ -693,21 +850,34 @@ export class ConversationDesignStateService {
         this.markSourceConfirmed(next, path);
       }
 
-      const updated = await tx.conversationDesignState.update({
-        where: { id: before.id },
+      const stateUpdate = await tx.conversationDesignState.updateMany({
+        where: { id: before.id, version: before.version },
         data: {
           version: next.version,
           ...this.toPrismaStateData(next),
-          prdDocument: toInputJson(input.document),
+          prdDocument: toInputJson(versionedDocument),
           prototypeSpec: Prisma.JsonNull,
           updatedBy: input.userId,
         },
       });
+      if (stateUpdate.count !== 1) {
+        throw new ConflictException("CONVERSATION_DESIGN_STATE_VERSION_CONFLICT：状态已被并发修改，请重试。");
+      }
+      await tx.requirementDocument.updateMany({
+        where: {
+          id: input.document.id,
+          conversationDesignStateId: before.id,
+        },
+        data: { conversationDesignStateVersion: next.version },
+      });
+      const updated = await tx.conversationDesignState.findUnique({ where: { id: before.id } });
+      if (!updated) throw new NotFoundException("CONVERSATION_DESIGN_STATE_NOT_FOUND");
       const after = this.toStateItem(updated as ConversationDesignStateRecord);
       await tx.conversation.update({
         where: { id: after.conversationId },
         data: {
           currentDesignStateId: after.id,
+          currentPrototypeArtifactId: null,
           status: conversationStatusFromDesignState(after),
           lastActivityAt: new Date(),
         },
@@ -742,7 +912,6 @@ export class ConversationDesignStateService {
         tx,
       );
       return after;
-    });
   }
 
   private async updateStateFromDraft(
@@ -764,7 +933,10 @@ export class ConversationDesignStateService {
     options: { userId?: string; reason?: string; runId?: string; messageId?: string },
   ) {
     const normalized = this.normalizeDraft(conversationId, draft, current);
-    normalized.version = current.version + 1;
+    normalized.version = Math.max(
+      current.version + 1,
+      await this.getNextStateVersion(conversationId, tx),
+    );
     normalized.id = current.id;
     normalized.createdAt = current.createdAt;
     normalized.createdBy = current.createdBy;
@@ -818,6 +990,10 @@ export class ConversationDesignStateService {
   ) {
     // txn-1：update + conversation.update + changeLog + versionSnapshot 原子化。
     return this.prisma.$transaction(async (tx) => {
+      state.version = Math.max(
+        state.version,
+        await this.getNextStateVersion(state.conversationId, tx),
+      );
       const updated = await tx.conversationDesignState.update({
         where: { id: state.id },
         data: {

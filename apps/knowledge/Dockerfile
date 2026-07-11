@@ -44,6 +44,7 @@ RUN git apply --check /opt/quartz-patches/0001-quartz-v5-prevent-duplicate-virtu
 COPY apps/knowledge/nginx.conf /etc/nginx/conf.d/default.conf
 COPY apps/knowledge/docker-entrypoint.sh /usr/local/bin/knowledge-entrypoint
 COPY apps/knowledge/finalize-output.mjs /usr/local/lib/knowledge-finalize-output.mjs
+COPY apps/knowledge/publish-generation.mjs /usr/local/lib/knowledge-publish-generation.mjs
 COPY scripts/assert-knowledge-output.mjs /usr/local/lib/knowledge-assert-output.mjs
 COPY knowledge-vault /seed-vault
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FinalActionApplierService } from "../src/ai/final-action-applier.service";
 import type { DeerFlowFinalAction, DeerFlowResolvedArtifact } from "../src/ai/deerflow-runtime.service";
 
@@ -6,10 +6,12 @@ describe("FinalActionApplierService", () => {
   const stateService = {
     createDraft: vi.fn(),
     createDraftInTransaction: vi.fn(),
+    createProvisionalDraftInTransaction: vi.fn(),
     attachGeneratedArtifacts: vi.fn(),
     attachGeneratedArtifactsInTransaction: vi.fn(),
     getCurrentState: vi.fn(),
     getCurrentStateInTransaction: vi.fn(),
+    getCurrentStateWithPublishFenceInTransaction: vi.fn(),
   };
   const documentService = {
     saveGeneratedDocument: vi.fn(),
@@ -23,8 +25,13 @@ describe("FinalActionApplierService", () => {
     run: vi.fn((): Array<{ severity: string; title: string }> => []),
   };
   const prisma = {
-    conversation: { findUnique: vi.fn() },
-    requirementDocument: { findMany: vi.fn() },
+    conversation: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    requirementDocument: { findMany: vi.fn(), updateMany: vi.fn() },
+    prototypeArtifact: { updateMany: vi.fn() },
+    qAReport: { findFirst: vi.fn() },
+    conversationDesignState: { updateMany: vi.fn() },
+    runtimeRunLog: { updateMany: vi.fn() },
+    $queryRaw: vi.fn(),
     $transaction: vi.fn((callback) => callback(prisma)),
   };
   const service = new FinalActionApplierService(
@@ -39,8 +46,161 @@ describe("FinalActionApplierService", () => {
     vi.clearAllMocks();
     prisma.conversation.findUnique.mockResolvedValue({ currentPrdDocumentId: null });
     prisma.requirementDocument.findMany.mockResolvedValue([]);
+    prisma.requirementDocument.updateMany.mockResolvedValue({ count: 1 });
+    prisma.prototypeArtifact.updateMany.mockResolvedValue({ count: 1 });
+    prisma.qAReport.findFirst.mockResolvedValue({
+      id: "qa-1",
+      conversationDesignStateId: "state-1",
+      conversationDesignStateVersion: 3,
+      prdDocumentId: "prd-1",
+      prototypeArtifactId: null,
+    });
+    prisma.runtimeRunLog.updateMany.mockResolvedValue({ count: 1 });
+    prisma.conversationDesignState.updateMany.mockResolvedValue({ count: 1 });
+    prisma.conversation.update.mockResolvedValue({});
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+    prisma.$queryRaw.mockResolvedValue([{
+      started_at: new Date("2026-06-20T08:00:00.000Z"),
+      version: 2,
+      updatedAt: new Date("2026-06-20T07:00:00.000Z"),
+      currentDesignStateId: "state-current",
+      currentPrdDocumentId: null,
+      currentPrototypeArtifactId: null,
+      latestQaReportId: null,
+    }]);
     prisma.$transaction.mockImplementation((callback) => callback(prisma));
+    stateService.createProvisionalDraftInTransaction.mockImplementation(
+      async (tx, conversationId, draft, options) => ({
+        state: await stateService.createDraftInTransaction(tx, conversationId, draft, options),
+        publishFence: basePublishFence(),
+      }),
+    );
+    stateService.getCurrentStateWithPublishFenceInTransaction.mockImplementation(
+      async (tx, conversationId) => {
+        const state = await stateService.getCurrentStateInTransaction(tx, conversationId);
+        return {
+          state,
+          publishFence: basePublishFence({
+            currentDesignStateId: state?.id ?? null,
+            currentDesignStateVersion: state?.version ?? null,
+            currentDesignStateUpdatedAt: state?.updatedAt ?? null,
+          }),
+        };
+      },
+    );
     qaRuleCheck.run.mockReturnValue([]);
+  });
+
+  it("publishes QA-approved artifacts and completes the fenced run atomically", async () => {
+    const state = baseState({ status: "design_ready" });
+    const document = { ...baseDocument(), status: "generating" as const };
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({
+      ...state,
+      status: "doc_ready",
+      prdDocument: { ...document, status: "ready" },
+    });
+
+    const result = await service.publishAppliedArtifacts({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-1",
+      commitToken: "lease-1",
+      qaReportId: "qa-1",
+      applied: {
+        prdDocument: document,
+        state,
+        publishFence: basePublishFence(),
+      },
+      runResult: { status: "success", qaReportId: "qa-1" },
+      outputSummary: "PRD 已生成",
+    });
+
+    expect(result.prdDocument?.status).toBe("ready");
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: "conversation-1",
+        currentDesignStateId: "state-current",
+      }),
+      data: expect.objectContaining({
+        currentDesignStateId: "state-1",
+        currentPrdDocumentId: "prd-1",
+        currentPrototypeArtifactId: null,
+        latestQaReportId: "qa-1",
+      }),
+    });
+    expect(prisma.runtimeRunLog.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "run-1",
+        status: "running",
+        leaseToken: "lease-1",
+      },
+      data: expect.objectContaining({ status: "succeeded" }),
+    });
+  });
+
+  it("does not publish or promote QA after the run lease is lost", async () => {
+    const state = baseState({ status: "design_ready" });
+    const document = { ...baseDocument(), status: "generating" as const };
+    prisma.$queryRaw.mockResolvedValueOnce([]);
+
+    await expect(service.publishAppliedArtifacts({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-cancelled",
+      commitToken: "stale-lease",
+      qaReportId: "qa-1",
+      applied: {
+        prdDocument: document,
+        state,
+        publishFence: basePublishFence(),
+      },
+      runResult: { status: "success", qaReportId: "qa-1" },
+      outputSummary: "PRD 已生成",
+    })).rejects.toThrow("RUN_COMMIT_FENCE_REJECTED");
+
+    expect(prisma.qAReport.findFirst).not.toHaveBeenCalled();
+    expect(prisma.requirementDocument.updateMany).not.toHaveBeenCalled();
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+    expect(prisma.runtimeRunLog.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a QA report that is not fenced to the current run and artifacts", async () => {
+    const state = baseState({ status: "design_ready" });
+    const document = { ...baseDocument(), status: "generating" as const };
+    prisma.qAReport.findFirst.mockResolvedValueOnce(null);
+
+    await expect(service.publishAppliedArtifacts({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-1",
+      commitToken: "lease-1",
+      qaReportId: "qa-other-run",
+      applied: {
+        prdDocument: document,
+        state,
+        publishFence: basePublishFence(),
+      },
+      runResult: { status: "success", qaReportId: "qa-other-run" },
+      outputSummary: "PRD 已生成",
+    })).rejects.toThrow("QA_REPORT_PUBLISH_FENCE_REJECTED");
+
+    expect(prisma.requirementDocument.updateMany).not.toHaveBeenCalled();
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+    expect(prisma.runtimeRunLog.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not downgrade state when publication committed but its acknowledgement was lost", async () => {
+    const state = baseState({ status: "doc_ready" });
+    const document = { ...baseDocument(), status: "ready" as const };
+    prisma.requirementDocument.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await service.rejectAppliedArtifacts({
+      runId: "run-1",
+      applied: { prdDocument: document, state },
+      error: new Error("database acknowledgement lost"),
+    });
+
+    expect(prisma.conversationDesignState.updateMany).not.toHaveBeenCalled();
   });
 
   it("bridges DeerFlow review_prd final actions into ConversationDesignState and PRD persistence", async () => {
@@ -148,10 +308,13 @@ describe("FinalActionApplierService", () => {
     );
     expect(stateService.attachGeneratedArtifactsInTransaction).toHaveBeenCalledWith(prisma, "state-1", expect.objectContaining({
       prdDocument: document,
-      status: "doc_ready",
       runId: "run-1",
     }));
-    expect(result).toEqual({ prdDocument: document, state: updatedState });
+    expect(result).toEqual(expect.objectContaining({
+      prdDocument: document,
+      state: updatedState,
+      publishFence: basePublishFence(),
+    }));
   });
 
   it("rejects generated artifacts inside the persistence transaction when deterministic QA finds a major issue", async () => {
@@ -520,12 +683,11 @@ describe("FinalActionApplierService", () => {
       expect.any(String), // htmlContent
       expect.any(Boolean), // hasContent
     );
-    expect(stateService.attachGeneratedArtifactsInTransaction).toHaveBeenCalledWith(prisma, "state-1", expect.objectContaining({
-      prototypeSpec,
-      status: "prototype_ready",
-      runId: "run-2",
+    expect(stateService.attachGeneratedArtifactsInTransaction).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      prototypeArtifact: artifact,
+      state: updatedState,
     }));
-    expect(result).toEqual({ prototypeArtifact: artifact, state: updatedState });
   });
 
   it("persists PRD and prototype from a single review_prototype final action when both payloads exist", async () => {
@@ -605,10 +767,13 @@ describe("FinalActionApplierService", () => {
       expect.objectContaining({
         prdDocument: document,
         prototypeSpec,
-        status: "prototype_ready",
       }),
     );
-    expect(result).toEqual({ prdDocument: document, prototypeArtifact: artifact, state: finalState });
+    expect(result).toEqual(expect.objectContaining({
+      prdDocument: document,
+      prototypeArtifact: artifact,
+      state: finalState,
+    }));
   });
 
   it("strips runtime noise before persisting generated PRD and prototype artifacts", async () => {
@@ -756,6 +921,127 @@ describe("FinalActionApplierService", () => {
 
     expect(prototypeService.saveGeneratedPrototypeInTransaction).not.toHaveBeenCalled();
   });
+
+  it("keeps the existing current state and pointers unchanged when QA rejects provisional artifacts", async () => {
+    const state = baseState({
+      id: "state-provisional",
+      version: 4,
+      updatedAt: "2026-06-20T09:00:01.000Z",
+    });
+    const document = { ...baseDocument(), id: "prd-provisional", status: "generating" as const };
+    prisma.conversation.findUnique.mockResolvedValueOnce({
+      currentDesignStateId: "state-current",
+    });
+
+    await service.rejectAppliedArtifacts({
+      runId: "run-rejected",
+      applied: { prdDocument: document, state },
+      error: new Error("GENERATED_ARTIFACT_QA_FAILED"),
+    });
+
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+    expect(prisma.conversation.updateMany).not.toHaveBeenCalled();
+    expect(prisma.conversationDesignState.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "state-provisional",
+        version: 4,
+        updatedAt: new Date("2026-06-20T09:00:01.000Z"),
+      },
+      data: { status: "qa_failed" },
+    });
+  });
+
+  it("rejects publish when the baseline current state was manually edited", async () => {
+    const state = baseState({
+      id: "state-provisional",
+      version: 4,
+      updatedAt: "2026-06-20T09:00:01.000Z",
+    });
+    const document = { ...baseDocument(), id: "prd-provisional", status: "generating" as const };
+    const fence = basePublishFence();
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ started_at: new Date("2026-06-20T08:00:00.000Z") }])
+      .mockResolvedValueOnce([{
+        version: 3,
+        updatedAt: new Date("2026-06-20T08:45:00.000Z"),
+      }]);
+
+    await expect(service.publishAppliedArtifacts({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-stale-baseline",
+      commitToken: "lease-1",
+      qaReportId: "qa-1",
+      applied: { prdDocument: document, state, publishFence: fence },
+      runResult: { status: "success" },
+      outputSummary: "PRD 已生成",
+    })).rejects.toThrow("CURRENT_STATE_PUBLISH_FENCE_REJECTED");
+
+    expect(prisma.qAReport.findFirst).not.toHaveBeenCalled();
+    expect(prisma.requirementDocument.updateMany).not.toHaveBeenCalled();
+    expect(prisma.conversation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("publishes the first approved state only after fencing a null current pointer", async () => {
+    const state = baseState({
+      version: 1,
+      updatedAt: "2026-06-20T09:00:01.000Z",
+    });
+    const document = {
+      ...baseDocument(),
+      conversationDesignStateVersion: 1,
+      status: "generating" as const,
+    };
+    const fence = basePublishFence({
+      currentDesignStateId: null,
+      currentDesignStateVersion: null,
+      currentDesignStateUpdatedAt: null,
+    });
+    prisma.qAReport.findFirst.mockResolvedValueOnce({
+      id: "qa-first",
+      conversationDesignStateId: "state-1",
+      conversationDesignStateVersion: 1,
+      prdDocumentId: "prd-1",
+      prototypeArtifactId: null,
+    });
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ started_at: new Date("2026-06-20T08:00:00.000Z") }])
+      .mockResolvedValueOnce([{
+        currentDesignStateId: null,
+        currentPrdDocumentId: null,
+        currentPrototypeArtifactId: null,
+        latestQaReportId: null,
+      }]);
+    stateService.attachGeneratedArtifactsInTransaction.mockResolvedValue({
+      ...state,
+      status: "doc_ready",
+      prdDocument: { ...document, status: "ready" },
+    });
+
+    await service.publishAppliedArtifacts({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      runId: "run-first",
+      commitToken: "lease-first",
+      qaReportId: "qa-first",
+      applied: { prdDocument: document, state, publishFence: fence },
+      runResult: { status: "success" },
+      outputSummary: "首份 PRD 已生成",
+    });
+
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: "conversation-1",
+        currentDesignStateId: null,
+      }),
+      data: expect.objectContaining({
+        currentDesignStateId: "state-1",
+        currentPrdDocumentId: "prd-1",
+        currentPrototypeArtifactId: null,
+        latestQaReportId: "qa-first",
+      }),
+    });
+  });
 });
 
 function finalAction(overrides: Partial<DeerFlowFinalAction>): DeerFlowFinalAction {
@@ -795,6 +1081,18 @@ function fullPrototypeHtml(extraBody = "") {
     "</body>",
     "</html>",
   ].join("");
+}
+
+function basePublishFence(overrides: Record<string, unknown> = {}) {
+  return {
+    currentDesignStateId: "state-current",
+    currentDesignStateVersion: 2,
+    currentDesignStateUpdatedAt: "2026-06-20T07:00:00.000Z",
+    currentPrdDocumentId: null,
+    currentPrototypeArtifactId: null,
+    latestQaReportId: null,
+    ...overrides,
+  };
 }
 
 function baseState(overrides: Record<string, unknown> = {}) {

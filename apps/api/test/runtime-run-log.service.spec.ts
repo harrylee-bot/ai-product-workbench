@@ -6,6 +6,7 @@ describe("RuntimeRunLogService", () => {
   const prisma = {
     runtimeRunLog: {
       create: vi.fn(),
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
@@ -16,6 +17,8 @@ describe("RuntimeRunLogService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    prisma.runtimeRunLog.findFirst.mockResolvedValue(null);
+    prisma.runtimeRunLog.updateMany.mockResolvedValue({ count: 0 });
   });
 
   it("creates a running run with summarized input and trace id", async () => {
@@ -25,6 +28,7 @@ describe("RuntimeRunLogService", () => {
       conversationId: "conversation-1",
       userId: "user-1",
       userInput: `  ${"生成签到活动 ".repeat(300)}  `,
+      requestId: "message-1",
     });
 
     expect(prisma.runtimeRunLog.create).toHaveBeenCalledWith({
@@ -32,11 +36,49 @@ describe("RuntimeRunLogService", () => {
         conversationId: "conversation-1",
         userId: "user-1",
         status: RuntimeRunStatus.running,
+        requestId: "message-1",
+        leaseToken: expect.any(String),
+        heartbeatAt: expect.any(Date),
+        leaseExpiresAt: expect.any(Date),
         traceId: expect.any(String),
         inputSummary: expect.stringMatching(/^生成签到活动/),
       }),
     });
     expect(prisma.runtimeRunLog.create.mock.calls[0][0].data.inputSummary.length).toBeLessThanOrEqual(2003);
+  });
+
+  it("rejects an idempotent retry before creating another run", async () => {
+    prisma.runtimeRunLog.findFirst.mockResolvedValue({
+      id: "run-existing",
+      status: RuntimeRunStatus.succeeded,
+    });
+
+    await expect(service.createRun({
+      conversationId: "conversation-1",
+      userId: "user-1",
+      userInput: "生成 PRD",
+      requestId: "message-1",
+    })).rejects.toMatchObject({ status: 409 });
+
+    expect(prisma.runtimeRunLog.create).not.toHaveBeenCalled();
+  });
+
+  it("renews only the matching running lease", async () => {
+    prisma.runtimeRunLog.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(service.renewLease("run-1", "lease-1")).resolves.toBe(true);
+
+    expect(prisma.runtimeRunLog.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "run-1",
+        status: RuntimeRunStatus.running,
+        leaseToken: "lease-1",
+      },
+      data: {
+        heartbeatAt: expect.any(Date),
+        leaseExpiresAt: expect.any(Date),
+      },
+    });
   });
 
   it("atomically completes only running runs and records duration/result", async () => {

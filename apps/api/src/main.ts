@@ -25,22 +25,23 @@ function enforceHttpsInProduction(request: Request, response: Response, next: Ne
     return;
   }
 
-  const forwardedProto = String(request.headers["x-forwarded-proto"] ?? "")
-    .split(",")
-    .at(0)
-    ?.trim()
-    .toLowerCase();
-  if (request.secure || forwardedProto === "https") {
+  if (request.secure) {
     next();
     return;
   }
 
-  if (request.method === "GET" || request.method === "HEAD") {
-    response.redirect(308, `https://${request.headers.host ?? ""}${request.originalUrl}`);
-    return;
-  }
-
   response.status(403).json({ statusCode: 403, message: "HTTPS_REQUIRED", error: "Forbidden" });
+}
+
+function trustedProxySetting(): false | string[] {
+  const configured = process.env.TRUST_PROXY?.trim();
+  if (!configured || configured.toLowerCase() === "false") return false;
+  if (configured === "*" || configured.toLowerCase() === "true") {
+    throw new Error("TRUST_PROXY must name trusted proxy addresses or subnets; wildcard trust is not allowed.");
+  }
+  const entries = configured.split(",").map((item) => item.trim()).filter(Boolean);
+  if (!entries.length) return false;
+  return entries;
 }
 
 async function bootstrap() {
@@ -48,7 +49,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  app.set("trust proxy", 1);
+  app.set("trust proxy", trustedProxySetting());
   app.setGlobalPrefix("api");
   app.use(cookieParser());
   app.use(enforceHttpsInProduction);
@@ -105,7 +106,9 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(Number(process.env.API_PORT ?? 4000));
+  const port = Number(process.env.API_PORT ?? 4000);
+  const host = process.env.API_HOST?.trim() || "127.0.0.1";
+  await app.listen(port, host);
 }
 
 void bootstrap();

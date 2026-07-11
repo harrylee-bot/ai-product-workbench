@@ -5,6 +5,7 @@ import { KnowledgeModule } from "../knowledge/knowledge.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { MessageService } from "../conversations/message.service";
 import { RuntimeRunLogService } from "./runtime-run-log.service";
+import { RuntimeModelPolicyService } from "./runtime-model-policy.service";
 import { DocumentCanvasService } from "./document-canvas.service";
 import { ConversationExportController } from "./export.controller";
 import { ExportService } from "./export.service";
@@ -75,6 +76,7 @@ import { AichatStreamService } from "./aichat/aichat-stream.service";
     ExternalResearchService,
     FinalActionApplierService,
     RuntimeRunLogService,
+    RuntimeModelPolicyService,
     ConversationDesignStateService,
     DocumentCanvasService,
     RequirementDocumentService,
@@ -94,6 +96,7 @@ import { AichatStreamService } from "./aichat/aichat-stream.service";
     ExternalResearchService,
     FinalActionApplierService,
     RuntimeRunLogService,
+    RuntimeModelPolicyService,
   ],
 })
 export class AiModule {}

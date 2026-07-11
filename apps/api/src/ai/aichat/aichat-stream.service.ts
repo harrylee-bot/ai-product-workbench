@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { KnowledgeType, MessageType, Prisma, type RuntimeRunLog } from "@prisma/client";
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
+import { KnowledgeType, MessageType, ModelTaskType, Prisma, type RuntimeRunLog } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { Response } from "express";
 import { createUIMessageStream, pipeUIMessageStreamToResponse } from "ai";
@@ -24,6 +24,7 @@ import {
 import { ExternalResearchService, type ExternalResearchContext } from "../external-research.service";
 import { QaService } from "../qa.service";
 import { RuntimeRunLogService } from "../runtime-run-log.service";
+import { RuntimeModelPolicyService } from "../runtime-model-policy.service";
 import { toInputJson } from "../ai-vibe.helpers";
 import type { QACheckType, QAReport } from "../ai-vibe.types";
 import { classifyRequirementMode, type RequirementMode } from "../requirement-mode.helper";
@@ -42,8 +43,10 @@ import {
   emitStaticText,
   finishReasoning,
   finishText,
+  getPersistedToolParts,
   recordToolInputAvailable,
   recordToolOutputAvailable,
+  type PersistedToolPart,
   runtimeEventsFromDeerFlow,
   type RuntimeProcessEvent,
   type RuntimeProcessSnapshot,
@@ -71,6 +74,7 @@ export class AichatStreamService {
     private readonly knowledgeRetrieval: KnowledgeRetrievalService,
     private readonly files: FileAssetService,
     private readonly externalResearch: ExternalResearchService,
+    @Optional() private readonly runtimeModelPolicy?: RuntimeModelPolicyService,
   ) {}
 
   /**
@@ -88,7 +92,12 @@ export class AichatStreamService {
     const runtimeContent = forceCanvasDocument
       ? buildCanvasDocumentRuntimePrompt(userContent)
       : userContent;
-    const selectedModelName = resolveSelectedRuntimeModelName(dto.selectedChatModel);
+    const selectedModelName = this.runtimeModelPolicy
+      ? await this.runtimeModelPolicy.resolve({
+          selectedModelId: dto.selectedChatModel,
+          taskType: runtimeModelTaskType(runtimeContent),
+        })
+      : resolveSelectedRuntimeModelName(dto.selectedChatModel);
 
     // b) 新对话页的 id 来自前端临时 UUID；首条消息到达时在后端落成真实会话。
     const session = await this.conversations.getOrCreateInternal(
@@ -102,23 +111,43 @@ export class AichatStreamService {
     const fileIds = [...new Set(fileParts.map((part) => part.fileId))];
     const attachmentFiles = await this.files.getRuntimeAttachmentFiles(fileIds, conversationId);
 
-    // c) 持久化用户消息
-    const userMessage = await this.messages.createUserMessage({
-      conversationId,
-      userId: user.id,
-      content: userContent,
-      attachments: fileParts.length ? toInputJson(fileParts) : undefined,
-      metadata: toInputJson({
-        source: "aichat",
-        selectedChatModel: dto.selectedChatModel,
-        selectedModelName,
-        selectedArtifactMode: forceCanvasDocument ? "canvas" : "chat",
-      }),
-    });
-    await this.files.attachFilesToMessage(fileIds, userMessage.id, conversationId);
-
     if (!this.deerFlow.isEnabled()) {
       throw new BadRequestException("DeerFlow 未启用，无法生成回复。");
+    }
+
+    // Reserve the durable run before writing the user message. The database
+    // unique guards make retries and concurrent turns side-effect free.
+    const run = await this.runLogs.createRun({
+      conversationId,
+      userId: user.id,
+      userInput: userContent,
+      requestId: dto.requestId ?? dto.message?.id,
+    });
+    const commitToken = run.leaseToken;
+    if (!commitToken) {
+      await this.runLogs.failRun(run.id, new Error("RUN_LEASE_TOKEN_MISSING"));
+      throw new Error("RUN_LEASE_TOKEN_MISSING");
+    }
+
+    try {
+      const userMessage = await this.messages.createUserMessage({
+        conversationId,
+        userId: user.id,
+        content: userContent,
+        attachments: fileParts.length ? toInputJson(fileParts) : undefined,
+        metadata: toInputJson({
+          source: "aichat",
+          requestId: dto.requestId ?? dto.message?.id,
+          selectedChatModel: dto.selectedChatModel,
+          selectedModelName,
+          selectedArtifactMode: forceCanvasDocument ? "canvas" : "chat",
+        }),
+        relatedRunId: run.id,
+      });
+      await this.files.attachFilesToMessage(fileIds, userMessage.id, conversationId);
+    } catch (error) {
+      await this.runLogs.failRun(run.id, error, commitToken).catch(() => undefined);
+      throw error;
     }
 
     // d) 构建 UIMessageStream
@@ -126,12 +155,12 @@ export class AichatStreamService {
       execute: async ({ writer }) => {
         const ctx = createBridgeContext();
         let deliveredUserVisibleResult = false;
-        const run = await this.runLogs.createRun({
-          conversationId,
-          userId: user.id,
-          userInput: userContent,
-        });
         const controller = new AbortController();
+        const stopLeaseHeartbeat = this.startRunLeaseHeartbeat(
+          run.id,
+          commitToken,
+          controller,
+        );
         this.activeRunControllers.set(run.id, controller);
         this.activeRunConversationIds.set(run.id, conversationId);
         this.activeConversationControllers.set(conversationId, controller);
@@ -154,6 +183,7 @@ export class AichatStreamService {
           runId: run.id,
           getContent: () => ctx.textBuffer.trim(),
           getRuntimeEvents: () => runtimeEvents,
+          getToolParts: () => getPersistedToolParts(ctx),
         });
         const recordRuntimeEvent = (eventType: string, payload: unknown) => {
           void this.runLogs.recordStreamEvent({
@@ -229,6 +259,7 @@ export class AichatStreamService {
               run.id,
               { status: "success", handledBy: "listKnowledgeBase" },
               "已返回知识库真实列表",
+              commitToken,
             );
             publishRuntimeFinish("succeeded");
             streamWriter.write({ type: "finish" });
@@ -406,6 +437,7 @@ export class AichatStreamService {
                 conversationId,
                 userId: user.id,
                 runId: run.id,
+                commitToken,
                 finalAction,
                 artifacts,
                 assistantText,
@@ -444,19 +476,75 @@ export class AichatStreamService {
             }
           }
 
+          let artifactQaReport: QAReport | undefined;
+          let artifactChatMessage: string | undefined;
+          if (applied.prdDocument || applied.prototypeArtifact) {
+            try {
+              artifactQaReport = applied.prdDocument && applied.prototypeArtifact
+                ? await this.qaService.runForConversation(conversationId, user.id, {
+                    trigger: "initial_generation",
+                    runId: run.id,
+                    prdDocument: applied.prdDocument,
+                    prototypeArtifact: applied.prototypeArtifact,
+                    conversationDesignState: applied.state,
+                    deferLatest: true,
+                  })
+                : applied.prdDocument
+                  ? await this.qaService.runForConversation(conversationId, user.id, {
+                      trigger: "initial_generation",
+                      runId: run.id,
+                      prdDocument: applied.prdDocument,
+                      checkTypes: PRD_GENERATION_QA_CHECK_TYPES,
+                      conversationDesignState: applied.state,
+                      deferLatest: true,
+                    })
+                  : await this.qaService.runForConversation(conversationId, user.id, {
+                      trigger: "initial_generation",
+                      runId: run.id,
+                      prototypeArtifact: applied.prototypeArtifact,
+                      conversationDesignState: applied.state,
+                      deferLatest: true,
+                    });
+              assertGeneratedArtifactQaPassed(artifactQaReport);
+              artifactChatMessage = formatArtifactReadyMessage({
+                prdTitle: applied.prdDocument?.title,
+                prototypeTitle: applied.prototypeArtifact?.title,
+                qaReport: artifactQaReport,
+              });
+              applied = await this.finalActionApplier.publishAppliedArtifacts({
+                conversationId,
+                userId: user.id,
+                runId: run.id,
+                commitToken,
+                qaReportId: artifactQaReport.id,
+                applied,
+                outputSummary: artifactChatMessage,
+                runResult: {
+                  status: "success",
+                  threadId: result.threadId,
+                  finalActionType: finalAction.type,
+                  prdDocumentId: applied.prdDocument?.id,
+                  prototypeArtifactId: applied.prototypeArtifact?.id,
+                  qaReportId: artifactQaReport.id,
+                },
+              });
+            } catch (error) {
+              await this.finalActionApplier.rejectAppliedArtifacts({
+                runId: run.id,
+                applied,
+                error,
+              }).catch((rejectError) => {
+                this.logger.error(
+                  `拒绝未发布产物失败 runId=${run.id}：${serializeError(rejectError)}`,
+                );
+              });
+              throw error;
+            }
+          }
+
           if (applied.prdDocument && applied.prototypeArtifact) {
-            const qaReport = await this.qaService.runForConversation(conversationId, user.id, {
-              trigger: "initial_generation",
-              runId: run.id,
-              prdDocument: applied.prdDocument,
-              prototypeArtifact: applied.prototypeArtifact,
-            });
-            assertGeneratedArtifactQaPassed(qaReport);
-            const combinedChatMessage = formatArtifactReadyMessage({
-              prdTitle: applied.prdDocument.title,
-              prototypeTitle: applied.prototypeArtifact.title,
-              qaReport,
-            });
+            const qaReport = artifactQaReport!;
+            const combinedChatMessage = artifactChatMessage!;
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
@@ -507,31 +595,10 @@ export class AichatStreamService {
               relatedPrototypeArtifactId: applied.prototypeArtifact.id,
               relatedQaReportId: qaReport.id,
             });
-            await this.completeRunBestEffort(
-              run.id,
-              {
-                status: "success",
-                threadId: result.threadId,
-                finalAction,
-                prdDocument: applied.prdDocument,
-                prototypeArtifact: applied.prototypeArtifact,
-                qaReport,
-              },
-              combinedChatMessage,
-            );
             publishRuntimeFinish("succeeded");
           } else if (applied.prdDocument) {
-            const qaReport = await this.qaService.runForConversation(conversationId, user.id, {
-              trigger: "initial_generation",
-              runId: run.id,
-              prdDocument: applied.prdDocument,
-              checkTypes: PRD_GENERATION_QA_CHECK_TYPES,
-            });
-            assertGeneratedArtifactQaPassed(qaReport);
-            const prdChatMessage = formatArtifactReadyMessage({
-              prdTitle: applied.prdDocument.title,
-              qaReport,
-            });
+            const qaReport = artifactQaReport!;
+            const prdChatMessage = artifactChatMessage!;
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
@@ -579,29 +646,10 @@ export class AichatStreamService {
               relatedPrdDocumentId: applied.prdDocument.id,
               relatedQaReportId: qaReport.id,
             });
-            await this.completeRunBestEffort(
-              run.id,
-              {
-                status: "success",
-                threadId: result.threadId,
-                finalAction,
-                prdDocument: applied.prdDocument,
-                qaReport,
-              },
-              prdChatMessage,
-            );
             publishRuntimeFinish("succeeded");
           } else if (applied.prototypeArtifact) {
-            const qaReport = await this.qaService.runForConversation(conversationId, user.id, {
-              trigger: "initial_generation",
-              runId: run.id,
-              prototypeArtifact: applied.prototypeArtifact,
-            });
-            assertGeneratedArtifactQaPassed(qaReport);
-            const prototypeChatMessage = formatArtifactReadyMessage({
-              prototypeTitle: applied.prototypeArtifact.title,
-              qaReport,
-            });
+            const qaReport = artifactQaReport!;
+            const prototypeChatMessage = artifactChatMessage!;
             publishRuntimeEvent(createRuntimeEvent({
               runId: run.id,
               id: "apply-final-action",
@@ -647,17 +695,6 @@ export class AichatStreamService {
               relatedPrototypeArtifactId: applied.prototypeArtifact.id,
               relatedQaReportId: qaReport.id,
             });
-            await this.completeRunBestEffort(
-              run.id,
-              {
-                status: "success",
-                threadId: result.threadId,
-                finalAction,
-                prototypeArtifact: applied.prototypeArtifact,
-                qaReport,
-              },
-              prototypeChatMessage,
-            );
             publishRuntimeFinish("succeeded");
           } else {
             // 无产物：把 finalAction.message 作为文本下发（若未在 chunk 流里）
@@ -690,6 +727,7 @@ export class AichatStreamService {
                 threadId: result.threadId,
               },
               message,
+              commitToken,
             );
             publishRuntimeFinish("succeeded");
           }
@@ -752,7 +790,7 @@ export class AichatStreamService {
           });
           publishRuntimeEvent(failedEvent);
           publishRuntimeFinish("failed");
-          await this.runLogs.failRun(run.id, error).catch((failError) => {
+          await this.runLogs.failRun(run.id, error, commitToken).catch((failError) => {
             this.logger.error(`aichat run 失败状态写入失败 runId=${run.id}：${serializeError(failError)}`);
           });
           if (!deliveredUserVisibleResult) {
@@ -779,6 +817,7 @@ export class AichatStreamService {
             streamWriter.write({ type: "finish", finishReason: "stop" });
           }
         } finally {
+          stopLeaseHeartbeat();
           res.off("close", markClientClosed);
           this.activeRunControllers.delete(run.id);
           this.activeRunConversationIds.delete(run.id);
@@ -814,7 +853,7 @@ export class AichatStreamService {
       if (!conversationId) {
         throw new NotFoundException("运行不存在");
       }
-      await this.conversations.get(user, conversationId).catch(() => {
+      await this.conversations.getOwnedConversation(user.id, conversationId).catch(() => {
         throw new NotFoundException("运行不存在");
       });
       directController.abort();
@@ -829,7 +868,7 @@ export class AichatStreamService {
     // 2) 否则按 conversationId 找当前运行中的 controller
     //    先校验会话归属，再取映射。刷新/重启后 controller 可能丢失，
     //    但 runtime-status 仍会从 DB 看到 running，所以需要兜底取消 DB 最新运行。
-    await this.conversations.get(user, conversationIdOrRunId).catch(() => {
+    await this.conversations.getOwnedConversation(user.id, conversationIdOrRunId).catch(() => {
       throw new NotFoundException("会话不存在");
     });
     const conversationController = this.activeConversationControllers.get(conversationIdOrRunId);
@@ -1036,6 +1075,7 @@ export class AichatStreamService {
     runId: string;
     getContent: () => string;
     getRuntimeEvents: () => RuntimeProcessEvent[];
+    getToolParts: () => PersistedToolPart[];
   }) {
     const thinkingMetadata = (visibleContent = input.getContent()) => {
       const metadata: Record<string, unknown> = {};
@@ -1045,8 +1085,12 @@ export class AichatStreamService {
       }
 
       const content = visibleContent.trim();
-      if (content) {
-        metadata.parts = buildPersistedAssistantParts(content);
+      const toolParts = input.getToolParts();
+      if (content || toolParts.length > 0) {
+        metadata.parts = buildPersistedAssistantParts({
+          content,
+          toolParts,
+        });
       }
 
       return metadata;
@@ -1165,16 +1209,41 @@ export class AichatStreamService {
     };
   }
 
+  private startRunLeaseHeartbeat(
+    runId: string,
+    commitToken: string,
+    controller: AbortController,
+  ) {
+    const timer = setInterval(() => {
+      void this.runLogs.renewLease(runId, commitToken).then((renewed) => {
+        if (!renewed && !controller.signal.aborted) {
+          controller.abort(new Error("RUN_LEASE_LOST"));
+        }
+      }).catch((error) => {
+        this.logger.warn(`Agent run 续租失败 runId=${runId}：${serializeError(error)}`);
+      });
+    }, readRunHeartbeatMs());
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }
+
   private async completeRunBestEffort(
     runId: string,
     result: unknown,
     outputSummary: string,
+    commitToken: string,
   ) {
     try {
-      await this.runLogs.completeRun(runId, result, outputSummary);
+      const completed = await this.runLogs.completeRun(
+        runId,
+        result,
+        outputSummary,
+        commitToken,
+      );
+      if (!completed) throw new Error("RUN_COMMIT_FENCE_REJECTED");
     } catch (error) {
       this.logger.error(`aichat run 成功状态写入失败 runId=${runId}：${serializeError(error)}`);
-      await this.runLogs.completeRun(
+      const completed = await this.runLogs.completeRun(
         runId,
         {
           status: readResultStatus(result) ?? "success",
@@ -1182,9 +1251,12 @@ export class AichatStreamService {
           warning: serializeError(error),
         },
         outputSummary,
+        commitToken,
       ).catch((fallbackError) => {
         this.logger.error(`aichat run 最小成功状态写入失败 runId=${runId}：${serializeError(fallbackError)}`);
+        return false;
       });
+      if (!completed) throw error;
     }
   }
 }
@@ -1868,17 +1940,6 @@ export function buildExternalResearchRuntimeEvent(input: {
     };
   }
 
-  if (input.context.status === "delegated_to_agent") {
-    return {
-      runId: input.runId,
-      id: "external-research-delegated",
-      kind: "knowledge" as const,
-      label: "联网资料由 Agent 按当前需求动态检索",
-      detail: "不预置任何样题来源；Agent 只在有帮助时搜索当前业务的公开资料，并保留实际使用的来源。",
-      status: "completed" as const,
-    };
-  }
-
   return {
     runId: input.runId,
     id: "external-research-unavailable",
@@ -2016,6 +2077,11 @@ export function buildArtifactRepairPrompt(
   ].join("\n");
 }
 
+function readRunHeartbeatMs() {
+  const parsed = Number(process.env.AGENT_RUN_HEARTBEAT_MS ?? 15_000);
+  return Number.isFinite(parsed) && parsed >= 5_000 ? parsed : 15_000;
+}
+
 function cleanArtifactTitle(value: string, fallback: string) {
   const line = value
     .split(/\r?\n/)
@@ -2069,6 +2135,12 @@ export function isPrototypeGenerationRequest(value: string) {
     return false;
   }
   return true;
+}
+
+function runtimeModelTaskType(value: string): ModelTaskType {
+  if (isPrototypeGenerationRequest(value)) return ModelTaskType.prototype_code_generation;
+  if (isDocumentGenerationRequest(value)) return ModelTaskType.prd_generation;
+  return ModelTaskType.conversation_design;
 }
 
 const DOCUMENT_ARTIFACT_PATTERN = "(prd|prd文档|需求文档|需求说明书|产品需求文档)";
@@ -2129,8 +2201,17 @@ function formatKnowledgeInventoryMessage(output: {
   ].join("\n");
 }
 
-function buildPersistedAssistantParts(content: string) {
-  return [{ type: "text", text: content }];
+function buildPersistedAssistantParts(input: {
+  content: string;
+  toolParts: PersistedToolPart[];
+}) {
+  const parts: unknown[] = [];
+  parts.push(...input.toolParts.map((part) => ({ ...part })));
+  const content = input.content.trim();
+  if (content) {
+    parts.push({ type: "text", text: content });
+  }
+  return parts;
 }
 
 function hasPersistableMetadata(metadata: Prisma.InputJsonValue) {

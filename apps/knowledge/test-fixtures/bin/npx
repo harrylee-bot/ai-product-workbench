@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${QUARTZ_TEST_BUILD_COUNT_FILE:?QUARTZ_TEST_BUILD_COUNT_FILE is required}"
+
+count=0
+if [ -f "$QUARTZ_TEST_BUILD_COUNT_FILE" ]; then
+  count="$(cat "$QUARTZ_TEST_BUILD_COUNT_FILE")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" > "$QUARTZ_TEST_BUILD_COUNT_FILE"
+
+active_dir="${QUARTZ_TEST_BUILD_COUNT_FILE}.active"
+owns_active=false
+if mkdir "$active_dir" 2>/dev/null; then
+  owns_active=true
+  printf '%s\n' "$$" > "$active_dir/pid"
+else
+  : > "${QUARTZ_TEST_BUILD_COUNT_FILE}.overlap"
+fi
+
+cleanup() {
+  if [ "$owns_active" = true ]; then rm -rf "$active_dir"; fi
+}
+trap cleanup EXIT
+trap 'exit 143' TERM INT
+
+directory=""
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --directory)
+      directory="$2"
+      shift 2
+      ;;
+    --output)
+      output="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+[ -n "$directory" ] && [ -n "$output" ]
+if [ -n "${QUARTZ_TEST_DELAY_FILE:-}" ] && [ -s "$QUARTZ_TEST_DELAY_FILE" ]; then
+  sleep "$(cat "$QUARTZ_TEST_DELAY_FILE")"
+fi
+mkdir -p "$output"
+if [ -n "${QUARTZ_TEST_FAIL_FILE:-}" ] && [ -e "$QUARTZ_TEST_FAIL_FILE" ]; then
+  printf 'partial build\n' > "$output/partial.txt"
+  exit 42
+fi
+
+mkdir -p "$output/static"
+printf 'body { color: black; }\n' > "$output/index.css"
+printf 'window.before = true;\n' > "$output/prescript.js"
+printf 'window.after = true;\n' > "$output/postscript.js"
+printf 'fixture-icon\n' > "$output/static/icon.png"
+printf 'fixture-og-image\n' > "$output/static/og-image.png"
+printf '<!doctype html><html><head><link href="./index.css"><script src="./prescript.js"></script><link rel="icon" href="./static/icon.png"><meta property="og:image" content="./static/og-image.png"></head><body>Build %s<script src="./postscript.js"></script></body></html>\n' "$count" > "$output/index.html"

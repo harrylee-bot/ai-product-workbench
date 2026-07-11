@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -13,21 +14,26 @@ import {
   FileChunkSourceType,
   FileParserType,
   FileStorageProvider,
+  KnowledgeSource,
+  KnowledgeStatus,
   ParseResultStatus,
   Prisma,
+  PrototypeConversionStatus,
   ConversationStatus,
   UserRole,
 } from "@prisma/client";
 import { fileTypeFromFile } from "file-type";
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { assertConversationId } from "../modules/conversation/conversation-id";
 import { PrismaService } from "../prisma/prisma.service";
 import type { ListConversationFilesQueryDto, UploadFilesDto } from "./dto";
 import { FileParserService } from "./file-parser.service";
 import type { AttachmentSummary, ParserOutput, RuntimeAttachmentFile, VisualAttachmentContext } from "./file.types";
 import { PrototypeConversionService } from "./prototype-conversion.service";
+import { assertStoragePath, resolveExistingStorageFile, resolveStoragePath } from "./storage-path";
 
 const ALLOWED_EXTENSIONS = new Set(["txt", "md", "docx", "pdf", "png", "jpg", "jpeg", "zip", "rp"]);
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg"]);
@@ -36,10 +42,14 @@ const TEXT_EXTENSIONS = new Set(["txt", "md"]);
 const MAX_FILES_PER_UPLOAD = 10;
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const DEFAULT_CHAT_ATTACHMENT_MAX_FILES = 8;
+const DEFAULT_CHAT_ATTACHMENT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 
 @Injectable()
 export class FileAssetService {
   private readonly uploadRoot: string;
+  private readonly chatAttachmentMaxFiles: number;
+  private readonly chatAttachmentMaxTotalBytes: number;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -47,9 +57,18 @@ export class FileAssetService {
     @Inject(ConfigService) configService: ConfigService,
     @Optional() private readonly prototypeConversion?: PrototypeConversionService,
   ) {
-    this.uploadRoot =
+    this.uploadRoot = path.resolve(
       configService.get<string>("FILE_UPLOAD_ROOT") ??
-      path.resolve(process.cwd(), "storage/uploads");
+      path.resolve(process.cwd(), "storage/uploads"),
+    );
+    this.chatAttachmentMaxFiles = readPositiveInteger(
+      configService.get<string>("CHAT_ATTACHMENT_MAX_FILES"),
+      DEFAULT_CHAT_ATTACHMENT_MAX_FILES,
+    );
+    this.chatAttachmentMaxTotalBytes = readPositiveInteger(
+      configService.get<string>("CHAT_ATTACHMENT_MAX_TOTAL_BYTES"),
+      DEFAULT_CHAT_ATTACHMENT_MAX_TOTAL_BYTES,
+    );
   }
 
   async uploadConversationFiles(
@@ -59,21 +78,21 @@ export class FileAssetService {
     files: Express.Multer.File[] = [],
   ) {
     if (!files.length) throw new BadRequestException("请选择要上传的文件");
-    if (files.length > MAX_FILES_PER_UPLOAD) throw new BadRequestException("单次最多上传 10 个文件");
-
-    await this.getAccessibleConversation(user, conversationId);
-
-    if (dto.conversationId && dto.conversationId !== conversationId) {
-      throw new BadRequestException("文件上传会话不一致");
-    }
-    if (dto.messageId) {
-      await this.assertMessageBelongsToConversation(dto.messageId, conversationId);
-    }
-
     const prepared: Array<{ file: Express.Multer.File; extension: string }> = [];
     const items: FileAsset[] = [];
 
     try {
+      if (files.length > MAX_FILES_PER_UPLOAD) throw new BadRequestException("单次最多上传 10 个文件");
+      assertConversationId(conversationId);
+      await this.getAccessibleConversation(user, conversationId, { requireOwner: true });
+
+      if (dto.conversationId && dto.conversationId !== conversationId) {
+        throw new BadRequestException("文件上传会话不一致");
+      }
+      if (dto.messageId) {
+        await this.assertMessageBelongsToConversation(dto.messageId, conversationId);
+      }
+
       for (const file of files) {
         const extension = this.normalizeExtension(file.originalname);
         await this.assertFileAllowed(file, extension);
@@ -97,6 +116,7 @@ export class FileAssetService {
   }
 
   async listConversationFiles(user: AuthenticatedUser, conversationId: string, query: ListConversationFilesQueryDto) {
+    assertConversationId(conversationId);
     await this.getAccessibleConversation(user, conversationId, { allowArchived: true });
     const page = Math.max(Number(query.page ?? 1), 1);
     const pageSize = Math.min(Math.max(Number(query.pageSize ?? 20), 1), 100);
@@ -177,32 +197,84 @@ export class FileAssetService {
   }
 
   async reparseFile(user: AuthenticatedUser, fileId: string) {
-    const file = await this.getAccessibleFile(user, fileId, { includeDeleted: false });
+    const file = await this.getAccessibleFile(user, fileId, { includeDeleted: false, requireOwner: true });
+    if (file.status === FileAssetStatus.parsing) {
+      throw new ConflictException("文件正在解析，请稍后再试");
+    }
 
-    const updated = await this.prisma.fileAsset.update({
-      where: { id: file.id },
+    const claimed = await this.prisma.fileAsset.updateMany({
+      where: {
+        id: file.id,
+        deletedAt: null,
+        status: { notIn: [FileAssetStatus.deleted, FileAssetStatus.parsing] },
+      },
       data: {
         status: FileAssetStatus.uploaded,
         parseError: null,
       },
     });
-    void this.parseFileInBackground(updated.id);
+    if (claimed.count !== 1) throw new ConflictException("文件正在解析或已删除，请刷新后再试");
+    const updated = await this.prisma.fileAsset.findUnique({ where: { id: file.id } });
+    if (!updated || updated.deletedAt || updated.status === FileAssetStatus.deleted) {
+      throw new NotFoundException("文件不存在");
+    }
+    void this.parseFileInBackground(file.id);
 
     return this.toFileAssetItem(updated);
   }
 
   async deleteFile(user: AuthenticatedUser, fileId: string) {
-    const file = await this.getAccessibleFile(user, fileId, { includeDeleted: false });
+    const file = await this.getAccessibleFile(user, fileId, { includeDeleted: false, requireOwner: true });
 
-    await this.prisma.fileAsset.update({
-      where: { id: file.id },
-      data: {
-        status: FileAssetStatus.deleted,
-        deletedAt: new Date(),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.fileAsset.updateMany({
+        where: {
+          id: file.id,
+          deletedAt: null,
+          status: { notIn: [FileAssetStatus.deleted, FileAssetStatus.parsing] },
+        },
+        data: {
+          status: FileAssetStatus.deleted,
+          deletedAt: new Date(),
+        },
+      });
+      if (deleted.count !== 1) {
+        throw new ConflictException("文件正在解析或已删除，暂不能清理");
+      }
+      const conversionJob = await tx.prototypeConversionJob.findUnique({
+        where: { fileAssetId: file.id },
+      });
+      if (conversionJob) {
+        const canceled = await tx.prototypeConversionJob.updateMany({
+          where: {
+            id: conversionJob.id,
+            status: { not: PrototypeConversionStatus.running },
+          },
+          data: {
+            status: PrototypeConversionStatus.canceled,
+            stage: "source_file_deleted",
+            completedAt: new Date(),
+          },
+        });
+        if (canceled.count !== 1) {
+          throw new ConflictException("原型转换进行中，暂不能删除该文件");
+        }
+      }
+      await tx.knowledgeItem.updateMany({
+        where: {
+          sourceFileId: file.id,
+          source: KnowledgeSource.file_extraction,
+          status: { in: [KnowledgeStatus.active, KnowledgeStatus.draft] },
+        },
+        data: {
+          status: KnowledgeStatus.disabled,
+          updatedBy: user.id,
+        },
+      });
     });
 
-    return { success: true };
+    const storageCleanupPending = !(await this.purgeFileStorage(file));
+    return { success: true, storageCleanupPending };
   }
 
   async attachFilesToMessage(fileIds: string[], messageId: string, conversationId: string) {
@@ -273,15 +345,43 @@ export class FileAssetService {
 
   async getRuntimeAttachmentFiles(fileIds: string[], conversationId: string): Promise<RuntimeAttachmentFile[]> {
     if (!fileIds.length) return [];
+    assertConversationId(conversationId);
+    const uniqueIds = [...new Set(fileIds)];
+    if (uniqueIds.length > this.chatAttachmentMaxFiles) {
+      throw new BadRequestException(`单次对话最多引用 ${this.chatAttachmentMaxFiles} 个附件`);
+    }
 
     const files = await this.prisma.fileAsset.findMany({
       where: {
-        id: { in: fileIds },
+        id: { in: uniqueIds },
         conversationId,
         deletedAt: null,
         status: { not: FileAssetStatus.deleted },
       },
     });
+    if (files.length !== uniqueIds.length) {
+      throw new BadRequestException("附件不存在或不属于当前会话");
+    }
+    const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes > this.chatAttachmentMaxTotalBytes) {
+      throw new BadRequestException(
+        `单次对话附件总大小不能超过 ${formatMegabytes(this.chatAttachmentMaxTotalBytes)}MB`,
+      );
+    }
+    const storageFiles = new Map<string, { path: string; size: number }>();
+    await Promise.all(files.map(async (file) => {
+      try {
+        storageFiles.set(file.id, await resolveExistingStorageFile(this.uploadRoot, file.storagePath));
+      } catch {
+        throw new BadRequestException(`附件文件不存在：${file.originalName}`);
+      }
+    }));
+    const actualTotalBytes = [...storageFiles.values()].reduce((sum, file) => sum + file.size, 0);
+    if (actualTotalBytes > this.chatAttachmentMaxTotalBytes) {
+      throw new BadRequestException(
+        `单次对话附件总大小不能超过 ${formatMegabytes(this.chatAttachmentMaxTotalBytes)}MB`,
+      );
+    }
     const order = new Map(fileIds.map((id, index) => [id, index]));
 
     return files
@@ -291,8 +391,8 @@ export class FileAssetService {
         fileName: file.originalName,
         fileType: file.extension,
         mimeType: file.mimeType,
-        size: file.size,
-        storagePath: file.storagePath,
+        size: storageFiles.get(file.id)!.size,
+        storagePath: storageFiles.get(file.id)!.path,
       }));
   }
 
@@ -305,14 +405,10 @@ export class FileAssetService {
       .find((item) => item.id === contextId);
     if (!context?.storagePath) throw new NotFoundException("视觉素材不存在");
 
-    const filePath = path.resolve(context.storagePath);
-    const uploadRoot = path.resolve(this.uploadRoot);
-    if (filePath !== uploadRoot && !filePath.startsWith(`${uploadRoot}${path.sep}`)) {
-      throw new ForbiddenException("视觉素材路径非法");
-    }
+    let filePath: string;
 
     try {
-      await access(filePath);
+      filePath = (await resolveExistingStorageFile(this.uploadRoot, context.storagePath)).path;
     } catch {
       throw new NotFoundException("视觉素材文件不存在");
     }
@@ -326,9 +422,35 @@ export class FileAssetService {
   async parseFileNow(fileId: string) {
     const file = await this.prisma.fileAsset.findUnique({ where: { id: fileId } });
     if (!file || file.deletedAt || file.status === FileAssetStatus.deleted) return null;
+    assertStoragePath(this.uploadRoot, file.storagePath);
+    const claimed = await this.prisma.fileAsset.updateMany({
+      where: {
+        id: file.id,
+        deletedAt: null,
+        status: FileAssetStatus.uploaded,
+      },
+      data: {
+        status: FileAssetStatus.parsing,
+        parseError: null,
+      },
+    });
+    if (claimed.count !== 1) return null;
 
     const output = await this.runParser(file);
     return this.saveParserOutput(file, output);
+  }
+
+  async failInterruptedParsingFiles() {
+    return this.prisma.fileAsset.updateMany({
+      where: {
+        status: FileAssetStatus.parsing,
+        deletedAt: null,
+      },
+      data: {
+        status: FileAssetStatus.parse_failed,
+        parseError: "文件解析因服务重启中断，请重新解析。",
+      },
+    });
   }
 
   private async createFileAsset(
@@ -338,41 +460,68 @@ export class FileAssetService {
     file: Express.Multer.File,
     extension: string,
   ) {
-    const uploadRoot = path.resolve(this.uploadRoot);
-    const projectDir = path.resolve(uploadRoot, conversationId);
-    if (projectDir === uploadRoot || !projectDir.startsWith(`${uploadRoot}${path.sep}`)) {
-      throw new BadRequestException("文件存储路径非法");
-    }
+    const projectDir = resolveStoragePath(this.uploadRoot, conversationId);
     const storedName = `${randomUUID()}.${extension}`;
-    const storagePath = path.join(projectDir, storedName);
+    const storagePath = resolveStoragePath(this.uploadRoot, conversationId, storedName);
     await mkdir(projectDir, { recursive: true });
     await rename(file.path, storagePath);
 
-    return this.prisma.fileAsset.create({
-      data: {
-        conversationId,
-        messageId: dto.messageId,
-        uploadedBy: user.id,
-        originalName: file.originalname,
-        storedName,
-        mimeType: file.mimetype || this.mimeFromExtension(extension),
-        extension,
-        size: file.size,
-        storageProvider: FileStorageProvider.local,
-        storagePath,
-        status: FileAssetStatus.uploaded,
-      },
-    });
+    try {
+      return await this.prisma.fileAsset.create({
+        data: {
+          conversationId,
+          messageId: dto.messageId,
+          uploadedBy: user.id,
+          originalName: file.originalname,
+          storedName,
+          mimeType: file.mimetype || this.mimeFromExtension(extension),
+          extension,
+          size: file.size,
+          storageProvider: FileStorageProvider.local,
+          storagePath,
+          status: FileAssetStatus.uploaded,
+        },
+      });
+    } catch (error) {
+      await rm(storagePath, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async cleanupFailedUpload(created: FileAsset[], files: Express.Multer.File[]) {
     await Promise.all(files.map((file) => rm(file.path, { force: true }).catch(() => undefined)));
-    await Promise.all(created.map((file) => rm(file.storagePath, { force: true }).catch(() => undefined)));
+    await Promise.all(created.map((file) =>
+      rm(assertStoragePath(this.uploadRoot, file.storagePath), { force: true }).catch(() => undefined),
+    ));
     if (created.length) {
       await this.prisma.fileAsset.deleteMany({
         where: { id: { in: created.map((file) => file.id) } },
       });
     }
+  }
+
+  private async purgeFileStorage(file: FileAsset) {
+    let targets: string[];
+    try {
+      targets = [
+        assertStoragePath(this.uploadRoot, file.storagePath),
+        resolveStoragePath(this.uploadRoot, file.conversationId, `${file.id}_extracted`),
+        resolveStoragePath(this.uploadRoot, file.conversationId, `${file.id}_axure_html`),
+      ];
+    } catch (error) {
+      console.error(`file_storage_cleanup_rejected:${file.id}`, error);
+      return false;
+    }
+
+    const results = await Promise.allSettled(
+      targets.map((target) => rm(target, { force: true, recursive: true })),
+    );
+    const failed = results.filter((result) => result.status === "rejected");
+    if (failed.length) {
+      console.error(`file_storage_cleanup_failed:${file.id}`, failed);
+      return false;
+    }
+    return true;
   }
 
   private parseFileInBackground(fileId: string) {
@@ -385,22 +534,14 @@ export class FileAssetService {
   }
 
   private async runParser(file: FileAsset): Promise<ParserOutput> {
-    await this.prisma.fileAsset.update({
-      where: { id: file.id },
-      data: {
-        status: FileAssetStatus.parsing,
-        parseError: null,
-      },
-    });
-
     try {
       return await this.parser.parse({
         fileId: file.id,
         originalName: file.originalName,
         extension: file.extension,
         mimeType: file.mimeType,
-        storagePath: file.storagePath,
-        extractDir: path.join(this.uploadRoot, file.conversationId, `${file.id}_extracted`),
+        storagePath: assertStoragePath(this.uploadRoot, file.storagePath),
+        extractDir: resolveStoragePath(this.uploadRoot, file.conversationId, `${file.id}_extracted`),
       });
     } catch (error) {
       return {
@@ -507,8 +648,9 @@ export class FileAssetService {
   private async getAccessibleConversation(
     user: AuthenticatedUser,
     conversationId: string,
-    options: { allowArchived?: boolean } = {},
+    options: { allowArchived?: boolean; requireOwner?: boolean } = {},
   ) {
+    assertConversationId(conversationId);
     const conversation = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     if (!conversation || conversation.status === ConversationStatus.deleted || conversation.deletedAt) {
       throw new NotFoundException("会话不存在");
@@ -516,7 +658,7 @@ export class FileAssetService {
     if (!options.allowArchived && conversation.status === ConversationStatus.archived) {
       throw new ForbiddenException("会话已归档，请先恢复后再上传文件");
     }
-    if (user.role !== UserRole.admin && conversation.ownerId !== user.id) {
+    if ((options.requireOwner || user.role !== UserRole.admin) && conversation.ownerId !== user.id) {
       throw new ForbiddenException("你无权访问该会话");
     }
     return conversation;
@@ -525,7 +667,7 @@ export class FileAssetService {
   private async getAccessibleFile(
     user: AuthenticatedUser,
     fileId: string,
-    options: { includeDeleted?: boolean } = {},
+    options: { includeDeleted?: boolean; requireOwner?: boolean } = {},
   ) {
     const file = await this.prisma.fileAsset.findUnique({
       where: { id: fileId },
@@ -539,7 +681,7 @@ export class FileAssetService {
     ) {
       throw new NotFoundException("文件不存在");
     }
-    if (user.role !== UserRole.admin && file.conversation.ownerId !== user.id) {
+    if ((options.requireOwner || user.role !== UserRole.admin) && file.conversation.ownerId !== user.id) {
       throw new ForbiddenException("你无权访问该文件");
     }
     return file;
@@ -639,7 +781,6 @@ export class FileAssetService {
       extension: file.extension,
       size: file.size,
       storageProvider: file.storageProvider,
-      storagePath: file.storagePath,
       publicUrl: file.publicUrl ?? undefined,
       status: file.status,
       parseError: file.parseError ?? undefined,
@@ -709,4 +850,13 @@ export class FileAssetService {
     if (normalized.length <= maxLength) return normalized;
     return `${normalized.slice(0, maxLength)}...`;
   }
+}
+
+function readPositiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function formatMegabytes(bytes: number) {
+  return Math.ceil(bytes / (1024 * 1024));
 }

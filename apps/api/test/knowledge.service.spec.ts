@@ -210,6 +210,115 @@ describe("Knowledge module services", () => {
     expect(result.references[0]?.content).toContain("线索必须包含来源渠道");
   });
 
+  it("does not turn priority and type preferences into a relevance hit", async () => {
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "unrelated-high-priority",
+        title: "每日签到强规则",
+        content: "用户每日只能签到一次。",
+        type: KnowledgeType.strong_rule,
+        priority: KnowledgePriority.high,
+        tags: ["签到"],
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      query: "深海潮汐观测预报",
+      preferredTypes: [KnowledgeType.strong_rule],
+      requirementMode: "one_sentence_completion",
+      vaultPolicy: "never",
+    });
+
+    expect(result).toMatchObject({ matchedCount: 0, selectedCount: 0, results: [], references: [] });
+    expect(prisma.knowledgeRetrievalLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        matchedKnowledgeIds: [],
+        selectedKnowledgeIds: [],
+      }),
+    });
+  });
+
+  it("does not qualify an item from one coincidental two-character body match", async () => {
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "single-common-term",
+        title: "每日签到强规则",
+        content: "活动配置状态需要保留。",
+        summary: null,
+        type: KnowledgeType.strong_rule,
+        priority: KnowledgePriority.high,
+        tags: ["签到"],
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({
+      query: "卫星状态诊断",
+      preferredTypes: [KnowledgeType.strong_rule],
+      vaultPolicy: "never",
+    });
+
+    expect(result).toMatchObject({ matchedCount: 0, selectedCount: 0, references: [] });
+  });
+
+  it("requires a semantic score to cross the eligibility threshold", async () => {
+    const embeddings = {
+      scoreItems: vi.fn()
+        .mockResolvedValueOnce(new Map([["semantic-only", 0.29]]))
+        .mockResolvedValueOnce(new Map([["semantic-only", 0.72]])),
+    };
+    const service = new KnowledgeRetrievalService(prisma as never, embeddings as never);
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "semantic-only",
+        title: "每日签到强规则",
+        content: "用户每日只能签到一次。",
+        type: KnowledgeType.strong_rule,
+        priority: KnowledgePriority.high,
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const belowThreshold = await service.search({ query: "空间光谱校准", vaultPolicy: "never" });
+    const aboveThreshold = await service.search({ query: "空间光谱校准", vaultPolicy: "never" });
+
+    expect(belowThreshold.selectedCount).toBe(0);
+    expect(aboveThreshold.references[0]?.knowledgeId).toBe("semantic-only");
+    expect(aboveThreshold.references[0]?.semanticScore).toBe(0.72);
+  });
+
+  it("falls back after irrelevant database rows and excludes draft vault documents", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "aipw-eligible-vault-"));
+    tempPaths.push(vaultRoot);
+    process.env.KNOWLEDGE_VAULT_ROOT = vaultRoot;
+    await writeVaultFile(
+      vaultRoot,
+      "02-业务域知识/潮汐观测.md",
+      "---\ntitle: 潮汐观测\nstatus: 已生效\ntags: [潮汐, 观测]\n---\n# 潮汐观测\n深海潮汐观测需要记录潮位、周期和预报误差。",
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "02-业务域知识/潮汐实验草稿.md",
+      "---\ntitle: 潮汐实验草稿\nstatus: 已生效\ndraft: true\ntags: [潮汐]\n---\n# 潮汐实验草稿\n未经确认的深海潮汐观测结论。",
+    );
+    prisma.knowledgeItem.findMany.mockResolvedValue([
+      itemRow({
+        id: "unrelated-db-row",
+        title: "每日签到强规则",
+        content: "用户每日只能签到一次。",
+        priority: KnowledgePriority.high,
+      }),
+    ]);
+    prisma.knowledgeRetrievalLog.create.mockResolvedValue({});
+
+    const result = await retrievalService.search({ query: "深海潮汐观测预报", vaultPolicy: "on_miss" });
+
+    expect(result.retrievalSource).toBe("vault_fallback");
+    expect(result.references.map((item) => item.title)).toContain("潮汐观测");
+    expect(result.references.map((item) => item.title)).not.toContain("潮汐实验草稿");
+  });
+
   it("falls back to the local Markdown knowledge vault when database knowledge misses", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "aipw-knowledge-vault-"));
     tempPaths.push(vaultRoot);

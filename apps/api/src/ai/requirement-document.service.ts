@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -61,7 +62,7 @@ export class RequirementDocumentService {
   async saveGeneratedDocument(
     state: ConversationDesignState,
     draft: RequirementDocumentDraft,
-    options: { userId: string; runId?: string; reason?: string },
+    options: { userId: string; runId?: string; reason?: string; deferPublish?: boolean },
   ) {
     return this.prisma.$transaction(async (tx) => {
       return this.saveGeneratedDocumentInTransaction(tx, state, draft, options);
@@ -72,7 +73,7 @@ export class RequirementDocumentService {
     tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
     state: ConversationDesignState,
     draft: RequirementDocumentDraft,
-    options: { userId: string; runId?: string; reason?: string },
+    options: { userId: string; runId?: string; reason?: string; deferPublish?: boolean },
   ) {
     const document = await tx.requirementDocument.create({
       data: {
@@ -80,7 +81,9 @@ export class RequirementDocumentService {
         conversationDesignStateId: state.id,
         conversationDesignStateVersion: state.version,
         title: draft.title,
-        status: RequirementDocumentStatus.ready,
+        status: options.deferPublish
+          ? RequirementDocumentStatus.generating
+          : RequirementDocumentStatus.ready,
         sections: toInputJson(draft.sections),
         assumptions: toInputJson(draft.assumptions),
         knowledgeRefs: toInputJson(draft.knowledgeRefs),
@@ -93,10 +96,12 @@ export class RequirementDocumentService {
     });
 
     const item = this.toDocumentItem(document as RequirementDocumentRecord);
-    await tx.conversation.update({
-      where: { id: state.conversationId },
-      data: { currentPrdDocumentId: document.id },
-    });
+    if (!options.deferPublish) {
+      await tx.conversation.update({
+        where: { id: state.conversationId },
+        data: { currentPrdDocumentId: document.id },
+      });
+    }
     await this.createVersion(
       item,
       options.userId,
@@ -127,23 +132,18 @@ export class RequirementDocumentService {
     const state = await this.stateService.getCurrentState(conversationId);
     const document = conversation.currentPrdDocumentId
       ? await this.prisma.requirementDocument.findFirst({
-          where: { id: conversation.currentPrdDocumentId, conversationId },
+          where: {
+            id: conversation.currentPrdDocumentId,
+            conversationId,
+            status: {
+              in: [RequirementDocumentStatus.ready, RequirementDocumentStatus.confirmed],
+            },
+          },
         })
-      : await this.prisma.requirementDocument.findFirst({
-          where: { conversationId },
-          orderBy: { updatedAt: "desc" },
-        });
+      : null;
     const item = document
       ? this.toDocumentItem(document as RequirementDocumentRecord)
       : null;
-    if (
-      !conversation.currentPrdDocumentId &&
-      state &&
-      item &&
-      !isDocumentFromCurrentState(item, state)
-    ) {
-      return { document: null, conversationDesignState: state };
-    }
     return { document: item, conversationDesignState: state ?? null };
   }
 
@@ -161,12 +161,15 @@ export class RequirementDocumentService {
     const state = await this.stateService.getCurrentState(conversationId);
     const document = conversation.currentPrdDocumentId
       ? await this.prisma.requirementDocument.findFirst({
-          where: { id: conversation.currentPrdDocumentId, conversationId },
+          where: {
+            id: conversation.currentPrdDocumentId,
+            conversationId,
+            status: {
+              in: [RequirementDocumentStatus.ready, RequirementDocumentStatus.confirmed],
+            },
+          },
         })
-      : await this.prisma.requirementDocument.findFirst({
-          where: { conversationId },
-          orderBy: { updatedAt: "desc" },
-        });
+      : null;
 
     return {
       document: document
@@ -217,31 +220,40 @@ export class RequirementDocumentService {
     });
     if (!matched) throw new NotFoundException("PRD_SECTION_NOT_FOUND");
 
-    const updated = await this.prisma.requirementDocument.update({
-      where: { id: documentId },
-      data: {
-        status: RequirementDocumentStatus.ready,
-        sections: toInputJson(sections),
-        updatedBy: user.id,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.requirementDocument.updateMany({
+        where: { id: documentId, updatedAt: current.updatedAt },
+        data: {
+          status: RequirementDocumentStatus.ready,
+          sections: toInputJson(sections),
+          updatedBy: user.id,
+        },
+      });
+      if (changed.count !== 1) {
+        throw new ConflictException("PRD_DOCUMENT_VERSION_CONFLICT：文档已被并发修改，请刷新后重试。");
+      }
+      const updated = await tx.requirementDocument.findUnique({ where: { id: documentId } });
+      if (!updated) throw new NotFoundException("PRD_DOCUMENT_NOT_FOUND");
+      const updatedDocument = this.toDocumentItem(updated as RequirementDocumentRecord);
+      const conversationDesignState = await this.stateService.syncRequirementDocumentEditInTransaction(tx, {
+        document: updatedDocument,
+        section:
+          sections.find((section) => section.id === sectionId) ??
+          updatedDocument.sections.find((section) => section.id === sectionId)!,
+        userId: user.id,
+        reason: `PRD 段落 ${sectionId} 已回流到 ConversationDesignState`,
+      });
+      const versioned = await tx.requirementDocument.findUnique({ where: { id: documentId } });
+      if (!versioned) throw new NotFoundException("PRD_DOCUMENT_NOT_FOUND");
+      const versionedDocument = this.toDocumentItem(versioned as RequirementDocumentRecord);
+      const version = await this.createVersion(
+        versionedDocument,
+        user.id,
+        `局部编辑 PRD 段落：${sectionId}`,
+        tx,
+      );
+      return { document: versionedDocument, version, conversationDesignState };
     });
-    const updatedDocument = this.toDocumentItem(
-      updated as RequirementDocumentRecord,
-    );
-    const version = await this.createVersion(
-      updatedDocument,
-      user.id,
-      `局部编辑 PRD 段落：${sectionId}`,
-    );
-    await this.stateService.syncRequirementDocumentEdit({
-      document: updatedDocument,
-      section:
-        sections.find((section) => section.id === sectionId) ??
-        updatedDocument.sections.find((section) => section.id === sectionId)!,
-      userId: user.id,
-      reason: `PRD 段落 ${sectionId} 已回流到 ConversationDesignState`,
-    });
-    return { document: updatedDocument, version };
   }
 
   async updateDocumentContentForUser(
@@ -254,34 +266,41 @@ export class RequirementDocumentService {
     const document = this.toDocumentItem(current as RequirementDocumentRecord);
     const edited = applyDocumentContentEdit(document, input.content);
 
-    const updated = await this.prisma.requirementDocument.update({
-      where: { id: documentId },
-      data: {
-        title: edited.title,
-        status: RequirementDocumentStatus.ready,
-        sections: toInputJson(edited.sections),
-        updatedBy: user.id,
-      },
-    });
-    const updatedDocument = this.toDocumentItem(
-      updated as RequirementDocumentRecord,
-    );
-    const version = await this.createVersion(
-      updatedDocument,
-      user.id,
-      "整文编辑 PRD",
-    );
-    const conversationDesignState =
-      await this.stateService.attachGeneratedArtifacts(
-        updatedDocument.conversationDesignStateId,
-        {
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.requirementDocument.updateMany({
+        where: { id: documentId, updatedAt: current.updatedAt },
+        data: {
+          title: edited.title,
+          status: RequirementDocumentStatus.ready,
+          sections: toInputJson(edited.sections),
+          updatedBy: user.id,
+        },
+      });
+      if (changed.count !== 1) {
+        throw new ConflictException("PRD_DOCUMENT_VERSION_CONFLICT：文档已被并发修改，请刷新后重试。");
+      }
+      const updated = await tx.requirementDocument.findUnique({ where: { id: documentId } });
+      if (!updated) throw new NotFoundException("PRD_DOCUMENT_NOT_FOUND");
+      const updatedDocument = this.toDocumentItem(updated as RequirementDocumentRecord);
+      const conversationDesignState =
+        await this.stateService.attachGeneratedArtifactsInTransaction(
+          tx,
+          updatedDocument.conversationDesignStateId,
+          {
           prdDocument: updatedDocument,
           status: ConversationDesignStateStatus.doc_ready,
           userId: user.id,
           reason: "整文编辑 PRD 后回流到 ConversationDesignState",
-        },
-      );
-    return { document: updatedDocument, version, conversationDesignState };
+          createVersion: false,
+          },
+        );
+      await tx.conversation.update({
+        where: { id: updatedDocument.conversationId },
+        data: { currentPrototypeArtifactId: null },
+      });
+      const version = await this.createVersion(updatedDocument, user.id, "整文编辑 PRD", tx);
+      return { document: updatedDocument, version, conversationDesignState };
+    });
   }
 
   async confirmForUser(
@@ -348,36 +367,39 @@ export class RequirementDocumentService {
     userId: string,
     reason: string,
   ) {
-    const updated =
-      current.status === RequirementDocumentStatus.confirmed
-        ? current
-        : await this.prisma.requirementDocument.update({
-            where: { id: current.id },
-            data: {
-              status: RequirementDocumentStatus.confirmed,
-              updatedBy: userId,
-            },
-          });
-    const document = this.toDocumentItem(updated as RequirementDocumentRecord);
-    const version = await this.createVersion(document, userId, reason);
-    const state = await this.stateService.getStateByIdForConversation(
-      document.conversationDesignStateId,
-      document.conversationId,
-    );
-    const status = state?.prototypeSpec
-      ? ConversationDesignStateStatus.prototype_ready
-      : ConversationDesignStateStatus.doc_confirmed;
-    const conversationDesignState =
-      await this.stateService.attachGeneratedArtifacts(
-        document.conversationDesignStateId,
-        {
-          prdDocument: document,
-          status,
-          userId,
-          reason: `${reason}，同步 PRD 确认状态到 ConversationDesignState`,
-        },
-      );
-    return { document, version, conversationDesignState };
+    return this.prisma.$transaction(async (tx) => {
+      const updated =
+        current.status === RequirementDocumentStatus.confirmed
+          ? current
+          : await tx.requirementDocument.update({
+              where: { id: current.id },
+              data: {
+                status: RequirementDocumentStatus.confirmed,
+                updatedBy: userId,
+              },
+            });
+      const document = this.toDocumentItem(updated as RequirementDocumentRecord);
+      const state = await tx.conversationDesignState.findUnique({
+        where: { id: document.conversationDesignStateId },
+      });
+      const status = state?.prototypeSpec
+        ? ConversationDesignStateStatus.prototype_ready
+        : ConversationDesignStateStatus.doc_confirmed;
+      const conversationDesignState =
+        await this.stateService.attachGeneratedArtifactsInTransaction(
+          tx,
+          document.conversationDesignStateId,
+          {
+            prdDocument: document,
+            status,
+            userId,
+            reason: `${reason}，同步 PRD 确认状态到 ConversationDesignState`,
+            createVersion: false,
+          },
+        );
+      const version = await this.createVersion(document, userId, reason, tx);
+      return { document, version, conversationDesignState };
+    });
   }
 
   async listVersionsForUser(user: AuthenticatedUser, documentId: string) {
@@ -512,16 +534,6 @@ export class RequirementDocumentService {
       updatedAt: document.updatedAt.toISOString(),
     };
   }
-}
-
-function isDocumentFromCurrentState(
-  document: RequirementDocument,
-  state: ConversationDesignState,
-) {
-  return (
-    document.conversationDesignStateId === state.id &&
-    document.conversationDesignStateVersion === state.version
-  );
 }
 
 function applyDocumentContentEdit(

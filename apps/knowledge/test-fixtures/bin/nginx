@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${QUARTZ_TEST_NGINX_PID_FILE:?QUARTZ_TEST_NGINX_PID_FILE is required}"
+printf '%s\n' "$$" > "$QUARTZ_TEST_NGINX_PID_FILE"
+trap 'exit 0' TERM INT
+while :; do
+  sleep 1
+done
