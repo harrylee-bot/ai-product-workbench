@@ -177,7 +177,15 @@ function input() {
 function adapterFor(server: Server) {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("test server did not bind TCP");
-  return new ClamAvScanAdapter("127.0.0.1", address.port, 2_000, maximumUploadByteSize);
+  return new ClamAvScanAdapter(
+    "127.0.0.1",
+    address.port,
+    2_000,
+    maximumUploadByteSize,
+    7 * 24 * 60 * 60_000,
+    undefined,
+    () => new Date("2026-07-15T00:00:00.000Z"),
+  );
 }
 
 async function scannerServer(
