@@ -1,0 +1,722 @@
+name: workbench
+
+services:
+  postgres:
+    image: ${WORKBENCH_POSTGRES_IMAGE:-pgvector/pgvector:pg16}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${WORKBENCH_POSTGRES_DB:-workbench}
+      POSTGRES_USER: ${WORKBENCH_POSTGRES_USER:-workbench}
+      POSTGRES_PASSWORD: ${WORKBENCH_POSTGRES_PASSWORD:?WORKBENCH_POSTGRES_PASSWORD is required}
+    volumes:
+      - workbench-postgres-data:/var/lib/postgresql/data
+      - ./workbench-postgres-extensions.sql:/docker-entrypoint-initdb.d/001-workbench-extensions.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [workbench-internal]
+
+  object-storage:
+    # Local-only convenience profile. MinIO is AGPL-3.0 and is not part of the
+    # default production topology; production must provide an approved S3 endpoint.
+    profiles: [local-object-storage]
+    image: ${WORKBENCH_MINIO_IMAGE:-minio/minio:RELEASE.2024-12-18T13-15-44Z}
+    restart: unless-stopped
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${WORKBENCH_MINIO_ROOT_USER:?WORKBENCH_MINIO_ROOT_USER is required for the local-object-storage profile}
+      MINIO_ROOT_PASSWORD: ${WORKBENCH_MINIO_ROOT_PASSWORD:?WORKBENCH_MINIO_ROOT_PASSWORD is required for the local-object-storage profile}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${WORKBENCH_WEB_ORIGIN:?WORKBENCH_WEB_ORIGIN is required for local object-storage CORS}
+      MINIO_API_STALE_UPLOADS_CLEANUP_INTERVAL: 1h
+      MINIO_API_STALE_UPLOADS_EXPIRY: 24h
+    ports:
+      - "${WORKBENCH_LOCAL_S3_BIND_ADDRESS:-127.0.0.1}:${WORKBENCH_LOCAL_S3_PORT:-9000}:9000"
+    volumes:
+      - workbench-object-data:/data
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [workbench-internal, workbench-ingress]
+
+  object-storage-init:
+    profiles: [local-object-storage]
+    image: ${WORKBENCH_MINIO_MC_IMAGE:-minio/mc:RELEASE.2024-11-21T17-21-54Z}
+    restart: "no"
+    depends_on:
+      object-storage:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${WORKBENCH_MINIO_ROOT_USER:?WORKBENCH_MINIO_ROOT_USER is required for the local-object-storage profile}
+      MINIO_ROOT_PASSWORD: ${WORKBENCH_MINIO_ROOT_PASSWORD:?WORKBENCH_MINIO_ROOT_PASSWORD is required for the local-object-storage profile}
+      WORKBENCH_S3_BUCKET: ${WORKBENCH_S3_BUCKET:-workbench}
+      WORKBENCH_WEB_ORIGIN: ${WORKBENCH_WEB_ORIGIN:?WORKBENCH_WEB_ORIGIN is required for local object-storage CORS}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://object-storage:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${WORKBENCH_S3_BUCKET}"
+        mc anonymous set none "local/$${WORKBENCH_S3_BUCKET}"
+        # MinIO applies browser CORS through MINIO_API_CORS_ALLOW_ORIGIN. Its
+        # local profile also expires stale multipart uploads through the
+        # MINIO_API_STALE_UPLOADS_* server settings above. External production
+        # S3 must apply workbench-s3-lifecycle.example.json independently.
+    networks: [workbench-internal]
+
+  docling:
+    profiles: [local-docling]
+    image: ${WORKBENCH_DOCLING_IMAGE:-ghcr.io/docling-project/docling-serve-cpu:v1.26.0@sha256:7e07522e0240c1db3ff5b837ffa969c2ecd5a71664c0e0369f5a69fc169e30ba}
+    restart: unless-stopped
+    init: true
+    environment:
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: 5001
+      UVICORN_WORKERS: 1
+      DOCLING_DEVICE: cpu
+      DOCLING_NUM_THREADS: 4
+      DOCLING_SERVE_LOG_FORMAT: json
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_ENABLE_MANAGEMENT_ENDPOINTS: "false"
+      DOCLING_SERVE_SHOW_VERSION_INFO: "true"
+      DOCLING_SERVE_DEBUG_ERROR_DETAILS: "false"
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "false"
+      DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS: "false"
+      DOCLING_SERVE_ALLOW_CUSTOM_VLM_CONFIG: "false"
+      DOCLING_SERVE_ALLOW_CUSTOM_PICTURE_DESCRIPTION_CONFIG: "false"
+      DOCLING_SERVE_ALLOW_CUSTOM_CODE_FORMULA_CONFIG: "false"
+      DOCLING_SERVE_SINGLE_USE_RESULTS: "false"
+      DOCLING_SERVE_MAX_DOCUMENT_TIMEOUT: 600
+      DOCLING_SERVE_MAX_NUM_PAGES: 300
+      DOCLING_SERVE_MAX_FILE_SIZE: 26214400
+      DOCLING_SERVE_ALLOWED_TARGET_TYPES: '["inbody"]'
+      DOCLING_SERVE_CORS_ORIGINS: '[]'
+      DOCLING_SERVE_CORS_METHODS: '["GET","POST"]'
+      DOCLING_SERVE_CORS_HEADERS: '["Accept","Content-Type","X-Api-Key"]'
+      DOCLING_SERVE_API_KEY: ${WORKBENCH_DOCLING_API_KEY:?WORKBENCH_DOCLING_API_KEY is required for local-docling}
+      DOCLING_SERVE_ENG_KIND: local
+      DOCLING_SERVE_ENG_LOC_NUM_WORKERS: 1
+      DOCLING_SERVE_ENG_LOC_SHARE_MODELS: "true"
+      DOCLING_SERVE_LOAD_MODELS_AT_BOOT: "true"
+      DOCLING_SERVE_SCRATCH_PATH: /tmp/docling-scratch
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=4294967296,mode=1770,uid=1001,gid=0
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/readyz', timeout=4)
+      interval: 20s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+    networks: [workbench-internal]
+
+  migrate:
+    image: ${WORKBENCH_API_MIGRATOR_IMAGE_REF:-workbench-api-migrator:local}
+    build:
+      context: ..
+      dockerfile: apps/workbench-api/Dockerfile
+      target: migrator
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE: ${WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE:-0}
+      WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    networks: [workbench-internal]
+
+  workbench-api:
+    image: ${WORKBENCH_API_IMAGE_REF:-workbench-api:local}
+    build:
+      context: ..
+      dockerfile: apps/workbench-api/Dockerfile
+      target: runner
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
+      WORKBENCH_API_HOST: 0.0.0.0
+      WORKBENCH_API_PORT: 4100
+      WORKBENCH_API_MAX_REQUEST_BYTES: ${WORKBENCH_API_MAX_REQUEST_BYTES:-2097152}
+      WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+      WORKBENCH_WEB_ORIGIN: ${WORKBENCH_WEB_ORIGIN:?WORKBENCH_WEB_ORIGIN is required}
+      WORKBENCH_INVITATION_TOKEN_SECRET: ${WORKBENCH_INVITATION_TOKEN_SECRET:?WORKBENCH_INVITATION_TOKEN_SECRET is required and must be a dedicated base64url secret of at least 32 bytes}
+      WORKBENCH_INVITATION_TOKEN_PREVIOUS_SECRETS: ${WORKBENCH_INVITATION_TOKEN_PREVIOUS_SECRETS:-}
+      WORKBENCH_INVITATION_TTL_HOURS: ${WORKBENCH_INVITATION_TTL_HOURS:-168}
+      WORKBENCH_PREVIEW_ORIGIN: ${WORKBENCH_PREVIEW_ORIGIN:?WORKBENCH_PREVIEW_ORIGIN is required and must differ from WORKBENCH_WEB_ORIGIN}
+      WORKBENCH_PREVIEW_TOKEN_SECRET: ${WORKBENCH_PREVIEW_TOKEN_SECRET:?WORKBENCH_PREVIEW_TOKEN_SECRET is required}
+      WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS: ${WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS:-3600}
+      WORKBENCH_AUTH_MODE: oidc
+      OIDC_ISSUER: ${WORKBENCH_WEB_ORIGIN:?WORKBENCH_WEB_ORIGIN is required}
+      OIDC_AUDIENCE: workbench
+      OIDC_JWKS_URL: http://workbench-web:3000/api/auth/jwks
+      DEERFLOW_LANGGRAPH_URL: ${WORKBENCH_DEERFLOW_LANGGRAPH_URL:?WORKBENCH_DEERFLOW_LANGGRAPH_URL is required}
+      DEERFLOW_GATEWAY_URL: ${WORKBENCH_DEERFLOW_GATEWAY_URL:?WORKBENCH_DEERFLOW_GATEWAY_URL is required}
+      DEERFLOW_INTERNAL_AUTH_TOKEN: ${WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN:?WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN is required}
+      DEERFLOW_MODEL_CATALOG_TIMEOUT_MS: ${WORKBENCH_DEERFLOW_MODEL_CATALOG_TIMEOUT_MS:-5000}
+      DEERFLOW_READINESS_TIMEOUT_MS: ${WORKBENCH_DEERFLOW_READINESS_TIMEOUT_MS:-5000}
+      WORKBENCH_KNOWLEDGE_TOOL_SECRET: ${WORKBENCH_KNOWLEDGE_TOOL_SECRET:?WORKBENCH_KNOWLEDGE_TOOL_SECRET is required and must be a new base64url secret of at least 32 bytes}
+      WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS: ${WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS:-900}
+      WORKBENCH_KNOWLEDGE_READINESS_TIMEOUT_MS: ${WORKBENCH_KNOWLEDGE_READINESS_TIMEOUT_MS:-4000}
+      WORKBENCH_CANVAS_TOOL_SECRET: ${WORKBENCH_CANVAS_TOOL_SECRET:?WORKBENCH_CANVAS_TOOL_SECRET is required and must be an independent base64url secret of at least 32 bytes}
+      WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS: ${WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS:-300}
+      WORKBENCH_CANVAS_COMMAND_TTL_SECONDS: ${WORKBENCH_CANVAS_COMMAND_TTL_SECONDS:-60}
+      WORKBENCH_CANVAS_INVOCATION_LEASE_SECONDS: ${WORKBENCH_CANVAS_INVOCATION_LEASE_SECONDS:-30}
+      WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_BATCH_SIZE: ${WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_BATCH_SIZE:-100}
+      WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_INTERVAL_MS: ${WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_INTERVAL_MS:-5000}
+      WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID: ${WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID:?WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID is required}
+      WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256: ${WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256:?WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256 is required}
+      WORKBENCH_TEI_URL: ${WORKBENCH_TEI_URL:?WORKBENCH_TEI_URL is required}
+      WORKBENCH_TEI_API_KEY: ${WORKBENCH_TEI_API_KEY:-}
+      WORKBENCH_TEI_IMAGE_DIGEST: ${WORKBENCH_TEI_IMAGE_DIGEST:?WORKBENCH_TEI_IMAGE_DIGEST is required}
+      WORKBENCH_TEI_REQUEST_TIMEOUT_MS: ${WORKBENCH_TEI_REQUEST_TIMEOUT_MS:-30000}
+      WORKBENCH_TEI_MAX_REQUEST_BYTES: ${WORKBENCH_TEI_MAX_REQUEST_BYTES:-8388608}
+      WORKBENCH_TEI_MAX_RESPONSE_BYTES: ${WORKBENCH_TEI_MAX_RESPONSE_BYTES:-33554432}
+      WORKBENCH_KNOWLEDGE_RERANKER_URL: ${WORKBENCH_KNOWLEDGE_RERANKER_URL:?WORKBENCH_KNOWLEDGE_RERANKER_URL is required}
+      WORKBENCH_KNOWLEDGE_RERANKER_API_KEY: ${WORKBENCH_KNOWLEDGE_RERANKER_API_KEY:-}
+      WORKBENCH_KNOWLEDGE_RERANKER_IMAGE_DIGEST: ${WORKBENCH_KNOWLEDGE_RERANKER_IMAGE_DIGEST:?WORKBENCH_KNOWLEDGE_RERANKER_IMAGE_DIGEST is required}
+      WORKBENCH_KNOWLEDGE_RERANKER_MODEL_ID: ${WORKBENCH_KNOWLEDGE_RERANKER_MODEL_ID:?WORKBENCH_KNOWLEDGE_RERANKER_MODEL_ID is required}
+      WORKBENCH_KNOWLEDGE_RERANKER_MODEL_REVISION: ${WORKBENCH_KNOWLEDGE_RERANKER_MODEL_REVISION:?WORKBENCH_KNOWLEDGE_RERANKER_MODEL_REVISION is required}
+      WORKBENCH_KNOWLEDGE_RERANKER_TEI_VERSION: ${WORKBENCH_KNOWLEDGE_RERANKER_TEI_VERSION:?WORKBENCH_KNOWLEDGE_RERANKER_TEI_VERSION is required}
+      WORKBENCH_KNOWLEDGE_RERANKER_MAX_INPUT_TOKENS: ${WORKBENCH_KNOWLEDGE_RERANKER_MAX_INPUT_TOKENS:?WORKBENCH_KNOWLEDGE_RERANKER_MAX_INPUT_TOKENS is required}
+      WORKBENCH_KNOWLEDGE_RERANKER_TIMEOUT_MS: ${WORKBENCH_KNOWLEDGE_RERANKER_TIMEOUT_MS:-30000}
+      WORKBENCH_KNOWLEDGE_RERANKER_MAX_REQUEST_BYTES: ${WORKBENCH_KNOWLEDGE_RERANKER_MAX_REQUEST_BYTES:-8388608}
+      WORKBENCH_KNOWLEDGE_RERANKER_MAX_RESPONSE_BYTES: ${WORKBENCH_KNOWLEDGE_RERANKER_MAX_RESPONSE_BYTES:-1048576}
+      WORKBENCH_S3_INTERNAL_ENDPOINT: ${WORKBENCH_S3_INTERNAL_ENDPOINT:-}
+      WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: ${WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL:?WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL is required}
+      WORKBENCH_S3_BUCKET: ${WORKBENCH_S3_BUCKET:?WORKBENCH_S3_BUCKET is required}
+      WORKBENCH_S3_REGION: ${WORKBENCH_S3_REGION:-us-east-1}
+      WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: ${WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE:-false}
+      WORKBENCH_API_STAGING_S3_ACCESS_KEY_ID: ${WORKBENCH_API_STAGING_S3_ACCESS_KEY_ID:?WORKBENCH_API_STAGING_S3_ACCESS_KEY_ID is required}
+      WORKBENCH_API_STAGING_S3_SECRET_ACCESS_KEY: ${WORKBENCH_API_STAGING_S3_SECRET_ACCESS_KEY:?WORKBENCH_API_STAGING_S3_SECRET_ACCESS_KEY is required}
+      WORKBENCH_API_READY_BLOB_S3_ACCESS_KEY_ID: ${WORKBENCH_API_READY_BLOB_S3_ACCESS_KEY_ID:?WORKBENCH_API_READY_BLOB_S3_ACCESS_KEY_ID is required}
+      WORKBENCH_API_READY_BLOB_S3_SECRET_ACCESS_KEY: ${WORKBENCH_API_READY_BLOB_S3_SECRET_ACCESS_KEY:?WORKBENCH_API_READY_BLOB_S3_SECRET_ACCESS_KEY is required}
+      WORKBENCH_FILE_PARSER: ${WORKBENCH_FILE_PARSER:-docling-serve}
+      WORKBENCH_FILE_PARSER_VERSION: ${WORKBENCH_FILE_PARSER_VERSION:-docling-serve/1.26.0+docling/2.107.0+core/2.85.0+parse/7.2.0}
+      WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION: ${WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION:-1}
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4100/api/v1/system/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 10s
+      start_period: 15s
+      retries: 4
+    networks: [workbench-internal, workbench-egress]
+
+  workbench-web:
+    image: ${WORKBENCH_WEB_IMAGE_REF:-workbench-web:local}
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      target: runner
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL: ${NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL:-}
+        NEXT_PUBLIC_WORKBENCH_FORUM_URL: ${NEXT_PUBLIC_WORKBENCH_FORUM_URL:-}
+        NEXT_PUBLIC_WORKBENCH_PRIVACY_URL: ${NEXT_PUBLIC_WORKBENCH_PRIVACY_URL:-}
+        NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED: ${WORKBENCH_PUBLIC_REGISTRATION_ENABLED:-false}
+        WORKBENCH_PREVIEW_ORIGIN: ${WORKBENCH_PREVIEW_ORIGIN:?WORKBENCH_PREVIEW_ORIGIN is required to build the Web CSP}
+        WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: ${WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL:?WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL is required to build the Web CSP}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      workbench-api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
+      WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+      WORKBENCH_DATABASE_SCHEMA: ${WORKBENCH_DATABASE_SCHEMA:-workbench}
+      WORKBENCH_AUTH_DB_POOL_MAX: ${WORKBENCH_AUTH_DB_POOL_MAX:-5}
+      WORKBENCH_AUTH_CLIENT_IP_HEADER: ${WORKBENCH_AUTH_CLIENT_IP_HEADER:?WORKBENCH_AUTH_CLIENT_IP_HEADER is required and must be x-workbench-client-ip}
+      BETTER_AUTH_URL: ${WORKBENCH_WEB_ORIGIN:?WORKBENCH_WEB_ORIGIN is required}
+      BETTER_AUTH_SECRET: ${WORKBENCH_BETTER_AUTH_SECRET:?WORKBENCH_BETTER_AUTH_SECRET is required}
+      WORKBENCH_PUBLIC_REGISTRATION_ENABLED: ${WORKBENCH_PUBLIC_REGISTRATION_ENABLED:-false}
+      WORKBENCH_OIDC_PROVIDER_ISSUER: ${WORKBENCH_OIDC_PROVIDER_ISSUER:?WORKBENCH_OIDC_PROVIDER_ISSUER is required}
+      WORKBENCH_OIDC_CLIENT_ID: ${WORKBENCH_OIDC_CLIENT_ID:?WORKBENCH_OIDC_CLIENT_ID is required}
+      WORKBENCH_OIDC_CLIENT_SECRET: ${WORKBENCH_OIDC_CLIENT_SECRET:?WORKBENCH_OIDC_CLIENT_SECRET is required}
+      WORKBENCH_API_INTERNAL_URL: http://workbench-api:4100/api/v1
+      WORKBENCH_BFF_MAX_REQUEST_BYTES: ${WORKBENCH_BFF_MAX_REQUEST_BYTES:-2097152}
+      WORKBENCH_PREVIEW_ORIGIN: ${WORKBENCH_PREVIEW_ORIGIN:?WORKBENCH_PREVIEW_ORIGIN is required to serve the Web CSP}
+      WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: ${WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL:?WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL is required to serve the Web CSP}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      start_period: 20s
+      retries: 4
+    networks: [workbench-internal, workbench-egress]
+
+  workbench-worker:
+    image: ${WORKBENCH_RUNTIME_WORKER_IMAGE_REF:-workbench-runtime-worker:local}
+    build:
+      context: ..
+      dockerfile: apps/workbench-worker/Dockerfile
+      target: runner
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
+      WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+      WORKBENCH_RUNTIME_CONCURRENCY: ${WORKBENCH_RUNTIME_CONCURRENCY:-2}
+      WORKBENCH_RUNTIME_EXECUTION_LEASE_MS: ${WORKBENCH_RUNTIME_EXECUTION_LEASE_MS:-45000}
+      WORKBENCH_RUNTIME_EXECUTION_HEARTBEAT_MS: ${WORKBENCH_RUNTIME_EXECUTION_HEARTBEAT_MS:-15000}
+      WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS: ${WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS:-5000}
+      WORKBENCH_RUNTIME_EXECUTION_RECONCILE_BATCH_SIZE: ${WORKBENCH_RUNTIME_EXECUTION_RECONCILE_BATCH_SIZE:-100}
+      DEERFLOW_LANGGRAPH_URL: ${WORKBENCH_DEERFLOW_LANGGRAPH_URL:?WORKBENCH_DEERFLOW_LANGGRAPH_URL is required}
+      DEERFLOW_GATEWAY_URL: ${WORKBENCH_DEERFLOW_GATEWAY_URL:?WORKBENCH_DEERFLOW_GATEWAY_URL is required}
+      DEERFLOW_ASSISTANT_ID: ${WORKBENCH_DEERFLOW_ASSISTANT_ID:-lead_agent}
+      DEERFLOW_INTERNAL_AUTH_TOKEN: ${WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN:?WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN is required}
+      DEERFLOW_STREAM_MODE: ${WORKBENCH_DEERFLOW_STREAM_MODE:-messages,values}
+      DEERFLOW_TIMEOUT_MS: ${WORKBENCH_DEERFLOW_TIMEOUT_MS:-600000}
+      DEERFLOW_IDLE_TIMEOUT_MS: ${WORKBENCH_DEERFLOW_IDLE_TIMEOUT_MS:-120000}
+      WORKBENCH_KNOWLEDGE_TOOL_URL: ${WORKBENCH_KNOWLEDGE_TOOL_URL:?WORKBENCH_KNOWLEDGE_TOOL_URL is required}
+      WORKBENCH_KNOWLEDGE_TOOL_SECRET: ${WORKBENCH_KNOWLEDGE_TOOL_SECRET:?WORKBENCH_KNOWLEDGE_TOOL_SECRET is required and must be a new base64url secret of at least 32 bytes}
+      WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS: ${WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS:-900}
+      WORKBENCH_CANVAS_TOOL_URL: ${WORKBENCH_CANVAS_TOOL_URL:?WORKBENCH_CANVAS_TOOL_URL is required and must be the public HTTPS Canvas capability endpoint}
+      WORKBENCH_CANVAS_VISUAL_URL: ${WORKBENCH_CANVAS_VISUAL_URL:?WORKBENCH_CANVAS_VISUAL_URL is required and must be the public HTTPS Canvas visual capability base URL}
+      WORKBENCH_CANVAS_TOOL_SECRET: ${WORKBENCH_CANVAS_TOOL_SECRET:?WORKBENCH_CANVAS_TOOL_SECRET is required and must be an independent base64url secret of at least 32 bytes}
+      WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS: ${WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS:-300}
+      WORKBENCH_S3_INTERNAL_ENDPOINT: ${WORKBENCH_S3_INTERNAL_ENDPOINT:-}
+      WORKBENCH_S3_BUCKET: ${WORKBENCH_S3_BUCKET:?WORKBENCH_S3_BUCKET is required}
+      WORKBENCH_S3_REGION: ${WORKBENCH_S3_REGION:-us-east-1}
+      WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: ${WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE:-false}
+      WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID: ${WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID:?WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID is required}
+      WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY: ${WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY:?WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY is required}
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    stop_grace_period: 45s
+    healthcheck:
+      test: [CMD, node, apps/workbench-worker/dist/healthcheck.js]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+    networks: [workbench-internal, workbench-egress]
+
+  workbench-file-worker:
+    image: ${WORKBENCH_FILE_WORKER_IMAGE_REF:-workbench-file-worker:local}
+    build:
+      context: ..
+      dockerfile: apps/workbench-file-worker/Dockerfile
+      target: runner
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
+      WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+      WORKBENCH_FILE_VERIFY_CONCURRENCY: ${WORKBENCH_FILE_VERIFY_CONCURRENCY:-2}
+      WORKBENCH_FILE_EXTRACT_CONCURRENCY: ${WORKBENCH_FILE_EXTRACT_CONCURRENCY:-1}
+      WORKBENCH_BLOB_GC_CONCURRENCY: ${WORKBENCH_BLOB_GC_CONCURRENCY:-1}
+      WORKBENCH_BLOB_GC_GRACE_MS: ${WORKBENCH_BLOB_GC_GRACE_MS:-604800000}
+      WORKBENCH_BLOB_GC_RECONCILIATION_INTERVAL_MS: ${WORKBENCH_BLOB_GC_RECONCILIATION_INTERVAL_MS:-300000}
+      WORKBENCH_BLOB_GC_BATCH_SIZE: ${WORKBENCH_BLOB_GC_BATCH_SIZE:-100}
+      WORKBENCH_KNOWLEDGE_BUILD_CONCURRENCY: ${WORKBENCH_KNOWLEDGE_BUILD_CONCURRENCY:-1}
+      WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID: ${WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID:?WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID is required}
+      WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256: ${WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256:?WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256 is required}
+      WORKBENCH_KNOWLEDGE_TOKENIZER_JSON_PATH: /models/embedding-tokenizer/tokenizer.json
+      WORKBENCH_KNOWLEDGE_TOKENIZER_CONFIG_JSON_PATH: /models/embedding-tokenizer/tokenizer_config.json
+      WORKBENCH_KNOWLEDGE_TOKENIZER_MAX_FILE_BYTES: ${WORKBENCH_KNOWLEDGE_TOKENIZER_MAX_FILE_BYTES:-134217728}
+      WORKBENCH_TEI_URL: ${WORKBENCH_TEI_URL:?WORKBENCH_TEI_URL is required}
+      WORKBENCH_TEI_API_KEY: ${WORKBENCH_TEI_API_KEY:-}
+      WORKBENCH_TEI_IMAGE_DIGEST: ${WORKBENCH_TEI_IMAGE_DIGEST:?WORKBENCH_TEI_IMAGE_DIGEST is required}
+      WORKBENCH_TEI_REQUEST_TIMEOUT_MS: ${WORKBENCH_TEI_REQUEST_TIMEOUT_MS:-30000}
+      WORKBENCH_TEI_MAX_REQUEST_BYTES: ${WORKBENCH_TEI_MAX_REQUEST_BYTES:-8388608}
+      WORKBENCH_TEI_MAX_RESPONSE_BYTES: ${WORKBENCH_TEI_MAX_RESPONSE_BYTES:-33554432}
+      WORKBENCH_KNOWLEDGE_VAULT_ROOT: /workspace/knowledge-vault
+      WORKBENCH_KNOWLEDGE_STORAGE_ROOT: /workspace/storage
+      WORKBENCH_KNOWLEDGE_MAX_ASSET_FILE_BYTES: ${WORKBENCH_KNOWLEDGE_MAX_ASSET_FILE_BYTES:-536870912}
+      WORKBENCH_KNOWLEDGE_MAX_ASSET_TOTAL_BYTES: ${WORKBENCH_KNOWLEDGE_MAX_ASSET_TOTAL_BYTES:-2147483648}
+      WORKBENCH_KNOWLEDGE_MAX_ASSETS: ${WORKBENCH_KNOWLEDGE_MAX_ASSETS:-10000}
+      WORKBENCH_FILE_SCAN_MODE: ${WORKBENCH_FILE_SCAN_MODE:-fail-closed}
+      WORKBENCH_CLAMAV_HOST: ${WORKBENCH_CLAMAV_HOST:-}
+      WORKBENCH_CLAMAV_PORT: ${WORKBENCH_CLAMAV_PORT:-3310}
+      WORKBENCH_CLAMAV_TIMEOUT_MS: ${WORKBENCH_CLAMAV_TIMEOUT_MS:-120000}
+      WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS: ${WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS:-172800000}
+      WORKBENCH_CLAMAV_STREAM_MAX_BYTES: ${WORKBENCH_CLAMAV_STREAM_MAX_BYTES:-26214400}
+      WORKBENCH_FILE_PARSER: ${WORKBENCH_FILE_PARSER:-docling-serve}
+      WORKBENCH_FILE_PARSER_VERSION: ${WORKBENCH_FILE_PARSER_VERSION:-docling-serve/1.26.0+docling/2.107.0+core/2.85.0+parse/7.2.0}
+      WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION: ${WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION:-1}
+      WORKBENCH_DOCLING_URL: ${WORKBENCH_DOCLING_URL:-http://docling:5001}
+      WORKBENCH_DOCLING_API_KEY: ${WORKBENCH_DOCLING_API_KEY:?WORKBENCH_DOCLING_API_KEY is required}
+      WORKBENCH_DOCLING_RESULTS_REPLAYABLE: ${WORKBENCH_DOCLING_RESULTS_REPLAYABLE:-false}
+      WORKBENCH_DOCLING_SUBMIT_TIMEOUT_MS: ${WORKBENCH_DOCLING_SUBMIT_TIMEOUT_MS:-120000}
+      WORKBENCH_DOCLING_POLL_TIMEOUT_MS: ${WORKBENCH_DOCLING_POLL_TIMEOUT_MS:-15000}
+      WORKBENCH_DOCLING_RESULT_RETENTION_SECONDS: ${WORKBENCH_DOCLING_RESULT_RETENTION_SECONDS:-86400}
+      WORKBENCH_DOCLING_REAPER_INTERVAL_MS: ${WORKBENCH_DOCLING_REAPER_INTERVAL_MS:-3600000}
+      WORKBENCH_DOCLING_IMAGE_DIGEST: sha256:7e07522e0240c1db3ff5b837ffa969c2ecd5a71664c0e0369f5a69fc169e30ba
+      WORKBENCH_S3_INTERNAL_ENDPOINT: ${WORKBENCH_S3_INTERNAL_ENDPOINT:-}
+      WORKBENCH_S3_BUCKET: ${WORKBENCH_S3_BUCKET:?WORKBENCH_S3_BUCKET is required}
+      WORKBENCH_S3_REGION: ${WORKBENCH_S3_REGION:-us-east-1}
+      WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: ${WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE:-false}
+      WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID: ${WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID:?WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID is required}
+      WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY: ${WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY:?WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY is required}
+    volumes:
+      - ../knowledge-vault:/workspace/knowledge-vault:ro
+      - ../storage:/workspace/storage:ro
+      - ${WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR:?WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR is required}:/models/embedding-tokenizer:ro
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    stop_grace_period: 45s
+    healthcheck:
+      test: [CMD, node, apps/workbench-file-worker/dist/healthcheck.js]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+    networks: [workbench-internal, workbench-egress]
+
+  workbench-import-worker:
+    image: ${WORKBENCH_IMPORT_WORKER_IMAGE_REF:-workbench-import-worker:local}
+    build:
+      context: ..
+      dockerfile: apps/workbench-import-worker/Dockerfile
+      target: runner
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
+      WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+      WORKBENCH_IMPORT_CONCURRENCY: ${WORKBENCH_IMPORT_CONCURRENCY:-2}
+      WORKBENCH_IMPORT_MAX_ATTEMPTS: ${WORKBENCH_IMPORT_MAX_ATTEMPTS:-3}
+      WORKBENCH_IMPORT_MAX_SOURCE_BYTES: ${WORKBENCH_IMPORT_MAX_SOURCE_BYTES:-52428800}
+      WORKBENCH_IMPORT_MAX_URL_BYTES: ${WORKBENCH_IMPORT_MAX_URL_BYTES:-10485760}
+      WORKBENCH_IMPORT_MAX_GITHUB_BYTES: ${WORKBENCH_IMPORT_MAX_GITHUB_BYTES:-52428800}
+      WORKBENCH_IMPORT_MAX_FIGMA_BYTES: ${WORKBENCH_IMPORT_MAX_FIGMA_BYTES:-26214400}
+      WORKBENCH_IMPORT_MAX_GITHUB_FILES: ${WORKBENCH_IMPORT_MAX_GITHUB_FILES:-50}
+      WORKBENCH_IMPORT_REQUEST_TIMEOUT_MS: ${WORKBENCH_IMPORT_REQUEST_TIMEOUT_MS:-30000}
+      WORKBENCH_IMPORT_MAX_REDIRECTS: ${WORKBENCH_IMPORT_MAX_REDIRECTS:-3}
+      WORKBENCH_IMPORT_STALE_RUNNING_MS: ${WORKBENCH_IMPORT_STALE_RUNNING_MS:-900000}
+      WORKBENCH_IMPORT_RECONCILE_INTERVAL_MS: ${WORKBENCH_IMPORT_RECONCILE_INTERVAL_MS:-60000}
+      WORKBENCH_IMPORT_GITHUB_TOKEN: ${WORKBENCH_IMPORT_GITHUB_TOKEN:-}
+      WORKBENCH_IMPORT_FIGMA_TOKEN: ${WORKBENCH_IMPORT_FIGMA_TOKEN:-}
+      WORKBENCH_FILE_SCAN_MODE: ${WORKBENCH_FILE_SCAN_MODE:-fail-closed}
+      WORKBENCH_CLAMAV_HOST: ${WORKBENCH_CLAMAV_HOST:-}
+      WORKBENCH_CLAMAV_PORT: ${WORKBENCH_CLAMAV_PORT:-3310}
+      WORKBENCH_CLAMAV_TIMEOUT_MS: ${WORKBENCH_CLAMAV_TIMEOUT_MS:-120000}
+      WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS: ${WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS:-172800000}
+      WORKBENCH_IMPORT_CLAMAV_STREAM_MAX_BYTES: ${WORKBENCH_IMPORT_CLAMAV_STREAM_MAX_BYTES:-52428800}
+      WORKBENCH_S3_INTERNAL_ENDPOINT: ${WORKBENCH_S3_INTERNAL_ENDPOINT:-}
+      WORKBENCH_S3_BUCKET: ${WORKBENCH_S3_BUCKET:?WORKBENCH_S3_BUCKET is required}
+      WORKBENCH_S3_REGION: ${WORKBENCH_S3_REGION:-us-east-1}
+      WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: ${WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE:-false}
+      WORKBENCH_IMPORT_S3_ACCESS_KEY_ID: ${WORKBENCH_IMPORT_S3_ACCESS_KEY_ID:?WORKBENCH_IMPORT_S3_ACCESS_KEY_ID is required}
+      WORKBENCH_IMPORT_S3_SECRET_ACCESS_KEY: ${WORKBENCH_IMPORT_S3_SECRET_ACCESS_KEY:?WORKBENCH_IMPORT_S3_SECRET_ACCESS_KEY is required}
+      WORKBENCH_IMPORT_PENDING_BLOB_PREFIX: ${WORKBENCH_IMPORT_PENDING_BLOB_PREFIX:-pending/imports}
+      WORKBENCH_CANONICAL_BLOB_PREFIX: ${WORKBENCH_CANONICAL_BLOB_PREFIX:-blobs}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 1.0
+    stop_grace_period: 45s
+    healthcheck:
+      test: [CMD, node, apps/workbench-import-worker/dist/healthcheck.js]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+    # External snapshots need controlled outbound HTTP(S). SafeHttpClient still
+    # performs DNS pinning, redirect revalidation, SSRF checks, and size limits.
+    networks: [workbench-internal, workbench-egress]
+
+  workbench-export-worker:
+    image: ${WORKBENCH_EXPORT_WORKER_IMAGE_REF:-workbench-export-worker:local}
+    build:
+      context: ..
+      dockerfile: apps/workbench-export-worker/Dockerfile
+      target: runner
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: ${OTEL_EXPORTER_OTLP_PROTOCOL:-http/protobuf}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
+      WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+      WORKBENCH_EXPORT_CONCURRENCY: ${WORKBENCH_EXPORT_CONCURRENCY:-1}
+      WORKBENCH_EXPORT_MAX_INPUT_BYTES: ${WORKBENCH_EXPORT_MAX_INPUT_BYTES:-52428800}
+      WORKBENCH_EXPORT_MAX_OUTPUT_BYTES: ${WORKBENCH_EXPORT_MAX_OUTPUT_BYTES:-52428800}
+      WORKBENCH_EXPORT_BROWSER_TIMEOUT_MS: ${WORKBENCH_EXPORT_BROWSER_TIMEOUT_MS:-20000}
+      WORKBENCH_EXPORT_RECONCILE_INTERVAL_MS: ${WORKBENCH_EXPORT_RECONCILE_INTERVAL_MS:-60000}
+      WORKBENCH_EXPORT_STALE_RUNNING_MS: ${WORKBENCH_EXPORT_STALE_RUNNING_MS:-1200000}
+      WORKBENCH_EXPORT_CHROMIUM_PATH: /usr/bin/chromium
+      WORKBENCH_S3_INTERNAL_ENDPOINT: ${WORKBENCH_S3_INTERNAL_ENDPOINT:-}
+      WORKBENCH_S3_BUCKET: ${WORKBENCH_S3_BUCKET:?WORKBENCH_S3_BUCKET is required}
+      WORKBENCH_S3_REGION: ${WORKBENCH_S3_REGION:-us-east-1}
+      WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: ${WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE:-false}
+      WORKBENCH_EXPORT_S3_ACCESS_KEY_ID: ${WORKBENCH_EXPORT_S3_ACCESS_KEY_ID:?WORKBENCH_EXPORT_S3_ACCESS_KEY_ID is required}
+      WORKBENCH_EXPORT_S3_SECRET_ACCESS_KEY: ${WORKBENCH_EXPORT_S3_SECRET_ACCESS_KEY:?WORKBENCH_EXPORT_S3_SECRET_ACCESS_KEY is required}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=268435456,mode=1770,uid=1000,gid=1000
+    pids_limit: 256
+    mem_limit: 1536m
+    cpus: 2.0
+    stop_grace_period: 45s
+    healthcheck:
+      test: [CMD, node, apps/workbench-export-worker/dist/healthcheck.js]
+      interval: 20s
+      timeout: 5s
+      start_period: 30s
+      retries: 4
+    # No egress network: production PostgreSQL and S3 endpoints must be private
+    # services reachable on workbench-internal.
+    networks: [workbench-internal]
+
+  workbench-preview:
+    image: ${WORKBENCH_PREVIEW_IMAGE_REF:-workbench-preview:local}
+    build:
+      context: ..
+      dockerfile: apps/workbench-preview/Dockerfile
+      target: runner
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+      WORKBENCH_PREVIEW_HOST: 0.0.0.0
+      WORKBENCH_PREVIEW_PORT: 4300
+      WORKBENCH_PREVIEW_ORIGIN: ${WORKBENCH_PREVIEW_ORIGIN:?WORKBENCH_PREVIEW_ORIGIN is required and must differ from WORKBENCH_WEB_ORIGIN}
+      WORKBENCH_WEB_ORIGIN: ${WORKBENCH_WEB_ORIGIN:?WORKBENCH_WEB_ORIGIN is required}
+      WORKBENCH_PREVIEW_TOKEN_SECRET: ${WORKBENCH_PREVIEW_TOKEN_SECRET:?WORKBENCH_PREVIEW_TOKEN_SECRET is required}
+      WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS: ${WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS:-3600}
+      WORKBENCH_PREVIEW_MAX_HTML_BYTES: ${WORKBENCH_PREVIEW_MAX_HTML_BYTES:-52428800}
+      WORKBENCH_PREVIEW_MAX_CONCURRENCY: ${WORKBENCH_PREVIEW_MAX_CONCURRENCY:-4}
+      WORKBENCH_PREVIEW_SPOOL_DIR: /var/lib/workbench-preview
+      WORKBENCH_S3_INTERNAL_ENDPOINT: ${WORKBENCH_S3_INTERNAL_ENDPOINT:-}
+      WORKBENCH_S3_BUCKET: ${WORKBENCH_S3_BUCKET:?WORKBENCH_S3_BUCKET is required}
+      WORKBENCH_S3_REGION: ${WORKBENCH_S3_REGION:-us-east-1}
+      WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: ${WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE:-false}
+      WORKBENCH_PREVIEW_S3_ACCESS_KEY_ID: ${WORKBENCH_PREVIEW_S3_ACCESS_KEY_ID:?WORKBENCH_PREVIEW_S3_ACCESS_KEY_ID is required}
+      WORKBENCH_PREVIEW_S3_SECRET_ACCESS_KEY: ${WORKBENCH_PREVIEW_S3_SECRET_ACCESS_KEY:?WORKBENCH_PREVIEW_S3_SECRET_ACCESS_KEY is required}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    volumes:
+      - workbench-preview-spool:/var/lib/workbench-preview
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    stop_grace_period: 20s
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4300/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      start_period: 15s
+      retries: 4
+    networks: [workbench-internal]
+
+  knowledge:
+    image: ${WORKBENCH_KNOWLEDGE_IMAGE_REF:-workbench-quartz:local}
+    build:
+      context: ..
+      dockerfile: apps/knowledge/Dockerfile
+      target: immutable-runner
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NGINX_IMAGE: ${WORKBENCH_NGINX_IMAGE:-nginx:1.27.5-alpine}
+        QUARTZ_REF: ${WORKBENCH_QUARTZ_REF:-v5.0.0}
+        QUARTZ_COMMIT: ${WORKBENCH_QUARTZ_COMMIT:-ab346fa66a895e12d63a308e70ce330ba795822a}
+        QUARTZ_BASE_URL: ${WORKBENCH_KNOWLEDGE_BASE_URL:?WORKBENCH_KNOWLEDGE_BASE_URL is required, for example workbench.example.com/knowledge}
+        KNOWLEDGE_WEB_URL: ${WORKBENCH_WEB_ORIGIN:?WORKBENCH_WEB_ORIGIN is required}
+    restart: unless-stopped
+    user: "101:101"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /var/cache/nginx:uid=101,gid=101,mode=1770
+      - /var/run:uid=101,gid=101,mode=1770
+      - /tmp:uid=101,gid=101,mode=1770
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:3000/__health]
+      interval: 20s
+      timeout: 5s
+      start_period: 15s
+      retries: 4
+    networks: [workbench-internal]
+
+  preview-gateway:
+    image: ${WORKBENCH_NGINX_IMAGE:-nginx:1.27.5-alpine}
+    restart: unless-stopped
+    user: "101:101"
+    entrypoint: [nginx, -g, daemon off;]
+    depends_on:
+      workbench-preview:
+        condition: service_healthy
+    ports:
+      # Terminate the dedicated preview hostname/TLS vhost in front of this port.
+      - 127.0.0.1:${WORKBENCH_PREVIEW_GATEWAY_PORT:-4190}:8080
+    volumes:
+      - ./workbench-preview-nginx.conf:/etc/nginx/nginx.conf:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /var/cache/nginx:uid=101,gid=101,mode=1770
+      - /var/run:uid=101,gid=101,mode=1770
+      - /tmp:uid=101,gid=101,mode=1770
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+    networks: [workbench-internal, workbench-ingress]
+
+  gateway:
+    image: ${WORKBENCH_NGINX_IMAGE:-nginx:1.27.5-alpine}
+    restart: unless-stopped
+    entrypoint: [nginx, -g, daemon off;]
+    depends_on:
+      workbench-web:
+        condition: service_healthy
+      workbench-api:
+        condition: service_healthy
+      knowledge:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:${WORKBENCH_GATEWAY_PORT:-4180}:8080
+    volumes:
+      - ./workbench-nginx.conf:/etc/nginx/nginx.conf:ro
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+    networks: [workbench-internal, workbench-ingress]
+
+volumes:
+  workbench-postgres-data:
+  workbench-object-data:
+  workbench-preview-spool:
+
+networks:
+  workbench-internal:
+    name: ${WORKBENCH_INTERNAL_NETWORK_NAME:-workbench_workbench-internal}
+    internal: true
+  # Published loopback ports need a non-internal bridge. Masquerading stays off
+  # so attaching an edge service here does not grant general Internet egress.
+  workbench-ingress:
+    driver: bridge
+    internal: false
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+  # API needs OIDC JWKS access and Worker needs DeerFlow/provider access. No
+  # service ports are published on this network.
+  workbench-egress:

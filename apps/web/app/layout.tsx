@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { MotionPreferenceProvider } from "@/components/motion-preference-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import "./globals.css";
-import { AuthProvider } from "@/lib/auth/nest-auth";
+import { WorkbenchAuthProvider } from "@/lib/auth/workbench-auth";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://aionbench.com"),
-  title: "AI Product Workbench",
+  applicationName: "产品工作台",
+  title: "产品工作台",
   description: "把产品需求、原型生成和项目知识沉淀连接起来的 AI 工作台。",
 };
 
@@ -64,11 +66,13 @@ export default function RootLayout({
           disableTransitionOnChange
           enableSystem={false}
         >
-          <Suspense fallback={null}>
-            <AuthProvider>
-              <TooltipProvider>{children}</TooltipProvider>
-            </AuthProvider>
-          </Suspense>
+          <MotionPreferenceProvider>
+            <Suspense fallback={null}>
+              <WorkbenchAuthProvider>
+                <TooltipProvider>{children}</TooltipProvider>
+              </WorkbenchAuthProvider>
+            </Suspense>
+          </MotionPreferenceProvider>
         </ThemeProvider>
       </body>
     </html>

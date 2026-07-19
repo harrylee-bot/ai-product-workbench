@@ -86,6 +86,11 @@
       "resolved": "https://github.com/quartz-community/hard-line-breaks.git",
       "commit": "0d448f38a24c568c5539ff2cd57d813293430ccd"
     },
+    "note-properties": {
+      "source": "github:quartz-community/note-properties",
+      "resolved": "https://github.com/quartz-community/note-properties.git",
+      "commit": "3cb40141e792a8a9ba9f99553cd436f36411bf8d"
+    },
     "obsidian-flavored-markdown": {
       "source": "github:quartz-community/obsidian-flavored-markdown",
       "resolved": "https://github.com/quartz-community/obsidian-flavored-markdown.git",

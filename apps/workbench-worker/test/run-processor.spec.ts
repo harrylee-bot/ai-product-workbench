@@ -1,0 +1,4199 @@
+import { boardNodeProtocol } from "@workbench/workbench-contracts";
+import {
+  boardPlacementsForArtifact,
+  canonicalJson,
+  mapRuntimeArtifactTarget,
+  mapRuntimeSources,
+  mapRuntimeDesignAssets,
+  prototypeAssetPins,
+  RunProcessor,
+  RuntimeCancelledError,
+  sha256Canonical,
+  validateRuntimeArtifactOperations,
+} from "../src/runs/run-processor.js";
+import { PrismaCanvasToolGrantIssuer } from "../src/runtime/canvas-tool-grant.service.js";
+import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
+
+const now = new Date("2026-07-12T00:00:00.000Z");
+const executionClaim = {
+  runId: "run-1",
+  attemptId: "runtime-attempt-1",
+  ownerId: "runtime-worker:test",
+  epoch: 1,
+};
+const noKnowledgeToolGrants = () => ({ issue: vi.fn(async () => null) });
+const prototypePatchCoordinator = () => ({
+  persistPatch: vi.fn(),
+  loadRunBaselinesTx: vi.fn(async () => []),
+  synchronizeCheckpointTx: vi.fn(async (_tx: unknown, input: { document: ReturnType<typeof prototypeDocument> }) => (
+    input.document.screens.map((screen) => ({
+      id: screen.id,
+      name: screen.name,
+      route: screen.route,
+      viewport: screen.viewport,
+      revision: 0,
+      checksum: prototypeScreenProjectionChecksum(input.document, screen.id, 0),
+    }))
+  )),
+  pauseRunTx: vi.fn(),
+  activateRunTx: vi.fn(),
+  discardRunTx: vi.fn(),
+  finalizeVersionTx: vi.fn(),
+});
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+  return { promise, resolve };
+}
+
+type CancellationPollerInternals = {
+  active: Map<string, AbortController>;
+  cancellationPollTimer: NodeJS.Timeout | null;
+  cancellationPollInFlight: boolean;
+  startCancellationPoller(): void;
+  pollActiveRunsForCancellation(): Promise<void>;
+};
+
+describe("RunProcessor shared cancellation poller", () => {
+  it("uses one batch query for all active Runs and aborts every matching controller", async () => {
+    const findMany = vi.fn(async () => [{ id: "run-1" }, { id: "run-2" }]);
+    const processor = new RunProcessor(
+      { run: { findMany } } as never,
+      {} as never,
+      noKnowledgeToolGrants(),
+    ) as unknown as CancellationPollerInternals;
+    const first = new AbortController();
+    const second = new AbortController();
+    processor.active.set("run-1", first);
+    processor.active.set("run-2", second);
+
+    await processor.pollActiveRunsForCancellation();
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["run-1", "run-2"] },
+        status: { in: ["cancelling", "cancelled"] },
+      },
+      select: { id: true },
+    });
+    expect(first.signal.aborted).toBe(true);
+    expect(second.signal.aborted).toBe(true);
+    expect(first.signal.reason).toBeInstanceOf(RuntimeCancelledError);
+    expect(second.signal.reason).toBeInstanceOf(RuntimeCancelledError);
+  });
+
+  it("does not overlap a slow poll and stops its timer after becoming idle", async () => {
+    const pending = deferred<Array<{ id: string }>>();
+    const findMany = vi.fn(() => pending.promise);
+    const processor = new RunProcessor(
+      { run: { findMany } } as never,
+      {} as never,
+      noKnowledgeToolGrants(),
+    ) as unknown as CancellationPollerInternals;
+    processor.active.set("run-1", new AbortController());
+    processor.startCancellationPoller();
+
+    const first = processor.pollActiveRunsForCancellation();
+    const overlapping = processor.pollActiveRunsForCancellation();
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(processor.cancellationPollInFlight).toBe(true);
+
+    processor.active.clear();
+    pending.resolve([]);
+    await Promise.all([first, overlapping]);
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(processor.cancellationPollInFlight).toBe(false);
+    expect(processor.cancellationPollTimer).toBeNull();
+  });
+});
+
+describe("Artifact Board placement", () => {
+  it("creates one durable Board node per Prototype screen", () => {
+    const placements = boardPlacementsForArtifact({
+      kind: "prototype",
+      schemaVersion: 1,
+      title: "Check-in flow",
+      citations: [],
+      operation: { kind: "create" },
+      content: prototypeDocument(),
+    });
+
+    expect(placements).toEqual([
+      {
+        key: "screen:screen-home",
+        size: { width: 390, height: 844 },
+        data: {
+          protocol: boardNodeProtocol,
+          nodeType: "artifact",
+          title: "Home",
+          artifactKind: "prototype",
+          screenId: "screen-home",
+          route: "/",
+        },
+      },
+      {
+        key: "screen:screen-success",
+        size: { width: 390, height: 844 },
+        data: {
+          protocol: boardNodeProtocol,
+          nodeType: "artifact",
+          title: "Success",
+          artifactKind: "prototype",
+          screenId: "screen-success",
+          route: "/success",
+        },
+      },
+    ]);
+  });
+
+  it("uses a stable root placement for non-screen artifacts", () => {
+    expect(boardPlacementsForArtifact({
+      kind: "document",
+      schemaVersion: 1,
+      title: "Research notes",
+      citations: [],
+      operation: { kind: "create" },
+      content: { text: "notes" },
+    })).toEqual([{
+      key: "root",
+      size: { width: 800, height: 600 },
+      data: {
+        protocol: boardNodeProtocol,
+        nodeType: "artifact",
+        title: "Research notes",
+        artifactKind: "document",
+      },
+    }]);
+  });
+});
+
+describe("Runtime Artifact target snapshots", () => {
+  it("materializes the exact inline Prototype and selected screens", () => {
+    const content = prototypeDocument();
+    const target = {
+      artifactId: "artifact-target",
+      artifactVersionId: "version-target",
+      screenIds: ["screen-home"],
+    };
+    const snapshot = mapRuntimeArtifactTarget("project-1", target, {
+      id: target.artifactVersionId,
+      artifactId: target.artifactId,
+      projectId: "project-1",
+      status: "ready",
+      schemaVersion: 1,
+      checksum: sha256Canonical(content),
+      content,
+      contentBlob: null,
+      artifact: { kind: "prototype" },
+      assets: [],
+    } as never);
+
+    expect(snapshot).toMatchObject({
+      ...target,
+      kind: "prototype",
+      content: { mode: "inline", value: content },
+    });
+  });
+
+  it("rejects forged screens and checksum drift before calling DeerFlow", () => {
+    const content = prototypeDocument();
+    const row = {
+      id: "version-target",
+      artifactId: "artifact-target",
+      projectId: "project-1",
+      status: "ready",
+      schemaVersion: 1,
+      checksum: sha256Canonical(content),
+      content,
+      contentBlob: null,
+      artifact: { kind: "prototype" },
+      assets: [],
+    };
+    expect(() => mapRuntimeArtifactTarget("project-1", {
+      artifactId: "artifact-target",
+      artifactVersionId: "version-target",
+      screenIds: ["screen-forged"],
+    }, row as never)).toThrow("RUNTIME_ARTIFACT_TARGET_SCREEN_INVALID");
+    expect(() => mapRuntimeArtifactTarget("project-1", {
+      artifactId: "artifact-target",
+      artifactVersionId: "version-target",
+      screenIds: ["screen-home"],
+    }, { ...row, checksum: "0".repeat(64) } as never)).toThrow("RUNTIME_ARTIFACT_TARGET_CHECKSUM_INVALID");
+  });
+
+  it("materializes exact pins but exposes only selected-screen asset dependencies to Generate", () => {
+    const binary = {
+      id: "hero-image",
+      kind: "image" as const,
+      name: "Hero",
+      blobId: "blob-image",
+      mediaType: "image/png" as const,
+      byteSize: 16,
+      sha256: "d".repeat(64),
+      width: 320,
+      height: 180,
+    };
+    const content = { ...prototypeDocument(), assets: [binary] };
+    const target = {
+      artifactId: "artifact-target",
+      artifactVersionId: "version-target",
+      screenIds: ["screen-home"],
+    };
+    const assetPin = {
+      artifactVersionId: target.artifactVersionId,
+      artifactId: target.artifactId,
+      projectId: "project-1",
+      assetId: binary.id,
+      kind: binary.kind,
+      blobId: binary.blobId,
+      mediaType: binary.mediaType,
+      byteSize: BigInt(binary.byteSize),
+      sha256: binary.sha256,
+      metadata: binary,
+      blob: {
+        id: binary.blobId,
+        status: "ready",
+        deletedAt: null,
+        storageKey: "tenant/private/hero",
+        mediaType: binary.mediaType,
+        byteSize: BigInt(binary.byteSize),
+        sha256: binary.sha256,
+      },
+    };
+    const row = {
+      id: target.artifactVersionId,
+      artifactId: target.artifactId,
+      projectId: "project-1",
+      status: "ready",
+      schemaVersion: 1,
+      checksum: sha256Canonical(content),
+      content,
+      contentBlob: null,
+      artifact: { kind: "prototype" },
+      assets: [assetPin],
+    };
+
+    expect(mapRuntimeArtifactTarget("project-1", target, row as never).assets).toEqual([{
+      artifactVersionId: target.artifactVersionId,
+      assetId: binary.id,
+      kind: binary.kind,
+      blobId: binary.blobId,
+      mediaType: binary.mediaType,
+      byteSize: binary.byteSize,
+      sha256: binary.sha256,
+      metadata: binary,
+      content: {
+        storageKey: "tenant/private/hero",
+        mediaType: binary.mediaType,
+        byteSize: binary.byteSize,
+        sha256: binary.sha256,
+      },
+    }]);
+    const generateSource = mapRuntimeArtifactTarget(
+      "project-1",
+      target,
+      row as never,
+      "generate-source",
+    );
+    expect(generateSource.assets).toEqual([]);
+    expect(generateSource.content).toMatchObject({
+      mode: "inline",
+      value: {
+        protocol: "workbench.prototype-source-projection.v1",
+        selectedScreenIds: ["screen-home"],
+        assets: [],
+      },
+    });
+    expect(JSON.stringify(generateSource.content)).not.toContain("screen-success");
+    expect(JSON.stringify(generateSource.content)).not.toContain(binary.blobId);
+    expect(() => mapRuntimeArtifactTarget("project-1", target, {
+      ...row,
+      assets: [],
+    } as never)).toThrow("RUNTIME_ARTIFACT_TARGET_ASSET_PIN_MISMATCH");
+    expect(() => mapRuntimeArtifactTarget("project-1", target, {
+      ...row,
+      assets: [{ ...assetPin, sha256: "e".repeat(64) }],
+    } as never)).toThrow("RUNTIME_ARTIFACT_TARGET_ASSET_SOURCE_INVALID:hero-image");
+    expect(() => mapRuntimeArtifactTarget("project-1", target, {
+      ...row,
+      assets: [{ ...assetPin, metadata: { ...binary, width: 321 } }],
+    } as never)).toThrow("RUNTIME_ARTIFACT_TARGET_ASSET_SOURCE_INVALID:hero-image");
+    expect(() => mapRuntimeArtifactTarget("project-1", target, {
+      ...row,
+      assets: [{ ...assetPin, blob: { ...assetPin.blob, deletedAt: now } }],
+    } as never)).toThrow("RUNTIME_ARTIFACT_TARGET_ASSET_SOURCE_INVALID:hero-image");
+  });
+
+  it("projects only assets actually used by the selected source screen", () => {
+    const hero = {
+      id: "hero-image",
+      kind: "image" as const,
+      name: "Hero",
+      blobId: "blob-hero",
+      mediaType: "image/png" as const,
+      byteSize: 16,
+      sha256: "d".repeat(64),
+      width: 320,
+      height: 180,
+    };
+    const unused = {
+      id: "unused-image",
+      kind: "image" as const,
+      name: "Unused",
+      blobId: "blob-unused",
+      mediaType: "image/png" as const,
+      byteSize: 32,
+      sha256: "e".repeat(64),
+      width: 640,
+      height: 360,
+    };
+    const document = {
+      ...prototypeDocument(),
+      assets: [hero, unused],
+    };
+    const homeFrame = document.nodes.find((node) => node.id === "frame-home");
+    if (!homeFrame || homeFrame.kind !== "frame") throw new Error("fixture frame missing");
+    const imageNode = {
+      id: "image-home",
+      screenId: "screen-home",
+      parentId: homeFrame.id,
+      name: "Hero image",
+      visible: true,
+      layout: homeFrame.layout,
+      style: homeFrame.style,
+      actionIds: [],
+      bindingIds: [],
+      motionIds: [],
+      kind: "image" as const,
+      assetId: hero.id,
+      fit: "cover" as const,
+      alt: "Hero",
+    };
+    document.nodes = document.nodes.map((node) => (
+      node.id === homeFrame.id
+        ? { ...node, childIds: [imageNode.id] }
+        : node
+    ));
+    document.nodes.push(imageNode);
+    const target = {
+      artifactId: "artifact-target",
+      artifactVersionId: "version-target",
+      screenIds: ["screen-home"],
+    };
+    const pin = (asset: typeof hero) => ({
+      artifactVersionId: target.artifactVersionId,
+      artifactId: target.artifactId,
+      projectId: "project-1",
+      assetId: asset.id,
+      kind: asset.kind,
+      blobId: asset.blobId,
+      mediaType: asset.mediaType,
+      byteSize: BigInt(asset.byteSize),
+      sha256: asset.sha256,
+      metadata: asset,
+      blob: {
+        id: asset.blobId,
+        status: "ready",
+        deletedAt: null,
+        storageKey: `tenant/private/${asset.id}`,
+        mediaType: asset.mediaType,
+        byteSize: BigInt(asset.byteSize),
+        sha256: asset.sha256,
+      },
+    });
+    const row = {
+      id: target.artifactVersionId,
+      artifactId: target.artifactId,
+      projectId: "project-1",
+      status: "ready",
+      schemaVersion: 1,
+      checksum: sha256Canonical(document),
+      content: document,
+      contentBlob: null,
+      artifact: { kind: "prototype" },
+      assets: [pin(hero), pin(unused)],
+    };
+
+    const projected = mapRuntimeArtifactTarget(
+      "project-1",
+      target,
+      row as never,
+      "generate-source",
+    );
+
+    expect(projected.assets.map((asset) => asset.assetId)).toEqual([hero.id]);
+    expect(projected.content).toMatchObject({
+      mode: "inline",
+      value: {
+        protocol: "workbench.prototype-source-projection.v1",
+        selectedScreenIds: ["screen-home"],
+        assets: [hero],
+      },
+    });
+    expect(JSON.stringify(projected.content)).not.toContain(unused.id);
+    expect(JSON.stringify(projected.content)).not.toContain(unused.blobId);
+  });
+});
+
+describe("Runtime Artifact publication operations", () => {
+  const target = {
+    artifactId: "artifact-target",
+    artifactVersionId: "version-target",
+    screenIds: ["screen-home"],
+  };
+  const editRequest = {
+    prompt: "Edit the selected screen",
+    modelId: "quality",
+    workflow: "edit" as const,
+    targetSurface: "app" as const,
+    designStyle: { kind: "automatic" as const },
+    sourceIds: [],
+    artifactTargets: [target],
+    requestedArtifactKinds: ["prototype" as const],
+  };
+  const revision = {
+    protocol: "workbench.runtime.result.v1" as const,
+    message: "done",
+    artifacts: [{
+      kind: "prototype" as const,
+      schemaVersion: 1 as const,
+      title: "Prototype",
+      citations: [],
+      operation: { kind: "revise" as const, target },
+      content: prototypeDocument(),
+    }],
+  };
+
+  it("requires edit results to revise every exact requested target", () => {
+    expect(() => validateRuntimeArtifactOperations(editRequest, revision)).not.toThrow();
+    expect(() => validateRuntimeArtifactOperations(editRequest, {
+      ...revision,
+      artifacts: [],
+    })).toThrow("RUNTIME_ARTIFACT_REVISION_TARGETS_INCOMPLETE");
+    expect(() => validateRuntimeArtifactOperations(editRequest, {
+      ...revision,
+      artifacts: [{
+        ...revision.artifacts[0]!,
+        operation: { kind: "revise", target: { ...target, screenIds: ["screen-success"] } },
+      }],
+    })).toThrow("RUNTIME_ARTIFACT_REVISION_TARGET_INVALID");
+  });
+
+  it("rejects revision output from non-edit workflows", () => {
+    expect(() => validateRuntimeArtifactOperations({
+      ...editRequest,
+      workflow: "generate",
+    }, revision)).toThrow("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
+  });
+});
+
+describe("Runtime Artifact revision publication", () => {
+  function revisionHarness(nextContent = {
+    ...prototypeDocument(),
+    revision: 2,
+    nodes: prototypeDocument().nodes.map((node) => (
+      node.screenId === "screen-home" ? { ...node, name: "edited-home" } : node
+    )),
+  }) {
+    const baseContent = prototypeDocument();
+    const target = {
+      artifactId: "artifact-target",
+      artifactVersionId: "version-base",
+      screenIds: ["screen-home"],
+    };
+    const tx = {
+      $queryRaw: vi.fn(async (query: unknown) => (
+        rawSqlText(query).includes('FROM "artifact_version_assets"')
+          ? []
+          : [{
+              id: target.artifactId,
+              kind: "prototype",
+              currentVersionId: target.artifactVersionId,
+            }]
+      )),
+      artifactVersion: {
+        findUnique: vi.fn(async () => ({
+          id: target.artifactVersionId,
+          artifactId: target.artifactId,
+          projectId: "project-1",
+          version: 1,
+          schemaVersion: 1,
+          status: "ready",
+          content: baseContent,
+          contentBlobId: null,
+          knowledgeReleaseId: null,
+          assets: [],
+        })),
+        findFirst: vi.fn(async () => ({
+          id: "version-next",
+          artifactId: target.artifactId,
+          projectId: "project-1",
+          version: 2,
+          schemaVersion: 1,
+          status: "staging",
+          content: nextContent,
+          contentBlobId: null,
+          checksum: sha256Canonical(nextContent),
+          citations: [],
+          runtimeDraftIndex: 0,
+          runtimeDraftTitle: "Updated prototype",
+          artifact: {
+            id: target.artifactId,
+            kind: "prototype",
+            currentVersionId: target.artifactVersionId,
+          },
+          assets: [],
+        })),
+        update: vi.fn(async () => ({ id: "version-next", artifactId: target.artifactId, version: 2 })),
+      },
+      artifactVersionAsset: { createMany: vi.fn(async () => ({ count: 0 })) },
+      artifact: { update: vi.fn(async () => ({ revision: 2 })) },
+      boardNode: {
+        findMany: vi.fn(async () => [{
+          id: "node-home",
+          data: { screenId: "screen-home" },
+        }]),
+        update: vi.fn(async () => ({})),
+      },
+    };
+    const processor = new RunProcessor(
+      {} as never,
+      {} as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    ) as unknown as ProcessorInternals;
+    const draft = {
+      kind: "prototype" as const,
+      schemaVersion: 1 as const,
+      title: "Updated prototype",
+      citations: [],
+      operation: { kind: "revise" as const, target },
+      content: nextContent,
+    };
+    return { draft, processor, target, tx };
+  }
+
+  it("promotes the staged next immutable version and advances existing Board pins", async () => {
+    const { draft, processor, target, tx } = revisionHarness();
+    await expect(processor.promoteStagedArtifactRevision(
+      tx,
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      "board-1",
+      draft,
+      0,
+    )).resolves.toEqual({ id: "version-next", artifactId: target.artifactId, version: 2 });
+    expect(tx.artifactVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-next" },
+      data: { status: "ready" },
+      select: { id: true, artifactId: true, version: true },
+    });
+    expect(tx.artifactVersion.findFirst).toHaveBeenCalledWith({
+      where: {
+        artifactId: target.artifactId,
+        createdByRunId: "run-edit",
+        runtimeDraftIndex: 0,
+        status: "staging",
+      },
+      include: { artifact: true },
+    });
+    expect(tx.artifact.update).toHaveBeenCalledWith({
+      where: { id: target.artifactId },
+      data: expect.objectContaining({ currentVersionId: "version-next", revision: { increment: 1 } }),
+    });
+    expect(tx.boardNode.update).toHaveBeenCalledWith({
+      where: { id: "node-home" },
+      data: expect.objectContaining({ artifactVersionId: "version-next" }),
+    });
+  });
+
+  it("rejects a selected-screen edit that mutates an unselected screen", async () => {
+    const changed = prototypeDocument();
+    const nextContent = {
+      ...changed,
+      revision: 2,
+      nodes: changed.nodes.map((node) => (
+        node.screenId === "screen-success" ? { ...node, name: "illegally-edited-success" } : node
+      )),
+    };
+    const { draft, processor, tx } = revisionHarness(nextContent);
+    await expect(processor.promoteStagedArtifactRevision(
+      tx,
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      "board-1",
+      draft,
+      0,
+    )).rejects.toThrow("RUNTIME_ARTIFACT_REVISION_SCOPE_VIOLATION");
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a selected-screen edit that mutates shared Prototype variables", async () => {
+    const changed = prototypeDocument();
+    const nextContent = {
+      ...changed,
+      revision: 2,
+      variables: [{ path: "theme.mode", initialValue: "light" }],
+    };
+    const { draft, processor, tx } = revisionHarness(nextContent);
+    await expect(processor.promoteStagedArtifactRevision(
+      tx,
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      "board-1",
+      draft,
+      0,
+    )).rejects.toThrow("RUNTIME_ARTIFACT_REVISION_SCOPE_VIOLATION");
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a staged revision asset is quarantined before promotion", async () => {
+    const asset = {
+      id: "hero-image",
+      kind: "image" as const,
+      name: "Hero",
+      blobId: "blob-hero",
+      mediaType: "image/png" as const,
+      byteSize: 16,
+      sha256: "d".repeat(64),
+      width: 320,
+      height: 180,
+    };
+    const baseContent = {
+      ...prototypeDocument(),
+      assets: [asset],
+    };
+    const nextContent = {
+      ...baseContent,
+      revision: 2,
+      nodes: baseContent.nodes.map((node) => (
+        node.screenId === "screen-home" ? { ...node, name: "edited-home" } : node
+      )),
+    };
+    const { draft, processor, target, tx } = revisionHarness(nextContent);
+    tx.artifactVersion.findUnique.mockResolvedValue({
+      id: target.artifactVersionId,
+      artifactId: target.artifactId,
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "ready",
+      content: baseContent,
+      contentBlobId: null,
+      knowledgeReleaseId: null,
+      assets: [],
+    });
+    tx.$queryRaw.mockImplementation(async (query: unknown) => (
+      rawSqlText(query).includes('FROM "artifact_version_assets"')
+        ? [{
+            artifactVersionId: "version-next",
+            assetId: asset.id,
+            kind: asset.kind,
+            blobId: asset.blobId,
+            mediaType: asset.mediaType,
+            byteSize: BigInt(asset.byteSize),
+            sha256: asset.sha256,
+            metadata: asset,
+            lockedBlobId: asset.blobId,
+            blobStatus: "quarantined",
+            blobDeletedAt: null,
+            blobMediaType: asset.mediaType,
+            blobByteSize: BigInt(asset.byteSize),
+            blobSha256: asset.sha256,
+          }]
+        : [{
+            id: target.artifactId,
+            kind: "prototype",
+            currentVersionId: target.artifactVersionId,
+          }]
+    ));
+
+    await expect(processor.promoteStagedArtifactRevision(
+      tx,
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      "board-1",
+      draft,
+      0,
+    )).rejects.toThrow("RUNTIME_ARTIFACT_REVISION_ASSET_INVALID");
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+    expect(tx.artifact.update).not.toHaveBeenCalled();
+    expect(tx.boardNode.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("Runtime Artifact draft staging and publication", () => {
+  const assetSha256 = "e".repeat(64);
+
+  function createDraftFixture() {
+    const asset = {
+      id: "asset-hero",
+      kind: "image" as const,
+      name: "Hero image",
+      blobId: "blob-hero",
+      mediaType: "image/png" as const,
+      byteSize: 16,
+      sha256: assetSha256,
+      width: 1200,
+      height: 800,
+    };
+    const content = { ...prototypeDocument(), assets: [asset] };
+    const draft = {
+      kind: "prototype" as const,
+      schemaVersion: 1 as const,
+      title: "Generated prototype",
+      citations: [],
+      operation: { kind: "create" as const },
+      content,
+    };
+    const event = {
+      type: "artifact.draft" as const,
+      artifactIndex: 0,
+      sourceEventId: "deerflow:draft-1",
+      draft,
+      checkpointScreens: content.screens.map(({ id }) => ({
+        screenId: id,
+        revision: 0,
+        checksum: prototypeScreenProjectionChecksum(content, id, 0),
+      })),
+    };
+    const source = {
+      position: 0,
+      blobId: asset.blobId,
+      originalName: "hero.png",
+      mediaType: asset.mediaType,
+      byteSize: asset.byteSize,
+      sha256: asset.sha256,
+      original: {
+        storageKey: "blobs/hero",
+        mediaType: asset.mediaType,
+        byteSize: asset.byteSize,
+        sha256: asset.sha256,
+      },
+      extraction: null,
+    };
+    return { asset, source, content, draft, event };
+  }
+
+  function draftStagingHarness(existing: unknown = null) {
+    const fixture = createDraftFixture();
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      id: "run-1",
+      projectId: "project-1",
+      attempt: 1,
+      request: {
+        prompt: "Build it",
+        modelId: "quality",
+        workflow: "generate",
+        generationIntent: null,
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+        sourceIds: ["file-1"],
+        artifactTargets: [],
+        requestedArtifactKinds: ["prototype"],
+      },
+      knowledgeReleaseId: "knowledge-release-1",
+    });
+    tx.runtimeAttempt.findUniqueOrThrow.mockResolvedValue({
+      id: "runtime-attempt-1",
+      runId: "run-1",
+      attempt: 1,
+      status: "running",
+    });
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "generating-ui" } },
+    ]);
+    const artifact = {
+      id: "artifact-new",
+      kind: "prototype",
+      title: fixture.draft.title,
+      currentVersionId: null,
+    };
+    const createdVersion = {
+      id: "version-staged",
+      artifactId: artifact.id,
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "staging",
+      content: fixture.content,
+      contentBlobId: null,
+      checksum: sha256Canonical(fixture.content),
+      citations: [],
+      createdByRunId: "run-1",
+      runtimeDraftSourceId: fixture.event.sourceEventId,
+      runtimeDraftIndex: 0,
+      runtimeDraftTitle: fixture.draft.title,
+      knowledgeReleaseId: "knowledge-release-1",
+      artifact,
+    };
+    Object.assign(tx, {
+      artifact: {
+        create: vi.fn(async () => artifact),
+        update: vi.fn(),
+      },
+      artifactVersion: {
+        findUnique: vi.fn(async () => existing),
+        create: vi.fn(async () => createdVersion),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...createdVersion,
+          ...(existing as Record<string, unknown> | null),
+          ...data,
+          artifact,
+        })),
+      },
+      artifactVersionAsset: {
+        createMany: vi.fn(async () => ({ count: 1 })),
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+      },
+      boardNode: { create: vi.fn() },
+    });
+    return { tx, ...processorWithTransaction(tx) };
+  }
+
+  function draftCreatedPayload(
+    draft: ReturnType<typeof createDraftFixture>["draft"],
+    {
+      artifactId = "artifact-new",
+      artifactVersionId = "version-staged",
+      attempt = 1,
+      artifactIndex = 0,
+    } = {},
+  ) {
+    return {
+      attempt,
+      artifactIndex,
+      artifactId,
+      artifactVersionId,
+      kind: draft.kind,
+      checksum: sha256Canonical(draft.content),
+      draftChecksum: sha256Canonical(draft),
+      screens: draft.content.screens.map(({ id, name, route, viewport }) => ({
+        id,
+        name,
+        route,
+        viewport,
+        revision: 0,
+        checksum: prototypeScreenProjectionChecksum(draft.content, id, 0),
+      })),
+    };
+  }
+
+  function createPublicationHarness(
+    staged: unknown,
+    existingBoardNodes: Array<{
+      position: { x: number; y: number };
+      size: { width: number; height: number } | null;
+    }> = [],
+  ) {
+    const { content, draft } = createDraftFixture();
+    const tx = eventTransaction();
+    const binaryAssets = content.assets.filter((asset) => asset.kind !== "icon");
+    tx.$queryRaw.mockImplementation(async (query: unknown) => (
+      rawSqlText(query).includes('FROM "artifact_version_assets"')
+        ? binaryAssets.map((asset) => ({
+            artifactVersionId: "version-staged",
+            assetId: asset.id,
+            kind: asset.kind,
+            blobId: asset.blobId,
+            mediaType: asset.mediaType,
+            byteSize: BigInt(asset.byteSize),
+            sha256: asset.sha256,
+            metadata: asset,
+            lockedBlobId: asset.blobId,
+            blobStatus: "ready",
+            blobDeletedAt: null,
+            blobMediaType: asset.mediaType,
+            blobByteSize: BigInt(asset.byteSize),
+            blobSha256: asset.sha256,
+          }))
+        : [{ id: "board-1", status: "running" }]
+    ));
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      id: "run-1",
+      status: "running",
+      attempt: 1,
+      projectId: "project-1",
+      knowledgeReleaseId: "knowledge-release-1",
+      request: {
+        prompt: "Build it",
+        modelId: "quality",
+        workflow: "generate",
+        generationIntent: null,
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+        sourceIds: ["file-1"],
+        artifactTargets: [],
+        requestedArtifactKinds: ["prototype"],
+      },
+    });
+    Object.assign(tx, {
+      threadEntry: { update: vi.fn(async () => ({})) },
+      board: { findUniqueOrThrow: vi.fn(async () => ({ id: "board-1" })) },
+      boardNode: {
+        findMany: vi.fn(async () => existingBoardNodes),
+        aggregate: vi.fn(async () => ({ _max: { sortOrder: null } })),
+        create: vi.fn(async () => ({})),
+      },
+      artifact: {
+        create: vi.fn(),
+        update: vi.fn(async () => ({ id: "artifact-new" })),
+      },
+      artifactVersion: {
+        findFirst: vi.fn(async () => staged),
+        create: vi.fn(),
+        update: vi.fn(async () => ({ id: "version-staged" })),
+      },
+    });
+    return { content, draft, tx, ...processorWithTransaction(tx) };
+  }
+
+  it("creates a hidden staging version, pins its assets, and emits the draft event atomically", async () => {
+    const { asset, source, content, draft, event } = createDraftFixture();
+    const { db, processor, tx } = draftStagingHarness();
+
+    await processor.persistArtifactDraft(
+      executionClaim,
+      event,
+      [source],
+      [],
+    );
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.artifact.create).toHaveBeenCalledWith({
+      data: {
+        projectId: "project-1",
+        kind: "prototype",
+        title: draft.title,
+      },
+    });
+    expect(tx.artifactVersion.create).toHaveBeenCalledWith({
+      data: {
+        artifactId: "artifact-new",
+        projectId: "project-1",
+        version: 1,
+        schemaVersion: 1,
+        status: "staging",
+        content,
+        checksum: sha256Canonical(content),
+        citations: [],
+        createdByRunId: "run-1",
+        runtimeDraftSourceId: event.sourceEventId,
+        runtimeDraftIndex: 0,
+        runtimeDraftTitle: draft.title,
+        knowledgeReleaseId: "knowledge-release-1",
+      },
+      include: {
+        artifact: {
+          select: { id: true, kind: true, title: true, currentVersionId: true },
+        },
+      },
+    });
+    expect(tx.artifactVersionAsset.createMany).toHaveBeenCalledWith({
+      data: [{
+        artifactVersionId: "version-staged",
+        artifactId: "artifact-new",
+        projectId: "project-1",
+        assetId: asset.id,
+        kind: asset.kind,
+        blobId: asset.blobId,
+        mediaType: asset.mediaType,
+        byteSize: 16n,
+        sha256: asset.sha256,
+        metadata: asset,
+      }],
+    });
+    expect(tx.artifact.update).not.toHaveBeenCalled();
+    expect(tx.boardNode.create).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: "run-1",
+        sourceId: event.sourceEventId,
+        type: "artifact.draft.created",
+        payload: {
+          attempt: 1,
+          artifactIndex: 0,
+          artifactId: "artifact-new",
+          artifactVersionId: "version-staged",
+          kind: "prototype",
+          checksum: sha256Canonical(content),
+          draftChecksum: sha256Canonical(draft),
+          screens: content.screens.map(({ id, name, route, viewport }) => ({
+            id,
+            name,
+            route,
+            viewport,
+            revision: 0,
+            checksum: prototypeScreenProjectionChecksum(content, id, 0),
+          })),
+        },
+      }),
+    });
+  });
+
+  it("authorizes a Generate create draft from independently pinned source target assets", async () => {
+    const { asset, event } = createDraftFixture();
+    const { processor, tx } = draftStagingHarness();
+    const sourceTarget = {
+      artifactId: "artifact-source",
+      artifactVersionId: "version-source",
+      screenIds: ["screen-home"],
+    };
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      id: "run-1",
+      projectId: "project-1",
+      attempt: 1,
+      request: {
+        prompt: "Generate a new Prototype from the selected screen",
+        modelId: "quality",
+        workflow: "generate",
+        generationIntent: "interactive-prototype",
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+        sourceIds: [],
+        artifactTargets: [sourceTarget],
+        requestedArtifactKinds: ["prototype"],
+      },
+      knowledgeReleaseId: "knowledge-release-1",
+    });
+    const sourceMetadata = {
+      ...asset,
+      id: "source-hero",
+      name: "Source hero",
+    };
+
+    await processor.persistArtifactDraft(
+      executionClaim,
+      event,
+      [],
+      [],
+      [{
+        ...sourceTarget,
+        kind: "prototype",
+        schemaVersion: 1,
+        checksum: sha256Canonical(prototypeDocument()),
+        content: { mode: "inline", value: prototypeDocument() },
+        assets: [{
+          artifactVersionId: sourceTarget.artifactVersionId,
+          assetId: sourceMetadata.id,
+          kind: sourceMetadata.kind,
+          blobId: sourceMetadata.blobId,
+          mediaType: sourceMetadata.mediaType,
+          byteSize: sourceMetadata.byteSize,
+          sha256: sourceMetadata.sha256,
+          metadata: sourceMetadata,
+          content: {
+            storageKey: "tenant/private/source-hero",
+            mediaType: sourceMetadata.mediaType,
+            byteSize: sourceMetadata.byteSize,
+            sha256: sourceMetadata.sha256,
+          },
+        }],
+      }],
+    );
+
+    expect(tx.artifact.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ projectId: "project-1", kind: "prototype" }),
+    });
+    expect(tx.artifactVersionAsset.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({
+        artifactId: "artifact-new",
+        artifactVersionId: "version-staged",
+        assetId: asset.id,
+        blobId: asset.blobId,
+      })],
+    });
+    expect(tx.artifact.update).not.toHaveBeenCalled();
+  });
+
+  it("treats an identical source replay as a no-op without duplicating the draft event", async () => {
+    const { source, draft, event } = createDraftFixture();
+    const { processor, tx } = draftStagingHarness();
+
+    await processor.persistArtifactDraft(
+      executionClaim,
+      event,
+      [source],
+      [],
+    );
+    tx.runEvent.findFirst.mockResolvedValue({
+      type: "artifact.draft.created",
+      payload: draftCreatedPayload(draft),
+    });
+    await processor.persistArtifactDraft(
+      executionClaim,
+      event,
+      [source],
+      [],
+    );
+
+    expect(tx.artifactVersion.findUnique).toHaveBeenCalledTimes(1);
+    expect(tx.artifact.create).toHaveBeenCalledTimes(1);
+    expect(tx.artifactVersion.create).toHaveBeenCalledTimes(1);
+    expect(tx.artifactVersionAsset.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.runEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates one staging version across checkpoints and ignores an older source replay", async () => {
+    const first = createDraftFixture();
+    const latestContent = { ...first.content, revision: 2 };
+    const latestDraft = { ...first.draft, content: latestContent };
+    const latestEvent = {
+      ...first.event,
+      sourceEventId: "deerflow:draft-2",
+      draft: latestDraft,
+    };
+    const existing = {
+      id: "version-staged",
+      artifactId: "artifact-new",
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "staging",
+      content: first.content,
+      contentBlobId: null,
+      checksum: sha256Canonical(first.content),
+      citations: [],
+      createdByRunId: "run-1",
+      runtimeDraftSourceId: first.event.sourceEventId,
+      runtimeDraftIndex: 0,
+      runtimeDraftTitle: first.draft.title,
+      knowledgeReleaseId: "knowledge-release-1",
+      artifact: {
+        id: "artifact-new",
+        kind: "prototype",
+        title: first.draft.title,
+        currentVersionId: null,
+      },
+    };
+    const { processor, tx } = draftStagingHarness();
+    tx.artifactVersion.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(existing);
+
+    await processor.persistArtifactDraft(
+      executionClaim,
+      first.event,
+      [first.source],
+      [],
+    );
+    await processor.persistArtifactDraft(
+      executionClaim,
+      latestEvent,
+      [first.source],
+      [],
+    );
+
+    expect(tx.artifact.create).toHaveBeenCalledTimes(1);
+    expect(tx.artifactVersion.create).toHaveBeenCalledTimes(1);
+    expect(tx.artifactVersion.update).toHaveBeenCalledTimes(1);
+    expect(tx.artifactVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-staged" },
+      data: {
+        content: latestContent,
+        checksum: sha256Canonical(latestContent),
+        citations: [],
+      },
+      include: {
+        artifact: {
+          select: { id: true, kind: true, title: true, currentVersionId: true },
+        },
+      },
+    });
+    expect(tx.artifactVersionAsset.deleteMany).toHaveBeenCalledWith({
+      where: { artifactVersionId: "version-staged" },
+    });
+    expect(tx.runEvent.create).toHaveBeenCalledTimes(2);
+    expect(tx.runEvent.create.mock.calls.map(([call]) => call.data)).toEqual([
+      expect.objectContaining({
+        sourceId: first.event.sourceEventId,
+        payload: draftCreatedPayload(first.draft),
+      }),
+      expect.objectContaining({
+        sourceId: latestEvent.sourceEventId,
+        payload: draftCreatedPayload(latestDraft),
+      }),
+    ]);
+
+    tx.runEvent.findFirst.mockResolvedValue({
+      type: "artifact.draft.created",
+      payload: draftCreatedPayload(first.draft),
+    });
+    await processor.persistArtifactDraft(
+      executionClaim,
+      first.event,
+      [first.source],
+      [],
+    );
+
+    expect(tx.artifactVersion.update).toHaveBeenCalledTimes(1);
+    expect(tx.runEvent.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects reuse of a source id for different draft content", async () => {
+    const { source, content, draft, event } = createDraftFixture();
+    const conflictingContent = { ...content, title: "Conflicting content" };
+    const { processor, tx } = draftStagingHarness();
+    tx.runEvent.findFirst.mockResolvedValue({
+      type: "artifact.draft.created",
+      payload: draftCreatedPayload(draft),
+    });
+
+    await expect(processor.persistArtifactDraft(
+      executionClaim,
+      { ...event, draft: { ...draft, content: conflictingContent } },
+      [source],
+      [],
+    )).rejects.toThrow("RUNTIME_ARTIFACT_DRAFT_SOURCE_CONFLICT");
+
+    expect(tx.artifact.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersionAsset.createMany).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("does not stage a draft after the cancellation lock has committed", async () => {
+    const { source, event } = createDraftFixture();
+    const { processor, tx } = draftStagingHarness();
+    rejectExecutionClaim(processor);
+
+    await expect(processor.persistArtifactDraft(
+      executionClaim,
+      event,
+      [source],
+      [],
+    )).rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+
+    expect(tx.run.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(tx.artifact.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersionAsset.createMany).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Prototype checkpoint before generating-ui is persisted", async () => {
+    const { source, event } = createDraftFixture();
+    const { processor, tx } = draftStagingHarness();
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "creating-flows" } },
+    ]);
+
+    await expect(processor.persistArtifactDraft(
+      executionClaim,
+      event,
+      [source],
+      [],
+    )).rejects.toThrow("RUNTIME_ARTIFACT_DRAFT_STAGE_TOO_EARLY");
+
+    expect(tx.artifact.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("publishes create output by promoting the same Run/index staging version in place", async () => {
+    const fixture = createDraftFixture();
+    const staged = {
+      id: "version-staged",
+      artifactId: "artifact-new",
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "staging",
+      content: fixture.content,
+      checksum: sha256Canonical(fixture.content),
+      citations: [],
+      runtimeDraftIndex: 0,
+      runtimeDraftTitle: fixture.draft.title,
+      artifact: {
+        id: "artifact-new",
+        kind: "prototype",
+        currentVersionId: null,
+      },
+    };
+    const { draft, processor, tx } = createPublicationHarness(staged);
+
+    await processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [draft],
+    });
+
+    expect(tx.artifactVersion.findFirst).toHaveBeenCalledWith({
+      where: {
+        createdByRunId: "run-1",
+        runtimeDraftIndex: 0,
+        status: "staging",
+      },
+      include: { artifact: true },
+    });
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
+    expect(tx.artifact.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-staged" },
+      data: { status: "ready" },
+    });
+    expect(tx.artifact.update).toHaveBeenCalledWith({
+      where: { id: "artifact-new" },
+      data: { title: draft.title, currentVersionId: "version-staged" },
+    });
+    expect(tx.boardNode.create).toHaveBeenCalledTimes(draft.content.screens.length);
+    expect(tx.boardNode.create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({
+        boardId: "board-1",
+        projectId: "project-1",
+        artifactId: "artifact-new",
+        artifactVersionId: "version-staged",
+        nodeKey: "artifact:artifact-new:screen:screen-home",
+      }),
+    });
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "artifact.version.created",
+        payload: {
+          artifactId: "artifact-new",
+          artifactVersionId: "version-staged",
+          version: 1,
+        },
+      }),
+    });
+  });
+
+  it("fails closed when a staged create asset is quarantined before publication", async () => {
+    const fixture = createDraftFixture();
+    const staged = {
+      id: "version-staged",
+      artifactId: "artifact-new",
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "staging",
+      content: fixture.content,
+      checksum: sha256Canonical(fixture.content),
+      citations: [],
+      runtimeDraftIndex: 0,
+      runtimeDraftTitle: fixture.draft.title,
+      artifact: {
+        id: "artifact-new",
+        kind: "prototype",
+        currentVersionId: null,
+      },
+    };
+    const { draft, content, processor, tx } = createPublicationHarness(staged);
+    const asset = content.assets.find((candidate) => candidate.kind !== "icon");
+    if (!asset || asset.kind === "icon") throw new Error("fixture asset missing");
+    tx.$queryRaw.mockImplementation(async (query: unknown) => (
+      rawSqlText(query).includes('FROM "artifact_version_assets"')
+        ? [{
+            artifactVersionId: "version-staged",
+            assetId: asset.id,
+            kind: asset.kind,
+            blobId: asset.blobId,
+            mediaType: asset.mediaType,
+            byteSize: BigInt(asset.byteSize),
+            sha256: asset.sha256,
+            metadata: asset,
+            lockedBlobId: asset.blobId,
+            blobStatus: "quarantined",
+            blobDeletedAt: null,
+            blobMediaType: asset.mediaType,
+            blobByteSize: BigInt(asset.byteSize),
+            blobSha256: asset.sha256,
+          }]
+        : [{ id: "board-1", status: "running" }]
+    ));
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [draft],
+    })).rejects.toThrow("RUNTIME_ARTIFACT_CREATE_ASSET_INVALID");
+
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+    expect(tx.artifact.update).not.toHaveBeenCalled();
+    expect(tx.boardNode.create).not.toHaveBeenCalled();
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("publishes at the persisted Board's actual right edge for non-uniform sparse nodes", async () => {
+    const fixture = createDraftFixture();
+    const staged = {
+      id: "version-staged",
+      artifactId: "artifact-new",
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "staging",
+      content: fixture.content,
+      checksum: sha256Canonical(fixture.content),
+      citations: [],
+      runtimeDraftIndex: 0,
+      runtimeDraftTitle: fixture.draft.title,
+      artifact: {
+        id: "artifact-new",
+        kind: "prototype",
+        currentVersionId: null,
+      },
+    };
+    const existingBoardNodes = [
+      { position: { x: 0, y: 0 }, size: { width: 100, height: 100 } },
+      { position: { x: 700, y: 50 }, size: { width: 250, height: 200 } },
+      { position: { x: 250, y: 700 }, size: { width: 120, height: 90 } },
+    ];
+    const { draft, processor, tx } = createPublicationHarness(staged, existingBoardNodes);
+
+    await processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [draft],
+    });
+
+    expect(tx.boardNode.findMany).toHaveBeenCalledWith({
+      where: { boardId: "board-1" },
+      select: { position: true, size: true },
+    });
+    expect(tx.boardNode.create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({ position: { x: 1_030, y: 0 } }),
+    });
+    expect(tx.boardNode.create).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({ position: { x: 1_500, y: 0 } }),
+    });
+  });
+
+  it("fails closed when create publication cannot find its staged draft", async () => {
+    const { draft, processor, tx } = createPublicationHarness(null);
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [draft],
+    })).rejects.toThrow("RUNTIME_ARTIFACT_DRAFT_MISSING");
+
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+    expect(tx.artifact.update).not.toHaveBeenCalled();
+    expect(tx.boardNode.create).not.toHaveBeenCalled();
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects final publication when its content differs from the latest staging checkpoint", async () => {
+    const fixture = createDraftFixture();
+    const staged = {
+      id: "version-staged",
+      artifactId: "artifact-new",
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "staging",
+      content: fixture.content,
+      checksum: sha256Canonical(fixture.content),
+      citations: [],
+      runtimeDraftIndex: 0,
+      runtimeDraftTitle: fixture.draft.title,
+      artifact: {
+        id: "artifact-new",
+        kind: "prototype",
+        currentVersionId: null,
+      },
+    };
+    const { draft, processor, tx } = createPublicationHarness(staged);
+    const mismatched = { ...draft, content: { ...draft.content, revision: 2 } };
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [mismatched],
+    })).rejects.toThrow("RUNTIME_FINAL_ARTIFACT_DIVERGED");
+
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+    expect(tx.artifact.update).not.toHaveBeenCalled();
+    expect(tx.boardNode.create).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects final publication when the persisted staging checksum drifts despite unchanged content", async () => {
+    const fixture = createDraftFixture();
+    const checksum = sha256Canonical(fixture.content);
+    const driftedChecksum = `${checksum.startsWith("0") ? "1" : "0"}${checksum.slice(1)}`;
+    const staged = {
+      id: "version-staged",
+      artifactId: "artifact-new",
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "staging",
+      content: fixture.content,
+      checksum: driftedChecksum,
+      citations: [],
+      runtimeDraftIndex: 0,
+      runtimeDraftTitle: fixture.draft.title,
+      artifact: {
+        id: "artifact-new",
+        kind: "prototype",
+        currentVersionId: null,
+      },
+    };
+    const { draft, processor, tx } = createPublicationHarness(staged);
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [draft],
+    })).rejects.toThrow("RUNTIME_FINAL_ARTIFACT_DIVERGED");
+
+    expect(draft.content).toEqual(staged.content);
+    expect(driftedChecksum).toMatch(/^[0-9a-f]{64}$/u);
+    expect(driftedChecksum).not.toBe(checksum);
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+    expect(tx.artifact.update).not.toHaveBeenCalled();
+    expect(tx.boardNode.create).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+});
+
+type ProcessorInternals = {
+  prepare(runId: string, approvalIds: string[]): Promise<unknown>;
+  persistProgress(claim: typeof executionClaim, event: {
+    type: "phase";
+    phase: "generating";
+    label: string;
+    progress: number | null;
+  } | {
+    type: "generation.stage";
+    stage: "design-system" | "mapping-components";
+    sourceEventId: string;
+  }): Promise<void>;
+  persistDelta(claim: typeof executionClaim, entryId: string, fullText: string, delta: string): Promise<void>;
+  waitForInput(claim: typeof executionClaim, input: {
+    protocol: "workbench.runtime.input-required.v1";
+    approvals: Array<{
+      key: string;
+      kind: string;
+      prompt: string;
+      options: [];
+    }>;
+  }): Promise<void>;
+  persistArtifactDraft(
+    claim: typeof executionClaim,
+    event: {
+      type: "artifact.draft";
+      artifactIndex: number;
+      sourceEventId: string;
+      draft: unknown;
+      checkpointScreens: Array<{ screenId: string; revision: number; checksum: string }>;
+    },
+    sources: unknown[],
+    designAssets: unknown[],
+    artifactTargets?: unknown[],
+  ): Promise<void>;
+  publishResult(claim: typeof executionClaim, entryId: string, streamedText: string, result: {
+    protocol: "workbench.runtime.result.v1";
+    message: string;
+    artifacts: unknown[];
+  }): Promise<void>;
+  promoteStagedArtifactRevision(
+    tx: unknown,
+    run: { id: string; projectId: string; knowledgeReleaseId: string | null },
+    boardId: string,
+    draft: unknown,
+    artifactIndex: number,
+  ): Promise<{ id: string; artifactId: string; version: number }>;
+  failRun(runId: string, runtimeAttemptId: string | null, error: unknown, retryable: boolean): Promise<void>;
+  finalizeCancellation(runId: string, reason: string, runtimeAttemptId?: string): Promise<void>;
+};
+
+function prototypeDocument() {
+  const literal = (value: number) => ({ kind: "literal" as const, value });
+  const frame = (id: string, screenId: string) => ({
+    id,
+    screenId,
+    parentId: null,
+    name: id,
+    visible: true,
+    layout: {
+      mode: "absolute" as const,
+      x: literal(0),
+      y: literal(0),
+      width: literal(390),
+      height: literal(844),
+      display: "block" as const,
+      direction: "column" as const,
+      gap: literal(0),
+      padding: { top: literal(0), right: literal(0), bottom: literal(0), left: literal(0) },
+      align: "stretch" as const,
+      justify: "start" as const,
+      gridColumns: null,
+      overflow: "hidden" as const,
+    },
+    style: {
+      opacity: 1,
+      rotation: 0,
+      transformOrigin: { x: 0.5, y: 0.5 },
+      fill: { kind: "literal" as const, value: "#ffffff" },
+      stroke: null,
+      radii: { topLeft: literal(0), topRight: literal(0), bottomRight: literal(0), bottomLeft: literal(0) },
+      shadowTokenIds: [],
+      typography: null,
+    },
+    actionIds: [],
+    bindingIds: [],
+    motionIds: [],
+    kind: "frame" as const,
+    childIds: [],
+    clipContent: true,
+  });
+  return {
+    protocol: "workbench.prototype.v1" as const,
+    documentId: "prototype-doc",
+    title: "Check-in flow",
+    revision: 1,
+    screens: [
+      { id: "screen-home", name: "Home", route: "/", rootNodeId: "frame-home", initialStateId: null, viewport: { width: 390, height: 844 } },
+      { id: "screen-success", name: "Success", route: "/success", rootNodeId: "frame-success", initialStateId: null, viewport: { width: 390, height: 844 } },
+    ],
+    nodes: [frame("frame-home", "screen-home"), frame("frame-success", "screen-success")],
+    tokens: [],
+    assets: [],
+    variables: [{ path: "theme.mode", initialValue: "dark" }],
+    states: [],
+    actions: [],
+    bindings: [],
+    motions: [],
+  };
+}
+
+function designAssetSnapshot() {
+  return {
+    protocol: "workbench.runtime.design-style.v1" as const,
+    source: {
+      projectId: "project-1",
+      artifactId: "artifact-style",
+      artifactVersionId: "version-style",
+      checksum: "a".repeat(64),
+    },
+    documentId: "design-main",
+    title: "Product UI",
+    tokens: [],
+    assets: [{
+      id: "brand-mark",
+      name: "Brand mark",
+      kind: "image" as const,
+      artifactVersionId: "version-style",
+      blobId: "blob-brand",
+      mediaType: "image/png",
+      byteSize: 16,
+      sha256: "d".repeat(64),
+    }],
+    principles: [],
+    guidelines: [],
+    components: [],
+  };
+}
+
+function designPresetSnapshot() {
+  const definition = {
+    presetId: "workbench.bauhaus",
+    version: 1,
+    label: "Bauhaus",
+    swatch: "#d23b49",
+    description: "A geometric product language with direct structure and primary color emphasis.",
+    directives: {
+      composition: "Use explicit geometric regions with asymmetric but intentional balance.",
+      hierarchy: "Use strong scale contrast and color anchors to expose the action order.",
+      typography: "Use sturdy geometric typography with concise and functional labels.",
+      components: "Expose component structure with crisp borders and simple solid shapes.",
+      imagery: "Use diagrammatic imagery and high-contrast crops tied to the layout.",
+      interaction: "Make state changes immediate with clear focus and pressed treatments.",
+    },
+    tokens: {
+      colors: {
+        canvas: "#f4f1e8",
+        surface: "#fffdf7",
+        surfaceMuted: "#e4dfd2",
+        textPrimary: "#171717",
+        textSecondary: "#55514a",
+        accent: "#d23b49",
+        accentContrast: "#ffffff",
+        border: "#171717",
+        focus: "#1559a6",
+        danger: "#b42318",
+      },
+      typography: {
+        headingFamily: "Futura, sans-serif",
+        bodyFamily: "Inter, sans-serif",
+        headingWeight: 700,
+        bodyWeight: 500,
+        baseSizePx: 16,
+        lineHeight: 1.4,
+      },
+      geometry: { cornerRadiusPx: 0, controlRadiusPx: 0, borderWidthPx: 2, controlHeightPx: 42 },
+      layout: { density: "compact" as const, spacingUnitPx: 8, contentMaxWidthPx: 1440, gridColumns: 12 },
+      motion: { durationFastMs: 80, durationStandardMs: 160, easing: "ease-out" },
+    },
+  };
+  const { presetId, version, ...payload } = definition;
+  return {
+    protocol: "workbench.runtime.design-preset.v1" as const,
+    source: { presetId, version, checksum: sha256Canonical(definition) },
+    ...payload,
+  };
+}
+
+function designAssetRow() {
+  return {
+    artifactVersionId: "version-style",
+    artifactId: "artifact-style",
+    projectId: "project-1",
+    assetId: "brand-mark",
+    kind: "image",
+    blobId: "blob-brand",
+    mediaType: "image/png",
+    byteSize: 16n,
+    sha256: "d".repeat(64),
+    metadata: {},
+    createdAt: now,
+    blob: {
+      id: "blob-brand",
+      sha256: "d".repeat(64),
+      storageKey: "blobs/brand",
+      mediaType: "image/png",
+      byteSize: 16n,
+      status: "ready" as const,
+      verifiedAt: now,
+      gcEligibleAt: null,
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  };
+}
+
+function eventRun(eventSequence = 1) {
+  return {
+    id: "run-1",
+    projectId: "project-1",
+    threadId: "thread-1",
+    requestId: "request-1",
+    traceId: "trace-1",
+    eventSequence,
+  };
+}
+
+function rawSqlText(query: unknown): string {
+  if (!query || typeof query !== "object") return String(query);
+  const value = query as { sql?: unknown; text?: unknown; strings?: unknown };
+  if (typeof value.sql === "string") return value.sql;
+  if (typeof value.text === "string") return value.text;
+  if (Array.isArray(value.strings)) return value.strings.join("");
+  return String(query);
+}
+
+function eventTransaction() {
+  let sequence = 0;
+  return {
+    $queryRaw: vi.fn(async (query: unknown) => (
+      rawSqlText(query).includes('FROM "artifact_version_assets"')
+        ? []
+        : [{ id: "board-1", status: "running" }]
+    )),
+    run: {
+      findUniqueOrThrow: vi.fn(async () => ({ status: "running" })),
+      update: vi.fn(async () => eventRun(++sequence)),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
+    runEvent: {
+      findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: `event-${String(data.sequence)}`,
+        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+        ...data,
+      })),
+    },
+    artifact: {
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    },
+    artifactVersion: {
+      findMany: vi.fn(async () => []),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    },
+    runDraft: {
+      deleteMany: vi.fn(async () => ({ count: 1 })),
+      upsert: vi.fn(async () => ({})),
+    },
+    runtimeAttempt: {
+      findUniqueOrThrow: vi.fn(async () => ({ id: "runtime-attempt-1", runId: "run-1", status: "running" })),
+      findUnique: vi.fn(async () => ({ id: "runtime-attempt-1", runId: "run-1", status: "running", startedAt: now })),
+      update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
+    canvasAgentSession: {
+      findUnique: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
+    canvasToolInvocation: {
+      findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
+    canvasToolGrant: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
+    canvasClientCommand: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
+  };
+}
+
+function processorWithTransaction(tx: object) {
+  const db = {
+    $transaction: vi.fn(async (callback: (transaction: object) => unknown) => callback(tx)),
+  };
+  const prototypePatches = prototypePatchCoordinator();
+  const processor = new RunProcessor(
+    db as never,
+    {} as never,
+    noKnowledgeToolGrants(),
+    undefined,
+    prototypePatches as never,
+  );
+  Object.assign((processor as unknown as { attempts: object }).attempts, {
+    assertClaimTx: vi.fn(async () => ({
+      databaseNow: now,
+      runStatus: "running",
+      attemptStatus: "running",
+    })),
+  });
+  return {
+    db,
+    prototypePatches,
+    processor: processor as unknown as ProcessorInternals,
+  };
+}
+
+function rejectExecutionClaim(processor: ProcessorInternals) {
+  const attempts = (processor as unknown as {
+    attempts: { assertClaimTx: ReturnType<typeof vi.fn> };
+  }).attempts;
+  attempts.assertClaimTx.mockRejectedValueOnce(new Error("RUNTIME_EXECUTION_FENCED"));
+}
+
+function publishableRun() {
+  return {
+    id: "run-1",
+    status: "running",
+    attempt: 1,
+    projectId: "project-1",
+    knowledgeReleaseId: null,
+    request: {
+      prompt: "Build it",
+      modelId: "quality",
+      workflow: "generate",
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      sourceIds: [],
+      artifactTargets: [],
+      requestedArtifactKinds: [],
+    },
+  };
+}
+
+function canvasDirectPublishHarness() {
+  const tx = eventTransaction() as ReturnType<typeof eventTransaction> & Record<string, any>;
+  const baseContent = prototypeDocument();
+  const aiContent = {
+    ...baseContent,
+    revision: 2,
+    nodes: baseContent.nodes.map((node) => (
+      node.screenId === "screen-home" ? { ...node, name: "ai-edited-home" } : node
+    )),
+  };
+  const target = {
+    artifactId: "artifact-target",
+    artifactVersionId: "version-base",
+    screenIds: ["screen-home"],
+  };
+  const reference = {
+    boardNodeId: "stable-node-home",
+    artifactId: target.artifactId,
+    artifactVersionId: target.artifactVersionId,
+    screenId: "screen-home",
+  };
+  const result = {
+    protocol: "workbench.runtime.result.v1" as const,
+    message: "AI and Canvas edits complete",
+    artifacts: [{
+      kind: "prototype" as const,
+      schemaVersion: 1 as const,
+      title: "Updated prototype",
+      citations: [],
+      operation: { kind: "revise" as const, target },
+      content: aiContent,
+    }],
+  };
+  tx.run.findUniqueOrThrow.mockResolvedValue({
+    id: "run-1",
+    status: "running",
+    attempt: 1,
+    projectId: "project-1",
+    createdById: "principal-1",
+    knowledgeReleaseId: null,
+    request: {
+      prompt: "Edit the selected screen",
+      modelId: "quality",
+      workflow: "edit",
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      sourceIds: [],
+      artifactTargets: [target],
+      requestedArtifactKinds: ["prototype"],
+    },
+  });
+  tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-1" });
+  tx.canvasToolInvocation.findMany.mockResolvedValue([
+    canvasMutationInvocation("rename_screen", 1, reference, { target: reference, title: "Agent Home" }),
+    canvasMutationInvocation("duplicate_screen", 2, reference, { target: reference }),
+  ]);
+  tx.$queryRaw = vi.fn()
+    .mockResolvedValueOnce([{
+      id: "canvas-session-1",
+      status: "active",
+      boardId: "board-1",
+      boardRevision: 3,
+      canvasStateRevision: 7,
+    }])
+    .mockResolvedValueOnce([{ id: "run-1" }])
+    .mockResolvedValueOnce([{ id: "board-1" }])
+    .mockResolvedValueOnce([{ boardId: null, revision: null }])
+    .mockResolvedValueOnce([{ boardId: "board-1", revision: "4" }])
+    .mockResolvedValueOnce([{
+      id: target.artifactId,
+      kind: "prototype",
+      currentVersionId: target.artifactVersionId,
+    }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ boardId: "", revision: "" }])
+    .mockResolvedValueOnce([{ id: "run-1" }]);
+
+  let stagedContent = aiContent;
+  let stagedChecksum = sha256Canonical(aiContent);
+  const stagedVersion = () => ({
+    id: "version-ready",
+    artifactId: target.artifactId,
+    projectId: "project-1",
+    version: 2,
+    schemaVersion: 1,
+    status: "staging",
+    content: stagedContent,
+    contentBlobId: null,
+    checksum: stagedChecksum,
+    citations: [],
+    runtimeDraftIndex: 0,
+    runtimeDraftTitle: "Updated prototype",
+    artifact: {
+      id: target.artifactId,
+      kind: "prototype",
+      currentVersionId: target.artifactVersionId,
+    },
+    assets: [],
+  });
+  Object.assign(tx.artifactVersion, {
+    findFirst: vi.fn(async () => stagedVersion()),
+    findUnique: vi.fn(async () => ({
+      id: target.artifactVersionId,
+      artifactId: target.artifactId,
+      projectId: "project-1",
+      version: 1,
+      schemaVersion: 1,
+      status: "ready",
+      content: baseContent,
+      contentBlobId: null,
+      knowledgeReleaseId: null,
+    })),
+    updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+      stagedContent = data.content as typeof aiContent;
+      stagedChecksum = data.checksum as string;
+      return { count: 1 };
+    }),
+    update: vi.fn(async () => ({ id: "version-ready", artifactId: target.artifactId, version: 2 })),
+  });
+  Object.assign(tx.artifact, {
+    update: vi.fn(async () => ({ revision: 2 })),
+  });
+  Object.assign(tx, {
+    threadEntry: { update: vi.fn(async () => ({})) },
+    board: {
+      findUniqueOrThrow: vi.fn(async () => ({ id: "board-1", projectId: "project-1", revision: 3 })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
+    artifactVersionAsset: { createMany: vi.fn(async () => ({ count: 0 })) },
+  });
+  const targetNodeData = {
+    protocol: boardNodeProtocol,
+    nodeType: "artifact",
+    title: "Agent Home",
+    artifactKind: "prototype",
+    screenId: "screen-home",
+    route: "/",
+  };
+  Object.assign(tx, {
+    boardNode: {
+      findMany: vi.fn(async (query: { where: Record<string, unknown> }) => (
+        "artifactId" in query.where
+          ? [
+              { id: "board-node-row-home", data: { screenId: "screen-home" } },
+              { id: "board-node-row-success", data: { screenId: "screen-success" } },
+            ]
+          : [
+              { position: { x: 0, y: 0 }, size: { width: 390, height: 844 } },
+              { position: { x: 470, y: 0 }, size: { width: 390, height: 844 } },
+            ]
+      )),
+      findUnique: vi.fn(async () => ({
+        id: "board-node-row-home",
+        boardId: "board-1",
+        projectId: "project-1",
+        nodeKey: reference.boardNodeId,
+        parentNodeKey: null,
+        sortOrder: 0,
+        kind: "artifact",
+        position: { x: 0, y: 0 },
+        size: { width: 390, height: 844 },
+        artifactId: target.artifactId,
+        artifactVersionId: "version-ready",
+        data: targetNodeData,
+      })),
+      aggregate: vi.fn(async () => ({ _max: { sortOrder: 1 } })),
+      update: vi.fn(async () => ({})),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: "new-row-id", ...data })),
+    },
+  });
+  tx.canvasToolInvocation.updateMany.mockResolvedValue({ count: 2 });
+  const { db, processor, prototypePatches } = processorWithTransaction(tx);
+  return { aiContent, db, processor, prototypePatches, reference, result, tx };
+}
+
+function canvasMutationInvocation(
+  toolName: "quick_edit" | "rename_screen" | "duplicate_screen",
+  sequence: number,
+  reference: Record<string, string>,
+  input: unknown,
+) {
+  return {
+    id: `invocation-${sequence}`,
+    sequence,
+    toolCallId: `tool-call-${sequence}`,
+    toolName,
+    requestHash: String(sequence).padStart(64, "0"),
+    request: { input },
+    satisfiesRunTarget: true,
+    targetBoardNodeId: reference.boardNodeId,
+    targetArtifactId: reference.artifactId,
+    targetArtifactVersionId: reference.artifactVersionId,
+    targetScreenId: reference.screenId,
+  };
+}
+
+function canvasQuickEditPublishHarness(actualBoardRevision = 3) {
+  const harness = canvasDirectPublishHarness();
+  const { reference, tx } = harness;
+  tx.canvasToolInvocation.findMany.mockResolvedValue([
+    canvasMutationInvocation("quick_edit", 1, reference, {
+      target: reference,
+      instruction: "Apply the AI revision",
+    }),
+  ]);
+  tx.canvasToolInvocation.updateMany.mockResolvedValue({ count: 1 });
+  tx.$queryRaw.mockReset()
+    .mockResolvedValueOnce([{
+      id: "canvas-session-1",
+      status: "active",
+      boardId: "board-1",
+      boardRevision: 3,
+      canvasStateRevision: 7,
+    }])
+    .mockResolvedValueOnce([{ id: "board-1" }])
+    .mockResolvedValueOnce([{ boardId: null, revision: null }])
+    .mockResolvedValueOnce([{ boardId: "board-1", revision: "4" }])
+    .mockResolvedValueOnce([{
+      id: reference.artifactId,
+      kind: "prototype",
+      currentVersionId: reference.artifactVersionId,
+    }])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ boardId: "", revision: "" }])
+    .mockResolvedValueOnce([{ id: "run-1" }]);
+  tx.board.findUniqueOrThrow.mockReset()
+    .mockResolvedValueOnce({ id: "board-1", projectId: "project-1", revision: actualBoardRevision })
+    .mockResolvedValueOnce({ revision: actualBoardRevision + 1 });
+  tx.board.updateMany.mockResolvedValue({ count: actualBoardRevision === 3 ? 1 : 0 });
+  return harness;
+}
+
+function pendingCanvasInvocation(
+  agentSessionId: string,
+  status: "in_flight" | "waiting_client" | "waiting_approval",
+) {
+  return {
+    id: `pending-${agentSessionId}`,
+    agentSessionId,
+    toolCallId: `tool-call-${agentSessionId}`,
+    toolName: "view_screen",
+    status,
+    boardRevisionBefore: 3,
+    boardRevisionAfter: null,
+    canvasStateRevisionBefore: 5,
+    canvasStateRevisionAfter: null,
+  };
+}
+
+function expectCanvasInvocationCancelled(
+  tx: ReturnType<typeof eventTransaction>,
+  invocation: ReturnType<typeof pendingCanvasInvocation>,
+) {
+  expect(tx.canvasToolInvocation.updateMany).toHaveBeenCalledWith({
+    where: { id: invocation.id, status: invocation.status },
+    data: {
+      status: "cancelled",
+      response: expect.objectContaining({
+        protocol: "workbench.canvas-agent-tool.v1",
+        agentSessionId: invocation.agentSessionId,
+        toolCallId: invocation.toolCallId,
+        toolName: invocation.toolName,
+        status: "cancelled",
+        boardRevision: 3,
+        canvasStateRevision: 5,
+        data: null,
+        failure: null,
+      }),
+      boardRevisionAfter: 3,
+      canvasStateRevisionAfter: 5,
+      completedAt: expect.any(Date),
+      leaseToken: null,
+      leaseExpiresAt: null,
+    },
+  });
+}
+
+describe("Canvas Agent Run lifecycle", () => {
+  it("rejects final publication while a Canvas invocation is non-terminal", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue(publishableRun());
+    tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-1" });
+    tx.$queryRaw
+      .mockResolvedValueOnce([{ id: "canvas-session-1", status: "active" }]);
+    tx.canvasToolInvocation.findFirst.mockResolvedValueOnce({ id: "invocation-pending" });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    })).rejects.toThrow("CANVAS_TOOL_INVOCATION_PENDING");
+
+    expect(tx.canvasToolInvocation.findFirst).toHaveBeenCalledWith({
+      where: {
+        agentSessionId: "canvas-session-1",
+        status: { in: ["in_flight", "waiting_client", "waiting_approval"] },
+      },
+      select: { id: true },
+    });
+    expect(tx.run.findUniqueOrThrow.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.canvasAgentSession.findUnique.mock.invocationCallOrder[0]!,
+    );
+    expect(tx.canvasAgentSession.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.$queryRaw.mock.invocationCallOrder[0]!,
+    );
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a succeeded quick_edit that was not bound to the Run target", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue(publishableRun());
+    tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-1" });
+    tx.$queryRaw
+      .mockResolvedValueOnce([{
+        id: "canvas-session-1",
+        status: "active",
+        boardId: "board-1",
+        boardRevision: 0,
+        canvasStateRevision: 0,
+      }]);
+    tx.canvasToolInvocation.findMany.mockResolvedValueOnce([{
+      id: "quick-edit-unsatisfied",
+      sequence: 1,
+      toolCallId: "tool-call-quick-edit",
+      toolName: "quick_edit",
+      requestHash: "a".repeat(64),
+      request: {
+        input: {
+          target: {
+            boardNodeId: "node-home",
+            artifactId: "artifact-prototype",
+            artifactVersionId: "version-prototype",
+            screenId: "screen-home",
+          },
+          instruction: "Change the heading",
+        },
+      },
+      satisfiesRunTarget: false,
+      targetBoardNodeId: "node-home",
+      targetArtifactId: "artifact-prototype",
+      targetArtifactVersionId: "version-prototype",
+      targetScreenId: "screen-home",
+      createdAt: now,
+    }]);
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    })).rejects.toThrow("CANVAS_QUICK_EDIT_RUN_TARGET_UNSATISFIED");
+
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("completes the session, revokes its grant, and cancels pending commands atomically", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue(publishableRun());
+    tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-1" });
+    tx.$queryRaw
+      .mockResolvedValueOnce([{
+        id: "canvas-session-1",
+        status: "active",
+        boardId: "board-1",
+        boardRevision: 0,
+        canvasStateRevision: 0,
+      }]);
+    Object.assign(tx, {
+      threadEntry: { update: vi.fn(async () => ({})) },
+      board: { findUniqueOrThrow: vi.fn(async () => ({ id: "board-1" })) },
+      boardNode: {
+        findMany: vi.fn(async () => []),
+        aggregate: vi.fn(async () => ({ _max: { sortOrder: null } })),
+      },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    });
+
+    expect(tx.canvasAgentSession.updateMany).toHaveBeenCalledWith({
+      where: { id: "canvas-session-1", status: "active" },
+      data: { status: "completed", activeMutationToolCallId: null },
+    });
+    expect(tx.canvasToolGrant.updateMany).toHaveBeenCalledWith({
+      where: { agentSessionId: "canvas-session-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(tx.canvasClientCommand.updateMany).toHaveBeenCalledWith({
+      where: { agentSessionId: "canvas-session-1", status: "pending" },
+      data: { status: "cancelled" },
+    });
+  });
+
+  it("publishes ordered direct intents over the AI revision using stable Board nodeKey identity", async () => {
+    const { aiContent, processor, prototypePatches, reference, result, tx } = canvasDirectPublishHarness();
+
+    await processor.publishResult(executionClaim, "entry-1", "", result);
+
+    const stagingUpdate = tx.artifactVersion.updateMany.mock.calls[0]?.[0];
+    const effectiveContent = stagingUpdate?.data.content;
+    expect(effectiveContent.nodes.find((node: { id: string }) => node.id === "frame-home")?.name).toBe("ai-edited-home");
+    expect(effectiveContent.screens.find((screen: { id: string }) => screen.id === "screen-home")?.name).toBe("Agent Home");
+    expect(effectiveContent.screens).toHaveLength(aiContent.screens.length + 1);
+    expect(prototypePatches.synchronizeCheckpointTx).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        runId: "run-1",
+        artifactVersionId: "version-ready",
+        document: effectiveContent,
+        mode: "trusted_final",
+      }),
+    );
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: "run-1",
+        sourceId: "system:canvas-direct-intent-checkpoint:1:0",
+        type: "artifact.draft.created",
+        payload: expect.objectContaining({
+          artifactVersionId: "version-ready",
+          checksum: sha256Canonical(effectiveContent),
+          screens: expect.arrayContaining([
+            expect.objectContaining({ id: "screen-home" }),
+          ]),
+        }),
+      }),
+    });
+    expect(tx.board.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.boardNode.findUnique).toHaveBeenCalledWith({
+      where: { boardId_nodeKey: { boardId: "board-1", nodeKey: reference.boardNodeId } },
+    });
+    const duplicate = tx.boardNode.create.mock.calls[0]?.[0].data;
+    expect(duplicate.nodeKey).toMatch(/^canvas:duplicate:/);
+    expect(duplicate.nodeKey).not.toBe("board-node-row-home");
+    expect(duplicate.artifactVersionId).toBe("version-ready");
+    expect(duplicate.data.title).toBe("Agent Home copy");
+    expect(tx.canvasToolInvocation.updateMany).toHaveBeenCalledWith({
+      where: {
+        agentSessionId: "canvas-session-1",
+        id: { in: ["invocation-1", "invocation-2"] },
+        status: "succeeded",
+        satisfiesRunTarget: true,
+        targetArtifactId: reference.artifactId,
+        targetArtifactVersionId: reference.artifactVersionId,
+        targetScreenId: reference.screenId,
+      },
+      data: {
+        resultArtifactVersionId: "version-ready",
+        boardRevisionAfter: 4,
+        canvasStateRevisionAfter: 7,
+      },
+    });
+    expect(tx.canvasAgentSession.updateMany).toHaveBeenCalledWith({
+      where: { id: "canvas-session-1", status: "active" },
+      data: { status: "completed", activeMutationToolCallId: null, boardRevision: 4 },
+    });
+    expect(tx.run.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "run-1",
+        status: "running",
+        executionOwnerId: executionClaim.ownerId,
+        executionEpoch: executionClaim.epoch,
+      },
+    }));
+  });
+
+  it("links quick_edit only when the Board revision is exact", async () => {
+    const { processor, reference, result, tx } = canvasQuickEditPublishHarness();
+
+    await processor.publishResult(executionClaim, "entry-1", "", result);
+
+    expect(tx.artifactVersion.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvasToolInvocation.updateMany).toHaveBeenCalledWith({
+      where: {
+        agentSessionId: "canvas-session-1",
+        id: { in: ["invocation-1"] },
+        status: "succeeded",
+        satisfiesRunTarget: true,
+        targetArtifactId: reference.artifactId,
+        targetArtifactVersionId: reference.artifactVersionId,
+        targetScreenId: reference.screenId,
+      },
+      data: {
+        resultArtifactVersionId: "version-ready",
+        boardRevisionAfter: 4,
+        canvasStateRevisionAfter: 7,
+      },
+    });
+    expect(tx.canvasAgentSession.updateMany).toHaveBeenCalledWith({
+      where: { id: "canvas-session-1", status: "active" },
+      data: { status: "completed", activeMutationToolCallId: null, boardRevision: 4 },
+    });
+    expect(tx.board.updateMany).toHaveBeenCalledWith({
+      where: { id: "board-1", projectId: "project-1", revision: 3 },
+      data: { revision: 4 },
+    });
+  });
+
+  it("rejects quick_edit when the Board has advanced after authorization", async () => {
+    const { processor, result, tx } = canvasQuickEditPublishHarness(5);
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", result))
+      .rejects.toThrow("CANVAS_QUICK_EDIT_BOARD_REVISION_INVALID");
+    expect(tx.canvasToolInvocation.updateMany).not.toHaveBeenCalled();
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not complete the Run or Canvas session when final intent linkage fails", async () => {
+    const { db, processor, result, tx } = canvasDirectPublishHarness();
+    tx.canvasToolInvocation.updateMany.mockRejectedValueOnce(new Error("intent linkage failed"));
+
+    await expect(processor.publishResult(
+      executionClaim,
+      "entry-1",
+      "",
+      result,
+    )).rejects.toThrow("intent linkage failed");
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(tx.runtimeAttempt.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvasAgentSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("retires the current Canvas capability cycle before waiting for approval", async () => {
+    const tx = eventTransaction();
+    const pendingInvocation = pendingCanvasInvocation("canvas-session-1", "in_flight");
+    tx.run.findUniqueOrThrow.mockResolvedValue({ id: "run-1", status: "running", attempt: 1 });
+    tx.canvasAgentSession.findMany.mockResolvedValue([{ id: "canvas-session-1" }]);
+    tx.canvasToolInvocation.findMany.mockResolvedValue([pendingInvocation]);
+    tx.canvasToolInvocation.updateMany.mockResolvedValue({ count: 1 });
+    Object.assign(tx, {
+      runApproval: {
+        findUnique: vi.fn(),
+        create: vi.fn(),
+      },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await processor.waitForInput(executionClaim, {
+      protocol: "workbench.runtime.input-required.v1",
+      approvals: [],
+    });
+
+    expect(tx.canvasAgentSession.findMany).toHaveBeenCalledWith({
+      where: {
+        runId: "run-1",
+        status: "active",
+        runtimeAttemptId: "runtime-attempt-1",
+      },
+      select: { id: true },
+    });
+    expect(tx.canvasAgentSession.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["canvas-session-1"] }, status: "active" },
+      data: { status: "cancelled", activeMutationToolCallId: null },
+    });
+    expectCanvasInvocationCancelled(tx, pendingInvocation);
+  });
+
+  it("does not reuse a creation-time Canvas snapshot on an approval-resume attempt", async () => {
+    const transaction = vi.fn();
+    const issuer = new PrismaCanvasToolGrantIssuer({ $transaction: transaction } as never, null);
+
+    await expect(issuer.issue({
+      attempt: 2,
+      snapshot: { expired: true },
+    } as never)).resolves.toBeNull();
+
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("authorizes snapshot references by stable Board nodeKey, not the database row id", async () => {
+    const document = prototypeDocument();
+    const reference = {
+      boardNodeId: "screen-node-key",
+      artifactId: "artifact-prototype",
+      artifactVersionId: "version-prototype",
+      screenId: "screen-home",
+    };
+    const expiresAt = new Date(Date.now() + 60_000);
+    const sessionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ status: "running" }]),
+      run: {
+        findUnique: vi.fn(async () => ({
+          id: "run-1",
+          projectId: "project-1",
+          threadId: "thread-1",
+          createdById: "principal-1",
+          status: "running",
+        })),
+      },
+      board: {
+        findUnique: vi.fn(async () => ({
+          id: "board-1",
+          projectId: "project-1",
+          revision: 7,
+          nodes: [{
+            id: "database-row-id",
+            nodeKey: reference.boardNodeId,
+            artifactId: reference.artifactId,
+            artifactVersionId: reference.artifactVersionId,
+            kind: "artifact",
+            data: { nodeType: "artifact", screenId: reference.screenId },
+          }],
+        })),
+      },
+      runtimeAttempt: {
+        findUnique: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          runId: "run-1",
+          attempt: 1,
+          status: "running",
+        })),
+      },
+      artifactVersion: {
+        findMany: vi.fn(async () => [{
+          id: reference.artifactVersionId,
+          artifactId: reference.artifactId,
+          status: "ready",
+          content: document,
+          contentBlobId: null,
+          artifact: { kind: "prototype" },
+        }]),
+      },
+      canvasAgentSession: {
+        count: vi.fn(async () => 0),
+        findUnique: vi.fn(async () => null),
+        create: sessionCreate,
+      },
+      canvasToolGrant: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...data,
+          revokedAt: null,
+        })),
+      },
+    };
+    const db = {
+      $transaction: vi.fn(async (callback: (transaction: typeof tx) => unknown) => callback(tx)),
+    };
+    const issuer = new PrismaCanvasToolGrantIssuer(db as never, {
+      endpoint: "https://workbench.example.com/runtime/canvas/tools/execute",
+      secret: Buffer.alloc(32, 7),
+      maximumTtlSeconds: 300,
+    });
+
+    const scope = {
+      runId: "run-1",
+      runtimeAttemptId: "runtime-attempt-1",
+      attempt: 1,
+      principalId: "principal-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      modelId: "quality",
+      workflow: "edit",
+      artifactTargets: [{
+        artifactId: reference.artifactId,
+        artifactVersionId: reference.artifactVersionId,
+        screenIds: [reference.screenId],
+      }],
+      snapshot: {
+        protocol: "workbench.canvas-snapshot.v1",
+        projectId: "project-1",
+        threadId: "thread-1",
+        runId: null,
+        boardId: "board-1",
+        clientSessionId: "canvas-client-1",
+        projectSessionGeneration: 1,
+        boardRevision: 7,
+        canvasStateRevision: 3,
+        capturedAt: new Date(Date.now() - 1_000).toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        viewport: { x: 0, y: 0, zoom: 1 },
+        screens: [{
+          reference,
+          name: "Home",
+          route: "/",
+          phase: "complete",
+          viewport: { width: 390, height: 844 },
+        }],
+        visibleScreens: [reference],
+        selectedScreens: [reference],
+      },
+    } as const;
+    const descriptor = await issuer.issue(scope);
+
+    expect(descriptor?.reference.declaredTools).toContain("quick_edit");
+    expect(sessionCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        selectedNodeIds: [reference.boardNodeId],
+        visibleNodeIds: [reference.boardNodeId],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    });
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.run.findUnique.mock.invocationCallOrder[0]!,
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.runtimeAttempt.findUnique.mock.invocationCallOrder[0]!,
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.board.findUnique.mock.invocationCallOrder[0]!,
+    );
+
+    vi.clearAllMocks();
+    tx.$queryRaw.mockResolvedValueOnce([{ status: "cancelling" }]);
+    await expect(issuer.issue(scope)).rejects.toThrow("CANVAS_TOOL_SCOPE_INVALID");
+    expect(tx.run.findUnique).not.toHaveBeenCalled();
+    expect(tx.runtimeAttempt.findUnique).not.toHaveBeenCalled();
+    expect(tx.board.findUnique).not.toHaveBeenCalled();
+    expect(sessionCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("Artifact canonicalization", () => {
+  it("hashes objects independently of key insertion order", () => {
+    expect(canonicalJson({ b: 2, a: 1 })).toBe('{"a":1,"b":2}');
+    expect(sha256Canonical({ b: 2, a: 1 })).toBe(sha256Canonical({ a: 1, b: 2 }));
+  });
+
+  it("rejects values that cannot be stored as JSON", () => {
+    expect(() => canonicalJson(undefined)).toThrow("ARTIFACT_CONTENT_NOT_JSON");
+    expect(() => canonicalJson(Number.NaN)).toThrow("ARTIFACT_CONTENT_NOT_JSON");
+  });
+});
+
+describe("Run durable snapshots", () => {
+  it("loads execution-only locators by joining every Design System snapshot pin to its ready Blob", async () => {
+    const snapshot = designAssetSnapshot();
+    const run = {
+      id: "run-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      createdById: "principal-1",
+      knowledgeReleaseId: null,
+      designStyleSnapshot: snapshot,
+      designStyleSnapshotSha256: sha256Canonical(snapshot),
+      status: "running",
+      attempt: 1,
+      startedAt: now,
+      outputEntryId: "entry-1",
+      request: {
+        prompt: "Build it",
+        modelId: "model-1",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "artifact", artifactVersionId: "version-style" },
+      },
+      sourceSnapshots: [],
+      draft: null,
+      thread: { id: "thread-1", project: { id: "project-1" } },
+    };
+    const tx = eventTransaction();
+    Object.assign(tx.run, { findUnique: vi.fn(async () => run) });
+    Object.assign(tx, {
+      artifactVersionAsset: { findMany: vi.fn(async () => [designAssetRow()]) },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    const prepared = await processor.prepare("run-1", []);
+
+    expect(prepared).toMatchObject({
+      designAssets: [{
+        assetId: "brand-mark",
+        artifactVersionId: "version-style",
+        blobId: "blob-brand",
+        content: {
+          storageKey: "blobs/brand",
+          mediaType: "image/png",
+          byteSize: 16,
+          sha256: "d".repeat(64),
+        },
+      }],
+    });
+    expect(tx.artifactVersionAsset.findMany).toHaveBeenCalledWith({
+      where: {
+        artifactVersionId: "version-style",
+        artifactId: "artifact-style",
+        projectId: "project-1",
+      },
+      include: { blob: true },
+      orderBy: { assetId: "asc" },
+    });
+  });
+
+  it("passes an exact materialized preset snapshot without querying Artifact assets", async () => {
+    const snapshot = designPresetSnapshot();
+    const run = {
+      id: "run-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      createdById: "principal-1",
+      knowledgeReleaseId: null,
+      designStyleSnapshot: snapshot,
+      designStyleSnapshotSha256: sha256Canonical(snapshot),
+      status: "running",
+      attempt: 1,
+      startedAt: now,
+      outputEntryId: "entry-1",
+      request: {
+        prompt: "Build it",
+        modelId: "model-1",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "preset", ...snapshot.source },
+      },
+      sourceSnapshots: [],
+      draft: null,
+      thread: { id: "thread-1", project: { id: "project-1" } },
+    };
+    const tx = eventTransaction();
+    Object.assign(tx.run, { findUnique: vi.fn(async () => run) });
+    const findAssets = vi.fn();
+    Object.assign(tx, { artifactVersionAsset: { findMany: findAssets } });
+    const { processor } = processorWithTransaction(tx);
+
+    const prepared = await processor.prepare("run-1", []);
+
+    expect(prepared).toMatchObject({ designStyleSnapshot: snapshot, designAssets: [] });
+    expect(findAssets).not.toHaveBeenCalled();
+  });
+
+  it("rejects a preset snapshot whose embedded catalog checksum is not canonical", async () => {
+    const valid = designPresetSnapshot();
+    const snapshot = { ...valid, source: { ...valid.source, checksum: "0".repeat(64) } };
+    const run = {
+      id: "run-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      createdById: "principal-1",
+      knowledgeReleaseId: null,
+      designStyleSnapshot: snapshot,
+      designStyleSnapshotSha256: sha256Canonical(snapshot),
+      status: "queued",
+      attempt: 0,
+      startedAt: null,
+      outputEntryId: "entry-1",
+      request: {
+        prompt: "Build it",
+        modelId: "model-1",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "preset", ...snapshot.source },
+      },
+      sourceSnapshots: [],
+      draft: null,
+      thread: { id: "thread-1", project: { id: "project-1" } },
+    };
+    const tx = eventTransaction();
+    Object.assign(tx.run, { findUnique: vi.fn(async () => run), update: vi.fn() });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.prepare("run-1", [])).rejects.toThrow(
+      "RUNTIME_DESIGN_STYLE_SNAPSHOT_INVALID",
+    );
+    expect(tx.run.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a persisted Design System snapshot whose canonical checksum drifted", async () => {
+    const snapshot = {
+      protocol: "workbench.runtime.design-style.v1",
+      source: {
+        projectId: "project-1",
+        artifactId: "artifact-style",
+        artifactVersionId: "version-style",
+        checksum: "a".repeat(64),
+      },
+      documentId: "design-main",
+      title: "Product UI",
+      tokens: [],
+      assets: [],
+      principles: [],
+      guidelines: [],
+      components: [],
+    };
+    const run = {
+      id: "run-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      createdById: "principal-1",
+      knowledgeReleaseId: null,
+      designStyleSnapshot: snapshot,
+      designStyleSnapshotSha256: "b".repeat(64),
+      status: "queued",
+      attempt: 0,
+      startedAt: null,
+      outputEntryId: "entry-1",
+      request: {
+        prompt: "Build it",
+        modelId: "model-1",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "artifact", artifactVersionId: "version-style" },
+      },
+      sourceSnapshots: [],
+      draft: null,
+      thread: { id: "thread-1", project: { id: "project-1" } },
+    };
+    const tx = eventTransaction();
+    Object.assign(tx.run, {
+      findUnique: vi.fn(async () => run),
+      update: vi.fn(),
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.prepare("run-1", [])).rejects.toThrow(
+      "RUNTIME_DESIGN_STYLE_SNAPSHOT_INVALID",
+    );
+    expect(tx.run.update).not.toHaveBeenCalled();
+  });
+
+  it("stores the initial phase in the same transaction as run.started", async () => {
+    const initialRun = {
+      id: "run-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      createdById: "principal-1",
+      knowledgeReleaseId: null,
+      status: "queued",
+      attempt: 0,
+      startedAt: null,
+      outputEntryId: "entry-1",
+      request: {
+        prompt: "Build it",
+        modelId: "model-1",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+      },
+      sourceSnapshots: [],
+      draft: null,
+      thread: { id: "thread-1", project: { id: "project-1" } },
+    };
+    let sequence = 0;
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockReset();
+    Object.assign(tx.run, {
+      findUnique: vi.fn(async () => initialRun),
+      findUniqueOrThrow: vi.fn(async () => ({
+        ...initialRun,
+        status: "running",
+        attempt: 1,
+        phase: "understanding",
+        phaseLabel: "正在理解需求",
+      })),
+      update: vi.fn(async () => eventRun(++sequence)),
+    });
+    const { db, processor } = processorWithTransaction(tx);
+
+    await processor.prepare("run-1", []);
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.run.updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: { id: "run-1", status: "queued" },
+      data: expect.objectContaining({
+        status: "running",
+        phase: "understanding",
+        phaseLabel: "正在理解需求",
+        progress: null,
+      }),
+    }));
+    expect(tx.runEvent.create.mock.calls.map(([call]) => call.data.type)).toEqual([
+      "run.started",
+      "run.generation.stage.changed",
+      "run.phase.changed",
+    ]);
+  });
+
+  it("does not start a queued Run after cancellation wins the state transition", async () => {
+    const queuedRun = {
+      id: "run-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      createdById: "principal-1",
+      knowledgeReleaseId: null,
+      status: "queued",
+      attempt: 0,
+      startedAt: null,
+      outputEntryId: "entry-1",
+      request: {
+        prompt: "Build it",
+        modelId: "quality",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+      },
+      sourceSnapshots: [],
+      draft: null,
+      thread: { id: "thread-1", project: { id: "project-1" } },
+    };
+    const tx = eventTransaction();
+    Object.assign(tx.run, {
+      findUnique: vi.fn()
+        .mockResolvedValueOnce(queuedRun)
+        .mockResolvedValueOnce({ status: "cancelling" }),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.prepare("run-1", [])).rejects.toThrow("RUNTIME_CANCELLED");
+
+    expect(tx.run.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "run-1", status: "queued" },
+      data: expect.objectContaining({ status: "running" }),
+    }));
+    expect(tx.run.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("replays a running run without incrementing its attempt or creating another output entry", async () => {
+    const recoveringRun = {
+      id: "run-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      createdById: "principal-1",
+      knowledgeReleaseId: null,
+      status: "running",
+      attempt: 2,
+      startedAt: now,
+      outputEntryId: "entry-1",
+      request: {
+        prompt: "Build it",
+        modelId: "model-1",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+      },
+      sourceSnapshots: [],
+      draft: { content: { entryId: "entry-1", text: "partially streamed" } },
+      thread: { id: "thread-1", project: { id: "project-1" } },
+    };
+    const tx = eventTransaction();
+    Object.assign(tx.run, {
+      findUnique: vi.fn(async () => recoveringRun),
+    });
+    Object.assign(tx, {
+      thread: { update: vi.fn() },
+      threadEntry: { create: vi.fn() },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    const prepared = await processor.prepare("run-1", []);
+
+    expect(prepared).toMatchObject({
+      run: { status: "running", attempt: 2 },
+      entryId: "entry-1",
+      previousAssistantText: "partially streamed",
+    });
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(tx.thread.update).not.toHaveBeenCalled();
+    expect(tx.threadEntry.create).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps a running run and its attempt non-terminal when a retry remains", async () => {
+    const retryableError = new Error("socket closed before the runtime stream completed");
+    const runtime = {
+      execute: vi.fn(async () => {
+        throw retryableError;
+      }),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({ status: "running" })),
+      },
+    };
+    const knowledgeToolGrants = noKnowledgeToolGrants();
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      knowledgeToolGrants,
+      undefined,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals & {
+      bindings: { ensure: ReturnType<typeof vi.fn> };
+      attempts: {
+        ensure: ReturnType<typeof vi.fn>;
+        claim: ReturnType<typeof vi.fn>;
+        submissionContext: ReturnType<typeof vi.fn>;
+        recordRetryableError: ReturnType<typeof vi.fn>;
+      };
+    };
+    const recordRetryableError = vi.fn(async () => undefined);
+    Object.assign(internals, {
+      prepare: vi.fn(async () => ({
+        run: {
+          id: "run-1",
+          attempt: 2,
+          createdById: "principal-1",
+          knowledgeReleaseId: null,
+        },
+        thread: { id: "thread-1" },
+        project: { id: "project-1" },
+        entryId: "entry-1",
+        request: {
+          prompt: "Build it",
+          modelId: "model-1",
+          workflow: "generate",
+          targetSurface: "app",
+          designStyle: { kind: "automatic" },
+        },
+        sources: [],
+        resume: null,
+        previousAssistantText: "",
+      })),
+      bindings: {
+        ensure: vi.fn(async () => ({
+          id: "binding-1",
+          adapter: "deerflow",
+          externalThreadId: "external-thread-1",
+        })),
+      },
+      attempts: {
+        ensure: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          externalRunId: null,
+          lastExternalEventId: null,
+        })),
+        claim: vi.fn(async () => executionClaim),
+        submissionContext: vi.fn(async () => ({
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+          submissionUnknown: false,
+          externalRunId: null,
+        })),
+        recordRetryableError,
+      },
+    });
+    const failRun = vi.spyOn(internals, "failRun");
+
+    await expect(processor.execute("run-1", [], undefined, { retryCount: 0, retryLimit: 2 }))
+      .rejects.toBe(retryableError);
+
+    expect(recordRetryableError).toHaveBeenCalledWith(executionClaim, {
+      code: "RUNTIME_EXECUTION_RETRYABLE",
+      detail: retryableError.message,
+    });
+    expect(knowledgeToolGrants.issue).toHaveBeenCalledWith({
+      runId: "run-1",
+      runtimeAttemptId: "runtime-attempt-1",
+      principalId: "principal-1",
+      projectId: "project-1",
+      releaseId: null,
+    });
+    expect(failRun).not.toHaveBeenCalled();
+  });
+
+  it("persists external event effects before committing the inbox cursor", async () => {
+    const persistGate = deferred<void>();
+    const cursorCommitted = vi.fn();
+    const persistRuntimeEffectsTx = vi.fn(async () => {
+      await persistGate.promise;
+      return "pending text";
+    });
+    const publishResult = vi.fn(async () => undefined);
+    const runtime = {
+      execute: vi.fn(async (_execution: unknown, runtimeObserver: {
+        onExternalEvent(
+          part: {
+            externalRunId: string;
+            externalEventId: string;
+            event: string;
+            payload: Record<string, unknown>;
+          },
+          effects: Array<{ type: "text.delta"; delta: string }>,
+        ): Promise<void>;
+      }) => {
+        await runtimeObserver.onExternalEvent({
+          externalRunId: "external-run-1",
+          externalEventId: "event-1",
+          event: "messages",
+          payload: { delta: "pending text" },
+        }, [{ type: "text.delta", delta: "pending text" }]);
+        return {
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [],
+        };
+      }),
+    };
+    const db = {
+      run: { findUnique: vi.fn(async () => ({ status: "running" })) },
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals & {
+      bindings: { ensure: ReturnType<typeof vi.fn> };
+      attempts: {
+        ensure: ReturnType<typeof vi.fn>;
+        claim: ReturnType<typeof vi.fn>;
+        submissionContext: ReturnType<typeof vi.fn>;
+        processExternalEvent: ReturnType<typeof vi.fn>;
+      };
+      persistRuntimeEffectsTx: ReturnType<typeof vi.fn>;
+    };
+    Object.assign(internals, {
+      prepare: vi.fn(async () => ({
+        run: {
+          id: "run-1",
+          attempt: 1,
+          createdById: "principal-1",
+          knowledgeReleaseId: null,
+        },
+        thread: { id: "thread-1" },
+        project: { id: "project-1" },
+        entryId: "entry-1",
+        request: {
+          prompt: "Build it",
+          modelId: "model-1",
+          workflow: "generate",
+          targetSurface: "app",
+          designStyle: { kind: "automatic" },
+          sourceIds: [],
+          artifactTargets: [],
+          requestedArtifactKinds: [],
+        },
+        artifactTargets: [],
+        sources: [],
+        designAssets: [],
+        designStyleSnapshot: null,
+        resume: null,
+        previousAssistantText: "",
+      })),
+      bindings: {
+        ensure: vi.fn(async () => ({
+          id: "binding-1",
+          adapter: "deerflow",
+          externalThreadId: "external-thread-1",
+        })),
+      },
+      attempts: {
+        ensure: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          externalRunId: "external-run-1",
+          lastExternalEventId: null,
+        })),
+        claim: vi.fn(async () => executionClaim),
+        submissionContext: vi.fn(async () => ({
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+          submissionUnknown: false,
+          externalRunId: "external-run-1",
+        })),
+        processExternalEvent: vi.fn(async (
+          _claim: unknown,
+          _part: unknown,
+          applyEffects: (tx: object) => Promise<void>,
+        ) => {
+          await applyEffects({});
+          cursorCommitted();
+          return { created: true, sequence: 1 };
+        }),
+      },
+      persistRuntimeEffectsTx,
+      publishResult,
+    });
+
+    const execution = processor.execute("run-1");
+    await vi.waitFor(() => expect(persistRuntimeEffectsTx).toHaveBeenCalledWith(
+      {},
+      executionClaim,
+      expect.objectContaining({ entryId: "entry-1" }),
+      "",
+      [{ type: "text.delta", delta: "pending text" }],
+    ));
+    expect(cursorCommitted).not.toHaveBeenCalled();
+    persistGate.resolve();
+    await expect(execution).resolves.toEqual({ runId: "run-1", artifactCount: 0 });
+
+    expect(cursorCommitted).toHaveBeenCalledTimes(1);
+    expect(persistRuntimeEffectsTx.mock.invocationCallOrder[0]).toBeLessThan(
+      cursorCommitted.mock.invocationCallOrder[0]!,
+    );
+    expect(publishResult).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not finalize local cancellation when cancelling the external run fails", async () => {
+    const externalError = new Error("runtime cancellation endpoint unavailable");
+    const runtime = {
+      cancel: vi.fn(async () => {
+        throw externalError;
+      }),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "cancelling",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            id: "runtime-attempt-1",
+            status: "running",
+            externalThreadId: "external-thread-1",
+            externalRunId: "external-run-1",
+          }],
+        })),
+      },
+      $transaction: vi.fn(),
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals;
+    Object.assign(internals, {
+      attempts: {
+        beginCancellation: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          status: "cancelling",
+          externalThreadId: "external-thread-1",
+          externalRunId: "external-run-1",
+          startedAt: new Date(),
+        })),
+      },
+    });
+    const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
+
+    await expect(processor.cancel("run-1")).rejects.toBe(externalError);
+
+    expect(runtime.cancel).toHaveBeenCalledTimes(1);
+    expect(finalizeCancellation).not.toHaveBeenCalled();
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps cancellation pending when an external Run may still appear", async () => {
+    const attachExternalRun = vi.fn(async () => undefined);
+    const runtime = {
+      cancel: vi.fn(async (
+        _scope: unknown,
+        onExternalRunCreated: (externalRunId: string) => Promise<void>,
+      ) => {
+        // The provider races cancellation with submission and reveals the id late.
+        await onExternalRunCreated("external-run-late");
+        return { found: false };
+      }),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "cancelling",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            id: "runtime-attempt-1",
+            status: "submitting",
+            externalThreadId: "external-thread-1",
+            externalRunId: null,
+          }],
+        })),
+      },
+      $transaction: vi.fn(),
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+      10_000,
+    );
+    const internals = processor as unknown as ProcessorInternals;
+    Object.assign(internals, {
+      attempts: {
+        beginCancellation: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          status: "cancelling",
+          externalThreadId: "external-thread-1",
+          externalRunId: null,
+          startedAt: new Date(),
+        })),
+        attachExternalRunForCancellation: attachExternalRun,
+      },
+    });
+    const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
+
+    await expect(processor.cancel("run-1")).rejects.toThrow("RUNTIME_EXTERNAL_RUN_UNRESOLVED");
+
+    expect(attachExternalRun).toHaveBeenCalledWith("runtime-attempt-1", "external-run-late");
+    expect(finalizeCancellation).not.toHaveBeenCalled();
+  });
+
+  it("finalizes missing external cancellation only after the recovery window", async () => {
+    const runtime = {
+      cancel: vi.fn(async () => ({ found: false })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "cancelling",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            id: "runtime-attempt-1",
+            status: "submitting",
+            externalThreadId: "external-thread-1",
+            externalRunId: null,
+          }],
+        })),
+      },
+      $transaction: vi.fn(),
+    };
+    const recoveryWindowMs = 10_000;
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+      recoveryWindowMs,
+    );
+    const internals = processor as unknown as ProcessorInternals;
+    Object.assign(internals, {
+      attempts: {
+        beginCancellation: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          status: "cancelling",
+          externalThreadId: "external-thread-1",
+          externalRunId: null,
+          startedAt: new Date(Date.now() - recoveryWindowMs - 1),
+        })),
+      },
+    });
+    const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
+
+    await expect(processor.cancel("run-1")).resolves.toEqual({
+      runId: "run-1",
+      cancelled: true,
+      externalRunAbsent: true,
+    });
+    expect(finalizeCancellation).toHaveBeenCalledWith(
+      "run-1",
+      "Cancelled after external Run creation window elapsed",
+      "runtime-attempt-1",
+    );
+  });
+
+  it("stores runtime phase state before appending its event", async () => {
+    const tx = eventTransaction();
+    const { db, processor } = processorWithTransaction(tx);
+
+    await processor.persistProgress(executionClaim, {
+      type: "phase",
+      phase: "generating",
+      label: "Generating prototype",
+      progress: 0.5,
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.run.update).toHaveBeenNthCalledWith(1, {
+      where: { id: "run-1" },
+      data: {
+        phase: "generating",
+        phaseLabel: "Generating prototype",
+        progress: 0.5,
+      },
+    });
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "run.phase.changed",
+        payload: {
+          phase: "generating",
+          label: "Generating prototype",
+          progress: 0.5,
+        },
+      }),
+    });
+  });
+
+  it("persists trusted generation stages once and updates the coarse Run phase", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      attempt: 1,
+      phase: "understanding",
+      phaseLabel: "Understanding request",
+    });
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "thinking" } },
+    ]);
+    const { processor } = processorWithTransaction(tx);
+
+    await processor.persistProgress(executionClaim, {
+      type: "generation.stage",
+      stage: "design-system",
+      sourceEventId: "deerflow:stage-call-1",
+    });
+
+    expect(tx.run.update).toHaveBeenNthCalledWith(1, {
+      where: { id: "run-1" },
+      data: {
+        phase: "planning",
+        phaseLabel: "正在生成设计系统",
+        progress: null,
+      },
+    });
+    expect(tx.runEvent.create.mock.calls.map(([call]) => call.data)).toEqual([
+      expect.objectContaining({
+        sourceId: "deerflow:stage-call-1",
+        type: "run.generation.stage.changed",
+        payload: { attempt: 1, stage: "design-system" },
+      }),
+      expect.objectContaining({
+        sourceId: null,
+        type: "run.phase.changed",
+      }),
+    ]);
+  });
+
+  it("treats a persisted generation-stage source replay as a no-op before regression checks", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      attempt: 1,
+      phase: "generating",
+      phaseLabel: "正在生成界面",
+    });
+    tx.runEvent.findFirst.mockResolvedValue({
+      type: "run.generation.stage.changed",
+      payload: { attempt: 1, stage: "mapping-components" },
+    });
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "generating-ui" } },
+    ]);
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.persistProgress(executionClaim, {
+      type: "generation.stage",
+      stage: "mapping-components",
+      sourceEventId: "deerflow:persisted-mapping-source",
+    })).resolves.toBeUndefined();
+
+    expect(tx.runEvent.findMany).not.toHaveBeenCalled();
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reused generation-stage source with a different payload", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      attempt: 1,
+      phase: "planning",
+      phaseLabel: "正在映射组件",
+    });
+    tx.runEvent.findFirst.mockResolvedValue({
+      type: "run.generation.stage.changed",
+      payload: { attempt: 1, stage: "design-system" },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.persistProgress(executionClaim, {
+      type: "generation.stage",
+      stage: "mapping-components",
+      sourceEventId: "deerflow:reused-stage-source",
+    })).rejects.toThrow("RUN_EVENT_SOURCE_CONFLICT");
+
+    expect(tx.runEvent.findMany).not.toHaveBeenCalled();
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a skipped Prototype generation stage", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      attempt: 1,
+      phase: "understanding",
+      phaseLabel: "正在理解需求",
+    });
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "thinking" } },
+    ]);
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.persistProgress(executionClaim, {
+      type: "generation.stage",
+      stage: "mapping-components",
+      sourceEventId: "deerflow:skipped-design-system",
+    })).rejects.toThrow("RUNTIME_GENERATION_STAGE_TRANSITION_INVALID");
+
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects the same Prototype generation stage from a different source", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      attempt: 1,
+      phase: "planning",
+      phaseLabel: "正在生成设计系统",
+    });
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "design-system" } },
+      { payload: { attempt: 1, stage: "thinking" } },
+    ]);
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.persistProgress(executionClaim, {
+      type: "generation.stage",
+      stage: "design-system",
+      sourceEventId: "deerflow:duplicate-design-system",
+    })).rejects.toThrow("RUNTIME_GENERATION_STAGE_DUPLICATE");
+
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a trusted generation stage regression", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      attempt: 1,
+      phase: "generating",
+      phaseLabel: "正在生成界面",
+    });
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "generating-ui" } },
+    ]);
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.persistProgress(executionClaim, {
+      type: "generation.stage",
+      stage: "mapping-components",
+      sourceEventId: "deerflow:late-call",
+    })).rejects.toThrow("RUNTIME_GENERATION_STAGE_REGRESSION");
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("does not append progress after cancellation has committed", async () => {
+    const tx = eventTransaction();
+    const { processor } = processorWithTransaction(tx);
+    rejectExecutionClaim(processor);
+
+    await expect(processor.persistProgress(executionClaim, {
+      type: "phase",
+      phase: "generating",
+      label: "Generating prototype",
+      progress: 0.5,
+    })).rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("does not append message deltas or drafts after cancellation has committed", async () => {
+    const tx = eventTransaction();
+    const { processor } = processorWithTransaction(tx);
+    rejectExecutionClaim(processor);
+
+    await expect(processor.persistDelta(
+      executionClaim,
+      "entry-1",
+      "partial response",
+      "response",
+    )).rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+
+    expect(tx.runDraft.upsert).not.toHaveBeenCalled();
+    expect(tx.run.update).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("does not enter waiting_input or create approvals after cancellation wins", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({ status: "running", attempt: 1 });
+    Object.assign(tx.run, {
+      findUnique: vi.fn(async () => ({ status: "cancelling" })),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    });
+    Object.assign(tx, {
+      runApproval: {
+        findUnique: vi.fn(),
+        create: vi.fn(),
+      },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.waitForInput(executionClaim, {
+      protocol: "workbench.runtime.input-required.v1",
+      approvals: [{ key: "scope", kind: "choice", prompt: "Choose scope", options: [] }],
+    })).rejects.toThrow("RUNTIME_CANCELLED");
+
+    expect(tx.runtimeAttempt.updateMany).not.toHaveBeenCalled();
+    expect(tx.runApproval.findUnique).not.toHaveBeenCalled();
+    expect(tx.runApproval.create).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("stores progress 1 when publishing a successful result", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      id: "run-1",
+      status: "running",
+      projectId: "project-1",
+      knowledgeReleaseId: null,
+      request: {
+        prompt: "Build it",
+        modelId: "quality",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+        sourceIds: [],
+        artifactTargets: [],
+        requestedArtifactKinds: [],
+      },
+    });
+    Object.assign(tx, {
+      threadEntry: { update: vi.fn(async () => ({})) },
+      board: { findUniqueOrThrow: vi.fn(async () => ({ id: "board-1" })) },
+      boardNode: {
+        findMany: vi.fn(async () => []),
+        aggregate: vi.fn(async () => ({ _max: { sortOrder: null } })),
+      },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    });
+
+    expect(tx.run.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "run-1",
+        status: "running",
+        executionOwnerId: executionClaim.ownerId,
+        executionEpoch: executionClaim.epoch,
+      },
+      data: expect.objectContaining({
+        status: "succeeded",
+        progress: 1,
+        errorRetryable: null,
+      }),
+    });
+    expect(tx.runtimeAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "runtime-attempt-1",
+        runId: "run-1",
+        status: "running",
+        executionOwnerId: executionClaim.ownerId,
+        executionEpoch: executionClaim.epoch,
+      },
+      data: expect.objectContaining({ status: "succeeded" }),
+    });
+  });
+
+  it("does not emit completion events after cancellation wins the publication fence", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      id: "run-1",
+      status: "running",
+      projectId: "project-1",
+      knowledgeReleaseId: null,
+      request: {
+        prompt: "Build it",
+        modelId: "quality",
+        workflow: "generate",
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+        sourceIds: [],
+        artifactTargets: [],
+        requestedArtifactKinds: [],
+      },
+    });
+    Object.assign(tx.run, {
+      findUnique: vi.fn(async () => ({ status: "cancelling" })),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    });
+    Object.assign(tx, {
+      threadEntry: { update: vi.fn(async () => ({})) },
+      board: { findUniqueOrThrow: vi.fn(async () => ({ id: "board-1" })) },
+      boardNode: {
+        findMany: vi.fn(async () => []),
+        aggregate: vi.fn(async () => ({ _max: { sortOrder: null } })),
+      },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    })).rejects.toThrow("RUNTIME_CANCELLED");
+
+    expect(tx.runtimeAttempt.updateMany).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("stores failure state and removes staging versions without deleting a revise target", async () => {
+    const tx = eventTransaction();
+    const pendingInvocation = pendingCanvasInvocation("canvas-session-failed", "waiting_client");
+    tx.canvasAgentSession.findMany.mockResolvedValue([{ id: "canvas-session-failed" }]);
+    tx.canvasToolInvocation.findMany.mockResolvedValue([pendingInvocation]);
+    tx.canvasToolInvocation.updateMany.mockResolvedValue({ count: 1 });
+    tx.artifactVersion.findMany.mockResolvedValue([
+      { id: "version-create-staging", artifactId: "artifact-create", artifact: { currentVersionId: null } },
+      {
+        id: "version-revise-staging",
+        artifactId: "artifact-revise",
+        artifact: { currentVersionId: "version-ready" },
+      },
+    ]);
+    tx.artifactVersion.deleteMany.mockResolvedValue({ count: 2 });
+    tx.artifact.deleteMany.mockResolvedValue({ count: 1 });
+    const { db, processor } = processorWithTransaction(tx);
+
+    await processor.failRun("run-1", "runtime-attempt-1", new Error("runtime unavailable"), false);
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.run.updateMany).toHaveBeenCalledWith({
+      where: { id: "run-1", status: { in: ["queued", "running"] } },
+      data: expect.objectContaining({
+        status: "failed",
+        errorRetryable: false,
+      }),
+    });
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "run.failed",
+        payload: expect.objectContaining({ retryable: false }),
+      }),
+    });
+    expect(tx.runtimeAttempt.updateMany).toHaveBeenCalledWith({
+      where: { id: "runtime-attempt-1" },
+      data: expect.objectContaining({ status: "failed", errorRetryable: false }),
+    });
+    expect(tx.canvasAgentSession.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["canvas-session-failed"] }, status: "active" },
+      data: { status: "cancelled", activeMutationToolCallId: null },
+    });
+    expect(tx.canvasToolGrant.updateMany).toHaveBeenCalledWith({
+      where: { agentSessionId: { in: ["canvas-session-failed"] }, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(tx.canvasClientCommand.updateMany).toHaveBeenCalledWith({
+      where: { agentSessionId: { in: ["canvas-session-failed"] }, status: "pending" },
+      data: { status: "cancelled" },
+    });
+    expectCanvasInvocationCancelled(tx, pendingInvocation);
+    expect(tx.artifactVersion.findMany).toHaveBeenCalledWith({
+      where: {
+        createdByRunId: "run-1",
+        status: "staging",
+        runtimeDraftSourceId: { not: null },
+        runtimeDraftIndex: { not: null },
+        runtimeDraftTitle: { not: null },
+      },
+      select: {
+        id: true,
+        artifactId: true,
+        artifact: { select: { currentVersionId: true } },
+      },
+    });
+    expect(tx.artifactVersion.deleteMany).toHaveBeenCalledWith({
+      where: {
+        createdByRunId: "run-1",
+        status: "staging",
+        runtimeDraftSourceId: { not: null },
+        runtimeDraftIndex: { not: null },
+        runtimeDraftTitle: { not: null },
+        id: { in: ["version-create-staging", "version-revise-staging"] },
+      },
+    });
+    expect(tx.artifact.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["artifact-create"] },
+        currentVersionId: null,
+        versions: { none: {} },
+        boardNodes: { none: {} },
+        designSystemImports: { none: {} },
+        designSystemCreations: { none: {} },
+        versionEditReceipts: { none: {} },
+        creationReceipt: null,
+      },
+    });
+    expect(tx.runDraft.deleteMany).toHaveBeenCalledWith({ where: { runId: "run-1" } });
+  });
+
+  it("stores cancellation and removes the Run's staging version and temporary Artifact", async () => {
+    const tx = eventTransaction();
+    const pendingInvocation = pendingCanvasInvocation("canvas-session-cancelled", "waiting_approval");
+    tx.canvasAgentSession.findMany.mockResolvedValue([{ id: "canvas-session-cancelled" }]);
+    tx.canvasToolInvocation.findMany.mockResolvedValue([pendingInvocation]);
+    tx.canvasToolInvocation.updateMany.mockResolvedValue({ count: 1 });
+    tx.artifactVersion.findMany.mockResolvedValue([
+      {
+        id: "version-cancelled-staging",
+        artifactId: "artifact-cancelled-create",
+        artifact: { currentVersionId: null },
+      },
+    ]);
+    tx.artifactVersion.deleteMany.mockResolvedValue({ count: 1 });
+    tx.artifact.deleteMany.mockResolvedValue({ count: 1 });
+    const { db, processor } = processorWithTransaction(tx);
+
+    await processor.finalizeCancellation("run-1", "Cancelled before publishing");
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.run.updateMany).toHaveBeenCalledWith({
+      where: { id: "run-1", status: "cancelling" },
+      data: expect.objectContaining({
+        status: "cancelled",
+        cancellationReason: "Cancelled before publishing",
+      }),
+    });
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "run.cancelled",
+        payload: { reason: "Cancelled before publishing" },
+      }),
+    });
+    expect(tx.canvasAgentSession.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["canvas-session-cancelled"] }, status: "active" },
+      data: { status: "cancelled", activeMutationToolCallId: null },
+    });
+    expect(tx.canvasToolGrant.updateMany).toHaveBeenCalledWith({
+      where: { agentSessionId: { in: ["canvas-session-cancelled"] }, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(tx.canvasClientCommand.updateMany).toHaveBeenCalledWith({
+      where: { agentSessionId: { in: ["canvas-session-cancelled"] }, status: "pending" },
+      data: { status: "cancelled" },
+    });
+    expectCanvasInvocationCancelled(tx, pendingInvocation);
+    expect(tx.artifactVersion.deleteMany).toHaveBeenCalledWith({
+      where: {
+        createdByRunId: "run-1",
+        status: "staging",
+        runtimeDraftSourceId: { not: null },
+        runtimeDraftIndex: { not: null },
+        runtimeDraftTitle: { not: null },
+        id: { in: ["version-cancelled-staging"] },
+      },
+    });
+    expect(tx.artifact.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["artifact-cancelled-create"] },
+        currentVersionId: null,
+        versions: { none: {} },
+        boardNodes: { none: {} },
+        designSystemImports: { none: {} },
+        designSystemCreations: { none: {} },
+        versionEditReceipts: { none: {} },
+        creationReceipt: null,
+      },
+    });
+  });
+
+  it("maps immutable source snapshots to ordered private content locators", () => {
+    const originalSha = "a".repeat(64);
+    const textSha = "b".repeat(64);
+    const structuredSha = "c".repeat(64);
+    const sourceChecksum = "f".repeat(64);
+    const blob = (overrides: Record<string, unknown>) => ({
+      id: "blob",
+      sha256: originalSha,
+      storageKey: "blobs/original",
+      mediaType: "application/pdf",
+      byteSize: 12n,
+      status: "ready" as const,
+      verifiedAt: now,
+      gcEligibleAt: null,
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      ...overrides,
+    });
+    const sources = mapRuntimeSources([{
+      id: "snapshot-1",
+      runId: "run-1",
+      projectId: "project-1",
+      position: 0,
+      sourceId: "source-1",
+      kind: "file",
+      label: "brief.pdf",
+      checksum: sourceChecksum,
+      descriptor: {},
+      snapshot: {},
+      createdAt: now,
+      source: {
+        id: "source-1",
+        projectId: "project-1",
+        kind: "file",
+        checksum: sourceChecksum,
+        blobs: [{
+          position: 0,
+          blobId: "blob-original",
+          fileAssetId: "file-1",
+          role: "primary",
+          path: "brief.pdf",
+          mediaType: "application/pdf",
+          byteSize: 12n,
+          sha256: originalSha,
+          blob: blob({ id: "blob-original" }),
+          fileAsset: {
+            currentExtraction: {
+              id: "extraction-1",
+              fileAssetId: "file-1",
+              sourceBlobId: "blob-original",
+              attempt: 1,
+              status: "ready" as const,
+              parser: "docling",
+              parserVersion: "1",
+              outputSchemaVersion: 1,
+              idempotencyKey: "extract:key",
+              requestHash: "d".repeat(64),
+              contentSha256: textSha,
+              failureCode: null,
+              failureDetail: null,
+              metadata: null,
+              startedAt: now,
+              finishedAt: now,
+              createdAt: now,
+              updatedAt: now,
+              outputs: [
+                {
+                  extractionId: "extraction-1",
+                  kind: "structured",
+                  position: 0,
+                  blobId: "blob-structured",
+                  metadata: null,
+                  createdAt: now,
+                  blob: blob({
+                    id: "blob-structured",
+                    sha256: structuredSha,
+                    storageKey: "blobs/structured",
+                    mediaType: "application/json",
+                    byteSize: 20n,
+                  }),
+                },
+                {
+                  extractionId: "extraction-1",
+                  kind: "text",
+                  position: 0,
+                  blobId: "blob-text",
+                  metadata: null,
+                  createdAt: now,
+                  blob: blob({
+                    id: "blob-text",
+                    sha256: textSha,
+                    storageKey: "blobs/text",
+                    mediaType: "text/markdown",
+                    byteSize: 30n,
+                  }),
+                },
+              ],
+            },
+          },
+        }],
+      },
+    }] as never);
+
+    expect(sources).toEqual([{
+      position: 0,
+      sourceId: "source-1",
+      sourceKind: "file",
+      blobId: "blob-original",
+      originalName: "brief.pdf",
+      mediaType: "application/pdf",
+      byteSize: 12,
+      sha256: originalSha,
+      original: {
+        storageKey: "blobs/original",
+        mediaType: "application/pdf",
+        byteSize: 12,
+        sha256: originalSha,
+      },
+      extraction: {
+        kind: "text",
+        position: 0,
+        content: {
+          storageKey: "blobs/text",
+          mediaType: "text/markdown",
+          byteSize: 30,
+          sha256: textSha,
+        },
+      },
+    }]);
+  });
+
+  it("pins Prototype binary assets only when they exactly match a verified Run source", () => {
+    const sha256 = "d".repeat(64);
+    const content = {
+      ...prototypeDocument(),
+      assets: [{
+        id: "hero-image",
+        kind: "image" as const,
+        name: "Hero",
+        blobId: "blob-image",
+        mediaType: "image/png" as const,
+        byteSize: 16,
+        sha256,
+        width: 320,
+        height: 180,
+      }],
+    };
+    const draft = {
+      kind: "prototype" as const,
+      schemaVersion: 1 as const,
+      title: "Prototype",
+      citations: [],
+      operation: { kind: "create" as const },
+      content,
+    };
+    const source = {
+      position: 0,
+      blobId: "blob-image",
+      originalName: "hero.png",
+      mediaType: "image/png",
+      byteSize: 16,
+      sha256,
+      original: {
+        storageKey: "blobs/hero",
+        mediaType: "image/png",
+        byteSize: 16,
+        sha256,
+      },
+      extraction: null,
+    };
+
+    expect(prototypeAssetPins(draft, [source])).toEqual([{
+      assetId: "hero-image",
+      kind: "image",
+      blobId: "blob-image",
+      mediaType: "image/png",
+      byteSize: 16,
+      sha256,
+      metadata: content.assets[0],
+    }]);
+    expect(() => prototypeAssetPins(draft, [{ ...source, sha256: "e".repeat(64) }]))
+      .toThrow("RUNTIME_PROTOTYPE_ASSET_UNAUTHORIZED:hero-image");
+    expect(() => prototypeAssetPins(draft, []))
+      .toThrow("RUNTIME_PROTOTYPE_ASSET_UNAUTHORIZED:hero-image");
+
+    const designAsset = {
+      assetId: "source-hero",
+      name: "Source hero",
+      kind: "image" as const,
+      artifactVersionId: "version-style",
+      blobId: "blob-image",
+      mediaType: "image/png",
+      byteSize: 16,
+      sha256,
+      content: {
+        storageKey: "blobs/design-hero",
+        mediaType: "image/png",
+        byteSize: 16,
+        sha256,
+      },
+    };
+    expect(prototypeAssetPins(draft, [], [designAsset])).toEqual([{
+      assetId: "hero-image",
+      kind: "image",
+      blobId: "blob-image",
+      mediaType: "image/png",
+      byteSize: 16,
+      sha256,
+      metadata: content.assets[0],
+    }]);
+    expect(() => prototypeAssetPins(draft, [], [{ ...designAsset, blobId: "blob-other" }]))
+      .toThrow("RUNTIME_PROTOTYPE_ASSET_UNAUTHORIZED:hero-image");
+    expect(() => prototypeAssetPins(draft, [], [{ ...designAsset, kind: "font" }]))
+      .toThrow("RUNTIME_PROTOTYPE_ASSET_UNAUTHORIZED:hero-image");
+
+    const sourceAsset = {
+      artifactVersionId: "version-source",
+      assetId: content.assets[0]!.id,
+      kind: content.assets[0]!.kind,
+      blobId: content.assets[0]!.blobId,
+      mediaType: content.assets[0]!.mediaType,
+      byteSize: content.assets[0]!.byteSize,
+      sha256: content.assets[0]!.sha256,
+      metadata: content.assets[0]!,
+      content: {
+        storageKey: "tenant/private/source-hero",
+        mediaType: content.assets[0]!.mediaType,
+        byteSize: content.assets[0]!.byteSize,
+        sha256: content.assets[0]!.sha256,
+      },
+    };
+    const renamedDraft = {
+      ...draft,
+      content: {
+        ...draft.content,
+        assets: [{ ...content.assets[0]!, id: "generated-hero", name: "Generated hero" }],
+      },
+    };
+    expect(prototypeAssetPins(renamedDraft, [], [], [], [sourceAsset])).toMatchObject([{
+      assetId: "generated-hero",
+      blobId: "blob-image",
+      metadata: { name: "Generated hero", width: 320, height: 180 },
+    }]);
+    expect(() => prototypeAssetPins({
+      ...renamedDraft,
+      content: {
+        ...renamedDraft.content,
+        assets: [{ ...renamedDraft.content.assets[0]!, width: 321 }],
+      },
+    }, [], [], [], [sourceAsset])).toThrow("RUNTIME_PROTOTYPE_ASSET_UNAUTHORIZED:generated-hero");
+    expect(() => prototypeAssetPins(renamedDraft, [], [], [], [{
+      ...sourceAsset,
+      metadata: { ...sourceAsset.metadata, blobId: "blob-forged" },
+    }])).toThrow("RUNTIME_PROTOTYPE_ASSET_UNAUTHORIZED:generated-hero");
+  });
+
+  it("rejects missing, drifted, deleted, or unavailable Design System asset sources", () => {
+    const snapshot = designAssetSnapshot();
+    const row = designAssetRow();
+
+    expect(() => mapRuntimeDesignAssets(snapshot, [])).toThrow(
+      "RUNTIME_DESIGN_STYLE_ASSET_PIN_MISMATCH",
+    );
+    expect(() => mapRuntimeDesignAssets(snapshot, [{ ...row, sha256: "e".repeat(64) }]))
+      .toThrow("RUNTIME_DESIGN_STYLE_ASSET_SOURCE_INVALID:brand-mark");
+    expect(() => mapRuntimeDesignAssets(snapshot, [{
+      ...row,
+      blob: { ...row.blob, status: "quarantined" as const },
+    }])).toThrow("RUNTIME_DESIGN_STYLE_ASSET_SOURCE_INVALID:brand-mark");
+    expect(() => mapRuntimeDesignAssets(snapshot, [{
+      ...row,
+      blob: { ...row.blob, deletedAt: now },
+    }])).toThrow("RUNTIME_DESIGN_STYLE_ASSET_SOURCE_INVALID:brand-mark");
+    expect(() => mapRuntimeDesignAssets(snapshot, [{
+      ...row,
+      blob: { ...row.blob, mediaType: "image/jpeg" },
+    }])).toThrow("RUNTIME_DESIGN_STYLE_ASSET_SOURCE_INVALID:brand-mark");
+  });
+
+  it("rejects source snapshots with gaps or unavailable blobs", () => {
+    const sourceChecksum = "f".repeat(64);
+    const row = {
+      id: "snapshot-1",
+      runId: "run-1",
+      projectId: "project-1",
+      position: 1,
+      sourceId: "source-1",
+      kind: "file" as const,
+      label: "brief.txt",
+      checksum: sourceChecksum,
+      descriptor: {},
+      snapshot: {},
+      createdAt: now,
+      source: {
+        id: "source-1",
+        projectId: "project-1",
+        kind: "file" as const,
+        checksum: sourceChecksum,
+        blobs: [{
+          position: 0,
+          blobId: "blob-1",
+          fileAssetId: "file-1",
+          role: "primary",
+          path: "brief.txt",
+          mediaType: "text/plain",
+          byteSize: 4n,
+          sha256: "a".repeat(64),
+          blob: {
+            id: "blob-1",
+            sha256: "a".repeat(64),
+            storageKey: "blobs/one",
+            mediaType: "text/plain",
+            byteSize: 4n,
+            status: "ready" as const,
+            verifiedAt: now,
+            gcEligibleAt: null,
+            deletedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+          fileAsset: null,
+        }],
+      },
+    };
+    expect(() => mapRuntimeSources([row] as never)).toThrow("RUNTIME_SOURCE_ORDER_INVALID");
+    expect(() => mapRuntimeSources([{
+      ...row,
+      position: 0,
+      source: {
+        ...row.source,
+        blobs: [{ ...row.source.blobs[0]!, blob: { ...row.source.blobs[0]!.blob, status: "deleted" as const } }],
+      },
+    }] as never)).toThrow("RUNTIME_SOURCE_BLOB_INVALID");
+    expect(() => mapRuntimeSources([{
+      ...row,
+      position: 0,
+      source: {
+        ...row.source,
+        blobs: [{ ...row.source.blobs[0]!, blob: { ...row.source.blobs[0]!.blob, status: "quarantined" as const } }],
+      },
+    }] as never)).toThrow("RUNTIME_SOURCE_BLOB_INVALID");
+  });
+});

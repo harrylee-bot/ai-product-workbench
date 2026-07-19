@@ -1,0 +1,30 @@
+{
+  "schema": "workbench.knowledge-retrieval-evaluation-dataset.v1",
+  "id": "zh-knowledge-smoke-r1",
+  "language": "zh-Hans-CN",
+  "k": 2,
+  "thresholds": {
+    "minimumRecallAtK": 0.75,
+    "minimumNdcgAtK": 0.75,
+    "maximumP95LatencyMs": 100
+  },
+  "cases": [
+    {
+      "id": "acceptance-rules",
+      "query": "需求文档的验收规则是什么？",
+      "routeScope": "production",
+      "expected": [
+        { "chunkId": "chunk_acceptance", "relevance": 3 },
+        { "chunkId": "chunk_prd", "relevance": 1 }
+      ]
+    },
+    {
+      "id": "original-source",
+      "query": "这个规则的原始来源是什么？",
+      "routeScope": "source_lookup",
+      "expected": [
+        { "chunkId": "chunk_source", "relevance": 2 }
+      ]
+    }
+  ]
+}

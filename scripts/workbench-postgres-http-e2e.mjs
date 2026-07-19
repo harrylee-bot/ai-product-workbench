@@ -1,0 +1,4418 @@
+#!/usr/bin/env node
+
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import http from "node:http";
+import path from "node:path";
+import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+import canonicalize from "canonicalize";
+import pg from "pg";
+import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
+
+const { Client } = pg;
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const databaseUrl = testDatabaseUrl(process.env.WORKBENCH_TEST_DATABASE_URL);
+const databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
+assertSchemaResetConfirmation(databaseName);
+const commandTimeoutMs = positiveInteger("WORKBENCH_E2E_COMMAND_TIMEOUT_MS", 180_000);
+const scenarioTimeoutMs = positiveInteger("WORKBENCH_E2E_SCENARIO_TIMEOUT_MS", 60_000);
+const fakeRuntimeToken = `workbench-e2e-${randomUUID()}`;
+const fakeStorageBucket = "workbench-e2e-sources";
+const fakeStorageAccessKeyId = "workbench-e2e-access-key";
+const fakeStorageSecretAccessKey = "workbench-e2e-secret-key";
+const previewTokenSecret = Buffer.alloc(32, 17).toString("base64url");
+const invitationTokenSecret = Buffer.alloc(32, 29).toString("base64url");
+const canvasToolSecret = Buffer.alloc(32, 41).toString("base64url");
+const runtimeCatalogModelId = "quality";
+const runtimeProviderModel = "fake-quality-model";
+const verbose = process.env.WORKBENCH_E2E_VERBOSE === "1";
+
+const services = [];
+let fakeRuntime;
+let cleanupPromise;
+
+class LogBuffer {
+  constructor(name) {
+    this.name = name;
+    this.buffer = "";
+  }
+
+  append(stream, chunk) {
+    const text = `[${stream}] ${chunk}`;
+    this.buffer = boundedAppend(this.buffer, text);
+    if (verbose) process[stream === "stderr" ? "stderr" : "stdout"].write(`[${this.name}] ${chunk}`);
+  }
+
+  value() {
+    return this.buffer;
+  }
+}
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => {
+    void cleanup().finally(() => process.exit(signal === "SIGINT" ? 130 : 143));
+  });
+}
+
+try {
+  console.log(`[e2e] target database: ${databaseName}`);
+  await buildWorkspaces();
+  await rebuildSchemas();
+  await migrateDatabase();
+
+  fakeRuntime = await startFakeDeerFlow(fakeRuntimeToken);
+  const apiPort = await reservePort();
+  const apiBaseUrl = `http://127.0.0.1:${apiPort}/api/v1`;
+  const commonEnvironment = {
+    ...process.env,
+    NODE_ENV: "test",
+    NO_COLOR: "1",
+    FORCE_COLOR: "0",
+    WORKBENCH_DATABASE_URL: databaseUrl,
+    WORKBENCH_S3_BUCKET: fakeStorageBucket,
+    WORKBENCH_S3_REGION: "us-east-1",
+    WORKBENCH_S3_INTERNAL_ENDPOINT: fakeRuntime.url,
+    WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: "true",
+    WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: `${fakeRuntime.url}/${fakeStorageBucket}`,
+    WORKBENCH_API_STAGING_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-api-staging`,
+    WORKBENCH_API_STAGING_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-api-staging`,
+    WORKBENCH_API_READY_BLOB_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-api-ready`,
+    WORKBENCH_API_READY_BLOB_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-api-ready`,
+    WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-runtime-ready`,
+    WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-runtime-ready`,
+  };
+
+  const api = spawnService("workbench-api", process.execPath, ["apps/workbench-api/dist/main.js"], {
+    ...commonEnvironment,
+    WORKBENCH_API_HOST: "127.0.0.1",
+    WORKBENCH_API_PORT: String(apiPort),
+    WORKBENCH_WEB_ORIGIN: "http://127.0.0.1:3000",
+    WORKBENCH_AUTH_MODE: "development",
+    WORKBENCH_INVITATION_TOKEN_SECRET: invitationTokenSecret,
+    WORKBENCH_INVITATION_TTL_HOURS: "168",
+    WORKBENCH_PREVIEW_ORIGIN: "http://127.0.0.1:4300",
+    WORKBENCH_PREVIEW_TOKEN_SECRET: previewTokenSecret,
+    WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS: "60",
+    WORKBENCH_CANVAS_TOOL_SECRET: canvasToolSecret,
+    WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS: "300",
+    WORKBENCH_CANVAS_COMMAND_TTL_SECONDS: "60",
+    WORKBENCH_CANVAS_INVOCATION_LEASE_SECONDS: "30",
+    DEERFLOW_LANGGRAPH_URL: fakeRuntime.url,
+    DEERFLOW_GATEWAY_URL: fakeRuntime.url,
+    DEERFLOW_INTERNAL_AUTH_TOKEN: fakeRuntimeToken,
+  });
+  await waitForHttp(`${apiBaseUrl}/system/ready`, api, scenarioTimeoutMs);
+
+  const worker = spawnService("workbench-worker", process.execPath, ["apps/workbench-worker/dist/main.js"], {
+    ...commonEnvironment,
+    WORKBENCH_RUNTIME_CONCURRENCY: "2",
+    WORKBENCH_CANVAS_TOOL_URL: `${apiBaseUrl}/runtime/canvas/tools/execute`,
+    WORKBENCH_CANVAS_VISUAL_URL: `${apiBaseUrl}/runtime/canvas/visuals`,
+    WORKBENCH_CANVAS_TOOL_SECRET: canvasToolSecret,
+    WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS: "300",
+    DEERFLOW_LANGGRAPH_URL: fakeRuntime.url,
+    DEERFLOW_GATEWAY_URL: fakeRuntime.url,
+    DEERFLOW_ASSISTANT_ID: "workbench-e2e-agent",
+    DEERFLOW_INTERNAL_AUTH_TOKEN: fakeRuntimeToken,
+    DEERFLOW_STREAM_MODE: "messages,values",
+    DEERFLOW_TIMEOUT_MS: "30000",
+    DEERFLOW_IDLE_TIMEOUT_MS: "5000",
+  });
+  await waitForProcessStart(worker, 750);
+
+  const client = createApiClient(apiBaseUrl);
+  const outsiderClient = createApiClient(apiBaseUrl, {
+    subject: "workbench-e2e-outsider",
+    email: "workbench-e2e-outsider@test.local",
+    name: "Workbench E2E Outsider",
+  });
+  const inviteeClient = createApiClient(apiBaseUrl, {
+    subject: "workbench-e2e-invitee",
+    email: "workbench-e2e-invitee@test.local",
+    name: "Workbench E2E Invitee",
+  });
+  const projectLifecycle = await runProjectLifecycleScenario(
+    client,
+    outsiderClient,
+    inviteeClient,
+  );
+  const sseRevocation = await runSseRevocationScenario(client, outsiderClient);
+  const success = await runSuccessScenario(client, outsiderClient);
+  const prototypePatch = await runPrototypePatchScenario(client);
+  const canvasGateway = await runCanvasGatewayScenario(client);
+  const sourceTargetGenerate = await runSourceTargetGeneratePrototypeScenario(client);
+  const approvals = await runApprovalScenario(client);
+  const cancellation = await runCancellationScenario(client);
+  const retry = await runRetryScenario(client);
+
+  assert.ok(fakeRuntime.state.threadCreates >= 4, "fake DeerFlow did not receive thread creation calls");
+  assert.ok(fakeRuntime.state.successRuns >= 1, "fake DeerFlow did not receive the success Run");
+  assert.equal(
+    fakeRuntime.state.prototypePatchRuns,
+    1,
+    "fake DeerFlow did not receive the Prototype patch Run",
+  );
+  assert.equal(
+    fakeRuntime.state.sourcePrototypeRuns,
+    1,
+    "fake DeerFlow did not receive the source Prototype seed Run",
+  );
+  assert.equal(
+    fakeRuntime.state.generatePrototypeRuns,
+    1,
+    "fake DeerFlow did not receive the targeted Generate Prototype Run",
+  );
+  assert.ok(fakeRuntime.state.approvalRuns >= 1, "fake DeerFlow did not emit approval interrupts");
+  assert.ok(fakeRuntime.state.approvalResumes >= 1, "fake DeerFlow did not receive approval resume decisions");
+  assert.ok(fakeRuntime.state.cancelRuns >= 1, "fake DeerFlow did not receive the cancellation Run");
+  assert.equal(fakeRuntime.state.canvasSeedRuns, 1, "fake DeerFlow did not receive the Canvas seed Run");
+  assert.equal(fakeRuntime.state.canvasQuickEditRuns, 1, "fake DeerFlow did not receive the Canvas quick-edit Run");
+  assert.equal(fakeRuntime.state.canvasDirectEditRuns, 1, "fake DeerFlow did not receive the Canvas direct-edit Run");
+  assert.deepEqual(
+    [...new Set(fakeRuntime.state.canvasToolCalls.map((call) => call.toolName))],
+    [
+      "get_visible_screens",
+      "get_selected_screens",
+      "view_screen",
+      "select_screen",
+      "navigate_canvas",
+      "quick_edit",
+      "rename_screen",
+      "duplicate_screen",
+    ],
+    "fake DeerFlow did not execute the complete Canvas tool surface",
+  );
+  assert.ok(
+    fakeRuntime.state.runRequests.every(
+      (request) => request.body?.config?.configurable?.model_name === runtimeCatalogModelId,
+    ),
+    "Worker did not send the stable runtime catalog model id to DeerFlow",
+  );
+  const expectedContentTransfers = success.runtimeContentCount
+    + approvals.runtimeContentCount
+    + cancellation.runtimeContentCount;
+  assert.equal(
+    fakeRuntime.state.objectReads.length,
+    expectedContentTransfers,
+    "Worker did not read every immutable source object exactly once",
+  );
+  assert.equal(
+    fakeRuntime.state.gatewayUploads.length,
+    expectedContentTransfers,
+    "Worker did not upload every immutable source object exactly once",
+  );
+  assert.ok(
+    fakeRuntime.state.gatewayUploads.every((upload) => upload.matchedStorageKeys.length === 1),
+    "a fake Gateway multipart body did not contain exactly one registered immutable object",
+  );
+  const serializedRuntimeRequests = JSON.stringify(fakeRuntime.state.runRequests);
+  assert.ok(
+    !serializedRuntimeRequests.includes(runtimeProviderModel),
+    "provider model name leaked into the Workbench runtime request contract",
+  );
+  for (const receipt of fakeRuntime.state.gatewayReceipts) {
+    assert.ok(!serializedRuntimeRequests.includes(receipt), "private Gateway receipt reached DeerFlow runtime context");
+  }
+
+  console.log(JSON.stringify({
+    ok: true,
+    database: databaseName,
+    apiBaseUrl,
+    projectLifecycle,
+    sseRevocation,
+    success,
+    prototypePatch,
+    canvasGateway,
+    sourceTargetGenerate,
+    approvals,
+    cancellation,
+    retry,
+    fakeRuntime: {
+      threadCreates: fakeRuntime.state.threadCreates,
+      successRuns: fakeRuntime.state.successRuns,
+      prototypePatchRuns: fakeRuntime.state.prototypePatchRuns,
+      sourcePrototypeRuns: fakeRuntime.state.sourcePrototypeRuns,
+      generatePrototypeRuns: fakeRuntime.state.generatePrototypeRuns,
+      approvalRuns: fakeRuntime.state.approvalRuns,
+      approvalResumes: fakeRuntime.state.approvalResumes,
+      cancelRuns: fakeRuntime.state.cancelRuns,
+      canvasSeedRuns: fakeRuntime.state.canvasSeedRuns,
+      canvasQuickEditRuns: fakeRuntime.state.canvasQuickEditRuns,
+      canvasDirectEditRuns: fakeRuntime.state.canvasDirectEditRuns,
+      canvasToolCalls: fakeRuntime.state.canvasToolCalls.length,
+      objectReads: fakeRuntime.state.objectReads.length,
+      gatewayUploads: fakeRuntime.state.gatewayUploads.length,
+    },
+  }, null, 2));
+} catch (error) {
+  console.error("[e2e] FAILED", error instanceof Error ? error.stack ?? error.message : error);
+  dumpLogs();
+  process.exitCode = 1;
+} finally {
+  await cleanup();
+}
+
+async function buildWorkspaces() {
+  console.log("[e2e] validating and building Workbench packages");
+  await runCommand("contracts:validate", npm, [
+    "--workspace", "@workbench/workbench-contracts", "run", "validate:openapi",
+  ]);
+  await runCommand("contracts:build", npm, [
+    "--workspace", "@workbench/workbench-contracts", "run", "build",
+  ]);
+  await runCommand("database:generate", npm, [
+    "--workspace", "@workbench/workbench-db", "run", "generate",
+  ], { WORKBENCH_DATABASE_URL: databaseUrl });
+  await runCommand("preview-token:build", npm, [
+    "--workspace", "@workbench/workbench-preview-token", "run", "build",
+  ]);
+  await runCommand("canvas-tools:build", npm, [
+    "--workspace", "@workbench/workbench-canvas-tools", "run", "build",
+  ]);
+  await runCommand("api:build", npm, [
+    "--workspace", "@workbench/workbench-api", "run", "build",
+  ]);
+  await runCommand("worker:build", npm, [
+    "--workspace", "@workbench/workbench-worker", "run", "build",
+  ]);
+}
+
+async function rebuildSchemas() {
+  const client = new Client({
+    connectionString: pgConnectionUrl(databaseUrl),
+    application_name: "workbench-e2e-reset",
+  });
+  await client.connect();
+  try {
+    const result = await client.query("SELECT current_database() AS name");
+    const actualName = result.rows[0]?.name;
+    if (typeof actualName !== "string" || !isTestDatabaseName(actualName)) {
+      throw new Error(`Refusing to reset non-test database reported by PostgreSQL: ${String(actualName)}`);
+    }
+    if (actualName !== databaseName) {
+      throw new Error(`Database URL resolved to ${actualName}, expected ${databaseName}`);
+    }
+
+    console.log("[e2e] rebuilding workbench and workbench_jobs schemas");
+    await client.query('DROP SCHEMA IF EXISTS "workbench_jobs" CASCADE');
+    await client.query('DROP SCHEMA IF EXISTS "workbench" CASCADE');
+    await client.query('CREATE SCHEMA "workbench"');
+  } finally {
+    await client.end();
+  }
+}
+
+async function queryDatabase(text, values = []) {
+  const client = new Client({
+    connectionString: pgConnectionUrl(databaseUrl),
+    application_name: "workbench-e2e-assertions",
+  });
+  await client.connect();
+  try {
+    await client.query('SET search_path TO "workbench", public');
+    return await client.query(text, values);
+  } finally {
+    await client.end();
+  }
+}
+
+async function migrateDatabase() {
+  console.log("[e2e] applying Workbench migrations");
+  await runCommand("database:migrate", npm, [
+    "--workspace", "@workbench/workbench-db", "run", "migrate:deploy",
+  ], { WORKBENCH_DATABASE_URL: databaseUrl });
+}
+
+function existingSubmissionAttachments(fileAssetIds) {
+  return fileAssetIds.map((fileAssetId) => ({ kind: "existing", fileAssetId }));
+}
+
+function createSubmissionIntent(
+  client,
+  { threadId, request, attachments = [], idempotencyKey, expectedStatus = 201 },
+) {
+  return client.json("POST", `/threads/${threadId}/submission-intents`, {
+    body: { request, attachments },
+    headers: { "Idempotency-Key": idempotencyKey },
+    expectedStatus,
+  });
+}
+
+function submitSubmissionIntent(client, intentId, expectedStatus = 202) {
+  return client.json("POST", `/submission-intents/${intentId}/submit`, { expectedStatus });
+}
+
+async function cancelPendingSubmissionIntent(client, intentId) {
+  const current = await client.json("GET", `/submission-intents/${intentId}`);
+  assert.equal(current.body.status, "pending");
+  const etag = current.headers.get("etag");
+  assert.match(etag ?? "", /^"\d+"$/);
+  await client.json("DELETE", `/submission-intents/${intentId}`, {
+    headers: { "If-Match": etag },
+    expectedStatus: 204,
+  });
+}
+
+async function startRunThroughSubmissionIntent(
+  client,
+  { threadId, request, attachments = [], idempotencyKey },
+) {
+  const created = await createSubmissionIntent(client, {
+    threadId,
+    request,
+    attachments,
+    idempotencyKey,
+  });
+  assert.deepEqual(
+    created.body.attachments.map((attachment) => ({
+      kind: attachment.kind,
+      fileAssetId: attachment.fileAssetId,
+    })),
+    attachments,
+  );
+  const submitted = await submitSubmissionIntent(client, created.body.id);
+  assert.equal(submitted.body.intent.id, created.body.id);
+  assert.equal(submitted.body.intent.status, "submitted");
+  assert.equal(submitted.body.intent.runId, submitted.body.run.id);
+  return { body: submitted.body.run, intent: submitted.body.intent };
+}
+
+async function runSuccessScenario(client, outsiderClient) {
+  console.log("[e2e] running success, idempotency, and SSE replay scenario");
+  const identity = await client.json("GET", "/identity/me");
+  assert.equal(typeof identity.body.id, "string");
+  assert.equal(typeof identity.body.defaultWorkspaceId, "string");
+  const runtimeModels = await client.json("GET", "/runtime/models");
+  assert.deepEqual(runtimeModels.body.items.map((model) => model.id), [runtimeCatalogModelId]);
+  assert.ok(
+    !JSON.stringify(runtimeModels.body).includes(runtimeProviderModel),
+    "provider model name leaked through the public runtime model catalog",
+  );
+  const designPresets = await client.json("GET", "/design-presets");
+  assert.deepEqual(
+    designPresets.body.items.map((item) => item.presetId),
+    ["workbench.alexandria", "workbench.bauhaus", "workbench.glacier", "workbench.carbon"],
+  );
+  const selectedPreset = designPresets.body.items[0];
+  assert.equal(selectedPreset.version, 1);
+  assert.match(selectedPreset.checksum, /^[0-9a-f]{64}$/);
+  assert.equal(typeof selectedPreset.directives.composition, "string");
+  assert.equal(typeof selectedPreset.tokens.colors.accent, "string");
+
+  const project = await client.json("POST", `/workspaces/${identity.body.defaultWorkspaceId}/projects`, {
+    body: { title: "Workbench PostgreSQL E2E" },
+    expectedStatus: 201,
+  });
+  const uploadIdempotencyKey = `e2e-upload-${randomUUID()}`;
+  const uploadRequest = {
+    fileName: "e2e-upload.pdf",
+    declaredMediaType: "application/pdf",
+    byteSize: 6 * 1024 * 1024,
+    sha256: sha256(Buffer.from("e2e-upload-digest-proof")),
+  };
+  const upload = await client.json("POST", `/projects/${project.body.id}/file-upload-sessions`, {
+    body: uploadRequest,
+    headers: { "Idempotency-Key": uploadIdempotencyKey },
+    expectedStatus: 201,
+  });
+  const uploadReplay = await client.json("POST", `/projects/${project.body.id}/file-upload-sessions`, {
+    body: uploadRequest,
+    headers: { "Idempotency-Key": uploadIdempotencyKey },
+    expectedStatus: 201,
+  });
+  assert.equal(upload.body.upload.status, "initiated");
+  assert.equal(uploadReplay.body.upload.id, upload.body.upload.id);
+  assert.equal(uploadReplay.body.file.id, upload.body.file.id);
+  const initial = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  assert.equal(initial.body.threads.length, 1);
+  assert.equal(initial.body.artifacts.length, 0);
+  assert.equal(initial.body.board.nodes.length, 0);
+  const threadId = initial.body.threads[0].id;
+  assert.equal(initial.body.selectedThreadId, threadId);
+  assert.equal(initial.body.latestRun, null);
+  const sourceFixtures = await seedRunSourceFixtures({
+    projectId: project.body.id,
+    principalId: identity.body.id,
+    label: "success",
+  });
+
+  const idempotencyKey = `e2e-success-${randomUUID()}`;
+  const request = {
+    prompt: "E2E_SUCCESS: generate one deterministic PRD artifact",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    targetSurface: "web",
+    designStyle: {
+      kind: "preset",
+      presetId: selectedPreset.presetId,
+      version: selectedPreset.version,
+      checksum: selectedPreset.checksum,
+    },
+    requestedArtifactKinds: ["prd"],
+  };
+  const attachments = existingSubmissionAttachments(
+    sourceFixtures.map((fixture) => fixture.fileAssetId),
+  );
+  const directRunPost = await client.json("POST", `/threads/${threadId}/runs`, {
+    body: {
+      ...request,
+      sourceIds: [],
+    },
+    headers: { "Idempotency-Key": `e2e-direct-run-disabled-${randomUUID()}` },
+    expectedStatus: 404,
+  });
+  assert.equal(directRunPost.body.status, 404);
+  assert.equal(directRunPost.body.code, "HTTP_404");
+  assert.match(directRunPost.body.detail, /Cannot POST .*\/threads\/.*\/runs/);
+
+  for (const [label, designStyle, expectedCode] of [
+    ["unknown", { ...request.designStyle, presetId: "workbench.unknown" }, "RUN_DESIGN_PRESET_UNKNOWN"],
+    ["version", { ...request.designStyle, version: request.designStyle.version + 1 }, "RUN_DESIGN_PRESET_VERSION_MISMATCH"],
+    ["checksum", { ...request.designStyle, checksum: "0".repeat(64) }, "RUN_DESIGN_PRESET_CHECKSUM_MISMATCH"],
+  ]) {
+    const rejectedIntent = await createSubmissionIntent(client, {
+      threadId,
+      request: { ...request, designStyle },
+      attachments,
+      idempotencyKey: `e2e-preset-${label}-${randomUUID()}`,
+    });
+    const rejected = await submitSubmissionIntent(client, rejectedIntent.body.id, 400);
+    assert.equal(rejected.body.code, expectedCode);
+    await cancelPendingSubmissionIntent(client, rejectedIntent.body.id);
+  }
+  const first = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request,
+    attachments,
+    idempotencyKey,
+  });
+  assert.deepEqual(first.body.requestedArtifactKinds, ["prd"]);
+  const typedOptions = assertRunTypedOptions(first.body, request);
+  const sourceSnapshots = assertRunSourceSnapshots(first.body, sourceFixtures);
+  const duplicate = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request,
+    attachments,
+    idempotencyKey,
+  });
+  assert.equal(duplicate.body.id, first.body.id, "same idempotency key did not return the original Run");
+  assert.deepEqual(duplicate.body.requestedArtifactKinds, ["prd"]);
+  assertRunTypedOptions(duplicate.body, request, typedOptions);
+  assertRunSourceSnapshots(duplicate.body, sourceFixtures, sourceSnapshots);
+
+  const typedOptionConflicts = [
+    ["workflow", { ...request, workflow: "ideate" }],
+    ["targetSurface", { ...request, targetSurface: "app" }],
+    ["designStyle", { ...request, designStyle: { kind: "automatic" } }],
+  ];
+  for (const [field, conflictingRequest] of typedOptionConflicts) {
+    const typedConflict = await createSubmissionIntent(client, {
+      threadId,
+      request: conflictingRequest,
+      attachments,
+      idempotencyKey,
+      expectedStatus: 409,
+    });
+    assert.equal(
+      typedConflict.body.code,
+      "IDEMPOTENCY_KEY_REUSED",
+      `changing ${field} did not invalidate the idempotency request hash`,
+    );
+  }
+
+  const conflict = await createSubmissionIntent(client, {
+    threadId,
+    request,
+    attachments: [...attachments].reverse(),
+    idempotencyKey,
+    expectedStatus: 409,
+  });
+  assert.equal(conflict.body.code, "IDEMPOTENCY_KEY_REUSED");
+
+  const events = await client.sse(`/runs/${first.body.id}/events?afterSequence=0`);
+  assertOrderedEvents(events, { runId: first.body.id, firstSequence: 1 });
+  assert.equal(events.at(-1)?.data.type, "run.completed");
+  assert.ok(events.some((event) => event.data.type === "artifact.version.created"));
+  assert.ok(events.some((event) => event.data.type === "message.delta"));
+
+  const cursorIndex = Math.max(0, Math.floor(events.length / 2) - 1);
+  const cursor = events[cursorIndex].data.sequence;
+  const replay = await client.sse(`/runs/${first.body.id}/events?afterSequence=0`, {
+    "Last-Event-ID": String(cursor),
+  });
+  const expectedReplay = events.filter((event) => event.data.sequence > cursor);
+  assert.deepEqual(
+    replay.map(eventIdentity),
+    expectedReplay.map(eventIdentity),
+    "Last-Event-ID replay did not return the exact ordered suffix",
+  );
+
+  const terminal = await client.json("GET", `/runs/${first.body.id}`);
+  assert.equal(terminal.body.status, "succeeded");
+  assert.deepEqual(terminal.body.requestedArtifactKinds, ["prd"]);
+  assertRunTypedOptions(terminal.body, request, typedOptions);
+  assertRunSourceSnapshots(terminal.body, sourceFixtures, sourceSnapshots);
+  assert.equal(terminal.body.progress, 1);
+  assert.equal(terminal.body.lastEventSequence, events.length);
+  assert.equal(terminal.body.failure, null);
+
+  const completed = await client.json("GET", `/projects/${project.body.id}/bootstrap?threadId=${threadId}`);
+  assert.equal(completed.body.selectedThreadId, threadId);
+  assert.equal(completed.body.latestRun.id, first.body.id);
+  assert.equal(completed.body.latestRun.status, "succeeded");
+  assert.equal(completed.body.latestRun.lastEventSequence, events.length);
+  assertRunTypedOptions(completed.body.latestRun, request, typedOptions);
+  assertRunSourceSnapshots(completed.body.latestRun, sourceFixtures, sourceSnapshots);
+  assert.equal(completed.body.artifacts.length, 1);
+  const artifact = completed.body.artifacts[0];
+  assert.equal(artifact.kind, "prd");
+  assert.equal(artifact.currentVersion.status, "ready");
+  assert.equal(artifact.currentVersion.createdByRunId, first.body.id);
+  assert.equal(artifact.revision, 1);
+
+  const artifactPage = await client.json(
+    "GET",
+    `/projects/${project.body.id}/artifacts?kind=prd&limit=1`,
+  );
+  assert.equal(artifactPage.body.items.length, 1);
+  assert.equal(artifactPage.body.items[0].id, artifact.id);
+  assert.equal(artifactPage.body.nextCursor, null);
+
+  const artifactDetail = await client.json("GET", `/artifacts/${artifact.id}`);
+  assert.deepEqual(artifactDetail.body, artifact);
+  assert.equal(artifactDetail.headers.get("etag"), '"1"');
+  const artifactNotModified = await client.json("GET", `/artifacts/${artifact.id}`, {
+    headers: { "If-None-Match": artifactDetail.headers.get("etag") },
+    expectedStatus: 304,
+  });
+  assert.equal(artifactNotModified.body, null);
+
+  const versionPage = await client.json(
+    "GET",
+    `/artifacts/${artifact.id}/versions?limit=1`,
+  );
+  assert.equal(versionPage.body.items.length, 1);
+  assert.equal(versionPage.body.items[0].artifactVersionId, artifact.currentVersion.artifactVersionId);
+  assert.equal(versionPage.body.items[0].contentMode, "inline");
+
+  const versionDetail = await client.json(
+    "GET",
+    `/artifacts/${artifact.id}/versions/${artifact.currentVersion.artifactVersionId}`,
+  );
+  const versionEtag = versionDetail.headers.get("etag");
+  assert.match(versionEtag ?? "", /^"[a-f0-9]{64}"$/);
+  assert.equal(versionDetail.body.contentMode, "inline");
+  assert.equal(versionDetail.body.content.protocol, "workbench.prd.v1");
+  assert.equal(versionDetail.body.knowledgeReleaseId, null);
+  const versionNotModified = await client.json(
+    "GET",
+    `/artifacts/${artifact.id}/versions/${artifact.currentVersion.artifactVersionId}`,
+    { headers: { "If-None-Match": versionEtag }, expectedStatus: 304 },
+  );
+  assert.equal(versionNotModified.body, null);
+
+  const wrongPair = await client.json(
+    "GET",
+    `/artifacts/not-the-owner/versions/${artifact.currentVersion.artifactVersionId}`,
+    { expectedStatus: 404 },
+  );
+  assert.equal(wrongPair.body.code, "RESOURCE_NOT_FOUND");
+  const outsiderArtifact = await outsiderClient.json("GET", `/artifacts/${artifact.id}`, {
+    expectedStatus: 404,
+  });
+  const outsiderVersion = await outsiderClient.json(
+    "GET",
+    `/artifacts/${artifact.id}/versions/${artifact.currentVersion.artifactVersionId}`,
+    { expectedStatus: 404 },
+  );
+  assert.equal(outsiderArtifact.body.code, "RESOURCE_NOT_FOUND");
+  assert.equal(outsiderVersion.body.code, "RESOURCE_NOT_FOUND");
+  const artifactNode = completed.body.board.nodes.find(
+    (node) => node.artifactVersionId === artifact.currentVersion.artifactVersionId,
+  );
+  assert.ok(artifactNode, "Worker did not add the ArtifactVersion to the Board");
+  assert.equal(artifactNode.artifactId, artifact.id);
+  const userEntry = completed.body.entries.find(
+    (entry) => entry.role === "user" && entry.content?.type === "user.prompt",
+  );
+  assert.equal(userEntry?.content.protocol, "workbench.entry.v1");
+  assert.deepEqual(
+    userEntry?.content.sourceIds,
+    sourceSnapshots.map((source) => source.sourceId),
+  );
+  const assistantEntry = completed.body.entries.find(
+    (entry) => entry.producedByRunId === first.body.id && entry.role === "assistant",
+  );
+  assert.equal(assistantEntry?.kind, "message");
+  assert.equal(assistantEntry?.content.protocol, "workbench.entry.v1");
+  assert.equal(assistantEntry?.content.type, "assistant.message");
+  assert.equal(assistantEntry?.content.text, "E2E generated response");
+
+  const secondThread = await client.json("POST", `/projects/${project.body.id}/threads`, {
+    body: { title: "Second thread" },
+    headers: { "Idempotency-Key": `e2e-thread-${randomUUID()}` },
+    expectedStatus: 201,
+  });
+  const secondBootstrap = await client.json(
+    "GET",
+    `/projects/${project.body.id}/bootstrap?threadId=${secondThread.body.id}`,
+  );
+  assert.equal(secondBootstrap.body.selectedThreadId, secondThread.body.id);
+  assert.equal(secondBootstrap.body.entries.length, 0);
+  assert.equal(secondBootstrap.body.latestRun, null);
+  const restoredOriginal = await client.json(
+    "GET",
+    `/projects/${project.body.id}/bootstrap?threadId=${threadId}`,
+  );
+  assert.equal(restoredOriginal.body.latestRun.id, first.body.id);
+  assertRunTypedOptions(restoredOriginal.body.latestRun, request, typedOptions);
+  assertRunSourceSnapshots(restoredOriginal.body.latestRun, sourceFixtures, sourceSnapshots);
+  assert.ok(restoredOriginal.body.entries.every((entry) => entry.threadId === threadId));
+
+  const runPage = await client.json("GET", `/threads/${threadId}/runs?limit=1`);
+  assert.equal(runPage.body.items.length, 1);
+  assert.equal(runPage.body.items[0].id, first.body.id);
+  assert.equal(runPage.body.items[0].status, "succeeded");
+  assertRunTypedOptions(runPage.body.items[0], request, typedOptions);
+  assertRunSourceSnapshots(runPage.body.items[0], sourceFixtures, sourceSnapshots);
+  assert.equal(runPage.body.nextCursor, null);
+
+  const persisted = await queryDatabase(`
+    SELECT
+      r.status,
+      r.phase,
+      r.progress,
+      r.event_sequence,
+      r.error_retryable,
+      r.cancellation_reason,
+      r.request->'requestedArtifactKinds' AS requested_artifact_kinds,
+      r.design_style_snapshot->>'protocol' AS design_style_snapshot_protocol,
+      r.design_style_snapshot#>>'{source,presetId}' AS design_style_preset_id,
+      r.design_style_snapshot#>>'{source,checksum}' AS design_style_preset_checksum,
+      r.design_style_snapshot_sha256,
+      count(DISTINCT av.id)::int AS artifact_version_count,
+      count(DISTINCT bn.id)::int AS board_node_count,
+      to_regnamespace('workbench_jobs') IS NOT NULL AS queue_schema_exists
+    FROM workbench.runs r
+    LEFT JOIN workbench.artifact_versions av ON av.created_by_run_id = r.id
+    LEFT JOIN workbench.board_nodes bn ON bn.artifact_version_id = av.id
+    WHERE r.id = $1
+    GROUP BY r.status, r.phase, r.progress, r.event_sequence,
+      r.error_retryable, r.cancellation_reason, r.request,
+      r.design_style_snapshot, r.design_style_snapshot_sha256
+  `, [first.body.id]);
+  assert.equal(persisted.rows[0]?.status, "succeeded");
+  assert.equal(persisted.rows[0]?.progress, 1);
+  assert.equal(persisted.rows[0]?.event_sequence, events.length);
+  assert.equal(persisted.rows[0]?.error_retryable, null);
+  assert.equal(persisted.rows[0]?.cancellation_reason, null);
+  assert.deepEqual(persisted.rows[0]?.requested_artifact_kinds, ["prd"]);
+  assert.equal(persisted.rows[0]?.design_style_snapshot_protocol, "workbench.runtime.design-preset.v1");
+  assert.equal(persisted.rows[0]?.design_style_preset_id, selectedPreset.presetId);
+  assert.equal(persisted.rows[0]?.design_style_preset_checksum, selectedPreset.checksum);
+  assert.match(persisted.rows[0]?.design_style_snapshot_sha256, /^[0-9a-f]{64}$/);
+  assert.equal(persisted.rows[0]?.artifact_version_count, 1);
+  assert.equal(persisted.rows[0]?.board_node_count, 1);
+  assert.equal(persisted.rows[0]?.queue_schema_exists, true);
+  await assertPersistedRunSources(first.body.id, sourceFixtures, sourceSnapshots);
+  assertRuntimeSourceIsolation(first.body.id, sourceFixtures, sourceSnapshots, request);
+
+  return {
+    runId: first.body.id,
+    eventCount: events.length,
+    replayCursor: cursor,
+    replayCount: replay.length,
+    artifactVersionId: artifact.currentVersion.artifactVersionId,
+    artifactEtag: artifactDetail.headers.get("etag"),
+    artifactVersionEtag: versionEtag,
+    boardNodeId: artifactNode.id,
+    sourceCount: sourceSnapshots.length,
+    runtimeContentCount: runtimeContentCount(sourceFixtures),
+  };
+}
+
+async function runPrototypePatchScenario(client) {
+  console.log("[e2e] running Prototype checkpoint, patch, and ready-publication scenario");
+  const identity = await client.json("GET", "/identity/me");
+  const project = await client.json(
+    "POST",
+    `/workspaces/${identity.body.defaultWorkspaceId}/projects`,
+    {
+      body: { title: "Prototype Patch PostgreSQL E2E" },
+      expectedStatus: 201,
+    },
+  );
+  const bootstrap = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const threadId = bootstrap.body.selectedThreadId;
+  assert.equal(typeof threadId, "string");
+
+  const request = {
+    prompt: "E2E_PROTOTYPE_PATCH: stream one deterministic Prototype patch",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    generationIntent: null,
+    targetSurface: "app",
+    designStyle: { kind: "automatic" },
+    requestedArtifactKinds: ["prototype"],
+  };
+  const run = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request,
+    idempotencyKey: `e2e-prototype-patch-${randomUUID()}`,
+  });
+  const events = await client.sse(`/runs/${run.body.id}/events?afterSequence=0`);
+  assertOrderedEvents(events, { runId: run.body.id, firstSequence: 1 });
+  assert.equal(events.at(-1)?.data.type, "run.completed");
+  const patchEvents = events.filter(
+    (event) => event.data.type === "artifact.prototype.patch.created",
+  );
+  const draftEvents = events.filter((event) => event.data.type === "artifact.draft.created");
+  assert.equal(patchEvents.length, 2);
+  assert.equal(draftEvents.length, 3);
+  assert.equal(
+    events.filter((event) => event.data.type === "artifact.prototype.patch.degraded").length,
+    0,
+  );
+  const firstDraftIndex = events.findIndex((event) => event.data.type === "artifact.draft.created");
+  const firstPatchIndex = events.findIndex(
+    (event) => event.data.type === "artifact.prototype.patch.created",
+  );
+  const secondPatchIndex = events.findLastIndex(
+    (event) => event.data.type === "artifact.prototype.patch.created",
+  );
+  const readyVersionIndex = events.findIndex((event) => event.data.type === "artifact.version.created");
+  assert.ok(
+    firstDraftIndex >= 0 && firstDraftIndex < firstPatchIndex,
+    "Patch preceded its complete checkpoint",
+  );
+  assert.ok(
+    firstPatchIndex < secondPatchIndex && secondPatchIndex < readyVersionIndex,
+    "consecutive Prototype patches were not published before ready",
+  );
+
+  const completed = await client.json(
+    "GET",
+    `/projects/${project.body.id}/bootstrap?threadId=${threadId}`,
+  );
+  assert.equal(completed.body.latestRun.id, run.body.id);
+  assert.equal(completed.body.latestRun.status, "succeeded");
+  const artifact = completed.body.artifacts.find((candidate) => candidate.kind === "prototype");
+  assert.ok(artifact?.currentVersion, "Prototype patch Run did not publish a ready ArtifactVersion");
+  assert.equal(artifact.currentVersion.status, "ready");
+  const versionId = artifact.currentVersion.artifactVersionId;
+  const version = await client.json(
+    "GET",
+    `/artifacts/${artifact.id}/versions/${versionId}`,
+  );
+  assert.equal(version.body.contentMode, "inline");
+  assert.equal(version.body.content.screens[0]?.name, "Streamed Home");
+  assert.equal(version.body.content.revision, 1, "transport patches changed document revision");
+  assert.ok(
+    completed.body.board.nodes.some((node) => (
+      node.artifactId === artifact.id && node.artifactVersionId === versionId
+    )),
+    "Prototype patch Run did not publish the ready version to the Board",
+  );
+
+  const checkpoint = await client.json(
+    "GET",
+    `/runs/${run.body.id}/artifact-drafts/${versionId}/checkpoint`,
+  );
+  assert.equal(checkpoint.body.status, "ready");
+  assert.equal(checkpoint.body.artifactVersionId, versionId);
+  assert.equal(checkpoint.body.document.screens[0]?.name, "Streamed Home");
+  assert.equal(checkpoint.body.screens.length, 1);
+  assert.deepEqual(checkpoint.body.screens[0], {
+    screenId: "screen-home",
+    revision: 2,
+    checksum: prototypeScreenProjectionChecksum(
+      checkpoint.body.document,
+      "screen-home",
+      2,
+    ),
+  });
+  assert.equal(checkpoint.body.documentChecksum, sha256(canonicalJson(checkpoint.body.document)));
+  assert.equal(checkpoint.body.lastSequence, events.length);
+
+  const persisted = await queryDatabase(`
+    SELECT
+      projection.status::text AS projection_status,
+      projection.revision AS projection_revision,
+      projection.checksum AS projection_checksum,
+      application.outcome::text AS application_outcome,
+      application.base_revision,
+      application.next_revision,
+      application.operations,
+      application.source_event_id,
+      event.type AS event_type
+    FROM prototype_patch_projections projection
+    JOIN prototype_patch_applications application
+      ON application.artifact_version_id = projection.artifact_version_id
+     AND application.screen_id = projection.screen_id
+    JOIN run_events event
+      ON event.id = application.run_event_id
+     AND event.run_id = application.run_id
+    WHERE projection.run_id = $1
+    ORDER BY application.next_revision ASC
+  `, [run.body.id]);
+  assert.equal(persisted.rows.length, 2);
+  assert.ok(persisted.rows.every((row) => row.projection_status === "finalized"));
+  assert.ok(persisted.rows.every((row) => row.projection_revision === 2));
+  assert.ok(persisted.rows.every((row) => (
+    row.projection_checksum === checkpoint.body.screens[0].checksum
+  )));
+  assert.ok(persisted.rows.every((row) => row.application_outcome === "applied"));
+  assert.deepEqual(
+    persisted.rows.map((row) => [row.base_revision, row.next_revision]),
+    [[0, 1], [1, 2]],
+  );
+  assert.ok(persisted.rows.every((row) => row.event_type === "artifact.prototype.patch.created"));
+  assert.ok(persisted.rows.every((row) => /^deerflow:[0-9a-f]{64}$/.test(row.source_event_id)));
+  assert.deepEqual(
+    persisted.rows.map((row) => row.operations.map((operation) => operation.kind)),
+    [["update_screen"], ["update_screen"]],
+  );
+
+  const persistedEvents = await queryDatabase(`
+    SELECT sequence, type, source_id
+    FROM run_events
+    WHERE run_id = $1
+    ORDER BY sequence ASC
+  `, [run.body.id]);
+  const explicitFinalCheckpointSourceId = runtimeToolEventSourceId(
+    checkpoint.body.runtimeAttemptId,
+    "workbench_artifact_draft_publish",
+    "prototype-patch-checkpoint-final",
+  );
+  const explicitFinalCheckpoint = persistedEvents.rows.find(
+    (event) => event.source_id === explicitFinalCheckpointSourceId,
+  );
+  assert.equal(explicitFinalCheckpoint?.type, "artifact.draft.created");
+  assert.ok(
+    explicitFinalCheckpoint.sequence > patchEvents[1].data.sequence
+      && explicitFinalCheckpoint.sequence < events[readyVersionIndex].data.sequence,
+    "the explicit final checkpoint was not persisted between the last patch and ready publication",
+  );
+
+  return {
+    runId: run.body.id,
+    eventCount: events.length,
+    artifactVersionId: versionId,
+    screenRevision: checkpoint.body.screens[0].revision,
+    patchEventSequences: patchEvents.map((event) => event.data.sequence),
+  };
+}
+
+async function runCanvasGatewayScenario(client) {
+  console.log("[e2e] running Canvas Gateway capability, command, and staged-mutation scenario");
+  const identity = await client.json("GET", "/identity/me");
+  const project = await client.json("POST", `/workspaces/${identity.body.defaultWorkspaceId}/projects`, {
+    body: { title: "Workbench Canvas Gateway E2E" },
+    expectedStatus: 201,
+  });
+  const initial = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const threadId = initial.body.selectedThreadId;
+  assert.equal(typeof threadId, "string");
+
+  const seed = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request: {
+      prompt: "E2E_CANVAS_SEED: generate one deterministic Prototype screen",
+      modelId: runtimeCatalogModelId,
+      workflow: "generate",
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      artifactTargets: [],
+      requestedArtifactKinds: ["prototype"],
+      canvasSnapshot: null,
+    },
+    idempotencyKey: `e2e-canvas-seed-${randomUUID()}`,
+  });
+  await waitForSucceededRun(client, seed.body.id, "Canvas seed Run");
+
+  const seededBootstrap = await client.json(
+    "GET",
+    `/projects/${project.body.id}/bootstrap?threadId=${threadId}`,
+  );
+  const seeded = await loadCanvasScreenFixture(client, seededBootstrap.body, "screen-home");
+  const seedBoardRevision = seededBootstrap.body.board.revision;
+  assert.equal(seeded.artifact.currentVersion.createdByRunId, seed.body.id);
+  assert.equal(seeded.artifact.currentVersion.status, "ready");
+
+  const quickSnapshot = createCanvasSnapshot({
+    projectId: project.body.id,
+    threadId,
+    board: seededBootstrap.body.board,
+    screen: seeded,
+    projectSessionGeneration: 1,
+  });
+  const quickEdit = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request: {
+      prompt: "E2E_CANVAS_QUICK_EDIT: inspect, interact with, and edit the selected screen",
+      modelId: runtimeCatalogModelId,
+      workflow: "edit",
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      artifactTargets: [{
+        artifactId: seeded.reference.artifactId,
+        artifactVersionId: seeded.reference.artifactVersionId,
+        screenIds: [seeded.reference.screenId],
+      }],
+      requestedArtifactKinds: ["prototype"],
+      canvasSnapshot: quickSnapshot,
+    },
+    idempotencyKey: `e2e-canvas-quick-edit-${randomUUID()}`,
+  });
+  const [quickTerminal, quickCommands] = await Promise.all([
+    waitForSucceededRun(client, quickEdit.body.id, "Canvas quick-edit Run"),
+    driveCanvasClientCommands(client, quickEdit.body.id, quickSnapshot, seeded.summary, 3),
+  ]);
+  assert.equal(quickTerminal.status, "succeeded");
+
+  const quickBootstrap = await client.json(
+    "GET",
+    `/projects/${project.body.id}/bootstrap?threadId=${threadId}`,
+  );
+  const quickResult = await loadCanvasScreenFixture(client, quickBootstrap.body, "screen-home");
+  const quickBoardRevision = quickBootstrap.body.board.revision;
+  assert.notEqual(quickResult.reference.artifactVersionId, seeded.reference.artifactVersionId);
+  assert.equal(quickResult.artifact.currentVersion.createdByRunId, quickEdit.body.id);
+  assert.equal(quickBoardRevision, seedBoardRevision + 1);
+  assert.equal(quickResult.node.artifactVersionId, quickResult.reference.artifactVersionId);
+
+  const directSnapshot = createCanvasSnapshot({
+    projectId: project.body.id,
+    threadId,
+    board: quickBootstrap.body.board,
+    screen: quickResult,
+    projectSessionGeneration: 2,
+  });
+  const directEdit = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request: {
+      prompt: "E2E_CANVAS_DIRECT_EDIT: rename and duplicate the selected screen",
+      modelId: runtimeCatalogModelId,
+      workflow: "edit",
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      artifactTargets: [{
+        artifactId: quickResult.reference.artifactId,
+        artifactVersionId: quickResult.reference.artifactVersionId,
+        screenIds: [quickResult.reference.screenId],
+      }],
+      requestedArtifactKinds: ["prototype"],
+      canvasSnapshot: directSnapshot,
+    },
+    idempotencyKey: `e2e-canvas-direct-edit-${randomUUID()}`,
+  });
+  await waitForSucceededRun(client, directEdit.body.id, "Canvas direct-intent Run");
+
+  const completed = await client.json(
+    "GET",
+    `/projects/${project.body.id}/bootstrap?threadId=${threadId}`,
+  );
+  const finalScreen = await loadCanvasScreenFixture(client, completed.body, "screen-home");
+  assert.notEqual(finalScreen.reference.artifactVersionId, quickResult.reference.artifactVersionId);
+  assert.equal(finalScreen.artifact.currentVersion.createdByRunId, directEdit.body.id);
+  assert.equal(completed.body.board.revision, quickBoardRevision + 1);
+  assert.equal(finalScreen.node.artifactVersionId, finalScreen.reference.artifactVersionId);
+  assert.equal(finalScreen.screen.name, "Agent Home");
+  assert.equal(finalScreen.document.screens.length, 2);
+  assert.equal(
+    completed.body.board.nodes.filter((node) => node.artifactId === finalScreen.reference.artifactId).length,
+    2,
+  );
+
+  const audit = await assertCanvasGatewayAudit({
+    seedRunId: seed.body.id,
+    quickRunId: quickEdit.body.id,
+    directRunId: directEdit.body.id,
+    projectId: project.body.id,
+    seededVersionId: seeded.reference.artifactVersionId,
+    quickVersionId: quickResult.reference.artifactVersionId,
+    finalVersionId: finalScreen.reference.artifactVersionId,
+    seedBoardRevision,
+    quickBoardRevision,
+    finalBoardRevision: completed.body.board.revision,
+    finalScreenName: finalScreen.screen.name,
+  });
+
+  return {
+    projectId: project.body.id,
+    threadId,
+    seedRunId: seed.body.id,
+    quickEditRunId: quickEdit.body.id,
+    directEditRunId: directEdit.body.id,
+    finalArtifactVersionId: finalScreen.reference.artifactVersionId,
+    finalBoardRevision: completed.body.board.revision,
+    toolsCovered: [...new Set([
+      ...audit.quickInvocationTools,
+      ...audit.directInvocationTools,
+    ])],
+    acknowledgedCommandCount: quickCommands.length,
+  };
+}
+
+async function runSourceTargetGeneratePrototypeScenario(client) {
+  console.log("[e2e] running targeted Generate Prototype source-projection scenario");
+  const identity = await client.json("GET", "/identity/me");
+  const project = await client.json(
+    "POST",
+    `/workspaces/${identity.body.defaultWorkspaceId}/projects`,
+    {
+      body: { title: "Workbench Generate Prototype Source E2E" },
+      expectedStatus: 201,
+    },
+  );
+  const initial = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const threadId = initial.body.selectedThreadId;
+  assert.equal(typeof threadId, "string");
+
+  const sourceRequest = {
+    prompt: "E2E_GENERATE_SOURCE_SEED: publish a deterministic three-screen source Prototype",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    generationIntent: null,
+    targetSurface: "app",
+    designStyle: { kind: "automatic" },
+    artifactTargets: [],
+    requestedArtifactKinds: ["prototype"],
+    canvasSnapshot: null,
+  };
+  const sourceRun = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request: sourceRequest,
+    idempotencyKey: `e2e-generate-source-seed-${randomUUID()}`,
+  });
+  assert.equal(sourceRun.body.generationIntent, null);
+  await waitForSucceededRun(client, sourceRun.body.id, "Generate Prototype source seed Run");
+
+  const sourceBootstrap = await client.json(
+    "GET",
+    `/projects/${project.body.id}/bootstrap?threadId=${threadId}`,
+  );
+  const sourceArtifact = sourceBootstrap.body.artifacts.find(
+    (candidate) => candidate.kind === "prototype"
+      && candidate.currentVersion?.createdByRunId === sourceRun.body.id,
+  );
+  assert.ok(sourceArtifact?.currentVersion, "source seed Run did not publish a ready Prototype");
+  const sourceVersionId = sourceArtifact.currentVersion.artifactVersionId;
+  const sourceVersion = await client.json(
+    "GET",
+    `/artifacts/${sourceArtifact.id}/versions/${sourceVersionId}`,
+  );
+  assert.equal(sourceVersion.body.contentMode, "inline");
+  assert.equal(sourceVersion.body.kind, "prototype");
+  const sourceContent = structuredClone(sourceVersion.body.content);
+  assert.deepEqual(
+    sourceContent.screens.map((screen) => screen.id),
+    ["screen-home", "screen-settings", "screen-admin"],
+  );
+  assert.equal(sourceBootstrap.body.board.nodes.filter(
+    (node) => node.artifactVersionId === sourceVersionId,
+  ).length, 3);
+
+  // Keep the caller's order intentionally different from document order. The
+  // runtime projection must preserve this frozen selection order while sorting
+  // only independently addressable collections.
+  const sourceTarget = {
+    artifactId: sourceArtifact.id,
+    artifactVersionId: sourceVersionId,
+    screenIds: ["screen-admin", "screen-home"],
+  };
+  const targetRequest = {
+    prompt: "E2E_GENERATE_PROTOTYPE_SOURCE: generate a new Prototype from two selected source screens",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    generationIntent: "interactive-prototype",
+    targetSurface: "app",
+    designStyle: { kind: "automatic" },
+    artifactTargets: [sourceTarget],
+    requestedArtifactKinds: ["prototype"],
+    canvasSnapshot: null,
+  };
+  const targetRun = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request: targetRequest,
+    idempotencyKey: `e2e-generate-prototype-source-${randomUUID()}`,
+  });
+  assert.equal(targetRun.body.generationIntent, "interactive-prototype");
+  assert.deepEqual(targetRun.body.artifactTargets, [sourceTarget]);
+  await waitForSucceededRun(client, targetRun.body.id, "targeted Generate Prototype Run");
+
+  const runtimeRequest = fakeRuntime.state.runRequests.find(
+    (request) => request.body?.config?.configurable?.workbench_run_id === targetRun.body.id
+      && request.body?.input !== null,
+  );
+  assert.ok(runtimeRequest, "fake DeerFlow did not receive the targeted Generate request");
+  const runtimeContext = parseWorkbenchRuntimeContext(runtimeRequest.body);
+  assert.equal(runtimeContext.generationIntent, "interactive-prototype");
+  assert.deepEqual(
+    runtimeContext.artifactTargets.map((target) => ({
+      artifactId: target.artifactId,
+      artifactVersionId: target.artifactVersionId,
+      screenIds: target.screenIds,
+    })),
+    [sourceTarget],
+  );
+  const projection = runtimeContext.artifactTargets[0]?.content?.value;
+  assert.equal(projection?.protocol, "workbench.prototype-source-projection.v1");
+  assert.deepEqual(projection?.selectedScreenIds, sourceTarget.screenIds);
+  assert.deepEqual(
+    projection?.screens?.map((screen) => screen.id),
+    sourceTarget.screenIds,
+  );
+  assert.deepEqual(
+    [...new Set(projection?.nodes?.map((node) => node.screenId))],
+    sourceTarget.screenIds,
+  );
+  assert.ok(
+    !projection.nodes.some((node) => node.id === "frame-settings" || node.id === "icon-settings"),
+    "Generate source projection leaked an unselected screen node",
+  );
+  assert.deepEqual(
+    projection.assets.map((asset) => asset.id),
+    ["asset-admin", "asset-home"],
+    "Generate source projection did not retain only selected-screen assets",
+  );
+  assert.deepEqual(projection.navigationTargets, [{
+    id: "screen-settings",
+    name: "Settings",
+    route: "/settings",
+    viewport: { width: 390, height: 844 },
+  }]);
+  assert.equal(projection.source.checksum, sourceVersion.body.checksum);
+
+  const completed = await client.json(
+    "GET",
+    `/projects/${project.body.id}/bootstrap?threadId=${threadId}`,
+  );
+  const generatedArtifact = completed.body.artifacts.find(
+    (candidate) => candidate.kind === "prototype"
+      && candidate.currentVersion?.createdByRunId === targetRun.body.id,
+  );
+  assert.ok(generatedArtifact?.currentVersion, "targeted Generate did not publish a ready Prototype");
+  assert.notEqual(generatedArtifact.id, sourceArtifact.id);
+  const generatedVersion = await client.json(
+    "GET",
+    `/artifacts/${generatedArtifact.id}/versions/${generatedArtifact.currentVersion.artifactVersionId}`,
+  );
+  assert.deepEqual(
+    generatedVersion.body.content.screens.map((screen) => screen.id),
+    sourceTarget.screenIds,
+  );
+  assert.equal(
+    completed.body.board.nodes.filter(
+      (node) => node.artifactVersionId === generatedArtifact.currentVersion.artifactVersionId,
+    ).length,
+    2,
+  );
+
+  const sourceAfter = await client.json(
+    "GET",
+    `/artifacts/${sourceArtifact.id}/versions/${sourceVersionId}`,
+  );
+  assert.deepEqual(sourceAfter.body.content, sourceContent, "targeted Generate mutated the source content");
+  assert.equal(sourceAfter.body.checksum, sourceVersion.body.checksum);
+
+  const persisted = await queryDatabase(`
+    SELECT
+      request->>'generationIntent' AS generation_intent,
+      request->'artifactTargets' AS artifact_targets,
+      status,
+      (SELECT count(*)::int FROM workbench.artifact_versions av
+       WHERE av.created_by_run_id = runs.id) AS created_versions
+    FROM workbench.runs
+    WHERE id = $1
+  `, [targetRun.body.id]);
+  assert.equal(persisted.rows[0]?.generation_intent, "interactive-prototype");
+  assert.deepEqual(persisted.rows[0]?.artifact_targets, [sourceTarget]);
+  assert.equal(persisted.rows[0]?.status, "succeeded");
+  assert.equal(persisted.rows[0]?.created_versions, 1);
+
+  return {
+    projectId: project.body.id,
+    threadId,
+    sourceRunId: sourceRun.body.id,
+    sourceArtifactId: sourceArtifact.id,
+    sourceVersionId,
+    targetRunId: targetRun.body.id,
+    generatedArtifactId: generatedArtifact.id,
+    generatedVersionId: generatedArtifact.currentVersion.artifactVersionId,
+    selectedScreenIds: sourceTarget.screenIds,
+    projectedNodeCount: projection.nodes.length,
+    projectedAssetIds: projection.assets.map((asset) => asset.id),
+  };
+}
+
+async function waitForSucceededRun(client, runId, label) {
+  let current;
+  await waitFor(async () => {
+    current = (await client.json("GET", `/runs/${runId}`)).body;
+    return ["succeeded", "failed", "cancelled"].includes(current.status);
+  }, scenarioTimeoutMs, `${label} never reached a terminal status`);
+  assert.equal(
+    current.status,
+    "succeeded",
+    `${label} failed: ${JSON.stringify(current.failure ?? current.cancellationReason)}`,
+  );
+  return current;
+}
+
+async function loadCanvasScreenFixture(client, bootstrap, screenId) {
+  const artifact = bootstrap.artifacts.find((candidate) => candidate.kind === "prototype");
+  assert.ok(artifact?.currentVersion, "Canvas bootstrap omitted the Prototype current version");
+  const node = bootstrap.board.nodes.find((candidate) => (
+    candidate.artifactId === artifact.id
+    && candidate.artifactVersionId === artifact.currentVersion.artifactVersionId
+    && candidate.data?.screenId === screenId
+  ));
+  assert.ok(node, `Canvas bootstrap omitted the ${screenId} Board node`);
+  const detail = await client.json(
+    "GET",
+    `/artifacts/${artifact.id}/versions/${artifact.currentVersion.artifactVersionId}`,
+  );
+  assert.equal(detail.body.kind, "prototype");
+  assert.equal(detail.body.contentMode, "inline");
+  const screen = detail.body.content.screens.find((candidate) => candidate.id === screenId);
+  assert.ok(screen, `Prototype ArtifactVersion omitted ${screenId}`);
+  const reference = {
+    boardNodeId: node.id,
+    artifactId: artifact.id,
+    artifactVersionId: artifact.currentVersion.artifactVersionId,
+    screenId,
+  };
+  return {
+    artifact,
+    node,
+    document: detail.body.content,
+    screen,
+    reference,
+    summary: {
+      reference,
+      name: screen.name,
+      route: screen.route,
+      phase: "complete",
+      viewport: screen.viewport,
+    },
+  };
+}
+
+function createCanvasSnapshot({ projectId, threadId, board, screen, projectSessionGeneration }) {
+  const capturedAt = new Date();
+  return {
+    protocol: "workbench.canvas-snapshot.v1",
+    projectId,
+    threadId,
+    runId: null,
+    boardId: board.id,
+    clientSessionId: `canvas-e2e-${randomUUID()}`,
+    projectSessionGeneration,
+    boardRevision: board.revision,
+    canvasStateRevision: 1,
+    capturedAt: capturedAt.toISOString(),
+    expiresAt: new Date(capturedAt.getTime() + 90_000).toISOString(),
+    viewport: board.viewport,
+    screens: [screen.summary],
+    visibleScreens: [screen.reference],
+    selectedScreens: [screen.reference],
+  };
+}
+
+async function driveCanvasClientCommands(client, runId, snapshot, screenSummary, expectedCount) {
+  const state = {
+    protocol: "workbench.canvas-client-state.v1",
+    clientSessionId: snapshot.clientSessionId,
+    projectSessionGeneration: snapshot.projectSessionGeneration,
+    boardId: snapshot.boardId,
+    boardRevision: snapshot.boardRevision,
+    canvasStateRevision: snapshot.canvasStateRevision,
+    viewport: structuredClone(snapshot.viewport),
+    visibleScreens: structuredClone(snapshot.visibleScreens),
+    selectedScreens: structuredClone(snapshot.selectedScreens),
+  };
+  const acknowledged = [];
+  const deadline = Date.now() + scenarioTimeoutMs;
+  const commandRoute = `/projects/${snapshot.projectId}/canvas-agent/commands`
+    + `?clientSessionId=${encodeURIComponent(snapshot.clientSessionId)}`
+    + `&projectSessionGeneration=${snapshot.projectSessionGeneration}`;
+
+  while (acknowledged.length < expectedCount && Date.now() < deadline) {
+    const listed = await client.json("GET", commandRoute);
+    for (const command of listed.body.items) {
+      if (acknowledged.some((candidate) => candidate.commandId === command.commandId)) continue;
+      await synchronizeCanvasClientState(client, snapshot.projectId, state);
+      const applied = applyCanvasClientCommand(command, state, screenSummary);
+      if (applied.stateChanged) state.canvasStateRevision += 1;
+      await synchronizeCanvasClientState(client, snapshot.projectId, state);
+      const ack = {
+        protocol: "workbench.canvas-client-command-ack.v1",
+        commandId: command.commandId,
+        agentSessionId: command.agentSessionId,
+        toolCallId: command.toolCallId,
+        requestId: command.requestId,
+        toolName: command.toolName,
+        projectId: command.projectId,
+        threadId: command.threadId,
+        runId: command.runId,
+        boardId: command.boardId,
+        clientSessionId: command.clientSessionId,
+        projectSessionGeneration: command.projectSessionGeneration,
+        boardRevision: command.boardRevision,
+        canvasStateRevision: state.canvasStateRevision,
+        acknowledgedAt: new Date().toISOString(),
+        status: "applied",
+        result: applied.result,
+        failure: null,
+      };
+      const settled = await client.json(
+        "POST",
+        `/projects/${snapshot.projectId}/canvas-agent/commands/${command.commandId}/ack`,
+        { body: ack },
+      );
+      assert.deepEqual(settled.body, ack);
+      await synchronizeCanvasClientState(client, snapshot.projectId, state);
+      acknowledged.push({
+        commandId: command.commandId,
+        toolName: command.toolName,
+        result: applied.result,
+      });
+    }
+    if (acknowledged.length >= expectedCount) break;
+    const run = await client.json("GET", `/runs/${runId}`);
+    if (["succeeded", "failed", "cancelled"].includes(run.body.status)) {
+      throw new Error(`Canvas Run ${runId} ended before ${expectedCount} commands were acknowledged`);
+    }
+    await delay(50);
+  }
+
+  assert.equal(acknowledged.length, expectedCount, "Canvas client command poll timed out");
+  assert.deepEqual(
+    acknowledged.map((command) => command.toolName),
+    ["view_screen", "select_screen", "navigate_canvas"],
+  );
+  return acknowledged;
+}
+
+async function synchronizeCanvasClientState(client, projectId, state) {
+  const synchronized = await client.json("PUT", `/projects/${projectId}/canvas-agent/state`, {
+    body: state,
+  });
+  assert.equal(synchronized.body.protocol, state.protocol);
+  assert.equal(synchronized.body.activeSession, true);
+  assert.equal(synchronized.body.canvasStateRevision, state.canvasStateRevision);
+}
+
+function applyCanvasClientCommand(command, state, screenSummary) {
+  assert.equal(command.boardRevision, state.boardRevision);
+  assert.ok(command.expectedCanvasStateRevision <= state.canvasStateRevision);
+  if (command.kind === "preview.open") {
+    assert.equal(command.toolName, "view_screen");
+    return { result: { view: command.view }, stateChanged: false };
+  }
+  if (command.kind === "selection.change") {
+    assert.equal(command.toolName, "select_screen");
+    assert.deepEqual(command.targets, [screenSummary.reference]);
+    assert.equal(command.mode, "replace");
+    const selectedScreens = structuredClone(command.targets);
+    const stateChanged = canonicalJson(state.selectedScreens) !== canonicalJson(selectedScreens);
+    state.selectedScreens = selectedScreens;
+    return {
+      result: {
+        selection: {
+          kind: "single",
+          items: [screenSummary],
+          truncated: false,
+        },
+      },
+      stateChanged,
+    };
+  }
+  assert.equal(command.kind, "viewport.navigate");
+  assert.equal(command.toolName, "navigate_canvas");
+  assert.deepEqual(command.target, { kind: "screen", screen: screenSummary.reference });
+  const viewport = { x: 48, y: 96, zoom: 1.25 };
+  const stateChanged = canonicalJson(state.viewport) !== canonicalJson(viewport);
+  state.viewport = viewport;
+  return { result: { viewport: state.viewport }, stateChanged };
+}
+
+async function assertCanvasGatewayAudit({
+  seedRunId,
+  quickRunId,
+  directRunId,
+  projectId,
+  seededVersionId,
+  quickVersionId,
+  finalVersionId,
+  seedBoardRevision,
+  quickBoardRevision,
+  finalBoardRevision,
+  finalScreenName,
+}) {
+  const runs = await queryDatabase(`
+    SELECT id, status
+    FROM workbench.runs
+    WHERE id = ANY($1::text[])
+    ORDER BY id
+  `, [[seedRunId, quickRunId, directRunId]]);
+  assert.equal(runs.rows.length, 3);
+  assert.ok(runs.rows.every((run) => run.status === "succeeded"));
+
+  const artifact = await queryDatabase(`
+    SELECT artifact.id, artifact.current_version_id, board.revision AS board_revision,
+           version.status, version.created_by_run_id, version.content
+    FROM workbench.artifacts AS artifact
+    JOIN workbench.artifact_versions AS version ON version.id = artifact.current_version_id
+    JOIN workbench.boards AS board ON board.project_id = artifact.project_id
+    WHERE artifact.project_id = $1 AND artifact.kind = 'prototype'
+  `, [projectId]);
+  assert.equal(artifact.rows.length, 1);
+  assert.equal(artifact.rows[0]?.current_version_id, finalVersionId);
+  assert.equal(artifact.rows[0]?.status, "ready");
+  assert.equal(artifact.rows[0]?.created_by_run_id, directRunId);
+  assert.equal(artifact.rows[0]?.board_revision, finalBoardRevision);
+  assert.equal(
+    artifact.rows[0]?.content?.screens?.find((screen) => screen.id === "screen-home")?.name,
+    finalScreenName,
+  );
+
+  const versions = await queryDatabase(`
+    SELECT id, status, created_by_run_id
+    FROM workbench.artifact_versions
+    WHERE project_id = $1 AND id = ANY($2::text[])
+    ORDER BY version
+  `, [projectId, [seededVersionId, quickVersionId, finalVersionId]]);
+  assert.deepEqual(
+    versions.rows.map((version) => ({ status: version.status, runId: version.created_by_run_id })),
+    [
+      { status: "ready", runId: seedRunId },
+      { status: "ready", runId: quickRunId },
+      { status: "ready", runId: directRunId },
+    ],
+  );
+
+  const sessions = await queryDatabase(`
+    SELECT session.id, session.run_id, session.status, session.board_revision,
+           session.canvas_state_revision, session.invocation_sequence,
+           session.active_mutation_tool_call_id, tool_grant.revoked_at
+    FROM workbench.canvas_agent_sessions AS session
+    JOIN workbench.canvas_tool_grants AS tool_grant ON tool_grant.agent_session_id = session.id
+    WHERE session.run_id = ANY($1::text[])
+    ORDER BY session.created_at
+  `, [[quickRunId, directRunId]]);
+  assert.equal(sessions.rows.length, 2);
+  const quickSession = sessions.rows.find((session) => session.run_id === quickRunId);
+  const directSession = sessions.rows.find((session) => session.run_id === directRunId);
+  assert.equal(quickSession?.status, "completed");
+  assert.equal(quickSession?.board_revision, quickBoardRevision);
+  assert.equal(quickSession?.canvas_state_revision, 2);
+  assert.equal(quickSession?.invocation_sequence, 6);
+  assert.equal(quickSession?.active_mutation_tool_call_id, null);
+  assert.ok(quickSession?.revoked_at instanceof Date);
+  assert.equal(directSession?.status, "completed");
+  assert.equal(directSession?.board_revision, finalBoardRevision);
+  assert.equal(directSession?.invocation_sequence, 3);
+  assert.equal(directSession?.active_mutation_tool_call_id, null);
+  assert.ok(directSession?.revoked_at instanceof Date);
+
+  const invocations = await queryDatabase(`
+    SELECT invocation.id, invocation.run_id, invocation.sequence,
+           invocation.tool_call_id, invocation.tool_name, invocation.status,
+           invocation.response, invocation.satisfies_run_target,
+           invocation.result_artifact_version_id,
+           invocation.board_revision_before, invocation.board_revision_after,
+           invocation.canvas_state_revision_before, invocation.canvas_state_revision_after
+    FROM workbench.canvas_tool_invocations AS invocation
+    WHERE invocation.run_id = ANY($1::text[])
+    ORDER BY invocation.run_id, invocation.sequence
+  `, [[quickRunId, directRunId]]);
+  const quickInvocations = invocations.rows.filter((invocation) => invocation.run_id === quickRunId);
+  const directInvocations = invocations.rows.filter((invocation) => invocation.run_id === directRunId);
+  const quickInvocationTools = quickInvocations.map((invocation) => invocation.tool_name);
+  const directInvocationTools = directInvocations.map((invocation) => invocation.tool_name);
+  assert.deepEqual(quickInvocationTools, [
+    "get_visible_screens",
+    "get_selected_screens",
+    "view_screen",
+    "select_screen",
+    "navigate_canvas",
+    "quick_edit",
+  ]);
+  assert.deepEqual(directInvocationTools, [
+    "get_selected_screens",
+    "rename_screen",
+    "duplicate_screen",
+  ]);
+  assert.ok(invocations.rows.every((invocation) => invocation.status === "succeeded"));
+  assert.ok(quickInvocations.slice(0, 5).every((invocation) => (
+    invocation.satisfies_run_target === false
+    && invocation.result_artifact_version_id === null
+  )));
+  assert.equal(quickInvocations[5]?.satisfies_run_target, true);
+  assert.equal(quickInvocations[5]?.result_artifact_version_id, quickVersionId);
+  assert.equal(directInvocations[0]?.satisfies_run_target, false);
+  assert.equal(directInvocations[0]?.result_artifact_version_id, null);
+  assert.ok(directInvocations.slice(1).every((invocation) => (
+    invocation.satisfies_run_target === true
+    && invocation.result_artifact_version_id === finalVersionId
+  )));
+  assert.ok(quickInvocations.every((invocation) => invocation.board_revision_before === seedBoardRevision));
+  assert.ok(directInvocations.every((invocation) => invocation.board_revision_before === quickBoardRevision));
+
+  const commands = await queryDatabase(`
+    SELECT command.id, command.status, command.command, command.acknowledgement,
+           command.acknowledged_at, invocation.response
+    FROM workbench.canvas_client_commands AS command
+    JOIN workbench.canvas_tool_invocations AS invocation ON invocation.id = command.invocation_id
+    WHERE command.run_id = $1
+    ORDER BY command.created_at, command.id
+  `, [quickRunId]);
+  assert.equal(commands.rows.length, 3);
+  assert.ok(commands.rows.every((command) => command.status === "acknowledged"));
+  assert.ok(commands.rows.every((command) => command.acknowledged_at instanceof Date));
+  for (const command of commands.rows) {
+    assert.equal(command.acknowledgement?.status, "applied");
+    assert.equal(command.acknowledgement?.commandId, command.id);
+    assert.deepEqual(command.acknowledgement?.result, command.response?.data);
+  }
+
+  const boardNodes = await queryDatabase(`
+    SELECT node_key, artifact_version_id, data->>'screenId' AS screen_id
+    FROM workbench.board_nodes
+    WHERE project_id = $1 AND artifact_version_id = $2
+    ORDER BY sort_order, node_key
+  `, [projectId, finalVersionId]);
+  assert.equal(boardNodes.rows.length, 2);
+  assert.ok(boardNodes.rows.every((node) => node.artifact_version_id === finalVersionId));
+  assert.ok(boardNodes.rows.some((node) => node.screen_id === "screen-home"));
+  assert.equal(new Set(boardNodes.rows.map((node) => node.node_key)).size, 2);
+
+  return { quickInvocationTools, directInvocationTools };
+}
+
+async function runProjectLifecycleScenario(ownerClient, sharedClient, inviteeClient) {
+  console.log("[e2e] running Project membership, invitation, duplicate, search, and archive scenario");
+  const ownerIdentity = await ownerClient.json("GET", "/identity/me");
+  const sharedIdentity = await sharedClient.json("GET", "/identity/me");
+  const workspaceId = ownerIdentity.body.defaultWorkspaceId;
+  await queryDatabase(`
+    INSERT INTO "workspace_members" (
+      "workspace_id", "principal_id", "role", "updated_at"
+    ) VALUES ($1, $2, 'member', clock_timestamp())
+    ON CONFLICT ("workspace_id", "principal_id") DO NOTHING
+  `, [workspaceId, sharedIdentity.body.id]);
+
+  const source = await ownerClient.json("POST", `/workspaces/${workspaceId}/projects`, {
+    body: { title: "Lifecycle Search Needle", summary: "private project lifecycle" },
+    expectedStatus: 201,
+  });
+  assert.equal(source.headers.get("etag"), '"0"');
+
+  const owned = await ownerClient.json(
+    "GET",
+    "/projects?q=search%20needle&relationship=owned&limit=1",
+  );
+  assert.equal(owned.body.items.length, 1);
+  assert.equal(owned.body.items[0].id, source.body.id);
+  assert.equal(owned.body.items[0].role, "owner");
+  assert.equal(owned.body.items[0].relationship, "owned");
+
+  const beforeShare = await sharedClient.json(
+    "GET",
+    "/projects?relationship=shared",
+  );
+  assert.equal(beforeShare.body.items.length, 0);
+  await sharedClient.json("GET", `/projects/${source.body.id}/bootstrap`, {
+    expectedStatus: 404,
+  });
+
+  const added = await ownerClient.json(
+    "PUT",
+    `/projects/${source.body.id}/members/${sharedIdentity.body.id}`,
+    {
+      headers: { "If-Match": '"0"' },
+      body: { role: "viewer" },
+    },
+  );
+  assert.equal(added.body.role, "viewer");
+  assert.equal(added.headers.get("etag"), '"1"');
+
+  const noOp = await ownerClient.json(
+    "PUT",
+    `/projects/${source.body.id}/members/${sharedIdentity.body.id}`,
+    {
+      headers: { "If-Match": '"1"' },
+      body: { role: "viewer" },
+    },
+  );
+  assert.equal(noOp.headers.get("etag"), '"1"');
+
+  const invitationKey = `e2e-project-invitation-${randomUUID()}`;
+  const invitationRequest = {
+    email: "WORKBENCH-E2E-INVITEE@test.local",
+    role: "editor",
+  };
+  const invitation = await ownerClient.json(
+    "POST",
+    `/projects/${source.body.id}/invitations`,
+    {
+      headers: {
+        "If-Match": '"1"',
+        "Idempotency-Key": invitationKey,
+      },
+      body: invitationRequest,
+      expectedStatus: 201,
+    },
+  );
+  assert.equal(invitation.headers.get("etag"), '"2"');
+  assert.equal(invitation.body.invitation.email, "workbench-e2e-invitee@test.local");
+  assert.equal(invitation.body.invitation.status, "pending");
+  assert.equal(invitation.body.deliveryStatus, "not_configured");
+  assert.match(invitation.body.token, /^wbi_/);
+
+  const invitationReplay = await ownerClient.json(
+    "POST",
+    `/projects/${source.body.id}/invitations`,
+    {
+      headers: {
+        "If-Match": '"1"',
+        "Idempotency-Key": invitationKey,
+      },
+      body: invitationRequest,
+      expectedStatus: 201,
+    },
+  );
+  assert.equal(invitationReplay.headers.get("etag"), '"2"');
+  assert.equal(invitationReplay.body.invitation.id, invitation.body.invitation.id);
+  assert.equal(invitationReplay.body.token, invitation.body.token);
+
+  const pendingInvitations = await ownerClient.json(
+    "GET",
+    `/projects/${source.body.id}/invitations?status=pending`,
+  );
+  assert.equal(pendingInvitations.body.items.length, 1);
+  assert.equal(pendingInvitations.body.items[0].token, invitation.body.token);
+  await sharedClient.json("POST", "/project-invitations/preview", {
+    body: { token: invitation.body.token },
+    expectedStatus: 409,
+  });
+  const preview = await inviteeClient.json("POST", "/project-invitations/preview", {
+    body: { token: invitation.body.token },
+  });
+  assert.equal(preview.body.projectId, source.body.id);
+  assert.equal(preview.body.role, "editor");
+
+  const accepted = await inviteeClient.json("POST", "/project-invitations/accept", {
+    body: { token: invitation.body.token },
+  });
+  assert.equal(accepted.headers.get("etag"), '"3"');
+  assert.equal(accepted.body.invitation.status, "accepted");
+  assert.equal(accepted.body.member.role, "editor");
+  const acceptedReplay = await inviteeClient.json("POST", "/project-invitations/accept", {
+    body: { token: invitation.body.token },
+  });
+  assert.equal(acceptedReplay.headers.get("etag"), '"3"');
+  assert.equal(acceptedReplay.body.invitation.id, invitation.body.invitation.id);
+  await inviteeClient.json("GET", `/projects/${source.body.id}/bootstrap`);
+  const inviteeWorkspaceMembership = await queryDatabase(`
+    SELECT count(*)::int AS count
+    FROM "workspace_members"
+    WHERE "workspace_id" = $1 AND "principal_id" = $2
+  `, [workspaceId, accepted.body.member.principalId]);
+  assert.equal(
+    inviteeWorkspaceMembership.rows[0]?.count,
+    0,
+    "accepting a Project invitation granted Workspace membership",
+  );
+
+  const revokeCandidate = await ownerClient.json(
+    "POST",
+    `/projects/${source.body.id}/invitations`,
+    {
+      headers: {
+        "If-Match": '"3"',
+        "Idempotency-Key": `e2e-project-invitation-revoke-${randomUUID()}`,
+      },
+      body: { email: "workbench-e2e-revoked@test.local", role: "viewer" },
+      expectedStatus: 201,
+    },
+  );
+  assert.equal(revokeCandidate.headers.get("etag"), '"4"');
+  const revoked = await ownerClient.json(
+    "DELETE",
+    `/projects/${source.body.id}/invitations/${revokeCandidate.body.invitation.id}`,
+    { headers: { "If-Match": '"4"' } },
+  );
+  assert.equal(revoked.headers.get("etag"), '"5"');
+  assert.equal(revoked.body.status, "revoked");
+
+  const shared = await sharedClient.json(
+    "GET",
+    "/projects?q=lifecycle&relationship=shared",
+  );
+  assert.equal(shared.body.items.length, 1);
+  assert.equal(shared.body.items[0].relationship, "shared");
+  await sharedClient.json("GET", `/projects/${source.body.id}/bootstrap`);
+  await sharedClient.json("PATCH", `/projects/${source.body.id}`, {
+    headers: { "If-Match": '"5"' },
+    body: { title: "Viewer cannot edit" },
+    expectedStatus: 404,
+  });
+
+  const duplicateKey = `e2e-project-duplicate-${randomUUID()}`;
+  const duplicate = await sharedClient.json("POST", `/projects/${source.body.id}/duplicate`, {
+    headers: { "Idempotency-Key": duplicateKey },
+    body: { title: "Viewer-owned duplicate" },
+    expectedStatus: 201,
+  });
+  const duplicateReplay = await sharedClient.json("POST", `/projects/${source.body.id}/duplicate`, {
+    headers: { "Idempotency-Key": duplicateKey },
+    body: { title: "Viewer-owned duplicate" },
+    expectedStatus: 201,
+  });
+  assert.equal(duplicateReplay.body.project.id, duplicate.body.project.id);
+  assert.notEqual(duplicate.body.project.id, source.body.id);
+  const duplicateBootstrap = await sharedClient.json(
+    "GET",
+    `/projects/${duplicate.body.project.id}/bootstrap`,
+  );
+  assert.equal(duplicateBootstrap.body.threads.length, 1);
+  assert.equal(duplicateBootstrap.body.entries.length, 0);
+  assert.equal(duplicateBootstrap.body.latestRun, null);
+
+  const archived = await ownerClient.json("DELETE", `/projects/${source.body.id}`, {
+    headers: { "If-Match": '"5"' },
+  });
+  assert.equal(archived.body.status, "archived");
+  assert.equal(archived.headers.get("etag"), '"6"');
+  await ownerClient.json("GET", `/projects/${source.body.id}/bootstrap`, {
+    expectedStatus: 404,
+  });
+
+  return {
+    sourceProjectId: source.body.id,
+    duplicateProjectId: duplicate.body.project.id,
+    sharedPrincipalId: sharedIdentity.body.id,
+    invitationId: invitation.body.invitation.id,
+    invitedPrincipalId: accepted.body.member.principalId,
+    revokedInvitationId: revoked.body.id,
+  };
+}
+
+async function runSseRevocationScenario(ownerClient, viewerClient) {
+  console.log("[e2e] running live SSE membership revocation scenario");
+  const owner = await ownerClient.json("GET", "/identity/me");
+  const viewer = await viewerClient.json("GET", "/identity/me");
+  const workspaceId = owner.body.defaultWorkspaceId;
+  await queryDatabase(`
+    INSERT INTO "workspace_members" (
+      "workspace_id", "principal_id", "role", "updated_at"
+    ) VALUES ($1, $2, 'member', clock_timestamp())
+    ON CONFLICT ("workspace_id", "principal_id") DO NOTHING
+  `, [workspaceId, viewer.body.id]);
+  const project = await ownerClient.json("POST", `/workspaces/${workspaceId}/projects`, {
+    body: { title: "Workbench SSE Revocation E2E" },
+    expectedStatus: 201,
+  });
+  const bootstrap = await ownerClient.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const threadId = bootstrap.body.selectedThreadId;
+  const added = await ownerClient.json(
+    "PUT",
+    `/projects/${project.body.id}/members/${viewer.body.id}`,
+    {
+      headers: { "If-Match": '"0"' },
+      body: { role: "viewer" },
+    },
+  );
+  assert.equal(added.body.role, "viewer");
+
+  const runId = `sse-revocation-${randomUUID()}`;
+  const requestId = `sse-revocation-request-${randomUUID()}`;
+  const traceId = `sse-revocation-trace-${randomUUID()}`;
+  const runRequest = {
+    prompt: "SSE authorization boundary",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    targetSurface: "web",
+    designStyle: { kind: "automatic" },
+    sourceIds: [],
+    artifactTargets: [],
+    requestedArtifactKinds: [],
+  };
+  await queryDatabase(`
+    WITH inserted_run AS (
+      INSERT INTO "runs" (
+        "id", "project_id", "thread_id", "created_by_id", "idempotency_key",
+        "request_hash", "request_id", "request", "status", "model_id", "trace_id",
+        "event_sequence", "started_at", "created_at", "updated_at"
+      ) VALUES (
+        $1, $2, $3, $4, $5, repeat('a', 64), $6, $7::jsonb, 'running',
+        $8, $9, 1, clock_timestamp(), clock_timestamp(), clock_timestamp()
+      )
+      RETURNING "id"
+    )
+    INSERT INTO "run_events" (
+      "id", "run_id", "sequence", "type", "payload", "trace_id", "occurred_at"
+    )
+    SELECT $10, "id", 1, 'run.started', '{"attempt":1}'::jsonb, $9, clock_timestamp()
+    FROM inserted_run
+  `, [
+    runId,
+    project.body.id,
+    threadId,
+    owner.body.id,
+    `sse-revocation-${randomUUID()}`,
+    requestId,
+    JSON.stringify(runRequest),
+    runtimeCatalogModelId,
+    traceId,
+    `sse-revocation-event-${randomUUID()}`,
+  ]);
+
+  const stream = await viewerClient.openSse(`/runs/${runId}/events?afterSequence=0`);
+  await waitFor(
+    () => stream.observed.some((event) => event.data.sequence === 1),
+    scenarioTimeoutMs,
+    "SSE client did not receive its authorized baseline event",
+  );
+
+  await ownerClient.json("DELETE", `/projects/${project.body.id}/members/${viewer.body.id}`, {
+    headers: { "If-Match": '"1"' },
+    expectedStatus: 204,
+  });
+  await queryDatabase(`
+    WITH advanced AS (
+      UPDATE "runs"
+      SET "event_sequence" = "event_sequence" + 1, "updated_at" = clock_timestamp()
+      WHERE "id" = $1
+      RETURNING "id", "event_sequence", "trace_id"
+    )
+    INSERT INTO "run_events" (
+      "id", "run_id", "sequence", "type", "payload", "trace_id", "occurred_at"
+    )
+    SELECT
+      $2,
+      "id",
+      "event_sequence",
+      'activity.changed',
+      '{"activityId":"revoked-sentinel","status":"running","label":"Must remain private","detail":null}'::jsonb,
+      "trace_id",
+      clock_timestamp()
+    FROM advanced
+  `, [runId, `sse-revocation-event-${randomUUID()}`]);
+
+  const events = await stream.events;
+  assert.deepEqual(events.map((event) => event.data.sequence), [1]);
+  assert.ok(!events.some((event) => event.data.payload?.activityId === "revoked-sentinel"));
+  await viewerClient.json("GET", `/runs/${runId}`, { expectedStatus: 404 });
+
+  return {
+    projectId: project.body.id,
+    runId,
+    deliveredSequences: events.map((event) => event.data.sequence),
+  };
+}
+
+async function runApprovalScenario(client) {
+  console.log("[e2e] running multiple durable approvals and checkpoint resume scenario");
+  const identity = await client.json("GET", "/identity/me");
+  const project = await client.json("POST", `/workspaces/${identity.body.defaultWorkspaceId}/projects`, {
+    body: { title: "Workbench Approval E2E" },
+    expectedStatus: 201,
+  });
+  const initial = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const threadId = initial.body.selectedThreadId;
+  assert.equal(typeof threadId, "string");
+  const sourceFixtures = await seedRunSourceFixtures({
+    projectId: project.body.id,
+    principalId: identity.body.id,
+    label: "approval",
+  });
+  const request = {
+    prompt: "E2E_APPROVAL: require two independent decisions before publishing",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    targetSurface: "web",
+    designStyle: { kind: "automatic" },
+    requestedArtifactKinds: ["prd"],
+  };
+  const attachments = existingSubmissionAttachments(
+    sourceFixtures.map((fixture) => fixture.fileAssetId),
+  );
+  const run = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request,
+    attachments,
+    idempotencyKey: `e2e-approval-${randomUUID()}`,
+  });
+  const typedOptions = assertRunTypedOptions(run.body, request);
+  const sourceSnapshots = assertRunSourceSnapshots(run.body, sourceFixtures);
+  const stream = client.sse(`/runs/${run.body.id}/events?afterSequence=0`);
+
+  await waitFor(async () => {
+    const current = await client.json("GET", `/runs/${run.body.id}`);
+    return current.body.status === "waiting_input";
+  }, scenarioTimeoutMs, "Run never reached waiting_input");
+
+  const pending = await client.json("GET", `/runs/${run.body.id}/approvals`);
+  assert.equal(pending.body.items.length, 2);
+  assert.ok(pending.body.items.every((approval) => approval.status === "pending"));
+  const gatewayUploadCountBeforeResume = fakeRuntime.state.gatewayUploads.length;
+
+  const first = pending.body.items[0];
+  const second = pending.body.items[1];
+  const firstDecision = await client.json(
+    "POST",
+    `/runs/${run.body.id}/approvals/${first.id}`,
+    {
+      body: { decision: "approve" },
+      headers: { "Idempotency-Key": `e2e-approval-first-${randomUUID()}` },
+      expectedStatus: 202,
+    },
+  );
+  assert.equal(firstDecision.body.approval.status, "approved");
+  assert.equal(firstDecision.body.run.status, "waiting_input");
+  assertRunTypedOptions(firstDecision.body.run, request, typedOptions);
+  assertRunSourceSnapshots(firstDecision.body.run, sourceFixtures, sourceSnapshots);
+  const stillWaiting = await client.json("GET", `/runs/${run.body.id}`);
+  assert.equal(stillWaiting.body.status, "waiting_input");
+  assertRunTypedOptions(stillWaiting.body, request, typedOptions);
+  assertRunSourceSnapshots(stillWaiting.body, sourceFixtures, sourceSnapshots);
+
+  const secondDecision = await client.json(
+    "POST",
+    `/runs/${run.body.id}/approvals/${second.id}`,
+    {
+      body: { decision: "submit", value: { direction: "quality" } },
+      headers: { "Idempotency-Key": `e2e-approval-second-${randomUUID()}` },
+      expectedStatus: 202,
+    },
+  );
+  assert.equal(secondDecision.body.approval.status, "submitted");
+  assert.equal(secondDecision.body.run.status, "queued");
+  assertRunTypedOptions(secondDecision.body.run, request, typedOptions);
+  assertRunSourceSnapshots(secondDecision.body.run, sourceFixtures, sourceSnapshots);
+
+  const events = await stream;
+  assertOrderedEvents(events, { runId: run.body.id, firstSequence: 1 });
+  assert.equal(events.filter((event) => event.data.type === "run.input.required").length, 2);
+  assert.equal(events.filter((event) => event.data.type === "run.input.submitted").length, 2);
+  assert.ok(events.some((event) => event.data.type === "run.queued" && event.data.sequence > 1));
+  assert.equal(events.at(-1)?.data.type, "run.completed");
+
+  const terminal = await client.json("GET", `/runs/${run.body.id}`);
+  assert.equal(terminal.body.status, "succeeded");
+  assert.equal(terminal.body.attempt, 2);
+  assert.equal(terminal.body.lastEventSequence, events.length);
+  assertRunTypedOptions(terminal.body, request, typedOptions);
+  assertRunSourceSnapshots(terminal.body, sourceFixtures, sourceSnapshots);
+  assert.equal(
+    fakeRuntime.state.gatewayUploads.length,
+    gatewayUploadCountBeforeResume,
+    "approval resume re-uploaded immutable Run sources",
+  );
+  await assertPersistedRunSources(run.body.id, sourceFixtures, sourceSnapshots);
+  assertRuntimeSourceIsolation(run.body.id, sourceFixtures, sourceSnapshots, request);
+  const decided = await client.json("GET", `/runs/${run.body.id}/approvals`);
+  assert.deepEqual(decided.body.items.map((approval) => approval.status), ["approved", "submitted"]);
+
+  return {
+    runId: run.body.id,
+    approvalCount: decided.body.items.length,
+    eventCount: events.length,
+    attempt: terminal.body.attempt,
+    sourceCount: sourceSnapshots.length,
+    runtimeContentCount: runtimeContentCount(sourceFixtures),
+  };
+}
+
+async function runCancellationScenario(client) {
+  console.log("[e2e] running in-flight cancellation scenario");
+  const identity = await client.json("GET", "/identity/me");
+  const project = await client.json("POST", `/workspaces/${identity.body.defaultWorkspaceId}/projects`, {
+    body: { title: "Workbench Cancellation E2E" },
+    expectedStatus: 201,
+  });
+  const initial = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const threadId = initial.body.threads[0].id;
+  const sourceFixtures = await seedRunSourceFixtures({
+    projectId: project.body.id,
+    principalId: identity.body.id,
+    label: "cancel",
+  });
+  const request = {
+    prompt: "E2E_CANCEL: hold the fake runtime stream until cancellation",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    targetSurface: "web",
+    designStyle: { kind: "automatic" },
+    requestedArtifactKinds: ["prd"],
+  };
+  const attachments = existingSubmissionAttachments(
+    sourceFixtures.map((fixture) => fixture.fileAssetId),
+  );
+  const run = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request,
+    attachments,
+    idempotencyKey: `e2e-cancel-${randomUUID()}`,
+  });
+  assert.deepEqual(run.body.requestedArtifactKinds, ["prd"]);
+  const typedOptions = assertRunTypedOptions(run.body, request);
+  const sourceSnapshots = assertRunSourceSnapshots(run.body, sourceFixtures);
+
+  await waitFor(async () => {
+    const current = await client.json("GET", `/runs/${run.body.id}`);
+    return current.body.status === "running";
+  }, scenarioTimeoutMs, "Run never reached running before cancellation");
+  await waitFor(
+    () => fakeRuntime.state.activeCancelStreams > 0,
+    scenarioTimeoutMs,
+    "fake DeerFlow never opened the cancellation stream",
+  );
+
+  const stream = client.sse(`/runs/${run.body.id}/events?afterSequence=0`);
+  const cancel = await client.json("POST", `/runs/${run.body.id}/cancel`, {
+    headers: { "Idempotency-Key": `e2e-cancel-command-${randomUUID()}` },
+    expectedStatus: 202,
+  });
+  assert.ok(["cancelling", "cancelled"].includes(cancel.body.status));
+  assertRunTypedOptions(cancel.body, request, typedOptions);
+  assertRunSourceSnapshots(cancel.body, sourceFixtures, sourceSnapshots);
+
+  const events = await stream;
+  assertOrderedEvents(events, { runId: run.body.id, firstSequence: 1 });
+  assert.equal(events.at(-1)?.data.type, "run.cancelled");
+  assert.ok(events.some((event) => event.data.type === "run.cancel.requested"));
+  assert.ok(!events.some((event) => event.data.type === "artifact.version.created"));
+  assert.ok(!events.some((event) => event.data.type === "run.completed"));
+
+  const terminal = await client.json("GET", `/runs/${run.body.id}`);
+  assert.equal(terminal.body.status, "cancelled");
+  assert.equal(terminal.body.cancellationReason, "Cancelled by user");
+  assert.equal(terminal.body.lastEventSequence, events.length);
+  assertRunTypedOptions(terminal.body, request, typedOptions);
+  assertRunSourceSnapshots(terminal.body, sourceFixtures, sourceSnapshots);
+  const completed = await client.json("GET", `/projects/${project.body.id}/bootstrap?threadId=${threadId}`);
+  assert.equal(completed.body.selectedThreadId, threadId);
+  assert.equal(completed.body.latestRun.id, run.body.id);
+  assert.equal(completed.body.latestRun.status, "cancelled");
+  assertRunTypedOptions(completed.body.latestRun, request, typedOptions);
+  assertRunSourceSnapshots(completed.body.latestRun, sourceFixtures, sourceSnapshots);
+  assert.equal(completed.body.artifacts.length, 0);
+  assert.equal(completed.body.board.nodes.length, 0);
+
+  const persisted = await queryDatabase(`
+    SELECT
+      r.status,
+      r.event_sequence,
+      r.cancellation_reason,
+      count(av.id)::int AS artifact_version_count
+    FROM workbench.runs r
+    LEFT JOIN workbench.artifact_versions av ON av.created_by_run_id = r.id
+    WHERE r.id = $1
+    GROUP BY r.status, r.event_sequence, r.cancellation_reason
+  `, [run.body.id]);
+  assert.equal(persisted.rows[0]?.status, "cancelled");
+  assert.equal(persisted.rows[0]?.event_sequence, events.length);
+  assert.equal(persisted.rows[0]?.cancellation_reason, "Cancelled by user");
+  assert.equal(persisted.rows[0]?.artifact_version_count, 0);
+  await assertPersistedRunSources(run.body.id, sourceFixtures, sourceSnapshots);
+  assertRuntimeSourceIsolation(run.body.id, sourceFixtures, sourceSnapshots, request);
+
+  return {
+    runId: run.body.id,
+    eventCount: events.length,
+    status: terminal.body.status,
+    sourceCount: sourceSnapshots.length,
+    runtimeContentCount: runtimeContentCount(sourceFixtures),
+  };
+}
+
+async function runRetryScenario(client) {
+  console.log("[e2e] running persisted-request Run retry scenario");
+  const identity = await client.json("GET", "/identity/me");
+  const project = await client.json("POST", `/workspaces/${identity.body.defaultWorkspaceId}/projects`, {
+    body: { title: "Workbench Retry E2E" },
+    expectedStatus: 201,
+  });
+  const initial = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const threadId = initial.body.selectedThreadId;
+  assert.equal(typeof threadId, "string");
+
+  const request = {
+    prompt: "E2E_RETRY: recreate this Run from its persisted request",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    generationIntent: null,
+    targetSurface: "app",
+    designStyle: { kind: "automatic" },
+    sourceIds: [],
+    artifactTargets: [],
+    requestedArtifactKinds: ["prd"],
+    canvasSnapshot: null,
+  };
+  const sourceRunId = `retry-source-${randomUUID()}`;
+  const terminalSourceRunId = `retry-terminal-${randomUUID()}`;
+  await queryDatabase(`
+    INSERT INTO workbench.runs (
+      id, project_id, thread_id, created_by_id, idempotency_key, request_hash,
+      request_id, request, status, model_id, trace_id, error_code, error_detail,
+      error_retryable, finished_at, created_at, updated_at
+    ) VALUES
+      ($1, $2, $3, $4, $5, repeat('e', 64), $6, $7::jsonb, 'failed', $8, $9,
+       'TEMPORARY_RUNTIME_FAILURE', 'Retryable E2E source', TRUE,
+       clock_timestamp(), clock_timestamp(), clock_timestamp()),
+      ($10, $2, $3, $4, $11, repeat('f', 64), $12, $7::jsonb, 'failed', $8, $13,
+       'INVALID_REQUEST', 'Terminal E2E source', FALSE,
+       clock_timestamp(), clock_timestamp(), clock_timestamp())
+  `, [
+    sourceRunId,
+    project.body.id,
+    threadId,
+    identity.body.id,
+    `source-${randomUUID()}`,
+    `source-request-${randomUUID()}`,
+    JSON.stringify(request),
+    request.modelId,
+    `source-trace-${randomUUID()}`,
+    terminalSourceRunId,
+    `terminal-${randomUUID()}`,
+    `terminal-request-${randomUUID()}`,
+    `terminal-trace-${randomUUID()}`,
+  ]);
+
+  const terminalRetry = await client.json("POST", `/runs/${terminalSourceRunId}/retry`, {
+    headers: { "Idempotency-Key": `e2e-retry-terminal-${randomUUID()}` },
+    expectedStatus: 409,
+  });
+  assert.equal(terminalRetry.body.code, "RUN_RETRY_NOT_ALLOWED");
+
+  const idempotencyKey = `e2e-retry-${randomUUID()}`;
+  const first = await client.json("POST", `/runs/${sourceRunId}/retry`, {
+    headers: { "Idempotency-Key": idempotencyKey },
+    expectedStatus: 202,
+  });
+  assert.equal(first.body.retryOfRunId, sourceRunId);
+  assertRunTypedOptions(first.body, request);
+
+  const duplicate = await client.json("POST", `/runs/${sourceRunId}/retry`, {
+    headers: { "Idempotency-Key": idempotencyKey },
+    expectedStatus: 202,
+  });
+  assert.equal(duplicate.body.id, first.body.id);
+  assert.equal(duplicate.body.retryOfRunId, sourceRunId);
+
+  await waitFor(async () => {
+    const current = await client.json("GET", `/runs/${first.body.id}`);
+    return current.body.status === "succeeded";
+  }, scenarioTimeoutMs, "Retried Run never succeeded");
+
+  const persisted = await queryDatabase(`
+    SELECT retry.id AS retry_id, retry.retry_of_run_id, retry.request,
+           source.status AS source_status, source.error_retryable AS source_retryable
+    FROM workbench.runs AS retry
+    JOIN workbench.runs AS source ON source.id = retry.retry_of_run_id
+    WHERE retry.id = $1
+  `, [first.body.id]);
+  assert.equal(persisted.rows[0]?.retry_of_run_id, sourceRunId);
+  assert.deepEqual(persisted.rows[0]?.request, request);
+  assert.equal(persisted.rows[0]?.source_status, "failed");
+  assert.equal(persisted.rows[0]?.source_retryable, true);
+
+  return {
+    sourceRunId,
+    retriedRunId: first.body.id,
+    idempotentReplayRunId: duplicate.body.id,
+  };
+}
+
+async function seedRunSourceFixtures({ projectId, principalId, label }) {
+  const token = randomUUID();
+  const definitions = [
+    {
+      suffix: "brief",
+      originalName: `${label}-brief.txt`,
+      mediaType: "text/plain",
+      bytes: Buffer.from(`Private ${label} source brief ${token}\n`, "utf8"),
+      extraction: Buffer.from(`# Normalized ${label} brief\n\n${token}\n`, "utf8"),
+    },
+    {
+      suffix: "requirements",
+      originalName: `${label}-requirements.json`,
+      mediaType: "application/json",
+      bytes: Buffer.from(JSON.stringify({ label, token, requirement: "ordered snapshots" }), "utf8"),
+      extraction: null,
+    },
+  ];
+  const fixtures = definitions.map((definition) => {
+    const idSuffix = `${label}-${definition.suffix}-${token}`;
+    const storageKey = `private/e2e/${token}/${definition.suffix}/original`;
+    const stagingKey = `private/e2e/${token}/${definition.suffix}/staging`;
+    const providerUploadId = `private-provider-upload-${idSuffix}`;
+    const extractionBytes = definition.extraction;
+    return {
+      ...definition,
+      fileAssetId: `file-${idSuffix}`,
+      blobId: `blob-${idSuffix}`,
+      scanId: `scan-${idSuffix}`,
+      uploadSessionId: `upload-${idSuffix}`,
+      storageKey,
+      stagingKey,
+      providerUploadId,
+      sha256: sha256(definition.bytes),
+      byteSize: definition.bytes.byteLength,
+      extractionId: extractionBytes ? `extraction-${idSuffix}` : null,
+      extractionBlobId: extractionBytes ? `blob-extraction-${idSuffix}` : null,
+      extractionStorageKey: extractionBytes
+        ? `private/e2e/${token}/${definition.suffix}/normalized`
+        : null,
+      extractionSha256: extractionBytes ? sha256(extractionBytes) : null,
+    };
+  });
+
+  const client = new Client({
+    connectionString: pgConnectionUrl(databaseUrl),
+    application_name: "workbench-e2e-source-fixtures",
+  });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query('SET LOCAL search_path TO "workbench"');
+    for (const fixture of fixtures) {
+      await client.query(`
+        INSERT INTO workbench.blobs (
+          id, sha256, generation, storage_key, media_type, byte_size, status,
+          verified_at, gc_eligible_at, deleted_at, created_at, updated_at
+        ) VALUES ($1, $2, 1, $3, $4, $5, 'pending', NULL, NULL, NULL, clock_timestamp(), clock_timestamp())
+      `, [fixture.blobId, fixture.sha256, fixture.storageKey, fixture.mediaType, fixture.byteSize]);
+      await client.query(`
+        INSERT INTO workbench.blob_scans (
+          id, blob_id, attempt, status, scanner, scanner_version, signature_version,
+          evidence, failure_code, failure_detail, started_at, finished_at, created_at, updated_at
+        ) VALUES (
+          $1, $2, 1, 'clean', 'workbench-e2e-scanner', '1', 'e2e-signatures-1',
+          $3::jsonb, NULL, NULL, clock_timestamp(), clock_timestamp(), clock_timestamp(), clock_timestamp()
+        )
+      `, [fixture.scanId, fixture.blobId, JSON.stringify({ verdict: "clean", fixture: label })]);
+      await client.query(`
+        UPDATE workbench.blobs
+        SET status = 'ready', verified_at = clock_timestamp(), updated_at = clock_timestamp()
+        WHERE id = $1
+      `, [fixture.blobId]);
+      await client.query(`
+        INSERT INTO workbench.file_assets (
+          id, project_id, blob_id, current_extraction_id, uploaded_by_id,
+          original_name, declared_media_type, detected_media_type, byte_size,
+          status, revision, failure_code, failure_detail, metadata, verified_at,
+          deleted_at, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, NULL, $4, $5, $6, $6, $7,
+          'ready', 0, NULL, NULL, $8::jsonb, clock_timestamp(),
+          NULL, clock_timestamp(), clock_timestamp()
+        )
+      `, [
+        fixture.fileAssetId,
+        projectId,
+        fixture.blobId,
+        principalId,
+        fixture.originalName,
+        fixture.mediaType,
+        fixture.byteSize,
+        JSON.stringify({ fixture: label, privateStorageKey: fixture.storageKey }),
+      ]);
+      await client.query(`
+        INSERT INTO workbench.file_upload_sessions (
+          id, project_id, file_asset_id, provider, provider_upload_id, staging_key,
+          status, expected_byte_size, expected_sha256, part_size, revision,
+          idempotency_key, request_hash, completion_idempotency_key,
+          completion_request_hash, failure_code, failure_detail, expires_at,
+          completed_at, aborted_at, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, 'private-e2e-provider', $4, $5,
+          'completed', $6, $7, 5242880, 0,
+          $8, $9, $10, $11, NULL, NULL,
+          clock_timestamp() + interval '1 day', clock_timestamp(), NULL,
+          clock_timestamp(), clock_timestamp()
+        )
+      `, [
+        fixture.uploadSessionId,
+        projectId,
+        fixture.fileAssetId,
+        fixture.providerUploadId,
+        fixture.stagingKey,
+        fixture.byteSize,
+        fixture.sha256,
+        `e2e-create-${fixture.fileAssetId}`,
+        sha256(Buffer.from(`create:${fixture.fileAssetId}`)),
+        `e2e-complete-${fixture.fileAssetId}`,
+        sha256(Buffer.from(`complete:${fixture.fileAssetId}`)),
+      ]);
+
+      if (fixture.extraction && fixture.extractionId && fixture.extractionBlobId
+        && fixture.extractionStorageKey && fixture.extractionSha256) {
+        await client.query(`
+          INSERT INTO workbench.blobs (
+            id, sha256, generation, storage_key, media_type, byte_size, status,
+            verified_at, gc_eligible_at, deleted_at, created_at, updated_at
+          ) VALUES (
+            $1, $2, 1, $3, 'text/markdown', $4, 'ready',
+            clock_timestamp(), NULL, NULL, clock_timestamp(), clock_timestamp()
+          )
+        `, [
+          fixture.extractionBlobId,
+          fixture.extractionSha256,
+          fixture.extractionStorageKey,
+          fixture.extraction.byteLength,
+        ]);
+        await client.query(`
+          INSERT INTO workbench.file_extractions (
+            id, file_asset_id, source_blob_id, attempt, status, parser,
+            parser_version, output_schema_version, idempotency_key, request_hash,
+            content_sha256, failure_code, failure_detail, metadata,
+            started_at, finished_at, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, 1, 'queued', 'workbench-e2e-parser',
+            '1', 1, $4, $5, NULL, NULL, NULL, $6::jsonb,
+            NULL, NULL, clock_timestamp(), clock_timestamp()
+          )
+        `, [
+          fixture.extractionId,
+          fixture.fileAssetId,
+          fixture.blobId,
+          `e2e-extract-${fixture.fileAssetId}`,
+          sha256(Buffer.from(`extract:${fixture.fileAssetId}`)),
+          JSON.stringify({ fixture: label }),
+        ]);
+        await client.query(`
+          UPDATE workbench.file_extractions
+          SET status = 'running', processing_attempts = 1, submission_generation = 1,
+              submission_started_at = clock_timestamp(), started_at = clock_timestamp(),
+              updated_at = clock_timestamp()
+          WHERE id = $1
+        `, [fixture.extractionId]);
+        await client.query(`
+          INSERT INTO workbench.file_extraction_outputs (
+            extraction_id, kind, position, blob_id, metadata, created_at
+          ) VALUES ($1, 'text', 0, $2, $3::jsonb, clock_timestamp())
+        `, [
+          fixture.extractionId,
+          fixture.extractionBlobId,
+          JSON.stringify({ normalized: true }),
+        ]);
+        await client.query(`
+          UPDATE workbench.file_extractions
+          SET status = 'ready', content_sha256 = $2,
+              finished_at = clock_timestamp(), updated_at = clock_timestamp()
+          WHERE id = $1
+        `, [fixture.extractionId, fixture.extractionSha256]);
+        await client.query(`
+          UPDATE workbench.file_assets
+          SET current_extraction_id = $2, revision = revision + 1, updated_at = clock_timestamp()
+          WHERE id = $1
+        `, [fixture.fileAssetId, fixture.extractionId]);
+      }
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    await client.end();
+  }
+
+  for (const fixture of fixtures) {
+    fakeRuntime.registerObject(fixture.storageKey, fixture.bytes, fixture.mediaType);
+    if (fixture.extraction && fixture.extractionStorageKey) {
+      fakeRuntime.registerObject(fixture.extractionStorageKey, fixture.extraction, "text/markdown");
+    }
+  }
+  return fixtures;
+}
+
+function assertRunTypedOptions(run, request, expectedOptions) {
+  const actual = {
+    workflow: run.workflow,
+    targetSurface: run.targetSurface,
+    designStyle: run.designStyle,
+  };
+  const requested = {
+    workflow: request.workflow,
+    targetSurface: request.targetSurface,
+    designStyle: request.designStyle,
+  };
+  assert.deepEqual(actual, requested, "Run response changed the submitted typed options");
+  if (expectedOptions) {
+    assert.deepEqual(actual, expectedOptions, "typed Run options changed across APIs");
+  }
+  return structuredClone(actual);
+}
+
+function assertRunSourceSnapshots(run, fixtures, expectedSnapshots) {
+  assert.equal(run.sources.length, fixtures.length, "Run source snapshot count changed");
+  assert.deepEqual(
+    run.sources.map((source) => source.position),
+    fixtures.map((_, position) => position),
+    "Run source snapshot request order changed",
+  );
+  const publicKeys = [
+    "checksum",
+    "createdAt",
+    "descriptor",
+    "id",
+    "kind",
+    "label",
+    "position",
+    "projectId",
+    "runId",
+    "snapshot",
+    "sourceId",
+  ].sort();
+  for (const [position, fixture] of fixtures.entries()) {
+    const source = run.sources[position];
+    assert.ok(source, `Run source ${position} is missing`);
+    assert.deepEqual(Object.keys(source).sort(), publicKeys, "Run source exposed a non-contract field");
+    assert.equal(source.runId, run.id);
+    assert.equal(source.projectId, run.projectId);
+    assert.equal(source.position, position);
+    assert.equal(source.kind, "file");
+    assert.equal(source.label, fixture.originalName);
+    assert.equal(source.checksum, fixture.sha256);
+    assert.deepEqual(source.descriptor, {
+      kind: "file",
+      fileAssetId: fixture.fileAssetId,
+      originalName: fixture.originalName,
+      mediaType: fixture.mediaType,
+    });
+    assert.deepEqual(source.snapshot, {
+      protocol: "workbench.import-source-snapshot.v1",
+      sourceRevision: 1,
+      checksum: fixture.sha256,
+      blobs: [{
+        position: 0,
+        blobId: fixture.blobId,
+        role: "primary",
+        path: fixture.originalName,
+        mediaType: fixture.mediaType,
+        byteSize: fixture.byteSize,
+        sha256: fixture.sha256,
+      }],
+    });
+    assert.equal(typeof source.sourceId, "string");
+    assert.ok(source.sourceId.length > 0, "Run source id is missing");
+    assert.ok(Number.isFinite(Date.parse(source.createdAt)), "Run source createdAt is not ISO datetime");
+  }
+  assertPrivateSourceDataAbsent(run.sources, fixtures, "Run source HTTP snapshot");
+  if (expectedSnapshots) {
+    assert.deepEqual(run.sources, expectedSnapshots, "immutable Run source snapshots changed across APIs");
+  }
+  return structuredClone(run.sources);
+}
+
+async function assertPersistedRunSources(runId, fixtures, expectedSnapshots) {
+  const persisted = await queryDatabase(`
+    SELECT
+      snapshot.position,
+      snapshot.source_id,
+      snapshot.kind::text AS kind,
+      snapshot.label,
+      snapshot.checksum,
+      snapshot.descriptor,
+      snapshot.snapshot,
+      source.status::text AS source_status,
+      source.revision AS source_revision,
+      source_blob.position AS blob_position,
+      source_blob.file_asset_id,
+      source_blob.blob_id,
+      source_blob.role,
+      source_blob.path,
+      source_blob.media_type,
+      source_blob.byte_size,
+      source_blob.sha256,
+      blob.storage_key,
+      upload.provider,
+      upload.provider_upload_id,
+      upload.staging_key
+    FROM workbench.run_source_snapshots AS snapshot
+    JOIN workbench.import_sources AS source ON source.id = snapshot.source_id
+    JOIN workbench.import_source_blobs AS source_blob ON source_blob.import_source_id = source.id
+    JOIN workbench.blobs AS blob ON blob.id = source_blob.blob_id
+    JOIN workbench.file_upload_sessions AS upload ON upload.file_asset_id = source_blob.file_asset_id
+    WHERE snapshot.run_id = $1
+    ORDER BY snapshot.position, source_blob.position
+  `, [runId]);
+  assert.equal(persisted.rows.length, fixtures.length);
+  for (const [position, fixture] of fixtures.entries()) {
+    const row = persisted.rows[position];
+    const expected = expectedSnapshots[position];
+    assert.equal(row?.position, position);
+    assert.equal(row?.source_id, expected.sourceId);
+    assert.equal(row?.kind, "file");
+    assert.equal(row?.label, fixture.originalName);
+    assert.equal(row?.checksum, fixture.sha256);
+    assert.deepEqual(row?.descriptor, expected.descriptor);
+    assert.deepEqual(row?.snapshot, expected.snapshot);
+    assert.equal(row?.source_status, "ready");
+    assert.equal(row?.source_revision, 1);
+    assert.equal(row?.blob_position, 0);
+    assert.equal(row?.file_asset_id, fixture.fileAssetId);
+    assert.equal(row?.blob_id, fixture.blobId);
+    assert.equal(row?.role, "primary");
+    assert.equal(row?.path, fixture.originalName);
+    assert.equal(row?.media_type, fixture.mediaType);
+    assert.equal(Number(row?.byte_size), fixture.byteSize);
+    assert.equal(row?.sha256, fixture.sha256);
+    assert.equal(row?.storage_key, fixture.storageKey);
+    assert.equal(row?.provider, "private-e2e-provider");
+    assert.equal(row?.provider_upload_id, fixture.providerUploadId);
+    assert.equal(row?.staging_key, fixture.stagingKey);
+  }
+  assertPrivateSourceDataAbsent(expectedSnapshots, fixtures, "persisted/public snapshot comparison");
+}
+
+function assertRuntimeSourceIsolation(runId, fixtures, sourceSnapshots, request) {
+  const requests = fakeRuntime.state.runRequests.filter(
+    (request) => request.body?.config?.configurable?.workbench_run_id === runId,
+  );
+  const initialRequests = requests.filter((request) => request.body?.input !== null);
+  assert.equal(initialRequests.length, 1, "DeerFlow did not receive exactly one initial source context");
+  const context = parseWorkbenchRuntimeContext(initialRequests[0].body);
+  assert.deepEqual(
+    { workflow: context.workflow, targetSurface: context.targetSurface },
+    { workflow: request.workflow, targetSurface: request.targetSurface },
+    "DeerFlow context changed the durable typed Run options",
+  );
+  if (request.designStyle.kind === "preset") {
+    assert.equal(context.designStyle.kind, "materialized");
+    assert.deepEqual(context.designStyle.snapshot.source, {
+      presetId: request.designStyle.presetId,
+      version: request.designStyle.version,
+      checksum: request.designStyle.checksum,
+    });
+    assert.equal(context.designStyle.snapshot.protocol, "workbench.runtime.design-preset.v1");
+    assert.deepEqual(context.designStyle.assetHandles, {});
+  } else {
+    assert.deepEqual(context.designStyle, request.designStyle);
+  }
+  assert.deepEqual(
+    context.sources.map((source) => ({
+      position: source.position,
+      sourceId: source.sourceId,
+      kind: source.kind,
+      blobId: source.blobId,
+      fileName: source.fileName,
+      mediaType: source.mediaType,
+      byteSize: source.byteSize,
+      sha256: source.sha256,
+    })),
+    fixtures.map((fixture, position) => ({
+      position,
+      sourceId: sourceSnapshots[position].sourceId,
+      kind: "file",
+      blobId: fixture.blobId,
+      fileName: fixture.originalName,
+      mediaType: fixture.mediaType,
+      byteSize: fixture.byteSize,
+      sha256: fixture.sha256,
+    })),
+    "DeerFlow source metadata did not preserve request order",
+  );
+  assert.deepEqual(
+    context.deerFlowSources.map((source) => ({
+      position: source.position,
+      fileName: source.fileName,
+      mediaType: source.fileType,
+      byteSize: source.size,
+    })),
+    fixtures.map((fixture, position) => ({
+      position,
+      fileName: fixture.originalName,
+      mediaType: fixture.mediaType,
+      byteSize: fixture.byteSize,
+    })),
+    "DeerFlow uploaded source handles did not preserve request order",
+  );
+  const serialized = JSON.stringify(requests.map((request) => request.body));
+  for (const fixture of fixtures) {
+    for (const privateValue of [
+      fixture.fileAssetId,
+      fixture.extractionId,
+      fixture.extractionBlobId,
+      fixture.storageKey,
+      fixture.extractionStorageKey,
+      fixture.stagingKey,
+      fixture.providerUploadId,
+    ]) {
+      if (privateValue) {
+        assert.ok(!serialized.includes(privateValue), `private source identifier reached DeerFlow: ${privateValue}`);
+      }
+    }
+  }
+}
+
+function parseWorkbenchRuntimeContext(body) {
+  const content = body?.input?.messages?.[0]?.content;
+  assert.equal(typeof content, "string", "DeerFlow initial request did not contain a Workbench message");
+  const startMarker = "<workbench_context>\n";
+  const endMarker = "\n</workbench_context>";
+  const start = content.indexOf(startMarker);
+  const end = content.indexOf(endMarker, start + startMarker.length);
+  assert.ok(start >= 0 && end > start, "DeerFlow initial request omitted the Workbench context envelope");
+  return parseJson(content.slice(start + startMarker.length, end), "DeerFlow Workbench context");
+}
+
+function assertPrivateSourceDataAbsent(value, fixtures, label) {
+  const serialized = JSON.stringify(value);
+  for (const fixture of fixtures) {
+    for (const privateValue of [
+      fixture.storageKey,
+      fixture.extractionStorageKey,
+      fixture.stagingKey,
+      fixture.providerUploadId,
+    ]) {
+      if (privateValue) assert.ok(!serialized.includes(privateValue), `${label} leaked ${privateValue}`);
+    }
+  }
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function runtimeToolEventSourceId(runtimeAttemptId, toolName, toolCallId) {
+  return `deerflow:${createHash("sha256")
+    .update("workbench-runtime-tool-event-v1\0")
+    .update(runtimeAttemptId)
+    .update("\0")
+    .update(toolName)
+    .update("\0")
+    .update(toolCallId)
+    .digest("hex")}`;
+}
+
+function canonicalJson(value) {
+  const result = canonicalize(value);
+  if (typeof result !== "string") throw new Error("E2E fixture is not canonical JSON");
+  return result;
+}
+
+function prototypeScreenProjectionChecksum(document, screenId, revision) {
+  const screen = document.screens.find((candidate) => candidate.id === screenId);
+  assert.ok(screen, `Prototype projection omitted ${screenId}`);
+  const screenNodeIds = new Set(
+    document.nodes.filter((node) => node.screenId === screenId).map((node) => node.id),
+  );
+  const sorted = (values, key) => [...values].sort((left, right) => {
+    const leftKey = String(key(left));
+    const rightKey = String(key(right));
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
+  const projection = {
+    protocol: "workbench.prototype-screen-projection.v1",
+    documentId: document.documentId,
+    revision,
+    screen,
+    nodes: sorted(document.nodes.filter((node) => node.screenId === screenId), (node) => node.id),
+    tokens: sorted(document.tokens, (token) => token.id),
+    assets: sorted(document.assets, (asset) => asset.id),
+    variables: sorted(document.variables, (variable) => variable.path),
+    states: sorted(document.states.filter((state) => state.screenId === screenId), (state) => state.id),
+    actions: sorted(document.actions.filter((action) => screenNodeIds.has(action.nodeId)), (action) => action.id),
+    bindings: sorted(document.bindings.filter((binding) => screenNodeIds.has(binding.nodeId)), (binding) => binding.id),
+    motions: sorted(document.motions.filter((motion) => screenNodeIds.has(motion.nodeId)), (motion) => motion.id),
+  };
+  return sha256(canonicalJson(projection));
+}
+
+function runtimeContentCount(fixtures) {
+  return fixtures.reduce((count, fixture) => count + 1 + (fixture.extraction ? 1 : 0), 0);
+}
+
+function createApiClient(baseUrl, identity = {}) {
+  const authenticationHeaders = {
+    "X-Workbench-Dev-Subject": identity.subject ?? "workbench-e2e-principal",
+    "X-Workbench-Dev-Email": identity.email ?? "workbench-e2e@test.local",
+    "X-Workbench-Dev-Name": identity.name ?? "Workbench E2E",
+  };
+
+  async function openSse(route, headers = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error(`SSE timeout: ${route}`)), scenarioTimeoutMs);
+    const response = await fetch(`${baseUrl}${route}`, {
+      headers: {
+        Accept: "text/event-stream",
+        ...authenticationHeaders,
+        ...headers,
+      },
+      signal: controller.signal,
+    });
+    if (response.status !== 200 || !response.body) {
+      clearTimeout(timeout);
+      throw new Error(`SSE ${route}: HTTP ${response.status}: ${(await response.text()).slice(0, 2000)}`);
+    }
+    const observed = [];
+    const events = readSse(response.body, (event) => observed.push(event))
+      .finally(() => clearTimeout(timeout));
+    return {
+      observed,
+      events,
+      abort: () => controller.abort(),
+    };
+  }
+
+  return {
+    openSse,
+    async json(method, route, options = {}) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new Error(`HTTP timeout: ${method} ${route}`)), scenarioTimeoutMs);
+      try {
+        const response = await fetch(`${baseUrl}${route}`, {
+          method,
+          headers: {
+            Accept: "application/json, application/problem+json",
+            ...authenticationHeaders,
+            ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
+            ...(options.headers ?? {}),
+          },
+          body: options.body === undefined ? undefined : JSON.stringify(options.body),
+          signal: controller.signal,
+        });
+        const text = await response.text();
+        const body = text ? parseJson(text, `${method} ${route}`) : null;
+        const expected = options.expectedStatus ?? 200;
+        if (response.status !== expected) {
+          throw new Error(`${method} ${route}: expected HTTP ${expected}, received ${response.status}: ${text.slice(0, 2000)}`);
+        }
+        return { status: response.status, headers: response.headers, body };
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+
+    async sse(route, headers = {}) {
+      const stream = await openSse(route, headers);
+      return stream.events;
+    },
+  };
+}
+
+async function readSse(body, onEvent) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const events = [];
+  let buffer = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) {
+        const event = parseSseFrame(frame);
+        if (event) {
+          events.push(event);
+          onEvent?.(event);
+        }
+      }
+    }
+    buffer += decoder.decode();
+    const final = parseSseFrame(buffer);
+    if (final) {
+      events.push(final);
+      onEvent?.(final);
+    }
+    return events;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseSseFrame(frame) {
+  if (!frame.trim() || frame.trimStart().startsWith(":")) return null;
+  let event = "message";
+  let id = null;
+  const data = [];
+  for (const line of frame.split(/\r?\n/)) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    if (line.startsWith("id:")) id = line.slice(3).trim();
+    if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+  }
+  if (!data.length) return null;
+  return { event, id, data: parseJson(data.join("\n"), `SSE ${event}`) };
+}
+
+function assertOrderedEvents(events, { runId, firstSequence }) {
+  assert.ok(events.length > 0, "SSE stream contained no events");
+  const seen = new Set();
+  for (const [index, event] of events.entries()) {
+    const sequence = event.data.sequence;
+    assert.equal(sequence, firstSequence + index, `SSE sequence gap at event ${index}`);
+    assert.equal(event.id, String(sequence), `SSE id does not match sequence ${sequence}`);
+    assert.equal(event.event, event.data.type, `SSE event name does not match payload type at ${sequence}`);
+    assert.equal(event.data.runId, runId, `SSE event ${sequence} belongs to another Run`);
+    assert.ok(!seen.has(event.data.id), `duplicate RunEvent id ${event.data.id}`);
+    seen.add(event.data.id);
+  }
+}
+
+function eventIdentity(event) {
+  return {
+    id: event.data.id,
+    sequence: event.data.sequence,
+    type: event.data.type,
+  };
+}
+
+async function startFakeDeerFlow(expectedToken) {
+  const storageObjects = new Map();
+  const state = {
+    threadCreates: 0,
+    successRuns: 0,
+    prototypePatchRuns: 0,
+    sourcePrototypeRuns: 0,
+    generatePrototypeRuns: 0,
+    approvalRuns: 0,
+    approvalResumes: 0,
+    cancelRuns: 0,
+    canvasSeedRuns: 0,
+    canvasQuickEditRuns: 0,
+    canvasDirectEditRuns: 0,
+    canvasToolCalls: [],
+    activeCancelStreams: 0,
+    objectReads: [],
+    gatewayUploads: [],
+    gatewayReceipts: [],
+    runRequests: [],
+    requests: [],
+    runtimeRuns: new Map(),
+    multipartCreates: [],
+  };
+  const sockets = new Set();
+  const server = http.createServer((request, response) => {
+    void handleFakeDeerFlow(request, response, expectedToken, state, storageObjects).catch((error) => {
+      state.requests.push({ error: error instanceof Error ? error.message : String(error) });
+      if (!response.headersSent) {
+        response.writeHead(500, { "content-type": "application/json" });
+      }
+      if (!response.writableEnded) response.end(JSON.stringify({ error: "fake runtime failure" }));
+    });
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  server.on("clientError", (_error, socket) => socket.destroy());
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  console.log(`[e2e] fake DeerFlow listening on 127.0.0.1:${address.port}`);
+  return {
+    state,
+    url: `http://127.0.0.1:${address.port}`,
+    registerObject(storageKey, bytes, mediaType) {
+      assert.ok(!storageObjects.has(storageKey), `duplicate fake S3 object key: ${storageKey}`);
+      storageObjects.set(storageKey, { bytes: Buffer.from(bytes), mediaType });
+    },
+    async close() {
+      for (const socket of sockets) socket.destroy();
+      server.closeAllConnections?.();
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
+async function handleFakeDeerFlow(request, response, expectedToken, state, storageObjects) {
+  const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  const storagePrefix = `/${fakeStorageBucket}/`;
+  if (request.method === "GET" && url.pathname.startsWith(storagePrefix)) {
+    const storageKey = url.pathname
+      .slice(storagePrefix.length)
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .join("/");
+    const object = storageObjects.get(storageKey);
+    if (!object) {
+      response.writeHead(404, { "content-type": "application/xml" });
+      response.end("<Error><Code>NoSuchKey</Code></Error>");
+      return;
+    }
+    state.objectReads.push({ storageKey, byteSize: object.bytes.byteLength, sha256: sha256(object.bytes) });
+    response.writeHead(200, {
+      "content-type": object.mediaType,
+      "content-length": String(object.bytes.byteLength),
+      etag: `\"${sha256(object.bytes)}\"`,
+      "last-modified": new Date().toUTCString(),
+      "x-amz-request-id": `e2e-${randomUUID()}`,
+    });
+    response.end(object.bytes);
+    return;
+  }
+  if (request.method === "POST" && url.pathname.startsWith(storagePrefix) && url.searchParams.has("uploads")) {
+    const storageKey = url.pathname
+      .slice(storagePrefix.length)
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .join("/");
+    const uploadId = `fake-multipart-${state.multipartCreates.length + 1}-${randomUUID()}`;
+    state.multipartCreates.push({ storageKey, uploadId });
+    response.writeHead(200, {
+      "content-type": "application/xml",
+      "x-amz-request-id": `e2e-${randomUUID()}`,
+    });
+    response.end([
+      '<CreateMultipartUploadResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">',
+      `<Bucket>${fakeStorageBucket}</Bucket>`,
+      `<Key>${escapeXml(storageKey)}</Key>`,
+      `<UploadId>${uploadId}</UploadId>`,
+      "</CreateMultipartUploadResult>",
+    ].join(""));
+    return;
+  }
+  if (request.headers["x-deerflow-internal-token"] !== expectedToken) {
+    response.writeHead(401, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "invalid internal token" }));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/models") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      models: [{
+        name: runtimeCatalogModelId,
+        model: runtimeProviderModel,
+        display_name: "E2E Quality",
+        description: "Fake model for the Workbench HTTP E2E",
+        supports_thinking: true,
+        supports_reasoning_effort: true,
+      }],
+      token_usage: { enabled: true },
+    }));
+    return;
+  }
+  const principalId = request.headers["x-deerflow-owner-user-id"];
+  if (typeof principalId !== "string" || !principalId) {
+    response.writeHead(400, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "missing owner" }));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/skills") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      skills: [{
+        name: "workbench",
+        description: "产品工作台 E2E runtime skill",
+        license: "MIT",
+        category: "public",
+        enabled: true,
+        editable: false,
+      }],
+    }));
+    return;
+  }
+
+  if (request.method === "POST" && /^\/api\/threads\/[^/]+\/uploads$/.test(url.pathname)) {
+    const body = await readRequestBuffer(request, 4 * 1024 * 1024);
+    const declaredLength = Number(request.headers["content-length"]);
+    assert.equal(declaredLength, body.byteLength, "fake Gateway received a truncated multipart upload");
+    const matchedStorageKeys = [];
+    for (const [storageKey, object] of storageObjects) {
+      if (body.includes(object.bytes)) matchedStorageKeys.push(storageKey);
+    }
+    const uploadIndex = state.gatewayUploads.length + 1;
+    const receipt = `private-gateway-receipt-${uploadIndex}-${randomUUID()}`;
+    state.gatewayUploads.push({
+      path: url.pathname,
+      principalId,
+      byteSize: body.byteLength,
+      contentType: request.headers["content-type"],
+      matchedStorageKeys,
+    });
+    state.gatewayReceipts.push(receipt);
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      files: [{
+        virtual_path: `/mnt/user-data/uploads/e2e-${uploadIndex}.bin`,
+        markdown_virtual_path: `/mnt/user-data/uploads/e2e-${uploadIndex}.md`,
+        provider_upload_id: receipt,
+        artifact_url: `https://private.invalid/${receipt}`,
+      }],
+    }));
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/threads") {
+    const body = await readJsonRequest(request);
+    state.threadCreates += 1;
+    state.requests.push({ method: request.method, path: url.pathname, kind: "thread", body });
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      thread_id: body.thread_id,
+      metadata: body.metadata,
+      status: "idle",
+    }));
+    return;
+  }
+
+  const runListMatch = /^\/threads\/([^/]+)\/runs$/.exec(url.pathname);
+  if (request.method === "GET" && runListMatch) {
+    const externalThreadId = decodeURIComponent(runListMatch[1]);
+    const runs = [...state.runtimeRuns.values()]
+      .filter((run) => run.thread_id === externalThreadId)
+      .map(publicRuntimeRun);
+    state.requests.push({ method: request.method, path: url.pathname, kind: "run-list" });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(runs));
+    return;
+  }
+
+  const runGetMatch = /^\/threads\/([^/]+)\/runs\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "GET" && runGetMatch) {
+    const run = state.runtimeRuns.get(decodeURIComponent(runGetMatch[2]));
+    if (!run || run.thread_id !== decodeURIComponent(runGetMatch[1])) {
+      response.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(publicRuntimeRun(run)));
+    return;
+  }
+
+  const runCancelMatch = /^\/threads\/([^/]+)\/runs\/([^/]+)\/cancel$/.exec(url.pathname);
+  if (request.method === "POST" && runCancelMatch) {
+    const run = state.runtimeRuns.get(decodeURIComponent(runCancelMatch[2]));
+    if (!run || run.thread_id !== decodeURIComponent(runCancelMatch[1])) {
+      response.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    assert.equal(url.searchParams.get("wait"), "1");
+    assert.equal(url.searchParams.get("action"), "interrupt");
+    run.status = "interrupted";
+    run.closeStream?.();
+    state.requests.push({ method: request.method, path: url.pathname, kind: "run-cancel" });
+    response.writeHead(204).end();
+    return;
+  }
+
+  if (request.method === "POST" && /^\/threads\/[^/]+\/runs\/stream$/.test(url.pathname)) {
+    const body = await readJsonRequest(request);
+    const serialized = JSON.stringify(body);
+    const cancellation = serialized.includes("E2E_CANCEL");
+    const approval = serialized.includes("E2E_APPROVAL");
+    const prototypePatch = serialized.includes("E2E_PROTOTYPE_PATCH");
+    const sourcePrototype = serialized.includes("E2E_GENERATE_SOURCE_SEED");
+    const generatePrototype = serialized.includes("E2E_GENERATE_PROTOTYPE_SOURCE");
+    const canvasSeed = serialized.includes("E2E_CANVAS_SEED");
+    const canvasQuickEdit = serialized.includes("E2E_CANVAS_QUICK_EDIT");
+    const canvasDirectEdit = serialized.includes("E2E_CANVAS_DIRECT_EDIT");
+    const resume = body?.input === null && body?.command?.resume !== undefined;
+    const kind = cancellation
+      ? "cancel"
+      : resume
+          ? "approval-resume"
+          : approval
+            ? "approval"
+            : prototypePatch
+              ? "prototype-patch"
+              : sourcePrototype
+                ? "source-prototype"
+                : generatePrototype
+                  ? "generate-prototype"
+              : canvasSeed
+                ? "canvas-seed"
+              : canvasQuickEdit
+                ? "canvas-quick-edit"
+                : canvasDirectEdit
+                  ? "canvas-direct-edit"
+                  : "success";
+    const externalThreadId = decodeURIComponent(url.pathname.split("/")[2]);
+    const externalRunId = randomUUID();
+    const run = {
+      run_id: externalRunId,
+      thread_id: externalThreadId,
+      assistant_id: body.assistant_id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      status: "running",
+      metadata: body.metadata ?? {},
+      multitask_strategy: body.multitask_strategy ?? null,
+      kind,
+      closeStream: null,
+    };
+    state.runtimeRuns.set(externalRunId, run);
+    state.runRequests.push({ kind, body });
+    state.requests.push({ method: request.method, path: url.pathname, kind, externalRunId });
+    response.setHeader("content-location", `/threads/${externalThreadId}/runs/${externalRunId}`);
+    if (cancellation) {
+      state.cancelRuns += 1;
+      await holdCancellationStream(request, response, state, run);
+    } else if (resume) {
+      state.approvalResumes += 1;
+      await writeSuccessfulRuntimeStream(response, body);
+      run.status = "success";
+    } else if (approval) {
+      state.approvalRuns += 1;
+      await writeApprovalRuntimeStream(response);
+      run.status = "interrupted";
+    } else if (prototypePatch) {
+      state.prototypePatchRuns += 1;
+      await writePrototypePatchRuntimeStream(response, body);
+      run.status = "success";
+    } else if (sourcePrototype) {
+      state.sourcePrototypeRuns += 1;
+      await writeSourcePrototypeRuntimeStream(response, body);
+      run.status = "success";
+    } else if (generatePrototype) {
+      state.generatePrototypeRuns += 1;
+      await writeGeneratePrototypeRuntimeStream(response, body);
+      run.status = "success";
+    } else if (canvasSeed) {
+      state.canvasSeedRuns += 1;
+      await writeCanvasRuntimeStream(response, body, "seed", state);
+      run.status = "success";
+    } else if (canvasQuickEdit) {
+      state.canvasQuickEditRuns += 1;
+      await writeCanvasRuntimeStream(response, body, "quick-edit", state);
+      run.status = "success";
+    } else if (canvasDirectEdit) {
+      state.canvasDirectEditRuns += 1;
+      await writeCanvasRuntimeStream(response, body, "direct-edit", state);
+      run.status = "success";
+    } else {
+      state.successRuns += 1;
+      await writeSuccessfulRuntimeStream(response, body);
+      run.status = "success";
+    }
+    run.updated_at = new Date().toISOString();
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "application/json" });
+  response.end(JSON.stringify({ error: "not found" }));
+}
+
+function publicRuntimeRun(run) {
+  return {
+    run_id: run.run_id,
+    thread_id: run.thread_id,
+    assistant_id: run.assistant_id,
+    created_at: run.created_at,
+    updated_at: run.updated_at,
+    status: run.status,
+    metadata: run.metadata,
+    multitask_strategy: run.multitask_strategy,
+  };
+}
+
+async function writeApprovalRuntimeStream(response) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  response.flushHeaders?.();
+  sendSse(response, "values", {
+    __interrupt__: [
+      {
+        id: "approval_publish",
+        resumable: true,
+        value: {
+          kind: "confirmation",
+          prompt: "Publish the generated result?",
+          options: [{ id: "publish", label: "Publish", value: "publish" }],
+        },
+      },
+      {
+        id: "approval_direction",
+        resumable: true,
+        value: {
+          kind: "selection",
+          prompt: "Choose the delivery direction",
+          options: [{ id: "quality", label: "Quality", value: { direction: "quality" } }],
+        },
+      },
+    ],
+  }, "1");
+  response.end();
+}
+
+async function writeSuccessfulRuntimeStream(response, requestBody) {
+  const scope = runtimeScopeFromRequest(requestBody);
+  const result = {
+    protocol: "workbench.runtime.result.v1",
+    message: "E2E generated response",
+    artifacts: [{
+      kind: "prd",
+      title: "E2E Product Requirement Document",
+      schemaVersion: 1,
+      operation: { kind: "create" },
+      content: minimalPrdDocument(),
+      citations: [],
+    }],
+  };
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  response.flushHeaders?.();
+  sendSse(response, "messages", [
+    { type: "AIMessageChunk", role: "assistant", content: "E2E generated" },
+    { langgraph_node: "generate_prd" },
+  ], "1");
+  await delay(250);
+  sendSse(response, "messages", [
+    { type: "AIMessageChunk", role: "assistant", content: "E2E generated response" },
+    { langgraph_node: "generate_prd" },
+  ], "2");
+  await delay(250);
+  sendSse(response, "values", {
+    node: "finalize",
+    values: {
+      messages: [
+        { type: "human", content: "Workbench E2E request" },
+        ...declaredToolMessages(
+          "workbench_runtime_result_submit",
+          "e2e-result-submit",
+          validatedRuntimeResultArtifact(result, {
+            ...scope,
+            toolCallId: "e2e-result-submit",
+          }),
+        ),
+      ],
+    },
+  }, "3");
+  response.end();
+}
+
+async function writePrototypePatchRuntimeStream(response, requestBody) {
+  const scope = runtimeScopeFromRequest(requestBody);
+  const initialDocument = minimalPrototypeDocument();
+  initialDocument.title = "Prototype Patch E2E";
+  const intermediateDocument = structuredClone(initialDocument);
+  intermediateDocument.screens[0].name = "Streamed Home step 1";
+  const finalDocument = structuredClone(intermediateDocument);
+  finalDocument.screens[0].name = "Streamed Home";
+  const initialDraft = {
+    kind: "prototype",
+    title: "Prototype Patch E2E",
+    schemaVersion: 1,
+    operation: { kind: "create" },
+    content: initialDocument,
+    citations: [],
+  };
+  const finalDraft = { ...initialDraft, content: finalDocument };
+  const firstPatch = {
+    protocol: "workbench.runtime.prototype-patch.v1",
+    artifactIndex: 0,
+    screenId: "screen-home",
+    baseRevision: 0,
+    nextRevision: 1,
+    operations: [{
+      kind: "update_screen",
+      screenId: "screen-home",
+      screen: intermediateDocument.screens[0],
+    }],
+    resultingChecksum: prototypeScreenProjectionChecksum(intermediateDocument, "screen-home", 1),
+  };
+  const secondPatch = {
+    protocol: "workbench.runtime.prototype-patch.v1",
+    artifactIndex: 0,
+    screenId: "screen-home",
+    baseRevision: 1,
+    nextRevision: 2,
+    operations: [{
+      kind: "update_screen",
+      screenId: "screen-home",
+      screen: finalDocument.screens[0],
+    }],
+    resultingChecksum: prototypeScreenProjectionChecksum(finalDocument, "screen-home", 2),
+  };
+  const messages = [{ type: "human", content: "Workbench Prototype patch request" }];
+  for (const stage of ["design-system", "mapping-components", "creating-flows", "generating-ui"]) {
+    const toolCallId = `prototype-patch-stage-${stage}`;
+    messages.push(...declaredToolMessages(
+      "workbench_generation_stage_update",
+      toolCallId,
+      validatedGenerationStageArtifact(stage, { ...scope, toolCallId }),
+    ));
+  }
+  const initialCheckpointCallId = "prototype-patch-checkpoint-initial";
+  messages.push(...declaredToolMessages(
+    "workbench_artifact_draft_publish",
+    initialCheckpointCallId,
+    validatedArtifactDraftArtifact(initialDraft, {
+      ...scope,
+      toolCallId: initialCheckpointCallId,
+    }),
+  ));
+  const afterInitialCheckpoint = structuredClone(messages);
+
+  const firstPatchCallId = "prototype-patch-apply-1";
+  messages.push(...declaredToolMessages(
+    "workbench_prototype_patch_publish",
+    firstPatchCallId,
+    validatedPrototypePatchArtifact(firstPatch, { ...scope, toolCallId: firstPatchCallId }),
+    prototypePatchToolArgs(firstPatch),
+  ));
+  const afterFirstPatch = structuredClone(messages);
+
+  const secondPatchCallId = "prototype-patch-apply-2";
+  messages.push(...declaredToolMessages(
+    "workbench_prototype_patch_publish",
+    secondPatchCallId,
+    validatedPrototypePatchArtifact(secondPatch, { ...scope, toolCallId: secondPatchCallId }),
+    prototypePatchToolArgs(secondPatch),
+  ));
+  const afterSecondPatch = structuredClone(messages);
+
+  const finalCheckpointCallId = "prototype-patch-checkpoint-final";
+  messages.push(...declaredToolMessages(
+    "workbench_artifact_draft_publish",
+    finalCheckpointCallId,
+    validatedArtifactDraftArtifact(finalDraft, {
+      ...scope,
+      toolCallId: finalCheckpointCallId,
+    }),
+  ));
+  const afterFinalCheckpoint = structuredClone(messages);
+
+  const result = {
+    protocol: "workbench.runtime.result.v1",
+    message: "Prototype patch completed",
+    artifacts: [finalDraft],
+  };
+  const resultCallId = "prototype-patch-result";
+  messages.push(...declaredToolMessages(
+    "workbench_runtime_result_submit",
+    resultCallId,
+    validatedRuntimeResultArtifact(result, { ...scope, toolCallId: resultCallId }),
+  ));
+
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  response.flushHeaders?.();
+  sendSse(response, "values", {
+    node: "prototype_patch",
+    values: { messages: afterInitialCheckpoint },
+  }, "1");
+  sendSse(response, "values", {
+    node: "prototype_patch",
+    values: { messages: afterFirstPatch },
+  }, "2");
+  sendSse(response, "values", {
+    node: "prototype_patch",
+    values: { messages: afterSecondPatch },
+  }, "3");
+  sendSse(response, "values", {
+    node: "prototype_patch",
+    values: { messages: afterFinalCheckpoint },
+  }, "4");
+  sendSse(response, "values", {
+    node: "finalize",
+    values: { messages },
+  }, "5");
+  response.end();
+}
+
+async function writeSourcePrototypeRuntimeStream(response, requestBody) {
+  const context = parseWorkbenchRuntimeContext(requestBody);
+  assert.equal(context.workflow, "generate");
+  assert.equal(context.generationIntent, null);
+  assert.deepEqual(context.artifactTargets, []);
+  const document = sourcePrototypeDocument();
+  await writePrototypeCreateRuntimeStream(
+    response,
+    requestBody,
+    {
+      kind: "prototype",
+      title: "Three-screen source Prototype",
+      schemaVersion: 1,
+      operation: { kind: "create" },
+      content: document,
+      citations: [],
+    },
+    "Source Prototype seeded",
+  );
+}
+
+async function writeGeneratePrototypeRuntimeStream(response, requestBody) {
+  const context = parseWorkbenchRuntimeContext(requestBody);
+  assert.equal(context.workflow, "generate");
+  assert.equal(context.generationIntent, "interactive-prototype");
+  assert.equal(context.artifactTargets.length, 1);
+  const target = context.artifactTargets[0];
+  assert.equal(target.content.mode, "inline");
+  const projection = target.content.value;
+  assert.equal(projection.protocol, "workbench.prototype-source-projection.v1");
+  assert.deepEqual(projection.selectedScreenIds, target.screenIds);
+  const document = generatedPrototypeFromSourceProjection(projection);
+  await writePrototypeCreateRuntimeStream(
+    response,
+    requestBody,
+    {
+      kind: "prototype",
+      title: "Generated Prototype from selected source screens",
+      schemaVersion: 1,
+      operation: { kind: "create" },
+      content: document,
+      citations: [],
+    },
+    "Generate Prototype completed",
+  );
+}
+
+async function writePrototypeCreateRuntimeStream(response, requestBody, draft, message) {
+  const scope = runtimeScopeFromRequest(requestBody);
+  const messages = [{ type: "human", content: "Workbench Prototype generation request" }];
+  for (const stage of ["design-system", "mapping-components", "creating-flows", "generating-ui"]) {
+    const stageToolCallId = `prototype-create-stage-${stage}`;
+    messages.push(...declaredToolMessages(
+      "workbench_generation_stage_update",
+      stageToolCallId,
+      validatedGenerationStageArtifact(stage, { ...scope, toolCallId: stageToolCallId }),
+    ));
+  }
+  const draftToolCallId = "prototype-create-draft";
+  messages.push(...declaredToolMessages(
+    "workbench_artifact_draft_publish",
+    draftToolCallId,
+    validatedArtifactDraftArtifact(draft, { ...scope, toolCallId: draftToolCallId }),
+  ));
+  const result = {
+    protocol: "workbench.runtime.result.v1",
+    message,
+    artifacts: [draft],
+  };
+  const resultToolCallId = "prototype-create-result";
+  messages.push(...declaredToolMessages(
+    "workbench_runtime_result_submit",
+    resultToolCallId,
+    validatedRuntimeResultArtifact(result, { ...scope, toolCallId: resultToolCallId }),
+  ));
+
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  response.flushHeaders?.();
+  sendSse(response, "messages", [
+    { type: "AIMessageChunk", role: "assistant", content: message },
+    { langgraph_node: "generate_prototype" },
+  ], "1");
+  sendSse(response, "values", {
+    node: "finalize",
+    values: { messages },
+  }, "2");
+  response.end();
+}
+
+function sourcePrototypeDocument() {
+  const base = minimalPrototypeDocument();
+  const sourceScreens = [
+    { id: "screen-home", name: "Home", route: "/", frameId: "frame-home", iconId: "icon-home", assetId: "asset-home", iconName: "House" },
+    { id: "screen-settings", name: "Settings", route: "/settings", frameId: "frame-settings", iconId: "icon-settings", assetId: "asset-settings", iconName: "Settings" },
+    { id: "screen-admin", name: "Admin", route: "/admin", frameId: "frame-admin", iconId: "icon-admin", assetId: "asset-admin", iconName: "Shield" },
+  ];
+  const screens = sourceScreens.map(({ id, name, route, frameId }) => ({
+    id,
+    name,
+    route,
+    rootNodeId: frameId,
+    initialStateId: null,
+    viewport: { width: 390, height: 844 },
+  }));
+  const nodes = [];
+  const assets = sourceScreens.map(({ id: screenId, name, assetId, iconName }) => ({
+    id: assetId,
+    kind: "icon",
+    name: `${name} icon`,
+    library: "lucide",
+    iconName,
+    screenId,
+  })).map(({ screenId: _screenId, ...asset }) => asset);
+  for (const source of sourceScreens) {
+    const frame = structuredClone(base.nodes[0]);
+    frame.id = source.frameId;
+    frame.screenId = source.id;
+    frame.name = `${source.name} frame`;
+    frame.childIds = [source.iconId];
+    frame.actionIds = [];
+    const { childIds: _childIds, clipContent: _clipContent, ...iconBase } = structuredClone(base.nodes[0]);
+    const icon = {
+      ...iconBase,
+      id: source.iconId,
+      screenId: source.id,
+      parentId: source.frameId,
+      name: `${source.name} icon node`,
+      kind: "icon",
+      assetId: source.assetId,
+      accessibilityLabel: `${source.name} navigation`,
+      actionIds: source.id === "screen-home" ? ["action-home-settings"] : source.id === "screen-admin" ? ["action-admin-home"] : [],
+      bindingIds: [],
+      motionIds: [],
+    };
+    nodes.push(frame, icon);
+  }
+  return {
+    protocol: "workbench.prototype.v1",
+    documentId: "source-prototype-document",
+    title: "Three-screen source Prototype",
+    revision: 1,
+    screens,
+    nodes,
+    tokens: [],
+    assets,
+    variables: [],
+    states: [],
+    actions: [
+      {
+        id: "action-home-settings",
+        nodeId: "icon-home",
+        event: "click",
+        kind: "navigate",
+        targetScreenId: "screen-settings",
+      },
+      {
+        id: "action-admin-home",
+        nodeId: "icon-admin",
+        event: "click",
+        kind: "navigate",
+        targetScreenId: "screen-home",
+      },
+    ],
+    bindings: [],
+    motions: [],
+  };
+}
+
+function generatedPrototypeFromSourceProjection(projection) {
+  const selected = new Set(projection.selectedScreenIds);
+  const actions = projection.actions.filter((action) => (
+    action.kind !== "navigate" || selected.has(action.targetScreenId)
+  ));
+  const actionIds = new Set(actions.map((action) => action.id));
+  return {
+    protocol: "workbench.prototype.v1",
+    documentId: "generated-source-prototype-document",
+    title: "Generated Prototype from selected source screens",
+    revision: 1,
+    screens: structuredClone(projection.screens),
+    nodes: projection.nodes.map((node) => ({
+      ...structuredClone(node),
+      actionIds: node.actionIds.filter((actionId) => actionIds.has(actionId)),
+    })),
+    tokens: structuredClone(projection.tokens),
+    assets: structuredClone(projection.assets),
+    variables: structuredClone(projection.variables),
+    states: structuredClone(projection.states),
+    actions: structuredClone(actions),
+    bindings: structuredClone(projection.bindings),
+    motions: structuredClone(projection.motions),
+  };
+}
+
+function runtimeScopeFromRequest(body) {
+  const runId = body?.metadata?.workbench_run_id;
+  const runtimeAttemptId = body?.metadata?.workbench_runtime_attempt_id;
+  assert.equal(typeof runId, "string", "fake runtime request omitted workbench_run_id");
+  assert.equal(typeof runtimeAttemptId, "string", "fake runtime request omitted workbench_runtime_attempt_id");
+  return { runId, runtimeAttemptId };
+}
+
+function declaredToolMessages(toolName, toolCallId, artifact, args = {}) {
+  return [
+    {
+      type: "ai",
+      content: "",
+      tool_calls: [{ id: toolCallId, name: toolName, args }],
+    },
+    {
+      type: "tool",
+      name: toolName,
+      tool_call_id: toolCallId,
+      artifact,
+    },
+  ];
+}
+
+function validatedRuntimeResultArtifact(result, { runId, runtimeAttemptId, toolCallId }) {
+  const envelope = {
+    protocol: "workbench.runtime.validated-result.v1",
+    runId,
+    runtimeAttemptId,
+    toolCallId,
+    ok: true,
+    resultChecksum: sha256(canonicalJson(result)),
+  };
+  return {
+    ...envelope,
+    result,
+    checksum: sha256(canonicalJson(envelope)),
+  };
+}
+
+function validatedArtifactDraftArtifact(draft, {
+  runId,
+  runtimeAttemptId,
+  toolCallId,
+  artifactIndex = 0,
+}) {
+  const envelope = {
+    protocol: "workbench.runtime.artifact-draft.v1",
+    runId,
+    runtimeAttemptId,
+    toolCallId,
+    artifactIndex,
+    ok: true,
+    draftChecksum: sha256(canonicalJson(draft)),
+  };
+  return {
+    ...envelope,
+    draft,
+    checksum: sha256(canonicalJson(envelope)),
+  };
+}
+
+function validatedPrototypePatchArtifact(patch, { runId, runtimeAttemptId, toolCallId }) {
+  const envelope = {
+    protocol: "workbench.runtime.prototype-patch-publication.v1",
+    runId,
+    runtimeAttemptId,
+    toolCallId,
+    ok: true,
+    patchChecksum: sha256(canonicalJson(patch)),
+  };
+  return {
+    ...envelope,
+    patch,
+    checksum: sha256(canonicalJson(envelope)),
+  };
+}
+
+function prototypePatchToolArgs(patch) {
+  return {
+    artifact_index: patch.artifactIndex,
+    screen_id: patch.screenId,
+    base_revision: patch.baseRevision,
+    next_revision: patch.nextRevision,
+    operations: patch.operations,
+    resulting_checksum: patch.resultingChecksum,
+  };
+}
+
+function validatedGenerationStageArtifact(stage, { runId, runtimeAttemptId, toolCallId }) {
+  const payload = {
+    protocol: "workbench.runtime.generation-stage.v1",
+    runId,
+    runtimeAttemptId,
+    toolCallId,
+    stage,
+  };
+  return { ...payload, checksum: sha256(canonicalJson(payload)) };
+}
+
+async function writeCanvasRuntimeStream(response, requestBody, mode, state) {
+  const scope = runtimeScopeFromRequest(requestBody);
+  const context = parseWorkbenchRuntimeContext(requestBody);
+  const messages = [{ type: "human", content: `Workbench Canvas ${mode} request` }];
+  let draft;
+
+  if (mode === "seed") {
+    draft = {
+      kind: "prototype",
+      schemaVersion: 1,
+      title: "Canvas E2E Prototype",
+      citations: [],
+      operation: { kind: "create" },
+      content: minimalPrototypeDocument(),
+    };
+  } else {
+    const descriptor = canvasDescriptorFromRequest(requestBody);
+    assert.deepEqual(descriptor.reference.declaredTools, [
+      "get_visible_screens",
+      "get_selected_screens",
+      "view_screen",
+      "select_screen",
+      "quick_edit",
+      "duplicate_screen",
+      "rename_screen",
+      "navigate_canvas",
+    ]);
+    const target = canvasRuntimeTarget(context);
+    if (mode === "quick-edit") {
+      const visibleInput = { limit: 10 };
+      const visible = await executeCanvasToolUntilTerminal(
+        descriptor,
+        "get_visible_screens",
+        "canvas-visible",
+        visibleInput,
+        state,
+        scope.runId,
+      );
+      messages.push(...declaredToolMessages(
+        "get_visible_screens",
+        "canvas-visible",
+        visible,
+        visibleInput,
+      ));
+    }
+    const selectedToolCallId = mode === "quick-edit" ? "canvas-selected" : "canvas-direct-selected";
+    const selected = await executeCanvasToolUntilTerminal(
+      descriptor,
+      "get_selected_screens",
+      selectedToolCallId,
+      {},
+      state,
+      scope.runId,
+    );
+    messages.push(...declaredToolMessages(
+      "get_selected_screens",
+      selectedToolCallId,
+      selected,
+      {},
+    ));
+    const reference = selectedCanvasReference(selected, target);
+    const remainingToolPlan = mode === "quick-edit"
+      ? [
+          ["view_screen", "canvas-view", { target: reference }],
+          ["select_screen", "canvas-select", { targets: [reference], mode: "replace" }],
+          ["navigate_canvas", "canvas-navigate", {
+            target: { kind: "screen", screen: reference },
+            behavior: "smooth",
+          }],
+          ["quick_edit", "canvas-quick-edit", {
+            target: reference,
+            instruction: "Make the home screen clearer",
+          }],
+        ]
+      : [
+          ["rename_screen", "canvas-rename", { target: reference, title: "Agent Home" }],
+          ["duplicate_screen", "canvas-duplicate", { target: reference }],
+        ];
+    for (const [toolName, toolCallId, input] of remainingToolPlan) {
+      const toolResult = await executeCanvasToolUntilTerminal(
+        descriptor,
+        toolName,
+        toolCallId,
+        input,
+        state,
+        scope.runId,
+      );
+      messages.push(...declaredToolMessages(toolName, toolCallId, toolResult, input));
+    }
+
+    const document = structuredClone(target.document);
+    document.revision += 1;
+    const frame = document.nodes.find((node) => node.id === "frame-home");
+    assert.ok(frame, "Canvas runtime target omitted frame-home");
+    frame.name = mode === "quick-edit" ? "quick-edited-home" : "direct-edited-home";
+    draft = {
+      kind: "prototype",
+      schemaVersion: 1,
+      title: mode === "quick-edit" ? "Quick-edited prototype" : "Direct-edited prototype",
+      citations: [],
+      operation: {
+        kind: "revise",
+        target: {
+          artifactId: target.artifactId,
+          artifactVersionId: target.artifactVersionId,
+          screenIds: [target.screenId],
+        },
+      },
+      content: document,
+    };
+  }
+
+  for (const stage of ["design-system", "mapping-components", "creating-flows", "generating-ui"]) {
+    const stageToolCallId = `canvas-${mode}-stage-${stage}`;
+    messages.push(...declaredToolMessages(
+      "workbench_generation_stage_update",
+      stageToolCallId,
+      validatedGenerationStageArtifact(stage, {
+        ...scope,
+        toolCallId: stageToolCallId,
+      }),
+    ));
+  }
+
+  const draftToolCallId = `canvas-${mode}-draft`;
+  messages.push(...declaredToolMessages(
+    "workbench_artifact_draft_publish",
+    draftToolCallId,
+    validatedArtifactDraftArtifact(draft, {
+      ...scope,
+      toolCallId: draftToolCallId,
+    }),
+  ));
+  const result = {
+    protocol: "workbench.runtime.result.v1",
+    message: `Canvas ${mode} completed`,
+    artifacts: [draft],
+  };
+  const resultToolCallId = `canvas-${mode}-result`;
+  messages.push(...declaredToolMessages(
+    "workbench_runtime_result_submit",
+    resultToolCallId,
+    validatedRuntimeResultArtifact(result, {
+      ...scope,
+      toolCallId: resultToolCallId,
+    }),
+  ));
+
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  response.flushHeaders?.();
+  sendSse(response, "messages", [
+    { type: "AIMessageChunk", role: "assistant", content: `Canvas ${mode} completed` },
+    { langgraph_node: "workbench_canvas" },
+  ], "1");
+  sendSse(response, "values", {
+    node: "finalize",
+    values: { messages },
+  }, "2");
+  response.end();
+}
+
+function canvasDescriptorFromRequest(body) {
+  const serialized = body?.context?.secrets?.WORKBENCH_CANVAS_CAPABILITY;
+  assert.equal(typeof serialized, "string", "Worker omitted the private Canvas capability descriptor");
+  const descriptor = parseJson(serialized, "Canvas capability descriptor");
+  assert.equal(descriptor.protocol, "workbench.canvas-agent-tool-descriptor.v1");
+  assert.equal(typeof descriptor.endpoint, "string");
+  assert.match(descriptor.token, /^wbct1\./);
+  assert.ok(Date.parse(descriptor.expiresAt) > Date.now());
+  assert.equal(descriptor.reference.protocol, "workbench.canvas-agent-tool-reference.v1");
+  return descriptor;
+}
+
+function canvasRuntimeTarget(context) {
+  assert.equal(context.workflow, "edit");
+  assert.equal(context.artifactTargets.length, 1);
+  const target = context.artifactTargets[0];
+  assert.equal(target.kind, "prototype");
+  assert.deepEqual(target.screenIds, ["screen-home"]);
+  assert.equal(target.content.mode, "inline");
+  return {
+    artifactId: target.artifactId,
+    artifactVersionId: target.artifactVersionId,
+    screenId: target.screenIds[0],
+    document: target.content.value,
+  };
+}
+
+function selectedCanvasReference(result, target) {
+  assert.equal(result.data?.kind, "single");
+  assert.equal(result.data?.items?.length, 1);
+  const reference = result.data.items[0].reference;
+  assert.equal(reference.artifactId, target.artifactId);
+  assert.equal(reference.artifactVersionId, target.artifactVersionId);
+  assert.equal(reference.screenId, target.screenId);
+  return reference;
+}
+
+async function executeCanvasToolUntilTerminal(
+  descriptor,
+  toolName,
+  toolCallId,
+  input,
+  state,
+  runId,
+) {
+  const statuses = [];
+  const deadline = Date.now() + scenarioTimeoutMs;
+  while (Date.now() < deadline) {
+    const result = await executeCanvasToolRequest({
+      descriptor,
+      toolName,
+      toolCallId,
+      input,
+      deadline,
+    });
+    statuses.push(result.status);
+    if (!["waiting_client", "waiting_approval"].includes(result.status)) {
+      assert.equal(result.status, "succeeded", `${toolName} failed: ${JSON.stringify(result.failure)}`);
+      state.canvasToolCalls.push({ runId, toolName, toolCallId, statuses });
+      return result;
+    }
+    assert.equal(result.status, "waiting_client", `${toolName} unexpectedly requires approval`);
+    await delay(50);
+  }
+  throw new Error(`Canvas tool ${toolName} did not reach a terminal status`);
+}
+
+function minimalPrototypeDocument() {
+  const literal = (value) => ({ kind: "literal", value });
+  return {
+    protocol: "workbench.prototype.v1",
+    documentId: "prototype-doc",
+    title: "Canvas E2E",
+    revision: 1,
+    screens: [{
+      id: "screen-home",
+      name: "Home",
+      route: "/",
+      rootNodeId: "frame-home",
+      initialStateId: null,
+      viewport: { width: 390, height: 844 },
+    }],
+    nodes: [{
+      id: "frame-home",
+      screenId: "screen-home",
+      parentId: null,
+      name: "base-home",
+      visible: true,
+      layout: {
+        mode: "absolute",
+        x: literal(0),
+        y: literal(0),
+        width: literal(390),
+        height: literal(844),
+        display: "block",
+        direction: "column",
+        gap: literal(0),
+        padding: { top: literal(0), right: literal(0), bottom: literal(0), left: literal(0) },
+        align: "stretch",
+        justify: "start",
+        gridColumns: null,
+        overflow: "hidden",
+      },
+      style: {
+        opacity: 1,
+        rotation: 0,
+        transformOrigin: { x: 0.5, y: 0.5 },
+        fill: { kind: "literal", value: "#ffffff" },
+        stroke: null,
+        radii: {
+          topLeft: literal(0),
+          topRight: literal(0),
+          bottomRight: literal(0),
+          bottomLeft: literal(0),
+        },
+        shadowTokenIds: [],
+        typography: null,
+      },
+      actionIds: [],
+      bindingIds: [],
+      motionIds: [],
+      kind: "frame",
+      childIds: [],
+      clipContent: true,
+    }],
+    tokens: [],
+    assets: [],
+    variables: [],
+    states: [],
+    actions: [],
+    bindings: [],
+    motions: [],
+  };
+}
+
+function minimalPrdDocument() {
+  const text = (value) => [{ type: "text", text: value, marks: [] }];
+  return {
+    protocol: "workbench.prd.v1",
+    documentId: "e2e-prd",
+    title: "E2E Product Requirement Document",
+    revision: {
+      number: 1,
+      status: "draft",
+      summary: "Initial E2E revision",
+      changedAt: "2026-07-12T00:00:00.000Z",
+      changedById: null,
+    },
+    assumptions: [],
+    citations: [],
+    sections: {
+      executiveSummary: {
+        title: "Executive summary",
+        blocks: [{ id: "summary", type: "paragraph", content: text("Deterministic summary") }],
+      },
+      problem: {
+        title: "Problem",
+        blocks: [{ id: "problem", type: "paragraph", content: text("Deterministic problem") }],
+      },
+      goals: {
+        title: "Goals",
+        blocks: [{
+          id: "goal-main",
+          type: "goal",
+          title: "Main goal",
+          description: text("Deliver a deterministic artifact"),
+          successMetric: "One validated ArtifactVersion",
+          priority: "primary",
+        }],
+      },
+      targetUsers: {
+        title: "Target users",
+        blocks: [{
+          id: "persona-main",
+          type: "persona",
+          name: "E2E user",
+          description: text("A deterministic test user"),
+          needs: ["Read the generated PRD"],
+          painPoints: ["Invalid contracts"],
+        }],
+      },
+      scope: {
+        title: "Scope",
+        blocks: [{
+          id: "scope-list",
+          type: "bulletList",
+          items: [{ id: "scope-item", content: text("Artifact publication") }],
+        }],
+      },
+      requirements: {
+        title: "Requirements",
+        blocks: [{
+          id: "requirement-main",
+          type: "requirement",
+          title: "Publish a valid Artifact",
+          description: text("The runtime returns strict PRD IR"),
+          priority: "must",
+          goalIds: ["goal-main"],
+          acceptanceCriterionIds: ["criterion-main"],
+        }],
+      },
+      userFlows: {
+        title: "User flows",
+        blocks: [{
+          id: "flow-main",
+          type: "flow",
+          title: "Generate PRD",
+          actor: "E2E user",
+          trigger: "Submit a generation request",
+          steps: [{
+            id: "flow-step",
+            text: "Wait for publication",
+            requirementIds: ["requirement-main"],
+          }],
+          outcome: "The PRD is readable through the Artifact API",
+        }],
+      },
+      acceptanceCriteria: {
+        title: "Acceptance criteria",
+        blocks: [{
+          id: "criterion-main",
+          type: "acceptanceCriterion",
+          requirementIds: ["requirement-main"],
+          given: text("Given a valid Run"),
+          when: text("When DeerFlow completes"),
+          then: text("Then an immutable PRD version is published"),
+        }],
+      },
+      risksAndDependencies: {
+        title: "Risks and dependencies",
+        blocks: [{
+          id: "risk-main",
+          type: "risk",
+          description: text("The runtime could return an invalid contract"),
+          likelihood: "low",
+          impact: "high",
+          mitigation: text("Validate before publication"),
+        }],
+      },
+    },
+  };
+}
+
+async function holdCancellationStream(request, response, state, run) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  response.flushHeaders?.();
+  state.activeCancelStreams += 1;
+  sendSse(response, "messages", [
+    { type: "AIMessageChunk", role: "assistant", content: "E2E cancellation pending" },
+    { langgraph_node: "generate_prd" },
+  ], "1");
+  await new Promise((resolve) => {
+    const heartbeat = setInterval(() => {
+      if (!response.destroyed && !response.writableEnded) response.write(`: fake-heartbeat ${Date.now()}\n\n`);
+    }, 250);
+    heartbeat.unref();
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(heartbeat);
+      state.activeCancelStreams -= 1;
+      resolve();
+    };
+    run.closeStream = () => {
+      if (!response.destroyed && !response.writableEnded) response.end();
+      finish();
+    };
+    request.once("aborted", finish);
+    response.once("close", finish);
+  });
+  run.closeStream = null;
+}
+
+function sendSse(response, event, value, id) {
+  if (!response.destroyed && !response.writableEnded) {
+    response.write(`${id ? `id: ${id}\n` : ""}event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
+  }
+}
+
+async function readJsonRequest(request) {
+  const body = await readRequestBuffer(request, 2 * 1024 * 1024);
+  const text = body.toString("utf8");
+  return text ? parseJson(text, "fake runtime request") : null;
+}
+
+async function readRequestBuffer(request, maximumBytes) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += chunk.length;
+    if (bytes > maximumBytes) throw new Error("fake HTTP request is too large");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function spawnService(name, command, args, environment) {
+  const log = new LogBuffer(name);
+  const child = spawn(command, args, {
+    cwd: root,
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => log.append("stdout", chunk));
+  child.stderr.on("data", (chunk) => log.append("stderr", chunk));
+  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+  const service = { name, child, log, exited, spawnError: null };
+  child.once("error", (error) => {
+    service.spawnError = error;
+    log.append("stderr", `failed to spawn: ${error.message}\n`);
+  });
+  services.push(service);
+  return service;
+}
+
+async function waitForHttp(url, service, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    assertServiceRunning(service);
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+      if (response.ok) return;
+    } catch {
+      // Service has not bound the port yet.
+    }
+    await delay(200);
+  }
+  throw new Error(`${service.name} did not become ready within ${timeoutMs}ms`);
+}
+
+async function waitForProcessStart(service, milliseconds) {
+  const deadline = Date.now() + milliseconds;
+  while (Date.now() < deadline) {
+    assertServiceRunning(service);
+    await delay(50);
+  }
+}
+
+function assertServiceRunning(service) {
+  if (service.spawnError) {
+    throw new Error(`${service.name} could not start: ${service.spawnError.message}`);
+  }
+  if (service.child.exitCode !== null || service.child.signalCode !== null) {
+    throw new Error(`${service.name} exited before becoming ready`);
+  }
+}
+
+async function runCommand(name, command, args, extraEnvironment = {}) {
+  const child = spawn(command, args, {
+    cwd: root,
+    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", ...extraEnvironment },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    output = boundedAppend(output, chunk);
+    if (verbose) process.stdout.write(chunk);
+  });
+  child.stderr.on("data", (chunk) => {
+    output = boundedAppend(output, chunk);
+    if (verbose) process.stderr.write(chunk);
+  });
+
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+    setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+  }, commandTimeoutMs);
+  const result = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+  }).finally(() => clearTimeout(timeout));
+  if (timedOut || result.code !== 0) {
+    throw new Error(`${name} failed (${timedOut ? "timeout" : `exit ${result.code}, signal ${result.signal}`})\n${output}`);
+  }
+}
+
+async function waitFor(predicate, timeoutMs, message) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      if (await predicate()) return;
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(100);
+  }
+  throw new Error(`${message}${lastError ? `: ${lastError instanceof Error ? lastError.message : lastError}` : ""}`);
+}
+
+async function reservePort() {
+  const server = http.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  return address.port;
+}
+
+async function cleanup() {
+  if (cleanupPromise) return cleanupPromise;
+  cleanupPromise = (async () => {
+    for (const service of [...services].reverse()) {
+      await stopService(service);
+    }
+    if (fakeRuntime) {
+      await fakeRuntime.close().catch(() => undefined);
+      fakeRuntime = undefined;
+    }
+  })();
+  return cleanupPromise;
+}
+
+async function stopService(service) {
+  if (service.spawnError || !service.child.pid) return;
+  if (service.child.exitCode !== null || service.child.signalCode !== null) return;
+  service.child.kill("SIGTERM");
+  const result = await Promise.race([
+    service.exited,
+    delay(10_000).then(() => null),
+  ]);
+  if (result === null && service.child.exitCode === null) {
+    service.child.kill("SIGKILL");
+    await Promise.race([service.exited, delay(2_000)]);
+  }
+}
+
+function dumpLogs() {
+  for (const service of services) {
+    console.error(`\n===== ${service.name} logs =====\n${service.log.value() || "(no output)"}`);
+  }
+  if (fakeRuntime) {
+    console.error(`\n===== fake DeerFlow state =====\n${diagnosticJson(fakeRuntime.state)}`);
+  }
+}
+
+function diagnosticJson(value) {
+  return JSON.stringify(value, (key, candidate) => (
+    key === "WORKBENCH_CANVAS_CAPABILITY" || key === "WORKBENCH_KNOWLEDGE_CAPABILITY"
+      ? "[capability redacted]"
+      : candidate
+  ), 2);
+}
+
+function boundedAppend(current, incoming, limit = 256_000) {
+  const combined = current + incoming;
+  return combined.length <= limit ? combined : combined.slice(combined.length - limit);
+}
+
+function parseJson(value, label) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new Error(`${label} returned invalid JSON: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+function escapeXml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function testDatabaseUrl(raw) {
+  if (!raw?.trim()) throw new Error("WORKBENCH_TEST_DATABASE_URL is required");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("WORKBENCH_TEST_DATABASE_URL must be a valid PostgreSQL URL");
+  }
+  if (url.protocol !== "postgresql:" && url.protocol !== "postgres:") {
+    throw new Error("WORKBENCH_TEST_DATABASE_URL must use postgresql:// or postgres://");
+  }
+  const name = decodeURIComponent(url.pathname.slice(1));
+  if (!name || !isTestDatabaseName(name)) {
+    throw new Error(`Refusing to use database without 'test' in its name: ${name || "(empty)"}`);
+  }
+  if (["postgres", "template0", "template1"].includes(name.toLowerCase())) {
+    throw new Error(`Refusing to use protected PostgreSQL database: ${name}`);
+  }
+  url.searchParams.set("schema", "workbench");
+  return url.toString();
+}
+
+function isTestDatabaseName(name) {
+  return /(?:^|[_-])test(?:$|[_-])/i.test(name);
+}
+
+function assertSchemaResetConfirmation(name) {
+  if (process.env.WORKBENCH_SCHEMA_RESET_CONFIRM !== name) {
+    throw new Error(`WORKBENCH_SCHEMA_RESET_CONFIRM must exactly equal the test database name (${name})`);
+  }
+}
+
+function pgConnectionUrl(value) {
+  const url = new URL(value);
+  url.searchParams.delete("schema");
+  url.searchParams.delete("options");
+  return url.toString();
+}
+
+function positiveInteger(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  return value;
+}

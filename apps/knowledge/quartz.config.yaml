@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=./quartz/plugins/quartz-plugins.schema.json
 configuration:
-  pageTitle: 业务需求知识库
+  pageTitle: 产品工作台知识库
   pageTitleSuffix: ""
   enableSPA: true
   enablePopovers: true
@@ -9,7 +9,9 @@ configuration:
   baseUrl: localhost:3001
   ignorePatterns:
     - private
-    - templates
+    - 07-来源资产索引
+    - 99-收件箱
+    - _templates
     - .obsidian
     - .trash
   theme:
@@ -41,6 +43,19 @@ configuration:
         highlight: rgba(96, 165, 250, 0.16)
         textHighlight: "#854d0e88"
 plugins:
+  - source: github:quartz-community/note-properties
+    enabled: true
+    options:
+      includeAll: false
+      includedProperties:
+        - description
+        - tags
+        - aliases
+      excludedProperties: []
+      hidePropertiesView: true
+      delimiters: "---"
+      language: yaml
+    order: 5
   - source: github:quartz-community/created-modified-date
     enabled: true
     options:
@@ -133,7 +148,7 @@ plugins:
       position: right
       priority: 50
   - source: github:quartz-community/article-title
-    enabled: true
+    enabled: false
     layout:
       position: beforeBody
       priority: 10

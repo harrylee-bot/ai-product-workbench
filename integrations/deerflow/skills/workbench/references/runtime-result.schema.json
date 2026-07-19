@@ -1,0 +1,4774 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "产品工作台 DeerFlow Runtime Result",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "enum": [
+        "workbench.runtime.result.v1"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 100000
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RuntimeArtifactDraft"
+      },
+      "maxItems": 20
+    }
+  },
+  "required": [
+    "protocol",
+    "message",
+    "artifacts"
+  ],
+  "additionalProperties": false,
+  "description": "A Runtime result revises each target Artifact at most once; enforced by the runtime Zod contract.",
+  "$defs": {
+    "ArtifactCitation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "chunkId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sourcePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "quote": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "locator": {
+          "$ref": "#/$defs/ArtifactCitationLocator"
+        }
+      },
+      "required": [
+        "id",
+        "documentId",
+        "chunkId",
+        "sourcePath",
+        "title",
+        "quote",
+        "locator"
+      ],
+      "additionalProperties": false
+    },
+    "ArtifactCitationLocator": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "startLine": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "endLine": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "heading",
+        "startLine",
+        "endLine"
+      ],
+      "additionalProperties": false,
+      "description": "When both lines are present, endLine is not before startLine; enforced by the runtime Zod contract."
+    },
+    "JsonValue": {
+      "type": [
+        "string",
+        "number",
+        "boolean",
+        "null",
+        "array",
+        "object"
+      ],
+      "description": "Recursive JSON value. This is the sole audited ZodLazy OpenAPI override.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        }
+      ]
+    },
+    "PrdAcceptanceCriterionBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "acceptanceCriterion"
+          ]
+        },
+        "requirementIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "maxItems": 50
+        },
+        "given": {
+          "$ref": "#/$defs/PrdInlineContent"
+        },
+        "when": {
+          "$ref": "#/$defs/PrdInlineContent"
+        },
+        "then": {
+          "$ref": "#/$defs/PrdInlineContent"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "requirementIds",
+        "given",
+        "when",
+        "then"
+      ],
+      "additionalProperties": false
+    },
+    "PrdAssumption": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "validated",
+            "rejected"
+          ]
+        },
+        "impact": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "introducedInRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "citationIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "id",
+        "statement",
+        "status",
+        "impact",
+        "owner",
+        "introducedInRevision",
+        "citationIds"
+      ],
+      "additionalProperties": false
+    },
+    "PrdBlock": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PrdParagraphBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdHeadingBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdBulletListBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdOrderedListBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdTableBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdCalloutBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdGoalBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdPersonaBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdRequirementBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdAcceptanceCriterionBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdFlowBlock"
+        },
+        {
+          "$ref": "#/$defs/PrdRiskBlock"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "type",
+        "mapping": {
+          "paragraph": "#/components/schemas/PrdParagraphBlock",
+          "heading": "#/components/schemas/PrdHeadingBlock",
+          "bulletList": "#/components/schemas/PrdBulletListBlock",
+          "orderedList": "#/components/schemas/PrdOrderedListBlock",
+          "table": "#/components/schemas/PrdTableBlock",
+          "callout": "#/components/schemas/PrdCalloutBlock",
+          "goal": "#/components/schemas/PrdGoalBlock",
+          "persona": "#/components/schemas/PrdPersonaBlock",
+          "requirement": "#/components/schemas/PrdRequirementBlock",
+          "acceptanceCriterion": "#/components/schemas/PrdAcceptanceCriterionBlock",
+          "flow": "#/components/schemas/PrdFlowBlock",
+          "risk": "#/components/schemas/PrdRiskBlock"
+        }
+      }
+    },
+    "PrdBulletListBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "bulletList"
+          ]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdListItem"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "PrdCalloutBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "callout"
+          ]
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "success",
+            "critical"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "content": {
+          "$ref": "#/$defs/PrdInlineContent"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "tone",
+        "title",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "PrdCitationInline": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "citation"
+          ]
+        },
+        "citationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 240
+        }
+      },
+      "required": [
+        "type",
+        "citationId",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "PrdDocument": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "workbench.prd.v1"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "revision": {
+          "$ref": "#/$defs/PrdRevision"
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdAssumption"
+          },
+          "maxItems": 500
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "maxItems": 1000
+        },
+        "sections": {
+          "$ref": "#/$defs/PrdSections"
+        }
+      },
+      "required": [
+        "protocol",
+        "documentId",
+        "title",
+        "revision",
+        "assumptions",
+        "citations",
+        "sections"
+      ],
+      "additionalProperties": false,
+      "description": "PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract."
+    },
+    "PrdFlowBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "flow"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "actor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "trigger": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdFlowStep"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "outcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "title",
+        "actor",
+        "trigger",
+        "steps",
+        "outcome"
+      ],
+      "additionalProperties": false
+    },
+    "PrdFlowStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "requirementIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "maxItems": 50
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "requirementIds"
+      ],
+      "additionalProperties": false
+    },
+    "PrdGoalBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "goal"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "description": {
+          "$ref": "#/$defs/PrdInlineContent"
+        },
+        "successMetric": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "secondary"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "title",
+        "description",
+        "successMetric",
+        "priority"
+      ],
+      "additionalProperties": false
+    },
+    "PrdHeadingBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "heading"
+          ]
+        },
+        "level": {
+          "anyOf": [
+            {
+              "type": "number",
+              "enum": [
+                2
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                3
+              ]
+            }
+          ]
+        },
+        "content": {
+          "$ref": "#/$defs/PrdInlineContent"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "level",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "PrdInline": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PrdTextInline"
+        },
+        {
+          "$ref": "#/$defs/PrdLinkInline"
+        },
+        {
+          "$ref": "#/$defs/PrdCitationInline"
+        },
+        {
+          "$ref": "#/$defs/PrdReferenceInline"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "type",
+        "mapping": {
+          "text": "#/components/schemas/PrdTextInline",
+          "link": "#/components/schemas/PrdLinkInline",
+          "citation": "#/components/schemas/PrdCitationInline",
+          "reference": "#/components/schemas/PrdReferenceInline"
+        }
+      }
+    },
+    "PrdInlineContent": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PrdInline"
+      },
+      "minItems": 1,
+      "maxItems": 1000
+    },
+    "PrdInlineMarks": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "strong",
+          "emphasis",
+          "code",
+          "strikethrough"
+        ]
+      },
+      "maxItems": 4,
+      "description": "Inline marks are unique; enforced by the runtime Zod contract.",
+      "uniqueItems": true
+    },
+    "PrdLinkInline": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "link"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "href": {
+          "$ref": "#/$defs/PrdSafeHref"
+        }
+      },
+      "required": [
+        "type",
+        "text",
+        "href"
+      ],
+      "additionalProperties": false
+    },
+    "PrdListItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "content": {
+          "$ref": "#/$defs/PrdInlineContent"
+        }
+      },
+      "required": [
+        "id",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "PrdOrderedListBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "orderedList"
+          ]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdListItem"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "PrdParagraphBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "paragraph"
+          ]
+        },
+        "content": {
+          "$ref": "#/$defs/PrdInlineContent"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "PrdPersonaBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "persona"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "description": {
+          "$ref": "#/$defs/PrdInlineContent"
+        },
+        "needs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "minItems": 1,
+          "maxItems": 30
+        },
+        "painPoints": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "minItems": 1,
+          "maxItems": 30
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "name",
+        "description",
+        "needs",
+        "painPoints"
+      ],
+      "additionalProperties": false
+    },
+    "PrdReferenceInline": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "reference"
+          ]
+        },
+        "targetType": {
+          "$ref": "#/$defs/PrdReferenceTarget"
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 240
+        }
+      },
+      "required": [
+        "type",
+        "targetType",
+        "targetId",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "PrdReferenceTarget": {
+      "type": "string",
+      "enum": [
+        "section",
+        "goal",
+        "requirement",
+        "acceptanceCriterion",
+        "flow",
+        "assumption"
+      ]
+    },
+    "PrdRequirementBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "requirement"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "description": {
+          "$ref": "#/$defs/PrdInlineContent"
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "must",
+            "should",
+            "could",
+            "wont"
+          ]
+        },
+        "goalIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "maxItems": 50
+        },
+        "acceptanceCriterionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "title",
+        "description",
+        "priority",
+        "goalIds",
+        "acceptanceCriterionIds"
+      ],
+      "additionalProperties": false
+    },
+    "PrdRevision": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "inReview",
+            "approved"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "changedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "changedById": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "number",
+        "status",
+        "summary",
+        "changedAt",
+        "changedById"
+      ],
+      "additionalProperties": false
+    },
+    "PrdRiskBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "risk"
+          ]
+        },
+        "description": {
+          "$ref": "#/$defs/PrdInlineContent"
+        },
+        "likelihood": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "impact": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "mitigation": {
+          "$ref": "#/$defs/PrdInlineContent"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "description",
+        "likelihood",
+        "impact",
+        "mitigation"
+      ],
+      "additionalProperties": false
+    },
+    "PrdSafeHref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^(?:\\/|#|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/|[Mm][Aa][Ii][Ll][Tt][Oo]:)"
+    },
+    "PrdSection": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdBlock"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        }
+      },
+      "required": [
+        "title",
+        "blocks"
+      ],
+      "additionalProperties": false
+    },
+    "PrdSections": {
+      "type": "object",
+      "properties": {
+        "executiveSummary": {
+          "$ref": "#/$defs/PrdSection"
+        },
+        "problem": {
+          "$ref": "#/$defs/PrdSection"
+        },
+        "goals": {
+          "$ref": "#/$defs/PrdSection"
+        },
+        "targetUsers": {
+          "$ref": "#/$defs/PrdSection"
+        },
+        "scope": {
+          "$ref": "#/$defs/PrdSection"
+        },
+        "requirements": {
+          "$ref": "#/$defs/PrdSection"
+        },
+        "userFlows": {
+          "$ref": "#/$defs/PrdSection"
+        },
+        "acceptanceCriteria": {
+          "$ref": "#/$defs/PrdSection"
+        },
+        "risksAndDependencies": {
+          "$ref": "#/$defs/PrdSection"
+        }
+      },
+      "required": [
+        "executiveSummary",
+        "problem",
+        "goals",
+        "targetUsers",
+        "scope",
+        "requirements",
+        "userFlows",
+        "acceptanceCriteria",
+        "risksAndDependencies"
+      ],
+      "additionalProperties": false
+    },
+    "PrdTableBlock": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "table"
+          ]
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdTableColumn"
+          },
+          "minItems": 1,
+          "maxItems": 30
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdTableRow"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "columns",
+        "rows"
+      ],
+      "additionalProperties": false
+    },
+    "PrdTableCell": {
+      "type": "object",
+      "properties": {
+        "columnId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "content": {
+          "$ref": "#/$defs/PrdInlineContent"
+        }
+      },
+      "required": [
+        "columnId",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "PrdTableColumn": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "PrdTableRow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "cells": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdTableCell"
+          },
+          "minItems": 1,
+          "maxItems": 30
+        }
+      },
+      "required": [
+        "id",
+        "cells"
+      ],
+      "additionalProperties": false
+    },
+    "PrdTextInline": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "text"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "marks": {
+          "$ref": "#/$defs/PrdInlineMarks"
+        }
+      },
+      "required": [
+        "type",
+        "text",
+        "marks"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeAction": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PrototypeNavigateAction"
+        },
+        {
+          "$ref": "#/$defs/PrototypeSetStateAction"
+        },
+        {
+          "$ref": "#/$defs/PrototypeOpenUrlAction"
+        },
+        {
+          "$ref": "#/$defs/PrototypeSubmitAction"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "kind",
+        "mapping": {
+          "navigate": "#/components/schemas/PrototypeNavigateAction",
+          "setState": "#/components/schemas/PrototypeSetStateAction",
+          "openUrl": "#/components/schemas/PrototypeOpenUrlAction",
+          "submit": "#/components/schemas/PrototypeSubmitAction"
+        }
+      }
+    },
+    "PrototypeAsset": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PrototypeImageAsset"
+        },
+        {
+          "$ref": "#/$defs/PrototypeIconAsset"
+        },
+        {
+          "$ref": "#/$defs/PrototypeFontAsset"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "kind",
+        "mapping": {
+          "image": "#/components/schemas/PrototypeImageAsset",
+          "icon": "#/components/schemas/PrototypeIconAsset",
+          "font": "#/components/schemas/PrototypeFontAsset"
+        }
+      }
+    },
+    "PrototypeBinding": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "property": {
+          "type": "string",
+          "enum": [
+            "text",
+            "value",
+            "visible",
+            "enabled",
+            "imageAssetId"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/PrototypeBindingSource"
+        }
+      },
+      "required": [
+        "id",
+        "nodeId",
+        "property",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeBindingSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 500,
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "state"
+              ]
+            },
+            "stateId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 96,
+              "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+            },
+            "field": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,119}$"
+            }
+          },
+          "required": [
+            "kind",
+            "stateId",
+            "field"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeButtonNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/PrototypeLayout"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        },
+        "actionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "motionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "button"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "childIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 100
+        },
+        "buttonType": {
+          "type": "string",
+          "enum": [
+            "button",
+            "submit",
+            "reset"
+          ]
+        },
+        "disabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "parentId",
+        "name",
+        "visible",
+        "layout",
+        "style",
+        "actionIds",
+        "bindingIds",
+        "motionIds",
+        "kind",
+        "label",
+        "childIds",
+        "buttonType",
+        "disabled"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeColorToken": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "color"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}(?:[0-9a-f]{2})?$"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeDocument": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "workbench.prototype.v1"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "revision": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "screens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeScreen"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeNode"
+          },
+          "minItems": 1,
+          "maxItems": 20000
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeToken"
+          },
+          "maxItems": 2000
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeAsset"
+          },
+          "maxItems": 2000
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeVariable"
+          },
+          "maxItems": 2000
+        },
+        "states": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeState"
+          },
+          "maxItems": 5000
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeAction"
+          },
+          "maxItems": 10000
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeBinding"
+          },
+          "maxItems": 10000
+        },
+        "motions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeMotion"
+          },
+          "maxItems": 10000
+        }
+      },
+      "required": [
+        "protocol",
+        "documentId",
+        "title",
+        "revision",
+        "screens",
+        "nodes",
+        "tokens",
+        "assets",
+        "variables",
+        "states",
+        "actions",
+        "bindings",
+        "motions"
+      ],
+      "additionalProperties": false,
+      "description": "Prototype screens, nodes, states, actions, bindings, assets, tokens, and motions form a valid semantic graph; enforced by the runtime Zod contract."
+    },
+    "PrototypeFontAsset": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "font"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "blobId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": [
+            "font/woff",
+            "font/woff2"
+          ]
+        },
+        "byteSize": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "family": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 900
+        },
+        "style": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "italic"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "blobId",
+        "mediaType",
+        "byteSize",
+        "sha256",
+        "family",
+        "weight",
+        "style"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeFontFamilyToken": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "fontFamily"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeFontWeightToken": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "fontWeight"
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number",
+              "enum": [
+                100
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                200
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                300
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                400
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                500
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                600
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                700
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                800
+              ]
+            },
+            {
+              "type": "number",
+              "enum": [
+                900
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeFormNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/PrototypeLayout"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        },
+        "actionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "motionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "form"
+          ]
+        },
+        "childIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 2000
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "parentId",
+        "name",
+        "visible",
+        "layout",
+        "style",
+        "actionIds",
+        "bindingIds",
+        "motionIds",
+        "kind",
+        "childIds"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeFrameNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/PrototypeLayout"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        },
+        "actionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "motionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "frame"
+          ]
+        },
+        "childIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 2000
+        },
+        "clipContent": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "parentId",
+        "name",
+        "visible",
+        "layout",
+        "style",
+        "actionIds",
+        "bindingIds",
+        "motionIds",
+        "kind",
+        "childIds",
+        "clipContent"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeIconAsset": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "icon"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "library": {
+          "type": "string",
+          "enum": [
+            "lucide"
+          ]
+        },
+        "iconName": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9-]{0,119}$"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "library",
+        "iconName"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeIconNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/PrototypeLayout"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        },
+        "actionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "motionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "icon"
+          ]
+        },
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "accessibilityLabel": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "parentId",
+        "name",
+        "visible",
+        "layout",
+        "style",
+        "actionIds",
+        "bindingIds",
+        "motionIds",
+        "kind",
+        "assetId",
+        "accessibilityLabel"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeImageAsset": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "blobId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ]
+        },
+        "byteSize": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "width": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "blobId",
+        "mediaType",
+        "byteSize",
+        "sha256",
+        "width",
+        "height"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeImageNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/PrototypeLayout"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        },
+        "actionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "motionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image"
+          ]
+        },
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "fit": {
+          "type": "string",
+          "enum": [
+            "contain",
+            "cover",
+            "fill",
+            "none"
+          ]
+        },
+        "alt": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "parentId",
+        "name",
+        "visible",
+        "layout",
+        "style",
+        "actionIds",
+        "bindingIds",
+        "motionIds",
+        "kind",
+        "assetId",
+        "fit",
+        "alt"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeInputNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/PrototypeLayout"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        },
+        "actionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "motionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "input"
+          ]
+        },
+        "inputType": {
+          "type": "string",
+          "enum": [
+            "text",
+            "email",
+            "password",
+            "number",
+            "search",
+            "date",
+            "textarea",
+            "select",
+            "checkbox",
+            "radio"
+          ],
+          "description": "date inputs bind an empty string or a canonical YYYY-MM-DD calendar date; locale dates, timestamps, and timezone suffixes are invalid"
+        },
+        "fieldName": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,119}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "placeholder": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "optionValue": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeSelectOption"
+          },
+          "maxItems": 500
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "disabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "parentId",
+        "name",
+        "visible",
+        "layout",
+        "style",
+        "actionIds",
+        "bindingIds",
+        "motionIds",
+        "kind",
+        "inputType",
+        "fieldName",
+        "label",
+        "placeholder",
+        "optionValue",
+        "options",
+        "required",
+        "disabled"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeLayout": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "absolute",
+            "flow"
+          ]
+        },
+        "x": {
+          "$ref": "#/$defs/PrototypeNumberValue"
+        },
+        "y": {
+          "$ref": "#/$defs/PrototypeNumberValue"
+        },
+        "width": {
+          "$ref": "#/$defs/PrototypePositiveValue"
+        },
+        "height": {
+          "$ref": "#/$defs/PrototypePositiveValue"
+        },
+        "display": {
+          "type": "string",
+          "enum": [
+            "block",
+            "flex",
+            "grid"
+          ]
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "row",
+            "column"
+          ]
+        },
+        "gap": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "padding": {
+          "$ref": "#/$defs/PrototypePadding"
+        },
+        "align": {
+          "type": "string",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "stretch"
+          ]
+        },
+        "justify": {
+          "type": "string",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "spaceBetween",
+            "spaceAround"
+          ]
+        },
+        "gridColumns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 24
+        },
+        "overflow": {
+          "type": "string",
+          "enum": [
+            "visible",
+            "hidden",
+            "scroll",
+            "auto"
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "x",
+        "y",
+        "width",
+        "height",
+        "display",
+        "direction",
+        "gap",
+        "padding",
+        "align",
+        "justify",
+        "gridColumns",
+        "overflow"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeMotion": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "trigger": {
+          "type": "string",
+          "enum": [
+            "enter",
+            "exit",
+            "hover",
+            "press",
+            "stateChange",
+            "action"
+          ]
+        },
+        "stateId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "actionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "property": {
+          "type": "string",
+          "enum": [
+            "opacity",
+            "x",
+            "y",
+            "scale",
+            "rotation"
+          ]
+        },
+        "from": {
+          "type": "number"
+        },
+        "to": {
+          "type": "number"
+        },
+        "duration": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "delay": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "easing": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "easeIn",
+            "easeOut",
+            "easeInOut",
+            "spring"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "nodeId",
+        "trigger",
+        "stateId",
+        "actionId",
+        "property",
+        "from",
+        "to",
+        "duration",
+        "delay",
+        "easing"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeNavigateAction": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "click",
+            "press",
+            "change",
+            "submit",
+            "focus",
+            "blur"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "navigate"
+          ]
+        },
+        "targetScreenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        }
+      },
+      "required": [
+        "id",
+        "nodeId",
+        "event",
+        "kind",
+        "targetScreenId"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeNode": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PrototypeFrameNode"
+        },
+        {
+          "$ref": "#/$defs/PrototypeFormNode"
+        },
+        {
+          "$ref": "#/$defs/PrototypeTextNode"
+        },
+        {
+          "$ref": "#/$defs/PrototypeIconNode"
+        },
+        {
+          "$ref": "#/$defs/PrototypeImageNode"
+        },
+        {
+          "$ref": "#/$defs/PrototypeVectorNode"
+        },
+        {
+          "$ref": "#/$defs/PrototypeButtonNode"
+        },
+        {
+          "$ref": "#/$defs/PrototypeInputNode"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "kind",
+        "mapping": {
+          "frame": "#/components/schemas/PrototypeFrameNode",
+          "form": "#/components/schemas/PrototypeFormNode",
+          "text": "#/components/schemas/PrototypeTextNode",
+          "icon": "#/components/schemas/PrototypeIconNode",
+          "image": "#/components/schemas/PrototypeImageNode",
+          "vector": "#/components/schemas/PrototypeVectorNode",
+          "button": "#/components/schemas/PrototypeButtonNode",
+          "input": "#/components/schemas/PrototypeInputNode"
+        }
+      }
+    },
+    "PrototypeNonNegativeValue": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/PrototypeTokenReference"
+        }
+      ]
+    },
+    "PrototypeNumberValue": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/PrototypeTokenReference"
+        }
+      ]
+    },
+    "PrototypeNumericToken": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "number",
+            "spacing",
+            "radius",
+            "fontSize",
+            "lineHeight",
+            "borderWidth",
+            "duration"
+          ]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeOpenUrl": {
+      "type": "string",
+      "maxLength": 2048,
+      "format": "uri",
+      "pattern": "^(?:https?:\\/\\/|mailto:|tel:)",
+      "description": "Prototype external navigation is restricted to canonical HTTP(S), mailto, and tel URLs; stricter mail recipient, query, and telephone syntax is enforced by the runtime Zod contract."
+    },
+    "PrototypeOpenUrlAction": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "click",
+            "press",
+            "change",
+            "submit",
+            "focus",
+            "blur"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "openUrl"
+          ]
+        },
+        "url": {
+          "$ref": "#/$defs/PrototypeOpenUrl"
+        },
+        "target": {
+          "type": "string",
+          "enum": [
+            "sameWindow",
+            "newWindow"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "nodeId",
+        "event",
+        "kind",
+        "url",
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypePadding": {
+      "type": "object",
+      "properties": {
+        "top": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "right": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "bottom": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "left": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        }
+      },
+      "required": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypePositiveValue": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/PrototypeTokenReference"
+        }
+      ]
+    },
+    "PrototypeRadii": {
+      "type": "object",
+      "properties": {
+        "topLeft": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "topRight": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "bottomRight": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        },
+        "bottomLeft": {
+          "$ref": "#/$defs/PrototypeNonNegativeValue"
+        }
+      },
+      "required": [
+        "topLeft",
+        "topRight",
+        "bottomRight",
+        "bottomLeft"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeRotation": {
+      "type": "number",
+      "minimum": -180,
+      "exclusiveMaximum": 180,
+      "description": "Clockwise node rotation in degrees, normalized to the half-open interval [-180, 180)"
+    },
+    "PrototypeRuntimeValue": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 10000
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "PrototypeScreen": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^\\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\\/?)*$"
+        },
+        "rootNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "initialStateId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "viewport": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 16384
+            },
+            "height": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 16384
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "route",
+        "rootNodeId",
+        "initialStateId",
+        "viewport"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeSelectOption": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "disabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "value",
+        "label",
+        "disabled"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeSetStateAction": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "click",
+            "press",
+            "change",
+            "submit",
+            "focus",
+            "blur"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "setState"
+          ]
+        },
+        "targetStateId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        }
+      },
+      "required": [
+        "id",
+        "nodeId",
+        "event",
+        "kind",
+        "targetStateId"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeShadowToken": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "shadow"
+          ]
+        },
+        "value": {
+          "type": "object",
+          "properties": {
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9a-f]{6}(?:[0-9a-f]{2})?$"
+            },
+            "offsetX": {
+              "type": "number"
+            },
+            "offsetY": {
+              "type": "number"
+            },
+            "blur": {
+              "type": "number",
+              "minimum": 0
+            },
+            "spread": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "color",
+            "offsetX",
+            "offsetY",
+            "blur",
+            "spread"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeState": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/PrototypeRuntimeValue"
+          },
+          "description": "A Prototype state defines at most 200 explicitly named runtime values; enforced by the runtime Zod contract.",
+          "maxProperties": 200
+        },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeStateOverride"
+          },
+          "minItems": 1,
+          "maxItems": 2000
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "name",
+        "values",
+        "overrides"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeStateOverride": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 100000
+        },
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        }
+      },
+      "required": [
+        "nodeId"
+      ],
+      "additionalProperties": false,
+      "description": "A state override changes at least one property in addition to nodeId; enforced by the runtime Zod contract.",
+      "minProperties": 2
+    },
+    "PrototypeStringValue": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/PrototypeTokenReference"
+        }
+      ]
+    },
+    "PrototypeStyle": {
+      "type": "object",
+      "properties": {
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rotation": {
+          "$ref": "#/$defs/PrototypeRotation"
+        },
+        "transformOrigin": {
+          "$ref": "#/$defs/PrototypeTransformOrigin"
+        },
+        "fill": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "literal"
+                  ]
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-f]{6}(?:[0-9a-f]{2})?$"
+                }
+              },
+              "required": [
+                "kind",
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "$ref": "#/$defs/PrototypeTokenReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stroke": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "color": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "literal"
+                      ]
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^#[0-9a-f]{6}(?:[0-9a-f]{2})?$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/PrototypeTokenReference"
+                }
+              ]
+            },
+            "width": {
+              "$ref": "#/$defs/PrototypeNonNegativeValue"
+            },
+            "style": {
+              "type": "string",
+              "enum": [
+                "solid",
+                "dashed",
+                "dotted"
+              ]
+            },
+            "position": {
+              "type": "string",
+              "enum": [
+                "inside",
+                "center",
+                "outside"
+              ]
+            }
+          },
+          "required": [
+            "color",
+            "width",
+            "style",
+            "position"
+          ],
+          "additionalProperties": false
+        },
+        "radii": {
+          "$ref": "#/$defs/PrototypeRadii"
+        },
+        "shadowTokenIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 8
+        },
+        "typography": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fontFamily": {
+              "$ref": "#/$defs/PrototypeStringValue"
+            },
+            "fontSize": {
+              "$ref": "#/$defs/PrototypePositiveValue"
+            },
+            "fontWeight": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "literal"
+                      ]
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "enum": [
+                            100
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            200
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            300
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            400
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            500
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            600
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            700
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            800
+                          ]
+                        },
+                        {
+                          "type": "number",
+                          "enum": [
+                            900
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/PrototypeTokenReference"
+                }
+              ]
+            },
+            "lineHeight": {
+              "$ref": "#/$defs/PrototypePositiveValue"
+            },
+            "letterSpacing": {
+              "$ref": "#/$defs/PrototypeNumberValue"
+            },
+            "align": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right",
+                "justify"
+              ]
+            },
+            "transform": {
+              "type": "string",
+              "enum": [
+                "none",
+                "uppercase",
+                "lowercase",
+                "capitalize"
+              ]
+            },
+            "decoration": {
+              "type": "string",
+              "enum": [
+                "none",
+                "underline",
+                "lineThrough"
+              ]
+            }
+          },
+          "required": [
+            "fontFamily",
+            "fontSize",
+            "fontWeight",
+            "lineHeight",
+            "letterSpacing",
+            "align",
+            "transform",
+            "decoration"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "opacity",
+        "rotation",
+        "transformOrigin",
+        "fill",
+        "stroke",
+        "radii",
+        "shadowTokenIds",
+        "typography"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeSubmitAction": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "nodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "click",
+            "press",
+            "change",
+            "submit",
+            "focus",
+            "blur"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "submit"
+          ]
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "successStateId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        }
+      },
+      "required": [
+        "id",
+        "nodeId",
+        "event",
+        "kind",
+        "bindingIds",
+        "successStateId"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeTextNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/PrototypeLayout"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        },
+        "actionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "motionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "text"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 100000
+        },
+        "maxLines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "parentId",
+        "name",
+        "visible",
+        "layout",
+        "style",
+        "actionIds",
+        "bindingIds",
+        "motionIds",
+        "kind",
+        "text",
+        "maxLines"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeToken": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PrototypeColorToken"
+        },
+        {
+          "$ref": "#/$defs/PrototypeNumericToken"
+        },
+        {
+          "$ref": "#/$defs/PrototypeFontFamilyToken"
+        },
+        {
+          "$ref": "#/$defs/PrototypeFontWeightToken"
+        },
+        {
+          "$ref": "#/$defs/PrototypeShadowToken"
+        }
+      ]
+    },
+    "PrototypeTokenReference": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "token"
+          ]
+        },
+        "tokenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        }
+      },
+      "required": [
+        "kind",
+        "tokenId"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeTransformOrigin": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "additionalProperties": false,
+      "description": "Rotation origin as normalized fractions of the node border box: (0,0) is top-left and (1,1) is bottom-right"
+    },
+    "PrototypeVariable": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 500,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$"
+        },
+        "initialValue": {
+          "$ref": "#/$defs/PrototypeRuntimeValue"
+        }
+      },
+      "required": [
+        "path",
+        "initialValue"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeVectorCommand": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "enum": [
+                "moveTo"
+              ]
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "command",
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "enum": [
+                "lineTo"
+              ]
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "command",
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "enum": [
+                "horizontalTo"
+              ]
+            },
+            "x": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "command",
+            "x"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "enum": [
+                "verticalTo"
+              ]
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "command",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "enum": [
+                "curveTo"
+              ]
+            },
+            "control1X": {
+              "type": "number"
+            },
+            "control1Y": {
+              "type": "number"
+            },
+            "control2X": {
+              "type": "number"
+            },
+            "control2Y": {
+              "type": "number"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "command",
+            "control1X",
+            "control1Y",
+            "control2X",
+            "control2Y",
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "enum": [
+                "quadraticTo"
+              ]
+            },
+            "controlX": {
+              "type": "number"
+            },
+            "controlY": {
+              "type": "number"
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "command",
+            "controlX",
+            "controlY",
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "enum": [
+                "close"
+              ]
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeVectorNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "screenId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/PrototypeLayout"
+        },
+        "style": {
+          "$ref": "#/$defs/PrototypeStyle"
+        },
+        "actionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "bindingIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "motionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+          },
+          "maxItems": 50
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "vector"
+          ]
+        },
+        "viewBox": {
+          "type": "object",
+          "properties": {
+            "minX": {
+              "type": "number"
+            },
+            "minY": {
+              "type": "number"
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "minX",
+            "minY",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeVectorPath"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        }
+      },
+      "required": [
+        "id",
+        "screenId",
+        "parentId",
+        "name",
+        "visible",
+        "layout",
+        "style",
+        "actionIds",
+        "bindingIds",
+        "motionIds",
+        "kind",
+        "viewBox",
+        "paths"
+      ],
+      "additionalProperties": false
+    },
+    "PrototypeVectorPath": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrototypeVectorCommand"
+          },
+          "minItems": 1,
+          "maxItems": 5000
+        },
+        "fillRule": {
+          "type": "string",
+          "enum": [
+            "nonzero",
+            "evenodd"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "commands",
+        "fillRule"
+      ],
+      "additionalProperties": false
+    },
+    "RunArtifactTarget": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "artifactVersionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "screenIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 12,
+          "description": "Screen ids within one Artifact target are unique; enforced by the runtime Zod contract.",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactVersionId",
+        "screenIds"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeArtifactDraft": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/RuntimeArtifactDraftPrd"
+        },
+        {
+          "$ref": "#/$defs/RuntimeArtifactDraftPrototype"
+        },
+        {
+          "$ref": "#/$defs/RuntimeArtifactDraftImage"
+        },
+        {
+          "$ref": "#/$defs/RuntimeArtifactDraftCode"
+        },
+        {
+          "$ref": "#/$defs/RuntimeArtifactDraftDocument"
+        },
+        {
+          "$ref": "#/$defs/RuntimeArtifactDraftData"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "kind",
+        "mapping": {
+          "prd": "#/components/schemas/RuntimeArtifactDraftPrd",
+          "prototype": "#/components/schemas/RuntimeArtifactDraftPrototype",
+          "image": "#/components/schemas/RuntimeArtifactDraftImage",
+          "code": "#/components/schemas/RuntimeArtifactDraftCode",
+          "document": "#/components/schemas/RuntimeArtifactDraftDocument",
+          "data": "#/components/schemas/RuntimeArtifactDraftData"
+        }
+      },
+      "description": "A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract."
+    },
+    "RuntimeArtifactDraftCode": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "maxItems": 1000
+        },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "create"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "revise"
+                  ]
+                },
+                "target": {
+                  "$ref": "#/$defs/RunArtifactTarget"
+                }
+              },
+              "required": [
+                "kind",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "code"
+          ]
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "title",
+        "citations",
+        "operation",
+        "kind",
+        "schemaVersion",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeArtifactDraftData": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "maxItems": 1000
+        },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "create"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "revise"
+                  ]
+                },
+                "target": {
+                  "$ref": "#/$defs/RunArtifactTarget"
+                }
+              },
+              "required": [
+                "kind",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "data"
+          ]
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "title",
+        "citations",
+        "operation",
+        "kind",
+        "schemaVersion",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeArtifactDraftDocument": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "maxItems": 1000
+        },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "create"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "revise"
+                  ]
+                },
+                "target": {
+                  "$ref": "#/$defs/RunArtifactTarget"
+                }
+              },
+              "required": [
+                "kind",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "document"
+          ]
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "title",
+        "citations",
+        "operation",
+        "kind",
+        "schemaVersion",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeArtifactDraftImage": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "maxItems": 1000
+        },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "create"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "revise"
+                  ]
+                },
+                "target": {
+                  "$ref": "#/$defs/RunArtifactTarget"
+                }
+              },
+              "required": [
+                "kind",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "image"
+          ]
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "title",
+        "citations",
+        "operation",
+        "kind",
+        "schemaVersion",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeArtifactDraftPrd": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "maxItems": 1000
+        },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "create"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "revise"
+                  ]
+                },
+                "target": {
+                  "$ref": "#/$defs/RunArtifactTarget"
+                }
+              },
+              "required": [
+                "kind",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "prd"
+          ]
+        },
+        "schemaVersion": {
+          "type": "number",
+          "enum": [
+            1
+          ]
+        },
+        "content": {
+          "$ref": "#/$defs/PrdDocument"
+        }
+      },
+      "required": [
+        "title",
+        "citations",
+        "operation",
+        "kind",
+        "schemaVersion",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeArtifactDraftPrototype": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "maxItems": 1000
+        },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "create"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "revise"
+                  ]
+                },
+                "target": {
+                  "$ref": "#/$defs/RunArtifactTarget"
+                }
+              },
+              "required": [
+                "kind",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "prototype"
+          ]
+        },
+        "schemaVersion": {
+          "type": "number",
+          "enum": [
+            1
+          ]
+        },
+        "content": {
+          "$ref": "#/$defs/PrototypeDocument"
+        }
+      },
+      "required": [
+        "title",
+        "citations",
+        "operation",
+        "kind",
+        "schemaVersion",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

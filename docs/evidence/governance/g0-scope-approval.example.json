@@ -1,0 +1,319 @@
+{
+  "schemaVersion": "workbench.g0-scope-approval.v1",
+  "recordId": "g0-scope-approval-example",
+  "product": "产品工作台",
+  "gateId": "G0",
+  "executionStatus": "NOT RUN",
+  "recordedAtUtc": "2026-07-19T00:00:00Z",
+  "candidate": {
+    "candidateId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sourceCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "signedTag": {
+      "name": "workbench-v0.0.0-example",
+      "tagObject": "cccccccccccccccccccccccccccccccccccccccc",
+      "payloadSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "manifest": {
+      "uri": "urn:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  },
+  "environment": {
+    "environmentId": "production-cn-hz-example",
+    "kind": "production",
+    "target": "example production target (not approved)",
+    "region": "cn-hangzhou"
+  },
+  "scope": {
+    "gateIds": [
+      "G0",
+      "G1",
+      "G2",
+      "G3",
+      "G4",
+      "G5",
+      "G6",
+      "G7",
+      "G8",
+      "G9",
+      "G10",
+      "G11",
+      "G12"
+    ],
+    "findingIds": [
+      "D-001",
+      "D-002",
+      "D-003",
+      "D-004",
+      "D-005",
+      "D-006",
+      "D-007",
+      "D-008",
+      "D-009",
+      "D-010",
+      "D-011",
+      "D-012",
+      "D-013",
+      "D-014",
+      "D-015",
+      "D-016",
+      "D-017",
+      "D-018",
+      "D-019",
+      "D-020",
+      "D-021",
+      "D-022",
+      "D-023",
+      "D-024",
+      "D-025",
+      "D-026",
+      "D-027",
+      "D-028",
+      "D-029",
+      "D-030",
+      "D-031",
+      "D-032",
+      "D-033",
+      "P-001",
+      "P-002",
+      "P-003",
+      "P-004",
+      "P-005",
+      "P-006",
+      "P-007",
+      "P-008",
+      "P-009",
+      "P-010",
+      "P-011",
+      "P-012",
+      "P-013",
+      "P-014",
+      "P-015",
+      "P-016",
+      "P-017",
+      "P-018",
+      "P-019"
+    ]
+  },
+  "capabilities": [
+    {
+      "capabilityId": "core-workbench",
+      "name": "Core product workbench workflows",
+      "classification": "advertised",
+      "reason": "Example only; production scope has not been approved.",
+      "classificationExpiresAtUtc": "2099-01-01T00:00:00Z",
+      "accountableRole": "Operations",
+      "targetDateUtc": "2098-12-01T00:00:00Z",
+      "escalationPath": [
+        "Escalate to the Operations owner",
+        "Escalate to the Release authority"
+      ],
+      "overdueAction": "Keep G0 NOT RUN and block release until a new target is approved.",
+      "approvals": []
+    },
+    {
+      "capabilityId": "enterprise-sso",
+      "name": "Enterprise SSO",
+      "classification": "deferred",
+      "reason": "Example deferral only; no production decision has been signed.",
+      "classificationExpiresAtUtc": "2099-01-01T00:00:00Z",
+      "accountableRole": "Security",
+      "targetDateUtc": "2098-12-01T00:00:00Z",
+      "escalationPath": [
+        "Escalate to the Security owner",
+        "Escalate to the Release authority"
+      ],
+      "overdueAction": "Reclassify explicitly and keep the capability unadvertised until approval.",
+      "approvals": []
+    },
+    {
+      "capabilityId": "figma-desktop-validation",
+      "name": "Figma Desktop production validation",
+      "classification": "N/A",
+      "reason": "Example classification only; an actual N/A requires Security and Release approval.",
+      "classificationExpiresAtUtc": "2099-01-01T00:00:00Z",
+      "accountableRole": "Security",
+      "targetDateUtc": "2098-12-01T00:00:00Z",
+      "escalationPath": [
+        "Escalate to the Security owner",
+        "Escalate to the Release authority"
+      ],
+      "overdueAction": "Expire N/A, return the capability to NOT RUN, and block any related claim.",
+      "approvals": []
+    }
+  ],
+  "responsibilityMatrix": {
+    "owners": [
+      {
+        "role": "Implementer",
+        "owner": {
+          "id": "implementer@example.invalid",
+          "displayName": "Example Implementer",
+          "team": "Example Delivery"
+        },
+        "responsibilities": [
+          "Implementation and test execution"
+        ],
+        "approval": null
+      },
+      {
+        "role": "Security",
+        "owner": {
+          "id": "security@example.invalid",
+          "displayName": "Example Security Approver",
+          "team": "Example Security"
+        },
+        "responsibilities": [
+          "Authorization, secrets, network, supply chain, and negative security acceptance"
+        ],
+        "approval": null
+      },
+      {
+        "role": "Data",
+        "owner": {
+          "id": "data@example.invalid",
+          "displayName": "Example Data Owner",
+          "team": "Example Data"
+        },
+        "responsibilities": [
+          "Migration, backup, restore, cleanup, RPO, and RTO"
+        ],
+        "approval": null
+      },
+      {
+        "role": "Operations",
+        "owner": {
+          "id": "operations@example.invalid",
+          "displayName": "Example Operations Owner",
+          "team": "Example Operations"
+        },
+        "responsibilities": [
+          "Deployment, monitoring, capacity, recovery, and rollback"
+        ],
+        "approval": null
+      },
+      {
+        "role": "Evidence",
+        "owner": {
+          "id": "evidence@example.invalid",
+          "displayName": "Example Evidence Custodian",
+          "team": "Example Assurance"
+        },
+        "responsibilities": [
+          "Ledger, hashes, and immutable evidence index"
+        ],
+        "approval": null
+      },
+      {
+        "role": "Release",
+        "owner": {
+          "id": "release@example.invalid",
+          "displayName": "Example Release Authority",
+          "team": "Example Release"
+        },
+        "responsibilities": [
+          "Independent final release decision"
+        ],
+        "approval": null
+      }
+    ],
+    "schedule": [
+      {
+        "scopeItemIds": [
+          "G0",
+          "G1",
+          "G2",
+          "G3",
+          "G4",
+          "G5",
+          "G6",
+          "G7",
+          "G8",
+          "G9",
+          "G10",
+          "G11",
+          "G12"
+        ],
+        "targetDateUtc": "2098-12-01T00:00:00Z",
+        "escalationPath": [
+          "Escalate to the accountable owner",
+          "Escalate to the Release authority"
+        ],
+        "overdueAction": "Keep the affected gate non-PASS and approve a new dated plan."
+      },
+      {
+        "scopeItemIds": [
+          "D-001",
+          "D-002",
+          "D-003",
+          "D-004",
+          "D-005",
+          "D-006",
+          "D-007",
+          "D-008",
+          "D-009",
+          "D-010",
+          "D-011",
+          "D-012",
+          "D-013",
+          "D-014",
+          "D-015",
+          "D-016",
+          "D-017",
+          "D-018",
+          "D-019",
+          "D-020",
+          "D-021",
+          "D-022",
+          "D-023",
+          "D-024",
+          "D-025",
+          "D-026",
+          "D-027",
+          "D-028",
+          "D-029",
+          "D-030",
+          "D-031",
+          "D-032",
+          "D-033"
+        ],
+        "targetDateUtc": "2098-12-01T00:00:00Z",
+        "escalationPath": [
+          "Escalate to the accountable owner",
+          "Escalate release-blocking defects to the Release authority"
+        ],
+        "overdueAction": "Keep each unresolved finding open and block its dependent gate."
+      },
+      {
+        "scopeItemIds": [
+          "P-001",
+          "P-002",
+          "P-003",
+          "P-004",
+          "P-005",
+          "P-006",
+          "P-007",
+          "P-008",
+          "P-009",
+          "P-010",
+          "P-011",
+          "P-012",
+          "P-013",
+          "P-014",
+          "P-015",
+          "P-016",
+          "P-017",
+          "P-018",
+          "P-019"
+        ],
+        "targetDateUtc": "2098-12-01T00:00:00Z",
+        "escalationPath": [
+          "Escalate to the accountable owner",
+          "Escalate unresolved production risk to the Release authority"
+        ],
+        "overdueAction": "Keep the risk unresolved and block production acceptance where applicable."
+      }
+    ]
+  },
+  "waivers": []
+}

@@ -1,5 +1,5 @@
 node_modules
-storage
+/storage/
 .next
 dist
 coverage
@@ -24,3 +24,5 @@ __pycache__/
 .playwright-cli
 agent-skills
 .claude/
+/packages/workbench-db/generated/
+/apps/workbench-figma-importer/build/

@@ -1,0 +1,29 @@
+{
+  "name": "@workbench/workbench-preview",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.873.0",
+    "@workbench/workbench-contracts": "0.1.0",
+    "@workbench/workbench-db": "0.1.0",
+    "@workbench/workbench-preview-token": "0.1.0",
+    "htmlparser2": "10.0.0",
+    "parse5": "8.0.0",
+    "penpal": "7.0.6",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "4.1.9"
+  }
+}

@@ -1,0 +1,28 @@
+# Validation-only overlay for the existing gateway-only DeerFlow instance.
+# It inherits that instance's validation-only auth setting, locks the host port
+# to loopback, and is not a production contract.
+services:
+  gateway:
+    ports: !override
+      - "127.0.0.1:${WORKBENCH_DEERFLOW_HOST_PORT:-2026}:8001"
+    environment:
+      DEER_FLOW_SKILLS_PATH: /app/skills
+      DEER_FLOW_INTERNAL_AUTH_TOKEN: "${WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN:?WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN is required}"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - "${WORKBENCH_DEERFLOW_VALIDATION_CONFIG_PATH:?WORKBENCH_DEERFLOW_VALIDATION_CONFIG_PATH is required}:/app/backend/config.yaml:ro"
+      - "${DEER_FLOW_EXTENSIONS_CONFIG_PATH:?DEER_FLOW_EXTENSIONS_CONFIG_PATH is required}:/app/backend/extensions_config.json:ro"
+      - "${DEER_FLOW_REPO_ROOT:?DEER_FLOW_REPO_ROOT is required}/skills:/app/skills:ro"
+      - "${WORKBENCH_APP_DIR:?WORKBENCH_APP_DIR is required}/integrations/deerflow/skills:/app/skills/public:ro"
+      - "${WORKBENCH_APP_DIR:?WORKBENCH_APP_DIR is required}/integrations/deerflow/skills/workbench:/app/skills/public/workbench:ro"
+      - "${WORKBENCH_APP_DIR:?WORKBENCH_APP_DIR is required}/integrations/deerflow/runtime-tools/deerflow_workbench_tools:/app/backend/deerflow_workbench_tools:ro"
+      - "${DEER_FLOW_HOME:?DEER_FLOW_HOME is required}:/app/backend/.deer-flow"
+    networks:
+      deer-flow: {}
+      workbench-runtime:
+        aliases: [deerflow]
+
+networks:
+  workbench-runtime:
+    external: true
+    name: "${WORKBENCH_INTERNAL_NETWORK_NAME:?WORKBENCH_INTERNAL_NETWORK_NAME is required}"

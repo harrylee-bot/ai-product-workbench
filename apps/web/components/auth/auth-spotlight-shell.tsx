@@ -55,7 +55,7 @@ export function AuthSpotlightShell({ children }: AuthSpotlightShellProps) {
   const [activeTabId, setActiveTabId] = useState<(typeof navItems)[number]["id"]>(
     navItems[0].id
   );
-  const authCtaLabel = isRegister ? "创建账号" : "登陆";
+  const authCtaLabel = isRegister ? "创建账号" : "登录";
 
   useEffect(() => {
     if (!authOpen) return;
@@ -133,13 +133,15 @@ export function AuthSpotlightShell({ children }: AuthSpotlightShellProps) {
             ))}
           </div>
 
-          <button
-            className="hidden rounded-full bg-white px-6 py-2.5 font-semibold text-gray-900 text-sm transition-colors hover:bg-gray-100 md:block"
-            onClick={() => setAuthOpen(true)}
-            type="button"
-          >
-            {authCtaLabel}
-          </button>
+          <div className="hidden items-center gap-2 md:flex">
+            <button
+              className="rounded-full bg-white px-6 py-2.5 font-semibold text-gray-900 text-sm transition-colors hover:bg-gray-100"
+              onClick={() => setAuthOpen(true)}
+              type="button"
+            >
+              {authCtaLabel}
+            </button>
+          </div>
 
           <button
             aria-expanded={mobileNavOpen}
@@ -195,14 +197,14 @@ export function AuthSpotlightShell({ children }: AuthSpotlightShellProps) {
         {authOpen && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center px-4 py-20">
             <button
-              aria-label="关闭登陆注册窗口"
+              aria-label="关闭登录注册窗口"
               className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
               onClick={() => setAuthOpen(false)}
               type="button"
             />
             <div className="hero-anim hero-reveal relative w-full max-w-[360px] rounded-[16px] border border-white/12 bg-black/42 px-5 pt-14 pb-5 text-white shadow-[0_24px_80px_-36px_rgba(0,0,0,0.95)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:px-6 sm:pt-14 sm:pb-6">
               <button
-                aria-label="关闭登陆注册窗口"
+                aria-label="关闭登录注册窗口"
                 className="absolute top-4 right-4 flex size-8 items-center justify-center rounded-full text-white/50 transition-colors hover:bg-white/10 hover:text-white"
                 onClick={() => setAuthOpen(false)}
                 type="button"

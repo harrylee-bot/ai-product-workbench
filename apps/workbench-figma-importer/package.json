@@ -1,0 +1,39 @@
+{
+  "name": "@workbench/figma-importer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "build-figma-plugin --typecheck --minify",
+    "package": "npm run build && node scripts/package-importer.mjs",
+    "watch": "build-figma-plugin --typecheck --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "figma-plugin": {
+    "editorType": [
+      "figma"
+    ],
+    "id": "workbench-importer",
+    "name": "产品工作台 Importer",
+    "main": "src/main.ts",
+    "ui": "src/ui.tsx"
+  },
+  "dependencies": {
+    "@create-figma-plugin/ui": "4.0.3",
+    "@create-figma-plugin/utilities": "4.0.3",
+    "@noble/hashes": "2.2.0",
+    "canonicalize": "2.1.0",
+    "fflate": "0.8.3",
+    "preact": "10.27.2",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@create-figma-plugin/build": "4.0.3",
+    "@create-figma-plugin/tsconfig": "4.0.3",
+    "@figma/plugin-typings": "1.130.0",
+    "@workbench/workbench-contracts": "0.1.0",
+    "typescript": "^5.9.2",
+    "vitest": "4.1.9"
+  }
+}

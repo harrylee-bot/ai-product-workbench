@@ -1,0 +1,27 @@
+{
+  "name": "@workbench/workbench-import-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.873.0",
+    "@workbench/workbench-content-security": "0.1.0",
+    "@workbench/workbench-contracts": "0.1.0",
+    "@workbench/workbench-db": "0.1.0",
+    "@workbench/workbench-telemetry": "0.1.0",
+    "pg-boss": "12.26.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "4.1.9"
+  }
+}

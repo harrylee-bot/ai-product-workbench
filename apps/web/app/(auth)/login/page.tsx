@@ -4,75 +4,105 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
-import { AuthForm } from "@/components/chat/auth-form";
-import { SubmitButton } from "@/components/chat/submit-button";
-import { toast } from "@/components/chat/toast";
-import { useAuth } from "@/lib/auth/nest-auth";
+import { AuthForm } from "@/components/auth/auth-form";
+import { AuthSubmitButton } from "@/components/auth/auth-submit-button";
+import { authToast } from "@/components/auth/auth-toast";
+import { Button } from "@/components/ui/button";
+import {
+  authRouteWithReturnPath,
+  safeAuthReturnPath,
+} from "@/lib/auth/auth-return-path";
+import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
+import {
+  isEmailLoginIdentifier,
+  isWorkbenchEmail,
+  isWorkbenchUsername,
+  WORKBENCH_PASSWORD_MIN_LENGTH,
+} from "@/lib/auth/workbench-auth.shared";
 
 export default function Page() {
   const searchParams = useSearchParams();
-  const { login } = useAuth();
-  const [email, setEmail] = useState("");
+  const { login, loginWithOidc } = useWorkbenchAuth();
+  const [account, setAccount] = useState("");
   const [isSuccessful, setIsSuccessful] = useState(false);
-  const nextPath = safeNextPath(searchParams.get("next"));
+  const [isSsoPending, setIsSsoPending] = useState(false);
+  const nextPath = safeAuthReturnPath(searchParams.get("next"));
+  const publicRegistrationEnabled =
+    process.env.NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED === "true";
 
   const handleSubmit = async (formData: FormData) => {
-    const emailValue = (formData.get("email") as string) ?? "";
+    const accountValue = ((formData.get("account") as string) ?? "").trim();
     const passwordValue = (formData.get("password") as string) ?? "";
 
-    setEmail(emailValue);
+    setAccount(accountValue);
 
-    if (!emailValue || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailValue)) {
-      toast({ type: "error", description: "请填写有效的邮箱和密码" });
+    const validAccount = isEmailLoginIdentifier(accountValue)
+      ? isWorkbenchEmail(accountValue)
+      : isWorkbenchUsername(accountValue);
+    if (!validAccount) {
+      authToast({ type: "error", description: "请输入有效的用户名或邮箱" });
       return;
     }
-    if (passwordValue.length < 6) {
-      toast({ type: "error", description: "密码至少需要 6 位" });
+    if (passwordValue.length < WORKBENCH_PASSWORD_MIN_LENGTH) {
+      authToast({
+        type: "error",
+        description: `密码至少需要 ${WORKBENCH_PASSWORD_MIN_LENGTH} 位`,
+      });
       return;
     }
 
     try {
-      await login({ email: emailValue, password: passwordValue });
+      await login({ account: accountValue, password: passwordValue });
       setIsSuccessful(true);
       window.location.assign(nextPath);
     } catch {
-      toast({ type: "error", description: "邮箱或密码不正确" });
+      authToast({ type: "error", description: "账号或密码不正确" });
+    }
+  };
+
+  const handleOidcSubmit = async () => {
+    try {
+      setIsSsoPending(true);
+      await loginWithOidc(nextPath);
+    } catch {
+      setIsSsoPending(false);
+      authToast({ type: "error", description: "企业账号登录暂时不可用" });
     }
   };
 
   return (
     <>
-      <AuthForm action={handleSubmit} defaultEmail={email}>
-        <SubmitButton isSuccessful={isSuccessful}>登陆</SubmitButton>
-        <p className="text-center text-[13px] text-muted-foreground">
-          {"还没有团队账号？"}
-          <Link
-            className="text-foreground underline-offset-4 hover:underline"
-            href="/register"
-          >
-            创建一个
-          </Link>
-        </p>
+      <AuthForm action={handleSubmit} defaultAccount={account}>
+        <AuthSubmitButton isSuccessful={isSuccessful}>登录</AuthSubmitButton>
+        {publicRegistrationEnabled && (
+          <p className="text-center text-[13px] text-muted-foreground">
+            {"还没有产品账号？"}
+            <Link
+              className="text-foreground underline-offset-4 hover:underline"
+              href={authRouteWithReturnPath("/register", nextPath)}
+            >
+              创建一个
+            </Link>
+          </p>
+        )}
       </AuthForm>
+
+      <div className="flex items-center gap-3" aria-hidden="true">
+        <span className="h-px flex-1 bg-border/60" />
+        <span className="text-xs text-muted-foreground">或</span>
+        <span className="h-px flex-1 bg-border/60" />
+      </div>
+
+      <form action={handleOidcSubmit} className="flex flex-col">
+        <Button
+          aria-disabled={isSsoPending}
+          disabled={isSsoPending}
+          type="submit"
+          variant="outline"
+        >
+          企业 SSO 登录
+        </Button>
+      </form>
     </>
   );
-}
-
-function safeNextPath(value: string | null) {
-  if (!value?.startsWith("/") || value.startsWith("//")) return "/";
-  if (value.includes("\\") || hasControlCharacter(value)) return "/";
-  try {
-    const url = new URL(value, "http://local.invalid");
-    if (url.origin !== "http://local.invalid") return "/";
-    return `${url.pathname}${url.search}${url.hash}`;
-  } catch {
-    return "/";
-  }
-}
-
-function hasControlCharacter(value: string) {
-  return Array.from(value).some((char) => {
-    const code = char.charCodeAt(0);
-    return code < 32 || code === 127;
-  });
 }

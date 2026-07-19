@@ -1,0 +1,52 @@
+{
+  "name": "@workbench/workbench-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./figma-export": {
+      "types": "./dist/figma-export.d.ts",
+      "import": "./dist/figma-export.js",
+      "default": "./dist/figma-export.js"
+    },
+    "./prototype": {
+      "types": "./dist/prototype.d.ts",
+      "import": "./dist/prototype.js",
+      "default": "./dist/prototype.js"
+    }
+  },
+  "files": [
+    "dist",
+    "openapi"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "generate:openapi": "tsx scripts/generate-openapi.ts",
+    "check:openapi": "tsx scripts/generate-openapi.ts --check",
+    "lint:openapi": "redocly lint openapi/workbench.v1.yaml --config redocly.yaml",
+    "validate:openapi": "npm run check:openapi && npm run lint:openapi && node scripts/validate-openapi.js"
+  },
+  "dependencies": {
+    "canonicalize": "2.1.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "7.3.4",
+    "@redocly/cli": "2.38.0",
+    "typescript": "^5.9.2",
+    "vitest": "4.1.9",
+    "yaml": "^2.8.1"
+  }
+}

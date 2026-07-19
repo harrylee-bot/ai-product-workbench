@@ -1,0 +1,22 @@
+{
+  "schema": "workbench.knowledge-retrieval-evaluation-results.v1",
+  "datasetId": "zh-knowledge-smoke-r1",
+  "datasetSha256": "31d36fb86f9b6a069ebef0c71b74a5ef134ec52c7b9f28e1155e8ad53cdd1b04",
+  "cases": [
+    {
+      "caseId": "acceptance-rules",
+      "latencyMs": 45,
+      "items": [
+        { "chunkId": "chunk_acceptance", "route": "production" },
+        { "chunkId": "chunk_unrelated", "route": "production" }
+      ]
+    },
+    {
+      "caseId": "original-source",
+      "latencyMs": 60,
+      "items": [
+        { "chunkId": "chunk_source", "route": "source_lookup" }
+      ]
+    }
+  ]
+}

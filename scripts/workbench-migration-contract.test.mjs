@@ -1,0 +1,177 @@
+import assert from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
+import test from "node:test";
+
+const migrationsDirectory = new URL(
+  "../packages/workbench-db/prisma/migrations/",
+  import.meta.url,
+);
+const exportDeliveryMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260718020000_export_delivery_matrix/migration.sql",
+  import.meta.url,
+), "utf8");
+const canvasSnapshotDigestMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260719010000_canvas_grant_snapshot_digest/migration.sql",
+  import.meta.url,
+), "utf8");
+const canvasStateAckDigestMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260719030000_canvas_state_ack_digest/migration.sql",
+  import.meta.url,
+), "utf8");
+const runtimeAttemptStatusMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260719015000_runtime_attempt_submission_unknown_status/migration.sql",
+  import.meta.url,
+), "utf8");
+const runtimeExecutionDurabilityMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260719020000_runtime_execution_durability/migration.sql",
+  import.meta.url,
+), "utf8");
+const triggerSearchPathMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260719050000_trigger_function_search_path_hardening/migration.sql",
+  import.meta.url,
+), "utf8");
+const extensionProvisioning = await readFile(new URL(
+  "../deploy/workbench-postgres-extensions.sql",
+  import.meta.url,
+), "utf8");
+const migratorEntrypoint = await readFile(new URL(
+  "../deploy/workbench-migrate.sh",
+  import.meta.url,
+), "utf8");
+
+test("export packaging backfill restores the mutation guard", () => {
+  const disableGuard = exportDeliveryMigration.indexOf(
+    'DISABLE TRIGGER "export_jobs_mutation_guard"',
+  );
+  const backfill = exportDeliveryMigration.indexOf('UPDATE "export_jobs"');
+  const enableGuard = exportDeliveryMigration.indexOf(
+    'ENABLE TRIGGER "export_jobs_mutation_guard"',
+  );
+
+  assert(disableGuard >= 0, "migration must disable the guard before schema backfill");
+  assert(backfill > disableGuard, "schema backfill must run after the guard is disabled");
+  assert(enableGuard > backfill, "migration must restore the guard after schema backfill");
+});
+
+test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
+  const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
+  const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
+  assert.equal(migrationCount, 62, "candidate migration inventory must be updated explicitly");
+  assert(migrationEntries.some((entry) => (
+    entry.isDirectory()
+    && entry.name === "20260719010000_canvas_grant_snapshot_digest"
+  )));
+
+  const sessionColumn = canvasSnapshotDigestMigration.indexOf(
+    'ALTER TABLE "canvas_agent_sessions"\nADD COLUMN "snapshot_sha256" CHAR(64) NOT NULL DEFAULT repeat(\'0\', 64)',
+  );
+  const grantColumn = canvasSnapshotDigestMigration.indexOf(
+    'ALTER TABLE "canvas_tool_grants"\nADD COLUMN "snapshot_sha256" CHAR(64) NOT NULL DEFAULT repeat(\'0\', 64)',
+  );
+  const revokeLegacy = canvasSnapshotDigestMigration.indexOf(
+    'UPDATE "canvas_tool_grants"\nSET "revoked_at"',
+  );
+  const cancelLegacy = canvasSnapshotDigestMigration.indexOf(
+    'UPDATE "canvas_agent_sessions"\nSET "status" = \'cancelled\'',
+  );
+  const removeLegacyDefault = canvasSnapshotDigestMigration.indexOf(
+    'ALTER COLUMN "snapshot_sha256" DROP DEFAULT',
+  );
+
+  assert(sessionColumn >= 0 && grantColumn >= 0, "session and grant must both persist the digest");
+  assert(revokeLegacy > grantColumn, "legacy grants must be revoked after adding the digest columns");
+  assert(cancelLegacy > revokeLegacy, "legacy sessions must be cancelled after grant revocation");
+  assert(
+    removeLegacyDefault > cancelLegacy,
+    "legacy authorization must be fenced before removing the one-time backfill default",
+  );
+  assert.match(
+    canvasSnapshotDigestMigration,
+    /UPDATE "canvas_tool_grants"[\s\S]*WHERE "revoked_at" IS NULL;/u,
+    "the migration must leave already-revoked immutable grants untouched",
+  );
+  assert.doesNotMatch(
+    canvasSnapshotDigestMigration,
+    /SET "snapshot_sha256"/u,
+    "legacy digests must be backfilled by ADD COLUMN defaults without firing immutable row guards",
+  );
+  assert.match(canvasSnapshotDigestMigration, /canvas_agent_sessions_snapshot_sha256_check/u);
+  assert.match(canvasSnapshotDigestMigration, /CANVAS_AGENT_SESSION_SNAPSHOT_IMMUTABLE/u);
+  assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_IMMUTABLE/u);
+  assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_SCOPE_INVALID/u);
+});
+
+test("Canvas command ACKs bind canonical state digests before and after execution", () => {
+  assert.match(canvasStateAckDigestMigration, /canvas_state_sha256_before/u);
+  assert.match(canvasStateAckDigestMigration, /canvas_state_sha256_after/u);
+  assert.match(canvasStateAckDigestMigration, /expected_canvas_state_sha256/u);
+  assert.match(canvasStateAckDigestMigration, /acknowledged_canvas_state_sha256/u);
+  assert.match(canvasStateAckDigestMigration, /canvas_tool_invocations_state_digest_check/u);
+  assert.match(canvasStateAckDigestMigration, /canvas_client_commands_state_digest_check/u);
+  assert.match(canvasStateAckDigestMigration, /CANVAS_TOOL_INVOCATION_STATE_BEFORE_IMMUTABLE/u);
+  assert.match(canvasStateAckDigestMigration, /CANVAS_TOOL_INVOCATION_STATE_AFTER_IMMUTABLE/u);
+  assert.match(canvasStateAckDigestMigration, /CANVAS_CLIENT_COMMAND_EXPECTED_STATE_INVALID/u);
+  assert(
+    canvasStateAckDigestMigration.indexOf('UPDATE "canvas_tool_invocations"')
+      < canvasStateAckDigestMigration.indexOf('canvas_tool_invocations_state_digest_check'),
+    "legacy terminal invocations must be backfilled before the lifecycle constraint is installed",
+  );
+});
+
+test("Runtime execution durability fences owners, submissions, and external event effects", () => {
+  assert.equal(
+    runtimeAttemptStatusMigration.trim(),
+    "ALTER TYPE \"RuntimeAttemptStatus\" ADD VALUE 'submission_unknown' AFTER 'submitting';",
+    "the new enum value must have its own committed Prisma migration",
+  );
+  assert.doesNotMatch(runtimeExecutionDurabilityMigration, /ALTER TYPE "RuntimeAttemptStatus"/u);
+  assert.match(runtimeExecutionDurabilityMigration, /^BEGIN;/u);
+  assert.match(runtimeExecutionDurabilityMigration, /execution_owner_id/u);
+  assert.match(runtimeExecutionDurabilityMigration, /execution_epoch/u);
+  assert.match(runtimeExecutionDurabilityMigration, /execution_lease_expires_at/u);
+  assert.match(runtimeExecutionDurabilityMigration, /\^wbrt:\[0-9a-f\]\{64\}\$/u);
+  assert.match(runtimeExecutionDurabilityMigration, /public\.digest\("id", 'sha256'\)/u);
+  assert.match(runtimeExecutionDurabilityMigration, /runtime_attempts_provider_idempotency_state_check/u);
+  assert.match(runtimeExecutionDurabilityMigration, /runtime_external_events_attempt_event_key/u);
+  assert.match(runtimeExecutionDurabilityMigration, /runtime_external_events_attempt_sequence_key/u);
+  assert.match(runtimeExecutionDurabilityMigration, /RUNTIME_EXTERNAL_EVENT_IMMUTABLE/u);
+});
+
+test("all application trigger functions use a fixed trusted search path", () => {
+  assert.match(triggerSearchPathMigration, /FROM pg_trigger AS trigger/u);
+  assert.match(triggerSearchPathMigration, /trigger\."tgisinternal" = FALSE/u);
+  assert.match(triggerSearchPathMigration, /dependency\."deptype" = 'e'/u);
+  assert.match(
+    triggerSearchPathMigration,
+    /ALTER FUNCTION %I\.%I\(%s\) SET search_path TO pg_catalog, public/u,
+  );
+  assert.match(triggerSearchPathMigration, /TRIGGER_FUNCTION_SEARCH_PATH_NOT_HARDENED/u);
+});
+
+test("database extensions are provisioned outside least-privilege application migrations", async () => {
+  const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
+  for (const entry of migrationEntries) {
+    if (!entry.isDirectory()) continue;
+    const migration = await readFile(new URL(
+      `${entry.name}/migration.sql`,
+      migrationsDirectory,
+    ), "utf8");
+    assert.doesNotMatch(
+      migration,
+      /\bCREATE\s+EXTENSION\b/iu,
+      `${entry.name} must not require infrastructure-admin privileges`,
+    );
+  }
+
+  for (const extension of ["vector", "pg_trgm", "pgcrypto"]) {
+    assert.match(
+      extensionProvisioning,
+      new RegExp(`CREATE\\s+EXTENSION\\s+IF\\s+NOT\\s+EXISTS\\s+${extension}\\b`, "iu"),
+    );
+  }
+  assert(
+    migratorEntrypoint.indexOf("assert-workbench-postgres-extensions.mjs --check")
+      < migratorEntrypoint.indexOf("migrate:deploy"),
+    "the migrator must fail closed on missing or unsupported extensions before Prisma runs",
+  );
+});

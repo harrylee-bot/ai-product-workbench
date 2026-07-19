@@ -1,0 +1,21 @@
+{
+  "CORSRules": [
+    {
+      "AllowedHeaders": [
+        "content-length",
+        "content-type",
+        "x-amz-*"
+      ],
+      "AllowedMethods": [
+        "PUT"
+      ],
+      "AllowedOrigins": [
+        "https://workbench.example.com"
+      ],
+      "ExposeHeaders": [
+        "ETag"
+      ],
+      "MaxAgeSeconds": 3600
+    }
+  ]
+}

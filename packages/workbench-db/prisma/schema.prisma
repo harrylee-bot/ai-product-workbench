@@ -1,0 +1,2338 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("WORKBENCH_DATABASE_URL")
+}
+
+enum PrincipalStatus {
+  active
+  disabled
+}
+
+enum WorkspaceRole {
+  owner
+  admin
+  member
+}
+
+enum ProjectStatus {
+  active
+  archived
+}
+
+enum ProjectRole {
+  owner
+  editor
+  viewer
+}
+
+enum ProjectInvitationStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+enum InvitationDeliveryStatus {
+  not_configured
+}
+
+enum ThreadStatus {
+  active
+  archived
+}
+
+enum ThreadEntryRole {
+  user
+  assistant
+  system
+}
+
+enum ThreadEntryKind {
+  message
+  activity
+  approval
+}
+
+enum RunStatus {
+  queued
+  running
+  waiting_input
+  cancelling
+  succeeded
+  failed
+  cancelled
+}
+
+enum RunPhase {
+  understanding
+  retrieving_knowledge
+  planning
+  generating
+  validating
+  publishing
+}
+
+enum SubmissionIntentStatus {
+  pending
+  submitting
+  submitted
+  cancelled
+}
+
+enum SubmissionIntentAttachmentKind {
+  existing
+  upload
+}
+
+enum RuntimeAttemptStatus {
+  pending
+  submitting
+  submission_unknown
+  running
+  waiting_input
+  cancelling
+  succeeded
+  failed
+  cancelled
+}
+
+enum RuntimeExternalEventStatus {
+  pending
+  processed
+}
+
+enum KnowledgeRetrievalInvocationStatus {
+  in_flight
+  succeeded
+  failed
+  discarded
+  abandoned
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+  submitted
+  expired
+}
+
+enum CanvasAgentSessionStatus {
+  active
+  completed
+  cancelled
+  expired
+}
+
+enum CanvasToolInvocationStatus {
+  in_flight
+  waiting_client
+  succeeded
+  waiting_approval
+  failed
+  cancelled
+}
+
+enum CanvasClientCommandStatus {
+  pending
+  acknowledged
+  expired
+  cancelled
+}
+
+enum CanvasVisualCapabilityStatus {
+  pending
+  ready
+  failed
+  expired
+}
+
+enum ArtifactKind {
+  prd
+  prototype
+  image
+  code
+  document
+  data
+  design_system
+}
+
+enum ArtifactVersionStatus {
+  staging
+  ready
+  rejected
+}
+
+enum PrototypePatchProjectionStatus {
+  active
+  paused
+  degraded
+  finalized
+  discarded
+}
+
+enum PrototypePatchApplicationOutcome {
+  applied
+  degraded
+}
+
+enum ArtifactVersionReaction {
+  like
+  dislike
+}
+
+enum BlobStatus {
+  pending
+  ready
+  quarantined
+  deleted
+}
+
+enum FileStatus {
+  uploading
+  verifying
+  ready
+  failed
+  quarantined
+  deleted
+}
+
+enum FileUploadStatus {
+  initiating
+  initiated
+  completing
+  completed
+  aborting
+  aborted
+  expired
+  failed
+}
+
+enum FileExtractionStatus {
+  queued
+  running
+  ready
+  unsupported
+  failed
+}
+
+enum ImportSourceKind {
+  file
+  design_md
+  url_snapshot
+  github_snapshot
+  figma_snapshot
+}
+
+enum ImportSourceStatus {
+  pending
+  ready
+  failed
+  deleted
+}
+
+enum ImportSourceAttemptStatus {
+  queued
+  running
+  succeeded
+  retryable_failed
+  terminal_failed
+}
+
+enum BlobScanStatus {
+  queued
+  running
+  clean
+  infected
+  failed
+}
+
+enum FileVerificationAttemptStatus {
+  running
+  succeeded
+  retryable_failed
+  terminal_failed
+}
+
+enum ShareScope {
+  view
+  remix
+}
+
+enum ShareStatus {
+  active
+  revoked
+  expired
+}
+
+enum ExportStatus {
+  queued
+  running
+  cancelling
+  succeeded
+  failed
+  cancelled
+}
+
+enum ExportJobPurpose {
+  export
+  preview
+}
+
+enum ProjectReleaseStatus {
+  building
+  ready
+  failed
+}
+
+enum ExportFormat {
+  html
+  react
+  figma
+  mcp
+}
+
+enum ExportPackaging {
+  single_file
+  zip
+}
+
+enum ExternalExportTarget {
+  ai_studio
+  netlify
+  lovable
+  bolt
+}
+
+enum ExternalExportAuthentication {
+  not_required
+  required
+  authenticated
+}
+
+enum ExternalExportDeliveryStatus {
+  pending_confirmation
+  queued
+  running
+  cancelling
+  succeeded
+  failed
+  cancelled
+}
+
+enum ExportSelectionKind {
+  release
+  board
+  board_nodes
+  artifact
+}
+
+enum KnowledgeReleaseStatus {
+  building
+  ready
+  failed
+  retired
+}
+
+enum KnowledgeSourceKind {
+  vault_markdown
+  storage_asset
+  project_upload
+}
+
+enum KnowledgeRoute {
+  production
+  source_lookup
+  excluded
+  quarantine
+}
+
+enum EmbeddingProfileStatus {
+  candidate
+  poc
+  adopted
+  retired
+}
+
+enum RetrievalProfileStatus {
+  candidate
+  poc
+  adopted
+  retired
+}
+
+enum KnowledgeProfileKind {
+  embedding
+  retrieval
+}
+
+enum KnowledgeProfileScope {
+  global
+}
+
+enum KnowledgeProfileOperatorAction {
+  grant
+  revoke
+}
+
+enum KnowledgeEmbeddingBatchStatus {
+  pending
+  running
+  ready
+  failed
+}
+
+// Better Auth owns only these technical identity/session tables. Workbench
+// authorization remains in Principal, WorkspaceMember, and ProjectMember.
+model AuthUser {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  email           String        @unique
+  username        String?       @unique
+  displayUsername String?       @map("display_username")
+  emailVerified   Boolean       @map("email_verified")
+  image           String?
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
+  sessions        AuthSession[]
+  accounts        AuthAccount[]
+
+  @@map("auth_users")
+}
+
+model AuthSession {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  token     String   @unique
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  userId    String   @map("user_id") @db.Uuid
+  user      AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("auth_sessions")
+}
+
+model AuthAccount {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id") @db.Uuid
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz(6)
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(6)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @map("updated_at") @db.Timestamptz(6)
+  user                  AuthUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("auth_accounts")
+}
+
+model AuthVerification {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([identifier])
+  @@map("auth_verifications")
+}
+
+model AuthJwk {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  publicKey  String    @map("public_key")
+  privateKey String    @map("private_key")
+  createdAt  DateTime  @map("created_at") @db.Timestamptz(6)
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  @@map("auth_jwks")
+}
+
+model Principal {
+  id                              String                            @id @default(cuid())
+  issuer                          String
+  subject                         String
+  email                           String?
+  displayName                     String?                           @map("display_name")
+  status                          PrincipalStatus                   @default(active)
+  createdAt                       DateTime                          @default(now()) @map("created_at")
+  updatedAt                       DateTime                          @updatedAt @map("updated_at")
+  memberships                     WorkspaceMember[]
+  projectMemberships              ProjectMember[]
+  createdWorkspaces               Workspace[]                       @relation("WorkspaceCreator")
+  createdProjects                 Project[]                         @relation("ProjectCreator")
+  createdThreads                  Thread[]                          @relation("ThreadCreator")
+  createdRuns                     Run[]
+  createdSubmissionIntents        SubmissionIntent[]                @relation("SubmissionIntentCreator")
+  uploadedFiles                   FileAsset[]                       @relation("FileUploader")
+  createdShares                   ShareGrant[]                      @relation("ShareCreator")
+  createdReleases                 ProjectRelease[]                  @relation("ProjectReleaseCreator")
+  createdExports                  ExportJob[]                       @relation("ExportCreator")
+  createdExternalExportDeliveries ExternalExportDelivery[]          @relation("ExternalExportDeliveryCreator")
+  createdPreviews                 ProjectPreview[]                  @relation("PreviewCreator")
+  createdLineages                 ProjectLineage[]                  @relation("ProjectLineageCreator")
+  createdDuplicates               ProjectDuplicate[]                @relation("ProjectDuplicateCreator")
+  designSystemImports             DesignSystemImport[]              @relation("DesignSystemImportCreator")
+  designSystemCreations           DesignSystemCreation[]            @relation("DesignSystemCreationCreator")
+  boardReplacements               BoardReplaceReceipt[]             @relation("BoardReplaceCreator")
+  artifactVersionEdits            ArtifactVersionEditReceipt[]      @relation("ArtifactVersionEditCreator")
+  artifactCreations               ArtifactCreationReceipt[]         @relation("ArtifactCreationCreator")
+  decidedApprovals                RunApproval[]                     @relation("ApprovalDecider")
+  canvasAgentSessions             CanvasAgentSession[]              @relation("CanvasAgentSessionPrincipal")
+  artifactVersionPreferences      ArtifactVersionPreference[]
+  communicationPreferences        PrincipalCommunicationPreference?
+  knowledgeToolGrants             KnowledgeToolGrant[]              @relation("KnowledgeToolGrantPrincipal")
+  knowledgeProfileOperatorEvents  KnowledgeProfileOperatorEvent[]
+  knowledgeProfileAdoptions       KnowledgeProfileAdoptionReceipt[] @relation("KnowledgeProfileAdoptionActor")
+  createdProjectInvitations       ProjectInvitation[]               @relation("ProjectInvitationCreator")
+  acceptedProjectInvitations      ProjectInvitation[]               @relation("ProjectInvitationAcceptor")
+  createdImportSources            ImportSource[]                    @relation("ImportSourceCreator")
+
+  @@unique([issuer, subject])
+  @@index([email])
+  @@map("principals")
+}
+
+model PrincipalCommunicationPreference {
+  principalId         String    @id @map("principal_id")
+  productUpdatesEmail Boolean   @default(false) @map("product_updates_email")
+  researchInvitations Boolean   @default(false) @map("research_invitations")
+  revision            Int       @default(0)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  principal           Principal @relation(fields: [principalId], references: [id], onDelete: Cascade)
+
+  @@map("principal_communication_preferences")
+}
+
+model Workspace {
+  id                 String              @id @default(cuid())
+  slug               String              @unique
+  name               String
+  createdById        String              @map("created_by_id")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  createdBy          Principal           @relation("WorkspaceCreator", fields: [createdById], references: [id])
+  members            WorkspaceMember[]
+  projects           Project[]
+  knowledgeReleases  KnowledgeRelease[]
+  projectLineages    ProjectLineage[]
+  projectInvitations ProjectInvitation[]
+
+  @@index([createdById])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  workspaceId String        @map("workspace_id")
+  principalId String        @map("principal_id")
+  role        WorkspaceRole @default(member)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  principal   Principal     @relation(fields: [principalId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, principalId])
+  @@index([principalId])
+  @@map("workspace_members")
+}
+
+model Project {
+  id                    String                    @id @default(cuid())
+  workspaceId           String                    @map("workspace_id")
+  createdById           String                    @map("created_by_id")
+  title                 String
+  summary               String?
+  status                ProjectStatus             @default(active)
+  revision              Int                       @default(0)
+  createdAt             DateTime                  @default(now()) @map("created_at")
+  updatedAt             DateTime                  @updatedAt @map("updated_at")
+  workspace             Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy             Principal                 @relation("ProjectCreator", fields: [createdById], references: [id])
+  members               ProjectMember[]
+  threads               Thread[]
+  artifacts             Artifact[]
+  boards                Board[]
+  files                 FileAsset[]
+  fileUploads           FileUploadSession[]
+  releases              ProjectRelease[]
+  shares                ShareGrant[]
+  lineage               ProjectLineage?
+  sourceDuplicates      ProjectDuplicate[]        @relation("ProjectDuplicateSource")
+  duplicateReceipt      ProjectDuplicate?         @relation("ProjectDuplicateTarget")
+  designSystemImports   DesignSystemImport[]      @relation("DesignSystemImportTargetProject")
+  designSystemCreations DesignSystemCreation[]    @relation("DesignSystemCreationProject")
+  boardReplaceReceipts  BoardReplaceReceipt[]
+  artifactCreations     ArtifactCreationReceipt[] @relation("ArtifactCreationProject")
+  knowledgeToolGrants   KnowledgeToolGrant[]      @relation("KnowledgeToolGrantProject")
+  invitations           ProjectInvitation[]
+  previews              ProjectPreview[]
+  submissionIntents     SubmissionIntent[]
+  canvasAgentSessions   CanvasAgentSession[]
+  importSources         ImportSource[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, status, updatedAt])
+  @@index([createdById])
+  @@map("projects")
+}
+
+model ProjectMember {
+  projectId   String      @map("project_id")
+  workspaceId String      @map("workspace_id")
+  principalId String      @map("principal_id")
+  role        ProjectRole
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  project     Project     @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Restrict)
+  principal   Principal   @relation(fields: [principalId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([projectId, principalId])
+  @@index([principalId, role, projectId])
+  @@index([workspaceId, principalId])
+  @@map("project_members")
+}
+
+model ProjectInvitation {
+  id             String                   @id @default(cuid())
+  projectId      String                   @map("project_id")
+  workspaceId    String                   @map("workspace_id")
+  email          String                   @db.VarChar(320)
+  role           ProjectRole
+  status         ProjectInvitationStatus  @default(pending)
+  deliveryStatus InvitationDeliveryStatus @default(not_configured) @map("delivery_status")
+  createdById    String                   @map("created_by_id")
+  acceptedById   String?                  @map("accepted_by_id")
+  idempotencyKey String                   @map("idempotency_key")
+  requestHash    String                   @map("request_hash") @db.Char(64)
+  tokenHash      String                   @unique @map("token_hash") @db.Char(64)
+  tokenKeyId     String                   @map("token_key_id") @db.VarChar(32)
+  revision       Int                      @default(0)
+  expiresAt      DateTime                 @map("expires_at") @db.Timestamptz(6)
+  acceptedAt     DateTime?                @map("accepted_at") @db.Timestamptz(6)
+  revokedAt      DateTime?                @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  project        Project                  @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: Restrict)
+  workspace      Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  createdBy      Principal                @relation("ProjectInvitationCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  acceptedBy     Principal?               @relation("ProjectInvitationAcceptor", fields: [acceptedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([projectId, createdById, idempotencyKey])
+  @@index([projectId, status, createdAt, id])
+  @@index([workspaceId, email])
+  @@index([createdById, createdAt])
+  @@index([acceptedById])
+  @@map("project_invitations")
+}
+
+model Thread {
+  id                  String               @id @default(cuid())
+  projectId           String               @map("project_id")
+  createdById         String               @map("created_by_id")
+  title               String
+  status              ThreadStatus         @default(active)
+  revision            Int                  @default(0)
+  entrySequence       Int                  @default(0) @map("entry_sequence")
+  idempotencyKey      String?              @map("idempotency_key")
+  requestHash         String?              @map("request_hash")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy           Principal            @relation("ThreadCreator", fields: [createdById], references: [id])
+  entries             ThreadEntry[]
+  runs                Run[]
+  submissionIntents   SubmissionIntent[]
+  runtimeBinding      RuntimeBinding?
+  canvasAgentSessions CanvasAgentSession[]
+
+  @@unique([projectId, idempotencyKey])
+  @@unique([id, projectId])
+  @@index([projectId, status, updatedAt])
+  @@index([createdById])
+  @@map("threads")
+}
+
+model SubmissionIntent {
+  id                   String                       @id @default(cuid())
+  projectId            String                       @map("project_id")
+  threadId             String                       @map("thread_id")
+  createdById          String                       @map("created_by_id")
+  status               SubmissionIntentStatus       @default(pending)
+  request              Json
+  requestHash          String                       @map("request_hash") @db.Char(64)
+  idempotencyKey       String                       @map("idempotency_key")
+  runIdempotencyKey    String                       @map("run_idempotency_key")
+  runId                String?                      @unique @map("run_id")
+  lastFailureCode      String?                      @map("last_failure_code") @db.VarChar(120)
+  lastFailureDetail    String?                      @map("last_failure_detail") @db.VarChar(2000)
+  lastFailureRetryable Boolean?                     @map("last_failure_retryable")
+  revision             Int                          @default(0)
+  submittedAt          DateTime?                    @map("submitted_at") @db.Timestamptz(6)
+  cancelledAt          DateTime?                    @map("cancelled_at") @db.Timestamptz(6)
+  createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  project              Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  thread               Thread                       @relation(fields: [threadId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  createdBy            Principal                    @relation("SubmissionIntentCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  run                  Run?                         @relation("SubmissionIntentRun", fields: [runId, threadId], references: [id, threadId], onDelete: NoAction, onUpdate: Restrict)
+  attachments          SubmissionIntentAttachment[]
+
+  @@unique([id, projectId])
+  @@unique([threadId, idempotencyKey])
+  @@unique([threadId, runIdempotencyKey])
+  @@unique([runId, threadId])
+  @@index([projectId, createdById, status, updatedAt])
+  @@index([createdById, createdAt])
+  @@map("submission_intents")
+}
+
+model SubmissionIntentAttachment {
+  submissionIntentId String                         @map("submission_intent_id")
+  projectId          String                         @map("project_id")
+  position           Int
+  kind               SubmissionIntentAttachmentKind
+  fileAssetId        String?                        @map("file_asset_id")
+  clientFingerprint  String?                        @map("client_fingerprint") @db.VarChar(256)
+  fileName           String?                        @map("file_name") @db.VarChar(500)
+  declaredMediaType  String?                        @map("declared_media_type") @db.VarChar(255)
+  byteSize           BigInt?                        @map("byte_size")
+  lastModified       BigInt?                        @map("last_modified")
+  createdAt          DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  submissionIntent   SubmissionIntent               @relation(fields: [submissionIntentId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  file               FileAsset?                     @relation(fields: [fileAssetId, projectId], references: [id, projectId], onDelete: NoAction, onUpdate: Restrict)
+
+  @@id([submissionIntentId, position])
+  @@unique([submissionIntentId, fileAssetId])
+  @@unique([submissionIntentId, clientFingerprint])
+  @@index([fileAssetId])
+  @@index([projectId])
+  @@map("submission_intent_attachments")
+}
+
+model ThreadEntry {
+  id              String          @id @default(cuid())
+  threadId        String          @map("thread_id")
+  sequence        Int
+  role            ThreadEntryRole
+  kind            ThreadEntryKind @default(message)
+  content         Json
+  producedByRunId String?         @map("produced_by_run_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  thread          Thread          @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  producedByRun   Run?            @relation("RunProducedEntries", fields: [producedByRunId], references: [id], onDelete: SetNull)
+  outputForRun    Run?            @relation("RunOutputEntry")
+
+  @@unique([threadId, sequence])
+  @@index([producedByRunId])
+  @@map("thread_entries")
+}
+
+model Run {
+  id                           String                     @id @default(cuid())
+  projectId                    String                     @map("project_id")
+  threadId                     String                     @map("thread_id")
+  retryOfRunId                 String?                    @map("retry_of_run_id")
+  createdById                  String                     @map("created_by_id")
+  knowledgeReleaseId           String?                    @map("knowledge_release_id")
+  designStyleArtifactVersionId String?                    @map("design_style_artifact_version_id")
+  designStyleSnapshot          Json?                      @map("design_style_snapshot")
+  designStyleSnapshotSha256    String?                    @map("design_style_snapshot_sha256")
+  idempotencyKey               String                     @map("idempotency_key")
+  requestHash                  String                     @map("request_hash")
+  requestId                    String                     @unique @map("request_id")
+  request                      Json
+  status                       RunStatus                  @default(queued)
+  phase                        RunPhase?
+  phaseLabel                   String?                    @map("phase_label")
+  progress                     Float?
+  modelId                      String                     @map("model_id")
+  traceId                      String                     @map("trace_id")
+  attempt                      Int                        @default(0)
+  eventSequence                Int                        @default(0) @map("event_sequence")
+  executionOwnerId             String?                    @map("execution_owner_id") @db.VarChar(128)
+  executionEpoch               Int                        @default(0) @map("execution_epoch")
+  executionHeartbeatAt         DateTime?                  @map("execution_heartbeat_at") @db.Timestamptz(6)
+  executionLeaseExpiresAt      DateTime?                  @map("execution_lease_expires_at") @db.Timestamptz(6)
+  cancelRequestedAt            DateTime?                  @map("cancel_requested_at")
+  startedAt                    DateTime?                  @map("started_at")
+  finishedAt                   DateTime?                  @map("finished_at")
+  errorCode                    String?                    @map("error_code")
+  errorDetail                  String?                    @map("error_detail")
+  errorRetryable               Boolean?                   @map("error_retryable")
+  cancellationReason           String?                    @map("cancellation_reason")
+  outputEntryId                String?                    @unique @map("output_entry_id")
+  createdAt                    DateTime                   @default(now()) @map("created_at")
+  updatedAt                    DateTime                   @updatedAt @map("updated_at")
+  thread                       Thread                     @relation(fields: [threadId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  retryOfRun                   Run?                       @relation("RunRetries", fields: [retryOfRunId, threadId], references: [id, threadId], onDelete: Restrict, onUpdate: Restrict)
+  retries                      Run[]                      @relation("RunRetries")
+  createdBy                    Principal                  @relation(fields: [createdById], references: [id])
+  knowledgeRelease             KnowledgeRelease?          @relation(fields: [knowledgeReleaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  designStyleArtifactVersion   ArtifactVersion?           @relation("RunDesignStyleArtifactVersion", fields: [designStyleArtifactVersionId, projectId], references: [id, projectId], onDelete: NoAction, onUpdate: Restrict)
+  events                       RunEvent[]
+  draft                        RunDraft?
+  approvals                    RunApproval[]
+  producedEntries              ThreadEntry[]              @relation("RunProducedEntries")
+  outputEntry                  ThreadEntry?               @relation("RunOutputEntry", fields: [outputEntryId], references: [id], onDelete: SetNull)
+  artifactVersions             ArtifactVersion[]
+  runtimeAttempts              RuntimeAttempt[]
+  knowledgeToolGrants          KnowledgeToolGrant[]       @relation("KnowledgeToolGrantRun")
+  submissionIntent             SubmissionIntent?          @relation("SubmissionIntentRun")
+  canvasAgentSessions          CanvasAgentSession[]
+  prototypePatchProjections    PrototypePatchProjection[]
+  sourceSnapshots              RunSourceSnapshot[]
+
+  @@unique([threadId, idempotencyKey])
+  @@unique([id, projectId])
+  @@unique([id, threadId])
+  @@index([projectId, createdAt])
+  @@index([threadId, status])
+  @@index([createdById])
+  @@index([knowledgeReleaseId])
+  @@index([designStyleArtifactVersionId])
+  @@index([traceId])
+  @@index([retryOfRunId])
+  @@index([status, executionLeaseExpiresAt])
+  @@map("runs")
+}
+
+model RuntimeBinding {
+  id               String           @id @default(cuid())
+  threadId         String           @unique @map("thread_id")
+  adapter          String
+  externalThreadId String           @map("external_thread_id")
+  metadata         Json
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  thread           Thread           @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  runtimeAttempts  RuntimeAttempt[]
+
+  @@unique([adapter, externalThreadId])
+  @@map("runtime_bindings")
+}
+
+model RuntimeAttempt {
+  id                         String                      @id @default(cuid())
+  runId                      String                      @map("run_id")
+  runtimeBindingId           String                      @map("runtime_binding_id")
+  attempt                    Int
+  adapter                    String
+  externalThreadId           String                      @map("external_thread_id")
+  externalRunId              String?                     @map("external_run_id")
+  providerIdempotencyKey     String?                     @unique @map("provider_idempotency_key") @db.VarChar(128)
+  status                     RuntimeAttemptStatus        @default(pending)
+  lastExternalEventId        String?                     @map("last_external_event_id")
+  externalEventSequence      Int                         @default(0) @map("external_event_sequence")
+  submissionUnknownAt        DateTime?                   @map("submission_unknown_at") @db.Timestamptz(6)
+  executionOwnerId           String?                     @map("execution_owner_id") @db.VarChar(128)
+  executionEpoch             Int                         @default(0) @map("execution_epoch")
+  executionHeartbeatAt       DateTime?                   @map("execution_heartbeat_at") @db.Timestamptz(6)
+  executionLeaseExpiresAt    DateTime?                   @map("execution_lease_expires_at") @db.Timestamptz(6)
+  startedAt                  DateTime?                   @map("started_at")
+  finishedAt                 DateTime?                   @map("finished_at")
+  errorCode                  String?                     @map("error_code")
+  errorDetail                String?                     @map("error_detail")
+  errorRetryable             Boolean?                    @map("error_retryable")
+  createdAt                  DateTime                    @default(now()) @map("created_at")
+  updatedAt                  DateTime                    @updatedAt @map("updated_at")
+  run                        Run                         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runtimeBinding             RuntimeBinding              @relation(fields: [runtimeBindingId], references: [id], onDelete: Cascade)
+  knowledgeToolBudget        KnowledgeToolBudget?
+  canvasAgentSession         CanvasAgentSession?
+  prototypePatchApplications PrototypePatchApplication[]
+  externalEvents             RuntimeExternalEvent[]
+
+  @@unique([runId, attempt])
+  @@unique([id, runId])
+  @@unique([adapter, externalRunId])
+  @@index([runtimeBindingId, status])
+  @@index([externalThreadId, status])
+  @@index([status, executionLeaseExpiresAt])
+  @@map("runtime_attempts")
+}
+
+model RuntimeExternalEvent {
+  id               String                     @id @default(cuid())
+  runtimeAttemptId String                     @map("runtime_attempt_id")
+  runId            String                     @map("run_id")
+  externalRunId    String                     @map("external_run_id") @db.VarChar(512)
+  externalEventId  String                     @map("external_event_id") @db.VarChar(1024)
+  sequence         Int
+  event            String                     @db.VarChar(128)
+  payload          Json
+  payloadSha256    String                     @map("payload_sha256") @db.Char(64)
+  status           RuntimeExternalEventStatus @default(pending)
+  receivedAt       DateTime                   @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt      DateTime?                  @map("processed_at") @db.Timestamptz(6)
+  runtimeAttempt   RuntimeAttempt             @relation(fields: [runtimeAttemptId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([runtimeAttemptId, externalEventId])
+  @@unique([runtimeAttemptId, sequence])
+  @@index([runtimeAttemptId, status, sequence])
+  @@map("runtime_external_events")
+}
+
+model CanvasAgentSession {
+  id                       String                   @id @default(cuid())
+  runtimeAttemptId         String                   @unique @map("runtime_attempt_id")
+  runId                    String                   @map("run_id")
+  projectId                String                   @map("project_id")
+  threadId                 String                   @map("thread_id")
+  principalId              String                   @map("principal_id")
+  boardId                  String                   @map("board_id")
+  clientSessionId          String                   @map("client_session_id") @db.VarChar(128)
+  projectSessionGeneration Int                      @map("project_session_generation")
+  status                   CanvasAgentSessionStatus @default(active)
+  profile                  String                   @db.VarChar(40)
+  declaredTools            Json                     @map("declared_tools")
+  declarationHash          String                   @map("declaration_hash") @db.Char(64)
+  snapshotSha256           String                   @map("snapshot_sha256") @db.Char(64)
+  boardRevision            Int                      @map("board_revision")
+  canvasStateRevision      Int                      @default(0) @map("canvas_state_revision")
+  invocationSequence       Int                      @default(0) @map("invocation_sequence")
+  selectedNodeIds          Json                     @map("selected_node_ids")
+  visibleNodeIds           Json                     @map("visible_node_ids")
+  viewport                 Json
+  activeMutationToolCallId String?                  @map("active_mutation_tool_call_id") @db.VarChar(512)
+  expiresAt                DateTime                 @map("expires_at") @db.Timestamptz(6)
+  createdAt                DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  runtimeAttempt           RuntimeAttempt           @relation(fields: [runtimeAttemptId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  run                      Run                      @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  project                  Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  thread                   Thread                   @relation(fields: [threadId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  principal                Principal                @relation("CanvasAgentSessionPrincipal", fields: [principalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  board                    Board                    @relation(fields: [boardId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  grant                    CanvasToolGrant?
+  invocations              CanvasToolInvocation[]
+  clientCommands           CanvasClientCommand[]
+  visualCapabilities       CanvasVisualCapability[]
+
+  @@unique([id, runId])
+  @@index([runId, status])
+  @@index([projectId, status])
+  @@index([threadId, status])
+  @@index([principalId, createdAt])
+  @@index([boardId, boardRevision])
+  @@map("canvas_agent_sessions")
+}
+
+model CanvasToolGrant {
+  id              String                 @id @db.Uuid
+  agentSessionId  String                 @unique @map("agent_session_id")
+  payloadSha256   String                 @unique @map("payload_sha256") @db.Char(64)
+  declarationHash String                 @map("declaration_hash") @db.Char(64)
+  snapshotSha256  String                 @map("snapshot_sha256") @db.Char(64)
+  issuedAt        DateTime               @map("issued_at") @db.Timestamptz(6)
+  expiresAt       DateTime               @map("expires_at") @db.Timestamptz(6)
+  revokedAt       DateTime?              @map("revoked_at") @db.Timestamptz(6)
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  agentSession    CanvasAgentSession     @relation(fields: [agentSessionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  invocations     CanvasToolInvocation[]
+  visualCapabilities CanvasVisualCapability[]
+
+  @@index([expiresAt])
+  @@map("canvas_tool_grants")
+}
+
+model CanvasToolInvocation {
+  id                        String                     @id @default(cuid())
+  agentSessionId            String                     @map("agent_session_id")
+  grantId                   String                     @map("grant_id") @db.Uuid
+  runId                     String                     @map("run_id")
+  projectId                 String                     @map("project_id")
+  principalId               String                     @map("principal_id")
+  toolCallId                String                     @map("tool_call_id") @db.VarChar(512)
+  toolName                  String                     @map("tool_name") @db.VarChar(80)
+  sequence                  Int
+  requestHash               String                     @map("request_hash") @db.Char(64)
+  request                   Json
+  status                    CanvasToolInvocationStatus @default(in_flight)
+  executionAttempt          Int                        @default(1) @map("execution_attempt")
+  leaseToken                String?                    @map("lease_token") @db.VarChar(128)
+  leaseExpiresAt            DateTime?                  @map("lease_expires_at") @db.Timestamptz(6)
+  boardRevisionBefore       Int                        @map("board_revision_before")
+  boardRevisionAfter        Int?                       @map("board_revision_after")
+  canvasStateRevisionBefore Int                        @map("canvas_state_revision_before")
+  canvasStateRevisionAfter  Int?                       @map("canvas_state_revision_after")
+  canvasStateSha256Before   String                     @map("canvas_state_sha256_before") @db.Char(64)
+  canvasStateSha256After    String?                    @map("canvas_state_sha256_after") @db.Char(64)
+  response                  Json?
+  failureCode               String?                    @map("failure_code") @db.VarChar(120)
+  targetBoardNodeId         String?                    @map("target_board_node_id") @db.VarChar(128)
+  targetArtifactId          String?                    @map("target_artifact_id") @db.VarChar(128)
+  targetArtifactVersionId   String?                    @map("target_artifact_version_id") @db.VarChar(128)
+  targetScreenId            String?                    @map("target_screen_id") @db.VarChar(128)
+  resultArtifactVersionId   String?                    @map("result_artifact_version_id") @db.VarChar(128)
+  satisfiesRunTarget        Boolean                    @default(false) @map("satisfies_run_target")
+  startedAt                 DateTime                   @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt               DateTime?                  @map("completed_at") @db.Timestamptz(6)
+  createdAt                 DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  agentSession              CanvasAgentSession         @relation(fields: [agentSessionId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict)
+  grant                     CanvasToolGrant            @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  clientCommand             CanvasClientCommand?
+  visualCapability           CanvasVisualCapability?
+  resultArtifactVersion     ArtifactVersion?           @relation("CanvasInvocationResultVersion", fields: [resultArtifactVersionId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([agentSessionId, toolCallId])
+  @@unique([agentSessionId, sequence])
+  @@index([runId, status])
+  @@index([projectId, createdAt])
+  @@index([principalId, createdAt])
+  @@index([grantId])
+  @@index([targetArtifactVersionId])
+  @@index([resultArtifactVersionId, projectId])
+  @@index([status, leaseExpiresAt])
+  @@map("canvas_tool_invocations")
+}
+
+model CanvasClientCommand {
+  id                            String                    @id @default(cuid())
+  agentSessionId                String                    @map("agent_session_id")
+  invocationId                  String                    @unique @map("invocation_id")
+  projectId                     String                    @map("project_id")
+  threadId                      String                    @map("thread_id")
+  runId                         String                    @map("run_id")
+  clientSessionId               String                    @map("client_session_id") @db.VarChar(128)
+  projectSessionGeneration      Int                       @map("project_session_generation")
+  toolCallId                    String                    @map("tool_call_id") @db.VarChar(512)
+  status                        CanvasClientCommandStatus @default(pending)
+  boardRevision                 Int                       @map("board_revision")
+  canvasStateRevision           Int                       @map("canvas_state_revision")
+  expectedCanvasStateSha256     String                    @map("expected_canvas_state_sha256") @db.Char(64)
+  acknowledgedCanvasStateSha256 String?                   @map("acknowledged_canvas_state_sha256") @db.Char(64)
+  command                       Json
+  acknowledgement               Json?
+  expiresAt                     DateTime                  @map("expires_at") @db.Timestamptz(6)
+  acknowledgedAt                DateTime?                 @map("acknowledged_at") @db.Timestamptz(6)
+  createdAt                     DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                     DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  agentSession                  CanvasAgentSession        @relation(fields: [agentSessionId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict)
+  invocation                    CanvasToolInvocation      @relation(fields: [invocationId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  visualCapability             CanvasVisualCapability?
+
+  @@unique([agentSessionId, toolCallId])
+  @@index([projectId, clientSessionId, status, createdAt])
+  @@index([runId, status])
+  @@index([expiresAt, status])
+  @@map("canvas_client_commands")
+}
+
+model CanvasVisualCapability {
+  id                String                       @id @db.Uuid
+  agentSessionId    String                       @map("agent_session_id")
+  grantId           String                       @db.Uuid @map("grant_id")
+  invocationId      String                       @unique @map("invocation_id")
+  commandId         String                       @unique @map("command_id")
+  projectId         String                       @map("project_id")
+  runId             String                       @map("run_id")
+  principalId       String                       @map("principal_id")
+  targetBoardNodeId String                       @map("target_board_node_id") @db.VarChar(128)
+  targetArtifactId  String                       @map("target_artifact_id") @db.VarChar(128)
+  targetVersionId   String                       @map("target_version_id") @db.VarChar(128)
+  targetScreenId    String                       @map("target_screen_id") @db.VarChar(128)
+  storageKey        String?                      @unique @map("storage_key")
+  status            CanvasVisualCapabilityStatus @default(pending)
+  mediaType         String?                      @map("media_type") @db.VarChar(80)
+  sha256            String?                      @db.Char(64)
+  byteSize          BigInt?                      @map("byte_size")
+  width             Int?
+  height            Int?
+  failureCode       String?                      @map("failure_code") @db.VarChar(120)
+  expiresAt         DateTime                     @map("expires_at") @db.Timestamptz(6)
+  storageDeletedAt  DateTime?                    @map("storage_deleted_at") @db.Timestamptz(6)
+  createdAt         DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  agentSession      CanvasAgentSession           @relation(fields: [agentSessionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  grant             CanvasToolGrant              @relation(fields: [grantId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  invocation        CanvasToolInvocation         @relation(fields: [invocationId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  command           CanvasClientCommand          @relation(fields: [commandId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([status, expiresAt])
+  @@index([projectId, createdAt])
+  @@index([runId, status])
+  @@map("canvas_visual_capabilities")
+}
+
+model KnowledgeToolBudget {
+  runtimeAttemptId         String                         @id @map("runtime_attempt_id")
+  maxSuccessfulCalls       Int                            @map("max_successful_calls")
+  maxConcurrentCalls       Int                            @map("max_concurrent_calls")
+  maxStartsPerWindow       Int                            @map("max_starts_per_window")
+  windowSeconds            Int                            @map("window_seconds")
+  maxAttemptsPerInvocation Int                            @map("max_attempts_per_invocation")
+  maxTotalStarts           Int                            @map("max_total_starts")
+  windowStartedAt          DateTime                       @map("window_started_at")
+  windowStarts             Int                            @default(0) @map("window_starts")
+  totalStarts              Int                            @default(0) @map("total_starts")
+  createdAt                DateTime                       @default(now()) @map("created_at")
+  updatedAt                DateTime                       @updatedAt @map("updated_at")
+  runtimeAttempt           RuntimeAttempt                 @relation(fields: [runtimeAttemptId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  grants                   KnowledgeToolGrant[]
+  invocations              KnowledgeRetrievalInvocation[]
+
+  @@map("knowledge_tool_budgets")
+}
+
+model KnowledgeToolGrant {
+  id               String                         @id
+  runtimeAttemptId String                         @map("runtime_attempt_id")
+  runId            String                         @map("run_id")
+  principalId      String                         @map("principal_id")
+  projectId        String                         @map("project_id")
+  releaseId        String                         @map("release_id")
+  payloadSha256    String                         @unique @map("payload_sha256")
+  issuedAt         DateTime                       @map("issued_at")
+  expiresAt        DateTime                       @map("expires_at")
+  revokedAt        DateTime?                      @map("revoked_at")
+  createdAt        DateTime                       @default(now()) @map("created_at")
+  budget           KnowledgeToolBudget            @relation(fields: [runtimeAttemptId], references: [runtimeAttemptId], onDelete: Cascade, onUpdate: Restrict)
+  run              Run                            @relation("KnowledgeToolGrantRun", fields: [runId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  principal        Principal                      @relation("KnowledgeToolGrantPrincipal", fields: [principalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  project          Project                        @relation("KnowledgeToolGrantProject", fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  release          KnowledgeRelease               @relation(fields: [releaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  invocations      KnowledgeRetrievalInvocation[]
+
+  @@index([runtimeAttemptId, expiresAt])
+  @@index([runId])
+  @@index([principalId])
+  @@index([projectId])
+  @@index([releaseId])
+  @@map("knowledge_tool_grants")
+}
+
+model KnowledgeRetrievalInvocation {
+  id               String                             @id
+  runtimeAttemptId String                             @map("runtime_attempt_id")
+  invocationId     String                             @map("invocation_id")
+  lastGrantId      String                             @map("last_grant_id")
+  querySha256      String                             @map("query_sha256")
+  status           KnowledgeRetrievalInvocationStatus
+  attemptCount     Int                                @map("attempt_count")
+  leaseToken       String?                            @map("lease_token")
+  leaseExpiresAt   DateTime?                          @map("lease_expires_at")
+  response         Json?
+  responseSha256   String?                            @map("response_sha256")
+  lastErrorCode    String?                            @map("last_error_code")
+  lastStartedAt    DateTime                           @map("last_started_at")
+  finishedAt       DateTime?                          @map("finished_at")
+  createdAt        DateTime                           @default(now()) @map("created_at")
+  updatedAt        DateTime                           @updatedAt @map("updated_at")
+  budget           KnowledgeToolBudget                @relation(fields: [runtimeAttemptId], references: [runtimeAttemptId], onDelete: Cascade, onUpdate: Restrict)
+  lastGrant        KnowledgeToolGrant                 @relation(fields: [lastGrantId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([runtimeAttemptId, invocationId])
+  @@index([runtimeAttemptId, status, leaseExpiresAt])
+  @@index([lastGrantId])
+  @@map("knowledge_retrieval_invocations")
+}
+
+model RunEvent {
+  id                        String                     @id @default(cuid())
+  runId                     String                     @map("run_id")
+  sourceId                  String?                    @map("source_id")
+  sequence                  Int
+  type                      String
+  payload                   Json
+  traceId                   String                     @map("trace_id")
+  occurredAt                DateTime                   @default(now()) @map("occurred_at")
+  run                       Run                        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  prototypePatchApplication PrototypePatchApplication?
+
+  @@unique([id, runId])
+  @@unique([runId, sequence])
+  @@unique([runId, sourceId])
+  @@index([runId, occurredAt])
+  @@index([type])
+  @@map("run_events")
+}
+
+model RunDraft {
+  id        String   @id @default(cuid())
+  runId     String   @unique @map("run_id")
+  version   Int      @default(0)
+  content   Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+  run       Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("run_drafts")
+}
+
+model RunApproval {
+  id                     String         @id @default(cuid())
+  runId                  String         @map("run_id")
+  key                    String
+  kind                   String
+  prompt                 String
+  options                Json
+  attempt                Int            @default(0)
+  status                 ApprovalStatus @default(pending)
+  response               Json?
+  decidedById            String?        @map("decided_by_id")
+  decidedAt              DateTime?      @map("decided_at")
+  revision               Int            @default(0)
+  decisionIdempotencyKey String?        @map("decision_idempotency_key")
+  decisionRequestHash    String?        @map("decision_request_hash")
+  createdAt              DateTime       @default(now()) @map("created_at")
+  updatedAt              DateTime       @updatedAt @map("updated_at")
+  run                    Run            @relation(fields: [runId], references: [id], onDelete: Cascade)
+  decidedBy              Principal?     @relation("ApprovalDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@unique([runId, key, attempt])
+  @@index([runId, status])
+  @@index([decidedById])
+  @@map("run_approvals")
+}
+
+model Blob {
+  id                 String                    @id @default(cuid())
+  sha256             String
+  generation         Int                       @default(1)
+  storageKey         String                    @unique @map("storage_key")
+  mediaType          String                    @map("media_type")
+  byteSize           BigInt                    @map("byte_size")
+  status             BlobStatus                @default(pending)
+  verifiedAt         DateTime?                 @map("verified_at")
+  gcEligibleAt       DateTime?                 @map("gc_eligible_at")
+  gcAttemptCount     Int                       @default(0) @map("gc_attempt_count")
+  gcLastErrorCode    String?                   @map("gc_last_error_code")
+  gcLastErrorDetail  String?                   @map("gc_last_error_detail")
+  gcLastErrorAt      DateTime?                 @map("gc_last_error_at")
+  deletedAt          DateTime?                 @map("deleted_at")
+  storageDeletedAt   DateTime?                 @map("storage_deleted_at")
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+  files              FileAsset[]
+  scans              BlobScan[]
+  sourceExtractions  FileExtraction[]          @relation("FileExtractionSourceBlob")
+  extractionOutputs  FileExtractionOutput[]
+  artifactVersions   ArtifactVersion[]         @relation("ArtifactContentBlob")
+  artifactAssets     ArtifactVersionAsset[]    @relation("ArtifactAssetBlob")
+  artifactCreations  ArtifactCreationReceipt[] @relation("ArtifactCreationSourceBlob")
+  knowledgeDocuments KnowledgeDocument[]       @relation("KnowledgeSourceBlob")
+  exportOutputs      ExportJob[]               @relation("ExportOutputBlob")
+  importSourceBlobs  ImportSourceBlob[]
+
+  @@unique([id, byteSize, mediaType])
+  @@unique([id, sha256, byteSize, mediaType])
+  @@unique([sha256, generation])
+  @@index([sha256, status])
+  @@index([status])
+  @@index([status, gcEligibleAt])
+  @@index([status, storageDeletedAt, gcAttemptCount])
+  @@map("blobs")
+}
+
+model BlobScan {
+  id               String         @id @default(cuid())
+  blobId           String         @map("blob_id")
+  attempt          Int
+  status           BlobScanStatus @default(queued)
+  scanner          String
+  scannerVersion   String         @map("scanner_version")
+  signatureVersion String?        @map("signature_version")
+  evidence         Json?
+  failureCode      String?        @map("failure_code")
+  failureDetail    String?        @map("failure_detail")
+  startedAt        DateTime?      @map("started_at")
+  finishedAt       DateTime?      @map("finished_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  blob             Blob           @relation(fields: [blobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([blobId, attempt])
+  @@index([blobId, status, attempt])
+  @@map("blob_scans")
+}
+
+model FileAsset {
+  id                          String                       @id @default(cuid())
+  projectId                   String                       @map("project_id")
+  blobId                      String?                      @map("blob_id")
+  currentExtractionId         String?                      @unique @map("current_extraction_id")
+  uploadedById                String                       @map("uploaded_by_id")
+  originalName                String                       @map("original_name")
+  declaredMediaType           String                       @map("declared_media_type")
+  detectedMediaType           String?                      @map("detected_media_type")
+  byteSize                    BigInt                       @map("byte_size")
+  status                      FileStatus                   @default(uploading)
+  revision                    Int                          @default(0)
+  failureCode                 String?                      @map("failure_code")
+  failureDetail               String?                      @map("failure_detail")
+  metadata                    Json?
+  verifiedAt                  DateTime?                    @map("verified_at")
+  deletedAt                   DateTime?                    @map("deleted_at")
+  createdAt                   DateTime                     @default(now()) @map("created_at")
+  updatedAt                   DateTime                     @updatedAt @map("updated_at")
+  project                     Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  blob                        Blob?                        @relation(fields: [blobId, byteSize, detectedMediaType], references: [id, byteSize, mediaType], onDelete: Restrict, onUpdate: Restrict)
+  uploadedBy                  Principal                    @relation("FileUploader", fields: [uploadedById], references: [id])
+  uploadSession               FileUploadSession?
+  extractions                 FileExtraction[]             @relation("FileExtractions")
+  currentExtraction           FileExtraction?              @relation("FileCurrentExtraction", fields: [currentExtractionId, id, blobId], references: [id, fileAssetId, sourceBlobId], onDelete: Restrict, onUpdate: Restrict)
+  artifactCreations           ArtifactCreationReceipt[]    @relation("ArtifactCreationSourceFile")
+  submissionIntentAttachments SubmissionIntentAttachment[]
+  importSourceBlobs           ImportSourceBlob[]
+
+  @@unique([id, projectId])
+  @@unique([id, blobId])
+  @@unique([id, projectId, blobId])
+  @@unique([currentExtractionId, id, blobId])
+  @@index([projectId, status, createdAt])
+  @@index([blobId])
+  @@index([uploadedById])
+  @@index([status, deletedAt])
+  @@map("file_assets")
+}
+
+model ImportSource {
+  id             String                @id @default(cuid())
+  projectId      String                @map("project_id")
+  createdById    String                @map("created_by_id")
+  kind           ImportSourceKind
+  status         ImportSourceStatus    @default(pending)
+  label          String                @db.VarChar(240)
+  descriptor     Json?
+  request        Json
+  requestHash    String                @map("request_hash") @db.Char(64)
+  idempotencyKey String                @map("idempotency_key") @db.VarChar(128)
+  checksum       String?               @db.Char(64)
+  revision       Int                   @default(0)
+  failureCode    String?               @map("failure_code") @db.VarChar(120)
+  failureDetail  String?               @map("failure_detail") @db.VarChar(2000)
+  deletedAt      DateTime?             @map("deleted_at") @db.Timestamptz(6)
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  project        Project               @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  createdBy      Principal             @relation("ImportSourceCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  blobs          ImportSourceBlob[]
+  attempts       ImportSourceAttempt[]
+  runSnapshots   RunSourceSnapshot[]
+
+  @@unique([id, projectId])
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, status, createdAt, id])
+  @@index([createdById, createdAt])
+  @@map("import_sources")
+}
+
+model ImportSourceAttempt {
+  id             String                    @id @default(cuid())
+  importSourceId String                    @map("import_source_id")
+  projectId      String                    @map("project_id")
+  attempt        Int
+  queueJobId     String                    @unique @map("queue_job_id")
+  status         ImportSourceAttemptStatus @default(queued)
+  leaseToken     String?                   @map("lease_token") @db.VarChar(128)
+  leaseExpiresAt DateTime?                 @map("lease_expires_at") @db.Timestamptz(6)
+  failureCode    String?                   @map("failure_code") @db.VarChar(120)
+  failureDetail  String?                   @map("failure_detail") @db.VarChar(2000)
+  startedAt      DateTime?                 @map("started_at") @db.Timestamptz(6)
+  finishedAt     DateTime?                 @map("finished_at") @db.Timestamptz(6)
+  createdAt      DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  source         ImportSource              @relation(fields: [importSourceId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([importSourceId, attempt])
+  @@index([projectId, status, updatedAt])
+  @@index([importSourceId, status, attempt])
+  @@map("import_source_attempts")
+}
+
+model ImportSourceBlob {
+  id             String       @id @default(cuid())
+  importSourceId String       @map("import_source_id")
+  projectId      String       @map("project_id")
+  position       Int
+  blobId         String       @map("blob_id")
+  fileAssetId    String?      @map("file_asset_id")
+  role           String       @db.VarChar(80)
+  path           String?      @db.VarChar(1024)
+  mediaType      String       @map("media_type") @db.VarChar(255)
+  byteSize       BigInt       @map("byte_size")
+  sha256         String       @db.Char(64)
+  metadata       Json?
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  source         ImportSource @relation(fields: [importSourceId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  blob           Blob         @relation(fields: [blobId, sha256, byteSize, mediaType], references: [id, sha256, byteSize, mediaType], onDelete: Restrict, onUpdate: Restrict)
+  fileAsset      FileAsset?   @relation(fields: [fileAssetId, projectId, blobId], references: [id, projectId, blobId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([importSourceId, position])
+  @@unique([importSourceId, path])
+  @@index([projectId, createdAt])
+  @@index([blobId])
+  @@index([fileAssetId, projectId, blobId])
+  @@map("import_source_blobs")
+}
+
+model RunSourceSnapshot {
+  id         String           @id @default(cuid())
+  runId      String           @map("run_id")
+  projectId  String           @map("project_id")
+  position   Int
+  sourceId   String           @map("source_id")
+  kind       ImportSourceKind
+  label      String           @db.VarChar(240)
+  checksum   String           @db.Char(64)
+  descriptor Json
+  snapshot   Json
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  run        Run              @relation(fields: [runId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  source     ImportSource     @relation(fields: [sourceId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([runId, position])
+  @@unique([runId, sourceId])
+  @@index([sourceId, createdAt])
+  @@map("run_source_snapshots")
+}
+
+model FileUploadSession {
+  id                       String                    @id @default(cuid())
+  projectId                String                    @map("project_id")
+  fileAssetId              String                    @unique @map("file_asset_id")
+  provider                 String                    @default("s3")
+  providerUploadId         String?                   @unique @map("provider_upload_id")
+  stagingKey               String                    @unique @map("staging_key")
+  status                   FileUploadStatus          @default(initiating)
+  expectedByteSize         BigInt                    @map("expected_byte_size")
+  expectedSha256           String?                   @map("expected_sha256")
+  partSize                 Int                       @map("part_size")
+  revision                 Int                       @default(0)
+  idempotencyKey           String                    @map("idempotency_key")
+  requestHash              String                    @map("request_hash")
+  completionIdempotencyKey String?                   @map("completion_idempotency_key")
+  completionRequestHash    String?                   @map("completion_request_hash")
+  failureCode              String?                   @map("failure_code")
+  failureDetail            String?                   @map("failure_detail")
+  expiresAt                DateTime                  @map("expires_at")
+  completedAt              DateTime?                 @map("completed_at")
+  abortedAt                DateTime?                 @map("aborted_at")
+  createdAt                DateTime                  @default(now()) @map("created_at")
+  updatedAt                DateTime                  @updatedAt @map("updated_at")
+  project                  Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  file                     FileAsset                 @relation(fields: [fileAssetId, projectId], references: [id, projectId], onDelete: Cascade)
+  verificationAttempts     FileVerificationAttempt[]
+
+  @@unique([fileAssetId, projectId])
+  @@unique([projectId, idempotencyKey])
+  @@index([status, expiresAt])
+  @@index([projectId, createdAt])
+  @@map("file_upload_sessions")
+}
+
+model FileVerificationAttempt {
+  id              String                        @id @default(cuid())
+  uploadSessionId String                        @map("upload_session_id")
+  sequence        Int
+  queueJobId      String                        @map("queue_job_id")
+  queueRetryCount Int                           @map("queue_retry_count")
+  status          FileVerificationAttemptStatus @default(running)
+  fileStatus      FileStatus?                   @map("file_status")
+  failureCode     String?                       @map("failure_code")
+  failureDetail   String?                       @map("failure_detail")
+  startedAt       DateTime                      @default(now()) @map("started_at")
+  finishedAt      DateTime?                     @map("finished_at")
+  createdAt       DateTime                      @default(now()) @map("created_at")
+  updatedAt       DateTime                      @updatedAt @map("updated_at")
+  uploadSession   FileUploadSession             @relation(fields: [uploadSessionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([uploadSessionId, sequence])
+  @@unique([queueJobId, queueRetryCount])
+  @@index([uploadSessionId, status, sequence])
+  @@index([status, updatedAt])
+  @@map("file_verification_attempts")
+}
+
+model FileExtraction {
+  id                   String                 @id @default(cuid())
+  fileAssetId          String                 @map("file_asset_id")
+  sourceBlobId         String                 @map("source_blob_id")
+  attempt              Int
+  status               FileExtractionStatus   @default(queued)
+  parser               String
+  parserVersion        String                 @map("parser_version")
+  outputSchemaVersion  Int                    @map("output_schema_version")
+  idempotencyKey       String                 @map("idempotency_key")
+  requestHash          String                 @map("request_hash")
+  contentSha256        String?                @map("content_sha256")
+  failureCode          String?                @map("failure_code")
+  failureDetail        String?                @map("failure_detail")
+  metadata             Json?
+  processingAttempts   Int                    @default(0) @map("processing_attempts")
+  submissionGeneration Int                    @default(0) @map("submission_generation")
+  submissionStartedAt  DateTime?              @map("submission_started_at")
+  externalTaskId       String?                @unique @map("external_task_id")
+  taskCheckpointedAt   DateTime?              @map("task_checkpointed_at")
+  leaseToken           String?                @map("lease_token")
+  leaseExpiresAt       DateTime?              @map("lease_expires_at")
+  startedAt            DateTime?              @map("started_at")
+  finishedAt           DateTime?              @map("finished_at")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  file                 FileAsset              @relation("FileExtractions", fields: [fileAssetId, sourceBlobId], references: [id, blobId], onDelete: Cascade, onUpdate: Restrict)
+  currentFor           FileAsset?             @relation("FileCurrentExtraction")
+  sourceBlob           Blob                   @relation("FileExtractionSourceBlob", fields: [sourceBlobId], references: [id], onDelete: Restrict)
+  outputs              FileExtractionOutput[]
+
+  @@unique([fileAssetId, attempt])
+  @@unique([fileAssetId, idempotencyKey])
+  @@unique([id, fileAssetId])
+  @@unique([id, fileAssetId, sourceBlobId])
+  @@index([status, createdAt])
+  @@index([status, leaseExpiresAt, updatedAt])
+  @@index([sourceBlobId])
+  @@map("file_extractions")
+}
+
+model FileExtractionOutput {
+  extractionId String         @map("extraction_id")
+  kind         String
+  position     Int            @default(0)
+  blobId       String         @map("blob_id")
+  metadata     Json?
+  createdAt    DateTime       @default(now()) @map("created_at")
+  extraction   FileExtraction @relation(fields: [extractionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  blob         Blob           @relation(fields: [blobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([extractionId, kind, position])
+  @@index([blobId])
+  @@map("file_extraction_outputs")
+}
+
+model Artifact {
+  id                    String                       @id @default(cuid())
+  projectId             String                       @map("project_id")
+  kind                  ArtifactKind
+  title                 String
+  revision              Int                          @default(0)
+  currentVersionId      String?                      @map("current_version_id")
+  createdAt             DateTime                     @default(now()) @map("created_at")
+  updatedAt             DateTime                     @updatedAt @map("updated_at")
+  project               Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  currentVersion        ArtifactVersion?             @relation("ArtifactCurrentVersion", fields: [currentVersionId, id], references: [id, artifactId], onDelete: NoAction, onUpdate: Restrict)
+  versions              ArtifactVersion[]            @relation("ArtifactVersions")
+  boardNodes            BoardNode[]
+  designSystemImports   DesignSystemImport[]         @relation("DesignSystemImportTargetArtifact")
+  designSystemCreations DesignSystemCreation[]       @relation("DesignSystemCreationArtifact")
+  versionEditReceipts   ArtifactVersionEditReceipt[]
+  creationReceipt       ArtifactCreationReceipt?     @relation("ArtifactCreationArtifact")
+
+  @@unique([id, projectId])
+  @@index([projectId, kind, updatedAt])
+  @@index([currentVersionId])
+  @@map("artifacts")
+}
+
+model ArtifactVersion {
+  id                        String                          @id @default(cuid())
+  artifactId                String                          @map("artifact_id")
+  projectId                 String                          @map("project_id")
+  version                   Int
+  schemaVersion             Int                             @map("schema_version")
+  status                    ArtifactVersionStatus           @default(staging)
+  content                   Json?
+  contentBlobId             String?                         @map("content_blob_id")
+  checksum                  String
+  citations                 Json
+  createdByRunId            String?                         @map("created_by_run_id")
+  runtimeDraftSourceId      String?                         @map("runtime_draft_source_id")
+  runtimeDraftIndex         Int?                            @map("runtime_draft_index")
+  runtimeDraftTitle         String?                         @map("runtime_draft_title")
+  knowledgeReleaseId        String?                         @map("knowledge_release_id")
+  createdAt                 DateTime                        @default(now()) @map("created_at")
+  artifact                  Artifact                        @relation("ArtifactVersions", fields: [artifactId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  currentFor                Artifact[]                      @relation("ArtifactCurrentVersion")
+  contentBlob               Blob?                           @relation("ArtifactContentBlob", fields: [contentBlobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdByRun              Run?                            @relation(fields: [createdByRunId, projectId], references: [id, projectId], onDelete: NoAction, onUpdate: Restrict)
+  knowledgeRelease          KnowledgeRelease?               @relation(fields: [knowledgeReleaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  boardNodes                BoardNode[]
+  releasePins               ReleaseArtifactVersion[]
+  previewPins               ProjectPreviewArtifactVersion[]
+  designStyleRuns           Run[]                           @relation("RunDesignStyleArtifactVersion")
+  assets                    ArtifactVersionAsset[]
+  designSystemImports       DesignSystemImport[]            @relation("DesignSystemImportTargetVersion")
+  designSystemCreations     DesignSystemCreation[]          @relation("DesignSystemCreationVersion")
+  editBaseReceipts          ArtifactVersionEditReceipt[]    @relation("ArtifactVersionEditBase")
+  editResultReceipts        ArtifactVersionEditReceipt[]    @relation("ArtifactVersionEditResult")
+  creationReceipt           ArtifactCreationReceipt?        @relation("ArtifactCreationVersion")
+  preferences               ArtifactVersionPreference[]
+  canvasResultInvocations   CanvasToolInvocation[]          @relation("CanvasInvocationResultVersion")
+  prototypePatchProjections PrototypePatchProjection[]
+
+  @@unique([id, artifactId])
+  @@unique([id, projectId])
+  @@unique([id, artifactId, projectId])
+  @@unique([artifactId, version])
+  @@unique([createdByRunId, runtimeDraftSourceId])
+  @@unique([createdByRunId, runtimeDraftIndex])
+  @@index([projectId, status, createdAt])
+  @@index([contentBlobId])
+  @@index([createdByRunId])
+  @@index([knowledgeReleaseId])
+  @@index([status])
+  @@map("artifact_versions")
+}
+
+model PrototypePatchProjection {
+  artifactVersionId String                         @map("artifact_version_id")
+  screenId          String                         @map("screen_id") @db.VarChar(128)
+  artifactId        String                         @map("artifact_id")
+  projectId         String                         @map("project_id")
+  runId             String                         @map("run_id")
+  revision          Int                            @default(0)
+  checksum          String                         @db.Char(64)
+  status            PrototypePatchProjectionStatus @default(active)
+  degradedReason    String?                        @map("degraded_reason") @db.VarChar(120)
+  finalizedAt       DateTime?                      @map("finalized_at") @db.Timestamptz(6)
+  discardedAt       DateTime?                      @map("discarded_at") @db.Timestamptz(6)
+  createdAt         DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  artifactVersion   ArtifactVersion                @relation(fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: Cascade, onUpdate: Restrict)
+  run               Run                            @relation(fields: [runId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  applications      PrototypePatchApplication[]
+
+  @@id([artifactVersionId, screenId])
+  @@unique([artifactVersionId, screenId, runId, artifactId, projectId])
+  @@unique([runId, artifactVersionId, screenId])
+  @@index([runId, status])
+  @@index([projectId, status])
+  @@map("prototype_patch_projections")
+}
+
+model PrototypePatchApplication {
+  id                String                           @id @default(cuid())
+  runtimeAttemptId  String                           @map("runtime_attempt_id")
+  runId             String                           @map("run_id")
+  artifactVersionId String                           @map("artifact_version_id")
+  artifactId        String                           @map("artifact_id")
+  projectId         String                           @map("project_id")
+  screenId          String                           @map("screen_id") @db.VarChar(128)
+  sourceEventId     String                           @map("source_event_id") @db.VarChar(1024)
+  outcome           PrototypePatchApplicationOutcome
+  degradedReason    String?                          @map("degraded_reason") @db.VarChar(120)
+  baseRevision      Int                              @map("base_revision")
+  nextRevision      Int                              @map("next_revision")
+  requestSha256     String                           @map("request_sha256") @db.Char(64)
+  operations        Json
+  resultingChecksum String                           @map("resulting_checksum") @db.Char(64)
+  runEventId        String                           @unique @map("run_event_id")
+  appliedAt         DateTime                         @default(now()) @map("applied_at") @db.Timestamptz(6)
+  projection        PrototypePatchProjection         @relation(fields: [artifactVersionId, screenId, runId, artifactId, projectId], references: [artifactVersionId, screenId, runId, artifactId, projectId], onDelete: Cascade, onUpdate: Restrict)
+  runtimeAttempt    RuntimeAttempt                   @relation(fields: [runtimeAttemptId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict)
+  runEvent          RunEvent                         @relation(fields: [runEventId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([runtimeAttemptId, sourceEventId])
+  @@unique([runEventId, runId])
+  @@index([runId, appliedAt])
+  @@index([artifactVersionId, screenId, nextRevision], map: "prototype_patch_applications_next_revision_idx")
+  @@index([artifactVersionId, screenId, baseRevision], map: "prototype_patch_applications_base_revision_idx")
+  @@map("prototype_patch_applications")
+}
+
+model ArtifactVersionPreference {
+  principalId       String                   @map("principal_id")
+  projectId         String                   @map("project_id")
+  artifactId        String                   @map("artifact_id")
+  artifactVersionId String                   @map("artifact_version_id")
+  screenId          String                   @default("") @map("screen_id")
+  favorite          Boolean                  @default(false)
+  reaction          ArtifactVersionReaction?
+  revision          Int                      @default(1)
+  createdAt         DateTime                 @default(now()) @map("created_at")
+  updatedAt         DateTime                 @updatedAt @map("updated_at")
+  principal         Principal                @relation(fields: [principalId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "artifact_version_preferences_principal_fkey")
+  artifactVersion   ArtifactVersion          @relation(fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: Cascade, onUpdate: Restrict, map: "artifact_version_preferences_version_fkey")
+
+  @@id([principalId, artifactVersionId, screenId], map: "artifact_version_preferences_pkey")
+  @@index([artifactVersionId, artifactId, projectId], map: "artifact_version_preferences_version_scope_idx")
+  @@index([principalId, favorite, updatedAt], map: "artifact_version_preferences_favorites_idx")
+  @@map("artifact_version_preferences")
+}
+
+model ArtifactVersionAsset {
+  artifactVersionId String          @map("artifact_version_id")
+  artifactId        String          @map("artifact_id")
+  projectId         String          @map("project_id")
+  assetId           String          @map("asset_id")
+  kind              String
+  blobId            String          @map("blob_id")
+  mediaType         String          @map("media_type")
+  byteSize          BigInt          @map("byte_size")
+  sha256            String
+  metadata          Json
+  createdAt         DateTime        @default(now()) @map("created_at")
+  artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: Cascade, onUpdate: Restrict)
+  blob              Blob            @relation("ArtifactAssetBlob", fields: [blobId, sha256, byteSize, mediaType], references: [id, sha256, byteSize, mediaType], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([artifactVersionId, assetId])
+  @@index([artifactId, projectId])
+  @@index([blobId])
+  @@map("artifact_version_assets")
+}
+
+model ArtifactVersionEditReceipt {
+  id                       String          @id @default(cuid())
+  artifactId               String          @map("artifact_id")
+  baseArtifactVersionId    String          @map("base_artifact_version_id")
+  resultArtifactVersionId  String          @map("result_artifact_version_id")
+  expectedArtifactRevision Int             @map("expected_artifact_revision")
+  resultArtifactRevision   Int             @map("result_artifact_revision")
+  createdById              String          @map("created_by_id")
+  idempotencyKey           String          @map("idempotency_key")
+  requestHash              String          @map("request_hash")
+  createdAt                DateTime        @default(now()) @map("created_at")
+  artifact                 Artifact        @relation(fields: [artifactId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  baseVersion              ArtifactVersion @relation("ArtifactVersionEditBase", fields: [baseArtifactVersionId, artifactId], references: [id, artifactId], onDelete: Cascade, onUpdate: Restrict)
+  resultVersion            ArtifactVersion @relation("ArtifactVersionEditResult", fields: [resultArtifactVersionId, artifactId], references: [id, artifactId], onDelete: Cascade, onUpdate: Restrict)
+  createdBy                Principal       @relation("ArtifactVersionEditCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([artifactId, idempotencyKey])
+  @@unique([resultArtifactVersionId])
+  @@index([baseArtifactVersionId])
+  @@index([createdById])
+  @@map("artifact_version_edit_receipts")
+}
+
+model ArtifactCreationReceipt {
+  id                String          @id @default(cuid())
+  projectId         String          @map("project_id")
+  artifactId        String          @unique @map("artifact_id")
+  artifactVersionId String          @unique @map("artifact_version_id")
+  sourceFileAssetId String          @map("source_file_asset_id")
+  sourceBlobId      String          @map("source_blob_id")
+  createdById       String          @map("created_by_id")
+  idempotencyKey    String          @map("idempotency_key")
+  requestHash       String          @map("request_hash")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  project           Project         @relation("ArtifactCreationProject", fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  artifact          Artifact        @relation("ArtifactCreationArtifact", fields: [artifactId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  artifactVersion   ArtifactVersion @relation("ArtifactCreationVersion", fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: Restrict, onUpdate: Restrict, map: "artifact_creation_receipts_version_fkey")
+  sourceFile        FileAsset       @relation("ArtifactCreationSourceFile", fields: [sourceFileAssetId, projectId, sourceBlobId], references: [id, projectId, blobId], onDelete: Restrict, onUpdate: Restrict, map: "artifact_creation_receipts_source_file_fkey")
+  sourceBlob        Blob            @relation("ArtifactCreationSourceBlob", fields: [sourceBlobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy         Principal       @relation("ArtifactCreationCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([projectId, idempotencyKey])
+  @@unique([artifactId, projectId])
+  @@unique([artifactVersionId, artifactId, projectId], map: "artifact_creation_receipts_version_artifact_project_key")
+  @@index([sourceFileAssetId, projectId, sourceBlobId], map: "artifact_creation_receipts_source_file_idx")
+  @@index([sourceBlobId])
+  @@index([createdById])
+  @@map("artifact_creation_receipts")
+}
+
+model DesignSystemImport {
+  id                      String          @id @default(cuid())
+  targetProjectId         String          @map("target_project_id")
+  targetArtifactId        String          @map("target_artifact_id")
+  targetArtifactVersionId String          @map("target_artifact_version_id")
+  sourceProjectId         String          @map("source_project_id")
+  sourceArtifactId        String          @map("source_artifact_id")
+  sourceArtifactVersionId String          @map("source_artifact_version_id")
+  sourceChecksum          String          @map("source_checksum")
+  createdById             String          @map("created_by_id")
+  idempotencyKey          String          @map("idempotency_key")
+  requestHash             String          @map("request_hash")
+  createdAt               DateTime        @default(now()) @map("created_at")
+  targetProject           Project         @relation("DesignSystemImportTargetProject", fields: [targetProjectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  targetArtifact          Artifact        @relation("DesignSystemImportTargetArtifact", fields: [targetArtifactId, targetProjectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  targetArtifactVersion   ArtifactVersion @relation("DesignSystemImportTargetVersion", fields: [targetArtifactVersionId, targetArtifactId, targetProjectId], references: [id, artifactId, projectId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy               Principal       @relation("DesignSystemImportCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([targetProjectId, idempotencyKey])
+  @@unique([targetArtifactVersionId])
+  @@index([targetArtifactId, targetProjectId])
+  @@index([sourceProjectId, createdAt])
+  @@index([sourceArtifactVersionId])
+  @@index([createdById])
+  @@map("design_system_imports")
+}
+
+model DesignSystemCreation {
+  id                String          @id @default(cuid())
+  projectId         String          @map("project_id")
+  artifactId        String          @map("artifact_id")
+  artifactVersionId String          @map("artifact_version_id")
+  checksum          String
+  createdById       String          @map("created_by_id")
+  idempotencyKey    String          @map("idempotency_key")
+  requestHash       String          @map("request_hash")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  project           Project         @relation("DesignSystemCreationProject", fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  artifact          Artifact        @relation("DesignSystemCreationArtifact", fields: [artifactId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  artifactVersion   ArtifactVersion @relation("DesignSystemCreationVersion", fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy         Principal       @relation("DesignSystemCreationCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([projectId, idempotencyKey])
+  @@unique([artifactVersionId])
+  @@index([artifactId, projectId])
+  @@index([createdById])
+  @@map("design_system_creations")
+}
+
+model Board {
+  id                  String                @id @default(cuid())
+  projectId           String                @map("project_id")
+  revision            Int                   @default(0)
+  viewport            Json
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+  project             Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  nodes               BoardNode[]
+  edges               BoardEdge[]
+  releases            ProjectRelease[]
+  previews            ProjectPreview[]
+  replaceReceipts     BoardReplaceReceipt[]
+  canvasAgentSessions CanvasAgentSession[]
+
+  @@unique([projectId])
+  @@unique([id, projectId])
+  @@map("boards")
+}
+
+model BoardNode {
+  id                String           @id @default(cuid())
+  boardId           String           @map("board_id")
+  projectId         String           @map("project_id")
+  nodeKey           String           @map("node_key")
+  parentNodeKey     String?          @map("parent_node_key")
+  sortOrder         Int              @map("sort_order")
+  kind              String
+  position          Json
+  size              Json?
+  artifactId        String?          @map("artifact_id")
+  artifactVersionId String?          @map("artifact_version_id")
+  data              Json
+  board             Board            @relation(fields: [boardId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  artifact          Artifact?        @relation(fields: [artifactId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  artifactVersion   ArtifactVersion? @relation(fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: NoAction, onUpdate: Restrict)
+  parentNode        BoardNode?       @relation("BoardNodeHierarchy", fields: [boardId, parentNodeKey], references: [boardId, nodeKey], onDelete: NoAction, onUpdate: Restrict)
+  childNodes        BoardNode[]      @relation("BoardNodeHierarchy")
+  outgoingEdges     BoardEdge[]      @relation("BoardEdgeSource")
+  incomingEdges     BoardEdge[]      @relation("BoardEdgeTarget")
+
+  @@unique([boardId, nodeKey])
+  @@index([projectId])
+  @@index([artifactId])
+  @@index([artifactVersionId])
+  @@index([boardId, parentNodeKey])
+  @@index([boardId, parentNodeKey, sortOrder], map: "board_nodes_board_parent_order_idx")
+  @@map("board_nodes")
+}
+
+model BoardEdge {
+  id            String    @id @default(cuid())
+  boardId       String    @map("board_id")
+  edgeKey       String    @map("edge_key")
+  sourceNodeKey String    @map("source_node_key")
+  targetNodeKey String    @map("target_node_key")
+  kind          String
+  data          Json
+  board         Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  sourceNode    BoardNode @relation("BoardEdgeSource", fields: [boardId, sourceNodeKey], references: [boardId, nodeKey], onDelete: Cascade, onUpdate: Restrict, map: "board_edges_source_node_fkey")
+  targetNode    BoardNode @relation("BoardEdgeTarget", fields: [boardId, targetNodeKey], references: [boardId, nodeKey], onDelete: Cascade, onUpdate: Restrict, map: "board_edges_target_node_fkey")
+
+  @@unique([boardId, edgeKey])
+  @@index([boardId, sourceNodeKey])
+  @@index([boardId, targetNodeKey])
+  @@map("board_edges")
+}
+
+model BoardReplaceReceipt {
+  id               String    @id @default(cuid())
+  projectId        String    @map("project_id")
+  boardId          String    @map("board_id")
+  expectedRevision Int       @map("expected_revision")
+  resultRevision   Int       @map("result_revision")
+  createdById      String    @map("created_by_id")
+  idempotencyKey   String    @map("idempotency_key")
+  requestHash      String    @map("request_hash")
+  response         Json
+  createdAt        DateTime  @default(now()) @map("created_at")
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  board            Board     @relation(fields: [boardId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  createdBy        Principal @relation("BoardReplaceCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([projectId, idempotencyKey])
+  @@unique([boardId, resultRevision])
+  @@index([createdById])
+  @@map("board_replace_receipts")
+}
+
+model ProjectRelease {
+  id              String                   @id @default(cuid())
+  projectId       String                   @map("project_id")
+  version         Int
+  status          ProjectReleaseStatus     @default(building)
+  createdById     String                   @map("created_by_id")
+  idempotencyKey  String                   @map("idempotency_key")
+  requestHash     String                   @map("request_hash")
+  boardId         String                   @map("board_id")
+  boardRevision   Int                      @map("board_revision")
+  boardSnapshot   Json                     @map("board_snapshot")
+  boardChecksum   String                   @map("board_checksum")
+  manifest        Json
+  manifestSha256  String                   @map("manifest_sha256")
+  failureCode     String?                  @map("failure_code")
+  failureDetail   String?                  @map("failure_detail")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  finishedAt      DateTime?                @map("finished_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+  project         Project                  @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy       Principal                @relation("ProjectReleaseCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  board           Board                    @relation(fields: [boardId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  artifactPins    ReleaseArtifactVersion[]
+  shares          ShareGrant[]
+  exportJobs      ExportJob[]
+  derivedProjects ProjectLineage[]
+
+  @@unique([projectId, version])
+  @@unique([projectId, idempotencyKey])
+  @@unique([id, projectId])
+  @@index([projectId, status, version])
+  @@index([createdById])
+  @@index([boardId])
+  @@map("project_releases")
+}
+
+model ReleaseArtifactVersion {
+  releaseId         String          @map("release_id")
+  projectId         String          @map("project_id")
+  position          Int
+  artifactId        String          @map("artifact_id")
+  artifactVersionId String          @map("artifact_version_id")
+  title             String
+  kind              ArtifactKind
+  createdAt         DateTime        @default(now()) @map("created_at")
+  release           ProjectRelease  @relation(fields: [releaseId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: Restrict, onUpdate: Restrict)
+  exportSelections  ExportJob[]     @relation("ExportSelectedReleaseArtifact")
+
+  @@id([releaseId, position])
+  @@unique([releaseId, artifactId])
+  @@unique([releaseId, artifactVersionId])
+  @@unique([releaseId, artifactId, artifactVersionId])
+  @@index([projectId])
+  @@index([artifactVersionId])
+  @@map("release_artifact_versions")
+}
+
+model ShareGrant {
+  id             String           @id @default(cuid())
+  projectId      String           @map("project_id")
+  releaseId      String           @map("release_id")
+  createdById    String           @map("created_by_id")
+  idempotencyKey String           @map("idempotency_key")
+  requestHash    String           @map("request_hash")
+  tokenHash      String           @unique @map("token_hash")
+  scope          ShareScope       @default(view)
+  status         ShareStatus      @default(active)
+  revision       Int              @default(0)
+  expiresAt      DateTime?        @map("expires_at")
+  revokedAt      DateTime?        @map("revoked_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  project        Project          @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  release        ProjectRelease   @relation(fields: [releaseId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy      Principal        @relation("ShareCreator", fields: [createdById], references: [id])
+  remixes        ProjectLineage[]
+
+  @@unique([id, releaseId])
+  @@index([projectId, status])
+  @@index([projectId, idempotencyKey, createdAt])
+  @@index([releaseId])
+  @@index([createdById])
+  @@index([expiresAt])
+  @@map("share_grants")
+}
+
+model ProjectLineage {
+  targetProjectId String         @id @map("target_project_id")
+  sourceReleaseId String         @map("source_release_id")
+  sourceShareId   String         @map("source_share_id")
+  createdById     String         @map("created_by_id")
+  workspaceId     String         @map("workspace_id")
+  idempotencyKey  String         @map("idempotency_key")
+  requestHash     String         @map("request_hash")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  targetProject   Project        @relation(fields: [targetProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  sourceRelease   ProjectRelease @relation(fields: [sourceReleaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  sourceShare     ShareGrant     @relation(fields: [sourceShareId, sourceReleaseId], references: [id, releaseId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy       Principal      @relation("ProjectLineageCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([targetProjectId, workspaceId])
+  @@unique([sourceShareId, createdById, idempotencyKey], map: "project_lineages_share_creator_idempotency_key")
+  @@index([sourceReleaseId])
+  @@index([sourceShareId])
+  @@index([createdById])
+  @@index([workspaceId, createdAt])
+  @@map("project_lineages")
+}
+
+model ProjectDuplicate {
+  targetProjectId String    @id @map("target_project_id")
+  sourceProjectId String    @map("source_project_id")
+  workspaceId     String    @map("workspace_id")
+  createdById     String    @map("created_by_id")
+  idempotencyKey  String    @map("idempotency_key")
+  requestHash     String    @map("request_hash")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  sourceProject   Project   @relation("ProjectDuplicateSource", fields: [sourceProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  targetProject   Project   @relation("ProjectDuplicateTarget", fields: [targetProjectId, workspaceId], references: [id, workspaceId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy       Principal @relation("ProjectDuplicateCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([sourceProjectId, createdById, idempotencyKey], map: "project_duplicates_source_creator_idempotency_key")
+  @@unique([targetProjectId, workspaceId])
+  @@index([sourceProjectId, createdAt])
+  @@index([createdById])
+  @@index([workspaceId, createdAt])
+  @@map("project_duplicates")
+}
+
+model ExportJob {
+  id                         String                   @id @default(cuid())
+  releaseId                  String?                  @map("release_id")
+  createdById                String                   @map("created_by_id")
+  idempotencyKey             String                   @map("idempotency_key")
+  requestHash                String                   @map("request_hash")
+  format                     ExportFormat
+  packaging                  ExportPackaging
+  purpose                    ExportJobPurpose         @default(export)
+  selectionKind              ExportSelectionKind      @map("selection_kind")
+  selectionArtifactId        String?                  @map("selection_artifact_id")
+  selectionArtifactVersionId String?                  @map("selection_artifact_version_id")
+  selectionScreenId          String?                  @map("selection_screen_id")
+  selectionNodeIds           String[]                 @default([]) @map("selection_node_ids")
+  status                     ExportStatus             @default(queued)
+  revision                   Int                      @default(0)
+  options                    Json
+  outputBlobId               String?                  @map("output_blob_id")
+  failureCode                String?                  @map("failure_code")
+  failureDetail              String?                  @map("failure_detail")
+  createdAt                  DateTime                 @default(now()) @map("created_at")
+  startedAt                  DateTime?                @map("started_at")
+  finishedAt                 DateTime?                @map("finished_at")
+  updatedAt                  DateTime                 @updatedAt @map("updated_at")
+  release                    ProjectRelease?          @relation(fields: [releaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy                  Principal                @relation("ExportCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  selectedReleaseArtifact    ReleaseArtifactVersion?  @relation("ExportSelectedReleaseArtifact", fields: [releaseId, selectionArtifactId, selectionArtifactVersionId], references: [releaseId, artifactId, artifactVersionId], onDelete: Restrict, onUpdate: Restrict)
+  outputBlob                 Blob?                    @relation("ExportOutputBlob", fields: [outputBlobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  preview                    ProjectPreview?          @relation("PreviewExportJob")
+  externalDeliveries         ExternalExportDelivery[]
+
+  @@unique([releaseId, idempotencyKey])
+  @@index([releaseId, createdAt])
+  @@index([createdById])
+  @@index([selectionArtifactVersionId])
+  @@index([outputBlobId])
+  @@index([status])
+  @@map("export_jobs")
+}
+
+model ExternalExportDelivery {
+  id                   String                       @id @default(cuid())
+  exportJobId          String                       @map("export_job_id")
+  createdById          String                       @map("created_by_id")
+  idempotencyKey       String                       @map("idempotency_key")
+  requestHash          String                       @map("request_hash")
+  target               ExternalExportTarget
+  authentication       ExternalExportAuthentication
+  status               ExternalExportDeliveryStatus @default(pending_confirmation)
+  revision             Int                          @default(0)
+  payload              Json
+  remoteReference      String?                      @map("remote_reference") @db.VarChar(500)
+  failureCode          String?                      @map("failure_code") @db.VarChar(120)
+  failureDetail        String?                      @map("failure_detail") @db.VarChar(4000)
+  attempt              Int                          @default(0)
+  leaseToken           String?                      @unique @map("lease_token") @db.VarChar(128)
+  leaseExpiresAt       DateTime?                    @map("lease_expires_at") @db.Timestamptz(6)
+  transferAuthorizedAt DateTime?                    @map("transfer_authorized_at") @db.Timestamptz(6)
+  confirmedAt          DateTime?                    @map("confirmed_at") @db.Timestamptz(6)
+  startedAt            DateTime?                    @map("started_at") @db.Timestamptz(6)
+  finishedAt           DateTime?                    @map("finished_at") @db.Timestamptz(6)
+  createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  exportJob            ExportJob                    @relation(fields: [exportJobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdBy            Principal                    @relation("ExternalExportDeliveryCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([exportJobId, idempotencyKey])
+  @@index([createdById, createdAt])
+  @@index([exportJobId, createdAt])
+  @@index([status, updatedAt])
+  @@index([status, leaseExpiresAt])
+  @@map("external_export_deliveries")
+}
+
+model ProjectPreview {
+  id             String                          @id @default(cuid())
+  projectId      String                          @map("project_id")
+  boardId        String                          @map("board_id")
+  boardRevision  Int                             @map("board_revision")
+  boardSnapshot  Json                            @map("board_snapshot")
+  boardChecksum  String                          @map("board_checksum")
+  manifest       Json
+  manifestSha256 String                          @map("manifest_sha256")
+  exportJobId    String                          @unique @map("export_job_id")
+  createdById    String                          @map("created_by_id")
+  idempotencyKey String                          @map("idempotency_key")
+  requestHash    String                          @map("request_hash")
+  expiresAt      DateTime                        @map("expires_at")
+  createdAt      DateTime                        @default(now()) @map("created_at")
+  updatedAt      DateTime                        @updatedAt @map("updated_at")
+  project        Project                         @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  board          Board                           @relation(fields: [boardId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  exportJob      ExportJob                       @relation("PreviewExportJob", fields: [exportJobId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  createdBy      Principal                       @relation("PreviewCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  artifactPins   ProjectPreviewArtifactVersion[]
+
+  @@unique([id, projectId])
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, createdAt])
+  @@index([expiresAt])
+  @@index([createdById])
+  @@map("project_previews")
+}
+
+model ProjectPreviewArtifactVersion {
+  previewId         String          @map("preview_id")
+  projectId         String          @map("project_id")
+  position          Int
+  artifactId        String          @map("artifact_id")
+  artifactVersionId String          @map("artifact_version_id")
+  title             String
+  kind              ArtifactKind
+  createdAt         DateTime        @default(now()) @map("created_at")
+  preview           ProjectPreview  @relation(fields: [previewId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
+  artifactVersion   ArtifactVersion @relation(fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([previewId, position])
+  @@unique([previewId, artifactId])
+  @@unique([previewId, artifactVersionId])
+  @@index([projectId])
+  @@index([artifactVersionId])
+  @@map("project_preview_artifact_versions")
+}
+
+model KnowledgeRelease {
+  id                         String                    @id @default(cuid())
+  key                        String
+  workspaceId                String?                   @map("workspace_id")
+  version                    Int
+  status                     KnowledgeReleaseStatus    @default(building)
+  embeddingProfileId         String                    @map("embedding_profile_id")
+  embeddingProfileSpecSha256 String                    @map("embedding_profile_spec_sha256")
+  embeddingDimension         Int                       @map("embedding_dimension")
+  retrievalProfileId         String                    @map("retrieval_profile_id")
+  retrievalProfileSpecSha256 String                    @map("retrieval_profile_spec_sha256")
+  buildAttempt               Int                       @default(0) @map("build_attempt")
+  leaseToken                 String?                   @map("lease_token")
+  leaseExpiresAt             DateTime?                 @map("lease_expires_at")
+  startedAt                  DateTime?                 @map("started_at")
+  chunksReadyAt              DateTime?                 @map("chunks_ready_at")
+  manifestSha256             String                    @map("manifest_sha256")
+  manifest                   Json
+  createdAt                  DateTime                  @default(now()) @map("created_at")
+  readyAt                    DateTime?                 @map("ready_at")
+  updatedAt                  DateTime                  @default(now()) @updatedAt @map("updated_at")
+  workspace                  Workspace?                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  embeddingProfile           EmbeddingProfile          @relation(fields: [embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension], references: [id, specSha256, dimension], onDelete: Restrict, onUpdate: Restrict)
+  retrievalProfile           RetrievalProfile          @relation(fields: [retrievalProfileId, retrievalProfileSpecSha256, embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension], references: [id, specSha256, embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension], onDelete: Restrict, onUpdate: Restrict, map: "knowledge_releases_retrieval_profile_fkey")
+  documents                  KnowledgeDocument[]
+  embeddingBatches           KnowledgeEmbeddingBatch[]
+  runs                       Run[]
+  artifactVersions           ArtifactVersion[]
+  knowledgeToolGrants        KnowledgeToolGrant[]
+
+  @@unique([key, version])
+  @@unique([id, embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension])
+  @@unique([id, retrievalProfileId, retrievalProfileSpecSha256, embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension], map: "knowledge_releases_retrieval_profile_key")
+  @@index([embeddingProfileId, status])
+  @@index([retrievalProfileId, status])
+  @@index([workspaceId, status, version])
+  @@index([status, leaseExpiresAt, updatedAt])
+  @@map("knowledge_releases")
+}
+
+model KnowledgeDocument {
+  id           String              @id @default(cuid())
+  releaseId    String              @map("release_id")
+  sourceKind   KnowledgeSourceKind @map("source_kind")
+  sourcePath   String              @map("source_path")
+  title        String
+  checksum     String
+  route        KnowledgeRoute
+  sourceBlobId String?             @map("source_blob_id")
+  metadata     Json
+  release      KnowledgeRelease    @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  sourceBlob   Blob?               @relation("KnowledgeSourceBlob", fields: [sourceBlobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  chunks       KnowledgeChunk[]
+
+  @@unique([releaseId, sourcePath])
+  @@unique([id, releaseId])
+  @@index([releaseId, route])
+  @@index([sourceBlobId])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id           String                    @id @default(cuid())
+  documentId   String                    @map("document_id")
+  releaseId    String                    @map("release_id")
+  sequence     Int
+  headingPath  Json                      @map("heading_path")
+  content      String
+  tokenCount   Int                       @map("token_count")
+  searchVector Unsupported("tsvector")?  @map("search_vector")
+  document     KnowledgeDocument         @relation(fields: [documentId, releaseId], references: [id, releaseId], onDelete: Cascade, onUpdate: Restrict)
+  embeddings   KnowledgeChunkEmbedding[]
+
+  @@unique([documentId, sequence])
+  @@unique([id, releaseId])
+  @@index([releaseId])
+  @@map("knowledge_chunks")
+}
+
+model EmbeddingProfile {
+  id                String                           @id
+  spec              Json
+  specSha256        String                           @unique @map("spec_sha256")
+  dimension         Int
+  status            EmbeddingProfileStatus           @default(candidate)
+  createdAt         DateTime                         @default(now()) @map("created_at")
+  updatedAt         DateTime                         @default(now()) @updatedAt @map("updated_at")
+  knowledgeReleases KnowledgeRelease[]
+  retrievalProfiles RetrievalProfile[]
+  embeddingBatches  KnowledgeEmbeddingBatch[]
+  chunkEmbeddings   KnowledgeChunkEmbedding[]
+  adoptionReceipt   KnowledgeProfileAdoptionReceipt?
+
+  @@unique([id, dimension])
+  @@unique([id, specSha256])
+  @@unique([id, specSha256, dimension])
+  @@index([status, createdAt])
+  @@map("embedding_profiles")
+}
+
+model RetrievalProfile {
+  id                         String                           @id
+  spec                       Json
+  specSha256                 String                           @unique @map("spec_sha256")
+  embeddingProfileId         String                           @map("embedding_profile_id")
+  embeddingProfileSpecSha256 String                           @map("embedding_profile_spec_sha256")
+  embeddingDimension         Int                              @map("embedding_dimension")
+  status                     RetrievalProfileStatus           @default(candidate)
+  createdAt                  DateTime                         @default(now()) @map("created_at")
+  updatedAt                  DateTime                         @default(now()) @updatedAt @map("updated_at")
+  embeddingProfile           EmbeddingProfile                 @relation(fields: [embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension], references: [id, specSha256, dimension], onDelete: Restrict, onUpdate: Restrict, map: "retrieval_profiles_embedding_profile_fkey")
+  knowledgeReleases          KnowledgeRelease[]
+  adoptionReceipt            KnowledgeProfileAdoptionReceipt?
+
+  @@unique([id, specSha256])
+  @@unique([id, specSha256, embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension], map: "retrieval_profiles_identity_key")
+  @@index([status, createdAt])
+  @@index([embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension, status], map: "retrieval_profiles_embedding_status_idx")
+  @@map("retrieval_profiles")
+}
+
+model KnowledgeProfileOperatorEvent {
+  id              BigInt                         @id @default(autoincrement())
+  principalId     String                         @map("principal_id")
+  action          KnowledgeProfileOperatorAction
+  authorizedBy    String                         @map("authorized_by")
+  changeReference String                         @unique @map("change_reference")
+  createdAt       DateTime                       @default(now()) @map("created_at")
+  principal       Principal                      @relation(fields: [principalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([principalId, id])
+  @@map("knowledge_profile_operator_events")
+}
+
+model KnowledgeProfileAdoptionReceipt {
+  id                         String                @id @default(cuid())
+  profileKind                KnowledgeProfileKind  @map("profile_kind")
+  profileVersion             Int                   @default(1) @map("profile_version")
+  embeddingProfileId         String?               @map("embedding_profile_id")
+  embeddingProfileSpecSha256 String?               @map("embedding_profile_spec_sha256")
+  retrievalProfileId         String?               @map("retrieval_profile_id")
+  retrievalProfileSpecSha256 String?               @map("retrieval_profile_spec_sha256")
+  actorPrincipalId           String                @map("actor_principal_id")
+  scope                      KnowledgeProfileScope @default(global)
+  adoptedAt                  DateTime              @default(now()) @map("adopted_at")
+  embeddingProfile           EmbeddingProfile?     @relation(fields: [embeddingProfileId, embeddingProfileSpecSha256], references: [id, specSha256], onDelete: Restrict, onUpdate: Restrict)
+  retrievalProfile           RetrievalProfile?     @relation(fields: [retrievalProfileId, retrievalProfileSpecSha256], references: [id, specSha256], onDelete: Restrict, onUpdate: Restrict)
+  actor                      Principal             @relation("KnowledgeProfileAdoptionActor", fields: [actorPrincipalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([embeddingProfileId, embeddingProfileSpecSha256])
+  @@unique([retrievalProfileId, retrievalProfileSpecSha256])
+  @@index([profileKind, adoptedAt, id])
+  @@index([actorPrincipalId, adoptedAt])
+  @@map("knowledge_profile_adoption_receipts")
+}
+
+model KnowledgeChunkEmbedding {
+  chunkId           String                @map("chunk_id")
+  releaseId         String                @map("release_id")
+  profileId         String                @map("profile_id")
+  profileSpecSha256 String                @map("profile_spec_sha256")
+  dimension         Int
+  embedding         Unsupported("vector")
+  embeddingSha256   String                @map("embedding_sha256")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  chunk             KnowledgeChunk        @relation(fields: [chunkId, releaseId], references: [id, releaseId], onDelete: Cascade, onUpdate: Restrict)
+  profile           EmbeddingProfile      @relation(fields: [profileId, profileSpecSha256, dimension], references: [id, specSha256, dimension], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([chunkId, profileId])
+  @@index([releaseId, profileId])
+  @@index([profileId, dimension])
+  @@map("knowledge_chunk_embeddings")
+}
+
+model KnowledgeEmbeddingBatch {
+  id                String                        @id
+  releaseId         String                        @map("release_id")
+  profileId         String                        @map("profile_id")
+  profileSpecSha256 String                        @map("profile_spec_sha256")
+  dimension         Int
+  sequence          Int
+  chunkIds          String[]                      @map("chunk_ids")
+  inputCount        Int                           @map("input_count")
+  inputSha256       String                        @map("input_sha256")
+  status            KnowledgeEmbeddingBatchStatus @default(pending)
+  attemptCount      Int                           @default(0) @map("attempt_count")
+  leaseToken        String?                       @map("lease_token")
+  queueJobId        String?                       @map("queue_job_id")
+  queueRetryCount   Int?                          @map("queue_retry_count")
+  tokenCount        Int?                          @map("token_count")
+  outputSha256      String?                       @map("output_sha256")
+  lastErrorCode     String?                       @map("last_error_code")
+  lastErrorDetail   String?                       @map("last_error_detail")
+  lastErrorAt       DateTime?                     @map("last_error_at")
+  startedAt         DateTime?                     @map("started_at")
+  finishedAt        DateTime?                     @map("finished_at")
+  createdAt         DateTime                      @default(now()) @map("created_at")
+  updatedAt         DateTime                      @default(now()) @updatedAt @map("updated_at")
+  release           KnowledgeRelease              @relation(fields: [releaseId, profileId, profileSpecSha256, dimension], references: [id, embeddingProfileId, embeddingProfileSpecSha256, embeddingDimension], onDelete: Cascade, onUpdate: Restrict)
+  profile           EmbeddingProfile              @relation(fields: [profileId, profileSpecSha256, dimension], references: [id, specSha256, dimension], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([releaseId, sequence])
+  @@index([releaseId, status, sequence])
+  @@index([profileId, profileSpecSha256, dimension])
+  @@map("knowledge_embedding_batches")
+}

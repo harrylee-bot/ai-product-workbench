@@ -1,0 +1,60 @@
+---
+title: "旧库来源｜权限审核与运营治理 / 原型重点｜a3faca8feaca"
+description: "原型重点"
+date: "2026-07-16"
+status: "仅查来源"
+tags:
+  - "旧数据库知识库"
+  - "来源条目"
+  - "业务域知识"
+  - "business_concept"
+  - "vault-sync"
+  - "knowledge-vault"
+  - "vault-tier:main"
+  - "业务域"
+  - "权限"
+  - "审核"
+aliases:
+  - "权限审核与运营治理 / 原型重点"
+source: "storage/source-assets/legacy-knowledge-20260716/knowledge-items.ndjson"
+legacyKnowledgeId: "vault_489e07c02fbe4cd6c55632ecd6486baf"
+legacyStatus: "active"
+legacyCategoryId: "f58523e2-2fdb-45d5-a7f7-a0140bbc0ca2"
+retrievalScope: "source_lookup"
+---
+
+# 权限审核与运营治理 / 原型重点
+
+## 来源元数据
+
+| 项目 | 内容 |
+| --- | --- |
+| 旧知识 ID | `vault_489e07c02fbe4cd6c55632ecd6486baf` |
+| 分类 | 业务域知识 |
+| 类型 | `business_concept` |
+| 范围 | `global` |
+| 优先级 | `high` |
+| 旧状态 | `active` |
+| 新检索状态 | 仅查来源 |
+| 旧来源类型 | `file_extraction` |
+| 创建时间 | 2026-06-30T02:36:45.426 |
+| 更新时间 | 2026-07-10T06:40:39.088 |
+| 历史版本 | 2 个；最新版本号 2 |
+
+## 旧库摘要
+
+原型重点
+
+## 旧库当前内容
+
+来源文件：02-业务域知识/权限审核与运营治理.md
+切片序号：7
+
+## 原型重点
+
+- 权限矩阵或角色配置页。
+- 审核列表：状态、提交人、对象、时间、操作。
+- 审核详情：变更前后值、影响范围、驳回原因。
+- 操作日志：筛选、明细、导出权限。
+- 无权限状态和高风险二次确认弹窗。
+

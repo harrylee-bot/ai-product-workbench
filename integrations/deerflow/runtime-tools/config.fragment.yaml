@@ -1,0 +1,43 @@
+tool_groups:
+  - name: workbench
+
+tools:
+  - name: workbench_artifact_draft_publish
+    group: workbench
+    use: deerflow_workbench_tools.artifact_draft_tool:workbench_artifact_draft_publish
+  - name: workbench_generation_stage_update
+    group: workbench
+    use: deerflow_workbench_tools.generation_stage_tool:workbench_generation_stage_update
+  - name: workbench_prototype_patch_publish
+    group: workbench
+    use: deerflow_workbench_tools.prototype_patch_tool:workbench_prototype_patch_publish
+  - name: workbench_knowledge_retrieve
+    group: workbench
+    use: deerflow_workbench_tools.knowledge_tool:workbench_knowledge_retrieve
+  - name: workbench_runtime_result_submit
+    group: workbench
+    use: deerflow_workbench_tools.runtime_result_tool:workbench_runtime_result_submit
+  - name: get_visible_screens
+    group: workbench
+    use: deerflow_workbench_tools.canvas_tool:get_visible_screens
+  - name: get_selected_screens
+    group: workbench
+    use: deerflow_workbench_tools.canvas_tool:get_selected_screens
+  - name: view_screen
+    group: workbench
+    use: deerflow_workbench_tools.canvas_tool:view_screen
+  - name: select_screen
+    group: workbench
+    use: deerflow_workbench_tools.canvas_tool:select_screen
+  - name: quick_edit
+    group: workbench
+    use: deerflow_workbench_tools.canvas_tool:quick_edit
+  - name: duplicate_screen
+    group: workbench
+    use: deerflow_workbench_tools.canvas_tool:duplicate_screen
+  - name: rename_screen
+    group: workbench
+    use: deerflow_workbench_tools.canvas_tool:rename_screen
+  - name: navigate_canvas
+    group: workbench
+    use: deerflow_workbench_tools.canvas_tool:navigate_canvas

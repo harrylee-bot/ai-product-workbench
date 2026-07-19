@@ -1,0 +1,312 @@
+{
+  "protocol": "workbench.runtime.result.v1",
+  "message": "报名原型已生成。",
+  "artifacts": [
+    {
+      "kind": "prototype",
+      "schemaVersion": 1,
+      "title": "活动报名",
+      "operation": { "kind": "create" },
+      "citations": [],
+      "content": {
+        "protocol": "workbench.prototype.v1",
+        "documentId": "prototype-signup",
+        "title": "活动报名",
+        "revision": 1,
+        "screens": [
+          {
+            "id": "screen-signup",
+            "name": "报名",
+            "route": "/",
+            "rootNodeId": "node-root",
+            "initialStateId": "state-ready",
+            "viewport": { "width": 390, "height": 844 }
+          }
+        ],
+        "nodes": [
+          {
+            "id": "node-root",
+            "screenId": "screen-signup",
+            "parentId": null,
+            "name": "报名页面",
+            "visible": true,
+            "layout": {
+              "mode": "absolute",
+              "x": { "kind": "literal", "value": 0 },
+              "y": { "kind": "literal", "value": 0 },
+              "width": { "kind": "literal", "value": 390 },
+              "height": { "kind": "literal", "value": 844 },
+              "display": "flex",
+              "direction": "column",
+              "gap": { "kind": "literal", "value": 0 },
+              "padding": {
+                "top": { "kind": "literal", "value": 24 },
+                "right": { "kind": "literal", "value": 24 },
+                "bottom": { "kind": "literal", "value": 24 },
+                "left": { "kind": "literal", "value": 24 }
+              },
+              "align": "stretch",
+              "justify": "start",
+              "gridColumns": null,
+              "overflow": "auto"
+            },
+            "style": {
+              "opacity": 1,
+              "rotation": 0,
+              "transformOrigin": { "x": 0.5, "y": 0.5 },
+              "fill": { "kind": "literal", "value": "#f7f7f8" },
+              "stroke": null,
+              "radii": {
+                "topLeft": { "kind": "literal", "value": 0 },
+                "topRight": { "kind": "literal", "value": 0 },
+                "bottomRight": { "kind": "literal", "value": 0 },
+                "bottomLeft": { "kind": "literal", "value": 0 }
+              },
+              "shadowTokenIds": [],
+              "typography": null
+            },
+            "actionIds": [],
+            "bindingIds": [],
+            "motionIds": [],
+            "kind": "frame",
+            "childIds": ["node-form"],
+            "clipContent": true
+          },
+          {
+            "id": "node-form",
+            "screenId": "screen-signup",
+            "parentId": "node-root",
+            "name": "报名表单",
+            "visible": true,
+            "layout": {
+              "mode": "flow",
+              "x": { "kind": "literal", "value": 0 },
+              "y": { "kind": "literal", "value": 0 },
+              "width": { "kind": "literal", "value": 342 },
+              "height": { "kind": "literal", "value": 120 },
+              "display": "flex",
+              "direction": "column",
+              "gap": { "kind": "literal", "value": 16 },
+              "padding": {
+                "top": { "kind": "literal", "value": 0 },
+                "right": { "kind": "literal", "value": 0 },
+                "bottom": { "kind": "literal", "value": 0 },
+                "left": { "kind": "literal", "value": 0 }
+              },
+              "align": "stretch",
+              "justify": "start",
+              "gridColumns": null,
+              "overflow": "visible"
+            },
+            "style": {
+              "opacity": 1,
+              "rotation": 0,
+              "transformOrigin": { "x": 0.5, "y": 0.5 },
+              "fill": null,
+              "stroke": null,
+              "radii": {
+                "topLeft": { "kind": "literal", "value": 0 },
+                "topRight": { "kind": "literal", "value": 0 },
+                "bottomRight": { "kind": "literal", "value": 0 },
+                "bottomLeft": { "kind": "literal", "value": 0 }
+              },
+              "shadowTokenIds": [],
+              "typography": null
+            },
+            "actionIds": ["action-submit"],
+            "bindingIds": [],
+            "motionIds": [],
+            "kind": "form",
+            "childIds": ["node-name", "node-submit"]
+          },
+          {
+            "id": "node-name",
+            "screenId": "screen-signup",
+            "parentId": "node-form",
+            "name": "姓名",
+            "visible": true,
+            "layout": {
+              "mode": "flow",
+              "x": { "kind": "literal", "value": 0 },
+              "y": { "kind": "literal", "value": 0 },
+              "width": { "kind": "literal", "value": 342 },
+              "height": { "kind": "literal", "value": 48 },
+              "display": "block",
+              "direction": "column",
+              "gap": { "kind": "literal", "value": 0 },
+              "padding": {
+                "top": { "kind": "literal", "value": 0 },
+                "right": { "kind": "literal", "value": 0 },
+                "bottom": { "kind": "literal", "value": 0 },
+                "left": { "kind": "literal", "value": 0 }
+              },
+              "align": "stretch",
+              "justify": "start",
+              "gridColumns": null,
+              "overflow": "visible"
+            },
+            "style": {
+              "opacity": 1,
+              "rotation": 0,
+              "transformOrigin": { "x": 0.5, "y": 0.5 },
+              "fill": { "kind": "literal", "value": "#ffffff" },
+              "stroke": {
+                "color": { "kind": "literal", "value": "#d1d5db" },
+                "width": { "kind": "literal", "value": 1 },
+                "style": "solid",
+                "position": "inside"
+              },
+              "radii": {
+                "topLeft": { "kind": "literal", "value": 8 },
+                "topRight": { "kind": "literal", "value": 8 },
+                "bottomRight": { "kind": "literal", "value": 8 },
+                "bottomLeft": { "kind": "literal", "value": 8 }
+              },
+              "shadowTokenIds": [],
+              "typography": null
+            },
+            "actionIds": [],
+            "bindingIds": ["binding-name"],
+            "motionIds": [],
+            "kind": "input",
+            "inputType": "text",
+            "fieldName": "name",
+            "label": "姓名",
+            "placeholder": "请输入姓名",
+            "optionValue": null,
+            "options": [],
+            "required": true,
+            "disabled": false
+          },
+          {
+            "id": "node-submit",
+            "screenId": "screen-signup",
+            "parentId": "node-form",
+            "name": "提交报名",
+            "visible": true,
+            "layout": {
+              "mode": "flow",
+              "x": { "kind": "literal", "value": 0 },
+              "y": { "kind": "literal", "value": 64 },
+              "width": { "kind": "literal", "value": 342 },
+              "height": { "kind": "literal", "value": 48 },
+              "display": "flex",
+              "direction": "row",
+              "gap": { "kind": "literal", "value": 0 },
+              "padding": {
+                "top": { "kind": "literal", "value": 0 },
+                "right": { "kind": "literal", "value": 16 },
+                "bottom": { "kind": "literal", "value": 0 },
+                "left": { "kind": "literal", "value": 16 }
+              },
+              "align": "center",
+              "justify": "center",
+              "gridColumns": null,
+              "overflow": "hidden"
+            },
+            "style": {
+              "opacity": 1,
+              "rotation": 0,
+              "transformOrigin": { "x": 0.5, "y": 0.5 },
+              "fill": { "kind": "literal", "value": "#111827" },
+              "stroke": null,
+              "radii": {
+                "topLeft": { "kind": "literal", "value": 8 },
+                "topRight": { "kind": "literal", "value": 8 },
+                "bottomRight": { "kind": "literal", "value": 8 },
+                "bottomLeft": { "kind": "literal", "value": 8 }
+              },
+              "shadowTokenIds": [],
+              "typography": {
+                "fontFamily": { "kind": "literal", "value": "Inter" },
+                "fontSize": { "kind": "literal", "value": 16 },
+                "fontWeight": { "kind": "literal", "value": 600 },
+                "lineHeight": { "kind": "literal", "value": 24 },
+                "letterSpacing": { "kind": "literal", "value": 0 },
+                "align": "center",
+                "transform": "none",
+                "decoration": "none"
+              }
+            },
+            "actionIds": [],
+            "bindingIds": ["binding-submit-label"],
+            "motionIds": ["motion-success"],
+            "kind": "button",
+            "label": "提交报名",
+            "childIds": [],
+            "buttonType": "submit",
+            "disabled": false
+          }
+        ],
+        "tokens": [],
+        "assets": [],
+        "variables": [
+          { "path": "form.name", "initialValue": "" }
+        ],
+        "states": [
+          {
+            "id": "state-ready",
+            "screenId": "screen-signup",
+            "name": "可提交",
+            "values": { "status": "ready", "submitLabel": "提交报名" },
+            "overrides": [
+              { "nodeId": "node-submit", "enabled": true }
+            ]
+          },
+          {
+            "id": "state-success",
+            "screenId": "screen-signup",
+            "name": "提交成功",
+            "values": { "status": "success", "submitLabel": "报名成功" },
+            "overrides": [
+              { "nodeId": "node-submit", "enabled": false, "text": "报名成功" }
+            ]
+          }
+        ],
+        "actions": [
+          {
+            "id": "action-submit",
+            "nodeId": "node-form",
+            "event": "submit",
+            "kind": "submit",
+            "bindingIds": ["binding-name"],
+            "successStateId": "state-success"
+          }
+        ],
+        "bindings": [
+          {
+            "id": "binding-name",
+            "nodeId": "node-name",
+            "property": "value",
+            "source": { "kind": "variable", "path": "form.name" }
+          },
+          {
+            "id": "binding-submit-label",
+            "nodeId": "node-submit",
+            "property": "text",
+            "source": {
+              "kind": "state",
+              "stateId": "state-ready",
+              "field": "submitLabel"
+            }
+          }
+        ],
+        "motions": [
+          {
+            "id": "motion-success",
+            "nodeId": "node-submit",
+            "trigger": "stateChange",
+            "stateId": "state-success",
+            "actionId": null,
+            "property": "opacity",
+            "from": 0.65,
+            "to": 1,
+            "duration": { "kind": "literal", "value": 180 },
+            "delay": { "kind": "literal", "value": 0 },
+            "easing": "easeOut"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,438 @@
+name: 产品工作台 CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - production
+
+concurrency:
+  group: workbench-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Contracts, architecture, tests, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: workbench_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d workbench_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      CI: true
+      WORKBENCH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=workbench
+      WORKBENCH_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=workbench
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache pinned oasdiff release
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/workbench/tools/oasdiff
+          key: oasdiff-${{ runner.os }}-${{ runner.arch }}-v1.23.0-resolver-v1
+
+      - name: Install and verify pinned oasdiff
+        run: npm run openapi:tool:prepare
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare contracts and generated clients
+        run: npm run workbench:prepare
+
+      - name: Provision database extensions as CI infrastructure admin
+        env:
+          WORKBENCH_POSTGRES_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test
+        run: npm run db:extensions:provision
+
+      - name: Apply clean migrations and verify PostgreSQL constraints
+        env:
+          WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_test
+        run: npm run test:workbench:postgres-constraints
+
+      - name: Check generated OpenAPI
+        run: npm run openapi:check
+
+      - name: Reject breaking OpenAPI changes
+        run: npm run openapi:breaking && npm run openapi:breaking:test
+
+      - name: Check product naming
+        run: npm run brand:check
+
+      - name: Validate hard-cut deletion manifest
+        run: npm run hard-cut:manifest
+
+      - name: Check types
+        run: npm run typecheck
+
+      - name: Check Workbench lint
+        run: npm run lint:workbench
+
+      - name: Check Workbench module boundaries
+        run: npm run architecture:workbench
+
+      - name: Run server and worker tests
+        run: npm test
+
+      - name: Run real PostgreSQL API and Worker workflows
+        env:
+          WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_test
+        run: npm run test:workbench:postgres-http
+
+      - name: Test trusted DeerFlow tools
+        run: npm run deerflow:tools:test
+
+      - name: Run Workbench Web tests
+        run: npm --workspace @workbench/web run test
+
+      - name: Install Workbench browser runtimes
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run Workbench browser smoke
+        run: npm run e2e:web
+
+      - name: Build production artifacts
+        run: npm run build
+        env:
+          WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: https://uploads.workbench.example.test/workbench
+
+      - name: Validate Workbench route bundles
+        run: npm run bundle:workbench:check
+
+  deployment-config:
+    name: Compose, gateways, and Quartz behavior
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate greenfield Compose model
+        run: >-
+          docker compose
+          --env-file deploy/workbench.env.example
+          --file deploy/workbench-compose.yml
+          --profile "*"
+          config --quiet
+
+      - name: Validate browser upload deployment contract
+        run: npm run deployment:upload:check
+
+      - name: Validate authentication proxy trust contract
+        run: npm run deployment:auth-proxy:check
+
+      - name: Validate deployment network boundaries
+        run: npm run deployment:network:check
+
+      - name: Validate production image inventory and evidence workflow
+        run: npm run deployment:images:check
+
+      - name: Validate clean-host deployment orchestration
+        run: npm run deployment:orchestration:check
+
+      - name: Validate primary gateway configuration
+        run: >-
+          docker run --rm
+          --add-host workbench-web:127.0.0.1
+          --add-host workbench-api:127.0.0.1
+          --add-host knowledge:127.0.0.1
+          --volume "$PWD/deploy/workbench-nginx.conf:/etc/nginx/nginx.conf:ro"
+          nginx:1.27.5-alpine nginx -t
+
+      - name: Validate isolated Preview gateway configuration
+        run: >-
+          docker run --rm
+          --add-host workbench-preview:127.0.0.1
+          --volume "$PWD/deploy/workbench-preview-nginx.conf:/etc/nginx/nginx.conf:ro"
+          nginx:1.27.5-alpine nginx -t
+
+      - name: Validate immutable Quartz source and plugin pins
+        run: npm run knowledge:assert-pinned
+
+      - name: Test Quartz watcher atomic publication and shutdown
+        run: bash apps/knowledge/test-quartz-watcher.sh
+
+  hard-cut-release-gate:
+    name: Enforce candidate-bound hard cut
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    needs: [quality, deployment-config, production-images, image-evidence]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reject missing, forged, stale, or cross-candidate deletion receipts
+        run: npm run hard-cut:manifest -- --enforce
+
+  production-images:
+    name: Production image / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: web
+            dockerfile: apps/web/Dockerfile
+            target: runner
+            build_args: |
+              WORKBENCH_PREVIEW_ORIGIN=https://preview.workbench.example.test
+              WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https://uploads.workbench.example.test/workbench
+              NEXT_PUBLIC_KNOWLEDGE_APP_URL=https://workbench.example.test/knowledge
+          - name: api
+            dockerfile: apps/workbench-api/Dockerfile
+            target: runner
+            build_args: ""
+          - name: api-migrator
+            dockerfile: apps/workbench-api/Dockerfile
+            target: migrator
+            build_args: ""
+          - name: runtime-worker
+            dockerfile: apps/workbench-worker/Dockerfile
+            target: runner
+            build_args: ""
+          - name: file-worker
+            dockerfile: apps/workbench-file-worker/Dockerfile
+            target: runner
+            build_args: ""
+          - name: import-worker
+            dockerfile: apps/workbench-import-worker/Dockerfile
+            target: runner
+            build_args: ""
+          - name: export-worker
+            dockerfile: apps/workbench-export-worker/Dockerfile
+            target: runner
+            build_args: ""
+          - name: preview
+            dockerfile: apps/workbench-preview/Dockerfile
+            target: runner
+            build_args: ""
+          - name: quartz
+            dockerfile: apps/knowledge/Dockerfile
+            target: immutable-runner
+            build_args: |
+              QUARTZ_BASE_URL=workbench.example.test/knowledge
+              KNOWLEDGE_WEB_URL=https://workbench.example.test
+          - name: deerflow
+            dockerfile: integrations/deerflow/Dockerfile
+            target: runtime
+            build_args: |
+              DEERFLOW_BASE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+              DEERFLOW_SOURCE_COMMIT=${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+              WORKBENCH_SOURCE_COMMIT=${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: github.ref == 'refs/heads/production'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Require fixed DeerFlow source and base image pins
+        if: matrix.name == 'deerflow' && github.ref == 'refs/heads/production'
+        env:
+          DEERFLOW_BASE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+          DEERFLOW_SOURCE_COMMIT: ${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+        run: |
+          test -n "$DEERFLOW_BASE_IMAGE"
+          printf '%s' "$DEERFLOW_BASE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+          printf '%s' "$DEERFLOW_SOURCE_COMMIT" | grep -Eq '^[a-f0-9]{40}$'
+
+      - name: Prepare image evidence directory
+        run: mkdir -p output
+
+      - name: Build ${{ matrix.name }} production image
+        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          build-args: ${{ matrix.build_args }}
+          tags: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}:${{ github.sha }}
+          push: ${{ github.ref == 'refs/heads/production' }}
+          load: ${{ github.ref != 'refs/heads/production' }}
+          provenance: ${{ github.ref == 'refs/heads/production' && 'mode=max' || false }}
+          sbom: ${{ github.ref == 'refs/heads/production' }}
+          metadata-file: output/build-metadata.json
+          cache-from: type=gha,scope=workbench-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=workbench-${{ matrix.name }},ignore-error=true
+
+      - name: Resolve image reference
+        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
+        id: image
+        run: |
+          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/workbench-${{ matrix.name }}:${GITHUB_SHA}"
+          if [ "$GITHUB_REF" = "refs/heads/production" ]; then
+            ref="$ref@${{ steps.build.outputs.digest }}"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SPDX SBOM
+        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.image.outputs.ref }}
+          artifact-name: sbom-${{ matrix.name }}.spdx.json
+          output-file: output/sbom-${{ matrix.name }}.spdx.json
+
+      - name: Scan image for release-blocking vulnerabilities
+        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: json
+          output: output/trivy-${{ matrix.name }}.json
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Publish signed build provenance attestation
+        if: github.ref == 'refs/heads/production'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Publish signed SBOM attestation
+        if: github.ref == 'refs/heads/production'
+        uses: actions/attest-sbom@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: output/sbom-${{ matrix.name }}.spdx.json
+          push-to-registry: true
+
+      - name: Install Cosign
+        if: github.ref == 'refs/heads/production'
+        uses: sigstore/cosign-installer@v3.7.0
+
+      - name: Sign and verify immutable image
+        if: github.ref == 'refs/heads/production'
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          cosign sign --yes --bundle "output/cosign-${{ matrix.name }}.bundle.json" "$IMAGE_REF"
+          cosign verify \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/workbench-ci.yml@refs/heads/production$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --output-file "output/cosign-${{ matrix.name }}.verify.json" \
+            "$IMAGE_REF"
+
+      - name: Write immutable image evidence record
+        if: github.ref == 'refs/heads/production'
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          node scripts/write-production-image-record.mjs \
+            --id "${{ matrix.name }}" \
+            --image-ref "$IMAGE_REF" \
+            --digest "$IMAGE_DIGEST" \
+            --source-commit "$GITHUB_SHA" \
+            --sbom-path "output/sbom-${{ matrix.name }}.spdx.json" \
+            --provenance-path output/build-metadata.json \
+            --signature-path "output/cosign-${{ matrix.name }}.bundle.json" \
+            --verification-path "output/cosign-${{ matrix.name }}.verify.json" \
+            --vulnerability-path "output/trivy-${{ matrix.name }}.json" \
+            > "output/image-record-${{ matrix.name }}.json"
+
+      - name: Upload image evidence
+        if: always() && (matrix.name != 'deerflow' || github.ref == 'refs/heads/production')
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-image-evidence-${{ matrix.name }}
+          path: output/
+          if-no-files-found: error
+
+  image-evidence:
+    name: Assemble signed production image inventory
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    needs: [production-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install manifest verifier dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Download signed image evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: production-image-evidence-*
+          path: output/image-evidence
+          merge-multiple: true
+
+      - name: Assemble candidate-bound image manifest
+        run: |
+          node scripts/production-image-inventory.mjs --contract
+          records=()
+          while IFS= read -r -d '' record; do records+=(--record "$record"); done < <(find output/image-evidence -name 'image-record-*.json' -print0)
+          node scripts/production-image-inventory.mjs --assemble \
+            --expected-commit "$GITHUB_SHA" \
+            "${records[@]}" \
+            > output/production-image-manifest.json
+
+      - name: Upload candidate image manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-image-manifest
+          path: output/production-image-manifest.json

@@ -1,0 +1,31 @@
+openapi: 3.1.0
+info:
+  title: Workbench oasdiff fixture
+  version: 1.0.0
+paths:
+  /projects/{projectId}:
+    get:
+      operationId: getProject
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+components:
+  schemas:
+    Project:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string

@@ -1,0 +1,29 @@
+www.{$WORKBENCH_WEB_HOSTNAME} {
+	redir https://{$WORKBENCH_WEB_HOSTNAME}{uri} 301
+}
+
+{$WORKBENCH_WEB_HOSTNAME} {
+	@trustedCdn {
+		remote_ip {$WORKBENCH_CDN_EDGE_CIDRS}
+		header X-Workbench-Origin-Auth {$WORKBENCH_CDN_ORIGIN_AUTH_SECRET}
+	}
+
+	handle @trustedCdn {
+		@notRunEvents {
+			not path_regexp runEvents ^/api/v1/runs/[^/]+/events$
+		}
+		encode @notRunEvents zstd gzip
+		reverse_proxy 127.0.0.1:4180 {
+			header_up X-Workbench-Client-IP {http.request.header.Ali-Cdn-Real-Ip}
+			header_up -X-Workbench-Origin-Auth
+		}
+	}
+
+	handle {
+		respond 403
+	}
+}
+
+{$WORKBENCH_PREVIEW_HOSTNAME} {
+	reverse_proxy 127.0.0.1:4190
+}

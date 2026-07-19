@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const dockerfile = readFileSync(new URL("../apps/knowledge/Dockerfile", import.meta.url), "utf8");
-const compose = readFileSync(new URL("../deploy/docker-compose.yml", import.meta.url), "utf8");
-const deployScript = readFileSync(new URL("../deploy/server-deploy.sh", import.meta.url), "utf8");
+const compose = readFileSync(new URL("../deploy/workbench-compose.yml", import.meta.url), "utf8");
 const quartzConfig = readFileSync(new URL("../apps/knowledge/quartz.config.yaml", import.meta.url), "utf8");
 const quartzLock = JSON.parse(readFileSync(new URL("../apps/knowledge/quartz.lock.json", import.meta.url), "utf8"));
 
@@ -42,6 +41,21 @@ assertContains(
   dockerfile,
   "npx quartz plugin install",
   "Knowledge Dockerfile must install Quartz plugins from the lockfile.",
+);
+assertContains(
+  dockerfile,
+  "FROM quartz-base AS immutable-builder",
+  "Knowledge Dockerfile must have an immutable Quartz build stage.",
+);
+assertContains(
+  dockerfile,
+  "FROM ${NGINX_IMAGE} AS immutable-runner",
+  "Knowledge Dockerfile must serve immutable output from a runtime-only Nginx stage.",
+);
+assertContains(
+  dockerfile,
+  "&& /usr/local/bin/knowledge-build-immutable",
+  "Knowledge immutable image must build the Quartz output at image-build time.",
 );
 
 const installBlock = dockerfile.slice(
@@ -92,12 +106,9 @@ for (const name of lockedPluginNames) {
   }
 }
 
-assertContains(compose, `QUARTZ_REF: \${QUARTZ_REF:-${quartzRef}}`, "docker-compose.yml must not override Quartz back to a floating ref.");
-assertContains(compose, `QUARTZ_COMMIT: \${QUARTZ_COMMIT:-${quartzCommit}}`, "docker-compose.yml must pass the pinned Quartz commit.");
-assertContains(deployScript, `QUARTZ_REF="\${QUARTZ_REF:-${quartzRef}}"`, "server-deploy.sh must default to the pinned Quartz ref.");
-assertContains(deployScript, `QUARTZ_COMMIT="\${QUARTZ_COMMIT:-${quartzCommit}}"`, "server-deploy.sh must default to the pinned Quartz commit.");
-assertContains(deployScript, "export QUARTZ_REF", "server-deploy.sh must export QUARTZ_REF for compose builds.");
-assertContains(deployScript, "export QUARTZ_COMMIT", "server-deploy.sh must export QUARTZ_COMMIT for compose builds.");
+assertContains(compose, `QUARTZ_REF: \${WORKBENCH_QUARTZ_REF:-${quartzRef}}`, "workbench-compose.yml must not override Quartz back to a floating ref.");
+assertContains(compose, `QUARTZ_COMMIT: \${WORKBENCH_QUARTZ_COMMIT:-${quartzCommit}}`, "workbench-compose.yml must pass the pinned Quartz commit.");
+assertContains(compose, "target: immutable-runner", "workbench-compose.yml must deploy the immutable Quartz runtime target.");
 
 if (errors.length) {
   console.error("Knowledge build pinning is not strict enough:");

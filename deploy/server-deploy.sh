@@ -1,320 +1,412 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/ai-product-workbench}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="${APP_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+ENV_FILE="${WORKBENCH_ENV_FILE:-${APP_DIR}/deploy/workbench.env}"
+COMPOSE_FILE="${WORKBENCH_COMPOSE_FILE:-${APP_DIR}/deploy/workbench-compose.yml}"
+COMPOSE_OVERLAY="${WORKBENCH_COMPOSE_OVERLAY:-}"
+COMPOSE_PROFILES="${WORKBENCH_COMPOSE_PROFILES:-}"
+DEERFLOW_COMPOSE_FILE="${WORKBENCH_DEERFLOW_COMPOSE_FILE:-${APP_DIR}/deploy/deerflow-runtime-compose.yml}"
+DEERFLOW_PREFLIGHT_SCRIPT="${WORKBENCH_DEERFLOW_PREFLIGHT_SCRIPT:-${APP_DIR}/deploy/deerflow-production-preflight.sh}"
+MANAGE_DEERFLOW_RUNTIME="${WORKBENCH_MANAGE_DEERFLOW_RUNTIME:-1}"
+IMAGE_MODE="${WORKBENCH_DEPLOY_IMAGE_MODE:-pinned}"
+if [ -n "${WORKBENCH_PREFLIGHT_SCRIPT:-}" ]; then
+  PREFLIGHT_SCRIPT="$WORKBENCH_PREFLIGHT_SCRIPT"
+elif [ "$IMAGE_MODE" = "build" ]; then
+  PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-server-preflight.sh"
+else
+  PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-production-preflight.sh"
+fi
 DEPLOY_TARGET="${DEPLOY_TARGET:-all}"
+case "$DEPLOY_TARGET" in
+  stop | rollback) SKIP_PREFLIGHT=1 ;;
+  *) SKIP_PREFLIGHT=0 ;;
+esac
+HEALTH_TIMEOUT_SECONDS="${WORKBENCH_DEPLOY_HEALTH_TIMEOUT_SECONDS:-300}"
+LOCK_FILE="${WORKBENCH_DEPLOY_LOCK_FILE:-/tmp/workbench-deploy.lock}"
+ROLLBACK_ON_FAILURE="${WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE:-1}"
+ROLLBACK_ENV_FILE="${WORKBENCH_ROLLBACK_ENV_FILE:-}"
+ROLLBACK_COMPOSE_FILE="${WORKBENCH_ROLLBACK_COMPOSE_FILE:-$COMPOSE_FILE}"
 
-if [ -f "${APP_DIR}/.env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "${APP_DIR}/.env"
-  set +a
+deployment_mutated=0
+clean_host=0
+existing_workbench_services=""
+existing_deerflow_services=""
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Required command is missing: $1" >&2
+    exit 69
+  fi
+}
+
+wait_for_services() {
+  local service
+  for service in "$@"; do
+    wait_for_service "$service"
+  done
+}
+
+wait_for_service() {
+  local service="$1"
+  local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+  local container_id=""
+  local status=""
+
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    container_id="$("${COMPOSE[@]}" ps -q "$service")"
+    if [ -n "$container_id" ]; then
+      status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
+      case "$status" in
+        healthy | running)
+          echo "Service ready: $service ($status)"
+          return 0
+          ;;
+        unhealthy | exited | dead)
+          echo "Service failed before readiness: $service ($status)" >&2
+          "${COMPOSE[@]}" logs --tail 100 "$service" >&2 || true
+          return 1
+          ;;
+      esac
+    fi
+    sleep 2
+  done
+
+  echo "Service readiness timed out: $service (last status: ${status:-missing})" >&2
+  "${COMPOSE[@]}" logs --tail 100 "$service" >&2 || true
+  return 1
+}
+
+wait_for_deerflow() {
+  local deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+  local container_id=""
+  local status=""
+
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    container_id="$("${DEERFLOW_COMPOSE[@]}" ps -q deerflow)"
+    if [ -n "$container_id" ]; then
+      status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
+      case "$status" in
+        healthy)
+          echo "Service ready: deerflow ($status)"
+          return 0
+          ;;
+        unhealthy | exited | dead)
+          echo "Service failed before readiness: deerflow ($status)" >&2
+          "${DEERFLOW_COMPOSE[@]}" logs --tail 100 deerflow >&2 || true
+          return 1
+          ;;
+      esac
+    fi
+    sleep 2
+  done
+
+  echo "Service readiness timed out: deerflow (last status: ${status:-missing})" >&2
+  "${DEERFLOW_COMPOSE[@]}" logs --tail 100 deerflow >&2 || true
+  return 1
+}
+
+rollback_clean_host() {
+  local status="$1"
+  [ "$ROLLBACK_ON_FAILURE" = "1" ] || return 0
+  [ "$clean_host" = "1" ] || {
+    echo "Deployment failed after an existing stack was detected; automatic rollback is disabled. Re-run with WORKBENCH_ROLLBACK_ENV_FILE set to the last signed candidate." >&2
+    return 0
+  }
+  [ "$deployment_mutated" = "1" ] || return 0
+  echo "Deployment failed on a clean host; removing partially started services." >&2
+  "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
+  if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
+    WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
+  fi
+  return "$status"
+}
+
+on_deploy_error() {
+  local status=$?
+  trap - ERR
+  rollback_clean_host "$status" || true
+  exit "$status"
+}
+
+env_value() {
+  local key="$1"
+  local count
+  count="$(grep -c "^${key}=" "$ENV_FILE" || true)"
+  if [ "$count" -ne 1 ]; then
+    echo "$key must occur exactly once in $ENV_FILE" >&2
+    exit 65
+  fi
+  sed -n "s/^${key}=//p" "$ENV_FILE"
+}
+
+assert_image_mode() {
+  case "$IMAGE_MODE" in
+    pinned | build) ;;
+    *) echo "WORKBENCH_DEPLOY_IMAGE_MODE must be pinned or build" >&2; exit 64 ;;
+  esac
+  case "$ROLLBACK_ON_FAILURE" in
+    0 | 1) ;;
+    *) echo "WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE must be 0 or 1" >&2; exit 64 ;;
+  esac
+}
+
+prepare_deerflow_runtime() {
+  local base_config effective_config runtime_home image_ref internal_network host_port existing_id current_id
+  base_config="$(env_value WORKBENCH_DEERFLOW_BASE_CONFIG_PATH)"
+  effective_config="$(env_value DEER_FLOW_CONFIG_PATH)"
+  runtime_home="$(env_value DEER_FLOW_HOME)"
+  image_ref="$(env_value WORKBENCH_DEERFLOW_IMAGE_REF)"
+  internal_network="$(env_value WORKBENCH_INTERNAL_NETWORK_NAME)"
+  host_port="$(env_value WORKBENCH_DEERFLOW_HOST_PORT)"
+
+  mkdir -p "$runtime_home" "$(dirname "$effective_config")"
+  node "$APP_DIR/scripts/merge-deerflow-config.mjs" \
+    --base "$base_config" \
+    --fragment "$APP_DIR/integrations/deerflow/runtime-tools/config.fragment.yaml" \
+    --output "$effective_config"
+
+  if ! docker image inspect "$image_ref" >/dev/null 2>&1; then
+    docker pull "$image_ref"
+  fi
+  docker network inspect "$internal_network" >/dev/null 2>&1 \
+    || { echo "Workbench internal network was not created: $internal_network" >&2; return 1; }
+  WORKBENCH_APP_DIR="$APP_DIR" \
+    WORKBENCH_ENV_FILE="$ENV_FILE" \
+    WORKBENCH_DEERFLOW_COMPOSE_FILE="$DEERFLOW_COMPOSE_FILE" \
+    "$DEERFLOW_PREFLIGHT_SCRIPT"
+  current_id="$("${DEERFLOW_COMPOSE[@]}" ps -q deerflow 2>/dev/null || true)"
+  existing_id="$(docker ps --filter "publish=$host_port" --format '{{.ID}}' | head -n 1)"
+  if [ -n "$existing_id" ] && [ "$existing_id" != "$current_id" ]; then
+    echo "DeerFlow host port $host_port is already occupied by container $existing_id; stop the old runtime before cutover." >&2
+    return 1
+  fi
+  WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" up -d --no-build --force-recreate deerflow
+  wait_for_deerflow
+}
+
+require_command docker
+assert_image_mode
+if ! docker compose version >/dev/null 2>&1; then
+  echo "docker compose v2 is required" >&2
+  exit 69
+fi
+if [ ! -f "$ENV_FILE" ]; then
+  echo "Workbench environment file is missing: $ENV_FILE" >&2
+  echo "Create it from deploy/workbench.env.example and provide production values." >&2
+  exit 66
+fi
+if [ ! -f "$COMPOSE_FILE" ]; then
+  echo "Workbench Compose file is missing: $COMPOSE_FILE" >&2
+  exit 66
+fi
+if [ -n "$COMPOSE_OVERLAY" ] && [ ! -f "$COMPOSE_OVERLAY" ]; then
+  echo "Workbench Compose overlay is missing: $COMPOSE_OVERLAY" >&2
+  exit 66
+fi
+case "$MANAGE_DEERFLOW_RUNTIME" in
+  0 | 1) ;;
+  *) echo "WORKBENCH_MANAGE_DEERFLOW_RUNTIME must be 0 or 1" >&2; exit 64 ;;
+esac
+if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
+  [ -f "$DEERFLOW_COMPOSE_FILE" ] || { echo "DeerFlow Compose file is missing: $DEERFLOW_COMPOSE_FILE" >&2; exit 66; }
+  [ -x "$DEERFLOW_PREFLIGHT_SCRIPT" ] || { echo "DeerFlow preflight is missing or not executable: $DEERFLOW_PREFLIGHT_SCRIPT" >&2; exit 66; }
+fi
+if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "pinned" ]; then
+  image_inventory_path="$(env_value WORKBENCH_IMAGE_INVENTORY_PATH)"
+  source_commit="$(env_value WORKBENCH_SOURCE_COMMIT)"
+  [ -f "$image_inventory_path" ] || { echo "Signed production image inventory is missing: $image_inventory_path" >&2; exit 66; }
+  node "$APP_DIR/scripts/production-image-inventory.mjs" \
+    --manifest "$image_inventory_path" \
+    --expected-commit "$source_commit" \
+    --env-file "$ENV_FILE"
+fi
+if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "build" ] && [ -z "$COMPOSE_OVERLAY" ]; then
+  echo "Workbench validation build requires WORKBENCH_COMPOSE_OVERLAY" >&2
+  exit 66
+fi
+if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "pinned" ] && [ -n "$COMPOSE_OVERLAY" ]; then
+  echo "Production pinned deployment must use the base greenfield Compose without a validation overlay" >&2
+  exit 66
+fi
+if [ "$SKIP_PREFLIGHT" = "0" ] && [ -n "$PREFLIGHT_SCRIPT" ] && [ ! -x "$PREFLIGHT_SCRIPT" ]; then
+  echo "Workbench preflight is missing or not executable: $PREFLIGHT_SCRIPT" >&2
+  exit 66
+fi
+if ! [[ "$HEALTH_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "WORKBENCH_DEPLOY_HEALTH_TIMEOUT_SECONDS must be a positive integer" >&2
+  exit 64
 fi
 
-DEPLOY_LOCK_FILE="${DEPLOY_LOCK_FILE:-/tmp/ai-product-workbench-deploy.lock}"
-if [ "${DEPLOY_LOCK_DISABLED:-0}" != "1" ] && command -v flock >/dev/null 2>&1; then
-  exec 9>"$DEPLOY_LOCK_FILE"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LOCK_FILE"
   if ! flock -n 9; then
-    echo "Another deployment is already running. Lock: ${DEPLOY_LOCK_FILE}" >&2
+    echo "Another Workbench deployment owns $LOCK_FILE" >&2
     exit 75
   fi
 fi
 
-# The production host is small; serial Compose builds avoid starving running
-# containers. Operators can opt into Bake after installing buildx.
-COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
-COMPOSE_ENV=(env COMPOSE_PARALLEL_LIMIT="$COMPOSE_PARALLEL_LIMIT")
-if [ "${ENABLE_COMPOSE_BAKE:-0}" = "1" ]; then
-  COMPOSE_ENV+=(COMPOSE_BAKE=true)
-else
-  unset COMPOSE_BAKE
+COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+if [ -n "$COMPOSE_OVERLAY" ]; then
+  COMPOSE+=(-f "$COMPOSE_OVERLAY")
 fi
-
-APP_HOST="${APP_HOST:-}"
-if [ -z "$APP_HOST" ]; then
-  echo "APP_HOST is required. Example: APP_HOST=example.com bash deploy/server-deploy.sh" >&2
-  exit 64
-fi
-DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
-APP_PUBLIC_URL="${APP_PUBLIC_URL:-http://${APP_HOST}:3000}"
-API_PUBLIC_BASE_URL="${API_PUBLIC_BASE_URL:-http://${APP_HOST}:4000/api}"
-if [[ "$APP_PUBLIC_URL" == https://* ]]; then
-  DEFAULT_FORCE_HTTPS=true
-  DEFAULT_AUTH_COOKIE_SECURE=true
-else
-  DEFAULT_FORCE_HTTPS=false
-  DEFAULT_AUTH_COOKIE_SECURE=false
-fi
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
-JWT_SECRET="${JWT_SECRET:-}"
-JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
-AUTH_COOKIE_SECURE="${AUTH_COOKIE_SECURE:-$DEFAULT_AUTH_COOKIE_SECURE}"
-AUTH_COOKIE_SAME_SITE="${AUTH_COOKIE_SAME_SITE:-lax}"
-FORCE_HTTPS="${FORCE_HTTPS:-$DEFAULT_FORCE_HTTPS}"
-MODEL_GATEWAY_ENCRYPTION_KEY="${MODEL_GATEWAY_ENCRYPTION_KEY:-}"
-MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER="${MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER:-true}"
-MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS="${MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS:-true}"
-DEFAULT_MODEL_PROVIDER_NAME="${DEFAULT_MODEL_PROVIDER_NAME:-datatoken}"
-DEFAULT_MODEL_BASE_URL="${DEFAULT_MODEL_BASE_URL:-https://datatoken.shop}"
-DEFAULT_MODEL_API_KEY="${DEFAULT_MODEL_API_KEY:-}"
-DEFAULT_MODEL_NAME="${DEFAULT_MODEL_NAME:-}"
-DEFAULT_MODEL_FAST_NAME="${DEFAULT_MODEL_FAST_NAME:-}"
-DEFAULT_MODEL_REASONING_NAME="${DEFAULT_MODEL_REASONING_NAME:-}"
-DEFAULT_MODEL_LONG_CONTEXT_NAME="${DEFAULT_MODEL_LONG_CONTEXT_NAME:-}"
-DEFAULT_MODEL_CODE_NAME="${DEFAULT_MODEL_CODE_NAME:-}"
-DEFAULT_MODEL_TASK_INTENT_DETECTION_NAME="${DEFAULT_MODEL_TASK_INTENT_DETECTION_NAME:-}"
-DEFAULT_MODEL_TASK_KNOWLEDGE_CLASSIFICATION_NAME="${DEFAULT_MODEL_TASK_KNOWLEDGE_CLASSIFICATION_NAME:-}"
-DEFAULT_MODEL_TASK_REQUIREMENT_ANALYSIS_NAME="${DEFAULT_MODEL_TASK_REQUIREMENT_ANALYSIS_NAME:-}"
-DEFAULT_MODEL_TASK_CONVERSATION_PLANNING_NAME="${DEFAULT_MODEL_TASK_CONVERSATION_PLANNING_NAME:-}"
-DEFAULT_MODEL_TASK_CONVERSATION_DESIGN_NAME="${DEFAULT_MODEL_TASK_CONVERSATION_DESIGN_NAME:-}"
-DEFAULT_MODEL_TASK_PRD_GENERATION_NAME="${DEFAULT_MODEL_TASK_PRD_GENERATION_NAME:-}"
-DEFAULT_MODEL_TASK_PROTOTYPE_DESIGN_NAME="${DEFAULT_MODEL_TASK_PROTOTYPE_DESIGN_NAME:-}"
-DEFAULT_MODEL_TASK_PROTOTYPE_CODE_GENERATION_NAME="${DEFAULT_MODEL_TASK_PROTOTYPE_CODE_GENERATION_NAME:-}"
-DEFAULT_MODEL_TASK_QA_CHECK_NAME="${DEFAULT_MODEL_TASK_QA_CHECK_NAME:-}"
-DEFAULT_MODEL_TASK_KNOWLEDGE_EXTRACTION_NAME="${DEFAULT_MODEL_TASK_KNOWLEDGE_EXTRACTION_NAME:-}"
-DEFAULT_MODEL_TASK_GENERAL_CHAT_NAME="${DEFAULT_MODEL_TASK_GENERAL_CHAT_NAME:-}"
-KNOWLEDGE_APP_PORT="${KNOWLEDGE_APP_PORT:-3001}"
-KNOWLEDGE_APP_PUBLIC_URL="${KNOWLEDGE_APP_PUBLIC_URL:-http://${APP_HOST}:${KNOWLEDGE_APP_PORT}}"
-WEB_ORIGIN="${WEB_ORIGIN:-$APP_PUBLIC_URL}"
-QUARTZ_REF="${QUARTZ_REF:-v5.0.0}"
-QUARTZ_COMMIT="${QUARTZ_COMMIT:-ab346fa66a895e12d63a308e70ce330ba795822a}"
-POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
-NODE_IMAGE="${NODE_IMAGE:-node:22-bookworm-slim}"
-QUARTZ_BASE_URL="${KNOWLEDGE_APP_PUBLIC_URL#http://}"
-QUARTZ_BASE_URL="${QUARTZ_BASE_URL#https://}"
-DEERFLOW_ENABLED="${DEERFLOW_ENABLED:-false}"
-DEERFLOW_GATEWAY_URL="${DEERFLOW_GATEWAY_URL:-http://host.docker.internal:8001}"
-DEERFLOW_LANGGRAPH_URL="${DEERFLOW_LANGGRAPH_URL:-${DEERFLOW_GATEWAY_URL}/api}"
-DEERFLOW_ASSISTANT_ID="${DEERFLOW_ASSISTANT_ID:-lead_agent}"
-DEERFLOW_AGENT_NAME="${DEERFLOW_AGENT_NAME:-}"
-DEERFLOW_MODEL_NAME="${DEERFLOW_MODEL_NAME:-}"
-DEERFLOW_MODEL_DISPLAY_NAME="${DEERFLOW_MODEL_DISPLAY_NAME:-}"
-DEERFLOW_MODEL_PROVIDER="${DEERFLOW_MODEL_PROVIDER:-}"
-DEERFLOW_STREAM_MODE="${DEERFLOW_STREAM_MODE:-messages,values}"
-DEERFLOW_INTERNAL_AUTH_TOKEN="${DEERFLOW_INTERNAL_AUTH_TOKEN:-}"
-DEERFLOW_PLAN_MODE="${DEERFLOW_PLAN_MODE:-true}"
-DEERFLOW_THINKING_ENABLED="${DEERFLOW_THINKING_ENABLED:-true}"
-DEERFLOW_SUBAGENT_ENABLED="${DEERFLOW_SUBAGENT_ENABLED:-true}"
-DEERFLOW_MAX_CONCURRENT_SUBAGENTS="${DEERFLOW_MAX_CONCURRENT_SUBAGENTS:-3}"
-DEERFLOW_TIMEOUT_MS="${DEERFLOW_TIMEOUT_MS:-600000}"
-DEERFLOW_UPLOADS_ENABLED="${DEERFLOW_UPLOADS_ENABLED:-true}"
-DEERFLOW_ARTIFACT_MAX_INLINE_BYTES="${DEERFLOW_ARTIFACT_MAX_INLINE_BYTES:-2000000}"
-
-# ===== 启动期密钥 fail-fast：拒绝以弱默认/空密钥部署生产 =====
-WEAK_SECRET_MARKERS="replace-with|change-me|change-before-production|dev-ai-product-workbench|ai_workbench"
-
-is_weak_secret() {
-  local value="$1"
-  if [ -z "$value" ]; then return 0; fi
-  if echo "$value" | grep -qiE "$WEAK_SECRET_MARKERS"; then return 0; fi
-  return 1
-}
-
-fail_if_weak() {
-  local name="$1"
-  local value="$2"
-  if is_weak_secret "$value"; then
-    echo "ERROR: ${name} 未设置或为弱默认值。请在 ${APP_DIR}/.env 中配置强随机值后再部署。" >&2
-    echo "  生成 JWT_SECRET / MODEL_GATEWAY_ENCRYPTION_KEY 示例：openssl rand -base64 32" >&2
-    exit 1
-  fi
-}
-
-case "$DEPLOY_TARGET" in
-  all | api)
-    fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
-    fail_if_weak "JWT_SECRET" "$JWT_SECRET"
-    fail_if_weak "MODEL_GATEWAY_ENCRYPTION_KEY" "$MODEL_GATEWAY_ENCRYPTION_KEY"
-
-    if [ "${DEERFLOW_ENABLED}" != "true" ]; then
-      echo "WARNING: DEERFLOW_ENABLED 非 true，自然语言→PRD→原型链路将不可用（仅返回停用文案）。" >&2
-    fi
-    ;;
-  postgres)
-    fail_if_weak "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
-    ;;
-  web | knowledge)
-    ;;
-  *)
-    echo "ERROR: DEPLOY_TARGET must be one of: all, web, api, knowledge, postgres" >&2
-    exit 2
-    ;;
-esac
-
-wait_for_http() {
-  local url="$1"
-  local label="$2"
-  local attempt
-
-  for attempt in $(seq 1 60); do
-    if curl --fail --silent -H "x-forwarded-proto: https" "$url" >/dev/null; then
-      return 0
-    fi
-    sleep 2
-  done
-
-  echo "${label} did not become ready: ${url}" >&2
-  return 1
-}
-
-export NODE_IMAGE
-export POSTGRES_IMAGE
-export POSTGRES_PASSWORD
-export JWT_SECRET
-export JWT_EXPIRES_IN
-export AUTH_COOKIE_SECURE
-export AUTH_COOKIE_SAME_SITE
-export FORCE_HTTPS
-export MODEL_GATEWAY_ENCRYPTION_KEY
-export MODEL_GATEWAY_KEEP_ONLY_DEFAULT_PROVIDER
-export MODEL_GATEWAY_HIDE_DISABLED_PROVIDERS
-export DEFAULT_MODEL_PROVIDER_NAME
-export DEFAULT_MODEL_BASE_URL
-export DEFAULT_MODEL_API_KEY
-export DEFAULT_MODEL_NAME
-export DEFAULT_MODEL_FAST_NAME
-export DEFAULT_MODEL_REASONING_NAME
-export DEFAULT_MODEL_LONG_CONTEXT_NAME
-export DEFAULT_MODEL_CODE_NAME
-export DEFAULT_MODEL_TASK_INTENT_DETECTION_NAME
-export DEFAULT_MODEL_TASK_KNOWLEDGE_CLASSIFICATION_NAME
-export DEFAULT_MODEL_TASK_REQUIREMENT_ANALYSIS_NAME
-export DEFAULT_MODEL_TASK_CONVERSATION_PLANNING_NAME
-export DEFAULT_MODEL_TASK_CONVERSATION_DESIGN_NAME
-export DEFAULT_MODEL_TASK_PRD_GENERATION_NAME
-export DEFAULT_MODEL_TASK_PROTOTYPE_DESIGN_NAME
-export DEFAULT_MODEL_TASK_PROTOTYPE_CODE_GENERATION_NAME
-export DEFAULT_MODEL_TASK_QA_CHECK_NAME
-export DEFAULT_MODEL_TASK_KNOWLEDGE_EXTRACTION_NAME
-export DEFAULT_MODEL_TASK_GENERAL_CHAT_NAME
-export WEB_ORIGIN
-export DEERFLOW_ENABLED
-export DEERFLOW_LANGGRAPH_URL
-export DEERFLOW_GATEWAY_URL
-export DEERFLOW_ASSISTANT_ID
-export DEERFLOW_AGENT_NAME
-export DEERFLOW_MODEL_NAME
-export DEERFLOW_MODEL_DISPLAY_NAME
-export DEERFLOW_MODEL_PROVIDER
-export DEERFLOW_STREAM_MODE
-export DEERFLOW_INTERNAL_AUTH_TOKEN
-export DEERFLOW_PLAN_MODE
-export DEERFLOW_THINKING_ENABLED
-export DEERFLOW_SUBAGENT_ENABLED
-export DEERFLOW_MAX_CONCURRENT_SUBAGENTS
-export DEERFLOW_TIMEOUT_MS
-export DEERFLOW_UPLOADS_ENABLED
-export DEERFLOW_ARTIFACT_MAX_INLINE_BYTES
-export KNOWLEDGE_APP_PORT
-export QUARTZ_REF
-export QUARTZ_COMMIT
-export QUARTZ_BASE_URL
-export NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-$API_PUBLIC_BASE_URL}"
-export NEXT_PUBLIC_KNOWLEDGE_APP_URL="${NEXT_PUBLIC_KNOWLEDGE_APP_URL:-$KNOWLEDGE_APP_PUBLIC_URL}"
+for profile in $COMPOSE_PROFILES; do
+  COMPOSE+=(--profile "$profile")
+done
+DEERFLOW_COMPOSE=(docker compose --project-directory "$APP_DIR/deploy" --env-file "$ENV_FILE" -f "$DEERFLOW_COMPOSE_FILE")
 
 cd "$APP_DIR"
+existing_workbench_services="$("${COMPOSE[@]}" ps -q 2>/dev/null || true)"
+existing_deerflow_services="$("${DEERFLOW_COMPOSE[@]}" ps -q deerflow 2>/dev/null || true)"
+if [ -z "$existing_workbench_services" ] && [ -z "$existing_deerflow_services" ]; then
+  clean_host=1
+fi
+trap on_deploy_error ERR
 
-if [ "${SKIP_GIT_PULL:-0}" != "1" ] && [ -d .git ]; then
-  git fetch origin "$DEPLOY_BRANCH"
-  git checkout "$DEPLOY_BRANCH"
-  git reset --hard "origin/${DEPLOY_BRANCH}"
-else
-  echo "Using code already present in ${APP_DIR}"
+if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "pinned" ]; then
+  # Pulling an already loaded digest is idempotent; mutable local build tags
+  # are never selected by the production path.
+  "${COMPOSE[@]}" pull --quiet
 fi
 
-docker network create ai-product-workbench >/dev/null 2>&1 || true
-docker volume create ai-product-workbench-postgres >/dev/null
-docker volume create ai-product-workbench-storage >/dev/null
+compose_up() {
+  local -a options=(-d --remove-orphans)
+  if [ "$IMAGE_MODE" = "build" ]; then
+    options+=(--build)
+  else
+    options+=(--no-build)
+  fi
+  "${COMPOSE[@]}" up "${options[@]}" "$@"
+}
 
-if [ "${PRUNE_DOCKER_BEFORE_BUILD:-1}" != "0" ]; then
-  docker container prune -f >/dev/null 2>&1 || true
-  docker image prune -f >/dev/null 2>&1 || true
-  docker builder prune -af >/dev/null 2>&1 || true
+if [ "$SKIP_PREFLIGHT" = "0" ] && [ -n "$PREFLIGHT_SCRIPT" ]; then
+  WORKBENCH_APP_DIR="$APP_DIR" \
+    WORKBENCH_ENV_FILE="$ENV_FILE" \
+  WORKBENCH_COMPOSE_FILE="$COMPOSE_FILE" \
+  WORKBENCH_OVERLAY_FILE="$COMPOSE_OVERLAY" \
+    WORKBENCH_COMPOSE_PROFILES="$COMPOSE_PROFILES" \
+    "$PREFLIGHT_SCRIPT"
 fi
-
-COMPOSE=("${COMPOSE_ENV[@]}" docker compose --env-file .env -f deploy/docker-compose.yml)
-
-ensure_storage_dirs() {
-  local storage_mount
-  storage_mount="$(docker volume inspect ai-product-workbench-storage -f '{{ .Mountpoint }}')"
-  mkdir -p "${storage_mount}/knowledge-vault"
-}
-
-wait_for_postgres() {
-  local attempt
-  for attempt in $(seq 1 60); do
-    if "${COMPOSE[@]}" exec -T postgres pg_isready -U ai_workbench -d ai_product_workbench >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 2
-  done
-
-  echo "Postgres did not become ready" >&2
-  return 1
-}
-
-remove_existing_container_outside_compose() {
-  local container_name="$1"
-  local compose_project
-
-  if ! docker ps -a --format '{{ .Names }}' | grep -qx "$container_name"; then
-    return 0
-  fi
-
-  compose_project="$(
-    docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$container_name" 2>/dev/null || true
-  )"
-  if [ "$compose_project" != "ai-product-workbench" ]; then
-    echo "Removing pre-existing container outside current compose project: ${container_name}"
-    docker rm -f "$container_name" >/dev/null 2>&1 || true
-  fi
-}
+if [ "$SKIP_PREFLIGHT" = "0" ]; then
+  "${COMPOSE[@]}" config --quiet
+fi
 
 case "$DEPLOY_TARGET" in
-  web)
-    "${COMPOSE[@]}" build web
-    remove_existing_container_outside_compose ai-product-workbench-web
-    "${COMPOSE[@]}" up -d --no-deps web
-    wait_for_http "http://127.0.0.1:3000/login" "Web"
+  all)
+    deployment_mutated=1
+    if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
+      "${COMPOSE[@]}" up -d postgres
+      wait_for_services postgres
+      prepare_deerflow_runtime
+    fi
+    compose_up
+    if [ -n "$COMPOSE_OVERLAY" ]; then
+      wait_for_services oidc object-storage clamav docling
+    fi
+    wait_for_services \
+      workbench-api \
+      workbench-web \
+      workbench-worker \
+      workbench-file-worker \
+      workbench-import-worker \
+      workbench-export-worker \
+      workbench-preview \
+      knowledge \
+      preview-gateway \
+      gateway
     ;;
   api)
-    "${COMPOSE[@]}" build api
-    remove_existing_container_outside_compose ai-product-workbench-api
-    "${COMPOSE[@]}" up -d --no-deps api
-    wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
+    deployment_mutated=1
+    compose_up workbench-api
+    wait_for_services workbench-api
+    ;;
+  web)
+    deployment_mutated=1
+    compose_up workbench-web knowledge gateway
+    wait_for_services workbench-web knowledge gateway
+    ;;
+  runtime-worker)
+    deployment_mutated=1
+    if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
+      "${COMPOSE[@]}" up -d postgres
+      wait_for_services postgres
+      prepare_deerflow_runtime
+    fi
+    compose_up workbench-worker
+    wait_for_services workbench-worker
+    ;;
+  deerflow-runtime)
+    deployment_mutated=1
+    [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ] \
+      || { echo "deerflow-runtime target requires WORKBENCH_MANAGE_DEERFLOW_RUNTIME=1" >&2; exit 64; }
+    "${COMPOSE[@]}" up -d postgres
+    wait_for_services postgres
+    prepare_deerflow_runtime
+    ;;
+  stop)
+    trap - ERR
+    "${COMPOSE[@]}" down --remove-orphans
+    if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
+      WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans
+    fi
+    ;;
+  rollback)
+    trap - ERR
+    [ -n "$ROLLBACK_ENV_FILE" ] || { echo "WORKBENCH_ROLLBACK_ENV_FILE is required for rollback" >&2; exit 64; }
+    [ -f "$ROLLBACK_ENV_FILE" ] || { echo "Rollback environment file is missing: $ROLLBACK_ENV_FILE" >&2; exit 66; }
+    [ -f "$ROLLBACK_COMPOSE_FILE" ] || { echo "Rollback Compose file is missing: $ROLLBACK_COMPOSE_FILE" >&2; exit 66; }
+    rollback_source_commit="$(sed -n 's/^WORKBENCH_SOURCE_COMMIT=//p' "$ROLLBACK_ENV_FILE" | sed -e 's/^"//' -e 's/"$//')"
+    rollback_inventory="$(sed -n 's/^WORKBENCH_IMAGE_INVENTORY_PATH=//p' "$ROLLBACK_ENV_FILE" | sed -e 's/^"//' -e 's/"$//')"
+    [ -n "$rollback_source_commit" ] || { echo "Rollback environment is missing WORKBENCH_SOURCE_COMMIT" >&2; exit 65; }
+    [ -f "$rollback_inventory" ] || { echo "Rollback image manifest is missing: $rollback_inventory" >&2; exit 66; }
+    node "$APP_DIR/scripts/production-image-inventory.mjs" \
+      --manifest "$rollback_inventory" \
+      --expected-commit "$rollback_source_commit" \
+      --env-file "$ROLLBACK_ENV_FILE"
+    "${COMPOSE[@]}" down --remove-orphans
+    if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
+      WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans
+    fi
+    WORKBENCH_ENV_FILE="$ROLLBACK_ENV_FILE" \
+      WORKBENCH_COMPOSE_FILE="$ROLLBACK_COMPOSE_FILE" \
+      WORKBENCH_DEPLOY_IMAGE_MODE=pinned \
+      DEPLOY_TARGET=all \
+      WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE=0 \
+      exec "$0"
+    ;;
+  file-worker)
+    deployment_mutated=1
+    compose_up workbench-file-worker
+    wait_for_services workbench-file-worker
+    ;;
+  import-worker)
+    deployment_mutated=1
+    compose_up workbench-import-worker
+    wait_for_services workbench-import-worker
+    ;;
+  export-worker)
+    deployment_mutated=1
+    compose_up workbench-export-worker
+    wait_for_services workbench-export-worker
+    ;;
+  preview)
+    deployment_mutated=1
+    compose_up workbench-preview preview-gateway
+    wait_for_services workbench-preview preview-gateway
     ;;
   knowledge)
-    ensure_storage_dirs
-    "${COMPOSE[@]}" build knowledge
-    remove_existing_container_outside_compose ai-product-knowledge
-    "${COMPOSE[@]}" up -d --no-deps knowledge
-    wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
+    deployment_mutated=1
+    compose_up knowledge gateway
+    wait_for_services knowledge gateway
     ;;
-  postgres)
-    remove_existing_container_outside_compose ai-product-workbench-postgres
-    "${COMPOSE[@]}" up -d --no-deps postgres
-    wait_for_postgres
+  migrate)
+    "${COMPOSE[@]}" run --rm migrate
     ;;
-  all)
-    ensure_storage_dirs
-    remove_existing_container_outside_compose ai-product-workbench-postgres
-    remove_existing_container_outside_compose ai-product-workbench-api
-    remove_existing_container_outside_compose ai-product-workbench-web
-    remove_existing_container_outside_compose ai-product-knowledge
-    "${COMPOSE[@]}" up -d --build
-    wait_for_postgres
-    wait_for_http "http://127.0.0.1:4000/api/system/health" "API"
-    wait_for_http "http://127.0.0.1:3000/login" "Web"
-    wait_for_http "http://127.0.0.1:${KNOWLEDGE_APP_PORT}/__health" "Knowledge app"
+  *)
+    echo "DEPLOY_TARGET must be one of: all, api, web, runtime-worker, deerflow-runtime, file-worker, import-worker, export-worker, preview, knowledge, migrate, stop, rollback" >&2
+    exit 64
     ;;
 esac
 
-echo "Deployed:"
-echo "  Web: ${APP_PUBLIC_URL}/login"
-echo "  API: ${API_PUBLIC_BASE_URL%/}/system/health"
-echo "  Knowledge: ${KNOWLEDGE_APP_PUBLIC_URL}"
-
-if [ "${PRUNE_DOCKER_AFTER_DEPLOY:-1}" != "0" ]; then
-  docker image prune -f >/dev/null 2>&1 || true
-  docker builder prune -af >/dev/null 2>&1 || true
-fi
+echo "产品工作台部署完成，目标: $DEPLOY_TARGET"

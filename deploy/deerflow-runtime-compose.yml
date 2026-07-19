@@ -1,0 +1,64 @@
+name: workbench-runtime
+
+services:
+  deerflow:
+    image: ${WORKBENCH_DEERFLOW_IMAGE_REF:?WORKBENCH_DEERFLOW_IMAGE_REF must be an immutable OCI digest reference}
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        cd /app/backend && exec uv run uvicorn app.gateway.app:app
+        --host 0.0.0.0 --port 8001 --workers 1
+    env_file:
+      - ${WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE:?WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE must contain approved provider credentials}
+    environment:
+      CI: "true"
+      DEER_FLOW_ENV: production
+      ENVIRONMENT: production
+      DEER_FLOW_AUTH_DISABLED: "0"
+      DEER_FLOW_PROJECT_ROOT: /app
+      DEER_FLOW_HOME: /app/backend/.deer-flow
+      DEER_FLOW_CONFIG_PATH: /app/backend/config.yaml
+      DEER_FLOW_EXTENSIONS_CONFIG_PATH: /app/backend/extensions_config.workbench.json
+      DEER_FLOW_SKILLS_PATH: /app/skills
+      DEER_FLOW_CHANNELS_LANGGRAPH_URL: http://deerflow:8001/api
+      DEER_FLOW_CHANNELS_GATEWAY_URL: http://deerflow:8001
+      DEER_FLOW_INTERNAL_AUTH_TOKEN: ${WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN:?WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN is required}
+      PYTHONDONTWRITEBYTECODE: "1"
+      NO_PROXY: localhost,127.0.0.1,::1,deerflow
+      no_proxy: localhost,127.0.0.1,::1,deerflow
+    ports:
+      - 127.0.0.1:${WORKBENCH_DEERFLOW_HOST_PORT:-2026}:8001
+    volumes:
+      - ${DEER_FLOW_CONFIG_PATH:?DEER_FLOW_CONFIG_PATH must point to the generated effective config}:/app/backend/config.yaml:ro
+      - ${DEER_FLOW_HOME:?DEER_FLOW_HOME must be a dedicated runtime home}:/app/backend/.deer-flow
+    read_only: true
+    tmpfs:
+      - /tmp:size=1073741824,mode=1770
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=4)
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
+    networks:
+      workbench-runtime:
+        aliases: [deerflow]
+      deerflow-egress: {}
+
+networks:
+  workbench-runtime:
+    external: true
+    name: ${WORKBENCH_INTERNAL_NETWORK_NAME:?WORKBENCH_INTERNAL_NETWORK_NAME is required}
+  deerflow-egress:
+    driver: bridge

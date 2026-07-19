@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>产品工作台隔离预览</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 100%; min-height: 100%; }
+      body { background: #f6f7f9; color: #17191d; font: 14px/1.5 Inter, system-ui, sans-serif; }
+      main { min-height: 100vh; padding: 28px 22px; }
+      h1 { margin: 0 0 10px; font-size: 24px; letter-spacing: 0; }
+      p { margin: 0 0 22px; color: #5d626b; }
+      button { border: 0; border-radius: 6px; background: #17191d; color: white; padding: 10px 14px; font: inherit; }
+      output { display: block; margin-top: 18px; color: #246b45; font-weight: 650; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>独立预览已加载</h1>
+      <p>内容运行在与产品工作台不同的 origin。</p>
+      <button id="action" type="button">验证交互</button>
+      <output id="result">等待操作</output>
+    </main>
+    <script>
+      document.getElementById("action").addEventListener("click", () => {
+        document.getElementById("result").textContent = "交互已执行";
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "candidateImages": [
+    {
+      "id": "api",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "workbench-api",
+      "imageEnvironment": "WORKBENCH_API_IMAGE_REF",
+      "dockerfile": "apps/workbench-api/Dockerfile",
+      "target": "runner"
+    },
+    {
+      "id": "api-migrator",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "migrate",
+      "imageEnvironment": "WORKBENCH_API_MIGRATOR_IMAGE_REF",
+      "dockerfile": "apps/workbench-api/Dockerfile",
+      "target": "migrator"
+    },
+    {
+      "id": "deerflow",
+      "composeFile": "deploy/deerflow-runtime-compose.yml",
+      "composeService": "deerflow",
+      "imageEnvironment": "WORKBENCH_DEERFLOW_IMAGE_REF",
+      "dockerfile": "integrations/deerflow/Dockerfile",
+      "target": "runtime"
+    },
+    {
+      "id": "export-worker",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "workbench-export-worker",
+      "imageEnvironment": "WORKBENCH_EXPORT_WORKER_IMAGE_REF",
+      "dockerfile": "apps/workbench-export-worker/Dockerfile",
+      "target": "runner"
+    },
+    {
+      "id": "file-worker",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "workbench-file-worker",
+      "imageEnvironment": "WORKBENCH_FILE_WORKER_IMAGE_REF",
+      "dockerfile": "apps/workbench-file-worker/Dockerfile",
+      "target": "runner"
+    },
+    {
+      "id": "import-worker",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "workbench-import-worker",
+      "imageEnvironment": "WORKBENCH_IMPORT_WORKER_IMAGE_REF",
+      "dockerfile": "apps/workbench-import-worker/Dockerfile",
+      "target": "runner"
+    },
+    {
+      "id": "preview",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "workbench-preview",
+      "imageEnvironment": "WORKBENCH_PREVIEW_IMAGE_REF",
+      "dockerfile": "apps/workbench-preview/Dockerfile",
+      "target": "runner"
+    },
+    {
+      "id": "quartz",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "knowledge",
+      "imageEnvironment": "WORKBENCH_KNOWLEDGE_IMAGE_REF",
+      "dockerfile": "apps/knowledge/Dockerfile",
+      "target": "immutable-runner"
+    },
+    {
+      "id": "runtime-worker",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "workbench-worker",
+      "imageEnvironment": "WORKBENCH_RUNTIME_WORKER_IMAGE_REF",
+      "dockerfile": "apps/workbench-worker/Dockerfile",
+      "target": "runner"
+    },
+    {
+      "id": "web",
+      "composeFile": "deploy/workbench-compose.yml",
+      "composeService": "workbench-web",
+      "imageEnvironment": "WORKBENCH_WEB_IMAGE_REF",
+      "dockerfile": "apps/web/Dockerfile",
+      "target": "runner"
+    }
+  ]
+}

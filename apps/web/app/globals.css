@@ -1,10 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@1,400;1,500;1,600&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap");
-@import "@xyflow/react/dist/style.css";
 @config "../tailwind.config.mjs";
 @import "tailwindcss";
-@import "katex/dist/katex.min.css";
-
-@source "../node_modules/streamdown/dist/index.js";
 
 @custom-variant dark (&:is(.dark, .dark *));
 
@@ -54,69 +50,90 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* ─── Stitch design tokens ─── */
+/* ─── Workbench design tokens ─── */
 :root {
   color-scheme: dark;
 
-  /* Stitch raw palette */
-  --stitch-bg:            #131314;
-  --stitch-panel:         #1f2021;
-  --stitch-panel-soft:    #201f20;
-  --stitch-panel-raised:  #2a2a2b;
-  --stitch-line:          #494454;
-  --stitch-muted-text:    #cbc3d7;
-  --stitch-text:          #e5e2e3;
-  --stitch-primary:       #8b5cf6;
-  --stitch-blue:          #3b82f6;
-  --stitch-blue-deep:     #0566d9;
-  --stitch-blue-card:     #1f293f;
-  --stitch-cyan:          #00f0ff;
-  --stitch-btn-hover:     rgba(255,255,255,0.08);
-  --g-bg:                 var(--stitch-bg);
-  --g-panel:              var(--stitch-panel);
-  --g-panel-soft:         var(--stitch-panel-soft);
-  --g-panel-raised:       var(--stitch-panel-raised);
-  --g-line:               var(--stitch-line);
-  --g-muted-text:         var(--stitch-muted-text);
-  --g-text:               var(--stitch-text);
-  --g-blue:               var(--stitch-blue);
-  --g-blue-deep:          var(--stitch-blue-deep);
-  --g-blue-card:          var(--stitch-blue-card);
-  --g-btn-hover:          var(--stitch-btn-hover);
+  /* Workbench raw palette */
+  --workbench-bg:            #1e1e20;
+  --workbench-panel:         #1a1b1d;
+  --workbench-panel-soft:    #18191b;
+  --workbench-panel-raised:  #282a2d;
+  --workbench-line:          #34343a;
+  --workbench-muted-text:    #cbc3d7;
+  --workbench-text:          #e5e2e3;
+  --workbench-primary:       #7467f6;
+  --workbench-blue:          #3b82f6;
+  --workbench-blue-deep:     #0566d9;
+  --workbench-blue-card:     #1f293f;
+  --workbench-cyan:          #00f0ff;
+  --workbench-btn-hover:     rgba(255,255,255,0.08);
+
+  /* Semantic surfaces shared by Home, Canvas, dialogs and Preview chrome. */
+  --workbench-surface:            rgb(32 33 36);
+  --workbench-surface-container:  rgb(22 23 24);
+  --workbench-surface-elevated:   rgb(40 42 45);
+  --workbench-canvas:             #101011;
+  --workbench-canvas-grid:        #666970;
+  --workbench-text-primary:       rgb(241 243 244);
+  --workbench-text-secondary:     rgb(189 193 198);
+  --workbench-state-enabled:      rgb(232 234 237);
+  --workbench-state-hover:        rgba(255 255 255 / 0.08);
+  --workbench-state-pressed:      rgba(255 255 255 / 0.14);
+  --workbench-outline:            rgba(255 255 255 / 0.10);
+  --workbench-accent-outline:     rgb(96 86 240);
+  --workbench-selection:          rgb(113 104 246);
+  --workbench-inverse-surface:    rgb(241 243 244);
+
+  /* Motion values are mirrored in workbench-motion.ts for JS transitions. */
+  --workbench-motion-tactile: 150ms;
+  --workbench-motion-popover: 150ms;
+  --workbench-motion-spatial: 500ms;
+  --g-bg:                 var(--workbench-bg);
+  --g-panel:              var(--workbench-panel);
+  --g-panel-soft:         var(--workbench-panel-soft);
+  --g-panel-raised:       var(--workbench-panel-raised);
+  --g-line:               var(--workbench-line);
+  --g-muted-text:         var(--workbench-muted-text);
+  --g-text:               var(--workbench-text);
+  --g-blue:               var(--workbench-blue);
+  --g-blue-deep:          var(--workbench-blue-deep);
+  --g-blue-card:          var(--workbench-blue-card);
+  --g-btn-hover:          var(--workbench-btn-hover);
 
   /* Tailwind / Radix token mapping */
   --radius: 12px;
-  --background:                   var(--stitch-bg);
-  --foreground:                   var(--stitch-text);
-  --card:                         var(--stitch-panel);
-  --card-foreground:              var(--stitch-text);
-  --popover:                      var(--stitch-panel-soft);
-  --popover-foreground:           var(--stitch-text);
-  --primary:                      var(--stitch-primary);
+  --background:                   var(--workbench-bg);
+  --foreground:                   var(--workbench-text);
+  --card:                         var(--workbench-panel);
+  --card-foreground:              var(--workbench-text);
+  --popover:                      var(--workbench-panel-soft);
+  --popover-foreground:           var(--workbench-text);
+  --primary:                      var(--workbench-primary);
   --primary-foreground:           #ffffff;
-  --secondary:                    var(--stitch-panel-raised);
-  --secondary-foreground:         var(--stitch-text);
-  --muted:                        var(--stitch-panel-raised);
-  --muted-foreground:             var(--stitch-muted-text);
-  --accent:                       var(--stitch-blue-card);
-  --accent-foreground:            var(--stitch-text);
+  --secondary:                    var(--workbench-panel-raised);
+  --secondary-foreground:         var(--workbench-text);
+  --muted:                        var(--workbench-panel-raised);
+  --muted-foreground:             var(--workbench-muted-text);
+  --accent:                       var(--workbench-blue-card);
+  --accent-foreground:            var(--workbench-text);
   --destructive:                  #ea4335;
-  --border:                       var(--stitch-line);
-  --input:                        var(--stitch-panel-soft);
-  --ring:                         var(--stitch-primary);
+  --border:                       var(--workbench-line);
+  --input:                        var(--workbench-panel-soft);
+  --ring:                         var(--workbench-primary);
   --chart-1: oklch(0.68 0.13 54);
   --chart-2: oklch(0.68 0.09 155);
   --chart-3: oklch(0.64 0.08 235);
   --chart-4: oklch(0.72 0.1  92);
   --chart-5: oklch(0.7  0.11 20);
-  --sidebar:                      var(--stitch-panel);
-  --sidebar-foreground:           var(--stitch-text);
-  --sidebar-primary:              var(--stitch-primary);
+  --sidebar:                      var(--workbench-panel);
+  --sidebar-foreground:           var(--workbench-text);
+  --sidebar-primary:              var(--workbench-primary);
   --sidebar-primary-foreground:   #ffffff;
   --sidebar-accent:               rgba(232,234,237,0.08);
-  --sidebar-accent-foreground:    var(--stitch-text);
-  --sidebar-border:               var(--stitch-line);
-  --sidebar-ring:                 var(--stitch-primary);
+  --sidebar-accent-foreground:    var(--workbench-text);
+  --sidebar-border:               var(--workbench-line);
+  --sidebar-ring:                 var(--workbench-primary);
 
   /* Shadows */
   --shadow-card:
@@ -146,32 +163,32 @@
 
 /* dark class mirrors :root (already dark-first) */
 .dark {
-  --background:                   var(--stitch-bg);
-  --foreground:                   var(--stitch-text);
-  --card:                         var(--stitch-panel);
-  --card-foreground:              var(--stitch-text);
-  --popover:                      var(--stitch-panel-soft);
-  --popover-foreground:           var(--stitch-text);
-  --primary:                      var(--stitch-primary);
+  --background:                   var(--workbench-bg);
+  --foreground:                   var(--workbench-text);
+  --card:                         var(--workbench-panel);
+  --card-foreground:              var(--workbench-text);
+  --popover:                      var(--workbench-panel-soft);
+  --popover-foreground:           var(--workbench-text);
+  --primary:                      var(--workbench-primary);
   --primary-foreground:           #ffffff;
-  --secondary:                    var(--stitch-panel-raised);
-  --secondary-foreground:         var(--stitch-text);
-  --muted:                        var(--stitch-panel-raised);
-  --muted-foreground:             var(--stitch-muted-text);
-  --accent:                       var(--stitch-blue-card);
-  --accent-foreground:            var(--stitch-text);
+  --secondary:                    var(--workbench-panel-raised);
+  --secondary-foreground:         var(--workbench-text);
+  --muted:                        var(--workbench-panel-raised);
+  --muted-foreground:             var(--workbench-muted-text);
+  --accent:                       var(--workbench-blue-card);
+  --accent-foreground:            var(--workbench-text);
   --destructive:                  #ea4335;
-  --border:                       var(--stitch-line);
-  --input:                        var(--stitch-panel-soft);
-  --ring:                         var(--stitch-primary);
-  --sidebar:                      var(--stitch-panel);
-  --sidebar-foreground:           var(--stitch-text);
-  --sidebar-primary:              var(--stitch-primary);
+  --border:                       var(--workbench-line);
+  --input:                        var(--workbench-panel-soft);
+  --ring:                         var(--workbench-primary);
+  --sidebar:                      var(--workbench-panel);
+  --sidebar-foreground:           var(--workbench-text);
+  --sidebar-primary:              var(--workbench-primary);
   --sidebar-primary-foreground:   #ffffff;
   --sidebar-accent:               rgba(232,234,237,0.08);
-  --sidebar-accent-foreground:    var(--stitch-text);
-  --sidebar-border:               var(--stitch-line);
-  --sidebar-ring:                 var(--stitch-primary);
+  --sidebar-accent-foreground:    var(--workbench-text);
+  --sidebar-border:               var(--workbench-line);
+  --sidebar-ring:                 var(--workbench-primary);
 
   --shadow-card:
     0 10px 28px -18px rgba(0,0,0,0.9),
@@ -195,7 +212,7 @@
 
   body {
     @apply bg-background text-foreground;
-    background: var(--stitch-bg);
+    background: var(--workbench-bg);
     font-feature-settings: "ss01", "ss02", "cv01";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -438,11 +455,6 @@ textarea:focus-visible {
   }
   *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
   *::-webkit-scrollbar-corner      { background: transparent; }
-}
-
-/* ─── ProseMirror / TipTap ─── */
-.ProseMirror {
-  outline: none;
 }
 
 /* ─── CodeMirror ─── */
@@ -721,101 +733,1127 @@ textarea:focus-visible {
   cursor: not-allowed;
 }
 
-@keyframes stitch-scan {
+@keyframes workbench-scan {
   0% {
-    transform: translateX(-42%);
-    opacity: 0.42;
+    transform: translateX(-62%);
+    opacity: 0.1;
   }
   50% {
+    opacity: 0.2;
+  }
+  100% {
+    transform: translateX(62%);
+    opacity: 0.1;
+  }
+}
+
+@keyframes workbench-composer-sheen {
+  0% {
+    transform: translateX(-72%);
+    opacity: 0;
+  }
+  20%, 68% {
+    opacity: 0.42;
+  }
+  100% {
+    transform: translateX(72%);
+    opacity: 0;
+  }
+}
+
+@property --workbench-composer-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 112deg;
+}
+
+@property --workbench-agent-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 218deg;
+}
+
+@property --workbench-task-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 34deg;
+}
+
+@property --workbench-screen-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 148deg;
+}
+
+@keyframes workbench-composer-border-orbit {
+  0% {
+    --workbench-composer-border-angle: 112deg;
+  }
+  100% {
+    --workbench-composer-border-angle: 472deg;
+  }
+}
+
+@keyframes workbench-agent-border-orbit {
+  0% {
+    --workbench-agent-border-angle: 218deg;
+  }
+  100% {
+    --workbench-agent-border-angle: 578deg;
+  }
+}
+
+@keyframes workbench-task-border-orbit {
+  0% {
+    --workbench-task-border-angle: 34deg;
+  }
+  100% {
+    --workbench-task-border-angle: 394deg;
+  }
+}
+
+@keyframes workbench-screen-border-orbit {
+  0% {
+    --workbench-screen-border-angle: 148deg;
+  }
+  100% {
+    --workbench-screen-border-angle: 508deg;
+  }
+}
+
+@keyframes workbench-screen-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes workbench-stage-ellipsis {
+  from { width: 0; }
+  to { width: 1.25em; }
+}
+
+@keyframes workbench-panel-pulse {
+  0%, 100% { transform: scale(1); }
+  48% { transform: scale(1.02); }
+}
+
+@keyframes workbench-composer-inner-drift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes workbench-soft-breathe {
+  0%, 100% {
+    opacity: 0.56;
+  }
+  50% {
+    opacity: 0.92;
+  }
+}
+
+@keyframes workbench-stage-sweep {
+  0% {
+    transform: translateX(-42%);
+    opacity: 0;
+  }
+  18%, 68% {
     opacity: 0.72;
   }
   100% {
     transform: translateX(42%);
-    opacity: 0.42;
+    opacity: 0;
   }
 }
 
-@keyframes stitch-border-breathe {
+@keyframes workbench-selection-breathe {
   0%, 100% {
     box-shadow:
-      inset 0 0 0 4px rgba(116, 92, 255, 0.96),
-      0 0 0 1px rgba(166, 146, 255, 0.26),
-      0 22px 90px rgba(0, 0, 0, 0.55);
+      inset 0 0 0 1px rgba(116, 103, 246, 0.94),
+      0 0 0 1px rgba(139, 128, 255, 0.10),
+      0 18px 64px rgba(0, 0, 0, 0.44);
+    opacity: 0.92;
   }
   50% {
     box-shadow:
-      inset 0 0 0 4px rgba(116, 92, 255, 1),
-      0 0 0 1px rgba(166, 146, 255, 0.44),
-      0 0 34px rgba(116, 92, 255, 0.24),
-      0 22px 90px rgba(0, 0, 0, 0.55);
+      inset 0 0 0 1px rgba(130, 118, 255, 1),
+      0 0 0 1px rgba(139, 128, 255, 0.20),
+      0 0 22px rgba(116, 103, 246, 0.14),
+      0 18px 64px rgba(0, 0, 0, 0.44);
+    opacity: 1;
   }
 }
 
-@keyframes stitch-card-edge {
-  0% {
-    opacity: 0.72;
-    transform: translate3d(-16%, -12%, 0);
+@keyframes workbench-agent-border-pan {
+  0%, 100% { background-position: 0% 20%; }
+  50% { background-position: 100% 80%; }
+}
+
+@keyframes workbench-agent-surface-shift {
+  0%, 100% {
+    background-position: -28% 14%, 94% 82%, 0 0;
+  }
+  25% {
+    background-position: 28% -12%, 66% 94%, 0 0;
   }
   50% {
-    opacity: 1;
-    transform: translate3d(14%, 10%, 0);
+    background-position: 108% 18%, 24% 72%, 0 0;
   }
-  100% {
-    opacity: 0.72;
-    transform: translate3d(-16%, -12%, 0);
+  75% {
+    background-position: 82% 102%, -14% 28%, 0 0;
   }
 }
 
-.stitch-agent-card::after {
+@keyframes workbench-agent-color-wash {
+  0%, 100% {
+    background-position: 106% -8%, -12% 88%;
+    opacity: 0.54;
+  }
+  50% {
+    background-position: -12% 88%, 106% -8%;
+    opacity: 0.88;
+  }
+}
+
+@keyframes workbench-document-wash-drift {
+  0%, 100% { transform: translateX(-18%); opacity: 0.30; }
+  50% { transform: translateX(18%); opacity: 0.78; }
+}
+
+@keyframes workbench-document-beam {
+  0% { transform: translateX(-65%); opacity: 0.10; }
+  48% { opacity: 0.34; }
+  100% { transform: translateX(150%); opacity: 0.10; }
+}
+
+@keyframes workbench-skeleton-fade {
+  from { background-position: 0 0; }
+  to { background-position: -135% 0; }
+}
+
+.workbench-backdrop {
+  pointer-events: none;
+  background-image: radial-gradient(rgba(58, 60, 66, 0.56) 1px, transparent 1px);
+  background-position: 0 0;
+  background-size: 14px 14px;
+}
+
+.workbench-surface {
+  background-color: var(--workbench-surface);
+  color: var(--workbench-text-primary);
+}
+
+.workbench-surface-container {
+  background-color: var(--workbench-surface-container);
+  color: var(--workbench-text-primary);
+}
+
+.workbench-surface-elevated {
+  background-color: var(--workbench-surface-elevated);
+  color: var(--workbench-text-primary);
+  border-color: var(--workbench-outline);
+}
+
+.workbench-outline {
+  border-color: var(--workbench-outline);
+}
+
+.workbench-selection-outline {
+  outline: 1px solid var(--workbench-selection);
+  outline-offset: -1px;
+}
+
+.workbench-home-pointer-backdrop {
+  pointer-events: none;
+  background-image: radial-gradient(rgba(205, 211, 218, 0.86) 1px, transparent 1px);
+  background-position: 0 0;
+  background-size: 14px 14px;
+  opacity: 0;
+  -webkit-mask-image: radial-gradient(
+    circle 145px at var(--workbench-pointer-x, 50%) var(--workbench-pointer-y, 44%),
+    #000 0%,
+    rgba(0, 0, 0, 0.90) 18%,
+    rgba(0, 0, 0, 0.46) 56%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    circle 145px at var(--workbench-pointer-x, 50%) var(--workbench-pointer-y, 44%),
+    #000 0%,
+    rgba(0, 0, 0, 0.90) 18%,
+    rgba(0, 0, 0, 0.46) 56%,
+    transparent 100%
+  );
+  transition: opacity 150ms ease;
+}
+
+[data-workbench-pointer-active="true"] .workbench-home-pointer-backdrop {
+  opacity: 0.78;
+}
+
+.workbench-stage-phase-wash {
+  background:
+    radial-gradient(ellipse 34% 31% at var(--workbench-pointer-x, 50%) var(--workbench-pointer-y, 44%), rgba(100, 110, 116, 0.10), transparent 100%),
+    linear-gradient(90deg, transparent 0%, rgba(185, 205, 196, 0.052) 44%, rgba(132, 118, 255, 0.036) 58%, transparent 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.018), transparent 22%, transparent 78%, rgba(0,0,0,0.16));
+}
+
+.workbench-stage-phase-wash::before {
+  position: absolute;
+  inset: 0 -42%;
+  content: "";
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(196, 216, 207, 0.22) 42%, rgba(132, 118, 255, 0.16) 54%, transparent 70%);
+  filter: blur(14px);
+  animation: workbench-stage-sweep 4.4s ease-in-out infinite;
+}
+
+.workbench-stage-phase-wash[data-generation-stage="creating-flows"]::before {
+  animation-duration: 2.5s;
+}
+
+.workbench-stage-phase-wash[data-generation-stage="thinking"]::before {
+  animation-duration: 3.8s;
+  opacity: 0.62;
+}
+
+.workbench-stage-phase-wash[data-generation-stage="design-system"]::before,
+.workbench-stage-phase-wash[data-generation-stage="mapping-components"]::before {
+  animation-duration: 3.2s;
+  opacity: 0.70;
+}
+
+.workbench-stage-phase-wash[data-generation-stage="generating-ui"]::before,
+.workbench-stage-phase-wash[data-generation-stage="screen-streaming"]::before {
+  animation-duration: 1.9s;
+  opacity: 0.88;
+}
+
+.workbench-stage-phase-wash[data-generation-stage="summarizing"]::before {
+  animation-duration: 4.8s;
+  opacity: 0.48;
+}
+
+.workbench-stage-phase-wash--refining::before {
+  animation-duration: 4.6s;
+  opacity: 0.62;
+}
+
+.workbench-stage-phase-wash--complete::before {
+  animation-duration: 5.8s;
+  opacity: 0.46;
+}
+
+.workbench-overview-field {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(108, 117, 126, 0.13), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,0.014), transparent 28%, rgba(0,0,0,0.10));
+}
+
+.workbench-canvas-layer {
+  transition:
+    filter 420ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.workbench-project--generating .workbench-canvas-layer {
+  filter: saturate(0.92) brightness(0.91);
+}
+
+.workbench-project--refining .workbench-canvas-layer {
+  filter: none;
+}
+
+.workbench-project--overview .workbench-canvas-layer {
+  filter: saturate(0.90) brightness(0.84);
+}
+
+.workbench-flow::before {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  content: "";
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 34% 30% at var(--workbench-pointer-x, 50%) var(--workbench-pointer-y, 44%), rgba(92, 101, 112, 0.11), transparent 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.014), transparent 24%, transparent 76%, rgba(0,0,0,0.10));
+  transition: opacity 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.workbench-project--generating .workbench-flow::before {
+  background:
+    radial-gradient(ellipse 38% 34% at var(--workbench-pointer-x, 50%) var(--workbench-pointer-y, 44%), rgba(102, 116, 120, 0.12), transparent 100%),
+    linear-gradient(90deg, rgba(91, 76, 140, 0.025), transparent 32%, rgba(76, 116, 111, 0.035) 68%, transparent),
+    linear-gradient(180deg, rgba(255,255,255,0.012), transparent 24%, transparent 76%, rgba(0,0,0,0.12));
+}
+
+.workbench-project--refining .workbench-flow::before {
+  background:
+    radial-gradient(ellipse 40% 36% at var(--workbench-pointer-x, 50%) var(--workbench-pointer-y, 44%), rgba(99, 116, 117, 0.13), transparent 100%),
+    linear-gradient(90deg, rgba(102, 83, 155, 0.035), transparent 38%, rgba(70, 127, 119, 0.045) 72%, transparent),
+    linear-gradient(180deg, rgba(255,255,255,0.014), transparent 24%, transparent 76%, rgba(0,0,0,0.10));
+}
+
+.workbench-project--complete .workbench-flow::before {
+  opacity: 0.76;
+}
+
+.workbench-pointer-background {
+  pointer-events: none;
+  opacity: 0;
+  -webkit-mask-image: radial-gradient(
+    circle 145px at var(--workbench-pointer-x, 50%) var(--workbench-pointer-y, 44%),
+    #000 0%,
+    rgba(0, 0, 0, 0.92) 16%,
+    rgba(0, 0, 0, 0.48) 52%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    circle 145px at var(--workbench-pointer-x, 50%) var(--workbench-pointer-y, 44%),
+    #000 0%,
+    rgba(0, 0, 0, 0.92) 16%,
+    rgba(0, 0, 0, 0.48) 52%,
+    transparent 100%
+  );
+  transition: opacity 150ms ease;
+}
+
+[data-workbench-pointer-active="true"] .workbench-pointer-background {
+  opacity: 0.86;
+}
+
+.workbench-composer-shell {
+  isolation: isolate;
+  position: relative;
+}
+
+.workbench-composer-shell > * {
+  position: relative;
+  z-index: 2;
+}
+
+.workbench-composer-shell::before,
+.workbench-composer-shell::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.workbench-composer-shell::before {
+  z-index: 0;
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(92, 101, 112, 0.12), transparent 46%),
+    radial-gradient(ellipse at 82% 100%, rgba(116, 103, 246, 0.055), transparent 38%),
+    linear-gradient(180deg, rgba(255,255,255,0.018), transparent 46%);
+}
+
+.workbench-composer-shell::after {
+  z-index: 1;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.14) 16%, rgba(118,103,246,0.16) 48%, rgba(97, 132, 132, 0.12) 68%, transparent 100%) border-box;
+  -webkit-mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  transform: translateX(-72%);
+}
+
+.workbench-composer-shell:is(:hover, :focus-within)::before,
+.workbench-composer-shell[data-active="true"]::before {
+  opacity: 1;
+}
+
+.workbench-composer-shell:is(:hover, :focus-within)::after,
+.workbench-composer-shell[data-active="true"]::after {
+  animation: workbench-composer-sheen 1.8s ease both;
+  opacity: 1;
+}
+
+.workbench-composer-shell[data-typing="true"]::before {
+  opacity: 0.86;
+}
+
+.workbench-composer-shell--home:is(:hover, :focus-within)::before,
+.workbench-composer-shell--home[data-active="true"]::before {
+  background:
+    radial-gradient(ellipse 58% 72% at 56% 58%, rgba(72, 118, 112, 0.09), transparent 100%),
+    radial-gradient(ellipse 34% 90% at 0% 72%, rgba(101, 78, 161, 0.07), transparent 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.012), transparent 54%);
+  background-size: 168% 100%, 142% 100%, 100% 100%;
+  animation: workbench-composer-inner-drift 6.2s ease-in-out infinite;
+  opacity: 1;
+}
+
+.workbench-composer-shell--home:is(:hover, :focus-within)::after,
+.workbench-composer-shell--home[data-active="true"]::after {
+  background:
+    conic-gradient(
+      from var(--workbench-composer-border-angle) at 50% 50%,
+      rgba(113, 94, 210, 0.62),
+      rgba(116, 103, 246, 0.18) 18%,
+      rgba(255,255,255,0.09) 34%,
+      rgba(67, 174, 165, 0.50) 52%,
+      rgba(83, 205, 191, 0.20) 66%,
+      rgba(116, 103, 246, 0.52) 82%,
+      rgba(113, 94, 210, 0.62)
+    ) border-box;
+  animation: workbench-composer-border-orbit 5.4s linear infinite;
+  opacity: 1;
+  transform: none;
+}
+
+.workbench-composer-shell--home[data-busy="true"]::after {
+  opacity: 0.48;
+  animation-duration: 2.8s;
+}
+
+.workbench-composer-shell--project:is(:hover, :focus-within)::before,
+.workbench-composer-shell--project[data-active="true"]::before {
+  background:
+    radial-gradient(ellipse 52% 120% at 48% 100%, rgba(66, 143, 134, 0.08), transparent 100%),
+    radial-gradient(ellipse 42% 120% at 0% 52%, rgba(100, 75, 170, 0.075), transparent 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.012), transparent 58%);
+  background-size: 166% 100%, 140% 100%, 100% 100%;
+  animation: workbench-composer-inner-drift 6.8s ease-in-out infinite;
+  opacity: 1;
+}
+
+.workbench-composer-shell--project:is(:hover, :focus-within)::after,
+.workbench-composer-shell--project[data-active="true"]::after {
+  background:
+    conic-gradient(
+      from var(--workbench-composer-border-angle) at 50% 50%,
+      rgba(113, 94, 210, 0.54),
+      rgba(116, 103, 246, 0.16) 18%,
+      rgba(255,255,255,0.08) 34%,
+      rgba(67, 174, 165, 0.44) 52%,
+      rgba(83, 205, 191, 0.16) 66%,
+      rgba(116, 103, 246, 0.46) 82%,
+      rgba(113, 94, 210, 0.54)
+    ) border-box;
+  animation: workbench-composer-border-orbit 5.8s linear infinite;
+  opacity: 1;
+  transform: none;
+}
+
+.workbench-composer-shell--project[data-busy="true"]::after {
+  opacity: 0.68;
+  animation-duration: 3.1s;
+}
+
+.workbench-composer-field {
+  caret-color: #f1f3f4;
+  transition: color 160ms ease, opacity 160ms ease;
+}
+
+.workbench-composer-tool,
+.workbench-composer-segment,
+.workbench-composer-model,
+.workbench-composer-send {
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
+}
+
+.workbench-composer-model {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+}
+
+.workbench-composer-send.is-ready {
+  background: #f1f3f4;
+  color: #202124;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.72),
+    0 10px 30px -18px rgba(241, 243, 244, 0.72);
+}
+
+.workbench-composer-send.is-ready:hover {
+  background: #ffffff;
+}
+
+.workbench-composer-send.is-busy {
+  background: #2b2d31;
+  color: #f1f3f4;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 10px 30px -20px rgba(0,0,0,0.95);
+}
+
+.workbench-composer-shell--home .workbench-composer-send.is-ready {
+  background: #6d7073;
+  color: #202124;
+  box-shadow: none;
+}
+
+.workbench-composer-shell--home .workbench-composer-send.is-ready:hover {
+  background: #777a7d;
+}
+
+.workbench-composer-shell--home .workbench-composer-send.is-busy {
+  background: transparent;
+  box-shadow: none;
+}
+
+.workbench-home-submit-spinner {
+  animation-duration: 1s;
+}
+
+.workbench-chrome-button,
+.workbench-chrome-pill,
+.workbench-utility-shell,
+.workbench-zoom-trigger,
+.workbench-tool-rail {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.035),
+    0 16px 46px -30px rgba(0,0,0,0.95);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
+}
+
+.workbench-chrome-button:hover,
+.workbench-chrome-pill:hover,
+.workbench-zoom-trigger:hover {
+  border-color: rgba(255,255,255,0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.055),
+    0 18px 52px -30px rgba(0,0,0,0.98);
+}
+
+.workbench-chrome-button:active,
+.workbench-chrome-pill:active,
+.workbench-zoom-trigger:active {
+  background-color: rgba(63, 65, 69, 0.92);
+}
+
+.workbench-tool-rail {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 24px 74px -36px rgba(0,0,0,0.95);
+}
+
+/* Utility controls use a dedicated positioning rule so responsive safety
+   offsets cannot be overridden by generated Tailwind !important utilities. */
+.workbench-utility-bar {
+  bottom: 16px;
+  right: 18px;
+}
+
+@media (max-width: 767px) {
+  .workbench-utility-bar {
+    bottom: auto;
+    right: 16px;
+    top: 132px;
+  }
+}
+
+/* Keep the desktop rail at the md breakpoint while lifting the utility bar
+   above the wide Composer on narrow desktop/tablet canvases. */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .workbench-utility-bar {
+    bottom: 124px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .workbench-utility-bar {
+    bottom: 16px;
+  }
+}
+
+.workbench-tool-button {
+  overflow: visible !important;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.workbench-tool-active {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.85),
+    0 10px 26px -16px rgba(241,243,244,0.72);
+}
+
+.workbench-tool-tooltip {
+  opacity: 0;
+  transform: translate(5px, -50%);
+  visibility: hidden;
+  transition:
+    opacity 120ms ease,
+    transform 150ms ease,
+    visibility 0s linear 150ms;
+}
+
+.workbench-tool-button:hover .workbench-tool-tooltip,
+.workbench-tool-button:focus-visible .workbench-tool-tooltip {
+  opacity: 1;
+  transform: translate(0, -50%);
+  visibility: visible;
+  transition-delay: 120ms;
+}
+
+.workbench-zoom-menu {
+  transform-origin: right bottom;
+}
+
+.workbench-zoom-item.is-selected {
+  background: rgba(255,255,255,0.075);
+  color: #f1f3f4;
+}
+
+.workbench-suggestion-chip {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.025),
+    0 18px 60px -38px rgba(0,0,0,0.95);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.workbench-suggestion-chip:hover {
+  border-color: rgba(120,132,150,0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.045),
+    0 20px 64px -38px rgba(0,0,0,0.98);
+}
+
+.workbench-status-spinner {
+  animation-duration: 1s;
+  border-left-color: rgba(216, 220, 226, 0.22);
+  border-bottom-color: rgba(216, 220, 226, 0.42);
+}
+
+.workbench-stage-ellipsis {
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  vertical-align: bottom;
+  animation: workbench-stage-ellipsis 900ms steps(4, end) infinite;
+}
+
+.workbench-agent-bubble {
+  filter: drop-shadow(0 12px 28px rgba(0,0,0,0.52));
+}
+
+.workbench-agent-card[data-generation-stage="thinking"] .workbench-agent-card-base-bg {
+  transform-origin: center;
+  animation: workbench-panel-pulse 600ms ease-out 1;
+}
+
+.workbench-task-card {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid rgba(255,255,255,0.09);
+  transition: height 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: height, transform, opacity;
+}
+
+.workbench-task-card::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  content: "";
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse 48% 42% at 100% 0%, rgba(115, 130, 126, 0.10), transparent 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.018), transparent 44%),
+    rgba(24, 25, 27, 0.34);
+  opacity: 0.72;
+}
+
+.workbench-task-card::after {
+  position: absolute;
+  inset: -1px;
+  z-index: 1;
+  content: "";
+  pointer-events: none;
+  border-radius: inherit;
+  border: 1px solid rgba(255,255,255,0.055);
+}
+
+.workbench-task-card[data-active="true"] {
+  border-color: transparent !important;
+}
+
+.workbench-task-card[data-active="true"]::after {
+  inset: 0;
+  border: 0;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--workbench-task-border-angle) at 50% 50%,
+    rgba(82, 158, 174, 0.54) 0%,
+    rgba(82, 158, 174, 0.08) 12%,
+    rgba(255, 255, 255, 0.055) 28%,
+    rgba(104, 91, 184, 0.09) 48%,
+    rgba(112, 94, 198, 0.48) 61%,
+    rgba(112, 94, 198, 0.08) 73%,
+    rgba(255, 255, 255, 0.055) 88%,
+    rgba(82, 158, 174, 0.54) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: workbench-task-border-orbit 5.6s linear infinite;
+}
+
+.workbench-task-card > * {
+  z-index: 2;
+}
+
+.workbench-task-card--complete::before {
+  animation: workbench-soft-breathe 2.8s ease-in-out infinite;
+}
+
+.workbench-task-pill {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.055),
+    0 12px 34px -24px rgba(0,0,0,0.95);
+}
+
+.workbench-log-toggle {
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.workbench-agent-card::after {
   position: absolute;
   inset: -2px;
   content: "";
   pointer-events: none;
   border-radius: inherit;
+  z-index: 18;
   background:
-    radial-gradient(circle at 0% 100%, rgba(24, 211, 191, 0.58), transparent 27%),
-    radial-gradient(circle at 0% 0%, rgba(123, 92, 255, 0.74), transparent 32%),
-    radial-gradient(circle at 100% 100%, rgba(24, 211, 191, 0.36), transparent 24%);
+    linear-gradient(180deg, rgba(255,255,255,0.06), transparent 18%),
+    linear-gradient(90deg, rgba(118, 132, 132, 0.18), transparent 36%),
+    linear-gradient(0deg, rgba(88, 104, 102, 0.12), transparent 30%);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
   mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
   mask-composite: exclude;
   padding: 1px;
-  animation: stitch-card-edge 5.4s ease-in-out infinite;
 }
 
-.stitch-generation-surface {
+.workbench-agent-card {
+  border: 1px solid rgba(255,255,255,0.08);
+  transition:
+    width 340ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 340ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: width, height, transform, opacity;
+}
+
+.workbench-agent-card-base-bg {
+  background: linear-gradient(112deg, #121315 0%, #18191b 56%, #17181a 100%);
+}
+
+.workbench-agent-card-shade {
+  background: linear-gradient(90deg, rgba(7, 8, 10, 0.38), rgba(7, 8, 10, 0.06) 72%, transparent);
+}
+
+.workbench-agent-card--active {
+  border-color: rgba(128, 113, 255, 0.32) !important;
+  box-shadow:
+    inset 0 -1px 0 rgba(121, 91, 255, 0.46),
+    inset 1px 0 0 rgba(121, 91, 255, 0.16),
+    0 24px 88px -46px rgba(0, 0, 0, 0.95);
+}
+
+.workbench-agent-card--active::after {
+  background: conic-gradient(
+    from var(--workbench-agent-border-angle) at 50% 50%,
+    rgba(67, 207, 194, 0.48),
+    rgba(67, 207, 194, 0.08) 24%,
+    rgba(121, 91, 255, 0.14) 42%,
+    rgba(121, 91, 255, 0.68) 65%,
+    rgba(166, 126, 255, 0.24) 82%,
+    rgba(67, 207, 194, 0.48)
+  );
+  background-size: 180% 180%;
+  animation:
+    workbench-agent-border-orbit 5.2s linear infinite,
+    workbench-agent-border-pan 2.8s ease-in-out infinite;
+}
+
+.workbench-agent-card--active .workbench-agent-card-base-bg {
   background:
-    linear-gradient(90deg, rgba(55, 83, 72, 0.74), rgba(46, 54, 66, 0.88) 46%, rgba(55, 53, 48, 0.76)),
-    #222326;
+    radial-gradient(ellipse 62% 58% at 100% 100%, rgba(95, 68, 176, 0.18), transparent 100%),
+    radial-gradient(ellipse 56% 46% at 82% 0%, rgba(64, 151, 141, 0.09), transparent 100%),
+    linear-gradient(106deg, rgba(18,19,21,0.97), rgba(21,23,25,0.91) 56%, rgba(31,31,43,0.78));
 }
 
-.stitch-generation-surface::before {
+.workbench-agent-card--generating {
+  border-color: transparent !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(136, 120, 255, 0.24),
+    inset 0 -1px 0 rgba(146, 98, 255, 0.62),
+    inset 1px 0 0 rgba(146, 98, 255, 0.64),
+    0 0 0 1px rgba(72, 203, 190, 0.09),
+    -13px 10px 38px -28px rgba(128, 90, 255, 0.9),
+    14px -12px 42px -32px rgba(72, 203, 190, 0.85),
+    0 24px 88px -46px rgba(0, 0, 0, 0.95);
+}
+
+.workbench-agent-card--generating::before {
   position: absolute;
   inset: 0;
   content: "";
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 1;
   background:
-    linear-gradient(90deg, transparent, rgba(142, 119, 255, 0.16), transparent),
-    repeating-linear-gradient(90deg, rgba(255,255,255,0.026) 0 1px, transparent 1px 72px);
-  animation: stitch-scan 2.8s ease-in-out infinite;
+    radial-gradient(circle at center, rgba(62, 157, 184, 0.17), transparent 61%),
+    radial-gradient(circle at center, rgba(126, 82, 205, 0.22), transparent 64%);
+  background-position: 106% -8%, -12% 88%;
+  background-repeat: no-repeat;
+  background-size: 74% 90%, 72% 88%;
+  animation: workbench-agent-color-wash 4.2s linear infinite;
 }
 
-.stitch-generation-surface::after {
+.workbench-agent-card--generating .workbench-agent-card-base-bg {
+  background:
+    radial-gradient(circle at center, rgba(56, 128, 158, 0.19), transparent 62%),
+    radial-gradient(circle at center, rgba(116, 79, 198, 0.23), transparent 64%),
+    linear-gradient(112deg, #18191b 0%, #1b1b20 56%, #17181b 100%);
+  background-position: -28% 14%, 94% 82%, 0 0;
+  background-repeat: no-repeat;
+  background-size: 82% 104%, 76% 102%, 100% 100%;
+  animation: workbench-agent-surface-shift 4.2s linear infinite;
+}
+
+.workbench-agent-card--generating .workbench-agent-card-shade {
+  background: linear-gradient(90deg, rgba(7, 8, 10, 0.16), rgba(7, 8, 10, 0.03) 72%, transparent);
+}
+
+.workbench-agent-card--generating::after {
+  inset: 0;
+  background: conic-gradient(
+    from var(--workbench-agent-border-angle) at 50% 50%,
+    rgba(65, 169, 190, 0.92) 0%,
+    rgba(65, 169, 190, 0.14) 10%,
+    rgba(255, 255, 255, 0.06) 27%,
+    rgba(111, 96, 203, 0.12) 43%,
+    rgba(119, 91, 218, 0.88) 58%,
+    rgba(119, 91, 218, 0.14) 70%,
+    rgba(255, 255, 255, 0.06) 87%,
+    rgba(65, 169, 190, 0.92) 100%
+  );
+  background-size: 100% 100%;
+  animation: workbench-agent-border-orbit 3.8s linear infinite;
+  padding: 1.5px;
+}
+
+.workbench-generation-surface {
+  background:
+    linear-gradient(90deg, rgba(35, 38, 40, 0.92), rgba(42, 45, 48, 0.88) 48%, rgba(35, 39, 40, 0.9)),
+    #222426;
+}
+
+.workbench-generation-surface::before {
   position: absolute;
   inset: 0;
   content: "";
+  pointer-events: none;
   background:
-    radial-gradient(circle at 0% 0%, rgba(116, 92, 255, 0.26), transparent 35%),
-    radial-gradient(circle at 100% 100%, rgba(24, 211, 191, 0.14), transparent 30%);
+    linear-gradient(90deg, transparent, rgba(184, 203, 195, 0.20), transparent),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 72px);
+  animation: workbench-scan 3.6s ease-in-out infinite;
+  z-index: 4;
 }
 
-.stitch-selection-glow {
-  animation: stitch-border-breathe 2.8s ease-in-out infinite;
+.workbench-generation-surface--refining::before {
+  opacity: 0.7;
+  animation-duration: 4.2s;
 }
 
-.stitch-workbench :where(button, [role="button"]) {
-  --tw-duration: 200ms !important;
-  --tw-ease: ease !important;
+.workbench-generation-surface--complete::before {
+  opacity: 0.42;
+  animation-duration: 5.4s;
+}
+
+.workbench-generation-surface::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.035), transparent 28%),
+    radial-gradient(circle at 100% 100%, rgba(184, 203, 195, 0.055), transparent 32%);
+  z-index: 5;
+}
+
+.workbench-generation-surface--complete::after {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.025), transparent 28%),
+    radial-gradient(circle at 100% 100%, rgba(184, 203, 195, 0.035), transparent 32%);
+}
+
+.workbench-selection-glow {
+  animation: workbench-selection-breathe 2.9s ease-in-out infinite;
+  box-shadow:
+    inset 0 0 0 1px rgba(116, 103, 246, 0.96),
+    0 0 0 1px rgba(139, 128, 255, 0.10),
+    0 18px 64px rgba(0, 0, 0, 0.44);
+}
+
+.workbench-document-wash {
+  animation: workbench-document-wash-drift 2.5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.workbench-generating-beam {
+  animation: workbench-document-beam 2.2s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.workbench-generating-beam--light {
+  animation-duration: 3.1s;
+  opacity: 0.12;
+}
+
+.workbench-generated-node {
+  animation: workbench-screen-enter 500ms
+    linear(
+      0,
+      0.0509 4.08%,
+      0.1663 8.16%,
+      0.306 12.24%,
+      0.5115 18.37%,
+      0.6814 24.49%,
+      0.8064 30.61%,
+      0.8911 36.73%,
+      0.957 44.9%,
+      0.9882 53.06%,
+      1.0007 61.22%,
+      1.0041 69.39%,
+      1 100%
+    )
+    both;
+  isolation: isolate;
+  transition:
+    filter 480ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 480ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: filter, opacity;
+}
+
+.workbench-generated-node::before {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  content: "";
+  pointer-events: none;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--workbench-screen-border-angle) at 50% 50%,
+    rgba(63, 171, 188, 0.88) 0%,
+    rgba(63, 171, 188, 0.10) 12%,
+    rgba(255, 255, 255, 0.05) 28%,
+    rgba(108, 91, 201, 0.12) 46%,
+    rgba(121, 91, 222, 0.84) 60%,
+    rgba(121, 91, 222, 0.10) 74%,
+    rgba(255, 255, 255, 0.05) 88%,
+    rgba(63, 171, 188, 0.88) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+
+.workbench-generated-node[data-generated-phase="generating"]::before,
+.workbench-generated-node[data-generated-phase="refining"]::before {
+  opacity: 0.92;
+  animation: workbench-screen-border-orbit 3.4s linear 1;
+}
+
+.workbench-generated-node[data-generated-phase="refining"]::before {
+  opacity: 1;
+}
+
+.workbench-generated-node[data-generated-index="0"]::before,
+.workbench-generated-node[data-generated-index="0"] .workbench-generating-beam {
+  animation-delay: -0.7s;
+}
+
+.workbench-generated-node[data-generated-index="1"]::before,
+.workbench-generated-node[data-generated-index="1"] .workbench-generating-beam {
+  animation-delay: -1.8s;
+}
+
+.workbench-generated-node[data-generated-index="2"]::before,
+.workbench-generated-node[data-generated-index="2"] .workbench-generating-beam {
+  animation-delay: -2.9s;
+}
+
+.workbench-generated-node[data-generated-phase="generating"] {
+  filter: saturate(0.82) brightness(0.74);
+  opacity: 0.96;
+}
+
+.workbench-generated-node[data-generated-phase="refining"] {
+  filter: none;
+}
+
+.workbench-generated-node[data-generated-ready="true"] {
+  filter: saturate(1) brightness(1);
+}
+
+.workbench-dialog-backdrop {
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.workbench-dialog-panel {
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-mobile-project-drawer {
+    transition-duration: 1ms !important;
+  }
+}
+
+.workbench-shell :where(button, [role="button"]) {
+  --tw-duration: 150ms !important;
+  --tw-ease: cubic-bezier(0.2, 0, 0, 1) !important;
   transition-property:
     background-color,
     border-color,
@@ -823,25 +1861,45 @@ textarea:focus-visible {
     box-shadow,
     opacity,
     transform !important;
-  transition-duration: 200ms !important;
-  transition-timing-function: ease !important;
+  transition-duration: 150ms !important;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
 }
 
-.stitch-workbench :where(button, [role="button"]):hover {
-  transform: translateY(-2px) !important;
+[data-workbench-artifact-skeleton]::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+  background-size: 200% 100%;
+  animation: workbench-skeleton-fade 2.5s ease-in-out infinite;
 }
 
-.stitch-workbench :where(button, [role="button"]):active {
-  transform: translateY(0) scale(0.98) !important;
+.workbench-shell :where(button, [role="button"]):hover {
+  transform: none !important;
 }
 
-.stitch-workbench :where(button, a, span, h1, h2, h3, p, label) {
+.workbench-shell :where(button, [role="button"]):active {
+  transform: scale(0.97);
+}
+
+.workbench-shell :where(button, a, span, h1, h2, h3, p, label) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.stitch-workbench .material-symbols-outlined {
+.workbench-shell .workbench-tool-button {
+  overflow: visible !important;
+}
+
+.workbench-shell .whitespace-normal {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.workbench-shell .material-symbols-outlined {
   direction: ltr;
   display: inline-block;
   font-family: "Material Symbols Outlined";
@@ -855,14 +1913,14 @@ textarea:focus-visible {
   word-wrap: normal;
 }
 
-.stitch-export-glass {
+.workbench-export-glass {
   background-color: rgba(28, 27, 28, 0.6);
   border: 1px solid rgba(73, 68, 84, 0.1);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
 }
 
-.stitch-glass {
+.workbench-glass {
   background-color: rgba(24, 25, 27, 0.86);
   border: 1px solid rgba(255, 255, 255, 0.08);
   -webkit-backdrop-filter: blur(20px);
@@ -872,7 +1930,7 @@ textarea:focus-visible {
     0 24px 74px -32px rgba(0,0,0,0.92);
 }
 
-.stitch-control {
+.workbench-control {
   align-items: center;
   background-color: rgba(35,36,39,0.82);
   border: 1px solid rgba(255,255,255,0.10);
@@ -884,11 +1942,10 @@ textarea:focus-visible {
   transition:
     background-color 200ms ease,
     border-color 200ms ease,
-    color 200ms ease,
-    transform 200ms ease;
+    color 200ms ease;
 }
 
-.stitch-icon-button {
+.workbench-icon-button {
   align-items: center;
   background-color: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.10);
@@ -898,50 +1955,43 @@ textarea:focus-visible {
   justify-content: center;
   transition:
     background-color 200ms ease,
-    color 200ms ease,
-    transform 200ms ease;
+    color 200ms ease;
 }
 
-.stitch-aurora {
-  animation: stitch-export-aurora-sweep 2s infinite linear;
-  background: linear-gradient(90deg, #d0bcff, #a078ff, #00dbe9, #d0bcff);
-  background-size: 300% 100%;
+.workbench-aurora {
+  background: #d8dce2;
 }
 
-.stitch-pulse {
-  animation: stitch-export-pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+.workbench-pulse {
+  box-shadow: none;
 }
 
-.stitch-export-aurora {
-  animation: stitch-export-aurora-sweep 2s infinite linear;
-  background: linear-gradient(90deg, #d0bcff, #a078ff, #00dbe9, #d0bcff);
-  background-size: 300% 100%;
+.workbench-export-aurora {
+  background: #d8dce2;
 }
 
-.stitch-export-pulse {
-  animation: stitch-export-pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+.workbench-export-pulse {
+  box-shadow: none;
 }
 
-@keyframes stitch-export-aurora-sweep {
-  0% {
-    background-position: 100% 0%;
+@media (prefers-reduced-motion: reduce) {
+  .workbench-shell *,
+  .workbench-shell *::before,
+  .workbench-shell *::after {
+    scroll-behavior: auto !important;
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0ms !important;
+    transition-duration: 1ms !important;
   }
-  100% {
-    background-position: -200% 0%;
-  }
-}
 
-@keyframes stitch-export-pulse-ring {
-  0% {
-    box-shadow: 0 0 0 0 rgba(208, 188, 255, 0.7);
-    transform: scale(0.8);
+  .workbench-generated-node {
+    opacity: 1;
+    transform: none;
   }
-  70% {
-    box-shadow: 0 0 0 10px rgba(208, 188, 255, 0);
-    transform: scale(1);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(208, 188, 255, 0);
-    transform: scale(0.8);
+
+  .workbench-stage-ellipsis {
+    width: 1.25em;
   }
 }

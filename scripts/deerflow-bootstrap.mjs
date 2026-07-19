@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -8,13 +9,15 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
+const csrfToken = randomBytes(64).toString("base64url");
 
 const defaults = {
   gatewayUrl: process.env.DEERFLOW_GATEWAY_URL ?? "http://localhost:8001",
   langgraphUrl: process.env.DEERFLOW_LANGGRAPH_URL ?? `${process.env.DEERFLOW_GATEWAY_URL ?? "http://localhost:8001"}/api`,
-  agentDir: path.join(repoRoot, "integrations/deerflow/agents/ai-product-workbench-lead"),
-  skillDir: path.join(repoRoot, "integrations/deerflow/skills/ai-product-workbench"),
+  agentDir: path.join(repoRoot, "integrations/deerflow/agents/workbench-lead"),
+  skillDir: path.join(repoRoot, "integrations/deerflow/skills/workbench"),
   threadId: process.env.DEERFLOW_BOOTSTRAP_THREAD_ID,
+  adminAccessToken: process.env.DEERFLOW_ADMIN_ACCESS_TOKEN,
 };
 
 const options = parseArgs(process.argv.slice(2));
@@ -29,6 +32,7 @@ const config = {
   agentDir: path.resolve(options.agentDir ?? defaults.agentDir),
   skillDir: path.resolve(options.skillDir ?? defaults.skillDir),
   threadId: options.threadId ?? defaults.threadId,
+  adminAccessToken: defaults.adminAccessToken,
   dryRun: Boolean(options.dryRun),
   skipAgent: Boolean(options.skipAgent),
   skipSkill: Boolean(options.skipSkill),
@@ -41,9 +45,14 @@ async function main(config) {
   assertPath(config.agentDir, "agent directory");
   assertPath(config.skillDir, "skill directory");
 
+  const writesRequested = !config.skipAgent || !config.skipSkill;
+  const adminHeaders = !config.dryRun && writesRequested
+    ? createAdminAuthHeaders(config.adminAccessToken)
+    : null;
+
   const agent = await loadAgent(config.agentDir);
   const skillName = await readSkillName(config.skillDir);
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "ai-workbench-deerflow-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "workbench-deerflow-"));
   const archivePath = path.join(tempDir, `${skillName}.skill`);
 
   try {
@@ -51,23 +60,28 @@ async function main(config) {
     log(`Packaged skill: ${archivePath}`);
 
     if (config.dryRun) {
-      log(`Dry run: would upsert agent '${agent.name}' at ${config.gatewayUrl}/api/agents`);
-      log(`Dry run: would install or refresh skill '${skillName}' through ${config.gatewayUrl}/api/skills/install`);
+      if (!config.skipAgent) {
+        log(`Dry run: would upsert agent '${agent.name}' at ${config.gatewayUrl}/api/agents`);
+      }
+      if (!config.skipSkill) {
+        log(`Dry run: would install or refresh skill '${skillName}' through ${config.gatewayUrl}/api/skills/install`);
+      }
       return;
     }
 
     if (!config.skipAgent) {
-      await upsertAgent(config.gatewayUrl, agent);
-      log(`Agent ready: ${agent.name}`);
+      await upsertAgent(config.gatewayUrl, agent, adminHeaders);
+      log(`Admin-scoped custom agent installed or updated: ${agent.name}`);
     }
 
     if (!config.skipSkill) {
-      const threadId = config.threadId ?? await createThread(config.langgraphUrl);
+      const threadId = config.threadId ?? await createThread(config.langgraphUrl, adminHeaders);
       log(`Bootstrap thread: ${threadId}`);
-      const virtualPath = await uploadSkillArchive(config.gatewayUrl, threadId, archivePath);
-      await installSkill(config.gatewayUrl, threadId, virtualPath, skillName);
-      await enableSkill(config.gatewayUrl, skillName);
-      log(`Skill ready: ${skillName}`);
+      const virtualPath = await uploadSkillArchive(config.gatewayUrl, threadId, archivePath, adminHeaders);
+      await installSkill(config.gatewayUrl, threadId, virtualPath, skillName, adminHeaders);
+      await enableSkill(config.gatewayUrl, skillName, adminHeaders);
+      log(`Admin-scoped custom skill installed and enabled: ${skillName}`);
+      log("Production runtime readiness still requires the skill to ship as a read-only PUBLIC skill in the DeerFlow deployment.");
     }
   } finally {
     if (!config.keepArchive) {
@@ -111,7 +125,7 @@ function packageSkill(skillDir, archivePath) {
   }
 }
 
-async function upsertAgent(gatewayUrl, agent) {
+async function upsertAgent(gatewayUrl, agent, adminHeaders) {
   const body = {
     name: agent.name,
     description: agent.description ?? "",
@@ -122,7 +136,7 @@ async function upsertAgent(gatewayUrl, agent) {
 
   const put = await fetchJson(`${gatewayUrl}/api/agents/${encodeURIComponent(agent.name)}`, {
     method: "PUT",
-    headers: jsonHeaders(),
+    headers: jsonHeaders(adminHeaders),
     body: JSON.stringify({
       description: body.description,
       model: body.model,
@@ -135,18 +149,18 @@ async function upsertAgent(gatewayUrl, agent) {
 
   return (await fetchJson(`${gatewayUrl}/api/agents`, {
     method: "POST",
-    headers: jsonHeaders(),
+    headers: jsonHeaders(adminHeaders),
     body: JSON.stringify(body),
   })).data;
 }
 
-async function createThread(langgraphUrl) {
+async function createThread(langgraphUrl, adminHeaders) {
   const result = await fetchJson(`${langgraphUrl}/threads`, {
     method: "POST",
-    headers: jsonHeaders(),
+    headers: jsonHeaders(adminHeaders),
     body: JSON.stringify({
       metadata: {
-        source: "ai-product-workbench-bootstrap",
+        source: "workbench-bootstrap",
       },
     }),
   });
@@ -155,12 +169,13 @@ async function createThread(langgraphUrl) {
   return threadId;
 }
 
-async function uploadSkillArchive(gatewayUrl, threadId, archivePath) {
+async function uploadSkillArchive(gatewayUrl, threadId, archivePath, adminHeaders) {
   const buffer = await readFile(archivePath);
   const formData = new FormData();
   formData.append("files", new Blob([new Uint8Array(buffer)], { type: "application/zip" }), path.basename(archivePath));
   const result = await fetchJson(`${gatewayUrl}/api/threads/${encodeURIComponent(threadId)}/uploads`, {
     method: "POST",
+    headers: adminHeaders,
     body: formData,
   });
   const first = Array.isArray(result.data?.files) ? result.data.files[0] : null;
@@ -169,10 +184,10 @@ async function uploadSkillArchive(gatewayUrl, threadId, archivePath) {
   return virtualPath;
 }
 
-async function installSkill(gatewayUrl, threadId, virtualPath, skillName) {
+async function installSkill(gatewayUrl, threadId, virtualPath, skillName, adminHeaders) {
   const request = {
     method: "POST",
-    headers: jsonHeaders(),
+    headers: jsonHeaders(adminHeaders),
     body: JSON.stringify({
       thread_id: threadId,
       path: virtualPath,
@@ -182,16 +197,16 @@ async function installSkill(gatewayUrl, threadId, virtualPath, skillName) {
 
   if (result.response.status === 409) {
     log(`Skill already installed: ${skillName}; reinstalling to refresh files`);
-    await deleteCustomSkill(gatewayUrl, skillName);
+    await deleteCustomSkill(gatewayUrl, skillName, adminHeaders);
     return (await fetchJson(`${gatewayUrl}/api/skills/install`, request)).data;
   }
   return result.data;
 }
 
-async function deleteCustomSkill(gatewayUrl, skillName) {
+async function deleteCustomSkill(gatewayUrl, skillName, adminHeaders) {
   const result = await fetchJson(`${gatewayUrl}/api/skills/custom/${encodeURIComponent(skillName)}`, {
     method: "DELETE",
-    headers: jsonHeaders(),
+    headers: jsonHeaders(adminHeaders),
   }, [404]);
 
   if (result.response.status === 404) {
@@ -200,10 +215,10 @@ async function deleteCustomSkill(gatewayUrl, skillName) {
   return result.data;
 }
 
-async function enableSkill(gatewayUrl, skillName) {
+async function enableSkill(gatewayUrl, skillName, adminHeaders) {
   return (await fetchJson(`${gatewayUrl}/api/skills/${encodeURIComponent(skillName)}`, {
     method: "PUT",
-    headers: jsonHeaders(),
+    headers: jsonHeaders(adminHeaders),
     body: JSON.stringify({ enabled: true }),
   })).data;
 }
@@ -250,8 +265,29 @@ function normalizeBaseUrl(value) {
   return value.replace(/\/+$/, "");
 }
 
-function jsonHeaders() {
-  return { "content-type": "application/json", accept: "application/json" };
+function jsonHeaders(authHeaders) {
+  return {
+    ...authHeaders,
+    "content-type": "application/json",
+    accept: "application/json",
+  };
+}
+
+function createAdminAuthHeaders(rawToken) {
+  const token = rawToken?.trim();
+  if (!token) {
+    throw new Error(
+      "DEERFLOW_ADMIN_ACCESS_TOKEN is required for DeerFlow bootstrap writes; "
+      + "DEERFLOW_INTERNAL_AUTH_TOKEN is a runtime service credential and cannot authorize skill management.",
+    );
+  }
+  if (/\s|[;,]/.test(token) || /^Bearer\s/i.test(token)) {
+    throw new Error("DEERFLOW_ADMIN_ACCESS_TOKEN must contain the raw admin session token without whitespace, cookie delimiters, or a 'Bearer ' prefix.");
+  }
+  return Object.freeze({
+    "X-CSRF-Token": csrfToken,
+    Cookie: `access_token=${token}; csrf_token=${csrfToken}`,
+  });
 }
 
 function assertPath(targetPath, label) {
@@ -274,5 +310,15 @@ Options:
   --skip-skill              Do not install/enable the skill
   --keep-archive            Keep the temporary packaged .skill archive
   --help                    Show this help
+
+Environment:
+  DEERFLOW_ADMIN_ACCESS_TOKEN  Raw session access token for a real DeerFlow admin user. All
+                              agent/thread/upload/skill writes use this same access_token cookie.
+                              DEERFLOW_INTERNAL_AUTH_TOKEN is not accepted as an admin credential.
+
+Scope:
+  DeerFlow custom agents and skills are per-user. This command validates and installs them only
+  for the authenticated admin identity. Production must ship 'workbench' as a read-only PUBLIC
+  skill with the DeerFlow deployment; this command does not create a shared or runtime-wide skill.
 `);
 }

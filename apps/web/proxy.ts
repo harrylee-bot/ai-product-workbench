@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { getSessionCookie } from "better-auth/cookies";
 
-const AUTH_COOKIE_NAME = "access_token";
-const PROTECTED_PREFIXES = ["/chat", "/admin"];
+const PROTECTED_PREFIXES = ["/admin", "/projects"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -11,15 +11,15 @@ export function proxy(request: NextRequest) {
       (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
     );
 
-  if (!isProtected || request.cookies.has(AUTH_COOKIE_NAME)) {
+  if (!isProtected || getSessionCookie(request, { cookiePrefix: "workbench" })) {
     return NextResponse.next();
   }
 
   const loginUrl = new URL("/login", request.url);
-  loginUrl.searchParams.set("next", pathname);
+  loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
   return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
-  matcher: ["/", "/chat/:path*", "/admin/:path*"],
+  matcher: ["/", "/admin/:path*", "/projects/:path*"],
 };

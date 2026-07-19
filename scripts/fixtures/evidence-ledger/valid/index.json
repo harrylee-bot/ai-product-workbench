@@ -1,0 +1,1 @@
+{"payload":{"createdAtUtc":"2026-07-18T08:00:01Z","indexId":"index-20260718-fixture","ledgerReferences":[{"ledgerId":"ledger-20260718-fixture","sha256":"369c4284433548f02c83034e97e0745c1d3e76851a261629f5506d84567cdbe2","uri":"file:./ledger.json"}]},"payloadSha256":"dff9d4eddad0ede543744f7bbc64c5eefe17f29d1e72b402ce4f721db23daa78","schemaVersion":"workbench.evidence-index.v1"}

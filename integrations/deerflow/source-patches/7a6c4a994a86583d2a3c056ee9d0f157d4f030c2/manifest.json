@@ -1,0 +1,27 @@
+{
+  "protocol": "workbench.deerflow-source-patch.v1",
+  "upstreamRepository": "https://github.com/bytedance/deer-flow",
+  "upstreamCommit": "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2",
+  "agent": {
+    "path": "deerflow/agents/lead_agent/agent.py",
+    "upstreamSha256": "9052cfadca31817a927e83ad2dff01bfe5afdf5acdae337cc8f30eb1a8d8469f",
+    "patchedSha256": "363a91528113a6daba6441dc7c2a32c787c8478a12be93f3222ba38adb7c8454",
+    "anchor": "    # Hide deferred tool schemas from model binding until tool_search promotes them.\n",
+    "insertion": "    # Product Workbench Canvas tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(workbench_canvas_policy_from_runnable_config(config))\n    )\n\n"
+  },
+  "deferredMiddleware": {
+    "path": "deerflow/agents/middlewares/deferred_tool_filter_middleware.py",
+    "sha256": "d0fb92b78bf7d65a3444925a7cef4a1072f464127b75393fdaf5f1fb7d9053f2"
+  },
+  "toolScopeMiddleware": {
+    "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
+    "sha256": "201abaf9a582eadf3c25083002bc4f5af22e013c0646e82737e6c79c283aa388"
+  },
+  "additionalSources": [],
+  "patchApplier": {
+    "sha256": "bd9502f2ae402eac3edb73d50cd125ea6d1f30ae6c201b5c1a04915ae315f754"
+  },
+  "contractTest": {
+    "sha256": "021369eaf82e240022ee021c81d99b67fe9ea58aa6a70fb8a04254e72c5afba0"
+  }
+}

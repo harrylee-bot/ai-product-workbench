@@ -3,21 +3,55 @@ export type SecurityHeader = {
   value: string;
 };
 
-const localApiOrigins = [
-  "http://localhost:4000",
-  "https://localhost:4000",
-  "http://127.0.0.1:4000",
-  "https://127.0.0.1:4000",
+export function normalizeBrowserUploadBucketUrl(
+  configured: string | undefined,
+  isProduction: boolean,
+): string | undefined {
+  const value = configured?.trim();
+  if (!value) {
+    if (isProduction) throw new Error("WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL is required");
+    return undefined;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL must be a safe HTTP(S) URL");
+  }
+  const loopback = isLoopbackHostname(url.hostname);
+  if (
+    !url.hostname
+    || !["http:", "https:"].includes(url.protocol)
+    || (isProduction && !loopback && url.protocol !== "https:")
+    || url.username
+    || url.password
+    || url.search
+    || url.hash
+  ) {
+    throw new Error(
+      "WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL must be HTTPS in production (loopback HTTP is allowed) and must not contain credentials, query, or fragment",
+    );
+  }
+  return value.replace(/\/+$/, "");
+}
+
+const localPreviewOrigins = [
+  "http://localhost:4300",
+  "https://localhost:4300",
+  "http://127.0.0.1:4300",
+  "https://127.0.0.1:4300",
 ];
 
 export function buildSecurityHeaders(input: {
   isProduction: boolean;
-  apiBaseUrl?: string;
+  previewOrigin?: string;
+  uploadBucketUrl?: string;
 }): SecurityHeader[] {
-  const apiOrigin = readApiOrigin(input.apiBaseUrl, input.isProduction);
-  const allowedApiOrigins = input.isProduction
-    ? apiOrigin
-    : unique([...apiOrigin, ...localApiOrigins]);
+  const configuredPreviewOrigins = readOrigin(input.previewOrigin);
+  const configuredUploadOrigins = readOrigin(input.uploadBucketUrl);
+  const allowedPreviewOrigins = input.isProduction
+    ? configuredPreviewOrigins
+    : unique([...configuredPreviewOrigins, ...localPreviewOrigins]);
   const scriptSrc = [
     "script-src 'self'",
     "'unsafe-inline'",
@@ -32,9 +66,9 @@ export function buildSecurityHeaders(input: {
         scriptSrc,
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob: https:",
-        "font-src 'self' data:",
-        ["connect-src 'self'", ...allowedApiOrigins].join(" "),
-        ["frame-src 'self' blob:", ...allowedApiOrigins].join(" "),
+        "font-src 'self' data: blob:",
+        ["connect-src 'self'", ...configuredUploadOrigins].join(" "),
+        ["frame-src 'self' blob:", ...allowedPreviewOrigins].join(" "),
         "object-src 'none'",
         "base-uri 'self'",
         "frame-ancestors 'none'",
@@ -46,14 +80,29 @@ export function buildSecurityHeaders(input: {
   ];
 }
 
-function readApiOrigin(configured: string | undefined, isProduction: boolean) {
+function readOrigin(configured: string | undefined) {
   const trimmed = configured?.trim();
   if (!trimmed) return [];
   try {
-    return [new URL(trimmed).origin];
+    const url = new URL(trimmed);
+    if (
+      !url.hostname
+      || !["http:", "https:"].includes(url.protocol)
+      || url.username
+      || url.password
+      || url.search
+      || url.hash
+    ) {
+      return [];
+    }
+    return [url.origin];
   } catch {
-    return isProduction ? [] : ["http://localhost:4000"];
+    return [];
   }
+}
+
+function isLoopbackHostname(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 function unique(values: string[]) {

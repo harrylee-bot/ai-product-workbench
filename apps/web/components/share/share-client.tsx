@@ -1,40 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { getApiBase } from "@/lib/api/config";
-import { useAuth } from "@/lib/auth/nest-auth";
+import { WorkbenchQueryProvider } from "@/lib/workbench/query";
+import { WorkbenchTransportProvider } from "@/lib/workbench/transport";
+import { useWorkbenchPublicShare } from "@/lib/workbench/features";
+import { isWorkbenchApiError } from "@/lib/workbench/api";
 import { ShareView } from "./share-view";
 
-export function ShareClient({ token: tokenProp }: { token?: string }) {
-  const searchParams = useSearchParams();
-  const token = tokenProp ?? searchParams.get("token") ?? "";
-  const { user, loading: authLoading } = useAuth();
+export function ShareClient({ token }: { token: string }) {
+  return (
+    <WorkbenchQueryProvider>
+      <WorkbenchTransportProvider>
+        <PublicShareContent token={token} />
+      </WorkbenchTransportProvider>
+    </WorkbenchQueryProvider>
+  );
+}
 
-  const [shareData, setShareData] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+function PublicShareContent({ token }: { token: string }) {
+  const query = useWorkbenchPublicShare(token);
+  if (!token || (query.isError && isMissingShare(query.error))) {
+    return <ShareStatus tone="error">分享链接无效或已失效</ShareStatus>;
+  }
+  if (query.isError) {
+    return (
+      <ShareStatus onRetry={() => void query.refetch()} tone="error">
+        分享服务暂不可用，请稍后重试
+      </ShareStatus>
+    );
+  }
+  if (query.isPending || !query.data) {
+    return <ShareStatus>正在加载分享内容...</ShareStatus>;
+  }
+  return <ShareView share={query.data.value} token={token} />;
+}
 
-  useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    if (authLoading) return;
-    if (!user) {
-      window.location.href = `/login?next=${encodeURIComponent(`/share/${encodeURIComponent(token)}`)}`;
-      return;
-    }
-    fetch(`${getApiBase()}/authenticated-share/${token}`, { credentials: "include" })
-      .then((res) => {
-        if (!res.ok) throw new Error(`加载失败 (${res.status})`);
-        return res.json();
-      })
-      .then((data) => { if (data) setShareData(data); })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [authLoading, token, user]);
+function isMissingShare(error: unknown): boolean {
+  return isWorkbenchApiError(error) && (error.status === 404 || error.status === 410);
+}
 
-  if (!token) return <div className="flex min-h-screen items-center justify-center bg-background"><p className="text-muted-foreground text-sm">无效的分享链接</p></div>;
-  if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><p className="text-muted-foreground text-sm">加载分享内容…</p></div>;
-  if (error) return <div className="flex min-h-screen items-center justify-center bg-background"><p className="text-destructive text-sm">{error}</p></div>;
-  if (!shareData) return null;
-  return <ShareView shareData={shareData} token={token} />;
+function ShareStatus({
+  children,
+  onRetry,
+  tone = "default",
+}: {
+  children: string;
+  onRetry?: () => void;
+  tone?: "default" | "error";
+}) {
+  const message = (
+    <p className={tone === "error" ? "text-sm text-[#f2a7a7]" : "text-sm text-[#aeb3bb]"}>
+      {children}
+    </p>
+  );
+
+  return (
+    <div className="grid min-h-screen place-items-center bg-[#111214] px-6">
+      {onRetry ? (
+        <div className="text-center">
+          {message}
+          <button
+            className="mt-3 rounded-full border border-white/[0.10] px-4 py-2 text-sm text-[#d8dce2] hover:bg-white/[0.06]"
+            onClick={onRetry}
+            type="button"
+          >
+            重试
+          </button>
+        </div>
+      ) : message}
+    </div>
+  );
 }

@@ -1,0 +1,6 @@
+{
+  "name": "workbench-lead",
+  "description": "Lead agent for 产品工作台 turns. Decides whether to answer, clarify, draft PRD/state, or delegate prototype/code execution to DeerFlow.",
+  "model": null,
+  "tool_groups": null
+}
