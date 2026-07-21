@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { assertRouteTransitionFrames } from "./workbench-route-frame-contract.mjs";
 
-test("accepts a mounted sync handoff when the first incoming sample is transparent", () => {
+test("accepts a mounted sync handoff when visible enter samples are coalesced", () => {
   const result = assertRouteTransitionFrames([
     frame({ home: route(1, "translateY(6px)"), homeHeader: route(1) }),
     frame({
@@ -18,17 +18,17 @@ test("accepts a mounted sync handoff when the first incoming sample is transpare
       elapsedMs: 32,
       home: route(0),
       homeHeader: route(0),
-      project: route(0.2),
-      projectHeader: route(0.2),
+      project: route(0.95),
+      projectHeader: route(0.95),
     }),
-    frame({ elapsedMs: 48, project: route(0.7), projectHeader: route(0.6) }),
+    frame({ elapsedMs: 48, project: route(0.98), projectHeader: route(0.98) }),
     frame({ elapsedMs: 64, project: route(1), projectHeader: route(1) }),
   ], "home", "project", "coalesced Home-to-Project");
 
   assert.equal(result.overlapFrames, 2);
   assert.equal(result.visibleOverlapFrames, 0);
-  assert.deepEqual(result.sourceOpacity, { maximum: 1, minimum: 0.5, range: 0.5 });
-  assert.deepEqual(result.targetOpacity, { maximum: 1, minimum: 0.2, range: 0.8 });
+  assert.deepEqual(result.sourceOpacity, { maximum: 1, minimum: 0, range: 1 });
+  assert.deepEqual(result.targetOpacity, { maximum: 1, minimum: 0, range: 1 });
 });
 
 test("rejects a serial route swap without any mounted overlap", () => {
@@ -57,6 +57,27 @@ test("still rejects a mounted frame when both routes are visually blank", () => 
   assert.throws(
     () => assertRouteTransitionFrames(frames, "home", "project", "blank Home-to-Project"),
     /must never expose a blank route frame/u,
+  );
+});
+
+test("rejects a concurrently mounted route that never changes opacity", () => {
+  const frames = [
+    frame({ home: route(1, "translateY(6px)"), homeHeader: route(1) }),
+    frame({
+      elapsedMs: 16,
+      home: route(0.5, "translateY(3px)"),
+      homeHeader: route(0.5),
+      project: route(1),
+      projectHeader: route(1),
+      source: "mutation",
+    }),
+    frame({ elapsedMs: 32, home: route(0), project: route(1), projectHeader: route(1) }),
+    frame({ elapsedMs: 48, project: route(1), projectHeader: route(1) }),
+  ];
+
+  assert.throws(
+    () => assertRouteTransitionFrames(frames, "home", "project", "snapped Home-to-Project"),
+    /incoming project opacity must animate during enter/u,
   );
 });
 

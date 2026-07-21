@@ -14,6 +14,8 @@ export function assertRouteTransitionFrames(frames, from, to, label) {
 
   const sourceFrames = frames.filter((frame) => routePresent(frame[from]));
   const targetFrames = frames.filter((frame) => routePresent(frame[to]));
+  const sourceMotionFrames = frames.filter((frame) => routeMounted(frame[from]));
+  const targetMotionFrames = frames.filter((frame) => routeMounted(frame[to]));
   const mountedOverlapFrames = frames.filter((frame) => (
     routeMounted(frame[from]) && routeMounted(frame[to])
   ));
@@ -29,8 +31,8 @@ export function assertRouteTransitionFrames(frames, from, to, label) {
     )}`,
   );
 
-  const sourceOpacity = opacityRange(sourceFrames.map((frame) => frame[from]));
-  const targetOpacity = opacityRange(targetFrames.map((frame) => frame[to]));
+  const sourceOpacity = opacityRange(sourceMotionFrames.map((frame) => frame[from]));
+  const targetOpacity = opacityRange(targetMotionFrames.map((frame) => frame[to]));
   assert(sourceOpacity.maximum >= 0.95, `${label} outgoing ${from} must begin fully visible`);
   assert(sourceOpacity.range >= 0.12, `${label} outgoing ${from} opacity must animate during exit`);
   assert(targetOpacity.maximum >= 0.95, `${label} incoming ${to} must finish fully visible`);
@@ -40,7 +42,7 @@ export function assertRouteTransitionFrames(frames, from, to, label) {
   assert(lastTarget?.[to].opacity >= 0.95, `${label} incoming ${to} must settle at opacity 1`);
   const childKey = to === "home" ? "homeHeader" : "projectHeader";
   const childOpacity = opacityRange(
-    frames.filter((frame) => routePresent(frame[childKey])).map((frame) => frame[childKey]),
+    frames.filter((frame) => routeMounted(frame[childKey])).map((frame) => frame[childKey]),
   );
   assert(childOpacity.maximum >= 0.95, `${label} incoming ${to} header must finish visible`);
   assert(childOpacity.range >= 0.08, `${label} must retain the incoming ${to} child enter animation`);
