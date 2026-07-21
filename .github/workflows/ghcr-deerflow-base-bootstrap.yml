@@ -1,0 +1,57 @@
+name: One-time GHCR DeerFlow base bootstrap
+
+on:
+  push:
+    branches:
+      - codex/ghcr-bootstrap-2665575f
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish exact DeerFlow base image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Configure ephemeral SSH identity
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.WORKBENCH_GHCR_BOOTSTRAP_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.WORKBENCH_GHCR_BOOTSTRAP_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Push the server-verified image to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -n "$GHCR_TOKEN"
+          printf '%s' "$GHCR_TOKEN" | ssh \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            root@45.207.206.119 \
+            'set -euo pipefail
+             image="ghcr.io/harrylee-bot/workbench-deerflow-base:7a6c4a994a86583d2a3c056ee9d0f157d4f030c2"
+             expected="sha256:fe30626a3de0a3889f4d05578ed1bdb915298ff5610967c04e664a5181d19090"
+             cleanup() {
+               docker logout ghcr.io >/dev/null 2>&1 || true
+               if test -f /root/.docker/config.json; then
+                 chmod 0600 /root/.docker/config.json
+               fi
+             }
+             trap cleanup EXIT
+             docker image inspect "$image" >/dev/null
+             docker image inspect "$image" --format "{{json .RepoDigests}}" | grep -Fq "$expected"
+             docker login ghcr.io --username harrylee-bot --password-stdin
+             docker push "$image"
+             docker image inspect "$image" --format "{{json .RepoDigests}}" | grep -Fq "ghcr.io/harrylee-bot/workbench-deerflow-base@$expected"
+             printf "publishedDigest=%s\n" "$expected"'
