@@ -284,7 +284,7 @@ describe("repository Vault release", () => {
       rawTarget: "07-来源资产索引/旧版整理/01-产品知识/需求文档知识库/业务域索引#运营配置与活动治理",
       resolution: "unresolved",
     }]);
-  });
+  }, 15_000);
 });
 
 function source(path: string, status: string, body: string): VaultSourceInput {

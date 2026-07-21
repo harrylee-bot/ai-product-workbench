@@ -486,19 +486,29 @@ Codex 的任何修复都必须保留：
 - **位置**：`scripts/g0-scope-approval.mjs`；`docs/evidence/governance/g0-scope-approval.schema.json`；`docs/evidence/governance/g0-scope-approval.example.json`
 - **触发**：正式候选准备 G0 payload 时，校验器仍将完整 finding 集合固定为 D-001～D-033 与 P-001～P-019，而审计规范已经新增 D-034～D-037。
 - **影响**：真实 G0 记录无法把新增供应链、工具最小权限、浏览器 CSP 和 CI 依赖 finding 纳入责任与进度范围；若沿用旧合同，G0 PASS 会产生漏审的生产批准事实。
-- **修复**：G0 的精确集合最初升级为 D-001～D-038 与 P-001～P-019；D-039 形成后继续同步升级到当前 D-001～D-039 与 P-001～P-019，共 58 项。JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
-- **测试**：新增回归用例显式断言当前 D-034～D-039 和 58 项总数，并证明只覆盖到 D-033 的旧记录 fail closed；D-039 前一版曾完成 G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test，完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`。当前 58 项合同必须在下一候选重新执行。
-- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 58 项并绑定同一 G1 manifest。
+- **修复**：G0 的精确集合最初升级为 D-001～D-038 与 P-001～P-019；D-039、D-040 形成后继续同步升级到当前 D-001～D-040 与 P-001～P-019，共 59 项。JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
+- **测试**：新增回归用例显式断言当前 D-034～D-040 和 59 项总数，并证明只覆盖到 D-033 的旧记录 fail closed；D-039 前一版曾完成 G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test，完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`。当前 59 项合同必须在下一候选重新执行。
+- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 59 项并绑定同一 G1 manifest。
 
 ### D-039 — 锁文件遗漏 Linux Rolldown 原生可选依赖
 
-- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；新冻结候选与 Linux CI 仍待执行
+- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；第二轮 Linux CI 已证明 binding 可加载，完整 G3 仍被 D-040 阻断
 - **位置**：`package.json`；`package-lock.json`；`scripts/prepare-node-image.test.mjs`
 - **触发**：签名候选 `8710fa5b83827b18c404690629aa7bbaa953ea79` 的 GitHub PR run `29844055994` 在 Linux `npm test` 启动 Workbench Contracts Vitest 时失败；`rolldown@1.1.4` 声明了平台包，但 lockfile 只有开发机的 `@rolldown/binding-darwin-arm64` 节点，`npm ci` 无法安装 `@rolldown/binding-linux-x64-gnu`。
 - **影响**：G3 Linux 测试无法启动；相同锁文件也未显式封存 Alpine 生产镜像所需的 musl binding，后续 G4 构建存在同类失败风险。若以本机 ARM 测试代替，会产生跨平台假绿。
 - **修复**：根 `optionalDependencies` 精确固定 `@rolldown/binding-linux-x64-gnu@1.1.4` 与 `@rolldown/binding-linux-x64-musl@1.1.4`；使用空 checkout 和固定 npm 11.18.0 生成两份完整 lockfile 节点，保留 registry integrity、CPU、OS、libc 与 optional 元数据。没有删除 lockfile、放宽 `npm ci` 或把平台二进制改为普通依赖。
-- **测试**：Node image 回归现在校验全部 Linux x64 原生 pin、根 manifest/lockfile 一致、完整节点、optional 标记与 SHA-512 integrity。还必须在 clean Linux runner 完成 `npm ci`、root test 与后续浏览器/构建矩阵，并在 Alpine G4 镜像实际加载相关工具链。
+- **测试**：Node image 回归现在校验全部 Linux x64 原生 pin、根 manifest/lockfile 一致、完整节点、optional 标记与 SHA-512 integrity。GitHub run `29846325332` 已在 Linux 完成 `npm ci`，Contracts 及后续多个 Vitest workspace 正常启动，关闭原始 native binding 缺失；该 run 后续因 D-040 的单测试预算失败。仍须在新 clean commit 完成 root test、后续浏览器/构建矩阵，并在 Alpine G4 镜像实际加载相关工具链。
 - **退出条件**：新 clean signed candidate 的 GitHub Linux G3 全绿，十镜像 G4 中使用 npm 11.18.0 的 Alpine build PASS，且 G0 真实批准范围包含 D-039。
+
+### D-040 — Knowledge 仓库级确定性测试沿用默认五秒预算
+
+- **状态/严重度**：REMEDIATED IN CODE / MEDIUM / release-blocking；新 Linux CI 仍待执行
+- **位置**：`packages/workbench-knowledge/test/knowledge.spec.ts`
+- **触发**：签名 commit `482e7ec7243721a0bc29465479650bee72a5fa3e` 的 GitHub PR run `29846325332` 在 Linux runner 读取 661 份 Vault 文档、10 个受引用资产并执行正序/逆序两次完整 release 构建时耗时 8456ms，超过 Vitest 默认 5000ms。
+- **影响**：测试的内容闭包、路由计数、不可变性与顺序无关断言都已执行，但 G3 在较慢的共享 Linux runner 上被不适合仓库级集成工作的默认单测预算阻断；若只依赖本机耗时，会继续产生跨平台假绿。
+- **修复**：只为该仓库级集成测试声明 15000ms 的显式预算，保留 661/10 数量、两次完整构建、canonical manifest/chunk/projection 相等、checksum、issue、route、reference 与 frozen object 全部断言；不修改 Vitest 全局默认值，不减少输入或跳过确定性验证。
+- **测试**：Knowledge suite 85/85、G0 合同 22/22、固定 npm 11.18.0 的完整 root test 与 typecheck 均 PASS；root test 日志 `/private/tmp/workbench-d040-root-test.log` 的 SHA-256 为 `c49a34b660a420a6617caa8f83881bed431056a39c6e7568105e074fa7847e86`，typecheck 日志 `/private/tmp/workbench-d040-typecheck.log` 的 SHA-256 为 `f88ab597a4513236d35ad1690021682910300790d8a882bec00e1559802ed3a1`。最终必须由新 clean commit 的 GitHub Linux run 证明该测试在预算内通过且剩余 G3 矩阵继续执行。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 全绿，且 G0 真实批准范围包含 D-040。
 
 ---
 
@@ -575,7 +585,7 @@ Codex 的任何修复都必须保留：
 | V-017 | Web unit/component tests | 182 files PASS、2 files SKIP；893 PASS、3 SKIP | E4 | 3 个 skip 为环境门控，不能计入 PASS |
 | V-018 | Browser matrix / Export Worker browser integration | PASS（本地） | E4 | 综合 `npm run e2e:web` 与独立专项脚本均通过；Chromium/Firefox/WebKit、375x812/768x1024/1440x900、Preview/Export 均通过；直接运行专项但未启动 Web server 的 connection-refused 前置失败不计为产品 FAIL/PASS；与 V-010 不重复计数 |
 | V-019 | G5 PostgreSQL recovery drill | PASS（18/18） | E4 | 以 `WORKBENCH_G5_DRILL_TEST_ADMIN_URL` 打开真实 PostgreSQL drill gate，在本机隔离 PostgreSQL 16.14 上完成真实 dump/restore/forward repair；先前未设置该变量的 run 只执行 plan/contract，不计为真实 G5 PASS；仍受 G1/G4 依赖阻断 |
-| V-020 | R0/evidence contract suite | PASS（95/95） | E4 | 只证明 fail-closed 工具合同；当前 dirty tree 仍不能形成 G1 PASS |
+| V-020 | R0/evidence contract suite | PASS（96/96） | E4 | 只证明 fail-closed 工具合同；当前 dirty tree 仍不能形成 G1 PASS |
 | V-021 | `npm run build` | PASS（配置后） | E4 | 裸命令因缺少 `WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL` fail-closed；使用仓库示例非敏感 HTTPS Origin `https://uploads.workbench.example.com/workbench` 后生产 build 与 Figma importer package PASS；不替代候选镜像 build/digest |
 | V-022 | 目标服务器 validation preflight + fresh migration | PASS（有限范围） | E3/E4 | 在 `45.207.206.119` 上安装 Docker/Caddy/Node 后，server-validation preflight PASS；首次 fresh migration 暴露 migrator 缺数据库级 `CREATE` 并失败，补充角色 provisioner 后空 PostgreSQL 容器 66/66 migrations、grant、Runtime queue reconcile PASS；runtime 负向 `CREATE SCHEMA` 被拒绝。V-023～V-027 后续补齐 DNS/TLS、validation images、runtime catalog 与 provider 短 smoke，但服务器仍未形成 clean signed candidate、registry immutable image、真实 S3/IAM 或生产 Edge/WireGuard，因此不关闭 G5/G10/G12 |
 | V-023 | `aionbench.com` DNS 与公网 HTTPS validation | PASS（有限范围） | E3 | Workbench 项目域名为 `aionbench.com`；`datatoken.shop` 仅是线上 AI Provider URL，不属于项目 DNS/CDN。2026-07-20 阿里云权威 DNS 的 apex、`www`、`preview`、`uploads`、`identity` A 记录均指向授权验证服务器 `45.207.206.119`，最终公网快照中 TLS 校验成功且目标 IP 一致；apex 返回 307 登录跳转、uploads health 200、identity discovery 200、Preview 缺失路径与 validation secret path 均 404。未启用 CDN，未改动 `cpa.datatoken.shop`；该证据仍是 dirty-tree server validation，不是生产 Edge/WireGuard 或 G10 E1 |
@@ -612,6 +622,7 @@ Codex 的任何修复都必须保留：
 | V-054 | 2026-07-21 当前源码与 Git 历史独立密钥扫描 | PASS（未绑定候选） | E4 | Gitleaks 8.30.1 扫描 2,092 个 tracked/untracked 非忽略源码文件和 415 个提交。当前源码零命中；历史初扫仅命中两个固定测试夹具，经人工核验为非凭据后，以精确 `commit:file:rule:line` 指纹写入 `.gitleaksignore`，没有关闭或放宽任何检测规则；复扫当前源码与完整历史均为零命中。被忽略的本机 `.env` 不属于候选且未被读入证据，仍必须在部署后清理/轮换其中已暴露的高权限凭据。 |
 | V-055 | 2026-07-21 首个真实签名候选与 G0 scope drift 诊断 | G1/G2 工具 PASS；候选已淘汰 | E2/E4 | 签名 commit `a4bc293e70741ce1863e7b82e43e9141eaaf5e28` 与签名 tag `workbench-remediation-20260721-a4bc293e` 首次 G1 因 ignored root `.env` fail closed；工具未读取内容，文件迁移到仓库外 0600 配置目录后，新不可变 G1 manifest 与 inventory PASS，candidate ID `sha256:880418843788188591785ef4d89ee4e8283f82fbbb749b8b86ddc0b47932e69a`。固定 npm 11.18.0 的 fresh-clone G2 随后 PASS，完成两轮生成、OpenAPI/runtime/typecheck、零源码漂移和 checkout 清理。准备真实 G0 时发现校验器只覆盖 D-001～D-033，遗漏 D-034～D-037，形成 D-038；因此该候选主动淘汰，G1/G2 事实不进入 production release chain。第二次 G1 manifest/inventory SHA-256 分别为 `fde19d9bbdc3767913c00f43458d2a0dcb71e74e86171d5865dff2d602138c69`、`44cea7416abfd558302a6c8de645900f00074e6f48f9cccffdd1cf82bb7af3cc`，G2 receipt SHA-256 为 `55f883d0a6a9ac09290e1c74220c25ad91178418c2e309f1c37eef51f03b6670`；均只保留为淘汰候选诊断，不得复用于新候选。 |
 | V-056 | 2026-07-21 第二个签名候选、真实 G0 待审批包与首轮 GitHub Linux CI | G1/G2 PASS、G0 NOT RUN、G3 FAIL；候选已淘汰 | E2/E4 | 签名 commit `8710fa5b83827b18c404690629aa7bbaa953ea79`、签名 tag `workbench-remediation-20260721-8710fa5b` 生成 clean G1 candidate `sha256:5a12d2ef8641ee8209735e5866256adb505b954095a3e74ff62b956bdc6add40`；manifest/inventory SHA-256 分别为 `8548ec1e19f9dd7d59e6d8783c22a1aa9fc4ed1113d49de3d1c891646a050110`、`f4eabb8e68698f567e035b98c40af7218d0ede55101f884ceb51f19c4ba444e4`。固定 Node 22/npm 11.18.0 的 fresh-clone G2 PASS，receipt SHA-256 `c52f9b6746b6914333fc0a4111bc3a97afa9be68f87c5646131edfc77bec0848`；57 项候选绑定 G0 待审批记录结构有效且明确 `NOT RUN`，release-chain 按设计停止在独立批准。分支/tag 推送后 PR #4 的 run `29844055994` 中 release-chain 合同与 Compose/gateway/Quartz job PASS，quality job 在 `npm test` 启动 Contracts Vitest 时因 lockfile 缺少 `@rolldown/binding-linux-x64-gnu@1.1.4` 失败，形成 D-039。故该候选及其 G0/G1/G2 哈希全部淘汰，不得复用于下一候选或生产链。 |
+| V-057 | 2026-07-21 Linux 原生依赖修复验证与第二轮 G3 诊断 | D-039 原触发关闭；G3 FAIL；commit 未形成候选 | E2 | 签名 commit `482e7ec7243721a0bc29465479650bee72a5fa3e` 的 PR #4 run `29846325332` 中 release-chain 合同与 Compose/gateway/Quartz job PASS；quality job 在固定 Node 22/npm 11.18.0 的 Linux runner 完成 `npm ci`、生成、迁移、OpenAPI、typecheck、lint 和架构检查，Contracts 及后续多个 Vitest workspace 正常启动，证明 D-039 的 glibc Rolldown binding 缺失已关闭。随后 Knowledge 仓库级测试的 84 项先行断言 PASS，唯一完整 Vault 双构建用例耗时 8456ms 并撞上默认 5000ms timeout，形成 D-040；其后 PostgreSQL、Web、浏览器和 build 步骤按 CI fail-fast 跳过。该 commit 没有签名 candidate tag、G1/G2 或真实 G0 包，不得沿用上一淘汰候选产物。 |
 
 注意：本轮超大 working-tree review 的 conventions finder 和最终 gap sweep 曾因 prompt too long 未完成；因此本文是经过多角度、去重和验证的高覆盖审查，但不得宣称绝对无遗漏。
 
