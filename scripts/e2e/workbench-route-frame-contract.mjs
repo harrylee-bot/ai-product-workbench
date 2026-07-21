@@ -2,7 +2,12 @@ export function assertRouteTransitionFrames(frames, from, to, label) {
   assert(frames.length >= 4, `${label} must capture multiple animation frames: ${frames.length}`);
   const stageFailures = frames.filter((frame) => !routePresent(frame.stage));
   assert(stageFailures.length === 0, `${label} must never hide or remove the Workbench stage`);
-  const blankFrames = frames.filter((frame) => (
+  const paintCandidateFrames = frames.filter((frame) => frame.source === "raf");
+  assert(
+    paintCandidateFrames.length > 0,
+    `${label} must capture at least one requestAnimationFrame paint candidate`,
+  );
+  const blankFrames = paintCandidateFrames.filter((frame) => (
     !routePresent(frame.home) && !routePresent(frame.project)
   ));
   assert(
@@ -63,6 +68,7 @@ export function assertRouteTransitionFrames(frames, from, to, label) {
     homeTransforms: [...homeTransforms],
     mutationSamples: frames.filter((frame) => frame.source === "mutation").length,
     overlapFrames: mountedOverlapFrames.length,
+    paintCandidateFrames: paintCandidateFrames.length,
     rafSamples: frames.filter((frame) => frame.source === "raf").length,
     sourceOpacity,
     targetChildOpacity: childOpacity,

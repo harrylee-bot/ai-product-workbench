@@ -32,6 +32,30 @@ test("accepts a mounted sync handoff when visible enter samples are coalesced", 
   assert.deepEqual(result.homeTransforms, ["translateY(6px)", "translateY(3px)", "none"]);
 });
 
+test("ignores an unpainted mutation intermediate state when RAF samples remain visible", () => {
+  const result = assertRouteTransitionFrames([
+    frame({ home: route(1, "translateY(6px)"), homeHeader: route(1) }),
+    frame({
+      elapsedMs: 16,
+      home: route(0),
+      project: route(0),
+      source: "mutation",
+    }),
+    frame({
+      elapsedMs: 32,
+      home: route(0.4, "translateY(3px)"),
+      homeHeader: route(0.4),
+      project: route(0.6),
+      projectHeader: route(0.6),
+    }),
+    frame({ elapsedMs: 48, project: route(0.98), projectHeader: route(0.98) }),
+    frame({ elapsedMs: 64, project: route(1), projectHeader: route(1) }),
+  ], "home", "project", "mutation-coalesced Home-to-Project");
+
+  assert.equal(result.mutationSamples, 1);
+  assert.equal(result.paintCandidateFrames, 4);
+});
+
 test("rejects a serial route swap without any mounted overlap", () => {
   const frames = [
     frame({ home: route(1, "translateY(6px)"), homeHeader: route(1) }),
@@ -50,7 +74,7 @@ test("rejects a serial route swap without any mounted overlap", () => {
 test("still rejects a mounted frame when both routes are visually blank", () => {
   const frames = [
     frame({ home: route(1, "translateY(6px)"), homeHeader: route(1) }),
-    frame({ elapsedMs: 16, home: route(0), project: route(0), source: "mutation" }),
+    frame({ elapsedMs: 16, home: route(0), project: route(0) }),
     frame({ elapsedMs: 32, project: route(0.2), projectHeader: route(0.2) }),
     frame({ elapsedMs: 48, project: route(1), projectHeader: route(1) }),
   ];

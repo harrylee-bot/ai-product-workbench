@@ -7,7 +7,12 @@ import {
   WORKBENCH_HOME_WARMUP_PATH,
   WORKBENCH_PROJECT_WARMUP_COOKIE,
   WORKBENCH_PROJECT_WARMUP_PATH,
+  WORKBENCH_WEB_STARTUP_TIMEOUT_MS,
 } from "./workbench-web-startup.mjs";
+
+test("allows each protected route three minutes for shared-runner cold compilation", () => {
+  assert.equal(WORKBENCH_WEB_STARTUP_TIMEOUT_MS, 180_000);
+});
 
 test("waits for the managed Web login route to become ready", async () => {
   const requests = [];

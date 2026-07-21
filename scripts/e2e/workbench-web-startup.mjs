@@ -1,4 +1,4 @@
-export const WORKBENCH_WEB_STARTUP_TIMEOUT_MS = 90_000;
+export const WORKBENCH_WEB_STARTUP_TIMEOUT_MS = 180_000;
 export const WORKBENCH_PROJECT_WARMUP_PATH = "/projects/project-run-preview";
 export const WORKBENCH_HOME_WARMUP_PATH = "/";
 export const WORKBENCH_PROJECT_WARMUP_COOKIE =
