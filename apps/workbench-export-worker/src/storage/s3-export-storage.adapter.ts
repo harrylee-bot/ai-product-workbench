@@ -8,7 +8,11 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import {
+  conditionalObjectCreateHeader,
+  conditionalObjectCreateInput,
   consumeVerifiedReadyObjectBody,
+  isConditionalObjectCreateConflict,
+  setObjectStorageRequestHeader,
   stageReadyObject,
   type ReadyObjectIntegrityRecorder,
 } from "@workbench/workbench-content-security";
@@ -27,6 +31,7 @@ export class S3ExportStorageAdapter implements ExportStoragePort {
       | "s3Region"
       | "s3InternalEndpoint"
       | "s3ForcePathStyle"
+      | "s3ConditionalCreateMode"
       | "exportS3AccessKeyId"
       | "exportS3SecretAccessKey"
     >,
@@ -37,6 +42,8 @@ export class S3ExportStorageAdapter implements ExportStoragePort {
       region: config.s3Region,
       ...(config.s3InternalEndpoint ? { endpoint: config.s3InternalEndpoint } : {}),
       forcePathStyle: config.s3ForcePathStyle,
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       credentials: {
         accessKeyId: config.exportS3AccessKeyId,
         secretAccessKey: config.exportS3SecretAccessKey,
@@ -81,18 +88,20 @@ export class S3ExportStorageAdapter implements ExportStoragePort {
     }
     let created = false;
     try {
-      await this.client.send(new PutObjectCommand({
+      const command = new PutObjectCommand({
         Bucket: this.config.s3Bucket,
         Key: identity.storageKey,
         Body: bytes,
         ContentLength: identity.byteSize,
         ContentType: identity.mediaType,
-        IfNoneMatch: "*",
+        ...conditionalObjectCreateInput(this.config.s3ConditionalCreateMode),
         Metadata: { sha256: identity.sha256, "byte-size": String(identity.byteSize) },
-      }), signal ? { abortSignal: signal } : undefined);
+      });
+      attachConditionalCreateHeader(command, this.config.s3ConditionalCreateMode);
+      await this.client.send(command, signal ? { abortSignal: signal } : undefined);
       created = true;
     } catch (error) {
-      if (!isPreconditionFailed(error)) throw error;
+      if (!isConditionalObjectCreateConflict(error)) throw error;
       const raced = await this.head(identity.storageKey, signal);
       if (!raced || !matches(raced, identity)) throw new Error("EXPORT_STORAGE_DESTINATION_IDENTITY_CONFLICT");
     }
@@ -130,9 +139,19 @@ function matches(stored: { byteSize: number; mediaType: string | null; sha256: s
     && stored.metadataByteSize === String(expected.byteSize);
 }
 
-function isPreconditionFailed(error: unknown) {
-  const candidate = error as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
-  return candidate?.name === "PreconditionFailed" || candidate?.Code === "PreconditionFailed" || candidate?.$metadata?.httpStatusCode === 412;
+function attachConditionalCreateHeader(
+  command: PutObjectCommand,
+  mode: ExportWorkerConfig["s3ConditionalCreateMode"],
+) {
+  const header = conditionalObjectCreateHeader(mode);
+  if (!header) return;
+  command.middlewareStack.add(
+    (next) => async (arguments_) => {
+      setObjectStorageRequestHeader(arguments_.request, header);
+      return next(arguments_);
+    },
+    { step: "build", name: "workbenchOssForbidOverwrite", priority: "low" },
+  );
 }
 
 function isNotFound(error: unknown) {

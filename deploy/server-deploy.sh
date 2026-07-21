@@ -329,6 +329,7 @@ case "$DEPLOY_TARGET" in
       wait_for_services oidc object-storage clamav docling
     fi
     wait_for_services \
+      object-storage-egress \
       workbench-api \
       workbench-web \
       workbench-worker \

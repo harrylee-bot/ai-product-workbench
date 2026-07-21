@@ -30,6 +30,8 @@ export class S3RuntimeReadyBlobReader implements RuntimeReadyBlobReader {
       region: config.s3Region,
       ...(config.s3InternalEndpoint ? { endpoint: config.s3InternalEndpoint } : {}),
       forcePathStyle: config.s3ForcePathStyle,
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       credentials: {
         accessKeyId: config.runtimeReadyBlobS3AccessKeyId,
         secretAccessKey: config.runtimeReadyBlobS3SecretAccessKey,

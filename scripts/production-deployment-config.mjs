@@ -41,6 +41,7 @@ export const PRODUCTION_CONFIG_PATHS = Object.freeze([
   "deploy/workbench-compose.yml",
   "deploy/workbench-migrate.sh",
   "deploy/workbench-nginx.conf",
+  "deploy/workbench-oss-egress-nginx.conf.template",
   "deploy/workbench-postgres-extensions.sql",
   "deploy/workbench-preview-nginx.conf",
   "deploy/workbench-production-preflight.sh",
@@ -53,6 +54,7 @@ export const INFRASTRUCTURE_IMAGE_DEFINITIONS = Object.freeze([
     environment: "WORKBENCH_NGINX_IMAGE",
     composeBindings: [
       "deploy/workbench-compose.yml#gateway",
+      "deploy/workbench-compose.yml#object-storage-egress",
       "deploy/workbench-compose.yml#preview-gateway",
     ],
   },
@@ -68,10 +70,12 @@ export const EFFECTIVE_CONFIG_FIELDS = Object.freeze([
   ["WORKBENCH_PREVIEW_ORIGIN", "https-url"],
   ["WORKBENCH_ENTERPRISE_SSO_ENABLED", "boolean"],
   ["WORKBENCH_S3_INTERNAL_ENDPOINT", "url"],
+  ["WORKBENCH_S3_EGRESS_UPSTREAM_HOST", "hostname"],
   ["WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL", "https-url"],
   ["WORKBENCH_S3_BUCKET", "string"],
   ["WORKBENCH_S3_REGION", "string"],
   ["WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE", "boolean"],
+  ["WORKBENCH_S3_CONDITIONAL_CREATE_MODE", "conditional-create-mode"],
   ["WORKBENCH_RUNTIME_WORKER_REPLICAS", "positive-integer"],
   ["WORKBENCH_RUNTIME_CONCURRENCY", "positive-integer"],
   ["WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS", "positive-integer"],
@@ -527,6 +531,13 @@ function normalizeEffectiveValue(value, name, type) {
     const normalized = trimmed.toLowerCase();
     assert(normalized === "true" || normalized === "false", `${name} must be true or false`);
     return normalized;
+  }
+  if (type === "conditional-create-mode") {
+    assert(
+      trimmed === "s3-if-none-match" || trimmed === "oss-forbid-overwrite",
+      `${name} must be s3-if-none-match or oss-forbid-overwrite`,
+    );
+    return trimmed;
   }
   if (type === "positive-integer") {
     assert(/^[1-9][0-9]*$/u.test(trimmed) && Number.isSafeInteger(Number(trimmed)), `${name} must be a positive integer`);

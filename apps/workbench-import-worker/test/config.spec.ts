@@ -23,6 +23,14 @@ describe("Import Worker configuration", () => {
     expect(config.clamAvStreamMaxBytes).toBe(50 * 1024 * 1024);
     expect(config.queueConnectionString).toBe("postgresql://user:pass@db:5432/workbench");
     expect(config.scanMode).toBe("fail-closed");
+    expect(config.s3ConditionalCreateMode).toBe("s3-if-none-match");
+  });
+
+  it("supports OSS create-only writes without accepting unknown modes", () => {
+    vi.stubEnv("WORKBENCH_S3_CONDITIONAL_CREATE_MODE", "oss-forbid-overwrite");
+    expect(loadImportWorkerConfig().s3ConditionalCreateMode).toBe("oss-forbid-overwrite");
+    vi.stubEnv("WORKBENCH_S3_CONDITIONAL_CREATE_MODE", "overwrite");
+    expect(() => loadImportWorkerConfig()).toThrow("WORKBENCH_S3_CONDITIONAL_CREATE_MODE");
   });
 
   it("allows operators to tighten but never exceed the Source manifest ceiling", () => {

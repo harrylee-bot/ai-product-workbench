@@ -15,7 +15,15 @@ describe("export worker S3 role configuration", () => {
     expect(loadExportWorkerConfig()).toMatchObject({
       exportS3AccessKeyId: "export-access",
       exportS3SecretAccessKey: "export-secret",
+      s3ConditionalCreateMode: "s3-if-none-match",
     });
+  });
+
+  it("supports OSS create-only writes without accepting unknown modes", () => {
+    vi.stubEnv("WORKBENCH_S3_CONDITIONAL_CREATE_MODE", "oss-forbid-overwrite");
+    expect(loadExportWorkerConfig().s3ConditionalCreateMode).toBe("oss-forbid-overwrite");
+    vi.stubEnv("WORKBENCH_S3_CONDITIONAL_CREATE_MODE", "overwrite");
+    expect(() => loadExportWorkerConfig()).toThrow("WORKBENCH_S3_CONDITIONAL_CREATE_MODE");
   });
 
   it("fails closed instead of falling back to generic S3 credentials", () => {

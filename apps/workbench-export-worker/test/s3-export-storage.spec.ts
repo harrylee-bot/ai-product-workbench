@@ -92,6 +92,7 @@ function config() {
     s3Region: "us-east-1",
     s3InternalEndpoint: "http://127.0.0.1:9000",
     s3ForcePathStyle: true,
+    s3ConditionalCreateMode: "s3-if-none-match" as const,
     exportS3AccessKeyId: "export-access",
     exportS3SecretAccessKey: "export-secret",
   };

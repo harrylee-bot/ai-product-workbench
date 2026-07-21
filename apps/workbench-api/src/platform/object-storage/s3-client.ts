@@ -9,6 +9,8 @@ export function createS3Client(
     region: config.region,
     ...(config.internalEndpoint ? { endpoint: config.internalEndpoint } : {}),
     forcePathStyle: config.forcePathStyle,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
     credentials,
   });
 }
@@ -21,6 +23,7 @@ export function createS3BrowserUploadClient(
     region: config.region,
     bucketEndpoint: true,
     requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
     credentials,
   });
 }

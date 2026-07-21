@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  INFRASTRUCTURE_IMAGE_DEFINITIONS,
   PRODUCTION_CONFIG_PATHS,
   createProductionDeploymentConfig,
   deploymentConfigBinding,
@@ -51,6 +52,16 @@ test("binds G1/G4/run attempt to the effective production topology without valid
   assert.equal(document.migrations.files.length > 10, true);
   assert(PRODUCTION_CONFIG_PATHS.includes("deploy/edge/workbench-edge.Caddyfile"));
   assert(PRODUCTION_CONFIG_PATHS.includes("deploy/edge/workbench-origin-wireguard-preflight.sh"));
+  assert(PRODUCTION_CONFIG_PATHS.includes("deploy/workbench-oss-egress-nginx.conf.template"));
+  assert.equal(
+    INFRASTRUCTURE_IMAGE_DEFINITIONS.find((dependency) => dependency.name === "gateway")
+      .composeBindings.includes("deploy/workbench-compose.yml#object-storage-egress"),
+    true,
+  );
+  assert.equal(
+    document.effectiveConfig.values.WORKBENCH_S3_EGRESS_UPSTREAM_HOST,
+    "s3.internal.example.test",
+  );
   assert.equal(PRODUCTION_CONFIG_PATHS.some((file) => /server-validation|dex|minio|\.example/u.test(file)), false);
 
   const binding = deploymentConfigBinding(document, "f".repeat(64));

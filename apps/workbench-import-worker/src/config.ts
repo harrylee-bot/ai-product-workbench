@@ -1,4 +1,5 @@
 import { maximumImportSourceManifestBlobs } from "./import/source-types.js";
+import { parseConditionalObjectCreateMode } from "@workbench/workbench-content-security";
 
 export type ImportWorkerConfig = ReturnType<typeof loadImportWorkerConfig>;
 
@@ -45,6 +46,9 @@ export function loadImportWorkerConfig() {
     s3Region: optional("WORKBENCH_S3_REGION") ?? "us-east-1",
     s3InternalEndpoint,
     s3ForcePathStyle: booleanValue("WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE", Boolean(s3InternalEndpoint)),
+    s3ConditionalCreateMode: parseConditionalObjectCreateMode(
+      optional("WORKBENCH_S3_CONDITIONAL_CREATE_MODE"),
+    ),
     importS3AccessKeyId: required("WORKBENCH_IMPORT_S3_ACCESS_KEY_ID"),
     importS3SecretAccessKey: required("WORKBENCH_IMPORT_S3_SECRET_ACCESS_KEY"),
     pendingBlobPrefix: cleanPrefix(optional("WORKBENCH_IMPORT_PENDING_BLOB_PREFIX") ?? "pending/imports"),

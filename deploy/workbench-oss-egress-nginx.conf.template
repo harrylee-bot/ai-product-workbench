@@ -1,0 +1,20 @@
+worker_processes 1;
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+
+events {
+  worker_connections 256;
+}
+
+stream {
+  resolver 127.0.0.11 valid=300s ipv6=off;
+  resolver_timeout 5s;
+
+  server {
+    listen 443;
+    set $oss_upstream "${WORKBENCH_S3_EGRESS_UPSTREAM_HOST}:443";
+    proxy_connect_timeout 10s;
+    proxy_timeout 900s;
+    proxy_pass $oss_upstream;
+  }
+}

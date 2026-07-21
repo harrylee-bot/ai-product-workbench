@@ -54,6 +54,24 @@ test("production preflight rejects a mutable Node base image", () => {
   assert.match(result.stderr, /WORKBENCH_NODE_IMAGE must be an immutable digest reference/u);
 });
 
+test("production preflight rejects an S3 tunnel target that differs from the SDK endpoint", () => {
+  const result = runPreflight({
+    WORKBENCH_S3_EGRESS_UPSTREAM_HOST: "other.internal.example.test",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /canonical restricted tunnel target/u);
+});
+
+test("production preflight requires OSS-native create-only semantics for Alibaba Cloud", () => {
+  const result = runPreflight({
+    WORKBENCH_S3_INTERNAL_ENDPOINT: "https://oss-cn-hangzhou.aliyuncs.com",
+    WORKBENCH_S3_EGRESS_UPSTREAM_HOST: "oss-cn-hangzhou.aliyuncs.com",
+    WORKBENCH_S3_CONDITIONAL_CREATE_MODE: "s3-if-none-match",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Alibaba Cloud OSS requires/u);
+});
+
 test("production preflight requires a manifest signature bundle", () => {
   const result = runPreflight({ WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH: "" });
   assert.notEqual(result.status, 0);
@@ -129,7 +147,11 @@ function runPreflight(overrides) {
   const env = {
     WORKBENCH_WEB_ORIGIN: "https://workbench.example.test",
     WORKBENCH_PREVIEW_ORIGIN: "https://preview.example.test",
+    WORKBENCH_S3_INTERNAL_ENDPOINT: "https://s3.internal.example.test",
+    WORKBENCH_S3_EGRESS_UPSTREAM_HOST: "s3.internal.example.test",
     WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: "https://uploads.example.test/workbench",
+    WORKBENCH_S3_BUCKET: "workbench-fixture",
+    WORKBENCH_S3_CONDITIONAL_CREATE_MODE: "s3-if-none-match",
     WORKBENCH_ENTERPRISE_SSO_ENABLED: "false",
     WORKBENCH_CANVAS_TOOL_URL: "https://workbench.example.test/api/v1/runtime/canvas/tools/execute",
     WORKBENCH_CANVAS_VISUAL_URL: "https://workbench.example.test/api/v1/runtime/canvas/visuals",

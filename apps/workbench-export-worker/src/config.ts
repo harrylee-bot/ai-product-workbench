@@ -1,4 +1,5 @@
 import { exportDeliveryQueueOptions } from "@workbench/workbench-contracts";
+import { parseConditionalObjectCreateMode } from "@workbench/workbench-content-security";
 
 export type ExportWorkerConfig = ReturnType<typeof loadExportWorkerConfig>;
 
@@ -32,6 +33,9 @@ export function loadExportWorkerConfig() {
     s3ForcePathStyle: booleanValue(
       "WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE",
       Boolean(s3InternalEndpoint),
+    ),
+    s3ConditionalCreateMode: parseConditionalObjectCreateMode(
+      optional("WORKBENCH_S3_CONDITIONAL_CREATE_MODE"),
     ),
     exportS3AccessKeyId,
     exportS3SecretAccessKey,

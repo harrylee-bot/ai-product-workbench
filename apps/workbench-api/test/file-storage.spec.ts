@@ -227,6 +227,24 @@ describe("split S3 object storage adapters", () => {
     expect(signed.url).not.toContain("127.0.0.1:9000");
   });
 
+  it("signs browser parts at a virtual-hosted custom-domain root", async () => {
+    const adapter = new S3MultipartStorageAdapter(storageConfig({
+      WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: "https://uploads.workbench.example.test",
+    }));
+
+    const signed = await adapter.signMultipartPart({
+      key: "staging/files/project/upload",
+      uploadId: "provider_1",
+      partNumber: 1,
+      contentLength: 8,
+      expiresInSeconds: 600,
+    });
+
+    const signedUrl = new URL(signed.url);
+    expect(signedUrl.origin).toBe("https://uploads.workbench.example.test");
+    expect(signedUrl.pathname).toBe("/staging/files/project/upload");
+  });
+
   it("streams Node object bodies and preserves range metadata", async () => {
     vi.spyOn(S3Client.prototype, "send").mockImplementation((async (command: unknown) => {
       if (command instanceof GetObjectCommand) {

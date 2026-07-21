@@ -16,7 +16,7 @@
 1. **阶段 12 仍为 REJECT**。真实 provider 的短链路 smoke 已在授权验证服务器通过，但 Production security acceptance、provider 长时序、可复现 clean candidate、不可变镜像与完整 hard-cut 证据均未闭环。
 2. 当前实现仍位于 HEAD `70c002238dd0909b9ddeeed4f23c5d6b512417b1` 之上的 dirty/untracked working tree。在冻结干净、可复现、不可变候选之前，当前 PASS 只能作为本地整改证据，不能作为生产验收事实。
 3. 2026-07-20 复核已在 dirty tree 上取得 OpenAPI、Web、浏览器、架构、部署合同、隔离 PostgreSQL、root `npm run typecheck` 和 root `npm run test` 的本地 PASS；D-009/D-020 最新修改已完成定向单测、PostgreSQL 故障注入、类型检查和生产构建。所有本地结果均未绑定 clean commit、签名 tag、不可变镜像或目标生产环境。
-4. Run/SSE、Canvas Agent、Prototype Patch、授权、对象存储、Preview、部署、CI 和 hard-cut 证据链中的多数缺陷已有代码整改；D-009 durable finalization、D-020 ready-object 全消费链、取证留存/GC fencing 与 D-035 Run 级工具可见性/委派边界已完成代码整改和本地验证。授权验证服务器上的真实 provider、Gateway secret-channel、Worker queue 和公网 HTTPS 短链路 smoke 已通过；真实 Edge/WireGuard、IAM、provider 长时序、签名不可变镜像和生产验收仍未执行。
+4. Run/SSE、Canvas Agent、Prototype Patch、授权、对象存储、Preview、部署、CI 和 hard-cut 证据链中的多数缺陷已有代码整改；D-009 durable finalization、D-020 ready-object 全消费链、取证留存/GC fencing 与 D-035 Run 级工具可见性/委派边界已完成代码整改和本地验证。授权验证服务器上的真实 provider、Gateway secret-channel、Worker queue 和公网 HTTPS 短链路 smoke 已通过；阿里云私有 OSS、8 个独立 RAM 身份、60/60 IAM 矩阵与公网 multipart 13/13 也已在 dirty-tree validation 上通过。真实 Edge/WireGuard、provider 长时序、同一签名不可变候选上的存储/镜像验证和生产验收仍未执行。
 5. 2026-07-21 公网浏览器复核发现并修复登录壳层的 CSP console error：全局 CSS 曾通过 Google Fonts 外部 `@import` 请求样式，违反生产 `style-src`。已移除该外部依赖、补充静态合同测试，并在 validation Web 镜像重建后复核 `aionbench.com/login` 无 console error；该修复仍未绑定 clean candidate。
 6. Preview sandbox、ArtifactVersion publication/immutability、Run sequence/identity 基本不变量等专项没有发现确认绕过。修复不得削弱这些已建立的边界。
 
@@ -296,13 +296,13 @@ Codex 的任何修复都必须保留：
 
 ### D-020 — Ready object 下载不重新验证实际 bytes SHA-256
 
-- **状态/严重度**：REMEDIATED IN CODE / CRITICAL / release-blocking；真实 S3/IAM 与冻结候选证据仍 NOT RUN
+- **状态/严重度**：REMEDIATED IN CODE / CRITICAL / release-blocking；真实 OSS/IAM dirty-tree validation PASS，冻结候选 E1/E2 仍 NOT RUN
 - **位置**：`packages/workbench-content-security/src/ready-object.ts`；`packages/workbench-content-security/src/ready-object-prisma.ts`；API、Runtime Worker、File Worker、Preview 与 Export Worker 的 ready-object adapters
 - **触发**：object store 中对象 bytes 被替换为相同 size/content-type 的内容，metadata 仍保留原 checksum。
 - **影响**：损坏或恶意对象以原 immutable checksum/ETag 返回，破坏 Artifact integrity 和审计链。
 - **修复**：所有 ready-object 消费者统一先把完整对象安全暂存并计算实际 SHA-256、byte size 和 media type，再向下游暴露 branded verified body；range 只在全对象验证后截取。任何不匹配先在独立数据库事务提交 append-only incident，并原子隔离 Blob/FileAsset/CanvasVisual，持久化失败时同样 fail closed。磁盘 spool 使用匿名 inode 和并发 byte budget；Blob/Canvas GC 保留 advisory lock、owner-row fence、取证 retention release 与重新校验。
 - **测试**：共享 content-security 3 files / 7 PASS；API 65 files / 467 PASS、Worker 13 files / 218 PASS、File Worker 13 files / 106 PASS、Preview 7 files / 20 PASS、Export Worker 6 files / 40 PASS（skipped 不计）；D-020 + Canvas PostgreSQL 14/14 PASS。File/Knowledge Worker PostgreSQL 全流程从空 schema 验证 GC 锁、扫描、Docling checkpoint/ambiguous submit、发布恢复、Knowledge 恢复与损坏检测；本轮首先暴露高保真 storage fixture 未实现新 `readReadyObject` 端口，修复为复用共享验证器后从头重跑 PASS。六个受影响 workspace 的 typecheck 和 production build 均 PASS。
-- **退出条件**：本地所有已知 byte-level mismatch 均无法到达 provider/parser/browser/export 消费者，durable incident 在拒绝前提交；仍须在角色隔离的真实 S3/IAM 和冻结镜像上完成同 size 篡改、截断、metadata spoof、multipart/range 与 GC 竞态 E1/E2。
+- **退出条件**：本地所有已知 byte-level mismatch 均无法到达 provider/parser/browser/export 消费者，durable incident 在拒绝前提交；阿里云私有 OSS 上的角色隔离、create-only 写入和公网 multipart 已通过未绑定候选验证，仍须在同一冻结镜像上完成同 size 篡改、截断、metadata spoof、range 与 GC 竞态 E1/E2。
 
 ### D-021 — Preview HEAD/304 请求仍物化近 50 MiB body
 
@@ -492,7 +492,7 @@ Codex 的任何修复都必须保留：
 | P-002 | 回源鉴权可审计且 fail closed | NOT RUN | 缺/错/重放 secret 仍能回源，或日志无法关联 request | E1 测试覆盖轮换、重放、脱敏、审计关联 |
 | P-003 | DeerFlow immutable image digest | FAIL/NOT RUN | 部署仍引用 tag/本地 mutable image | 签名 digest、SBOM、provenance、部署实际 digest 一致 |
 | P-004 | Better Auth 生产身份/KMS；企业 OIDC（仅启用 SSO 时） | NOT RUN | 本地账号、Dex 或静态 secret 被当作 production acceptance，或关闭 SSO 后仍保留可用 OIDC 配置 | Better Auth 密码登录、注册策略、session/JWT、撤销、密钥轮换与审计 E1 通过；只有 `WORKBENCH_ENTERPRISE_SSO_ENABLED=true` 时才要求目标 IdP/OIDC E1 |
-| P-005 | 真实 S3/IAM/ClamAV | NOT RUN | 共享过宽 identity、scanner bypass 或 quarantine 失败 | 独立 identities、EICAR、quarantine、checksum、恢复 E1 通过 |
+| P-005 | 真实 S3/IAM/ClamAV | OSS/IAM VALIDATION PASS / FROZEN CANDIDATE NOT RUN | 共享过宽 identity、scanner bypass 或 quarantine 失败 | 阿里云 OSS 8 个独立 identities、60/60 IAM 与公网 multipart 13/13 已通过；仍需同一候选上的 EICAR、quarantine、checksum、恢复 E1 |
 | P-006 | 双 HTTPS Preview origin/cookie isolation | NOT RUN | 单 origin/HTTP 证据被当作生产 | 两个真实 HTTPS origin 上 cookie/CORS/CSP/sandbox 负向通过 |
 | P-007 | OTLP collector、trace 与告警 | NOT RUN | 仅配置存在，无 collector/trace/alert 证据 | 目标 collector 收到端到端 trace，告警阈值与 runbook 验证 |
 | P-008 | Docker/Quartz/崩溃恢复 | NOT RUN | 仅 unit/compose config 测试 | 目标拓扑 SIGTERM、kill、重启、重复投递、恢复 E1 通过 |
@@ -586,6 +586,10 @@ Codex 的任何修复都必须保留：
 | V-048 | 2026-07-21 最新 R0 candidate diagnostic | R0 FAIL | E4 | 当前 diagnostic candidate 为 `sha256:758bb319129af81d50f3ea21fe19ade458b792973de261e8cb9a7fb745e138b4`，manifest SHA-256 为 `f829d291a8f55eb0b5f4a5f1886fcb6fbb0104cd6e3efa4e4f896bcc44134828`，inventory SHA-256 为 `2ac3ff6a69b7bcaa6a447d91af48e536ecf9f1ab54a07a795aafa9b70069c720`；finding count 为 100，G1=FAIL。原因仍包括 dirty working tree、93 个运行关键 untracked 文件、4 个 migration 未 tracked（62/66）、3 个 runbook 未 tracked、根 `.env` secret material、tracked `scripts/fixtures/evidence-ledger/valid/raw/g0.log`，以及没有可验证 signed annotated tag。该诊断没有读取或写入 secret 内容，也没有把临时 synthetic 签名 rehearsal 当作真实候选。 |
 | V-049 | 2026-07-21 最新公网、服务器与数据库 live recheck | PASS（有限范围） | E3 | 直连拓扑复核确认 `aionbench.com`、`www`、`preview`、`uploads`、`identity` 均解析到 `45.207.206.119`，`datatoken.shop` 解析到 `45.207.206.63`；`aionbench.com/login`、`/api/healthz`、Provider `/v1/` 均 HTTP 200，Preview 探针 404，TLS verify=0。升级后服务器 Workbench/DeerFlow validation 服务 healthy，应用数据库仍为 66 migrations，扩展含 `pg_trgm 1.6`、`pgcrypto 1.3`、`vector 0.8.5`；`knowledge_releases`、`embedding_profiles`、`retrieval_profiles` 仍为空。该结果证明当前直连 validation 状态，不证明真实 S3/IAM/KMS、registry immutable digest/SBOM/Cosign、生产 Edge/WireGuard、Knowledge Release 或 G4/G7/G9/G10/G12。 |
 | V-050 | 2026-07-21 R0 diagnostic snapshot preceding its evidence entry | R0 FAIL | E4 | 新快照 candidate 为 `sha256:cb90763763be784a0f1d841c12018da317f32e8ab86157a7645bf133c5d8dcae`，manifest SHA-256 为 `d4e60e3b7eb356d4c17c3f065694cf7b10a756c679b57b24ac1b8a7233dad562`，inventory SHA-256 为 `c415375fa38e6c51370639a8499ae08994762fa4019e2277503fd41163e02a27`，inventory entry count 为 138676；finding count 仍为 100，G1=FAIL，status SHA-256 仍为 `653e83d51321715d8703d5b06f438472c8e85e931cda0087d54791f5fd642ca5`。阻断集合未改变：dirty working tree、93 个运行关键 untracked 文件、62/66 tracked migrations、runbooks scope 缺失、根 `.env` secret material、tracked fixture `.log` 和无 verified signed tag。该诊断只作为当前 dirty-tree 的事实记录，不构成真实签名候选或生产批准。 |
+| V-051 | 2026-07-21 阿里云私有 OSS、RAM 最小权限与公网上传切换 | PASS（有限范围） | E3/E4 | 新私有 Bucket `aionbench-workbench-prod` 使用 8 个按 API staging/ready、Canvas、Runtime ready、File pipeline、Import、Export、Preview 拆分的 RAM 身份；真实 IAM 允许/拒绝、multipart、create-only 与清理矩阵 60/60 PASS，公网 `https://aionbench.com` 到 `https://uploads.aionbench.com` 的登录、multipart、完成、下载、删除及 public signup fail-closed 共 13/13 PASS。应用通过固定目标 TLS passthrough egress 访问 OSS，旧 MinIO 服务已停止但容器和卷保留以便回滚；公网登录、健康检查和 OSS egress 正常。证据不含 AccessKey secret；bootstrap 高权限 AccessKey 和本轮临时凭据必须在收口后撤销/轮换。该验证来自 dirty tree 和可变服务器部署，不关闭 G4/G6/G8/G10。 |
+| V-052 | 2026-07-21 OSS 改动后的隔离 PostgreSQL 全回归 | PASS（未绑定候选） | E4 | 本机 PostgreSQL 16.14 临时库完成 fresh 66 migrations、328 个数据库约束、API/Worker HTTP/SSE/Canvas/retry/cancel、File Worker/GC/提取/Knowledge 和 18/18 dump/restore/forward-repair；启用 PostgreSQL 条件套件的根测试退出 0，测试库随后删除且无残留。该结果证明新 OSS 配置和 conditional-create 代码没有破坏数据库边界，但不替代 G1/G4 candidate binding 或目标环境恢复 E1。 |
+| V-053 | 2026-07-21 OSS 改动后的最终静态、构建与浏览器矩阵 | PASS（含一次保留的重试记录） | E4 | 根 typecheck、根测试、Web 893 PASS/3 环境门控 SKIP、lint、506 模块/1671 依赖架构检查、OpenAPI breaking 和使用正式上传域的 production build 均退出 0。首次完整 E2E 在 Chromium PASS 后因 Firefox Home→Project 入场动画采样未达到阈值退出 1；未修改源码或阈值，原样复跑后 Chromium/Firefox/WebKit、375x812/768x1024/1440x900、console/network/overflow/pixel、Export 与隔离 Preview 全部退出 0。失败和成功日志均保留；必须在签名候选与部署环境重跑，不能把本次重试升级为 G11。 |
+| V-054 | 2026-07-21 当前源码与 Git 历史独立密钥扫描 | PASS（未绑定候选） | E4 | Gitleaks 8.30.1 扫描 2,092 个 tracked/untracked 非忽略源码文件和 415 个提交。当前源码零命中；历史初扫仅命中两个固定测试夹具，经人工核验为非凭据后，以精确 `commit:file:rule:line` 指纹写入 `.gitleaksignore`，没有关闭或放宽任何检测规则；复扫当前源码与完整历史均为零命中。被忽略的本机 `.env` 不属于候选且未被读入证据，仍必须在部署后清理/轮换其中已暴露的高权限凭据。 |
 
 注意：本轮超大 working-tree review 的 conventions finder 和最终 gap sweep 曾因 prompt too long 未完成；因此本文是经过多角度、去重和验证的高覆盖审查，但不得宣称绝对无遗漏。
 
@@ -659,6 +663,23 @@ Codex 的任何修复都必须保留：
 | 2026-07-21 provider example production build with upload Origin | `/private/tmp/workbench-remediation-20260721-provider-example/build-with-upload-origin.log` | `b152d5068ae03c85b0d35884bb16bbdd95923299c44a03777ca6817030faba40` |
 | 2026-07-21 provider example bare build fail-closed diagnostic | `/private/tmp/workbench-remediation-20260721-provider-example/build.log` | `8a25f8b00f34d263717d70b3de668914f579ec4a00f7feccea241f5ec122f2eb` |
 | Final Gitleaks raw report | `/private/tmp/workbench-secret-scan-20260721-final-asset-closure/gitleaks-report.json` | `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570` |
+| Alibaba Cloud OSS IAM 60/60 evidence | `/private/tmp/workbench-oss-iam-conditional-20260721T101204Z.json` | `52803ec1f44860b772b4aa0883d511e0ee994dbe24a0cba64df6fbd2cd22051a` |
+| Public OSS multipart upload 13/13 evidence | `/private/tmp/workbench-oss-http-upload-20260721T104403Z.json` | `f9e8c4ea2d3f82ea157455c6a7e083b0f2dd78437804900da7f89127bc9a34f5` |
+| OSS regression PostgreSQL fresh migrations + 328 constraints | `/private/tmp/workbench-remediation-20260721-oss-postgres-constraints.log` | `92484d511137bf8352767c217243bdb2b249454d610f512a9eb963c962d8da30` |
+| OSS regression PostgreSQL API/Worker HTTP/SSE/Canvas | `/private/tmp/workbench-remediation-20260721-oss-postgres-http.log` | `663dbb3fbefeb596c14ffcb90ae2be550aae962cda5c2714f19aaad3631e5a7b` |
+| OSS regression PostgreSQL File Worker/GC/Knowledge | `/private/tmp/workbench-remediation-20260721-oss-file-worker-postgres.log` | `6be9c2b0c823602793f74abac260523aea32f1e838736f8d3f8b7e020afffc53` |
+| OSS regression PostgreSQL recovery drill 18/18 | `/private/tmp/workbench-remediation-20260721-oss-postgres-recovery.log` | `53210445348e082adbb8218b5a90a226acd81e08637911308de48666767c87b0` |
+| OSS regression root test with PostgreSQL gates | `/private/tmp/workbench-remediation-20260721-oss-postgres-root-test.log` | `234a476c73dc993d87be6ea7deedf0d2a8d256930fe0392c6750e2726ff5a02f` |
+| Final typecheck after OSS switch | `/private/tmp/workbench-remediation-20260721-oss-final-typecheck.log` | `6b1f1e709cf06cbca00708224e45a39ff06a81da0012ff5d7668d333f6bfee11` |
+| Final root test after OSS switch | `/private/tmp/workbench-remediation-20260721-oss-final-root-test.log` | `e60b1afbc7a1a13c124134d7c2687c9bbf5adef320d2d1d36cbbe773482f051f` |
+| Final Web tests after OSS switch | `/private/tmp/workbench-remediation-20260721-oss-final-web-test.log` | `1faf536f355c7404a0abfadc87b7f3b58591734d993728cd417184b1f71e54b4` |
+| Final lint after OSS switch | `/private/tmp/workbench-remediation-20260721-oss-final-lint.log` | `4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51` |
+| Final architecture checks after OSS switch | `/private/tmp/workbench-remediation-20260721-oss-final-architecture.log` | `3e82be17ecd0805daffda6c018504e09b89de5cf900a6ce8d1efe001c02d84d2` |
+| Final OpenAPI breaking check after OSS switch | `/private/tmp/workbench-remediation-20260721-oss-final-openapi-breaking.log` | `e6299e97f4a8a9649fee790b72ce21f26b6de96fdd639bc1afed435428a52f34` |
+| Final production build after OSS switch | `/private/tmp/workbench-remediation-20260721-oss-final-build.log` | `39433e75ce2e6fc95dfad7f0d8793a37768b16575ff26c6f46217fb23c848068` |
+| Browser E2E first-run Firefox animation sampling failure | `/private/tmp/workbench-remediation-20260721-oss-e2e-web.log` | `29e9cc57c0d5351a441e44a6d61461bf2f62ed833097c950d01f197800bc6519` |
+| Browser E2E unchanged full rerun PASS | `/private/tmp/workbench-remediation-20260721-oss-e2e-web-rerun.log` | `ee7a6a2860a9b27f83607faadfcad968d1c3822d7a1c5edfa1b4db562f50f336` |
+| Final current-source and Git-history secret scan summary | `/private/tmp/workbench-source-secret-scan-20260721-oss-precommit.log` | `be8d9f299f30a0fad93450a18b2bce30562ad687d4afccaa59b9adbc1f4218ab` |
 
 本轮补充目标服务器 validation 日志（dirty tree/E3/E4，均位于本机 `/private/tmp`，包含服务器回执或服务器命令输出，不是不可变外部 ledger；日志不得含真实 root 密码或 OpenAI key）：
 
@@ -863,9 +884,9 @@ Codex 的任何修复都必须保留：
 | G3 | 完整 CI、type、test、architecture、OpenAPI breaking | G2 | BLOCKED | dirty tree 与 unsigned clean-source checkout 上多项套件通过；没有 G2 candidate binding，不构成 G3 | root typecheck PASS；breaking diff PASS；全部 blocking suite PASS |
 | G4 | 全服务 artifacts、SBOM、签名、digest、inventory 一致 | G3 | BLOCKED | image/inventory 静态合同通过；服务器 validation 已构建并运行 Workbench 与 DeerFlow derived images，API `sharp` probe、patch label 和本地 image ID 已核验；但没有 G1/G3 候选绑定、签名 tag、SBOM/Cosign/provenance 或 registry immutable digest | 包含 Import Worker、DeerFlow，CI/Compose/deploy inventory 一致 |
 | G5 | Migration、约束、升级、backup/restore、RPO/RTO | G4 | BLOCKED | 本机 PostgreSQL 16.14、66 migrations、constraints 和 18/18 recovery drill 通过；目标服务器 validation fresh migration 修复后 66/66 PASS，但未绑定 G4 candidate | least-privilege fresh/upgrade migration 与候选绑定 restore drill PASS |
-| G6 | Auth、安全、checksum、Edge/WireGuard、KMS、IAM、ClamAV、SSRF、审计 | G4 | BLOCKED | 本地代码/负向合同部分通过；D-020 与目标环境仍未关闭 | D-001～D-005、D-019、D-020 等关闭，目标环境负向 E1 PASS |
+| G6 | Auth、安全、checksum、Edge/WireGuard、KMS、IAM、ClamAV、SSRF、审计 | G4 | BLOCKED | 阿里云私有 OSS 的 8 身份与 60/60 IAM 已在 dirty-tree validation 通过；D-020 候选绑定、KMS、Edge/WireGuard、ClamAV 故障矩阵及目标环境整体仍未关闭 | D-001～D-005、D-019、D-020 等关闭，目标环境负向 E1 PASS |
 | G7 | DeerFlow/runtime/model/tool 最小权限 | G4 | BLOCKED | tools 64/64；服务器 DeerFlow catalog、Gateway context、真实 provider 基础 smoke、按 Run 工具裁剪、非 Prototype 委派关闭及 secret-channel 均通过，D-035 的 validation 阻塞已消除；仍无 clean signed immutable candidate，Prototype/code 子代理、图像输入与完整故障矩阵未形成 E1/E2 | immutable digest、validator、secret、图像输入、按 Run tool catalog PASS |
-| G8 | 真实存储、Import/Export/Preview/provider | G4 | BLOCKED | 真实 provider 的 document 短 smoke 已通过；真实 S3/IAM、Import/Export/Preview 与 provider 拒绝/429/5xx/timeout/cancel/recovery/长时序未运行 | 成功及拒绝/timeout/429/5xx/retry/cancel/audit E1 PASS |
+| G8 | 真实存储、Import/Export/Preview/provider | G4 | BLOCKED | 真实 provider document 短 smoke、阿里云 OSS 60/60 IAM 与公网 multipart 13/13 已在 dirty-tree validation 通过；同一签名候选上的 Import/Export/Preview、对象损坏/恢复及 provider 拒绝/429/5xx/timeout/cancel/长时序未运行 | 成功及拒绝/timeout/429/5xx/retry/cancel/audit E1 PASS |
 | G9 | Knowledge/retrieval/Quartz | G4 | BLOCKED | 本地 Knowledge 合同 7/7、集成及服务器 secret-channel Knowledge 调用通过；服务器无 ready Knowledge Release fixture，真实 release/adopted model/profile/benchmark 未运行 | 固定 benchmark、model digest、citation、route isolation、delivery PASS |
 | G10 | Production topology、双 origin、OTLP、恢复、容量/SLO | G4 | BLOCKED | Edge/WireGuard 静态合同、本地浏览器矩阵和服务器 validation preflight 通过；`aionbench.com` DNS/TLS、公网路由、15 个 Workbench 栈容器加独立 DeerFlow（共 16 个）healthy 及基础真实 Run 已验证。该拓扑仍是 dirty-tree validation，未完成正式 clean-host deploy/rollback、Edge/WireGuard 防绕过、OTLP、容量或恢复演练 | clean host、真实网络、trace/alert、kill/restart/capacity E1 PASS |
 | G11 | 部署候选完整产品矩阵 | G5–G10 | BLOCKED | 无可执行候选 | 账户、项目、Run、Canvas、Prototype、Import/Export/Preview、a11y 全 PASS |

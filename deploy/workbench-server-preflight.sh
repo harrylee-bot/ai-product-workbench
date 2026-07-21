@@ -82,6 +82,7 @@ canvas_visual_url=$(require_env WORKBENCH_CANVAS_VISUAL_URL)
 tokenizer_dir=$(require_env WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR)
 s3_internal=$(require_env WORKBENCH_S3_INTERNAL_ENDPOINT)
 s3_browser=$(require_env WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL)
+s3_conditional_create_mode=$(require_env WORKBENCH_S3_CONDITIONAL_CREATE_MODE)
 local_s3_port=$(require_env WORKBENCH_LOCAL_S3_PORT)
 clamav_host=$(require_env WORKBENCH_CLAMAV_HOST)
 file_clamav_stream_max_bytes=$(require_env WORKBENCH_CLAMAV_STREAM_MAX_BYTES)
@@ -123,6 +124,8 @@ s3_hostname=$WORKBENCH_S3_HOSTNAME
 identity_hostname=$WORKBENCH_IDENTITY_HOSTNAME
 
 [ "$s3_internal" = "http://object-storage:9000" ] || fail "validation S3 internal endpoint mismatch"
+[ "$s3_conditional_create_mode" = "s3-if-none-match" ] \
+  || fail "local validation requires WORKBENCH_S3_CONDITIONAL_CREATE_MODE=s3-if-none-match"
 [ "$local_s3_port" = "9100" ] || fail "validation S3 port must be 9100"
 [ "$clamav_host" = "clamav" ] || fail "validation ClamAV host must be clamav"
 [ "$scan_mode" = "clamav" ] || fail "server validation requires WORKBENCH_FILE_SCAN_MODE=clamav"

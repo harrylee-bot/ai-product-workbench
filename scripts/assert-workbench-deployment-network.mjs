@@ -28,9 +28,21 @@ assertUsesIngress(validation.services?.oidc, "oidc");
 assertOnlyExpectedServicesUseIngress(base.services, ["gateway", "preview-gateway", "object-storage"]);
 assertOnlyExpectedServicesUseIngress(validation.services, ["oidc"]);
 assertExactNetworks(
+  base.services?.["object-storage-egress"],
+  "object-storage-egress",
+  ["workbench-internal", "workbench-egress"],
+);
+assertExactNetworks(
   base.services?.["workbench-import-worker"],
   "workbench-import-worker",
   ["workbench-internal", "workbench-egress"],
+);
+for (const serviceName of ["workbench-export-worker", "workbench-preview"]) {
+  assertExactNetworks(base.services?.[serviceName], serviceName, ["workbench-internal"]);
+}
+assert(
+  (base.services?.["object-storage-egress"]?.ports?.length ?? 0) === 0,
+  "object-storage-egress must not publish a host port",
 );
 
 console.log("Workbench deployment network contract passed.");

@@ -8,6 +8,10 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import {
+  conditionalObjectCreateHeader,
+  conditionalObjectCreateInput,
+  isConditionalObjectCreateConflict,
+  setObjectStorageRequestHeader,
   stageReadyObject,
   type ReadyObjectIntegrityRecorder,
   type ReadyObjectManifest,
@@ -33,6 +37,7 @@ export class S3FileStorageAdapter implements FileStoragePort, ReadyFileStoragePo
       | "s3Region"
       | "s3InternalEndpoint"
       | "s3ForcePathStyle"
+      | "s3ConditionalCreateMode"
       | "filePipelineS3AccessKeyId"
       | "filePipelineS3SecretAccessKey"
     >,
@@ -43,6 +48,8 @@ export class S3FileStorageAdapter implements FileStoragePort, ReadyFileStoragePo
       region: config.s3Region,
       ...(config.s3InternalEndpoint ? { endpoint: config.s3InternalEndpoint } : {}),
       forcePathStyle: config.s3ForcePathStyle,
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       credentials: {
         accessKeyId: config.filePipelineS3AccessKeyId,
         secretAccessKey: config.filePipelineS3SecretAccessKey,
@@ -165,23 +172,25 @@ export class S3FileStorageAdapter implements FileStoragePort, ReadyFileStoragePo
     sourceBody.pipe(hashingBody);
     let created = false;
     try {
-      await this.client.send(new PutObjectCommand({
+      const command = new PutObjectCommand({
         Bucket: this.config.s3Bucket,
         Key: object.destinationKey,
         Body: hashingBody,
         ContentLength: object.byteSize,
         ContentType: object.mediaType,
-        IfNoneMatch: "*",
+        ...conditionalObjectCreateInput(this.config.s3ConditionalCreateMode),
         Metadata: {
           sha256: object.sha256,
           "byte-size": String(object.byteSize),
         },
-      }), signal ? { abortSignal: signal } : undefined);
+      });
+      attachConditionalCreateHeader(command, this.config.s3ConditionalCreateMode);
+      await this.client.send(command, signal ? { abortSignal: signal } : undefined);
       created = true;
     } catch (error) {
       sourceBody.destroy();
       hashingBody.destroy();
-      if (!isPreconditionFailed(error)) throw error;
+      if (!isConditionalObjectCreateConflict(error)) throw error;
       const raced = await this.headObject(object.destinationKey, signal);
       if (!matches(raced, object)) throw storageIdentityConflict();
       await this.verifyObjectBytes(object, signal);
@@ -248,12 +257,19 @@ function safeStorageSize(value: number) {
   return value;
 }
 
-function isPreconditionFailed(error: unknown) {
-  if (!error || typeof error !== "object") return false;
-  const candidate = error as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
-  return candidate.name === "PreconditionFailed"
-    || candidate.Code === "PreconditionFailed"
-    || candidate.$metadata?.httpStatusCode === 412;
+function attachConditionalCreateHeader(
+  command: PutObjectCommand,
+  mode: FileWorkerConfig["s3ConditionalCreateMode"],
+) {
+  const header = conditionalObjectCreateHeader(mode);
+  if (!header) return;
+  command.middlewareStack.add(
+    (next) => async (arguments_) => {
+      setObjectStorageRequestHeader(arguments_.request, header);
+      return next(arguments_);
+    },
+    { step: "build", name: "workbenchOssForbidOverwrite", priority: "low" },
+  );
 }
 
 function storageIdentityConflict() {

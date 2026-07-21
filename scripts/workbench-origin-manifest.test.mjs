@@ -54,6 +54,15 @@ test("supports a second deployment domain without product-domain constants", () 
   assert.equal(manifest.identityHostname, "sso.beta.test");
 });
 
+test("supports virtual-hosted object storage at the custom-domain root", () => {
+  const manifest = deriveOriginManifest(environment({
+    WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: "https://uploads.example.test",
+  }));
+
+  assert.equal(manifest.s3BrowserBucketUrl, "https://uploads.example.test");
+  assert.equal(manifest.s3Hostname, "uploads.example.test");
+});
+
 test("derives the identity hostname without a redundant production setting", () => {
   const manifest = deriveOriginManifest(environment({
     WORKBENCH_IDENTITY_HOSTNAME: "",
@@ -67,7 +76,6 @@ for (const [label, overrides, pattern] of [
   ["non-HTTPS origin", { WORKBENCH_WEB_ORIGIN: "http://workbench.example.test" }, /must use HTTPS/u],
   ["same Web and Preview host", { WORKBENCH_PREVIEW_ORIGIN: "https://workbench.example.test" }, /must be distinct/u],
   ["Preview port", { WORKBENCH_PREVIEW_ORIGIN: "https://preview.example.test:8443" }, /must not contain credentials, a port/u],
-  ["upload URL without bucket", { WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: "https://uploads.example.test" }, /must include the bucket path/u],
   ["issuer hostname drift", { WORKBENCH_IDENTITY_HOSTNAME: "other.example.test" }, /must equal the OIDC issuer hostname/u],
   ["ambiguous SSO policy", { WORKBENCH_ENTERPRISE_SSO_ENABLED: "1" }, /must be true or false/u],
   ["enabled SSO without a client id", { WORKBENCH_OIDC_CLIENT_ID: "" }, /WORKBENCH_OIDC_CLIENT_ID is required/u],

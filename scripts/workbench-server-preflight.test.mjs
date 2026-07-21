@@ -121,6 +121,7 @@ function runPreflight(overrides) {
     WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR: "/srv/workbench/tokenizer",
     WORKBENCH_S3_INTERNAL_ENDPOINT: "http://object-storage:9000",
     WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: "https://uploads.example.test/workbench",
+    WORKBENCH_S3_CONDITIONAL_CREATE_MODE: "s3-if-none-match",
     WORKBENCH_LOCAL_S3_PORT: "9100",
     WORKBENCH_CLAMAV_HOST: "clamav",
     WORKBENCH_CLAMAV_STREAM_MAX_BYTES: "26214400",

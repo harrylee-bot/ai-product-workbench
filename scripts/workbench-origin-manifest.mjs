@@ -40,7 +40,6 @@ export function deriveOriginManifest(environment) {
   const uploads = strictHttpsUrl(required(environment, "WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL"), {
     name: "WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL",
     allowPath: true,
-    requirePath: true,
   });
   const enterpriseSsoEnabled = optionalBoolean(
     environment,
@@ -123,7 +122,7 @@ export function renderCaddyEnvironment(manifest) {
   return `${lines.join("\n")}\n`;
 }
 
-function strictHttpsUrl(value, { name, allowPath, requirePath = false }) {
+function strictHttpsUrl(value, { name, allowPath }) {
   let url;
   try {
     url = new URL(value);
@@ -136,7 +135,6 @@ function strictHttpsUrl(value, { name, allowPath, requirePath = false }) {
   }
   assertHostname(url.hostname, name);
   if (!allowPath && url.pathname !== "/") throw new Error(`${name} must not contain a path`);
-  if (requirePath && url.pathname === "/") throw new Error(`${name} must include the bucket path`);
   if (/\/{2,}/u.test(url.pathname) || /(?:^|\/)\.\.?\//u.test(url.pathname)) {
     throw new Error(`${name} contains an ambiguous path`);
   }

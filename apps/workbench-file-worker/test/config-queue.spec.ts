@@ -86,6 +86,18 @@ describe("file worker boundary configuration", () => {
     expect(config.blobGcReconciliationIntervalMs).toBe(5 * 60_000);
     expect(config.blobGcBatchSize).toBe(100);
     expect(config.filePipelineS3AccessKeyId).toBe("file-pipeline-access");
+    expect(config.s3ConditionalCreateMode).toBe("s3-if-none-match");
+  });
+
+  it("accepts only explicit S3 or OSS conditional-create semantics", () => {
+    expect(loadFileWorkerConfig({
+      ...base,
+      WORKBENCH_S3_CONDITIONAL_CREATE_MODE: "oss-forbid-overwrite",
+    }).s3ConditionalCreateMode).toBe("oss-forbid-overwrite");
+    expect(() => loadFileWorkerConfig({
+      ...base,
+      WORKBENCH_S3_CONDITIONAL_CREATE_MODE: "overwrite",
+    })).toThrow("WORKBENCH_S3_CONDITIONAL_CREATE_MODE");
   });
 
   it("fails closed instead of accepting generic or ambient S3 credentials", () => {

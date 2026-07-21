@@ -13,6 +13,7 @@ const config = {
   s3Region: "us-east-1",
   s3InternalEndpoint: "http://s3.test",
   s3ForcePathStyle: true,
+  s3ConditionalCreateMode: "s3-if-none-match" as const,
   filePipelineS3AccessKeyId: "file-pipeline-access",
   filePipelineS3SecretAccessKey: "file-pipeline-secret",
 };

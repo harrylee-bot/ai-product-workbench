@@ -64,6 +64,10 @@ validate_private_ipv4() {
 require_env WORKBENCH_WEB_ORIGIN >/dev/null
 require_env WORKBENCH_PREVIEW_ORIGIN >/dev/null
 require_env WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL >/dev/null
+s3_internal_endpoint=$(require_env WORKBENCH_S3_INTERNAL_ENDPOINT)
+s3_egress_upstream_host=$(require_env WORKBENCH_S3_EGRESS_UPSTREAM_HOST)
+s3_bucket=$(require_env WORKBENCH_S3_BUCKET)
+s3_conditional_create_mode=$(require_env WORKBENCH_S3_CONDITIONAL_CREATE_MODE)
 enterprise_sso_enabled=$(require_env WORKBENCH_ENTERPRISE_SSO_ENABLED)
 canvas_tool_url=$(require_env WORKBENCH_CANVAS_TOOL_URL)
 canvas_visual_url=$(require_env WORKBENCH_CANVAS_VISUAL_URL)
@@ -93,6 +97,18 @@ nginx_image=$(require_env WORKBENCH_NGINX_IMAGE)
 node_image=$(require_env WORKBENCH_NODE_IMAGE)
 compose_profiles=${WORKBENCH_COMPOSE_PROFILES:-${COMPOSE_PROFILES:-}}
 
+node -e '
+  const [endpointValue, upstreamHost, bucket] = process.argv.slice(1);
+  const endpoint = new URL(endpointValue);
+  const hostname = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+  const bucketName = /^(?=.{3,63}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/u;
+  if (endpoint.protocol !== "https:" || endpoint.pathname !== "/" || endpoint.port
+      || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) process.exit(1);
+  if (!hostname.test(upstreamHost) || endpoint.hostname !== upstreamHost) process.exit(1);
+  if (!bucketName.test(bucket)) process.exit(1);
+' "$s3_internal_endpoint" "$s3_egress_upstream_host" "$s3_bucket" >/dev/null 2>&1 \
+  || fail "S3 internal endpoint, egress upstream host, or bucket is not a canonical restricted tunnel target"
+
 case "$canvas_tool_url" in
   https://*/api/v1/runtime/canvas/tools/execute) ;;
   *) fail "WORKBENCH_CANVAS_TOOL_URL must be the public HTTPS Canvas execution endpoint" ;;
@@ -108,6 +124,16 @@ esac
 case "$public_registration" in
   true | false) ;;
   *) fail "WORKBENCH_PUBLIC_REGISTRATION_ENABLED must be true or false" ;;
+esac
+case "$s3_conditional_create_mode" in
+  s3-if-none-match | oss-forbid-overwrite) ;;
+  *) fail "WORKBENCH_S3_CONDITIONAL_CREATE_MODE must be s3-if-none-match or oss-forbid-overwrite" ;;
+esac
+case "$s3_egress_upstream_host" in
+  *.aliyuncs.com)
+    [ "$s3_conditional_create_mode" = "oss-forbid-overwrite" ] \
+      || fail "Alibaba Cloud OSS requires WORKBENCH_S3_CONDITIONAL_CREATE_MODE=oss-forbid-overwrite"
+    ;;
 esac
 case "$enterprise_sso_enabled" in
   true | false) ;;

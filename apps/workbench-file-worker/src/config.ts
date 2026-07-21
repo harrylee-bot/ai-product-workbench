@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 
 import { maximumUserUploadByteSize } from "@workbench/workbench-contracts";
+import { parseConditionalObjectCreateMode } from "@workbench/workbench-content-security";
 
 export type FileWorkerConfig = ReturnType<typeof loadFileWorkerConfig>;
 
@@ -62,6 +63,9 @@ export function loadFileWorkerConfig(environment: NodeJS.ProcessEnv = process.en
       environment,
       "WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE",
       Boolean(s3InternalEndpoint),
+    ),
+    s3ConditionalCreateMode: parseConditionalObjectCreateMode(
+      environment.WORKBENCH_S3_CONDITIONAL_CREATE_MODE,
     ),
     filePipelineS3AccessKeyId,
     filePipelineS3SecretAccessKey,

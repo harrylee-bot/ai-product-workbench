@@ -114,6 +114,8 @@ export class PreviewStorage {
       region: config.s3Region,
       ...(config.s3InternalEndpoint ? { endpoint: config.s3InternalEndpoint } : {}),
       forcePathStyle: config.s3ForcePathStyle,
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       credentials: {
         accessKeyId: config.previewS3AccessKeyId,
         secretAccessKey: config.previewS3SecretAccessKey,

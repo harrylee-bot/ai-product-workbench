@@ -201,6 +201,7 @@ export class FilesController {
   }
 
   @Post("file-upload-sessions/:uploadSessionId/parts/:partNumber")
+  @HttpCode(200)
   async signUploadPart(
     @CurrentPrincipal() principal: AuthenticatedPrincipal,
     @Param("uploadSessionId") uploadSessionId: string,

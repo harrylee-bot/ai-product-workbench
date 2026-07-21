@@ -98,6 +98,7 @@ describe("FileExtractionProcessor", () => {
       s3Region: "us-east-1",
       s3InternalEndpoint: "http://s3.test",
       s3ForcePathStyle: true,
+      s3ConditionalCreateMode: "s3-if-none-match",
       filePipelineS3AccessKeyId: "file-access",
       filePipelineS3SecretAccessKey: "file-secret",
     }, recordIntegrityFailure, s3 as never);

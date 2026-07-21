@@ -1,5 +1,6 @@
 import type { Response } from "express";
 import { Readable } from "node:stream";
+import { HTTP_CODE_METADATA } from "@nestjs/common/constants";
 import {
   FilesController,
   parseFileLimit,
@@ -16,6 +17,13 @@ function responseDouble() {
 }
 
 describe("FilesController", () => {
+  it("returns the OpenAPI success status when signing an upload part", () => {
+    expect(Reflect.getMetadata(
+      HTTP_CODE_METADATA,
+      FilesController.prototype.signUploadPart,
+    )).toBe(200);
+  });
+
   it("strictly parses File filters, multipart part numbers, and required receipts", () => {
     expect(parseFileStatus("ready")).toBe("ready");
     expect(parseFileStatus(undefined)).toBeUndefined();
