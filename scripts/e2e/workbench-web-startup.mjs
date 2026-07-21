@@ -1,7 +1,12 @@
 export const WORKBENCH_WEB_STARTUP_TIMEOUT_MS = 90_000;
 export const WORKBENCH_PROJECT_WARMUP_PATH = "/projects/project-run-preview";
+export const WORKBENCH_HOME_WARMUP_PATH = "/";
 export const WORKBENCH_PROJECT_WARMUP_COOKIE =
   "workbench.session_token=workbench-project-route-warmup";
+export const WORKBENCH_PROTECTED_ROUTE_WARMUPS = Object.freeze([
+  Object.freeze({ path: WORKBENCH_PROJECT_WARMUP_PATH, phase: "project route warmup" }),
+  Object.freeze({ path: WORKBENCH_HOME_WARMUP_PATH, phase: "home route warmup" }),
+]);
 
 export async function waitForWorkbenchWeb(
   baseUrl,
@@ -35,7 +40,7 @@ export async function waitForWorkbenchWeb(
   throw new Error(`Timed out waiting for Workbench Web at ${baseUrl}`);
 }
 
-export async function warmWorkbenchProjectRoute(
+export async function warmWorkbenchProtectedRoutes(
   baseUrl,
   exitPromise,
   {
@@ -43,7 +48,24 @@ export async function warmWorkbenchProjectRoute(
     timeoutMs = WORKBENCH_WEB_STARTUP_TIMEOUT_MS,
   } = {},
 ) {
-  const warmupUrl = new URL(WORKBENCH_PROJECT_WARMUP_PATH, baseUrl);
+  const warmedPaths = [];
+  for (const warmup of WORKBENCH_PROTECTED_ROUTE_WARMUPS) {
+    await warmWorkbenchProtectedRoute(baseUrl, exitPromise, warmup, {
+      fetchImpl,
+      timeoutMs,
+    });
+    warmedPaths.push(warmup.path);
+  }
+  return warmedPaths;
+}
+
+async function warmWorkbenchProtectedRoute(
+  baseUrl,
+  exitPromise,
+  warmup,
+  { fetchImpl, timeoutMs },
+) {
+  const warmupUrl = new URL(warmup.path, baseUrl);
   const state = await requestWithinStartupBudget({
     url: warmupUrl,
     init: {
@@ -53,18 +75,18 @@ export async function warmWorkbenchProjectRoute(
     exitPromise,
     fetchImpl,
     deadline: startupDeadline(timeoutMs),
-    phase: "project route warmup",
+    phase: warmup.phase,
   });
 
   if (state.kind === "error") {
     throw new Error(
-      `Workbench Web project route warmup request failed at ${warmupUrl}`,
+      `Workbench Web ${warmup.phase} request failed at ${warmupUrl}`,
       { cause: state.error },
     );
   }
   if (state.status !== 200) {
     throw new Error(
-      `Workbench Web project route warmup returned HTTP ${state.status} at ${warmupUrl}`,
+      `Workbench Web ${warmup.phase} returned HTTP ${state.status} at ${warmupUrl}`,
     );
   }
 }

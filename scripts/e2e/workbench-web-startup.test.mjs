@@ -3,7 +3,8 @@ import test from "node:test";
 
 import {
   waitForWorkbenchWeb,
-  warmWorkbenchProjectRoute,
+  warmWorkbenchProtectedRoutes,
+  WORKBENCH_HOME_WARMUP_PATH,
   WORKBENCH_PROJECT_WARMUP_COOKIE,
   WORKBENCH_PROJECT_WARMUP_PATH,
 } from "./workbench-web-startup.mjs";
@@ -27,49 +28,64 @@ test("waits for the managed Web login route to become ready", async () => {
   assert.equal(requests[1].init.redirect, "manual");
 });
 
-test("warms the authenticated dynamic project route through the complete response", async () => {
-  let bodyCompleted = false;
-  let request;
+test("warms every authenticated app entrypoint through the complete response", async () => {
+  let completedBodies = 0;
+  const requests = [];
   const fetchImpl = async (url, init) => {
-    request = { url: String(url), init };
+    requests.push({ url: String(url), init });
     return new Response(new ReadableStream({
       start(controller) {
         setTimeout(() => {
-          bodyCompleted = true;
-          controller.enqueue(new TextEncoder().encode("project ready"));
+          completedBodies += 1;
+          controller.enqueue(new TextEncoder().encode("route ready"));
           controller.close();
         }, 10);
       },
     }), { status: 200 });
   };
 
-  await warmWorkbenchProjectRoute("http://127.0.0.1:3000", null, {
+  const warmedPaths = await warmWorkbenchProtectedRoutes("http://127.0.0.1:3000", null, {
     fetchImpl,
     timeoutMs: 500,
   });
 
-  assert.equal(request.url, `http://127.0.0.1:3000${WORKBENCH_PROJECT_WARMUP_PATH}`);
-  assert.equal(request.init.redirect, "manual");
-  assert.equal(request.init.headers.Cookie, WORKBENCH_PROJECT_WARMUP_COOKIE);
-  assert.equal(bodyCompleted, true);
+  assert.deepEqual(
+    requests.map(({ url }) => url),
+    [
+      `http://127.0.0.1:3000${WORKBENCH_PROJECT_WARMUP_PATH}`,
+      `http://127.0.0.1:3000${WORKBENCH_HOME_WARMUP_PATH}`,
+    ],
+  );
+  assert.deepEqual(warmedPaths, [WORKBENCH_PROJECT_WARMUP_PATH, WORKBENCH_HOME_WARMUP_PATH]);
+  for (const request of requests) {
+    assert.equal(request.init.redirect, "manual");
+    assert.equal(request.init.headers.Cookie, WORKBENCH_PROJECT_WARMUP_COOKIE);
+  }
+  assert.equal(completedBodies, 2);
 });
 
-test("fails closed when project warmup redirects instead of compiling the protected route", async () => {
+test("fails closed when home warmup redirects instead of compiling the protected route", async () => {
+  let requestCount = 0;
   await assert.rejects(
-    warmWorkbenchProjectRoute("http://127.0.0.1:3000", null, {
-      fetchImpl: async () => new Response(null, {
-        status: 307,
-        headers: { Location: "/login" },
-      }),
+    warmWorkbenchProtectedRoutes("http://127.0.0.1:3000", null, {
+      fetchImpl: async () => {
+        requestCount += 1;
+        return requestCount === 1
+          ? new Response(null, { status: 200 })
+          : new Response(null, {
+              status: 307,
+              headers: { Location: "/login" },
+            });
+      },
       timeoutMs: 500,
     }),
-    /project route warmup returned HTTP 307/,
+    /home route warmup returned HTTP 307/,
   );
 });
 
-test("reports a project warmup request failure when the response body cannot complete", async () => {
+test("reports a protected route warmup failure when the response body cannot complete", async () => {
   await assert.rejects(
-    warmWorkbenchProjectRoute("http://127.0.0.1:3000", null, {
+    warmWorkbenchProtectedRoutes("http://127.0.0.1:3000", null, {
       fetchImpl: async () => ({
         status: 200,
         async arrayBuffer() {
@@ -86,7 +102,7 @@ test("reports a project warmup request failure when the response body cannot com
   );
 });
 
-test("aborts project warmup when the managed Web process exits", async () => {
+test("aborts protected route warmup when the managed Web process exits", async () => {
   let resolveExit;
   let requestAborted = false;
   const exitPromise = new Promise((resolve) => {
@@ -99,7 +115,7 @@ test("aborts project warmup when the managed Web process exits", async () => {
     }, { once: true });
   });
 
-  const warmup = warmWorkbenchProjectRoute("http://127.0.0.1:3000", exitPromise, {
+  const warmup = warmWorkbenchProtectedRoutes("http://127.0.0.1:3000", exitPromise, {
     fetchImpl,
     timeoutMs: 500,
   });
