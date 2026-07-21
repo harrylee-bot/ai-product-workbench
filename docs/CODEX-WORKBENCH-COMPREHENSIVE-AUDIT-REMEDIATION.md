@@ -486,9 +486,9 @@ Codex 的任何修复都必须保留：
 - **位置**：`scripts/g0-scope-approval.mjs`；`docs/evidence/governance/g0-scope-approval.schema.json`；`docs/evidence/governance/g0-scope-approval.example.json`
 - **触发**：正式候选准备 G0 payload 时，校验器仍将完整 finding 集合固定为 D-001～D-033 与 P-001～P-019，而审计规范已经新增 D-034～D-037。
 - **影响**：真实 G0 记录无法把新增供应链、工具最小权限、浏览器 CSP 和 CI 依赖 finding 纳入责任与进度范围；若沿用旧合同，G0 PASS 会产生漏审的生产批准事实。
-- **修复**：G0 的精确集合最初升级为 D-001～D-038 与 P-001～P-019；D-039、D-040 形成后继续同步升级到当前 D-001～D-040 与 P-001～P-019，共 59 项。JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
-- **测试**：新增回归用例显式断言当前 D-034～D-040 和 59 项总数，并证明只覆盖到 D-033 的旧记录 fail closed；D-039 前一版曾完成 G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test，完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`。当前 59 项合同必须在下一候选重新执行。
-- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 59 项并绑定同一 G1 manifest。
+- **修复**：G0 的精确集合最初升级为 D-001～D-038 与 P-001～P-019；D-039～D-041 形成后继续同步升级到当前 D-001～D-041 与 P-001～P-019，共 60 项。JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
+- **测试**：新增回归用例显式断言当前 D-034～D-041 和 60 项总数，并证明只覆盖到 D-033 的旧记录 fail closed；D-039 前一版曾完成 G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test，完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`。当前 60 项合同必须在下一候选重新执行。
+- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 60 项并绑定同一 G1 manifest。
 
 ### D-039 — 锁文件遗漏 Linux Rolldown 原生可选依赖
 
@@ -509,6 +509,16 @@ Codex 的任何修复都必须保留：
 - **修复**：只为该仓库级集成测试声明 15000ms 的显式预算，保留 661/10 数量、两次完整构建、canonical manifest/chunk/projection 相等、checksum、issue、route、reference 与 frozen object 全部断言；不修改 Vitest 全局默认值，不减少输入或跳过确定性验证。
 - **测试**：Knowledge suite 85/85、G0 合同 22/22、固定 npm 11.18.0 的完整 root test 与 typecheck 均 PASS；root test 日志 `/private/tmp/workbench-d040-root-test.log` 的 SHA-256 为 `c49a34b660a420a6617caa8f83881bed431056a39c6e7568105e074fa7847e86`，typecheck 日志 `/private/tmp/workbench-d040-typecheck.log` 的 SHA-256 为 `f88ab597a4513236d35ad1690021682910300790d8a882bec00e1559802ed3a1`。最终必须由新 clean commit 的 GitHub Linux run 证明该测试在预算内通过且剩余 G3 矩阵继续执行。
 - **退出条件**：新 clean signed candidate 的 GitHub Linux G3 全绿，且 G0 真实批准范围包含 D-040。
+
+### D-041 — Runtime 恢复队列允许同一 Run 重复排队
+
+- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；本地 PostgreSQL 并发回归与完整 HTTP/SSE 工作流已通过，新 Linux CI 仍待执行
+- **位置**：`packages/workbench-contracts/src/queues.ts`；`apps/workbench-worker/src/runs/runtime-execution-reconciler.ts`；`apps/workbench-worker/test/runtime-execution-reconciler.postgres.spec.ts`；`scripts/workbench-postgres-http-e2e.mjs`
+- **触发**：签名 commit `0917c4472eefbde49f6cd454ea5f5f14f0ca360b` 的 PR #4 run `29848133959` 已越过 D-039、D-040 的原始触发，但在真实 PostgreSQL API/Worker 工作流中，SSE fixture 留下无人持有的 `running` Run，恢复器每五秒为同一 `singletonKey` 再次发送任务；`runtime.execute` 的 `key_strict_fifo` policy 不会拒绝已排队的同 key job，多个 `created` job 在 claim 时触发 `job_common_i8` 唯一索引冲突，并把后续 targeted Generate 阻塞在队头。
+- **影响**：一个失租或测试遗留 Run 可持续制造重复恢复任务，使同 key claim 失败并阻塞其他 Run；Worker 表面存活但合法生成一直停留在 `queued`，导致 G3 PostgreSQL 工作流超时。仅依赖稳定 `singletonKey` 不能证明恢复投递幂等。
+- **修复**：`runtime.execute` policy 改为 PostgreSQL 唯一索引约束的 `exclusive`，同一 Run 在 queued/retry/active 状态只允许一个任务，已保留的 failed job 不阻断下一次恢复。恢复器在 Prisma 事务中二次确认 Run 仍为无人持有或失租的 `running` 状态，以 `FOR UPDATE SKIP LOCKED` 锁定该 Run，并通过 `fromPrisma(tx)` 在同一事务发送带 `singletonKey=runId`、`group.id=threadId` 的任务。SSE fixture 改为带有效 owner、heartbeat 和未来 lease 的 attempt 1 Run，并在场景结束后删除 synthetic Run。
+- **测试**：Contracts queue 10/10、恢复器单元测试 4/4、Worker typecheck 与真实 PostgreSQL 并发回归 1/1 PASS；并发回归覆盖双 Reconciler、active 去重、failed 后仅一个新恢复任务及不同 Run 可同时 fetch。完整 PostgreSQL API/Worker HTTP/SSE 工作流随后 PASS，targeted Generate 只进入 Fake DeerFlow 一次，approval/cancel/retry 均完成，且无 `job_common_i8`、duplicate key 或 timeout。固定 npm 11.18.0 的最终 root test、typecheck、G0 22/22、lint 与架构检查也均 PASS；root test、typecheck 和 PostgreSQL E2E 日志 SHA-256 分别为 `16b0ecca9537595e1164e5ca21c1ff99182cc117d9e9cfb17d398322ae7eb4d8`、`195288fb66f7ea885d53e2d5a59cda4b95ebf4417ceebe645a73474db1e69bbe`、`3da2704e5e6874a7992a57b7b960e104f9fa3d8986760c0959953fd913ebd329`；这些仍是 dirty-tree E4 证据。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 全绿，60 项 G0 真实批准范围包含 D-041，并由同一候选上的故障恢复矩阵证明失租、并发扫描和 failed 后重投不会重复执行或阻塞其他 Run。
 
 ---
 
@@ -623,6 +633,7 @@ Codex 的任何修复都必须保留：
 | V-055 | 2026-07-21 首个真实签名候选与 G0 scope drift 诊断 | G1/G2 工具 PASS；候选已淘汰 | E2/E4 | 签名 commit `a4bc293e70741ce1863e7b82e43e9141eaaf5e28` 与签名 tag `workbench-remediation-20260721-a4bc293e` 首次 G1 因 ignored root `.env` fail closed；工具未读取内容，文件迁移到仓库外 0600 配置目录后，新不可变 G1 manifest 与 inventory PASS，candidate ID `sha256:880418843788188591785ef4d89ee4e8283f82fbbb749b8b86ddc0b47932e69a`。固定 npm 11.18.0 的 fresh-clone G2 随后 PASS，完成两轮生成、OpenAPI/runtime/typecheck、零源码漂移和 checkout 清理。准备真实 G0 时发现校验器只覆盖 D-001～D-033，遗漏 D-034～D-037，形成 D-038；因此该候选主动淘汰，G1/G2 事实不进入 production release chain。第二次 G1 manifest/inventory SHA-256 分别为 `fde19d9bbdc3767913c00f43458d2a0dcb71e74e86171d5865dff2d602138c69`、`44cea7416abfd558302a6c8de645900f00074e6f48f9cccffdd1cf82bb7af3cc`，G2 receipt SHA-256 为 `55f883d0a6a9ac09290e1c74220c25ad91178418c2e309f1c37eef51f03b6670`；均只保留为淘汰候选诊断，不得复用于新候选。 |
 | V-056 | 2026-07-21 第二个签名候选、真实 G0 待审批包与首轮 GitHub Linux CI | G1/G2 PASS、G0 NOT RUN、G3 FAIL；候选已淘汰 | E2/E4 | 签名 commit `8710fa5b83827b18c404690629aa7bbaa953ea79`、签名 tag `workbench-remediation-20260721-8710fa5b` 生成 clean G1 candidate `sha256:5a12d2ef8641ee8209735e5866256adb505b954095a3e74ff62b956bdc6add40`；manifest/inventory SHA-256 分别为 `8548ec1e19f9dd7d59e6d8783c22a1aa9fc4ed1113d49de3d1c891646a050110`、`f4eabb8e68698f567e035b98c40af7218d0ede55101f884ceb51f19c4ba444e4`。固定 Node 22/npm 11.18.0 的 fresh-clone G2 PASS，receipt SHA-256 `c52f9b6746b6914333fc0a4111bc3a97afa9be68f87c5646131edfc77bec0848`；57 项候选绑定 G0 待审批记录结构有效且明确 `NOT RUN`，release-chain 按设计停止在独立批准。分支/tag 推送后 PR #4 的 run `29844055994` 中 release-chain 合同与 Compose/gateway/Quartz job PASS，quality job 在 `npm test` 启动 Contracts Vitest 时因 lockfile 缺少 `@rolldown/binding-linux-x64-gnu@1.1.4` 失败，形成 D-039。故该候选及其 G0/G1/G2 哈希全部淘汰，不得复用于下一候选或生产链。 |
 | V-057 | 2026-07-21 Linux 原生依赖修复验证与第二轮 G3 诊断 | D-039 原触发关闭；G3 FAIL；commit 未形成候选 | E2 | 签名 commit `482e7ec7243721a0bc29465479650bee72a5fa3e` 的 PR #4 run `29846325332` 中 release-chain 合同与 Compose/gateway/Quartz job PASS；quality job 在固定 Node 22/npm 11.18.0 的 Linux runner 完成 `npm ci`、生成、迁移、OpenAPI、typecheck、lint 和架构检查，Contracts 及后续多个 Vitest workspace 正常启动，证明 D-039 的 glibc Rolldown binding 缺失已关闭。随后 Knowledge 仓库级测试的 84 项先行断言 PASS，唯一完整 Vault 双构建用例耗时 8456ms 并撞上默认 5000ms timeout，形成 D-040；其后 PostgreSQL、Web、浏览器和 build 步骤按 CI fail-fast 跳过。该 commit 没有签名 candidate tag、G1/G2 或真实 G0 包，不得沿用上一淘汰候选产物。 |
+| V-058 | 2026-07-21 Runtime 恢复队列与第三轮 G3 诊断 | D-039/D-040 原触发关闭；G3 FAIL；commit 未形成候选 | E2/E4 | 签名 commit `0917c4472eefbde49f6cd454ea5f5f14f0ca360b` 的 PR #4 run `29848133959` 中 release-chain 合同与 Compose/gateway/Quartz job PASS；quality job 在固定 Node 22/npm 11.18.0 的 Linux runner 完成安装、生成、迁移、OpenAPI、typecheck、lint、架构检查与 server/worker tests，证明 D-039/D-040 的原始失败均已越过。真实 PostgreSQL API/Worker 工作流随后因同一失租 Run 的重复 `created` 恢复任务触发 `job_common_i8`，targeted Generate 未进入 Fake DeerFlow 并超时，形成 D-041；其后 File Worker、DeerFlow、Web、浏览器和 build 步骤按 CI fail-fast 跳过。修复后本地真实 PostgreSQL 并发回归与完整 HTTP/SSE 工作流 PASS，但仍属 dirty-tree E4；该 commit 没有签名 candidate tag、G1/G2 或真实 G0 包，不得作为发布候选。 |
 
 注意：本轮超大 working-tree review 的 conventions finder 和最终 gap sweep 曾因 prompt too long 未完成；因此本文是经过多角度、去重和验证的高覆盖审查，但不得宣称绝对无遗漏。
 
@@ -713,6 +724,10 @@ Codex 的任何修复都必须保留：
 | Browser E2E first-run Firefox animation sampling failure | `/private/tmp/workbench-remediation-20260721-oss-e2e-web.log` | `29e9cc57c0d5351a441e44a6d61461bf2f62ed833097c950d01f197800bc6519` |
 | Browser E2E unchanged full rerun PASS | `/private/tmp/workbench-remediation-20260721-oss-e2e-web-rerun.log` | `ee7a6a2860a9b27f83607faadfcad968d1c3822d7a1c5edfa1b4db562f50f336` |
 | Final current-source and Git-history secret scan summary | `/private/tmp/workbench-source-secret-scan-20260721-oss-precommit.log` | `be8d9f299f30a0fad93450a18b2bce30562ad687d4afccaa59b9adbc1f4218ab` |
+| D-041 60-item G0 contract | `/private/tmp/workbench-d041-g0-scope.log` | `4a948efdb96366299a36cece7a57b4b9b603c7cf6253b5bf8216e389613934fd` |
+| D-041 final root `npm test` with npm 11.18.0 | `/private/tmp/workbench-d041-root-test-final.log` | `16b0ecca9537595e1164e5ca21c1ff99182cc117d9e9cfb17d398322ae7eb4d8` |
+| D-041 root `npm run typecheck` with npm 11.18.0 | `/private/tmp/workbench-d041-typecheck.log` | `195288fb66f7ea885d53e2d5a59cda4b95ebf4417ceebe645a73474db1e69bbe` |
+| D-041 PostgreSQL API/Worker HTTP/SSE workflow | `/private/tmp/workbench-d041-postgres-http.log` | `3da2704e5e6874a7992a57b7b960e104f9fa3d8986760c0959953fd913ebd329` |
 
 本轮补充目标服务器 validation 日志（dirty tree/E3/E4，均位于本机 `/private/tmp`，包含服务器回执或服务器命令输出，不是不可变外部 ledger；日志不得含真实 root 密码或 OpenAI key）：
 

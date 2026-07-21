@@ -40,7 +40,7 @@ export const exportDeliveryQueueOptions = {
 // full definition shared and assert the persisted queue after createQueue(),
 // because pg-boss does not overwrite an existing queue's configuration.
 export const runtimeExecuteQueueOptions = {
-  policy: "key_strict_fifo",
+  policy: "exclusive",
   retryLimit: 5,
   retryDelay: 2,
   retryBackoff: true,

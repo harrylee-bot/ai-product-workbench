@@ -1,11 +1,16 @@
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
 import { runtimeExecuteQueue } from "@workbench/workbench-contracts";
+import { fromPrisma } from "pg-boss";
 
 type RuntimeExecuteQueueSender = {
   send(
     name: typeof runtimeExecuteQueue,
     data: { runId: string },
-    options: { singletonKey: string },
+    options: {
+      singletonKey: string;
+      group: { id: string };
+      db: ReturnType<typeof fromPrisma>;
+    },
   ): Promise<string | null>;
 };
 
@@ -50,11 +55,7 @@ export class RuntimeExecutionReconciler {
       `);
       for (const candidate of candidates) {
         try {
-          await this.queue.send(
-            runtimeExecuteQueue,
-            { runId: candidate.id },
-            { singletonKey: candidate.id },
-          );
+          await this.reconcileRun(candidate.id);
         } catch (error) {
           this.onError(error);
         }
@@ -62,5 +63,33 @@ export class RuntimeExecutionReconciler {
     } finally {
       this.running = false;
     }
+  }
+
+  async reconcileRun(runId: string): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      const candidates = await tx.$queryRaw<Array<{ id: string; threadId: string }>>(Prisma.sql`
+        SELECT run."id", run."thread_id" AS "threadId"
+        FROM "runs" AS run
+        WHERE run."id" = ${runId}
+          AND run."status" = 'running'
+          AND (
+            run."execution_owner_id" IS NULL
+            OR run."execution_lease_expires_at" <= CURRENT_TIMESTAMP
+          )
+        FOR UPDATE SKIP LOCKED
+      `);
+      const candidate = candidates[0];
+      if (!candidate) return;
+
+      await this.queue.send(
+        runtimeExecuteQueue,
+        { runId: candidate.id },
+        {
+          singletonKey: candidate.id,
+          group: { id: candidate.threadId },
+          db: fromPrisma(tx),
+        },
+      );
+    });
   }
 }

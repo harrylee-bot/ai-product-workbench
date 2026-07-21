@@ -1929,6 +1929,7 @@ async function runSseRevocationScenario(ownerClient, viewerClient) {
   const runId = `sse-revocation-${randomUUID()}`;
   const requestId = `sse-revocation-request-${randomUUID()}`;
   const traceId = `sse-revocation-trace-${randomUUID()}`;
+  const executionOwnerId = `sse-revocation-fixture:${randomUUID()}`;
   const runRequest = {
     prompt: "SSE authorization boundary",
     modelId: runtimeCatalogModelId,
@@ -1944,17 +1945,21 @@ async function runSseRevocationScenario(ownerClient, viewerClient) {
       INSERT INTO "runs" (
         "id", "project_id", "thread_id", "created_by_id", "idempotency_key",
         "request_hash", "request_id", "request", "status", "model_id", "trace_id",
-        "event_sequence", "started_at", "created_at", "updated_at"
+        "event_sequence", "attempt", "execution_owner_id", "execution_epoch",
+        "execution_heartbeat_at", "execution_lease_expires_at",
+        "started_at", "created_at", "updated_at"
       ) VALUES (
         $1, $2, $3, $4, $5, repeat('a', 64), $6, $7::jsonb, 'running',
-        $8, $9, 1, clock_timestamp(), clock_timestamp(), clock_timestamp()
+        $8, $9, 1, 1, $10, 1, clock_timestamp(),
+        clock_timestamp() + interval '5 minutes',
+        clock_timestamp(), clock_timestamp(), clock_timestamp()
       )
       RETURNING "id"
     )
     INSERT INTO "run_events" (
       "id", "run_id", "sequence", "type", "payload", "trace_id", "occurred_at"
     )
-    SELECT $10, "id", 1, 'run.started', '{"attempt":1}'::jsonb, $9, clock_timestamp()
+    SELECT $11, "id", 1, 'run.started', '{"attempt":1}'::jsonb, $9, clock_timestamp()
     FROM inserted_run
   `, [
     runId,
@@ -1966,6 +1971,7 @@ async function runSseRevocationScenario(ownerClient, viewerClient) {
     JSON.stringify(runRequest),
     runtimeCatalogModelId,
     traceId,
+    executionOwnerId,
     `sse-revocation-event-${randomUUID()}`,
   ]);
 
@@ -2005,6 +2011,7 @@ async function runSseRevocationScenario(ownerClient, viewerClient) {
   assert.deepEqual(events.map((event) => event.data.sequence), [1]);
   assert.ok(!events.some((event) => event.data.payload?.activityId === "revoked-sentinel"));
   await viewerClient.json("GET", `/runs/${runId}`, { expectedStatus: 404 });
+  await queryDatabase('DELETE FROM "runs" WHERE "id" = $1', [runId]);
 
   return {
     projectId: project.body.id,

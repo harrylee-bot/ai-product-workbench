@@ -25,7 +25,7 @@ import {
 describe("shared pg-boss queue definitions", () => {
   it("pins and provisions both Runtime queues from one persisted contract", async () => {
     expect(runtimeExecuteQueueOptions).toEqual({
-      policy: "key_strict_fifo",
+      policy: "exclusive",
       retryLimit: 5,
       retryDelay: 2,
       retryBackoff: true,
@@ -136,7 +136,7 @@ describe("shared pg-boss queue definitions", () => {
     const queues = new Map<string, unknown>([
       [runtimeExecuteQueue, runtimeQueue(runtimeExecuteQueue, {
         ...runtimeExecuteQueueOptions,
-        policy: "standard",
+        policy: "key_strict_fifo",
       })],
       [runtimeCancelQueue, runtimeQueue(runtimeCancelQueue, runtimeCancelQueueOptions)],
     ]);
@@ -151,7 +151,7 @@ describe("shared pg-boss queue definitions", () => {
     const queues = new Map<string, unknown>([
       [runtimeExecuteQueue, runtimeQueue(runtimeExecuteQueue, {
         ...runtimeExecuteQueueOptions,
-        policy: "standard",
+        policy: "key_strict_fifo",
       })],
       [runtimeCancelQueue, runtimeQueue(runtimeCancelQueue, runtimeCancelQueueOptions)],
     ]);
