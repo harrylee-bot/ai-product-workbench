@@ -12,7 +12,7 @@
   JSON 的自报值。
 - 环境必须记录 `environmentId`、`kind`、`target` 和 `region`；`PASS` 只接受
   `production`。
-- 当前整改规范中的 G0-G12、D-001-D-038 和 P-001-P-019 必须完整纳入 scope。
+- 当前整改规范中的 G0-G12、D-001-D-039 和 P-001-P-019 必须完整纳入 scope。
 - `advertised`、`deferred`、`N/A` 三种能力分类必须显式出现，并记录理由、分类到期、
   目标日期、升级路径、逾期处理和批准。`N/A` 不能由 Implementer 批准，过期分类直接
   失败。

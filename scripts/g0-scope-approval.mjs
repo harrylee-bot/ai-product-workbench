@@ -22,7 +22,7 @@ export const G0_ROLES = Object.freeze([
 ]);
 export const G0_GATE_IDS = Object.freeze(Array.from({ length: 13 }, (_, index) => `G${index}`));
 export const G0_FINDING_IDS = Object.freeze([
-  ...Array.from({ length: 38 }, (_, index) => `D-${String(index + 1).padStart(3, "0")}`),
+  ...Array.from({ length: 39 }, (_, index) => `D-${String(index + 1).padStart(3, "0")}`),
   ...Array.from({ length: 19 }, (_, index) => `P-${String(index + 1).padStart(3, "0")}`),
 ]);
 

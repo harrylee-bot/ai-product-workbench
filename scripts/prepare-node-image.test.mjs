@@ -65,12 +65,17 @@ test("all candidate Node Dockerfiles use the hardened Alpine helper", async () =
   assert.match(workflow, /NGINX_IMAGE: .*nginx:stable-alpine/u);
 });
 
-test("the Web image pins and probes its x64 musl native dependencies", async () => {
+test("the Web and CI builds pin their Linux x64 native dependencies", async () => {
   const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
   const nativePins = {
+    "@esbuild/linux-x64": "0.28.1",
     "@next/swc-linux-x64-musl": "16.2.10",
+    "@rolldown/binding-linux-x64-gnu": "1.1.4",
+    "@rolldown/binding-linux-x64-musl": "1.1.4",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.3.1",
     "@tailwindcss/oxide-linux-x64-musl": "4.3.1",
+    "lightningcss-linux-x64-gnu": "1.32.0",
     "lightningcss-linux-x64-musl": "1.32.0",
   };
 
@@ -80,6 +85,7 @@ test("the Web image pins and probes its x64 musl native dependencies", async () 
     const lockedPackage = lockfile.packages?.[`node_modules/${name}`];
     assert.equal(lockedPackage?.version, version, `${name} must have a complete lockfile entry`);
     assert.equal(lockedPackage?.optional, true, `${name} must remain optional outside Linux x64 builds`);
+    assert.match(lockedPackage?.integrity ?? "", /^sha512-/u, `${name} must retain registry integrity metadata`);
   }
 
   const webDockerfile = await readFile(path.join(root, "apps/web/Dockerfile"), "utf8");
