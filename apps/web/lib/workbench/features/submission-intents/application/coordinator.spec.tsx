@@ -14,6 +14,7 @@ import { workbenchQueryKeys } from "../../../query/keys";
 import {
   createWorkbenchSubmissionPlan,
   matchSubmissionIntentFiles,
+  resetWorkbenchSubmissionCoordinatorRegistryForTests,
   useWorkbenchSubmissionCoordinator,
   type WorkbenchSubmissionUploadPort,
 } from "./coordinator";
@@ -32,6 +33,7 @@ vi.mock("../api-adapter", () => ({
 }));
 
 beforeEach(() => {
+  resetWorkbenchSubmissionCoordinatorRegistryForTests();
   vi.clearAllMocks();
   mocks.cancelSubmissionIntent.mockResolvedValue(undefined);
 });
@@ -189,6 +191,181 @@ describe("SubmissionIntent coordinator application flow", () => {
 
     rendered.rerender();
     await act(async () => Promise.resolve());
+    expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce();
+    rendered.unmount();
+    queryClient.clear();
+  });
+
+  it("shares and does not replay a manual submit across a stale coordinator remount", async () => {
+    const queryClient = client();
+    const remountedQueryClient = client();
+    const uploads = uploadPort();
+    const created = pendingIntent("thread-1", {
+      request: runRequest(),
+      attachments: [],
+    });
+    const receipt = deferred<{
+      value: { intent: SubmissionIntent; run: Run };
+      etag: string;
+    }>();
+    mocks.createSubmissionIntent.mockResolvedValue({ value: created, etag: '"1"' });
+    mocks.submitSubmissionIntent.mockReturnValue(receipt.promise);
+    const rendered = renderHook(({ currentIntent }: {
+      currentIntent: SubmissionIntent | null;
+    }) => useWorkbenchSubmissionCoordinator({
+      currentIntent,
+      onRun: vi.fn(),
+      projectId: "project-1",
+      uploads,
+    }), {
+      initialProps: { currentIntent: null },
+      wrapper: wrapper(queryClient),
+    });
+
+    let submission!: Promise<Run | null>;
+    act(() => {
+      submission = rendered.result.current.submitPrepared({
+        projectId: "project-1",
+        threadId: "thread-1",
+        submission: { request: runRequest() },
+      });
+    });
+    await waitFor(() => expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce());
+    rendered.unmount();
+
+    const remounted = renderHook(() => useWorkbenchSubmissionCoordinator({
+      currentIntent: created,
+      onRun: vi.fn(),
+      projectId: "project-1",
+      uploads,
+    }), { wrapper: wrapper(remountedQueryClient) });
+    await act(async () => Promise.resolve());
+    expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce();
+
+    const submitted = submittedIntent(created);
+    receipt.resolve({ value: { intent: submitted, run: run(submitted) }, etag: '"2"' });
+    await act(() => submission);
+    remounted.rerender();
+    await act(async () => Promise.resolve());
+
+    expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce();
+    remounted.unmount();
+    queryClient.clear();
+    remountedQueryClient.clear();
+  });
+
+  it("replays a settled receipt without resubmitting after a stale QueryClient remount", async () => {
+    const queryClient = client();
+    const remountedQueryClient = client();
+    const created = pendingIntent("thread-1", {
+      request: runRequest(),
+      attachments: [],
+    });
+    const submitted = submittedIntent(created);
+    const receipt = { value: { intent: submitted, run: run(submitted) }, etag: '"2"' };
+    mocks.createSubmissionIntent.mockResolvedValue({ value: created, etag: '"1"' });
+    mocks.submitSubmissionIntent.mockResolvedValue(receipt);
+    const rendered = renderHook(() => useWorkbenchSubmissionCoordinator({
+      currentIntent: null,
+      onRun: vi.fn(),
+      projectId: "project-1",
+      uploads: uploadPort(),
+    }), { wrapper: wrapper(queryClient) });
+
+    await act(() => rendered.result.current.submitPrepared({
+      projectId: "project-1",
+      threadId: "thread-1",
+      submission: { request: runRequest() },
+    }));
+    expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce();
+    rendered.unmount();
+
+    const onRecoveredRun = vi.fn();
+    const remounted = renderHook(() => useWorkbenchSubmissionCoordinator({
+      currentIntent: created,
+      onRun: onRecoveredRun,
+      projectId: "project-1",
+      uploads: uploadPort(),
+    }), { wrapper: wrapper(remountedQueryClient) });
+
+    await waitFor(() => expect(onRecoveredRun).toHaveBeenCalledWith(receipt.value.run));
+    expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce();
+    remounted.unmount();
+    queryClient.clear();
+    remountedQueryClient.clear();
+  });
+
+  it("does not automatically resubmit after an ambiguous submit response", async () => {
+    const queryClient = client();
+    const remountedQueryClient = client();
+    const created = pendingIntent("thread-1", {
+      request: runRequest(),
+      attachments: [],
+    });
+    const submitted = submittedIntent(created);
+    const receipt = { value: { intent: submitted, run: run(submitted) }, etag: '"2"' };
+    mocks.createSubmissionIntent.mockResolvedValue({ value: created, etag: '"1"' });
+    mocks.submitSubmissionIntent
+      .mockRejectedValueOnce(new Error("submit response could not be verified"))
+      .mockResolvedValueOnce(receipt);
+    const rendered = renderHook(() => useWorkbenchSubmissionCoordinator({
+      currentIntent: null,
+      onRun: vi.fn(),
+      projectId: "project-1",
+      uploads: uploadPort(),
+    }), { wrapper: wrapper(queryClient) });
+
+    await expect(act(() => rendered.result.current.submitPrepared({
+      projectId: "project-1",
+      threadId: "thread-1",
+      submission: { request: runRequest() },
+    }))).rejects.toThrow("submit response could not be verified");
+    rendered.unmount();
+
+    const onRecoveredRun = vi.fn();
+    const remounted = renderHook(() => useWorkbenchSubmissionCoordinator({
+      currentIntent: created,
+      onRun: onRecoveredRun,
+      projectId: "project-1",
+      uploads: uploadPort(),
+    }), { wrapper: wrapper(remountedQueryClient) });
+    await act(async () => Promise.resolve());
+    expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce();
+
+    await act(() => remounted.result.current.retryRecovery());
+    expect(mocks.submitSubmissionIntent).toHaveBeenCalledTimes(2);
+    expect(onRecoveredRun).toHaveBeenCalledWith(receipt.value.run);
+    remounted.unmount();
+    queryClient.clear();
+    remountedQueryClient.clear();
+  });
+
+  it("shares one in-flight submit between a manual retry and automatic recovery", async () => {
+    const queryClient = client();
+    const intent = readyIntent(pendingIntent("thread-1", {
+      request: runRequest(),
+      attachments: [],
+    }));
+    const receipt = deferred<{
+      value: { intent: SubmissionIntent; run: Run };
+      etag: string;
+    }>();
+    mocks.submitSubmissionIntent.mockReturnValue(receipt.promise);
+    const rendered = renderHook(() => useWorkbenchSubmissionCoordinator({
+      currentIntent: intent,
+      onRun: vi.fn(),
+      projectId: "project-1",
+      uploads: uploadPort(),
+    }), { wrapper: wrapper(queryClient) });
+
+    await waitFor(() => expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce());
+    const retry = rendered.result.current.retryRecovery();
+    await act(async () => Promise.resolve());
+    expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce();
+
+    const submitted = submittedIntent(intent);
+    receipt.resolve({ value: { intent: submitted, run: run(submitted) }, etag: '"2"' });
+    await act(() => retry);
     expect(mocks.submitSubmissionIntent).toHaveBeenCalledOnce();
     rendered.unmount();
     queryClient.clear();

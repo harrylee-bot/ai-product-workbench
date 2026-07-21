@@ -5,9 +5,13 @@ import {
   importSourceProcessJobOptions,
   importSourceProcessQueue,
 } from "@workbench/workbench-contracts";
+import { PgBoss } from "pg-boss";
 import { AccessService } from "../src/modules/access/access.service.js";
 import { ImportSourcesService } from "../src/modules/import-sources/import-sources.service.js";
-import { WorkbenchQueueService } from "../src/platform/queue/workbench-queue.service.js";
+import {
+  WorkbenchQueueService,
+  pgConnectionString,
+} from "../src/platform/queue/workbench-queue.service.js";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -24,6 +28,7 @@ describeWithPostgres("Import Source PostgreSQL queue atomicity", () => {
     const queueJobIds: string[] = [];
 
     try {
+      await installQueueSchema(databaseUrl!);
       await queue.onModuleInit();
       const principal = await db.principal.create({
         data: { issuer: `import-source-${suffix}`, subject: `owner-${suffix}` },
@@ -120,6 +125,26 @@ describeWithPostgres("Import Source PostgreSQL queue atomicity", () => {
     }
   });
 });
+
+async function installQueueSchema(connectionString: string) {
+  const installer = new PgBoss({
+    connectionString: pgConnectionString(connectionString),
+    schema: "workbench_jobs",
+    application_name: "workbench-api-postgres-test-migrator",
+    schedule: false,
+    supervise: false,
+    migrate: true,
+    createSchema: true,
+    useListenNotify: false,
+  });
+  let started = false;
+  try {
+    await installer.start();
+    started = true;
+  } finally {
+    if (started) await installer.stop({ graceful: true, timeout: 30_000 });
+  }
+}
 
 function jobRows(db: PrismaClient, jobId: string) {
   return db.$queryRaw<Array<{ id: string; name: string }>>(Prisma.sql`

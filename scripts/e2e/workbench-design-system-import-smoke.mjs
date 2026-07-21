@@ -169,6 +169,9 @@ try {
     if (method === "GET" && requestPath === "/api/v1/workspaces/workspace-1/design-systems") {
       return json(route, { items: [sourceCatalogItem], nextCursor: null });
     }
+    if (method === "GET" && requestPath === `/api/v1/projects/${project.id}/import-sources`) {
+      return json(route, { items: [], nextCursor: null });
+    }
     if (method === "POST" && requestPath === "/api/v1/workspaces/workspace-1/projects") {
       const body = request.postDataJSON();
       assert(body.title === prompt, `Created Project title must preserve the prompt: ${JSON.stringify(body)}`);

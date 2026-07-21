@@ -4,6 +4,7 @@ import { Pool } from "pg";
 
 import { discardStoredOidcIdToken } from "./auth-account-storage";
 import { workbenchAuthIpAddressOptions } from "./workbench-auth-ip";
+import { isWorkbenchEnterpriseSsoEnabled } from "./workbench-enterprise-sso-policy";
 import { isWorkbenchPublicRegistrationEnabled } from "./workbench-registration-policy";
 import {
   isWorkbenchUsername,
@@ -21,6 +22,12 @@ function runtimeEnv(name: string, fallback: string): string {
   if (value) return value;
   if (process.env.NODE_ENV !== "production" || isProductionBuild) return fallback;
   throw new Error(`${name} is required`);
+}
+
+function requiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value || value.includes("REPLACE_WITH_")) throw new Error(`${name} is required`);
+  return value;
 }
 
 function normalizedOrigin(value: string, name: string): string {
@@ -49,12 +56,15 @@ const authOrigin = normalizedOrigin(
   runtimeEnv("BETTER_AUTH_URL", "http://localhost:3000"),
   "BETTER_AUTH_URL",
 );
-const oidcIssuer = normalizedIssuer(
-  runtimeEnv("WORKBENCH_OIDC_PROVIDER_ISSUER", "http://127.0.0.1:9080/realms/workbench"),
-  "WORKBENCH_OIDC_PROVIDER_ISSUER",
-);
 const databaseSchema = runtimeEnv("WORKBENCH_DATABASE_SCHEMA", "workbench");
 const publicRegistrationEnabled = isWorkbenchPublicRegistrationEnabled();
+const enterpriseSsoEnabled = isWorkbenchEnterpriseSsoEnabled();
+const oidcIssuer = enterpriseSsoEnabled
+  ? normalizedIssuer(
+      requiredEnv("WORKBENCH_OIDC_PROVIDER_ISSUER"),
+      "WORKBENCH_OIDC_PROVIDER_ISSUER",
+    )
+  : null;
 if (!/^[a-z_][a-z0-9_]*$/.test(databaseSchema)) {
   throw new Error("WORKBENCH_DATABASE_SCHEMA must be a simple PostgreSQL identifier");
 }
@@ -171,7 +181,7 @@ export const auth = betterAuth({
         },
       },
     }),
-    genericOAuth({
+    ...(oidcIssuer ? [genericOAuth({
       config: [
         {
           providerId: WORKBENCH_OIDC_PROVIDER_ID,
@@ -180,17 +190,14 @@ export const auth = betterAuth({
           // Dex 2.42 omits RFC 9207's callback `iss`; state, PKCE, and fixed
           // discovery/token/userinfo endpoints still bind the authorization flow.
           requireIssuerValidation: false,
-          clientId: runtimeEnv("WORKBENCH_OIDC_CLIENT_ID", "workbench-web"),
-          clientSecret: runtimeEnv(
-            "WORKBENCH_OIDC_CLIENT_SECRET",
-            "workbench-build-only-client-secret",
-          ),
+          clientId: requiredEnv("WORKBENCH_OIDC_CLIENT_ID"),
+          clientSecret: requiredEnv("WORKBENCH_OIDC_CLIENT_SECRET"),
           scopes: ["openid", "profile", "email"],
           pkce: true,
           accessType: "offline",
         },
       ],
-    }),
+    })] : []),
     jwt({
       jwt: {
         issuer: authOrigin,

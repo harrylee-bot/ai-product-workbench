@@ -5,9 +5,9 @@
   "agent": {
     "path": "deerflow/agents/lead_agent/agent.py",
     "upstreamSha256": "9052cfadca31817a927e83ad2dff01bfe5afdf5acdae337cc8f30eb1a8d8469f",
-    "patchedSha256": "363a91528113a6daba6441dc7c2a32c787c8478a12be93f3222ba38adb7c8454",
+    "patchedSha256": "6bae0682d26cac465e5f7783e2878254bb45212bb1d88e4da9c937a5ae31aa49",
     "anchor": "    # Hide deferred tool schemas from model binding until tool_search promotes them.\n",
-    "insertion": "    # Product Workbench Canvas tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(workbench_canvas_policy_from_runnable_config(config))\n    )\n\n"
+    "insertion": "    # Product Workbench tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n        workbench_requested_artifact_kinds_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(\n            workbench_canvas_policy_from_runnable_config(config),\n            workbench_requested_artifact_kinds_from_runnable_config(config),\n        )\n    )\n\n"
   },
   "deferredMiddleware": {
     "path": "deerflow/agents/middlewares/deferred_tool_filter_middleware.py",
@@ -15,13 +15,78 @@
   },
   "toolScopeMiddleware": {
     "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
-    "sha256": "201abaf9a582eadf3c25083002bc4f5af22e013c0646e82737e6c79c283aa388"
+    "sha256": "32b9ea424b78b249ba59e8a688d584c9acec56a481749a0523c2700a2189a95a"
   },
-  "additionalSources": [],
+  "additionalSources": [
+    {
+      "path": "deerflow/tools/builtins/task_tool.py",
+      "upstreamSha256": "bbbf58869ea4e24a8c230695478fb5d09fd35c2e4dbb2c16bc5052871027ee95",
+      "patchedSha256": "3e14b348c6f1941fd3fe0a08d4bf75a539f451d50ab186aecd3de2db21c198de",
+      "replacements": [
+        {
+          "anchor": "    # Create executor\n",
+          "position": "before",
+          "insertion": "    # Product Workbench publication and Canvas tools are parent-run scoped. A\n    # subagent must never rediscover them from the inherited global tool group.\n    _workbench_parent_run_tool_names = frozenset(\n        {\n            \"workbench_generation_stage_update\",\n            \"workbench_artifact_draft_publish\",\n            \"workbench_prototype_patch_publish\",\n            \"get_visible_screens\",\n            \"get_selected_screens\",\n            \"view_screen\",\n            \"select_screen\",\n            \"quick_edit\",\n            \"duplicate_screen\",\n            \"rename_screen\",\n            \"navigate_canvas\",\n        }\n    )\n    tools = [\n        tool\n        for tool in tools\n        if getattr(tool, \"name\", None) not in _workbench_parent_run_tool_names\n    ]\n\n"
+        }
+      ]
+    }
+  ],
+  "gatewaySources": [
+    {
+      "path": "app/gateway/services.py",
+      "upstreamSha256": "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34",
+      "patchedSha256": "b248817f54e62a63a4777acaf9058a806b9695cb987c4cc5e4fa9eefd5b04440",
+      "replacements": [
+        {
+          "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
+          "position": "before",
+          "insertion": "_WORKBENCH_CONTEXT_KEYS: frozenset[str] = frozenset({\"workbench\", \"secrets\"})\n_WORKBENCH_SECRET_KEYS: frozenset[str] = frozenset(\n    {\n        \"WORKBENCH_KNOWLEDGE_CAPABILITY\",\n        \"WORKBENCH_CANVAS_CAPABILITY\",\n    }\n)\n_WORKBENCH_REQUESTED_ARTIFACT_KINDS: frozenset[str] = frozenset(\n    {\"prd\", \"prototype\", \"image\", \"code\", \"document\", \"data\"}\n)\n_WORKBENCH_SCOPE_KEYS: frozenset[str] = frozenset(\n    {\n        \"runId\",\n        \"runtimeAttemptId\",\n        \"requestedArtifactKinds\",\n        \"canvasTools\",\n        \"prototypePatchBaselines\",\n    }\n)\n\n\ndef _is_trusted_internal_caller(request: Request | None) -> bool:\n    user = getattr(getattr(request, \"state\", None), \"user\", None)\n    return getattr(user, \"system_role\", None) == INTERNAL_SYSTEM_ROLE\n\n\ndef _strip_workbench_channels(value: Any) -> Any:\n    if not isinstance(value, Mapping):\n        return value\n    sanitized = dict(value)\n    for key in (*_WORKBENCH_CONTEXT_KEYS, *_WORKBENCH_SECRET_KEYS):\n        sanitized.pop(key, None)\n    return sanitized\n\n\ndef _sanitize_run_config(request_config: dict[str, Any] | None) -> dict[str, Any] | None:\n    \"\"\"Remove reserved Workbench channels before config persistence or execution.\"\"\"\n    if request_config is None:\n        return None\n    sanitized = dict(request_config)\n    for container_name in (\"configurable\", \"context\"):\n        if container_name in sanitized:\n            sanitized[container_name] = _strip_workbench_channels(sanitized[container_name])\n    for key in (*_WORKBENCH_CONTEXT_KEYS, *_WORKBENCH_SECRET_KEYS):\n        sanitized.pop(key, None)\n    return sanitized\n\n\ndef _normalize_workbench_scope(value: Any) -> dict[str, Any] | None:\n    if not isinstance(value, Mapping):\n        return None\n    if not set(value).issubset(_WORKBENCH_SCOPE_KEYS):\n        return None\n    run_id = value.get(\"runId\")\n    runtime_attempt_id = value.get(\"runtimeAttemptId\")\n    requested_artifact_kinds = value.get(\"requestedArtifactKinds\")\n    if (\n        not isinstance(run_id, str)\n        or not run_id\n        or not isinstance(runtime_attempt_id, str)\n        or not runtime_attempt_id\n        or (\n            requested_artifact_kinds is not None\n            and (\n                not isinstance(requested_artifact_kinds, list)\n                or len(requested_artifact_kinds) > len(_WORKBENCH_REQUESTED_ARTIFACT_KINDS)\n                or any(\n                    not isinstance(kind, str)\n                    or kind not in _WORKBENCH_REQUESTED_ARTIFACT_KINDS\n                    for kind in requested_artifact_kinds\n                )\n                or len(set(requested_artifact_kinds)) != len(requested_artifact_kinds)\n            )\n        )\n    ):\n        return None\n    return {key: value[key] for key in _WORKBENCH_SCOPE_KEYS if key in value}\n\n\ndef _normalize_workbench_secrets(value: Any) -> dict[str, str]:\n    if not isinstance(value, Mapping):\n        return {}\n    return {\n        key: secret\n        for key, secret in value.items()\n        if key in _WORKBENCH_SECRET_KEYS and isinstance(secret, str) and secret\n    }\n\n\n"
+        },
+        {
+          "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
+          "position": "replace",
+          "insertion": "def merge_run_context_overrides(\n    config: dict[str, Any],\n    context: Mapping[str, Any] | None,\n    *,\n    allow_workbench_context: bool = False,\n) -> None:\n"
+        },
+        {
+          "anchor": "    if \"user_id\" in context and isinstance(runtime_context, dict):\n        runtime_context.setdefault(\"user_id\", context[\"user_id\"])\n",
+          "position": "replace",
+          "insertion": "    if \"user_id\" in context and isinstance(runtime_context, dict):\n        runtime_context.setdefault(\"user_id\", context[\"user_id\"])\n    if allow_workbench_context and isinstance(runtime_context, dict):\n        scope = _normalize_workbench_scope(context.get(\"workbench\"))\n        if scope is None:\n            return\n        runtime_context[\"workbench\"] = scope\n        secrets = _normalize_workbench_secrets(context.get(\"secrets\"))\n        if secrets:\n            runtime_context[\"secrets\"] = secrets\n"
+        },
+        {
+          "anchor": "    config: dict[str, Any] = {\"recursion_limit\": 100}\n",
+          "position": "before",
+          "insertion": "    request_config = _sanitize_run_config(request_config)\n"
+        },
+        {
+          "anchor": "    owner_context_token = set_current_user(SimpleNamespace(id=owner_user_id)) if owner_user_id else None\n",
+          "position": "before",
+          "insertion": "    trusted_internal_caller = _is_trusted_internal_caller(request)\n    sanitized_request_config = _sanitize_run_config(body.config)\n"
+        },
+        {
+          "anchor": "                kwargs={\"input\": body.input, \"config\": body.config},\n",
+          "position": "replace",
+          "insertion": "                kwargs={\"input\": body.input, \"config\": sanitized_request_config},\n"
+        },
+        {
+          "anchor": "        config = build_run_config(thread_id, body.config, body.metadata, assistant_id=body.assistant_id)\n",
+          "position": "replace",
+          "insertion": "        config = build_run_config(thread_id, sanitized_request_config, body.metadata, assistant_id=body.assistant_id)\n"
+        },
+        {
+          "anchor": "        merge_run_context_overrides(config, getattr(body, \"context\", None))\n",
+          "position": "replace",
+          "insertion": "        merge_run_context_overrides(\n            config,\n            getattr(body, \"context\", None),\n            allow_workbench_context=trusted_internal_caller,\n        )\n"
+        }
+      ]
+    }
+  ],
   "patchApplier": {
-    "sha256": "bd9502f2ae402eac3edb73d50cd125ea6d1f30ae6c201b5c1a04915ae315f754"
+    "sha256": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb"
   },
   "contractTest": {
-    "sha256": "021369eaf82e240022ee021c81d99b67fe9ea58aa6a70fb8a04254e72c5afba0"
+    "sha256": "43189bf22c37de9214a565a8ead91be6ccf7f721446015dcb6355665ca4deb22"
+  },
+  "requestContextTest": {
+    "sha256": "e5195ba0b6f5b22d8f2ecc94c29cd80260cdb8a420a8636a05279d14b7517e24"
   }
 }

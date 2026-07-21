@@ -1,5 +1,6 @@
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
+import { Readable } from "node:stream";
 import {
   canvasAgentToolRequestSchema,
   canvasAgentToolInvocationSchema,
@@ -9,7 +10,9 @@ import {
   type CanvasAgentToolInvocation,
 } from "@workbench/workbench-contracts";
 import {
+  createCanvasToolCapabilityGrant,
   canvasToolCapabilityGrantPayloadSha256,
+  canvasToolPayloadSha256,
   type CanvasToolCapabilityGrantPayload,
 } from "@workbench/workbench-canvas-tools";
 import { describe, expect, it, vi } from "vitest";
@@ -42,6 +45,91 @@ describe("CanvasAgentService", () => {
     };
     expect(failure.status).toBe(503);
     expect(failure.getResponse().code).toBe("CANVAS_TOOL_NOT_CONFIGURED");
+  });
+
+  it("rechecks the live session, grant, Run, membership, and owner before reading a visual", async () => {
+    const grant = capabilityGrant();
+    const secret = Buffer.alloc(32, 17);
+    const token = createCanvasToolCapabilityGrant(grant, secret, {
+      now: new Date(),
+      maximumTtlSeconds: 300,
+    });
+    const bytes = Buffer.from("visual-bytes");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const db = {
+      $queryRaw: vi.fn().mockResolvedValue([{
+        storageKey: "canvas-visuals/visual_1.webp",
+        mediaType: "image/webp",
+        sha256,
+        byteSize: BigInt(bytes.byteLength),
+        expiresAt: new Date(Date.now() + 30_000),
+        snapshotSha256: grant.snapshotSha256,
+        boardRevision: grant.boardRevision,
+        canvasStateRevision: grant.canvasStateRevision,
+        viewport: { x: 0, y: 0, zoom: 1 },
+        selectedNodeIds: [],
+        visibleNodeIds: [],
+        profile: grant.profile,
+      }]),
+    };
+    const storage = {
+      getObject: vi.fn().mockResolvedValue({
+        body: Readable.from([bytes]),
+        byteSize: bytes.byteLength,
+        mediaType: "image/webp",
+        contentRange: null,
+      }),
+      putObject: vi.fn(),
+      deleteObject: vi.fn(),
+    };
+    const service = new CanvasAgentService(
+      db as never,
+      new CanvasAgentConfig(new ConfigService({ WORKBENCH_CANVAS_TOOL_SECRET: secret.toString("base64url") })),
+      storage,
+    );
+
+    const result = await service.getVisual(`Bearer ${token}`, "visual_1");
+
+    expect(result).toMatchObject({
+      mediaType: "image/webp",
+      byteSize: bytes.byteLength,
+      sha256,
+    });
+    const query = db.$queryRaw.mock.calls[0]?.[0] as { strings?: string[] };
+    const sql = query.strings?.join("?").replace(/\s+/gu, " ") ?? "";
+    expect(sql).toContain('session."status" = \'active\'');
+    expect(sql).toContain('tool_grant."revoked_at" IS NULL');
+    expect(sql).toContain('run."status" = \'running\'');
+    expect(sql).toContain('project."status" = \'active\'');
+    expect(sql).toContain('principal."status" = \'active\'');
+    expect(sql).toContain('visual."storage_deleted_at" IS NULL');
+    expect(storage.getObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when the signed token still lives but its live owner rows are no longer valid", async () => {
+    const grant = capabilityGrant();
+    const secret = Buffer.alloc(32, 18);
+    const token = createCanvasToolCapabilityGrant(grant, secret, {
+      now: new Date(),
+      maximumTtlSeconds: 300,
+    });
+    const db = { $queryRaw: vi.fn().mockResolvedValue([]) };
+    const storage = {
+      getObject: vi.fn(),
+      putObject: vi.fn(),
+      deleteObject: vi.fn(),
+    };
+    const service = new CanvasAgentService(
+      db as never,
+      new CanvasAgentConfig(new ConfigService({ WORKBENCH_CANVAS_TOOL_SECRET: secret.toString("base64url") })),
+      storage,
+    );
+
+    await expect(service.getVisual(`Bearer ${token}`, "visual_1")).rejects.toMatchObject({
+      status: 401,
+      response: expect.objectContaining({ code: "CANVAS_TOOL_GRANT_UNAUTHORIZED" }),
+    });
+    expect(storage.getObject).not.toHaveBeenCalled();
   });
 
   it("normalizes the Worker minimal envelope from the signed session scope", async () => {
@@ -488,6 +576,34 @@ describe("CanvasAgentService", () => {
     expect(rawSqlText(tx.$queryRaw.mock.calls[3]?.[0])).toContain('FROM "boards"');
   });
 
+  it("blocks a new tool call while a provisional client command is waiting for ACK", async () => {
+    const scope = authorizedScope();
+    const request = normalizedRequest("get_selected_screens", {});
+    const tx = {
+      $queryRaw: vi.fn()
+        .mockResolvedValueOnce([activeReservationIdentity()])
+        .mockResolvedValueOnce([reservationMembership()])
+        .mockResolvedValueOnce([{
+          ...lockedSession(scope.grant),
+          waitingClientToolCallId: "pending_canvas_call",
+        }])
+        .mockResolvedValueOnce([{ revision: 7 }]),
+      canvasToolInvocation: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+      },
+      canvasAgentSession: { update: vi.fn() },
+    };
+    const service = serviceWithTransaction(tx);
+
+    const failure = await reserveForTest(service, scope, request)
+      .catch((error: unknown) => error) as { getResponse: () => { code?: string } };
+
+    expect(failure.getResponse().code).toBe("CANVAS_TOOL_INVOCATION_CONFLICT");
+    expect(tx.canvasToolInvocation.create).not.toHaveBeenCalled();
+    expect(tx.canvasAgentSession.update).not.toHaveBeenCalled();
+  });
+
   it("rejects reservation when Canvas state changes after authorization", async () => {
     const scope = authorizedScope();
     const request = normalizedRequest("get_selected_screens", {});
@@ -784,6 +900,22 @@ describe("CanvasAgentService", () => {
     expect(failure.getResponse().code).toBe("CANVAS_CLIENT_COMMAND_CONFLICT");
   });
 
+  it("revokes the grant when a rejected ACK follows a provisional state advance", async () => {
+    const command = navigateCommand();
+    const ack = rejectedNavigateAck(command);
+    const tx = acknowledgementTransaction(command, null, {
+      commandStatus: "pending",
+      sessionStatus: "active",
+    });
+    const service = serviceWithTransaction(tx, { locateCommand: true });
+
+    await expect(service.acknowledge("principal_1", "project_1", command.commandId, ack)).resolves.toEqual(ack);
+    expect(tx.canvasToolGrant.updateMany).toHaveBeenCalledWith({
+      where: { id: "11111111-1111-4111-8111-111111111111", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
   it("publishes a normalized Canvas visual once and verifies replay without another upload", async () => {
     const capture = visualCaptureFixture();
     const pending = pendingVisualCapability(capture.visualCapabilityId);
@@ -907,6 +1039,10 @@ describe("CanvasAgentService", () => {
       },
       canvasVisualCapability: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       canvasToolInvocation: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      canvasAgentSession: {
+        findUnique: vi.fn().mockResolvedValue({ canvasStateRevision: invocation.canvasStateRevisionBefore }),
+      },
+      canvasToolGrant: { updateMany: vi.fn() },
     };
     const service = serviceWithTransaction(tx);
 
@@ -926,21 +1062,20 @@ describe("CanvasAgentService", () => {
       where: { id: "invocation_1", status: "waiting_client" },
       data: expect.objectContaining({ status: "failed", failureCode: "COMMAND_EXPIRED" }),
     }));
+    expect(tx.canvasToolGrant.updateMany).not.toHaveBeenCalled();
   });
 
-  it("synchronizes the complete browser-owned Canvas state before command ACK", async () => {
+  it("synchronizes a complete Canvas state caused by the pending client command", async () => {
+    const command = navigateCommand();
     const state = clientState({
       canvasStateRevision: 4,
       viewport: { x: 20, y: 30, zoom: 1.25 },
+      causedByCommandId: command.commandId,
     });
     const tx = {
-      projectMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          project: { status: "active" },
-          principal: { status: "active" },
-        }),
-      },
       $queryRaw: vi.fn()
+        .mockResolvedValueOnce([activeReservationIdentity()])
+        .mockResolvedValueOnce([reservationMembership()])
         .mockResolvedValueOnce([{
           id: "session_1",
           boardRevision: 7,
@@ -952,6 +1087,10 @@ describe("CanvasAgentService", () => {
         .mockResolvedValueOnce([{ revision: 7 }]),
       boardNode: { findMany: vi.fn().mockResolvedValue([]) },
       artifactVersion: { findMany: vi.fn().mockResolvedValue([]) },
+      canvasClientCommand: {
+        findUnique: vi.fn().mockResolvedValue(causalCommandRow(command)),
+      },
+      canvasToolGrant: { updateMany: vi.fn() },
       canvasAgentSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
     const service = serviceWithTransaction(tx);
@@ -970,21 +1109,18 @@ describe("CanvasAgentService", () => {
         viewport: { x: 20, y: 30, zoom: 1.25 },
       },
     });
+    expect(tx.canvasToolGrant.updateMany).not.toHaveBeenCalled();
   });
 
-  it("rejects two different browser states at the same Canvas state revision", async () => {
+  it("rejects two different browser states at the same revision without revoking the grant", async () => {
     const state = clientState({
       canvasStateRevision: 3,
       viewport: { x: 20, y: 30, zoom: 1.25 },
     });
     const tx = {
-      projectMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          project: { status: "active" },
-          principal: { status: "active" },
-        }),
-      },
       $queryRaw: vi.fn()
+        .mockResolvedValueOnce([activeReservationIdentity()])
+        .mockResolvedValueOnce([reservationMembership()])
         .mockResolvedValueOnce([{
           id: "session_1",
           boardRevision: 7,
@@ -996,14 +1132,103 @@ describe("CanvasAgentService", () => {
         .mockResolvedValueOnce([{ revision: 7 }]),
       boardNode: { findMany: vi.fn().mockResolvedValue([]) },
       artifactVersion: { findMany: vi.fn().mockResolvedValue([]) },
-      canvasAgentSession: { updateMany: vi.fn() },
+      canvasToolGrant: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      canvasAgentSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
     const service = serviceWithTransaction(tx);
 
     const failure = await service.synchronizeClientState("principal_1", "project_1", state)
       .catch((error: unknown) => error) as { getResponse: () => { code?: string } };
     expect(failure.getResponse().code).toBe("CANVAS_REVISION_MISMATCH");
+    expect(tx.canvasToolGrant.updateMany).not.toHaveBeenCalled();
     expect(tx.canvasAgentSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("revokes only the grant for an uncaused forward Canvas state advance", async () => {
+    const databaseNow = new Date("2026-07-20T09:00:00.000Z");
+    const state = clientState({
+      canvasStateRevision: 4,
+      viewport: { x: 20, y: 30, zoom: 1.25 },
+    });
+    const tx = {
+      $queryRaw: vi.fn()
+        .mockResolvedValueOnce([activeReservationIdentity({ databaseNow })])
+        .mockResolvedValueOnce([reservationMembership()])
+        .mockResolvedValueOnce([{
+          id: "session_1",
+          boardRevision: 7,
+          canvasStateRevision: 3,
+          selectedNodeIds: [],
+          visibleNodeIds: [],
+          viewport: { x: 0, y: 0, zoom: 1 },
+        }])
+        .mockResolvedValueOnce([{ revision: 7 }]),
+      boardNode: { findMany: vi.fn().mockResolvedValue([]) },
+      artifactVersion: { findMany: vi.fn().mockResolvedValue([]) },
+      canvasToolGrant: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      canvasAgentSession: { updateMany: vi.fn() },
+    };
+    const service = serviceWithTransaction(tx);
+
+    await expect(service.synchronizeClientState("principal_1", "project_1", state)).resolves.toEqual({
+      protocol: "workbench.canvas-client-state.v1",
+      activeSession: false,
+      canvasStateRevision: 4,
+    });
+    expect(tx.canvasToolGrant.updateMany).toHaveBeenCalledWith({
+      where: { agentSessionId: "session_1", revokedAt: null },
+      data: { revokedAt: databaseNow },
+    });
+    expect(tx.canvasAgentSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("accepts only a persisted successful client-command digest as causal state lineage", async () => {
+    const scope = authorizedScope();
+    const viewport = { x: 20, y: 30, zoom: 1.25 };
+    const session = {
+      ...scope.session,
+      canvasStateRevision: 4,
+      viewport,
+    };
+    const snapshot = {
+      ...scope.snapshot,
+      canvasStateRevision: 4,
+      viewport,
+    };
+    const findFirst = vi.fn().mockResolvedValue({ id: "acknowledged_invocation" });
+    const service = new CanvasAgentService(
+      { canvasToolInvocation: { findFirst } } as never,
+      new CanvasAgentConfig(new ConfigService({})),
+    );
+    const verifyLineage = (service as unknown as {
+      assertCurrentCanvasStateLineage: (
+        grant: CanvasToolCapabilityGrantPayload,
+        currentSession: unknown,
+        currentSnapshot: unknown,
+        toolCallId: string,
+      ) => Promise<void>;
+    }).assertCurrentCanvasStateLineage.bind(service);
+
+    await expect(verifyLineage(scope.grant, session, snapshot, "next_call")).resolves.toBeUndefined();
+    expect(findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        agentSessionId: "session_1",
+        OR: expect.arrayContaining([
+          expect.objectContaining({
+            status: "succeeded",
+            canvasStateRevisionAfter: 4,
+            canvasStateSha256After: canonicalCanvasStateSha256(snapshot as never),
+          }),
+          expect.objectContaining({ status: "waiting_client", toolCallId: "next_call" }),
+        ]),
+      }),
+      select: { id: true },
+    });
+
+    findFirst.mockResolvedValueOnce(null);
+    const failure = await verifyLineage(scope.grant, session, snapshot, "unrelated_call")
+      .catch((error: unknown) => error) as { getResponse: () => { code?: string } };
+    expect(failure.getResponse().code).toBe("CANVAS_REVISION_MISMATCH");
   });
 
   it("settles an ACK only after its full Canvas state revision was synchronized", async () => {
@@ -1169,6 +1394,13 @@ function capabilityGrant(): CanvasToolCapabilityGrantPayload {
     runtimeAttemptId: "attempt_1",
     agentSessionId: "session_1",
     boardId: "board_1",
+    snapshotSha256: "e".repeat(64),
+    boardRevision: 7,
+    canvasStateRevision: 3,
+    viewportSha256: canvasToolPayloadSha256({ x: 0, y: 0, zoom: 1 }),
+    selectedNodeIdsSha256: canvasToolPayloadSha256([]),
+    visibleNodeIdsSha256: canvasToolPayloadSha256([]),
+    profile: "edit",
     declarationSha256: "a".repeat(64),
     issuedAt: now,
     notBefore: now,
@@ -1194,6 +1426,7 @@ function lockedSession(grant: CanvasToolCapabilityGrantPayload) {
 }
 
 function activeReservationIdentity(overrides: Partial<{
+  databaseNow: Date;
   projectStatus: string;
   principalStatus: string;
 }> = {}) {
@@ -1430,9 +1663,37 @@ function navigateAck(
   });
 }
 
+function rejectedNavigateAck(command: ReturnType<typeof navigateCommand>) {
+  return canvasClientCommandAckSchema.parse({
+    protocol: "workbench.canvas-client-command-ack.v1",
+    commandId: command.commandId,
+    agentSessionId: command.agentSessionId,
+    toolCallId: command.toolCallId,
+    requestId: command.requestId,
+    toolName: command.toolName,
+    projectId: command.projectId,
+    threadId: command.threadId,
+    runId: command.runId,
+    boardId: command.boardId,
+    clientSessionId: command.clientSessionId,
+    projectSessionGeneration: command.projectSessionGeneration,
+    boardRevision: command.boardRevision,
+    canvasStateRevision: 4,
+    acknowledgedAt: new Date().toISOString(),
+    status: "rejected",
+    result: null,
+    failure: {
+      code: "CLIENT_COMMAND_FAILED",
+      message: "The Canvas client command failed",
+      retryable: false,
+    },
+  });
+}
+
 function clientState(overrides: {
   canvasStateRevision?: number;
   viewport?: { x: number; y: number; zoom: number };
+  causedByCommandId?: string;
 } = {}) {
   return canvasClientStateSyncRequestSchema.parse({
     protocol: "workbench.canvas-client-state.v1",
@@ -1444,7 +1705,28 @@ function clientState(overrides: {
     viewport: overrides.viewport ?? { x: 0, y: 0, zoom: 1 },
     visibleScreens: [],
     selectedScreens: [],
+    ...(overrides.causedByCommandId ? { causedByCommandId: overrides.causedByCommandId } : {}),
   });
+}
+
+function causalCommandRow(command: ReturnType<typeof navigateCommand>) {
+  return {
+    id: command.commandId,
+    agentSessionId: command.agentSessionId,
+    projectId: command.projectId,
+    clientSessionId: command.clientSessionId,
+    projectSessionGeneration: command.projectSessionGeneration,
+    boardRevision: command.boardRevision,
+    canvasStateRevision: command.expectedCanvasStateRevision,
+    status: "pending",
+    expiresAt: new Date(command.expiresAt),
+    command,
+    invocation: {
+      status: "waiting_client",
+      agentSessionId: command.agentSessionId,
+      canvasStateRevisionBefore: command.expectedCanvasStateRevision,
+    },
+  };
 }
 
 function acknowledgementTransaction(
@@ -1541,5 +1823,6 @@ function acknowledgementTransaction(
     artifactVersion: { findMany: vi.fn().mockResolvedValue([]) },
     canvasAgentSession: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     canvasToolInvocation: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    canvasToolGrant: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
   };
 }

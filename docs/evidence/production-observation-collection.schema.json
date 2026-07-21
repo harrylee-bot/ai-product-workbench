@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aionbench.com/schemas/workbench.production-observation-collection.v1.json",
+  "title": "Product Workbench production observation collection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "payload", "payloadSha256"],
+  "properties": {
+    "schemaVersion": { "const": "workbench.production-observation-collection.v1" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["collectionId", "collectedAtUtc", "status", "plan", "catalog", "binding", "gates"],
+      "properties": {
+        "collectionId": { "$ref": "#/$defs/identifier" },
+        "collectedAtUtc": { "$ref": "#/$defs/utc" },
+        "status": { "enum": ["PASS", "FAIL"] },
+        "plan": { "$ref": "#/$defs/evidenceDescriptor" },
+        "catalog": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "path", "sha256"],
+          "properties": {
+            "schemaVersion": { "const": "workbench.production-acceptance-control-catalog.v1" },
+            "path": { "const": "governance/production-acceptance-control-catalog.v1.json" },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "binding": { "$ref": "#/$defs/binding" },
+        "gates": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["gateId", "status", "controlCount", "observedAtUtc", "ledger"],
+            "properties": {
+              "gateId": { "enum": ["G5", "G6", "G7", "G8", "G9", "G10", "G11"] },
+              "status": { "enum": ["PASS", "FAIL"] },
+              "controlCount": { "type": "integer", "minimum": 1 },
+              "observedAtUtc": { "$ref": "#/$defs/utc" },
+              "ledger": { "$ref": "#/$defs/evidenceDescriptor" }
+            }
+          }
+        }
+      }
+    },
+    "payloadSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "prefixedSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$" },
+    "commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "path": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+    "evidenceDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "digest"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "digest": { "$ref": "#/$defs/prefixedSha256" }
+      }
+    },
+    "digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["images", "configSha256", "migrationSha256", "deploymentConfigManifestSha256", "imageManifestSha256", "controlCatalogSha256"],
+      "properties": {
+        "images": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/image" } },
+        "configSha256": { "$ref": "#/$defs/sha256" },
+        "migrationSha256": { "$ref": "#/$defs/sha256" },
+        "deploymentConfigManifestSha256": { "$ref": "#/$defs/sha256" },
+        "imageManifestSha256": { "$ref": "#/$defs/sha256" },
+        "controlCatalogSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "deployId", "environmentId", "commitSha", "tag", "releaseChainId", "digests"],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/prefixedSha256" },
+        "deployId": { "$ref": "#/$defs/identifier" },
+        "environmentId": { "$ref": "#/$defs/identifier" },
+        "commitSha": { "$ref": "#/$defs/commit" },
+        "tag": { "$ref": "#/$defs/identifier" },
+        "releaseChainId": { "$ref": "#/$defs/prefixedSha256" },
+        "digests": { "$ref": "#/$defs/digests" }
+      }
+    }
+  }
+}

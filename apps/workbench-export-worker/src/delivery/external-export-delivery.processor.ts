@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ReadyObjectIntegrityError } from "@workbench/workbench-content-security";
 import { boundedDetail, TerminalExportError } from "@workbench/workbench-export-core";
 import type { ExportWorkerConfig } from "../config.js";
 import type { ExportStoragePort } from "../storage/storage.port.js";
@@ -154,6 +155,7 @@ export class ExternalExportDeliveryProcessor {
 }
 
 function terminalInfrastructureError(error: unknown) {
+  if (error instanceof ReadyObjectIntegrityError) return true;
   if (!(error instanceof Error)) return false;
   return [
     "EXPORT_INPUT_SIZE_LIMIT_EXCEEDED",

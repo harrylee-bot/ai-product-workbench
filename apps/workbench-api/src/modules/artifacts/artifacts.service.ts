@@ -38,6 +38,7 @@ import {
   type ReadyBlobStoragePort,
 } from "../../platform/object-storage/object-storage.port.js";
 import { readReadyObject } from "../../platform/object-storage/read-ready-object.js";
+import { readyObjectIntegrityRecorder } from "../../platform/object-storage/ready-object-integrity.js";
 import {
   projectMembershipFilter,
   type ProjectCapability,
@@ -680,6 +681,7 @@ export class ArtifactsService {
     artifactVersionId: string,
     rangeHeader?: string,
     ifNoneMatch?: string,
+    signal?: AbortSignal,
   ) {
     const version = await this.db.artifactVersion.findFirst({
       where: {
@@ -726,7 +728,7 @@ export class ArtifactsService {
       throw notFoundProblem("Artifact version content");
     }
 
-    return this.readBlob(blob, rangeHeader, ifNoneMatch);
+    return this.readBlob(blob, rangeHeader, ifNoneMatch, signal);
   }
 
   async getAssetContent(
@@ -736,6 +738,7 @@ export class ArtifactsService {
     assetId: string,
     rangeHeader?: string,
     ifNoneMatch?: string,
+    signal?: AbortSignal,
   ) {
     const pin = await this.db.artifactVersionAsset.findFirst({
       where: {
@@ -790,20 +793,24 @@ export class ArtifactsService {
     ) {
       throw notFoundProblem("Artifact version asset");
     }
-    return this.readBlob(pin.blob, rangeHeader, ifNoneMatch);
+    return this.readBlob(pin.blob, rangeHeader, ifNoneMatch, signal);
   }
 
   private async readBlob(
     blob: StoredArtifactBlob,
     rangeHeader?: string,
     ifNoneMatch?: string,
+    signal?: AbortSignal,
   ) {
     return readReadyObject(this.storage, {
       storageKey: blob.storageKey,
       sha256: blob.sha256,
       byteSize: safeByteSize(blob.byteSize),
       mediaType: blob.mediaType,
-    }, rangeHeader, ifNoneMatch);
+    }, rangeHeader, ifNoneMatch, {
+      signal,
+      recordIntegrityFailure: readyObjectIntegrityRecorder(this.db),
+    });
   }
 
   private async requireAuthorizedProject(

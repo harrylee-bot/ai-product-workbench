@@ -95,8 +95,8 @@ export class PrismaKnowledgeRetrievalStore implements KnowledgeRetrievalStore {
         chunk."content" AS "content",
         ts_rank_cd(chunk."search_vector", lexical_query.value, 32)::double precision AS "lexicalScore",
         NULL::double precision AS "denseScore"
-      FROM public."knowledge_chunks" AS chunk
-      JOIN public."knowledge_documents" AS document
+      FROM "knowledge_chunks" AS chunk
+      JOIN "knowledge_documents" AS document
         ON document."id" = chunk."document_id"
        AND document."release_id" = chunk."release_id"
       CROSS JOIN lexical_query
@@ -137,11 +137,11 @@ export class PrismaKnowledgeRetrievalStore implements KnowledgeRetrievalStore {
         chunk."content" AS "content",
         NULL::double precision AS "lexicalScore",
         (1 - (embedding."embedding" OPERATOR(public.<=>) ${vector}::public.vector))::double precision AS "denseScore"
-      FROM public."knowledge_chunk_embeddings" AS embedding
-      JOIN public."knowledge_chunks" AS chunk
+      FROM "knowledge_chunk_embeddings" AS embedding
+      JOIN "knowledge_chunks" AS chunk
         ON chunk."id" = embedding."chunk_id"
        AND chunk."release_id" = embedding."release_id"
-      JOIN public."knowledge_documents" AS document
+      JOIN "knowledge_documents" AS document
         ON document."id" = chunk."document_id"
        AND document."release_id" = chunk."release_id"
       WHERE embedding."release_id" = ${input.releaseId}

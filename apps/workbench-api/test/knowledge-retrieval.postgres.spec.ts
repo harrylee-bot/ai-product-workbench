@@ -167,7 +167,7 @@ describeWithPostgres("Knowledge retrieval PostgreSQL boundaries", () => {
           await tx.$executeRawUnsafe("SAVEPOINT knowledge_pin_drift");
           await expect(
             tx.$executeRaw(Prisma.sql`
-          UPDATE public."knowledge_releases"
+          UPDATE "knowledge_releases"
           SET "embedding_dimension" = 4
           WHERE "id" = ${fixture.releaseId}
         `),
@@ -840,7 +840,7 @@ describeWithPostgres("Knowledge retrieval PostgreSQL boundaries", () => {
       const allowRemoval = deferred<void>();
       const removal = peer.$transaction(async (tx) => {
         await tx.$queryRaw(Prisma.sql`
-          SELECT "id" FROM public."projects" WHERE "id" = ${fixture.projectId} FOR UPDATE
+          SELECT "id" FROM "projects" WHERE "id" = ${fixture.projectId} FOR UPDATE
         `);
         lockAcquired.resolve();
         await allowRemoval.promise;
@@ -1117,7 +1117,7 @@ async function seedFixture(tx: Prisma.TransactionClient) {
     });
     const searchText = integrationSegmenter.segment(chunk.content).join(" ");
     await tx.$executeRaw(Prisma.sql`
-      UPDATE public."knowledge_chunks"
+      UPDATE "knowledge_chunks"
       SET "search_vector" = to_tsvector('simple', ${searchText})
       WHERE "id" = ${chunk.id}
     `);
@@ -1150,7 +1150,7 @@ async function seedFixture(tx: Prisma.TransactionClient) {
   });
   for (const chunk of chunks) {
     await tx.$executeRaw(Prisma.sql`
-      INSERT INTO public."knowledge_chunk_embeddings" (
+      INSERT INTO "knowledge_chunk_embeddings" (
         "chunk_id", "release_id", "profile_id", "profile_spec_sha256",
         "dimension", "embedding", "embedding_sha256"
       ) VALUES (
@@ -1402,7 +1402,7 @@ async function seedExpiredInvocation(
   await db.$transaction(async (tx) => {
     await tx.$queryRaw(Prisma.sql`
       SELECT "runtime_attempt_id"
-      FROM public."knowledge_tool_budgets"
+      FROM "knowledge_tool_budgets"
       WHERE "runtime_attempt_id" = ${grant.runtimeAttemptId}
       FOR UPDATE
     `);
@@ -1449,7 +1449,7 @@ async function seedHistoricalStarts(
     await db.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`
         SELECT "runtime_attempt_id"
-        FROM public."knowledge_tool_budgets"
+        FROM "knowledge_tool_budgets"
         WHERE "runtime_attempt_id" = ${grant.runtimeAttemptId}
         FOR UPDATE
       `);

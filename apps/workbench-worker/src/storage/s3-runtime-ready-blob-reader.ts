@@ -1,5 +1,9 @@
 import { Readable } from "node:stream";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  stageReadyObject,
+  type ReadyObjectIntegrityRecorder,
+} from "@workbench/workbench-content-security";
 import type { WorkerConfig } from "../config.js";
 import type { RuntimeContentLocator } from "../runtime/runtime.port.js";
 import type { RuntimeReadyBlobReader } from "./runtime-ready-blob-reader.port.js";
@@ -19,6 +23,7 @@ export class S3RuntimeReadyBlobReader implements RuntimeReadyBlobReader {
       | "runtimeReadyBlobS3AccessKeyId"
       | "runtimeReadyBlobS3SecretAccessKey"
     >,
+    private readonly recordIntegrityFailure: ReadyObjectIntegrityRecorder,
     client?: S3Reader,
   ) {
     this.client = client ?? new S3Client({
@@ -33,25 +38,28 @@ export class S3RuntimeReadyBlobReader implements RuntimeReadyBlobReader {
   }
 
   async getObject(locator: RuntimeContentLocator, signal?: AbortSignal) {
-    const result = await this.client.send(new GetObjectCommand({
-      Bucket: this.config.s3Bucket,
-      Key: locator.storageKey,
-    }), signal ? { abortSignal: signal } : undefined);
-    if (!(result.Body instanceof Readable) || result.ContentLength === undefined) {
-      throw new Error("RUNTIME_SOURCE_STORAGE_BODY_UNSUPPORTED");
-    }
-    if (!Number.isSafeInteger(result.ContentLength) || result.ContentLength < 0) {
-      result.Body.destroy();
-      throw new Error("RUNTIME_SOURCE_STORAGE_SIZE_INVALID");
-    }
-    if (result.ContentLength !== locator.byteSize) {
-      result.Body.destroy();
-      throw new Error("RUNTIME_SOURCE_STORAGE_SIZE_MISMATCH");
-    }
+    const staged = await stageReadyObject(locator, async (requestSignal) => {
+      const result = await this.client.send(new GetObjectCommand({
+        Bucket: this.config.s3Bucket,
+        Key: locator.storageKey,
+      }), requestSignal ? { abortSignal: requestSignal } : undefined);
+      if (!(result.Body instanceof Readable)) {
+        throw new Error("RUNTIME_SOURCE_STORAGE_BODY_UNSUPPORTED");
+      }
+      return {
+        body: result.Body,
+        byteSize: result.ContentLength ?? null,
+        mediaType: result.ContentType ?? null,
+        contentRange: result.ContentRange ?? null,
+      };
+    }, {
+      recordIntegrityFailure: this.recordIntegrityFailure,
+      ...(signal ? { signal } : {}),
+    });
     return {
-      body: result.Body,
-      byteSize: result.ContentLength,
-      mediaType: result.ContentType ?? null,
+      body: staged.body,
+      byteSize: staged.byteSize,
+      mediaType: staged.manifest.mediaType,
     };
   }
 }

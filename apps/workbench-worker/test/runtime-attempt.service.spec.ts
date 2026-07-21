@@ -80,6 +80,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
     && (where.executionEpoch === undefined || where.executionEpoch === state.attemptEpoch)
     && (where.providerIdempotencyKey === undefined
       || where.providerIdempotencyKey === state.providerIdempotencyKey)
+    && (where.externalRunId === undefined || where.externalRunId === state.externalRunId)
     && (where.externalEventSequence === undefined
       || where.externalEventSequence === state.externalEventSequence)
   );
@@ -304,9 +305,8 @@ describe("RuntimeAttemptService", () => {
     const expected = `wbrt:${createHash("sha256").update("runtime-attempt-1").digest("hex")}`;
 
     await expect(service.submissionContext(claim)).resolves.toEqual({
+      mode: "submit",
       providerIdempotencyKey: expected,
-      submissionUnknown: false,
-      externalRunId: null,
     });
     await expect(service.submissionContext(claim)).resolves.toMatchObject({
       providerIdempotencyKey: expected,
@@ -315,6 +315,31 @@ describe("RuntimeAttemptService", () => {
 
     expect(state.providerIdempotencyKey).toBe(expected);
     expect(state.attemptStatus).toBe("submitting");
+  });
+
+  it("requires reconciliation after a worker dies with a durable submitting intent", async () => {
+    const { service, state } = harness({}, 10_000);
+    const firstClaim = await service.claim("run-1", "runtime-attempt-1", "worker-a:test");
+    await service.submissionContext(firstClaim);
+    await service.authorizeSubmission(firstClaim);
+
+    state.databaseNow = new Date("2026-07-19T00:00:11.000Z");
+    const recoveryClaim = await service.claim("run-1", "runtime-attempt-1", "worker-b:test");
+
+    await expect(service.submissionContext(recoveryClaim)).resolves.toMatchObject({
+      mode: "reconcile",
+    });
+    await expect(service.authorizeSubmission(recoveryClaim))
+      .rejects.toThrow("RUNTIME_SUBMISSION_RECONCILIATION_REQUIRED");
+    expect(state.attemptStatus).toBe("submitting");
+
+    await service.markSubmissionUnknown(recoveryClaim, "provider lookup returned no matching Run");
+    expect(state).toMatchObject({
+      attemptStatus: "submission_unknown",
+      submissionUnknownAt: state.databaseNow,
+      runOwnerId: null,
+      attemptOwnerId: null,
+    });
   });
 
   it("marks an ambiguous submission once and releases both leases", async () => {
@@ -341,8 +366,33 @@ describe("RuntimeAttemptService", () => {
     await service.attachExternalRun(claim, "external-run-1");
 
     expect(state).toMatchObject({ externalRunId: "external-run-1", attemptStatus: "running" });
+    await expect(service.submissionContext(claim)).resolves.toEqual({
+      mode: "join",
+      providerIdempotencyKey: state.providerIdempotencyKey,
+      externalRunId: "external-run-1",
+      lastExternalEventId: null,
+    });
+    await expect(service.authorizeSubmission(claim))
+      .rejects.toThrow("RUNTIME_SUBMISSION_EXTERNAL_RUN_ALREADY_ATTACHED");
     await expect(service.attachExternalRun(claim, "external-run-2"))
       .rejects.toThrow("RUNTIME_EXTERNAL_RUN_ID_CONFLICT");
+  });
+
+  it("releases a resolved reconciliation claim without reverting its attached Run", async () => {
+    const { service, state } = harness({
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+    });
+    const claim = await service.claim("run-1", "runtime-attempt-1", "worker-a:test");
+
+    await service.markSubmissionUnknown(claim, "attach commit response was lost");
+
+    expect(state).toMatchObject({
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+      runOwnerId: null,
+      attemptOwnerId: null,
+    });
   });
 
   it("deduplicates an exact external event replay with effects and cursor in one transaction", async () => {

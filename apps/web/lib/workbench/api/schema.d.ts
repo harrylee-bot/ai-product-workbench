@@ -4019,6 +4019,7 @@ export interface components {
             viewport: components["schemas"]["CanvasViewport"];
             visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
             selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
+            causedByCommandId?: string;
         };
         CanvasClientStateSyncResponse: {
             /** @enum {string} */
@@ -5890,6 +5891,7 @@ export interface components {
         };
         /** @enum {string} */
         PrototypePatchDegradedReason: "revision_gap" | "checksum_mismatch" | "patch_rejected" | "checkpoint_unavailable" | "buffer_limit_exceeded";
+        RunEventSourceId: string;
         /** @description Degraded Prototype patch events preserve the rejected one-step screen revision transition for recovery and audit. */
         PrototypePatchDegradedEventPayload: {
             attempt: number;
@@ -5898,7 +5900,7 @@ export interface components {
             artifactId: string;
             artifactVersionId: string;
             screenId: string;
-            sourceEventId: string;
+            sourceEventId: components["schemas"]["RunEventSourceId"];
             revision: components["schemas"]["PrototypePatchRevision"];
             reason: components["schemas"]["PrototypePatchDegradedReason"];
             requestSha256: components["schemas"]["PrototypePatchChecksum"];
@@ -5916,7 +5918,7 @@ export interface components {
             artifactIndex: number;
             artifactId: string;
             artifactVersionId: string;
-            sourceEventId: string;
+            sourceEventId: components["schemas"]["RunEventSourceId"];
             requestSha256: components["schemas"]["PrototypePatchChecksum"];
             screenId: string;
             baseRevision: components["schemas"]["PrototypePatchRevision"];

@@ -29,6 +29,8 @@ export class WorkbenchQueueService implements OnModuleInit, OnModuleDestroy {
       application_name: "workbench-api",
       schedule: false,
       supervise: false,
+      migrate: false,
+      createSchema: false,
       useListenNotify: false,
     });
     this.boss.on("error", (error) => this.logger.error(error.message, error.stack));

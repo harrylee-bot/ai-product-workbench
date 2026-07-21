@@ -11,6 +11,9 @@ import type {
   PrototypeAsset,
   PrototypeDocument,
 } from "@workbench/workbench-contracts";
+import type { RuntimeProviderTextState } from "./runtime-assistant-text.js";
+
+export { runtimeExternalFinalizationEvent } from "./runtime-assistant-text.js";
 
 export type RuntimeThreadMetadata = {
   workbenchProjectId: string;
@@ -92,6 +95,22 @@ export type RuntimePrototypePatchBaseline = {
   }>;
 };
 
+export type RuntimeSubmissionState =
+  | {
+      mode: "submit";
+      providerIdempotencyKey: string;
+    }
+  | {
+      mode: "reconcile";
+      providerIdempotencyKey: string;
+    }
+  | {
+      mode: "join";
+      providerIdempotencyKey: string;
+      externalRunId: string;
+      lastExternalEventId: string | null;
+    };
+
 export type RuntimeExecution = {
   runId: string;
   runtimeAttemptId: string;
@@ -109,11 +128,8 @@ export type RuntimeExecution = {
   canvasTool?: CanvasAgentToolDescriptor | null;
   designStyleSnapshot: RuntimeMaterializedDesignStyleSnapshot | null;
   resume: RuntimeResumeDecision[] | null;
-  previousAssistantText: string;
-  externalRunId: string | null;
-  lastExternalEventId: string | null;
-  providerIdempotencyKey: string;
-  submissionUnknown: boolean;
+  providerTextState: RuntimeProviderTextState;
+  submission: RuntimeSubmissionState;
 };
 
 export type RuntimeExternalEventPart = {
@@ -130,7 +146,10 @@ export type RuntimeExecutionObserver = {
     part: RuntimeExternalEventPart,
     effects: RuntimeProgressEvent[],
   ) => Promise<void>;
-  onEvent: (event: RuntimeProgressEvent) => Promise<void>;
+  onExternalFinalization: (
+    part: RuntimeExternalEventPart,
+    effects: RuntimeProgressEvent[],
+  ) => Promise<void>;
 };
 
 export class RuntimeSubmissionUnknownError extends Error {

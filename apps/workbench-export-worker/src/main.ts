@@ -13,6 +13,7 @@ import {
   traceQueueConsume,
   traceQueuePublish,
 } from "@workbench/workbench-telemetry";
+import { prismaReadyObjectIntegrityRecorder } from "@workbench/workbench-content-security";
 import { PgBoss, type JobWithMetadata } from "pg-boss";
 import { BrowserExportService } from "./browser/browser-export.service.js";
 import { loadExportWorkerConfig } from "./config.js";
@@ -36,6 +37,8 @@ async function main() {
     application_name: "workbench-export-worker",
     schedule: false,
     supervise: true,
+    migrate: false,
+    createSchema: false,
     useListenNotify: true,
   });
   boss.on("error", (error) => console.error("[export-worker:pg-boss]", error));
@@ -54,7 +57,10 @@ async function main() {
   });
   await boss.createQueue(exportDeliveryQueue, exportDeliveryQueueOptions);
 
-  const storage = new S3ExportStorageAdapter(config);
+  const storage = new S3ExportStorageAdapter(
+    config,
+    prismaReadyObjectIntegrityRecorder(db),
+  );
   const store = new PrismaExportStore(db, config);
   const loader = new ExportSourceLoader(store, storage, config);
   const browser = new BrowserExportService(config);

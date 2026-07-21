@@ -1,5 +1,6 @@
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import {
   canvasAgentToolInvocationSchema,
   canvasAgentToolRequestSchema,
@@ -13,16 +14,21 @@ import {
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import {
   canvasToolCapabilityGrantPayloadSha256,
+  canvasToolPayloadSha256,
   createCanvasToolCapabilityGrant,
   type CanvasToolCapabilityGrantPayload,
 } from "@workbench/workbench-canvas-tools";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { CanvasAgentConfig } from "../src/modules/canvas-agent/canvas-agent.config.js";
 import { CanvasAgentExpiryReconciler } from "../src/modules/canvas-agent/canvas-agent-expiry-reconciler.js";
 import {
   CanvasAgentService,
   canonicalCanvasStateSha256,
 } from "../src/modules/canvas-agent/canvas-agent.service.js";
+import {
+  READY_OBJECT_INTEGRITY_QUARANTINE_CODE,
+  recordReadyObjectIntegrityFailure,
+} from "../src/platform/object-storage/ready-object-integrity.js";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -155,6 +161,31 @@ describeWithPostgres("Canvas Agent PostgreSQL linearization", () => {
       await fixture.dispose();
     }
   }, 30_000);
+
+  it("rejects the original capability after the browser advances its bound Canvas snapshot", async () => {
+    const fixture = await createFixture();
+    const client = fixture.client(fixture.applicationName("snapshot_advance"));
+    const service = fixture.service(client);
+
+    try {
+      await expect(service.synchronizeClientState(
+        fixture.principalId,
+        fixture.projectId,
+        fixture.state(2, synchronizedViewport),
+      )).resolves.toMatchObject({ activeSession: false, canvasStateRevision: 2 });
+
+      await expect(service.execute(
+        `Bearer ${fixture.token}`,
+        "snapshot-advance-old-grant",
+        invocation("call_snapshot_advance"),
+      )).rejects.toMatchObject({ status: 401 });
+      await expect(admin!.canvasToolInvocation.count({
+        where: { agentSessionId: fixture.sessionId },
+      })).resolves.toBe(0);
+    } finally {
+      await fixture.dispose();
+    }
+  }, 30_000);
 });
 
 describeWithPostgres("Canvas ACK PostgreSQL state binding", () => {
@@ -178,7 +209,7 @@ describeWithPostgres("Canvas ACK PostgreSQL state binding", () => {
       await expect(service.synchronizeClientState(
         fixture.principalId,
         fixture.projectId,
-        fixture.state(2, synchronizedViewport),
+        fixture.state(2, synchronizedViewport, issued.command.commandId),
       )).resolves.toMatchObject({ activeSession: true, canvasStateRevision: 2 });
       const ack = fixture.ack(issued.command, 2, synchronizedViewport);
       await expect(service.acknowledge(
@@ -237,7 +268,7 @@ describeWithPostgres("Canvas ACK PostgreSQL state binding", () => {
       const synchronization = settle(fixture.service(syncClient).synchronizeClientState(
         fixture.principalId,
         fixture.projectId,
-        fixture.state(2, synchronizedViewport),
+        fixture.state(2, synchronizedViewport, issued.command.commandId),
       ));
       const syncPid = await waitForBlockedBy(observer, syncName, heldBoard.pid);
 
@@ -286,10 +317,12 @@ describeWithPostgres("Canvas expiry PostgreSQL reconciliation", () => {
       const leftReconciler = new CanvasAgentExpiryReconciler(
         left.client(left.applicationName("reconciler")) as never,
         reconcilerConfig(1) as never,
+        rejectingVisualStorage() as never,
       );
       const rightReconciler = new CanvasAgentExpiryReconciler(
         right.client(right.applicationName("reconciler")) as never,
         reconcilerConfig(1) as never,
+        rejectingVisualStorage() as never,
       );
 
       const results = await Promise.all([
@@ -335,6 +368,7 @@ describeWithPostgres("Canvas expiry PostgreSQL reconciliation", () => {
       const reconciler = new CanvasAgentExpiryReconciler(
         fixture.client(fixture.applicationName("reconciler")) as never,
         reconcilerConfig(10) as never,
+        rejectingVisualStorage() as never,
       );
       await expect(reconciler.runOnce()).resolves.toEqual({
         expiredSessions: 1,
@@ -368,6 +402,204 @@ describeWithPostgres("Canvas expiry PostgreSQL reconciliation", () => {
   }, 30_000);
 });
 
+describeWithPostgres("Canvas visual capability PostgreSQL lifecycle", () => {
+  it("rejects a live visual after grant revocation and retries object cleanup", async () => {
+    const fixture = await createFixture();
+    const bytes = Buffer.from("canvas-visual-bytes");
+    const visualSha256 = createHash("sha256").update(bytes).digest("hex");
+    const visual = await seedVisualCapability(fixture, {
+      sha256: visualSha256,
+      byteSize: bytes.byteLength,
+    });
+    const storage = {
+      getObject: async () => ({
+        body: Readable.from([bytes]),
+        byteSize: bytes.byteLength,
+        mediaType: "image/webp",
+        contentRange: null,
+      }),
+      deleteObject: vi.fn()
+        .mockRejectedValueOnce(new Error("temporary visual storage outage"))
+        .mockResolvedValueOnce(undefined),
+    };
+    const apiClient = fixture.client(fixture.applicationName("visual_api"));
+    const service = new CanvasAgentService(apiClient as never, canvasConfig(), storage as never);
+
+    try {
+      await expect(service.getVisual(`Bearer ${fixture.token}`, visual.visualCapabilityId))
+        .resolves.toMatchObject({ sha256: visualSha256, byteSize: bytes.byteLength });
+      await admin!.principal.update({
+        where: { id: fixture.principalId },
+        data: { status: "disabled" },
+      });
+      await expect(service.getVisual(`Bearer ${fixture.token}`, visual.visualCapabilityId))
+        .rejects.toMatchObject({ status: 401 });
+      await admin!.principal.update({
+        where: { id: fixture.principalId },
+        data: { status: "active" },
+      });
+      await admin!.canvasToolGrant.update({
+        where: { id: fixture.grantId },
+        data: { revokedAt: new Date() },
+      });
+      await expect(service.getVisual(`Bearer ${fixture.token}`, visual.visualCapabilityId))
+        .rejects.toMatchObject({ status: 401 });
+
+      const reconcilerClient = fixture.client(fixture.applicationName("visual_gc"));
+      const reconciler = new CanvasAgentExpiryReconciler(
+        reconcilerClient as never,
+        reconcilerConfig(10) as never,
+        storage as never,
+      );
+      await reconciler.runOnce();
+      await expect(admin!.canvasVisualCapability.findUniqueOrThrow({
+        where: { id: visual.visualCapabilityId },
+        select: { status: true, storageDeletedAt: true },
+      })).resolves.toMatchObject({ status: "expired", storageDeletedAt: null });
+
+      await reconciler.runOnce();
+      await expect(admin!.canvasVisualCapability.findUniqueOrThrow({
+        where: { id: visual.visualCapabilityId },
+        select: { status: true, storageDeletedAt: true },
+      })).resolves.toMatchObject({ status: "expired", storageDeletedAt: expect.any(Date) });
+      expect(storage.deleteObject).toHaveBeenCalledTimes(2);
+    } finally {
+      await fixture.dispose();
+    }
+  }, 30_000);
+
+  it("quarantines a zero-byte visual and serializes its incident ahead of physical cleanup", async () => {
+    const fixture = await createFixture();
+    const expectedBytes = Buffer.from("canvas-visual-bytes");
+    const tamperedBytes = Buffer.alloc(0);
+    const visualSha256 = createHash("sha256").update(expectedBytes).digest("hex");
+    const visual = await seedVisualCapability(fixture, {
+      sha256: visualSha256,
+      byteSize: expectedBytes.byteLength,
+    });
+    const storageKey = `canvas-visuals/${visual.visualCapabilityId}.webp`;
+    const storage = {
+      getObject: vi.fn(async () => ({
+        body: Readable.from([tamperedBytes]),
+        byteSize: tamperedBytes.byteLength,
+        mediaType: "image/webp",
+        contentRange: null,
+      })),
+      deleteObject: vi.fn().mockResolvedValue(undefined),
+    };
+    const apiClient = fixture.client(fixture.applicationName("visual_integrity_api"));
+    const service = new CanvasAgentService(apiClient as never, canvasConfig(), storage as never);
+
+    try {
+      await expect(service.getVisual(`Bearer ${fixture.token}`, visual.visualCapabilityId))
+        .rejects.toThrow("OBJECT_STORAGE_BYTE_SIZE_MISMATCH");
+      await expect(admin!.canvasVisualCapability.findUniqueOrThrow({
+        where: { id: visual.visualCapabilityId },
+        select: { status: true, failureCode: true, storageDeletedAt: true },
+      })).resolves.toEqual({
+        status: "failed",
+        failureCode: READY_OBJECT_INTEGRITY_QUARANTINE_CODE,
+        storageDeletedAt: null,
+      });
+      const incident = await admin!.readyObjectIntegrityIncident.findFirstOrThrow({
+        where: { storageKey },
+        select: {
+          id: true,
+          failureCode: true,
+          expectedSha256: true,
+          observedSha256: true,
+          occurrenceCount: true,
+        },
+      });
+      expect(incident).toEqual({
+        id: expect.any(String),
+        failureCode: "OBJECT_STORAGE_BYTE_SIZE_MISMATCH",
+        expectedSha256: visualSha256,
+        observedSha256: null,
+        occurrenceCount: 1,
+      });
+
+      const reconciler = new CanvasAgentExpiryReconciler(
+        fixture.client(fixture.applicationName("visual_integrity_gc")) as never,
+        reconcilerConfig(10) as never,
+        storage as never,
+      );
+      await reconciler.runOnce();
+      expect(storage.deleteObject).not.toHaveBeenCalled();
+      await expect(admin!.canvasVisualCapability.findUniqueOrThrow({
+        where: { id: visual.visualCapabilityId },
+        select: { storageDeletedAt: true },
+      })).resolves.toEqual({ storageDeletedAt: null });
+
+      // Release the first observation, then hold the incident row so the next
+      // recorder owns the storage-key/visual fence while its upsert is still
+      // uncommitted. The cleanup query starts on an older READ COMMITTED
+      // snapshot; its final in-transaction hold recheck must still prevent S3.
+      await admin!.readyObjectIntegrityRetentionRelease.create({
+        data: {
+          incidentId: incident.id,
+          releasedOccurrenceCount: 1,
+          releaseReference: "D020-CANVAS-CONCURRENCY-BASELINE",
+        },
+      });
+      const blocker = await holdIntegrityIncident(
+        fixture.client(fixture.applicationName("visual_integrity_blocker")),
+        incident.id,
+      );
+      const recorderName = fixture.applicationName("visual_integrity_recorder");
+      const cleanupName = fixture.applicationName("visual_integrity_cleanup");
+      const observer = fixture.client(fixture.applicationName("visual_integrity_observer"));
+      const recording = recordReadyObjectIntegrityFailure(
+        fixture.client(recorderName) as never,
+        {
+          failureCode: "OBJECT_STORAGE_BYTE_SIZE_MISMATCH",
+          storageKey,
+          expectedSha256: visualSha256,
+          expectedByteSize: expectedBytes.byteLength,
+          expectedMediaType: "image/webp",
+          observedSha256: null,
+          observedByteSize: tamperedBytes.byteLength,
+          observedMediaType: "image/webp",
+          observedContentRange: null,
+        },
+      );
+      let cleanup: Promise<unknown> | undefined;
+      try {
+        const recorderPid = await waitForBlockedBy(observer, recorderName, blocker.pid);
+        const racingReconciler = new CanvasAgentExpiryReconciler(
+          fixture.client(cleanupName) as never,
+          reconcilerConfig(10) as never,
+          storage as never,
+        );
+        cleanup = racingReconciler.runOnce();
+        await waitForBlockedBy(observer, cleanupName, recorderPid);
+        expect(storage.deleteObject).not.toHaveBeenCalled();
+
+        blocker.release.resolve();
+        await blocker.transaction;
+        await recording;
+        await cleanup;
+      } finally {
+        blocker.release.resolve();
+        await blocker.transaction.catch(() => undefined);
+        await recording.catch(() => undefined);
+        await cleanup?.catch(() => undefined);
+      }
+      expect(storage.deleteObject).not.toHaveBeenCalled();
+      await expect(admin!.readyObjectIntegrityIncident.findUniqueOrThrow({
+        where: { id: incident.id },
+        select: { occurrenceCount: true },
+      })).resolves.toEqual({ occurrenceCount: 2 });
+      await expect(admin!.canvasVisualCapability.findUniqueOrThrow({
+        where: { id: visual.visualCapabilityId },
+        select: { storageDeletedAt: true },
+      })).resolves.toEqual({ storageDeletedAt: null });
+    } finally {
+      await fixture.dispose();
+    }
+  }, 30_000);
+});
+
 describeWithPostgres("Canvas revoke and ACK PostgreSQL races", () => {
   it("rejects ACK when revocation owns the grant lock first", async () => {
     const fixture = await createFixture();
@@ -380,7 +612,7 @@ describeWithPostgres("Canvas revoke and ACK PostgreSQL races", () => {
     await fixture.service(issuer).synchronizeClientState(
       fixture.principalId,
       fixture.projectId,
-      fixture.state(2, synchronizedViewport),
+      fixture.state(2, synchronizedViewport, issued.command.commandId),
     );
     const held = await holdGrantRevocation(revoker, fixture.grantId);
 
@@ -422,7 +654,7 @@ describeWithPostgres("Canvas revoke and ACK PostgreSQL races", () => {
     await fixture.service(issuer).synchronizeClientState(
       fixture.principalId,
       fixture.projectId,
-      fixture.state(2, synchronizedViewport),
+      fixture.state(2, synchronizedViewport, issued.command.commandId),
     );
     const heldBoard = await holdBoardLock(boardLocker, fixture.boardId);
     let revocation: Promise<void> | null = null;
@@ -687,7 +919,7 @@ async function createFixture(options: { expiredSession?: boolean } = {}) {
       clientSessionId: `client_${tag}`,
       projectSessionGeneration: 1,
       profile: "edit",
-      declaredTools: ["navigate_canvas"],
+      declaredTools: ["navigate_canvas", "view_screen"],
       declarationHash: declarationSha256,
       snapshotSha256,
       boardRevision: board.revision,
@@ -708,6 +940,13 @@ async function createFixture(options: { expiredSession?: boolean } = {}) {
     runtimeAttemptId: attempt.id,
     agentSessionId: session.id,
     boardId: board.id,
+    snapshotSha256,
+    boardRevision: board.revision,
+    canvasStateRevision: 1,
+    viewportSha256: canvasToolPayloadSha256(initialViewport),
+    selectedNodeIdsSha256: canvasToolPayloadSha256([boardNodeId]),
+    visibleNodeIdsSha256: canvasToolPayloadSha256([boardNodeId]),
+    profile: "edit",
     declarationSha256,
     issuedAt,
     notBefore: issuedAt,
@@ -739,7 +978,11 @@ async function createFixture(options: { expiredSession?: boolean } = {}) {
     canvasConfig(),
     rejectingVisualStorage() as never,
   );
-  const state = (canvasStateRevision: number, viewport: Viewport) => (
+  const state = (
+    canvasStateRevision: number,
+    viewport: Viewport,
+    causedByCommandId?: string,
+  ) => (
     canvasClientStateSyncRequestSchema.parse({
       protocol: "workbench.canvas-client-state.v1",
       clientSessionId: session.clientSessionId,
@@ -750,6 +993,7 @@ async function createFixture(options: { expiredSession?: boolean } = {}) {
       viewport,
       visibleScreens: [reference],
       selectedScreens: [reference],
+      ...(causedByCommandId ? { causedByCommandId } : {}),
     })
   );
   const ack = (
@@ -934,6 +1178,91 @@ function invocation(toolCallId: string) {
   });
 }
 
+async function seedVisualCapability(
+  fixture: Fixture,
+  payload: { sha256?: string; byteSize?: number } = {},
+) {
+  const visualCapabilityId = randomUUID();
+  const invocationId = `visual_invocation_${visualCapabilityId.replaceAll("-", "")}`;
+  const commandId = randomUUID();
+  const now = new Date(Date.now() - 1_000);
+  const expiresAt = new Date(Date.now() + 120_000);
+  const sequence = await admin!.canvasAgentSession.update({
+    where: { id: fixture.sessionId },
+    data: { invocationSequence: { increment: 1 } },
+    select: { invocationSequence: true },
+  });
+  const toolCallId = `visual_call_${visualCapabilityId.replaceAll("-", "")}`;
+  await admin!.canvasToolInvocation.create({
+    data: {
+      id: invocationId,
+      agentSessionId: fixture.sessionId,
+      grantId: fixture.grantId,
+      runId: fixture.runId,
+      projectId: fixture.projectId,
+      principalId: fixture.principalId,
+      toolCallId,
+      toolName: "view_screen",
+      sequence: sequence.invocationSequence,
+      requestHash: "d".repeat(64),
+      request: {} as Prisma.InputJsonValue,
+      status: "waiting_client",
+      boardRevisionBefore: 1,
+      canvasStateRevisionBefore: 1,
+      canvasStateSha256Before: "e".repeat(64),
+      startedAt: now,
+      createdAt: now,
+    },
+  });
+  await admin!.canvasClientCommand.create({
+    data: {
+      id: commandId,
+      agentSessionId: fixture.sessionId,
+      invocationId,
+      projectId: fixture.projectId,
+      threadId: fixture.threadId,
+      runId: fixture.runId,
+      clientSessionId: fixture.clientSessionId,
+      projectSessionGeneration: fixture.projectSessionGeneration,
+      toolCallId,
+      boardRevision: 1,
+      canvasStateRevision: 1,
+      expectedCanvasStateSha256: "e".repeat(64),
+      command: {
+        kind: "preview.open",
+        view: { visualCapabilityId },
+      } as Prisma.InputJsonValue,
+      expiresAt,
+      createdAt: now,
+    },
+  });
+  await admin!.canvasVisualCapability.create({
+    data: {
+      id: visualCapabilityId,
+      agentSessionId: fixture.sessionId,
+      grantId: fixture.grantId,
+      invocationId,
+      commandId,
+      projectId: fixture.projectId,
+      runId: fixture.runId,
+      principalId: fixture.principalId,
+      targetBoardNodeId: fixture.reference.boardNodeId,
+      targetArtifactId: fixture.reference.artifactId,
+      targetVersionId: fixture.reference.artifactVersionId,
+      targetScreenId: fixture.reference.screenId,
+      status: "ready",
+      storageKey: `canvas-visuals/${visualCapabilityId}.webp`,
+      mediaType: "image/webp",
+      sha256: payload.sha256 ?? "f".repeat(64),
+      byteSize: payload.byteSize ?? 1,
+      width: 1,
+      height: 1,
+      expiresAt,
+    },
+  });
+  return { visualCapabilityId };
+}
+
 function normalizedRequest(input: {
   tag: string;
   toolCallId: string;
@@ -1090,6 +1419,23 @@ async function holdGrantRevocation(client: PrismaClient, grantId: string) {
     started.resolve(pid);
     await release.promise;
   });
+  return { pid: await started.promise, release, transaction };
+}
+
+async function holdIntegrityIncident(client: PrismaClient, incidentId: string) {
+  const release = deferred<void>();
+  const started = deferred<number>();
+  const transaction = client.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ pid: number }>>(Prisma.sql`
+      SELECT pg_backend_pid() AS "pid"
+      FROM "ready_object_integrity_incidents"
+      WHERE "id" = ${incidentId}
+      FOR UPDATE
+    `);
+    if (!rows[0]) throw new Error("CANVAS_TEST_INTEGRITY_INCIDENT_NOT_FOUND");
+    started.resolve(rows[0].pid);
+    await release.promise;
+  }, { timeout: 30_000 });
   return { pid: await started.promise, release, transaction };
 }
 

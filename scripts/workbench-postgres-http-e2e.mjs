@@ -27,6 +27,7 @@ const fakeStorageSecretAccessKey = "workbench-e2e-secret-key";
 const previewTokenSecret = Buffer.alloc(32, 17).toString("base64url");
 const invitationTokenSecret = Buffer.alloc(32, 29).toString("base64url");
 const canvasToolSecret = Buffer.alloc(32, 41).toString("base64url");
+const canvasVisualFixtureBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const runtimeCatalogModelId = "quality";
 const runtimeProviderModel = "fake-quality-model";
 const verbose = process.env.WORKBENCH_E2E_VERBOSE === "1";
@@ -82,6 +83,8 @@ try {
     WORKBENCH_API_STAGING_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-api-staging`,
     WORKBENCH_API_READY_BLOB_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-api-ready`,
     WORKBENCH_API_READY_BLOB_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-api-ready`,
+    WORKBENCH_API_CANVAS_VISUAL_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-api-canvas-visual`,
+    WORKBENCH_API_CANVAS_VISUAL_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-api-canvas-visual`,
     WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-runtime-ready`,
     WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-runtime-ready`,
   };
@@ -209,6 +212,14 @@ try {
     fakeRuntime.state.gatewayUploads.every((upload) => upload.matchedStorageKeys.length === 1),
     "a fake Gateway multipart body did not contain exactly one registered immutable object",
   );
+  assert.equal(fakeRuntime.state.storageWrites.length, 1, "Canvas visual was not written exactly once");
+  assert.equal(fakeRuntime.state.visualReads.length, 1, "Canvas visual was not read exactly once");
+  const [visualWrite] = fakeRuntime.state.storageWrites;
+  const [visualRead] = fakeRuntime.state.visualReads;
+  assert.match(visualWrite.storageKey, /^canvas-visuals\/[A-Za-z0-9][A-Za-z0-9._:-]*\/.+\.webp$/);
+  assert.equal(visualWrite.mediaType, "image/webp");
+  assert.equal(visualRead.storageKey, visualWrite.storageKey);
+  assert.equal(visualRead.sha256, visualWrite.sha256);
   const serializedRuntimeRequests = JSON.stringify(fakeRuntime.state.runRequests);
   assert.ok(
     !serializedRuntimeRequests.includes(runtimeProviderModel),
@@ -245,6 +256,7 @@ try {
       canvasDirectEditRuns: fakeRuntime.state.canvasDirectEditRuns,
       canvasToolCalls: fakeRuntime.state.canvasToolCalls.length,
       objectReads: fakeRuntime.state.objectReads.length,
+      visualReads: fakeRuntime.state.visualReads.length,
       gatewayUploads: fakeRuntime.state.gatewayUploads.length,
     },
   }, null, 2));
@@ -321,10 +333,11 @@ async function queryDatabase(text, values = []) {
 }
 
 async function migrateDatabase() {
-  console.log("[e2e] applying Workbench migrations");
-  await runCommand("database:migrate", npm, [
-    "--workspace", "@workbench/workbench-db", "run", "migrate:deploy",
-  ], { WORKBENCH_DATABASE_URL: databaseUrl });
+  console.log("[e2e] applying Workbench migrations and reconciling Runtime queues");
+  await runCommand("database:migrate", "sh", ["deploy/workbench-migrate.sh"], {
+    WORKBENCH_DATABASE_URL: databaseUrl,
+    WORKBENCH_MIGRATOR_DATABASE_URL: databaseUrl,
+  });
 }
 
 function existingSubmissionAttachments(fileAssetIds) {
@@ -541,7 +554,18 @@ async function runSuccessScenario(client, outsiderClient) {
 
   const cursorIndex = Math.max(0, Math.floor(events.length / 2) - 1);
   const cursor = events[cursorIndex].data.sequence;
-  const replay = await client.sse(`/runs/${first.body.id}/events?afterSequence=0`, {
+  const conflictingCursor = await client.json(
+    "GET",
+    `/runs/${first.body.id}/events?afterSequence=0`,
+    {
+      headers: { "Last-Event-ID": String(cursor) },
+      expectedStatus: 400,
+    },
+  );
+  assert.equal(conflictingCursor.body.code, "VALIDATION_ERROR");
+  assert.match(conflictingCursor.body.detail, /must match/u);
+
+  const replay = await client.sse(`/runs/${first.body.id}/events`, {
     "Last-Event-ID": String(cursor),
   });
   const expectedReplay = events.filter((event) => event.data.sequence > cursor);
@@ -1349,8 +1373,8 @@ async function driveCanvasClientCommands(client, runId, snapshot, screenSummary,
       await synchronizeCanvasClientState(client, snapshot.projectId, state);
       const applied = applyCanvasClientCommand(command, state, screenSummary);
       if (applied.stateChanged) state.canvasStateRevision += 1;
-      await synchronizeCanvasClientState(client, snapshot.projectId, state);
-      const ack = {
+      await synchronizeCanvasClientState(client, snapshot.projectId, state, command.commandId);
+      const durableAck = {
         protocol: "workbench.canvas-client-command-ack.v1",
         commandId: command.commandId,
         agentSessionId: command.agentSessionId,
@@ -1370,12 +1394,46 @@ async function driveCanvasClientCommands(client, runId, snapshot, screenSummary,
         result: applied.result,
         failure: null,
       };
+      const visualCapture = command.kind === "preview.open"
+        ? createCanvasVisualCapture(command.view.visualCapabilityId)
+        : undefined;
+      const wireAck = visualCapture
+        ? { ...durableAck, visualCapture }
+        : durableAck;
       const settled = await client.json(
         "POST",
         `/projects/${snapshot.projectId}/canvas-agent/commands/${command.commandId}/ack`,
-        { body: ack },
+        { body: wireAck },
       );
-      assert.deepEqual(settled.body, ack);
+      // Visual bytes are wire-only. The API persists and returns the durable
+      // ACK without the potentially large capture payload.
+      assert.deepEqual(settled.body, durableAck);
+      if (visualCapture) {
+        const descriptor = canvasCapabilityDescriptorForRun(runId);
+        const visualUrl = `${descriptor.visualEndpoint}/${encodeURIComponent(visualCapture.visualCapabilityId)}`;
+        const visual = await fetchBytes(visualUrl, {
+          Accept: "image/webp, image/jpeg, image/png",
+          Authorization: `Bearer ${descriptor.token}`,
+          "Cache-Control": "no-store",
+        });
+        assert.equal(visual.headers.get("content-type"), "image/webp");
+        assert.equal(Number(visual.headers.get("content-length")), visual.bytes.byteLength);
+        assert.equal(visual.headers.get("x-content-sha256"), sha256(visual.bytes));
+        assert.equal(visual.headers.get("etag"), `"${sha256(visual.bytes)}"`);
+        assert.ok(Date.parse(visual.headers.get("x-canvas-visual-expires-at") ?? "") > Date.now());
+        assert.ok(visual.bytes.byteLength > 0);
+        const replay = await fetchBytes(
+          visualUrl,
+          {
+            Accept: "image/webp, image/jpeg, image/png",
+            Authorization: `Bearer ${descriptor.token}`,
+            "Cache-Control": "no-store",
+            "If-None-Match": visual.headers.get("etag") ?? "",
+          },
+          304,
+        );
+        assert.equal(replay.bytes.byteLength, 0);
+      }
       await synchronizeCanvasClientState(client, snapshot.projectId, state);
       acknowledged.push({
         commandId: command.commandId,
@@ -1399,9 +1457,9 @@ async function driveCanvasClientCommands(client, runId, snapshot, screenSummary,
   return acknowledged;
 }
 
-async function synchronizeCanvasClientState(client, projectId, state) {
+async function synchronizeCanvasClientState(client, projectId, state, causedByCommandId) {
   const synchronized = await client.json("PUT", `/projects/${projectId}/canvas-agent/state`, {
-    body: state,
+    body: causedByCommandId ? { ...state, causedByCommandId } : state,
   });
   assert.equal(synchronized.body.protocol, state.protocol);
   assert.equal(synchronized.body.activeSession, true);
@@ -1440,6 +1498,42 @@ function applyCanvasClientCommand(command, state, screenSummary) {
   const stateChanged = canonicalJson(state.viewport) !== canonicalJson(viewport);
   state.viewport = viewport;
   return { result: { viewport: state.viewport }, stateChanged };
+}
+
+function createCanvasVisualCapture(visualCapabilityId) {
+  assert.equal(typeof visualCapabilityId, "string");
+  const bytes = Buffer.from(canvasVisualFixtureBase64, "base64");
+  return {
+    protocol: "workbench.canvas-visual-capture.v1",
+    visualCapabilityId,
+    mediaType: "image/png",
+    byteSize: bytes.byteLength,
+    width: 1,
+    height: 1,
+    sha256: sha256(bytes),
+    dataBase64: canvasVisualFixtureBase64,
+  };
+}
+
+function canvasCapabilityDescriptorForRun(runId) {
+  const request = [...fakeRuntime.state.runRequests].reverse().find(
+    (candidate) => candidate.body?.metadata?.workbench_run_id === runId
+      && candidate.body?.context?.secrets?.WORKBENCH_CANVAS_CAPABILITY,
+  );
+  assert.ok(request, `Canvas runtime request for ${runId} did not expose a capability descriptor`);
+  const descriptor = parseJson(
+    request.body.context.secrets.WORKBENCH_CANVAS_CAPABILITY,
+    "Canvas capability descriptor",
+  );
+  assert.match(descriptor.token, /^wbct1\./);
+  const endpoint = new URL(descriptor.endpoint);
+  const visualEndpoint = new URL(descriptor.visualEndpoint);
+  assert.equal(endpoint.pathname, "/api/v1/runtime/canvas/tools/execute");
+  assert.equal(visualEndpoint.pathname, "/api/v1/runtime/canvas/visuals");
+  assert.equal(visualEndpoint.origin, endpoint.origin);
+  assert.equal(visualEndpoint.search, "");
+  assert.equal(visualEndpoint.hash, "");
+  return descriptor;
 }
 
 async function assertCanvasGatewayAudit({
@@ -2802,6 +2896,24 @@ function createApiClient(baseUrl, identity = {}) {
   };
 }
 
+async function fetchBytes(url, headers, expectedStatus = 200) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error(`HTTP timeout: GET ${url}`)), scenarioTimeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers,
+      signal: controller.signal,
+    });
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (response.status !== expectedStatus) {
+      throw new Error(`GET ${url}: expected HTTP ${expectedStatus}, received ${response.status}`);
+    }
+    return { status: response.status, headers: response.headers, bytes };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function readSse(body, onEvent) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -2887,12 +2999,14 @@ async function startFakeDeerFlow(expectedToken) {
     canvasToolCalls: [],
     activeCancelStreams: 0,
     objectReads: [],
+    visualReads: [],
     gatewayUploads: [],
     gatewayReceipts: [],
     runRequests: [],
     requests: [],
     runtimeRuns: new Map(),
     multipartCreates: [],
+    storageWrites: [],
   };
   const sockets = new Set();
   const server = http.createServer((request, response) => {
@@ -2946,7 +3060,9 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
       response.end("<Error><Code>NoSuchKey</Code></Error>");
       return;
     }
-    state.objectReads.push({ storageKey, byteSize: object.bytes.byteLength, sha256: sha256(object.bytes) });
+    const read = { storageKey, byteSize: object.bytes.byteLength, sha256: sha256(object.bytes) };
+    if (storageKey.startsWith("canvas-visuals/")) state.visualReads.push(read);
+    else state.objectReads.push(read);
     response.writeHead(200, {
       "content-type": object.mediaType,
       "content-length": String(object.bytes.byteLength),
@@ -2955,6 +3071,37 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
       "x-amz-request-id": `e2e-${randomUUID()}`,
     });
     response.end(object.bytes);
+    return;
+  }
+  if (request.method === "PUT" && url.pathname.startsWith(storagePrefix)) {
+    const storageKey = url.pathname
+      .slice(storagePrefix.length)
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .join("/");
+    assert.match(storageKey, /^canvas-visuals\/[A-Za-z0-9][A-Za-z0-9._:-]*\//);
+    assert.match(
+      String(request.headers.authorization ?? ""),
+      new RegExp(`^AWS4-HMAC-SHA256 Credential=${fakeStorageAccessKeyId}-api-canvas-visual/`),
+      "Canvas visual PUT did not use the dedicated S3 identity",
+    );
+    const bytes = await readRequestBuffer(request, 2 * 1024 * 1024);
+    const declaredLength = Number(request.headers["content-length"]);
+    assert.equal(declaredLength, bytes.byteLength, "fake S3 received a truncated Canvas visual PUT");
+    const digest = sha256(bytes);
+    const metadataDigest = request.headers["x-amz-meta-sha256"];
+    assert.equal(metadataDigest, digest, "Canvas visual PUT omitted its immutable metadata digest");
+    const checksum = request.headers["x-amz-checksum-sha256"];
+    assert.equal(typeof checksum, "string", "Canvas visual PUT omitted its S3 checksum");
+    assert.equal(Buffer.from(checksum, "base64").toString("hex"), digest);
+    const mediaType = String(request.headers["content-type"] ?? "application/octet-stream");
+    storageObjects.set(storageKey, { bytes, mediaType });
+    state.storageWrites.push({ storageKey, byteSize: bytes.byteLength, mediaType, sha256: digest });
+    response.writeHead(200, {
+      etag: `"${digest}"`,
+      "x-amz-version-id": `e2e-${state.storageWrites.length}`,
+    });
+    response.end();
     return;
   }
   if (request.method === "POST" && url.pathname.startsWith(storagePrefix) && url.searchParams.has("uploads")) {

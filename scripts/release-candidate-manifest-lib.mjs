@@ -18,7 +18,7 @@ const IMAGE_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const GIT_OBJECT_ID_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const MAX_GIT_OUTPUT_BYTES = 256 * 1024 * 1024;
 
-export const RELEASE_CANDIDATE_SCHEMA_VERSION = 1;
+export const RELEASE_CANDIDATE_SCHEMA_VERSION = 2;
 
 export const REQUIRED_KNOWLEDGE_VAULT_CONFIG = Object.freeze([
   "knowledge-vault/.obsidian/app.json",
@@ -50,6 +50,8 @@ export const REQUIRED_SOURCE_SCOPES = Object.freeze([
   },
   { name: "ci", roots: [".github/"] },
   { name: "deployment", roots: ["deploy/"] },
+  { name: "runbooks", roots: ["docs/runbooks/"] },
+  { name: "evidenceContracts", roots: ["docs/evidence/", "schemas/"] },
   { name: "web", roots: ["apps/web/"] },
   { name: "quartz", roots: ["apps/knowledge/"] },
   { name: "workbenchApi", roots: ["apps/workbench-api/"] },
@@ -133,6 +135,10 @@ const CRITICAL_GROUP_DEFINITIONS = Object.freeze([
     name: "remediationControl",
     exactPaths: REQUIRED_REMEDIATION_CONTROL_FILES,
     includeEntries: true,
+  },
+  {
+    name: "evidenceContracts",
+    roots: ["docs/evidence/", "schemas/"],
   },
 ]);
 
@@ -374,25 +380,29 @@ function normalizeDeerFlowMetadata(value, issues) {
   const label = "releaseMetadata.deerFlow";
   if (!isPlainObject(value)) {
     issues.push(`${label} must be an object`);
-    return { sourceCommit: null, imageDigest: null, overlayConfigSha256: null };
+    return { sourceCommit: null, baseImageDigest: null, overlayConfigSha256: null };
   }
-  const allowedKeys = new Set(["sourceCommit", "imageDigest", "overlayConfigSha256"]);
+  const allowedKeys = new Set(["sourceCommit", "baseImageDigest", "overlayConfigSha256"]);
   for (const key of Object.keys(value)) {
     if (!allowedKeys.has(key)) issues.push(`${label}.${key} is not supported`);
   }
   const sourceCommit = requiredMetadataString(value.sourceCommit, `${label}.sourceCommit`, issues);
-  const imageDigest = requiredMetadataString(value.imageDigest, `${label}.imageDigest`, issues);
+  const baseImageDigest = requiredMetadataString(
+    value.baseImageDigest,
+    `${label}.baseImageDigest`,
+    issues,
+  );
   const overlayConfigSha256 = requiredMetadataString(value.overlayConfigSha256, `${label}.overlayConfigSha256`, issues);
   if (sourceCommit && !GIT_OBJECT_ID_PATTERN.test(sourceCommit)) {
     issues.push(`${label}.sourceCommit must be a lowercase 40- or 64-character Git object ID`);
   }
-  if (imageDigest && !IMAGE_DIGEST_PATTERN.test(imageDigest)) {
-    issues.push(`${label}.imageDigest must be an immutable sha256 image digest`);
+  if (baseImageDigest && !IMAGE_DIGEST_PATTERN.test(baseImageDigest)) {
+    issues.push(`${label}.baseImageDigest must be an immutable sha256 image digest`);
   }
   if (overlayConfigSha256 && !SHA256_PATTERN.test(overlayConfigSha256)) {
     issues.push(`${label}.overlayConfigSha256 must be a lowercase SHA-256 digest`);
   }
-  return { sourceCommit, imageDigest, overlayConfigSha256 };
+  return { sourceCommit, baseImageDigest, overlayConfigSha256 };
 }
 
 function normalizeDigestMap(value, label, issues) {

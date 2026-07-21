@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@workbench/workbench-canvas-tools": "0.1.0",
+    "@workbench/workbench-content-security": "0.1.0",
     "@workbench/workbench-contracts": "0.1.0",
     "@workbench/workbench-db": "0.1.0",
     "@workbench/workbench-knowledge": "0.1.0",

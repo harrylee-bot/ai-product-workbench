@@ -1,14 +1,41 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const repoRoot = new URL("../../", import.meta.url);
+const repoRootPath = fileURLToPath(repoRoot);
+const webRootPath = path.join(repoRootPath, "apps/web");
 const configuredOrigin = process.env.WORKBENCH_E2E_WEB_ORIGIN;
-const existingDevOrigin = configuredOrigin ? null : await activeProjectDevOrigin();
-const managedWebPort = configuredOrigin || existingDevOrigin ? null : await reservePort();
-const origin = configuredOrigin ?? existingDevOrigin ?? `http://127.0.0.1:${managedWebPort}`;
+const managedWebPort = configuredOrigin ? null : await reservePort();
+const origin = configuredOrigin ?? `http://127.0.0.1:${managedWebPort}`;
 const previewOrigin = process.env.WORKBENCH_E2E_PREVIEW_ORIGIN ?? "http://127.0.0.1:4300";
+const managedDistDir = managedWebPort === null ? null : `.next/e2e-${process.pid}-${managedWebPort}`;
+const managedDistDirPath = managedDistDir === null
+  ? null
+  : path.join(webRootPath, managedDistDir);
+const managedTsconfigRelativePath = managedDistDir === null
+  ? null
+  : `tsconfig.e2e-${process.pid}-${managedWebPort}.json`;
+const managedTsconfigPath = managedTsconfigRelativePath === null
+  ? null
+  : path.join(webRootPath, managedTsconfigRelativePath);
+const sourceTsconfigPath = path.join(webRootPath, "tsconfig.json");
+const sourceNextEnvPath = path.join(webRootPath, "next-env.d.ts");
+const sourceTsconfig = managedWebPort === null ? null : await readFile(sourceTsconfigPath);
+const sourceNextEnv = managedWebPort === null ? null : await readFile(sourceNextEnvPath);
+
+if (managedDistDirPath && managedTsconfigPath) {
+  await mkdir(managedDistDirPath, { recursive: true });
+  await writeFile(
+    managedTsconfigPath,
+    sourceTsconfig,
+    "utf8",
+  );
+}
+
 const server = managedWebPort === null
   ? null
   : spawn(
@@ -34,6 +61,8 @@ const server = managedWebPort === null
           WORKBENCH_E2E_WEB_ORIGIN: origin,
           WORKBENCH_E2E_PREVIEW_ORIGIN: previewOrigin,
           WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
+          WORKBENCH_NEXT_DIST_DIR: managedDistDir,
+          WORKBENCH_NEXT_TSCONFIG_PATH: managedTsconfigRelativePath,
         },
         stdio: ["ignore", "inherit", "inherit"],
       },
@@ -44,6 +73,35 @@ const serverExit = server
       server.once("exit", (code, signal) => resolve({ code, signal }));
     })
   : null;
+
+let cleanupPromise;
+let signalHandled = false;
+const cleanupManagedFiles = () => {
+  cleanupPromise ??= (async () => {
+    if (sourceTsconfig && sourceNextEnv) {
+      await writeFile(sourceTsconfigPath, sourceTsconfig);
+      await writeFile(sourceNextEnvPath, sourceNextEnv);
+    }
+    if (managedDistDirPath) {
+      await rm(managedDistDirPath, { recursive: true, force: true });
+    }
+    if (managedTsconfigPath) {
+      await rm(managedTsconfigPath, { force: true });
+    }
+  })();
+  return cleanupPromise;
+};
+const handleSignal = (signal) => {
+  if (signalHandled) return;
+  signalHandled = true;
+  void (async () => {
+    if (server && serverExit) await stopServer(server, serverExit);
+    await cleanupManagedFiles();
+    process.exit(128 + (signal === "SIGINT" ? 2 : 15));
+  })();
+};
+process.once("SIGINT", handleSignal);
+process.once("SIGTERM", handleSignal);
 
 try {
   await waitForServer(origin, serverExit);
@@ -62,6 +120,7 @@ try {
   await run("node", ["scripts/e2e/workbench-isolated-preview-smoke.mjs"]);
 } finally {
   if (server && serverExit) await stopServer(server, serverExit);
+  await cleanupManagedFiles();
 }
 
 async function waitForServer(baseUrl, exitPromise) {
@@ -137,22 +196,6 @@ async function reservePort() {
     listener.close((error) => error ? reject(error) : resolve());
   });
   return address.port;
-}
-
-async function activeProjectDevOrigin() {
-  try {
-    const lock = JSON.parse(await readFile(
-      new URL("apps/web/.next/dev/lock", repoRoot),
-      "utf8",
-    ));
-    if (!Number.isInteger(lock.pid) || typeof lock.appUrl !== "string") return null;
-    process.kill(lock.pid, 0);
-    const response = await fetch(`${lock.appUrl}/login`, { redirect: "manual" });
-    if (response.status >= 500) return null;
-    return lock.appUrl;
-  } catch {
-    return null;
-  }
 }
 
 function delay(milliseconds) {

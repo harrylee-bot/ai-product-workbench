@@ -1,0 +1,1589 @@
+{
+  "schemaVersion": "workbench.production-acceptance-control-catalog.v1",
+  "product": "产品工作台",
+  "technicalIdentifier": "workbench",
+  "catalogId": "workbench-production-g5-g11-v1",
+  "capacityProfile": {
+    "profileId": "workbench-production-capacity-v1",
+    "status": "proposed-baseline",
+    "activeRuns": 100,
+    "workerReplicas": 10,
+    "runtimeConcurrencyPerReplica": 10,
+    "cancellationQueryBatchSize": 100,
+    "pollIntervalMs": 1000,
+    "maxPollerQpsPerReplica": 4,
+    "cancelP95Ms": 10000,
+    "recoveryMs": 60000
+  },
+  "gates": [
+    {
+      "gateId": "G5",
+      "controls": [
+        {
+          "controlId": "G5.DATABASE.LEAST_PRIVILEGE",
+          "controlObjective": "Prove infrastructure admin, migrator, runtime, and operations database privileges are separated in the target environment.",
+          "prerequisites": [
+            "The candidate is deployed with target PostgreSQL roles and no application process receives the admin credential."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G5.DATABASE.LEAST_PRIVILEGE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every allowed operation succeeds and every prohibited operation is denied by PostgreSQL.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-028"
+            },
+            {
+              "kind": "finding",
+              "id": "P-016"
+            }
+          ]
+        },
+        {
+          "controlId": "G5.MIGRATION.FRESH",
+          "controlObjective": "Prove all candidate migrations apply to an empty PostgreSQL 16 database with pre-provisioned extensions.",
+          "prerequisites": [
+            "The empty target-compatible database is isolated and the expected migration count is candidate-bound."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G5.MIGRATION.FRESH --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "All candidate migrations apply exactly once and the resulting migration manifest matches the candidate.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-028"
+            },
+            {
+              "kind": "decision",
+              "id": "G5"
+            }
+          ]
+        },
+        {
+          "controlId": "G5.MIGRATION.UPGRADE",
+          "controlObjective": "Prove the candidate can upgrade the approved predecessor schema without data or constraint drift.",
+          "prerequisites": [
+            "An isolated predecessor database and its immutable data manifest are approved by the Data owner."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G5.MIGRATION.UPGRADE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The upgrade completes and all expected data and database invariants remain valid.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-019"
+            },
+            {
+              "kind": "decision",
+              "id": "G5"
+            }
+          ]
+        },
+        {
+          "controlId": "G5.RECOVERY.BACKUP_RESTORE",
+          "controlObjective": "Prove a candidate-bound logical backup restores into a new database with identical migration and data manifests.",
+          "prerequisites": [
+            "The G5 recovery drill target and destructive restore-database confirmation are approved by the Data owner."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G5.RECOVERY.BACKUP_RESTORE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Archive verification, restore, forward repair, data comparison, and cleanup all pass.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G5"
+            },
+            {
+              "kind": "finding",
+              "id": "P-008"
+            }
+          ]
+        },
+        {
+          "controlId": "G5.RECOVERY.RPO",
+          "controlObjective": "Prove the measured recovery point objective meets the approved production upper bound.",
+          "prerequisites": [
+            "The Data owner approved a maximum RPO of 60 seconds for this release."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G5.RECOVERY.RPO --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Measured RPO is no greater than 60 seconds.",
+          "threshold": {
+            "kind": "number",
+            "operator": "lte",
+            "expected": 60,
+            "unit": "seconds"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G5"
+            }
+          ]
+        },
+        {
+          "controlId": "G5.RECOVERY.RTO",
+          "controlObjective": "Prove the measured recovery time objective meets the approved production upper bound.",
+          "prerequisites": [
+            "The Data owner approved a maximum RTO of 900 seconds for this release."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G5.RECOVERY.RTO --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Measured RTO is no greater than 900 seconds.",
+          "threshold": {
+            "kind": "number",
+            "operator": "lte",
+            "expected": 900,
+            "unit": "seconds"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "gateId": "G6",
+      "controls": [
+        {
+          "controlId": "G6.AUTH.KEY_ROTATION_KMS",
+          "controlObjective": "Prove signing keys are non-exportable, independently controlled, rotated, and auditable.",
+          "prerequisites": [
+            "The target KMS or secret-store policy and an approved rotation window are active."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G6.AUTH.KEY_ROTATION_KMS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Key material is not exportable and rotation preserves only the approved bounded session behavior.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-004"
+            },
+            {
+              "kind": "decision",
+              "id": "G6"
+            }
+          ]
+        },
+        {
+          "controlId": "G6.AUTH.PASSWORD_LOGIN",
+          "controlObjective": "Prove Better Auth password login is primary and the optional enterprise SSO branch is complete only when explicitly enabled.",
+          "prerequisites": [
+            "An isolated production acceptance account exists and the exact WORKBENCH_ENTERPRISE_SSO_ENABLED value is captured from the candidate configuration."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G6.AUTH.PASSWORD_LOGIN --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Password login always completes locally; disabled SSO fails closed, while enabled SSO passes the complete issuer, audience, callback, session, logout, and revocation matrix without implicit navigation.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-004"
+            },
+            {
+              "kind": "decision",
+              "id": "G6"
+            }
+          ]
+        },
+        {
+          "controlId": "G6.AUTH.PUBLIC_SIGNUP_CLOSED",
+          "controlObjective": "Prove every production public registration path fails closed unless explicitly approved.",
+          "prerequisites": [
+            "Production registration policy is unset or explicitly false for the candidate deployment."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G6.AUTH.PUBLIC_SIGNUP_CLOSED --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "All public signup paths are denied and only the approved invitation flow remains usable.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-019"
+            },
+            {
+              "kind": "decision",
+              "id": "G6"
+            }
+          ]
+        },
+        {
+          "controlId": "G6.AUTH.SESSION_JWT_LIFECYCLE",
+          "controlObjective": "Prove sessions and backend JWTs expire, revoke, and preserve the business authorization model.",
+          "prerequisites": [
+            "Approved test users cover owner, editor, viewer, revoked, and expired states."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G6.AUTH.SESSION_JWT_LIFECYCLE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Only live sessions with the correct mapped role can access each protected resource.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-004"
+            },
+            {
+              "kind": "decision",
+              "id": "G6"
+            }
+          ]
+        },
+        {
+          "controlId": "G6.CANVAS.READY_OBJECT_AUTH_INTEGRITY",
+          "controlObjective": "Prove Canvas authorization linearization and ready-object byte integrity fail closed in production.",
+          "prerequisites": [
+            "Isolated Canvas sessions and same-size tampered object fixtures are available in the production acceptance tenant."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G6.CANVAS.READY_OBJECT_AUTH_INTEGRITY --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Revoked Canvas operations and every mismatched object fail closed with complete durable audit evidence.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-002"
+            },
+            {
+              "kind": "finding",
+              "id": "D-003"
+            },
+            {
+              "kind": "finding",
+              "id": "D-004"
+            },
+            {
+              "kind": "finding",
+              "id": "D-020"
+            }
+          ]
+        },
+        {
+          "controlId": "G6.EDGE.WIREGUARD_ORIGIN_AUTH",
+          "controlObjective": "Prove public traffic reaches the origin only through the approved WireGuard Edge and origin authentication boundary.",
+          "prerequisites": [
+            "The approved Edge, origin, TLS certificates, WireGuard peers, and independent origin-auth secret are deployed."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G6.EDGE.WIREGUARD_ORIGIN_AUTH --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Only the fixed Edge peer with current origin authentication reaches Web or Preview; all bypasses fail.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-001"
+            },
+            {
+              "kind": "finding",
+              "id": "P-001"
+            },
+            {
+              "kind": "finding",
+              "id": "P-002"
+            }
+          ]
+        },
+        {
+          "controlId": "G6.SECURITY.TENANT_SSRF_AUDIT",
+          "controlObjective": "Prove tenant isolation, prompt-injection controls, egress policy, SSRF defenses, and audit correlation in the target topology.",
+          "prerequisites": [
+            "Two isolated acceptance tenants and approved metadata, private-network, DNS-rebinding, and redirect targets are available."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G6.SECURITY.TENANT_SSRF_AUDIT --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "All cross-tenant and prohibited egress attempts fail closed and are represented in redacted audit evidence.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-011"
+            },
+            {
+              "kind": "decision",
+              "id": "G6"
+            }
+          ]
+        },
+        {
+          "controlId": "G6.STORAGE.IAM_SCAN_CHECKSUM",
+          "controlObjective": "Prove production S3 identities, tenant prefixes, multipart checksums, ClamAV, quarantine, and scanner outage behavior.",
+          "prerequisites": [
+            "Independent short-lived API, Runtime, File, Import, Export, and Preview storage identities are active."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G6.STORAGE.IAM_SCAN_CHECKSUM --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every identity has only its declared operations and all unsafe content is quarantined without publication.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-005"
+            },
+            {
+              "kind": "decision",
+              "id": "G6"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "gateId": "G7",
+      "controls": [
+        {
+          "controlId": "G7.CANVAS.VIEW_SCREEN_IMAGE",
+          "controlObjective": "Prove view_screen sends the command-bound image to the approved multimodal model and exposes no reusable capability.",
+          "prerequisites": [
+            "The signed DeerFlow image and approved multimodal provider are active for the acceptance Run."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G7.CANVAS.VIEW_SCREEN_IMAGE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The model receives exactly the authorized image and every replay or scope violation fails closed.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-013"
+            },
+            {
+              "kind": "decision",
+              "id": "G7"
+            }
+          ]
+        },
+        {
+          "controlId": "G7.DEERFLOW.SUPPLY_CHAIN",
+          "controlObjective": "Prove the deployed DeerFlow runtime is the candidate-bound signed image with complete SBOM, provenance, patch, and tool inventory.",
+          "prerequisites": [
+            "The CI-owned production image manifest and deployed image digest are available."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G7.DEERFLOW.SUPPLY_CHAIN --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every supply-chain identity and deployed runtime digest matches the candidate image manifest.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-003"
+            },
+            {
+              "kind": "decision",
+              "id": "G7"
+            }
+          ]
+        },
+        {
+          "controlId": "G7.RUNTIME.DURABLE_REPLAY",
+          "controlObjective": "Prove Run claims, submission reconciliation, external event checkpoints, text, and finalization survive all declared crash points without duplicate effects.",
+          "prerequisites": [
+            "A real provider test account and a production-like queue/database failure injector are approved."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G7.RUNTIME.DURABLE_REPLAY --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Each internal attempt maps to at most one provider Run and replay produces an identical, non-duplicated durable result.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-007"
+            },
+            {
+              "kind": "finding",
+              "id": "D-008"
+            },
+            {
+              "kind": "finding",
+              "id": "D-009"
+            },
+            {
+              "kind": "finding",
+              "id": "D-010"
+            }
+          ]
+        },
+        {
+          "controlId": "G7.RUNTIME.PROVIDER_FAILURE_MATRIX",
+          "controlObjective": "Prove real provider success, refusal, rate limit, server error, timeout, cancel, and retry semantics.",
+          "prerequisites": [
+            "Approved short-lived provider credentials and isolated billing limits are active."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G7.RUNTIME.PROVIDER_FAILURE_MATRIX --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every provider outcome maps to the specified durable state, audit event, and retry policy.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-012"
+            },
+            {
+              "kind": "finding",
+              "id": "P-015"
+            }
+          ]
+        },
+        {
+          "controlId": "G7.RUNTIME.REQUEST_SCOPED_SECRETS",
+          "controlObjective": "Prove provider, knowledge, Canvas, and storage capabilities remain request-scoped and absent from model-visible content and logs.",
+          "prerequisites": [
+            "Secret scanning is enabled for provider payloads, traces, logs, queue messages, and evidence outputs."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G7.RUNTIME.REQUEST_SCOPED_SECRETS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "No reusable secret appears outside its channel and all cross-Run or expired uses fail closed.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G7"
+            },
+            {
+              "kind": "finding",
+              "id": "P-014"
+            }
+          ]
+        },
+        {
+          "controlId": "G7.TOOLS.DECLARED_SCOPE",
+          "controlObjective": "Prove each Run exposes and permits only its declared tool catalog.",
+          "prerequisites": [
+            "The signed DeerFlow image contains the candidate scope middleware and tool descriptors."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G7.TOOLS.DECLARED_SCOPE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The visible and callable tool set equals declaredTools for every Run and undeclared calls fail closed.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-014"
+            },
+            {
+              "kind": "decision",
+              "id": "G7"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "gateId": "G8",
+      "controls": [
+        {
+          "controlId": "G8.EXPORT.PROVIDER_FAILURES",
+          "controlObjective": "Prove Export and third-party provider success and failure semantics are durable and auditable.",
+          "prerequisites": [
+            "Approved short-lived export/provider credentials and isolated destinations are active."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G8.EXPORT.PROVIDER_FAILURES --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Each failure mode reaches one correct durable state without duplicate publication or lost audit evidence.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-012"
+            },
+            {
+              "kind": "finding",
+              "id": "P-015"
+            }
+          ]
+        },
+        {
+          "controlId": "G8.IMPORT.SCAN_QUARANTINE",
+          "controlObjective": "Prove every imported object is verified and scanned before parsing or publication.",
+          "prerequisites": [
+            "Real S3, ClamAV, Docling, and isolated clean/EICAR/oversize fixtures are available."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G8.IMPORT.SCAN_QUARANTINE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Only fully verified clean bytes reach Docling or Knowledge; every unsafe case is quarantined before third-party transfer.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-020"
+            },
+            {
+              "kind": "finding",
+              "id": "P-005"
+            }
+          ]
+        },
+        {
+          "controlId": "G8.PREVIEW.DUAL_ORIGIN",
+          "controlObjective": "Prove Preview runs on a distinct HTTPS origin with host-only cookies and the required opaque sandbox.",
+          "prerequisites": [
+            "The real Web and Preview HTTPS origins and production certificates are deployed."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G8.PREVIEW.DUAL_ORIGIN --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Preview serves only authorized immutable content and cannot inherit Web origin credentials or same-origin authority.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-021"
+            },
+            {
+              "kind": "finding",
+              "id": "P-006"
+            }
+          ]
+        },
+        {
+          "controlId": "G8.PUBLICATION.EXPLICIT_CONFIRMATION",
+          "controlObjective": "Prove no external publication or export occurs without explicit user confirmation.",
+          "prerequisites": [
+            "Isolated external destinations and approval fixtures are configured."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G8.PUBLICATION.EXPLICIT_CONFIRMATION --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Only the exact currently approved operation can produce one external effect.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G8"
+            }
+          ]
+        },
+        {
+          "controlId": "G8.STORAGE.MULTIPART_CHECKSUM",
+          "controlObjective": "Prove real object storage multipart, checksum, range, abort, and recovery behavior across all consumers.",
+          "prerequisites": [
+            "Production S3 identities and isolated multipart fixtures are active."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G8.STORAGE.MULTIPART_CHECKSUM --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "All valid objects preserve their canonical digest and all mismatches fail before consumer exposure.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-020"
+            },
+            {
+              "kind": "finding",
+              "id": "P-005"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "gateId": "G9",
+      "controls": [
+        {
+          "controlId": "G9.CITATION.ROUTE_ISOLATION",
+          "controlObjective": "Prove citations resolve to authorized immutable knowledge sources without cross-tenant or cross-route leakage.",
+          "prerequisites": [
+            "Two isolated tenants contain overlapping query text and distinct immutable source fixtures."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G9.CITATION.ROUTE_ISOLATION --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every citation resolves only to its authorized immutable source and every forged or cross-tenant route fails.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G9"
+            }
+          ]
+        },
+        {
+          "controlId": "G9.MODEL.DIGEST_ADOPTION",
+          "controlObjective": "Prove the adopted embedding and reranker profiles use the approved immutable model and runtime digests.",
+          "prerequisites": [
+            "Embedding and reranker profile approvals and signed image/model digests are available."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G9.MODEL.DIGEST_ADOPTION --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Only the approved immutable profile starts and every identity mismatch fails closed.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-010"
+            },
+            {
+              "kind": "decision",
+              "id": "G9"
+            }
+          ]
+        },
+        {
+          "controlId": "G9.QUARTZ.DELIVERY",
+          "controlObjective": "Prove candidate-bound knowledge releases publish atomically to Quartz and recover from interruption.",
+          "prerequisites": [
+            "The target Quartz origin and an isolated candidate knowledge release are deployed."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G9.QUARTZ.DELIVERY --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Quartz never exposes a partial release and recovers to one immutable candidate-bound version.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G9"
+            }
+          ]
+        },
+        {
+          "controlId": "G9.RETRIEVAL.CHINESE_BENCHMARK",
+          "controlObjective": "Prove the adopted retrieval profile passes the approved fixed Chinese benchmark.",
+          "prerequisites": [
+            "The benchmark corpus, expected judgments, profile digest, and release checksum are approved and immutable."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G9.RETRIEVAL.CHINESE_BENCHMARK --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every approved benchmark threshold passes with the candidate model and knowledge release digests.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-010"
+            },
+            {
+              "kind": "decision",
+              "id": "G9"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "gateId": "G10",
+      "controls": [
+        {
+          "controlId": "G10.CAPACITY.ACTIVE_RUNS",
+          "controlObjective": "Prove the catalog-bound capacity profile sustains at least 100 simultaneous active Runs.",
+          "prerequisites": [
+            "The load generator profile, candidate configuration digest, worker replica count, and provider quota snapshot are immutable evidence."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.CAPACITY.ACTIVE_RUNS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The steady-state active Run high-water mark is at least 100 with no undeclared load-profile change.",
+          "threshold": {
+            "kind": "number",
+            "operator": "gte",
+            "expected": 100,
+            "unit": "simultaneous-active-runs"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-031"
+            },
+            {
+              "kind": "decision",
+              "id": "G10"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.CAPACITY.BATCH_SIZE",
+          "controlObjective": "Prove cancellation queries exercise the catalog-bound batch size of 100 active Run IDs.",
+          "prerequisites": [
+            "The candidate cancellation query batch setting and database query trace are captured."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.CAPACITY.BATCH_SIZE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The exercised maximum cancellation query batch contains exactly 100 Run IDs.",
+          "threshold": {
+            "kind": "number",
+            "operator": "eq",
+            "expected": 100,
+            "unit": "run-ids-per-query"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-031"
+            },
+            {
+              "kind": "decision",
+              "id": "G10"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.CAPACITY.CANCEL_LATENCY",
+          "controlObjective": "Prove cancellation reaches every active Run within the approved latency bound at target capacity.",
+          "prerequisites": [
+            "The approved active-Run load profile and target worker replica count are running."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.CAPACITY.CANCEL_LATENCY --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Cancellation p95 is no greater than 10000 milliseconds.",
+          "threshold": {
+            "kind": "number",
+            "operator": "lte",
+            "expected": 10000,
+            "unit": "milliseconds"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-031"
+            },
+            {
+              "kind": "decision",
+              "id": "G10"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.CAPACITY.POLLER_QPS_PER_REPLICA",
+          "controlObjective": "Prove shared cancellation polling remains bounded independently of active Run count.",
+          "prerequisites": [
+            "The approved active-Run load profile exposes database query metrics per worker replica."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.CAPACITY.POLLER_QPS_PER_REPLICA --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Cancellation polling uses no more than 4 database queries per second per worker replica.",
+          "threshold": {
+            "kind": "number",
+            "operator": "lte",
+            "expected": 4,
+            "unit": "queries-per-second-per-replica"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-031"
+            },
+            {
+              "kind": "decision",
+              "id": "G10"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.CAPACITY.PROFILE_BINDING",
+          "controlObjective": "Prove the executed capacity profile and all numeric SLO thresholds are protected by the candidate control-catalog and configuration digests.",
+          "prerequisites": [
+            "The profile records activeRuns=100, cancellationQueryBatchSize=100, pollerQpsPerReplica=4, cancelP95Ms=10000, and recoveryMs=60000."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.CAPACITY.PROFILE_BINDING --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "One immutable profile binds every executed capacity and recovery threshold to the candidate configuration and protected catalog.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-031"
+            },
+            {
+              "kind": "decision",
+              "id": "G10"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.CAPACITY.RECOVERY_TIME",
+          "controlObjective": "Prove cancellation polling recovers from a degraded database or poller interruption within 60000 milliseconds at target capacity.",
+          "prerequisites": [
+            "The 100-active-Run profile is steady and an approved poller or database interruption is ready."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.CAPACITY.RECOVERY_TIME --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "All pending cancellations reconcile within 60000 milliseconds after dependency restoration.",
+          "threshold": {
+            "kind": "number",
+            "operator": "lte",
+            "expected": 60000,
+            "unit": "milliseconds"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-031"
+            },
+            {
+              "kind": "decision",
+              "id": "G10"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.EDGE.TLS_WIREGUARD",
+          "controlObjective": "Prove public TLS, Edge routing, WireGuard peer restrictions, SSE streaming, and Preview routing in the target topology.",
+          "prerequisites": [
+            "DNS-independent curl resolution and direct Edge, origin, and WireGuard probes are approved."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.EDGE.TLS_WIREGUARD --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Only the approved TLS hosts and WireGuard path work, while every topology bypass fails closed.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-001"
+            },
+            {
+              "kind": "finding",
+              "id": "P-002"
+            },
+            {
+              "kind": "finding",
+              "id": "P-006"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.OBSERVABILITY.OTLP_ALERT",
+          "controlObjective": "Prove end-to-end traces reach the target collector and release-blocking alerts fire and resolve.",
+          "prerequisites": [
+            "The target OTLP collector, trace backend, alert rules, and notification sink are active."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.OBSERVABILITY.OTLP_ALERT --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The complete trace is queryable and every required alert fires, routes, and resolves without secret leakage.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-007"
+            },
+            {
+              "kind": "decision",
+              "id": "G10"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.RECOVERY.FAILURE_MATRIX",
+          "controlObjective": "Prove clean restart and recovery from process, queue, database, provider, Quartz, and network interruption.",
+          "prerequisites": [
+            "The candidate is deployed on a clean host with approved fault injection and rollback boundaries."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.RECOVERY.FAILURE_MATRIX --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every fault recovers within the approved SLO without data loss, duplicate effects, or an unobservable stuck state.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-008"
+            },
+            {
+              "kind": "finding",
+              "id": "P-015"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.SLO.BLOCKING_INCIDENTS",
+          "controlObjective": "Prove the approved production observation window completes without a release-blocking SLO or alert incident.",
+          "prerequisites": [
+            "The Operations and Release owners approved the observation duration and SLO dashboard revision."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.SLO.BLOCKING_INCIDENTS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The completed observation window contains zero release-blocking incidents.",
+          "threshold": {
+            "kind": "number",
+            "operator": "eq",
+            "expected": 0,
+            "unit": "release-blocking-incidents"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G10"
+            }
+          ]
+        },
+        {
+          "controlId": "G10.TOPOLOGY.CLEAN_HOST",
+          "controlObjective": "Prove the complete Workbench and DeerFlow topology can be rebuilt on a clean host from immutable candidate inputs.",
+          "prerequisites": [
+            "A clean target-compatible host, signed image manifest, approved configuration revision, and secret injection channel are available."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G10.TOPOLOGY.CLEAN_HOST --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The complete topology starts without undeclared host state and every deployed digest matches the candidate.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "D-022"
+            },
+            {
+              "kind": "finding",
+              "id": "D-023"
+            },
+            {
+              "kind": "finding",
+              "id": "D-024"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "gateId": "G11",
+      "controls": [
+        {
+          "controlId": "G11.ACCESSIBILITY.REDUCED_MOTION",
+          "controlObjective": "Prove keyboard, focus, accessible names, contrast, and reduced-motion behavior across the complete product matrix.",
+          "prerequisites": [
+            "The deployed candidate and approved accessibility browser tooling are available."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.ACCESSIBILITY.REDUCED_MOTION --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "No release-blocking accessibility issue remains and reduced-motion behavior preserves every workflow.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G11"
+            }
+          ]
+        },
+        {
+          "controlId": "G11.BROWSER.VIEWPORT_MATRIX",
+          "controlObjective": "Prove the complete product workflows in Chromium, Firefox, and WebKit at mobile, tablet, and desktop viewports.",
+          "prerequisites": [
+            "The real Web and Preview HTTPS origins are deployed and test accounts are isolated."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.BROWSER.VIEWPORT_MATRIX --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every browser and viewport matrix cell completes with the same durable product result.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G11"
+            }
+          ]
+        },
+        {
+          "controlId": "G11.FIGMA.SCOPE",
+          "controlObjective": "Prove the approved Figma Desktop scope is either validated on the advertised version or independently classified N/A.",
+          "prerequisites": [
+            "G0 contains the current Figma advertised or N/A decision, approver, and expiry."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.FIGMA.SCOPE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "The advertised Figma workflow passes, or a valid non-implementer N/A decision proves it is outside release scope.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-009"
+            },
+            {
+              "kind": "decision",
+              "id": "G11"
+            }
+          ]
+        },
+        {
+          "controlId": "G11.PRODUCT.ACCOUNT_PROJECT",
+          "controlObjective": "Prove product-account, invitation, workspace, project, membership, and role workflows on the deployed candidate.",
+          "prerequisites": [
+            "Isolated owner, editor, viewer, invited, revoked, and expired accounts are available."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.ACCOUNT_PROJECT --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every account and project workflow reaches the specified durable state and every unauthorized path fails closed.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G11"
+            }
+          ]
+        },
+        {
+          "controlId": "G11.PRODUCT.IMPORT_EXPORT_PREVIEW",
+          "controlObjective": "Prove Import, File, Knowledge, Export, and isolated Preview workflows and their failure recovery.",
+          "prerequisites": [
+            "Real target storage, scanner, parser, knowledge, browser, and approved external provider integrations are active."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.IMPORT_EXPORT_PREVIEW --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every content workflow and failure path reaches the specified durable, authorized, checksum-bound state.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "finding",
+              "id": "P-015"
+            },
+            {
+              "kind": "decision",
+              "id": "G11"
+            }
+          ]
+        },
+        {
+          "controlId": "G11.PRODUCT.RUN_CANVAS_PROTOTYPE",
+          "controlObjective": "Prove Run, SSE, approval, cancel, retry, Canvas, Prototype Patch, and Artifact workflows on the deployed candidate.",
+          "prerequisites": [
+            "A real provider and isolated projects with document, data, design, and prototype fixtures are available."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.RUN_CANVAS_PROTOTYPE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Every workflow preserves sequence, identity, authorization, idempotency, and immutable publication invariants.",
+          "threshold": {
+            "kind": "boolean",
+            "operator": "eq",
+            "expected": true
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G11"
+            },
+            {
+              "kind": "finding",
+              "id": "P-017"
+            },
+            {
+              "kind": "finding",
+              "id": "P-018"
+            }
+          ]
+        },
+        {
+          "controlId": "G11.QUALITY.CONSOLE_ERRORS",
+          "controlObjective": "Prove the complete product matrix emits no unexpected browser console errors.",
+          "prerequisites": [
+            "Console capture is enabled for every G11 browser and viewport cell."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.QUALITY.CONSOLE_ERRORS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Unexpected console error count is zero.",
+          "threshold": {
+            "kind": "number",
+            "operator": "eq",
+            "expected": 0,
+            "unit": "unexpected-console-errors"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G11"
+            }
+          ]
+        },
+        {
+          "controlId": "G11.QUALITY.FAILED_NETWORK_REQUESTS",
+          "controlObjective": "Prove the complete product matrix emits no unexpected failed network requests.",
+          "prerequisites": [
+            "Network capture is enabled for every G11 browser and viewport cell."
+          ],
+          "procedure": {
+            "kind": "command",
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.QUALITY.FAILED_NETWORK_REQUESTS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+          },
+          "expectedObservation": "Unexpected failed network request count is zero.",
+          "threshold": {
+            "kind": "number",
+            "operator": "eq",
+            "expected": 0,
+            "unit": "unexpected-failed-requests"
+          },
+          "evidenceLevel": "E1",
+          "tool": {
+            "name": "workbench-production-control-runner",
+            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+          },
+          "relatedFindingsOrDecisions": [
+            {
+              "kind": "decision",
+              "id": "G11"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

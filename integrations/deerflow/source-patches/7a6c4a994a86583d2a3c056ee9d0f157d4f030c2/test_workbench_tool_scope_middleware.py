@@ -67,9 +67,16 @@ middleware_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(middleware_module)
 
 CANVAS_TOOL_NAMES = middleware_module.CANVAS_TOOL_NAMES
+PROTOTYPE_TOOL_NAMES = middleware_module.PROTOTYPE_TOOL_NAMES
 WorkbenchToolScopeMiddleware = middleware_module.WorkbenchToolScopeMiddleware
 normalize_workbench_canvas_policy = middleware_module.normalize_workbench_canvas_policy
+normalize_workbench_requested_artifact_kinds = (
+    middleware_module.normalize_workbench_requested_artifact_kinds
+)
 workbench_canvas_policy_from_runnable_config = middleware_module.workbench_canvas_policy_from_runnable_config
+workbench_requested_artifact_kinds_from_runnable_config = (
+    middleware_module.workbench_requested_artifact_kinds_from_runnable_config
+)
 
 
 class FakeTool:
@@ -96,10 +103,14 @@ def policy(*declared: str) -> dict:
 
 class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.all_tools = [FakeTool("workbench_runtime_result_submit"), *map(FakeTool, CANVAS_TOOL_NAMES)]
+        self.all_tools = [
+            FakeTool("workbench_runtime_result_submit"),
+            *map(FakeTool, PROTOTYPE_TOOL_NAMES),
+            *map(FakeTool, CANVAS_TOOL_NAMES),
+        ]
 
-    def visible_names(self, descriptor) -> list[str]:
-        middleware = WorkbenchToolScopeMiddleware(descriptor)
+    def visible_names(self, descriptor, requested_artifact_kinds=None) -> list[str]:
+        middleware = WorkbenchToolScopeMiddleware(descriptor, requested_artifact_kinds)
         observed = middleware.wrap_model_call(FakeModelRequest(self.all_tools), lambda scoped: scoped)
         return [tool.name for tool in observed.tools]
 
@@ -138,6 +149,69 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             )
         )
         self.assertIsNone(workbench_canvas_policy_from_runnable_config({"configurable": []}))
+
+    def test_requested_artifact_kinds_are_read_only_from_trusted_runtime_context(self) -> None:
+        expected = ["prototype"]
+        self.assertIs(
+            workbench_requested_artifact_kinds_from_runnable_config(
+                {"context": {"workbench": {"requestedArtifactKinds": expected}}}
+            ),
+            expected,
+        )
+        self.assertIsNone(
+            workbench_requested_artifact_kinds_from_runnable_config(
+                {"configurable": {"requestedArtifactKinds": expected}}
+            )
+        )
+        self.assertIsNone(
+            workbench_requested_artifact_kinds_from_runnable_config(
+                {"context": {"workbench": []}}
+            )
+        )
+
+    def test_prototype_tools_are_visible_only_when_prototype_is_requested(self) -> None:
+        self.assertEqual(
+            self.visible_names(None, ["document"]),
+            ["workbench_runtime_result_submit"],
+        )
+        self.assertEqual(
+            self.visible_names(None, ["prototype"]),
+            ["workbench_runtime_result_submit", *PROTOTYPE_TOOL_NAMES],
+        )
+        self.assertEqual(
+            self.visible_names(None, ["prd", "prototype"]),
+            ["workbench_runtime_result_submit", *PROTOTYPE_TOOL_NAMES],
+        )
+
+    def test_requested_artifact_kind_policy_is_copied_and_malformed_input_is_fail_closed(self) -> None:
+        source = ["prototype"]
+        normalized = normalize_workbench_requested_artifact_kinds(source)
+        middleware = WorkbenchToolScopeMiddleware(None, source)
+        self.assertEqual(normalized, source)
+        self.assertIsNot(normalized, source)
+        source.append("document")
+        self.assertEqual(normalized, ["prototype"])
+        observed = middleware.wrap_model_call(FakeModelRequest(self.all_tools), lambda scoped: scoped)
+        self.assertEqual(
+            [tool.name for tool in observed.tools],
+            ["workbench_runtime_result_submit", *PROTOTYPE_TOOL_NAMES],
+        )
+
+        malformed = [
+            None,
+            "prototype",
+            ["prototype", "prototype"],
+            ["unknown"],
+            ["prototype", 1],
+            ["prd", "prototype", "image", "code", "document", "data", "prd"],
+        ]
+        for requested_kinds in malformed:
+            with self.subTest(requested_kinds=requested_kinds):
+                self.assertIsNone(normalize_workbench_requested_artifact_kinds(requested_kinds))
+                self.assertEqual(
+                    self.visible_names(None, requested_kinds),
+                    ["workbench_runtime_result_submit"],
+                )
 
     def test_missing_or_malformed_policy_hides_all_eight_canvas_tools(self) -> None:
         malformed = [
@@ -195,6 +269,35 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertEqual(result.name, "quick_edit")
         self.assertEqual(result.tool_call_id, "call-1")
         self.assertEqual(result.content, "Error: WORKBENCH_CANVAS_TOOL_NOT_DECLARED")
+
+    def test_non_prototype_execution_is_rejected_without_calling_handler(self) -> None:
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        for name in PROTOTYPE_TOOL_NAMES:
+            with self.subTest(name=name):
+                result = WorkbenchToolScopeMiddleware(None, ["document"]).wrap_tool_call(
+                    FakeToolRequest(name),
+                    handler,
+                )
+                self.assertFalse(called)
+                self.assertEqual(result.status, "error")
+                self.assertEqual(result.name, name)
+                self.assertEqual(result.content, "Error: WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED")
+
+    def test_prototype_execution_is_allowed_when_prototype_is_requested(self) -> None:
+        sentinel = object()
+        middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        for name in PROTOTYPE_TOOL_NAMES:
+            with self.subTest(name=name):
+                self.assertIs(
+                    middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel),
+                    sentinel,
+                )
 
     def test_declared_canvas_execution_and_non_canvas_tools_are_unchanged(self) -> None:
         sentinel = object()
@@ -257,6 +360,22 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
             handler,
         )
         self.assertIs(observed, sentinel)
+
+    async def test_async_prototype_tool_execution_is_fail_closed(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["document"])
+        called = False
+
+        async def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        blocked = await middleware.awrap_tool_call(
+            FakeToolRequest("workbench_artifact_draft_publish"),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertEqual(blocked.content, "Error: WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED")
 
 
 if __name__ == "__main__":

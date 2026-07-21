@@ -1,0 +1,74 @@
+www.{$WORKBENCH_WEB_HOSTNAME} {
+	redir https://{$WORKBENCH_WEB_HOSTNAME}{uri} 301
+}
+
+{$WORKBENCH_WEB_HOSTNAME} {
+	@runEvents path_regexp runEvents ^/api/v1/runs/[^/]+/events$
+	handle @runEvents {
+		reverse_proxy http://{$WORKBENCH_ORIGIN_WIREGUARD_IP}:{$WORKBENCH_ORIGIN_HTTP_PORT} {
+			header_up -Forwarded
+			header_up -X-Real-IP
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+				header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.remote.host}
+			header_up -X-Workbench-Client-IP
+			header_up -X-Workbench-Edge-Client-IP
+			header_up -X-Workbench-Edge-Auth
+			header_up X-Workbench-Edge-Client-IP {http.request.remote.host}
+			header_up X-Workbench-Edge-Auth {$WORKBENCH_EDGE_ORIGIN_AUTH_SECRET}
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy http://{$WORKBENCH_ORIGIN_WIREGUARD_IP}:{$WORKBENCH_ORIGIN_HTTP_PORT} {
+			header_up -Forwarded
+			header_up -X-Real-IP
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+				header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.remote.host}
+			header_up -X-Workbench-Client-IP
+			header_up -X-Workbench-Edge-Client-IP
+			header_up -X-Workbench-Edge-Auth
+			header_up X-Workbench-Edge-Client-IP {http.request.remote.host}
+			header_up X-Workbench-Edge-Auth {$WORKBENCH_EDGE_ORIGIN_AUTH_SECRET}
+		}
+	}
+}
+
+{$WORKBENCH_PREVIEW_HOSTNAME} {
+	@preview path /preview/*
+	handle @preview {
+		reverse_proxy http://{$WORKBENCH_ORIGIN_WIREGUARD_IP}:{$WORKBENCH_ORIGIN_HTTP_PORT} {
+			header_up -Forwarded
+			header_up -X-Real-IP
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+				header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.remote.host}
+			header_up -Cookie
+			header_up -X-Workbench-Client-IP
+			header_up -X-Workbench-Edge-Client-IP
+			header_up -X-Workbench-Edge-Auth
+			header_up X-Workbench-Edge-Client-IP {http.request.remote.host}
+			header_up X-Workbench-Edge-Auth {$WORKBENCH_EDGE_ORIGIN_AUTH_SECRET}
+			header_down -Set-Cookie
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}

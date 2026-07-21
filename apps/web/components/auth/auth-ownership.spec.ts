@@ -34,7 +34,7 @@ describe("authentication UI ownership", () => {
   });
 
   it("routes every auth presentation dependency through auth-owned modules", async () => {
-    await expectImports("app/(auth)/login/page.tsx", [
+    await expectImports("app/(auth)/login/login-page.tsx", [
       "@/components/auth/auth-form",
       "@/components/auth/auth-submit-button",
       "@/components/auth/auth-toast",

@@ -14,15 +14,32 @@ import {
   sha256Bytes,
   verifyG0ScopeApproval,
 } from "./g0-scope-approval.mjs";
+import {
+  canonicalJson,
+  REQUIRED_SOURCE_SCOPES,
+} from "./release-candidate-manifest-lib.mjs";
 
 const execFileAsync = promisify(execFile);
 const NOW = new Date("2026-07-19T12:00:00Z");
+const SOURCE_COMMIT = "b".repeat(40);
+const SOURCE_TREE_SHA256 = "e".repeat(64);
+const SIGNED_TAG = "workbench-v1.0.0-rc.1";
+const TAG_OBJECT = "c".repeat(40);
+const TAG_PAYLOAD_SHA256 = "d".repeat(64);
 const CANDIDATE = Object.freeze({
-  candidateId: `sha256:${"a".repeat(64)}`,
-  sourceCommit: "b".repeat(40),
-  signedTag: "workbench-v1.0.0-rc.1",
-  tagObject: "c".repeat(40),
-  payloadSha256: "d".repeat(64),
+  candidateId: `sha256:${sha256Bytes(canonicalJson({
+    sourceCommit: SOURCE_COMMIT,
+    sourceTree: SOURCE_TREE_SHA256,
+    signedTag: {
+      name: SIGNED_TAG,
+      tagObject: TAG_OBJECT,
+      payloadSha256: TAG_PAYLOAD_SHA256,
+    },
+  }))}`,
+  sourceCommit: SOURCE_COMMIT,
+  signedTag: SIGNED_TAG,
+  tagObject: TAG_OBJECT,
+  payloadSha256: TAG_PAYLOAD_SHA256,
 });
 
 test("validates a complete PASS record bound to a candidate manifest and hashed approvals", async (t) => {
@@ -148,6 +165,38 @@ test("rejects mutable approval URIs", async (t) => {
   await expectFailure(() => fixture.verify(), /uri is mutable or unsupported/);
 });
 
+test("rejects credential and presigned query parameters even when a remote URI is version-pinned", async (t) => {
+  const fixture = await createFixture();
+  t.after(fixture.cleanup);
+  const forbiddenParameters = [
+    "access_token",
+    "api-key",
+    "Authorization",
+    "key",
+    "signature",
+    "sig",
+    "token",
+    "X-Amz-Credential",
+    "X-Amz-Security-Token",
+    "X-Amz-Signature",
+    "X-Goog-Credential",
+    "X-Goog-Signature",
+  ];
+
+  for (const parameter of forbiddenParameters) {
+    await fixture.rewrite((document) => {
+      ownerFor(document, "Evidence").approval.reference = {
+        uri: `https://evidence.example.test/object?versionId=immutable-v1&${parameter}=redacted-credential-value`,
+        sha256: "e".repeat(64),
+      };
+    });
+    await expectFailure(
+      () => fixture.verify(),
+      /uri is mutable or unsupported/,
+    );
+  }
+});
+
 test("rejects wrong local evidence hashes", async (t) => {
   const fixture = await createFixture();
   t.after(fixture.cleanup);
@@ -221,6 +270,93 @@ test("rejects candidate manifest hash and identity drift", async (t) => {
     manifest.candidateId = `sha256:${"2".repeat(64)}`;
   }, { updateReferenceHash: true });
   await expectFailure(() => wrongIdentity.verify(), /candidate manifest candidateId mismatch/);
+});
+
+test("rejects a supplied candidate manifest that does not satisfy the complete v2 schema", async (t) => {
+  const fixture = await createFixture();
+  t.after(fixture.cleanup);
+  await fixture.rewriteManifest((manifest) => {
+    delete manifest.technicalIdentifier;
+  }, { updateReferenceHash: true });
+
+  await expectFailure(
+    () => fixture.verify(),
+    /candidate manifest schema .*technicalIdentifier/,
+  );
+
+  const legacy = await createFixture();
+  t.after(legacy.cleanup);
+  await legacy.rewriteManifest((manifest) => {
+    manifest.schemaVersion = 1;
+  }, { updateReferenceHash: true });
+  await expectFailure(
+    () => legacy.verify(),
+    /candidate manifest schema .*schemaVersion/,
+  );
+});
+
+test("rejects a G1 FAIL candidate manifest even when the G0 approval record claims PASS", async (t) => {
+  const fixture = await createFixture();
+  t.after(fixture.cleanup);
+  await fixture.rewriteManifest((manifest) => {
+    manifest.gate.status = "FAIL";
+    manifest.gate.findingCount = 1;
+    manifest.findings = [{
+      code: "DIRTY_WORKTREE",
+      path: null,
+      detail: "fixture G1 failure",
+    }];
+  }, { updateReferenceHash: true });
+
+  await expectFailure(() => fixture.verify(), /candidate manifest G1 gate.status must be PASS/);
+  await expectFailure(() => fixture.verify(), /candidate manifest G1 must contain zero findings/);
+});
+
+test("rejects candidate manifests with non-releaseable semantic state", async (t) => {
+  const cases = [
+    {
+      expected: /must record a clean Git worktree/,
+      mutate(manifest) {
+        manifest.status.clean = false;
+        manifest.status.porcelainV1 = " M apps/web/app/page.tsx\n";
+        manifest.status.sha256 = sha256Bytes(manifest.status.porcelainV1);
+      },
+    },
+    {
+      expected: /captureConsistency.statusStable must be true/,
+      mutate(manifest) {
+        manifest.captureConsistency.statusStable = false;
+      },
+    },
+    {
+      expected: /criticalArtifacts.migrations must be complete/,
+      mutate(manifest) {
+        manifest.criticalArtifacts.migrations.status = "blocked";
+        manifest.criticalArtifacts.migrations.blockedEntryCount = 1;
+      },
+    },
+    {
+      expected: /source scope web must be complete/,
+      mutate(manifest) {
+        const scope = manifest.sourceScopes.find(({ name }) => name === "web");
+        scope.status = "blocked";
+        scope.blockedEntryCount = 1;
+      },
+    },
+    {
+      expected: /knowledgeStorage.auditPassed must be true/,
+      mutate(manifest) {
+        manifest.knowledgeStorage.auditPassed = false;
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    const fixture = await createFixture();
+    t.after(fixture.cleanup);
+    await fixture.rewriteManifest(scenario.mutate, { updateReferenceHash: true });
+    await expectFailure(() => fixture.verify(), scenario.expected);
+  }
 });
 
 test("rejects PASS without an independently supplied candidate manifest", async (t) => {
@@ -461,22 +597,141 @@ async function createFixture() {
 }
 
 function candidateManifest() {
+  const inventoryEntryCount = REQUIRED_SOURCE_SCOPES.length;
+  const inventorySlice = (entryCount, shaCharacter) => ({
+    entryCount,
+    sha256: shaCharacter.repeat(64),
+  });
+  const criticalArtifact = () => ({
+    entryCount: 1,
+    blockedEntryCount: 0,
+    sha256: "9".repeat(64),
+    status: "complete",
+  });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     product: "产品工作台",
+    technicalIdentifier: "workbench",
     candidateId: CANDIDATE.candidateId,
     sourceCommit: CANDIDATE.sourceCommit,
+    sourceTree: {
+      gitTree: "f".repeat(40),
+      sha256: SOURCE_TREE_SHA256,
+      entryCount: inventoryEntryCount,
+    },
+    branch: "codex/workbench-greenfield",
     environmentId: "production-cn-hz-01",
     signedTag: {
-      requested: CANDIDATE.signedTag,
       name: CANDIDATE.signedTag,
-      objectType: "tag",
       tagObject: CANDIDATE.tagObject,
       targetCommit: CANDIDATE.sourceCommit,
       payloadSha256: CANDIDATE.payloadSha256,
-      signatureVerified: true,
       verified: true,
     },
+    sourceCommitSignature: { verified: false },
+    status: {
+      command: "git status --porcelain=v1 --untracked-files=all",
+      clean: true,
+      porcelainV1: "",
+      sha256: sha256Bytes(""),
+    },
+    deployId: "deploy-fixture-001",
+    configRevision: "config-fixture-001",
+    audit: {
+      startedAt: "2026-07-19T00:00:00Z",
+      endedAt: "2026-07-19T00:30:00Z",
+      executor: "release-automation@workbench.test",
+      verifier: "evidence-custodian@workbench.test",
+    },
+    releaseMetadata: {
+      postgresVersion: "16.4",
+      pgvectorVersion: "0.8.0",
+      deerFlow: {
+        sourceCommit: "1".repeat(40),
+        baseImageDigest: `sha256:${"2".repeat(64)}`,
+        overlayConfigSha256: "3".repeat(64),
+      },
+      images: {
+        web: `sha256:${"4".repeat(64)}`,
+      },
+      artifacts: {},
+    },
+    inventory: {
+      artifactName: "release-candidate-inventory.ndjson",
+      mediaType: "application/x-ndjson",
+      canonicalization: "fixture canonical NDJSON",
+      sha256: "5".repeat(64),
+      byteSize: 1024,
+      entryCount: inventoryEntryCount,
+      byRepositoryState: {
+        tracked: inventorySlice(inventoryEntryCount, "6"),
+        untracked: inventorySlice(0, "7"),
+        ignored: inventorySlice(0, "7"),
+      },
+      byDisposition: {
+        included: inventorySlice(inventoryEntryCount, "6"),
+        blocked: inventorySlice(0, "7"),
+        excluded: inventorySlice(0, "7"),
+        external: inventorySlice(0, "7"),
+      },
+    },
+    sourceScopes: REQUIRED_SOURCE_SCOPES.map((scope) => ({
+      name: scope.name,
+      roots: [...scope.roots],
+      exactPaths: [...(scope.exactPaths ?? [])],
+      entryCount: 1,
+      blockedEntryCount: 0,
+      sha256: "8".repeat(64),
+      status: "complete",
+    })),
+    criticalArtifacts: {
+      lockfile: criticalArtifact(),
+      generatedContracts: criticalArtifact(),
+      databaseSchema: criticalArtifact(),
+      migrations: criticalArtifact(),
+      ci: criticalArtifact(),
+      deployment: criticalArtifact(),
+      hardCutDeletion: criticalArtifact(),
+      brandAssets: criticalArtifact(),
+      knowledgeVaultMarkdown: criticalArtifact(),
+      knowledgeVaultConfiguration: criticalArtifact(),
+      remediationControl: criticalArtifact(),
+      evidenceContracts: criticalArtifact(),
+    },
+    knowledgeStorage: {
+      policy: "raw assets remain under storage and are bound by explicit references",
+      auditPassed: true,
+      referencedAssetCount: 0,
+      referencedBytes: 0,
+      referencedAssets: [],
+      unreferencedStorage: {
+        totalFiles: 0,
+        totalBytes: 0,
+        unreferencedFiles: 0,
+        unreferencedBytes: 0,
+        byTopLevel: [],
+      },
+    },
+    scopePolicy: {
+      inventoryStates: ["tracked", "untracked", "ignored"],
+      sourceCandidateIncludes: "all tracked release source",
+      rawStoragePolicy: "referenced storage is external to the public candidate",
+      reasonDescriptions: {
+        trackedCandidateFile: "Tracked repository content is included.",
+      },
+    },
+    captureConsistency: {
+      sourceCommitStable: true,
+      gitTreeStable: true,
+      branchStable: true,
+      statusStable: true,
+    },
+    gate: {
+      gateId: "G1",
+      status: "PASS",
+      findingCount: 0,
+    },
+    findings: [],
   };
 }
 

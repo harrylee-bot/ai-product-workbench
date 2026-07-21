@@ -10,10 +10,13 @@ import type {
 } from "@workbench/workbench-contracts";
 import {
   canonicalJson,
+  isoDateTimeSchema,
   materializeRuntimeDesignPresetSnapshot,
   materializeRuntimeDesignStyleSnapshot,
+  opaqueIdSchema,
   runSourceBlobLimit,
   runEventSchema,
+  runSchema,
   runStatusSchema,
   runtimeCancelQueue,
   runtimeExecuteQueue,
@@ -603,52 +606,95 @@ export class RunsService {
     return { events, status };
   }
 
-  async cancel(principalId: string, runId: string): Promise<Run> {
+  async cancel(principalId: string, runId: string, idempotencyKey: string): Promise<Run> {
+    validateIdempotencyKey(idempotencyKey);
     const authorized = await this.access.findRun(principalId, runId, "edit");
-    if (authorized.status === "cancelled") return mapRun(authorized);
-    if (terminalStatuses.has(authorized.status)) throw runStateConflictProblem(authorized.status);
+    const requestHash = runCancellationRequestHash(runId);
+    const replay = await this.findCancellationReplay(principalId, idempotencyKey);
+    if (replay) return resolveCancellationReplay(replay, principalId, runId, requestHash);
+    if (terminalStatuses.has(authorized.status) && authorized.status !== "cancelled") {
+      throw runStateConflictProblem(authorized.status);
+    }
 
-    const run = await this.db.$transaction(async (tx) => {
-      await lockActiveProject(tx, authorized.projectId, principalId, "edit");
-      const updated = await tx.run.updateMany({
-        where: { id: runId, status: { in: ["queued", "running", "waiting_input"] } },
-        data: { status: "cancelling", cancelRequestedAt: new Date() },
-      });
-      const current = await tx.run.findUniqueOrThrow({
-        where: { id: runId },
-        include: { sourceSnapshots: orderedRunSourceSnapshots },
-      });
-      if (updated.count === 0) {
-        if (current.status === "cancelling" || current.status === "cancelled") return current;
-        throw runStateConflictProblem(current.status);
-      }
-
-      const latestAttempt = await tx.runtimeAttempt.findFirst({
-        where: { runId },
-        orderBy: { attempt: "desc" },
-        select: { id: true, status: true },
-      });
-      if (
-        latestAttempt
-        && ["submitting", "running", "waiting_input"].includes(latestAttempt.status)
-      ) {
-        await tx.runtimeAttempt.updateMany({
-          where: {
-            id: latestAttempt.id,
-            runId,
-            status: { in: ["submitting", "running", "waiting_input"] },
-          },
-          data: { status: "cancelling" },
+    try {
+      return await this.db.$transaction(async (tx) => {
+        await lockRunCancellationReceiptIdentity(tx, principalId, idempotencyKey);
+        const duplicate = await tx.runCancellationReceipt.findUnique({
+          where: { principalId_idempotencyKey: { principalId, idempotencyKey } },
         });
-      }
+        if (duplicate) {
+          return resolveCancellationReplay(duplicate, principalId, runId, requestHash);
+        }
 
-      await this.events.append(tx, runId, "run.cancel.requested", {});
-      await this.queue.sendInTransaction(tx, runtimeCancelQueue, { runId }, {
-        singletonKey: runId,
+        await lockActiveProject(tx, authorized.projectId, principalId, "edit");
+        const updated = await tx.run.updateMany({
+          where: { id: runId, status: { in: ["queued", "running", "waiting_input"] } },
+          data: { status: "cancelling", cancelRequestedAt: new Date() },
+        });
+        if (updated.count === 1) {
+          const latestAttempt = await tx.runtimeAttempt.findFirst({
+            where: { runId },
+            orderBy: { attempt: "desc" },
+            select: { id: true, status: true },
+          });
+          if (
+            latestAttempt
+            && ["submitting", "running", "waiting_input"].includes(latestAttempt.status)
+          ) {
+            await tx.runtimeAttempt.updateMany({
+              where: {
+                id: latestAttempt.id,
+                runId,
+                status: { in: ["submitting", "running", "waiting_input"] },
+              },
+              data: { status: "cancelling" },
+            });
+          }
+
+          await this.events.append(tx, runId, "run.cancel.requested", {});
+          await this.queue.sendInTransaction(tx, runtimeCancelQueue, { runId }, {
+            singletonKey: runId,
+          });
+        }
+
+        const current = await tx.run.findUniqueOrThrow({
+          where: { id: runId },
+          include: { sourceSnapshots: orderedRunSourceSnapshots },
+        });
+        if (
+          updated.count === 0
+          && current.status !== "cancelling"
+          && current.status !== "cancelled"
+        ) {
+          throw runStateConflictProblem(current.status);
+        }
+
+        const result = mapRun(current);
+        await tx.runCancellationReceipt.create({
+          data: {
+            runId,
+            principalId,
+            idempotencyKey,
+            requestHash,
+            response: result as Prisma.InputJsonValue,
+            responseHash: hashRequest(result),
+          },
+        });
+        return result;
       });
-      return current;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const raced = await this.findCancellationReplay(principalId, idempotencyKey);
+        if (raced) return resolveCancellationReplay(raced, principalId, runId, requestHash);
+      }
+      throw error;
+    }
+  }
+
+  private findCancellationReplay(principalId: string, idempotencyKey: string) {
+    return this.db.runCancellationReceipt.findUnique({
+      where: { principalId_idempotencyKey: { principalId, idempotencyKey } },
     });
-    return mapRun({ ...run, status: run.status === "cancelled" ? "cancelled" : "cancelling" });
   }
 
   isTerminal(status: string) {
@@ -876,10 +922,58 @@ function isRunCursor(value: unknown): value is RunCursor {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   if (Object.keys(record).length !== 2) return false;
-  if (typeof record.id !== "string" || record.id.length === 0 || record.id.length > 256) return false;
+  if (!opaqueIdSchema.safeParse(record.id).success) return false;
   if (typeof record.createdAt !== "string" || record.createdAt.length > 64) return false;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u.test(record.createdAt)) return false;
-  return !Number.isNaN(Date.parse(record.createdAt));
+  return isoDateTimeSchema.safeParse(record.createdAt).success;
+}
+
+function runCancellationRequestHash(runId: string) {
+  return hashRequest({ protocol: "workbench.run-cancellation.v1", runId });
+}
+
+async function lockRunCancellationReceiptIdentity(
+  tx: Prisma.TransactionClient,
+  principalId: string,
+  idempotencyKey: string,
+) {
+  await tx.$queryRaw(Prisma.sql`
+    SELECT pg_advisory_xact_lock(
+      hashtextextended(${`run-cancellation:v1:${principalId}:${idempotencyKey}`}, 0)
+    )::TEXT AS "receiptLock"
+  `);
+}
+
+function resolveCancellationReplay(
+  receipt: {
+    runId: string;
+    principalId: string;
+    requestHash: string;
+    response: unknown;
+    responseHash: string;
+  },
+  principalId: string,
+  runId: string,
+  requestHash: string,
+) {
+  if (
+    receipt.principalId !== principalId
+    || receipt.runId !== runId
+    || receipt.requestHash !== requestHash
+  ) {
+    throw idempotencyConflictProblem();
+  }
+  if (hashRequest(receipt.response) !== receipt.responseHash) {
+    throw new Error("RUN_CANCELLATION_RECEIPT_HASH_INVALID");
+  }
+  const response = runSchema.parse(receipt.response);
+  if (
+    response.id !== runId
+    || (response.status !== "cancelling" && response.status !== "cancelled")
+  ) {
+    throw new Error("RUN_CANCELLATION_RECEIPT_RESPONSE_INVALID");
+  }
+  return response;
 }
 
 export function runRequestHash(request: StartRunRequest, designStyleSnapshotSha256: string | null) {

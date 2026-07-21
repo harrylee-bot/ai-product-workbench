@@ -130,15 +130,24 @@ on_deploy_error() {
   exit "$status"
 }
 
-env_value() {
-  local key="$1"
+env_file_value() {
+  local file="$1"
+  local key="$2"
   local count
-  count="$(grep -c "^${key}=" "$ENV_FILE" || true)"
+  count="$(grep -c "^${key}=" "$file" || true)"
   if [ "$count" -ne 1 ]; then
-    echo "$key must occur exactly once in $ENV_FILE" >&2
+    echo "$key must occur exactly once in $file" >&2
     exit 65
   fi
-  sed -n "s/^${key}=//p" "$ENV_FILE"
+  sed -n "s/^${key}=//p" "$file"
+}
+
+env_value() {
+  env_file_value "$ENV_FILE" "$1"
+}
+
+rollback_env_value() {
+  env_file_value "$ROLLBACK_ENV_FILE" "$1" | sed -e 's/^"//' -e 's/"$//'
 }
 
 assert_image_mode() {
@@ -215,10 +224,18 @@ if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
 fi
 if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "pinned" ]; then
   image_inventory_path="$(env_value WORKBENCH_IMAGE_INVENTORY_PATH)"
+  image_inventory_bundle_path="$(env_value WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH)"
+  cosign_identity="$(env_value WORKBENCH_COSIGN_CERTIFICATE_IDENTITY)"
+  cosign_issuer="$(env_value WORKBENCH_COSIGN_OIDC_ISSUER)"
   source_commit="$(env_value WORKBENCH_SOURCE_COMMIT)"
   [ -f "$image_inventory_path" ] || { echo "Signed production image inventory is missing: $image_inventory_path" >&2; exit 66; }
+  [ -f "$image_inventory_bundle_path" ] || { echo "Production image inventory signature bundle is missing: $image_inventory_bundle_path" >&2; exit 66; }
+  require_command cosign
   node "$APP_DIR/scripts/production-image-inventory.mjs" \
     --manifest "$image_inventory_path" \
+    --bundle "$image_inventory_bundle_path" \
+    --certificate-identity "$cosign_identity" \
+    --certificate-oidc-issuer "$cosign_issuer" \
     --expected-commit "$source_commit" \
     --env-file "$ENV_FILE"
 fi
@@ -280,6 +297,13 @@ compose_up() {
   "${COMPOSE[@]}" up "${options[@]}" "$@"
 }
 
+compose_up_force_recreate() {
+  # Nginx resolves Docker service names when it starts. Recreate the public
+  # gateway after an upstream rollout so it cannot retain a removed container
+  # IP in its resolved upstream.
+  "${COMPOSE[@]}" up -d --remove-orphans --no-build --force-recreate "$@"
+}
+
 if [ "$SKIP_PREFLIGHT" = "0" ] && [ -n "$PREFLIGHT_SCRIPT" ]; then
   WORKBENCH_APP_DIR="$APP_DIR" \
     WORKBENCH_ENV_FILE="$ENV_FILE" \
@@ -315,16 +339,22 @@ case "$DEPLOY_TARGET" in
       knowledge \
       preview-gateway \
       gateway
+    compose_up_force_recreate preview-gateway gateway
+    wait_for_services preview-gateway gateway
     ;;
   api)
     deployment_mutated=1
     compose_up workbench-api
     wait_for_services workbench-api
+    compose_up_force_recreate gateway
+    wait_for_services gateway
     ;;
   web)
     deployment_mutated=1
-    compose_up workbench-web knowledge gateway
-    wait_for_services workbench-web knowledge gateway
+    compose_up workbench-web knowledge
+    wait_for_services workbench-web knowledge
+    compose_up_force_recreate gateway
+    wait_for_services gateway
     ;;
   runtime-worker)
     deployment_mutated=1
@@ -356,12 +386,20 @@ case "$DEPLOY_TARGET" in
     [ -n "$ROLLBACK_ENV_FILE" ] || { echo "WORKBENCH_ROLLBACK_ENV_FILE is required for rollback" >&2; exit 64; }
     [ -f "$ROLLBACK_ENV_FILE" ] || { echo "Rollback environment file is missing: $ROLLBACK_ENV_FILE" >&2; exit 66; }
     [ -f "$ROLLBACK_COMPOSE_FILE" ] || { echo "Rollback Compose file is missing: $ROLLBACK_COMPOSE_FILE" >&2; exit 66; }
-    rollback_source_commit="$(sed -n 's/^WORKBENCH_SOURCE_COMMIT=//p' "$ROLLBACK_ENV_FILE" | sed -e 's/^"//' -e 's/"$//')"
-    rollback_inventory="$(sed -n 's/^WORKBENCH_IMAGE_INVENTORY_PATH=//p' "$ROLLBACK_ENV_FILE" | sed -e 's/^"//' -e 's/"$//')"
+    rollback_source_commit="$(rollback_env_value WORKBENCH_SOURCE_COMMIT)"
+    rollback_inventory="$(rollback_env_value WORKBENCH_IMAGE_INVENTORY_PATH)"
+    rollback_inventory_bundle="$(rollback_env_value WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH)"
+    rollback_cosign_identity="$(rollback_env_value WORKBENCH_COSIGN_CERTIFICATE_IDENTITY)"
+    rollback_cosign_issuer="$(rollback_env_value WORKBENCH_COSIGN_OIDC_ISSUER)"
     [ -n "$rollback_source_commit" ] || { echo "Rollback environment is missing WORKBENCH_SOURCE_COMMIT" >&2; exit 65; }
     [ -f "$rollback_inventory" ] || { echo "Rollback image manifest is missing: $rollback_inventory" >&2; exit 66; }
+    [ -f "$rollback_inventory_bundle" ] || { echo "Rollback image manifest signature bundle is missing: $rollback_inventory_bundle" >&2; exit 66; }
+    require_command cosign
     node "$APP_DIR/scripts/production-image-inventory.mjs" \
       --manifest "$rollback_inventory" \
+      --bundle "$rollback_inventory_bundle" \
+      --certificate-identity "$rollback_cosign_identity" \
+      --certificate-oidc-issuer "$rollback_cosign_issuer" \
       --expected-commit "$rollback_source_commit" \
       --env-file "$ROLLBACK_ENV_FILE"
     "${COMPOSE[@]}" down --remove-orphans
@@ -394,11 +432,15 @@ case "$DEPLOY_TARGET" in
     deployment_mutated=1
     compose_up workbench-preview preview-gateway
     wait_for_services workbench-preview preview-gateway
+    compose_up_force_recreate preview-gateway
+    wait_for_services preview-gateway
     ;;
   knowledge)
     deployment_mutated=1
-    compose_up knowledge gateway
-    wait_for_services knowledge gateway
+    compose_up knowledge
+    wait_for_services knowledge
+    compose_up_force_recreate gateway
+    wait_for_services gateway
     ;;
   migrate)
     "${COMPOSE[@]}" run --rm migrate

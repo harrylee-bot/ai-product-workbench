@@ -1,0 +1,8 @@
+[Interface]
+Address = 10.88.0.1/30
+ListenPort = 51820
+PrivateKey = REPLACE_WITH_EDGE_WIREGUARD_PRIVATE_KEY
+
+[Peer]
+PublicKey = REPLACE_WITH_ORIGIN_WIREGUARD_PUBLIC_KEY
+AllowedIPs = 10.88.0.2/32

@@ -1,7 +1,7 @@
-import type { Readable } from "node:stream";
+import type { VerifiedReadyObjectBody } from "@workbench/workbench-content-security";
 
 export type ParserSource = {
-  body: Readable;
+  body: VerifiedReadyObjectBody;
   byteSize: number;
   sha256: string;
   mediaType: string;

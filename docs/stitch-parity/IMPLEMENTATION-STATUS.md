@@ -1,15 +1,17 @@
 # 产品工作台产品等价改造实施状态
 
-更新日期：2026-07-18
+更新日期：2026-07-21
 实施规格：`CODEX-STITCH-PARITY-IMPLEMENTATION.md`
-当前阶段：阶段 0-11 本地实现与回归门禁、阶段 12 服务器硬切与上线验收已完成
-下一阶段：补齐 production security preflight（CDN edge CIDR、回源鉴权、DeerFlow immutable image pin），并在配置真实 provider 凭证后验证真实 Run/Import/Export；不保留旧项目兼容层
+当前阶段：阶段 0-11 本地实现与回归门禁已完成；阶段 12 已在 `aionbench.com` 直连验证拓扑完成有限范围复验，生产硬门禁仍未关闭
+下一阶段：完成 clean candidate、供应链签名、真实 S3/IAM、Edge/WireGuard（若启用）、OTLP、恢复与长时序验收；不保留旧项目兼容层
 
-## 阶段 12：服务器硬切与上线验收（已完成）
+> **现状校正（2026-07-21）**：本节中标注为历史的 2026-07-18 回执仍不代表当前生产验收。当前实测为：`aionbench.com`、`www`、`preview`、`uploads`、`identity` 均解析到 `45.207.206.119`；Origin validation 栈已部署，15 个 Workbench 容器加 1 个 DeerFlow 容器均 healthy，公网登录跳转、TLS、uploads、identity 和 Preview 负向路径通过。当前拓扑不使用 CDN；`deploy/edge/` 只保留为尚未启用的可选 Edge/WireGuard 方案。阶段 12 仍为 **REVALIDATION REQUIRED / NOT ACCEPTED**，不得把有限验证写成生产接受。
+
+## 阶段 12：服务器硬切与上线验收（历史回执，当前待重新验证）
 
 ### 硬切结果
 
-- 服务器 `8.130.160.177` 已切换到唯一新项目部署目录；旧部署目录已不存在。
+- 历史回执曾记录服务器 `8.130.160.177` 切换到唯一新项目部署目录；该旧 Edge 回执不代表当前入口。当前验证部署位于 `45.207.206.119`，旧部署目录已不存在。
 - 旧项目容器、旧应用镜像和未使用的旧卷已清理；仅保留新项目运行所需的 PostgreSQL、MinIO、ClamAV、Dex、Docling、Knowledge、Gateway、Preview、Web、API、Runtime Worker、File Worker、Import Worker 和 Export Worker 运行边界。
 - DeerFlow 保留，并重新绑定“产品工作台”的 public skill/runtime tools；没有恢复旧项目源代码或旧业务容器。
 - 仓库中的旧 `apps/api`、`packages/db`、Chat/AI SDK/SWR 前端、旧认证/API client、旧 Compose 与只服务旧 Conversation 链路的脚本已物理删除；根构建、类型检查和测试只保留新 Workbench workspace。
@@ -33,13 +35,13 @@
 ### 登录验收
 
 - 生产登录页可直接使用 Better Auth 账号密码登录：账号 `workbench-admin` 登录 `https://aionbench.com/` 成功并进入“产品工作台”首页。
-- 错误账号密码保持在产品登录页，不强制跳转 Dex；只有点击“企业 SSO 登录”才跳转到 `identity.8.130.160.177.sslip.io`。
+- 错误账号密码保持在产品登录页，不强制跳转 Dex；只有启用企业 SSO 并点击入口时才跳转到 `identity.aionbench.com`。
 - Better Auth credential 与原 `workbench-oidc` account 并存，业务权限模型未改动；密码材料只保存在服务器受限文件，未写入代码、文档或回执。
 
 ### 发布边界
 
 - 新项目部署、旧项目删除、迁移、数据清理、健康检查和登录验收已完成；这不是兼容层发布，旧项目可彻底删除。
-- 完整 production security acceptance 尚未宣称通过：当前服务器仍是 `server-validation` topology，preflight 还缺 `WORKBENCH_CDN_EDGE_CIDRS`，并需完成 CDN allowlist、回源鉴权审计和 DeerFlow immutable image pin。
+- 完整 production security acceptance 尚未宣称通过：当前服务器仍是 `server-validation` topology，尚未完成公网 Edge、WireGuard peer、源站防绕过、回源鉴权审计和 DeerFlow immutable image pin 的真实环境验收。
 - AI Studio、Netlify、Lovable、Bolt 的真实第三方 provider 凭证/adapter 仍按 capability fail-closed；fake provider 合同测试不等于真实外发已上线。真实 Run/Import/Export 长时序需在发布门禁和 provider 配置完成后补验。
 
 ## 阶段 7：Import Source 矩阵（已完成）
@@ -68,7 +70,7 @@
 ### 安全和部署边界
 
 - Import Worker 使用独立 S3 凭据、受控 egress 和 ClamAV 服务；Compose、Dockerfile、server deploy target 和 preflight 已接入。
-- 当前机器没有 Docker CLI，因此本机未执行真实镜像构建或 `docker compose config`；服务器 candidate Compose config、镜像构建与部署验收已完成，最终硬切结果见阶段 12。
+- 历史回执（2026-07-18）：当时本机没有 Docker CLI，服务器 candidate 曾完成 Compose config、镜像构建与旧拓扑部署；该结果不适用于当前 Edge/Origin 新拓扑，必须重新部署和验收。
 - 本阶段没有迁移旧原始对话；按要求只保留知识库数据。`stitch-evidence-bundle` 保持只读，不同步到知识库或第三方。
 
 ## 阶段 8：首页和工作台视觉对齐（已完成）
@@ -102,7 +104,7 @@
 ### 阶段 8 剩余风险
 
 - 1501x855、390x844、320x720 是补充交互 smoke 视口；规格要求的 375x812、768x1024、1440x900 固定视觉矩阵已由阶段 11 补齐并通过。
-- Docker CLI 不存在，无法在本机执行镜像构建或 Compose 解析；服务器 candidate Compose config、镜像构建和部署已完成，残余发布门禁见阶段 12。
+- 历史回执（2026-07-18）：当时由旧服务器 candidate 补做 Compose 与镜像验证；该回执只保留为历史，不计入阶段 12。2026-07-20/21 的新 Origin validation 证据见综合审计文档 V-022 至 V-027，仍不等于生产接受。
 
 ## 阶段 9：Motion 对齐（已完成）
 
@@ -229,10 +231,10 @@
 
 ### 剩余风险与发布边界
 
-1. 本机没有 Docker CLI；服务器 candidate 的 `docker compose config`、镜像构建和新项目部署已通过，首轮镜像构建暴露的 Canvas Tools Docker 依赖问题已修复。
-2. 服务器硬切、旧项目删除、生产账号密码登录、Better Auth credential/JWT 接线和 SSO 可选跳转已验收；真实 Run/Import/Export 长时序仍需在真实 provider 凭证和 production security preflight 完成后补验。
+1. 本机没有 Docker CLI；2026-07-18 旧服务器 candidate 的 Compose、镜像和部署结果仅为历史回执。2026-07-20/21 已在新 Origin 完成 dirty-tree validation 部署和有限 smoke；仍必须用同一 clean signed candidate 重新执行 Compose、镜像、Edge/Origin 和生产 preflight。
+2. 2026-07-18 曾执行旧服务器硬切、数据清理和登录验证；当前 DNS/服务器拓扑已变化，该结果不再构成线上验收。Better Auth 账号密码与可选 SSO 的代码合同、当前直连域名和基础登录跳转已复验，真实身份长时序与 Run/Import/Export 长时序仍待生产候选。
 3. AI Studio、Netlify、Lovable、Bolt 等真实第三方 provider 凭证/adapter 仍按 capability fail-closed，fake provider 的协议测试不等于生产外发已上线。
-4. 当前工作区仍是 dirty worktree；部署和删除服务器项目已按授权完成，提交/推送仍需在文件归属审查后单独执行。
+4. 当前工作区仍是 dirty worktree；本轮未提交或推送。验证服务器部署和 DNS 指向已实际发生，但没有签名候选、独立批准或 production acceptance receipt，不能表述为当前候选已发布。
 
 ## 阶段 1：画布工具语义重构（已完成）
 
@@ -447,7 +449,7 @@ Board E2E 在 Chromium 中验证 1501×855 和 390×844。工具条可见 surfac
 |---|---|
 | 动态能力描述 | Worker 根据当前 Project、Run、浏览器 Canvas snapshot、选择、权限、active mutation 和 edit model 生成有序 `declaredTools`，签发短期 request-scoped capability；模型参数不能提交 principal、Project、Run、Board、revision、endpoint 或 token。 |
 | 读取 | `get_visible_screens` 与 `get_selected_screens` 只返回当前 snapshot 内的 opaque screen reference 和受限摘要；分页、数量、route、标题与结构均受合同上限约束。 |
-| `view_screen` | API 返回真实节点、action、state、motion 计数并发出 `preview.open` client command；Web 打开 isolated Preview 后同步完整 Canvas state 再 ACK。当前不向模型提供截图，见偏差说明。 |
+| `view_screen` | API 返回真实结构并发出带 `visualCapabilityId` 的 `preview.open`；Web 打开 isolated Preview、采集受限图片并 ACK，API 规范化后由同一短期 capability 提供给 DeerFlow 图片内容块。 |
 | UI 指示 | `select_screen` 与 `navigate_canvas` 只产生绑定 Project、Thread、Run、client session generation、Board revision 和 Canvas state revision 的 client command，不直接持久化 Board。 |
 | Run intent | `quick_edit`、`rename_screen`、`duplicate_screen` 只在当前 active edit Run 的精确单屏 target 上接受；不创建嵌套 Run，也不由 API 提前修改 Artifact。 |
 | 最终发布 | `quick_edit` 由 Runtime 返回完整 revise 文档；rename/duplicate 作为有序 staged intent 叠加到 Runtime 结果。Worker 在同一最终发布事务中创建 ready ArtifactVersion、更新 Board 并回填 invocation 的最终版本审计链。 |
@@ -519,10 +521,10 @@ E2E 使用两个独立 edit Run 遵守生产互斥规则：
 
 ### 明确偏差与剩余风险
 
-1. `view_screen` 当前只返回真实结构计数并为用户打开 isolated Preview，`visualCapabilityId` 固定为 `null`；没有截图、像素或渲染图进入模型上下文，因此不能让 Agent 判断颜色、布局和真实视觉细节。这与 Evidence Bundle 的视觉观察语义不等价。
+1. `view_screen` 已改为由服务端签发 command-bound `visualCapabilityId`，浏览器 ACK 携带受限图片，API 规范化为 WebP 并写入专用 `canvas-visuals/*`，DeerFlow Python client 以同一短期 bearer 获取并生成标准图片内容块。本地 PostgreSQL HTTP E2E 已覆盖专用 S3 身份、digest、ETag/304、无 session header 读取和过期头；真实派生 DeerFlow 镜像与多模态 provider 消费仍未在生产验证。
 2. 固定 DeerFlow commit 仍静态注册 8 个 Canvas 工具，但候选派生镜像已用 commit/SHA-256 绑定的最小 source patch 安装 `WorkbenchToolScopeMiddleware`：模型绑定只看到本 Run `configurable.workbench_canvas_tools.declaredTools`，未声明调用在 ToolNode handler 前拒绝，缺失或畸形策略隐藏并拒绝全部 Canvas 工具，非 Canvas 工具不受影响。该实现已进入代码与构建/preflight 合同；升为生产通过仍需固定 digest 镜像和真实 Run E2 证据。
-3. `npm run openapi:breaking` 本轮未得到差异结论：固定 `oasdiff` 下载访问 `proxy.golang.org` 超时。OpenAPI 生成一致、Redocly 和自定义 validator 已通过，但 breaking-diff 仍需在依赖可用的 CI/发布环境执行。
-4. 阶段 3 当时本机没有 Docker CLI，无法执行 `docker compose config --quiet`；已用严格 YAML parser 验证 `deploy/workbench-compose.yml` 包含 14 个合法 service，并通过仓库 deployment network/upload/auth/DeerFlow 静态门禁。服务器 candidate Compose preflight 后续已通过，见阶段 11。
+3. `npm run openapi:breaking` 与 breaking fixtures 已于 2026-07-20 使用固定 `oasdiff@v1.23.0` 通过；当前差异无 breaking，兼容 fixture 通过且 breaking fixture 被正确拒绝。
+4. 阶段 3 当时本机没有 Docker CLI；严格 YAML 与 deployment network/upload/auth/DeerFlow 静态门禁当前仍通过。2026-07-18 服务器 candidate Compose preflight 只属于旧拓扑历史回执，不能替代新 Origin 的真实部署。
 5. 当前交付仍依赖既有 dirty worktree；提交前必须按阶段审查文件所有权，不能混入不相关改动。
 
 ### 阶段 3 结束时边界（历史记录）

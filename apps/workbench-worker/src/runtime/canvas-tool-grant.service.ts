@@ -160,6 +160,15 @@ export class PrismaCanvasToolGrantIssuer implements CanvasToolGrantIssuer {
             : "read";
       const selectedNodeIds = selected.map((screen) => screen.boardNodeId);
       const visibleNodeIds = visibleKeys.map((key) => byKey.get(key)!.boardNodeId);
+      const capabilitySnapshot = {
+        snapshotSha256,
+        boardRevision: snapshot.boardRevision,
+        canvasStateRevision: snapshot.canvasStateRevision,
+        viewportSha256: sha256(canonicalJson(snapshot.viewport)),
+        selectedNodeIdsSha256: sha256(canonicalJson(selectedNodeIds)),
+        visibleNodeIdsSha256: sha256(canonicalJson(visibleNodeIds)),
+        profile,
+      } as const;
       const expiresAt = new Date(Math.min(
         Date.parse(snapshot.expiresAt) - SESSION_TTL_SAFETY_MS,
         now.getTime() + this.config!.maximumTtlSeconds * 1_000,
@@ -185,9 +194,28 @@ export class PrismaCanvasToolGrantIssuer implements CanvasToolGrantIssuer {
         if (existing.grant.snapshotSha256 !== snapshotSha256) {
           throw new Error("CANVAS_AGENT_SESSION_SCOPE_CONFLICT");
         }
+        const replayPayload: CanvasToolCapabilityGrantPayload = {
+          grantId: existing.grant.id,
+          principalId: scope.principalId,
+          projectId: scope.projectId,
+          threadId: scope.threadId,
+          runId: scope.runId,
+          runtimeAttemptId: scope.runtimeAttemptId,
+          agentSessionId: existing.id,
+          boardId: existing.boardId,
+          ...capabilitySnapshot,
+          declarationSha256,
+          issuedAt: existing.grant.issuedAt,
+          notBefore: existing.grant.issuedAt,
+          expiresAt: existing.grant.expiresAt,
+        };
+        if (existing.grant.payloadSha256 !== canvasToolCapabilityGrantPayloadSha256(replayPayload)) {
+          throw new Error("CANVAS_TOOL_GRANT_PAYLOAD_CONFLICT");
+        }
         return {
           session: existing,
           grant: existing.grant,
+          capabilitySnapshot,
           declaredTools,
           declarationSha256,
           selectedNodeIds,
@@ -207,6 +235,7 @@ export class PrismaCanvasToolGrantIssuer implements CanvasToolGrantIssuer {
         runtimeAttemptId: scope.runtimeAttemptId,
         agentSessionId,
         boardId: board.id,
+        ...capabilitySnapshot,
         declarationSha256,
         issuedAt: now,
         notBefore: now,
@@ -251,6 +280,7 @@ export class PrismaCanvasToolGrantIssuer implements CanvasToolGrantIssuer {
       return {
         session,
         grant,
+        capabilitySnapshot,
         declaredTools,
         declarationSha256,
         selectedNodeIds,
@@ -268,6 +298,7 @@ export class PrismaCanvasToolGrantIssuer implements CanvasToolGrantIssuer {
       runtimeAttemptId: scope.runtimeAttemptId,
       agentSessionId: issued.session.id,
       boardId: issued.session.boardId,
+      ...issued.capabilitySnapshot,
       declarationSha256: issued.declarationSha256,
       issuedAt: issued.grant.issuedAt,
       notBefore: issued.grant.issuedAt,

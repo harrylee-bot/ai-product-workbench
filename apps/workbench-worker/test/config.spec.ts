@@ -39,6 +39,9 @@ describe("worker database configuration", () => {
         runtimeExecutionHeartbeatMs: 15_000,
         runtimeExecutionReconcileIntervalMs: 5_000,
         runtimeExecutionReconcileBatchSize: 100,
+        concurrency: 2,
+        runtimeCancellationPollIntervalMs: 1_000,
+        runtimeCancellationQueryBatchSize: 100,
         knowledgeTool: {
           endpoint: "https://workbench.test/api/v1/runtime/knowledge/retrieve",
           maximumTtlSeconds: 900,
@@ -52,6 +55,19 @@ describe("worker database configuration", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it.each([
+    ["WORKBENCH_RUNTIME_CONCURRENCY", "65"],
+    ["WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS", "249"],
+    ["WORKBENCH_RUNTIME_CANCELLATION_QUERY_BATCH_SIZE", "1001"],
+  ])("rejects an unbounded %s value", (name, value) => {
+    vi.stubEnv("WORKBENCH_DATABASE_URL", "postgresql://localhost/workbench?schema=workbench");
+    vi.stubEnv("DEERFLOW_LANGGRAPH_URL", "https://deerflow.test/api/");
+    vi.stubEnv("DEERFLOW_GATEWAY_URL", "https://deerflow.test/");
+    vi.stubEnv("WORKBENCH_S3_BUCKET", "workbench");
+    vi.stubEnv(name, value);
+    expect(() => loadWorkerConfig()).toThrow(new RegExp(`${name} must be an integer between`, "u"));
   });
 
   it("fails closed instead of using generic or ambient S3 credentials", () => {

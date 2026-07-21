@@ -45,12 +45,27 @@ describe("PreviewStorage bounded staging", () => {
 
   it("fails closed and removes the spool file when the trusted digest does not match", async () => {
     const source = Buffer.from("<!doctype html><html><head></head><body>tampered</body></html>");
-    const { storage, spoolDirectory } = await storageFor(source.byteLength, Readable.from([source]));
+    let recorderResolved = false;
+    const recordIntegrityFailure = vi.fn(async () => {
+      await Promise.resolve();
+      recorderResolved = true;
+    });
+    const { storage, spoolDirectory } = await storageFor(
+      source.byteLength,
+      Readable.from([source]),
+      recordIntegrityFailure,
+    );
 
     await expect(storage.stageHtml({
       ...identity(source),
       sha256: "0".repeat(64),
-    }, 1024 * 1024)).rejects.toThrow("PREVIEW_STORAGE_IDENTITY_MISMATCH");
+    }, 1024 * 1024)).rejects.toThrow("OBJECT_STORAGE_SHA256_MISMATCH");
+    expect(recorderResolved).toBe(true);
+    expect(recordIntegrityFailure).toHaveBeenCalledOnce();
+    expect(recordIntegrityFailure).toHaveBeenCalledWith(expect.objectContaining({
+      failureCode: "OBJECT_STORAGE_SHA256_MISMATCH",
+      storageKey: "blobs/preview/source",
+    }));
     expect(await readdir(spoolDirectory)).toEqual([]);
   });
 
@@ -104,7 +119,11 @@ describe("PreviewStorage bounded staging", () => {
   }, 30_000);
 });
 
-async function storageFor(contentLength: number, body: Readable) {
+async function storageFor(
+  contentLength: number,
+  body: Readable,
+  recordIntegrityFailure = vi.fn(async () => undefined),
+) {
   const spoolDirectory = await mkdtemp(join(tmpdir(), "workbench-preview-storage-test-"));
   roots.push(spoolDirectory);
   const client = {
@@ -124,7 +143,7 @@ async function storageFor(contentLength: number, body: Readable) {
       previewS3AccessKeyId: "preview-access",
       previewS3SecretAccessKey: "preview-secret",
       spoolDirectory,
-    }, client as never),
+    }, recordIntegrityFailure, client as never),
   };
 }
 

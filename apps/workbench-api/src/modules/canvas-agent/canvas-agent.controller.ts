@@ -23,6 +23,7 @@ import {
   type CanvasClientStateSyncRequest,
 } from "@workbench/workbench-contracts";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
+import { httpResponseAbortSignalArgument } from "../../common/http-request-abort.js";
 import { CurrentPrincipal } from "../identity/current-principal.decorator.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { WorkbenchAuthGuard } from "../identity/workbench-auth.guard.js";
@@ -49,7 +50,12 @@ export class CanvasAgentController {
     @Headers("if-none-match") ifNoneMatch: string | undefined,
     @Res({ passthrough: true }) response: Response,
   ) {
-    return this.canvas.getVisual(authorization, visualCapabilityId, ifNoneMatch).then((result) => {
+    return this.canvas.getVisual(
+      authorization,
+      visualCapabilityId,
+      ifNoneMatch,
+      ...httpResponseAbortSignalArgument(response),
+    ).then((result) => {
       response.setHeader("Cache-Control", "no-store, private");
       response.setHeader("Content-Type", result.mediaType);
       response.setHeader("Content-Length", String(result.byteSize));

@@ -25,8 +25,10 @@ EXPECTED_MANIFEST_KEYS = frozenset(
         "deferredMiddleware",
         "toolScopeMiddleware",
         "additionalSources",
+        "gatewaySources",
         "patchApplier",
         "contractTest",
+        "requestContextTest",
     }
 )
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -83,9 +85,37 @@ def _validate_replacements(value: object) -> bool:
             return False
         if not isinstance(replacement["insertion"], str) or not replacement["insertion"]:
             return False
-        if replacement["position"] not in {"before", "after"}:
+        if replacement["position"] not in {"before", "after", "replace"}:
             return False
     return True
+
+
+def _validate_source_entries(
+    value: object,
+    seen_paths: set[str],
+    required_prefix: str | None = None,
+) -> list[dict]:
+    if not isinstance(value, list):
+        raise SystemExit("DEERFLOW_PATCH_MANIFEST_INVALID")
+    entries: list[dict] = []
+    for entry in value:
+        if (
+            not isinstance(entry, dict)
+            or frozenset(entry) != {"path", "upstreamSha256", "patchedSha256", "replacements"}
+            or not _valid_relative_path(entry.get("path"))
+            or entry["path"] in seen_paths
+            or not _valid_sha256(entry.get("upstreamSha256"))
+            or not _valid_sha256(entry.get("patchedSha256"))
+            or not _validate_replacements(entry.get("replacements"))
+            or (
+                required_prefix is not None
+                and not entry["path"].startswith(required_prefix)
+            )
+        ):
+            raise SystemExit("DEERFLOW_PATCH_MANIFEST_INVALID")
+        seen_paths.add(entry["path"])
+        entries.append(entry)
+    return entries
 
 
 def load_manifest() -> dict:
@@ -128,24 +158,15 @@ def load_manifest() -> dict:
     ):
         raise SystemExit("DEERFLOW_PATCH_MANIFEST_INVALID")
 
-    additional_sources = manifest.get("additionalSources")
-    if not isinstance(additional_sources, list):
-        raise SystemExit("DEERFLOW_PATCH_MANIFEST_INVALID")
     seen_paths = {agent["path"], deferred["path"], middleware["path"]}
-    for entry in additional_sources:
-        if (
-            not isinstance(entry, dict)
-            or frozenset(entry) != {"path", "upstreamSha256", "patchedSha256", "replacements"}
-            or not _valid_relative_path(entry.get("path"))
-            or entry["path"] in seen_paths
-            or not _valid_sha256(entry.get("upstreamSha256"))
-            or not _valid_sha256(entry.get("patchedSha256"))
-            or not _validate_replacements(entry.get("replacements"))
-        ):
-            raise SystemExit("DEERFLOW_PATCH_MANIFEST_INVALID")
-        seen_paths.add(entry["path"])
+    additional_sources = _validate_source_entries(manifest.get("additionalSources"), seen_paths)
+    gateway_sources = _validate_source_entries(
+        manifest.get("gatewaySources"),
+        set(),
+        "app/gateway/",
+    )
 
-    for key in ("patchApplier", "contractTest"):
+    for key in ("patchApplier", "contractTest", "requestContextTest"):
         entry = manifest.get(key)
         if (
             not isinstance(entry, dict)
@@ -172,6 +193,8 @@ def render_source_patch(path: Path, entry: dict) -> str:
             source = source.replace(anchor, f"{insertion}{anchor}", 1)
         elif replacement["position"] == "after":
             source = source.replace(anchor, f"{anchor}{insertion}", 1)
+        elif replacement["position"] == "replace":
+            source = source.replace(anchor, insertion, 1)
         else:
             raise SystemExit("DEERFLOW_PATCH_MANIFEST_INVALID")
     return source
@@ -180,6 +203,7 @@ def render_source_patch(path: Path, entry: dict) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--gateway-root", type=Path)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
@@ -190,10 +214,18 @@ def main() -> None:
         manifest["contractTest"]["sha256"],
         "DEERFLOW_PATCH_CONTRACT_TEST_MISMATCH",
     )
+    verify_hash(
+        PATCH_ROOT / "test_workbench_request_context.py",
+        manifest["requestContextTest"]["sha256"],
+        "DEERFLOW_PATCH_REQUEST_CONTEXT_TEST_MISMATCH",
+    )
     if arguments.source_commit != manifest.get("upstreamCommit"):
         raise SystemExit("DEERFLOW_PATCH_SOURCE_COMMIT_MISMATCH")
 
     root = arguments.root.resolve()
+    gateway_sources_root = arguments.gateway_root.resolve() if arguments.gateway_root else None
+    if manifest["gatewaySources"] and gateway_sources_root is None:
+        raise SystemExit("DEERFLOW_PATCH_GATEWAY_ROOT_REQUIRED")
     agent = root / manifest["agent"]["path"]
     deferred = root / manifest["deferredMiddleware"]["path"]
     target_middleware = root / manifest["toolScopeMiddleware"]["path"]
@@ -202,6 +234,10 @@ def main() -> None:
         (root / entry["path"], entry)
         for entry in manifest["additionalSources"]
     ]
+    gateway_sources = [
+        (gateway_sources_root / entry["path"], entry)
+        for entry in manifest["gatewaySources"]
+    ] if gateway_sources_root is not None else []
 
     verify_hash(deferred, manifest["deferredMiddleware"]["sha256"], "DEERFLOW_PATCH_DEFERRED_SOURCE_MISMATCH")
     verify_hash(source_middleware, manifest["toolScopeMiddleware"]["sha256"], "DEERFLOW_PATCH_MIDDLEWARE_SOURCE_MISMATCH")
@@ -211,6 +247,8 @@ def main() -> None:
         verify_hash(target_middleware, manifest["toolScopeMiddleware"]["sha256"], "DEERFLOW_PATCH_MIDDLEWARE_NOT_APPLIED")
         for path, entry in additional_sources:
             verify_hash(path, entry["patchedSha256"], "DEERFLOW_PATCH_ADDITIONAL_SOURCE_NOT_APPLIED")
+        for path, entry in gateway_sources:
+            verify_hash(path, entry["patchedSha256"], "DEERFLOW_PATCH_GATEWAY_SOURCE_NOT_APPLIED")
         print("DeerFlow Workbench tool-scope patch verified.")
         return
 
@@ -225,10 +263,16 @@ def main() -> None:
     for path, entry in additional_sources:
         verify_hash(path, entry["upstreamSha256"], "DEERFLOW_PATCH_ADDITIONAL_SOURCE_MISMATCH")
         rendered_additional_sources.append((path, entry, render_source_patch(path, entry)))
+    rendered_gateway_sources = []
+    for path, entry in gateway_sources:
+        verify_hash(path, entry["upstreamSha256"], "DEERFLOW_PATCH_GATEWAY_SOURCE_MISMATCH")
+        rendered_gateway_sources.append((path, entry, render_source_patch(path, entry)))
     if target_middleware.exists() and sha256(target_middleware) != manifest["toolScopeMiddleware"]["sha256"]:
         raise SystemExit("DEERFLOW_PATCH_MIDDLEWARE_TARGET_CONFLICT")
     atomic_write(agent, patched)
     for path, _entry, rendered in rendered_additional_sources:
+        atomic_write(path, rendered)
+    for path, _entry, rendered in rendered_gateway_sources:
         atomic_write(path, rendered)
     target_middleware.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(target_middleware, source_middleware.read_text(encoding="utf-8"))
@@ -236,6 +280,8 @@ def main() -> None:
     verify_hash(target_middleware, manifest["toolScopeMiddleware"]["sha256"], "DEERFLOW_PATCH_MIDDLEWARE_OUTPUT_MISMATCH")
     for path, entry, _rendered in rendered_additional_sources:
         verify_hash(path, entry["patchedSha256"], "DEERFLOW_PATCH_ADDITIONAL_SOURCE_OUTPUT_MISMATCH")
+    for path, entry, _rendered in rendered_gateway_sources:
+        verify_hash(path, entry["patchedSha256"], "DEERFLOW_PATCH_GATEWAY_SOURCE_OUTPUT_MISMATCH")
     print("DeerFlow Workbench tool-scope patch applied.")
 
 

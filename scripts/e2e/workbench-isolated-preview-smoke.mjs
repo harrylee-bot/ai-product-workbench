@@ -190,6 +190,9 @@ await context.route("**/api/v1/**", async (route) => {
   if (method === "GET" && path === "/api/v1/workspaces/workspace-1/design-systems") {
     return json(route, { items: [], nextCursor: null });
   }
+  if (method === "GET" && path === "/api/v1/projects/project-1/import-sources") {
+    return json(route, { items: [], nextCursor: null });
+  }
   if (method === "GET" && path === "/api/v1/projects/project-1/bootstrap") {
     return json(route, {
       project,

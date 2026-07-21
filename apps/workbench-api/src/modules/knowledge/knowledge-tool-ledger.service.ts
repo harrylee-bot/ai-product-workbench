@@ -297,7 +297,7 @@ export class KnowledgeToolLedgerService {
 
   async release(reservation: KnowledgeToolReservation, errorCode: string): Promise<void> {
     await this.db.$executeRaw(Prisma.sql`
-      UPDATE public."knowledge_retrieval_invocations"
+      UPDATE "knowledge_retrieval_invocations"
       SET
         "status" = 'failed',
         "lease_token" = NULL,
@@ -352,14 +352,14 @@ export class KnowledgeToolLedgerService {
         project."status"::TEXT AS "projectStatus",
         NULL::TEXT AS "memberPrincipalId",
         clock_timestamp() AS "now"
-      FROM public."knowledge_tool_grants" AS capability
-      JOIN public."knowledge_tool_budgets" AS budget
+      FROM "knowledge_tool_grants" AS capability
+      JOIN "knowledge_tool_budgets" AS budget
         ON budget."runtime_attempt_id" = capability."runtime_attempt_id"
-      JOIN public."runtime_attempts" AS attempt
+      JOIN "runtime_attempts" AS attempt
         ON attempt."id" = capability."runtime_attempt_id"
-      JOIN public."runs" AS run ON run."id" = capability."run_id"
-      JOIN public."threads" AS thread ON thread."id" = run."thread_id"
-      JOIN public."projects" AS project ON project."id" = run."project_id"
+      JOIN "runs" AS run ON run."id" = capability."run_id"
+      JOIN "threads" AS thread ON thread."id" = run."thread_id"
+      JOIN "projects" AS project ON project."id" = run."project_id"
       WHERE capability."id" = ${grant.grantId}
       FOR UPDATE OF budget
       FOR SHARE OF capability, attempt, run, thread, project
@@ -368,7 +368,7 @@ export class KnowledgeToolLedgerService {
     if (!row || !ledgerIdentityMatches(row, grant)) throw knowledgeGrantUnauthorizedProblem();
     const members = await tx.$queryRaw<Array<{ principalId: string }>>(Prisma.sql`
       SELECT "principal_id" AS "principalId"
-      FROM public."project_members"
+      FROM "project_members"
       WHERE "project_id" = ${grant.projectId}
         AND "principal_id" = ${grant.principalId}
       FOR SHARE

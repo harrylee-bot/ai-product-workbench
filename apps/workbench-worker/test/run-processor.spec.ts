@@ -13,6 +13,7 @@ import {
 } from "../src/runs/run-processor.js";
 import { PrismaCanvasToolGrantIssuer } from "../src/runtime/canvas-tool-grant.service.js";
 import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
+import { RuntimeSubmissionUnknownError } from "../src/runtime/runtime.port.js";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
 const executionClaim = {
@@ -40,6 +41,49 @@ const prototypePatchCoordinator = () => ({
   discardRunTx: vi.fn(),
   finalizeVersionTx: vi.fn(),
 });
+
+function durableExecutionPrepared() {
+  return {
+    run: {
+      id: "run-1",
+      attempt: 1,
+      createdById: "principal-1",
+      knowledgeReleaseId: null,
+    },
+    thread: { id: "thread-1" },
+    project: { id: "project-1" },
+    entryId: "entry-1",
+    request: {
+      prompt: "Build it",
+      modelId: "model-1",
+      workflow: "generate" as const,
+      targetSurface: "app" as const,
+      designStyle: { kind: "automatic" as const },
+      sourceIds: [],
+      artifactTargets: [],
+      requestedArtifactKinds: [],
+    },
+    artifactTargets: [],
+    prototypePatchBaselines: [],
+    sources: [],
+    designAssets: [],
+    designStyleSnapshot: null,
+    resume: null,
+    previousAssistantText: "",
+  };
+}
+
+function emptyProviderTextState(visibleAssistantText = "") {
+  return {
+    protocol: "workbench.runtime-provider-text-state.v1" as const,
+    rawAssistantText: visibleAssistantText,
+    visibleAssistantText,
+    durableVisibleAssistantText: visibleAssistantText,
+    redactionBuffer: "",
+    processedExternalEventIds: [],
+    committedFinalization: null,
+  };
+}
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -109,6 +153,35 @@ describe("RunProcessor shared cancellation poller", () => {
     expect(findMany).toHaveBeenCalledTimes(1);
     expect(processor.cancellationPollInFlight).toBe(false);
     expect(processor.cancellationPollTimer).toBeNull();
+  });
+
+  it("splits cancellation status reads into bounded batches", async () => {
+    const findMany = vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => (
+      where.id.in.map((id) => ({ id }))
+    ));
+    const processor = new RunProcessor(
+      { run: { findMany } } as never,
+      {} as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      undefined,
+      undefined,
+      { cancellationQueryBatchSize: 2 },
+    ) as unknown as CancellationPollerInternals;
+    const controllers = ["run-1", "run-2", "run-3"].map((id) => {
+      const controller = new AbortController();
+      processor.active.set(id, controller);
+      return controller;
+    });
+
+    await processor.pollActiveRunsForCancellation();
+
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany.mock.calls.map(([input]) => input.where.id.in)).toEqual([
+      ["run-1", "run-2"],
+      ["run-3"],
+    ]);
+    for (const controller of controllers) expect(controller.signal.aborted).toBe(true);
   });
 });
 
@@ -2986,6 +3059,7 @@ describe("Run durable snapshots", () => {
         ensure: ReturnType<typeof vi.fn>;
         claim: ReturnType<typeof vi.fn>;
         submissionContext: ReturnType<typeof vi.fn>;
+        providerTextState: ReturnType<typeof vi.fn>;
         recordRetryableError: ReturnType<typeof vi.fn>;
       };
     };
@@ -3027,10 +3101,10 @@ describe("Run durable snapshots", () => {
         })),
         claim: vi.fn(async () => executionClaim),
         submissionContext: vi.fn(async () => ({
+          mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
-          submissionUnknown: false,
-          externalRunId: null,
         })),
+        providerTextState: vi.fn(async () => emptyProviderTextState()),
         recordRetryableError,
       },
     });
@@ -3050,6 +3124,144 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       releaseId: null,
     });
+    expect(failRun).not.toHaveBeenCalled();
+  });
+
+  it("uses the authoritative post-claim join state and skips new capability grants", async () => {
+    const runtime = {
+      execute: vi.fn(async () => ({
+        protocol: "workbench.runtime.result.v1" as const,
+        message: "done",
+        artifacts: [],
+      })),
+    };
+    const db = { run: { findUnique: vi.fn(async () => ({ status: "running" })) } };
+    const knowledgeToolGrants = noKnowledgeToolGrants();
+    const canvasToolGrants = { issue: vi.fn(async () => null) };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      knowledgeToolGrants,
+      canvasToolGrants,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals & {
+      bindings: { ensure: ReturnType<typeof vi.fn> };
+      attempts: {
+        ensure: ReturnType<typeof vi.fn>;
+        claim: ReturnType<typeof vi.fn>;
+        submissionContext: ReturnType<typeof vi.fn>;
+        providerTextState: ReturnType<typeof vi.fn>;
+      };
+    };
+    const publishResult = vi.fn(async () => undefined);
+    Object.assign(internals, {
+      prepare: vi.fn(async () => durableExecutionPrepared()),
+      bindings: {
+        ensure: vi.fn(async () => ({
+          id: "binding-1",
+          adapter: "deerflow",
+          externalThreadId: "external-thread-1",
+        })),
+      },
+      attempts: {
+        // This row was read before claim and is intentionally stale.
+        ensure: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          externalRunId: null,
+          lastExternalEventId: null,
+        })),
+        claim: vi.fn(async () => executionClaim),
+        submissionContext: vi.fn(async () => ({
+          mode: "join",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+          externalRunId: "external-run-authoritative",
+          lastExternalEventId: "provider-event-7",
+        })),
+        providerTextState: vi.fn(async () => emptyProviderTextState()),
+      },
+      publishResult,
+    });
+
+    await expect(processor.execute("run-1")).resolves.toEqual({
+      runId: "run-1",
+      artifactCount: 0,
+    });
+
+    expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      submission: {
+        mode: "join",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+        externalRunId: "external-run-authoritative",
+        lastExternalEventId: "provider-event-7",
+      },
+      knowledgeTool: null,
+      canvasTool: null,
+    }), expect.any(Object), expect.any(AbortSignal));
+    expect(knowledgeToolGrants.issue).not.toHaveBeenCalled();
+    expect(canvasToolGrants.issue).not.toHaveBeenCalled();
+  });
+
+  it("keeps reconciliation UNKNOWN and releases it without issuing new grants", async () => {
+    const ambiguity = new RuntimeSubmissionUnknownError(
+      "RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE",
+      { cause: new Error("provider lookup unavailable") },
+    );
+    const runtime = { execute: vi.fn(async () => Promise.reject(ambiguity)) };
+    const db = { run: { findUnique: vi.fn(async () => ({ status: "running" })) } };
+    const knowledgeToolGrants = noKnowledgeToolGrants();
+    const canvasToolGrants = { issue: vi.fn(async () => null) };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      knowledgeToolGrants,
+      canvasToolGrants,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals & {
+      bindings: { ensure: ReturnType<typeof vi.fn> };
+      attempts: {
+        ensure: ReturnType<typeof vi.fn>;
+        claim: ReturnType<typeof vi.fn>;
+        submissionContext: ReturnType<typeof vi.fn>;
+        providerTextState: ReturnType<typeof vi.fn>;
+        markSubmissionUnknown: ReturnType<typeof vi.fn>;
+      };
+    };
+    const markSubmissionUnknown = vi.fn(async () => undefined);
+    Object.assign(internals, {
+      prepare: vi.fn(async () => durableExecutionPrepared()),
+      bindings: {
+        ensure: vi.fn(async () => ({
+          id: "binding-1",
+          adapter: "deerflow",
+          externalThreadId: "external-thread-1",
+        })),
+      },
+      attempts: {
+        ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
+        claim: vi.fn(async () => executionClaim),
+        submissionContext: vi.fn(async () => ({
+          mode: "reconcile",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+        })),
+        providerTextState: vi.fn(async () => emptyProviderTextState()),
+        markSubmissionUnknown,
+      },
+    });
+    const failRun = vi.spyOn(internals, "failRun");
+
+    await expect(processor.execute("run-1", [], undefined, {
+      retryCount: 99,
+      retryLimit: 99,
+    })).resolves.toEqual({ runId: "run-1", submissionUnknown: true });
+
+    expect(markSubmissionUnknown).toHaveBeenCalledWith(
+      executionClaim,
+      "provider lookup unavailable",
+    );
+    expect(knowledgeToolGrants.issue).not.toHaveBeenCalled();
+    expect(canvasToolGrants.issue).not.toHaveBeenCalled();
     expect(failRun).not.toHaveBeenCalled();
   });
 
@@ -3102,6 +3314,7 @@ describe("Run durable snapshots", () => {
         ensure: ReturnType<typeof vi.fn>;
         claim: ReturnType<typeof vi.fn>;
         submissionContext: ReturnType<typeof vi.fn>;
+        providerTextState: ReturnType<typeof vi.fn>;
         processExternalEvent: ReturnType<typeof vi.fn>;
       };
       persistRuntimeEffectsTx: ReturnType<typeof vi.fn>;
@@ -3149,10 +3362,12 @@ describe("Run durable snapshots", () => {
         })),
         claim: vi.fn(async () => executionClaim),
         submissionContext: vi.fn(async () => ({
+          mode: "join",
           providerIdempotencyKey: "wbrt:test-attempt-key",
-          submissionUnknown: false,
           externalRunId: "external-run-1",
+          lastExternalEventId: null,
         })),
+        providerTextState: vi.fn(async () => emptyProviderTextState()),
         processExternalEvent: vi.fn(async (
           _claim: unknown,
           _part: unknown,

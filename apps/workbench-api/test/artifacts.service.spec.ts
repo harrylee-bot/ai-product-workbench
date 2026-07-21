@@ -1,4 +1,5 @@
 import type { ArtifactVersionDetail } from "@workbench/workbench-contracts";
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import {
   artifactVersionEtag,
@@ -79,6 +80,10 @@ function storage() {
 
 function createService(db: ReturnType<typeof createDb>, objectStorage = storage()) {
   return new ArtifactsService(db as never, objectStorage as never);
+}
+
+function sha256Bytes(value: string) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 describe("ArtifactsService", () => {
@@ -341,13 +346,14 @@ describe("ArtifactsService", () => {
   });
 
   it("streams authorized immutable Blob bytes with digest ETag and an exact byte range", async () => {
+    const objectSha256 = sha256Bytes("0123456789");
     const db = createDb();
     db.artifactVersion.findFirst.mockResolvedValue({
       status: "ready",
       createdByRunId: "run_1",
       contentBlob: {
         storageKey: "blobs/bb/content",
-        sha256: "b".repeat(64),
+        sha256: objectSha256,
         byteSize: 10n,
         mediaType: "text/plain",
         status: "ready",
@@ -372,7 +378,7 @@ describe("ArtifactsService", () => {
       '"different"',
     )).resolves.toEqual({
       notModified: false,
-      etag: `"${"b".repeat(64)}"`,
+      etag: `"${objectSha256}"`,
       body: expect.any(Readable),
       byteSize: 4,
       mediaType: "text/plain",
@@ -437,10 +443,11 @@ describe("ArtifactsService", () => {
   });
 
   it("streams Blob content for Run-created staging by exact id and rejects ordinary staging", async () => {
+    const objectSha256 = sha256Bytes("draft-text");
     const db = createDb();
     const contentBlob = {
       storageKey: "blobs/bb/draft",
-      sha256: "b".repeat(64),
+      sha256: objectSha256,
       byteSize: 10n,
       mediaType: "text/plain",
       status: "ready",
@@ -469,7 +476,7 @@ describe("ArtifactsService", () => {
     await expect(service.getContent("principal_1", "artifact_1", "version_draft"))
       .resolves.toMatchObject({
         notModified: false,
-        etag: `"${"b".repeat(64)}"`,
+        etag: `"${objectSha256}"`,
       });
     await expect(service.getContent("principal_1", "artifact_1", "version_untrusted"))
       .rejects.toMatchObject({ status: 404 });
@@ -484,12 +491,13 @@ describe("ArtifactsService", () => {
   });
 
   it("streams only a ready Blob pinned by asset id to an authorized Prototype or Design System version", async () => {
+    const objectSha256 = sha256Bytes("image-bytes!");
     const db = createDb();
     db.artifactVersionAsset.findFirst.mockResolvedValue({
       artifactVersion: { status: "ready", createdByRunId: "run_1" },
       blob: {
         storageKey: "blobs/cc/hero",
-        sha256: "c".repeat(64),
+        sha256: objectSha256,
         byteSize: 12n,
         mediaType: "image/png",
         status: "ready",
@@ -513,7 +521,7 @@ describe("ArtifactsService", () => {
       "hero-image",
     )).resolves.toEqual({
       notModified: false,
-      etag: `"${"c".repeat(64)}"`,
+      etag: `"${objectSha256}"`,
       body: expect.any(Readable),
       byteSize: 12,
       mediaType: "image/png",
@@ -551,10 +559,11 @@ describe("ArtifactsService", () => {
   });
 
   it("streams an asset for Run-created staging by exact id and rejects ordinary staging", async () => {
+    const objectSha256 = sha256Bytes("image-bytes!");
     const db = createDb();
     const blob = {
       storageKey: "blobs/cc/draft-hero",
-      sha256: "c".repeat(64),
+      sha256: objectSha256,
       byteSize: 12n,
       mediaType: "image/png",
       status: "ready",
@@ -585,7 +594,7 @@ describe("ArtifactsService", () => {
       "hero-image",
     )).resolves.toMatchObject({
       notModified: false,
-      etag: `"${"c".repeat(64)}"`,
+      etag: `"${objectSha256}"`,
     });
     await expect(service.getAssetContent(
       "principal_1",
@@ -608,12 +617,13 @@ describe("ArtifactsService", () => {
   });
 
   it("supports immutable ETag and byte-range reads for private Design System assets", async () => {
+    const objectSha256 = sha256Bytes("0123456789");
     const db = createDb();
     db.artifactVersionAsset.findFirst.mockResolvedValue({
       artifactVersion: { status: "ready", createdByRunId: null },
       blob: {
         storageKey: "blobs/dd/design-font",
-        sha256: "d".repeat(64),
+        sha256: objectSha256,
         byteSize: 10n,
         mediaType: "font/woff2",
         status: "ready",
@@ -636,10 +646,10 @@ describe("ArtifactsService", () => {
       "design_version",
       "font_inter",
       undefined,
-      `W/\"${"d".repeat(64)}\"`,
+      `W/\"${objectSha256}\"`,
     )).resolves.toEqual({
       notModified: true,
-      etag: `"${"d".repeat(64)}"`,
+      etag: `"${objectSha256}"`,
       byteSize: 10,
       mediaType: "font/woff2",
     });
@@ -654,7 +664,7 @@ describe("ArtifactsService", () => {
       '"different"',
     )).resolves.toEqual({
       notModified: false,
-      etag: `"${"d".repeat(64)}"`,
+      etag: `"${objectSha256}"`,
       body: expect.any(Readable),
       byteSize: 4,
       mediaType: "font/woff2",

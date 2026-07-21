@@ -1,21 +1,25 @@
-www.{$WORKBENCH_WEB_HOSTNAME} {
-	redir https://{$WORKBENCH_WEB_HOSTNAME}{uri} 301
-}
+http://{$WORKBENCH_WEB_HOSTNAME}:{$WORKBENCH_ORIGIN_HTTP_PORT} {
+	bind {$WORKBENCH_ORIGIN_WIREGUARD_IP}
 
-{$WORKBENCH_WEB_HOSTNAME} {
-	@trustedCdn {
-		remote_ip {$WORKBENCH_CDN_EDGE_CIDRS}
-		header X-Workbench-Origin-Auth {$WORKBENCH_CDN_ORIGIN_AUTH_SECRET}
+	@trustedEdge {
+		remote_ip {$WORKBENCH_EDGE_WIREGUARD_IP}
+		header X-Workbench-Edge-Auth {$WORKBENCH_EDGE_ORIGIN_AUTH_SECRET}
 	}
 
-	handle @trustedCdn {
-		@notRunEvents {
-			not path_regexp runEvents ^/api/v1/runs/[^/]+/events$
-		}
-		encode @notRunEvents zstd gzip
+	handle @trustedEdge {
 		reverse_proxy 127.0.0.1:4180 {
-			header_up X-Workbench-Client-IP {http.request.header.Ali-Cdn-Real-Ip}
-			header_up -X-Workbench-Origin-Auth
+			header_up -Forwarded
+			header_up -X-Real-IP
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.header.X-Workbench-Edge-Client-IP}
+			header_up X-Workbench-Client-IP {http.request.header.X-Workbench-Edge-Client-IP}
+			header_up -X-Workbench-Edge-Client-IP
+			header_up -X-Workbench-Edge-Auth
 		}
 	}
 
@@ -24,6 +28,34 @@ www.{$WORKBENCH_WEB_HOSTNAME} {
 	}
 }
 
-{$WORKBENCH_PREVIEW_HOSTNAME} {
-	reverse_proxy 127.0.0.1:4190
+http://{$WORKBENCH_PREVIEW_HOSTNAME}:{$WORKBENCH_ORIGIN_HTTP_PORT} {
+	bind {$WORKBENCH_ORIGIN_WIREGUARD_IP}
+
+	@trustedEdge {
+		remote_ip {$WORKBENCH_EDGE_WIREGUARD_IP}
+		header X-Workbench-Edge-Auth {$WORKBENCH_EDGE_ORIGIN_AUTH_SECRET}
+	}
+
+	handle @trustedEdge {
+		reverse_proxy 127.0.0.1:4190 {
+			header_up -Forwarded
+			header_up -X-Real-IP
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.header.X-Workbench-Edge-Client-IP}
+			header_up -Cookie
+			header_up -X-Workbench-Client-IP
+			header_up -X-Workbench-Edge-Client-IP
+			header_up -X-Workbench-Edge-Auth
+			header_down -Set-Cookie
+		}
+	}
+
+	handle {
+		respond 403
+	}
 }

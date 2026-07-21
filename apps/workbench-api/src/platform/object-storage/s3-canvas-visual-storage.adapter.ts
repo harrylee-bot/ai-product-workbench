@@ -42,13 +42,17 @@ export class S3CanvasVisualStorageAdapter implements CanvasVisualStoragePort {
     }));
   }
 
-  async getObject(input: { key: string; range?: { start: number; end: number } }): Promise<StoredObjectBody> {
+  async getObject(input: {
+    key: string;
+    range?: { start: number; end: number };
+    signal?: AbortSignal;
+  }): Promise<StoredObjectBody> {
     this.config.assertConfigured();
     const result = await this.client.send(new GetObjectCommand({
       Bucket: this.config.bucket,
       Key: input.key,
       ...(input.range ? { Range: `bytes=${input.range.start}-${input.range.end}` } : {}),
-    }));
+    }), input.signal ? { abortSignal: input.signal } : undefined);
     if (!result.Body || result.ContentLength === undefined) {
       throw new Error("CANVAS_VISUAL_STORAGE_OBJECT_INVALID");
     }
@@ -62,10 +66,17 @@ export class S3CanvasVisualStorageAdapter implements CanvasVisualStoragePort {
 
   async deleteObject(key: string): Promise<void> {
     this.config.assertConfigured();
-    await this.client.send(new DeleteObjectCommand({
-      Bucket: this.config.bucket,
-      Key: key,
-    }));
+    try {
+      await this.client.send(new DeleteObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+      }));
+    } catch (error) {
+      // DeleteObject is intentionally idempotent for the reconciler: a prior
+      // successful delete followed by a lost DB commit must be safe to retry.
+      if (isNotFound(error)) return;
+      throw error;
+    }
   }
 }
 
@@ -78,8 +89,22 @@ function toNodeReadable(value: unknown): Readable {
 }
 
 function safeByteSize(value: number): number {
-  if (!Number.isSafeInteger(value) || value <= 0 || value > 1_048_576) {
+  // Zero is valid observed metadata. readReadyObject compares it with the
+  // positive immutable manifest and records a durable byte-size incident.
+  if (!Number.isSafeInteger(value) || value < 0 || value > 1_048_576) {
     throw new Error("CANVAS_VISUAL_STORAGE_SIZE_INVALID");
   }
   return value;
+}
+
+function isNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; Code?: unknown; code?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  return candidate.name === "NotFound"
+    || candidate.name === "NoSuchKey"
+    || candidate.Code === "NotFound"
+    || candidate.Code === "NoSuchKey"
+    || candidate.code === "NotFound"
+    || candidate.code === "NoSuchKey"
+    || candidate.$metadata?.httpStatusCode === 404;
 }

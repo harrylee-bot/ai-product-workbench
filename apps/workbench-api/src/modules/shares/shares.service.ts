@@ -28,6 +28,7 @@ import {
   type ReadyBlobStoragePort,
 } from "../../platform/object-storage/object-storage.port.js";
 import { readReadyObject } from "../../platform/object-storage/read-ready-object.js";
+import { readyObjectIntegrityRecorder } from "../../platform/object-storage/ready-object-integrity.js";
 import { AccessService, projectMembershipFilter } from "../access/access.service.js";
 import { assertProjectCapability, lockActiveProject } from "../projects/project-lock.js";
 import {
@@ -345,6 +346,7 @@ export class SharesService {
     assetId: string,
     rangeHeader?: string,
     ifNoneMatch?: string,
+    signal?: AbortSignal,
   ) {
     const { release } = await this.findActivePublicShare(token);
     const pin = release.artifactPins.find((candidate) => (
@@ -406,7 +408,10 @@ export class SharesService {
       sha256: assetPin.sha256,
       byteSize: assetPin.byteSize,
       mediaType: assetPin.mediaType,
-    }, rangeHeader, ifNoneMatch);
+    }, rangeHeader, ifNoneMatch, {
+      signal,
+      recordIntegrityFailure: readyObjectIntegrityRecorder(this.db),
+    });
   }
 
   async getPublicArtifactContent(
@@ -415,6 +420,7 @@ export class SharesService {
     artifactVersionId: string,
     rangeHeader?: string,
     ifNoneMatch?: string,
+    signal?: AbortSignal,
   ) {
     const { release } = await this.findActivePublicShare(token);
     const pin = release.artifactPins.find((candidate) => (
@@ -488,7 +494,10 @@ export class SharesService {
       sha256: pin.checksum,
       byteSize,
       mediaType: blob.mediaType,
-    }, rangeHeader, ifNoneMatch);
+    }, rangeHeader, ifNoneMatch, {
+      signal,
+      recordIntegrityFailure: readyObjectIntegrityRecorder(this.db),
+    });
   }
 
   private async findActivePublicShare(token: string) {

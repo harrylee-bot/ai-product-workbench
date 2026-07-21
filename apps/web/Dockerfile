@@ -41,7 +41,7 @@ RUN npm --workspace @workbench/workbench-contracts run validate:openapi \
 WORKDIR /app/apps/web
 # Type checking in a separate process avoids retaining the compiler heap while
 # Next starts its TypeScript worker on memory-constrained builders.
-RUN npx next typegen && npm run typecheck
+RUN npx next typegen && npx tsc -p tsconfig.json --noEmit
 ENV WORKBENCH_TYPES_PREVALIDATED=1
 RUN npm run build
 

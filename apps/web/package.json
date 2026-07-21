@@ -9,7 +9,8 @@
     "generate:workbench-api": "openapi-typescript ../../packages/workbench-contracts/openapi/workbench.v1.yaml -o lib/workbench/api/schema.d.ts",
     "test": "vitest run --config vitest.workbench.config.ts",
     "test:watch": "vitest --config vitest.workbench.config.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typegen": "node ../../scripts/workbench-web-typegen.mjs",
+    "typecheck": "npm run typegen && tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "lint:workbench": "eslint 'app/(auth)' 'app/(invitation)' 'app/(workbench)' app/share components/auth components/share components/workbench lib/workbench",
     "architecture:workbench": "depcruise --config ../../.dependency-cruiser.cjs 'app/(auth)' 'app/(invitation)' 'app/(workbench)' app/share components/auth components/share components/workbench lib/workbench"

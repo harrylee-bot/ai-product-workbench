@@ -429,6 +429,9 @@ async function routeWorkbenchApi(route) {
   if (method === "GET" && requestPath === "/api/v1/workspaces/workspace-1/design-systems") {
     return json(route, { items: [], nextCursor: null });
   }
+  if (method === "GET" && requestPath === `/api/v1/projects/${project.id}/import-sources`) {
+    return json(route, { items: [], nextCursor: null });
+  }
   if (method === "GET" && requestPath === `/api/v1/projects/${project.id}/bootstrap`) {
     bootstrapRunStatuses.push(currentRun.status);
     return json(route, {

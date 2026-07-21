@@ -46,6 +46,11 @@ Classify the turn before doing work:
 - Prototype/code generation: create or refine specs first, then use DeerFlow's coding/prototype execution capability and return the requested Artifact kinds.
 - Export request: use the dedicated 产品工作台 export workflow; do not invent an export Artifact in a generation Run.
 
+`task` delegation is available only when `requestedArtifactKinds` contains
+`prototype` or `code`. Never delegate merely to read or summarize this skill.
+For PRD, document, image, and data Runs, the lead agent must work directly and
+finish with `workbench_runtime_result_submit`.
+
 ## Requirement Modes
 
 ### historical_extension

@@ -2,6 +2,7 @@ import { PgBoss, type JobWithMetadata } from "pg-boss";
 import {
   ClamAvScanAdapter,
   FailClosedScanAdapter,
+  prismaReadyObjectIntegrityRecorder,
 } from "@workbench/workbench-content-security";
 import {
   assertBlobGcQueueConfiguration,
@@ -71,7 +72,10 @@ async function main() {
     maximumArtifactBytes: config.knowledgeTokenizerMaximumFileBytes,
   });
   await db.$connect();
-  const storage = new S3FileStorageAdapter(config);
+  const storage = new S3FileStorageAdapter(
+    config,
+    prismaReadyObjectIntegrityRecorder(db),
+  );
   const blobGcStore = new PrismaBlobGcStore(db);
   const blobGcProcessor = new BlobGcProcessor(
     blobGcStore,
@@ -176,6 +180,8 @@ async function main() {
     application_name: "workbench-file-worker",
     schedule: false,
     supervise: true,
+    migrate: false,
+    createSchema: false,
     useListenNotify: true,
   });
   boss.on("error", (error) => console.error("[file-worker:pg-boss]", error));

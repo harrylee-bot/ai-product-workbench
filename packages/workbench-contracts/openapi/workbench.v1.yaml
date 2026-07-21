@@ -8477,6 +8477,11 @@ components:
           items:
             $ref: "#/components/schemas/CanvasAgentScreenReference"
           maxItems: 512
+        causedByCommandId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
       required:
         - protocol
         - clientSessionId
@@ -14563,6 +14568,11 @@ components:
         - patch_rejected
         - checkpoint_unavailable
         - buffer_limit_exceeded
+    RunEventSourceId:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: ^[A-Za-z0-9._:-]+$
     PrototypePatchDegradedEventPayload:
       type: object
       properties:
@@ -14591,9 +14601,7 @@ components:
           maxLength: 96
           pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
         sourceEventId:
-          type: string
-          minLength: 1
-          maxLength: 128
+          $ref: "#/components/schemas/RunEventSourceId"
         revision:
           $ref: "#/components/schemas/PrototypePatchRevision"
         reason:
@@ -14666,9 +14674,7 @@ components:
           minLength: 1
           maxLength: 128
         sourceEventId:
-          type: string
-          minLength: 1
-          maxLength: 128
+          $ref: "#/components/schemas/RunEventSourceId"
         requestSha256:
           $ref: "#/components/schemas/PrototypePatchChecksum"
         screenId:

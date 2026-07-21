@@ -19,6 +19,7 @@ describe("CanvasAgentCommandPoller", () => {
     const command = makeCommand();
     const acknowledgements: CanvasClientCommandAckRequest[] = [];
     const events: string[] = [];
+    const synchronizationCauses: Array<string | undefined> = [];
     let listed = false;
     const transport: CanvasAgentCommandTransport = {
       list: async () => {
@@ -34,6 +35,7 @@ describe("CanvasAgentCommandPoller", () => {
       },
       syncState: async (_projectId, state) => {
         events.push("sync");
+        synchronizationCauses.push(state.causedByCommandId);
         return synchronized(state.canvasStateRevision);
       },
     };
@@ -52,6 +54,7 @@ describe("CanvasAgentCommandPoller", () => {
     expect(acknowledgements).toHaveLength(1);
     expect(acknowledgements[0]!.status).toBe("applied");
     expect(events).toEqual(["sync", "list", "ui", "sync", "ack"]);
+    expect(synchronizationCauses).toEqual([undefined, command.commandId]);
   });
 
   it("sends a view_screen capture only on the wire ACK", async () => {

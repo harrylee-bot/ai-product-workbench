@@ -12,8 +12,8 @@ import {
   readKnowledgeReleaseOptions,
 } from "./workbench-knowledge-release-lib.mjs";
 
-const databaseUrl = process.env.WORKBENCH_DATABASE_URL?.trim();
-if (!databaseUrl) throw new Error("Missing WORKBENCH_DATABASE_URL");
+const databaseUrl = process.env.WORKBENCH_MIGRATOR_DATABASE_URL?.trim();
+if (!databaseUrl) throw new Error("Missing WORKBENCH_MIGRATOR_DATABASE_URL");
 
 const options = readKnowledgeReleaseOptions();
 const db = new PrismaClient({ datasourceUrl: databaseUrl });
@@ -23,6 +23,8 @@ const boss = new PgBoss({
   application_name: "workbench-knowledge-release",
   schedule: false,
   supervise: false,
+  migrate: false,
+  createSchema: false,
   useListenNotify: false,
 });
 

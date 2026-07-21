@@ -637,6 +637,9 @@ async function routeWorkbenchApi(route) {
   if (method === "GET" && requestPath === "/api/v1/workspaces/workspace-1/design-systems") {
     return json(route, { items: [], nextCursor: null });
   }
+  if (method === "GET" && requestPath === "/api/v1/projects/p1/import-sources") {
+    return json(route, { items: [], nextCursor: null });
+  }
   if (method === "GET" && requestPath === "/api/v1/projects/p1/bootstrap") {
     return json(route, {
       project,
@@ -675,6 +678,9 @@ async function routeWorkbenchApi(route) {
       artifacts: [],
       latestRun: null,
     }, { etag: '"1"' });
+  }
+  if (method === "GET" && requestPath === "/api/v1/projects/p2/import-sources") {
+    return json(route, { items: [], nextCursor: null });
   }
   if (method === "GET" && requestPath === `/api/v1/threads/${thread.id}/submission-intents/current`) {
     return json(route, { item: null });

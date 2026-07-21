@@ -19,6 +19,7 @@ import {
 import { entityTagMatches, UnsatisfiedByteRangeProblem } from "../../common/byte-content.js";
 import { parseIfMatch, revisionEtag } from "../../common/http-preconditions.js";
 import { validationProblem } from "../../common/problem-details.js";
+import { httpResponseAbortSignalArgument } from "../../common/http-request-abort.js";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { CurrentPrincipal } from "../identity/current-principal.decorator.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
@@ -157,6 +158,7 @@ export class PublicSharesController {
         artifactVersionId,
         range,
         ifNoneMatch,
+        ...httpResponseAbortSignalArgument(response),
       );
     } catch (error) {
       if (error instanceof UnsatisfiedByteRangeProblem) {
@@ -201,6 +203,7 @@ export class PublicSharesController {
         assetId,
         range,
         ifNoneMatch,
+        ...httpResponseAbortSignalArgument(response),
       );
     } catch (error) {
       if (error instanceof UnsatisfiedByteRangeProblem) {

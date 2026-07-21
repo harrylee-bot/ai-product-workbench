@@ -1,4 +1,4 @@
-issuer: https://identity.8.130.160.177.sslip.io
+issuer: https://identity.aionbench.com
 
 storage:
   type: sqlite3

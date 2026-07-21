@@ -27,6 +27,7 @@ import {
 } from "../../common/byte-content.js";
 import { parseIfMatch, revisionEtag } from "../../common/http-preconditions.js";
 import { validationProblem } from "../../common/problem-details.js";
+import { httpResponseAbortSignalArgument } from "../../common/http-request-abort.js";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { CurrentPrincipal } from "../identity/current-principal.decorator.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
@@ -163,7 +164,13 @@ export class ExportsController {
   ) {
     let result;
     try {
-      result = await this.exportsService.getContent(principal.id, exportId, range, ifNoneMatch);
+      result = await this.exportsService.getContent(
+        principal.id,
+        exportId,
+        range,
+        ifNoneMatch,
+        ...httpResponseAbortSignalArgument(response),
+      );
     } catch (error) {
       if (error instanceof UnsatisfiedByteRangeProblem) {
         response.setHeader("Content-Range", `bytes */${error.byteSize}`);

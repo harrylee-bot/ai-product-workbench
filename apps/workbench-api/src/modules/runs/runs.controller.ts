@@ -95,7 +95,7 @@ export class RunsController {
   ) {
     if (!idempotencyKey) throw validationProblem("Idempotency-Key is required");
     validateIdempotencyKey(idempotencyKey);
-    return this.runs.cancel(principal.id, runId);
+    return this.runs.cancel(principal.id, runId, idempotencyKey);
   }
 
   @Post("runs/:runId/retry")

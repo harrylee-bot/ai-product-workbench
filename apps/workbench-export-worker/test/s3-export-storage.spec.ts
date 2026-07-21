@@ -35,8 +35,22 @@ describe("S3ExportStorageAdapter", () => {
       if (command instanceof DeleteObjectCommand) return {};
       throw new Error("unexpected command");
     });
-    const storage = new S3ExportStorageAdapter(config(), { send } as never);
-    await expect(storage.putVerified(identity, expectedBytes)).rejects.toThrow("EXPORT_STORAGE_IDENTITY_MISMATCH");
+    let recorderResolved = false;
+    const recordIntegrityFailure = vi.fn(async () => {
+      await Promise.resolve();
+      recorderResolved = true;
+    });
+    const storage = new S3ExportStorageAdapter(
+      config(),
+      recordIntegrityFailure,
+      { send } as never,
+    );
+    await expect(storage.putVerified(identity, expectedBytes)).rejects.toThrow("OBJECT_STORAGE_SHA256_MISMATCH");
+    expect(recorderResolved).toBe(true);
+    expect(recordIntegrityFailure).toHaveBeenCalledWith(expect.objectContaining({
+      failureCode: "OBJECT_STORAGE_SHA256_MISMATCH",
+      storageKey: identity.storageKey,
+    }));
     expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(false);
   });
 
@@ -52,8 +66,14 @@ describe("S3ExportStorageAdapter", () => {
       if (command instanceof DeleteObjectCommand) return {};
       throw new Error("unexpected command");
     });
-    const storage = new S3ExportStorageAdapter(config(), { send } as never);
-    await expect(storage.putVerified(identity, expectedBytes)).rejects.toThrow("EXPORT_STORAGE_IDENTITY_MISMATCH");
+    const recordIntegrityFailure = vi.fn(async () => undefined);
+    const storage = new S3ExportStorageAdapter(
+      config(),
+      recordIntegrityFailure,
+      { send } as never,
+    );
+    await expect(storage.putVerified(identity, expectedBytes)).rejects.toThrow("OBJECT_STORAGE_SHA256_MISMATCH");
+    expect(recordIntegrityFailure).toHaveBeenCalledOnce();
     expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(true);
   });
 });

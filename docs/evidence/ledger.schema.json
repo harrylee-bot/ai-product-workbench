@@ -96,7 +96,10 @@
       "required": [
         "images",
         "configSha256",
-        "migrationSha256"
+        "migrationSha256",
+        "deploymentConfigManifestSha256",
+        "imageManifestSha256",
+        "controlCatalogSha256"
       ],
       "properties": {
         "images": {
@@ -110,6 +113,15 @@
         },
         "migrationSha256": {
           "$ref": "#/$defs/sha256"
+        },
+        "deploymentConfigManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "imageManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "controlCatalogSha256": {
+          "$ref": "#/$defs/sha256"
         }
       }
     },
@@ -122,6 +134,7 @@
         "environmentId",
         "commitSha",
         "tag",
+        "releaseChainId",
         "digests"
       ],
       "properties": {
@@ -140,6 +153,10 @@
         },
         "tag": {
           "$ref": "#/$defs/identifier"
+        },
+        "releaseChainId": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
         },
         "digests": {
           "$ref": "#/$defs/digests"

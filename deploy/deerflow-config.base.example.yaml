@@ -1,0 +1,19 @@
+config_version: 1
+
+models:
+  - name: gpt-5.5
+    display_name: GPT-5.5
+    use: langchain_openai:ChatOpenAI
+    model: gpt-5.5
+    api_key: $OPENAI_API_KEY
+    base_url: $WORKBENCH_DEERFLOW_PROVIDER_BASE_URL
+    supports_thinking: true
+    supports_reasoning_effort: true
+    supports_vision: true
+
+sandbox:
+  use: deerflow.sandbox.local:LocalSandboxProvider
+  allow_host_bash: false
+
+tool_groups: []
+tools: []

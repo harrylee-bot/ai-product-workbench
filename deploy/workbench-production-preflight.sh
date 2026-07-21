@@ -6,6 +6,9 @@ ENV_FILE=${WORKBENCH_ENV_FILE:-$APP_DIR/deploy/workbench.env}
 COMPOSE_FILE=${WORKBENCH_COMPOSE_FILE:-$APP_DIR/deploy/workbench-compose.yml}
 CADDY_FILE=${WORKBENCH_CADDY_FILE:-$APP_DIR/deploy/workbench-production.Caddyfile}
 ORIGIN_MANIFEST_SCRIPT=${WORKBENCH_ORIGIN_MANIFEST_SCRIPT:-$APP_DIR/scripts/workbench-origin-manifest.mjs}
+DATABASE_ROLE_CONTRACT_SCRIPT=${WORKBENCH_DATABASE_ROLE_CONTRACT_SCRIPT:-$APP_DIR/scripts/assert-workbench-database-role-contract.mjs}
+ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT=${WORKBENCH_ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT:-$APP_DIR/deploy/edge/workbench-origin-wireguard-preflight.sh}
+ORIGIN_WIREGUARD_CONFIG=${WORKBENCH_ORIGIN_WIREGUARD_CONFIG:-/etc/wireguard/wg0.conf}
 
 fail() {
   printf '%s\n' "workbench production preflight: $*" >&2
@@ -16,6 +19,8 @@ fail() {
 [ -f "$COMPOSE_FILE" ] || fail "missing $COMPOSE_FILE"
 [ -f "$CADDY_FILE" ] || fail "missing $CADDY_FILE"
 [ -f "$ORIGIN_MANIFEST_SCRIPT" ] || fail "missing $ORIGIN_MANIFEST_SCRIPT"
+[ -f "$DATABASE_ROLE_CONTRACT_SCRIPT" ] || fail "missing $DATABASE_ROLE_CONTRACT_SCRIPT"
+[ -f "$ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT" ] || fail "missing $ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT"
 [ -r "$APP_DIR/knowledge-vault/README.md" ] || fail "knowledge-vault is missing"
 
 env_value() {
@@ -34,25 +39,58 @@ require_env() {
   printf '%s' "$value"
 }
 
+validate_private_ipv4() {
+  name=$1
+  value=$2
+  printf '%s' "$value" | awk -F. '
+    NF != 4 { exit 1 }
+    { for (octet = 1; octet <= 4; octet += 1) {
+        if ($octet !~ /^[0-9]+$/ || $octet < 0 || $octet > 255) exit 1
+      }
+    }
+  ' || fail "$name must be a canonical private IPv4 address"
+  case "$value" in
+    10.* | 192.168.*) ;;
+    172.*)
+      second=${value#172.}
+      second=${second%%.*}
+      [ "$second" -ge 16 ] && [ "$second" -le 31 ] \
+        || fail "$name must be an RFC1918 IPv4 address"
+      ;;
+    *) fail "$name must be an RFC1918 IPv4 address" ;;
+  esac
+}
+
 require_env WORKBENCH_WEB_ORIGIN >/dev/null
 require_env WORKBENCH_PREVIEW_ORIGIN >/dev/null
 require_env WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL >/dev/null
-require_env WORKBENCH_OIDC_PROVIDER_ISSUER >/dev/null
-require_env WORKBENCH_IDENTITY_HOSTNAME >/dev/null
+enterprise_sso_enabled=$(require_env WORKBENCH_ENTERPRISE_SSO_ENABLED)
 canvas_tool_url=$(require_env WORKBENCH_CANVAS_TOOL_URL)
 canvas_visual_url=$(require_env WORKBENCH_CANVAS_VISUAL_URL)
 database_url=$(require_env WORKBENCH_DATABASE_URL)
+require_env WORKBENCH_POSTGRES_ADMIN_URL >/dev/null
+require_env WORKBENCH_MIGRATOR_DATABASE_URL >/dev/null
+require_env WORKBENCH_POSTGRES_USER >/dev/null
+require_env WORKBENCH_POSTGRES_MIGRATOR_USER >/dev/null
+require_env WORKBENCH_POSTGRES_MIGRATOR_PASSWORD >/dev/null
+require_env WORKBENCH_POSTGRES_RUNTIME_USER >/dev/null
+require_env WORKBENCH_POSTGRES_RUNTIME_PASSWORD >/dev/null
 public_registration=$(require_env WORKBENCH_PUBLIC_REGISTRATION_ENABLED)
 auth_ip_header=$(require_env WORKBENCH_AUTH_CLIENT_IP_HEADER)
-cdn_edge_cidrs=$(require_env WORKBENCH_CDN_EDGE_CIDRS)
-cdn_edge_cidrs_source=$(require_env WORKBENCH_CDN_EDGE_CIDRS_SOURCE)
-cdn_origin_auth_secret=$(require_env WORKBENCH_CDN_ORIGIN_AUTH_SECRET)
+edge_wireguard_ip=$(require_env WORKBENCH_EDGE_WIREGUARD_IP)
+origin_wireguard_ip=$(require_env WORKBENCH_ORIGIN_WIREGUARD_IP)
+origin_http_port=$(require_env WORKBENCH_ORIGIN_HTTP_PORT)
+edge_origin_auth_secret=$(require_env WORKBENCH_EDGE_ORIGIN_AUTH_SECRET)
 tokenizer_dir=$(require_env WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR)
 image_inventory=$(require_env WORKBENCH_IMAGE_INVENTORY_PATH)
+image_inventory_bundle=$(require_env WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH)
+cosign_identity=$(require_env WORKBENCH_COSIGN_CERTIFICATE_IDENTITY)
+cosign_issuer=$(require_env WORKBENCH_COSIGN_OIDC_ISSUER)
 source_commit=$(require_env WORKBENCH_SOURCE_COMMIT)
 scan_mode=$(require_env WORKBENCH_FILE_SCAN_MODE)
 postgres_image=$(require_env WORKBENCH_POSTGRES_IMAGE)
 nginx_image=$(require_env WORKBENCH_NGINX_IMAGE)
+node_image=$(require_env WORKBENCH_NODE_IMAGE)
 compose_profiles=${WORKBENCH_COMPOSE_PROFILES:-${COMPOSE_PROFILES:-}}
 
 case "$canvas_tool_url" in
@@ -71,23 +109,39 @@ case "$public_registration" in
   true | false) ;;
   *) fail "WORKBENCH_PUBLIC_REGISTRATION_ENABLED must be true or false" ;;
 esac
+case "$enterprise_sso_enabled" in
+  true | false) ;;
+  *) fail "WORKBENCH_ENTERPRISE_SSO_ENABLED must be true or false" ;;
+esac
 [ "$auth_ip_header" = "x-workbench-client-ip" ] || fail "WORKBENCH_AUTH_CLIENT_IP_HEADER must be x-workbench-client-ip"
 [ "$scan_mode" = "clamav" ] || fail "production uploads require WORKBENCH_FILE_SCAN_MODE=clamav"
 printf '%s' "$database_url" | grep -Eq '@postgres([:/?]|$)' || fail "WORKBENCH_DATABASE_URL must address the Compose postgres service"
+node "$DATABASE_ROLE_CONTRACT_SCRIPT" --env-file="$ENV_FILE" \
+  || fail "database role separation contract is invalid"
 printf '%s' "$source_commit" | grep -Eq '^[0-9a-f]{40}$' || fail "WORKBENCH_SOURCE_COMMIT must be a lowercase Git commit"
+printf '%s' "$cosign_identity" | grep -Eq '^https://[^[:space:]]+$' \
+  || fail "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY must be an exact HTTPS identity"
+printf '%s' "$cosign_issuer" | grep -Eq '^https://[^[:space:]]+$' \
+  || fail "WORKBENCH_COSIGN_OIDC_ISSUER must be an exact HTTPS issuer"
 printf '%s' "$postgres_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_POSTGRES_IMAGE must be an immutable digest reference"
 printf '%s' "$nginx_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_NGINX_IMAGE must be an immutable digest reference"
-case " $cdn_edge_cidrs " in
-  *" 0.0.0.0/0 "* | *" ::/0 "*) fail "WORKBENCH_CDN_EDGE_CIDRS must not trust the public Internet" ;;
+printf '%s' "$node_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_NODE_IMAGE must be an immutable digest reference"
+validate_private_ipv4 WORKBENCH_EDGE_WIREGUARD_IP "$edge_wireguard_ip"
+validate_private_ipv4 WORKBENCH_ORIGIN_WIREGUARD_IP "$origin_wireguard_ip"
+[ "$edge_wireguard_ip" != "$origin_wireguard_ip" ] \
+  || fail "Edge and origin WireGuard IPs must differ"
+printf '%s' "$origin_http_port" | grep -Eq '^[1-9][0-9]{3,4}$' \
+  || fail "WORKBENCH_ORIGIN_HTTP_PORT must be an unprivileged TCP port"
+[ "$origin_http_port" -ge 1024 ] && [ "$origin_http_port" -le 65535 ] \
+  || fail "WORKBENCH_ORIGIN_HTTP_PORT must be between 1024 and 65535"
+case "$edge_origin_auth_secret" in
+  *[!A-Za-z0-9_-]*) fail "WORKBENCH_EDGE_ORIGIN_AUTH_SECRET must be base64url" ;;
 esac
-for cidr in $cdn_edge_cidrs; do
-  printf '%s' "$cidr" | grep -Eq '^[0-9A-Fa-f:.]+/[0-9]{1,3}$' || fail "WORKBENCH_CDN_EDGE_CIDRS contains an invalid CIDR token"
-done
-case "$cdn_edge_cidrs_source" in https://*) ;; *) fail "WORKBENCH_CDN_EDGE_CIDRS_SOURCE must be an HTTPS reference" ;; esac
-case "$cdn_origin_auth_secret" in
-  *[!A-Za-z0-9_-]*) fail "WORKBENCH_CDN_ORIGIN_AUTH_SECRET must be base64url" ;;
-esac
-[ "${#cdn_origin_auth_secret}" -ge 43 ] || fail "WORKBENCH_CDN_ORIGIN_AUTH_SECRET must contain at least 32 random bytes"
+[ "${#edge_origin_auth_secret}" -ge 43 ] \
+  || fail "WORKBENCH_EDGE_ORIGIN_AUTH_SECRET must contain at least 32 random bytes"
+WORKBENCH_ENV_FILE="$ENV_FILE" \
+WORKBENCH_ORIGIN_WIREGUARD_CONFIG="$ORIGIN_WIREGUARD_CONFIG" \
+  sh "$ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT"
 
 origin_env=$(mktemp)
 trap 'rm -f "$origin_env"' EXIT HUP INT TERM
@@ -96,22 +150,45 @@ node "$ORIGIN_MANIFEST_SCRIPT" --env-file "$ENV_FILE" --format caddy-env >"$orig
 . "$origin_env"
 [ "$WORKBENCH_WEB_HOSTNAME" != "$WORKBENCH_PREVIEW_HOSTNAME" ] || fail "Preview must use a distinct hostname"
 
+[ "$(grep -Fc 'bind {$WORKBENCH_ORIGIN_WIREGUARD_IP}' "$CADDY_FILE")" -eq 2 ] \
+  || fail "Web and Preview must both bind only the origin WireGuard address"
+[ "$(grep -Fc 'remote_ip {$WORKBENCH_EDGE_WIREGUARD_IP}' "$CADDY_FILE")" -eq 2 ] \
+  || fail "Web and Preview must both source-allowlist the WireGuard Edge peer"
+[ "$(grep -Fc 'header X-Workbench-Edge-Auth {$WORKBENCH_EDGE_ORIGIN_AUTH_SECRET}' "$CADDY_FILE")" -eq 2 ] \
+  || fail "Web and Preview must both authenticate the Edge"
+[ "$(grep -Fc 'respond 403' "$CADDY_FILE")" -eq 2 ] \
+  || fail "Web and Preview must both reject requests outside the authenticated Edge handler"
+grep -Fq 'header_up X-Workbench-Client-IP {http.request.header.X-Workbench-Edge-Client-IP}' "$CADDY_FILE" \
+  || fail "Web must derive the canonical client IP from the authenticated Edge header"
+grep -Fq 'header_up -Cookie' "$CADDY_FILE" \
+  || fail "Preview origin requests must not receive Web cookies"
+grep -Fq 'header_down -Set-Cookie' "$CADDY_FILE" \
+  || fail "Preview origin responses must not set cookies"
+
 [ -f "$image_inventory" ] || fail "missing signed production image manifest: $image_inventory"
+[ -f "$image_inventory_bundle" ] || fail "missing production image manifest signature bundle: $image_inventory_bundle"
+command -v cosign >/dev/null 2>&1 || fail "cosign is required to verify the production image manifest"
 node "$APP_DIR/scripts/production-image-inventory.mjs" \
   --manifest "$image_inventory" \
+  --bundle "$image_inventory_bundle" \
+  --certificate-identity "$cosign_identity" \
+  --certificate-oidc-issuer "$cosign_issuer" \
   --expected-commit "$source_commit" \
-  --env-file "$ENV_FILE"
+  --env-file "$ENV_FILE" \
+  --inspect-local-images \
+  --exclude-image deerflow
 
 [ -r "$tokenizer_dir/tokenizer.json" ] || fail "tokenizer.json is missing"
 [ -r "$tokenizer_dir/tokenizer_config.json" ] || fail "tokenizer_config.json is missing"
 
 command -v caddy >/dev/null 2>&1 || fail "caddy is missing"
-WORKBENCH_CDN_EDGE_CIDRS="$cdn_edge_cidrs" \
-WORKBENCH_CDN_ORIGIN_AUTH_SECRET="$cdn_origin_auth_secret" \
+WORKBENCH_EDGE_WIREGUARD_IP="$edge_wireguard_ip" \
+WORKBENCH_ORIGIN_WIREGUARD_IP="$origin_wireguard_ip" \
+WORKBENCH_ORIGIN_HTTP_PORT="$origin_http_port" \
+WORKBENCH_EDGE_ORIGIN_AUTH_SECRET="$edge_origin_auth_secret" \
 WORKBENCH_WEB_HOSTNAME="$WORKBENCH_WEB_HOSTNAME" \
 WORKBENCH_PREVIEW_HOSTNAME="$WORKBENCH_PREVIEW_HOSTNAME" \
 WORKBENCH_S3_HOSTNAME="$WORKBENCH_S3_HOSTNAME" \
-WORKBENCH_IDENTITY_HOSTNAME="$WORKBENCH_IDENTITY_HOSTNAME" \
   caddy validate --adapter caddyfile --config "$CADDY_FILE" >/dev/null
 
 docker compose \

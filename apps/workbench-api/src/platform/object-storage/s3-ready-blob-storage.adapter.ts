@@ -13,13 +13,17 @@ export class S3ReadyBlobStorageAdapter implements ReadyBlobStoragePort {
     this.client = createS3Client(config, config.readyBlobCredentials);
   }
 
-  async getObject(input: { key: string; range?: { start: number; end: number } }): Promise<StoredObjectBody> {
+  async getObject(input: {
+    key: string;
+    range?: { start: number; end: number };
+    signal?: AbortSignal;
+  }): Promise<StoredObjectBody> {
     this.config.assertConfigured();
     const result = await this.client.send(new GetObjectCommand({
       Bucket: this.config.bucket,
       Key: input.key,
       ...(input.range ? { Range: `bytes=${input.range.start}-${input.range.end}` } : {}),
-    }));
+    }), input.signal ? { abortSignal: input.signal } : undefined);
     if (!(result.Body instanceof Readable) || result.ContentLength === undefined) {
       throw new Error("S3 returned an unsupported object body");
     }

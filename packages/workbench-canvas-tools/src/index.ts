@@ -29,6 +29,13 @@ export type CanvasToolCapabilityGrantPayload = {
   readonly runtimeAttemptId: string | null;
   readonly agentSessionId: string;
   readonly boardId: string;
+  readonly snapshotSha256: string;
+  readonly boardRevision: number;
+  readonly canvasStateRevision: number;
+  readonly viewportSha256: string;
+  readonly selectedNodeIdsSha256: string;
+  readonly visibleNodeIdsSha256: string;
+  readonly profile: "zero" | "read" | "multi" | "edit";
   readonly declarationSha256: string;
   readonly issuedAt: Date;
   readonly notBefore: Date;
@@ -156,6 +163,13 @@ type WirePayload = {
   readonly runtimeAttemptId: string | null;
   readonly agentSessionId: string;
   readonly boardId: string;
+  readonly snapshotSha256: string;
+  readonly boardRevision: number;
+  readonly canvasStateRevision: number;
+  readonly viewportSha256: string;
+  readonly selectedNodeIdsSha256: string;
+  readonly visibleNodeIdsSha256: string;
+  readonly profile: "zero" | "read" | "multi" | "edit";
   readonly declarationSha256: string;
   readonly iat: number;
   readonly nbf: number;
@@ -257,6 +271,8 @@ function wirePayloadFromExternal(payload: CanvasToolCapabilityGrantPayload): Wir
   assertExactDataObject(payload, [
     "agentSessionId",
     "boardId",
+    "boardRevision",
+    "canvasStateRevision",
     "declarationSha256",
     "expiresAt",
     "grantId",
@@ -264,9 +280,14 @@ function wirePayloadFromExternal(payload: CanvasToolCapabilityGrantPayload): Wir
     "notBefore",
     "principalId",
     "projectId",
+    "profile",
     "runId",
     "runtimeAttemptId",
+    "selectedNodeIdsSha256",
+    "snapshotSha256",
     "threadId",
+    "viewportSha256",
+    "visibleNodeIdsSha256",
   ], "CANVAS_TOOL_CAPABILITY_GRANT_INVALID");
   const wirePayload = {
     v: 1 as const,
@@ -278,6 +299,13 @@ function wirePayloadFromExternal(payload: CanvasToolCapabilityGrantPayload): Wir
     runtimeAttemptId: payload.runtimeAttemptId,
     agentSessionId: payload.agentSessionId,
     boardId: payload.boardId,
+    snapshotSha256: payload.snapshotSha256,
+    boardRevision: payload.boardRevision,
+    canvasStateRevision: payload.canvasStateRevision,
+    viewportSha256: payload.viewportSha256,
+    selectedNodeIdsSha256: payload.selectedNodeIdsSha256,
+    visibleNodeIdsSha256: payload.visibleNodeIdsSha256,
+    profile: payload.profile,
     declarationSha256: payload.declarationSha256,
     iat: dateSeconds(payload.issuedAt),
     nbf: dateSeconds(payload.notBefore),
@@ -290,6 +318,8 @@ function validatedWirePayload(value: unknown): WirePayload {
   assertExactDataObject(value, [
     "agentSessionId",
     "boardId",
+    "boardRevision",
+    "canvasStateRevision",
     "declarationSha256",
     "exp",
     "grantId",
@@ -297,10 +327,15 @@ function validatedWirePayload(value: unknown): WirePayload {
     "nbf",
     "principalId",
     "projectId",
+    "profile",
     "runId",
     "runtimeAttemptId",
+    "selectedNodeIdsSha256",
+    "snapshotSha256",
     "threadId",
     "v",
+    "viewportSha256",
+    "visibleNodeIdsSha256",
   ], "CANVAS_TOOL_CAPABILITY_GRANT_INVALID");
   const candidate = value as Record<string, unknown>;
   if (candidate.v !== 1) throw new CanvasToolCapabilityGrantError("CANVAS_TOOL_CAPABILITY_GRANT_INVALID");
@@ -328,6 +363,28 @@ function validatedWirePayload(value: unknown): WirePayload {
   }
   if (typeof candidate.declarationSha256 !== "string" || !sha256Pattern.test(candidate.declarationSha256)) {
     throw new CanvasToolCapabilityGrantError("CANVAS_TOOL_CAPABILITY_GRANT_DECLARATION_HASH_INVALID");
+  }
+  for (const field of [
+    "snapshotSha256",
+    "viewportSha256",
+    "selectedNodeIdsSha256",
+    "visibleNodeIdsSha256",
+  ] as const) {
+    if (typeof candidate[field] !== "string" || !sha256Pattern.test(candidate[field])) {
+      throw new CanvasToolCapabilityGrantError("CANVAS_TOOL_CAPABILITY_GRANT_SCOPE_HASH_INVALID");
+    }
+  }
+  for (const field of ["boardRevision", "canvasStateRevision"] as const) {
+    if (
+      typeof candidate[field] !== "number"
+      || !Number.isSafeInteger(candidate[field])
+      || candidate[field] < 0
+    ) {
+      throw new CanvasToolCapabilityGrantError("CANVAS_TOOL_CAPABILITY_GRANT_REVISION_INVALID");
+    }
+  }
+  if (!new Set(["zero", "read", "multi", "edit"]).has(candidate.profile as string)) {
+    throw new CanvasToolCapabilityGrantError("CANVAS_TOOL_CAPABILITY_GRANT_PROFILE_INVALID");
   }
   const iat = candidate.iat;
   const nbf = candidate.nbf;
@@ -359,6 +416,13 @@ function externalPayloadFromWire(payload: WirePayload): CanvasToolCapabilityGran
     runtimeAttemptId: payload.runtimeAttemptId,
     agentSessionId: payload.agentSessionId,
     boardId: payload.boardId,
+    snapshotSha256: payload.snapshotSha256,
+    boardRevision: payload.boardRevision,
+    canvasStateRevision: payload.canvasStateRevision,
+    viewportSha256: payload.viewportSha256,
+    selectedNodeIdsSha256: payload.selectedNodeIdsSha256,
+    visibleNodeIdsSha256: payload.visibleNodeIdsSha256,
+    profile: payload.profile,
     declarationSha256: payload.declarationSha256,
     issuedAt: new Date(payload.iat * 1_000),
     notBefore: new Date(payload.nbf * 1_000),

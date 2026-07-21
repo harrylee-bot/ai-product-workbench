@@ -1,15 +1,37 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import YAML from "yaml";
 
 const root = new URL("../", import.meta.url);
 
 test("the migrator reconciles Runtime queues before services start", async () => {
-  const [dockerfile, migrate, compose, envExample] = await Promise.all([
+  const [
+    dockerfile,
+    migrate,
+    compose,
+    envExample,
+    apiQueue,
+    runtimeWorker,
+    importWorker,
+    exportWorker,
+    fileWorker,
+    workflowSource,
+    postgresHttpE2e,
+    fileWorkerPostgres,
+  ] = await Promise.all([
     readFile(new URL("apps/workbench-api/Dockerfile", root), "utf8"),
     readFile(new URL("deploy/workbench-migrate.sh", root), "utf8"),
     readFile(new URL("deploy/workbench-compose.yml", root), "utf8"),
     readFile(new URL("deploy/workbench.env.example", root), "utf8"),
+    readFile(new URL("apps/workbench-api/src/platform/queue/workbench-queue.service.ts", root), "utf8"),
+    readFile(new URL("apps/workbench-worker/src/main.ts", root), "utf8"),
+    readFile(new URL("apps/workbench-import-worker/src/main.ts", root), "utf8"),
+    readFile(new URL("apps/workbench-export-worker/src/main.ts", root), "utf8"),
+    readFile(new URL("apps/workbench-file-worker/src/main.ts", root), "utf8"),
+    readFile(new URL(".github/workflows/workbench-ci.yml", root), "utf8"),
+    readFile(new URL("scripts/workbench-postgres-http-e2e.mjs", root), "utf8"),
+    readFile(new URL("scripts/workbench-file-worker-postgres-integration.mjs", root), "utf8"),
   ]);
 
   assert.match(dockerfile, /COPY scripts\/reconcile-workbench-runtime-queues\.mjs/u);
@@ -22,4 +44,45 @@ test("the migrator reconciles Runtime queues before services start", async () =>
     /WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE: \$\{WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE:-0\}/u,
   );
   assert.match(envExample, /^WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=0$/mu);
+  for (const source of [apiQueue, runtimeWorker, importWorker, exportWorker, fileWorker]) {
+    assert.match(source, /migrate: false/u);
+    assert.match(source, /createSchema: false/u);
+  }
+  assert.match(compose, /WORKBENCH_MIGRATOR_DATABASE_URL/u);
+  assert.match(compose, /WORKBENCH_POSTGRES_ADMIN_URL/u);
+
+  const workflow = YAML.parse(workflowSource);
+  const qualitySteps = workflow.jobs?.quality?.steps ?? [];
+  const reconcileIndex = qualitySteps.findIndex((step) => step.name === "Reconcile runtime queue schema and policies");
+  const testIndex = qualitySteps.findIndex((step) => step.run === "npm test");
+  assert.ok(reconcileIndex >= 0, "CI quality must reconcile queues through the production migrator entrypoint");
+  assert.ok(testIndex >= 0 && reconcileIndex < testIndex, "CI queue reconciliation must complete before npm test");
+  assert.equal(qualitySteps[reconcileIndex].run, "sh deploy/workbench-migrate.sh");
+  assert.equal(
+    qualitySteps[reconcileIndex].env?.WORKBENCH_MIGRATOR_DATABASE_URL,
+    "${{ env.WORKBENCH_DATABASE_URL }}",
+  );
+  const fileWorkerPostgresStep = qualitySteps.find(
+    (step) => step.name === "Run candidate-bound File Worker PostgreSQL integration",
+  );
+  assert.ok(fileWorkerPostgresStep, "CI quality must run the File Worker PostgreSQL integration");
+  assert.equal(
+    fileWorkerPostgresStep.run,
+    "npm --workspace @workbench/workbench-file-worker run test:postgres",
+  );
+  assert.equal(
+    fileWorkerPostgresStep.env?.WORKBENCH_SCHEMA_RESET_CONFIRM,
+    "workbench_test",
+    "the destructive integration reset must be explicitly bound to the CI test database",
+  );
+  for (const [name, source] of [
+    ["PostgreSQL HTTP E2E", postgresHttpE2e],
+    ["File Worker PostgreSQL integration", fileWorkerPostgres],
+  ]) {
+    assert.match(
+      source,
+      /async function migrateDatabase\(\) \{[\s\S]{0,1200}deploy\/workbench-migrate\.sh/u,
+      `${name} must initialize pg-boss through the production migrator entrypoint`,
+    );
+  }
 });

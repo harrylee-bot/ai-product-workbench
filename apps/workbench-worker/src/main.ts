@@ -7,6 +7,7 @@ import {
   type RuntimeCancelJob,
   type RuntimeExecuteJob,
 } from "@workbench/workbench-contracts";
+import { prismaReadyObjectIntegrityRecorder } from "@workbench/workbench-content-security";
 import {
   initializeTelemetry,
   queuePayload,
@@ -27,7 +28,10 @@ const telemetry = initializeTelemetry({ serviceName: "workbench-runtime-worker" 
 async function main() {
   const config = loadWorkerConfig();
   await db.$connect();
-  const storage = new S3RuntimeReadyBlobReader(config);
+  const storage = new S3RuntimeReadyBlobReader(
+    config,
+    prismaReadyObjectIntegrityRecorder(db),
+  );
   const runtime = new DeerFlowRuntimeAdapter(config, storage);
   const knowledgeToolGrants = new PrismaKnowledgeToolGrantIssuer(db, config.knowledgeTool);
   const canvasToolGrants = new PrismaCanvasToolGrantIssuer(db, config.canvasTool);
@@ -42,6 +46,8 @@ async function main() {
       ownerPrefix: `runtime-worker:${process.pid}:${randomUUID()}`,
       leaseMs: config.runtimeExecutionLeaseMs,
       heartbeatMs: config.runtimeExecutionHeartbeatMs,
+      cancellationPollIntervalMs: config.runtimeCancellationPollIntervalMs,
+      cancellationQueryBatchSize: config.runtimeCancellationQueryBatchSize,
     },
   );
   const boss = new PgBoss({
@@ -50,6 +56,8 @@ async function main() {
     application_name: "workbench-runtime-worker",
     schedule: false,
     supervise: true,
+    migrate: false,
+    createSchema: false,
     useListenNotify: true,
   });
   boss.on("error", (error) => console.error("[pg-boss]", error));

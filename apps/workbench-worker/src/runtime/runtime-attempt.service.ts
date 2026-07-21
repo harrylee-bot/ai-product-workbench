@@ -2,6 +2,15 @@ import { createHash } from "node:crypto";
 import { canonicalJson, jsonValueSchema, type JsonValue } from "@workbench/workbench-contracts";
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
 import { lockRunStatus } from "../runs/run-state-lock.js";
+import {
+  rebuildRuntimeProviderTextState,
+  runtimeProviderTextReplayEventLimit,
+  type RuntimeProviderTextEvent,
+} from "./runtime-assistant-text.js";
+import {
+  runtimeExternalFinalizationEvent,
+  type RuntimeSubmissionState,
+} from "./runtime.port.js";
 
 type RuntimeBindingRecord = {
   id: string;
@@ -23,6 +32,7 @@ type ClaimScopeRow = {
   providerIdempotencyKey: string | null;
   submissionUnknownAt: Date | null;
   externalEventSequence: number;
+  lastExternalEventId: string | null;
 };
 
 export type RuntimeExecutionClaim = {
@@ -148,7 +158,7 @@ export class RuntimeAttemptService {
     });
   }
 
-  async submissionContext(claim: RuntimeExecutionClaim) {
+  async submissionContext(claim: RuntimeExecutionClaim): Promise<RuntimeSubmissionState> {
     return this.db.$transaction(async (tx) => {
       let scope = await this.assertClaimTx(tx, claim);
       const key = scope.providerIdempotencyKey ?? providerIdempotencyKey(claim.attemptId);
@@ -160,11 +170,63 @@ export class RuntimeAttemptService {
         if (updated.count !== 1) throw new RuntimeExecutionFencedError();
         scope = { ...scope, providerIdempotencyKey: key };
       }
-      return {
-        providerIdempotencyKey: key,
-        submissionUnknown: scope.attemptStatus === "submission_unknown",
-        externalRunId: scope.externalRunId,
-      };
+      if (scope.externalRunId) {
+        if (scope.attemptStatus !== "running") {
+          throw new Error("RUNTIME_SUBMISSION_JOIN_STATE_INVALID");
+        }
+        return {
+          mode: "join",
+          providerIdempotencyKey: key,
+          externalRunId: scope.externalRunId,
+          lastExternalEventId: scope.lastExternalEventId,
+        };
+      }
+      if (scope.attemptStatus === "pending") {
+        return { mode: "submit", providerIdempotencyKey: key };
+      }
+      if (scope.attemptStatus === "submitting" || scope.attemptStatus === "submission_unknown") {
+        return { mode: "reconcile", providerIdempotencyKey: key };
+      }
+      throw new Error("RUNTIME_SUBMISSION_STATE_INVALID");
+    });
+  }
+
+  async providerTextState(claim: RuntimeExecutionClaim) {
+    return this.db.$transaction(async (tx) => {
+      await this.assertClaimTx(tx, claim);
+      const rows = await tx.$queryRaw<Array<RuntimeProviderTextEvent & { payload: Prisma.JsonValue }>>(
+        Prisma.sql`
+          SELECT
+            event."runtime_attempt_id" AS "runtimeAttemptId",
+            attempt."attempt" AS "attempt",
+            event."external_event_id" AS "externalEventId",
+            event."sequence" AS "sequence",
+            event."event" AS "event",
+            event."payload" AS "payload",
+            event."payload_sha256" AS "payloadSha256"
+          FROM "runtime_external_events" AS event
+          JOIN "runtime_attempts" AS attempt ON attempt."id" = event."runtime_attempt_id"
+          WHERE event."run_id" = ${claim.runId}
+            AND event."status" = 'processed'
+          ORDER BY attempt."attempt" DESC, event."sequence" DESC
+          LIMIT ${runtimeProviderTextReplayEventLimit + 1}
+        `,
+      );
+      const truncated = rows.length > runtimeProviderTextReplayEventLimit;
+      const events = rows
+        .slice(0, runtimeProviderTextReplayEventLimit)
+        .reverse()
+        .map((row) => ({ ...row, payload: jsonValueSchema.parse(row.payload) }));
+      const draft = await tx.runDraft.findUnique({
+        where: { runId: claim.runId },
+        select: { content: true },
+      });
+      return rebuildRuntimeProviderTextState({
+        currentRuntimeAttemptId: claim.attemptId,
+        durableVisibleAssistantText: runtimeDraftText(draft?.content),
+        events,
+        truncated,
+      });
     });
   }
 
@@ -172,15 +234,22 @@ export class RuntimeAttemptService {
     try {
       await this.db.$transaction(async (tx) => {
         const scope = await this.assertClaimTx(tx, claim);
-        if (scope.externalRunId || scope.attemptStatus === "submitting") return;
-        if (scope.attemptStatus === "submission_unknown") {
-          throw new Error("RUNTIME_SUBMISSION_UNKNOWN_RETRY_FORBIDDEN");
+        if (scope.externalRunId) {
+          throw new Error("RUNTIME_SUBMISSION_EXTERNAL_RUN_ALREADY_ATTACHED");
+        }
+        if (scope.attemptStatus === "submitting" || scope.attemptStatus === "submission_unknown") {
+          throw new Error("RUNTIME_SUBMISSION_RECONCILIATION_REQUIRED");
         }
         if (scope.attemptStatus !== "pending" || !scope.providerIdempotencyKey) {
           throw new Error("RUNTIME_SUBMISSION_STATE_INVALID");
         }
         const updated = await tx.runtimeAttempt.updateMany({
-          where: { ...claimAttemptWhere(claim), status: "pending" },
+          where: {
+            ...claimAttemptWhere(claim),
+            status: "pending",
+            externalRunId: null,
+            providerIdempotencyKey: scope.providerIdempotencyKey,
+          },
           data: {
             status: "submitting",
             startedAt: scope.databaseNow,
@@ -202,7 +271,23 @@ export class RuntimeAttemptService {
   async markSubmissionUnknown(claim: RuntimeExecutionClaim, detail: string): Promise<void> {
     await this.db.$transaction(async (tx) => {
       const scope = await this.assertClaimTx(tx, claim);
-      if (scope.externalRunId) throw new Error("RUNTIME_SUBMISSION_UNKNOWN_EXTERNAL_RUN_ATTACHED");
+      if (scope.externalRunId) {
+        if (scope.attemptStatus !== "running") {
+          throw new Error("RUNTIME_SUBMISSION_UNKNOWN_EXTERNAL_RUN_STATE_INVALID");
+        }
+        const attemptUpdated = await tx.runtimeAttempt.updateMany({
+          where: claimAttemptWhere(claim),
+          data: releasedLease(),
+        });
+        const runUpdated = await tx.run.updateMany({
+          where: claimRunWhere(claim),
+          data: releasedLease(),
+        });
+        if (attemptUpdated.count !== 1 || runUpdated.count !== 1) {
+          throw new RuntimeExecutionFencedError();
+        }
+        return;
+      }
       if (scope.attemptStatus !== "submitting" && scope.attemptStatus !== "submission_unknown") {
         throw new Error("RUNTIME_SUBMISSION_UNKNOWN_STATE_INVALID");
       }
@@ -284,6 +369,29 @@ export class RuntimeAttemptService {
     input: RuntimeExternalEventInput,
     applyEffects: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<{ created: boolean; sequence: number }> {
+    if (input.event === runtimeExternalFinalizationEvent) {
+      throw new Error("RUNTIME_EXTERNAL_EVENT_TYPE_RESERVED");
+    }
+    return this.processInboxEvent(claim, input, applyEffects, true);
+  }
+
+  async processExternalFinalization(
+    claim: RuntimeExecutionClaim,
+    input: RuntimeExternalEventInput,
+    applyEffects: (tx: Prisma.TransactionClient) => Promise<void>,
+  ): Promise<{ created: boolean; sequence: number }> {
+    if (input.event !== runtimeExternalFinalizationEvent) {
+      throw new Error("RUNTIME_EXTERNAL_FINALIZATION_TYPE_INVALID");
+    }
+    return this.processInboxEvent(claim, input, applyEffects, false);
+  }
+
+  private async processInboxEvent(
+    claim: RuntimeExecutionClaim,
+    input: RuntimeExternalEventInput,
+    applyEffects: (tx: Prisma.TransactionClient) => Promise<void>,
+    checkpointProviderCursor: boolean,
+  ): Promise<{ created: boolean; sequence: number }> {
     assertExternalRunId(input.externalRunId);
     assertExternalEvent(input);
     const payload = jsonValueSchema.parse(input.payload);
@@ -341,10 +449,12 @@ export class RuntimeAttemptService {
         },
         data: { status: "processed", processedAt: scope.databaseNow },
       });
-      const checkpointed = await tx.runtimeAttempt.updateMany({
-        where: claimAttemptWhere(claim),
-        data: { lastExternalEventId: input.externalEventId },
-      });
+      const checkpointed = checkpointProviderCursor
+        ? await tx.runtimeAttempt.updateMany({
+            where: claimAttemptWhere(claim),
+            data: { lastExternalEventId: input.externalEventId },
+          })
+        : { count: 1 };
       if (processed.count !== 1 || checkpointed.count !== 1) {
         throw new RuntimeExecutionFencedError();
       }
@@ -461,7 +571,8 @@ export class RuntimeAttemptService {
         attempt."external_run_id" AS "externalRunId",
         attempt."provider_idempotency_key" AS "providerIdempotencyKey",
         attempt."submission_unknown_at" AS "submissionUnknownAt",
-        attempt."external_event_sequence" AS "externalEventSequence"
+        attempt."external_event_sequence" AS "externalEventSequence",
+        attempt."last_external_event_id" AS "lastExternalEventId"
       FROM "runs" AS run
       JOIN "runtime_attempts" AS attempt ON attempt."run_id" = run."id"
       WHERE run."id" = ${runId}
@@ -511,6 +622,16 @@ function providerIdempotencyKey(attemptId: string) {
 
 function sha256Canonical(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function runtimeDraftText(value: unknown) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("RUNTIME_PROVIDER_TEXT_DRAFT_INVALID");
+  }
+  const text = (value as Record<string, unknown>).text;
+  if (typeof text !== "string") throw new Error("RUNTIME_PROVIDER_TEXT_DRAFT_INVALID");
+  return text;
 }
 
 function assertOwnerId(ownerId: string) {

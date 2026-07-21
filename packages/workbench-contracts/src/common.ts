@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 export const opaqueIdSchema = z.string().min(1).max(128);
+export const runEventSourceIdMaxLength = 128;
+export const runEventSourceIdPattern = /^[A-Za-z0-9._:-]+$/u;
+export const runEventSourceIdSchema = z.string()
+  .min(1)
+  .max(runEventSourceIdMaxLength)
+  .regex(runEventSourceIdPattern);
 export const isoDateTimeSchema = z.string().datetime();
 export const revisionSchema = z.number().int().nonnegative();
 

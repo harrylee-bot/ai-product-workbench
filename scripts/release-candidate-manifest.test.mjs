@@ -40,7 +40,7 @@ const VALID_RELEASE_METADATA = Object.freeze({
   pgvectorVersion: "0.8.0",
   deerFlow: Object.freeze({
     sourceCommit: "1".repeat(40),
-    imageDigest: `sha256:${"2".repeat(64)}`,
+    baseImageDigest: `sha256:${"2".repeat(64)}`,
     overlayConfigSha256: "3".repeat(64),
   }),
   images: Object.freeze({}),
@@ -71,7 +71,7 @@ test("requires complete release metadata and explicit empty R0 digest maps", () 
     delete candidate[field];
     assert.throws(() => normalizeReleaseMetadata(candidate), new RegExp(`releaseMetadata\\.${field}`));
   }
-  for (const field of ["sourceCommit", "imageDigest", "overlayConfigSha256"]) {
+  for (const field of ["sourceCommit", "baseImageDigest", "overlayConfigSha256"]) {
     const candidate = structuredClone(VALID_RELEASE_METADATA);
     delete candidate.deerFlow[field];
     assert.throws(() => normalizeReleaseMetadata(candidate), new RegExp(`releaseMetadata\\.deerFlow\\.${field}`));
@@ -81,7 +81,7 @@ test("requires complete release metadata and explicit empty R0 digest maps", () 
 test("rejects mutable or malformed release digests", () => {
   const cases = [
     ["sourceCommit", (value) => { value.deerFlow.sourceCommit = "not-a-commit"; }],
-    ["imageDigest", (value) => { value.deerFlow.imageDigest = "deerflow:latest"; }],
+    ["baseImageDigest", (value) => { value.deerFlow.baseImageDigest = "deerflow:latest"; }],
     ["overlayConfigSha256", (value) => { value.deerFlow.overlayConfigSha256 = `sha256:${"3".repeat(64)}`; }],
     ["images.api", (value) => { value.images.api = "workbench-api:latest"; }],
     ["artifacts.sbom", (value) => { value.artifacts.sbom = "4".repeat(64); }],
@@ -91,6 +91,14 @@ test("rejects mutable or malformed release digests", () => {
     mutate(candidate);
     assert.throws(() => normalizeReleaseMetadata(candidate), new RegExp(field.replace(".", "\\.")));
   }
+
+  const legacyDerivedImage = structuredClone(VALID_RELEASE_METADATA);
+  delete legacyDerivedImage.deerFlow.baseImageDigest;
+  legacyDerivedImage.deerFlow.imageDigest = `sha256:${"2".repeat(64)}`;
+  assert.throws(
+    () => normalizeReleaseMetadata(legacyDerivedImage),
+    /releaseMetadata\.deerFlow\.imageDigest is not supported/u,
+  );
 });
 
 test("CLI treats a missing metadata file argument as invalid invocation", async (t) => {
@@ -199,7 +207,9 @@ test("creates byte-identical manifest and inventory for the same repository snap
   assert.equal(first.manifest.criticalArtifacts.generatedContracts.entryCount, 4);
   assert.equal(first.manifest.criticalArtifacts.knowledgeVaultConfiguration.entryCount, 4);
   assert.equal(first.manifest.criticalArtifacts.remediationControl.entryCount, 2);
+  assert.ok(first.manifest.criticalArtifacts.evidenceContracts.entryCount >= 2);
   assert.ok(first.manifest.sourceScopes.every((scope) => scope.status === "complete"));
+  assert.equal(first.manifest.sourceScopes.find((scope) => scope.name === "runbooks")?.entryCount, 1);
   assert.equal(first.manifest.signedTag.verified, true);
   assert.equal(first.manifest.sourceCommitSignature.verified, true);
   assert.equal(first.manifest.gate.status, "PASS");
@@ -342,6 +352,8 @@ async function createRepositoryFixture({ referencedAsset = null, orphanAsset = n
     ["tsconfig.base.json", "{}\n"],
     [".github/workflows/ci.yml", "name: candidate\n"],
     ["deploy/workbench-compose.yml", "services: {}\n"],
+    ["docs/runbooks/production-acceptance.md", "# Production acceptance\n"],
+    ["docs/evidence/ledger.schema.json", "{}\n"],
     ["apps/web/app/page.tsx", "export default function Page() { return null; }\n"],
     ["apps/web/app/icon.png", "icon\n"],
     ["apps/web/app/favicon.ico", "favicon\n"],

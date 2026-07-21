@@ -19,6 +19,7 @@ RUN sed -i \
 
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/workbench-export-worker/package.json apps/workbench-export-worker/package.json
+COPY packages/workbench-content-security/package.json packages/workbench-content-security/package.json
 COPY packages/workbench-contracts/package.json packages/workbench-contracts/package.json
 COPY packages/workbench-db/package.json packages/workbench-db/package.json
 COPY packages/workbench-export-core/package.json packages/workbench-export-core/package.json
@@ -28,6 +29,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM dependencies AS build
 COPY apps/workbench-export-worker apps/workbench-export-worker
+COPY packages/workbench-content-security packages/workbench-content-security
 COPY packages/workbench-contracts packages/workbench-contracts
 COPY packages/workbench-db packages/workbench-db
 COPY packages/workbench-export-core packages/workbench-export-core
@@ -35,6 +37,7 @@ COPY packages/workbench-telemetry packages/workbench-telemetry
 RUN rm -rf packages/workbench-db/generated \
   && npm --workspace @workbench/workbench-contracts run build \
   && npm --workspace @workbench/workbench-db run generate \
+  && npm --workspace @workbench/workbench-content-security run build \
   && npm --workspace @workbench/workbench-export-core run build \
   && npm --workspace @workbench/workbench-telemetry run build \
   && npm --workspace @workbench/workbench-export-worker run build
@@ -68,6 +71,7 @@ RUN sed -i \
 
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node apps/workbench-export-worker/package.json apps/workbench-export-worker/package.json
+COPY --chown=node:node packages/workbench-content-security/package.json packages/workbench-content-security/package.json
 COPY --chown=node:node packages/workbench-contracts/package.json packages/workbench-contracts/package.json
 COPY --chown=node:node packages/workbench-db/package.json packages/workbench-db/package.json
 COPY --chown=node:node packages/workbench-export-core/package.json packages/workbench-export-core/package.json
@@ -75,6 +79,7 @@ COPY --chown=node:node packages/workbench-telemetry/package.json packages/workbe
 COPY --from=production-dependencies --chown=node:node /app/node_modules node_modules
 COPY --from=production-dependencies --chown=node:node /app/packages/workbench-export-core/node_modules packages/workbench-export-core/node_modules
 COPY --from=build --chown=node:node /app/apps/workbench-export-worker/dist apps/workbench-export-worker/dist
+COPY --from=build --chown=node:node /app/packages/workbench-content-security/dist packages/workbench-content-security/dist
 COPY --from=build --chown=node:node /app/packages/workbench-contracts/dist packages/workbench-contracts/dist
 COPY --from=build --chown=node:node /app/packages/workbench-db/generated packages/workbench-db/generated
 COPY --from=build --chown=node:node /app/packages/workbench-export-core/dist packages/workbench-export-core/dist

@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { verifyProductionBuildConfiguration } from "./write-production-build-configuration.mjs";
+
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 
@@ -13,7 +15,9 @@ export function createProductionImageRecord({
   imageRef,
   digest,
   sourceCommit,
+  buildConfigurationPath,
   sbomPath,
+  sbomAttestationPath,
   provenancePath,
   signaturePath,
   verificationPath,
@@ -23,6 +27,8 @@ export function createProductionImageRecord({
   assert(DIGEST_PATTERN.test(digest), "image digest must be immutable sha256");
   assert(imageRef.endsWith(`@${digest}`), "imageRef must end with the image digest");
   assert(COMMIT_PATTERN.test(sourceCommit), "source commit must be a 40-character lowercase Git SHA");
+  const buildConfiguration = JSON.parse(readFileSync(resolve(buildConfigurationPath), "utf8"));
+  verifyProductionBuildConfiguration(buildConfiguration, { id, sourceCommit });
   const evidence = (path, label) => {
     const bytes = readFileSync(resolve(path));
     const sha256 = createHash("sha256").update(bytes).digest("hex");
@@ -35,12 +41,13 @@ export function createProductionImageRecord({
     imageRef,
     digest,
     sourceCommit,
+    buildConfiguration,
     sbom: evidence(sbomPath, "spdx-json"),
-    provenance: evidence(provenancePath, "build-metadata"),
+    sbomAttestation: evidence(sbomAttestationPath, "signed-sbom-attestation-bundle"),
+    provenance: evidence(provenancePath, "signed-provenance-bundle"),
     signature: {
       ...evidence(signaturePath, "cosign-bundle"),
       verification: evidence(verificationPath, "cosign-verify"),
-      verified: true,
     },
     vulnerabilityReport: { ...vulnerabilityReport, status: "PASS", critical: scan.critical, high: scan.high },
   };
@@ -67,14 +74,27 @@ function parseTrivy(source) {
 
 function parseArguments(argv) {
   const result = {};
+  const names = new Map([
+    ["--id", "id"],
+    ["--image-ref", "imageRef"],
+    ["--digest", "digest"],
+    ["--source-commit", "sourceCommit"],
+    ["--build-configuration-path", "buildConfigurationPath"],
+    ["--sbom-path", "sbomPath"],
+    ["--sbom-attestation-path", "sbomAttestationPath"],
+    ["--provenance-path", "provenancePath"],
+    ["--signature-path", "signaturePath"],
+    ["--verification-path", "verificationPath"],
+    ["--vulnerability-path", "vulnerabilityPath"],
+  ]);
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (!argument.startsWith("--")) throw new Error(`unsupported argument: ${argument}`);
-    const key = argument.slice(2).replaceAll("-", "_");
+    const key = names.get(argument);
+    assert(key, `unsupported argument: ${argument}`);
     result[key] = argv[++index];
   }
-  for (const key of ["id", "image_ref", "digest", "source_commit", "sbom_path", "provenance_path", "signature_path", "verification_path", "vulnerability_path"]) {
-    assert(result[key], `--${key.replaceAll("_", "-")} is required`);
+  for (const [flag, key] of names) {
+    assert(result[key], `${flag} is required`);
   }
   return result;
 }

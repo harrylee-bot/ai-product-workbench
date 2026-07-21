@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { FileApiConfig } from "../src/modules/files/file-api.config.js";
 import {
@@ -9,7 +10,7 @@ import { entityTagMatches, parseByteRange } from "../src/common/byte-content.js"
 import type { ReadyBlobStoragePort } from "../src/platform/object-storage/object-storage.port.js";
 
 const createdAt = new Date("2026-07-12T08:00:00.000Z");
-const sha256 = "a".repeat(64);
+const sha256 = createHash("sha256").update("0123456789").digest("hex");
 
 function extraction(status: "queued" | "running" | "ready" = "queued") {
   return {

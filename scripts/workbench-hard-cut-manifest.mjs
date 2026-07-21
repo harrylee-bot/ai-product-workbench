@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { createPublicKey, verify as verifySignature } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -12,6 +11,19 @@ import {
   sha256Bytes,
   verifyEvidenceLedger,
 } from "./evidence-ledger.mjs";
+import {
+  loadProductionTrustPolicy,
+  ProductionTrustPolicyError,
+  resolveReceiptAuthority,
+  verifyTrustedEd25519Signature,
+} from "./workbench-production-trust-policy.mjs";
+import { loadProductionImageDigestBinding } from "./production-image-inventory.mjs";
+import { loadProductionDeploymentConfigBinding } from "./production-deployment-config.mjs";
+import {
+  DEFAULT_CONTROL_CATALOG_PATH,
+  loadProductionAcceptanceControlCatalog,
+  ProductionAcceptanceContractError,
+} from "./production-acceptance/catalog.mjs";
 
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryKinds = new Set(["path", "dependency"]);
@@ -30,7 +42,9 @@ const states = new Set(["pending", "removed"]);
 const statusValues = new Set(["pre-cutover", "cutover-accepted", "completed"]);
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$/u;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
+const candidateIdPattern = /^sha256:[0-9a-f]{64}$/u;
 const commitPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
+const releaseCommitPattern = /^[0-9a-f]{40}$/u;
 const fileUriPattern = /^file:\.\/[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
 const signaturePattern = /^[A-Za-z0-9_-]{64,256}$/u;
 const cutoverScopeIds = Object.freeze({
@@ -43,6 +57,18 @@ export async function validateHardCutManifest({
   manifestPath = path.join(defaultRepoRoot, "docs/workbench-hard-cut-deletion-manifest.json"),
   root = defaultRepoRoot,
   enforce = false,
+  expectedCandidateId,
+  expectedSourceCommit,
+  expectedSignedTag,
+  expectedReleaseChainId,
+  productionImageManifestPath,
+  expectedProductionImageManifestSha256,
+  deploymentConfigManifestPath,
+  expectedDeploymentConfigManifestSha256,
+  controlCatalogPath,
+  expectedControlCatalogSha256,
+  trustPolicyPath,
+  expectedTrustPolicySha256,
   now = new Date(),
 } = {}) {
   const repoRoot = path.resolve(root);
@@ -54,6 +80,13 @@ export async function validateHardCutManifest({
   const observedExternalKinds = new Set();
   const verifiedReceipts = new Map();
   let unverifiedReceiptCount = 0;
+  const trustPolicy = await resolveTrustPolicy({
+    enforce,
+    trustPolicyPath,
+    expectedTrustPolicySha256,
+    repoRoot,
+    findings,
+  });
 
   if (manifest.version !== 3) findings.push("manifest version must be 3");
   if (manifest.product !== "产品工作台") findings.push("manifest product must be 产品工作台");
@@ -67,7 +100,36 @@ export async function validateHardCutManifest({
   if (manifest.policy?.preserveKnowledgeVault !== true) findings.push("knowledge-vault preservation must remain enabled");
   if (manifest.policy?.preserveOnlyReferencedStorage !== true) findings.push("referenced storage preservation must remain enabled");
 
-  const candidateBinding = validateCandidateBinding(manifest.candidateBinding, findings, enforce);
+  const expectedCandidate = validateExpectedCandidate({
+    candidateId: expectedCandidateId,
+    sourceCommit: expectedSourceCommit,
+    signedTag: expectedSignedTag,
+  }, findings, enforce);
+  const productionBinding = await resolveProductionBinding({
+    enforce,
+    productionImageManifestPath,
+    expectedProductionImageManifestSha256,
+    expectedReleaseChainId,
+    expectedSourceCommit,
+    expectedCandidateId,
+    expectedSignedTag,
+    deploymentConfigManifestPath,
+    expectedDeploymentConfigManifestSha256,
+    controlCatalogPath,
+    expectedControlCatalogSha256,
+    repoRoot,
+    findings,
+  });
+  const candidateBinding = validateCandidateBinding(
+    manifest.candidateBinding,
+    findings,
+    enforce,
+    productionBinding,
+  );
+  if (trustPolicy && candidateBinding && trustPolicy.environmentId !== candidateBinding.environmentId) {
+    findings.push("trust policy environmentId does not match candidateBinding.environmentId");
+  }
+  validateCandidateAgainstExpected(candidateBinding, expectedCandidate, findings);
   const cutoverReceipts = manifest.cutoverReceipts ?? {};
   for (const [name, scopeId] of Object.entries(cutoverScopeIds)) {
     const receipt = cutoverReceipts[name] ?? null;
@@ -85,6 +147,7 @@ export async function validateHardCutManifest({
       expectedThreshold: name === "rollbackWindowClosure" ? "zero" : "true",
       candidateBinding,
       repoRoot,
+      trustPolicy,
       now,
       findings,
     });
@@ -127,6 +190,7 @@ export async function validateHardCutManifest({
           expectedThreshold: externalKinds.has(entry.kind) ? "zero" : "true",
           candidateBinding,
           repoRoot,
+          trustPolicy,
           now,
           findings,
         });
@@ -169,25 +233,183 @@ export async function validateHardCutManifest({
   };
 }
 
+async function resolveProductionBinding({
+  enforce,
+  productionImageManifestPath,
+  expectedProductionImageManifestSha256,
+  expectedReleaseChainId,
+  expectedSourceCommit,
+  expectedCandidateId,
+  expectedSignedTag,
+  deploymentConfigManifestPath,
+  expectedDeploymentConfigManifestSha256,
+  controlCatalogPath,
+  expectedControlCatalogSha256,
+  repoRoot,
+  findings,
+}) {
+  const provided = [
+    productionImageManifestPath,
+    expectedProductionImageManifestSha256,
+    expectedReleaseChainId,
+    deploymentConfigManifestPath,
+    expectedDeploymentConfigManifestSha256,
+    controlCatalogPath,
+    expectedControlCatalogSha256,
+  ].some((value) => value !== undefined && value !== null && value !== "");
+  if (!provided && !enforce) return null;
+  if (!productionImageManifestPath) findings.push("enforced hard cut requires productionImageManifestPath");
+  if (!sha256Pattern.test(expectedProductionImageManifestSha256 ?? "")) {
+    findings.push("enforced hard cut requires expectedProductionImageManifestSha256");
+  }
+  if (!candidateIdPattern.test(expectedReleaseChainId ?? "")) {
+    findings.push("enforced hard cut requires expectedReleaseChainId");
+  }
+  if (!deploymentConfigManifestPath) findings.push("enforced hard cut requires deploymentConfigManifestPath");
+  if (!sha256Pattern.test(expectedDeploymentConfigManifestSha256 ?? "")) {
+    findings.push("enforced hard cut requires expectedDeploymentConfigManifestSha256");
+  }
+  if (!controlCatalogPath) findings.push("enforced hard cut requires controlCatalogPath");
+  if (!sha256Pattern.test(expectedControlCatalogSha256 ?? "")) {
+    findings.push("enforced hard cut requires expectedControlCatalogSha256");
+  }
+  if (!releaseCommitPattern.test(expectedSourceCommit ?? "")) return null;
+  if (
+    !productionImageManifestPath
+    || !sha256Pattern.test(expectedProductionImageManifestSha256 ?? "")
+    || !candidateIdPattern.test(expectedReleaseChainId ?? "")
+    || !deploymentConfigManifestPath
+    || !sha256Pattern.test(expectedDeploymentConfigManifestSha256 ?? "")
+    || !controlCatalogPath
+    || !sha256Pattern.test(expectedControlCatalogSha256 ?? "")
+  ) return null;
+
+  const resolvedImageManifestPath = path.resolve(productionImageManifestPath);
+  const resolvedDeploymentConfigPath = path.resolve(deploymentConfigManifestPath);
+  const resolvedControlCatalogPath = path.resolve(controlCatalogPath);
+  if (isWithin(repoRoot, resolvedImageManifestPath)) {
+    findings.push("production image manifest must be outside the hard-cut evidence root");
+  }
+  if (isWithin(repoRoot, resolvedDeploymentConfigPath)) {
+    findings.push("production deployment configuration must be outside the hard-cut evidence root");
+  }
+  if (isWithin(repoRoot, resolvedControlCatalogPath)) {
+    findings.push("production control catalog must be outside the hard-cut evidence root");
+  }
+  if (resolvedControlCatalogPath !== DEFAULT_CONTROL_CATALOG_PATH) {
+    findings.push("production control catalog must identify the catalog in the protected verifier checkout");
+  }
+  let imageBinding;
+  let deploymentConfigBinding;
+  try {
+    imageBinding = loadProductionImageDigestBinding({
+      manifestPath: resolvedImageManifestPath,
+      expectedManifestSha256: expectedProductionImageManifestSha256,
+      expectedCommit: expectedSourceCommit,
+      expectedReleaseChainId,
+    });
+  } catch (error) {
+    findings.push(`production image manifest is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (imageBinding) {
+    try {
+      deploymentConfigBinding = loadProductionDeploymentConfigBinding({
+        manifestPath: resolvedDeploymentConfigPath,
+        expectedManifestSha256: expectedDeploymentConfigManifestSha256,
+        expected: {
+          candidateId: expectedCandidateId,
+          sourceCommit: expectedSourceCommit,
+          signedTag: expectedSignedTag,
+          releaseChainId: expectedReleaseChainId,
+          imageManifestSha256: imageBinding.manifestSha256,
+          images: imageBinding.images,
+        },
+      });
+    } catch (error) {
+      findings.push(`production deployment configuration is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  try {
+    await loadProductionAcceptanceControlCatalog({
+      catalogPath: resolvedControlCatalogPath,
+      expectedSha256: expectedControlCatalogSha256,
+    });
+  } catch (error) {
+    if (error instanceof ProductionAcceptanceContractError) {
+      findings.push(...error.findings.map((finding) => `production control catalog is invalid: ${finding}`));
+    } else {
+      findings.push(`production control catalog is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (!imageBinding || !deploymentConfigBinding) return null;
+  return {
+    images: imageBinding.images,
+    imageManifestSha256: imageBinding.manifestSha256,
+    controlCatalogSha256: expectedControlCatalogSha256,
+    releaseChainId: expectedReleaseChainId,
+    deploymentConfigManifestSha256: deploymentConfigBinding.manifestSha256,
+    configSha256: deploymentConfigBinding.binding.configSha256,
+    migrationSha256: deploymentConfigBinding.binding.migrationSha256,
+  };
+}
+
 export async function verifyHardCutReceipt({
   receipt,
   expectedScopeId,
   expectedThreshold = "zero",
   candidateBinding,
   root = defaultRepoRoot,
+  trustPolicy,
+  trustPolicyPath,
+  expectedTrustPolicySha256,
   now = new Date(),
 } = {}) {
   const findings = [];
+  const resolvedTrustPolicy = trustPolicy ?? await resolveTrustPolicy({
+    enforce: true,
+    trustPolicyPath,
+    expectedTrustPolicySha256,
+    repoRoot: path.resolve(root),
+    findings,
+  });
+  if (resolvedTrustPolicy && candidateBinding && resolvedTrustPolicy.environmentId !== candidateBinding.environmentId) {
+    findings.push("trust policy environmentId does not match candidateBinding.environmentId");
+  }
   const verified = await validateReceipt(receipt, {
     label: "receipt",
     expectedScopeId,
     expectedThreshold,
     candidateBinding,
     repoRoot: path.resolve(root),
+    trustPolicy: resolvedTrustPolicy,
     now,
     findings,
   });
   return { ok: findings.length === 0 && verified !== null, verified, findings };
+}
+
+async function resolveTrustPolicy({ enforce, trustPolicyPath, expectedTrustPolicySha256, repoRoot, findings }) {
+  if (!trustPolicyPath && !expectedTrustPolicySha256 && !enforce) return null;
+  if (!trustPolicyPath) findings.push("enforced hard cut requires trustPolicyPath");
+  if (!expectedTrustPolicySha256 || !sha256Pattern.test(expectedTrustPolicySha256)) {
+    findings.push("enforced hard cut requires expectedTrustPolicySha256");
+  }
+  if (!trustPolicyPath || !sha256Pattern.test(expectedTrustPolicySha256 ?? "")) return null;
+  const resolvedPath = path.resolve(trustPolicyPath);
+  if (isWithin(repoRoot, resolvedPath)) {
+    findings.push("production trust policy must be outside the hard-cut evidence root");
+    return null;
+  }
+  try {
+    return await loadProductionTrustPolicy({
+      policyPath: resolvedPath,
+      expectedSha256: expectedTrustPolicySha256,
+    });
+  } catch (error) {
+    if (error instanceof ProductionTrustPolicyError) findings.push(...error.findings);
+    else findings.push(`cannot load production trust policy: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 async function validateReceipt(receipt, {
@@ -196,6 +418,7 @@ async function validateReceipt(receipt, {
   expectedThreshold,
   candidateBinding,
   repoRoot,
+  trustPolicy,
   now,
   findings,
 }) {
@@ -206,8 +429,8 @@ async function validateReceipt(receipt, {
   }
   const expectedKeys = ["schemaVersion", "scopeId", "ledger", "signedAtUtc", "validUntilUtc", "signature"];
   validateExactKeys(receipt, expectedKeys, label, findings);
-  if (receipt.schemaVersion !== "workbench.hard-cut-receipt.v1") {
-    findings.push(`${label}.schemaVersion must be workbench.hard-cut-receipt.v1`);
+  if (receipt.schemaVersion !== "workbench.hard-cut-receipt.v2") {
+    findings.push(`${label}.schemaVersion must be workbench.hard-cut-receipt.v2`);
   }
   if (receipt.scopeId !== expectedScopeId) findings.push(`${label}.scopeId must be ${expectedScopeId}`);
   const signedAt = parseUtc(receipt.signedAtUtc, `${label}.signedAtUtc`, findings);
@@ -232,30 +455,22 @@ async function validateReceipt(receipt, {
     findings.push(`${label}.signature must be an object`);
     return null;
   }
-  validateExactKeys(signature, ["algorithm", "publicKeyUri", "publicKeySha256", "value"], `${label}.signature`, findings);
+  validateExactKeys(signature, ["algorithm", "keyId", "value"], `${label}.signature`, findings);
   if (signature.algorithm !== "Ed25519") findings.push(`${label}.signature.algorithm must be Ed25519`);
-  if (!fileUriPattern.test(signature.publicKeyUri ?? "")) {
-    findings.push(`${label}.signature.publicKeyUri must be a repository-relative file URI`);
-  }
-  if (!sha256Pattern.test(signature.publicKeySha256 ?? "")) findings.push(`${label}.signature.publicKeySha256 is invalid`);
+  if (!candidateIdPattern.test(signature.keyId ?? "")) findings.push(`${label}.signature.keyId is invalid`);
   if (!signaturePattern.test(signature.value ?? "")) findings.push(`${label}.signature.value is invalid base64url`);
+  if (!trustPolicy) findings.push(`${label} requires an external production trust policy`);
   if (findings.length !== startFindings) return null;
 
   let ledgerPath;
-  let publicKeyPath;
   try {
     ledgerPath = await resolveLocalEvidenceFile(repoRoot, ledger.uri);
-    publicKeyPath = await resolveLocalEvidenceFile(repoRoot, signature.publicKeyUri);
   } catch (error) {
     findings.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
-  const [ledgerRaw, publicKeyRaw] = await Promise.all([
-    readFile(ledgerPath),
-    readFile(publicKeyPath),
-  ]);
+  const ledgerRaw = await readFile(ledgerPath);
   if (sha256Bytes(ledgerRaw) !== ledger.sha256) findings.push(`${label}.ledger SHA-256 mismatch`);
-  if (sha256Bytes(publicKeyRaw) !== signature.publicKeySha256) findings.push(`${label}.public key SHA-256 mismatch`);
   if (findings.length !== startFindings) return null;
 
   let report;
@@ -301,28 +516,42 @@ async function validateReceipt(receipt, {
     findings.push(`${label} was signed before its evidence entry was executed`);
   }
 
+  let authority;
+  try {
+    authority = resolveReceiptAuthority(trustPolicy, {
+      scopeId: expectedScopeId,
+      keyId: signature.keyId,
+      signedAt,
+    });
+  } catch (error) {
+    findings.push(`${label}.signature ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (authority && entry.executor.id !== authority.signerId) {
+    findings.push(`${label}.ledger executor is not the trusted receipt authority`);
+  }
+
   const signedPayload = Buffer.from(canonicalJson({
     schemaVersion: receipt.schemaVersion,
     scopeId: receipt.scopeId,
+    keyId: signature.keyId,
     candidateBinding,
     ledger: receipt.ledger,
     signedAtUtc: receipt.signedAtUtc,
     validUntilUtc: receipt.validUntilUtc,
   }), "utf8");
   try {
-    const valid = verifySignature(
-      null,
-      signedPayload,
-      createPublicKey(publicKeyRaw),
-      Buffer.from(signature.value, "base64url"),
-    );
+    const valid = authority && verifyTrustedEd25519Signature({
+      key: authority.key,
+      payload: signedPayload,
+      signature: signature.value,
+    });
     if (!valid) findings.push(`${label}.signature verification failed`);
   } catch (error) {
     findings.push(`${label}.signature could not be verified: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (findings.length !== startFindings) return null;
   return {
-    signerKeySha256: signature.publicKeySha256,
+    signerKeySha256: authority.key.publicKeySha256,
     executorId: entry.executor.id,
     executedAt,
   };
@@ -349,7 +578,7 @@ function validateIndependentProductionAcceptance(receipts, findings) {
   }
 }
 
-function validateCandidateBinding(value, findings, required) {
+function validateCandidateBinding(value, findings, required, expectedProductionBinding) {
   if (value === null || value === undefined) {
     if (required) findings.push("enforced hard cut requires candidateBinding");
     return null;
@@ -358,31 +587,121 @@ function validateCandidateBinding(value, findings, required) {
     findings.push("candidateBinding must be an object or null");
     return null;
   }
-  validateExactKeys(value, ["candidateId", "deployId", "environmentId", "commitSha", "tag", "digests"], "candidateBinding", findings);
+  validateExactKeys(value, [
+    "candidateId",
+    "deployId",
+    "environmentId",
+    "commitSha",
+    "tag",
+    "releaseChainId",
+    "digests",
+  ], "candidateBinding", findings);
   for (const field of ["candidateId", "deployId", "environmentId", "tag"]) {
     if (!identifierPattern.test(value[field] ?? "")) findings.push(`candidateBinding.${field} is invalid`);
   }
   if (!commitPattern.test(value.commitSha ?? "")) findings.push("candidateBinding.commitSha is invalid");
+  if (!candidateIdPattern.test(value.releaseChainId ?? "")) findings.push("candidateBinding.releaseChainId is invalid");
   if (!isObject(value.digests)) {
     findings.push("candidateBinding.digests must be an object");
     return null;
   }
-  validateExactKeys(value.digests, ["images", "configSha256", "migrationSha256"], "candidateBinding.digests", findings);
-  for (const field of ["configSha256", "migrationSha256"]) {
+  validateExactKeys(value.digests, [
+    "images",
+    "configSha256",
+    "migrationSha256",
+    "deploymentConfigManifestSha256",
+    "imageManifestSha256",
+    "controlCatalogSha256",
+  ], "candidateBinding.digests", findings);
+  for (const field of [
+    "configSha256",
+    "migrationSha256",
+    "deploymentConfigManifestSha256",
+    "imageManifestSha256",
+    "controlCatalogSha256",
+  ]) {
     if (!sha256Pattern.test(value.digests[field] ?? "")) findings.push(`candidateBinding.digests.${field} is invalid`);
   }
-  if (!Array.isArray(value.digests.images)) {
-    findings.push("candidateBinding.digests.images must be an array");
-  } else {
-    for (const [index, image] of value.digests.images.entries()) {
-      if (!isObject(image)
-        || !identifierPattern.test(image.name ?? "")
-        || !/^sha256:[0-9a-f]{64}$/u.test(image.digest ?? "")) {
-        findings.push(`candidateBinding.digests.images[${index}] is invalid`);
-      }
+  validateImageDigests(value.digests.images, "candidateBinding.digests.images", findings);
+  if (expectedProductionBinding) {
+    if (value.releaseChainId !== expectedProductionBinding.releaseChainId) {
+      findings.push("candidateBinding.releaseChainId does not match the verified release chain");
+    }
+    if (value.digests.imageManifestSha256 !== expectedProductionBinding.imageManifestSha256) {
+      findings.push("candidateBinding.digests.imageManifestSha256 does not match the verified G4 image manifest");
+    }
+    if (value.digests.controlCatalogSha256 !== expectedProductionBinding.controlCatalogSha256) {
+      findings.push("candidateBinding.digests.controlCatalogSha256 does not match the protected control catalog");
+    }
+    if (value.digests.deploymentConfigManifestSha256 !== expectedProductionBinding.deploymentConfigManifestSha256) {
+      findings.push("candidateBinding.digests.deploymentConfigManifestSha256 does not match the signed deployment configuration");
+    }
+    if (value.digests.configSha256 !== expectedProductionBinding.configSha256) {
+      findings.push("candidateBinding.digests.configSha256 does not match the signed deployment configuration");
+    }
+    if (value.digests.migrationSha256 !== expectedProductionBinding.migrationSha256) {
+      findings.push("candidateBinding.digests.migrationSha256 does not match the signed deployment configuration");
+    }
+    if (canonicalJson(value.digests.images) !== canonicalJson(expectedProductionBinding.images)) {
+      findings.push("candidateBinding.digests.images does not match the complete verified G4 image inventory");
     }
   }
   return value;
+}
+
+function validateImageDigests(value, label, findings) {
+  if (!Array.isArray(value) || value.length === 0) {
+    findings.push(`${label} must be a non-empty array`);
+    return;
+  }
+  const names = new Set();
+  let previousName = "";
+  for (const [index, image] of value.entries()) {
+    if (!isObject(image)
+      || Object.keys(image).sort().join(",") !== "digest,name"
+      || !identifierPattern.test(image.name ?? "")
+      || !/^sha256:[0-9a-f]{64}$/u.test(image.digest ?? "")) {
+      findings.push(`${label}[${index}] is invalid`);
+      continue;
+    }
+    if (names.has(image.name)) findings.push(`${label}[${index}].name is duplicated`);
+    if (previousName && previousName.localeCompare(image.name, "en") >= 0) {
+      findings.push(`${label} must be sorted by unique name`);
+    }
+    names.add(image.name);
+    previousName = image.name;
+  }
+}
+
+function validateExpectedCandidate(value, findings, required) {
+  const fields = [
+    ["expectedCandidateId", value.candidateId, candidateIdPattern],
+    ["expectedSourceCommit", value.sourceCommit, releaseCommitPattern],
+    ["expectedSignedTag", value.signedTag, identifierPattern],
+  ];
+  const provided = fields.some(([, candidate]) => candidate !== undefined && candidate !== null && candidate !== "");
+  if (!provided && !required) return null;
+  let valid = true;
+  for (const [name, candidate, pattern] of fields) {
+    if (typeof candidate !== "string" || !pattern.test(candidate)) {
+      findings.push(`${required ? "enforced hard cut requires" : "invalid"} ${name}`);
+      valid = false;
+    }
+  }
+  return valid ? value : null;
+}
+
+function validateCandidateAgainstExpected(binding, expected, findings) {
+  if (!binding || !expected) return;
+  for (const [bindingField, expectedField] of [
+    ["candidateId", "candidateId"],
+    ["commitSha", "sourceCommit"],
+    ["tag", "signedTag"],
+  ]) {
+    if (binding[bindingField] !== expected[expectedField]) {
+      findings.push(`candidateBinding.${bindingField} does not match the verified release candidate`);
+    }
+  }
 }
 
 async function validateRepositoryEntry(entry, id, repoRoot, enforce, findings) {
@@ -500,10 +819,23 @@ function parseCli(argv) {
       options.enforce = true;
       continue;
     }
-    const field = argument === "--root" ? "root"
-      : argument === "--manifest" ? "manifestPath"
-        : argument === "--now" ? "now"
-          : null;
+    const field = ({
+      "--root": "root",
+      "--manifest": "manifestPath",
+      "--now": "now",
+      "--expected-candidate-id": "expectedCandidateId",
+      "--expected-source-commit": "expectedSourceCommit",
+      "--expected-signed-tag": "expectedSignedTag",
+      "--expected-release-chain-id": "expectedReleaseChainId",
+      "--production-image-manifest": "productionImageManifestPath",
+      "--production-image-manifest-sha256": "expectedProductionImageManifestSha256",
+      "--deployment-config-manifest": "deploymentConfigManifestPath",
+      "--deployment-config-manifest-sha256": "expectedDeploymentConfigManifestSha256",
+      "--control-catalog": "controlCatalogPath",
+      "--control-catalog-sha256": "expectedControlCatalogSha256",
+      "--trust-policy": "trustPolicyPath",
+      "--trust-policy-sha256": "expectedTrustPolicySha256",
+    })[argument] ?? null;
     if (!field) throw new Error(`unknown argument: ${argument}`);
     const value = argv[index + 1];
     if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value`);

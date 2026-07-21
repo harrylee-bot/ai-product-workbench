@@ -31,6 +31,7 @@ import {
   UnsatisfiedByteRangeProblem,
 } from "../../common/byte-content.js";
 import { validationProblem } from "../../common/problem-details.js";
+import { httpResponseAbortSignalArgument } from "../../common/http-request-abort.js";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { CurrentPrincipal } from "../identity/current-principal.decorator.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
@@ -114,7 +115,13 @@ export class FilesController {
   ) {
     let result;
     try {
-      result = await this.files.getContent(principal.id, fileId, range, ifNoneMatch);
+      result = await this.files.getContent(
+        principal.id,
+        fileId,
+        range,
+        ifNoneMatch,
+        ...httpResponseAbortSignalArgument(response),
+      );
     } catch (error) {
       if (error instanceof UnsatisfiedByteRangeProblem) {
         response.setHeader("Content-Range", `bytes */${error.byteSize}`);

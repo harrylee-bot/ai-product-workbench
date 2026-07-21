@@ -1,5 +1,6 @@
 import { createServer, type ServerResponse } from "node:http";
 import { pipeline } from "node:stream/promises";
+import { prismaReadyObjectIntegrityRecorder } from "@workbench/workbench-content-security";
 import { loadPreviewConfig } from "./config.js";
 import { createPreviewDb } from "./db.js";
 import { PreviewService } from "./preview.service.js";
@@ -11,7 +12,11 @@ async function main() {
   const config = loadPreviewConfig();
   const db = createPreviewDb(config);
   await db.$connect();
-  const service = new PreviewService(db, new PreviewStorage(config), config);
+  const service = new PreviewService(
+    db,
+    new PreviewStorage(config, prismaReadyObjectIntegrityRecorder(db)),
+    config,
+  );
   let active = 0;
 
   const server = createServer(async (request, response) => {

@@ -12,7 +12,7 @@ else
   PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-production-preflight.sh"
 fi
 CADDY_INSTALL_FILE=/etc/caddy/Caddyfile
-CADDY_RUNTIME_ENV_FILE=/etc/caddy/workbench-auth-proxy.env
+CADDY_RUNTIME_ENV_FILE=/etc/caddy/workbench-origin-edge.env
 CADDY_DROP_IN_DIR=/etc/systemd/system/caddy.service.d
 CADDY_DROP_IN_TEMPLATE=${WORKBENCH_CADDY_DROP_IN_TEMPLATE:-$APP_DIR/deploy/caddy-workbench.service.d/override.conf}
 CADDY_SERVICE=${WORKBENCH_CADDY_SERVICE:-caddy}
@@ -45,15 +45,20 @@ WORKBENCH_ENV_FILE="$ENV_FILE" \
 WORKBENCH_CADDY_FILE="$CADDY_FILE" \
   sh "$PREFLIGHT_SCRIPT"
 
-cdn_edge_cidrs=$(env_value WORKBENCH_CDN_EDGE_CIDRS)
-cdn_origin_auth_secret=$(env_value WORKBENCH_CDN_ORIGIN_AUTH_SECRET)
+edge_wireguard_ip=$(env_value WORKBENCH_EDGE_WIREGUARD_IP)
+origin_wireguard_ip=$(env_value WORKBENCH_ORIGIN_WIREGUARD_IP)
+origin_http_port=$(env_value WORKBENCH_ORIGIN_HTTP_PORT)
+edge_origin_auth_secret=$(env_value WORKBENCH_EDGE_ORIGIN_AUTH_SECRET)
 web_origin=$(env_value WORKBENCH_WEB_ORIGIN)
-[ -n "$cdn_edge_cidrs" ] || fail "WORKBENCH_CDN_EDGE_CIDRS is empty"
-[ -n "$cdn_origin_auth_secret" ] || fail "WORKBENCH_CDN_ORIGIN_AUTH_SECRET is empty"
+[ -n "$edge_wireguard_ip" ] || fail "WORKBENCH_EDGE_WIREGUARD_IP is empty"
+[ -n "$origin_wireguard_ip" ] || fail "WORKBENCH_ORIGIN_WIREGUARD_IP is empty"
+[ -n "$origin_http_port" ] || fail "WORKBENCH_ORIGIN_HTTP_PORT is empty"
+[ -n "$edge_origin_auth_secret" ] || fail "WORKBENCH_EDGE_ORIGIN_AUTH_SECRET is empty"
 [ -n "$web_origin" ] || fail "WORKBENCH_WEB_ORIGIN is empty"
 
 origin_env_tmp=$(mktemp)
 trap 'rm -f "$origin_env_tmp"' EXIT HUP INT TERM
+WORKBENCH_IDENTITY_HOSTNAME=
 node "$ORIGIN_MANIFEST_SCRIPT" --env-file "$ENV_FILE" --format caddy-env >"$origin_env_tmp" \
   || fail "public origin manifest is invalid"
 . "$origin_env_tmp"
@@ -62,8 +67,10 @@ preview_hostname=$WORKBENCH_PREVIEW_HOSTNAME
 s3_hostname=$WORKBENCH_S3_HOSTNAME
 identity_hostname=$WORKBENCH_IDENTITY_HOSTNAME
 
-WORKBENCH_CDN_EDGE_CIDRS="$cdn_edge_cidrs" \
-WORKBENCH_CDN_ORIGIN_AUTH_SECRET="$cdn_origin_auth_secret" \
+WORKBENCH_EDGE_WIREGUARD_IP="$edge_wireguard_ip" \
+WORKBENCH_ORIGIN_WIREGUARD_IP="$origin_wireguard_ip" \
+WORKBENCH_ORIGIN_HTTP_PORT="$origin_http_port" \
+WORKBENCH_EDGE_ORIGIN_AUTH_SECRET="$edge_origin_auth_secret" \
 WORKBENCH_WEB_HOSTNAME="$web_hostname" \
 WORKBENCH_PREVIEW_HOSTNAME="$preview_hostname" \
 WORKBENCH_S3_HOSTNAME="$s3_hostname" \
@@ -74,12 +81,16 @@ runtime_env_tmp=$(mktemp)
 trap 'rm -f "$runtime_env_tmp" "$origin_env_tmp"' EXIT HUP INT TERM
 umask 077
 {
-  printf 'WORKBENCH_CDN_EDGE_CIDRS="%s"\n' "$cdn_edge_cidrs"
-  printf 'WORKBENCH_CDN_ORIGIN_AUTH_SECRET=%s\n' "$cdn_origin_auth_secret"
+  printf 'WORKBENCH_EDGE_WIREGUARD_IP=%s\n' "$edge_wireguard_ip"
+  printf 'WORKBENCH_ORIGIN_WIREGUARD_IP=%s\n' "$origin_wireguard_ip"
+  printf 'WORKBENCH_ORIGIN_HTTP_PORT=%s\n' "$origin_http_port"
+  printf 'WORKBENCH_EDGE_ORIGIN_AUTH_SECRET=%s\n' "$edge_origin_auth_secret"
   printf 'WORKBENCH_WEB_HOSTNAME=%s\n' "$web_hostname"
   printf 'WORKBENCH_PREVIEW_HOSTNAME=%s\n' "$preview_hostname"
   printf 'WORKBENCH_S3_HOSTNAME=%s\n' "$s3_hostname"
-  printf 'WORKBENCH_IDENTITY_HOSTNAME=%s\n' "$identity_hostname"
+  if [ -n "$identity_hostname" ]; then
+    printf 'WORKBENCH_IDENTITY_HOSTNAME=%s\n' "$identity_hostname"
+  fi
 } >"$runtime_env_tmp"
 
 install -d -m 0755 "$(dirname "$CADDY_INSTALL_FILE")" "$CADDY_DROP_IN_DIR"
@@ -89,4 +100,4 @@ install -m 0644 "$CADDY_DROP_IN_TEMPLATE" "$CADDY_DROP_IN_DIR/override.conf"
 systemctl daemon-reload
 systemctl reload "$CADDY_SERVICE"
 
-printf '%s\n' "workbench caddy reload: installed persistent auth proxy configuration"
+printf '%s\n' "workbench caddy reload: installed persistent WireGuard Edge origin configuration"

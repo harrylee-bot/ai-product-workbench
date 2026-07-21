@@ -44,8 +44,12 @@ import type {
   RuntimeDesignAsset,
   RuntimePort,
   RuntimeExternalEventPart,
+  RuntimeSubmissionState,
 } from "../runtime/runtime.port.js";
-import { RuntimeSubmissionUnknownError } from "../runtime/runtime.port.js";
+import {
+  RuntimeSubmissionUnknownError,
+  runtimeExternalFinalizationEvent,
+} from "../runtime/runtime.port.js";
 import {
   RuntimeAttemptService,
   RuntimeExecutionClaimBusyError,
@@ -56,6 +60,7 @@ import {
 import { RuntimeBindingService } from "../runtime/runtime-binding.service.js";
 import type { KnowledgeToolGrantIssuer } from "../runtime/knowledge-tool-grant.service.js";
 import type { CanvasToolGrantIssuer } from "../runtime/canvas-tool-grant.service.js";
+import { parseRuntimeFinalizationPayload } from "../runtime/runtime-assistant-text.js";
 import { withBoardRevisionOwner } from "./board-revision-owner.js";
 import {
   assertExactCanvasQuickEditTarget,
@@ -158,6 +163,8 @@ export class RunProcessor {
   private readonly prototypePatches: PrototypePatchService;
   private readonly executionOwnerPrefix: string;
   private readonly executionHeartbeatMs: number;
+  private readonly cancellationPollIntervalMs: number;
+  private readonly cancellationQueryBatchSize: number;
 
   constructor(
     private readonly db: PrismaClient,
@@ -170,6 +177,8 @@ export class RunProcessor {
       ownerPrefix?: string;
       leaseMs?: number;
       heartbeatMs?: number;
+      cancellationPollIntervalMs?: number;
+      cancellationQueryBatchSize?: number;
     } = {},
   ) {
     this.events = new RunEventStore(db);
@@ -179,6 +188,18 @@ export class RunProcessor {
     this.prototypePatches = prototypePatches ?? new PrototypePatchService(db);
     this.executionOwnerPrefix = execution.ownerPrefix ?? "runtime-worker";
     this.executionHeartbeatMs = execution.heartbeatMs ?? 15_000;
+    this.cancellationPollIntervalMs = execution.cancellationPollIntervalMs ?? 1_000;
+    this.cancellationQueryBatchSize = execution.cancellationQueryBatchSize ?? 100;
+    if (!Number.isSafeInteger(this.cancellationPollIntervalMs)
+      || this.cancellationPollIntervalMs < 250
+      || this.cancellationPollIntervalMs > 10_000) {
+      throw new Error("RUNTIME_CANCELLATION_POLL_INTERVAL_INVALID");
+    }
+    if (!Number.isSafeInteger(this.cancellationQueryBatchSize)
+      || this.cancellationQueryBatchSize < 1
+      || this.cancellationQueryBatchSize > 1_000) {
+      throw new Error("RUNTIME_CANCELLATION_QUERY_BATCH_SIZE_INVALID");
+    }
     if (this.executionHeartbeatMs >= leaseMs) {
       throw new Error("RUNTIME_EXECUTION_HEARTBEAT_INTERVAL_INVALID");
     }
@@ -215,6 +236,7 @@ export class RunProcessor {
     let fullText = prepared.previousAssistantText;
     let runtimeAttemptId: string | null = null;
     let claim: RuntimeExecutionClaim | null = null;
+    let submission: RuntimeSubmissionState | null = null;
     let heartbeatTimer: NodeJS.Timeout | null = null;
 
     try {
@@ -231,19 +253,20 @@ export class RunProcessor {
         `${this.executionOwnerPrefix}:${randomUUID()}`,
       );
       heartbeatTimer = this.startExecutionHeartbeat(claim, controller);
-      const submission = await this.attempts.submissionContext(claim);
-      const knowledgeTool = runtimeAttempt.externalRunId
-        ? null
-        : await this.knowledgeToolGrants.issue({
+      submission = await this.attempts.submissionContext(claim);
+      const providerTextState = await this.attempts.providerTextState(claim);
+      fullText = providerTextState.durableVisibleAssistantText;
+      const knowledgeTool = submission.mode === "submit"
+        ? await this.knowledgeToolGrants.issue({
             runId,
             runtimeAttemptId: runtimeAttempt.id,
             principalId: prepared.run.createdById,
             projectId: prepared.project.id,
             releaseId: prepared.run.knowledgeReleaseId,
-          });
-      const canvasTool = runtimeAttempt.externalRunId
-        ? null
-        : await this.canvasToolGrants.issue({
+          })
+        : null;
+      const canvasTool = submission.mode === "submit"
+        ? await this.canvasToolGrants.issue({
             runId,
             runtimeAttemptId: runtimeAttempt.id,
             attempt: prepared.run.attempt,
@@ -254,7 +277,8 @@ export class RunProcessor {
             workflow: prepared.request.workflow,
             artifactTargets: prepared.request.artifactTargets,
             snapshot: prepared.request.canvasSnapshot ?? null,
-          });
+          })
+        : null;
       const outcome = await this.runtime.execute({
         runId,
         runtimeAttemptId: runtimeAttempt.id,
@@ -272,11 +296,8 @@ export class RunProcessor {
         canvasTool,
         designStyleSnapshot: prepared.designStyleSnapshot,
         resume: prepared.resume,
-        previousAssistantText: prepared.previousAssistantText,
-        externalRunId: runtimeAttempt.externalRunId,
-        lastExternalEventId: runtimeAttempt.lastExternalEventId,
-        providerIdempotencyKey: submission.providerIdempotencyKey,
-        submissionUnknown: submission.submissionUnknown,
+        providerTextState,
+        submission,
       }, {
         onSubmissionStarted: () => this.attempts.authorizeSubmission(claim!),
         onExternalRunCreated: async (externalRunId) => {
@@ -295,13 +316,41 @@ export class RunProcessor {
           });
           fullText = nextFullText;
         },
-        onEvent: async (event) => {
-          fullText = await this.persistRuntimeEffects(
-            claim!,
-            prepared,
-            fullText,
-            [event],
-          );
+        onExternalFinalization: async (part, effects) => {
+          if (part.event !== runtimeExternalFinalizationEvent) {
+            throw new Error("RUNTIME_EXTERNAL_FINALIZATION_TYPE_INVALID");
+          }
+          if (effects.some((effect) => effect.type === "text.delta")) {
+            throw new Error("RUNTIME_EXTERNAL_FINALIZATION_TEXT_DELTA_FORBIDDEN");
+          }
+          const finalization = parseRuntimeFinalizationPayload(part.payload);
+          if (canonicalizeJson(finalization.effects) !== canonicalizeJson(effects)) {
+            throw new Error("RUNTIME_EXTERNAL_FINALIZATION_EFFECTS_CONFLICT");
+          }
+          let nextFullText = fullText;
+          await this.attempts.processExternalFinalization(claim!, part, async (tx) => {
+            nextFullText = await this.persistRuntimeEffectsTx(
+              tx,
+              claim!,
+              prepared,
+              nextFullText,
+              effects,
+            );
+            const terminalText = finalization.visibleFinalEffect.text;
+            const terminalDelta = terminalVisibleTextDelta(nextFullText, terminalText);
+            if (terminalDelta) {
+              await this.persistDeltaTx(
+                tx,
+                claim!.runId,
+                prepared.entryId,
+                terminalText,
+                terminalDelta,
+              );
+            }
+            nextFullText = terminalText;
+            await this.terminalizeRunningActivitiesTx(tx, claim!);
+          });
+          fullText = nextFullText;
         },
       }, signal);
 
@@ -547,18 +596,6 @@ export class RunProcessor {
     });
   }
 
-  private async persistRuntimeEffects(
-    claim: RuntimeExecutionClaim,
-    context: RuntimePersistenceContext,
-    fullText: string,
-    effects: RuntimeProgressEvent[],
-  ) {
-    return this.db.$transaction(async (tx) => {
-      await this.assertActiveClaimTx(tx, claim);
-      return this.persistRuntimeEffectsTx(tx, claim, context, fullText, effects);
-    });
-  }
-
   private async persistRuntimeEffectsTx(
     tx: Prisma.TransactionClient,
     claim: RuntimeExecutionClaim,
@@ -592,6 +629,48 @@ export class RunProcessor {
       await this.persistProgressTx(tx, claim.runId, event);
     }
     return fullText;
+  }
+
+  private async terminalizeRunningActivitiesTx(
+    tx: Prisma.TransactionClient,
+    claim: RuntimeExecutionClaim,
+  ) {
+    const activities = await tx.$queryRaw<Array<{
+      activityId: string | null;
+      label: string | null;
+      detail: string | null;
+    }>>(Prisma.sql`
+      SELECT
+        latest."payload"->>'activityId' AS "activityId",
+        latest."payload"->>'label' AS "label",
+        latest."payload"->>'detail' AS "detail"
+      FROM (
+        SELECT DISTINCT ON (event."payload"->>'activityId') event."payload", event."sequence"
+        FROM "run_events" AS event
+        WHERE event."run_id" = ${claim.runId}
+          AND event."type" = 'activity.changed'
+        ORDER BY event."payload"->>'activityId', event."sequence" DESC
+      ) AS latest
+      WHERE latest."payload"->>'status' = 'running'
+      ORDER BY latest."payload"->>'activityId'
+    `);
+    for (const activity of activities) {
+      if (!activity.activityId || !activity.label) {
+        throw new Error("RUNTIME_ACTIVITY_EVENT_INVALID");
+      }
+      await this.events.appendOnce(
+        tx,
+        claim.runId,
+        "activity.changed",
+        {
+          activityId: activity.activityId,
+          status: "succeeded",
+          label: activity.label,
+          detail: activity.detail,
+        },
+        runtimeFinalizationActivitySourceId(claim.attemptId, activity.activityId),
+      );
+    }
   }
 
   private async waitForInput(claim: RuntimeExecutionClaim, input: RuntimeInputRequired) {
@@ -2022,7 +2101,7 @@ export class RunProcessor {
     if (this.cancellationPollTimer) return;
     this.cancellationPollTimer = setInterval(() => {
       void this.pollActiveRunsForCancellation();
-    }, 1_000);
+    }, this.cancellationPollIntervalMs);
     this.cancellationPollTimer.unref();
   }
 
@@ -2073,15 +2152,18 @@ export class RunProcessor {
     this.cancellationPollInFlight = true;
     try {
       const runIds = [...this.active.keys()];
-      const cancelled = await this.db.run.findMany({
-        where: {
-          id: { in: runIds },
-          status: { in: ["cancelling", "cancelled"] },
-        },
-        select: { id: true },
-      });
-      for (const run of cancelled) {
-        this.active.get(run.id)?.abort(new RuntimeCancelledError());
+      for (let offset = 0; offset < runIds.length; offset += this.cancellationQueryBatchSize) {
+        const batch = runIds.slice(offset, offset + this.cancellationQueryBatchSize);
+        const cancelled = await this.db.run.findMany({
+          where: {
+            id: { in: batch },
+            status: { in: ["cancelling", "cancelled"] },
+          },
+          select: { id: true },
+        });
+        for (const run of cancelled) {
+          this.active.get(run.id)?.abort(new RuntimeCancelledError());
+        }
       }
     } catch {
       // The durable cancellation reconciler remains authoritative. A failed
@@ -3048,6 +3130,14 @@ export function sha256Canonical(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
+function runtimeFinalizationActivitySourceId(attemptId: string, activityId: string) {
+  return `system:runtime-finalization-activity:${createHash("sha256")
+    .update(attemptId)
+    .update("\0")
+    .update(activityId)
+    .digest("hex")}`;
+}
+
 const generationStagePresentations = {
   "thinking": { rank: 0, phase: "understanding", label: "正在理解需求" },
   "design-system": { rank: 1, phase: "planning", label: "正在生成设计系统" },
@@ -3189,4 +3279,10 @@ function persistedDesignStyleSnapshot(
 function draftText(value: unknown) {
   const text = asRecord(value)?.text;
   return typeof text === "string" ? text : "";
+}
+
+function terminalVisibleTextDelta(previous: string, terminal: string) {
+  if (terminal === previous) return "";
+  if (terminal.startsWith(previous)) return terminal.slice(previous.length);
+  throw new Error("RUNTIME_EXTERNAL_FINALIZATION_TEXT_CONFLICT");
 }

@@ -1,22 +1,39 @@
-import { createHash } from "node:crypto";
-import { Readable } from "node:stream";
+import {
+  ReadyObjectIntegrityError,
+  readyObjectIntegrityFailureCodes,
+  stageReadyObject,
+  type ReadyObjectIntegrityFailure,
+  type ReadyObjectIntegrityFailureCode,
+  type ReadyObjectIntegrityRecorder,
+  type ReadyObjectManifest,
+  type ReadyObjectStagingOptions,
+} from "@workbench/workbench-content-security";
 import { entityTagMatches, parseByteRange } from "../../common/byte-content.js";
 import type { ReadyBlobStoragePort } from "./object-storage.port.js";
 import { objectStorageUnavailableProblem } from "./object-storage.problems.js";
 
-export type ReadyObjectPointer = {
-  storageKey: string;
-  sha256: string;
-  byteSize: number;
-  mediaType: string;
+export {
+  ReadyObjectIntegrityError,
+  readyObjectIntegrityFailureCodes,
 };
+export type {
+  ReadyObjectIntegrityFailure,
+  ReadyObjectIntegrityFailureCode,
+  ReadyObjectIntegrityRecorder,
+};
+
+export type ReadyObjectPointer = ReadyObjectManifest;
+
+export type ReadyObjectReadOptions = Omit<ReadyObjectStagingOptions, "range">;
 
 export async function readReadyObject(
   storage: ReadyBlobStoragePort,
   pointer: ReadyObjectPointer,
-  rangeHeader?: string,
-  ifNoneMatch?: string,
+  rangeHeader: string | undefined,
+  ifNoneMatch: string | undefined,
+  options: ReadyObjectReadOptions,
 ) {
+  assertReadyObjectPointer(pointer);
   const etag = `"${pointer.sha256}"`;
   if (entityTagMatches(ifNoneMatch, etag)) {
     return {
@@ -28,91 +45,53 @@ export async function readReadyObject(
   }
 
   const range = parseByteRange(rangeHeader, pointer.byteSize);
-  let stored;
-  try {
-    // A partial object cannot prove the immutable full-object digest. Always
-    // verify the complete Blob and project the requested range from that stream.
-    stored = await storage.getObject({ key: pointer.storageKey });
-  } catch {
-    throw objectStorageUnavailableProblem();
-  }
-  if (stored.byteSize !== pointer.byteSize) {
-    stored.body.destroy();
-    throw new Error("OBJECT_STORAGE_BYTE_SIZE_MISMATCH");
-  }
-  if (stored.mediaType !== null && stored.mediaType !== pointer.mediaType) {
-    stored.body.destroy();
-    throw new Error("OBJECT_STORAGE_MEDIA_TYPE_MISMATCH");
-  }
-  if (stored.contentRange !== null) {
-    stored.body.destroy();
-    throw new Error("OBJECT_STORAGE_CONTENT_RANGE_MISMATCH");
-  }
-  const expectedByteSize = range ? range.end - range.start + 1 : pointer.byteSize;
-  const contentRange = range
-    ? `bytes ${range.start}-${range.end}/${pointer.byteSize}`
-    : null;
+  const staged = await stageReadyObject(pointer, async (signal) => {
+    try {
+      return await storage.getObject({
+        key: pointer.storageKey,
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      if (signal?.aborted) throw abortReason(signal);
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      throw objectStorageUnavailableProblem();
+    }
+  }, {
+    ...options,
+    ...(range ? { range } : {}),
+    ...(options.spoolDirectory
+      ? {}
+      : process.env.WORKBENCH_READY_OBJECT_SPOOL_DIR?.trim()
+        ? { spoolDirectory: process.env.WORKBENCH_READY_OBJECT_SPOOL_DIR.trim() }
+        : {}),
+  });
+
   return {
     notModified: false as const,
     etag,
-    body: Readable.from(verifiedObjectSlice(
-      stored.body,
-      pointer.byteSize,
-      pointer.sha256,
-      range ?? { start: 0, end: pointer.byteSize - 1 },
-    )),
-    byteSize: expectedByteSize,
+    body: staged.body,
+    byteSize: staged.byteSize,
     mediaType: pointer.mediaType,
     range,
-    contentRange,
+    contentRange: range
+      ? `bytes ${range.start}-${range.end}/${pointer.byteSize}`
+      : null,
   };
 }
 
-async function* verifiedObjectSlice(
-  source: Readable,
-  expectedSourceBytes: number,
-  expectedSha256: string,
-  range: { start: number; end: number },
-) {
-  const digest = createHash("sha256");
-  let sourceBytes = 0;
-  let selectedBytes = 0;
-  let heldByte: Buffer | null = null;
-
-  try {
-    for await (const value of source) {
-      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
-      const chunkStart = sourceBytes;
-      const chunkEnd = chunkStart + chunk.byteLength - 1;
-      sourceBytes += chunk.byteLength;
-      if (sourceBytes > expectedSourceBytes) throw new Error("OBJECT_STORAGE_BYTE_SIZE_MISMATCH");
-      digest.update(chunk);
-
-      const selectedStart = Math.max(range.start, chunkStart);
-      const selectedEnd = Math.min(range.end, chunkEnd);
-      if (selectedStart > selectedEnd) continue;
-      const selected = chunk.subarray(
-        selectedStart - chunkStart,
-        selectedEnd - chunkStart + 1,
-      );
-      selectedBytes += selected.byteLength;
-
-      const pending: Buffer = heldByte
-        ? Buffer.concat([heldByte, selected], heldByte.byteLength + selected.byteLength)
-        : selected;
-      if (pending.byteLength > 1) yield pending.subarray(0, pending.byteLength - 1);
-      heldByte = Buffer.from(pending.subarray(pending.byteLength - 1));
-    }
-
-    const expectedSelectedBytes = range.end - range.start + 1;
-    if (sourceBytes !== expectedSourceBytes || selectedBytes !== expectedSelectedBytes) {
-      throw new Error("OBJECT_STORAGE_BYTE_SIZE_MISMATCH");
-    }
-    if (digest.digest("hex") !== expectedSha256) {
-      throw new Error("OBJECT_STORAGE_SHA256_MISMATCH");
-    }
-    if (heldByte) yield heldByte;
-  } finally {
-    source.destroy();
+function assertReadyObjectPointer(pointer: ReadyObjectPointer) {
+  if (!pointer.storageKey.trim()) throw new Error("READY_OBJECT_STORAGE_KEY_INVALID");
+  if (!Number.isSafeInteger(pointer.byteSize) || pointer.byteSize < 1) {
+    throw new Error("READY_OBJECT_BYTE_SIZE_INVALID");
   }
+  if (!/^[a-f0-9]{64}$/u.test(pointer.sha256)) {
+    throw new Error("READY_OBJECT_SHA256_INVALID");
+  }
+  if (!pointer.mediaType.trim()) throw new Error("READY_OBJECT_MEDIA_TYPE_INVALID");
+}
+
+function abortReason(signal: AbortSignal) {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("Ready object read aborted", "AbortError");
 }

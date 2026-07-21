@@ -43,6 +43,7 @@ const previewHtml = await readFile(
 );
 const timestamp = "2026-07-14T01:00:00.000Z";
 const checksum = "a".repeat(64);
+const preferenceEtag = (revision) => `"avp1.${revision}.${"a".repeat(43)}"`;
 const projectBaselineScreenshot = "output/playwright/workbench-phase0-baseline-project-complete-1501x855.png";
 const desktopFavouritesPanelScreenshot = "output/playwright/workbench-board-favourites-panel-desktop-1501x855.png";
 const desktopDesignSystemPanelScreenshot = "output/playwright/workbench-board-design-system-panel-desktop-1501x855.png";
@@ -379,13 +380,13 @@ await context.route("**/api/v1/**", async (route) => {
     assert(screenId === "screen-home", `Artifact preference must stay scoped to screen-home: ${screenId}`);
     if (method === "GET") {
       artifactPreferenceReads += 1;
-      return json(route, artifactPreference, { etag: `"${artifactPreference.revision}"` });
+      return json(route, artifactPreference, { etag: preferenceEtag(artifactPreference.revision) });
     }
     if (method === "PUT") {
       const expectedRevision = artifactPreference.revision;
       const ifMatch = request.headers()["if-match"];
       assert(
-        ifMatch === `"${expectedRevision}"`,
+        ifMatch === preferenceEtag(expectedRevision),
         `Artifact preference update must use revision ${expectedRevision}`,
       );
       artifactPreferenceIfMatches.push(ifMatch);
@@ -413,7 +414,7 @@ await context.route("**/api/v1/**", async (route) => {
           updatedAt: timestamp,
         };
         artifactPreferenceUpdates.push(structuredClone(artifactPreference));
-        await json(route, artifactPreference, { etag: `"${artifactPreference.revision}"` });
+        await json(route, artifactPreference, { etag: preferenceEtag(artifactPreference.revision) });
         return;
       } finally {
         artifactPreferencePutsInFlight -= 1;
@@ -822,7 +823,7 @@ assert(
   `Rapid Shift+F preference PUTs must be serialized; observed ${maxArtifactPreferencePutsInFlight} in flight`,
 );
 assert(
-  JSON.stringify(artifactPreferenceIfMatches) === JSON.stringify(['"2"', '"3"']),
+  JSON.stringify(artifactPreferenceIfMatches) === JSON.stringify([preferenceEtag(2), preferenceEtag(3)]),
   `Rapid Shift+F must advance If-Match monotonically: ${JSON.stringify(artifactPreferenceIfMatches)}`,
 );
 

@@ -28,6 +28,7 @@ assertSchemaResetConfirmation(databaseName);
 process.env.WORKBENCH_DATABASE_URL = databaseUrl;
 
 let db;
+let stageReadyObject;
 async function main() {
   try {
     console.log(`[file-integration] target database: ${databaseName}`);
@@ -36,6 +37,7 @@ async function main() {
     await migrateDatabase();
 
     const { Prisma, PrismaClient } = await import("@workbench/workbench-db");
+    ({ stageReadyObject } = await import("@workbench/workbench-content-security"));
     const { fromPrisma, PgBoss } = await import("pg-boss");
     const { FileVerificationProcessor } = await importBuilt("verification/file-verification.processor.js");
     const { PrismaVerificationStore } = await importBuilt("verification/prisma-verification.store.js");
@@ -456,16 +458,18 @@ async function runBlobGcConcurrentReferenceScenario(database, PrismaClient) {
         status: "deleted",
         deletedAt: new Date("2026-07-15T05:00:00.000Z"),
       },
-    }).finally(() => { referenceSettled = true; });
+    }).then(
+      (value) => ({ status: "fulfilled", value }),
+      (error) => ({ status: "rejected", error }),
+    ).finally(() => { referenceSettled = true; });
     await new Promise((resolve) => setTimeout(resolve, 75));
     assert.equal(referenceSettled, false, "new reference did not wait on the Blob GC row lock");
 
     releaseResolve();
     await gc;
-    await assert.rejects(reference, (error) => {
-      assert.equal(error?.code, "P2003");
-      return true;
-    });
+    const referenceResult = await reference;
+    assert.equal(referenceResult.status, "rejected");
+    assert.equal(referenceResult.error?.code, "P2003");
     assert.equal(await database.fileAsset.count({ where: { id: "file-gc-concurrent" } }), 0);
     assert.equal((await database.blob.findUniqueOrThrow({
       where: { id: "blob-gc-concurrent" },
@@ -557,11 +561,6 @@ async function runKnowledgeInvalidProfileScenario(database, dependencies) {
     output: { dimension: 3 },
   };
   const specSha256 = dependencies.canonicalSha256(spec);
-  await database.embeddingProfile.create({
-    data: { id: profileId, spec, specSha256, dimension: 3 },
-  });
-  await database.embeddingProfile.update({ where: { id: profileId }, data: { status: "poc" } });
-  await database.embeddingProfile.update({ where: { id: profileId }, data: { status: "adopted" } });
   const retrievalSpec = structuredClone(integrationRetrievalProfile.spec);
   retrievalSpec.id = "integration-invalid-retrieval-r1";
   retrievalSpec.embedding = {
@@ -570,23 +569,48 @@ async function runKnowledgeInvalidProfileScenario(database, dependencies) {
     dimension: 3,
   };
   const retrievalSpecSha256 = dependencies.canonicalSha256(retrievalSpec);
-  await database.retrievalProfile.create({
-    data: {
-      id: retrievalSpec.id,
-      spec: retrievalSpec,
-      specSha256: retrievalSpecSha256,
-      embeddingProfileId: profileId,
-      embeddingProfileSpecSha256: specSha256,
-      embeddingDimension: 3,
-    },
-  });
-  await database.retrievalProfile.update({
-    where: { id: retrievalSpec.id },
-    data: { status: "poc" },
-  });
-  await database.retrievalProfile.update({
-    where: { id: retrievalSpec.id },
-    data: { status: "adopted" },
+  await database.$transaction(async (tx) => {
+    await tx.embeddingProfile.create({
+      data: { id: profileId, spec, specSha256, dimension: 3 },
+    });
+    await tx.embeddingProfile.update({ where: { id: profileId }, data: { status: "poc" } });
+    await tx.embeddingProfile.update({ where: { id: profileId }, data: { status: "adopted" } });
+    await tx.knowledgeProfileAdoptionReceipt.create({
+      data: {
+        id: "integration-invalid-embedding-adoption",
+        profileKind: "embedding",
+        embeddingProfileId: profileId,
+        embeddingProfileSpecSha256: specSha256,
+        actorPrincipalId: "integration-principal",
+      },
+    });
+    await tx.retrievalProfile.create({
+      data: {
+        id: retrievalSpec.id,
+        spec: retrievalSpec,
+        specSha256: retrievalSpecSha256,
+        embeddingProfileId: profileId,
+        embeddingProfileSpecSha256: specSha256,
+        embeddingDimension: 3,
+      },
+    });
+    await tx.retrievalProfile.update({
+      where: { id: retrievalSpec.id },
+      data: { status: "poc" },
+    });
+    await tx.retrievalProfile.update({
+      where: { id: retrievalSpec.id },
+      data: { status: "adopted" },
+    });
+    await tx.knowledgeProfileAdoptionReceipt.create({
+      data: {
+        id: "integration-invalid-retrieval-adoption",
+        profileKind: "retrieval",
+        retrievalProfileId: retrievalSpec.id,
+        retrievalProfileSpecSha256: retrievalSpecSha256,
+        actorPrincipalId: "integration-principal",
+      },
+    });
   });
   const release = await createKnowledgeRelease(database, "knowledge-invalid-profile", 1, {
     embeddingProfileId: profileId,
@@ -1543,6 +1567,7 @@ class HighFidelityStorage {
   objects = new Map();
   promotions = [];
   deleted = [];
+  integrityFailures = [];
   destinationCreates = 0;
   destinationReuses = 0;
   contentAddressedCreates = 0;
@@ -1574,6 +1599,28 @@ class HighFidelityStorage {
       ]),
       byteSize: object.bytes.byteLength,
       mediaType: object.mediaType,
+    };
+  }
+
+  async readReadyObject(manifest, signal) {
+    if (!stageReadyObject) throw new Error("READY_OBJECT_VERIFIER_NOT_INITIALIZED");
+    const verified = await stageReadyObject(
+      manifest,
+      async (sourceSignal) => {
+        const source = await this.getObject(manifest.storageKey, sourceSignal);
+        return { ...source, contentRange: null };
+      },
+      {
+        signal,
+        recordIntegrityFailure: async (failure) => {
+          this.integrityFailures.push(structuredClone(failure));
+        },
+      },
+    );
+    return {
+      body: verified.body,
+      byteSize: verified.byteSize,
+      mediaType: verified.manifest.mediaType,
     };
   }
 
@@ -1734,48 +1781,76 @@ class DeterministicParser {
 }
 
 async function seedOwnership(database, knowledgeCore) {
-  await database.embeddingProfile.create({
-    data: {
-      id: integrationEmbeddingProfile.id,
-      spec: integrationEmbeddingProfile.spec,
-      specSha256: integrationEmbeddingProfile.specSha256,
-      dimension: integrationEmbeddingProfile.dimension,
-    },
-  });
-  await database.embeddingProfile.update({
-    where: { id: integrationEmbeddingProfile.id },
-    data: { status: "poc" },
-  });
-  await database.embeddingProfile.update({
-    where: { id: integrationEmbeddingProfile.id },
-    data: { status: "adopted" },
-  });
-  await database.retrievalProfile.create({
-    data: {
-      id: integrationRetrievalProfile.id,
-      spec: integrationRetrievalProfile.spec,
-      specSha256: integrationRetrievalProfile.specSha256,
-      embeddingProfileId: integrationEmbeddingProfile.id,
-      embeddingProfileSpecSha256: integrationEmbeddingProfile.specSha256,
-      embeddingDimension: integrationEmbeddingProfile.dimension,
-    },
-  });
-  await database.retrievalProfile.update({
-    where: { id: integrationRetrievalProfile.id },
-    data: { status: "poc" },
-  });
-  await database.retrievalProfile.update({
-    where: { id: integrationRetrievalProfile.id },
-    data: { status: "adopted" },
-  });
-  await database.principal.create({
-    data: {
-      id: "integration-principal",
-      issuer: "integration-test",
-      subject: "integration-principal",
-      email: "file-worker-integration@test.local",
-      displayName: "File Worker Integration",
-    },
+  await database.$transaction(async (tx) => {
+    await tx.principal.create({
+      data: {
+        id: "integration-principal",
+        issuer: "integration-test",
+        subject: "integration-principal",
+        email: "file-worker-integration@test.local",
+        displayName: "File Worker Integration",
+      },
+    });
+    await tx.knowledgeProfileOperatorEvent.create({
+      data: {
+        principalId: "integration-principal",
+        action: "grant",
+        authorizedBy: "file-worker-postgres-integration",
+        changeReference: "FILE-WORKER-INTEGRATION-KNOWLEDGE-PROFILE-OPERATOR",
+      },
+    });
+    await tx.embeddingProfile.create({
+      data: {
+        id: integrationEmbeddingProfile.id,
+        spec: integrationEmbeddingProfile.spec,
+        specSha256: integrationEmbeddingProfile.specSha256,
+        dimension: integrationEmbeddingProfile.dimension,
+      },
+    });
+    await tx.embeddingProfile.update({
+      where: { id: integrationEmbeddingProfile.id },
+      data: { status: "poc" },
+    });
+    await tx.embeddingProfile.update({
+      where: { id: integrationEmbeddingProfile.id },
+      data: { status: "adopted" },
+    });
+    await tx.knowledgeProfileAdoptionReceipt.create({
+      data: {
+        id: "integration-embedding-profile-adoption",
+        profileKind: "embedding",
+        embeddingProfileId: integrationEmbeddingProfile.id,
+        embeddingProfileSpecSha256: integrationEmbeddingProfile.specSha256,
+        actorPrincipalId: "integration-principal",
+      },
+    });
+    await tx.retrievalProfile.create({
+      data: {
+        id: integrationRetrievalProfile.id,
+        spec: integrationRetrievalProfile.spec,
+        specSha256: integrationRetrievalProfile.specSha256,
+        embeddingProfileId: integrationEmbeddingProfile.id,
+        embeddingProfileSpecSha256: integrationEmbeddingProfile.specSha256,
+        embeddingDimension: integrationEmbeddingProfile.dimension,
+      },
+    });
+    await tx.retrievalProfile.update({
+      where: { id: integrationRetrievalProfile.id },
+      data: { status: "poc" },
+    });
+    await tx.retrievalProfile.update({
+      where: { id: integrationRetrievalProfile.id },
+      data: { status: "adopted" },
+    });
+    await tx.knowledgeProfileAdoptionReceipt.create({
+      data: {
+        id: "integration-retrieval-profile-adoption",
+        profileKind: "retrieval",
+        retrievalProfileId: integrationRetrievalProfile.id,
+        retrievalProfileSpecSha256: integrationRetrievalProfile.specSha256,
+        actorPrincipalId: "integration-principal",
+      },
+    });
   });
   await database.workspace.create({
     data: {
@@ -1813,8 +1888,9 @@ async function seedOwnership(database, knowledgeCore) {
 }
 
 async function buildWorkspaces() {
-  console.log("[file-integration] building contracts, Knowledge core, Prisma client, and File Worker");
+  console.log("[file-integration] building contracts, content security, Knowledge core, Prisma client, and File Worker");
   await runCommand(npm, ["--workspace", "@workbench/workbench-contracts", "run", "build"]);
+  await runCommand(npm, ["--workspace", "@workbench/workbench-content-security", "run", "build"]);
   await runCommand(npm, ["--workspace", "@workbench/workbench-knowledge", "run", "build"]);
   await runCommand(
     npm,
@@ -1845,11 +1921,14 @@ async function rebuildSchemas() {
 }
 
 async function migrateDatabase() {
-  console.log("[file-integration] applying current Workbench migrations");
+  console.log("[file-integration] applying Workbench migrations and reconciling Runtime queues");
   await runCommand(
-    npm,
-    ["--workspace", "@workbench/workbench-db", "run", "migrate:deploy"],
-    { WORKBENCH_DATABASE_URL: databaseUrl },
+    "sh",
+    ["deploy/workbench-migrate.sh"],
+    {
+      WORKBENCH_DATABASE_URL: databaseUrl,
+      WORKBENCH_MIGRATOR_DATABASE_URL: databaseUrl,
+    },
   );
 }
 

@@ -7,13 +7,23 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import {
+  stageReadyObject,
+  type ReadyObjectIntegrityRecorder,
+  type ReadyObjectManifest,
+} from "@workbench/workbench-content-security";
 import { RetryableVerificationError } from "../errors.js";
 import type { FileWorkerConfig } from "../config.js";
-import type { ContentAddressedObject, FileStoragePort, PromotedObject } from "./storage.port.js";
+import type {
+  ContentAddressedObject,
+  FileStoragePort,
+  PromotedObject,
+  ReadyFileStoragePort,
+} from "./storage.port.js";
 
 type S3Sender = Pick<S3Client, "send">;
 
-export class S3FileStorageAdapter implements FileStoragePort {
+export class S3FileStorageAdapter implements FileStoragePort, ReadyFileStoragePort {
   private readonly client: S3Sender;
 
   constructor(
@@ -26,6 +36,7 @@ export class S3FileStorageAdapter implements FileStoragePort {
       | "filePipelineS3AccessKeyId"
       | "filePipelineS3SecretAccessKey"
     >,
+    private readonly recordIntegrityFailure: ReadyObjectIntegrityRecorder,
     client?: S3Sender,
   ) {
     this.client = client ?? new S3Client({
@@ -49,6 +60,32 @@ export class S3FileStorageAdapter implements FileStoragePort {
     }
     const byteSize = safeStorageSize(result.ContentLength);
     return { body: result.Body, byteSize, mediaType: result.ContentType ?? null };
+  }
+
+  async readReadyObject(manifest: ReadyObjectManifest, signal?: AbortSignal) {
+    const staged = await stageReadyObject(manifest, async (requestSignal) => {
+      const result = await this.client.send(
+        new GetObjectCommand({ Bucket: this.config.s3Bucket, Key: manifest.storageKey }),
+        requestSignal ? { abortSignal: requestSignal } : undefined,
+      );
+      if (!(result.Body instanceof Readable)) {
+        throw new Error("FILE_STORAGE_BODY_UNSUPPORTED");
+      }
+      return {
+        body: result.Body,
+        byteSize: result.ContentLength ?? null,
+        mediaType: result.ContentType ?? null,
+        contentRange: result.ContentRange ?? null,
+      };
+    }, {
+      recordIntegrityFailure: this.recordIntegrityFailure,
+      ...(signal ? { signal } : {}),
+    });
+    return {
+      body: staged.body,
+      byteSize: staged.byteSize,
+      mediaType: staged.manifest.mediaType,
+    };
   }
 
   async promoteObject(object: PromotedObject, signal?: AbortSignal) {

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ReadyObjectIntegrityError } from "@workbench/workbench-content-security";
 import {
   TerminalExportError,
   boundedDetail,
@@ -74,6 +75,7 @@ export class ExportProcessor {
 }
 
 function terminalInfrastructureError(error: unknown) {
+  if (error instanceof ReadyObjectIntegrityError) return true;
   if (!(error instanceof Error)) return false;
   return [
     "EXPORT_INPUT_SIZE_LIMIT_EXCEEDED",

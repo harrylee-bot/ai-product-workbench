@@ -27,7 +27,8 @@ export function workbenchAuthIpAddressOptions(
   }
 
   return {
-    // The edge replaces this single-value header after authenticating the CDN.
+    // The origin replaces this single-value header only after authenticating
+    // the dedicated Edge over WireGuard.
     // Never fall back to end-user-controlled forwarding headers here.
     ipAddressHeaders: [WORKBENCH_CANONICAL_CLIENT_IP_HEADER],
     ipv6Subnet: 64,

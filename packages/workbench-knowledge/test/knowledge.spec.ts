@@ -22,6 +22,7 @@ import {
 
 const vaultRoot = fileURLToPath(new URL("../../../knowledge-vault", import.meta.url));
 const storageRoot = fileURLToPath(new URL("../../../storage", import.meta.url));
+const storageAssetClosureFixture = fileURLToPath(new URL("./fixtures/knowledge-storage-asset-closure.v1.json", import.meta.url));
 
 describe("path, frontmatter, and routing", () => {
   it.each([
@@ -352,8 +353,23 @@ async function readVaultAssets(sources: readonly VaultSourceInput[]) {
     raw: normalizeMarkdownInput(source.content),
   })));
   expect(declarations.issues).toEqual([]);
-  return Promise.all(declarations.assets.map(async (declaration) => {
-    const absolutePath = resolve(storageRoot, declaration.path.slice("storage/".length));
+  // Keep large raw assets outside source candidates; the committed snapshot supplies clean-source metadata.
+  const configuredStorageRoot = process.env.KNOWLEDGE_STORAGE_ROOT?.trim();
+  if (configuredStorageRoot) {
+    return readVerifiedVaultAssets(declarations.assets, resolve(configuredStorageRoot));
+  }
+  if (await isDirectory(storageRoot)) {
+    return readVerifiedVaultAssets(declarations.assets, storageRoot);
+  }
+  return readVaultAssetClosureFixture(declarations.assets);
+}
+
+async function readVerifiedVaultAssets(
+  declarations: ReturnType<typeof collectKnowledgeStorageDeclarations>["assets"],
+  root: string,
+) {
+  return Promise.all(declarations.map(async (declaration) => {
+    const absolutePath = resolve(root, declaration.path.slice("storage/".length));
     const fileStats = await stat(absolutePath);
     const linkStats = await lstat(absolutePath);
     const digest = createHash("sha256");
@@ -366,6 +382,59 @@ async function readVaultAssets(sources: readonly VaultSourceInput[]) {
       symbolicLink: linkStats.isSymbolicLink(),
     };
   }));
+}
+
+async function readVaultAssetClosureFixture(
+  declarations: ReturnType<typeof collectKnowledgeStorageDeclarations>["assets"],
+) {
+  const fixture = JSON.parse(await readFile(storageAssetClosureFixture, "utf8")) as KnowledgeAssetClosureFixture;
+  expect(fixture.schema).toBe("workbench.knowledge-asset-closure.v1");
+  expect(fixture.assets).toHaveLength(declarations.length);
+  expect([...fixture.assets].map((asset) => asset.path)).toEqual(declarations.map((asset) => asset.path));
+  expect(fixture.assets.reduce((total, asset) => total + asset.byteSize, 0)).toBe(fixture.totalBytes);
+
+  const metadataByPath = new Map(fixture.assets.map((asset) => [asset.path, asset]));
+  return declarations.map((declaration) => {
+    const metadata = metadataByPath.get(declaration.path);
+    expect(metadata).toBeDefined();
+    return {
+      ...declaration,
+      mediaType: metadata!.mediaType,
+      byteSize: metadata!.byteSize,
+      sha256: metadata!.sha256,
+      symbolicLink: metadata!.symbolicLink,
+    };
+  });
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && (error.code === "ENOENT" || error.code === "ENOTDIR");
+}
+
+interface KnowledgeAssetClosureFixture {
+  readonly schema: "workbench.knowledge-asset-closure.v1";
+  readonly totalBytes: number;
+  readonly assets: readonly KnowledgeAssetClosureFixtureAsset[];
+}
+
+interface KnowledgeAssetClosureFixtureAsset {
+  readonly path: string;
+  readonly mediaType: string;
+  readonly byteSize: number;
+  readonly sha256: string;
+  readonly symbolicLink: boolean;
 }
 
 async function markdownFiles(directory: string): Promise<readonly string[]> {

@@ -71,7 +71,21 @@ export function loadWorkerConfig() {
       .filter(Boolean),
     deerFlowTimeoutMs,
     deerFlowIdleTimeoutMs: positiveInteger("DEERFLOW_IDLE_TIMEOUT_MS", 120_000),
-    concurrency: positiveInteger("WORKBENCH_RUNTIME_CONCURRENCY", 2),
+    // Keep queue execution and cancellation polling bounded even if an
+    // operator supplies an unexpectedly large environment value.
+    concurrency: boundedInteger("WORKBENCH_RUNTIME_CONCURRENCY", 2, 1, 64),
+    runtimeCancellationPollIntervalMs: boundedInteger(
+      "WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS",
+      1_000,
+      250,
+      10_000,
+    ),
+    runtimeCancellationQueryBatchSize: boundedInteger(
+      "WORKBENCH_RUNTIME_CANCELLATION_QUERY_BATCH_SIZE",
+      100,
+      1,
+      1_000,
+    ),
     runtimeExecutionLeaseMs,
     runtimeExecutionHeartbeatMs,
     runtimeExecutionReconcileIntervalMs: boundedInteger(

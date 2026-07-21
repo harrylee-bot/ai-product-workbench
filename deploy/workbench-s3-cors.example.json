@@ -10,7 +10,7 @@
         "PUT"
       ],
       "AllowedOrigins": [
-        "https://workbench.example.com"
+        "https://aionbench.com"
       ],
       "ExposeHeaders": [
         "ETag"

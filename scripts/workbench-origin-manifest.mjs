@@ -42,14 +42,38 @@ export function deriveOriginManifest(environment) {
     allowPath: true,
     requirePath: true,
   });
-  const issuer = strictHttpsUrl(required(environment, "WORKBENCH_OIDC_PROVIDER_ISSUER"), {
-    name: "WORKBENCH_OIDC_PROVIDER_ISSUER",
-    allowPath: true,
-  });
-  const configuredIdentityHostname = required(environment, "WORKBENCH_IDENTITY_HOSTNAME").toLowerCase();
-  assertHostname(configuredIdentityHostname, "WORKBENCH_IDENTITY_HOSTNAME");
-  if (configuredIdentityHostname !== issuer.hostname) {
-    throw new Error("WORKBENCH_IDENTITY_HOSTNAME must equal the OIDC issuer hostname");
+  const enterpriseSsoEnabled = optionalBoolean(
+    environment,
+    "WORKBENCH_ENTERPRISE_SSO_ENABLED",
+    false,
+  );
+  const enterpriseSsoKeys = [
+    "WORKBENCH_OIDC_PROVIDER_ISSUER",
+    "WORKBENCH_OIDC_CLIENT_ID",
+    "WORKBENCH_OIDC_CLIENT_SECRET",
+    "WORKBENCH_IDENTITY_HOSTNAME",
+  ];
+  let issuer = null;
+  if (enterpriseSsoEnabled) {
+    issuer = strictHttpsUrl(required(environment, "WORKBENCH_OIDC_PROVIDER_ISSUER"), {
+      name: "WORKBENCH_OIDC_PROVIDER_ISSUER",
+      allowPath: true,
+    });
+    required(environment, "WORKBENCH_OIDC_CLIENT_ID");
+    required(environment, "WORKBENCH_OIDC_CLIENT_SECRET");
+    const configuredIdentityHostname = environment.get("WORKBENCH_IDENTITY_HOSTNAME")?.trim();
+    if (configuredIdentityHostname) {
+      assertHostname(configuredIdentityHostname, "WORKBENCH_IDENTITY_HOSTNAME");
+      if (configuredIdentityHostname !== issuer.hostname) {
+        throw new Error("WORKBENCH_IDENTITY_HOSTNAME must equal the OIDC issuer hostname");
+      }
+    }
+  } else {
+    for (const key of enterpriseSsoKeys) {
+      if (environment.get(key)?.trim()) {
+        throw new Error(`${key} must be empty when enterprise SSO is disabled`);
+      }
+    }
   }
 
   for (const key of PROHIBITED_COOKIE_DOMAIN_KEYS) {
@@ -58,9 +82,14 @@ export function deriveOriginManifest(environment) {
     }
   }
 
-  const publicHostnames = [web.hostname, preview.hostname, uploads.hostname, issuer.hostname];
+  const publicHostnames = [
+    web.hostname,
+    preview.hostname,
+    uploads.hostname,
+    ...(issuer ? [issuer.hostname] : []),
+  ];
   if (new Set(publicHostnames).size !== publicHostnames.length) {
-    throw new Error("Web, Preview, browser upload, and identity hostnames must be distinct");
+    throw new Error("Web, Preview, browser upload, and enabled identity hostnames must be distinct");
   }
 
   return Object.freeze({
@@ -71,8 +100,9 @@ export function deriveOriginManifest(environment) {
     previewHostname: preview.hostname,
     s3BrowserBucketUrl: uploads.href.replace(/\/$/u, ""),
     s3Hostname: uploads.hostname,
-    oidcIssuer: issuer.href.replace(/\/$/u, ""),
-    identityHostname: issuer.hostname,
+    enterpriseSsoEnabled,
+    oidcIssuer: issuer?.href.replace(/\/$/u, "") ?? null,
+    identityHostname: issuer?.hostname ?? null,
     authCookie: Object.freeze({
       domainPolicy: "host-only",
       hostname: web.hostname,
@@ -82,13 +112,15 @@ export function deriveOriginManifest(environment) {
 }
 
 export function renderCaddyEnvironment(manifest) {
-  return [
+  const lines = [
     `WORKBENCH_WEB_HOSTNAME=${manifest.webHostname}`,
     `WORKBENCH_PREVIEW_HOSTNAME=${manifest.previewHostname}`,
     `WORKBENCH_S3_HOSTNAME=${manifest.s3Hostname}`,
-    `WORKBENCH_IDENTITY_HOSTNAME=${manifest.identityHostname}`,
-    "",
-  ].join("\n");
+  ];
+  if (manifest.identityHostname) {
+    lines.push(`WORKBENCH_IDENTITY_HOSTNAME=${manifest.identityHostname}`);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function strictHttpsUrl(value, { name, allowPath, requirePath = false }) {
@@ -121,6 +153,14 @@ function required(environment, name) {
   const value = environment.get(name)?.trim();
   if (!value || value.includes("REPLACE_WITH_")) throw new Error(`${name} is required`);
   return value;
+}
+
+function optionalBoolean(environment, name, fallback) {
+  const value = environment.get(name)?.trim().toLowerCase();
+  if (!value) return fallback;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be true or false`);
 }
 
 function stripMatchingQuotes(value) {

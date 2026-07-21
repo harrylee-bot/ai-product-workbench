@@ -1,4 +1,9 @@
-import { canonicalJson, runEventSchema, type RunEvent } from "@workbench/workbench-contracts";
+import {
+  canonicalJson,
+  runEventSchema,
+  runEventSourceIdSchema,
+  type RunEvent,
+} from "@workbench/workbench-contracts";
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
 
 export class RunEventStore {
@@ -20,9 +25,9 @@ export class RunEventStore {
     payload: unknown,
     sourceId: string,
   ) {
-    if (!sourceId.trim() || sourceId.length > 1_024) {
-      throw new Error("RUN_EVENT_SOURCE_ID_INVALID");
-    }
+    const parsedSourceId = runEventSourceIdSchema.safeParse(sourceId);
+    if (!parsedSourceId.success) throw new Error("RUN_EVENT_SOURCE_ID_INVALID");
+    sourceId = parsedSourceId.data;
     const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT "id" FROM "runs" WHERE "id" = ${runId} FOR UPDATE
     `);

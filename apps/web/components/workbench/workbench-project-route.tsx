@@ -1761,6 +1761,7 @@ function ProjectScreen({
   const preferenceToggleCoordinatorRef = useRef(new ArtifactPreferenceToggleCoordinator());
   const preferenceTargetKey = artifactSelection.preferenceTargetReference
     ? artifactPreferenceTargetKey(
+        principalCacheNamespace,
         artifactSelection.preferenceTargetReference,
         artifactSelection.preferenceTargetScreenId,
       )
@@ -1911,12 +1912,17 @@ function ProjectScreen({
         });
         return result.value;
       },
+      async () => {
+        const result = await artifactPreferenceQuery.refetch({ throwOnError: true });
+        return result.data?.value ?? null;
+      },
     );
     void task.catch(() => {
       if (projectSession.isCurrent()) toast.error("界面偏好保存失败，请重试");
     });
   }, [
     artifactPreferenceQuery.data?.value,
+    artifactPreferenceQuery.refetch,
     artifactSelection.preferenceTargetReference,
     capabilities.canEdit,
     preferenceTargetKey,
@@ -3940,10 +3946,12 @@ function workbenchCanvasSelection(nodes: readonly WorkbenchNode[]): WorkbenchCan
 }
 
 function artifactPreferenceTargetKey(
+  principalCacheNamespace: string,
   reference: WorkbenchArtifactReference,
   screenId: string | null,
 ): string {
   return JSON.stringify([
+    principalCacheNamespace,
     reference.projectId,
     reference.artifactId,
     reference.artifactVersionId,

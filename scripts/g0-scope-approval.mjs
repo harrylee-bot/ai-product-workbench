@@ -4,6 +4,12 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import Ajv2020 from "@redocly/ajv/dist/2020.js";
+
+import {
+  canonicalJson,
+  REQUIRED_SOURCE_SCOPES,
+} from "./release-candidate-manifest-lib.mjs";
 
 export const G0_SCHEMA_VERSION = "workbench.g0-scope-approval.v1";
 export const G0_ROLES = Object.freeze([
@@ -46,6 +52,20 @@ const GIT_OBJECT_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{1,255}$/;
 const UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const FILE_URI_PATTERN = /^file:\.\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const CREDENTIAL_QUERY_PARAMETERS = new Set([
+  "accesstoken",
+  "apikey",
+  "authorization",
+  "key",
+  "signature",
+  "sig",
+  "token",
+  "xamzcredential",
+  "xamzsecuritytoken",
+  "xamzsignature",
+  "xgoogcredential",
+  "xgoogsignature",
+]);
 const PLACEHOLDER_PATTERN = /(?:^|[\s._:/-])(?:tbd|todo|unknown|unset|placeholder|待定|未知|未分配)(?:$|[\s._:/-])/i;
 const EXAMPLE_ID_PATTERN = /(?:example|placeholder)|(?:@|\.)invalid$/i;
 const FORBIDDEN_SECRET_KEYS = new Set([
@@ -75,6 +95,11 @@ const TEXT_SECRET_PATTERNS = [
     pattern: /\b(?:api[_-]?key|authorization|client[_-]?secret|cookie|password|private[_-]?key|refresh[_-]?token|secret|token)\b\s*[:=]\s*["']?(?!\$\{|\$[A-Z_]|<redacted>|\[redacted\]|redacted\b|none\b|null\b)[A-Za-z0-9._~+\/-]{8,}/i,
   },
 ];
+
+const candidateManifestValidatorPromise = readFile(
+  new URL("../schemas/release-candidate-manifest.schema.json", import.meta.url),
+  "utf8",
+).then((raw) => new Ajv2020({ strict: true, allErrors: true }).compile(JSON.parse(raw)));
 
 export class G0ApprovalValidationError extends Error {
   constructor(errors) {
@@ -138,7 +163,12 @@ export async function verifyG0ScopeApproval({
           errors.push(`candidate manifest SHA-256 mismatch: expected ${expectedReference.sha256}, got ${actualSha256}`);
         }
       }
-      validateCandidateManifest(loadedManifest.document, loaded.document.candidate, loaded.document.environment, errors);
+      await validateCandidateManifest(
+        loadedManifest.document,
+        loaded.document.candidate,
+        loaded.document.environment,
+        errors,
+      );
       candidateManifest = loadedManifest.document;
     }
   } else if (loaded.document.executionStatus === "PASS") {
@@ -548,8 +578,18 @@ function validateExpectedCandidate(candidate, expectedCandidate, errors) {
   }
 }
 
-function validateCandidateManifest(manifest, candidate, environment, errors) {
+async function validateCandidateManifest(manifest, candidate, environment, errors) {
   if (!expectObject(manifest, "$candidateManifest", errors)) return;
+  const validateSchema = await candidateManifestValidatorPromise;
+  if (!validateSchema(manifest)) {
+    for (const schemaError of validateSchema.errors ?? []) {
+      const location = schemaError.instancePath || "/";
+      errors.push(`candidate manifest schema ${location} ${schemaError.message}`);
+    }
+    return;
+  }
+
+  validateCandidateManifestSemantics(manifest, errors);
   if (manifest.product !== "产品工作台") errors.push("candidate manifest product must be 产品工作台");
   if (manifest.candidateId !== candidate?.candidateId) errors.push("candidate manifest candidateId mismatch");
   if (manifest.sourceCommit !== candidate?.sourceCommit) errors.push("candidate manifest sourceCommit mismatch");
@@ -569,6 +609,141 @@ function validateCandidateManifest(manifest, candidate, environment, errors) {
   }
   if (manifest.signedTag.targetCommit !== undefined && manifest.signedTag.targetCommit !== candidate?.sourceCommit) {
     errors.push("candidate manifest signedTag.targetCommit mismatch");
+  }
+}
+
+function validateCandidateManifestSemantics(manifest, errors) {
+  const signedTagIdentity = manifest.signedTag.verified ? {
+    name: manifest.signedTag.name,
+    tagObject: manifest.signedTag.tagObject,
+    payloadSha256: manifest.signedTag.payloadSha256,
+  } : null;
+  const computedCandidateId = `sha256:${sha256Bytes(canonicalJson({
+    sourceCommit: manifest.sourceCommit,
+    sourceTree: manifest.sourceTree.sha256,
+    signedTag: signedTagIdentity,
+  }))}`;
+  if (manifest.candidateId !== computedCandidateId) {
+    errors.push("candidate manifest candidateId does not match its source commit, source tree, and signed tag identity");
+  }
+
+  if (manifest.signedTag.verified !== true) errors.push("candidate manifest signedTag.verified must be true");
+  if (manifest.signedTag.targetCommit !== manifest.sourceCommit) {
+    errors.push("candidate manifest signedTag.targetCommit must equal sourceCommit");
+  }
+  if (typeof manifest.branch !== "string" || manifest.branch.length === 0) {
+    errors.push("candidate manifest branch must identify a named branch");
+  }
+  if (!Object.values(manifest.audit).every((value) => typeof value === "string" && value.length > 0)) {
+    errors.push("candidate manifest audit fields must all be populated");
+  } else if (Date.parse(manifest.audit.endedAt) < Date.parse(manifest.audit.startedAt)) {
+    errors.push("candidate manifest audit.endedAt must not precede audit.startedAt");
+  }
+
+  const porcelainSha256 = sha256Bytes(manifest.status.porcelainV1);
+  if (manifest.status.sha256 !== porcelainSha256) {
+    errors.push("candidate manifest status.sha256 must match status.porcelainV1");
+  }
+  if (manifest.status.clean !== true || manifest.status.porcelainV1 !== "") {
+    errors.push("candidate manifest must record a clean Git worktree");
+  }
+
+  for (const [check, stable] of Object.entries(manifest.captureConsistency)) {
+    if (stable !== true) errors.push(`candidate manifest captureConsistency.${check} must be true`);
+  }
+
+  if (manifest.gate.status !== "PASS") errors.push("candidate manifest G1 gate.status must be PASS");
+  if (manifest.gate.findingCount !== manifest.findings.length) {
+    errors.push("candidate manifest gate.findingCount must equal findings.length");
+  }
+  if (manifest.gate.findingCount !== 0 || manifest.findings.length !== 0) {
+    errors.push("candidate manifest G1 must contain zero findings");
+  }
+
+  validateManifestInventory(manifest, errors);
+  validateManifestSourceScopes(manifest.sourceScopes, errors);
+  for (const [name, group] of Object.entries(manifest.criticalArtifacts)) {
+    if (group.status !== "complete" || group.blockedEntryCount !== 0 || group.entryCount < 1) {
+      errors.push(`candidate manifest criticalArtifacts.${name} must be complete, non-empty, and contain zero blocked entries`);
+    }
+    if (group.entries !== undefined) {
+      if (group.entries.length !== group.entryCount) {
+        errors.push(`candidate manifest criticalArtifacts.${name}.entryCount must equal entries.length`);
+      }
+      if (group.sha256 !== sha256Bytes(canonicalJson(group.entries))) {
+        errors.push(`candidate manifest criticalArtifacts.${name}.sha256 must match entries`);
+      }
+    }
+  }
+
+  const knowledgeStorage = manifest.knowledgeStorage;
+  if (knowledgeStorage.auditPassed !== true) {
+    errors.push("candidate manifest knowledgeStorage.auditPassed must be true");
+  }
+  if (knowledgeStorage.referencedAssetCount !== knowledgeStorage.referencedAssets.length) {
+    errors.push("candidate manifest knowledgeStorage.referencedAssetCount must equal referencedAssets.length");
+  }
+  const referencedBytes = knowledgeStorage.referencedAssets.reduce((sum, asset) => sum + asset.byteSize, 0);
+  if (knowledgeStorage.referencedBytes !== referencedBytes) {
+    errors.push("candidate manifest knowledgeStorage.referencedBytes must equal the referenced asset byte total");
+  }
+}
+
+function validateManifestInventory(manifest, errors) {
+  const repositoryTotal = Object.values(manifest.inventory.byRepositoryState)
+    .reduce((sum, slice) => sum + slice.entryCount, 0);
+  if (manifest.inventory.entryCount !== repositoryTotal) {
+    errors.push("candidate manifest inventory.entryCount must equal the repository-state entry total");
+  }
+
+  const requiredDispositions = ["included", "blocked", "excluded", "external"];
+  for (const disposition of requiredDispositions) {
+    if (!isObject(manifest.inventory.byDisposition[disposition])) {
+      errors.push(`candidate manifest inventory.byDisposition.${disposition} is required`);
+    }
+  }
+  if (requiredDispositions.some((disposition) => !isObject(manifest.inventory.byDisposition[disposition]))) return;
+
+  const dispositionTotal = Object.values(manifest.inventory.byDisposition)
+    .reduce((sum, slice) => sum + slice.entryCount, 0);
+  if (manifest.inventory.entryCount !== dispositionTotal) {
+    errors.push("candidate manifest inventory.entryCount must equal the disposition entry total");
+  }
+  if (manifest.inventory.byDisposition.blocked.entryCount !== 0) {
+    errors.push("candidate manifest inventory must contain zero blocked entries");
+  }
+  if (manifest.sourceTree.entryCount !== manifest.inventory.byDisposition.included.entryCount) {
+    errors.push("candidate manifest sourceTree.entryCount must equal included inventory entries");
+  }
+}
+
+function validateManifestSourceScopes(sourceScopes, errors) {
+  const actualByName = new Map();
+  for (const scope of sourceScopes) {
+    if (actualByName.has(scope.name)) {
+      errors.push(`candidate manifest sourceScopes duplicates ${scope.name}`);
+      continue;
+    }
+    actualByName.set(scope.name, scope);
+    if (scope.status !== "complete" || scope.blockedEntryCount !== 0 || scope.entryCount < 1) {
+      errors.push(`candidate manifest source scope ${scope.name} must be complete, non-empty, and contain zero blocked entries`);
+    }
+  }
+  for (const expected of REQUIRED_SOURCE_SCOPES) {
+    const actual = actualByName.get(expected.name);
+    if (!actual) {
+      errors.push(`candidate manifest sourceScopes is missing ${expected.name}`);
+      continue;
+    }
+    if (canonicalJson(actual.roots) !== canonicalJson(expected.roots)
+      || canonicalJson(actual.exactPaths) !== canonicalJson(expected.exactPaths ?? [])) {
+      errors.push(`candidate manifest source scope ${expected.name} definition does not match the release candidate policy`);
+    }
+  }
+  for (const name of actualByName.keys()) {
+    if (!REQUIRED_SOURCE_SCOPES.some((scope) => scope.name === name)) {
+      errors.push(`candidate manifest sourceScopes contains unknown scope ${name}`);
+    }
   }
 }
 
@@ -629,6 +804,7 @@ function isImmutableUri(uri, expectedSha256) {
   }
   if (!["https:", "s3:", "gs:", "az:"].includes(parsed.protocol)) return false;
   if (parsed.username || parsed.password || parsed.hash) return false;
+  if (hasCredentialQueryParameter(parsed)) return false;
   if (/(?:^|[\/_=?&.-])(?:latest|current|head)(?:$|[\/_=?&.-])/i.test(`${parsed.pathname}${parsed.search}`)) return false;
   const immutableQueryKeys = ["versionId", "versionid", "generation"];
   if (immutableQueryKeys.some((key) => {
@@ -639,6 +815,14 @@ function isImmutableUri(uri, expectedSha256) {
   if (/(?:^|[\/:=_-])sha256[:=_-]?[0-9a-f]{64}(?:$|[/?&#._-])/i.test(value)) return true;
   if (/(?:^|\/)(?:commit|blob|tree|objects?|revisions?|versions?)\/[0-9a-f]{40,64}(?:$|[/?#._-])/i.test(value)) return true;
   return /(?:^|[\/_=-])[0-9a-f]{64}(?:$|[/?&#._-])/i.test(value);
+}
+
+function hasCredentialQueryParameter(parsed) {
+  return [...parsed.searchParams.keys()].some((key) => CREDENTIAL_QUERY_PARAMETERS.has(normalizeKey(key)));
+}
+
+function normalizeKey(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 async function resolveRoot(root, errors) {

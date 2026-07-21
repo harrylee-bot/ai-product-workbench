@@ -85,17 +85,29 @@ const result = await runtime.execute({
   knowledgeTool: null,
   designStyleSnapshot: null,
   resume: null,
-  previousAssistantText: "",
-  externalRunId: null,
-  lastExternalEventId: null,
+  providerTextState: {
+    protocol: "workbench.runtime-provider-text-state.v1",
+    rawAssistantText: "",
+    visibleAssistantText: "",
+    durableVisibleAssistantText: "",
+    redactionBuffer: "",
+    processedExternalEventIds: [],
+    committedFinalization: null,
+  },
+  submission: {
+    mode: "submit",
+    providerIdempotencyKey: `wbrt:runtime-smoke:${suffix}`,
+  },
 }, {
   onSubmissionStarted: async () => undefined,
   onExternalRunCreated: async (id) => {
     externalRunId = id;
   },
-  onExternalEventCheckpoint: async () => undefined,
-  onEvent: async (event) => {
-    events.push(event);
+  onExternalEvent: async (_part, effects) => {
+    events.push(...effects);
+  },
+  onExternalFinalization: async (_part, effects) => {
+    events.push(...effects);
   },
 });
 

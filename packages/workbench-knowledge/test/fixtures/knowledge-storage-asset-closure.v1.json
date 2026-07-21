@@ -1,0 +1,76 @@
+{
+  "schema": "workbench.knowledge-asset-closure.v1",
+  "totalBytes": 225061953,
+  "assets": [
+    {
+      "path": "storage/imports/manuals-prototypes-20260702/axure-html/guizhou-signin/files/贵州签到打卡/data.js",
+      "mediaType": "text/javascript",
+      "byteSize": 103866,
+      "sha256": "560f086b0a3e65244a451b293ae2dcf49e35491786b85cbe97a72e7a168bdb1a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/imports/manuals-prototypes-20260702/axure-html/guizhou-signin/index.html",
+      "mediaType": "text/html",
+      "byteSize": 6841,
+      "sha256": "cfdcb0820fa2b98bd5b34caa299620e1d1be36ebb47197f08515cf08dd52fe2a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/imports/manuals-prototypes-20260702/axure-html/guizhou-signin/贵州签到打卡.html",
+      "mediaType": "text/html",
+      "byteSize": 144758,
+      "sha256": "64bb2dd5fc24a34c551cafb985e046516a9bc2412f2940d5acd427fc3bd56448",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/legacy-knowledge-20260716/README.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1408,
+      "sha256": "935d15de4d58e971c95efc7221a61cee4dfdbb296bb5c29e0b8461e8dda867d4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/legacy-knowledge-20260716/SHA256SUMS",
+      "mediaType": "application/octet-stream",
+      "byteSize": 351,
+      "sha256": "7e611fb24ab6580d00144a064489a0bce4f3f9b1a962e39815fcb0e410d0f8df",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/legacy-knowledge-20260716/knowledge-categories.ndjson",
+      "mediaType": "application/octet-stream",
+      "byteSize": 2562,
+      "sha256": "088044c8671e7bdef25e8fd9441b69684c2a9dd76bcb9e0c230d90865261a2fa",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/legacy-knowledge-20260716/knowledge-items.ndjson",
+      "mediaType": "application/octet-stream",
+      "byteSize": 775372,
+      "sha256": "c3c96b67600c545e95508dbca6670b2c9fddf5267e868a3fb471aa59e76d587b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/legacy-knowledge-20260716/knowledge-versions.ndjson",
+      "mediaType": "application/octet-stream",
+      "byteSize": 1693612,
+      "sha256": "5af9fb0223e9f7a59a36c2d6f17aade4bd03be3c0e667f556dd022a8218200e2",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/prototype-html/html.zip",
+      "mediaType": "application/zip",
+      "byteSize": 113156166,
+      "sha256": "712790a2dfb02e4fda1f935c155306b2233a191c60d70c28a1b06cf02d9bbf7f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/prototype-html/原型转HTML.zip",
+      "mediaType": "application/zip",
+      "byteSize": 109177017,
+      "sha256": "5e1322d9ab4bdafcd58d619f92742736d3f14e59ba8778b7cc72fa28b724453a",
+      "symbolicLink": false
+    }
+  ]
+}

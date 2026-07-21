@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { PassThrough, Readable, Transform } from "node:stream";
+import { PassThrough, Transform } from "node:stream";
 import {
   approvalOptionSchema,
   approvalOptionsSchema,
@@ -29,6 +29,7 @@ import {
   type RuntimeResult,
   type RuntimeResumeDecision,
 } from "@workbench/workbench-contracts";
+import type { VerifiedReadyObjectBody } from "@workbench/workbench-content-security";
 import { Client, type Run, type StreamMode } from "@langchain/langgraph-sdk";
 import { tracedFetch } from "@workbench/workbench-telemetry";
 import FormData from "form-data";
@@ -36,6 +37,13 @@ import { v5 as uuidV5 } from "uuid";
 import { z } from "zod";
 import type { WorkerConfig } from "../config.js";
 import type { RuntimeReadyBlobReader } from "../storage/runtime-ready-blob-reader.port.js";
+import {
+  assistantTextDelta,
+  CapabilityRedactionFilter as KnowledgeGrantRedactionFilter,
+  createRuntimeFinalizationPayload,
+  createRuntimeProviderTextCheckpoint,
+  extractAssistantTextFrame,
+} from "./runtime-assistant-text.js";
 import type {
   RuntimeSource,
   RuntimeCancellation,
@@ -48,7 +56,15 @@ import type {
   RuntimePrototypePatchBaseline,
   RuntimeThreadMetadata,
 } from "./runtime.port.js";
-import { RuntimeSubmissionUnknownError } from "./runtime.port.js";
+import {
+  RuntimeSubmissionUnknownError,
+  runtimeExternalFinalizationEvent,
+} from "./runtime.port.js";
+
+export {
+  assistantTextDelta,
+  CapabilityRedactionFilter as KnowledgeGrantRedactionFilter,
+} from "./runtime-assistant-text.js";
 
 const MAX_GATEWAY_RESPONSE_SIZE = 65_536;
 const ARTIFACT_DRAFT_PUBLISH_TOOL = "workbench_artifact_draft_publish";
@@ -61,9 +77,6 @@ const PROTOTYPE_PATCH_PUBLICATION_PROTOCOL = "workbench.runtime.prototype-patch-
 const VALIDATED_RUNTIME_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1";
 const RUN_PAGE_SIZE = 100;
 const MAX_RUN_RECOVERY_PAGES = 100;
-const KNOWLEDGE_GRANT_PREFIX = "wbkg1.";
-const CANVAS_GRANT_PREFIX = "wbct1.";
-const KNOWLEDGE_GRANT_TOKEN_CHARACTER = /^[A-Za-z0-9_.-]$/u;
 const KNOWLEDGE_GRANT_TOKEN = /wbkg1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const CANVAS_GRANT_TOKEN = /wbct1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const TERMINAL_EXTERNAL_RUN_STATUSES = new Set<Run["status"]>(["error", "success", "timeout", "interrupted"]);
@@ -252,25 +265,48 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     observer: RuntimeExecutionObserver,
     signal?: AbortSignal,
   ): Promise<RuntimeOutcome> {
-    const baselineState = prototypePatchBaselineState(execution.prototypePatchBaselines);
-    const client = this.client(execution.principalId, execution.providerIdempotencyKey);
-    let recovered = execution.externalRunId
-      ? await client.runs.get(execution.externalThreadId, execution.externalRunId, { signal })
-      : await this.findExternalRun(
-          client,
-          execution.externalThreadId,
-          execution.runtimeAttemptId,
-          execution.providerIdempotencyKey,
-          signal,
-        );
-    let externalRunId = execution.externalRunId;
+    const submission = execution.submission;
+    let baselineState = submission.mode === "reconcile"
+      ? null
+      : prototypePatchBaselineState(execution.prototypePatchBaselines);
+    const client = this.client(execution.principalId, submission.providerIdempotencyKey);
+    let recovered: Run | null;
+    try {
+      recovered = submission.mode === "join"
+        ? await client.runs.get(execution.externalThreadId, submission.externalRunId, { signal })
+        : await this.findExternalRun(
+            client,
+            execution.externalThreadId,
+            execution.runtimeAttemptId,
+            submission.providerIdempotencyKey,
+            signal,
+          );
+    } catch (error) {
+      if (submission.mode === "reconcile") {
+        throw new RuntimeSubmissionUnknownError("RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE", {
+          cause: error,
+        });
+      }
+      throw error;
+    }
+    let externalRunId = submission.mode === "join" ? submission.externalRunId : null;
     if (recovered) {
       externalRunId = recovered.run_id;
-      if (execution.externalRunId && execution.externalRunId !== recovered.run_id) {
+      if (submission.mode === "join" && submission.externalRunId !== recovered.run_id) {
         throw new Error("RUNTIME_EXTERNAL_RUN_ID_CONFLICT");
       }
-      if (!execution.externalRunId) await observer.onExternalRunCreated(recovered.run_id);
+      if (submission.mode !== "join") {
+        try {
+          if (submission.mode === "submit") await observer.onSubmissionStarted();
+          await observer.onExternalRunCreated(recovered.run_id);
+        } catch (error) {
+          throw new RuntimeSubmissionUnknownError("RUNTIME_SUBMISSION_RECONCILIATION_PERSISTENCE_UNKNOWN", {
+            cause: error,
+          });
+        }
+      }
     }
+    baselineState ??= prototypePatchBaselineState(execution.prototypePatchBaselines);
 
     let externalRunPersistence: Promise<void> | null = externalRunId ? Promise.resolve() : null;
     const registerExternalRun = (candidate: string) => {
@@ -288,15 +324,16 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       stream = client.runs.joinStream(execution.externalThreadId, externalRunId, {
         signal,
         cancelOnDisconnect: false,
-        lastEventId: execution.lastExternalEventId ?? undefined,
+        lastEventId: submission.mode === "join"
+          ? submission.lastExternalEventId ?? undefined
+          : undefined,
         streamMode: this.streamMode(),
         streamIdleReconnect: this.config.deerFlowIdleTimeoutMs,
       });
     } else {
-      if (execution.submissionUnknown) {
+      if (submission.mode === "reconcile") {
         throw new RuntimeSubmissionUnknownError();
       }
-      await observer.onSubmissionStarted();
       const sourceHandles = execution.resume
         ? []
         : await this.uploadSources(execution, signal);
@@ -312,6 +349,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         designAssetHandles,
         artifactTargetHandles,
       );
+      await observer.onSubmissionStarted();
       submissionMayHaveBeenAccepted = true;
       stream = client.runs.stream(
         execution.externalThreadId,
@@ -324,20 +362,22 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       );
     }
 
-    let assistantText = execution.previousAssistantText;
-    const capabilityOutput = new KnowledgeGrantRedactionFilter();
+    let assistantText = execution.providerTextState.rawAssistantText;
+    let visibleAssistantText = execution.providerTextState.visibleAssistantText;
+    const capabilityOutput = new KnowledgeGrantRedactionFilter(
+      execution.providerTextState.redactionBuffer,
+    );
     let finalState: unknown;
     let inputRequired: RuntimeInputRequired | null = null;
     let activeNode: string | null = null;
     let resultToolCallId: string | null = null;
     let partEffects: RuntimeProgressEvent[] | null = null;
-    const seenExternalEventIds = new Set<string>();
+    const seenExternalEventIds = new Set(
+      execution.providerTextState.processedExternalEventIds,
+    );
     const emitEvent = async (event: RuntimeProgressEvent) => {
-      if (partEffects) {
-        partEffects.push(event);
-        return;
-      }
-      await observer.onEvent(event);
+      if (!partEffects) throw new Error("RUNTIME_EFFECT_WITHOUT_EXTERNAL_IDENTITY");
+      partEffects.push(event);
     };
     const emittedStageSources = new Map<
       string,
@@ -659,24 +699,53 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           event: part.event,
           payload: jsonValueSchema.parse(part.data),
         }, effects);
+        visibleAssistantText += visibleTextDeltaFromEffects(effects);
         seenExternalEventIds.add(part.id);
       }
     } catch (error) {
-      if (externalRunPersistence) await externalRunPersistence;
+      let persistenceError: unknown = null;
+      if (externalRunPersistence) {
+        try {
+          await externalRunPersistence;
+        } catch (candidate) {
+          persistenceError = candidate;
+        }
+      }
       if (submissionMayHaveBeenAccepted && !externalRunId) {
-        const accepted = await this.findExternalRun(
-          client,
-          execution.externalThreadId,
-          execution.runtimeAttemptId,
-          execution.providerIdempotencyKey,
-          signal,
-        ).catch(() => null);
+        let accepted = null;
+        try {
+          accepted = await this.findExternalRun(
+            client,
+            execution.externalThreadId,
+            execution.runtimeAttemptId,
+            submission.providerIdempotencyKey,
+            signal,
+          );
+        } catch (lookupError) {
+          throw new RuntimeSubmissionUnknownError("RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE", {
+            cause: lookupError,
+          });
+        }
         if (accepted) {
-          await observer.onExternalRunCreated(accepted.run_id);
+          try {
+            await observer.onExternalRunCreated(accepted.run_id);
+          } catch (attachError) {
+            throw new RuntimeSubmissionUnknownError(
+              "RUNTIME_SUBMISSION_RECONCILIATION_PERSISTENCE_UNKNOWN",
+              { cause: attachError },
+            );
+          }
           throw error;
         }
         throw new RuntimeSubmissionUnknownError("RUNTIME_SUBMISSION_UNKNOWN", { cause: error });
       }
+      if (submissionMayHaveBeenAccepted && persistenceError) {
+        throw new RuntimeSubmissionUnknownError(
+          "RUNTIME_SUBMISSION_RECONCILIATION_PERSISTENCE_UNKNOWN",
+          { cause: persistenceError },
+        );
+      }
+      if (persistenceError) throw persistenceError;
       throw error;
     }
 
@@ -687,8 +756,33 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     }
 
     inputRequired ??= extractRuntimeInputRequired(finalState);
+    partEffects = [];
     await processArtifactState(finalState);
-    const finalVisibleDelta = capabilityOutput.flush();
+    const providerTextBeforeFinalization = {
+      rawAssistantText: assistantText,
+      visibleAssistantText,
+      redactionBuffer: capabilityOutput.snapshot(),
+    };
+    const terminalFrame = extractAssistantTextFrame("values", finalState);
+    const terminalRawDelta = terminalFrame
+      ? assistantTextDelta(assistantText, terminalFrame.text, terminalFrame.kind)
+      : "";
+    const terminalRawAssistantText = `${assistantText}${terminalRawDelta}`;
+    const providerTextCheckpoint = createRuntimeProviderTextCheckpoint(
+      providerTextBeforeFinalization,
+      terminalRawAssistantText,
+    );
+    const finalVisibleDelta = visibleProjectionDelta(
+      visibleAssistantText,
+      providerTextCheckpoint.terminal.visibleAssistantText,
+    );
+    const incrementalFilter = new KnowledgeGrantRedactionFilter(
+      providerTextBeforeFinalization.redactionBuffer,
+    );
+    const incrementalVisibleDelta = `${incrementalFilter.push(terminalRawDelta)}${incrementalFilter.flush()}`;
+    if (incrementalVisibleDelta !== finalVisibleDelta) {
+      throw new Error("RUNTIME_PROVIDER_TEXT_TERMINAL_PROJECTION_CONFLICT");
+    }
     if (finalVisibleDelta) {
       if (resultToolCallId && finalVisibleDelta.trim()) {
         await emitStage(
@@ -696,13 +790,30 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           runtimeToolSourceId(execution.runtimeAttemptId, "assistant-summary", resultToolCallId),
         );
       }
-      await emitEvent({ type: "text.delta", delta: finalVisibleDelta });
     }
-    if (inputRequired) return assertNoKnowledgeGrant(inputRequired);
-    if (activeNode) await emitEvent(activityEvent(activeNode, "succeeded"));
-    return assertNoKnowledgeGrant(
-      resolveRuntimeResult(finalState, execution.request.requestedArtifactKinds, execution),
+    const outcome = inputRequired
+      ? assertNoKnowledgeGrant(inputRequired)
+      : assertNoKnowledgeGrant(
+          resolveRuntimeResult(finalState, execution.request.requestedArtifactKinds, execution),
+        );
+    const derivedFinalizationEffects = partEffects;
+    partEffects = null;
+    const finalizationEffects = execution.providerTextState.committedFinalization
+      ? execution.providerTextState.committedFinalization.payload.effects as RuntimeProgressEvent[]
+      : derivedFinalizationEffects;
+    await observer.onExternalFinalization(
+      runtimeFinalizationPart(
+        execution,
+        externalRunId,
+        finalState,
+      outcome,
+      finalizationEffects,
+      providerTextCheckpoint.terminal.visibleAssistantText,
+      providerTextCheckpoint,
+      ),
+      finalizationEffects,
     );
+    return outcome;
   }
 
   async cancel(
@@ -860,7 +971,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       multitaskStrategy: "reject" as const,
       metadata: {
         workbench_runtime_attempt_id: execution.runtimeAttemptId,
-        workbench_provider_idempotency_key: execution.providerIdempotencyKey,
+        workbench_provider_idempotency_key: execution.submission.providerIdempotencyKey,
         workbench_run_id: execution.runId,
         workbench_attempt: execution.attempt,
       },
@@ -868,6 +979,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         workbench: {
           runId: execution.runId,
           runtimeAttemptId: execution.runtimeAttemptId,
+          requestedArtifactKinds: [...execution.request.requestedArtifactKinds],
           canvasTools: canvasToolCapability?.reference ?? null,
           prototypePatchBaselines,
         },
@@ -893,7 +1005,9 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           model_name: execution.request.modelId,
           is_plan_mode: true,
           thinking_enabled: true,
-          subagent_enabled: true,
+          subagent_enabled: execution.request.requestedArtifactKinds.some(
+            (kind) => kind === "prototype" || kind === "code",
+          ),
         },
       },
     };
@@ -1199,65 +1313,6 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
   }
 }
 
-export class KnowledgeGrantRedactionFilter {
-  private buffer = "";
-
-  push(chunk: string): string {
-    this.buffer += chunk;
-    let output = "";
-    while (this.buffer) {
-      const match = earliestCapabilityPrefix(this.buffer);
-      const grantStart = match?.index ?? -1;
-      if (grantStart >= 0) {
-        output += this.buffer.slice(0, grantStart);
-        this.buffer = this.buffer.slice(grantStart);
-        const boundary = [...this.buffer].findIndex((character, index) => (
-          index >= match!.prefix.length && !KNOWLEDGE_GRANT_TOKEN_CHARACTER.test(character)
-        ));
-        if (boundary < 0) {
-          if (this.buffer.length > 4_096) {
-            output += `[${match!.kind} capability redacted]`;
-            this.buffer = "";
-          }
-          return output;
-        }
-        output += `[${match!.kind} capability redacted]`;
-        this.buffer = this.buffer.slice(boundary);
-        continue;
-      }
-      const retained = retainedPrefixLength(this.buffer);
-      output += this.buffer.slice(0, this.buffer.length - retained);
-      this.buffer = this.buffer.slice(this.buffer.length - retained);
-      return output;
-    }
-    return output;
-  }
-
-  flush(): string {
-    const match = earliestCapabilityPrefix(this.buffer);
-    const result = match?.index === 0 ? `[${match.kind} capability redacted]` : this.buffer;
-    this.buffer = "";
-    return result;
-  }
-}
-
-function retainedPrefixLength(value: string): number {
-  const prefixes = [KNOWLEDGE_GRANT_PREFIX, CANVAS_GRANT_PREFIX];
-  const maximum = Math.min(value.length, Math.max(...prefixes.map((prefix) => prefix.length)) - 1);
-  for (let length = maximum; length > 0; length -= 1) {
-    if (prefixes.some((prefix) => prefix.startsWith(value.slice(-length)))) return length;
-  }
-  return 0;
-}
-
-function earliestCapabilityPrefix(value: string) {
-  const matches = [
-    { kind: "knowledge", prefix: KNOWLEDGE_GRANT_PREFIX, index: value.indexOf(KNOWLEDGE_GRANT_PREFIX) },
-    { kind: "canvas", prefix: CANVAS_GRANT_PREFIX, index: value.indexOf(CANVAS_GRANT_PREFIX) },
-  ].filter((match) => match.index >= 0);
-  return matches.sort((left, right) => left.index - right.index)[0];
-}
-
 function assertNoKnowledgeGrant<T>(value: T): T {
   const serialized = JSON.stringify(value);
   if (KNOWLEDGE_GRANT_TOKEN.test(serialized)) throw new Error("RUNTIME_KNOWLEDGE_GRANT_LEAK");
@@ -1266,7 +1321,7 @@ function assertNoKnowledgeGrant<T>(value: T): T {
 }
 
 export function createMultipartUploadStream(input: {
-  source: Readable;
+  source: VerifiedReadyObjectBody;
   fileName: string;
   mediaType: string;
   byteSize: number;
@@ -1452,18 +1507,6 @@ async function boundedResponseText(response: Response, maximumBytes: number) {
     reader.releaseLock();
   }
   return Buffer.concat(chunks, received).toString("utf8");
-}
-
-export function assistantTextDelta(
-  previous: string,
-  incoming: string,
-  kind: "delta" | "cumulative" = "cumulative",
-) {
-  if (!incoming) return "";
-  if (kind === "delta") return incoming;
-  if (incoming === previous || previous.startsWith(incoming)) return "";
-  if (incoming.startsWith(previous)) return incoming.slice(previous.length);
-  throw new Error("RUNTIME_ASSISTANT_CUMULATIVE_CONFLICT");
 }
 
 export function resolveRuntimeResult(
@@ -2013,6 +2056,44 @@ function sha256CanonicalPayload(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
+function visibleTextDeltaFromEffects(effects: RuntimeProgressEvent[]) {
+  return effects.flatMap((effect) => effect.type === "text.delta" ? [effect.delta] : []).join("");
+}
+
+function visibleProjectionDelta(previous: string, terminal: string) {
+  if (terminal === previous) return "";
+  if (terminal.startsWith(previous)) return terminal.slice(previous.length);
+  throw new Error("RUNTIME_PROVIDER_TEXT_VISIBLE_PROJECTION_CONFLICT");
+}
+
+function runtimeFinalizationPart(
+  execution: Pick<RuntimeExecution, "runtimeAttemptId">,
+  externalRunId: string,
+  finalState: unknown,
+  outcome: RuntimeOutcome,
+  effects: RuntimeProgressEvent[],
+  visibleAssistantText: string,
+  providerTextCheckpoint: ReturnType<typeof createRuntimeProviderTextCheckpoint>,
+) {
+  const protocol = "workbench.runtime-finalization.v2";
+  return {
+    externalRunId,
+    externalEventId: `workbench-finalization:${sha256CanonicalPayload({
+      protocol,
+      runtimeAttemptId: execution.runtimeAttemptId,
+      externalRunId,
+    })}`,
+    event: runtimeExternalFinalizationEvent,
+    payload: createRuntimeFinalizationPayload({
+      messagesSha256: sha256CanonicalPayload(jsonValueSchema.parse(runtimeMessages(finalState))),
+      outcomeSha256: sha256CanonicalPayload(outcome),
+      effects,
+      visibleAssistantText,
+      providerTextCheckpoint,
+    }),
+  };
+}
+
 export function extractRuntimeInputRequired(finalState: unknown): RuntimeInputRequired | null {
   const state = asRecord(finalState);
   const nested = asRecord(state?.values);
@@ -2159,25 +2240,6 @@ function stableValue(value: unknown) {
   } catch {
     return String(value);
   }
-}
-
-function extractAssistantTextFrame(
-  event: string,
-  data: unknown,
-): { kind: "delta" | "cumulative"; text: string } | null {
-  if (event === "messages" || event === "messages-tuple") {
-    const payload = Array.isArray(data) ? data[0] : data;
-    const message = asRecord(payload);
-    if (!message || !isAssistant(message)) return null;
-    const text = contentText(message.content);
-    return text ? { kind: "delta", text } : null;
-  }
-  if (event !== "values") return null;
-  const messages = runtimeMessages(data);
-  const message = [...messages].reverse().map(asRecord).find((candidate) => candidate && isAssistant(candidate));
-  if (!message) return null;
-  const text = contentText(message.content);
-  return text ? { kind: "cumulative", text } : null;
 }
 
 function extractNode(data: unknown) {

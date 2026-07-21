@@ -116,6 +116,8 @@ describe("Workbench route ownership", () => {
     expect(loaderSource.match(/\?\?= import\("\.\/workbench-project-route"\)/g)).toHaveLength(1);
     expect(loaderSource).toContain("await loadRoute()");
     expect(globalCss).not.toContain('@import "@xyflow/react/dist/style.css"');
+    expect(globalCss).not.toMatch(/@import\s+url\(/u);
+    expect(globalCss).not.toContain("fonts.googleapis.com");
     expect(globalCss).not.toContain(".react-flow__");
     expect(globalCss).not.toContain("--xy-");
     expect(projectCss).toContain('@import "@xyflow/react/dist/style.css"');

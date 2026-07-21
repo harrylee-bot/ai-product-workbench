@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aionbench.com/schemas/workbench.production-approval-signature.v3.json",
+  "title": "Product Workbench production approval signature subject",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "role", "decision", "approverId", "signedAtUtc", "keyId", "acceptanceEnvelope", "candidate", "productionImages", "deploymentConfig", "controlCatalog", "hardCutManifest", "gates", "evidence"],
+  "properties": {
+    "schemaVersion": { "const": "workbench.production-approval-signature.v3" },
+    "role": { "enum": ["Security", "Data", "Operations", "Release"] },
+    "decision": { "const": "APPROVE" },
+    "approverId": { "$ref": "#/$defs/identifier" },
+    "signedAtUtc": { "$ref": "#/$defs/utc" },
+    "keyId": { "$ref": "#/$defs/keyId" },
+    "acceptanceEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementerId", "createdAtUtc", "acceptedAtUtc"],
+      "properties": {
+        "implementerId": { "$ref": "#/$defs/identifier" },
+        "createdAtUtc": { "$ref": "#/$defs/utc" },
+        "acceptedAtUtc": { "$ref": "#/$defs/utc" }
+      }
+    },
+    "candidate": { "$ref": "#/$defs/candidate" },
+    "productionImages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifestSha256", "images"],
+      "properties": {
+        "manifestSha256": { "$ref": "#/$defs/sha256" },
+        "images": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/image" }
+        }
+      }
+    },
+    "deploymentConfig": { "$ref": "#/$defs/deploymentConfig" },
+    "controlCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sha256"],
+      "properties": {
+        "schemaVersion": { "const": "workbench.production-acceptance-control-catalog.v1" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "hardCutManifest": { "$ref": "#/$defs/evidence" },
+    "gates": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["gateId", "status", "observedAtUtc", "candidate", "evidencePath", "evidenceSha256"],
+        "properties": {
+          "gateId": { "enum": ["G5", "G6", "G7", "G8", "G9", "G10", "G11"] },
+          "status": { "const": "PASS" },
+          "observedAtUtc": { "$ref": "#/$defs/utc" },
+          "candidate": { "$ref": "#/$defs/candidate" },
+          "evidencePath": { "$ref": "#/$defs/path" },
+          "evidenceSha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "evidence": { "$ref": "#/$defs/evidence" }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "prefixedSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "keyId": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "path": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "sourceCommit", "signedTag", "chainId"],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/prefixedSha256" },
+        "sourceCommit": { "$ref": "#/$defs/commit" },
+        "signedTag": { "$ref": "#/$defs/identifier" },
+        "chainId": { "$ref": "#/$defs/prefixedSha256" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "digest"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "digest": { "$ref": "#/$defs/prefixedSha256" }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "endpoint", "version", "imageRef", "digest", "configAttestationSha256"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["deployed-image", "external-service"] },
+        "endpoint": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "imageRef": { "type": ["string", "null"] },
+        "digest": { "type": ["string", "null"] },
+        "configAttestationSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enterpriseSsoEnabled", "provider"],
+      "properties": {
+        "enterpriseSsoEnabled": { "type": "boolean" },
+        "provider": { "type": ["object", "null"] }
+      }
+    },
+    "deploymentConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "manifestSha256", "configSha256", "migrationSha256", "effectiveConfigSha256", "secretVersionsSha256", "identity", "dependencies"],
+      "properties": {
+        "schemaVersion": { "const": "workbench.production-deployment-configuration.v1" },
+        "manifestSha256": { "$ref": "#/$defs/sha256" },
+        "configSha256": { "$ref": "#/$defs/sha256" },
+        "migrationSha256": { "$ref": "#/$defs/sha256" },
+        "effectiveConfigSha256": { "$ref": "#/$defs/sha256" },
+        "secretVersionsSha256": { "$ref": "#/$defs/sha256" },
+        "identity": { "$ref": "#/$defs/identity" },
+        "dependencies": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 9,
+          "items": { "$ref": "#/$defs/dependency" }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

@@ -6,7 +6,7 @@ FROM ${DEERFLOW_BASE_IMAGE} AS runtime
 ARG DEERFLOW_BASE_IMAGE
 ARG DEERFLOW_SOURCE_COMMIT
 ARG WORKBENCH_SOURCE_COMMIT
-ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=492b4bda4423887ca55b976f72c1fae4879e42c20610e1ce9e43c18eb7f80df3
+ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=17819f84ad6632b7ed35087275758113c1323429f8ed1f067f3003c9177cbf11
 
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
@@ -24,16 +24,20 @@ COPY deploy/deerflow-extensions.production.json /app/backend/extensions_config.w
 COPY integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/ /opt/workbench/deerflow/source-patch/
 
 # The base image must contain the exact audited upstream sources. Apply the
-# deterministic patch, run its middleware contract against the image's real
+# deterministic patch, run its contracts against the image's real
 # LangChain/LangGraph dependencies, then verify the resulting file hashes.
 RUN test "${DEERFLOW_SOURCE_COMMIT}" = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2" \
     && python3 /opt/workbench/deerflow/source-patch/apply.py \
       --root /app/backend/packages/harness \
+      --gateway-root /app/backend \
       --source-commit "${DEERFLOW_SOURCE_COMMIT}" \
     && cd /app/backend \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
       uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_tool_scope_middleware.py \
+    && PYTHONPATH=/app/backend/packages/harness:/app/backend \
+      uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_request_context.py \
     && python3 /opt/workbench/deerflow/source-patch/apply.py \
       --root /app/backend/packages/harness \
+      --gateway-root /app/backend \
       --source-commit "${DEERFLOW_SOURCE_COMMIT}" \
       --check

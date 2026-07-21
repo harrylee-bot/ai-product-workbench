@@ -33,6 +33,7 @@ import {
   type ReadyBlobStoragePort,
 } from "../../platform/object-storage/object-storage.port.js";
 import { readReadyObject } from "../../platform/object-storage/read-ready-object.js";
+import { readyObjectIntegrityRecorder } from "../../platform/object-storage/ready-object-integrity.js";
 import { WorkbenchQueueService } from "../../platform/queue/workbench-queue.service.js";
 import {
   AccessService,
@@ -547,6 +548,7 @@ export class ExportsService {
     exportId: string,
     rangeHeader?: string,
     ifNoneMatch?: string,
+    signal?: AbortSignal,
   ) {
     const job = await this.db.exportJob.findFirst({
       where: {
@@ -592,7 +594,10 @@ export class ExportsService {
       sha256: blob.sha256,
       byteSize,
       mediaType: blob.mediaType,
-    }, rangeHeader, ifNoneMatch);
+    }, rangeHeader, ifNoneMatch, {
+      signal,
+      recordIntegrityFailure: readyObjectIntegrityRecorder(this.db),
+    });
     return {
       ...content,
       fileName: outputFileName(job.id, job.format, job.packaging),

@@ -36,6 +36,8 @@ async function main() {
     application_name: "workbench-import-worker",
     schedule: false,
     supervise: true,
+    migrate: false,
+    createSchema: false,
     useListenNotify: true,
   });
   boss.on("error", (error) => console.error("[import-worker:pg-boss]", error));

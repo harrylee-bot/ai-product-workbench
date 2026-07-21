@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { FileExtractionProcessor } from "../src/extraction/file-extraction.processor.js";
 import { TerminalExtractionError } from "../src/extraction/extraction.errors.js";
+import { DoclingParserAdapter } from "../src/extraction/docling-parser.adapter.js";
+import { S3FileStorageAdapter } from "../src/storage/s3-file-storage.adapter.js";
 
 describe("FileExtractionProcessor", () => {
   it("submits once, checkpoints before polling, and publishes both normalized outputs", async () => {
@@ -32,7 +35,7 @@ describe("FileExtractionProcessor", () => {
 
     await expect(processor.extract(start)).resolves.toBe("ready");
 
-    expect(storage.getObject).not.toHaveBeenCalled();
+    expect(storage.readReadyObject).not.toHaveBeenCalled();
     expect(parser.submit).not.toHaveBeenCalled();
     expect(parser.poll).toHaveBeenCalledWith("task_existing", undefined);
     expect(parser.result).toHaveBeenCalledWith("task_existing", undefined);
@@ -73,6 +76,73 @@ describe("FileExtractionProcessor", () => {
     await expect(processor.extract(start)).rejects.toMatchObject({ code: "DOCLING_TASK_LOST" });
     expect(parser.submit).not.toHaveBeenCalled();
   });
+
+  it("records corrupted S3 bytes before rejection and sends zero Docling POSTs", async () => {
+    const expected = Buffer.from("trusted docling source");
+    const tampered = Buffer.from("TAMPERED docling sourc");
+    expect(tampered.byteLength).toBe(expected.byteLength);
+    let recorderResolved = false;
+    const recordIntegrityFailure = vi.fn(async () => {
+      await Promise.resolve();
+      recorderResolved = true;
+    });
+    const s3 = {
+      send: vi.fn(async () => ({
+        Body: Readable.from([tampered.subarray(0, 5), tampered.subarray(5)]),
+        ContentLength: tampered.byteLength,
+        ContentType: "text/plain",
+      })),
+    };
+    const storage = new S3FileStorageAdapter({
+      s3Bucket: "workbench",
+      s3Region: "us-east-1",
+      s3InternalEndpoint: "http://s3.test",
+      s3ForcePathStyle: true,
+      filePipelineS3AccessKeyId: "file-access",
+      filePipelineS3SecretAccessKey: "file-secret",
+    }, recordIntegrityFailure, s3 as never);
+    const doclingFetch = vi.fn();
+    const parser = new DoclingParserAdapter({
+      doclingUrl: "http://docling.test",
+      doclingApiKey: "docling-secret",
+      doclingSubmitTimeoutMs: 10_000,
+      doclingPollTimeoutMs: 10_000,
+      maximumNormalizedOutputByteSize: 1024 * 1024,
+    }, doclingFetch as never);
+    const test = fixture();
+    test.start.command.source = {
+      storageKey: "blobs/corrupted-docling-source",
+      sha256: createHash("sha256").update(expected).digest("hex"),
+      byteSize: expected.byteLength,
+      mediaType: "text/plain",
+      fileName: "source.txt",
+    };
+    const processor = new FileExtractionProcessor(
+      test.store as never,
+      storage,
+      parser,
+      1024 * 1024,
+      60_000,
+    );
+
+    let rejection: unknown;
+    try {
+      await processor.extract(test.start);
+    } catch (error) {
+      rejection = error;
+      expect(recorderResolved).toBe(true);
+    }
+
+    expect(rejection).toMatchObject({ message: "OBJECT_STORAGE_SHA256_MISMATCH" });
+    expect(recordIntegrityFailure).toHaveBeenCalledOnce();
+    expect(recordIntegrityFailure).toHaveBeenCalledWith(expect.objectContaining({
+      failureCode: "OBJECT_STORAGE_SHA256_MISMATCH",
+      storageKey: "blobs/corrupted-docling-source",
+      observedSha256: createHash("sha256").update(tampered).digest("hex"),
+    }));
+    expect(doclingFetch).not.toHaveBeenCalled();
+    expect(test.store.checkpointTask).not.toHaveBeenCalled();
+  });
 });
 
 function fixture(maximumOutputBytes = 1024 ** 2) {
@@ -91,7 +161,7 @@ function fixture(maximumOutputBytes = 1024 ** 2) {
   };
   const sourceBytes = Buffer.from("source");
   const storage = {
-    getObject: vi.fn().mockResolvedValue({
+    readReadyObject: vi.fn().mockResolvedValue({
       body: Readable.from([sourceBytes]),
       byteSize: sourceBytes.byteLength,
       mediaType: "text/plain",

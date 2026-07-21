@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:workbench:release-candidate-manifest:v1",
+  "$id": "urn:workbench:release-candidate-manifest:v2",
   "title": "产品工作台 Release Candidate Manifest",
   "type": "object",
   "additionalProperties": false,
@@ -30,7 +30,7 @@
     "findings"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "product": { "const": "产品工作台" },
     "technicalIdentifier": { "const": "workbench" },
     "candidateId": { "$ref": "#/$defs/prefixedSha256" },
@@ -168,7 +168,8 @@
         "brandAssets",
         "knowledgeVaultMarkdown",
         "knowledgeVaultConfiguration",
-        "remediationControl"
+        "remediationControl",
+        "evidenceContracts"
       ],
       "properties": {
         "lockfile": { "$ref": "#/$defs/artifactGroup" },
@@ -181,7 +182,8 @@
         "brandAssets": { "$ref": "#/$defs/artifactGroup" },
         "knowledgeVaultMarkdown": { "$ref": "#/$defs/artifactGroup" },
         "knowledgeVaultConfiguration": { "$ref": "#/$defs/artifactGroup" },
-        "remediationControl": { "$ref": "#/$defs/artifactGroup" }
+        "remediationControl": { "$ref": "#/$defs/artifactGroup" },
+        "evidenceContracts": { "$ref": "#/$defs/artifactGroup" }
       }
     },
     "knowledgeStorage": {
@@ -277,10 +279,10 @@
     "deerFlow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sourceCommit", "imageDigest", "overlayConfigSha256"],
+      "required": ["sourceCommit", "baseImageDigest", "overlayConfigSha256"],
       "properties": {
         "sourceCommit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
-        "imageDigest": { "$ref": "#/$defs/prefixedSha256" },
+        "baseImageDigest": { "$ref": "#/$defs/prefixedSha256" },
         "overlayConfigSha256": { "$ref": "#/$defs/sha256" }
       }
     },

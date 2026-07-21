@@ -22,7 +22,12 @@ export class BlobGcProcessor {
     if (claim.kind !== "delete") return claim.kind;
 
     try {
-      await this.storage.deleteObject(claim.storageKey, signal);
+      return await this.store.deleteClaimed(
+        blobId,
+        claim.storageKey,
+        this.clock(),
+        () => this.storage.deleteObject(claim.storageKey, signal),
+      );
     } catch (error) {
       await this.store.recordFailure(
         blobId,
@@ -32,7 +37,5 @@ export class BlobGcProcessor {
       );
       throw error;
     }
-    await this.store.complete(blobId, this.clock());
-    return "deleted";
   }
 }

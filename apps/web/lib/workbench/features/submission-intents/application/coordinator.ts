@@ -8,7 +8,7 @@ import {
   type SubmissionIntentRunRequest,
   type SubmitSubmissionIntentResponse,
 } from "@workbench/workbench-contracts";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { nanoid } from "nanoid";
 import {
   useCallback,
@@ -99,6 +99,23 @@ type WorkbenchSubmissionActionContext = {
   setIntentId: (intentId: string) => void;
 };
 
+type SubmissionIntentReceipt = Versioned<SubmitSubmissionIntentResponse>;
+
+type SubmissionIntentClientState = {
+  acceptedSubmissions: Map<string, Promise<Run>>;
+  automaticReplayAttempts: Set<string>;
+};
+
+type SubmissionIntentRegistry = {
+  clientStates: WeakMap<QueryClient, SubmissionIntentClientState>;
+  inFlight: Map<string, Promise<SubmissionIntentReceipt>>;
+  networkSubmissionAttempts: Set<string>;
+  settled: Map<string, SubmissionIntentReceipt>;
+};
+
+const MAX_REMEMBERED_SUBMISSIONS = 512;
+let submissionIntentRegistry = createSubmissionIntentRegistry();
+
 export function useWorkbenchSubmissionCoordinator({
   currentIntent,
   onRun,
@@ -107,10 +124,12 @@ export function useWorkbenchSubmissionCoordinator({
 }: WorkbenchSubmissionCoordinatorOptions) {
   const service = useWorkbenchSubmissionIntentsApi();
   const queryClient = useQueryClient();
+  const submissionRegistry = submissionIntentRegistry;
+  const submissionClientState = submissionClientStateFor(submissionRegistry, queryClient);
+  const { acceptedSubmissions, automaticReplayAttempts } = submissionClientState;
   const onRunRef = useRef(onRun);
   const actionsRef = useRef(new Map<string, WorkbenchSubmissionAction>());
   const cancelledIntentIds = useRef(new Set<string>());
-  const attemptedAutomaticReplay = useRef(new Set<string>());
   const pendingBatches = useRef(new Map<string, string | null>());
   const cancellationActionsRef = useRef(new Map<string, symbol>());
   const [actionStates, setActionStates] = useState(
@@ -138,6 +157,7 @@ export function useWorkbenchSubmissionCoordinator({
     result: Versioned<SubmitSubmissionIntentResponse>,
   ) => {
     const { intent, run } = result.value;
+    rememberAutomaticReplayAttempt(automaticReplayAttempts, intent.id);
     queryClient.setQueryData(
       workbenchQueryKeys.submissionIntent(intent.id),
       { value: intent, etag: result.etag },
@@ -167,14 +187,42 @@ export function useWorkbenchSubmissionCoordinator({
       }),
     ]);
     return run;
-  }, [queryClient, uploads]);
+  }, [automaticReplayAttempts, queryClient, uploads]);
 
   const submitIntent = useCallback(async (
     intent: SubmissionIntent,
   ) => {
-    const result = await service.submitSubmissionIntent(intent.id);
-    return acceptReceipt(intent.projectId, intent.threadId, result);
-  }, [acceptReceipt, service]);
+    const existingAcceptance = acceptedSubmissions.get(intent.id);
+    if (existingAcceptance) return existingAcceptance;
+
+    const settledReceipt = submissionRegistry.settled.get(intent.id);
+    let receipt = settledReceipt ? Promise.resolve(settledReceipt) : undefined;
+    receipt ??= submissionRegistry.inFlight.get(intent.id);
+    if (!receipt) {
+      rememberAutomaticReplayAttempt(submissionRegistry.networkSubmissionAttempts, intent.id);
+      const requestedReceipt: Promise<SubmissionIntentReceipt> = Promise.resolve()
+        .then(() => service.submitSubmissionIntent(intent.id))
+        .then((result) => rememberSettledSubmission(submissionRegistry, intent, result))
+        .finally(() => {
+          if (submissionRegistry.inFlight.get(intent.id) === requestedReceipt) {
+            submissionRegistry.inFlight.delete(intent.id);
+          }
+        });
+      submissionRegistry.inFlight.set(intent.id, requestedReceipt);
+      receipt = requestedReceipt;
+    }
+
+    const acceptance: Promise<Run> = receipt
+      .then((result) => acceptReceipt(intent.projectId, intent.threadId, result))
+      .catch((error: unknown) => {
+        if (acceptedSubmissions.get(intent.id) === acceptance) {
+          acceptedSubmissions.delete(intent.id);
+        }
+        throw error;
+      });
+    rememberBounded(acceptedSubmissions, intent.id, acceptance);
+    return acceptance;
+  }, [acceptReceipt, acceptedSubmissions, service, submissionRegistry]);
 
   const runAction = useCallback(async <Result,>(
     targetProjectId: string,
@@ -311,12 +359,14 @@ export function useWorkbenchSubmissionCoordinator({
 
   const retryRecovery = useCallback(async () => {
     if (!currentIntent) throw new Error("There is no submission to retry");
+    const existingAcceptance = acceptedSubmissions.get(currentIntent.id);
+    if (existingAcceptance) return existingAcceptance;
     return runAction(
       currentIntent.projectId,
       () => submitIntent(currentIntent),
       currentIntent.id,
     );
-  }, [currentIntent, runAction, submitIntent]);
+  }, [acceptedSubmissions, currentIntent, runAction, submitIntent]);
 
   const cancelRecovery = useCallback(async () => {
     if (!currentIntent) throw new Error("There is no submission to cancel");
@@ -375,8 +425,17 @@ export function useWorkbenchSubmissionCoordinator({
     ) return;
     const canSubmit = submissionIntentRecoveryState(currentIntent) === "ready_to_submit"
       || canReplaySubmissionIntentSubmit(currentIntent);
-    if (!canSubmit || attemptedAutomaticReplay.current.has(currentIntent.id)) return;
-    attemptedAutomaticReplay.current.add(currentIntent.id);
+    const reusableSubmission = submissionRegistry.inFlight.has(currentIntent.id)
+      || submissionRegistry.settled.has(currentIntent.id);
+    if (
+      !canSubmit
+      || automaticReplayAttempts.has(currentIntent.id)
+      || (
+        submissionRegistry.networkSubmissionAttempts.has(currentIntent.id)
+        && !reusableSubmission
+      )
+    ) return;
+    rememberAutomaticReplayAttempt(automaticReplayAttempts, currentIntent.id);
     void runAction(
       currentIntent.projectId,
       () => submitIntent(currentIntent),
@@ -384,7 +443,15 @@ export function useWorkbenchSubmissionCoordinator({
     ).catch(() => {
       void refreshCurrent(currentIntent.threadId).catch(() => undefined);
     });
-  }, [currentIntent, refreshCurrent, runAction, selectedActionState?.pending, submitIntent]);
+  }, [
+    automaticReplayAttempts,
+    currentIntent,
+    refreshCurrent,
+    runAction,
+    selectedActionState?.pending,
+    submitIntent,
+    submissionRegistry,
+  ]);
 
   const scopedActionError = currentIntent && selectedActionState?.intentId === currentIntent.id
     ? selectedActionState.error
@@ -415,6 +482,76 @@ export function useWorkbenchSubmissionCoordinator({
     selectRecoveryFiles,
     submitPrepared,
   };
+}
+
+export function resetWorkbenchSubmissionCoordinatorRegistryForTests(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("The SubmissionIntent registry may be reset only in tests");
+  }
+  submissionIntentRegistry = createSubmissionIntentRegistry();
+}
+
+function createSubmissionIntentRegistry(): SubmissionIntentRegistry {
+  return {
+    clientStates: new WeakMap(),
+    inFlight: new Map(),
+    networkSubmissionAttempts: new Set(),
+    settled: new Map(),
+  };
+}
+
+function submissionClientStateFor(
+  registry: SubmissionIntentRegistry,
+  queryClient: QueryClient,
+): SubmissionIntentClientState {
+  let state = registry.clientStates.get(queryClient);
+  if (!state) {
+    state = {
+      acceptedSubmissions: new Map(),
+      automaticReplayAttempts: new Set(),
+    };
+    registry.clientStates.set(queryClient, state);
+  }
+  return state;
+}
+
+function rememberSettledSubmission(
+  registry: SubmissionIntentRegistry,
+  expectedIntent: SubmissionIntent,
+  receipt: SubmissionIntentReceipt,
+): SubmissionIntentReceipt {
+  const { intent, run } = receipt.value;
+  if (
+    intent.id !== expectedIntent.id
+    || intent.projectId !== expectedIntent.projectId
+    || intent.threadId !== expectedIntent.threadId
+    || run.projectId !== intent.projectId
+    || run.threadId !== intent.threadId
+  ) {
+    throw new Error("SubmissionIntent submit receipt identity does not match the submitted Intent");
+  }
+  rememberBounded(registry.settled, intent.id, receipt);
+  return receipt;
+}
+
+function rememberAutomaticReplayAttempt(attempts: Set<string>, intentId: string): void {
+  attempts.delete(intentId);
+  attempts.add(intentId);
+  while (attempts.size > MAX_REMEMBERED_SUBMISSIONS) {
+    const oldest = attempts.values().next().value;
+    if (oldest === undefined) return;
+    attempts.delete(oldest);
+  }
+}
+
+function rememberBounded<Value>(target: Map<string, Value>, key: string, value: Value): void {
+  target.delete(key);
+  target.set(key, value);
+  while (target.size > MAX_REMEMBERED_SUBMISSIONS) {
+    const oldest = target.keys().next().value;
+    if (oldest === undefined) return;
+    target.delete(oldest);
+  }
 }
 
 function updateActionState(

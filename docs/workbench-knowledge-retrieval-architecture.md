@@ -282,6 +282,8 @@ npm run knowledge:retrieval:eval -- \
 
 每个闭包文件始终输出规范相对路径、media type、实际 byte size、实际 SHA-256 和所有引用来源。索引使用 `SHA-256` / `checksum` 或 `byteSize` / `文件大小` / `压缩包大小` 声明完整性时，声明必须能唯一绑定到一个资产，并与实际文件完全一致；同一资产的多个声明互相冲突也会失败。
 
+R0 候选捕获必须提供可读但不纳入 Git 的 `storage/` 外部闭包（例如受控只读挂载或按引用 allowlist 物化的临时目录）。只有知识库明确引用的文件进入候选 inventory 的 `external` 项，并由实际字节重新计算大小和 SHA-256；纯 fresh clone 没有该闭包时必须失败，不能用测试 fixture、旧 manifest 或“目录存在”替代原始资产证据。这样既保持重型原文件不进入 source candidate，也避免 clean candidate 丢失运行所需的知识资产。
+
 `assetClosure.unreferencedStorage.byTopLevel` 按 storage 顶层分类输出文件数、字节数、闭包引用数和未引用摘要，只作为清理决策证据，不执行删除。删除动作必须使用另行批准的 allowlist，不能从报告中的示例路径反推批量删除命令。定向回归测试使用 `node --test scripts/knowledge-vault-audit.test.mjs`，覆盖成功闭包、缺失文件、路径穿越、绝对路径、非允许分类、symlink escape、SHA-256 与 byteSize 不匹配。
 
 ## 费用与工作量

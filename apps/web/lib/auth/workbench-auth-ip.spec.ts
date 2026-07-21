@@ -23,8 +23,8 @@ describe("Workbench Better Auth client IP trust", () => {
     });
   });
 
-  it("rejects forwarding and CDN source headers as application trust roots", () => {
-    for (const configuredHeader of ["x-forwarded-for", "ali-cdn-real-ip"]) {
+  it("rejects forwarding and Edge source headers as application trust roots", () => {
+    for (const configuredHeader of ["x-forwarded-for", "x-workbench-edge-client-ip"]) {
       expect(() => workbenchAuthIpAddressOptions({
         NODE_ENV: "production",
         WORKBENCH_AUTH_CLIENT_IP_HEADER: configuredHeader,
@@ -35,7 +35,7 @@ describe("Workbench Better Auth client IP trust", () => {
   it("reads a valid IPv4 address only from the canonical header", () => {
     const headers = new Headers({
       [WORKBENCH_CANONICAL_CLIENT_IP_HEADER]: "203.0.113.42",
-      "ali-cdn-real-ip": "198.51.100.9",
+      "x-workbench-edge-client-ip": "198.51.100.9",
       "x-forwarded-for": "198.51.100.10, 172.24.0.1",
     });
 
@@ -58,7 +58,7 @@ describe("Workbench Better Auth client IP trust", () => {
       [
         'import { getIp } from "@better-auth/core/utils/ip";',
         "const headers = new Headers({",
-        '  "ali-cdn-real-ip": "198.51.100.9",',
+        '  "x-workbench-edge-client-ip": "198.51.100.9",',
         '  "x-forwarded-for": "198.51.100.10, 172.24.0.1",',
         "});",
         "const value = getIp(headers, { advanced: { ipAddress: {",

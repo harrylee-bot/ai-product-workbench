@@ -7,17 +7,18 @@ import assert from "node:assert/strict";
 
 const preflight = resolve("deploy/workbench-server-preflight.sh");
 const originManifest = resolve("scripts/workbench-origin-manifest.mjs");
+const originWireguardPreflight = resolve("deploy/edge/workbench-origin-wireguard-preflight.sh");
 
-test("server preflight rejects a missing CDN allowlist", () => {
-  const result = runPreflight({ WORKBENCH_CDN_EDGE_CIDRS: undefined });
+test("server preflight rejects a missing WireGuard Edge peer", () => {
+  const result = runPreflight({ WORKBENCH_EDGE_WIREGUARD_IP: undefined });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /WORKBENCH_CDN_EDGE_CIDRS must occur exactly once/);
+  assert.match(result.stderr, /WORKBENCH_EDGE_WIREGUARD_IP must occur exactly once/);
 });
 
-test("server preflight rejects an Internet-wide CDN allowlist", () => {
-  const result = runPreflight({ WORKBENCH_CDN_EDGE_CIDRS: "0.0.0.0/0" });
+test("server preflight rejects a public Edge address as the WireGuard peer", () => {
+  const result = runPreflight({ WORKBENCH_EDGE_WIREGUARD_IP: "8.130.160.177" });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /must not trust the public Internet/);
+  assert.match(result.stderr, /must be an RFC1918 IPv4 address/);
 });
 
 test("server preflight rejects a non-HTTPS main origin", () => {
@@ -29,17 +30,17 @@ test("server preflight rejects a non-HTTPS main origin", () => {
 test("server preflight rejects a Preview hostname equal to the main hostname", () => {
   const result = runPreflight({ WORKBENCH_PREVIEW_ORIGIN: "https://workbench.example.test" });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Web, Preview, browser upload, and identity hostnames must be distinct/);
+  assert.match(result.stderr, /Web, Preview, browser upload, and enabled identity hostnames must be distinct/);
 });
 
-test("server preflight rejects a weak CDN origin authentication secret", () => {
-  const result = runPreflight({ WORKBENCH_CDN_ORIGIN_AUTH_SECRET: "too-short" });
+test("server preflight rejects a weak Edge origin authentication secret", () => {
+  const result = runPreflight({ WORKBENCH_EDGE_ORIGIN_AUTH_SECRET: "too-short" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /must contain at least 32 random bytes/);
 });
 
 test("server preflight rejects a non-canonical Better Auth IP header", () => {
-  const result = runPreflight({ WORKBENCH_AUTH_CLIENT_IP_HEADER: "ali-cdn-real-ip" });
+  const result = runPreflight({ WORKBENCH_AUTH_CLIENT_IP_HEADER: "x-workbench-edge-client-ip" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /must be x-workbench-client-ip/);
 });
@@ -48,6 +49,12 @@ test("server preflight rejects an ambiguous public registration policy", () => {
   const result = runPreflight({ WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "1" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /WORKBENCH_PUBLIC_REGISTRATION_ENABLED must be true or false/);
+});
+
+test("server validation requires enterprise SSO for its local Dex profile", () => {
+  const result = runPreflight({ WORKBENCH_ENTERPRISE_SSO_ENABLED: "false" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /requires WORKBENCH_ENTERPRISE_SSO_ENABLED=true/u);
 });
 
 test("server preflight requires production imports to use ClamAV", () => {
@@ -104,6 +111,7 @@ function runPreflight(overrides) {
   const env = {
     WORKBENCH_WEB_ORIGIN: "https://workbench.example.test",
     WORKBENCH_PREVIEW_ORIGIN: "https://preview.example.test",
+    WORKBENCH_ENTERPRISE_SSO_ENABLED: "true",
     WORKBENCH_OIDC_PROVIDER_ISSUER: "https://identity.example.test",
     WORKBENCH_OIDC_CLIENT_ID: "workbench-web",
     WORKBENCH_OIDC_CLIENT_SECRET: "oidc-secret",
@@ -126,9 +134,11 @@ function runPreflight(overrides) {
     WORKBENCH_DOCLING_URL: "http://docling:5001",
     WORKBENCH_AUTH_CLIENT_IP_HEADER: "x-workbench-client-ip",
     WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "false",
-    WORKBENCH_CDN_EDGE_CIDRS: "192.0.2.0/24 2001:db8::/48",
-    WORKBENCH_CDN_EDGE_CIDRS_SOURCE: "https://cdn.example.test/official-origin-ranges",
-    WORKBENCH_CDN_ORIGIN_AUTH_SECRET: "A".repeat(64),
+    WORKBENCH_EDGE_WIREGUARD_IP: "10.88.0.1",
+    WORKBENCH_ORIGIN_WIREGUARD_IP: "10.88.0.2",
+    WORKBENCH_EDGE_WIREGUARD_ENDPOINT: "8.130.160.177:51820",
+    WORKBENCH_ORIGIN_HTTP_PORT: "8080",
+    WORKBENCH_EDGE_ORIGIN_AUTH_SECRET: "A".repeat(64),
     ...overrides,
   };
   const envSource = Object.entries(env)
@@ -141,6 +151,17 @@ function runPreflight(overrides) {
   writeFileSync(join(deployDir, "workbench-server-validation-compose.yml"), "services: {}\n");
   writeFileSync(join(deployDir, "workbench-dex-config.yaml"), "issuer: https://identity.example.test\n");
   writeFileSync(join(deployDir, "workbench-server-validation.Caddyfile"), ":8080 { respond 403 }\n");
+  const wireguardConfig = join(deployDir, "wg0.conf");
+  writeFileSync(wireguardConfig, [
+    "[Interface]",
+    "Address = 10.88.0.2/30",
+    `PrivateKey = ${"A".repeat(43)}=`,
+    "[Peer]",
+    `PublicKey = ${"B".repeat(43)}=`,
+    "Endpoint = 8.130.160.177:51820",
+    "AllowedIPs = 10.88.0.1/32",
+    "",
+  ].join("\n"));
   writeFileSync(join(vaultDir, "README.md"), "# fixture\n");
 
   try {
@@ -150,6 +171,8 @@ function runPreflight(overrides) {
         ...process.env,
         WORKBENCH_APP_DIR: appDir,
         WORKBENCH_ORIGIN_MANIFEST_SCRIPT: originManifest,
+        WORKBENCH_ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT: originWireguardPreflight,
+        WORKBENCH_ORIGIN_WIREGUARD_CONFIG: wireguardConfig,
       },
     });
   } finally {

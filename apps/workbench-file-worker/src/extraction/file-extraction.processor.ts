@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { canonicalJson } from "@workbench/workbench-contracts";
-import type { FileStoragePort } from "../storage/storage.port.js";
+import type { FileStoragePort, ReadyFileStoragePort } from "../storage/storage.port.js";
 import { TerminalExtractionError } from "./extraction.errors.js";
 import type { ExtractionOutcome, ExtractionStart, ExtractionStore, NormalizedOutputIdentity } from "./extraction.store.js";
 import type { ParserPort } from "./parser.port.js";
@@ -10,7 +10,7 @@ import type { ParserPort } from "./parser.port.js";
 export class FileExtractionProcessor {
   constructor(
     private readonly store: ExtractionStore,
-    private readonly storage: FileStoragePort,
+    private readonly storage: FileStoragePort & ReadyFileStoragePort,
     private readonly parser: ParserPort,
     private readonly maximumOutputBytes: number,
     private readonly extractionTimeoutMs: number,
@@ -23,11 +23,7 @@ export class FileExtractionProcessor {
       if (taskId !== null || command.submissionGeneration !== 1) {
         throw new TerminalExtractionError("failed", "DOCLING_SUBMISSION_STATE_INVALID", "The Docling submission state is invalid");
       }
-      const stored = await this.storage.getObject(command.source.storageKey, signal);
-      if (stored.byteSize !== command.source.byteSize || stored.mediaType !== command.source.mediaType) {
-        stored.body.destroy();
-        throw new TerminalExtractionError("failed", "FILE_EXTRACTION_SOURCE_IDENTITY_MISMATCH", "The source object metadata changed before parsing");
-      }
+      const stored = await this.storage.readReadyObject(command.source, signal);
       taskId = await this.parser.submit({
         ...command.source,
         body: stored.body,

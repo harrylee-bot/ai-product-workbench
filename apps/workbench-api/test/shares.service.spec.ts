@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { canonicalSha256, type ReleaseRecord } from "../src/modules/releases/release.mapper.js";
 import { HTTP_CODE_METADATA } from "@nestjs/common/constants";
@@ -9,8 +10,8 @@ import {
 import { SharesService, hashShareToken } from "../src/modules/shares/shares.service.js";
 
 const now = new Date("2026-07-13T00:00:00.000Z");
-const checksum = "a".repeat(64);
-const assetChecksum = "c".repeat(64);
+const checksum = createHash("sha256").update("shareobj").digest("hex");
+const assetChecksum = checksum;
 
 function objectStorage() {
   return {

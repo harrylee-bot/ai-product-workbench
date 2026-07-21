@@ -1,0 +1,9 @@
+[Interface]
+Address = 10.88.0.2/30
+PrivateKey = REPLACE_WITH_ORIGIN_WIREGUARD_PRIVATE_KEY
+
+[Peer]
+PublicKey = REPLACE_WITH_EDGE_WIREGUARD_PUBLIC_KEY
+Endpoint = REPLACE_WITH_EDGE_PUBLIC_HOST:51820
+AllowedIPs = 10.88.0.1/32
+PersistentKeepalive = 25

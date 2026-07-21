@@ -32,6 +32,7 @@ const expectedBinding = Object.freeze({
 const commitSha = "1".repeat(40);
 const configSha256 = "2".repeat(64);
 const migrationSha256 = "3".repeat(64);
+const deploymentConfigManifestSha256 = "8".repeat(64);
 const imageDigest = `sha256:${"4".repeat(64)}`;
 
 test("keeps the committed reference fixture fully verifiable", async () => {
@@ -424,7 +425,7 @@ test("schemas enumerate every 7.1 field and keep index state-free", async () => 
 
 async function createFixture() {
   const root = await mkdtemp(path.join(tmpdir(), "workbench-evidence-ledger-test-"));
-  const rawPath = path.join(root, "raw", "g0.log");
+  const rawPath = path.join(root, "raw", "g0.txt");
   const manifestPath = path.join(root, "candidate-manifest.json");
   const ledgerPath = path.join(root, "ledger.json");
   const indexPath = path.join(root, "index.json");
@@ -507,10 +508,14 @@ function baseBinding() {
     environmentId: expectedBinding.environmentId,
     commitSha,
     tag: "workbench-v1.0.0-rc.1",
+    releaseChainId: `sha256:${"7".repeat(64)}`,
     digests: {
       images: [{ name: "web", digest: imageDigest }],
       configSha256,
       migrationSha256,
+      deploymentConfigManifestSha256,
+      imageManifestSha256: "5".repeat(64),
+      controlCatalogSha256: "6".repeat(64),
     },
   };
 }
@@ -547,7 +552,7 @@ function baseEntry(rawSha256, entryId) {
     },
     binding: baseBinding(),
     toolVersions: [{ name: "node", version: "v22.22.0" }],
-    evidence: [{ uri: "file:./raw/g0.log", sha256: rawSha256 }],
+    evidence: [{ uri: "file:./raw/g0.txt", sha256: rawSha256 }],
     retryRecords: [],
     relatedFindingsOrDecisions: [{ kind: "decision", id: "R0" }],
   };

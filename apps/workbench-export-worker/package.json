@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@workbench/workbench-contracts": "0.1.0",
+    "@workbench/workbench-content-security": "0.1.0",
     "@workbench/workbench-db": "0.1.0",
     "@workbench/workbench-export-core": "0.1.0",
     "@workbench/workbench-telemetry": "0.1.0",

@@ -6,22 +6,36 @@ import type { BlobGcStore } from "../src/gc/blob-gc.store.js";
 const now = new Date("2026-07-15T00:00:00.000Z");
 
 describe("BlobGcProcessor", () => {
-  it("soft-deletes before idempotently deleting storage and recording completion", async () => {
+  it("soft-deletes before running storage deletion through the fenced owner-row callback", async () => {
     const store = gcStore();
     store.claim.mockResolvedValue({ kind: "delete", storageKey: "blobs/aa/bb/hash/g1", attemptCount: 1 });
+    store.deleteClaimed.mockImplementation(async (_blobId, _storageKey, _completedAt, deleteObject) => {
+      await deleteObject();
+      return "deleted";
+    });
     const storage = { deleteObject: vi.fn().mockResolvedValue(undefined) };
     const processor = new BlobGcProcessor(store, storage, 6, () => now);
 
     await expect(processor.run("blob_1")).resolves.toBe("deleted");
     expect(store.claim).toHaveBeenCalledWith("blob_1", now, 6);
     expect(storage.deleteObject).toHaveBeenCalledWith("blobs/aa/bb/hash/g1", undefined);
-    expect(store.complete).toHaveBeenCalledWith("blob_1", now);
+    expect(store.deleteClaimed).toHaveBeenCalledWith(
+      "blob_1",
+      "blobs/aa/bb/hash/g1",
+      now,
+      expect.any(Function),
+    );
+    expect(store.complete).not.toHaveBeenCalled();
     expect(store.recordFailure).not.toHaveBeenCalled();
   });
 
   it("persists a bounded failure receipt and lets pg-boss retry the delete", async () => {
     const store = gcStore();
     store.claim.mockResolvedValue({ kind: "delete", storageKey: "blobs/aa/bb/hash/g1", attemptCount: 2 });
+    store.deleteClaimed.mockImplementation(async (_blobId, _storageKey, _completedAt, deleteObject) => {
+      await deleteObject();
+      return "deleted";
+    });
     const failure = new Error("provider detail must not be persisted");
     const storage = { deleteObject: vi.fn().mockRejectedValue(failure) };
     const processor = new BlobGcProcessor(store, storage, 6, () => now);
@@ -46,6 +60,7 @@ describe("BlobGcProcessor", () => {
 
       await expect(processor.run("blob_1")).resolves.toBe(kind);
       expect(storage.deleteObject).not.toHaveBeenCalled();
+      expect(store.deleteClaimed).not.toHaveBeenCalled();
       expect(store.complete).not.toHaveBeenCalled();
     },
   );
@@ -112,6 +127,7 @@ function gcStore() {
     reconcileEligibility: vi.fn<BlobGcStore["reconcileEligibility"]>(),
     findCandidates: vi.fn<BlobGcStore["findCandidates"]>(),
     claim: vi.fn<BlobGcStore["claim"]>(),
+    deleteClaimed: vi.fn<BlobGcStore["deleteClaimed"]>(),
     recordFailure: vi.fn<BlobGcStore["recordFailure"]>().mockResolvedValue(undefined),
     complete: vi.fn<BlobGcStore["complete"]>().mockResolvedValue(undefined),
   };

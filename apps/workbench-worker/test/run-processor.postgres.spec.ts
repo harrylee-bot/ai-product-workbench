@@ -3,11 +3,15 @@ import { boardNodeProtocol } from "@workbench/workbench-contracts";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { RunProcessor, sha256Canonical } from "../src/runs/run-processor.js";
 import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
+import { DeerFlowRuntimeAdapter } from "../src/runtime/deerflow-runtime.adapter.js";
+import { runtimeExternalFinalizationEvent } from "../src/runtime/runtime-assistant-text.js";
 import {
   RuntimeAttemptService,
   type RuntimeExecutionClaim,
 } from "../src/runtime/runtime-attempt.service.js";
-import type { RuntimeArtifactTarget } from "../src/runtime/runtime.port.js";
+import type {
+  RuntimeArtifactTarget,
+} from "../src/runtime/runtime.port.js";
 
 const databaseUrl =
   process.env.WORKBENCH_RUN_PROCESSOR_TEST_DATABASE_URL
@@ -648,6 +652,255 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
     },
     120_000,
   );
+
+  it.each([
+    {
+      relation: "below",
+      drift: async (worker: PrismaClient, fixture: Awaited<ReturnType<typeof seedCanvasEditPublicationFixture>>) => {
+        await worker.canvasAgentSession.update({
+          where: { id: fixture.agentSessionId },
+          data: { boardRevision: fixture.baseBoardRevision + 1 },
+        });
+      },
+    },
+    {
+      relation: "above",
+      drift: async (worker: PrismaClient, fixture: Awaited<ReturnType<typeof seedCanvasEditPublicationFixture>>) => {
+        await worker.board.update({
+          where: { id: fixture.boardId },
+          data: { revision: { increment: 1 } },
+        });
+      },
+    },
+  ])(
+    "rejects quick_edit when the current Board revision is $relation the authorized revision",
+    async ({ drift }) => {
+      const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
+      const fixture = await seedCanvasEditPublicationFixture(worker, "quick_edit");
+      const processor = new RunProcessor(
+        worker,
+        {} as never,
+        noKnowledgeToolGrants(),
+      ) as unknown as ProcessorInternals;
+
+      try {
+        await drift(worker, fixture);
+        await expect(processor.publishResult(
+          fixture.claim,
+          fixture.outputEntryId!,
+          "streamed edit",
+          fixture.result as never,
+        )).rejects.toThrow("CANVAS_QUICK_EDIT_BOARD_REVISION_INVALID");
+
+        await expect(worker.run.findUniqueOrThrow({ where: { id: fixture.runId } }))
+          .resolves.toMatchObject({ status: "running" });
+        await expect(worker.canvasToolInvocation.findFirstOrThrow({
+          where: { agentSessionId: fixture.agentSessionId },
+        })).resolves.toMatchObject({
+          resultArtifactVersionId: null,
+          boardRevisionAfter: fixture.baseBoardRevision,
+        });
+        await expect(worker.artifact.findUniqueOrThrow({ where: { id: fixture.artifactId } }))
+          .resolves.toMatchObject({ currentVersionId: fixture.baseVersionId });
+      } finally {
+        await cleanupFixture(worker, fixture);
+        await worker.$disconnect();
+      }
+    },
+    120_000,
+  );
+
+  it("rejects a concurrent Board advance and keeps source replay plus publish retry idempotent", async () => {
+    const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const concurrentEditor = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedCanvasEditPublicationFixture(worker, "quick_edit");
+    const boardLockRequested = deferred<void>();
+    const processor = processorWithBoardLockObservation(worker, boardLockRequested);
+    const concurrentUpdateCommitted = deferred<void>();
+    const releaseConcurrentUpdate = deferred<void>();
+    const concurrentUpdate = concurrentEditor.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id"
+        FROM "boards"
+        WHERE "id" = ${fixture.boardId}
+        FOR UPDATE
+      `);
+      await tx.board.update({
+        where: { id: fixture.boardId },
+        data: { revision: { increment: 1 } },
+      });
+      concurrentUpdateCommitted.resolve();
+      await releaseConcurrentUpdate.promise;
+    }, { timeout: 30_000 });
+
+    try {
+      await fixture.draftProcessor.persistArtifactDraft(
+        fixture.claim,
+        fixture.draftEvent,
+        [],
+        [],
+      );
+      await expect(worker.runEvent.count({
+        where: { runId: fixture.runId, sourceId: fixture.draftEvent.sourceEventId },
+      })).resolves.toBe(1);
+
+      await concurrentUpdateCommitted.promise;
+      const firstPublish = processor.publishResult(
+        fixture.claim,
+        fixture.outputEntryId!,
+        "streamed edit",
+        fixture.result as never,
+      ).then(
+        () => ({ error: null }),
+        (error: unknown) => ({ error }),
+      );
+      await boardLockRequested.promise;
+      releaseConcurrentUpdate.resolve();
+      await concurrentUpdate;
+
+      expect((await firstPublish).error).toMatchObject({
+        message: "CANVAS_QUICK_EDIT_BOARD_REVISION_INVALID",
+      });
+      await expect(processor.publishResult(
+        fixture.claim,
+        fixture.outputEntryId!,
+        "streamed edit",
+        fixture.result as never,
+      )).rejects.toThrow("CANVAS_QUICK_EDIT_BOARD_REVISION_INVALID");
+
+      await expect(worker.board.findUniqueOrThrow({ where: { id: fixture.boardId } }))
+        .resolves.toMatchObject({ revision: fixture.baseBoardRevision + 1 });
+      await expect(worker.run.findUniqueOrThrow({ where: { id: fixture.runId } }))
+        .resolves.toMatchObject({ status: "running" });
+      await expect(worker.canvasAgentSession.findUniqueOrThrow({
+        where: { id: fixture.agentSessionId },
+      })).resolves.toMatchObject({
+        status: "active",
+        boardRevision: fixture.baseBoardRevision,
+      });
+      await expect(worker.canvasToolInvocation.findFirstOrThrow({
+        where: { agentSessionId: fixture.agentSessionId },
+      })).resolves.toMatchObject({
+        resultArtifactVersionId: null,
+        boardRevisionAfter: fixture.baseBoardRevision,
+      });
+      await expect(worker.artifact.findUniqueOrThrow({ where: { id: fixture.artifactId } }))
+        .resolves.toMatchObject({ currentVersionId: fixture.baseVersionId });
+      await expect(worker.artifactVersion.count({
+        where: { createdByRunId: fixture.runId, status: "ready" },
+      })).resolves.toBe(0);
+    } finally {
+      releaseConcurrentUpdate.resolve();
+      await concurrentUpdate.catch(() => undefined);
+      await cleanupFixture(worker, fixture);
+      await Promise.all([worker.$disconnect(), concurrentEditor.$disconnect()]);
+    }
+  }, 120_000);
+});
+
+describeWithPostgres("Run processor PostgreSQL external finalization crash replay", () => {
+  it("replays a committed finalization after its response is lost without duplicating tail or activity effects", async () => {
+    const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedRunFixture(worker, "publish");
+    const token = `wbkg1.${"a".repeat(80)}.${"b".repeat(43)}`;
+    const provider = deerFlowFinalizationReplayProvider(fixture, `before ${token}`);
+    vi.stubGlobal("fetch", provider.fetch);
+    const runtime = new DeerFlowRuntimeAdapter(
+      postgresDeerFlowConfig(),
+      { getObject: vi.fn() } as never,
+    );
+    const runtimeExecute = vi.spyOn(runtime, "execute");
+    const lossyProcessor = new RunProcessor(
+      databaseWithFinalizationCommitResponseLoss(worker) as never,
+      runtime,
+      noKnowledgeToolGrants(),
+    );
+
+    try {
+      await expect(lossyProcessor.execute(
+        fixture.runId,
+        [],
+        undefined,
+        { retryCount: 0, retryLimit: 1 },
+      )).rejects.toThrow("SIMULATED_FINALIZATION_COMMIT_RESPONSE_LOSS");
+
+      await expect(worker.run.findUniqueOrThrow({ where: { id: fixture.runId } }))
+        .resolves.toMatchObject({ status: "running" });
+      await expect(worker.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+        status: "running",
+        lastExternalEventId: "provider-terminal-part",
+        externalEventSequence: 2,
+      });
+      await expect(worker.runDraft.findUniqueOrThrow({ where: { runId: fixture.runId } }))
+        .resolves.toMatchObject({
+          content: {
+            entryId: fixture.outputEntryId,
+            text: "before [knowledge capability redacted]",
+          },
+        });
+      await expect(worker.runtimeExternalEvent.findMany({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        orderBy: { sequence: "asc" },
+        select: { sequence: true, externalEventId: true, event: true, status: true },
+      })).resolves.toEqual([
+        {
+          sequence: 1,
+          externalEventId: "provider-terminal-part",
+          event: "values",
+          status: "processed",
+        },
+        {
+          sequence: 2,
+          externalEventId: expect.stringMatching(/^workbench-finalization:[0-9a-f]{64}$/u),
+          event: runtimeExternalFinalizationEvent,
+          status: "processed",
+        },
+      ]);
+      await expect(finalizationEffectState(worker, fixture.runId)).resolves.toEqual({
+        messageDeltas: ["before ", "[knowledge capability redacted]"],
+        activityStatuses: ["running", "succeeded"],
+        completed: 0,
+      });
+
+      const recoveringProcessor = new RunProcessor(worker, runtime, noKnowledgeToolGrants());
+      await expect(recoveringProcessor.execute(fixture.runId)).resolves.toEqual({
+        runId: fixture.runId,
+        artifactCount: 0,
+      });
+
+      await expect(finalizationEffectState(worker, fixture.runId)).resolves.toEqual({
+        messageDeltas: ["before ", "[knowledge capability redacted]"],
+        activityStatuses: ["running", "succeeded"],
+        completed: 1,
+      });
+      await expect(worker.threadEntry.findUniqueOrThrow({ where: { id: fixture.outputEntryId! } }))
+        .resolves.toMatchObject({
+          content: {
+            protocol: "workbench.entry.v1",
+            type: "assistant.message",
+            text: "before [knowledge capability redacted]",
+          },
+        });
+      await expect(worker.run.findUniqueOrThrow({ where: { id: fixture.runId } }))
+        .resolves.toMatchObject({ status: "succeeded", progress: 1 });
+      expect(runtimeExecute.mock.calls.map(([execution]) => execution.submission)).toEqual([
+        expect.objectContaining({ mode: "join", lastExternalEventId: null }),
+        expect.objectContaining({
+          mode: "join",
+          lastExternalEventId: "provider-terminal-part",
+        }),
+      ]);
+      expect(provider.joinRequests).toHaveLength(2);
+      expect(provider.joinRequests[1]?.headers.get("last-event-id")).toBe("provider-terminal-part");
+      expect(provider.stateRequests).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      await cleanupFixture(worker, fixture);
+      await worker.$disconnect();
+    }
+  }, 120_000);
 });
 
 type FixtureKind = "prepare" | "wait" | "publish";
@@ -661,6 +914,8 @@ type RunFixture = {
   runId: string;
   runtimeAttemptId: string | null;
   outputEntryId: string | null;
+  externalThreadId: string;
+  externalRunId: string;
 };
 
 async function seedRunFixture(
@@ -678,6 +933,8 @@ async function seedRunFixture(
     runId: `run_${suffix}`,
     runtimeAttemptId: kind === "prepare" ? null : `attempt_${suffix}`,
     outputEntryId: kind === "publish" ? `entry_${suffix}` : null,
+    externalThreadId: `external_thread_${suffix}`,
+    externalRunId: `external_run_${suffix}`,
   };
   await db.$transaction(async (tx) => {
     await tx.principal.create({
@@ -733,7 +990,7 @@ async function seedRunFixture(
         title: "Run cancellation race",
       },
     });
-    const externalThreadId = `external_thread_${suffix}`;
+    const externalThreadId = ids.externalThreadId;
     const bindingId = `binding_${suffix}`;
     if (ids.runtimeAttemptId) {
       await tx.runtimeBinding.create({
@@ -818,7 +1075,7 @@ async function seedRunFixture(
       await tx.runtimeAttempt.update({
         where: { id: ids.runtimeAttemptId },
         data: {
-          externalRunId: `external_run_${suffix}`,
+          externalRunId: ids.externalRunId,
           status: "running",
         },
       });
@@ -1060,19 +1317,20 @@ async function seedCanvasEditPublicationFixture(
       sourceEventId: `deerflow:canvas-${mode}-${stage}`,
     });
   }
+  const draftEvent = {
+    type: "artifact.draft" as const,
+    artifactIndex: 0,
+    sourceEventId: `deerflow:canvas-${mode}-draft`,
+    draft,
+    checkpointScreens: draft.content.screens.map(({ id }) => ({
+      screenId: id,
+      revision: 0,
+      checksum: prototypeScreenProjectionChecksum(draft.content, id, 0),
+    })),
+  };
   await draftProcessor.persistArtifactDraft(
     claim,
-    {
-      type: "artifact.draft",
-      artifactIndex: 0,
-      sourceEventId: `deerflow:canvas-${mode}-draft`,
-      draft,
-      checkpointScreens: draft.content.screens.map(({ id }) => ({
-        screenId: id,
-        revision: 0,
-        checksum: prototypeScreenProjectionChecksum(draft.content, id, 0),
-      })),
-    },
+    draftEvent,
     [],
     [],
   );
@@ -1084,6 +1342,8 @@ async function seedCanvasEditPublicationFixture(
     baseVersionId,
     baseBoardRevision: board.revision,
     claim,
+    draftEvent,
+    draftProcessor,
     result,
   };
 }
@@ -1184,6 +1444,192 @@ function canvasPrototypeDocumentWithImage(asset: {
   };
 }
 
+function deerFlowFinalizationReplayProvider(fixture: RunFixture, assistantText: string) {
+  const result = {
+    protocol: "workbench.runtime.result.v1" as const,
+    message: "",
+    artifacts: [],
+  };
+  const toolCallId = "result-finalization-replay";
+  const envelope = {
+    protocol: "workbench.runtime.validated-result.v1",
+    runId: fixture.runId,
+    runtimeAttemptId: fixture.runtimeAttemptId!,
+    toolCallId,
+    ok: true,
+    resultChecksum: sha256Canonical(result),
+  };
+  const finalState = {
+    node: "writer",
+    messages: [
+      { type: "human", content: "current turn" },
+      {
+        type: "ai",
+        content: "",
+        tool_calls: [{ id: toolCallId, name: "workbench_runtime_result_submit", args: {} }],
+      },
+      {
+        type: "tool",
+        name: "workbench_runtime_result_submit",
+        tool_call_id: toolCallId,
+        artifact: {
+          ...envelope,
+          result,
+          checksum: sha256Canonical(envelope),
+        },
+      },
+      { type: "ai", content: assistantText },
+    ],
+  };
+  const joinRequests: Array<{ headers: Headers }> = [];
+  let stateRequests = 0;
+  const fetch = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(String(input));
+    const runPath = `/api/threads/${fixture.externalThreadId}/runs/${fixture.externalRunId}`;
+    if (url.pathname === runPath && (init.method ?? "GET") === "GET") {
+      return Response.json({
+        run_id: fixture.externalRunId,
+        thread_id: fixture.externalThreadId,
+        status: "success",
+        metadata: {
+          workbench_runtime_attempt_id: fixture.runtimeAttemptId,
+        },
+      });
+    }
+    if (url.pathname === `${runPath}/stream` && (init.method ?? "GET") === "GET") {
+      joinRequests.push({ headers: new Headers(init.headers) });
+      return postgresRuntimeStreamResponse([{
+        id: "provider-terminal-part",
+        event: "values",
+        data: finalState,
+      }]);
+    }
+    if (
+      url.pathname === `/api/threads/${fixture.externalThreadId}/state`
+      && (init.method ?? "GET") === "GET"
+    ) {
+      stateRequests += 1;
+      return Response.json({ values: finalState });
+    }
+    throw new Error(`Unexpected DeerFlow request: ${init.method ?? "GET"} ${url}`);
+  });
+  return {
+    fetch,
+    joinRequests,
+    get stateRequests() {
+      return stateRequests;
+    },
+  };
+}
+
+function postgresRuntimeStreamResponse(parts: Array<{ id: string; event: string; data: unknown }>) {
+  return new Response(new ReadableStream({
+    start(controller) {
+      const lines = parts.flatMap((part) => [
+        `id: ${part.id}`,
+        `event: ${part.event}`,
+        `data: ${JSON.stringify(part.data)}`,
+        "",
+      ]);
+      controller.enqueue(new TextEncoder().encode([...lines, ""].join("\n")));
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+function postgresDeerFlowConfig() {
+  return {
+    deerFlowLangGraphUrl: "http://deerflow.test/api",
+    deerFlowGatewayUrl: "http://gateway.test",
+    deerFlowAssistantId: "lead_agent",
+    deerFlowInternalToken: "internal",
+    deerFlowStreamMode: ["messages", "values"],
+    deerFlowTimeoutMs: 5_000,
+    deerFlowIdleTimeoutMs: 5_000,
+  } as never;
+}
+
+async function finalizationEffectState(db: PrismaClient, runId: string) {
+  const events = await db.runEvent.findMany({
+    where: {
+      runId,
+      type: { in: ["message.delta", "activity.changed", "run.completed"] },
+    },
+    orderBy: { sequence: "asc" },
+    select: { type: true, payload: true },
+  });
+  return {
+    messageDeltas: events.flatMap((event) => (
+      event.type === "message.delta"
+        ? [(event.payload as { delta: string }).delta]
+        : []
+    )),
+    activityStatuses: events.flatMap((event) => (
+      event.type === "activity.changed"
+        ? [(event.payload as { status: string }).status]
+        : []
+    )),
+    completed: events.filter((event) => event.type === "run.completed").length,
+  };
+}
+
+function databaseWithFinalizationCommitResponseLoss(client: PrismaClient) {
+  let injected = false;
+  return new Proxy(client, {
+    get(target, property, receiver) {
+      if (property === "$transaction") {
+        return async <T>(
+          callback: (tx: Prisma.TransactionClient) => Promise<T>,
+          options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel },
+        ) => {
+          let committedFinalization = false;
+          const result = await client.$transaction(async (tx) => callback(new Proxy(tx, {
+            get(transaction, transactionProperty, transactionReceiver) {
+              if (transactionProperty === "runtimeExternalEvent") {
+                const delegate = Reflect.get(
+                  transaction,
+                  transactionProperty,
+                  transactionReceiver,
+                ) as object;
+                return new Proxy(delegate, {
+                  get(delegateTarget, delegateProperty, delegateReceiver) {
+                    const value = Reflect.get(delegateTarget, delegateProperty, delegateReceiver) as unknown;
+                    if (delegateProperty === "create") {
+                      const create = (value as (args: {
+                        data: { event?: string };
+                      }) => Promise<unknown>).bind(delegateTarget);
+                      return async (args: { data: { event?: string } }) => {
+                        const created = await create(args);
+                        if (args.data.event === runtimeExternalFinalizationEvent) {
+                          committedFinalization = true;
+                        }
+                        return created;
+                      };
+                    }
+                    return typeof value === "function" ? value.bind(delegateTarget) : value;
+                  },
+                });
+              }
+              const value = Reflect.get(transaction, transactionProperty, transactionReceiver) as unknown;
+              return typeof value === "function" ? value.bind(transaction) : value;
+            },
+          }) as Prisma.TransactionClient), options);
+          if (committedFinalization && !injected) {
+            injected = true;
+            throw new Error("SIMULATED_FINALIZATION_COMMIT_RESPONSE_LOSS");
+          }
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, receiver) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 function processorWithRunLockFence(
   client: PrismaClient,
   lockRequested: Deferred<void>,
@@ -1251,6 +1697,44 @@ function processorWithRunReadFence(
     {} as never,
     noKnowledgeToolGrants(),
   ) as unknown as ProcessorInternals;
+}
+
+function processorWithBoardLockObservation(
+  client: PrismaClient,
+  boardLockRequested: Deferred<void>,
+) {
+  let observed = false;
+  const database = {
+    $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      client.$transaction(async (tx) => callback(new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "$queryRaw") {
+            const queryRaw = target.$queryRaw.bind(target) as (...args: unknown[]) => Promise<unknown>;
+            return async (...args: unknown[]) => {
+              const sql = rawSqlText(args[0]);
+              if (!observed && sql.includes('FROM "boards"') && sql.includes("FOR UPDATE")) {
+                observed = true;
+                boardLockRequested.resolve();
+              }
+              return queryRaw(...args);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as Prisma.TransactionClient), { timeout: 30_000 }),
+  };
+  return new RunProcessor(
+    database as never,
+    {} as never,
+    noKnowledgeToolGrants(),
+  ) as unknown as ProcessorInternals;
+}
+
+function rawSqlText(value: unknown): string {
+  if (!value || typeof value !== "object" || !("strings" in value)) return String(value ?? "");
+  const strings = (value as { strings?: unknown }).strings;
+  return Array.isArray(strings) ? strings.join("?") : String(value);
 }
 
 function documentDraft(title: string, text: string): DocumentDraft {

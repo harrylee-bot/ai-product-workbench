@@ -478,6 +478,7 @@ model Principal {
   createdProjects                 Project[]                         @relation("ProjectCreator")
   createdThreads                  Thread[]                          @relation("ThreadCreator")
   createdRuns                     Run[]
+  runCancellationReceipts         RunCancellationReceipt[]           @relation("RunCancellationReceiptPrincipal")
   createdSubmissionIntents        SubmissionIntent[]                @relation("SubmissionIntentCreator")
   uploadedFiles                   FileAsset[]                       @relation("FileUploader")
   createdShares                   ShareGrant[]                      @relation("ShareCreator")
@@ -797,6 +798,7 @@ model Run {
   canvasAgentSessions          CanvasAgentSession[]
   prototypePatchProjections    PrototypePatchProjection[]
   sourceSnapshots              RunSourceSnapshot[]
+  cancellationReceipts         RunCancellationReceipt[]
 
   @@unique([threadId, idempotencyKey])
   @@unique([id, projectId])
@@ -810,6 +812,23 @@ model Run {
   @@index([retryOfRunId])
   @@index([status, executionLeaseExpiresAt])
   @@map("runs")
+}
+
+model RunCancellationReceipt {
+  id             String    @id @default(cuid())
+  runId          String    @map("run_id")
+  principalId    String    @map("principal_id")
+  idempotencyKey String    @map("idempotency_key") @db.VarChar(128)
+  requestHash    String    @map("request_hash") @db.Char(64)
+  response       Json
+  responseHash   String    @map("response_hash") @db.Char(64)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  run            Run       @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  principal      Principal @relation("RunCancellationReceiptPrincipal", fields: [principalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([principalId, idempotencyKey])
+  @@index([runId, createdAt])
+  @@map("run_cancellation_receipts")
 }
 
 model RuntimeBinding {
@@ -1066,6 +1085,7 @@ model CanvasVisualCapability {
   command           CanvasClientCommand          @relation(fields: [commandId], references: [id], onDelete: Cascade, onUpdate: Restrict)
 
   @@index([status, expiresAt])
+  @@index([status, storageDeletedAt, expiresAt], map: "canvas_visual_capabilities_status_storage_deleted_expires_idx")
   @@index([projectId, createdAt])
   @@index([runId, status])
   @@map("canvas_visual_capabilities")
@@ -1147,7 +1167,7 @@ model KnowledgeRetrievalInvocation {
 model RunEvent {
   id                        String                     @id @default(cuid())
   runId                     String                     @map("run_id")
-  sourceId                  String?                    @map("source_id")
+  sourceId                  String?                    @map("source_id") @db.VarChar(128)
   sequence                  Int
   type                      String
   payload                   Json
@@ -1238,6 +1258,41 @@ model Blob {
   @@index([status, gcEligibleAt])
   @@index([status, storageDeletedAt, gcAttemptCount])
   @@map("blobs")
+}
+
+model ReadyObjectIntegrityIncident {
+  id                   String   @id @default(cuid())
+  fingerprint          String   @unique @db.Char(64)
+  storageKey           String   @map("storage_key")
+  failureCode          String   @map("failure_code") @db.VarChar(120)
+  expectedSha256       String   @map("expected_sha256") @db.Char(64)
+  expectedByteSize     BigInt   @map("expected_byte_size")
+  expectedMediaType    String   @map("expected_media_type")
+  observedSha256       String?  @map("observed_sha256") @db.Char(64)
+  observedByteSize     BigInt?  @map("observed_byte_size")
+  observedMediaType    String?  @map("observed_media_type") @db.VarChar(512)
+  observedContentRange String?  @map("observed_content_range") @db.VarChar(512)
+  occurrenceCount      Int      @default(1) @map("occurrence_count")
+  firstDetectedAt      DateTime @default(now()) @map("first_detected_at") @db.Timestamptz(6)
+  lastDetectedAt       DateTime @default(now()) @map("last_detected_at") @db.Timestamptz(6)
+  retentionReleases    ReadyObjectIntegrityRetentionRelease[]
+
+  @@index([storageKey, lastDetectedAt], map: "ready_object_integrity_incidents_storage_detected_idx")
+  @@index([failureCode, lastDetectedAt], map: "ready_object_integrity_incidents_failure_detected_idx")
+  @@map("ready_object_integrity_incidents")
+}
+
+model ReadyObjectIntegrityRetentionRelease {
+  id                      String                       @id @default(cuid())
+  incidentId              String                       @map("incident_id")
+  releasedOccurrenceCount Int                          @map("released_occurrence_count")
+  releaseReference        String                       @map("release_reference") @db.VarChar(256)
+  releasedAt              DateTime                     @default(now()) @map("released_at") @db.Timestamptz(6)
+  incident                ReadyObjectIntegrityIncident @relation(fields: [incidentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([incidentId, releasedOccurrenceCount], map: "ready_object_integrity_release_occurrence_key")
+  @@index([incidentId, releasedAt], map: "ready_object_integrity_release_incident_released_idx")
+  @@map("ready_object_integrity_retention_releases")
 }
 
 model BlobScan {

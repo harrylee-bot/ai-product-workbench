@@ -6,6 +6,7 @@ import {
   assertPrototypePatchPayloadSize,
   prototypePatchCheckpointScreenSchema,
   prototypeDocumentSchema,
+  runEventSourceIdSchema,
   runtimePrototypePatchInputSchema,
   type PrototypeDocument,
   type PrototypePatchCheckpointScreen,
@@ -784,7 +785,7 @@ async function lockVersionProjections(
 }
 
 function assertSourceEventId(sourceEventId: string) {
-  if (!sourceEventId.trim() || sourceEventId.length > 1_024) {
+  if (!runEventSourceIdSchema.safeParse(sourceEventId).success) {
     throw new Error("RUNTIME_PROTOTYPE_PATCH_SOURCE_ID_INVALID");
   }
 }

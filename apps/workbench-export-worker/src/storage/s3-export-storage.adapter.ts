@@ -7,6 +7,11 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import {
+  consumeVerifiedReadyObjectBody,
+  stageReadyObject,
+  type ReadyObjectIntegrityRecorder,
+} from "@workbench/workbench-content-security";
 import type { ExportWorkerConfig } from "../config.js";
 import type { ExportStoragePort, StoredIdentity } from "./storage.port.js";
 
@@ -25,6 +30,7 @@ export class S3ExportStorageAdapter implements ExportStoragePort {
       | "exportS3AccessKeyId"
       | "exportS3SecretAccessKey"
     >,
+    private readonly recordIntegrityFailure: ReadyObjectIntegrityRecorder,
     client?: S3Sender,
   ) {
     this.client = client ?? new S3Client({
@@ -40,36 +46,27 @@ export class S3ExportStorageAdapter implements ExportStoragePort {
 
   async readVerified(identity: StoredIdentity, maximumBytes: number, signal?: AbortSignal) {
     if (identity.byteSize > maximumBytes) throw new Error("EXPORT_INPUT_SIZE_LIMIT_EXCEEDED");
-    const result = await this.client.send(new GetObjectCommand({
-      Bucket: this.config.s3Bucket,
-      Key: identity.storageKey,
-    }), signal ? { abortSignal: signal } : undefined);
-    if (!(result.Body instanceof Readable) || result.ContentLength === undefined) {
-      throw new Error("EXPORT_STORAGE_BODY_UNSUPPORTED");
-    }
-    if (result.ContentLength !== identity.byteSize || result.ContentType !== identity.mediaType) {
-      result.Body.destroy();
-      throw new Error("EXPORT_STORAGE_IDENTITY_MISMATCH");
-    }
-    const chunks: Buffer[] = [];
-    const digest = createHash("sha256");
-    let byteSize = 0;
-    try {
-      for await (const value of result.Body) {
-        if (signal?.aborted) throw abortError(signal);
-        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
-        byteSize += chunk.byteLength;
-        if (byteSize > identity.byteSize || byteSize > maximumBytes) throw new Error("EXPORT_STORAGE_IDENTITY_MISMATCH");
-        chunks.push(chunk);
-        digest.update(chunk);
+    const staged = await stageReadyObject(identity, async (requestSignal) => {
+      const result = await this.client.send(new GetObjectCommand({
+        Bucket: this.config.s3Bucket,
+        Key: identity.storageKey,
+      }), requestSignal ? { abortSignal: requestSignal } : undefined);
+      if (!(result.Body instanceof Readable)) {
+        throw new Error("EXPORT_STORAGE_BODY_UNSUPPORTED");
       }
-    } finally {
-      result.Body.destroy();
-    }
-    if (byteSize !== identity.byteSize || digest.digest("hex") !== identity.sha256) {
-      throw new Error("EXPORT_STORAGE_IDENTITY_MISMATCH");
-    }
-    return Buffer.concat(chunks, byteSize);
+      return {
+        body: result.Body,
+        byteSize: result.ContentLength ?? null,
+        mediaType: result.ContentType ?? null,
+        contentRange: result.ContentRange ?? null,
+      };
+    }, {
+      recordIntegrityFailure: this.recordIntegrityFailure,
+      maximumObjectBytes: maximumBytes,
+      memoryThresholdBytes: Math.min(maximumBytes, 1024 * 1024),
+      ...(signal ? { signal } : {}),
+    });
+    return consumeVerifiedReadyObjectBody(staged.body, staged.byteSize);
   }
 
   async putVerified(identity: StoredIdentity, bytes: Uint8Array, signal?: AbortSignal) {
@@ -141,8 +138,4 @@ function isPreconditionFailed(error: unknown) {
 function isNotFound(error: unknown) {
   const candidate = error as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
   return candidate?.name === "NotFound" || candidate?.name === "NoSuchKey" || candidate?.Code === "NotFound" || candidate?.Code === "NoSuchKey" || candidate?.$metadata?.httpStatusCode === 404;
-}
-
-function abortError(signal: AbortSignal) {
-  return signal.reason instanceof Error ? signal.reason : new Error("EXPORT_ABORTED");
 }

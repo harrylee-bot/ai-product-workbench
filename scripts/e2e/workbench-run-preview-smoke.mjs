@@ -341,6 +341,9 @@ try {
     if (method === "GET" && requestPath === "/api/v1/workspaces/workspace-1/design-systems") {
       return json(route, { items: [], nextCursor: null });
     }
+    if (method === "GET" && requestPath === `/api/v1/projects/${project.id}/import-sources`) {
+      return json(route, { items: [], nextCursor: null });
+    }
     if (method === "GET" && requestPath === `/api/v1/projects/${project.id}/bootstrap`) {
       return json(route, {
         project,
@@ -444,6 +447,7 @@ try {
       const {
         prompt: _prompt,
         canvasSnapshot: _canvasSnapshot,
+        sourceIds: _sourceIds,
         ...submittedRunRequest
       } = activeSubmissionIntent.request;
       Object.assign(run, submittedRunRequest);

@@ -6,8 +6,8 @@ import {
   readKnowledgeProfileOperatorOptions,
 } from "./workbench-knowledge-profile-operator-lib.mjs";
 
-const databaseUrl = process.env.WORKBENCH_DATABASE_URL?.trim();
-if (!databaseUrl) throw new Error("Missing WORKBENCH_DATABASE_URL");
+const databaseUrl = process.env.WORKBENCH_MIGRATOR_DATABASE_URL?.trim();
+if (!databaseUrl) throw new Error("Missing WORKBENCH_MIGRATOR_DATABASE_URL");
 
 const options = readKnowledgeProfileOperatorOptions();
 const db = new PrismaClient({ datasourceUrl: databaseUrl });

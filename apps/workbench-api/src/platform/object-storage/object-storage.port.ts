@@ -54,7 +54,11 @@ export interface MultipartStoragePort {
 }
 
 export interface ReadyBlobStoragePort {
-  getObject(input: { key: string; range?: { start: number; end: number } }): Promise<StoredObjectBody>;
+  getObject(input: {
+    key: string;
+    range?: { start: number; end: number };
+    signal?: AbortSignal;
+  }): Promise<StoredObjectBody>;
 }
 
 /** Dedicated short-lived storage scope for Canvas visual capabilities. */
@@ -66,6 +70,10 @@ export interface CanvasVisualStoragePort {
     mediaType: string;
     sha256: string;
   }): Promise<void>;
-  getObject(input: { key: string; range?: { start: number; end: number } }): Promise<StoredObjectBody>;
+  getObject(input: {
+    key: string;
+    range?: { start: number; end: number };
+    signal?: AbortSignal;
+  }): Promise<StoredObjectBody>;
   deleteObject(key: string): Promise<void>;
 }

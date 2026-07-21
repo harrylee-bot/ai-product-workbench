@@ -316,7 +316,7 @@ Run 只接受目标 Project 内 ready 的设计系统 ArtifactVersion。API 从�
 - 不导入或保留旧数据库中的知识文档行、chunk、embedding、向量索引、检索缓存或旧 `KnowledgeRelease`；所有知识投影由允许保留的源资产重新生成。
 - 不制作旧业务数据库、旧对话或旧生成产物的上线回滚快照；切流后的故障只允许在新系统上修复，或回滚新系统代码/新 schema 迁移，不允许恢复旧版处理业务。
 - 删除范围包括只服务旧链路的前后端源码与测试、API、schema/表/视图/队列、数据库实例及备份快照、对象存储非知识 allowlist 数据及历史版本、卷与上传/解析/生成目录、DeerFlow binding/配置、部署服务/容器/镜像/制品、环境变量/secrets，以及日志/trace/metric 及其归档。
-- 删除动作必须输出可审计 manifest：仓库预切流基线 `docs/workbench-hard-cut-deletion-manifest.json` 已升级为 v2，覆盖数据库/备份、对象前缀与历史版本、容器/镜像/制品、卷、网络、密钥、日志/trace/metric 和删除回执。切流前运行 `npm run hard-cut:manifest` 时各生产删除项保持 `pending` 是正确状态；只有生产验收、切流和物理删除完成后，才运行 `node scripts/workbench-hard-cut-manifest.mjs --enforce` 并逐项写入删除前计数、删除结果和残留扫描回执。仅隐藏旧导航、NGINX 入口或停止容器不算完成。
+- 删除动作必须输出可审计 manifest：仓库预切流基线 `docs/workbench-hard-cut-deletion-manifest.json` 已升级为 v3，覆盖数据库/备份、对象前缀与历史版本、容器/镜像/制品、卷、网络、密钥、日志/trace/metric 和删除回执。切流前运行 `npm run hard-cut:manifest` 时各生产删除项保持 `pending` 是正确状态；G12 只允许通过受保护的 `.github/workflows/workbench-production-acceptance.yml` 执行：从同一已验证 release chain 下载无凭证 HTTPS 外部证据包，验证 G5-G11、四方批准和候选绑定，再在临时 evidence root 运行 `node scripts/workbench-hard-cut-manifest.mjs --enforce --expected-candidate-id <G1-candidate-id> --expected-source-commit <G0-G2-source-commit> --expected-signed-tag <signed-tag>`。三个 expected 值不能从 manifest 自身回填。仅隐藏旧导航、NGINX 入口或停止容器不算完成。
 
 ## 当前施工状态
 

@@ -33,6 +33,10 @@ require_env() {
   printf '%s' "$value"
 }
 
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
 deerflow_home=$(require_env DEER_FLOW_HOME)
 base_config=$(require_env WORKBENCH_DEERFLOW_BASE_CONFIG_PATH)
 effective_config=$(require_env DEER_FLOW_CONFIG_PATH)
@@ -45,6 +49,7 @@ base_image_ref=$(require_env WORKBENCH_DEERFLOW_BASE_IMAGE_REF)
 image_ref=$(require_env WORKBENCH_DEERFLOW_IMAGE_REF)
 image_digest=$(require_env WORKBENCH_DEERFLOW_IMAGE_DIGEST)
 image_inventory=$(require_env WORKBENCH_IMAGE_INVENTORY_PATH)
+image_inventory_bundle=$(require_env WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH)
 cosign_identity=$(require_env WORKBENCH_COSIGN_CERTIFICATE_IDENTITY)
 cosign_issuer=$(require_env WORKBENCH_COSIGN_OIDC_ISSUER)
 attestation=$(require_env WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH)
@@ -56,6 +61,7 @@ host_port=$(require_env WORKBENCH_DEERFLOW_HOST_PORT)
 [ -d "$deerflow_home" ] || fail "missing dedicated DeerFlow home: $deerflow_home"
 [ -f "$attestation" ] || fail "missing request-scoped secret attestation: $attestation"
 [ -f "$image_inventory" ] || fail "missing signed image evidence manifest: $image_inventory"
+[ -f "$image_inventory_bundle" ] || fail "missing image evidence manifest signature bundle: $image_inventory_bundle"
 tool_scope_patch_sha256=$(sha256sum "$TOOL_SCOPE_PATCH_MANIFEST" 2>/dev/null | awk '{print $1}') \
   || fail "cannot hash DeerFlow tool-scope patch manifest"
 printf '%s' "$tool_scope_patch_sha256" | grep -Eq '^[0-9a-f]{64}$' \
@@ -65,10 +71,35 @@ printf '%s' "$tool_scope_patch_sha256" | grep -Eq '^[0-9a-f]{64}$' \
 [ ! -L "$base_config" ] || fail "base config must not be a symlink"
 grep -Fq 'REPLACE_WITH_' "$provider_env" && fail "provider environment still contains placeholders"
 
-provider_mode=$(stat -c '%a' "$provider_env" 2>/dev/null) || fail "cannot inspect provider environment permissions"
+provider_mode=$(file_mode "$provider_env") || fail "cannot inspect provider environment permissions"
 case "$provider_mode" in
   400 | 440 | 600 | 640) ;;
   *) fail "provider environment must be owner-readable, optionally group-readable, and never writable by group/other" ;;
+esac
+
+provider_env_value() {
+  key=$1
+  count=$(grep -c "^${key}=" "$provider_env" || true)
+  [ "$count" -eq 1 ] || fail "$key must occur exactly once in provider environment"
+  sed -n "s/^${key}=//p" "$provider_env"
+}
+
+provider_api_key=$(provider_env_value OPENAI_API_KEY)
+provider_base_url=$(provider_env_value WORKBENCH_DEERFLOW_PROVIDER_BASE_URL)
+provider_model=$(provider_env_value WORKBENCH_DEERFLOW_PROVIDER_MODEL)
+
+[ -n "$provider_api_key" ] || fail "OPENAI_API_KEY is empty in provider environment"
+[ -n "$provider_base_url" ] || fail "WORKBENCH_DEERFLOW_PROVIDER_BASE_URL is empty in provider environment"
+[ -n "$provider_model" ] || fail "WORKBENCH_DEERFLOW_PROVIDER_MODEL is empty in provider environment"
+case "$provider_base_url" in
+  https://*) ;;
+  *) fail "WORKBENCH_DEERFLOW_PROVIDER_BASE_URL must use HTTPS" ;;
+esac
+case "$provider_base_url" in
+  *"@"* | *"?"* | *"#"*) fail "WORKBENCH_DEERFLOW_PROVIDER_BASE_URL must not contain credentials, a query, or a fragment" ;;
+esac
+case "$provider_model" in
+  *[!A-Za-z0-9._:/-]* | latest | "") fail "WORKBENCH_DEERFLOW_PROVIDER_MODEL must be a fixed provider model id" ;;
 esac
 
 case "$host_port" in
@@ -80,8 +111,10 @@ printf '%s' "$workbench_source_commit" | grep -Eq '^[0-9a-f]{40}$' \
   || fail "WORKBENCH_SOURCE_COMMIT must be a lowercase Git commit"
 printf '%s' "$base_image_ref" | grep -Eq '@sha256:[0-9a-f]{64}$' \
   || fail "WORKBENCH_DEERFLOW_BASE_IMAGE_REF must be an immutable digest reference"
+printf '%s' "$cosign_identity" | grep -Eq '^https://[^[:space:]]+$' \
+  || fail "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY must be an exact HTTPS identity"
 printf '%s' "$cosign_issuer" | grep -Eq '^https://[^[:space:]]+$' \
-  || fail "WORKBENCH_COSIGN_OIDC_ISSUER must be an HTTPS issuer"
+  || fail "WORKBENCH_COSIGN_OIDC_ISSUER must be an exact HTTPS issuer"
 printf '%s' "$image_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' \
   || fail "WORKBENCH_DEERFLOW_IMAGE_DIGEST must be sha256:<64 lowercase hex>"
 case "$image_ref" in
@@ -97,17 +130,25 @@ node "$APP_DIR/scripts/merge-deerflow-config.mjs" \
   --fragment "$FRAGMENT_FILE" \
   --output "$effective_config" \
   --check
+node "$APP_DIR/scripts/assert-deerflow-runtime-config.mjs" \
+  --config "$effective_config" \
+  --provider-env "$provider_env"
 node "$APP_DIR/scripts/assert-deerflow-secret-channel-attestation.mjs" \
   --attestation "$attestation" \
   --commit "$expected_commit" \
   --image-digest "$image_digest"
+command -v cosign >/dev/null 2>&1 || fail "cosign is required to verify the production image manifest"
 node "$APP_DIR/scripts/production-image-inventory.mjs" \
   --manifest "$image_inventory" \
+  --bundle "$image_inventory_bundle" \
+  --certificate-identity "$cosign_identity" \
+  --certificate-oidc-issuer "$cosign_issuer" \
   --expected-commit "$workbench_source_commit" \
   --env-file "$ENV_FILE" \
-  --image deerflow
+  --image deerflow \
+  --inspect-local-images
 
-config_mode=$(stat -c '%a' "$effective_config" 2>/dev/null) || fail "cannot inspect effective config permissions"
+config_mode=$(file_mode "$effective_config") || fail "cannot inspect effective config permissions"
 [ "$config_mode" = "600" ] || fail "effective config must have mode 0600"
 
 image_repo_digests=$(docker image inspect --format '{{join .RepoDigests " "}}' "$image_ref" 2>/dev/null) \

@@ -14,6 +14,7 @@ import {
 
 const root = new URL("../", import.meta.url);
 const runtimeCompose = readYaml("deploy/deerflow-runtime-compose.yml");
+const baseConfigExample = readYaml("deploy/deerflow-config.base.example.yaml");
 const extensions = JSON.parse(readText("deploy/deerflow-extensions.production.json"));
 const fragment = readYaml("integrations/deerflow/runtime-tools/config.fragment.yaml");
 const workbenchSkill = readYamlFrontmatter("integrations/deerflow/skills/workbench/SKILL.md");
@@ -48,6 +49,7 @@ const requiredEnvironment = {
   DEER_FLOW_EXTENSIONS_CONFIG_PATH: "/app/backend/extensions_config.workbench.json",
   DEER_FLOW_SKILLS_PATH: "/app/skills",
   DEER_FLOW_INTERNAL_AUTH_TOKEN: "${WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN:?WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN is required}",
+  UV_CACHE_DIR: "/tmp/uv-cache",
   PYTHONDONTWRITEBYTECODE: "1",
 };
 for (const [name, expected] of Object.entries(requiredEnvironment)) {
@@ -69,6 +71,7 @@ for (const variable of [
   "WORKBENCH_DEERFLOW_IMAGE_REF=",
   "WORKBENCH_DEERFLOW_IMAGE_DIGEST=",
   "WORKBENCH_SOURCE_COMMIT=",
+  "WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=",
   "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY=",
   "WORKBENCH_COSIGN_OIDC_ISSUER=",
 ]) {
@@ -91,6 +94,16 @@ assert(
 assert(gateway.cap_drop?.includes("ALL"), "DeerFlow must drop ambient Linux capabilities");
 assert(gateway.security_opt?.includes("no-new-privileges:true"), "DeerFlow must forbid privilege escalation");
 assert(String(gateway.command).includes("--workers 1"), "DeerFlow must keep a single in-process runtime worker");
+assert(String(gateway.command).includes("uv run --no-sync"), "DeerFlow must not mutate the read-only image while starting");
+
+const configuredModel = baseConfigExample.models?.find((model) => model?.name === "gpt-5.5");
+assert(configuredModel, "the DeerFlow base-config example must define the pinned gpt-5.5 model");
+assert(configuredModel.use === "langchain_openai:ChatOpenAI", "the DeerFlow base-config example must use the OpenAI-compatible adapter");
+assert(configuredModel.model === "gpt-5.5", "the DeerFlow base-config example must pin the gpt-5.5 API model");
+assert(configuredModel.api_key === "$OPENAI_API_KEY", "the DeerFlow base-config example must reference the provider key by environment name");
+assert(configuredModel.base_url === "$WORKBENCH_DEERFLOW_PROVIDER_BASE_URL", "the DeerFlow base-config example must reference the approved provider URL by environment name");
+assert(baseConfigExample.sandbox?.use === "deerflow.sandbox.local:LocalSandboxProvider", "the DeerFlow base-config example must select the local provider explicitly");
+assert(baseConfigExample.sandbox?.allow_host_bash === false, "the DeerFlow base-config example must disable host bash");
 
 const deerflowDockerfile = readText("integrations/deerflow/Dockerfile");
 for (const requiredLine of [
@@ -103,6 +116,8 @@ for (const requiredLine of [
   `COPY integrations/deerflow/source-patches/${patchCommit}/ /opt/workbench/deerflow/source-patch/`,
   `test \"\${DEERFLOW_SOURCE_COMMIT}\" = \"${patchCommit}\"`,
   "test_workbench_tool_scope_middleware.py",
+  "--gateway-root /app/backend",
+  "test_workbench_request_context.py",
   "apply.py",
   "--check",
   `ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=${patchManifestSha256}`,
@@ -125,19 +140,74 @@ assert(
   "DeerFlow lead-agent upstream source hash drifted",
 );
 assert(
-  patchManifest.agent?.patchedSha256 === "363a91528113a6daba6441dc7c2a32c787c8478a12be93f3222ba38adb7c8454",
+  patchManifest.agent?.patchedSha256 === "6bae0682d26cac465e5f7783e2878254bb45212bb1d88e4da9c937a5ae31aa49",
   "DeerFlow lead-agent patched source hash drifted",
 );
 assert(
   patchManifest.deferredMiddleware?.sha256 === "d0fb92b78bf7d65a3444925a7cef4a1072f464127b75393fdaf5f1fb7d9053f2",
   "DeerFlow middleware API source hash drifted",
 );
-assertDeepEqual(patchManifest.additionalSources, [], "DeerFlow source patch may modify only the audited lead agent and add the scoped middleware");
 assert(
-  patchManifest.agent?.insertion?.includes(
-    "WorkbenchToolScopeMiddleware(workbench_canvas_policy_from_runnable_config(config))",
-  ),
-  "DeerFlow lead-agent patch must freeze the per-Run configurable policy into the middleware",
+  Array.isArray(patchManifest.additionalSources)
+    && patchManifest.additionalSources.length === 1,
+  "DeerFlow source patch must declare the audited subagent tool filter",
+);
+const subagentToolPatch = patchManifest.additionalSources[0];
+assert(
+  subagentToolPatch.path === "deerflow/tools/builtins/task_tool.py"
+    && subagentToolPatch.upstreamSha256 === "bbbf58869ea4e24a8c230695478fb5d09fd35c2e4dbb2c16bc5052871027ee95"
+    && subagentToolPatch.patchedSha256 === "3e14b348c6f1941fd3fe0a08d4bf75a539f451d50ab186aecd3de2db21c198de",
+  "DeerFlow subagent tool filter must bind the audited upstream and patched hashes",
+);
+assert(
+  subagentToolPatch.replacements?.some((replacement) => (
+    replacement.anchor === "    # Create executor\n"
+      && replacement.insertion.includes("_workbench_parent_run_tool_names")
+      && replacement.insertion.includes('"workbench_generation_stage_update"')
+      && replacement.insertion.includes('"workbench_artifact_draft_publish"')
+      && replacement.insertion.includes('"workbench_prototype_patch_publish"')
+      && replacement.insertion.includes('"navigate_canvas"')
+      && replacement.insertion.includes("getattr(tool, \"name\", None)")
+  )),
+  "DeerFlow subagent patch must remove parent-run publication and Canvas tools before executor creation",
+);
+assert(
+  Array.isArray(patchManifest.gatewaySources)
+    && patchManifest.gatewaySources.length === 1,
+  "DeerFlow source patch must declare the audited Gateway context patch",
+);
+const gatewayContextPatch = patchManifest.gatewaySources[0];
+assert(
+  gatewayContextPatch.path === "app/gateway/services.py"
+    && gatewayContextPatch.upstreamSha256 === "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34"
+    && gatewayContextPatch.patchedSha256 === "b248817f54e62a63a4777acaf9058a806b9695cb987c4cc5e4fa9eefd5b04440",
+  "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
+);
+assert(
+  gatewayContextPatch.replacements?.some((replacement) => (
+    replacement.position === "before"
+      && replacement.anchor.includes("merge_run_context_overrides")
+      && replacement.insertion.includes("_WORKBENCH_SECRET_KEYS")
+      && replacement.insertion.includes('"requestedArtifactKinds"')
+      && replacement.insertion.includes("_WORKBENCH_REQUESTED_ARTIFACT_KINDS")
+      && replacement.insertion.includes("_is_trusted_internal_caller")
+  ))
+    && gatewayContextPatch.replacements?.some((replacement) => (
+      replacement.position === "replace"
+        && replacement.insertion.includes("allow_workbench_context=trusted_internal_caller")
+    ))
+    && gatewayContextPatch.replacements?.some((replacement) => (
+      replacement.insertion.includes("sanitized_request_config")
+    )),
+  "DeerFlow Gateway patch must gate and redact request-scoped Workbench context",
+);
+assert(
+  patchManifest.agent?.insertion?.includes("WorkbenchToolScopeMiddleware(")
+    && patchManifest.agent.insertion.includes("workbench_canvas_policy_from_runnable_config(config)")
+    && patchManifest.agent.insertion.includes(
+      "workbench_requested_artifact_kinds_from_runnable_config(config)",
+    ),
+  "DeerFlow lead-agent patch must freeze per-Run Canvas and Artifact policies into the middleware",
 );
 assert(
   sha256(toolScopeMiddlewareSource)
@@ -147,8 +217,12 @@ assert(
 assert(
   toolScopeMiddlewareSource.includes("def workbench_canvas_policy_from_runnable_config(config: Any) -> Any:")
     && toolScopeMiddlewareSource.includes('config.get("configurable")')
+    && toolScopeMiddlewareSource.includes(
+      "def workbench_requested_artifact_kinds_from_runnable_config(config: Any) -> Any:",
+    )
+    && toolScopeMiddlewareSource.includes('context.get("workbench")')
     && !toolScopeMiddlewareSource.includes("runtime.config"),
-  "Workbench tool-scope middleware must read only graph-factory RunnableConfig.configurable",
+  "Workbench tool-scope middleware must read only graph-factory RunnableConfig policy channels",
 );
 const middlewareToolTuple = /CANVAS_TOOL_NAMES = \(\n([\s\S]*?)\n\)/u.exec(toolScopeMiddlewareSource);
 assert(middlewareToolTuple, "Workbench tool-scope middleware Canvas tuple is missing");
@@ -157,10 +231,31 @@ assertDeepEqual(
   WORKBENCH_CANVAS_TOOLS.map((tool) => tool.name),
   "Workbench tool-scope middleware must use the canonical eight Canvas tools in order",
 );
+const prototypeToolTuple = /PROTOTYPE_TOOL_NAMES = \(\n([\s\S]*?)\n\)/u.exec(toolScopeMiddlewareSource);
+assert(prototypeToolTuple, "Workbench tool-scope middleware Prototype tuple is missing");
+assertDeepEqual(
+  [...prototypeToolTuple[1].matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]),
+  [
+    "workbench_generation_stage_update",
+    "workbench_artifact_draft_publish",
+    "workbench_prototype_patch_publish",
+  ],
+  "Workbench tool-scope middleware must use the three Prototype-only tools in order",
+);
 assert(
   /workbench_canvas_tools:\s*canvasToolCapability\s*\?\s*\{\s*declaredTools:/u.test(runtimeAdapter)
     && /:\s*null,\s*\n\s*model_name:/u.test(runtimeAdapter),
   "Runtime Worker must send an explicit per-Run workbench_canvas_tools.declaredTools policy or null",
+);
+assert(
+  /requestedArtifactKinds:\s*\[\.\.\.execution\.request\.requestedArtifactKinds\]/u.test(runtimeAdapter),
+  "Runtime Worker must send requested Artifact kinds through the trusted Workbench context",
+);
+assert(
+  /subagent_enabled:\s*execution\.request\.requestedArtifactKinds\.some\([\s\S]*?kind === "prototype" \|\| kind === "code"/u
+    .test(runtimeAdapter)
+    && !runtimeAdapter.includes("subagent_enabled: true"),
+  "Runtime Worker must enable delegation only for Prototype or code Runs",
 );
 assert(
   sha256(patchApplierSource) === patchManifest.patchApplier?.sha256,
@@ -170,13 +265,19 @@ assert(
   sha256(patchContractTestSource) === patchManifest.contractTest?.sha256,
   "DeerFlow tool-scope contract test does not match its manifest",
 );
+const patchRequestContextTestSource = readText(`${patchRoot}/test_workbench_request_context.py`);
+assert(
+  sha256(patchRequestContextTestSource) === patchManifest.requestContextTest?.sha256,
+  "DeerFlow request-context contract test does not match its manifest",
+);
 assertDeepEqual(
   readdirSync(new URL(`${patchRoot}/`, root)).sort(),
-  ["apply.py", "manifest.json", "test_workbench_tool_scope_middleware.py", "workbench_tool_scope_middleware.py"],
-  "DeerFlow source-patch bundle must contain only the four audited files",
+  ["apply.py", "manifest.json", "test_workbench_request_context.py", "test_workbench_tool_scope_middleware.py", "workbench_tool_scope_middleware.py"],
+  "DeerFlow source-patch bundle must contain only the audited files",
 );
 assert(
   patchApplierSource.includes('manifest["additionalSources"]')
+    && patchApplierSource.includes('manifest["gatewaySources"]')
     && patchApplierSource.includes("DEERFLOW_PATCH_AGENT_OUTPUT_MISMATCH")
     && patchApplierSource.includes("DEERFLOW_PATCH_MIDDLEWARE_OUTPUT_MISMATCH"),
   "DeerFlow patch applier must verify every declared patch output",
@@ -187,10 +288,17 @@ assert(
     && patchContractTestSource.includes("test_async_non_canvas_tool_is_not_affected_by_malformed_policy"),
   "DeerFlow patch contract must cover sync/async fail-closed and non-Canvas behavior",
 );
+assert(
+  patchRequestContextTestSource.includes("test_only_an_authenticated_internal_caller_can_deliver_workbench_channels")
+    && patchRequestContextTestSource.includes("test_untrusted_context_is_fail_closed_and_persistence_config_is_redacted")
+    && patchRequestContextTestSource.includes("test_malformed_scope_does_not_create_a_runtime_secret_channel"),
+  "DeerFlow request-context contract must cover caller auth, redaction, and malformed scope",
+);
 for (const requiredPreflightText of [
   "TOOL_SCOPE_PATCH_MANIFEST=",
   "--expected-commit \"$expected_commit\"",
   "io.workbench.deerflow.tool-scope-patch-sha256",
+  "assert-deerflow-runtime-config.mjs",
 ]) {
   assert(preflight.includes(requiredPreflightText), `DeerFlow preflight is missing ${requiredPreflightText}`);
 }

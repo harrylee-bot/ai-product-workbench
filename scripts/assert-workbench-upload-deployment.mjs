@@ -18,6 +18,12 @@ const importClamAvStreamMaxBytes = "WORKBENCH_IMPORT_CLAMAV_STREAM_MAX_BYTES";
 assertEnvironment(services["workbench-api"], internalEndpoint, "workbench-api");
 assertEnvironment(services["workbench-api"], internalPathStyle, "workbench-api");
 assertEnvironment(services["workbench-api"], browserBucketUrl, "workbench-api");
+for (const canvasCredential of [
+  "WORKBENCH_API_CANVAS_VISUAL_S3_ACCESS_KEY_ID",
+  "WORKBENCH_API_CANVAS_VISUAL_S3_SECRET_ACCESS_KEY",
+]) {
+  assertEnvironment(services["workbench-api"], canvasCredential, "workbench-api");
+}
 
 for (const serviceName of [
   "workbench-worker",
@@ -32,6 +38,15 @@ for (const serviceName of [
     !Object.hasOwn(services[serviceName]?.environment ?? {}, browserBucketUrl),
     `${serviceName} must not receive the browser upload bucket URL`,
   );
+  for (const canvasCredential of [
+    "WORKBENCH_API_CANVAS_VISUAL_S3_ACCESS_KEY_ID",
+    "WORKBENCH_API_CANVAS_VISUAL_S3_SECRET_ACCESS_KEY",
+  ]) {
+    assert(
+      !Object.hasOwn(services[serviceName]?.environment ?? {}, canvasCredential),
+      `${serviceName} must not receive ${canvasCredential}`,
+    );
+  }
 }
 
 assertEnvironment(
@@ -146,6 +161,14 @@ assert(
   )),
   "external production S3 lifecycle template must abort incomplete multipart uploads after one day",
 );
+assert(
+  !lifecycle.Rules?.some((rule) => (
+    rule.Status === "Enabled"
+    && (rule.Expiration || rule.NoncurrentVersionExpiration)
+    && lifecyclePrefixOverlaps(lifecycleRulePrefix(rule), "canvas-visuals/")
+  )),
+  "external production S3 lifecycle must not delete Canvas visuals outside the database forensic-release fence",
+);
 
 const deploymentContracts = [
   "deploy/workbench-compose.yml",
@@ -215,12 +238,64 @@ assert(
 );
 const productionImageMatrix = ci.jobs?.["production-images"]?.strategy?.matrix?.include ?? [];
 assert(
+  equal(ci.jobs?.["production-images"]?.needs, ["release-chain", "release-chain-signing", "quality", "deployment-config"]),
+  "production images must wait for the verified release chain, release-chain signing, quality, and deployment configuration gates",
+);
+assert(
   productionImageMatrix.some((entry) => (
     entry?.name === "import-worker"
     && entry?.dockerfile === "apps/workbench-import-worker/Dockerfile"
     && entry?.target === "runner"
   )),
   "production image CI matrix must build the Workbench Import Worker",
+);
+const webImage = productionImageMatrix.find((entry) => entry?.name === "web");
+for (const marker of [
+  "vars.WORKBENCH_PREVIEW_ORIGIN",
+  "vars.WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL",
+  "vars.WORKBENCH_KNOWLEDGE_BASE_URL",
+  "vars.WORKBENCH_PUBLIC_REGISTRATION_ENABLED",
+  "vars.NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL",
+  "vars.NEXT_PUBLIC_WORKBENCH_FORUM_URL",
+  "vars.NEXT_PUBLIC_WORKBENCH_PRIVACY_URL",
+  "NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=",
+]) {
+  assert(
+    String(webImage?.build_args ?? "").includes(marker),
+    `production Web build args must derive ${marker} from approved release variables`,
+  );
+}
+const quartzImage = productionImageMatrix.find((entry) => entry?.name === "quartz");
+for (const marker of ["vars.WORKBENCH_KNOWLEDGE_BASE_URL", "vars.WORKBENCH_WEB_ORIGIN"]) {
+  assert(
+    String(quartzImage?.build_args ?? "").includes(marker),
+    `production Quartz build args must derive ${marker} from approved release variables`,
+  );
+}
+const productionImageSteps = ci.jobs?.["production-images"]?.steps ?? [];
+const productionInputGate = productionImageSteps.find((step) => step?.name === "Require approved production build inputs");
+assert(productionInputGate, "production image workflow must fail closed on missing release build inputs");
+for (const variable of [
+  "WORKBENCH_WEB_ORIGIN",
+  "WORKBENCH_PREVIEW_ORIGIN",
+  "WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL",
+  "WORKBENCH_KNOWLEDGE_BASE_URL",
+  "WORKBENCH_PUBLIC_REGISTRATION_ENABLED",
+]) {
+  assert(
+    String(productionInputGate?.env?.[variable] ?? "").includes(`vars.${variable}`),
+    `production input gate must read ${variable} from repository or environment variables`,
+  );
+}
+const buildConfigurationStep = productionImageSteps.find((step) => step?.name === "Freeze public image build configuration");
+assert(
+  String(buildConfigurationStep?.run ?? "").includes("write-production-build-configuration.mjs"),
+  "production images must freeze a canonical public build configuration before building",
+);
+const buildImageStep = productionImageSteps.find((step) => step?.name === "Build ${{ matrix.name }} production image");
+assert(
+  String(buildImageStep?.with?.labels ?? "").includes("io.workbench.build-configuration-sha256="),
+  "the signed image digest must bind the canonical build configuration SHA-256 through an OCI label",
 );
 
 const dockerIgnore = new Set(
@@ -256,6 +331,14 @@ function assertEnvironment(service, name, serviceName) {
 
 function equal(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function lifecyclePrefixOverlaps(left, right) {
+  return left.startsWith(right) || right.startsWith(left);
+}
+
+function lifecycleRulePrefix(rule) {
+  return rule.Filter?.Prefix ?? rule.Filter?.And?.Prefix ?? "";
 }
 
 function read(path) {

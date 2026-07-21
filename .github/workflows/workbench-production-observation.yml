@@ -1,0 +1,373 @@
+name: 产品工作台生产观察证据采集
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_chain_run_id:
+        description: "Successful production workbench-ci run ID for the observed candidate"
+        required: true
+        type: string
+      plan_url:
+        description: "Credential-free immutable HTTPS URL for the canonical acceptance plan"
+        required: true
+        type: string
+      plan_sha256:
+        description: "SHA-256 of the canonical acceptance plan bytes"
+        required: true
+        type: string
+      observation_source_url:
+        description: "Credential-free immutable HTTPS URL for the observation source bundle JSON"
+        required: true
+        type: string
+      observation_source_sha256:
+        description: "SHA-256 of the observation source bundle bytes"
+        required: true
+        type: string
+
+concurrency:
+  group: workbench-production-observation
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  collect-production-observations:
+    name: Validate and seal G5-G11 observations
+    runs-on: [self-hosted, production-observer]
+    environment:
+      name: production-observation
+    timeout-minutes: 120
+    steps:
+      - name: Resolve successful production CI run
+        id: ci_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHAIN_RUN_ID: ${{ inputs.release_chain_run_id }}
+          VERIFIER_COMMIT: ${{ vars.WORKBENCH_ACCEPTANCE_VERIFIER_COMMIT }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/production"
+          printf '%s' "$RELEASE_CHAIN_RUN_ID" | grep -Eq '^[1-9][0-9]*$'
+          printf '%s' "$VERIFIER_COMMIT" | grep -Eq '^[a-f0-9]{40}$'
+          root="$RUNNER_TEMP/workbench-observation-ci"
+          rm -rf "$root"
+          mkdir -p "$root"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_CHAIN_RUN_ID" > "$root/run.json"
+          RUN_METADATA="$root/run.json" node --input-type=module - "$GITHUB_OUTPUT" <<'NODE'
+          import fs from 'node:fs';
+          const run = JSON.parse(fs.readFileSync(process.env.RUN_METADATA, 'utf8'));
+          const expected = {
+            event: 'push',
+            head_branch: 'production',
+            status: 'completed',
+            conclusion: 'success',
+            path: '.github/workflows/workbench-ci.yml',
+          };
+          for (const [field, value] of Object.entries(expected)) {
+            if (run[field] !== value) throw new Error(`release-chain run ${field} is not ${value}`);
+          }
+          if (run.head_repository?.full_name !== process.env.GITHUB_REPOSITORY) {
+            throw new Error('release-chain run belongs to another repository');
+          }
+          if (!/^[a-f0-9]{40}$/.test(run.head_sha ?? '')) throw new Error('release-chain run head_sha is invalid');
+          if (!Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) throw new Error('release-chain run_attempt is invalid');
+          fs.appendFileSync(process.argv[2], `head_sha=${run.head_sha}\nrun_attempt=${run.run_attempt}\n`);
+          NODE
+
+      - name: Download CI-owned release-chain and G4 artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHAIN_RUN_ID: ${{ inputs.release_chain_run_id }}
+          RELEASE_CHAIN_RUN_ATTEMPT: ${{ steps.ci_run.outputs.run_attempt }}
+        run: |
+          set -euo pipefail
+          gh run download "$RELEASE_CHAIN_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "verified-release-chain-$RELEASE_CHAIN_RUN_ATTEMPT" \
+            --dir "$RUNNER_TEMP/workbench-observation-ci/release-chain"
+          gh run download "$RELEASE_CHAIN_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "production-image-manifest-$RELEASE_CHAIN_RUN_ATTEMPT" \
+            --dir "$RUNNER_TEMP/workbench-observation-ci/production-images"
+          gh run download "$RELEASE_CHAIN_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "production-deployment-config-$RELEASE_CHAIN_RUN_ATTEMPT" \
+            --dir "$RUNNER_TEMP/workbench-observation-ci/deployment-config"
+
+      - name: Derive candidate only from the CI artifact
+        id: release_chain
+        env:
+          CHAIN_ROOT: ${{ runner.temp }}/workbench-observation-ci/release-chain
+          EXPECTED_HEAD_SHA: ${{ steps.ci_run.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          CHAIN_OUTPUT="$GITHUB_OUTPUT" node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const expectedFiles = [
+            'g0.json', 'g1-inventory.ndjson', 'g1-manifest.json', 'g2-receipt.json',
+            'release-chain.bundle.json', 'release-chain.json',
+          ];
+          const actualFiles = fs.readdirSync(process.env.CHAIN_ROOT).sort();
+          if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
+            throw new Error(`verified-release-chain artifact has unexpected files: ${actualFiles.join(',')}`);
+          }
+          const chain = JSON.parse(fs.readFileSync(path.join(process.env.CHAIN_ROOT, 'release-chain.json'), 'utf8'));
+          if (chain.status !== 'PASS') throw new Error('release chain status must be PASS');
+          if (chain.sourceCommit !== process.env.EXPECTED_HEAD_SHA) throw new Error('release chain sourceCommit does not match CI head_sha');
+          if (!/^sha256:[a-f0-9]{64}$/.test(chain.chainId ?? '')) throw new Error('release chain ID is invalid');
+          if (!/^sha256:[a-f0-9]{64}$/.test(chain.candidateId ?? '')) throw new Error('release candidate ID is invalid');
+          if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$/.test(chain.signedTag ?? '')) throw new Error('release signed tag is invalid');
+          const outputs = {
+            chain_id: chain.chainId,
+            candidate_id: chain.candidateId,
+            source_commit: chain.sourceCommit,
+            signed_tag: chain.signedTag,
+          };
+          fs.appendFileSync(process.env.CHAIN_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
+          NODE
+
+      - name: Checkout protected verifier source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ vars.WORKBENCH_ACCEPTANCE_VERIFIER_COMMIT }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install verifier dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
+      - name: Verify release chain and G4 image manifest
+        env:
+          CHAIN_ROOT: ${{ runner.temp }}/workbench-observation-ci/release-chain
+          IMAGE_ROOT: ${{ runner.temp }}/workbench-observation-ci/production-images
+          CONFIG_ROOT: ${{ runner.temp }}/workbench-observation-ci/deployment-config
+          CANDIDATE_ID: ${{ steps.release_chain.outputs.candidate_id }}
+          SOURCE_COMMIT: ${{ steps.release_chain.outputs.source_commit }}
+          SIGNED_TAG: ${{ steps.release_chain.outputs.signed_tag }}
+          RELEASE_CHAIN_ID: ${{ steps.release_chain.outputs.chain_id }}
+          RELEASE_CHAIN_RUN_ID: ${{ inputs.release_chain_run_id }}
+          RELEASE_CHAIN_RUN_ATTEMPT: ${{ steps.ci_run.outputs.run_attempt }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/production
+          CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -euo pipefail
+          cosign verify-blob \
+            --bundle "$CHAIN_ROOT/release-chain.bundle.json" \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$CERTIFICATE_OIDC_ISSUER" \
+            "$CHAIN_ROOT/release-chain.json"
+          cosign verify-blob \
+            --bundle "$IMAGE_ROOT/production-image-manifest.bundle.json" \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$CERTIFICATE_OIDC_ISSUER" \
+            "$IMAGE_ROOT/production-image-manifest.json"
+          node scripts/production-image-inventory.mjs \
+            --manifest "$IMAGE_ROOT/production-image-manifest.json" \
+            --bundle "$IMAGE_ROOT/production-image-manifest.bundle.json" \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$CERTIFICATE_OIDC_ISSUER" \
+            --expected-commit "$SOURCE_COMMIT" \
+            --release-chain-id "$RELEASE_CHAIN_ID"
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { loadVerifiedProductionDeploymentConfig } from './scripts/production-deployment-config.mjs';
+          import { productionImageDigestBinding } from './scripts/production-image-inventory.mjs';
+          const imagePath = path.join(process.env.IMAGE_ROOT, 'production-image-manifest.json');
+          const imageBytes = fs.readFileSync(imagePath);
+          const imageManifest = JSON.parse(imageBytes.toString('utf8'));
+          loadVerifiedProductionDeploymentConfig({
+            manifestPath: path.join(process.env.CONFIG_ROOT, 'production-deployment-config.json'),
+            bundlePath: path.join(process.env.CONFIG_ROOT, 'production-deployment-config.bundle.json'),
+            certificateIdentity: process.env.CERTIFICATE_IDENTITY,
+            certificateOidcIssuer: process.env.CERTIFICATE_OIDC_ISSUER,
+            expected: {
+              candidateId: process.env.CANDIDATE_ID,
+              sourceCommit: process.env.SOURCE_COMMIT,
+              signedTag: process.env.SIGNED_TAG,
+              releaseChainId: process.env.RELEASE_CHAIN_ID,
+              imageManifestSha256: createHash('sha256').update(imageBytes).digest('hex'),
+              images: productionImageDigestBinding({
+                manifest: imageManifest,
+                expectedCommit: process.env.SOURCE_COMMIT,
+                expectedReleaseChainId: process.env.RELEASE_CHAIN_ID,
+              }),
+              githubRunId: process.env.RELEASE_CHAIN_RUN_ID,
+              githubRunAttempt: process.env.RELEASE_CHAIN_RUN_ATTEMPT,
+            },
+          });
+          NODE
+
+      - name: Validate immutable external inputs
+        env:
+          PLAN_URL: ${{ inputs.plan_url }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          SOURCE_URL: ${{ inputs.observation_source_url }}
+          SOURCE_SHA256: ${{ inputs.observation_source_sha256 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$PLAN_SHA256" | grep -Eq '^[a-f0-9]{64}$'
+          printf '%s' "$SOURCE_SHA256" | grep -Eq '^[a-f0-9]{64}$'
+          node --input-type=module - "$PLAN_URL" "$SOURCE_URL" <<'NODE'
+          import { validateImmutableHttpsUrl } from './scripts/verify-workbench-hard-cut-acceptance.mjs';
+          validateImmutableHttpsUrl(process.argv[2]);
+          validateImmutableHttpsUrl(process.argv[3]);
+          NODE
+
+      - name: Download and hash plan and observation source
+        env:
+          PLAN_URL: ${{ inputs.plan_url }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          SOURCE_URL: ${{ inputs.observation_source_url }}
+          SOURCE_SHA256: ${{ inputs.observation_source_sha256 }}
+        run: |
+          set -euo pipefail
+          input_root="$RUNNER_TEMP/workbench-observation-input"
+          rm -rf "$input_root"
+          mkdir -p "$input_root"
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-redirs 0 \
+            --max-filesize 10485760 --output "$input_root/plan.json" "$PLAN_URL"
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-redirs 0 \
+            --max-filesize 104857600 --output "$input_root/source.json" "$SOURCE_URL"
+          test "$(sha256sum "$input_root/plan.json" | awk '{print $1}')" = "$PLAN_SHA256"
+          test "$(sha256sum "$input_root/source.json" | awk '{print $1}')" = "$SOURCE_SHA256"
+
+      - name: Verify plan binding against CI-owned candidate, G4, and catalog
+        env:
+          PLAN_PATH: ${{ runner.temp }}/workbench-observation-input/plan.json
+          IMAGE_PATH: ${{ runner.temp }}/workbench-observation-ci/production-images/production-image-manifest.json
+          DEPLOYMENT_CONFIG_PATH: ${{ runner.temp }}/workbench-observation-ci/deployment-config/production-deployment-config.json
+          CANDIDATE_ID: ${{ steps.release_chain.outputs.candidate_id }}
+          SOURCE_COMMIT: ${{ steps.release_chain.outputs.source_commit }}
+          SIGNED_TAG: ${{ steps.release_chain.outputs.signed_tag }}
+          RELEASE_CHAIN_ID: ${{ steps.release_chain.outputs.chain_id }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { canonicalJson } from './scripts/evidence-ledger.mjs';
+          import { loadProductionDeploymentConfigBinding } from './scripts/production-deployment-config.mjs';
+          import { loadProductionImageDigestBinding } from './scripts/production-image-inventory.mjs';
+          import { loadProductionAcceptanceControlCatalog } from './scripts/production-acceptance/catalog.mjs';
+          import { loadProductionAcceptancePlan } from './scripts/production-acceptance/plan.mjs';
+          const catalog = await loadProductionAcceptanceControlCatalog();
+          const loaded = await loadProductionAcceptancePlan({ planPath: process.env.PLAN_PATH, catalog });
+          const binding = loaded.plan.payload.binding;
+          const expected = {
+            candidateId: process.env.CANDIDATE_ID,
+            commitSha: process.env.SOURCE_COMMIT,
+            tag: process.env.SIGNED_TAG,
+            releaseChainId: process.env.RELEASE_CHAIN_ID,
+          };
+          for (const [field, value] of Object.entries(expected)) {
+            if (binding[field] !== value) throw new Error(`plan binding ${field} differs from CI-owned release chain`);
+          }
+          const images = loadProductionImageDigestBinding({
+            manifestPath: process.env.IMAGE_PATH,
+            expectedManifestSha256: binding.digests.imageManifestSha256,
+            expectedCommit: binding.commitSha,
+            expectedReleaseChainId: binding.releaseChainId,
+          });
+          if (canonicalJson(images.images) !== canonicalJson(binding.digests.images)) {
+            throw new Error('plan image inventory differs from the CI-owned G4 manifest');
+          }
+          const deploymentConfig = loadProductionDeploymentConfigBinding({
+            manifestPath: process.env.DEPLOYMENT_CONFIG_PATH,
+            expectedManifestSha256: binding.digests.deploymentConfigManifestSha256,
+            expected: {
+              candidateId: binding.candidateId,
+              sourceCommit: binding.commitSha,
+              signedTag: binding.tag,
+              releaseChainId: binding.releaseChainId,
+              imageManifestSha256: binding.digests.imageManifestSha256,
+              images: binding.digests.images,
+            },
+          });
+          if (deploymentConfig.binding.configSha256 !== binding.digests.configSha256) {
+            throw new Error('plan config digest differs from the signed deployment configuration');
+          }
+          if (deploymentConfig.binding.migrationSha256 !== binding.digests.migrationSha256) {
+            throw new Error('plan migration digest differs from the signed deployment configuration');
+          }
+          NODE
+
+      - name: Materialize constrained observation source
+        env:
+          SOURCE_PATH: ${{ runner.temp }}/workbench-observation-input/source.json
+          SOURCE_SHA256: ${{ inputs.observation_source_sha256 }}
+          EVIDENCE_ROOT: ${{ runner.temp }}/workbench-observation-source
+        run: |
+          set -euo pipefail
+          rm -rf "$EVIDENCE_ROOT"
+          node scripts/production-acceptance/materialize-source.mjs \
+            --source "$SOURCE_PATH" \
+            --source-sha256 "$SOURCE_SHA256" \
+            --output-root "$EVIDENCE_ROOT"
+
+      - name: Recompute thresholds and seal G5-G11 collection
+        id: collect
+        env:
+          PLAN_PATH: ${{ runner.temp }}/workbench-observation-input/plan.json
+          EVIDENCE_ROOT: ${{ runner.temp }}/workbench-observation-source
+          OUTPUT_ROOT: ${{ runner.temp }}/workbench-observation-output/collection
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/workbench-observation-output"
+          mkdir -p "$RUNNER_TEMP/workbench-observation-output"
+          collected_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node scripts/production-acceptance/collect.mjs \
+            --plan "$PLAN_PATH" \
+            --observations "$EVIDENCE_ROOT/observations" \
+            --evidence-root "$EVIDENCE_ROOT" \
+            --output-root "$OUTPUT_ROOT" \
+            --collected-at "$collected_at"
+          printf 'collected_at=%s\n' "$collected_at" >> "$GITHUB_OUTPUT"
+
+      - name: Write observation workflow provenance
+        env:
+          OUTPUT_PATH: ${{ runner.temp }}/workbench-observation-output/observation-run.json
+          RELEASE_CHAIN_RUN_ID: ${{ inputs.release_chain_run_id }}
+          RELEASE_CHAIN_RUN_ATTEMPT: ${{ steps.ci_run.outputs.run_attempt }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+          SOURCE_SHA256: ${{ inputs.observation_source_sha256 }}
+          COLLECTED_AT: ${{ steps.collect.outputs.collected_at }}
+          VERIFIER_COMMIT: ${{ vars.WORKBENCH_ACCEPTANCE_VERIFIER_COMMIT }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const value = {
+            schemaVersion: 'workbench.production-observation-run.v1',
+            releaseChainRunId: process.env.RELEASE_CHAIN_RUN_ID,
+            releaseChainRunAttempt: process.env.RELEASE_CHAIN_RUN_ATTEMPT,
+            verifierCommit: process.env.VERIFIER_COMMIT,
+            planSha256: process.env.PLAN_SHA256,
+            observationSourceSha256: process.env.SOURCE_SHA256,
+            collectedAtUtc: process.env.COLLECTED_AT,
+          };
+          const canonical = (input) => Array.isArray(input)
+            ? input.map(canonical)
+            : input && typeof input === 'object'
+              ? Object.fromEntries(Object.keys(input).sort().map((key) => [key, canonical(input[key])]))
+              : input;
+          fs.writeFileSync(process.env.OUTPUT_PATH, `${JSON.stringify(canonical(value))}\n`, { flag: 'wx', mode: 0o600 });
+          NODE
+
+      - name: Upload sealed observation collection
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-observation-collection-${{ inputs.release_chain_run_id }}-${{ steps.ci_run.outputs.run_attempt }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/workbench-observation-output
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

@@ -22,7 +22,7 @@ const config = loadFileWorkerConfig({
 
 const bytes = Buffer.from("source document");
 const source = () => ({
-  body: Readable.from([bytes]),
+  body: Readable.from([bytes]) as never,
   byteSize: bytes.byteLength,
   sha256: createHash("sha256").update(bytes).digest("hex"),
   mediaType: "text/plain",

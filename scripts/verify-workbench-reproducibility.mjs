@@ -1380,7 +1380,7 @@ function normalizeFailure(error) {
   };
 }
 
-function validateReceiptSeal(receipt) {
+export function validateReceiptSeal(receipt) {
   if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
     throw new Error("receipt must be an object");
   }

@@ -1,9 +1,10 @@
-"""Per-run Product Workbench Canvas tool visibility and execution policy.
+"""Per-run Product Workbench tool visibility and execution policy.
 
-The eight Canvas tools stay registered in ToolNode so DeerFlow can route a
-declared call. The model-visible schemas and execution path are independently
-reduced to ``configurable.workbench_canvas_tools.declaredTools`` for every run.
-Missing or malformed policy is an empty declaration, never ambient access.
+Scoped tools stay registered in ToolNode so DeerFlow can route a declared call.
+The model-visible schemas and execution path are independently reduced for every
+run. Canvas tools use their tokenless configurable declaration. Prototype-only
+publication tools are enabled only by the trusted requested Artifact kinds in
+``context.workbench``. Missing or malformed policy never grants ambient access.
 """
 
 from __future__ import annotations
@@ -35,10 +36,26 @@ CANVAS_TOOL_NAMES = (
     "rename_screen",
     "navigate_canvas",
 )
+PROTOTYPE_TOOL_NAMES = (
+    "workbench_generation_stage_update",
+    "workbench_artifact_draft_publish",
+    "workbench_prototype_patch_publish",
+)
+RUNTIME_ARTIFACT_KINDS = (
+    "prd",
+    "prototype",
+    "image",
+    "code",
+    "document",
+    "data",
+)
 _CANVAS_TOOL_NAME_SET = frozenset(CANVAS_TOOL_NAMES)
+_PROTOTYPE_TOOL_NAME_SET = frozenset(PROTOTYPE_TOOL_NAMES)
+_RUNTIME_ARTIFACT_KIND_SET = frozenset(RUNTIME_ARTIFACT_KINDS)
 _POLICY_KEY = "workbench_canvas_tools"
 _POLICY_KEYS = frozenset({"declaredTools"})
-_BLOCK_CODE = "WORKBENCH_CANVAS_TOOL_NOT_DECLARED"
+_CANVAS_BLOCK_CODE = "WORKBENCH_CANVAS_TOOL_NOT_DECLARED"
+_PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
 
 
 def normalize_workbench_canvas_policy(value: Any) -> dict[str, list[str]] | None:
@@ -67,6 +84,31 @@ def workbench_canvas_policy_from_runnable_config(config: Any) -> Any:
     return configurable.get(_POLICY_KEY)
 
 
+def normalize_workbench_requested_artifact_kinds(value: Any) -> list[str] | None:
+    """Return canonical requested kinds, or ``None`` for fail-closed input."""
+    if (
+        not isinstance(value, list)
+        or len(value) > len(RUNTIME_ARTIFACT_KINDS)
+        or any(not isinstance(kind, str) or kind not in _RUNTIME_ARTIFACT_KIND_SET for kind in value)
+        or len(set(value)) != len(value)
+    ):
+        return None
+    return list(value)
+
+
+def workbench_requested_artifact_kinds_from_runnable_config(config: Any) -> Any:
+    """Read requested kinds only from the Gateway-authenticated runtime context."""
+    if not isinstance(config, Mapping):
+        return None
+    context = config.get("context")
+    if not isinstance(context, Mapping):
+        return None
+    scope = context.get("workbench")
+    if not isinstance(scope, Mapping):
+        return None
+    return scope.get("requestedArtifactKinds")
+
+
 def _tool_name(tool: Any) -> str | None:
     name = getattr(tool, "name", None)
     if isinstance(name, str):
@@ -85,31 +127,41 @@ def _tool_name(tool: Any) -> str | None:
 
 
 class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
-    """Apply the request-scoped Canvas declaration to model and ToolNode calls."""
+    """Apply request-scoped Workbench declarations to model and ToolNode calls."""
 
-    def __init__(self, policy: Any = None):
+    def __init__(self, canvas_policy: Any = None, requested_artifact_kinds: Any = None):
         super().__init__()
-        normalized = normalize_workbench_canvas_policy(policy)
-        self._declared = frozenset(normalized["declaredTools"] if normalized is not None else ())
+        normalized_canvas = normalize_workbench_canvas_policy(canvas_policy)
+        normalized_kinds = normalize_workbench_requested_artifact_kinds(requested_artifact_kinds)
+        self._declared_canvas = frozenset(
+            normalized_canvas["declaredTools"] if normalized_canvas is not None else ()
+        )
+        self._prototype_enabled = normalized_kinds is not None and "prototype" in normalized_kinds
 
     def _filter_tools(self, request: ModelRequest) -> ModelRequest:
-        visible = [
-            tool
-            for tool in request.tools
-            if _tool_name(tool) not in _CANVAS_TOOL_NAME_SET
-            or _tool_name(tool) in self._declared
-        ]
+        visible = []
+        for tool in request.tools:
+            name = _tool_name(tool)
+            if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
+                continue
+            if name in _PROTOTYPE_TOOL_NAME_SET and not self._prototype_enabled:
+                continue
+            visible.append(tool)
         return request if len(visible) == len(request.tools) else request.override(tools=visible)
 
     def _blocked_tool_message(self, request: ToolCallRequest) -> ToolMessage | None:
         name = request.tool_call.get("name")
-        if not isinstance(name, str) or name not in _CANVAS_TOOL_NAME_SET:
+        if not isinstance(name, str):
             return None
-        if name in self._declared:
+        if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
+            block_code = _CANVAS_BLOCK_CODE
+        elif name in _PROTOTYPE_TOOL_NAME_SET and not self._prototype_enabled:
+            block_code = _PROTOTYPE_BLOCK_CODE
+        else:
             return None
         tool_call_id = request.tool_call.get("id")
         return ToolMessage(
-            content=f"Error: {_BLOCK_CODE}",
+            content=f"Error: {block_code}",
             tool_call_id=(tool_call_id if isinstance(tool_call_id, str) and tool_call_id else "missing_tool_call_id"),
             name=name,
             status="error",

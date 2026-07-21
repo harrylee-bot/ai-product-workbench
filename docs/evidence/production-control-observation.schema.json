@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aionbench.com/schemas/workbench.production-control-observation.v1.json",
+  "title": "Product Workbench production control observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "observationId",
+    "controlId",
+    "gateId",
+    "catalog",
+    "binding",
+    "environment",
+    "executedAtUtc",
+    "executor",
+    "toolVersions",
+    "toolAttestation",
+    "evidenceLevel",
+    "result",
+    "evidence",
+    "retryRecords"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "workbench.production-control-observation.v1" },
+    "observationId": { "$ref": "#/$defs/identifier" },
+    "controlId": { "$ref": "#/$defs/identifier" },
+    "gateId": { "enum": ["G5", "G6", "G7", "G8", "G9", "G10", "G11"] },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sha256"],
+      "properties": {
+        "schemaVersion": { "const": "workbench.production-acceptance-control-catalog.v1" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "binding": { "$ref": "#/$defs/binding" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "executedAtUtc": { "$ref": "#/$defs/utc" },
+    "executor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["person", "auditor", "ci", "automation"] },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "toolVersions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "version": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        }
+      }
+    },
+    "toolAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "artifact", "provenance", "provenanceSubjectSha256"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "artifact": { "$ref": "#/$defs/immutableReference" },
+        "provenance": { "$ref": "#/$defs/immutableReference" },
+        "provenanceSubjectSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "evidenceLevel": { "enum": ["E1", "E2"] },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executionStatus", "observedValue", "summary"],
+      "properties": {
+        "executionStatus": { "enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"] },
+        "observedValue": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "number" }
+          ]
+        },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "uri", "sha256"],
+        "properties": {
+          "kind": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$" },
+          "uri": { "type": "string", "minLength": 1, "maxLength": 2048 },
+          "sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "retryRecords": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt", "executedAtUtc", "executionStatus", "reason", "evidence"],
+        "properties": {
+          "attempt": { "type": "integer", "minimum": 1 },
+          "executedAtUtc": { "$ref": "#/$defs/utc" },
+          "executionStatus": { "enum": ["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"] },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["uri", "sha256"],
+              "properties": {
+                "uri": { "type": "string", "minLength": 1, "maxLength": 2048 },
+                "sha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "prefixedSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$" },
+    "commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "immutableReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "digest"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "digest": { "$ref": "#/$defs/prefixedSha256" }
+      }
+    },
+    "digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["images", "configSha256", "migrationSha256", "deploymentConfigManifestSha256", "imageManifestSha256", "controlCatalogSha256"],
+      "properties": {
+        "images": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/image" } },
+        "configSha256": { "$ref": "#/$defs/sha256" },
+        "migrationSha256": { "$ref": "#/$defs/sha256" },
+        "deploymentConfigManifestSha256": { "$ref": "#/$defs/sha256" },
+        "imageManifestSha256": { "$ref": "#/$defs/sha256" },
+        "controlCatalogSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "deployId", "environmentId", "commitSha", "tag", "releaseChainId", "digests"],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/prefixedSha256" },
+        "deployId": { "$ref": "#/$defs/identifier" },
+        "environmentId": { "$ref": "#/$defs/identifier" },
+        "commitSha": { "$ref": "#/$defs/commit" },
+        "tag": { "$ref": "#/$defs/identifier" },
+        "releaseChainId": { "$ref": "#/$defs/prefixedSha256" },
+        "digests": { "$ref": "#/$defs/digests" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environmentId", "kind", "description", "region"],
+      "properties": {
+        "environmentId": { "$ref": "#/$defs/identifier" },
+        "kind": { "const": "production" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "region": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    }
+  }
+}

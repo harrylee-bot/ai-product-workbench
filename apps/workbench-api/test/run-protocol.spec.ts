@@ -15,6 +15,29 @@ import {
 } from "../src/modules/runs/runs.service.js";
 
 describe("Run HTTP and SSE protocol", () => {
+  it("requires and forwards the Run cancellation Idempotency-Key", async () => {
+    const runs = { cancel: vi.fn().mockResolvedValue({ status: "cancelling" }) };
+    const controller = new RunsController(runs as never);
+
+    expect(() => controller.cancel(
+      { id: "principal_1" } as never,
+      "run_1",
+      undefined,
+    )).toThrow(expect.objectContaining({ status: 400 }));
+    expect(runs.cancel).not.toHaveBeenCalled();
+
+    await expect(controller.cancel(
+      { id: "principal_1" } as never,
+      "run_1",
+      "run-cancel:key-1",
+    )).resolves.toEqual({ status: "cancelling" });
+    expect(runs.cancel).toHaveBeenCalledWith(
+      "principal_1",
+      "run_1",
+      "run-cancel:key-1",
+    );
+  });
+
   it("requires one unambiguous client cursor", () => {
     expect(parseEventCursor(undefined, "9")).toBe(9);
     expect(parseEventCursor("7", undefined)).toBe(7);

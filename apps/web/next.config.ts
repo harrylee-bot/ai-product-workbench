@@ -7,6 +7,8 @@ import {
 
 const isProduction = process.env.NODE_ENV === "production";
 const typesPrevalidated = process.env.WORKBENCH_TYPES_PREVALIDATED === "1";
+const configuredDistDir = process.env.WORKBENCH_NEXT_DIST_DIR?.trim();
+const configuredTsconfigPath = process.env.WORKBENCH_NEXT_TSCONFIG_PATH?.trim();
 const uploadBucketUrl = normalizeBrowserUploadBucketUrl(
   process.env.WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL,
   isProduction,
@@ -18,10 +20,12 @@ const securityHeaders = buildSecurityHeaders({
 });
 
 const nextConfig: NextConfig = {
+  ...(configuredDistDir ? { distDir: configuredDistDir } : {}),
   cacheComponents: true,
   devIndicators: false,
   poweredByHeader: false,
   typescript: {
+    ...(configuredTsconfigPath ? { tsconfigPath: configuredTsconfigPath } : {}),
     ignoreBuildErrors: typesPrevalidated,
   },
   env: {

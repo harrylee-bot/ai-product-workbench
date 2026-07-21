@@ -17,7 +17,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("next=/projects/project_1?tab=files"),
 }));
 
-import Page from "./page";
+import { LoginPage } from "./login-page";
 
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED", "true");
@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe("product account login page", () => {
   it("shows product credentials and optional SSO without starting a redirect", () => {
-    render(<Page />);
+    render(<LoginPage enterpriseSsoEnabled />);
 
     expect(screen.getByLabelText("用户名或邮箱")).toBeTruthy();
     expect(screen.getByLabelText("密码")).toBeTruthy();
@@ -46,17 +46,24 @@ describe("product account login page", () => {
 
   it("hides self-registration when production policy is closed", () => {
     vi.stubEnv("NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED", "false");
-    render(<Page />);
+    render(<LoginPage enterpriseSsoEnabled />);
 
     expect(screen.queryByRole("link", { name: "创建一个" })).toBeNull();
     expect(screen.getByLabelText("用户名或邮箱")).toBeTruthy();
+  });
+
+  it("hides the enterprise SSO entry when it is not configured", () => {
+    render(<LoginPage enterpriseSsoEnabled={false} />);
+
+    expect(screen.getByLabelText("用户名或邮箱")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "企业 SSO 登录" })).toBeNull();
   });
 
   it("submits a username directly and only redirects when SSO is selected", async () => {
     const driver = userEvent.setup();
     auth.login.mockRejectedValueOnce(new Error("expected test rejection"));
     auth.loginWithOidc.mockResolvedValueOnce(undefined);
-    render(<Page />);
+    render(<LoginPage enterpriseSsoEnabled />);
 
     await driver.type(screen.getByLabelText("用户名或邮箱"), "Product.Owner");
     await driver.type(screen.getByLabelText("密码"), "Password1!");

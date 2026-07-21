@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { canonicalJson } from "./canonical-json.js";
 import { artifactIrIdSchema } from "./citations.js";
-import { opaqueIdSchema } from "./common.js";
+import { opaqueIdSchema, runEventSourceIdSchema } from "./common.js";
 import {
   prototypeActionSchema,
   prototypeAssetSchema,
@@ -164,7 +164,7 @@ export const prototypePatchEventPayloadSchema = z.object({
   artifactIndex: z.number().int().min(0).max(19),
   artifactId: opaqueIdSchema,
   artifactVersionId: opaqueIdSchema,
-  sourceEventId: opaqueIdSchema,
+  sourceEventId: runEventSourceIdSchema,
   requestSha256: prototypePatchChecksumSchema,
   ...prototypePatchBatchShape,
 }).strict().superRefine(refinePrototypePatchRevisionPair);
@@ -184,7 +184,7 @@ export const prototypePatchDegradedEventPayloadSchema = z.object({
   artifactId: opaqueIdSchema,
   artifactVersionId: opaqueIdSchema,
   screenId: artifactIrIdSchema,
-  sourceEventId: opaqueIdSchema,
+  sourceEventId: runEventSourceIdSchema,
   revision: prototypePatchRevisionSchema,
   reason: prototypePatchDegradedReasonSchema,
   requestSha256: prototypePatchChecksumSchema,

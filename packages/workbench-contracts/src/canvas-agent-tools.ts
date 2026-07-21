@@ -159,6 +159,9 @@ export const canvasClientStateSyncRequestSchema = z.object({
   viewport: canvasViewportSchema,
   visibleScreens: z.array(canvasScreenReferenceSchema).max(maximumCanvasScreenCount),
   selectedScreens: z.array(canvasScreenReferenceSchema).max(maximumCanvasScreenCount),
+  // Only the post-dispatch synchronization may name the server command that
+  // caused this state transition. Ordinary browser state changes omit it.
+  causedByCommandId: canvasAgentIdSchema.optional(),
 }).strict().superRefine((state, context) => {
   refineUniqueScreenReferences(state.visibleScreens, ["visibleScreens"], context);
   refineUniqueScreenReferences(state.selectedScreens, ["selectedScreens"], context);

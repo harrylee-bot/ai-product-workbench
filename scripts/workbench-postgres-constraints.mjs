@@ -1289,11 +1289,7 @@ async function runConstraintChecks(db) {
 
   await expectAccept(db, "RuntimeAttempt follows the durable submission lifecycle", async () => {
     await insertRuntimeAttempt(db);
-    await db.query(`
-      UPDATE "runtime_attempts"
-      SET "status" = 'submitting', "started_at" = clock_timestamp(), "updated_at" = clock_timestamp()
-      WHERE "id" = 'candidate-runtime-attempt'
-    `);
+    await beginRuntimeSubmission(db, "candidate-runtime-attempt");
     await db.query(`
       UPDATE "runtime_attempts"
       SET "status" = 'running', "external_run_id" = 'external-run-a', "updated_at" = clock_timestamp()
@@ -1345,6 +1341,15 @@ async function runConstraintChecks(db) {
     `);
   }, trigger("23514", "RUNTIME_ATTEMPT_STATUS_TRANSITION_INVALID"));
 
+  await expectReject(db, "RuntimeAttempt submitting state requires a provider idempotency key", async () => {
+    await insertRuntimeAttempt(db);
+    await db.query(`
+      UPDATE "runtime_attempts"
+      SET "status" = 'submitting', "started_at" = clock_timestamp(), "updated_at" = clock_timestamp()
+      WHERE "id" = 'candidate-runtime-attempt'
+    `);
+  }, constraint("23514", "runtime_attempts_provider_idempotency_state_check"));
+
   await expectReject(db, "RuntimeAttempt external Run binding is immutable", async () => {
     await insertRunningRuntimeAttempt(db);
     await db.query(`
@@ -1362,11 +1367,7 @@ async function runConstraintChecks(db) {
       runtimeBindingId: "runtime-binding-b",
       externalThreadId: "external-thread-b",
     });
-    await db.query(`
-      UPDATE "runtime_attempts"
-      SET "status" = 'submitting', "started_at" = clock_timestamp(), "updated_at" = clock_timestamp()
-      WHERE "id" = 'candidate-runtime-attempt-b'
-    `);
+    await beginRuntimeSubmission(db, "candidate-runtime-attempt-b");
     await db.query(`
       UPDATE "runtime_attempts"
       SET "status" = 'running', "external_run_id" = 'external-run-shared', "updated_at" = clock_timestamp()
@@ -4704,14 +4705,14 @@ async function blobStatus(db, blobId) {
 async function moveBlobToQuarantine(db, blobId) {
   const result = await db.query(`
     UPDATE "blobs"
-    SET "storage_key" = 'quarantine/blobs/'
+    SET "storage_key" = $2
           || substring("sha256" FROM 1 FOR 2) || '/'
           || substring("sha256" FROM 3 FOR 2) || '/'
           || "sha256" || '/g' || "generation"::TEXT,
         "updated_at" = clock_timestamp()
     WHERE "id" = $1
     RETURNING "storage_key"
-  `, [blobId]);
+  `, [blobId, "quarantine/blobs/"]);
   assert.equal(result.rowCount, 1, `Blob ${blobId} must exist`);
   assert.match(result.rows[0].storage_key, /^quarantine\/blobs\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{64}\/g[1-9][0-9]*$/);
 }
@@ -4947,16 +4948,23 @@ async function insertRunningRuntimeAttempt(db, overrides = {}) {
   const externalRunId = overrides.externalRunId ?? "external-run-a";
   const { externalRunId: _externalRunId, ...insertOverrides } = overrides;
   await insertRuntimeAttempt(db, insertOverrides);
-  await db.query(`
-    UPDATE "runtime_attempts"
-    SET "status" = 'submitting', "started_at" = clock_timestamp(), "updated_at" = clock_timestamp()
-    WHERE "id" = $1
-  `, [insertOverrides.id ?? "candidate-runtime-attempt"]);
+  await beginRuntimeSubmission(db, insertOverrides.id ?? "candidate-runtime-attempt");
   await db.query(`
     UPDATE "runtime_attempts"
     SET "status" = 'running', "external_run_id" = $2, "updated_at" = clock_timestamp()
     WHERE "id" = $1
   `, [insertOverrides.id ?? "candidate-runtime-attempt", externalRunId]);
+}
+
+async function beginRuntimeSubmission(db, attemptId) {
+  await db.query(`
+    UPDATE "runtime_attempts"
+    SET "status" = 'submitting',
+        "provider_idempotency_key" = 'wbrt:' || encode(public.digest("id", 'sha256'), 'hex'),
+        "started_at" = clock_timestamp(),
+        "updated_at" = clock_timestamp()
+    WHERE "id" = $1
+  `, [attemptId]);
 }
 
 async function insertCanvasToolInvocation(db) {

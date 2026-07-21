@@ -8,6 +8,7 @@ import helmet from "helmet";
 import { AppModule } from "./app.module.js";
 import { ProblemDetailsFilter } from "./common/problem-details.filter.js";
 import { configureWorkbenchRequestBody } from "./common/request-body.js";
+import { bindHttpRequestAbortSignal } from "./common/http-request-abort.js";
 
 const telemetry = initializeTelemetry({ serviceName: "workbench-api" });
 
@@ -40,6 +41,7 @@ async function bootstrap() {
   validateConfiguration();
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.use((request: Request, response: Response, next: NextFunction) => {
+    bindHttpRequestAbortSignal(request, response);
     const requestSpan = startHttpServerSpan({
       method: request.method,
       route: "/api/v1/*",

@@ -1,8 +1,8 @@
-import type { Readable } from "node:stream";
+import type { VerifiedReadyObjectBody } from "@workbench/workbench-content-security";
 import type { RuntimeContentLocator } from "../runtime/runtime.port.js";
 
 export type RuntimeReadyBlobBody = {
-  body: Readable;
+  body: VerifiedReadyObjectBody;
   byteSize: number;
   mediaType: string | null;
 };

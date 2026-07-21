@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { ConfigService } from "@nestjs/config";
 import { fileExtractionParser } from "@workbench/workbench-contracts";
 import {
   AbortMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListPartsCommand,
@@ -15,7 +17,9 @@ import {
   normalizeEtag,
   S3MultipartStorageAdapter,
 } from "../src/platform/object-storage/s3-multipart-storage.adapter.js";
+import { S3CanvasVisualStorageAdapter } from "../src/platform/object-storage/s3-canvas-visual-storage.adapter.js";
 import { S3ReadyBlobStorageAdapter } from "../src/platform/object-storage/s3-ready-blob-storage.adapter.js";
+import { readReadyObject } from "../src/platform/object-storage/read-ready-object.js";
 
 function apiConfig(overrides: Record<string, string> = {}) {
   const values: Record<string, string> = {
@@ -56,6 +60,7 @@ describe("FileApiConfig", () => {
       forcePathStyle: true,
       stagingCredentials: { accessKeyId: "staging-access", secretAccessKey: "staging-secret" },
       readyBlobCredentials: { accessKeyId: "ready-access", secretAccessKey: "ready-secret" },
+      canvasVisualCredentials: { accessKeyId: "canvas-visual-access", secretAccessKey: "canvas-visual-secret" },
     });
     expect(apiConfig()).toMatchObject({
       stagingPrefix: "staging/files",
@@ -69,6 +74,8 @@ describe("FileApiConfig", () => {
       .toThrow("WORKBENCH_API_STAGING_S3_ACCESS_KEY_ID and WORKBENCH_API_STAGING_S3_SECRET_ACCESS_KEY are required");
     expect(() => storageConfig({ WORKBENCH_API_READY_BLOB_S3_ACCESS_KEY_ID: "" }))
       .toThrow("WORKBENCH_API_READY_BLOB_S3_ACCESS_KEY_ID and WORKBENCH_API_READY_BLOB_S3_SECRET_ACCESS_KEY are required");
+    expect(() => storageConfig({ WORKBENCH_API_CANVAS_VISUAL_S3_SECRET_ACCESS_KEY: "" }))
+      .toThrow("WORKBENCH_API_CANVAS_VISUAL_S3_ACCESS_KEY_ID and WORKBENCH_API_CANVAS_VISUAL_S3_SECRET_ACCESS_KEY are required");
     expect(() => storageConfig({
       WORKBENCH_API_STAGING_S3_ACCESS_KEY_ID: "",
       AWS_ACCESS_KEY_ID: "ambient-access",
@@ -143,6 +150,61 @@ describe("split S3 object storage adapters", () => {
 
     await expect(adapter.abortMultipartUpload({ key: "staging/key", uploadId: "provider_1" })).resolves.toBeUndefined();
     await expect(adapter.statObject("missing/key")).resolves.toBeNull();
+  });
+
+  it("treats a missing Canvas visual object as an idempotent delete", async () => {
+    const send = vi.spyOn(S3Client.prototype, "send").mockImplementation((async (command: unknown) => {
+      if (command instanceof DeleteObjectCommand) {
+        throw Object.assign(new Error("gone"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } });
+      }
+      throw new Error("unexpected command");
+    }) as never);
+    const adapter = new S3CanvasVisualStorageAdapter(storageConfig());
+
+    await expect(adapter.deleteObject("canvas-visuals/missing.webp")).resolves.toBeUndefined();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hide a denied Canvas visual delete", async () => {
+    const denied = Object.assign(new Error("denied"), { name: "AccessDenied", $metadata: { httpStatusCode: 403 } });
+    vi.spyOn(S3Client.prototype, "send").mockRejectedValue(denied as never);
+    const adapter = new S3CanvasVisualStorageAdapter(storageConfig());
+
+    await expect(adapter.deleteObject("canvas-visuals/protected.webp")).rejects.toBe(denied);
+  });
+
+  it("passes a zero-byte Canvas object to immutable verification and records an incident", async () => {
+    vi.spyOn(S3Client.prototype, "send").mockImplementation((async (command: unknown) => {
+      if (command instanceof GetObjectCommand) {
+        return {
+          Body: Readable.from([]),
+          ContentLength: 0,
+          ContentType: "image/webp",
+        } as never;
+      }
+      throw new Error("unexpected command");
+    }) as never);
+    const adapter = new S3CanvasVisualStorageAdapter(storageConfig());
+    const expected = Buffer.from("not-empty", "utf8");
+    const recordIntegrityFailure = vi.fn().mockResolvedValue(undefined);
+
+    await expect(readReadyObject(
+      adapter,
+      {
+        storageKey: "canvas-visuals/zero.webp",
+        sha256: createHash("sha256").update(expected).digest("hex"),
+        byteSize: expected.byteLength,
+        mediaType: "image/webp",
+      },
+      undefined,
+      undefined,
+      { recordIntegrityFailure },
+    )).rejects.toThrow("OBJECT_STORAGE_BYTE_SIZE_MISMATCH");
+    expect(recordIntegrityFailure).toHaveBeenCalledWith(expect.objectContaining({
+      failureCode: "OBJECT_STORAGE_BYTE_SIZE_MISMATCH",
+      observedByteSize: 0,
+      observedMediaType: "image/webp",
+    }));
   });
 
   it("signs browser parts against the public bucket URL instead of the internal endpoint", async () => {

@@ -412,7 +412,15 @@ function validateLedgerEntry(entry, location, errors) {
 
 function validateLedgerBinding(binding, location, errors, { allowManifest }) {
   if (!expectObject(binding, location, errors)) return;
-  expectExactKeys(binding, ["candidateId", "deployId", "environmentId", "commitSha", "tag", "digests"], allowManifest ? ["candidateManifest"] : [], location, errors);
+  expectExactKeys(binding, [
+    "candidateId",
+    "deployId",
+    "environmentId",
+    "commitSha",
+    "tag",
+    "releaseChainId",
+    "digests",
+  ], allowManifest ? ["candidateManifest"] : [], location, errors);
   expectIdentifier(binding.candidateId, `${location}.candidateId`, errors);
   expectIdentifier(binding.deployId, `${location}.deployId`, errors);
   expectIdentifier(binding.environmentId, `${location}.environmentId`, errors);
@@ -420,6 +428,9 @@ function validateLedgerBinding(binding, location, errors, { allowManifest }) {
     errors.push(`${location}.commitSha must be a lowercase 40- or 64-hex Git commit`);
   }
   expectIdentifier(binding.tag, `${location}.tag`, errors);
+  if (typeof binding.releaseChainId !== "string" || !DIGEST_PATTERN.test(binding.releaseChainId)) {
+    errors.push(`${location}.releaseChainId must be sha256:<64 lowercase hex>`);
+  }
   validateDigests(binding.digests, `${location}.digests`, errors);
   if (allowManifest && binding.candidateManifest !== undefined) {
     validateEvidenceReferenceShape(binding.candidateManifest, `${location}.candidateManifest`, errors);
@@ -428,7 +439,7 @@ function validateLedgerBinding(binding, location, errors, { allowManifest }) {
 
 function validateEntryBindings(entry, ledgerBinding, errors) {
   const location = `entry ${entry.entryId}`;
-  for (const key of ["candidateId", "deployId", "environmentId", "commitSha", "tag"]) {
+  for (const key of ["candidateId", "deployId", "environmentId", "commitSha", "tag", "releaseChainId"]) {
     if (entry.binding[key] !== ledgerBinding[key]) {
       errors.push(`${location} ${key} does not match the ledger binding`);
     }
@@ -443,9 +454,19 @@ function validateEntryBindings(entry, ledgerBinding, errors) {
 
 function validateDigests(digests, location, errors) {
   if (!expectObject(digests, location, errors)) return;
-  expectExactKeys(digests, ["images", "configSha256", "migrationSha256"], [], location, errors);
+  expectExactKeys(digests, [
+    "images",
+    "configSha256",
+    "migrationSha256",
+    "deploymentConfigManifestSha256",
+    "imageManifestSha256",
+    "controlCatalogSha256",
+  ], [], location, errors);
   expectSha256(digests.configSha256, `${location}.configSha256`, errors);
   expectSha256(digests.migrationSha256, `${location}.migrationSha256`, errors);
+  expectSha256(digests.deploymentConfigManifestSha256, `${location}.deploymentConfigManifestSha256`, errors);
+  expectSha256(digests.imageManifestSha256, `${location}.imageManifestSha256`, errors);
+  expectSha256(digests.controlCatalogSha256, `${location}.controlCatalogSha256`, errors);
   if (!expectArray(digests.images, `${location}.images`, errors, { min: 0 })) return;
   const names = new Set();
   let previousName = "";

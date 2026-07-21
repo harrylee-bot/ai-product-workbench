@@ -28,6 +28,7 @@ import type {
   RuntimeExecution,
   RuntimeExecutionObserver,
 } from "../src/runtime/runtime.port.js";
+import { S3RuntimeReadyBlobReader } from "../src/storage/s3-runtime-ready-blob-reader.js";
 
 function workerConfig() {
   return {
@@ -134,11 +135,19 @@ function execution(overrides: Partial<RuntimeExecution> = {}): RuntimeExecution 
     knowledgeTool: null,
     designStyleSnapshot: null,
     resume: null,
-    previousAssistantText: "",
-    externalRunId: null,
-    lastExternalEventId: null,
-    providerIdempotencyKey: "wbrt:test-attempt-key",
-    submissionUnknown: false,
+    providerTextState: {
+      protocol: "workbench.runtime-provider-text-state.v1",
+      rawAssistantText: "",
+      visibleAssistantText: "",
+      durableVisibleAssistantText: "",
+      redactionBuffer: "",
+      processedExternalEventIds: [],
+      committedFinalization: null,
+    },
+    submission: {
+      mode: "submit",
+      providerIdempotencyKey: "wbrt:test-attempt-key",
+    },
     ...overrides,
   };
 }
@@ -423,12 +432,15 @@ function knowledgeDescriptor(secret: Uint8Array) {
 
 function observer(): RuntimeExecutionObserver & {
   [Key in keyof RuntimeExecutionObserver]: ReturnType<typeof vi.fn>;
-} {
+} & { onEvent: ReturnType<typeof vi.fn> } {
   const onEvent = vi.fn(async () => undefined);
   return {
     onSubmissionStarted: vi.fn(async () => undefined),
     onExternalRunCreated: vi.fn(async () => undefined),
     onExternalEvent: vi.fn(async (_part, effects) => {
+      for (const event of effects) await onEvent(event);
+    }),
+    onExternalFinalization: vi.fn(async (_part, effects) => {
       for (const event of effects) await onEvent(event);
     }),
     onEvent,
@@ -469,6 +481,169 @@ describe("DeerFlow runtime adapter", () => {
     expect(visible).toBe("before [knowledge capability redacted] after");
     expect(visible).not.toContain("wbkg1");
     expect(visible).not.toContain("a".repeat(20));
+  });
+
+  it("routes the redaction tail through one stable end-of-stream finalization identity", async () => {
+    const token = `wbkg1.${"a".repeat(80)}.${"b".repeat(43)}`;
+    const finalState = {
+      node: "writer",
+      messages: [
+        { type: "human", content: "current turn" },
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [],
+        }, "redaction-tail-result"),
+        { type: "ai", content: `visible ${token}` },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([{
+          id: "redaction-tail-event",
+          event: "values",
+          data: finalState,
+        }], { runId: "external_run_redaction_tail" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+
+    const finalizations = [];
+    for (let restart = 0; restart < 2; restart += 1) {
+      const runtimeObserver = observer();
+      const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+      await adapter.execute(execution(), runtimeObserver);
+      expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ externalEventId: "redaction-tail-event" }),
+        expect.arrayContaining([
+          expect.objectContaining({ type: "activity", activityId: "deerflow:writer", status: "running" }),
+          { type: "text.delta", delta: "visible " },
+        ]),
+      );
+      expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledWith(
+        expect.objectContaining({
+          externalRunId: "external_run_redaction_tail",
+          externalEventId: expect.stringMatching(/^workbench-finalization:[0-9a-f]{64}$/u),
+          event: "workbench.runtime.finalization.v2",
+          payload: expect.objectContaining({
+            visibleFinalEffect: {
+              type: "text.final",
+              text: "visible [knowledge capability redacted]",
+            },
+            effectsSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+            providerTextCheckpointSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+          }),
+        }),
+        [],
+      );
+      finalizations.push(runtimeObserver.onExternalFinalization.mock.calls[0]?.[0]);
+    }
+    expect(finalizations[1]).toEqual(finalizations[0]);
+  });
+
+  it("routes effects recovered only from the terminal thread state through finalization", async () => {
+    const messages = [
+      { type: "human", content: "current turn" },
+      ...generationStageToolMessages("design-system", { toolCallId: "terminal-state-stage" }),
+      ...validatedResultToolMessages({
+        protocol: "workbench.runtime.result.v1" as const,
+        message: "done",
+        artifacts: [],
+      }, "terminal-state-result"),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([{
+          id: "terminal-metadata-event",
+          event: "metadata",
+          data: { run_id: "external_run_terminal_state" },
+        }], { runId: "external_run_terminal_state" });
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/state" && (init.method ?? "GET") === "GET") {
+        return Response.json({ values: { messages } });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution(), runtimeObserver)).resolves.toMatchObject({ message: "done" });
+
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ externalEventId: "terminal-metadata-event" }),
+      [],
+    );
+    expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalRunId: "external_run_terminal_state",
+        event: "workbench.runtime.finalization.v2",
+      }),
+      [{
+        type: "generation.stage",
+        stage: "design-system",
+        sourceEventId: expect.stringMatching(/^deerflow:[0-9a-f]{64}$/u),
+      }],
+    );
+  });
+
+  it("projects terminal-only assistant text as one chunk-independent visible final effect", async () => {
+    const terminalState = {
+      __interrupt__: [{
+        id: "interrupt_terminal_text",
+        resumable: true,
+        value: { kind: "confirmation", question: "Continue?", options: [] },
+      }],
+      messages: [
+        { type: "human", content: "current turn" },
+        { type: "ai", content: "terminal-only assistant text" },
+      ],
+    };
+    const finalizations: Array<Record<string, unknown>> = [];
+    for (const streamedPrefix of [null, "terminal-only "] as const) {
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+          return Response.json([]);
+        }
+        if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+          return runtimeStreamResponse(streamedPrefix ? [{
+            id: `terminal-prefix-${streamedPrefix.length}`,
+            event: "messages",
+            data: { type: "ai", content: streamedPrefix },
+          }] : [], { runId: "external_run_terminal_text" });
+        }
+        if (url.pathname === "/api/threads/deer_thread_1/state" && (init.method ?? "GET") === "GET") {
+          return Response.json(terminalState);
+        }
+        throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+      }));
+      const runtimeObserver = observer();
+      const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+      await expect(adapter.execute(execution(), runtimeObserver)).resolves.toMatchObject({
+        protocol: "workbench.runtime.input-required.v1",
+      });
+
+      const part = runtimeObserver.onExternalFinalization.mock.calls[0]?.[0] as Record<string, unknown>;
+      finalizations.push(part);
+      expect(part.payload).toMatchObject({
+        visibleFinalEffect: {
+          type: "text.final",
+          text: "terminal-only assistant text",
+        },
+      });
+      expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledWith(part, []);
+    }
+    expect((finalizations[1]?.payload as { effectsSha256: string }).effectsSha256)
+      .toBe((finalizations[0]?.payload as { effectsSha256: string }).effectsSha256);
   });
 
   it("accepts a declared Canvas tool with a terminal response before the Runtime result", () => {
@@ -816,6 +991,7 @@ describe("DeerFlow runtime adapter", () => {
     expect(submittedBody.input.messages[0].content)
       .toMatch(/^\/workbench\n<workbench_context>\n/u);
     expect(submittedBody.input.messages[0].content).toMatch(/<\/workbench_context>\nBuild the product$/u);
+    expect(submittedBody.context.workbench.requestedArtifactKinds).toEqual([]);
     expect(submittedBody.config.configurable.workbench_canvas_tools).toBeNull();
     expect(runtimeObserver.onSubmissionStarted).toHaveBeenCalledTimes(1);
     expect(runtimeObserver.onExternalRunCreated).toHaveBeenCalledWith("external_run_new");
@@ -859,6 +1035,48 @@ describe("DeerFlow runtime adapter", () => {
       secrets: { WORKBENCH_CANVAS_CAPABILITY: string };
     }).secrets.WORKBENCH_CANVAS_CAPABILITY;
     expect(JSON.parse(secretValue)).toEqual(descriptor);
+  });
+
+  it("sends requested Artifact kinds through the trusted Workbench runtime context", async () => {
+    let submittedBody: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        submittedBody = JSON.parse(String(init.body));
+        return successfulRuntimeResponse({
+          runId: "external_run_artifact_scope",
+          artifacts: [{
+            kind: "document",
+            schemaVersion: 1,
+            title: "Generated document",
+            citations: [],
+            operation: { kind: "create" },
+            content: { body: "done" },
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await adapter.execute(execution({
+      request: {
+        ...execution().request,
+        requestedArtifactKinds: ["document"],
+      },
+    }), observer());
+
+    expect((submittedBody?.context as {
+      workbench: { requestedArtifactKinds: string[] };
+    }).workbench.requestedArtifactKinds).toEqual(["document"]);
+    expect((submittedBody?.config as { configurable: Record<string, unknown> }).configurable)
+      .not.toHaveProperty("requestedArtifactKinds");
+    expect((submittedBody?.config as {
+      configurable: { subagent_enabled: boolean };
+    }).configurable.subagent_enabled).toBe(false);
   });
 
   it("classifies an unobservable submit response as submission_unknown", async () => {
@@ -907,13 +1125,83 @@ describe("DeerFlow runtime adapter", () => {
     const runtimeObserver = observer();
     const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
 
-    await expect(adapter.execute(execution({ submissionUnknown: true }), runtimeObserver))
+    await expect(adapter.execute(execution({
+      submission: {
+        mode: "reconcile",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+    }), runtimeObserver))
       .resolves.toMatchObject({ protocol: "workbench.runtime.result.v1" });
 
     expect(requests.some((request) => request.init.method === "POST")).toBe(false);
     expect(runtimeObserver.onSubmissionStarted).not.toHaveBeenCalled();
     expect(runtimeObserver.onExternalRunCreated)
       .toHaveBeenCalledWith("external_run_unknown_recovered");
+  });
+
+  it("never re-POSTs after acceptance and a crash-before-attach while lookup is temporarily empty", async () => {
+    const acceptedRunId = "external_run_crash_recovery";
+    let providerRunVisible = false;
+    let postCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json(providerRunVisible ? [runtimeRun(acceptedRunId)] : []);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        postCount += 1;
+        return successfulRuntimeResponse({ runId: acceptedRunId });
+      }
+      if (url.pathname === `/api/threads/deer_thread_1/runs/${acceptedRunId}/stream`) {
+        return successfulRuntimeResponse({
+          runId: acceptedRunId,
+          eventId: "event-crash-recovery-1",
+          includeContentLocation: false,
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    const killedWorkerObserver = observer();
+    killedWorkerObserver.onExternalRunCreated.mockRejectedValueOnce(
+      new Error("SIMULATED_WORKER_CRASH_BEFORE_EXTERNAL_RUN_ATTACH"),
+    );
+
+    await expect(adapter.execute(execution(), killedWorkerObserver)).rejects.toMatchObject({
+      name: "RuntimeSubmissionUnknownError",
+      message: "RUNTIME_SUBMISSION_RECONCILIATION_PERSISTENCE_UNKNOWN",
+      cause: expect.objectContaining({
+        message: "SIMULATED_WORKER_CRASH_BEFORE_EXTERNAL_RUN_ATTACH",
+      }),
+    });
+    expect(postCount).toBe(1);
+
+    const invisibleLookupObserver = observer();
+    await expect(adapter.execute(execution({
+      submission: {
+        mode: "reconcile",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+    }), invisibleLookupObserver)).rejects.toMatchObject({
+      name: "RuntimeSubmissionUnknownError",
+      message: "RUNTIME_SUBMISSION_UNKNOWN",
+    });
+    expect(postCount).toBe(1);
+    expect(invisibleLookupObserver.onSubmissionStarted).not.toHaveBeenCalled();
+
+    providerRunVisible = true;
+    const recoveredObserver = observer();
+    await expect(adapter.execute(execution({
+      submission: {
+        mode: "reconcile",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+    }), recoveredObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+    });
+    expect(postCount).toBe(1);
+    expect(recoveredObserver.onSubmissionStarted).not.toHaveBeenCalled();
+    expect(recoveredObserver.onExternalRunCreated).toHaveBeenCalledWith(acceptedRunId);
   });
 
   it("emits trusted generation stages once when DeerFlow replays the same values state", async () => {
@@ -2202,6 +2490,9 @@ describe("DeerFlow runtime adapter", () => {
         assets: [],
       },
     ]);
+    expect((submittedBody?.config as {
+      configurable: { subagent_enabled: boolean };
+    }).configurable.subagent_enabled).toBe(true);
   });
 
   it("joins an existing SDK run with Last-Event-ID and never submits a duplicate", async () => {
@@ -2226,8 +2517,12 @@ describe("DeerFlow runtime adapter", () => {
     const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
 
     const result = await adapter.execute(execution({
-      externalRunId: "external_run_1",
-      lastExternalEventId: "event-existing-1",
+      submission: {
+        mode: "join",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+        externalRunId: "external_run_1",
+        lastExternalEventId: "event-existing-1",
+      },
     }), runtimeObserver);
 
     expect(result).toMatchObject({ protocol: "workbench.runtime.result.v1", message: "done" });
@@ -2276,7 +2571,7 @@ describe("DeerFlow runtime adapter", () => {
     expect(requests[0]?.url.searchParams.get("limit")).toBe("100");
     expect(requests[0]?.url.searchParams.get("offset")).toBe("0");
     expect(requests.some((request) => request.init.method === "POST")).toBe(false);
-    expect(runtimeObserver.onSubmissionStarted).not.toHaveBeenCalled();
+    expect(runtimeObserver.onSubmissionStarted).toHaveBeenCalledTimes(1);
     expect(runtimeObserver.onExternalRunCreated).toHaveBeenCalledWith("external_run_recovered");
     expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2419,7 +2714,6 @@ describe("DeerFlow runtime adapter", () => {
       }],
       knowledgeTool: null,
       resume: [{ key: "interrupt_1", decision: "approve" }],
-      previousAssistantText: "",
     }), runtimeObserver);
 
     expect(result).toMatchObject({ protocol: "workbench.runtime.result.v1", message: "resumed" });
@@ -2448,7 +2742,7 @@ describe("DeerFlow runtime adapter", () => {
   it("streams multipart bytes and refuses a mismatched digest before finalizing the body", async () => {
     const content = Buffer.from("streamed source");
     const multipart = createMultipartUploadStream({
-      source: Readable.from([content.subarray(0, 5), content.subarray(5)]),
+      source: Readable.from([content.subarray(0, 5), content.subarray(5)]) as never,
       fileName: "需求 brief.txt",
       mediaType: "text/plain",
       byteSize: content.byteLength,
@@ -2461,7 +2755,7 @@ describe("DeerFlow runtime adapter", () => {
     expect(encoded.toString()).toContain("streamed source");
 
     const corrupted = createMultipartUploadStream({
-      source: Readable.from([content]),
+      source: Readable.from([content]) as never,
       fileName: "brief.txt",
       mediaType: "text/plain",
       byteSize: content.byteLength,
@@ -2485,7 +2779,7 @@ describe("DeerFlow runtime adapter", () => {
       if (!address || typeof address === "string") throw new Error("test server address missing");
       const content = Buffer.from("native fetch stream");
       const multipart = createMultipartUploadStream({
-        source: Readable.from([content]),
+        source: Readable.from([content]) as never,
         fileName: "native.txt",
         mediaType: "text/plain",
         byteSize: content.byteLength,
@@ -2594,7 +2888,6 @@ describe("DeerFlow runtime adapter", () => {
       knowledgeTool: null,
       designStyleSnapshot: presetSnapshot,
       resume: null,
-      previousAssistantText: "",
     }), observer());
 
     expect(storage.getObject).toHaveBeenCalledTimes(2);
@@ -2620,6 +2913,87 @@ describe("DeerFlow runtime adapter", () => {
     expect(serialized).not.toContain("tenant/private");
     expect(serialized).not.toContain("must-not-leak.example");
     expect(serialized).not.toContain("artifact_url");
+  });
+
+  it("commits integrity evidence before rejecting corrupted S3 bytes and sends zero provider POSTs", async () => {
+    const expected = Buffer.from("trusted runtime source");
+    const tampered = Buffer.from("TAMPERED runtime sourc");
+    expect(tampered.byteLength).toBe(expected.byteLength);
+    let recorderResolved = false;
+    const recordIntegrityFailure = vi.fn(async () => {
+      await Promise.resolve();
+      recorderResolved = true;
+    });
+    const s3 = {
+      send: vi.fn(async () => ({
+        Body: Readable.from([tampered.subarray(0, 4), tampered.subarray(4)]),
+        ContentLength: tampered.byteLength,
+        ContentType: "text/plain",
+      })),
+    };
+    const storage = new S3RuntimeReadyBlobReader(
+      workerConfig(),
+      recordIntegrityFailure,
+      s3 as never,
+    );
+    const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/api/threads/deer_thread_1/runs") && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      throw new Error(`Provider request must not occur before ready-object verification: ${init.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), storage);
+    const presetSnapshot = runtimePresetSnapshot();
+
+    let rejection: unknown;
+    try {
+      await adapter.execute(execution({
+        request: {
+          prompt: "Use the attached brief",
+          modelId: "quality",
+          workflow: "redesign",
+          targetSurface: "web",
+          designStyle: { kind: "preset", ...presetSnapshot.source },
+          sourceIds: ["file-corrupted"],
+          artifactTargets: [],
+          requestedArtifactKinds: [],
+        },
+        sources: [{
+          position: 0,
+          sourceId: "file-corrupted",
+          sourceKind: "file",
+          blobId: "blob-corrupted",
+          originalName: "brief.txt",
+          mediaType: "text/plain",
+          byteSize: expected.byteLength,
+          sha256: sha256(expected),
+          original: {
+            storageKey: "blobs/corrupted-runtime-source",
+            mediaType: "text/plain",
+            byteSize: expected.byteLength,
+            sha256: sha256(expected),
+          },
+          extraction: null,
+        }],
+        knowledgeTool: null,
+        designStyleSnapshot: presetSnapshot,
+        resume: null,
+      }), observer());
+    } catch (error) {
+      rejection = error;
+      expect(recorderResolved).toBe(true);
+    }
+
+    expect(rejection).toMatchObject({ message: "RUNTIME_SOURCE_STORAGE_READ_FAILED" });
+    expect(recordIntegrityFailure).toHaveBeenCalledOnce();
+    expect(recordIntegrityFailure).toHaveBeenCalledWith(expect.objectContaining({
+      failureCode: "OBJECT_STORAGE_SHA256_MISMATCH",
+      storageKey: "blobs/corrupted-runtime-source",
+      observedSha256: sha256(tampered),
+    }));
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   });
 
   it("uploads pinned Design System assets and exposes only asset-to-handle mappings", async () => {

@@ -11,7 +11,9 @@ import {
 } from "./workbench-deerflow-knowledge-smoke-lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const HISTORY_LIMIT = 1_000;
+// The pinned DeerFlow history endpoint rejects limits above 100. Reaching the
+// maximum remains fail-closed because the response may be truncated.
+const HISTORY_LIMIT = 100;
 const RUN_PAGE_SIZE = 100;
 const MAX_RUN_PAGES = 100;
 let database = null;

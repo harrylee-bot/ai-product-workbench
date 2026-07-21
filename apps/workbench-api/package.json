@@ -15,12 +15,6 @@
     "test:knowledge-postgres": "vitest run test/knowledge-retrieval.postgres.spec.ts"
   },
   "dependencies": {
-    "@workbench/workbench-canvas-tools": "0.1.0",
-    "@workbench/workbench-contracts": "0.1.0",
-    "@workbench/workbench-db": "0.1.0",
-    "@workbench/workbench-knowledge": "0.1.0",
-    "@workbench/workbench-preview-token": "0.1.0",
-    "@workbench/workbench-telemetry": "0.1.0",
     "@aws-sdk/client-s3": "^3.873.0",
     "@aws-sdk/s3-request-presigner": "^3.873.0",
     "@nestjs/common": "^11.1.6",
@@ -28,6 +22,13 @@
     "@nestjs/core": "^11.1.6",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.6",
+    "@workbench/workbench-canvas-tools": "0.1.0",
+    "@workbench/workbench-content-security": "0.1.0",
+    "@workbench/workbench-contracts": "0.1.0",
+    "@workbench/workbench-db": "0.1.0",
+    "@workbench/workbench-knowledge": "0.1.0",
+    "@workbench/workbench-preview-token": "0.1.0",
+    "@workbench/workbench-telemetry": "0.1.0",
     "helmet": "^8.2.0",
     "jieba-wasm": "2.4.0",
     "jwks-rsa": "^3.2.0",
@@ -45,5 +46,9 @@
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "4.1.9"
+  },
+  "optionalDependencies": {
+    "@img/sharp-libvips-linux-x64": "^1.2.4",
+    "@img/sharp-linux-x64": "^0.34.5"
   }
 }

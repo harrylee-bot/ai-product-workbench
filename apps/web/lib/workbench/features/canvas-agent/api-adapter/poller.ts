@@ -93,7 +93,7 @@ export class CanvasAgentCommandPoller {
         if (signal.aborted) return;
         const outcome = await this.#dispatcher.dispatch({ command, scope: this.#scope });
         if (outcome.kind !== "ack") continue;
-        const stateAfterDispatch = await this.#synchronizeState(signal);
+        const stateAfterDispatch = await this.#synchronizeState(signal, command.commandId);
         if (!stateAfterDispatch?.activeSession || signal.aborted) return;
         const acknowledgedOutcome: CanvasAgentDispatchOutcome = {
           kind: "ack",
@@ -122,7 +122,10 @@ export class CanvasAgentCommandPoller {
     } while (cursor && !signal.aborted);
   }
 
-  async #synchronizeState(signal: AbortSignal): Promise<CanvasClientStateSyncResponse | null> {
+  async #synchronizeState(
+    signal: AbortSignal,
+    causedByCommandId?: string,
+  ): Promise<CanvasClientStateSyncResponse | null> {
     const state = this.#captureState();
     if (!state || signal.aborted) return null;
     if (
@@ -134,7 +137,7 @@ export class CanvasAgentCommandPoller {
     }
     const synchronized = await this.#transport.syncState(
       this.#scope.projectId,
-      state,
+      causedByCommandId ? { ...state, causedByCommandId } : state,
       signal,
     );
     if (

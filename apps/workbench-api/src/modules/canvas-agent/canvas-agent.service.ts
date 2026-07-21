@@ -41,6 +41,7 @@ import {
 import {
   CanvasToolCapabilityGrantError,
   canvasToolCapabilityGrantPayloadSha256,
+  canvasToolPayloadSha256,
   verifyCanvasToolCapabilityGrant,
   type CanvasToolCapabilityGrantPayload,
 } from "@workbench/workbench-canvas-tools";
@@ -57,6 +58,7 @@ import {
   type CanvasVisualStoragePort,
 } from "../../platform/object-storage/object-storage.port.js";
 import { readReadyObject } from "../../platform/object-storage/read-ready-object.js";
+import { readyObjectIntegrityRecorder } from "../../platform/object-storage/ready-object-integrity.js";
 import { CanvasAgentConfig } from "./canvas-agent.config.js";
 import {
   canvasCommandConflictProblem,
@@ -178,6 +180,21 @@ type InvocationRow = {
 };
 
 type CanvasProjectionClient = Pick<Prisma.TransactionClient, "artifactVersion">;
+
+type AuthorizedVisualCapabilityRow = {
+  storageKey: string;
+  mediaType: string;
+  sha256: string;
+  byteSize: bigint;
+  expiresAt: Date;
+  snapshotSha256: string;
+  boardRevision: number;
+  canvasStateRevision: number;
+  viewport: Prisma.JsonValue;
+  selectedNodeIds: Prisma.JsonValue;
+  visibleNodeIds: Prisma.JsonValue;
+  profile: string;
+};
 
 type LockedProjectMembership = {
   databaseNow: Date;
@@ -446,6 +463,21 @@ export class CanvasAgentService {
         },
       });
       if (invocationUpdated.count !== 1) throw canvasCommandConflictProblem();
+      if (
+        ack.status === "rejected"
+        && (
+          ack.canvasStateRevision !== current.invocation.canvasStateRevisionBefore
+          || acknowledgedCanvasStateSha256 !== current.invocation.canvasStateSha256Before
+        )
+      ) {
+        const revoked = await tx.canvasToolGrant.updateMany({
+          where: { id: current.agentSession.grant!.id, revokedAt: null },
+          data: { revokedAt: membership.databaseNow },
+        });
+        if (revoked.count !== 1) {
+          throw canvasCommandConflictProblem("Rejected Canvas state transition raced with grant revocation");
+        }
+      }
       return { kind: "acknowledged" as const, ack };
       });
     } catch (error) {
@@ -465,50 +497,107 @@ export class CanvasAgentService {
     authorization: string | undefined,
     visualCapabilityId: string,
     ifNoneMatch?: string,
+    signal?: AbortSignal,
   ) {
     const grant = this.verifyGrant(authorization);
-    const visual = await this.db.canvasVisualCapability.findUnique({
-      where: { id: visualCapabilityId },
-      select: {
-        id: true,
-        grantId: true,
-        agentSessionId: true,
-        runId: true,
-        projectId: true,
-        principalId: true,
-        status: true,
-        storageKey: true,
-        mediaType: true,
-        sha256: true,
-        byteSize: true,
-        expiresAt: true,
-      },
-    });
-    if (
-      !visual
-      || visual.grantId !== grant.grantId
-      || visual.agentSessionId !== grant.agentSessionId
-      || visual.runId !== grant.runId
-      || visual.projectId !== grant.projectId
-      || visual.principalId !== grant.principalId
-      || visual.status !== "ready"
-      || !visual.storageKey
-      || !visual.mediaType
-      || !visual.sha256
-      || visual.byteSize === null
-      || visual.expiresAt.getTime() <= Date.now()
-    ) throw canvasUnauthorizedProblem();
+    const visual = await this.findAuthorizedVisualCapability(grant, visualCapabilityId);
     const object = await readReadyObject(this.visualStorage, {
       storageKey: visual.storageKey,
       sha256: visual.sha256,
       byteSize: safeVisualByteSize(visual.byteSize),
       mediaType: visual.mediaType,
-    }, undefined, ifNoneMatch);
+    }, undefined, ifNoneMatch, {
+      signal,
+      recordIntegrityFailure: readyObjectIntegrityRecorder(this.db),
+    });
     return {
       ...object,
       sha256: visual.sha256,
       capabilityExpiresAt: visual.expiresAt,
     };
+  }
+
+  /**
+   * A signed capability is intentionally not the source of truth for object
+   * access.  Session completion, grant revocation, membership removal, and Run
+   * cancellation can all happen while the token is still within its TTL.  Lock
+   * and re-check every owner row in one statement so those lifecycle changes
+   * take effect before a visual object is read.
+   */
+  private async findAuthorizedVisualCapability(
+    grant: CanvasToolCapabilityGrantPayload,
+    visualCapabilityId: string,
+  ): Promise<AuthorizedVisualCapabilityRow> {
+    const payloadSha256 = canvasToolCapabilityGrantPayloadSha256(grant);
+    const rows = await this.db.$queryRaw<AuthorizedVisualCapabilityRow[]>(Prisma.sql`
+      SELECT
+        visual."storage_key" AS "storageKey",
+        visual."media_type" AS "mediaType",
+        visual."sha256" AS "sha256",
+        visual."byte_size" AS "byteSize",
+        visual."expires_at" AS "expiresAt",
+        session."snapshot_sha256" AS "snapshotSha256",
+        session."board_revision" AS "boardRevision",
+        session."canvas_state_revision" AS "canvasStateRevision",
+        session."viewport" AS "viewport",
+        session."selected_node_ids" AS "selectedNodeIds",
+        session."visible_node_ids" AS "visibleNodeIds",
+        session."profile"::TEXT AS "profile"
+      FROM "canvas_visual_capabilities" AS visual
+      JOIN "canvas_agent_sessions" AS session
+        ON session."id" = visual."agent_session_id"
+      JOIN "canvas_tool_grants" AS tool_grant
+        ON tool_grant."id" = visual."grant_id"
+       AND tool_grant."agent_session_id" = session."id"
+      JOIN "runs" AS run
+        ON run."id" = visual."run_id"
+       AND run."project_id" = visual."project_id"
+      JOIN "projects" AS project
+        ON project."id" = visual."project_id"
+      JOIN "principals" AS principal
+        ON principal."id" = visual."principal_id"
+      JOIN "project_members" AS membership
+        ON membership."project_id" = visual."project_id"
+       AND membership."principal_id" = visual."principal_id"
+      WHERE visual."id"::TEXT = ${visualCapabilityId}
+        AND visual."grant_id"::TEXT = ${grant.grantId}
+        AND visual."agent_session_id" = ${grant.agentSessionId}
+        AND visual."run_id" = ${grant.runId}
+        AND visual."project_id" = ${grant.projectId}
+        AND visual."principal_id" = ${grant.principalId}
+        AND visual."status" = 'ready'
+        AND visual."storage_key" IS NOT NULL
+        AND visual."storage_deleted_at" IS NULL
+        AND visual."media_type" IS NOT NULL
+        AND visual."sha256" IS NOT NULL
+        AND visual."byte_size" IS NOT NULL
+        AND visual."expires_at" > CURRENT_TIMESTAMP
+        AND session."project_id" = visual."project_id"
+        AND session."run_id" = visual."run_id"
+        AND session."thread_id" = ${grant.threadId}
+        AND session."principal_id" = visual."principal_id"
+        AND session."board_id" = ${grant.boardId}
+        AND session."runtime_attempt_id" = ${grant.runtimeAttemptId}
+        AND session."status" = 'active'
+        AND session."expires_at" > CURRENT_TIMESTAMP
+        AND session."declaration_hash" = ${grant.declarationSha256}
+        AND tool_grant."payload_sha256" = ${payloadSha256}
+        AND tool_grant."declaration_hash" = ${grant.declarationSha256}
+        AND tool_grant."revoked_at" IS NULL
+        AND tool_grant."expires_at" > CURRENT_TIMESTAMP
+        AND run."thread_id" = ${grant.threadId}
+        AND run."created_by_id" = ${grant.principalId}
+        AND run."status" = 'running'
+        AND project."status" = 'active'
+        AND principal."status" = 'active'
+      FOR SHARE OF visual, session, tool_grant, run, project, principal, membership
+    `);
+    const visual = rows[0];
+    if (!visual || !visual.storageKey || !visual.mediaType || !visual.sha256 || visual.byteSize === null) {
+      throw canvasUnauthorizedProblem();
+    }
+    this.assertGrantSnapshot(grant, visual);
+    return visual;
   }
 
   async synchronizeClientState(
@@ -517,13 +606,7 @@ export class CanvasAgentService {
     state: CanvasClientStateSyncRequest,
   ) {
     return this.db.$transaction(async (tx) => {
-      const membership = await tx.projectMember.findUnique({
-        where: { projectId_principalId: { projectId, principalId } },
-        include: { project: true, principal: true },
-      });
-      if (!membership || membership.project.status !== "active" || membership.principal.status !== "active") {
-        throw canvasScopeProblem("The authenticated principal is not an active member of this Project");
-      }
+      const membership = await this.lockActiveProjectMembership(tx, principalId, projectId);
 
       const sessions = await tx.$queryRaw<Array<{
         id: string;
@@ -581,20 +664,56 @@ export class CanvasAgentService {
         state.boardId,
         [...state.selectedScreens, ...state.visibleScreens],
       );
+      let activeSessionCount = sessions.length;
       for (const session of sessions) {
-        if (state.canvasStateRevision < session.canvasStateRevision) {
-          throw canvasRevisionProblem("The browser Canvas state revision regressed");
-        }
         const nextState = { selectedNodeIds, visibleNodeIds, viewport: state.viewport };
         const currentState = {
           selectedNodeIds: parseIdArray(session.selectedNodeIds),
           visibleNodeIds: parseIdArray(session.visibleNodeIds),
           viewport: parseViewport(session.viewport),
         };
-        if (state.canvasStateRevision === session.canvasStateRevision) {
-          if (hashRequest(nextState) !== hashRequest(currentState)) {
-            throw canvasRevisionProblem("One Canvas state revision cannot describe different browser state");
-          }
+        const stateMatches = hashRequest(nextState) === hashRequest(currentState)
+          && state.canvasStateRevision === session.canvasStateRevision;
+        if (stateMatches) {
+          continue;
+        }
+        if (state.canvasStateRevision <= session.canvasStateRevision) {
+          throw canvasRevisionProblem(
+            state.canvasStateRevision < session.canvasStateRevision
+              ? "The browser Canvas state revision regressed"
+              : "One Canvas state revision cannot describe different browser state",
+          );
+        }
+        const command = state.causedByCommandId
+          ? await tx.canvasClientCommand.findUnique({
+              where: { id: state.causedByCommandId },
+              include: { invocation: true },
+            })
+          : null;
+        const parsedCommand = command ? canvasClientCommandSchema.safeParse(command.command) : null;
+        const causalTransition = Boolean(
+          command
+          && parsedCommand?.success
+          && command.agentSessionId === session.id
+          && command.projectId === projectId
+          && command.clientSessionId === state.clientSessionId
+          && command.projectSessionGeneration === state.projectSessionGeneration
+          && command.boardRevision === state.boardRevision
+          && command.canvasStateRevision === session.canvasStateRevision
+          && command.status === "pending"
+          && command.expiresAt.getTime() > membership.databaseNow.getTime()
+          && command.invocation.status === "waiting_client"
+          && command.invocation.agentSessionId === session.id
+          && command.invocation.canvasStateRevisionBefore === session.canvasStateRevision
+          && commandAllowsCanvasStateTransition(
+            parsedCommand.data,
+            { ...currentState, canvasStateRevision: session.canvasStateRevision },
+            { ...nextState, canvasStateRevision: state.canvasStateRevision },
+          )
+        );
+        if (!causalTransition) {
+          await this.revokeGrantForUncausedClientState(tx, session.id, membership.databaseNow);
+          activeSessionCount -= 1;
           continue;
         }
         const updated = await tx.canvasAgentSession.updateMany({
@@ -616,10 +735,24 @@ export class CanvasAgentService {
       }
       return canvasClientStateSyncResponseSchema.parse({
         protocol: "workbench.canvas-client-state.v1",
-        activeSession: true,
+        activeSession: activeSessionCount > 0,
         canvasStateRevision: state.canvasStateRevision,
       });
     });
+  }
+
+  private async revokeGrantForUncausedClientState(
+    tx: Prisma.TransactionClient,
+    agentSessionId: string,
+    databaseNow: Date,
+  ): Promise<void> {
+    const revoked = await tx.canvasToolGrant.updateMany({
+      where: { agentSessionId, revokedAt: null },
+      data: { revokedAt: databaseNow },
+    });
+    if (revoked.count !== 1) {
+      throw canvasCommandConflictProblem("Canvas state revocation raced with grant completion");
+    }
   }
 
   async listCommands(
@@ -920,6 +1053,12 @@ export class CanvasAgentService {
     const projected = await this.projectSnapshot(session, boardRow);
     if (projected.snapshot.boardRevision !== context.boardRevision) throw canvasRevisionProblem();
     if (projected.snapshot.canvasStateRevision !== context.canvasStateRevision) throw canvasRevisionProblem();
+    await this.assertCurrentCanvasStateLineage(
+      grant,
+      session as unknown as SessionRow,
+      projected.snapshot,
+      request.context.toolCallId,
+    );
     if (
       (profile.requiresExistingScreen && projected.screens.size === 0)
       || (profile.requiresSingleEditableSelection && projected.snapshot.selectedScreens.length !== 1)
@@ -937,8 +1076,14 @@ export class CanvasAgentService {
     threadId: string;
     principalId: string;
     boardId: string;
+    profile: string;
     declarationHash?: string;
     snapshotSha256?: string;
+    boardRevision: number;
+    canvasStateRevision: number;
+    selectedNodeIds: Prisma.JsonValue;
+    visibleNodeIds: Prisma.JsonValue;
+    viewport: Prisma.JsonValue;
     grant?: {
       id: string;
       payloadSha256: string;
@@ -958,6 +1103,15 @@ export class CanvasAgentService {
       || session.boardId !== grant.boardId
     ) throw canvasUnauthorizedProblem();
     if (session.declarationHash && session.declarationHash !== grant.declarationSha256) throw canvasUnauthorizedProblem();
+    // Mutable Canvas state may advance only through an ACK-verified command.
+    // The immutable grant remains bound to the original complete snapshot;
+    // its persisted payload hash proves every original state hash without
+    // incorrectly requiring the current causal successor to equal that state.
+    if (
+      session.snapshotSha256 !== grant.snapshotSha256
+      || session.boardRevision !== grant.boardRevision
+      || session.profile !== grant.profile
+    ) throw canvasUnauthorizedProblem();
     if (!session.grant) throw canvasUnauthorizedProblem();
     if (
       session.grant.id !== grant.grantId
@@ -971,6 +1125,77 @@ export class CanvasAgentService {
       || session.grant.revokedAt !== null
       || session.grant.expiresAt.getTime() <= now.getTime()
     ) throw canvasUnauthorizedProblem();
+  }
+
+  private assertGrantSnapshot(
+    grant: CanvasToolCapabilityGrantPayload,
+    state: {
+      snapshotSha256?: string;
+      boardRevision: number;
+      canvasStateRevision: number;
+      viewport: Prisma.JsonValue;
+      selectedNodeIds: Prisma.JsonValue;
+      visibleNodeIds: Prisma.JsonValue;
+      profile: string;
+    },
+  ): void {
+    if (!this.grantMatchesCanvasState(grant, state)) throw canvasUnauthorizedProblem();
+  }
+
+  private grantMatchesCanvasState(
+    grant: CanvasToolCapabilityGrantPayload,
+    state: {
+      snapshotSha256?: string;
+      boardRevision: number;
+      canvasStateRevision: number;
+      viewport: Prisma.JsonValue;
+      selectedNodeIds: Prisma.JsonValue;
+      visibleNodeIds: Prisma.JsonValue;
+      profile: string;
+    },
+  ): boolean {
+    return !(
+      state.snapshotSha256 !== grant.snapshotSha256
+      || state.boardRevision !== grant.boardRevision
+      || state.canvasStateRevision !== grant.canvasStateRevision
+      || canvasToolPayloadSha256(state.viewport) !== grant.viewportSha256
+      || canvasToolPayloadSha256(state.selectedNodeIds) !== grant.selectedNodeIdsSha256
+      || canvasToolPayloadSha256(state.visibleNodeIds) !== grant.visibleNodeIdsSha256
+      || state.profile !== grant.profile
+    );
+  }
+
+  private async assertCurrentCanvasStateLineage(
+    grant: CanvasToolCapabilityGrantPayload,
+    session: SessionRow,
+    snapshot: CanvasSnapshot,
+    toolCallId: string,
+  ): Promise<void> {
+    if (this.grantMatchesCanvasState(grant, session)) return;
+    const digest = canonicalCanvasStateSha256(snapshot);
+    const lineage = await this.db.canvasToolInvocation.findFirst({
+      where: {
+        agentSessionId: session.id,
+        OR: [
+          {
+            status: "succeeded",
+            toolName: { in: [...clientCommandToolNames] },
+            canvasStateRevisionAfter: session.canvasStateRevision,
+            canvasStateSha256After: digest,
+          },
+          {
+            status: "waiting_client",
+            toolCallId,
+            canvasStateRevisionBefore: { lt: session.canvasStateRevision },
+            clientCommand: { is: { status: "pending" } },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!lineage) {
+      throw canvasRevisionProblem("The current Canvas state has no acknowledged command lineage");
+    }
   }
 
   private async projectSnapshot(
@@ -1083,6 +1308,7 @@ export class CanvasAgentService {
         selectedNodeIds: Prisma.JsonValue;
         visibleNodeIds: Prisma.JsonValue;
         viewport: Prisma.JsonValue;
+        waitingClientToolCallId: string | null;
         grantId: string;
         grantPayloadSha256: string;
         grantRevokedAt: Date | null;
@@ -1097,6 +1323,14 @@ export class CanvasAgentService {
           session."selected_node_ids" AS "selectedNodeIds",
           session."visible_node_ids" AS "visibleNodeIds",
           session."viewport" AS "viewport",
+          (
+            SELECT pending."tool_call_id"
+            FROM "canvas_tool_invocations" AS pending
+            WHERE pending."agent_session_id" = session."id"
+              AND pending."status" = 'waiting_client'
+            ORDER BY pending."sequence" ASC
+            LIMIT 1
+          ) AS "waitingClientToolCallId",
           tool_grant."id" AS "grantId",
           tool_grant."payload_sha256" AS "grantPayloadSha256",
           tool_grant."revoked_at" AS "grantRevokedAt",
@@ -1179,6 +1413,12 @@ export class CanvasAgentService {
             leaseExpiresAt: lease.expiresAt,
           } as unknown as InvocationRow,
         };
+      }
+      if (
+        lockedSession.waitingClientToolCallId
+        && lockedSession.waitingClientToolCallId !== request.context.toolCallId
+      ) {
+        throw canvasInvocationConflictProblem("A Canvas client command is still waiting for acknowledgement");
       }
       if (
         mutationToolNames.has(request.toolName)
@@ -2174,6 +2414,19 @@ export class CanvasAgentService {
     if (commandExpired.count !== 1 || invocationExpired.count !== 1) {
       throw canvasCommandConflictProblem("Canvas command expiry raced with acknowledgement");
     }
+    const session = await tx.canvasAgentSession.findUnique({
+      where: { id: command.invocation.agentSessionId },
+      select: { canvasStateRevision: true },
+    });
+    if (session && session.canvasStateRevision !== command.invocation.canvasStateRevisionBefore) {
+      const revoked = await tx.canvasToolGrant.updateMany({
+        where: { agentSessionId: command.invocation.agentSessionId, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      if (revoked.count !== 1) {
+        throw canvasCommandConflictProblem("Expired provisional Canvas state raced with grant revocation");
+      }
+    }
     return result;
   }
 }
@@ -2209,6 +2462,54 @@ function parseViewport(value: Prisma.JsonValue) {
     }
   }
   return { x: 0, y: 0, zoom: 1 };
+}
+
+type CanvasMutableState = {
+  canvasStateRevision: number;
+  selectedNodeIds: string[];
+  visibleNodeIds: string[];
+  viewport: { x: number; y: number; zoom: number };
+};
+
+function commandAllowsCanvasStateTransition(
+  command: CanvasClientCommand,
+  current: CanvasMutableState,
+  next: CanvasMutableState,
+): boolean {
+  if (command.expectedCanvasStateRevision !== current.canvasStateRevision) return false;
+  const selectedChanged = !sameIdSet(current.selectedNodeIds, next.selectedNodeIds);
+  const visibleChanged = !sameIdSet(current.visibleNodeIds, next.visibleNodeIds);
+  const viewportChanged = hashRequest(current.viewport) !== hashRequest(next.viewport);
+  const stateChanged = selectedChanged || visibleChanged || viewportChanged;
+  if (next.canvasStateRevision !== current.canvasStateRevision + (stateChanged ? 1 : 0)) return false;
+
+  if (command.kind === "preview.open") return !stateChanged;
+  if (command.kind === "selection.change") {
+    if (visibleChanged || viewportChanged) return false;
+    const expected = new Set(current.selectedNodeIds);
+    const targets = command.targets.map((target) => target.boardNodeId);
+    if (command.mode === "replace") {
+      expected.clear();
+      targets.forEach((target) => expected.add(target));
+    } else if (command.mode === "add") {
+      targets.forEach((target) => expected.add(target));
+    } else if (command.mode === "remove") {
+      targets.forEach((target) => expected.delete(target));
+    } else {
+      targets.forEach((target) => {
+        if (expected.has(target)) expected.delete(target);
+        else expected.add(target);
+      });
+    }
+    return sameIdSet([...expected], next.selectedNodeIds);
+  }
+  return !selectedChanged;
+}
+
+function sameIdSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return rightSet.size === right.length && left.every((value) => rightSet.has(value));
 }
 
 function targetFromRequest(request: CanvasAgentToolRequest): CanvasScreenReference | null {

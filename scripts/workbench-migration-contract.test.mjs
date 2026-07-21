@@ -30,12 +30,36 @@ const triggerSearchPathMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260719050000_trigger_function_search_path_hardening/migration.sql",
   import.meta.url,
 ), "utf8");
+const runCancellationReceiptMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260719060000_run_cancellation_receipts/migration.sql",
+  import.meta.url,
+), "utf8");
+const runEventAppendOnlyMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260720010000_run_event_append_only_source_identity/migration.sql",
+  import.meta.url,
+), "utf8");
+const canvasVisualLifecycleMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260720020000_canvas_visual_lifecycle_gc/migration.sql",
+  import.meta.url,
+), "utf8");
+const readyObjectIntegrityMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260720030000_ready_object_integrity_incidents/migration.sql",
+  import.meta.url,
+), "utf8");
 const extensionProvisioning = await readFile(new URL(
   "../deploy/workbench-postgres-extensions.sql",
   import.meta.url,
 ), "utf8");
 const migratorEntrypoint = await readFile(new URL(
   "../deploy/workbench-migrate.sh",
+  import.meta.url,
+), "utf8");
+const databaseRoleProvisioning = await readFile(new URL(
+  "./provision-workbench-database-roles.mjs",
+  import.meta.url,
+), "utf8");
+const readyObjectIntegrityReleaseOperator = await readFile(new URL(
+  "./release-ready-object-integrity-retention.mjs",
   import.meta.url,
 ), "utf8");
 
@@ -56,7 +80,7 @@ test("export packaging backfill restores the mutation guard", () => {
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 62, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 66, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -99,6 +123,76 @@ test("Canvas grant snapshot digest migration is append-only and fences legacy gr
   assert.match(canvasSnapshotDigestMigration, /CANVAS_AGENT_SESSION_SNAPSHOT_IMMUTABLE/u);
   assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_IMMUTABLE/u);
   assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_SCOPE_INVALID/u);
+});
+
+test("Canvas visual cleanup has a bounded lifecycle candidate index", () => {
+  assert.match(
+    canvasVisualLifecycleMigration,
+    /CREATE INDEX "canvas_visual_capabilities_status_storage_deleted_expires_idx"/u,
+  );
+  assert.match(
+    canvasVisualLifecycleMigration,
+    /\("status", "storage_deleted_at", "expires_at"\)/u,
+  );
+});
+
+test("ready object integrity incidents are constrained and deduplicated audit evidence", () => {
+  assert.match(readyObjectIntegrityMigration, /^BEGIN;/u);
+  assert.match(readyObjectIntegrityMigration, /ready_object_integrity_incidents_fingerprint_key/u);
+  assert.match(readyObjectIntegrityMigration, /OBJECT_STORAGE_SHA256_MISMATCH/u);
+  assert.match(readyObjectIntegrityMigration, /READY_OBJECT_INTEGRITY_INCIDENT_IMMUTABLE/u);
+  assert.match(readyObjectIntegrityMigration, /READY_OBJECT_INTEGRITY_INCIDENT_DELETE_FORBIDDEN/u);
+  assert.match(readyObjectIntegrityMigration, /BEFORE UPDATE OR DELETE ON "ready_object_integrity_incidents"/u);
+  assert.match(readyObjectIntegrityMigration, /READY_OBJECT_INTEGRITY_AUDIT_TRUNCATE_FORBIDDEN/u);
+  assert.match(readyObjectIntegrityMigration, /BEFORE TRUNCATE ON "ready_object_integrity_incidents"/u);
+  assert.match(readyObjectIntegrityMigration, /occurrence_count" <> OLD\."occurrence_count" \+ 1/u);
+  assert.match(readyObjectIntegrityMigration, /ready_object_integrity_retention_releases/u);
+  assert.match(readyObjectIntegrityMigration, /READY_OBJECT_INTEGRITY_RELEASE_REQUIRES_OWNER/u);
+  assert.match(readyObjectIntegrityMigration, /READY_OBJECT_INTEGRITY_RELEASE_APPEND_ONLY/u);
+  assert.match(readyObjectIntegrityMigration, /SET search_path = pg_catalog/u);
+  assert.match(readyObjectIntegrityMigration, /COMMIT;\s*$/u);
+  assert.match(readyObjectIntegrityReleaseOperator, /WORKBENCH_MIGRATOR_DATABASE_URL/u);
+  assert.doesNotMatch(readyObjectIntegrityReleaseOperator, /WORKBENCH_DATABASE_URL\?\.trim/u);
+});
+
+test("Run cancellation receipts are scoped, immutable, and lifecycle-bound to their Run", () => {
+  assert.match(runCancellationReceiptMigration, /^BEGIN;/u);
+  assert.match(
+    runCancellationReceiptMigration,
+    /run_cancellation_receipts_principal_id_idempotency_key_key/u,
+  );
+  assert.match(runCancellationReceiptMigration, /run_cancellation_receipts_response_shape_check/u);
+  assert.match(
+    runCancellationReceiptMigration,
+    /FOREIGN KEY \("run_id"\) REFERENCES "runs"\("id"\)\s+ON DELETE CASCADE/u,
+  );
+  assert.match(runCancellationReceiptMigration, /RUN_CANCELLATION_RECEIPT_IMMUTABLE/u);
+  assert.match(
+    runCancellationReceiptMigration,
+    /LANGUAGE plpgsql\s+SET search_path = pg_catalog/u,
+  );
+  assert.match(
+    runCancellationReceiptMigration,
+    /BEFORE UPDATE ON "run_cancellation_receipts"/u,
+  );
+  assert.match(runCancellationReceiptMigration, /COMMIT;\s*$/u);
+});
+
+test("RunEvent is append-only and shares the application source-id language", () => {
+  assert.match(runEventAppendOnlyMigration, /^BEGIN;/u);
+  assert.match(runEventAppendOnlyMigration, /RUN_EVENT_SOURCE_ID_BACKFILL_REQUIRED/u);
+  assert.match(runEventAppendOnlyMigration, /ALTER COLUMN "source_id" TYPE VARCHAR\(128\)/u);
+  assert.match(runEventAppendOnlyMigration, /run_events_source_id_format_check/u);
+  assert.match(runEventAppendOnlyMigration, /\^\[A-Za-z0-9\._:-\]\+\$/u);
+  assert.match(runEventAppendOnlyMigration, /RUN_EVENT_APPEND_ONLY/u);
+  assert.match(runEventAppendOnlyMigration, /BEFORE UPDATE OR DELETE ON "run_events"/u);
+  assert.match(runEventAppendOnlyMigration, /BEFORE TRUNCATE ON "run_events"/u);
+  assert.match(runEventAppendOnlyMigration, /pg_trigger_depth\(\) > 1/u);
+  assert.match(
+    runEventAppendOnlyMigration,
+    /SET search_path = pg_catalog, public/u,
+  );
+  assert.match(runEventAppendOnlyMigration, /COMMIT;\s*$/u);
 });
 
 test("Canvas command ACKs bind canonical state digests before and after execution", () => {
@@ -174,4 +268,17 @@ test("database extensions are provisioned outside least-privilege application mi
       < migratorEntrypoint.indexOf("migrate:deploy"),
     "the migrator must fail closed on missing or unsupported extensions before Prisma runs",
   );
+});
+
+test("database roles keep migrations separate from runtime DML", () => {
+  assert.match(databaseRoleProvisioning, /WORKBENCH_POSTGRES_ADMIN_URL/u);
+  assert.match(databaseRoleProvisioning, /WORKBENCH_POSTGRES_MIGRATOR_USER/u);
+  assert.match(databaseRoleProvisioning, /WORKBENCH_POSTGRES_RUNTIME_USER/u);
+  assert.match(databaseRoleProvisioning, /REVOKE UPDATE, DELETE, TRUNCATE ON TABLE .*run_events/u);
+  assert.match(databaseRoleProvisioning, /REVOKE DELETE, TRUNCATE ON TABLE .*ready_object_integrity_incidents/u);
+  assert.match(databaseRoleProvisioning, /REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE .*ready_object_integrity_retention_releases/u);
+  assert.match(databaseRoleProvisioning, /schemaIdentifier\("workbench_jobs"\)/u);
+  assert.match(databaseRoleProvisioning, /REVOKE CREATE ON SCHEMA \$\{jobsSchema\}/u);
+  assert.match(migratorEntrypoint, /--phase=bootstrap/u);
+  assert.match(migratorEntrypoint, /--phase=grant/u);
 });

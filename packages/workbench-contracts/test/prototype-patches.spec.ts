@@ -148,11 +148,11 @@ describe("Prototype patch operation contracts", () => {
   it("keeps source identity opaque and the event envelope strict", () => {
     const payload = {
       attempt: 1,
-      runtimeAttemptId: "runtime/opaque:attempt",
+      runtimeAttemptId: "runtime.opaque:attempt",
       artifactIndex: 0,
       artifactId: "artifact-1",
       artifactVersionId: "version-1",
-      sourceEventId: "runtime/tool-call#opaque",
+      sourceEventId: "runtime.tool-call:opaque",
       requestSha256: "f".repeat(64),
       ...patch([{ kind: "remove_node", nodeId: "node-a" }]),
     };

@@ -211,6 +211,14 @@ describe("Canvas Agent tool contracts", () => {
     expect(canvasClientStateSyncRequestSchema.safeParse(state).success).toBe(true);
     expect(canvasClientStateSyncRequestSchema.safeParse({
       ...state,
+      causedByCommandId: "command-1",
+    }).success).toBe(true);
+    expect(canvasClientStateSyncRequestSchema.safeParse({
+      ...state,
+      causedByCommandId: "https://attacker.example/command",
+    }).success).toBe(false);
+    expect(canvasClientStateSyncRequestSchema.safeParse({
+      ...state,
       selectedScreens: [screenReference, screenReference],
     }).success).toBe(false);
     expect(canvasClientStateSyncRequestSchema.safeParse({

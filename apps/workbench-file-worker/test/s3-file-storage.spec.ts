@@ -30,7 +30,7 @@ const promoted = {
 describe("S3FileStorageAdapter", () => {
   it("returns a streaming object with a validated positive size", async () => {
     const client = new FakeS3();
-    const adapter = new S3FileStorageAdapter(config, client as never);
+    const adapter = storageAdapter(client);
 
     await expect(adapter.getObject(promoted.sourceKey)).resolves.toMatchObject({
       byteSize: 4,
@@ -42,7 +42,7 @@ describe("S3FileStorageAdapter", () => {
   it("reuses an existing destination only after metadata and actual bytes match", async () => {
     const client = new FakeS3();
     client.destination = exactDestination();
-    const adapter = new S3FileStorageAdapter(config, client as never);
+    const adapter = storageAdapter(client);
 
     await adapter.promoteObject(promoted);
 
@@ -52,7 +52,7 @@ describe("S3FileStorageAdapter", () => {
 
   it("publishes with create-only PutObject and verifies the resulting bytes", async () => {
     const client = new FakeS3();
-    const adapter = new S3FileStorageAdapter(config, client as never);
+    const adapter = storageAdapter(client);
 
     await adapter.promoteObject(promoted);
 
@@ -71,7 +71,7 @@ describe("S3FileStorageAdapter", () => {
 
   it("streams generated content to a create-only content-addressed destination", async () => {
     const client = new FakeS3();
-    const adapter = new S3FileStorageAdapter(config, client as never);
+    const adapter = storageAdapter(client);
 
     await adapter.putContentAddressed({
       body: Readable.from([bytes]),
@@ -98,7 +98,7 @@ describe("S3FileStorageAdapter", () => {
       mediaType: "text/plain",
       sha256: "b".repeat(64),
     };
-    const adapter = new S3FileStorageAdapter(config, client as never);
+    const adapter = storageAdapter(client);
 
     await expect(adapter.promoteObject(promoted)).rejects.toMatchObject({
       code: "FILE_STORAGE_DESTINATION_IDENTITY_CONFLICT",
@@ -110,7 +110,7 @@ describe("S3FileStorageAdapter", () => {
   it("handles a conditional-create race only when the winner stored identical bytes", async () => {
     const client = new FakeS3();
     client.preconditionRace = exactDestination();
-    const adapter = new S3FileStorageAdapter(config, client as never);
+    const adapter = storageAdapter(client);
 
     await expect(adapter.promoteObject(promoted)).resolves.toBeUndefined();
 
@@ -120,7 +120,7 @@ describe("S3FileStorageAdapter", () => {
 
   it("uses idempotent S3 deletion for staging cleanup", async () => {
     const client = new FakeS3();
-    const adapter = new S3FileStorageAdapter(config, client as never);
+    const adapter = storageAdapter(client);
 
     await adapter.deleteObject(promoted.sourceKey);
 
@@ -133,6 +133,14 @@ type Destination = {
   mediaType: string;
   sha256: string;
 };
+
+function storageAdapter(client: FakeS3) {
+  return new S3FileStorageAdapter(
+    config,
+    vi.fn(async () => undefined),
+    client as never,
+  );
+}
 
 class FakeS3 {
   commands: Array<HeadObjectCommand | GetObjectCommand | PutObjectCommand | DeleteObjectCommand> = [];

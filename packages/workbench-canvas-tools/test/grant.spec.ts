@@ -25,6 +25,13 @@ const payload: CanvasToolCapabilityGrantPayload = {
   runtimeAttemptId: "attempt_123",
   agentSessionId: "session_123",
   boardId: "board_123",
+  snapshotSha256: "b".repeat(64),
+  boardRevision: 7,
+  canvasStateRevision: 3,
+  viewportSha256: "c".repeat(64),
+  selectedNodeIdsSha256: "d".repeat(64),
+  visibleNodeIdsSha256: "e".repeat(64),
+  profile: "edit",
   declarationSha256: "a".repeat(64),
   issuedAt: now,
   notBefore: now,
@@ -74,6 +81,12 @@ describe("canvas tool capability grants", () => {
       .toThrow("CANVAS_TOOL_CAPABILITY_GRANT_ID_INVALID");
     expect(() => createCanvasToolCapabilityGrant({ ...payload, declarationSha256: "A".repeat(64) }, secret, { now }))
       .toThrow("CANVAS_TOOL_CAPABILITY_GRANT_DECLARATION_HASH_INVALID");
+    expect(() => createCanvasToolCapabilityGrant({ ...payload, snapshotSha256: "A".repeat(64) }, secret, { now }))
+      .toThrow("CANVAS_TOOL_CAPABILITY_GRANT_SCOPE_HASH_INVALID");
+    expect(() => createCanvasToolCapabilityGrant({ ...payload, boardRevision: -1 }, secret, { now }))
+      .toThrow("CANVAS_TOOL_CAPABILITY_GRANT_REVISION_INVALID");
+    expect(() => createCanvasToolCapabilityGrant({ ...payload, profile: "admin" } as never, secret, { now }))
+      .toThrow("CANVAS_TOOL_CAPABILITY_GRANT_PROFILE_INVALID");
     expect(() => createCanvasToolCapabilityGrant({ ...payload, unexpected: true } as never, secret, { now }))
       .toThrow("CANVAS_TOOL_CAPABILITY_GRANT_INVALID");
   });
@@ -154,6 +167,13 @@ describe("canvas tool capability grants", () => {
       runtimeAttemptId: payload.runtimeAttemptId,
       agentSessionId: payload.agentSessionId,
       boardId: payload.boardId,
+      snapshotSha256: payload.snapshotSha256,
+      boardRevision: payload.boardRevision,
+      canvasStateRevision: payload.canvasStateRevision,
+      viewportSha256: payload.viewportSha256,
+      selectedNodeIdsSha256: payload.selectedNodeIdsSha256,
+      visibleNodeIdsSha256: payload.visibleNodeIdsSha256,
+      profile: payload.profile,
       declarationSha256: payload.declarationSha256,
       iat: Math.floor(payload.issuedAt.getTime() / 1_000),
       nbf: Math.floor(payload.notBefore.getTime() / 1_000),
@@ -202,7 +222,7 @@ describe("canonical canvas tool payload hashes", () => {
     expect(canvasToolPayloadSha256({ a: 1, z: [true, null, "产品工作台"] }))
       .toBe("1d16e854e248acc4b6a80f9e5776e878f1677c6d239d4dd36f1abf6bdcb8bcd6");
     expect(canvasToolCapabilityGrantPayloadSha256(payload))
-      .toBe("5a9c73eb322b4ffa559a6bef6e3b160ea88204f65b365d1240ad2aa6fdc09ced");
+      .toBe("5f986a74e746916d38b5492bde1d05786d1479af8851096676386366ae151c8d");
   });
 
   it("rejects values that are not unambiguous JSON data", () => {
