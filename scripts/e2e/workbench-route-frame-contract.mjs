@@ -49,15 +49,18 @@ export function assertRouteTransitionFrames(frames, from, to, label) {
 
   const homeTransforms = new Set(
     frames
-      .filter((frame) => routePresent(frame.home))
-      .map((frame) => frame.home.transform)
-      .filter((value) => value && value !== "none"),
+      .filter((frame) => routeMounted(frame.home))
+      .map((frame) => frame.home.transform || "none"),
   );
-  assert(homeTransforms.size >= 2, `${label} must retain the Home root translate progression`);
+  assert(
+    homeTransforms.size >= 2,
+    `${label} must retain the Home root translate progression: ${JSON.stringify([...homeTransforms])}`,
+  );
 
   return {
     elapsedMs: Math.round(frames.at(-1)?.elapsedMs ?? 0),
     frameCount: frames.length,
+    homeTransforms: [...homeTransforms],
     mutationSamples: frames.filter((frame) => frame.source === "mutation").length,
     overlapFrames: mountedOverlapFrames.length,
     rafSamples: frames.filter((frame) => frame.source === "raf").length,

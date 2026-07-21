@@ -29,6 +29,7 @@ test("accepts a mounted sync handoff when visible enter samples are coalesced", 
   assert.equal(result.visibleOverlapFrames, 0);
   assert.deepEqual(result.sourceOpacity, { maximum: 1, minimum: 0, range: 1 });
   assert.deepEqual(result.targetOpacity, { maximum: 1, minimum: 0, range: 1 });
+  assert.deepEqual(result.homeTransforms, ["translateY(6px)", "translateY(3px)", "none"]);
 });
 
 test("rejects a serial route swap without any mounted overlap", () => {
@@ -78,6 +79,33 @@ test("rejects a concurrently mounted route that never changes opacity", () => {
   assert.throws(
     () => assertRouteTransitionFrames(frames, "home", "project", "snapped Home-to-Project"),
     /incoming project opacity must animate during enter/u,
+  );
+});
+
+test("rejects an opacity transition that never changes the Home transform", () => {
+  const frames = [
+    frame({ home: route(1), homeHeader: route(1) }),
+    frame({
+      elapsedMs: 16,
+      home: route(0.5),
+      homeHeader: route(0.5),
+      project: route(0),
+      projectHeader: route(0),
+      source: "mutation",
+    }),
+    frame({
+      elapsedMs: 32,
+      home: route(0),
+      homeHeader: route(0),
+      project: route(0.5),
+      projectHeader: route(0.5),
+    }),
+    frame({ elapsedMs: 48, project: route(1), projectHeader: route(1) }),
+  ];
+
+  assert.throws(
+    () => assertRouteTransitionFrames(frames, "home", "project", "static-transform Home-to-Project"),
+    /must retain the Home root translate progression/u,
   );
 });
 
