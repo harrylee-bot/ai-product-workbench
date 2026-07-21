@@ -486,13 +486,13 @@ Codex 的任何修复都必须保留：
 - **位置**：`scripts/g0-scope-approval.mjs`；`docs/evidence/governance/g0-scope-approval.schema.json`；`docs/evidence/governance/g0-scope-approval.example.json`
 - **触发**：正式候选准备 G0 payload 时，校验器仍将完整 finding 集合固定为 D-001～D-033 与 P-001～P-019，而审计规范已经新增 D-034～D-037。
 - **影响**：真实 G0 记录无法把新增供应链、工具最小权限、浏览器 CSP 和 CI 依赖 finding 纳入责任与进度范围；若沿用旧合同，G0 PASS 会产生漏审的生产批准事实。
-- **修复**：G0 的精确集合最初升级为 D-001～D-038 与 P-001～P-019；D-039～D-043 形成后继续同步升级到当前 D-001～D-043 与 P-001～P-019，共 62 项。JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
-- **测试**：新增回归用例显式断言当前 D-034～D-043 和 62 项总数，并证明只覆盖到 D-033 的旧记录 fail closed；D-039 前一版曾完成 G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test，完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`。当前 62 项合同必须在下一候选重新执行。
-- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 62 项并绑定同一 G1 manifest。
+- **修复**：G0 的精确集合最初升级为 D-001～D-038 与 P-001～P-019；D-039～D-044 形成后继续同步升级到当前 D-001～D-044 与 P-001～P-019，共 63 项。JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
+- **测试**：新增回归用例显式断言当前 D-034～D-044 和 63 项总数，并证明只覆盖到 D-033 的旧记录 fail closed；D-039 前一版曾完成 G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test，完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`。当前 63 项合同必须在下一候选重新执行。
+- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 63 项并绑定同一 G1 manifest。
 
 ### D-039 — 锁文件遗漏 Linux Rolldown 原生可选依赖
 
-- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；后续 Linux CI 已证明 binding 可加载，完整 G3 仍被 D-043 阻断
+- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；后续 Linux CI 已证明 binding 可加载，完整 G3 仍被 D-044 阻断
 - **位置**：`package.json`；`package-lock.json`；`scripts/prepare-node-image.test.mjs`
 - **触发**：签名候选 `8710fa5b83827b18c404690629aa7bbaa953ea79` 的 GitHub PR run `29844055994` 在 Linux `npm test` 启动 Workbench Contracts Vitest 时失败；`rolldown@1.1.4` 声明了平台包，但 lockfile 只有开发机的 `@rolldown/binding-darwin-arm64` 节点，`npm ci` 无法安装 `@rolldown/binding-linux-x64-gnu`。
 - **影响**：G3 Linux 测试无法启动；相同锁文件也未显式封存 Alpine 生产镜像所需的 musl binding，后续 G4 构建存在同类失败风险。若以本机 ARM 测试代替，会产生跨平台假绿。
@@ -502,7 +502,7 @@ Codex 的任何修复都必须保留：
 
 ### D-040 — Knowledge 仓库级确定性测试沿用默认五秒预算
 
-- **状态/严重度**：REMEDIATED IN CODE / MEDIUM / release-blocking；后续 Linux CI 已越过原始测试预算，完整 G3 仍被 D-043 阻断
+- **状态/严重度**：REMEDIATED IN CODE / MEDIUM / release-blocking；后续 Linux CI 已越过原始测试预算，完整 G3 仍被 D-044 阻断
 - **位置**：`packages/workbench-knowledge/test/knowledge.spec.ts`
 - **触发**：签名 commit `482e7ec7243721a0bc29465479650bee72a5fa3e` 的 GitHub PR run `29846325332` 在 Linux runner 读取 661 份 Vault 文档、10 个受引用资产并执行正序/逆序两次完整 release 构建时耗时 8456ms，超过 Vitest 默认 5000ms。
 - **影响**：测试的内容闭包、路由计数、不可变性与顺序无关断言都已执行，但 G3 在较慢的共享 Linux runner 上被不适合仓库级集成工作的默认单测预算阻断；若只依赖本机耗时，会继续产生跨平台假绿。
@@ -512,33 +512,43 @@ Codex 的任何修复都必须保留：
 
 ### D-041 — Runtime 恢复队列允许同一 Run 重复排队
 
-- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；本地与 Linux PostgreSQL 工作流均已通过，完整 G3 仍被 D-043 阻断
+- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；本地与 Linux PostgreSQL 工作流均已通过，完整 G3 仍被 D-044 阻断
 - **位置**：`packages/workbench-contracts/src/queues.ts`；`apps/workbench-worker/src/runs/runtime-execution-reconciler.ts`；`apps/workbench-worker/test/runtime-execution-reconciler.postgres.spec.ts`；`scripts/workbench-postgres-http-e2e.mjs`
 - **触发**：签名 commit `0917c4472eefbde49f6cd454ea5f5f14f0ca360b` 的 PR #4 run `29848133959` 已越过 D-039、D-040 的原始触发，但在真实 PostgreSQL API/Worker 工作流中，SSE fixture 留下无人持有的 `running` Run，恢复器每五秒为同一 `singletonKey` 再次发送任务；`runtime.execute` 的 `key_strict_fifo` policy 不会拒绝已排队的同 key job，多个 `created` job 在 claim 时触发 `job_common_i8` 唯一索引冲突，并把后续 targeted Generate 阻塞在队头。
 - **影响**：一个失租或测试遗留 Run 可持续制造重复恢复任务，使同 key claim 失败并阻塞其他 Run；Worker 表面存活但合法生成一直停留在 `queued`，导致 G3 PostgreSQL 工作流超时。仅依赖稳定 `singletonKey` 不能证明恢复投递幂等。
 - **修复**：`runtime.execute` policy 改为 PostgreSQL 唯一索引约束的 `exclusive`，同一 Run 在 queued/retry/active 状态只允许一个任务，已保留的 failed job 不阻断下一次恢复。恢复器在 Prisma 事务中二次确认 Run 仍为无人持有或失租的 `running` 状态，以 `FOR UPDATE SKIP LOCKED` 锁定该 Run，并通过 `fromPrisma(tx)` 在同一事务发送带 `singletonKey=runId`、`group.id=threadId` 的任务。SSE fixture 改为带有效 owner、heartbeat 和未来 lease 的 attempt 1 Run，并在场景结束后删除 synthetic Run。
-- **测试**：Contracts queue 10/10、恢复器单元测试 4/4、Worker typecheck 与真实 PostgreSQL 并发回归 1/1 PASS；并发回归覆盖双 Reconciler、active 去重、failed 后仅一个新恢复任务及不同 Run 可同时 fetch。完整 PostgreSQL API/Worker HTTP/SSE 工作流随后 PASS，targeted Generate 只进入 Fake DeerFlow 一次，approval/cancel/retry 均完成，且无 `job_common_i8`、duplicate key 或 timeout。固定 npm 11.18.0 的最终 root test、typecheck、G0 22/22、lint 与架构检查也均 PASS；root test、typecheck 和 PostgreSQL E2E 日志 SHA-256 分别为 `16b0ecca9537595e1164e5ca21c1ff99182cc117d9e9cfb17d398322ae7eb4d8`、`195288fb66f7ea885d53e2d5a59cda4b95ebf4417ceebe645a73474db1e69bbe`、`3da2704e5e6874a7992a57b7b960e104f9fa3d8986760c0959953fd913ebd329`；这些仍是 dirty-tree E4 证据。签名 commits `a79a34c316958070ed8a822d56fda22f14db85c5` 与 `068792fa4ad079e605d2aeb340d59633631d28a7` 的 Linux runs `29852008323`、`29855070481` 随后均完整通过真实 PostgreSQL API/Worker、File Worker 与 DeerFlow 步骤，关闭 D-041 的原始 CI 触发；后一 run 最终被 D-043 阻断。
-- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 全绿，62 项 G0 真实批准范围包含 D-041，并由同一候选上的故障恢复矩阵证明失租、并发扫描和 failed 后重投不会重复执行或阻塞其他 Run。
+- **测试**：Contracts queue 10/10、恢复器单元测试 4/4、Worker typecheck 与真实 PostgreSQL 并发回归 1/1 PASS；并发回归覆盖双 Reconciler、active 去重、failed 后仅一个新恢复任务及不同 Run 可同时 fetch。完整 PostgreSQL API/Worker HTTP/SSE 工作流随后 PASS，targeted Generate 只进入 Fake DeerFlow 一次，approval/cancel/retry 均完成，且无 `job_common_i8`、duplicate key 或 timeout。固定 npm 11.18.0 的最终 root test、typecheck、G0 22/22、lint 与架构检查也均 PASS；root test、typecheck 和 PostgreSQL E2E 日志 SHA-256 分别为 `16b0ecca9537595e1164e5ca21c1ff99182cc117d9e9cfb17d398322ae7eb4d8`、`195288fb66f7ea885d53e2d5a59cda4b95ebf4417ceebe645a73474db1e69bbe`、`3da2704e5e6874a7992a57b7b960e104f9fa3d8986760c0959953fd913ebd329`；这些仍是 dirty-tree E4 证据。签名 commits `a79a34c316958070ed8a822d56fda22f14db85c5`、`068792fa4ad079e605d2aeb340d59633631d28a7` 与 `abbef5db516a06c230db8791cb7e68d41de39903` 的 Linux runs `29852008323`、`29855070481`、`29857428945` 随后均完整通过真实 PostgreSQL API/Worker、File Worker 与 DeerFlow 步骤，关闭 D-041 的原始 CI 触发；最新 run 最终被 D-044 阻断。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 全绿，63 项 G0 真实批准范围包含 D-041，并由同一候选上的故障恢复矩阵证明失租、并发扫描和 failed 后重投不会重复执行或阻塞其他 Run。
 
 ### D-042 — 浏览器 smoke 启动仅预热登录路由
 
-- **状态/严重度**：REMEDIATED IN CODE / MEDIUM / release-blocking；项目路由预热已由 Linux CI 证明，完整 G3 仍被 D-043 阻断
+- **状态/严重度**：REMEDIATED IN CODE / MEDIUM / release-blocking；项目路由预热已由 Linux CI 证明，完整 G3 仍被 D-044 阻断
 - **位置**：`scripts/e2e/run-workbench-web-smoke.mjs`；`scripts/e2e/workbench-web-startup.mjs`；`scripts/e2e/workbench-web-startup.test.mjs`
 - **触发**：签名 commit `a79a34c316958070ed8a822d56fda22f14db85c5` 的 PR #4 run `29852008323` 已通过安装、生成、迁移、静态检查、server/worker、真实 PostgreSQL、File Worker、DeerFlow、Web tests、浏览器 runtime 安装与 export integration；托管 Next dev 只用 `/login` 判断 ready，第一个 smoke 随后导航 `/projects/project-run-preview` 时才触发 Turbopack 首次编译 `/projects/[projectId]`，编译占用约 27 秒并使 `page.goto(..., waitUntil: "domcontentloaded")` 撞上 Playwright 30 秒默认预算。
 - **影响**：业务路由实际无功能错误时，Linux 冷缓存仍会随机阻断 G3 并跳过 production build 与 route bundle 验证；直接放宽所有浏览器导航超时还会掩盖真实页面加载回归。
 - **修复**：托管 Next dev 在登录路由 ready 后，以明确的 `workbench.session_token` 测试 Cookie 请求动态项目路由，完整消费响应并要求 HTTP 200。该预热使用独立 90 秒启动预算，同时监听托管服务提前退出并中止请求；Playwright 页面导航仍保留原 30 秒预算，外部自管 origin 不被启动器改写。
 - **测试**：启动合同 5/5 PASS，覆盖连接重试、动态路由与 Cookie、完整响应、响应体中断、鉴权重定向 fail closed、服务提前退出与请求中止。固定 npm 11.18.0 的完整 `npm run e2e:web` 一次 PASS，实际日志先出现 `/projects/[projectId]` 冷编译，再完成 Run Preview、Board、Chromium/Firefox/WebKit、设计系统、Export 与隔离 Preview；日志 SHA-256 为 `cfa743ac77868d86321044cd91319ae618697d9614e9e206a27b2611965ec847`。固定 npm 11.18.0 的 root test、typecheck、lint、架构检查和 release-chain 8/8 也均 PASS，日志 SHA-256 分别为 `7e62bba433a415b73f07b9c2ac78fa35fba520bcce6ff5ed007ab97413e3bbfa`、`8bf1811023151cac14947a9788f2125721bb0234a01f17fc91010dafd1108310`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`6e6f5f6400d5d0b2cf73fd064d1179c13310ccb177017897b97e72071b723b30`、`03df608a31a1a0635d905b7fc64cfb63687956c37cbe7914d294c71793d82de9`。签名 commit `068792fa4ad079e605d2aeb340d59633631d28a7` 的 Linux run `29855070481` 随后先完成项目路由预热并通过 Run Preview smoke，证明 D-042 的原始触发已关闭；下一首页场景形成 D-043。原始 CI 失败日志 `/private/tmp/workbench-ci-29852008323-failed.log` 的 SHA-256 为 `401694b30a0d956d86cd82a1627820341e93d4d0f46e88ff83921fce7af3592a`。
-- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 在默认 Playwright 导航预算内完成浏览器 smoke、production build 与 route bundle 验证，62 项 G0 真实批准范围包含 D-042。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 在默认 Playwright 导航预算内完成浏览器 smoke、production build 与 route bundle 验证，63 项 G0 真实批准范围包含 D-042。
 
 ### D-043 — 浏览器 smoke 未预热独立首页路由
 
-- **状态/严重度**：REMEDIATED IN CODE / MEDIUM / release-blocking；双入口启动合同与完整本地浏览器矩阵已通过，新 Linux CI 仍待执行
+- **状态/严重度**：REMEDIATED IN CODE / MEDIUM / release-blocking；双入口预热已由 Linux CI 证明，完整 G3 随后被 D-044 阻断
 - **位置**：`scripts/e2e/run-workbench-web-smoke.mjs`；`scripts/e2e/workbench-web-startup.mjs`；`scripts/e2e/workbench-web-startup.test.mjs`
 - **触发**：签名 commit `068792fa4ad079e605d2aeb340d59633631d28a7` 的 PR #4 run `29855070481` 已通过 D-042 的项目路由预热和首个 Run Preview smoke；第二个 approval/preferences smoke 首次导航 `/` 时才触发独立首页 bundle 冷编译，约 27 秒后 `page.goto(origin, waitUntil: "networkidle")` 撞上 Playwright 30 秒默认预算。该 run 此前的 release-chain、Compose/gateway/Quartz、迁移、静态检查、server/worker、真实 PostgreSQL、File Worker、DeerFlow、Web tests、浏览器 runtime 与 export integration 均 PASS。
 - **影响**：只预热测试序列中的第一个业务入口会把同类冷编译失败推迟到下一个入口，仍会随机阻断 G3 并跳过 production build 与 route bundle；逐个放宽页面导航预算会把编译启动成本混入产品加载预算。
 - **修复**：启动器使用固定受保护入口矩阵，依次预热动态项目路由和首页路由；每个入口都有独立 90 秒启动预算、明确测试会话 Cookie、完整响应消费、HTTP 200 要求与托管服务退出监控。浏览器导航继续保留 30 秒默认预算，外部自管 origin 仍不执行托管预热。
-- **测试**：更新后的启动合同 5/5 PASS，直接断言项目与首页两个 URL 的顺序、Cookie、完整响应、首页鉴权重定向 fail closed、响应体中断与服务提前退出。固定 npm 11.18.0 的完整 `npm run e2e:web` 一次 PASS，并在任何 smoke 输出前记录 `protected routes ready: /projects/project-run-preview, /`；root test、typecheck、lint、架构检查与 release-chain 8/8 也均 PASS。六份日志 SHA-256 分别为 `15bcff674c72dc6a53ee4ed5218a26539e2fda2d7ef7b0af988984dd5e00d4d2`、`a99a26bb66e7a4788e366d9224be477e5c194548da09d5be6da4d3c0df6b26a8`、`7cd0fa084ff2b5d0a7e486cd92dcef1423ee5256e74bf9e6c32aa98ba6f7c726`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`bfdfd1db097638c53a6e7fa292342359bc535a6ac1bd16a13a19f8625b5abf95`、`1c797c81d4eec75456764d3342c31f9bda79ded921be1ae9f46247be958711c7`。GitHub Linux run 仍待执行。原始 CI 失败日志 `/private/tmp/workbench-ci-29855070481-failed.log` 的 SHA-256 为 `6e18d733361b385aa89341a7356f85683827ad77db131f9a3c5f2607f22226b1`。
-- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 在两个入口均预热后完成全浏览器 smoke、production build 与 route bundle，62 项 G0 真实批准范围包含 D-043。
+- **测试**：更新后的启动合同 5/5 PASS，直接断言项目与首页两个 URL 的顺序、Cookie、完整响应、首页鉴权重定向 fail closed、响应体中断与服务提前退出。固定 npm 11.18.0 的完整 `npm run e2e:web` 一次 PASS，并在任何 smoke 输出前记录 `protected routes ready: /projects/project-run-preview, /`；root test、typecheck、lint、架构检查与 release-chain 8/8 也均 PASS。六份日志 SHA-256 分别为 `15bcff674c72dc6a53ee4ed5218a26539e2fda2d7ef7b0af988984dd5e00d4d2`、`a99a26bb66e7a4788e366d9224be477e5c194548da09d5be6da4d3c0df6b26a8`、`7cd0fa084ff2b5d0a7e486cd92dcef1423ee5256e74bf9e6c32aa98ba6f7c726`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`bfdfd1db097638c53a6e7fa292342359bc535a6ac1bd16a13a19f8625b5abf95`、`1c797c81d4eec75456764d3342c31f9bda79ded921be1ae9f46247be958711c7`。签名 commit `abbef5db516a06c230db8791cb7e68d41de39903` 的 Linux run `29857428945` 随后先输出两个受保护入口均 ready，并在默认导航预算内通过 Run Preview 与首页 approval/preferences smoke，证明 D-043 原始触发关闭；该 run 后续在导航动画断言形成 D-044。原始 CI 失败日志 `/private/tmp/workbench-ci-29855070481-failed.log` 的 SHA-256 为 `6e18d733361b385aa89341a7356f85683827ad77db131f9a3c5f2607f22226b1`。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 在两个入口均预热后完成全浏览器 smoke、production build 与 route bundle，63 项 G0 真实批准范围包含 D-043。
+
+### D-044 — 导航 smoke 将同步挂载交接误判为可见透明度重叠
+
+- **状态/严重度**：REMEDIATED IN CODE / MEDIUM / release-blocking；定向合同与完整本地浏览器矩阵已通过，新 Linux CI 仍待执行
+- **位置**：`scripts/e2e/workbench-navigation-guard-smoke.mjs`；`scripts/e2e/workbench-route-frame-contract.mjs`；`scripts/e2e/workbench-route-frame-contract.test.mjs`
+- **触发**：签名 commit `abbef5db516a06c230db8791cb7e68d41de39903` 的 PR #4 run `29857428945` 已完成双入口预热，并通过 release-chain、Compose/gateway/Quartz、迁移、静态检查、server/worker、真实 PostgreSQL、File Worker、DeerFlow、Web tests、浏览器 runtime、export integration、Run Preview、approval/preferences 与 Board smoke；随后 Chromium 的 Home-to-Project 动画被 `must use a live Framer overlap` 断言阻断。旧断言使用要求 `opacity > 0.001` 的 `routePresent` 同时判断空白帧和 AnimatePresence overlap；合法的 `mode="sync"` 交接可在 incoming root 首个采样仍为透明时同时挂载两个 root，而共享 runner 调度可能合并下一可见帧，因此 DOM ownership overlap 被错误等同于 visible-opacity overlap。
+- **影响**：真实同步交接、独立出入场动画和非空页面均成立时，采样时序仍可产生 Linux 假失败并跳过 production build 与 route bundle；若直接删除 overlap/空白帧断言，又会漏掉 `mode="wait"` 串行切换或实际空白帧回归。
+- **修复**：抽出独立 route-frame contract，以尺寸、display、visibility 与祖先可见性定义 `routeMounted`，要求 outgoing/incoming root 至少一个采样同时挂载来证明 `AnimatePresence mode="sync"`；仍用包含透明度阈值的 `routePresent` 拒绝任何视觉空白帧，并继续要求 source/target 独立透明度进程、target settle、child enter 与 Home translate 进程。可见重叠帧改为独立诊断字段，不作为同步 DOM ownership 的必要条件。
+- **测试**：Node 合同 3/3 PASS，覆盖 incoming 首帧透明但同步挂载通过、无挂载重叠的串行交换失败、双 root 同时透明仍失败；与 63 项 G0 合同合并定向执行为 25/25 PASS。固定 npm 11.18.0 的完整 `npm run e2e:web` PASS，双入口预热后完成 Board、Chromium/Firefox/WebKit 导航、设计系统、Export 与隔离 Preview；三种浏览器所有路由方向均记录挂载重叠和实际可见重叠。完整 root test、typecheck、lint、506 模块/1671 依赖架构检查与 release-chain 8/8 也均 PASS。七份本地日志 SHA-256 分别为 `f7a56c8e8aa01d2c9a5c96303ee0aefa8e38bcef1d0304ccc595a3200994cb91`、`f62073830b25af8d3ea313b700dc849f03f3189cfe5dc364e6526ce55635691d`、`a1c4c71cc33fa45a4471111a10d2e180fb155c51621ee06bcc3e46a4e4b5ada5`、`7f49ffdd7cf713ec3511e9d9d6fef21a03ec338f74668a0c68ce908de7983b89`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`788f4d03d46a1ae78d62f28e4be8345c90e31b4e9a6be1139355c6c5f4bf9acf`、`a6432563e8357c2708120d81fad05f748e565456f24d7219bf7a32dc8e48b8e7`。Gitleaks 8.30.1 对最终 tracked/untracked 非忽略源码快照 2,099 个文件执行扫描，零命中，空 JSON 报告 SHA-256 为 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`。原始 Linux CI 失败日志 `/private/tmp/workbench-ci-29857428945-failed.log` 的 SHA-256 为 `01171b3e431d16e1707f49fbc943b4d468005d14f05ca1134ced50d81d6f2513`；当前修复仍是 dirty-tree E4，不能升级为 G3 PASS。
+- **退出条件**：新 clean signed commit 的 GitHub Linux G3 完成全浏览器 smoke、production build 与 route bundle，且 63 项 G0 真实批准范围包含 D-044。
 
 ---
 
@@ -656,6 +666,7 @@ Codex 的任何修复都必须保留：
 | V-058 | 2026-07-21 Runtime 恢复队列与第三轮 G3 诊断 | D-039/D-040 原触发关闭；G3 FAIL；commit 未形成候选 | E2/E4 | 签名 commit `0917c4472eefbde49f6cd454ea5f5f14f0ca360b` 的 PR #4 run `29848133959` 中 release-chain 合同与 Compose/gateway/Quartz job PASS；quality job 在固定 Node 22/npm 11.18.0 的 Linux runner 完成安装、生成、迁移、OpenAPI、typecheck、lint、架构检查与 server/worker tests，证明 D-039/D-040 的原始失败均已越过。真实 PostgreSQL API/Worker 工作流随后因同一失租 Run 的重复 `created` 恢复任务触发 `job_common_i8`，targeted Generate 未进入 Fake DeerFlow 并超时，形成 D-041；其后 File Worker、DeerFlow、Web、浏览器和 build 步骤按 CI fail-fast 跳过。修复后本地真实 PostgreSQL 并发回归与完整 HTTP/SSE 工作流 PASS，但仍属 dirty-tree E4；该 commit 没有签名 candidate tag、G1/G2 或真实 G0 包，不得作为发布候选。 |
 | V-059 | 2026-07-21 Runtime 修复后的第四轮 G3 与浏览器冷启动诊断 | D-039～D-041 原触发关闭；G3 FAIL；commit 未形成候选 | E2/E4 | 签名 commit `a79a34c316958070ed8a822d56fda22f14db85c5` 的 PR #4 run `29852008323` 中 release-chain 合同与 Compose/gateway/Quartz job PASS；quality job 在固定 Node 22/npm 11.18.0 的 Linux runner 完成安装、生成、迁移、OpenAPI、typecheck、lint、架构检查、server/worker、真实 PostgreSQL API/Worker、File Worker、DeerFlow、Web tests、浏览器 runtime 安装与 export integration，证明 D-039～D-041 的原始失败均已关闭。随后首个 Workbench smoke 在 Next dev 已 ready 后才冷编译 `/projects/[projectId]`，`page.goto` 30 秒预算先于冷编译导航完成而失败，形成 D-042；production build 与 route bundle 按 fail-fast 跳过。失败日志 SHA-256 为 `401694b30a0d956d86cd82a1627820341e93d4d0f46e88ff83921fce7af3592a`。该 commit 没有候选 tag、G1/G2 或真实 G0 包，不得作为发布候选。 |
 | V-060 | 2026-07-21 项目路由预热后的第五轮 G3 与首页冷启动诊断 | D-039～D-042 原触发关闭；G3 FAIL；commit 未形成候选 | E2/E4 | 签名 commit `068792fa4ad079e605d2aeb340d59633631d28a7` 的 PR #4 run `29855070481` 中 release-chain 合同与 Compose/gateway/Quartz job PASS；quality job 再次完成安装、生成、迁移、静态检查、server/worker、真实 PostgreSQL、File Worker、DeerFlow、Web tests、浏览器 runtime 与 export integration。项目动态路由在独立 90 秒预算内完成冷编译，首个 Run Preview smoke 在默认 30 秒导航预算内 PASS，证明 D-042 原始触发关闭；随后第二个 smoke 首次导航 `/` 时冷编译独立首页 bundle并在 30 秒时超时，形成 D-043，production build 与 route bundle 按 fail-fast 跳过。失败日志 SHA-256 为 `6e18d733361b385aa89341a7356f85683827ad77db131f9a3c5f2607f22226b1`。该 commit 没有候选 tag、G1/G2 或真实 G0 包，不得作为发布候选。 |
+| V-061 | 2026-07-21 双入口预热后的第六轮 G3 与导航采样诊断 | D-039～D-043 原触发关闭；G3 FAIL；commit 未形成候选 | E2/E4 | 签名 commit `abbef5db516a06c230db8791cb7e68d41de39903` 的 PR #4 run `29857428945` 中 release-chain 与 Compose/gateway/Quartz jobs PASS；quality job 完成安装、生成、迁移、OpenAPI、typecheck、lint、架构检查、server/worker、真实 PostgreSQL、File Worker、DeerFlow、Web tests、浏览器 runtime 与 export integration。浏览器启动明确输出 `/projects/project-run-preview, /` 均 ready，Run Preview、首页 approval/preferences 与 Board smoke PASS，证明 D-043 原始触发关闭；随后 Chromium Home-to-Project 因旧断言要求同时 `opacity > 0.001` 的可见重叠而失败，形成 D-044，production build 与 route bundle 按 fail-fast 跳过。失败日志 SHA-256 为 `01171b3e431d16e1707f49fbc943b4d468005d14f05ca1134ced50d81d6f2513`。该 commit 没有候选 tag、G1/G2 或真实 G0 包，不得作为发布候选。 |
 
 注意：本轮超大 working-tree review 的 conventions finder 和最终 gap sweep 曾因 prompt too long 未完成；因此本文是经过多角度、去重和验证的高覆盖审查，但不得宣称绝对无遗漏。
 
@@ -764,6 +775,15 @@ Codex 的任何修复都必须保留：
 | D-043 lint | `/private/tmp/workbench-d043-lint.log` | `4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51` |
 | D-043 architecture checks | `/private/tmp/workbench-d043-architecture.log` | `bfdfd1db097638c53a6e7fa292342359bc535a6ac1bd16a13a19f8625b5abf95` |
 | D-043 release-chain tests | `/private/tmp/workbench-d043-release-chain.log` | `1c797c81d4eec75456764d3342c31f9bda79ded921be1ae9f46247be958711c7` |
+| D-044 originating GitHub Linux CI failure | `/private/tmp/workbench-ci-29857428945-failed.log` | `01171b3e431d16e1707f49fbc943b4d468005d14f05ca1134ced50d81d6f2513` |
+| D-044 targeted route-frame and 63-item G0 contracts | `/private/tmp/workbench-d044-targeted-contracts.log` | `f7a56c8e8aa01d2c9a5c96303ee0aefa8e38bcef1d0304ccc595a3200994cb91` |
+| D-044 fixed-npm full browser E2E | `/private/tmp/workbench-d044-e2e-web.log` | `f62073830b25af8d3ea313b700dc849f03f3189cfe5dc364e6526ce55635691d` |
+| D-044 fixed-npm root `npm test` | `/private/tmp/workbench-d044-root-test.log` | `a1c4c71cc33fa45a4471111a10d2e180fb155c51621ee06bcc3e46a4e4b5ada5` |
+| D-044 fixed-npm root typecheck | `/private/tmp/workbench-d044-typecheck.log` | `7f49ffdd7cf713ec3511e9d9d6fef21a03ec338f74668a0c68ce908de7983b89` |
+| D-044 lint | `/private/tmp/workbench-d044-lint.log` | `4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51` |
+| D-044 architecture checks | `/private/tmp/workbench-d044-architecture.log` | `788f4d03d46a1ae78d62f28e4be8345c90e31b4e9a6be1139355c6c5f4bf9acf` |
+| D-044 release-chain tests | `/private/tmp/workbench-d044-release-chain.log` | `a6432563e8357c2708120d81fad05f748e565456f24d7219bf7a32dc8e48b8e7` |
+| D-044 final current-source Gitleaks empty report | `/private/tmp/workbench-d044-gitleaks-final-report.json` | `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570` |
 
 本轮补充目标服务器 validation 日志（dirty tree/E3/E4，均位于本机 `/private/tmp`，包含服务器回执或服务器命令输出，不是不可变外部 ledger；日志不得含真实 root 密码或 OpenAI key）：
 

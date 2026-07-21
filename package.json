@@ -54,7 +54,7 @@
     "g5:postgres-recovery": "node scripts/workbench-postgres-recovery-drill.mjs",
     "g5:postgres-recovery:test": "node --test scripts/workbench-postgres-recovery-drill.test.mjs scripts/workbench-postgres-recovery-drill.postgres.test.mjs",
     "production:acceptance:test": "node --test scripts/production-acceptance/production-acceptance.test.mjs",
-    "remediation:r0:test": "node --test scripts/release-candidate-manifest.test.mjs scripts/evidence-ledger.test.mjs scripts/verify-workbench-reproducibility.test.mjs scripts/g0-scope-approval.test.mjs scripts/workbench-hard-cut-manifest.test.mjs scripts/workbench-web-typegen.test.mjs scripts/production-acceptance/production-acceptance.test.mjs",
+    "remediation:r0:test": "node --test scripts/release-candidate-manifest.test.mjs scripts/evidence-ledger.test.mjs scripts/verify-workbench-reproducibility.test.mjs scripts/g0-scope-approval.test.mjs scripts/workbench-hard-cut-manifest.test.mjs scripts/workbench-web-typegen.test.mjs scripts/e2e/workbench-route-frame-contract.test.mjs scripts/production-acceptance/production-acceptance.test.mjs",
     "deployment:database-roles:test": "node --test scripts/workbench-database-role-contract.test.mjs scripts/workbench-database-role.postgres.test.mjs",
     "lint:workbench": "npm --workspace @workbench/web run lint:workbench",
     "architecture:workbench": "npm --workspace @workbench/web run architecture:workbench && npm run architecture:deerflow-tools",
