@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:22-bookworm-slim
+ARG NODE_IMAGE=node:22-alpine
 
 FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
@@ -7,11 +7,15 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     NPM_CONFIG_REPLACE_REGISTRY_HOST=always
+COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
+RUN prepare-node-image
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/workbench-contracts/package.json packages/workbench-contracts/package.json
 COPY packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
-RUN --mount=type=cache,target=/root/.npm npm ci --include=dev --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --include=dev --include=optional --no-audit --no-fund \
+  && node -e "require('lightningcss'); require('@tailwindcss/oxide')"
 
 FROM deps AS build
 ARG NEXT_PUBLIC_KNOWLEDGE_APP_URL
@@ -46,7 +50,7 @@ ENV WORKBENCH_TYPES_PREVALIDATED=1
 RUN npm run build
 
 FROM build AS prod-deps
-RUN npm prune --omit=dev --no-audit --no-fund && rm -rf /root/.npm
+RUN npm prune --omit=dev --include=optional --no-audit --no-fund && rm -rf /root/.npm
 
 FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
@@ -58,6 +62,8 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     NPM_CONFIG_REPLACE_REGISTRY_HOST=always
+COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
+RUN prepare-node-image
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/workbench-contracts/package.json packages/workbench-contracts/package.json
@@ -70,5 +76,6 @@ COPY --from=build /app/apps/web/public apps/web/public
 COPY --from=build /app/packages/workbench-contracts/dist packages/workbench-contracts/dist
 COPY --from=build /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
 WORKDIR /app/apps/web
+USER node
 EXPOSE 3000
 CMD ["npx", "next", "start", "--hostname", "0.0.0.0", "--port", "3000"]

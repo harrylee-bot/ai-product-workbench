@@ -20,7 +20,7 @@
     "@workbench/workbench-db": "0.1.0",
     "@workbench/workbench-knowledge": "0.1.0",
     "@workbench/workbench-telemetry": "0.1.0",
-    "@aws-sdk/client-s3": "^3.873.0",
+    "@aws-sdk/client-s3": "3.896.0",
     "@langchain/core": "1.1.48",
     "@langchain/langgraph-sdk": "1.9.25",
     "form-data": "4.0.6",

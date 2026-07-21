@@ -94,11 +94,14 @@
     "deerflow:config:merge": "node scripts/merge-deerflow-config.mjs",
     "deerflow:config:check": "node scripts/assert-deerflow-runtime-config.mjs",
     "deerflow:deployment:check": "node scripts/assert-deerflow-production-deployment.mjs",
-    "deerflow:deployment:test": "node --test scripts/merge-deerflow-config.test.mjs scripts/merge-workbench-env-overlay.test.mjs scripts/assert-deerflow-runtime-config.test.mjs scripts/assert-deerflow-production-deployment.test.mjs scripts/assert-deerflow-secret-channel-attestation.test.mjs scripts/workbench-runtime-queue-deployment.test.mjs scripts/assert-workbench-deployment-orchestration.test.mjs scripts/assert-workbench-upload-deployment.test.mjs scripts/workbench-origin-manifest.test.mjs scripts/workbench-oss-ram-manifest.test.mjs scripts/workbench-production-preflight.test.mjs scripts/production-deployment-config.test.mjs scripts/production-image-inventory.test.mjs scripts/write-production-build-configuration.test.mjs scripts/write-production-image-record.test.mjs",
+    "deerflow:deployment:test": "node --test scripts/merge-deerflow-config.test.mjs scripts/merge-workbench-env-overlay.test.mjs scripts/assert-deerflow-runtime-config.test.mjs scripts/assert-deerflow-production-deployment.test.mjs scripts/assert-deerflow-secret-channel-attestation.test.mjs scripts/workbench-runtime-queue-deployment.test.mjs scripts/assert-workbench-deployment-orchestration.test.mjs scripts/assert-workbench-upload-deployment.test.mjs scripts/workbench-origin-manifest.test.mjs scripts/workbench-oss-ram-manifest.test.mjs scripts/workbench-production-preflight.test.mjs scripts/production-deployment-config.test.mjs scripts/production-image-inventory.test.mjs scripts/prepare-node-image.test.mjs scripts/write-production-build-configuration.test.mjs scripts/write-production-image-record.test.mjs",
     "deerflow:tools:test": "PYTHONPATH=integrations/deerflow/runtime-tools /usr/bin/python3 -S -m unittest integrations/deerflow/runtime-tools/test_artifact_draft_tool.py integrations/deerflow/runtime-tools/test_generation_stage_tool.py integrations/deerflow/runtime-tools/test_prototype_patch_tool.py integrations/deerflow/runtime-tools/test_knowledge_client.py integrations/deerflow/runtime-tools/test_runtime_result_tool.py integrations/deerflow/runtime-tools/test_runtime_result_validator.py integrations/deerflow/runtime-tools/test_canvas_client.py integrations/deerflow/runtime-tools/test_canvas_tool.py integrations/deerflow/runtime-tools/test_runtime_tool_architecture.py integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/test_workbench_tool_scope_middleware.py"
   },
   "overrides": {
     "esbuild": "0.28.1",
+    "fast-xml-parser": "5.10.1",
+    "glob": "10.5.0",
+    "js-yaml": "4.3.0",
     "multer": "2.2.0",
     "postcss": "8.5.16",
     "vite": "8.1.3"
@@ -116,8 +119,11 @@
   },
   "optionalDependencies": {
     "@esbuild/linux-x64": "0.28.1",
+    "@next/swc-linux-x64-musl": "16.2.10",
     "@tailwindcss/oxide-linux-x64-gnu": "4.3.1",
-    "lightningcss-linux-x64-gnu": "1.32.0"
+    "@tailwindcss/oxide-linux-x64-musl": "4.3.1",
+    "lightningcss-linux-x64-gnu": "1.32.0",
+    "lightningcss-linux-x64-musl": "1.32.0"
   },
   "dependencies": {
     "@workbench/workbench-contracts": "0.1.0",
@@ -125,5 +131,12 @@
     "@workbench/workbench-knowledge": "0.1.0",
     "jose": "6.2.3",
     "pg-boss": "12.26.0"
+  },
+  "allowScripts": {
+    "@prisma/client": false,
+    "@prisma/engines": false,
+    "esbuild": false,
+    "prisma": false,
+    "sharp": false
   }
 }

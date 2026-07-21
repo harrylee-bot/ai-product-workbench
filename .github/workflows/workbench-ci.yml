@@ -368,7 +368,7 @@ jobs:
 
       - name: Validate primary gateway configuration
         env:
-          NGINX_IMAGE: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:1.27.5-alpine' }}
+          NGINX_IMAGE: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
         run: >-
           docker run --rm
           --add-host workbench-web:127.0.0.1
@@ -379,7 +379,7 @@ jobs:
 
       - name: Validate isolated Preview gateway configuration
         env:
-          NGINX_IMAGE: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:1.27.5-alpine' }}
+          NGINX_IMAGE: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
         run: >-
           docker run --rm
           --add-host workbench-preview:127.0.0.1
@@ -418,50 +418,50 @@ jobs:
               NEXT_PUBLIC_WORKBENCH_FORUM_URL=${{ github.ref == 'refs/heads/production' && vars.NEXT_PUBLIC_WORKBENCH_FORUM_URL || '' }}
               NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=${{ github.ref == 'refs/heads/production' && vars.NEXT_PUBLIC_WORKBENCH_PRIVACY_URL || '' }}
               NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_PUBLIC_REGISTRATION_ENABLED || 'false' }}
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: api
             dockerfile: apps/workbench-api/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: api-migrator
             dockerfile: apps/workbench-api/Dockerfile
             target: migrator
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: runtime-worker
             dockerfile: apps/workbench-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: file-worker
             dockerfile: apps/workbench-file-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: import-worker
             dockerfile: apps/workbench-import-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: export-worker
             dockerfile: apps/workbench-export-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: preview
             dockerfile: apps/workbench-preview/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: quartz
             dockerfile: apps/knowledge/Dockerfile
             target: immutable-runner
             build_args: |
               QUARTZ_BASE_URL=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_KNOWLEDGE_BASE_URL || 'workbench.example.test/knowledge' }}
               KNOWLEDGE_WEB_URL=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_WEB_ORIGIN || 'https://workbench.example.test' }}
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-bookworm-slim' }}
-              NGINX_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:1.27.5-alpine' }}
+              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              NGINX_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
           - name: deerflow
             dockerfile: integrations/deerflow/Dockerfile
             target: runtime

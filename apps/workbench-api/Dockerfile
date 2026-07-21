@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:22-bookworm-slim
+ARG NODE_IMAGE=node:22-alpine
 
 FROM ${NODE_IMAGE} AS dependencies
 WORKDIR /app
@@ -9,13 +9,8 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_REPLACE_REGISTRY_HOST=always \
     DEBIAN_FRONTEND=noninteractive
 
-RUN sed -i \
-    -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
-    -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
-    /etc/apt/sources.list.d/debian.sources \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl \
-  && rm -rf /var/lib/apt/lists/*
+COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
+RUN prepare-node-image ca-certificates openssl
 
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/workbench-api/package.json apps/workbench-api/package.json
@@ -76,13 +71,8 @@ ENV NODE_ENV=production \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 
-RUN sed -i \
-    -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
-    -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
-    /etc/apt/sources.list.d/debian.sources \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl \
-  && rm -rf /var/lib/apt/lists/*
+COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
+RUN prepare-node-image ca-certificates openssl
 
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node apps/workbench-api/package.json apps/workbench-api/package.json
@@ -94,6 +84,7 @@ COPY --chown=node:node packages/workbench-knowledge/package.json packages/workbe
 COPY --chown=node:node packages/workbench-preview-token/package.json packages/workbench-preview-token/package.json
 COPY --chown=node:node packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
 COPY --from=production-dependencies --chown=node:node /app/node_modules node_modules
+COPY --from=production-dependencies --chown=node:node /app/apps/workbench-api/node_modules/@img/ node_modules/@img/
 COPY --from=build --chown=node:node /app/apps/workbench-api/dist apps/workbench-api/dist
 COPY --from=build --chown=node:node /app/packages/workbench-canvas-tools/dist packages/workbench-canvas-tools/dist
 COPY --from=build --chown=node:node /app/packages/workbench-content-security/dist packages/workbench-content-security/dist
@@ -104,7 +95,8 @@ COPY --from=build --chown=node:node /app/packages/workbench-knowledge/dist packa
 COPY --from=build --chown=node:node /app/packages/workbench-preview-token/dist packages/workbench-preview-token/dist
 COPY --from=build --chown=node:node /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
 
-RUN install -d -o node -g node -m 0700 /var/lib/workbench-api/ready-object-spool
+RUN node -e "const sharp = require('sharp'); if (!sharp.versions.vips) process.exit(1)" \
+  && install -d -o node -g node -m 0700 /var/lib/workbench-api/ready-object-spool
 
 USER node
 EXPOSE 4100

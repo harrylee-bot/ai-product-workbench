@@ -173,7 +173,7 @@ assert(
 assert(productionPreflight.includes("WORKBENCH_POSTGRES_IMAGE must be an immutable digest reference"), "production PostgreSQL image must be digest-pinned");
 assert(productionPreflight.includes("WORKBENCH_NGINX_IMAGE must be an immutable digest reference"), "production Nginx image must be digest-pinned");
 assert(productionPreflight.includes("WORKBENCH_NODE_IMAGE must be an immutable digest reference"), "production Node base image must be digest-pinned");
-assert(envExample.includes("WORKBENCH_NODE_IMAGE=node:22-bookworm-slim"), "deployment env must expose the Node base image input");
+assert(envExample.includes("WORKBENCH_NODE_IMAGE=node:22-alpine"), "deployment env must expose the hardened Node base image input");
 assert(compose.services?.["workbench-api"]?.build?.args?.NODE_IMAGE?.includes("WORKBENCH_NODE_IMAGE"), "API build must consume the pinned Node base image input");
 assert(compose.services?.knowledge?.build?.args?.NGINX_IMAGE?.includes("WORKBENCH_NGINX_IMAGE"), "Quartz build must consume the pinned Nginx base image input");
 assert(serverDeploy.includes("base greenfield Compose without a validation overlay"), "production must reject the validation overlay");

@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.873.0",
+    "@aws-sdk/client-s3": "3.896.0",
     "@workbench/workbench-content-security": "0.1.0",
     "@workbench/workbench-contracts": "0.1.0",
     "@workbench/workbench-db": "0.1.0",

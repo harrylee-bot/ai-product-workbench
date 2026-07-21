@@ -49,7 +49,7 @@ test("production preflight rejects a weak Edge origin authentication secret", ()
 });
 
 test("production preflight rejects a mutable Node base image", () => {
-  const result = runPreflight({ WORKBENCH_NODE_IMAGE: "node:22-bookworm-slim" });
+  const result = runPreflight({ WORKBENCH_NODE_IMAGE: "node:22-alpine" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /WORKBENCH_NODE_IMAGE must be an immutable digest reference/u);
 });
@@ -178,8 +178,8 @@ function runPreflight(overrides) {
     WORKBENCH_SOURCE_COMMIT: "a".repeat(40),
     WORKBENCH_FILE_SCAN_MODE: "clamav",
     WORKBENCH_POSTGRES_IMAGE: `pgvector/pgvector:pg16@sha256:${"b".repeat(64)}`,
-    WORKBENCH_NGINX_IMAGE: `nginx:1.27.5-alpine@sha256:${"c".repeat(64)}`,
-    WORKBENCH_NODE_IMAGE: `node:22-bookworm-slim@sha256:${"d".repeat(64)}`,
+    WORKBENCH_NGINX_IMAGE: `nginx:stable-alpine@sha256:${"c".repeat(64)}`,
+    WORKBENCH_NODE_IMAGE: `node:22-alpine@sha256:${"d".repeat(64)}`,
     ...overrides,
   };
   const envSource = Object.entries(env)

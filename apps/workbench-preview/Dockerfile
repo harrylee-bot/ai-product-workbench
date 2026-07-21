@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:22-bookworm-slim
+ARG NODE_IMAGE=node:22-alpine
 
 FROM ${NODE_IMAGE} AS dependencies
 WORKDIR /app
@@ -8,13 +8,8 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 
-RUN sed -i \
-    -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
-    -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
-    /etc/apt/sources.list.d/debian.sources \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl \
-  && rm -rf /var/lib/apt/lists/*
+COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
+RUN prepare-node-image ca-certificates openssl
 
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/workbench-preview/package.json apps/workbench-preview/package.json
@@ -51,13 +46,8 @@ ENV NODE_ENV=production \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 
-RUN sed -i \
-    -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
-    -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
-    /etc/apt/sources.list.d/debian.sources \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl \
-  && rm -rf /var/lib/apt/lists/*
+COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
+RUN prepare-node-image ca-certificates openssl
 
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node apps/workbench-preview/package.json apps/workbench-preview/package.json

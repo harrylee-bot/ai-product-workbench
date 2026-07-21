@@ -72,7 +72,7 @@ services:
   object-storage-egress:
     # TLS is passed through untouched to one configured S3 host. Internal-only
     # consumers gain OSS access without receiving general Internet egress.
-    image: ${WORKBENCH_NGINX_IMAGE:-nginx:1.27.5-alpine}
+    image: ${WORKBENCH_NGINX_IMAGE:-nginx:stable-alpine}
     restart: unless-stopped
     init: true
     user: "101:101"
@@ -166,7 +166,7 @@ services:
       dockerfile: apps/workbench-api/Dockerfile
       target: migrator
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
     restart: "no"
     depends_on:
       postgres:
@@ -193,7 +193,7 @@ services:
       dockerfile: apps/workbench-api/Dockerfile
       target: runner
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     init: true
     depends_on:
@@ -296,7 +296,7 @@ services:
       dockerfile: apps/web/Dockerfile
       target: runner
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
         NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL: ${NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL:-}
         NEXT_PUBLIC_WORKBENCH_FORUM_URL: ${NEXT_PUBLIC_WORKBENCH_FORUM_URL:-}
         NEXT_PUBLIC_WORKBENCH_PRIVACY_URL: ${NEXT_PUBLIC_WORKBENCH_PRIVACY_URL:-}
@@ -356,7 +356,7 @@ services:
       dockerfile: apps/workbench-worker/Dockerfile
       target: runner
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     init: true
     depends_on:
@@ -419,7 +419,7 @@ services:
       dockerfile: apps/workbench-file-worker/Dockerfile
       target: runner
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     init: true
     depends_on:
@@ -506,7 +506,7 @@ services:
       dockerfile: apps/workbench-import-worker/Dockerfile
       target: runner
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     init: true
     depends_on:
@@ -576,7 +576,7 @@ services:
       dockerfile: apps/workbench-export-worker/Dockerfile
       target: runner
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     init: true
     depends_on:
@@ -633,7 +633,7 @@ services:
       dockerfile: apps/workbench-preview/Dockerfile
       target: runner
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     init: true
     depends_on:
@@ -684,8 +684,8 @@ services:
       dockerfile: apps/knowledge/Dockerfile
       target: immutable-runner
       args:
-        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-bookworm-slim}
-        NGINX_IMAGE: ${WORKBENCH_NGINX_IMAGE:-nginx:1.27.5-alpine}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
+        NGINX_IMAGE: ${WORKBENCH_NGINX_IMAGE:-nginx:stable-alpine}
         QUARTZ_REF: ${WORKBENCH_QUARTZ_REF:-v5.0.0}
         QUARTZ_COMMIT: ${WORKBENCH_QUARTZ_COMMIT:-ab346fa66a895e12d63a308e70ce330ba795822a}
         QUARTZ_BASE_URL: ${WORKBENCH_KNOWLEDGE_BASE_URL:?WORKBENCH_KNOWLEDGE_BASE_URL is required, for example aionbench.com/knowledge}
@@ -711,7 +711,7 @@ services:
     networks: [workbench-internal]
 
   preview-gateway:
-    image: ${WORKBENCH_NGINX_IMAGE:-nginx:1.27.5-alpine}
+    image: ${WORKBENCH_NGINX_IMAGE:-nginx:stable-alpine}
     restart: unless-stopped
     user: "101:101"
     entrypoint: [nginx, -g, daemon off;]
@@ -741,7 +741,7 @@ services:
     networks: [workbench-internal, workbench-ingress]
 
   gateway:
-    image: ${WORKBENCH_NGINX_IMAGE:-nginx:1.27.5-alpine}
+    image: ${WORKBENCH_NGINX_IMAGE:-nginx:stable-alpine}
     restart: unless-stopped
     entrypoint: [nginx, -g, daemon off;]
     depends_on:

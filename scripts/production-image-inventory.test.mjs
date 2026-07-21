@@ -271,7 +271,7 @@ test("requires complete Import Worker evidence and its exact deployed digest", (
   const importWorker = manifest.images.find((entry) => entry.id === "import-worker");
   const deploymentEnvironment = new Map([
     ["WORKBENCH_IMPORT_WORKER_IMAGE_REF", importWorker.imageRef],
-    ["WORKBENCH_NODE_IMAGE", `node:22-bookworm-slim@sha256:${"a".repeat(64)}`],
+    ["WORKBENCH_NODE_IMAGE", `node:22-alpine@sha256:${"a".repeat(64)}`],
   ]);
 
   assert.equal(verifyProductionImageManifest({
@@ -451,7 +451,7 @@ test("rejects a Web image compiled for origins outside the deployment environmen
       "NEXT_PUBLIC_WORKBENCH_FORUM_URL=",
       "NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=",
       "NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=false",
-      `NODE_IMAGE=node:22-bookworm-slim@sha256:${"a".repeat(64)}`,
+      `NODE_IMAGE=node:22-alpine@sha256:${"a".repeat(64)}`,
       "WORKBENCH_PREVIEW_ORIGIN=https://preview.workbench.example.test",
       "WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https://uploads.workbench.example.test/workbench",
     ].join("\n"),
@@ -462,7 +462,7 @@ test("rejects a Web image compiled for origins outside the deployment environmen
     ["WORKBENCH_PUBLIC_REGISTRATION_ENABLED", "false"],
     ["WORKBENCH_PREVIEW_ORIGIN", "https://preview.workbench.example.test"],
     ["WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL", "https://uploads.workbench.example.test/workbench"],
-    ["WORKBENCH_NODE_IMAGE", `node:22-bookworm-slim@sha256:${"a".repeat(64)}`],
+    ["WORKBENCH_NODE_IMAGE", `node:22-alpine@sha256:${"a".repeat(64)}`],
   ]);
   assert.equal(verifyProductionImageManifest({
     manifest,
@@ -528,14 +528,14 @@ function buildConfiguration(id) {
         "NEXT_PUBLIC_WORKBENCH_FORUM_URL=",
         "NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=",
         "NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=false",
-        `NODE_IMAGE=node:22-bookworm-slim@sha256:${"a".repeat(64)}`,
+        `NODE_IMAGE=node:22-alpine@sha256:${"a".repeat(64)}`,
         "WORKBENCH_PREVIEW_ORIGIN=https://preview.workbench.example.test",
         "WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https://uploads.workbench.example.test/workbench",
       ].join("\n")
       : id === "quartz"
-        ? `KNOWLEDGE_WEB_URL=https://workbench.example.test\nNGINX_IMAGE=nginx:1.27.5-alpine@sha256:${"b".repeat(64)}\nNODE_IMAGE=node:22-bookworm-slim@sha256:${"a".repeat(64)}\nQUARTZ_BASE_URL=workbench.example.test/knowledge`
+        ? `KNOWLEDGE_WEB_URL=https://workbench.example.test\nNGINX_IMAGE=nginx:stable-alpine@sha256:${"b".repeat(64)}\nNODE_IMAGE=node:22-alpine@sha256:${"a".repeat(64)}\nQUARTZ_BASE_URL=workbench.example.test/knowledge`
         : ["api", "api-migrator", "runtime-worker", "file-worker", "import-worker", "export-worker", "preview"].includes(id)
-          ? `NODE_IMAGE=node:22-bookworm-slim@sha256:${"a".repeat(64)}`
+          ? `NODE_IMAGE=node:22-alpine@sha256:${"a".repeat(64)}`
           : "";
   return createProductionBuildConfiguration({ id, sourceCommit: commit, dockerfile, target, buildArgsSource });
 }

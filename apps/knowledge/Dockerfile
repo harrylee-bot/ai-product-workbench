@@ -1,5 +1,5 @@
-ARG NODE_IMAGE=node:22-bookworm-slim
-ARG NGINX_IMAGE=nginx:1.27.5-alpine
+ARG NODE_IMAGE=node:22-alpine
+ARG NGINX_IMAGE=nginx:stable-alpine
 ARG QUARTZ_REF=v5.0.0
 ARG QUARTZ_COMMIT=ab346fa66a895e12d63a308e70ce330ba795822a
 
@@ -13,13 +13,8 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false
 
-RUN sed -i \
-    -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
-    -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
-    /etc/apt/sources.list.d/debian.sources \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git \
-  && rm -rf /var/lib/apt/lists/*
+COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
+RUN prepare-node-image ca-certificates coreutils git
 
 RUN git clone --depth 1 --branch "${QUARTZ_REF}" https://github.com/jackyzha0/quartz.git /opt/quartz \
   && cd /opt/quartz \
@@ -34,10 +29,8 @@ RUN npm ci --no-audit --no-fund \
 
 FROM quartz-base AS mutable-runner
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends nginx tini \
-  && rm -f /etc/nginx/sites-enabled/default \
-  && rm -rf /var/lib/apt/lists/* \
+RUN prepare-node-image nginx tini \
+  && rm -f /etc/nginx/sites-enabled/default /etc/nginx/http.d/default.conf \
   && mkdir -p /vault /usr/share/nginx/html /var/cache/nginx /var/run/nginx
 
 COPY apps/knowledge/nginx.conf /etc/nginx/conf.d/default.conf
