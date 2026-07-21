@@ -480,6 +480,16 @@ Codex 的任何修复都必须保留：
 - **测试**：首次执行 `npm run deployment:upload:check` 按设计失败并定位到旧期望；修复后 `deployment:upload:check`、`deployment:images:check`、`deployment:auth-proxy:check`、`deployment:orchestration:check` 与完整 `npm test` 均通过。原始修复后合同日志见 V-033。
 - **退出条件**：同一 clean candidate 的 CI run 实际完成 release-chain signing、image evidence、deployment config 和 downstream verifier，并重新绑定 G3/G4/G12 证据。
 
+### D-038 — G0 审批范围遗漏新增 release-blocking findings
+
+- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；新冻结候选与真实 G0 批准仍待执行
+- **位置**：`scripts/g0-scope-approval.mjs`；`docs/evidence/governance/g0-scope-approval.schema.json`；`docs/evidence/governance/g0-scope-approval.example.json`
+- **触发**：正式候选准备 G0 payload 时，校验器仍将完整 finding 集合固定为 D-001～D-033 与 P-001～P-019，而审计规范已经新增 D-034～D-037。
+- **影响**：真实 G0 记录无法把新增供应链、工具最小权限、浏览器 CSP 和 CI 依赖 finding 纳入责任与进度范围；若沿用旧合同，G0 PASS 会产生漏审的生产批准事实。
+- **修复**：G0 的精确集合升级为 D-001～D-038 与 P-001～P-019，共 57 项；JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
+- **测试**：新增回归用例显式断言 D-034～D-038 和 57 项总数，并证明只覆盖到 D-033 的旧记录 fail closed；G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test 均 PASS。完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`。
+- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 57 项并绑定同一 G1 manifest。
+
 ---
 
 ## 5. 生产验收缺口与目标环境风险
@@ -590,6 +600,7 @@ Codex 的任何修复都必须保留：
 | V-052 | 2026-07-21 OSS 改动后的隔离 PostgreSQL 全回归 | PASS（未绑定候选） | E4 | 本机 PostgreSQL 16.14 临时库完成 fresh 66 migrations、328 个数据库约束、API/Worker HTTP/SSE/Canvas/retry/cancel、File Worker/GC/提取/Knowledge 和 18/18 dump/restore/forward-repair；启用 PostgreSQL 条件套件的根测试退出 0，测试库随后删除且无残留。该结果证明新 OSS 配置和 conditional-create 代码没有破坏数据库边界，但不替代 G1/G4 candidate binding 或目标环境恢复 E1。 |
 | V-053 | 2026-07-21 OSS 改动后的最终静态、构建与浏览器矩阵 | PASS（含一次保留的重试记录） | E4 | 根 typecheck、根测试、Web 893 PASS/3 环境门控 SKIP、lint、506 模块/1671 依赖架构检查、OpenAPI breaking 和使用正式上传域的 production build 均退出 0。首次完整 E2E 在 Chromium PASS 后因 Firefox Home→Project 入场动画采样未达到阈值退出 1；未修改源码或阈值，原样复跑后 Chromium/Firefox/WebKit、375x812/768x1024/1440x900、console/network/overflow/pixel、Export 与隔离 Preview 全部退出 0。失败和成功日志均保留；必须在签名候选与部署环境重跑，不能把本次重试升级为 G11。 |
 | V-054 | 2026-07-21 当前源码与 Git 历史独立密钥扫描 | PASS（未绑定候选） | E4 | Gitleaks 8.30.1 扫描 2,092 个 tracked/untracked 非忽略源码文件和 415 个提交。当前源码零命中；历史初扫仅命中两个固定测试夹具，经人工核验为非凭据后，以精确 `commit:file:rule:line` 指纹写入 `.gitleaksignore`，没有关闭或放宽任何检测规则；复扫当前源码与完整历史均为零命中。被忽略的本机 `.env` 不属于候选且未被读入证据，仍必须在部署后清理/轮换其中已暴露的高权限凭据。 |
+| V-055 | 2026-07-21 首个真实签名候选与 G0 scope drift 诊断 | G1/G2 工具 PASS；候选已淘汰 | E2/E4 | 签名 commit `a4bc293e70741ce1863e7b82e43e9141eaaf5e28` 与签名 tag `workbench-remediation-20260721-a4bc293e` 首次 G1 因 ignored root `.env` fail closed；工具未读取内容，文件迁移到仓库外 0600 配置目录后，新不可变 G1 manifest 与 inventory PASS，candidate ID `sha256:880418843788188591785ef4d89ee4e8283f82fbbb749b8b86ddc0b47932e69a`。固定 npm 11.18.0 的 fresh-clone G2 随后 PASS，完成两轮生成、OpenAPI/runtime/typecheck、零源码漂移和 checkout 清理。准备真实 G0 时发现校验器只覆盖 D-001～D-033，遗漏 D-034～D-037，形成 D-038；因此该候选主动淘汰，G1/G2 事实不进入 production release chain。第二次 G1 manifest/inventory SHA-256 分别为 `fde19d9bbdc3767913c00f43458d2a0dcb71e74e86171d5865dff2d602138c69`、`44cea7416abfd558302a6c8de645900f00074e6f48f9cccffdd1cf82bb7af3cc`，G2 receipt SHA-256 为 `55f883d0a6a9ac09290e1c74220c25ad91178418c2e309f1c37eef51f03b6670`；均只保留为淘汰候选诊断，不得复用于新候选。 |
 
 注意：本轮超大 working-tree review 的 conventions finder 和最终 gap sweep 曾因 prompt too long 未完成；因此本文是经过多角度、去重和验证的高覆盖审查，但不得宣称绝对无遗漏。
 

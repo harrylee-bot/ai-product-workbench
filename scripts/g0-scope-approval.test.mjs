@@ -77,6 +77,30 @@ test("keeps the repository example explicitly NOT RUN and never reports gate PAS
   assert.equal(report.candidateManifestVerified, false);
 });
 
+test("requires every current remediation finding through D-038", async (t) => {
+  assert.deepEqual(
+    G0_FINDING_IDS.filter((id) => id.startsWith("D-")).slice(-5),
+    ["D-034", "D-035", "D-036", "D-037", "D-038"],
+  );
+  assert.equal(G0_FINDING_IDS.length, 57);
+
+  const legacy = await createFixture();
+  t.after(legacy.cleanup);
+  await legacy.rewrite((document) => {
+    document.scope.findingIds = document.scope.findingIds.filter((id) => ![
+      "D-034",
+      "D-035",
+      "D-036",
+      "D-037",
+      "D-038",
+    ].includes(id));
+    document.responsibilityMatrix.schedule[1].scopeItemIds =
+      document.responsibilityMatrix.schedule[1].scopeItemIds.filter((id) => document.scope.findingIds.includes(id));
+  });
+
+  await expectFailure(() => legacy.verify(), /must contain (?:at least|exactly) 57/);
+});
+
 test("CLI returns exit code 2 for a valid NOT RUN example", async () => {
   const scriptPath = filePath(new URL("./g0-scope-approval.mjs", import.meta.url));
   const examplePath = filePath(new URL("../docs/evidence/governance/g0-scope-approval.example.json", import.meta.url));
