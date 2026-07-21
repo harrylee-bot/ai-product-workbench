@@ -5,6 +5,11 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  waitForWorkbenchWeb,
+  warmWorkbenchProjectRoute,
+} from "./workbench-web-startup.mjs";
+
 const repoRoot = new URL("../../", import.meta.url);
 const repoRootPath = fileURLToPath(repoRoot);
 const webRootPath = path.join(repoRootPath, "apps/web");
@@ -104,7 +109,8 @@ process.once("SIGINT", handleSignal);
 process.once("SIGTERM", handleSignal);
 
 try {
-  await waitForServer(origin, serverExit);
+  await waitForWorkbenchWeb(origin, serverExit);
+  if (serverExit) await warmWorkbenchProjectRoute(origin, serverExit);
   await run("node", ["scripts/e2e/workbench-run-preview-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-approval-preferences-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-board-tools-smoke.mjs"]);
@@ -121,27 +127,6 @@ try {
 } finally {
   if (server && serverExit) await stopServer(server, serverExit);
   await cleanupManagedFiles();
-}
-
-async function waitForServer(baseUrl, exitPromise) {
-  const deadline = Date.now() + 90_000;
-  while (Date.now() < deadline) {
-    const probes = [
-      fetch(`${baseUrl}/login`, { redirect: "manual" })
-        .then((response) => ({ kind: "response", response }))
-        .catch(() => ({ kind: "retry" })),
-    ];
-    if (exitPromise) {
-      probes.push(exitPromise.then((result) => ({ kind: "exit", result })));
-    }
-    const state = await Promise.race(probes);
-    if (state.kind === "exit") {
-      throw new Error(`Workbench Web exited before E2E startup: ${JSON.stringify(state.result)}`);
-    }
-    if (state.kind === "response" && state.response.status < 500) return;
-    await delay(250);
-  }
-  throw new Error(`Timed out waiting for Workbench Web at ${baseUrl}`);
 }
 
 async function run(command, args, environment = {}) {
