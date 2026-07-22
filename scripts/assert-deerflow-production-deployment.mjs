@@ -125,6 +125,7 @@ for (const requiredLine of [
   "COPY integrations/deerflow/skills/workbench/ /app/skills/public/workbench/",
   "COPY integrations/deerflow/runtime-tools/deerflow_workbench_tools/ /app/backend/deerflow_workbench_tools/",
   `COPY integrations/deerflow/source-patches/${patchCommit}/ /opt/workbench/deerflow/source-patch/`,
+  "USER root",
   `test \"\${DEERFLOW_SOURCE_COMMIT}\" = \"${patchCommit}\"`,
   "test_workbench_tool_scope_middleware.py",
   "--gateway-root /app/backend",
@@ -132,11 +133,19 @@ for (const requiredLine of [
   "validate_runtime_result({})",
   "apply.py",
   "--check",
+  "USER 65532:65532",
   `ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=${patchManifestSha256}`,
   "io.workbench.deerflow.tool-scope-patch-sha256",
 ]) {
   assert(deerflowDockerfile.includes(requiredLine), `derived DeerFlow Dockerfile is missing: ${requiredLine}`);
 }
+const deerflowBuildRootIndex = deerflowDockerfile.indexOf("USER root");
+const deerflowPatchIndex = deerflowDockerfile.indexOf(`test \"\${DEERFLOW_SOURCE_COMMIT}\" = \"${patchCommit}\"`);
+const deerflowRuntimeUserIndex = deerflowDockerfile.indexOf("USER 65532:65532");
+assert(
+  deerflowBuildRootIndex < deerflowPatchIndex && deerflowPatchIndex < deerflowRuntimeUserIndex,
+  "derived DeerFlow Dockerfile must elevate only for the source patch and restore UID/GID 65532",
+);
 
 assert(patchManifest.protocol === "workbench.deerflow-source-patch.v1", "DeerFlow source patch manifest protocol is invalid");
 assert(

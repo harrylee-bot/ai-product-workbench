@@ -30,6 +30,10 @@ COPY integrations/deerflow/runtime-tools/config.fragment.yaml /opt/workbench/dee
 COPY deploy/deerflow-extensions.production.json /app/backend/extensions_config.workbench.json
 COPY integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/ /opt/workbench/deerflow/source-patch/
 
+# The hardened upstream image runs as the non-root runtime identity. Apply the
+# immutable source patch as root, then restore that identity in the final image.
+USER root
+
 # The base image must contain the exact audited upstream sources. Apply the
 # deterministic patch, run its contracts against the image's real
 # LangChain/LangGraph dependencies, then verify the resulting file hashes.
@@ -50,3 +54,5 @@ RUN test "${DEERFLOW_SOURCE_COMMIT}" = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2
       --gateway-root /app/backend \
       --source-commit "${DEERFLOW_SOURCE_COMMIT}" \
       --check
+
+USER 65532:65532
