@@ -108,6 +108,7 @@ test("the API image preserves and probes the musl Sharp runtime", async () => {
     source,
     /COPY --from=production-dependencies --chown=node:node \/app\/apps\/workbench-api\/node_modules\/@img\/ node_modules\/@img\//u,
   );
+  assert.match(source, /cp -a node_modules\/@img apps\/workbench-api\/node_modules\/@img/u);
   assert.match(source, /const sharp = require\('sharp'\); if \(!sharp\.versions\.vips\) process\.exit\(1\)/u);
 });
 

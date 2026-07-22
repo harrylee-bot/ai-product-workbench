@@ -7,7 +7,10 @@
     "outDir": "dist",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "sharp": ["../../node_modules/sharp/lib/index.d.ts"]
+    }
   },
   "include": ["src/**/*.ts"]
 }

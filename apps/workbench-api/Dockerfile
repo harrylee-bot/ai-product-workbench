@@ -46,6 +46,8 @@ RUN rm -rf packages/workbench-db/generated \
 
 FROM build AS production-dependencies
 RUN npm prune --omit=dev --include=optional --no-audit --no-fund \
+  && install -d apps/workbench-api/node_modules \
+  && cp -a node_modules/@img apps/workbench-api/node_modules/@img \
   && rm -rf /root/.npm
 
 # Migrations are a one-shot deployment concern. This target intentionally keeps
