@@ -117,6 +117,54 @@ describeWithPostgres("RuntimeAttempt PostgreSQL cancellation fences", () => {
 });
 
 describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", () => {
+  it("commits a slow external event atomically beyond Prisma's default transaction timeout", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture, 45_000);
+    const input = externalEvent(fixture, "event-slow-atomic-commit");
+    const events = new RunEventStore(db);
+
+    try {
+      await expect(service.processExternalEvent(claim, input, async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT 1 AS "delayed" FROM pg_sleep(6)`);
+        await appendActivityEffect(events, tx, fixture, input.externalEventId);
+      })).resolves.toEqual({ created: true, sequence: 1 });
+
+      await expect(durableEventState(db, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, [input]));
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("lets a heartbeat wait for a slow external event transaction", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture, 45_000);
+    const input = externalEvent(fixture, "event-slow-heartbeat-contention");
+    const eventLocked = deferred<void>();
+    const events = new RunEventStore(db);
+
+    try {
+      const event = service.processExternalEvent(claim, input, async (tx) => {
+        eventLocked.resolve();
+        await tx.$queryRaw(Prisma.sql`SELECT 1 AS "delayed" FROM pg_sleep(6)`);
+        await appendActivityEffect(events, tx, fixture, input.externalEventId);
+      });
+      await eventLocked.promise;
+
+      await expect(Promise.all([event, service.heartbeat(claim)]))
+        .resolves.toEqual([{ created: true, sequence: 1 }, undefined]);
+      await expect(durableEventState(db, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, [input]));
+    } finally {
+      eventLocked.resolve();
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
   it("rolls back an inbox reservation when the worker crashes before the internal append", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
     const fixture = await seedAttemptFixture(db, true);
@@ -357,9 +405,13 @@ async function seedAttemptFixture(db: PrismaClient, withAttempt: boolean): Promi
   return fixture;
 }
 
-async function activateExternalRun(db: PrismaClient, fixture: AttemptFixture) {
+async function activateExternalRun(
+  db: PrismaClient,
+  fixture: AttemptFixture,
+  leaseMs = 120_000,
+) {
   if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
-  const service = new RuntimeAttemptService(db, 120_000);
+  const service = new RuntimeAttemptService(db, leaseMs);
   const claim = await service.claim(
     fixture.runId,
     fixture.runtimeAttemptId,

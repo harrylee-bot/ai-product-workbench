@@ -35,6 +35,11 @@ type ClaimScopeRow = {
   lastExternalEventId: string | null;
 };
 
+const runtimeExecutionTransactionOptions = {
+  maxWait: 10_000,
+  timeout: 30_000,
+} as const;
+
 export type RuntimeExecutionClaim = {
   runId: string;
   attemptId: string;
@@ -155,7 +160,7 @@ export class RuntimeAttemptService {
       if (runUpdated.count !== 1 || attemptUpdated.count !== 1) {
         throw new RuntimeExecutionFencedError();
       }
-    });
+    }, runtimeExecutionTransactionOptions);
   }
 
   async submissionContext(claim: RuntimeExecutionClaim): Promise<RuntimeSubmissionState> {
@@ -459,7 +464,7 @@ export class RuntimeAttemptService {
         throw new RuntimeExecutionFencedError();
       }
       return { created: true, sequence };
-    });
+    }, runtimeExecutionTransactionOptions);
   }
 
   async release(claim: RuntimeExecutionClaim): Promise<void> {

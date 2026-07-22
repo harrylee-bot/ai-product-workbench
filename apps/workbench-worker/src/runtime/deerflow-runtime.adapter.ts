@@ -636,6 +636,13 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     };
     try {
       for await (const part of stream) {
+        // DeerFlow terminates its Redis-backed stream with an un-ID'd end/null
+        // sentinel. The SDK carries the previous SSE ID onto that frame, so it
+        // must not enter the durable business-event inbox or advance the cursor.
+        if (part.event === "end") {
+          if (part.data !== null) throw new Error("DEERFLOW_STREAM_END_INVALID");
+          continue;
+        }
         if (part.id && seenExternalEventIds.has(part.id)) {
           if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
           await observer.onExternalEvent({

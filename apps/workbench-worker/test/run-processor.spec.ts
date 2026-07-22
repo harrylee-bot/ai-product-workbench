@@ -2,6 +2,7 @@ import { boardNodeProtocol } from "@workbench/workbench-contracts";
 import {
   boardPlacementsForArtifact,
   canonicalJson,
+  isRetryableRuntimeError,
   mapRuntimeArtifactTarget,
   mapRuntimeSources,
   mapRuntimeDesignAssets,
@@ -40,6 +41,16 @@ const prototypePatchCoordinator = () => ({
   activateRunTx: vi.fn(),
   discardRunTx: vi.fn(),
   finalizeVersionTx: vi.fn(),
+});
+
+describe("Runtime retry classification", () => {
+  it("does not retry deterministic stream protocol or identity failures", () => {
+    expect(isRetryableRuntimeError(new Error("DEERFLOW_STREAM_END_INVALID"))).toBe(false);
+    expect(isRetryableRuntimeError(new Error("RUNTIME_EXTERNAL_EVENT_IDENTITY_CONFLICT")))
+      .toBe(false);
+    expect(isRetryableRuntimeError(new Error("socket closed before the runtime stream completed")))
+      .toBe(true);
+  });
 });
 
 function durableExecutionPrepared() {

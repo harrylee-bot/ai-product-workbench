@@ -3,6 +3,7 @@ import {
   RuntimeAttemptService,
   type RuntimeExecutionClaim,
 } from "../src/runtime/runtime-attempt.service.js";
+import { runtimeExternalFinalizationEvent } from "../src/runtime/runtime.port.js";
 
 const binding = {
   id: "binding-1",
@@ -268,7 +269,7 @@ describe("RuntimeAttemptService", () => {
   });
 
   it("heartbeats from database time and extends both leases", async () => {
-    const { service, state } = harness({}, 10_000);
+    const { db, service, state } = harness({}, 10_000);
     const claim = await service.claim("run-1", "runtime-attempt-1", "worker-a:test");
     state.databaseNow = new Date("2026-07-19T00:00:04.000Z");
 
@@ -276,6 +277,10 @@ describe("RuntimeAttemptService", () => {
 
     expect(state.runLeaseExpiresAt).toEqual(new Date("2026-07-19T00:00:14.000Z"));
     expect(state.attemptLeaseExpiresAt).toEqual(new Date("2026-07-19T00:00:14.000Z"));
+    expect(db.$transaction).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      { maxWait: 10_000, timeout: 30_000 },
+    );
   });
 
   it("takes over an expired claim and fences the old epoch", async () => {
@@ -396,7 +401,7 @@ describe("RuntimeAttemptService", () => {
   });
 
   it("deduplicates an exact external event replay with effects and cursor in one transaction", async () => {
-    const { service, state, externalEvents } = harness({
+    const { db, service, state, externalEvents } = harness({
       runOwnerId: claimA.ownerId,
       attemptOwnerId: claimA.ownerId,
       runEpoch: claimA.epoch,
@@ -422,6 +427,38 @@ describe("RuntimeAttemptService", () => {
     expect(effects).toHaveBeenCalledTimes(1);
     expect(state.lastExternalEventId).toBe("event-1");
     expect(externalEvents.get("event-1")).toMatchObject({ status: "processed", sequence: 1 });
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    for (const call of db.$transaction.mock.calls) {
+      expect(call).toEqual([
+        expect.any(Function),
+        { maxWait: 10_000, timeout: 30_000 },
+      ]);
+    }
+  });
+
+  it("uses the bounded inbox transaction budget for external finalization", async () => {
+    const { db, service } = harness({
+      runOwnerId: claimA.ownerId,
+      attemptOwnerId: claimA.ownerId,
+      runEpoch: claimA.epoch,
+      attemptEpoch: claimA.epoch,
+      runLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+    });
+
+    await service.processExternalFinalization(claimA, {
+      externalRunId: "external-run-1",
+      externalEventId: "finalization-1",
+      event: runtimeExternalFinalizationEvent,
+      payload: { protocol: "workbench.runtime-finalization.v2" },
+    }, async () => undefined);
+
+    expect(db.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { maxWait: 10_000, timeout: 30_000 },
+    );
   });
 
   it("rejects reuse of an external event id with another payload", async () => {

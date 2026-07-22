@@ -545,6 +545,135 @@ describe("DeerFlow runtime adapter", () => {
     expect(finalizations[1]).toEqual(finalizations[0]);
   });
 
+  it("does not persist the SDK-inherited cursor on DeerFlow's end sentinel", async () => {
+    const finalState = {
+      messages: [
+        { type: "human", content: "current turn" },
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [],
+        }, "end-sentinel-result"),
+        { type: "ai", content: "done" },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([
+          { id: "provider-event-before-end", event: "values", data: finalState },
+          { event: "end", data: null },
+        ], { runId: "external_run_end_sentinel" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution(), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "done",
+    });
+
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledTimes(1);
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalRunId: "external_run_end_sentinel",
+        externalEventId: "provider-event-before-end",
+        event: "values",
+      }),
+      expect.any(Array),
+    );
+    expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a malformed DeerFlow end sentinel without finalizing", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([
+          {
+            id: "provider-event-before-malformed-end",
+            event: "metadata",
+            data: { run_id: "external_run_malformed_end" },
+          },
+          { event: "end", data: { unexpected: true } },
+        ], { runId: "external_run_malformed_end" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution(), runtimeObserver))
+      .rejects.toThrow("DEERFLOW_STREAM_END_INVALID");
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledTimes(1);
+    expect(runtimeObserver.onExternalFinalization).not.toHaveBeenCalled();
+  });
+
+  it("preserves identical provider payloads when their explicit event IDs differ", async () => {
+    const repeatedPayload = { repeated: true };
+    const finalState = {
+      messages: [
+        { type: "human", content: "current turn" },
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [],
+        }, "repeated-payload-result"),
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([
+          {
+            id: "provider-repeated-payload-1",
+            event: "updates",
+            data: repeatedPayload,
+          },
+          {
+            id: "provider-repeated-payload-2",
+            event: "updates",
+            data: repeatedPayload,
+          },
+          { id: "provider-final-values", event: "values", data: finalState },
+        ], { runId: "external_run_repeated_payload" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution(), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "done",
+    });
+
+    const repeatedParts = runtimeObserver.onExternalEvent.mock.calls
+      .map(([part]) => part)
+      .filter((part) => part.event === "updates");
+    expect(repeatedParts).toEqual([
+      expect.objectContaining({
+        externalEventId: "provider-repeated-payload-1",
+        payload: repeatedPayload,
+      }),
+      expect.objectContaining({
+        externalEventId: "provider-repeated-payload-2",
+        payload: repeatedPayload,
+      }),
+    ]);
+  });
+
   it("routes effects recovered only from the terminal thread state through finalization", async () => {
     const messages = [
       { type: "human", content: "current turn" },
