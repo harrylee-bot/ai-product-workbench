@@ -486,9 +486,9 @@ Codex 的任何修复都必须保留：
 - **位置**：`scripts/g0-scope-approval.mjs`；`docs/evidence/governance/g0-scope-approval.schema.json`；`docs/evidence/governance/g0-scope-approval.example.json`
 - **触发**：正式候选准备 G0 payload 时，校验器仍将完整 finding 集合固定为 D-001～D-033 与 P-001～P-019，而审计规范已经新增 D-034～D-037。
 - **影响**：真实 G0 记录无法把新增供应链、工具最小权限、浏览器 CSP 和 CI 依赖 finding 纳入责任与进度范围；若沿用旧合同，G0 PASS 会产生漏审的生产批准事实。
-- **修复**：G0 的精确集合最初升级为 D-001～D-038 与 P-001～P-019；D-039～D-048 形成后继续同步升级到当前 D-001～D-048 与 P-001～P-019，共 67 项。JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
-- **测试**：当前回归显式断言 D-034～D-048 和 67 项总数，并证明旧范围 fail closed；与 route-frame、Web startup 合同合并为 34/34 PASS，日志 SHA-256 为 `694939d29ef7272c7c5cb901e89455d37edfdd28c898c810a716242ea0ea42e6`。D-039 前一版曾完成 G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test，完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`；该旧数量只作历史记录。当前 67 项合同必须在下一候选重新执行。
-- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 67 项并绑定同一 G1 manifest。
+- **修复**：G0 的精确集合最初升级为 D-001～D-038 与 P-001～P-019；D-039～D-049 形成后继续同步升级到当前 D-001～D-049 与 P-001～P-019，共 68 项。JSON Schema、NOT RUN 示例、治理说明和 schedule fixture 同步更新。校验器继续拒绝缺项、多项、重复项与未分配 schedule，不放宽任何批准独立性或证据规则。
+- **测试**：回归现显式断言 D-034～D-049 和 68 项总数，并证明旧范围 fail closed；D-048 形成时与 route-frame、Web startup 合同合并为 34/34 PASS，历史日志 SHA-256 为 `694939d29ef7272c7c5cb901e89455d37edfdd28c898c810a716242ea0ea42e6`。D-039 前一版曾完成 G0 定向 22/22、R0 96/96、release-chain 8/8 及固定 npm 11.18.0 的完整 root test，完整日志 `/private/tmp/workbench-d038-root-test.log` 的 SHA-256 为 `38d50fbe3611cc33c8f5d65bfe7409a0bd8c7227b0dabcc5f287d585b3f27c2d`；旧数量只作历史记录。当前 68 项合同必须在下一候选重新执行。
+- **退出条件**：新 clean signed candidate 上 G0 合同与 release-chain 测试 PASS，且真实独立 G0 批准记录包含全部 68 项并绑定同一 G1 manifest。
 
 ### D-039 — 锁文件遗漏 Linux Rolldown 原生可选依赖
 
@@ -518,7 +518,7 @@ Codex 的任何修复都必须保留：
 - **影响**：一个失租或测试遗留 Run 可持续制造重复恢复任务，使同 key claim 失败并阻塞其他 Run；Worker 表面存活但合法生成一直停留在 `queued`，导致 G3 PostgreSQL 工作流超时。仅依赖稳定 `singletonKey` 不能证明恢复投递幂等。
 - **修复**：`runtime.execute` policy 改为 PostgreSQL 唯一索引约束的 `exclusive`，同一 Run 在 queued/retry/active 状态只允许一个任务，已保留的 failed job 不阻断下一次恢复。恢复器在 Prisma 事务中二次确认 Run 仍为无人持有或失租的 `running` 状态，以 `FOR UPDATE SKIP LOCKED` 锁定该 Run，并通过 `fromPrisma(tx)` 在同一事务发送带 `singletonKey=runId`、`group.id=threadId` 的任务。SSE fixture 改为带有效 owner、heartbeat 和未来 lease 的 attempt 1 Run，并在场景结束后删除 synthetic Run。
 - **测试**：Contracts queue 10/10、恢复器单元测试 4/4、Worker typecheck 与真实 PostgreSQL 并发回归 1/1 PASS；并发回归覆盖双 Reconciler、active 去重、failed 后仅一个新恢复任务及不同 Run 可同时 fetch。完整 PostgreSQL API/Worker HTTP/SSE 工作流随后 PASS，targeted Generate 只进入 Fake DeerFlow 一次，approval/cancel/retry 均完成，且无 `job_common_i8`、duplicate key 或 timeout。固定 npm 11.18.0 的最终 root test、typecheck、G0 22/22、lint 与架构检查也均 PASS；root test、typecheck 和 PostgreSQL E2E 日志 SHA-256 分别为 `16b0ecca9537595e1164e5ca21c1ff99182cc117d9e9cfb17d398322ae7eb4d8`、`195288fb66f7ea885d53e2d5a59cda4b95ebf4417ceebe645a73474db1e69bbe`、`3da2704e5e6874a7992a57b7b960e104f9fa3d8986760c0959953fd913ebd329`；这些仍是 dirty-tree E4 证据。签名 commits `a79a34c316958070ed8a822d56fda22f14db85c5`、`068792fa4ad079e605d2aeb340d59633631d28a7`、`abbef5db516a06c230db8791cb7e68d41de39903`、`369938a8444d6c137400c3cfd53b7b360b22a600` 与 `4fadacb4e117b53e3ed369079871875675c52daa` 的 Linux runs `29852008323`、`29855070481`、`29857428945`、`29860405435`、`29862838335` 随后均完整通过真实 PostgreSQL API/Worker、File Worker 与 DeerFlow 步骤，关闭 D-041 的原始 CI 触发；最新 run 最终被 D-046 阻断。
-- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 全绿，67 项 G0 真实批准范围包含 D-041，并由同一候选上的故障恢复矩阵证明失租、并发扫描和 failed 后重投不会重复执行或阻塞其他 Run。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 全绿，68 项 G0 真实批准范围包含 D-041，并由同一候选上的故障恢复矩阵证明失租、并发扫描和 failed 后重投不会重复执行或阻塞其他 Run。
 
 ### D-042 — 浏览器 smoke 启动仅预热登录路由
 
@@ -528,7 +528,7 @@ Codex 的任何修复都必须保留：
 - **影响**：业务路由实际无功能错误时，Linux 冷缓存仍会随机阻断 G3 并跳过 production build 与 route bundle 验证；直接放宽所有浏览器导航超时还会掩盖真实页面加载回归。
 - **修复**：托管 Next dev 在登录路由 ready 后，以明确的 `workbench.session_token` 测试 Cookie 请求动态项目路由，完整消费响应并要求 HTTP 200。该预热使用独立 90 秒启动预算，同时监听托管服务提前退出并中止请求；Playwright 页面导航仍保留原 30 秒预算，外部自管 origin 不被启动器改写。
 - **测试**：启动合同 5/5 PASS，覆盖连接重试、动态路由与 Cookie、完整响应、响应体中断、鉴权重定向 fail closed、服务提前退出与请求中止。固定 npm 11.18.0 的完整 `npm run e2e:web` 一次 PASS，实际日志先出现 `/projects/[projectId]` 冷编译，再完成 Run Preview、Board、Chromium/Firefox/WebKit、设计系统、Export 与隔离 Preview；日志 SHA-256 为 `cfa743ac77868d86321044cd91319ae618697d9614e9e206a27b2611965ec847`。固定 npm 11.18.0 的 root test、typecheck、lint、架构检查和 release-chain 8/8 也均 PASS，日志 SHA-256 分别为 `7e62bba433a415b73f07b9c2ac78fa35fba520bcce6ff5ed007ab97413e3bbfa`、`8bf1811023151cac14947a9788f2125721bb0234a01f17fc91010dafd1108310`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`6e6f5f6400d5d0b2cf73fd064d1179c13310ccb177017897b97e72071b723b30`、`03df608a31a1a0635d905b7fc64cfb63687956c37cbe7914d294c71793d82de9`。签名 commit `068792fa4ad079e605d2aeb340d59633631d28a7` 的 Linux run `29855070481` 随后先完成项目路由预热并通过 Run Preview smoke，证明 D-042 的原始触发已关闭；下一首页场景形成 D-043。原始 CI 失败日志 `/private/tmp/workbench-ci-29852008323-failed.log` 的 SHA-256 为 `401694b30a0d956d86cd82a1627820341e93d4d0f46e88ff83921fce7af3592a`。
-- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 在默认 Playwright 导航预算内完成浏览器 smoke、production build 与 route bundle 验证，67 项 G0 真实批准范围包含 D-042。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 在默认 Playwright 导航预算内完成浏览器 smoke、production build 与 route bundle 验证，68 项 G0 真实批准范围包含 D-042。
 
 ### D-043 — 浏览器 smoke 未预热独立首页路由
 
@@ -538,7 +538,7 @@ Codex 的任何修复都必须保留：
 - **影响**：只预热测试序列中的第一个业务入口会把同类冷编译失败推迟到下一个入口，仍会随机阻断 G3 并跳过 production build 与 route bundle；逐个放宽页面导航预算会把编译启动成本混入产品加载预算。
 - **修复**：启动器使用固定受保护入口矩阵，依次预热动态项目路由和首页路由；每个入口都有独立 90 秒启动预算、明确测试会话 Cookie、完整响应消费、HTTP 200 要求与托管服务退出监控。浏览器导航继续保留 30 秒默认预算，外部自管 origin 仍不执行托管预热。
 - **测试**：更新后的启动合同 5/5 PASS，直接断言项目与首页两个 URL 的顺序、Cookie、完整响应、首页鉴权重定向 fail closed、响应体中断与服务提前退出。固定 npm 11.18.0 的完整 `npm run e2e:web` 一次 PASS，并在任何 smoke 输出前记录 `protected routes ready: /projects/project-run-preview, /`；root test、typecheck、lint、架构检查与 release-chain 8/8 也均 PASS。六份日志 SHA-256 分别为 `15bcff674c72dc6a53ee4ed5218a26539e2fda2d7ef7b0af988984dd5e00d4d2`、`a99a26bb66e7a4788e366d9224be477e5c194548da09d5be6da4d3c0df6b26a8`、`7cd0fa084ff2b5d0a7e486cd92dcef1423ee5256e74bf9e6c32aa98ba6f7c726`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`bfdfd1db097638c53a6e7fa292342359bc535a6ac1bd16a13a19f8625b5abf95`、`1c797c81d4eec75456764d3342c31f9bda79ded921be1ae9f46247be958711c7`。签名 commit `abbef5db516a06c230db8791cb7e68d41de39903` 的 Linux run `29857428945` 随后先输出两个受保护入口均 ready，并在默认导航预算内通过 Run Preview 与首页 approval/preferences smoke，证明 D-043 原始触发关闭；该 run 后续在导航动画断言形成 D-044。原始 CI 失败日志 `/private/tmp/workbench-ci-29855070481-failed.log` 的 SHA-256 为 `6e18d733361b385aa89341a7356f85683827ad77db131f9a3c5f2607f22226b1`。
-- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 在两个入口均预热后完成全浏览器 smoke、production build 与 route bundle，67 项 G0 真实批准范围包含 D-043。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 在两个入口均预热后完成全浏览器 smoke、production build 与 route bundle，68 项 G0 真实批准范围包含 D-043。
 
 ### D-044 — 导航 smoke 将同步挂载交接误判为可见透明度重叠
 
@@ -548,7 +548,7 @@ Codex 的任何修复都必须保留：
 - **影响**：真实同步交接、独立出入场动画和非空页面均成立时，采样时序仍可产生 Linux 假失败并跳过 production build 与 route bundle；若直接删除 overlap/空白帧断言，又会漏掉 `mode="wait"` 串行切换或实际空白帧回归。
 - **修复**：抽出独立 route-frame contract，以尺寸、display、visibility 与祖先可见性定义 `routeMounted`，要求 outgoing/incoming root 至少一个采样同时挂载来证明 `AnimatePresence mode="sync"`；仍用包含透明度阈值的 `routePresent` 拒绝任何视觉空白帧，并继续要求 source/target 独立透明度进程、target settle、child enter 与 Home translate 进程。可见重叠帧改为独立诊断字段，不作为同步 DOM ownership 的必要条件。
 - **测试**：Node 合同 3/3 PASS，覆盖 incoming 首帧透明但同步挂载通过、无挂载重叠的串行交换失败、双 root 同时透明仍失败；与 63 项 G0 合同合并定向执行为 25/25 PASS。固定 npm 11.18.0 的完整 `npm run e2e:web` PASS，双入口预热后完成 Board、Chromium/Firefox/WebKit 导航、设计系统、Export 与隔离 Preview；三种浏览器所有路由方向均记录挂载重叠和实际可见重叠。完整 root test、typecheck、lint、506 模块/1671 依赖架构检查与 release-chain 8/8 也均 PASS。七份本地日志 SHA-256 分别为 `f7a56c8e8aa01d2c9a5c96303ee0aefa8e38bcef1d0304ccc595a3200994cb91`、`f62073830b25af8d3ea313b700dc849f03f3189cfe5dc364e6526ce55635691d`、`a1c4c71cc33fa45a4471111a10d2e180fb155c51621ee06bcc3e46a4e4b5ada5`、`7f49ffdd7cf713ec3511e9d9d6fef21a03ec338f74668a0c68ce908de7983b89`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`788f4d03d46a1ae78d62f28e4be8345c90e31b4e9a6be1139355c6c5f4bf9acf`、`a6432563e8357c2708120d81fad05f748e565456f24d7219bf7a32dc8e48b8e7`。Gitleaks 8.30.1 对最终 tracked/untracked 非忽略源码快照 2,099 个文件执行扫描，零命中，空 JSON 报告 SHA-256 为 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`。签名 commit `369938a8444d6c137400c3cfd53b7b360b22a600` 的 Linux run `29860405435` 随后通过新的 mounted-overlap 断言并继续执行到 incoming opacity range，证明 D-044 原始触发关闭；该 run 在下一判据形成 D-045。原始 Linux CI 失败日志 `/private/tmp/workbench-ci-29857428945-failed.log` 的 SHA-256 为 `01171b3e431d16e1707f49fbc943b4d468005d14f05ca1134ced50d81d6f2513`。
-- **退出条件**：新 clean signed commit 的 GitHub Linux G3 完成全浏览器 smoke、production build 与 route bundle，且 67 项 G0 真实批准范围包含 D-044。
+- **退出条件**：新 clean signed commit 的 GitHub Linux G3 完成全浏览器 smoke、production build 与 route bundle，且 68 项 G0 真实批准范围包含 D-044。
 
 ### D-045 — 导航 smoke 的透明度范围排除透明挂载端点
 
@@ -558,7 +558,7 @@ Codex 的任何修复都必须保留：
 - **影响**：页面无空白、同步挂载和入场端点均成立时，采样密度仍可使合法动画假失败；若直接删除 opacity range，又会让 incoming root 瞬间全显、从未执行入场动画的回归通过。
 - **修复**：source、target 和 incoming child 的 opacity range 改用 `routeMounted` 样本，使透明挂载起点与透明退出终点进入端点计算；source/target 可见性、页面空白帧、同步挂载 overlap、target settle、Home transform 与 child enter 断言全部保留。新增负向合同证明 incoming route 即使与 outgoing 同时挂载，只要 opacity 始终为 1，仍会因 range 为 0 而失败。
 - **测试**：Node 合同 4/4 PASS，覆盖可见中间帧被合并的同步入场、无挂载 overlap 的串行交换、双 root 同时透明的视觉空白，以及同步挂载但 incoming opacity 从未变化的直接跳变；与 64 项 G0 合同合并定向执行为 26/26 PASS。固定 npm 11.18.0 的完整 `npm run e2e:web` PASS，Chromium/Firefox/WebKit 每个路由方向的 source、target 与 child 均记录透明端点、挂载 overlap、实际可见 overlap 和最终 settle，Board、设计系统、Export 与隔离 Preview 也全部完成。完整 root test（含 R0 100/100）、typecheck、lint、506 模块/1671 依赖架构检查与 release-chain 8/8 均 PASS。七份本地日志 SHA-256 分别为 `3c9f4cc45e19955ff784d3ceef7460a3ff456000590e6b0c8e38e9152ef217a6`、`61b282831992c4c531cfb2012fa87c1be91e3748842cbfbb10d6ba2fc86f91fa`、`bbf430995a8aa07b111e0c7b2587139271231a5ee31b704ddc371e50af00086b`、`23c7866c3b0c0fe735ba012e35415a16c7be8f9dc754364cc11806836ab7d55c`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`2a43bedf148c5a1e3025a05325c7af0df09c95a6f5fcdfc013b858951e083b0b`、`e50153e7c1ea29345d56f29a578060e5c6ccef72ccad6151f2524625e0d040d5`。Gitleaks 8.30.1 对最终 tracked/untracked 非忽略源码快照 2,099 个文件执行扫描，零命中，空 JSON 报告 SHA-256 为 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`；当前结果仍是 dirty-tree E4，不能升级为 G3 PASS。签名 commit `4fadacb4e117b53e3ed369079871875675c52daa` 的 Linux run `29862838335` 随后通过 mounted opacity 端点断言并继续执行到 Home translate 进程，证明 D-045 原始触发关闭；该 run 在下一判据形成 D-046。原始 Linux CI 失败日志 `/private/tmp/workbench-ci-29860405435-failed.log` 的 SHA-256 为 `a02feaef2c7caa4196580c86e74cca58c658ffbc4835252388e8b68b550b4168`。
-- **退出条件**：新 clean signed commit 的 GitHub Linux G3 完成全浏览器 smoke、production build 与 route bundle，且 67 项 G0 真实批准范围包含 D-045。
+- **退出条件**：新 clean signed commit 的 GitHub Linux G3 完成全浏览器 smoke、production build 与 route bundle，且 68 项 G0 真实批准范围包含 D-045。
 
 ### D-046 — 导航 smoke 的 Home 位移范围排除透明挂载与中性端点
 
@@ -568,7 +568,7 @@ Codex 的任何修复都必须保留：
 - **影响**：页面无空白、同步挂载、opacity 入场和真实 Home translate 均成立时，采样密度仍可让合法动画在 Linux 假失败并跳过 production build 与 route bundle；若直接删除 transform 断言，则 Home 只做透明度变化、完全丢失既定空间动效的回归会漏检。
 - **修复**：Home transform 集合改用所有 `routeMounted` 帧，缺失或中性值统一保留为 `none`，使透明挂载期间的位移样本和 neutral endpoint 一起参与 progression 判定；断言失败时输出实际 transform 状态，便于区分采样合并与真实静态回归。mounted/visible overlap、空白帧、source/target/child opacity、target settle 与 child enter 断言全部保留。新增负向合同证明 opacity 正常变化但 Home transform 始终为 `none` 时仍会失败。
 - **测试**：Node route-frame 与 65 项 G0 合同合并定向执行 27/27 PASS。固定 npm 11.18.0 的完整 `npm run e2e:web` PASS，Chromium、Firefox、WebKit 的 Home-to-Project、Project-to-Home 和 forward 均记录至少两个 Home transform 状态，且继续满足 opacity 端点、挂载 overlap、实际可见 overlap、最终 settle、Board、设计系统、Export 与隔离 Preview。完整 root test（含 R0 101/101）、typecheck、lint、506 模块/1671 依赖架构检查与 release-chain 8/8 均 PASS。七份本地日志 SHA-256 分别为 `330ac38e2698de4fbedfd3c5492fcdd123fc443121497c99b877cbaeff01d93b`、`6b12ceb80b2f5400a153c78f2a262bd34578187ed35809b74ac1c711f55d39dd`、`1e4ce35b54975f29a817854320b0d5aebd14d48120a95842d47f1e68b19b3b82`、`da58cced68eea053b6f4a8873c1608604c2a67e05e332fafa14bcd1fd3967cb5`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`83e69d045f57478cee780927e56ece6d494e8458492bf2ff898ffb4d58d8be66`、`b3df152d542230477a2c1548d37435c1066b1cb68e6e74698c85a61900aaff19`。Gitleaks 8.30.1 对 2,099 个 tracked/untracked 非忽略候选文件扫描零命中，空 JSON 报告 SHA-256 为 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`；这些结果仍是 dirty-tree E4，不能升级为 G3 PASS。
-- **退出条件**：新 clean signed commit 的 GitHub Linux G3 完成全浏览器 smoke、production build 与 route bundle，且 67 项 G0 真实批准范围包含 D-046。
+- **退出条件**：新 clean signed commit 的 GitHub Linux G3 完成全浏览器 smoke、production build 与 route bundle，且 68 项 G0 真实批准范围包含 D-046。
 
 ### D-047 — 双入口冷编译预算不足以覆盖共享 Linux runner 抖动
 
@@ -578,7 +578,7 @@ Codex 的任何修复都必须保留：
 - **影响**：共享 runner 的单次冷编译抖动可使完全相同的已通过候选假失败；若改为放宽所有 Playwright 导航预算，则会把真实产品加载退化混入基础设施预热阶段。
 - **修复**：仅把托管 Next dev 的 startup/每个受保护入口 warmup 默认预算从 90 秒提升为 180 秒；项目与首页仍各自使用独立 deadline，完整消费响应并强制 HTTP 200。服务提前退出、请求失败、鉴权重定向仍立即 fail closed，实际浏览器导航继续使用 Playwright 原预算。
 - **测试**：Web startup 合同新增 180000ms 精确断言，并继续覆盖连接重试、双入口顺序/Cookie/完整响应、非 200、响应体中断和服务退出中止；与 D-048 route-frame 及 67 项 G0 合同合并 34/34 PASS。固定 npm 11.18.0 的最终完整浏览器流程、root test、typecheck、lint、506 模块/1671 依赖架构和 release-chain 8/8 均 PASS，日志 SHA-256 分别为 `5c1f75d2b3f7fa78fa3d05f01f4f455d6f497319e9a7153aacefa28b2800f39e`、`f29b41e15109874f9fc3c14489f7aaaa1fc02c64f332606e8a72d43a5fe53d3a`、`bbaaf731257e3d7e6e5b3e2ae743859d22cfb7f4069ee69bbb25c915d2cf1645`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`2a43bedf148c5a1e3025a05325c7af0df09c95a6f5fcdfc013b858951e083b0b`、`cf42db223a41205184026d9b4b0f7e8c16ae5b7b2af19ab4654f23f40ada802d`。原始 attempt 2 失败日志 SHA-256 为 `de1b1d1026c34b5e1ec3ba4b6483bb5fc3961dde48a50f70492139e9be6bf1e8`。
-- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 完成双入口预热、全浏览器 smoke、production build 与 route bundle，且 67 项 G0 真实批准范围包含 D-047。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 完成双入口预热、全浏览器 smoke、production build 与 route bundle，且 68 项 G0 真实批准范围包含 D-047。
 
 ### D-048 — 导航 smoke 将 MutationObserver 中间态误判为已绘制空白帧
 
@@ -588,7 +588,17 @@ Codex 的任何修复都必须保留：
 - **影响**：MutationObserver 在同一渲染任务的绘制前可观察到分步 style 写入；把所有 mutation 回调都当成屏幕帧会让真实页面没有绘制空白时产生 WebKit 假失败。若删除空白断言，则真实双透明 RAF 帧会漏检。
 - **修复**：视觉空白只在 `requestAnimationFrame` paint candidates 上判定，并要求每次转场至少存在一个 RAF 样本；mutation 与 RAF 全样本仍共同用于 DOM mounted overlap、source/target/child opacity 进程、Home transform 和 settle 判定。结果新增 `paintCandidateFrames` 诊断计数，不放宽 `routePresent` 阈值。
 - **测试**：route-frame 合同现为 6/6 PASS，新增“透明 mutation 夹在两个可见 RAF 之间应通过”，并继续证明真实 RAF 双透明、无 mounted overlap、incoming opacity 不变及 Home transform 静态均失败；与 startup/G0 合并定向日志 SHA-256 为 `694939d29ef7272c7c5cb901e89455d37edfdd28c898c810a716242ea0ea42e6`。最终固定 npm 浏览器矩阵中 Chromium、Firefox、WebKit 全部 PASS，WebKit Home-to-Project 记录 60 个 paint candidates；其余 Board、设计系统、Export、隔离 Preview 与像素检查均通过。原始 attempt 3 失败日志 SHA-256 为 `c9b9c45ae3d0cec075f82535d32b1b42e89eb75aa45a5634a5c846044747a43f`。
-- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 首轮及至少一次完整复跑均完成全浏览器 smoke、production build 与 route bundle，且 67 项 G0 真实批准范围包含 D-048。
+- **退出条件**：新 clean signed candidate 的 GitHub Linux G3 首轮及至少一次完整复跑均完成全浏览器 smoke、production build 与 route bundle，且 68 项 G0 真实批准范围包含 D-048。
+
+### D-049 — 非 root DeerFlow 无法写 tmpfs 或读取运行时配置
+
+- **状态/严重度**：REMEDIATED IN CODE / HIGH / release-blocking；目标服务器候选复跑待执行
+- **位置**：`deploy/deerflow-runtime-compose.yml`；`deploy/server-deploy.sh`；`deploy/deerflow-production-preflight.sh`；部署编排合同
+- **触发**：候选 `2652322277cb66df57905041a2f97fd9a281b111` 的十镜像技术验证首先在 DeerFlow 启动时因 root-owned `/tmp` 拒绝 UID/GID `65532:65532` 创建 `UV_CACHE_DIR`。修复 tmpfs 属主后，签名候选 `a8fc877e3a5a7cf7dd8d1f164102064deca3cd1e` 完成 G1/G2、十镜像构建及零 HIGH/CRITICAL 技术扫描，但部署继续因 root-owned `config.effective.yaml` 和 runtime home 报 `[Errno 13] Permission denied: '/app/backend/config.yaml'`。两次失败均由 readiness fail closed 并自动回滚，原 `server-validation` 栈恢复 healthy。
+- **影响**：镜像本身满足 non-root 用户合同仍不足以证明可运行；Docker tmpfs 和 host bind mount 的属主若未与固定运行 UID/GID 对齐，DeerFlow 会持续重启，依赖它的 API/Web/Gateway 在切换窗口退化。把容器改回 root 或把配置放宽为 world-readable 会破坏既定最小权限与 secret 边界。
+- **修复**：DeerFlow `/tmp` 固定使用 `uid=65532,gid=65532,mode=1770`；部署在合并配置后把 effective config 与 runtime home 交给 `65532:65532`，分别保持 `0600` 与 `0700`。生产 preflight 同时验证 mode 和 numeric owner；部署编排合同拒绝缺失属主交接。候选验证使用隔离的私有 config/home，避免为短暂验证改写原栈运行状态。
+- **测试**：目标 Docker 上独立 tmpfs 探针已证明 UID/GID `65532:65532` 可写且 sticky/1770 保持；本地可执行部署/preflight 回归 31/31、完整 DeerFlow 部署合同 96/96 均通过，覆盖 root-owned config/home 拒绝、65532:65532 通过及 chown 失败即阻断。`a8fc877e` 失败证据位于数据盘候选 evidence root，回滚码为 0。更新后的静态合同、G0 68 项范围、fresh clone、候选部署/readiness/回滚仍须在下一签名候选从头执行。
+- **退出条件**：新 clean signed candidate 的 G0 范围包含 D-049，G3/G4 前置按状态词处理，并在目标服务器以 `65532:65532` 完成配置读取、home 写入、真实 smoke 和原栈回滚。
 
 ---
 
@@ -711,6 +721,8 @@ Codex 的任何修复都必须保留：
 | V-063 | 2026-07-22 透明端点修复后的第八轮 G3 与 Home 位移采样诊断 | D-039～D-045 原触发关闭；G3 FAIL；commit 未形成候选 | E2/E4 | 签名 commit `4fadacb4e117b53e3ed369079871875675c52daa` 的 PR #4 run `29862838335` 中 release-chain 与 Compose/gateway/Quartz jobs PASS；quality job 再次完成安装、生成、迁移、OpenAPI、typecheck、lint、架构检查、server/worker、真实 PostgreSQL、File Worker、DeerFlow、Web tests、浏览器 runtime 与 export integration。双入口、Run Preview、approval/preferences 与 Board smoke 均 PASS，Chromium Home-to-Project 已通过 D-045 的 mounted opacity endpoint 断言；随后 transform progression 因只保留可见且非 `none` 的样本而把合法 Home 位移误判为静态，形成 D-046，production build 与 route bundle 按 fail-fast 跳过。失败日志 SHA-256 为 `13ce5db9d23e31e3c7bf7a287cece53dc876722f5284149beba9f6ed3ef64b6f`。该 commit 没有候选 tag、G1/G2 或真实 G0 包，不得作为发布候选。 |
 | V-064 | 2026-07-22 首个完整 G3 候选及强制复跑诊断 | G1/G2 PASS；G3 attempt 1 PASS；attempt 2/3 分别形成 D-047/D-048；G0 NOT RUN；候选已淘汰 | E2/E3/E4 | 签名 commit `2665575f5a8b4f0dad6fd6bdf12bcb3f614d4c56`、tag `workbench-remediation-20260722-2665575f` 形成 candidate `sha256:a59dd78978eabd7b6721fe045cc693aa2226a6e750fead912dee1eb7a9aebbf1`；G1 manifest/inventory SHA-256 为 `d8c5d75f291e5e6614d017573cfbf4d1267c9a2752fcc44984ee7aa8ee21758e`、`0066bb8c6e4a426854904c262ea1201948c5c4d436b308cff2686f17ba5925f7`，G2 receipt 为 `b4e9e9d60a25d5a076d72ffbf21b630646b68013b5d6268f5438da74c54adfd4`。run `29866702430` attempt 1 完整通过 quality、全浏览器、production build、route bundle 与 Compose/gateway/Quartz，快照 SHA-256 `9f24143a0d996b1d0a5418c4a0f28491b29a15d376c5d14d5231a109e156653b`；强制复跑随后暴露 D-047/D-048，因此没有沿用该 PASS。候选绑定 G5 技术预检完成 fresh/真实旧版本升级、least privilege、backup/restore，RPO 2.708s、RTO 2.224s，receipt SHA-256 `8f3f8861b684ef48e818c9f2c2d4952b6dee19815e8be8ae8c0c802ec8c2ed04`；G4 技术构建在 8/10 Workbench 镜像和已完成镜像零 HIGH/CRITICAL 后主动停止，未伪造正式 OIDC/Cosign/provenance。 |
 | V-065 | 2026-07-22 D-047/D-048 本地修复矩阵 | 本地 PASS；新 clean candidate/CI 待执行 | E4 | 固定 Node 22.22.0/npm 11.18.0 下，定向合同 34/34、完整浏览器矩阵、root test、typecheck、lint、506 模块/1671 依赖架构和 release-chain 8/8 均 PASS；对应 SHA-256 为 `694939d29ef7272c7c5cb901e89455d37edfdd28c898c810a716242ea0ea42e6`、`5c1f75d2b3f7fa78fa3d05f01f4f455d6f497319e9a7153aacefa28b2800f39e`、`f29b41e15109874f9fc3c14489f7aaaa1fc02c64f332606e8a72d43a5fe53d3a`、`bbaaf731257e3d7e6e5b3e2ae743859d22cfb7f4069ee69bbb25c915d2cf1645`、`4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、`2a43bedf148c5a1e3025a05325c7af0df09c95a6f5fcdfc013b858951e083b0b`、`cf42db223a41205184026d9b4b0f7e8c16ae5b7b2af19ab4654f23f40ada802d`。官方 Gitleaks 8.30.1 对最终 2,099 个 tracked/untracked 非忽略源码文件扫描零命中，空 JSON 报告 SHA-256 为 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`。这些结果不升级为候选绑定 G3。 |
+| V-066 | 2026-07-22 十镜像技术扫描与 non-root DeerFlow 候选诊断 | G1/G2 PASS；技术 G4 PASS；部署 FAIL 后回滚 PASS；候选已淘汰 | E2/E3/E4 | 签名 commit `a8fc877e3a5a7cf7dd8d1f164102064deca3cd1e`、tag `workbench-remediation-20260722-a8fc877e` 形成 candidate `sha256:7091108a63a9a9c26c8a4c41dc4692f6da273b5ef7f04cb7e6dddb6303b07398`；G1 manifest/inventory SHA-256 为 `c243f4d004aa3c37faa95866a45fb59351af7ce0d87eb41029776da645ebfe2a`、`12d25a6378d4deaabd7b6cab95e2341433f3ef773de047eeac6ed79192d7b0fa`，G2 receipt SHA-256 为 `808929ef54d7bdcef36aae86ed53e0dc477661fed95a330e76882aaf291ab8cc`。十镜像构建、SBOM 与 Trivy 均完成且 HIGH/CRITICAL 为 0，technical image/supply-chain manifest SHA-256 为 `fde20f363ae67e22032e902b41a760672863c69e1e7bd7f92c5498da86e96194`、`0900d9f649c83b898753c5721041d009de92d16acfc1949dcbd326854b0d59d2`；manifest 明确 `formalG4=false`，缺 OIDC/Cosign/registry digest/G0 release-chain。候选部署越过 tmpfs 问题后因 effective config/runtime home 属主错误形成 D-049，自动回滚码为 0；源码随 D-049 修复变化后该候选及全部下游哈希淘汰。 |
+| V-067 | 2026-07-22 D-049 所有权修复本地矩阵 | 本地 PASS；dirty tree E4；新 clean candidate、GitHub Linux CI 与目标服务器复跑待执行 | E4 | 当前工作树在固定 Node `22.22.0`/npm `11.18.0` 下完成 D-049 部署/preflight 回归 31/31，完整 DeerFlow 部署合同 96/96，R0 102/102，完整 root `npm test`，typecheck、lint、506 模块/1671 依赖架构、release-chain 8/8、三浏览器 `npm run e2e:web`、production build 与 Web bundle 合同均 PASS。日志 SHA-256 依次为 deployment `1cd40683754f3e0432db2dddb622ffdb6722cea1d192fc3ea168c16e177d5e6e`、R0 `6426ffb7c869fd57dcec479290255967f752c4a74158a49d53fba43c775fdbf1`、root `6a35fabebd64fed8d4957d9955db7dc5a3695df2a1b0fda0725bb3e230de3bba`、typecheck `85a32e14b34d6eeb48377b361fededa9bbfd6972345ef4aaab02a370f4c745ba`、lint `4e4ad8bbf5e26ed8a8859f8f782afaedac831829808d7be93652a92a97cb3b51`、architecture `79a5aed2e7b86f7723e920406518d74b40e85837da2b3d2492d7fde62aa4a3a4`、release-chain `14e1cfb9a30d2e262c3720fd0322a91eb1ff019a8f806b5b352b0cfdbc5a884b`、browser `99c04663121e4d80748827b609299bff4e9f4b38db26a637484ce3b6044c0eea`、build `32e1115eda31ce232cb6a17481459ebb1a5661849e8a86c457c347cba79cfc1f`、bundle `8f977035d806338db92c36c4fe781d507e251bfde670be669c78816e6da6fe86`。官方 Gitleaks 8.30.1 扫描 2,100 个 tracked/untracked 非忽略文件，零命中；空报告 SHA-256 为 `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570`。这些结果不构成 G0/G3/G4/G12 正式 PASS，也不替代目标环境证据。 |
 
 注意：本轮超大 working-tree review 的 conventions finder 和最终 gap sweep 曾因 prompt too long 未完成；因此本文是经过多角度、去重和验证的高覆盖审查，但不得宣称绝对无遗漏。
 
@@ -856,6 +868,13 @@ Codex 的任何修复都必须保留：
 | D-047/D-048 architecture checks | `/private/tmp/workbench-d048-architecture.log` | `2a43bedf148c5a1e3025a05325c7af0df09c95a6f5fcdfc013b858951e083b0b` |
 | D-047/D-048 release-chain tests | `/private/tmp/workbench-d048-release-chain.log` | `cf42db223a41205184026d9b4b0f7e8c16ae5b7b2af19ab4654f23f40ada802d` |
 | D-047/D-048 final current-source Gitleaks empty report | `/private/tmp/workbench-d048-gitleaks-final-report.json` | `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570` |
+| D-049 deployment/preflight regression (31/31) | `/private/tmp/workbench-d049-deerflow-deployment-test.log` | `1cd40683754f3e0432db2dddb622ffdb6722cea1d192fc3ea168c16e177d5e6e` |
+| D-049 R0 contracts (102/102) | `/private/tmp/workbench-d049-r0.log` | `6426ffb7c869fd57dcec479290255967f752c4a74158a49d53fba43c775fdbf1` |
+| D-049 root `npm test` | `/private/tmp/workbench-d049-root-test.log` | `6a35fabebd64fed8d4957d9955db7dc5a3695df2a1b0fda0725bb3e230de3bba` |
+| D-049 typecheck | `/private/tmp/workbench-d049-typecheck.log` | `85a32e14b34d6eeb48377b361fededa9bbfd6972345ef4aaab02a370f4c745ba` |
+| D-049 browser E2E (Chromium/Firefox/WebKit) | `/private/tmp/workbench-d049-e2e-web.log` | `99c04663121e4d80748827b609299bff4e9f4b38db26a637484ce3b6044c0eea` |
+| D-049 production build with `uploads.aionbench.com` | `/private/tmp/workbench-d049-build-final.log` | `32e1115eda31ce232cb6a17481459ebb1a5661849e8a86c457c347cba79cfc1f` |
+| D-049 current-source Gitleaks empty report | `/private/tmp/workbench-d049-gitleaks.hyatO5/gitleaks-report.json` | `37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570` |
 
 本轮补充目标服务器 validation 日志（dirty tree/E3/E4，均位于本机 `/private/tmp`，包含服务器回执或服务器命令输出，不是不可变外部 ledger；日志不得含真实 root 密码或 OpenAI key）：
 
@@ -1054,11 +1073,11 @@ Codex 的任何修复都必须保留：
 
 | Gate | 控制目标 | 依赖 | Gate 状态 | 未绑定本地预检 | PASS 条件摘要 |
 |---|---|---|---|---|---|
-| G0 | 范围、生产目标、Owner、advertised/deferred capabilities | 无 | NOT RUN | 67 项 G0/schema 合同通过，但没有真实独立签署记录 | 产品范围、环境、责任、N/A 有签署记录 |
-| G1 | Immutable source candidate 与 clean provenance | G0 | BLOCKED | `2665575f` 曾形成 clean signed G1 PASS，但因 D-047/D-048 淘汰；当前修复尚未封印新候选 | clean commit/tag/manifest，无关键 untracked/ignored 依赖 |
-| G2 | Fresh-clone install/generation/reproducibility | G1 | BLOCKED | 淘汰候选 `2665575f` 的 Node 22/npm 11.18.0 fresh clone、两轮生成和 clean-clone 收口 PASS；不得复用于新候选 | Node 22 clean clone 全流程及二次生成零 diff |
-| G3 | 完整 CI、type、test、architecture、OpenAPI breaking | G2 | BLOCKED | 淘汰候选 attempt 1 完整 PASS，但强制复跑形成 D-047/D-048；修复后固定工具链本地矩阵 PASS，新候选 CI 未运行 | root typecheck PASS；breaking diff PASS；全部 blocking suite PASS |
-| G4 | 全服务 artifacts、SBOM、签名、digest、inventory 一致 | G3 | BLOCKED | 淘汰候选技术构建完成 8/10 且已扫镜像零 HIGH/CRITICAL 后主动停止；没有新候选 OIDC/Cosign/provenance 或完整十镜像 inventory | 包含 Import Worker、DeerFlow，CI/Compose/deploy inventory 一致 |
+| G0 | 范围、生产目标、Owner、advertised/deferred capabilities | 无 | NOT RUN | 68 项 G0/schema 合同待随 D-049 重跑；没有真实独立签署记录 | 产品范围、环境、责任、N/A 有签署记录 |
+| G1 | Immutable source candidate 与 clean provenance | G0 | BLOCKED | `a8fc877e` 曾形成 clean signed G1 PASS，但因 D-049 淘汰；当前修复尚未封印新候选 | clean commit/tag/manifest，无关键 untracked/ignored 依赖 |
+| G2 | Fresh-clone install/generation/reproducibility | G1 | BLOCKED | 淘汰候选 `a8fc877e` 的 Node 22/npm 11.18.0 fresh clone、两轮生成和 clean-clone 收口 PASS；不得复用于新候选 | Node 22 clean clone 全流程及二次生成零 diff |
+| G3 | 完整 CI、type、test、architecture、OpenAPI breaking | G2 | BLOCKED | `a8fc877e` 未形成新的 GitHub Linux CI；D-049 修复后仅可先执行本地合同，新候选 G3 未运行 | root typecheck PASS；breaking diff PASS；全部 blocking suite PASS |
+| G4 | 全服务 artifacts、SBOM、签名、digest、inventory 一致 | G3 | BLOCKED | 淘汰候选 `a8fc877e` 的十镜像构建/SBOM/Trivy 技术矩阵 PASS 且零 HIGH/CRITICAL，但 `formalG4=false`，没有 OIDC/Cosign/registry digest/G0 release-chain | 包含 Import Worker、DeerFlow，CI/Compose/deploy inventory 一致 |
 | G5 | Migration、约束、升级、backup/restore、RPO/RTO | G4 | BLOCKED | 淘汰候选已完成 66 migrations、真实旧版本升级、least privilege、backup/restore，RPO 2.708s/RTO 2.224s；源变化后不得升级为正式 G5 | least-privilege fresh/upgrade migration 与候选绑定 restore drill PASS |
 | G6 | Auth、安全、checksum、Edge/WireGuard、KMS、IAM、ClamAV、SSRF、审计 | G4 | BLOCKED | 阿里云私有 OSS 的 8 身份与 60/60 IAM 已在 dirty-tree validation 通过；D-020 候选绑定、KMS、Edge/WireGuard、ClamAV 故障矩阵及目标环境整体仍未关闭 | D-001～D-005、D-019、D-020 等关闭，目标环境负向 E1 PASS |
 | G7 | DeerFlow/runtime/model/tool 最小权限 | G4 | BLOCKED | tools 64/64；服务器 DeerFlow catalog、Gateway context、真实 provider 基础 smoke、按 Run 工具裁剪、非 Prototype 委派关闭及 secret-channel 均通过，D-035 的 validation 阻塞已消除；仍无 clean signed immutable candidate，Prototype/code 子代理、图像输入与完整故障矩阵未形成 E1/E2 | immutable digest、validator、secret、图像输入、按 Run tool catalog PASS |

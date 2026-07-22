@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -50,7 +51,37 @@ test("DeerFlow preflight rejects mutable provider model aliases", () => {
   assert.match(result.stderr, /WORKBENCH_DEERFLOW_PROVIDER_MODEL must be a fixed provider model id/u);
 });
 
-function runPreflight(providerEnvSource) {
+test("DeerFlow preflight rejects a root-owned effective config", () => {
+  const result = runPreflight(validProviderEnv(), {
+    configOwner: "0:0",
+    homeOwner: "65532:65532",
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /effective config must be owned by the DeerFlow runtime identity 65532:65532/u);
+});
+
+test("DeerFlow preflight rejects a root-owned runtime home", () => {
+  const result = runPreflight(validProviderEnv(), {
+    configOwner: "65532:65532",
+    homeOwner: "0:0",
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /DeerFlow home must be owned by the DeerFlow runtime identity 65532:65532/u);
+});
+
+test("DeerFlow preflight accepts private paths owned by the pinned runtime identity", () => {
+  const result = runPreflight(validProviderEnv(), {
+    configOwner: "65532:65532",
+    homeOwner: "65532:65532",
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /deerflow production preflight: ok/u);
+});
+
+function runPreflight(providerEnvSource, ownership = null) {
   const appDir = mkdtempSync(join(tmpdir(), "workbench-deerflow-preflight-"));
   const deployDir = join(appDir, "deploy");
   const integrationsDir = join(appDir, "integrations/deerflow");
@@ -60,21 +91,24 @@ function runPreflight(providerEnvSource) {
   const etcDir = join(appDir, "etc/workbench/deerflow");
   const runtimeDir = join(appDir, "var/lib/workbench/deerflow");
   const releaseDir = join(appDir, "etc/workbench/release");
+  const fakeBinDir = join(appDir, "test-bin");
+  const effectiveConfig = join(runtimeDir, "config.effective.yaml");
+  const runtimeHome = join(runtimeDir, "home");
 
   mkdirSync(deployDir, { recursive: true });
   mkdirSync(runtimeToolsDir, { recursive: true });
   mkdirSync(patchDir, { recursive: true });
   mkdirSync(scriptsDir, { recursive: true });
   mkdirSync(etcDir, { recursive: true, mode: 0o700 });
-  mkdirSync(join(runtimeDir, "home"), { recursive: true, mode: 0o700 });
+  mkdirSync(runtimeHome, { recursive: true, mode: 0o700 });
   mkdirSync(releaseDir, { recursive: true });
 
   writeFileSync(join(runtimeToolsDir, "config.fragment.yaml"), readFixture(fragment));
   writeFileSync(join(patchDir, "manifest.json"), readFixture(patchManifest));
   writeFileSync(join(deployDir, "deerflow-runtime-compose.yml"), "services: {}\n");
   writeFileSync(join(etcDir, "config.base.yaml"), "models: []\ntool_groups: []\ntools: []\n");
-  writeFileSync(join(runtimeDir, "config.effective.yaml"), "models: []\ntool_groups: []\ntools: []\n", { mode: 0o600 });
-  chmodSync(join(runtimeDir, "config.effective.yaml"), 0o600);
+  writeFileSync(effectiveConfig, "models: []\ntool_groups: []\ntools: []\n", { mode: 0o600 });
+  chmodSync(effectiveConfig, 0o600);
   writeFileSync(join(etcDir, "provider.env"), providerEnvSource, { mode: 0o600 });
   chmodSync(join(etcDir, "provider.env"), 0o600);
   writeFileSync(join(etcDir, "request-scoped-secrets.attestation.json"), "{}\n");
@@ -89,9 +123,9 @@ function runPreflight(providerEnvSource) {
 
   const envFile = join(deployDir, "workbench.env");
   writeFileSync(envFile, [
-    `DEER_FLOW_HOME=${join(runtimeDir, "home")}`,
+    `DEER_FLOW_HOME=${runtimeHome}`,
     `WORKBENCH_DEERFLOW_BASE_CONFIG_PATH=${join(etcDir, "config.base.yaml")}`,
-    `DEER_FLOW_CONFIG_PATH=${join(runtimeDir, "config.effective.yaml")}`,
+    `DEER_FLOW_CONFIG_PATH=${effectiveConfig}`,
     `WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE=${join(etcDir, "provider.env")}`,
     "WORKBENCH_DEERFLOW_HOST_PORT=2026",
     "WORKBENCH_INTERNAL_NETWORK_NAME=workbench_internal",
@@ -109,6 +143,37 @@ function runPreflight(providerEnvSource) {
     "",
   ].join("\n"));
 
+  if (ownership) {
+    mkdirSync(fakeBinDir, { recursive: true });
+    writeExecutable(join(fakeBinDir, "node"), "#!/bin/sh\nexit 0\n");
+    writeExecutable(join(fakeBinDir, "cosign"), "#!/bin/sh\nexit 0\n");
+    writeExecutable(join(fakeBinDir, "stat"), [
+      "#!/bin/sh",
+      "if { [ \"$1\" = \"-c\" ] || [ \"$1\" = \"-f\" ]; } && [ \"$2\" = \"%u:%g\" ]; then",
+      "  case \"$3\" in",
+      "    \"$TEST_EFFECTIVE_CONFIG\") printf '%s\\n' \"$TEST_CONFIG_OWNER\"; exit 0 ;;",
+      "    \"$TEST_RUNTIME_HOME\") printf '%s\\n' \"$TEST_HOME_OWNER\"; exit 0 ;;",
+      "  esac",
+      "fi",
+      "if [ \"$1\" = \"-c\" ] && [ \"$2\" = \"%a\" ]; then",
+      "  /usr/bin/stat -c '%a' \"$3\" 2>/dev/null && exit 0",
+      "  exec /usr/bin/stat -f '%Lp' \"$3\"",
+      "fi",
+      "exec /usr/bin/stat \"$@\"",
+      "",
+    ].join("\n"));
+    writeExecutable(join(fakeBinDir, "docker"), [
+      "#!/bin/sh",
+      "case \" $* \" in",
+      "  *' {{join .RepoDigests \" \"}} '*) printf '%s@%s\\n' \"$TEST_IMAGE_REPOSITORY\" \"$TEST_IMAGE_DIGEST\" ;;",
+      "  *' {{json .Config.Labels}} '*) printf '{\"org.opencontainers.image.revision\":\"%s\",\"io.workbench.deerflow.source-commit\":\"%s\",\"io.workbench.deerflow.base-image\":\"%s\",\"io.workbench.deerflow.tool-scope-patch-sha256\":\"%s\"}\\n' \"$TEST_SOURCE_COMMIT\" \"$TEST_DEERFLOW_COMMIT\" \"$TEST_BASE_IMAGE_REF\" \"$TEST_PATCH_SHA256\" ;;",
+      "  *' {{.Internal}} '*) printf 'true\\n' ;;",
+      "esac",
+      "exit 0",
+      "",
+    ].join("\n"));
+  }
+
   try {
     return spawnSync("sh", [preflight], {
       encoding: "utf8",
@@ -117,11 +182,38 @@ function runPreflight(providerEnvSource) {
         WORKBENCH_APP_DIR: appDir,
         WORKBENCH_ENV_FILE: envFile,
         WORKBENCH_DEERFLOW_COMPOSE_FILE: join(deployDir, "deerflow-runtime-compose.yml"),
+        ...(ownership ? {
+          PATH: `${fakeBinDir}:${process.env.PATH}`,
+          TEST_EFFECTIVE_CONFIG: effectiveConfig,
+          TEST_RUNTIME_HOME: runtimeHome,
+          TEST_CONFIG_OWNER: ownership.configOwner,
+          TEST_HOME_OWNER: ownership.homeOwner,
+          TEST_IMAGE_REPOSITORY: "registry.example.test/workbench/deerflow",
+          TEST_IMAGE_DIGEST: `sha256:${"c".repeat(64)}`,
+          TEST_SOURCE_COMMIT: "a".repeat(40),
+          TEST_DEERFLOW_COMMIT: "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2",
+          TEST_BASE_IMAGE_REF: `registry.example.test/deerflow/base@sha256:${"b".repeat(64)}`,
+          TEST_PATCH_SHA256: createHash("sha256").update(readFixture(patchManifest)).digest("hex"),
+        } : {}),
       },
     });
   } finally {
     rmSync(appDir, { recursive: true, force: true });
   }
+}
+
+function validProviderEnv() {
+  return [
+    "OPENAI_API_KEY=test-key-with-enough-entropy",
+    "WORKBENCH_DEERFLOW_PROVIDER_BASE_URL=https://provider.example.test/v1",
+    "WORKBENCH_DEERFLOW_PROVIDER_MODEL=gpt5.5",
+    "",
+  ].join("\n");
+}
+
+function writeExecutable(path, source) {
+  writeFileSync(path, source, { mode: 0o755 });
+  chmodSync(path, 0o755);
 }
 
 function readFixture(path) {

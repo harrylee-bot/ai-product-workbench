@@ -24,6 +24,16 @@ assert(runtime.networks?.["workbench-runtime"]?.external === true, "DeerFlow mus
 assert(deerflow.networks?.["workbench-runtime"]?.aliases?.includes("deerflow"), "DeerFlow alias must be stable");
 assert(deerflow.healthcheck, "DeerFlow readiness healthcheck is required");
 assert(deerflow.read_only === true, "DeerFlow root filesystem must be read-only");
+assert(
+  serverDeploy.includes('chown -R "$DEERFLOW_RUNTIME_UID:$DEERFLOW_RUNTIME_GID" "$runtime_home"')
+    && serverDeploy.includes('chown "$DEERFLOW_RUNTIME_UID:$DEERFLOW_RUNTIME_GID" "$effective_config"'),
+  "DeerFlow deploy must transfer private runtime paths to the pinned non-root identity",
+);
+assert(
+  deerflowProductionPreflight.includes("effective config must be owned by the DeerFlow runtime identity 65532:65532")
+    && deerflowProductionPreflight.includes("DeerFlow home must be owned by the DeerFlow runtime identity 65532:65532"),
+  "DeerFlow preflight must reject root-owned runtime paths",
+);
 
 for (const name of ["workbench-api", "workbench-worker"]) {
   const service = compose.services?.[name];

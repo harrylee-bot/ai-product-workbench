@@ -9,6 +9,8 @@ COMPOSE_OVERLAY="${WORKBENCH_COMPOSE_OVERLAY:-}"
 COMPOSE_PROFILES="${WORKBENCH_COMPOSE_PROFILES:-}"
 DEERFLOW_COMPOSE_FILE="${WORKBENCH_DEERFLOW_COMPOSE_FILE:-${APP_DIR}/deploy/deerflow-runtime-compose.yml}"
 DEERFLOW_PREFLIGHT_SCRIPT="${WORKBENCH_DEERFLOW_PREFLIGHT_SCRIPT:-${APP_DIR}/deploy/deerflow-production-preflight.sh}"
+DEERFLOW_RUNTIME_UID=65532
+DEERFLOW_RUNTIME_GID=65532
 MANAGE_DEERFLOW_RUNTIME="${WORKBENCH_MANAGE_DEERFLOW_RUNTIME:-1}"
 IMAGE_MODE="${WORKBENCH_DEPLOY_IMAGE_MODE:-pinned}"
 if [ -n "${WORKBENCH_PREFLIGHT_SCRIPT:-}" ]; then
@@ -175,6 +177,10 @@ prepare_deerflow_runtime() {
     --base "$base_config" \
     --fragment "$APP_DIR/integrations/deerflow/runtime-tools/config.fragment.yaml" \
     --output "$effective_config"
+  chown -R "$DEERFLOW_RUNTIME_UID:$DEERFLOW_RUNTIME_GID" "$runtime_home"
+  chmod 0700 "$runtime_home"
+  chown "$DEERFLOW_RUNTIME_UID:$DEERFLOW_RUNTIME_GID" "$effective_config"
+  chmod 0600 "$effective_config"
 
   if ! docker image inspect "$image_ref" >/dev/null 2>&1; then
     docker pull "$image_ref"

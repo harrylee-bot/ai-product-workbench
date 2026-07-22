@@ -37,6 +37,10 @@ file_mode() {
   stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
 }
 
+file_owner() {
+  stat -c '%u:%g' "$1" 2>/dev/null || stat -f '%u:%g' "$1" 2>/dev/null
+}
+
 deerflow_home=$(require_env DEER_FLOW_HOME)
 base_config=$(require_env WORKBENCH_DEERFLOW_BASE_CONFIG_PATH)
 effective_config=$(require_env DEER_FLOW_CONFIG_PATH)
@@ -150,6 +154,12 @@ node "$APP_DIR/scripts/production-image-inventory.mjs" \
 
 config_mode=$(file_mode "$effective_config") || fail "cannot inspect effective config permissions"
 [ "$config_mode" = "600" ] || fail "effective config must have mode 0600"
+config_owner=$(file_owner "$effective_config") || fail "cannot inspect effective config owner"
+[ "$config_owner" = "65532:65532" ] || fail "effective config must be owned by the DeerFlow runtime identity 65532:65532"
+home_mode=$(file_mode "$deerflow_home") || fail "cannot inspect DeerFlow home permissions"
+[ "$home_mode" = "700" ] || fail "DeerFlow home must have mode 0700"
+home_owner=$(file_owner "$deerflow_home") || fail "cannot inspect DeerFlow home owner"
+[ "$home_owner" = "65532:65532" ] || fail "DeerFlow home must be owned by the DeerFlow runtime identity 65532:65532"
 
 image_repo_digests=$(docker image inspect --format '{{join .RepoDigests " "}}' "$image_ref" 2>/dev/null) \
   || fail "pinned DeerFlow image is not present: $image_ref"
