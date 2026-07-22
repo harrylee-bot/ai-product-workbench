@@ -66,6 +66,11 @@ assert(!gateway.volumes.some((mount) => mount.includes("DEER_FLOW_REPO_ROOT")), 
 assert(!gateway.volumes.some((mount) => mount.includes("integrations/deerflow")), "production extensions must be embedded in the derived image");
 assert(gateway.pull_policy === "never", "preflight must resolve the image before Compose starts it");
 assert(gateway.read_only === true, "the derived DeerFlow root filesystem must be read-only");
+assertDeepEqual(
+  gateway.tmpfs,
+  ["/tmp:size=1073741824,uid=65532,gid=65532,mode=1770"],
+  "DeerFlow tmpfs must be writable by the pinned non-root runtime user",
+);
 for (const variable of [
   "WORKBENCH_DEERFLOW_BASE_IMAGE_REF=",
   "WORKBENCH_DEERFLOW_IMAGE_REF=",

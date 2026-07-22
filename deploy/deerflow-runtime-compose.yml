@@ -38,7 +38,7 @@ services:
       - ${DEER_FLOW_HOME:?DEER_FLOW_HOME must be a dedicated runtime home}:/app/backend/.deer-flow
     read_only: true
     tmpfs:
-      - /tmp:size=1073741824,mode=1770
+      - /tmp:size=1073741824,uid=65532,gid=65532,mode=1770
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 60s
