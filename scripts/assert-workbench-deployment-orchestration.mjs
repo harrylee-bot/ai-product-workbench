@@ -145,6 +145,10 @@ for (const marker of [
   "on_deploy_error",
   "Rollback image manifest is missing",
   "Rollback image manifest signature bundle is missing",
+  "RUNTIME_QUEUE_PARTICIPANTS",
+  "stop_runtime_queue_participants",
+  "run_runtime_queue_migrator",
+  "Runtime queue reconciliation failed closed",
 ]) {
   assert(serverDeploy.includes(marker), `server deploy is missing ${marker}`);
 }
@@ -189,9 +193,32 @@ assert(compose.services?.knowledge?.build?.args?.NGINX_IMAGE?.includes("WORKBENC
 assert(serverDeploy.includes("base greenfield Compose without a validation overlay"), "production must reject the validation overlay");
 assert(serverDeploy.indexOf("prepare_deerflow_runtime") < serverDeploy.indexOf("compose_up"), "DeerFlow must be ready before Workbench consumers start");
 assert(serverDeploy.includes("down --remove-orphans"), "deployment must have a deterministic shutdown path");
+assert(
+  serverDeploy.includes('export WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE="$ALLOW_RUNTIME_QUEUE_RECREATE"'),
+  "queue policy recreation must be authorized by the deploy invocation instead of a persisted env-file value",
+);
+
+const allDeployBody = caseBody(serverDeploy, "all");
+assert(
+  allDeployBody.includes("prepare_runtime_queue_cutover")
+    && allDeployBody.indexOf("prepare_runtime_queue_cutover") < allDeployBody.indexOf("compose_up"),
+  "full deployment must reconcile Runtime queues before queue participants start",
+);
+const migrateBody = caseBody(serverDeploy, "migrate");
+assert(
+  migrateBody.includes("prepare_runtime_queue_cutover"),
+  "the manual migration target must use the drained Runtime queue cutover",
+);
+const rollbackBody = caseBody(serverDeploy, "rollback");
+const rollbackMigrate = rollbackBody.indexOf('"${ROLLBACK_COMPOSE[@]}" run --rm --no-deps migrate');
+const rollbackDown = rollbackBody.indexOf('"${COMPOSE[@]}" down --remove-orphans');
+assert(
+  rollbackMigrate >= 0 && rollbackDown > rollbackMigrate,
+  "rollback must restore queue policy with the previous candidate migrator before teardown",
+);
 
 for (const [target, requiredMarkers] of [
-  ["all", ["compose_up_force_recreate preview-gateway gateway"]],
+  ["all", ["prepare_runtime_queue_cutover", "compose_up_force_recreate preview-gateway gateway"]],
   ["api", ["compose_up workbench-api", "compose_up_force_recreate gateway"]],
   ["web", ["compose_up workbench-web knowledge", "compose_up_force_recreate gateway"]],
   ["knowledge", ["compose_up knowledge", "compose_up_force_recreate gateway"]],

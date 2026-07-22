@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
@@ -30,11 +30,26 @@ LOCK_FILE="${WORKBENCH_DEPLOY_LOCK_FILE:-/tmp/workbench-deploy.lock}"
 ROLLBACK_ON_FAILURE="${WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE:-1}"
 ROLLBACK_ENV_FILE="${WORKBENCH_ROLLBACK_ENV_FILE:-}"
 ROLLBACK_COMPOSE_FILE="${WORKBENCH_ROLLBACK_COMPOSE_FILE:-$COMPOSE_FILE}"
+ALLOW_RUNTIME_QUEUE_RECREATE="${WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE:-0}"
+RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS="${WORKBENCH_RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS:-45}"
+RUNTIME_QUEUE_PARTICIPANTS=(
+  workbench-api
+  workbench-worker
+  workbench-file-worker
+  workbench-import-worker
+  workbench-export-worker
+)
+
+# Compose interpolation must use the per-invocation authorization. A value left
+# in an env file is intentionally unable to authorize a later policy rebuild.
+export WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE="$ALLOW_RUNTIME_QUEUE_RECREATE"
 
 deployment_mutated=0
 clean_host=0
 existing_workbench_services=""
 existing_deerflow_services=""
+runtime_queue_cutover_started=0
+runtime_queue_reconciled=0
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -128,6 +143,9 @@ rollback_clean_host() {
 on_deploy_error() {
   local status=$?
   trap - ERR
+  if [ "$runtime_queue_cutover_started" = "1" ] && [ "$runtime_queue_reconciled" = "0" ] && [ "$clean_host" = "0" ]; then
+    echo "Runtime queue reconciliation failed closed; queue producers and consumers remain stopped." >&2
+  fi
   rollback_clean_host "$status" || true
   exit "$status"
 }
@@ -161,6 +179,19 @@ assert_image_mode() {
     0 | 1) ;;
     *) echo "WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE must be 0 or 1" >&2; exit 64 ;;
   esac
+  case "$ALLOW_RUNTIME_QUEUE_RECREATE" in
+    0 | 1) ;;
+    *) echo "WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE must be 0 or 1" >&2; exit 64 ;;
+  esac
+  if [ "$ALLOW_RUNTIME_QUEUE_RECREATE" = "1" ]; then
+    case "$DEPLOY_TARGET" in
+      all | migrate | rollback) ;;
+      *)
+        echo "WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 requires DEPLOY_TARGET=all, migrate, or rollback" >&2
+        exit 64
+        ;;
+    esac
+  fi
 }
 
 prepare_deerflow_runtime() {
@@ -261,6 +292,10 @@ if ! [[ "$HEALTH_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
   echo "WORKBENCH_DEPLOY_HEALTH_TIMEOUT_SECONDS must be a positive integer" >&2
   exit 64
 fi
+if ! [[ "$RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "WORKBENCH_RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS must be a positive integer" >&2
+  exit 64
+fi
 
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$LOCK_FILE"
@@ -310,6 +345,36 @@ compose_up_force_recreate() {
   "${COMPOSE[@]}" up -d --remove-orphans --no-build --force-recreate "$@"
 }
 
+stop_runtime_queue_participants() {
+  local service running_ids
+  runtime_queue_cutover_started=1
+  echo "Stopping Runtime queue producers and consumers before reconciliation."
+  "${COMPOSE[@]}" stop \
+    --timeout "$RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS" \
+    "${RUNTIME_QUEUE_PARTICIPANTS[@]}"
+
+  for service in "${RUNTIME_QUEUE_PARTICIPANTS[@]}"; do
+    running_ids="$("${COMPOSE[@]}" ps -q "$service")"
+    if [ -n "$running_ids" ]; then
+      echo "Runtime queue participant did not stop: $service" >&2
+      return 1
+    fi
+  done
+}
+
+run_runtime_queue_migrator() {
+  echo "Reconciling database migrations and Runtime queue policies while participants are stopped."
+  "${COMPOSE[@]}" run --rm --no-deps migrate
+  runtime_queue_reconciled=1
+}
+
+prepare_runtime_queue_cutover() {
+  stop_runtime_queue_participants
+  "${COMPOSE[@]}" up -d postgres
+  wait_for_services postgres
+  run_runtime_queue_migrator
+}
+
 if [ "$SKIP_PREFLIGHT" = "0" ] && [ -n "$PREFLIGHT_SCRIPT" ]; then
   WORKBENCH_APP_DIR="$APP_DIR" \
     WORKBENCH_ENV_FILE="$ENV_FILE" \
@@ -325,9 +390,8 @@ fi
 case "$DEPLOY_TARGET" in
   all)
     deployment_mutated=1
+    prepare_runtime_queue_cutover
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
-      "${COMPOSE[@]}" up -d postgres
-      wait_for_services postgres
       prepare_deerflow_runtime
     fi
     compose_up
@@ -389,7 +453,6 @@ case "$DEPLOY_TARGET" in
     fi
     ;;
   rollback)
-    trap - ERR
     [ -n "$ROLLBACK_ENV_FILE" ] || { echo "WORKBENCH_ROLLBACK_ENV_FILE is required for rollback" >&2; exit 64; }
     [ -f "$ROLLBACK_ENV_FILE" ] || { echo "Rollback environment file is missing: $ROLLBACK_ENV_FILE" >&2; exit 66; }
     [ -f "$ROLLBACK_COMPOSE_FILE" ] || { echo "Rollback Compose file is missing: $ROLLBACK_COMPOSE_FILE" >&2; exit 66; }
@@ -409,6 +472,22 @@ case "$DEPLOY_TARGET" in
       --certificate-oidc-issuer "$rollback_cosign_issuer" \
       --expected-commit "$rollback_source_commit" \
       --env-file "$ROLLBACK_ENV_FILE"
+    ROLLBACK_COMPOSE=(docker compose --env-file "$ROLLBACK_ENV_FILE" -f "$ROLLBACK_COMPOSE_FILE")
+    WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 "${ROLLBACK_COMPOSE[@]}" config --quiet
+    WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 "${ROLLBACK_COMPOSE[@]}" pull --quiet migrate
+    stop_runtime_queue_participants
+    "${COMPOSE[@]}" up -d postgres
+    wait_for_services postgres
+    echo "Restoring Runtime queue policies with the previous signed candidate migrator."
+    if WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 \
+      "${ROLLBACK_COMPOSE[@]}" run --rm --no-deps migrate; then
+      :
+    else
+      rollback_migration_status=$?
+      echo "Rollback queue reconciliation failed closed; queue producers and consumers remain stopped." >&2
+      exit "$rollback_migration_status"
+    fi
+    runtime_queue_reconciled=1
     "${COMPOSE[@]}" down --remove-orphans
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
       WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans
@@ -416,6 +495,7 @@ case "$DEPLOY_TARGET" in
     WORKBENCH_ENV_FILE="$ROLLBACK_ENV_FILE" \
       WORKBENCH_COMPOSE_FILE="$ROLLBACK_COMPOSE_FILE" \
       WORKBENCH_DEPLOY_IMAGE_MODE=pinned \
+      WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 \
       DEPLOY_TARGET=all \
       WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE=0 \
       exec "$0"
@@ -450,7 +530,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services gateway
     ;;
   migrate)
-    "${COMPOSE[@]}" run --rm migrate
+    prepare_runtime_queue_cutover
     ;;
   *)
     echo "DEPLOY_TARGET must be one of: all, api, web, runtime-worker, deerflow-runtime, file-worker, import-worker, export-worker, preview, knowledge, migrate, stop, rollback" >&2

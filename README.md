@@ -196,6 +196,17 @@ sudo WORKBENCH_APP_DIR="$PWD" \
 
 更新 `workbench-api`、`workbench-web`、`knowledge` 或 `all` 时必须使用上面的 `server-deploy.sh` 目标；脚本会在上游容器就绪后强制重建主 `gateway`，避免 Nginx 保留已删除容器的旧 IP。更新 `workbench-preview` 时同样会强制重建 `preview-gateway`。不要用裸 `docker compose up workbench-web`、`docker compose up workbench-api` 或只替换单个上游容器来完成线上切换。
 
+完整部署和 `migrate` 目标会先优雅停止 `workbench-api` 及 Runtime/File/Import/Export Workers，确认所有 pg-boss 生产者与消费者都已停止，再独立运行 migrator。队列策略或其他配置需要变更但队列仍含 queued/deferred/active job 时，migrator 会失败且这些服务保持停止；先按运维窗口处理积压，禁止删除队列绕过。需要重建持久化 queue policy 的一次性 hard cut 必须由调用进程显式授权，不能把授权常驻在 `workbench.env`：
+
+独立 `migrate` 即使成功也不会重新启动这些服务，因为迁移后的策略可能只与待切换候选兼容；完成检查后使用同一候选的 `DEPLOY_TARGET=all` 启动全栈。
+
+```bash
+WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 \
+WORKBENCH_ENV_FILE=/etc/workbench/release/workbench.env \
+DEPLOY_TARGET=all \
+bash deploy/server-deploy.sh
+```
+
 生产候选必须先把 CI 生成的 `production-image-manifest.json`、对应的 `production-image-manifest.bundle.json` 和批准的环境文件放到服务器，再运行同一个编排器。服务器会先用配置的 GitHub Actions 精确 certificate identity 与 OIDC issuer 执行 `cosign verify-blob`；签名未通过时不会解析清单、拉取镜像或变更服务：
 
 生产 GitHub Actions 环境还必须提供 `WORKBENCH_NODE_IMAGE`、`WORKBENCH_NGINX_IMAGE`、`WORKBENCH_POSTGRES_IMAGE` 和 `WORKBENCH_CI_POSTGRES_IMAGE`，且每个值都必须是带 `@sha256:<64hex>` 的不可变 OCI 引用。`WORKBENCH_DOCLING_IMAGE`、`WORKBENCH_CLAMAV_IMAGE`、`WORKBENCH_MINIO_IMAGE`、`WORKBENCH_MINIO_MC_IMAGE` 和 `WORKBENCH_DEX_IMAGE` 如果被配置，也必须使用同样的 digest；生产拓扑不允许启用 `local-object-storage` 或 `local-docling`，因此 MinIO、Dex 和 Docling 的 tag fallback 只属于本地/验证环境。Node/Nginx digest 会同时作为 Docker build args 写入镜像构建配置并纳入签名 evidence。
@@ -219,4 +230,4 @@ DEPLOY_TARGET=rollback \
 bash deploy/server-deploy.sh
 ```
 
-数据库迁移是前向兼容合同；发生不可逆迁移后不能假装通过镜像回滚，必须按备份/restore 与 forward-repair runbook 处理。
+回滚会在拆除当前栈之前停止同一组队列参与者，并以一次性授权运行上一签名候选的 migrator 来恢复其 queue policy；旧策略恢复失败或队列未排空时保持 fail closed，不会继续启动旧服务。数据库迁移仍是前向兼容合同；发生不可逆迁移后不能假装通过镜像回滚，必须按备份/restore 与 forward-repair runbook 处理。
