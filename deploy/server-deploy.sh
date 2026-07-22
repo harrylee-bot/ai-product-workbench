@@ -223,7 +223,7 @@ prepare_deerflow_runtime() {
     WORKBENCH_DEERFLOW_COMPOSE_FILE="$DEERFLOW_COMPOSE_FILE" \
     "$DEERFLOW_PREFLIGHT_SCRIPT"
   current_id="$("${DEERFLOW_COMPOSE[@]}" ps -q deerflow 2>/dev/null || true)"
-  existing_id="$(docker ps --filter "publish=$host_port" --format '{{.ID}}' | head -n 1)"
+  existing_id="$(docker ps --filter "publish=$host_port" --no-trunc --format '{{.ID}}' | head -n 1)"
   if [ -n "$existing_id" ] && [ "$existing_id" != "$current_id" ]; then
     echo "DeerFlow host port $host_port is already occupied by container $existing_id; stop the old runtime before cutover." >&2
     return 1

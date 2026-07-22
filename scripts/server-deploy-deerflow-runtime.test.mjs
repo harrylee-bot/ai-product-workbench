@@ -31,7 +31,37 @@ test("DeerFlow deployment fails closed when ownership transfer fails", () => {
   assert.doesNotMatch(result.commandLog, /deerflow-preflight/u);
 });
 
-function runDeployment({ failChownTarget = "" } = {}) {
+test("DeerFlow deployment recognizes the current port owner by its full container ID", () => {
+  const containerId = "c".repeat(64);
+  const result = runDeployment({
+    composeDeerflowId: containerId,
+    portOwnerFullId: containerId,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.commandLog,
+    /docker ps --filter publish=2026 --no-trunc --format \{\{\.ID\}\}/u,
+  );
+  assert.match(result.commandLog, /docker compose .* up -d --no-build --force-recreate deerflow/u);
+});
+
+test("DeerFlow deployment fails closed when another full container ID owns the port", () => {
+  const result = runDeployment({
+    composeDeerflowId: "c".repeat(64),
+    portOwnerFullId: "d".repeat(64),
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /DeerFlow host port 2026 is already occupied/u);
+  assert.doesNotMatch(result.commandLog, /docker compose .* up -d --no-build --force-recreate deerflow/u);
+});
+
+function runDeployment({
+  failChownTarget = "",
+  composeDeerflowId = "deerflow-id",
+  portOwnerFullId = "",
+} = {}) {
   const appDir = mkdtempSync(join(tmpdir(), "workbench-server-deploy-deerflow-"));
   const deployDir = join(appDir, "deploy");
   const configDir = join(appDir, "etc/workbench/deerflow");
@@ -72,16 +102,24 @@ function runDeployment({ failChownTarget = "" } = {}) {
   writeExecutable(join(fakeBinDir, "node"), "#!/bin/sh\nexit 0\n");
   writeExecutable(join(fakeBinDir, "docker"), [
     "#!/bin/sh",
+    "printf 'docker %s\\n' \"$*\" >> \"$TEST_COMMAND_LOG\"",
     "if [ \"$1\" = \"compose\" ]; then",
     "  case \" $* \" in",
     "    *' ps -q postgres '*) printf 'postgres-id\\n' ;;",
-    "    *' ps -q deerflow '*) printf 'deerflow-id\\n' ;;",
+    "    *' ps -q deerflow '*) printf '%s\\n' \"$TEST_COMPOSE_DEERFLOW_ID\" ;;",
     "  esac",
     "  exit 0",
     "fi",
     "case \"$1 $2\" in",
     "  'inspect --format') printf 'healthy\\n' ;;",
-    "  'ps --filter') exit 0 ;;",
+    "  'ps --filter')",
+    "    if [ -n \"$TEST_PORT_OWNER_FULL_ID\" ]; then",
+    "      case \" $* \" in",
+    "        *' --no-trunc '*) printf '%s\\n' \"$TEST_PORT_OWNER_FULL_ID\" ;;",
+    "        *) printf '%.12s\\n' \"$TEST_PORT_OWNER_FULL_ID\" ;;",
+    "      esac",
+    "    fi",
+    "    ;;",
     "esac",
     "exit 0",
     "",
@@ -123,6 +161,8 @@ function runDeployment({ failChownTarget = "" } = {}) {
         DEPLOY_TARGET: "deerflow-runtime",
         TEST_COMMAND_LOG: commandLogPath,
         TEST_FAIL_CHOWN_TARGET: failChownTarget,
+        TEST_COMPOSE_DEERFLOW_ID: composeDeerflowId,
+        TEST_PORT_OWNER_FULL_ID: portOwnerFullId,
       },
     });
     const commandLog = readFileSync(commandLogPath, "utf8");

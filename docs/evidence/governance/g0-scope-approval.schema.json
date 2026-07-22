@@ -221,8 +221,8 @@
         },
         "findingIds": {
           "type": "array",
-          "minItems": 69,
-          "maxItems": 69,
+          "minItems": 70,
+          "maxItems": 70,
           "uniqueItems": true,
           "items": {
             "type": "string",
