@@ -1,9 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
 ARG DEERFLOW_BASE_IMAGE
+ARG DEERFLOW_NODE_IMAGE
+FROM ${DEERFLOW_NODE_IMAGE} AS validator-runtime
+
 FROM ${DEERFLOW_BASE_IMAGE} AS runtime
 
 ARG DEERFLOW_BASE_IMAGE
+ARG DEERFLOW_NODE_IMAGE
 ARG DEERFLOW_SOURCE_COMMIT
 ARG WORKBENCH_SOURCE_COMMIT
 ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=17819f84ad6632b7ed35087275758113c1323429f8ed1f067f3003c9177cbf11
@@ -11,12 +15,15 @@ ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=17819f84ad6632b7ed35087275758113c
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
       io.workbench.deerflow.base-image="${DEERFLOW_BASE_IMAGE}" \
+      io.workbench.deerflow.validator-node-image="${DEERFLOW_NODE_IMAGE}" \
       io.workbench.deerflow.source-commit="${DEERFLOW_SOURCE_COMMIT}" \
       io.workbench.deerflow.tool-scope-patch-sha256="${WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256}" \
       io.workbench.deerflow.contract-version="1"
 
 # The candidate-owned extension is embedded in the derived image. Production
 # never installs tools or public skills from a mutable host checkout.
+COPY --from=validator-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=validator-runtime /usr/local/LICENSE /usr/share/licenses/node/LICENSE
 COPY integrations/deerflow/skills/workbench/ /app/skills/public/workbench/
 COPY integrations/deerflow/runtime-tools/deerflow_workbench_tools/ /app/backend/deerflow_workbench_tools/
 COPY integrations/deerflow/runtime-tools/config.fragment.yaml /opt/workbench/deerflow/config.fragment.yaml
@@ -36,6 +43,8 @@ RUN test "${DEERFLOW_SOURCE_COMMIT}" = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2
       uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_tool_scope_middleware.py \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
       uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_request_context.py \
+    && PYTHONPATH=/app/backend/packages/harness:/app/backend \
+      uv run --no-sync python -c 'from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result; result = validate_runtime_result({}); assert result["protocol"] == "workbench.runtime.validation.v1" and result["ok"] is False and result["issues"]' \
     && python3 /opt/workbench/deerflow/source-patch/apply.py \
       --root /app/backend/packages/harness \
       --gateway-root /app/backend \

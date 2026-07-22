@@ -51,6 +51,33 @@ test("DeerFlow preflight rejects mutable provider model aliases", () => {
   assert.match(result.stderr, /WORKBENCH_DEERFLOW_PROVIDER_MODEL must be a fixed provider model id/u);
 });
 
+test("DeerFlow preflight requires an immutable Validator Node image", () => {
+  const missing = runPreflight(validProviderEnv(), null, { nodeImageRef: null });
+  assert.notEqual(missing.status, 0);
+  assert.match(missing.stderr, /WORKBENCH_DEERFLOW_NODE_IMAGE_REF must occur exactly once/u);
+
+  const mutable = runPreflight(validProviderEnv(), null, {
+    nodeImageRef: "node:22-bookworm-slim",
+  });
+  assert.notEqual(mutable.status, 0);
+  assert.match(
+    mutable.stderr,
+    /WORKBENCH_DEERFLOW_NODE_IMAGE_REF must be an immutable digest reference/u,
+  );
+});
+
+test("DeerFlow preflight rejects a Validator Node image label mismatch", () => {
+  const result = runPreflight(validProviderEnv(), {
+    configOwner: "65532:65532",
+    homeOwner: "65532:65532",
+  }, {
+    labelNodeImageRef: `node:22-bookworm-slim@sha256:${"e".repeat(64)}`,
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /image is not bound to WORKBENCH_DEERFLOW_NODE_IMAGE_REF/u);
+});
+
 test("DeerFlow preflight rejects a root-owned effective config", () => {
   const result = runPreflight(validProviderEnv(), {
     configOwner: "0:0",
@@ -79,9 +106,79 @@ test("DeerFlow preflight accepts private paths owned by the pinned runtime ident
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /deerflow production preflight: ok/u);
+  const probeArguments = result.stderr.split("\n");
+  for (const argument of [
+    "--rm",
+    "--network",
+    "none",
+    "--read-only",
+    "--user",
+    "65532:65532",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges:true",
+    "--pids-limit",
+    "64",
+    "--tmpfs",
+    "/tmp:rw,nosuid,nodev,size=67108864,uid=65532,gid=65532,mode=1770",
+    "--entrypoint",
+    "/bin/sh",
+    `registry.example.test/workbench/deerflow@sha256:${"c".repeat(64)}`,
+  ]) {
+    assert.ok(probeArguments.includes(`validator-probe-arg=${argument}`), `missing probe argument: ${argument}`);
+  }
+  assert.match(result.stderr, /validator-probe-arg=.*validate_runtime_result\(\{\}\)/u);
 });
 
-function runPreflight(providerEnvSource, ownership = null) {
+test("DeerFlow preflight fails closed when the Validator image probe fails", () => {
+  const result = runPreflight(validProviderEnv(), {
+    configOwner: "65532:65532",
+    homeOwner: "65532:65532",
+  }, { validatorProbeStatus: 42 });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED/u);
+});
+
+test("DeerFlow preflight preserves the exact previous candidate as a legacy rollback", () => {
+  const result = runPreflight(validProviderEnv(), {
+    configOwner: "65532:65532",
+    homeOwner: "65532:65532",
+  }, {
+    workbenchSourceCommit: "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
+    nodeImageRef: null,
+    labelNodeImageRef: null,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /deerflow production preflight: ok/u);
+  assert.doesNotMatch(result.stderr, /validator-probe-arg=/u);
+});
+
+test("DeerFlow preflight rejects a Node environment binding on the legacy rollback candidate", () => {
+  const result = runPreflight(validProviderEnv(), null, {
+    workbenchSourceCommit: "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /legacy DeerFlow rollback candidate must not define WORKBENCH_DEERFLOW_NODE_IMAGE_REF/u);
+});
+
+test("DeerFlow preflight rejects a Node image label on the legacy rollback candidate", () => {
+  const result = runPreflight(validProviderEnv(), {
+    configOwner: "65532:65532",
+    homeOwner: "65532:65532",
+  }, {
+    workbenchSourceCommit: "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
+    nodeImageRef: null,
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /legacy DeerFlow rollback image unexpectedly declares a Validator Node runtime/u);
+});
+
+function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
   const appDir = mkdtempSync(join(tmpdir(), "workbench-deerflow-preflight-"));
   const deployDir = join(appDir, "deploy");
   const integrationsDir = join(appDir, "integrations/deerflow");
@@ -122,6 +219,10 @@ function runPreflight(providerEnvSource, ownership = null) {
   writeFileSync(join(scriptsDir, "production-image-inventory.mjs"), "process.exit(99);\n");
 
   const envFile = join(deployDir, "workbench.env");
+  const nodeImageRef = overrides.nodeImageRef === undefined
+    ? `node:22-bookworm-slim@sha256:${"d".repeat(64)}`
+    : overrides.nodeImageRef;
+  const workbenchSourceCommit = overrides.workbenchSourceCommit ?? "a".repeat(40);
   writeFileSync(envFile, [
     `DEER_FLOW_HOME=${runtimeHome}`,
     `WORKBENCH_DEERFLOW_BASE_CONFIG_PATH=${join(etcDir, "config.base.yaml")}`,
@@ -131,8 +232,9 @@ function runPreflight(providerEnvSource, ownership = null) {
     "WORKBENCH_INTERNAL_NETWORK_NAME=workbench_internal",
     "WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN=test-internal-token",
     "WORKBENCH_DEERFLOW_COMMIT=7a6c4a994a86583d2a3c056ee9d0f157d4f030c2",
-    `WORKBENCH_SOURCE_COMMIT=${"a".repeat(40)}`,
+    `WORKBENCH_SOURCE_COMMIT=${workbenchSourceCommit}`,
     `WORKBENCH_DEERFLOW_BASE_IMAGE_REF=registry.example.test/deerflow/base@sha256:${"b".repeat(64)}`,
+    ...(nodeImageRef === null ? [] : [`WORKBENCH_DEERFLOW_NODE_IMAGE_REF=${nodeImageRef}`]),
     `WORKBENCH_DEERFLOW_IMAGE_DIGEST=sha256:${"c".repeat(64)}`,
     `WORKBENCH_DEERFLOW_IMAGE_REF=registry.example.test/workbench/deerflow@sha256:${"c".repeat(64)}`,
     `WORKBENCH_IMAGE_INVENTORY_PATH=${join(releaseDir, "production-image-manifest.json")}`,
@@ -164,9 +266,20 @@ function runPreflight(providerEnvSource, ownership = null) {
     ].join("\n"));
     writeExecutable(join(fakeBinDir, "docker"), [
       "#!/bin/sh",
+      "if [ \"$1\" = \"run\" ]; then",
+      "  shift",
+      "  for arg in \"$@\"; do printf 'validator-probe-arg=%s\\n' \"$arg\" >&2; done",
+      "  exit \"${TEST_VALIDATOR_PROBE_STATUS:-0}\"",
+      "fi",
       "case \" $* \" in",
       "  *' {{join .RepoDigests \" \"}} '*) printf '%s@%s\\n' \"$TEST_IMAGE_REPOSITORY\" \"$TEST_IMAGE_DIGEST\" ;;",
-      "  *' {{json .Config.Labels}} '*) printf '{\"org.opencontainers.image.revision\":\"%s\",\"io.workbench.deerflow.source-commit\":\"%s\",\"io.workbench.deerflow.base-image\":\"%s\",\"io.workbench.deerflow.tool-scope-patch-sha256\":\"%s\"}\\n' \"$TEST_SOURCE_COMMIT\" \"$TEST_DEERFLOW_COMMIT\" \"$TEST_BASE_IMAGE_REF\" \"$TEST_PATCH_SHA256\" ;;",
+      "  *' {{json .Config.Labels}} '*)",
+      "    if [ \"$TEST_INCLUDE_NODE_LABEL\" = \"1\" ]; then",
+      "      printf '{\"org.opencontainers.image.revision\":\"%s\",\"io.workbench.deerflow.source-commit\":\"%s\",\"io.workbench.deerflow.base-image\":\"%s\",\"io.workbench.deerflow.validator-node-image\":\"%s\",\"io.workbench.deerflow.tool-scope-patch-sha256\":\"%s\"}\\n' \"$TEST_SOURCE_COMMIT\" \"$TEST_DEERFLOW_COMMIT\" \"$TEST_BASE_IMAGE_REF\" \"$TEST_NODE_IMAGE_REF\" \"$TEST_PATCH_SHA256\"",
+      "    else",
+      "      printf '{\"org.opencontainers.image.revision\":\"%s\",\"io.workbench.deerflow.source-commit\":\"%s\",\"io.workbench.deerflow.base-image\":\"%s\",\"io.workbench.deerflow.tool-scope-patch-sha256\":\"%s\"}\\n' \"$TEST_SOURCE_COMMIT\" \"$TEST_DEERFLOW_COMMIT\" \"$TEST_BASE_IMAGE_REF\" \"$TEST_PATCH_SHA256\"",
+      "    fi",
+      "    ;;",
       "  *' {{.Internal}} '*) printf 'true\\n' ;;",
       "esac",
       "exit 0",
@@ -190,9 +303,13 @@ function runPreflight(providerEnvSource, ownership = null) {
           TEST_HOME_OWNER: ownership.homeOwner,
           TEST_IMAGE_REPOSITORY: "registry.example.test/workbench/deerflow",
           TEST_IMAGE_DIGEST: `sha256:${"c".repeat(64)}`,
-          TEST_SOURCE_COMMIT: "a".repeat(40),
+          TEST_SOURCE_COMMIT: workbenchSourceCommit,
           TEST_DEERFLOW_COMMIT: "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2",
           TEST_BASE_IMAGE_REF: `registry.example.test/deerflow/base@sha256:${"b".repeat(64)}`,
+          TEST_NODE_IMAGE_REF: overrides.labelNodeImageRef
+            ?? `node:22-bookworm-slim@sha256:${"d".repeat(64)}`,
+          TEST_INCLUDE_NODE_LABEL: overrides.labelNodeImageRef === null ? "0" : "1",
+          TEST_VALIDATOR_PROBE_STATUS: String(overrides.validatorProbeStatus ?? 0),
           TEST_PATCH_SHA256: createHash("sha256").update(readFixture(patchManifest)).digest("hex"),
         } : {}),
       },

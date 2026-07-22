@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const deployScript = resolve("deploy/server-deploy.sh");
+const legacyValidatorNodeRollbackCommit = "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1";
 const queueParticipants = [
   "workbench-api",
   "workbench-worker",
@@ -103,11 +104,39 @@ test("rollback reconciliation failure keeps the active stack from teardown", () 
   assert.match(result.stderr, /Rollback queue reconciliation failed closed/u);
 });
 
+test("legacy rollback recursively verifies the inventory and both production preflights", () => {
+  const result = runDeployment({
+    deployTarget: "rollback",
+    manageDeerflowRuntime: true,
+    rollbackSourceCommit: legacyValidatorNodeRollbackCommit,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const inventoryIndexes = result.lines
+    .map((line, index) => line.startsWith("inventory-verifier ") ? index : -1)
+    .filter((index) => index >= 0);
+  assert.equal(inventoryIndexes.length, 2, result.commandLog);
+  for (const index of inventoryIndexes) {
+    assert.match(result.lines[index], new RegExp(`--expected-commit ${legacyValidatorNodeRollbackCommit}`, "u"));
+    assert.ok(result.lines[index].includes(`--env-file ${result.rollbackEnv}`));
+  }
+
+  const mainPreflightIndex = findLine(result.lines, (line) => line === "main-preflight");
+  const deerflowPreflightIndex = findLine(result.lines, (line) => line === "deerflow-preflight");
+  assert.ok(inventoryIndexes[1] > inventoryIndexes[0], "recursive deployment must re-run inventory verification");
+  assert.ok(mainPreflightIndex > inventoryIndexes[1], "main preflight must run after recursive inventory verification");
+  assert.ok(deerflowPreflightIndex > mainPreflightIndex, "DeerFlow preflight must run after the main preflight");
+  assert.equal(result.lines.filter((line) => line === "main-preflight").length, 1);
+  assert.equal(result.lines.filter((line) => line === "deerflow-preflight").length, 1);
+});
+
 function runDeployment({
   deployTarget = "all",
   envFileAuthorization = "0",
   failMigration = false,
+  manageDeerflowRuntime = false,
   processAuthorization,
+  rollbackSourceCommit = "a".repeat(40),
 } = {}) {
   const appDir = mkdtempSync(join(tmpdir(), "workbench-server-deploy-queue-"));
   const deployDir = join(appDir, "deploy");
@@ -120,6 +149,11 @@ function runDeployment({
   const rollbackCompose = join(deployDir, "rollback-compose.yml");
   const composeOverlay = join(deployDir, "workbench-validation-overlay.yml");
   const preflight = join(deployDir, "preflight.sh");
+  const deerflowCompose = join(deployDir, "deerflow-runtime-compose.yml");
+  const deerflowPreflight = join(deployDir, "deerflow-preflight.sh");
+  const deerflowBaseConfig = join(deployDir, "deerflow-base.yaml");
+  const deerflowEffectiveConfig = join(stateDir, "deerflow-config.yaml");
+  const deerflowHome = join(stateDir, "deerflow-home");
   const inventory = join(deployDir, "production-image-manifest.json");
   const inventoryBundle = join(deployDir, "production-image-manifest.bundle.json");
 
@@ -131,20 +165,33 @@ function runDeployment({
   writeFileSync(composeFile, "name: workbench\nservices: {}\n");
   writeFileSync(rollbackCompose, "name: workbench\nservices: {}\n");
   writeFileSync(composeOverlay, "services: {}\n");
+  writeFileSync(deerflowCompose, "name: workbench-runtime\nservices: {}\n");
+  writeFileSync(deerflowBaseConfig, "models: []\n");
   writeFileSync(inventory, "{}\n");
   writeFileSync(inventoryBundle, "{}\n");
   writeFileSync(rollbackEnv, [
     "WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=0",
-    `WORKBENCH_SOURCE_COMMIT=${"a".repeat(40)}`,
+    `WORKBENCH_SOURCE_COMMIT=${rollbackSourceCommit}`,
     `WORKBENCH_IMAGE_INVENTORY_PATH=${inventory}`,
     `WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=${inventoryBundle}`,
     "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY=https://example.test/workbench.yml@refs/heads/main",
     "WORKBENCH_COSIGN_OIDC_ISSUER=https://token.actions.githubusercontent.com",
+    ...(manageDeerflowRuntime ? [
+      `WORKBENCH_DEERFLOW_BASE_CONFIG_PATH=${deerflowBaseConfig}`,
+      `DEER_FLOW_CONFIG_PATH=${deerflowEffectiveConfig}`,
+      `DEER_FLOW_HOME=${deerflowHome}`,
+      `WORKBENCH_DEERFLOW_IMAGE_REF=registry.example.test/workbench/deerflow@sha256:${"d".repeat(64)}`,
+      "WORKBENCH_INTERNAL_NETWORK_NAME=workbench_internal",
+      "WORKBENCH_DEERFLOW_HOST_PORT=2026",
+    ] : []),
     "",
   ].join("\n"));
-  writeExecutable(preflight, "#!/bin/sh\nprintf 'preflight\\n' >> \"$TEST_COMMAND_LOG\"\n");
-  writeExecutable(join(fakeBinDir, "node"), "#!/bin/sh\nexit 0\n");
+  writeExecutable(preflight, "#!/bin/sh\nprintf 'main-preflight\\n' >> \"$TEST_COMMAND_LOG\"\n");
+  writeExecutable(deerflowPreflight, "#!/bin/sh\nprintf 'deerflow-preflight\\n' >> \"$TEST_COMMAND_LOG\"\n");
+  writeExecutable(join(fakeBinDir, "node"), fakeNodeSource());
   writeExecutable(join(fakeBinDir, "cosign"), "#!/bin/sh\nexit 0\n");
+  writeExecutable(join(fakeBinDir, "chown"), "#!/bin/sh\nexit 0\n");
+  writeExecutable(join(fakeBinDir, "chmod"), "#!/bin/sh\nexit 0\n");
   writeExecutable(join(fakeBinDir, "docker"), fakeDockerSource());
 
   const env = {
@@ -155,8 +202,10 @@ function runDeployment({
     WORKBENCH_COMPOSE_FILE: composeFile,
     WORKBENCH_COMPOSE_OVERLAY: deployTarget === "rollback" ? "" : composeOverlay,
     WORKBENCH_PREFLIGHT_SCRIPT: preflight,
+    WORKBENCH_DEERFLOW_COMPOSE_FILE: deerflowCompose,
+    WORKBENCH_DEERFLOW_PREFLIGHT_SCRIPT: deerflowPreflight,
     WORKBENCH_DEPLOY_IMAGE_MODE: deployTarget === "rollback" ? "pinned" : "build",
-    WORKBENCH_MANAGE_DEERFLOW_RUNTIME: "0",
+    WORKBENCH_MANAGE_DEERFLOW_RUNTIME: manageDeerflowRuntime ? "1" : "0",
     WORKBENCH_DEPLOY_LOCK_FILE: join(appDir, "deploy.lock"),
     WORKBENCH_DEPLOY_HEALTH_TIMEOUT_SECONDS: "5",
     WORKBENCH_RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS: "5",
@@ -187,6 +236,22 @@ function runDeployment({
   } finally {
     rmSync(appDir, { recursive: true, force: true });
   }
+}
+
+function fakeNodeSource() {
+  return [
+    "#!/bin/sh",
+    "case \"$1\" in",
+    "  */scripts/production-image-inventory.mjs)",
+    "    printf 'inventory-verifier %s\\n' \"$*\" >> \"$TEST_COMMAND_LOG\"",
+    "    ;;",
+    "  */scripts/merge-deerflow-config.mjs)",
+    "    printf 'deerflow-config-merge %s\\n' \"$*\" >> \"$TEST_COMMAND_LOG\"",
+    "    ;;",
+    "esac",
+    "exit 0",
+    "",
+  ].join("\n");
 }
 
 function fakeDockerSource() {

@@ -5,8 +5,10 @@ import hashlib
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from deerflow_workbench_tools.runtime_result_validator import (
+    RuntimeResultValidatorError,
     validate_runtime_artifact_draft,
     validate_runtime_prototype_patch,
     validate_runtime_result,
@@ -29,6 +31,17 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertEqual(result["issues"], [])
         self.assertRegex(result["candidateChecksum"], r"^[0-9a-f]{64}$")
         self.assertEqual(len(result["artifactChecksums"]), 1)
+
+    def test_fails_with_a_fixed_code_when_node_is_missing(self) -> None:
+        with patch(
+            "deerflow_workbench_tools.runtime_result_validator.shutil.which",
+            return_value=None,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeResultValidatorError,
+                "^WORKBENCH_RUNTIME_VALIDATOR_NODE_MISSING$",
+            ):
+                validate_runtime_result(self.example)
 
     def test_reports_state_binding_shape_errors(self) -> None:
         candidate = copy.deepcopy(self.example)

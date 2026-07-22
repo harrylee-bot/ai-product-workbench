@@ -16,6 +16,11 @@ const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const CHAIN_ID_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+// The prior signed candidate predates the Validator Node build input; no other
+// candidate is allowed to omit the runtime binding.
+const LEGACY_DEERFLOW_VALIDATOR_NODE_ROLLBACK_COMMITS = new Set([
+  "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
+]);
 
 export function loadProductionImageInventory() {
   return JSON.parse(readText("deploy/production-image-inventory.json"));
@@ -363,6 +368,9 @@ function assertProductionImageMatrix({ ci, inventory, ids, workflowSource }) {
     if (dockerfile.includes("ARG NODE_IMAGE")) {
       assert(buildArgs.includes("NODE_IMAGE="), `${image.id} CI build must bind NODE_IMAGE`);
     }
+    if (dockerfile.includes("ARG DEERFLOW_NODE_IMAGE")) {
+      assert(buildArgs.includes("DEERFLOW_NODE_IMAGE="), `${image.id} CI build must bind DEERFLOW_NODE_IMAGE`);
+    }
     if (dockerfile.includes("ARG NGINX_IMAGE")) {
       assert(buildArgs.includes("NGINX_IMAGE="), `${image.id} CI build must bind NGINX_IMAGE`);
     }
@@ -408,6 +416,7 @@ function assertProductionImageMatrix({ ci, inventory, ids, workflowSource }) {
     "Require immutable production base image inputs",
     "WORKBENCH_CI_POSTGRES_IMAGE",
     "WORKBENCH_NODE_IMAGE",
+    "WORKBENCH_DEERFLOW_NODE_IMAGE_REF",
     "WORKBENCH_NGINX_IMAGE",
     "WORKBENCH_POSTGRES_IMAGE",
     "WORKBENCH_DOCLING_IMAGE",
@@ -416,6 +425,7 @@ function assertProductionImageMatrix({ ci, inventory, ids, workflowSource }) {
     "WORKBENCH_MINIO_MC_IMAGE",
     "WORKBENCH_DEX_IMAGE",
     "NODE_IMAGE=",
+    "DEERFLOW_NODE_IMAGE=",
     "NGINX_IMAGE=",
     "production-deployment-config-${{ github.run_attempt }}",
     "createProductionDeploymentConfig",
@@ -645,6 +655,9 @@ function assertBuildConfigurationMatchesDeployment(record, expectedCommit, envir
     case "deerflow":
       expectedBuildArgs = {
         DEERFLOW_BASE_IMAGE: required("WORKBENCH_DEERFLOW_BASE_IMAGE_REF"),
+        ...(!LEGACY_DEERFLOW_VALIDATOR_NODE_ROLLBACK_COMMITS.has(expectedCommit)
+          ? { DEERFLOW_NODE_IMAGE: required("WORKBENCH_DEERFLOW_NODE_IMAGE_REF") }
+          : {}),
         DEERFLOW_SOURCE_COMMIT: required("WORKBENCH_DEERFLOW_COMMIT"),
         WORKBENCH_SOURCE_COMMIT: expectedCommit,
       };

@@ -49,6 +49,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/production'
         env:
           NODE_IMAGE: ${{ vars.WORKBENCH_NODE_IMAGE }}
+          DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
           NGINX_IMAGE: ${{ vars.WORKBENCH_NGINX_IMAGE }}
           POSTGRES_IMAGE: ${{ vars.WORKBENCH_POSTGRES_IMAGE }}
           CI_POSTGRES_IMAGE: ${{ vars.WORKBENCH_CI_POSTGRES_IMAGE }}
@@ -66,6 +67,7 @@ jobs:
             printf '%s' "$value" | grep -Eq '@sha256:[a-f0-9]{64}$' || { echo "$name must be an immutable @sha256 reference" >&2; return 1; }
           }
           require_digest WORKBENCH_NODE_IMAGE "$NODE_IMAGE"
+          require_digest WORKBENCH_DEERFLOW_NODE_IMAGE_REF "$DEERFLOW_NODE_IMAGE"
           require_digest WORKBENCH_NGINX_IMAGE "$NGINX_IMAGE"
           require_digest WORKBENCH_POSTGRES_IMAGE "$POSTGRES_IMAGE"
           require_digest WORKBENCH_CI_POSTGRES_IMAGE "$CI_POSTGRES_IMAGE"
@@ -467,6 +469,7 @@ jobs:
             target: runtime
             build_args: |
               DEERFLOW_BASE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+              DEERFLOW_NODE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
               DEERFLOW_SOURCE_COMMIT=${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
               WORKBENCH_SOURCE_COMMIT=${{ github.sha }}
     steps:
@@ -508,10 +511,13 @@ jobs:
         if: matrix.name == 'deerflow' && github.ref == 'refs/heads/production'
         env:
           DEERFLOW_BASE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+          DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
           DEERFLOW_SOURCE_COMMIT: ${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
         run: |
           test -n "$DEERFLOW_BASE_IMAGE"
           printf '%s' "$DEERFLOW_BASE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+          test -n "$DEERFLOW_NODE_IMAGE"
+          printf '%s' "$DEERFLOW_NODE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
           printf '%s' "$DEERFLOW_SOURCE_COMMIT" | grep -Eq '^[a-f0-9]{40}$'
 
       - name: Prepare image evidence directory

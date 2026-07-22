@@ -413,6 +413,77 @@ test("binds the deployed DeerFlow reference to the signed record", () => {
   );
 });
 
+test("binds the DeerFlow Validator Node image to the deployment environment", () => {
+  const manifest = candidateManifest();
+  const deerflow = manifest.images.find((entry) => entry.id === "deerflow");
+  const deploymentEnvironment = new Map([
+    ["WORKBENCH_DEERFLOW_IMAGE_REF", deerflow.imageRef],
+    ["WORKBENCH_DEERFLOW_BASE_IMAGE_REF", `registry.example.test/deerflow@sha256:${"f".repeat(64)}`],
+    ["WORKBENCH_DEERFLOW_NODE_IMAGE_REF", `node:22-bookworm-slim@sha256:${"9".repeat(64)}`],
+    ["WORKBENCH_DEERFLOW_COMMIT", "d".repeat(40)],
+  ]);
+  assert.equal(verifyProductionImageManifest({
+    manifest,
+    expectedCommit: commit,
+    deploymentEnvironment,
+    onlyImageId: "deerflow",
+  }), true);
+
+  deploymentEnvironment.delete("WORKBENCH_DEERFLOW_NODE_IMAGE_REF");
+  assert.throws(() => verifyProductionImageManifest({
+    manifest,
+    expectedCommit: commit,
+    deploymentEnvironment,
+    onlyImageId: "deerflow",
+  }), /requires WORKBENCH_DEERFLOW_NODE_IMAGE_REF/u);
+  deploymentEnvironment.set(
+    "WORKBENCH_DEERFLOW_NODE_IMAGE_REF",
+    `node:22-bookworm-slim@sha256:${"9".repeat(64)}`,
+  );
+
+  deploymentEnvironment.set(
+    "WORKBENCH_DEERFLOW_NODE_IMAGE_REF",
+    `node:22-bookworm-slim@sha256:${"8".repeat(64)}`,
+  );
+  assert.throws(() => verifyProductionImageManifest({
+    manifest,
+    expectedCommit: commit,
+    deploymentEnvironment,
+    onlyImageId: "deerflow",
+  }), /does not match the deployment environment/u);
+});
+
+test("keeps the exact previous DeerFlow candidate available for rollback", () => {
+  const legacyCommit = "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1";
+  const manifest = candidateManifest(["deerflow"]);
+  const deerflow = manifest.images[0];
+  manifest.candidate.sourceCommit = legacyCommit;
+  deerflow.sourceCommit = legacyCommit;
+  deerflow.buildConfiguration = createProductionBuildConfiguration({
+    id: "deerflow",
+    sourceCommit: legacyCommit,
+    dockerfile: "integrations/deerflow/Dockerfile",
+    target: "runtime",
+    buildArgsSource: [
+      `DEERFLOW_BASE_IMAGE=registry.example.test/deerflow@sha256:${"f".repeat(64)}`,
+      `DEERFLOW_SOURCE_COMMIT=${"d".repeat(40)}`,
+      `WORKBENCH_SOURCE_COMMIT=${legacyCommit}`,
+    ].join("\n"),
+  });
+  const deploymentEnvironment = new Map([
+    ["WORKBENCH_DEERFLOW_IMAGE_REF", deerflow.imageRef],
+    ["WORKBENCH_DEERFLOW_BASE_IMAGE_REF", `registry.example.test/deerflow@sha256:${"f".repeat(64)}`],
+    ["WORKBENCH_DEERFLOW_COMMIT", "d".repeat(40)],
+  ]);
+
+  assert.equal(verifyProductionImageManifest({
+    manifest,
+    expectedCommit: legacyCommit,
+    deploymentEnvironment,
+    onlyImageId: "deerflow",
+  }), true);
+});
+
 test("binds inspected image labels to source and canonical build configuration", () => {
   const manifest = candidateManifest();
   const labelsFor = (record) => ({
@@ -520,7 +591,7 @@ function buildConfiguration(id) {
   };
   const [dockerfile, target] = definitions[id];
   const buildArgsSource = id === "deerflow"
-    ? `DEERFLOW_BASE_IMAGE=registry.example.test/deerflow@sha256:${"f".repeat(64)}\nDEERFLOW_SOURCE_COMMIT=${"d".repeat(40)}\nWORKBENCH_SOURCE_COMMIT=${commit}`
+    ? `DEERFLOW_BASE_IMAGE=registry.example.test/deerflow@sha256:${"f".repeat(64)}\nDEERFLOW_NODE_IMAGE=node:22-bookworm-slim@sha256:${"9".repeat(64)}\nDEERFLOW_SOURCE_COMMIT=${"d".repeat(40)}\nWORKBENCH_SOURCE_COMMIT=${commit}`
     : id === "web"
       ? [
         "NEXT_PUBLIC_KNOWLEDGE_APP_URL=https://workbench.example.test/knowledge",

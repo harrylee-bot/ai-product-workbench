@@ -73,6 +73,7 @@ assertDeepEqual(
 );
 for (const variable of [
   "WORKBENCH_DEERFLOW_BASE_IMAGE_REF=",
+  "WORKBENCH_DEERFLOW_NODE_IMAGE_REF=",
   "WORKBENCH_DEERFLOW_IMAGE_REF=",
   "WORKBENCH_DEERFLOW_IMAGE_DIGEST=",
   "WORKBENCH_SOURCE_COMMIT=",
@@ -113,9 +114,14 @@ assert(baseConfigExample.sandbox?.allow_host_bash === false, "the DeerFlow base-
 const deerflowDockerfile = readText("integrations/deerflow/Dockerfile");
 for (const requiredLine of [
   "ARG DEERFLOW_BASE_IMAGE",
+  "ARG DEERFLOW_NODE_IMAGE",
+  "FROM ${DEERFLOW_NODE_IMAGE} AS validator-runtime",
   "FROM ${DEERFLOW_BASE_IMAGE} AS runtime",
   "io.workbench.deerflow.base-image",
+  "io.workbench.deerflow.validator-node-image",
   "io.workbench.deerflow.source-commit",
+  "COPY --from=validator-runtime /usr/local/bin/node /usr/local/bin/node",
+  "COPY --from=validator-runtime /usr/local/LICENSE /usr/share/licenses/node/LICENSE",
   "COPY integrations/deerflow/skills/workbench/ /app/skills/public/workbench/",
   "COPY integrations/deerflow/runtime-tools/deerflow_workbench_tools/ /app/backend/deerflow_workbench_tools/",
   `COPY integrations/deerflow/source-patches/${patchCommit}/ /opt/workbench/deerflow/source-patch/`,
@@ -123,6 +129,7 @@ for (const requiredLine of [
   "test_workbench_tool_scope_middleware.py",
   "--gateway-root /app/backend",
   "test_workbench_request_context.py",
+  "validate_runtime_result({})",
   "apply.py",
   "--check",
   `ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=${patchManifestSha256}`,
@@ -304,6 +311,9 @@ for (const requiredPreflightText of [
   "--expected-commit \"$expected_commit\"",
   "io.workbench.deerflow.tool-scope-patch-sha256",
   "assert-deerflow-runtime-config.mjs",
+  "WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED",
+  "--network none",
+  "--user 65532:65532",
 ]) {
   assert(preflight.includes(requiredPreflightText), `DeerFlow preflight is missing ${requiredPreflightText}`);
 }
