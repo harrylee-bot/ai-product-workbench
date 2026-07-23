@@ -1685,7 +1685,7 @@ textarea:focus-visible {
     rgba(65, 169, 190, 0.92) 100%
   );
   background-size: 100% 100%;
-  animation: workbench-agent-border-orbit 3.8s linear infinite;
+  animation: workbench-agent-border-orbit 3.4s linear infinite;
   padding: 1.5px;
 }
 

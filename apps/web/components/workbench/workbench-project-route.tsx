@@ -4113,6 +4113,7 @@ function ProjectScreen({
       failure: runFailure,
       generationProgress,
       generationStage,
+      isPrdRun: requestedArtifactKinds.includes("prd"),
       messages: runMessages,
       onCancel: () => {
         if (capabilities.canRun) void onCancelRun().catch(() => undefined);

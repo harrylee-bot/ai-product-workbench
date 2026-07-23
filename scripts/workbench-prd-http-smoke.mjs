@@ -25,13 +25,11 @@ const smokeThemeRequirements = [
   { label: "失败重试", terms: ["失败重试", "发送失败", "重试"] },
   { label: "权限反馈", terms: ["权限反馈", "无权限", "权限"] },
 ];
-const unrelatedSmokeBusinessTerms = [
-  "工作台任务页面",
-  "任务处理入口",
-  "提交任务",
-  "创建任务",
-  "任务编号",
-];
+const unrelatedSmokeBusinessPattern = /产品工作台|当前项目|提交区|运行状态区|任务(?:页面|处理|执行入口|状态|权限|记录|编号|能力|结果|闭环)|(?:发起|提交|创建|查询)任务/u;
+const smokeSectionThemePattern = /订单|通知/u;
+const smokeDiagramThemePattern = /订单|通知|发送/u;
+const smokeDegradationTopicPattern = /通知|发送/u;
+const smokeDegradationRecoveryPattern = /重试|再次发送|重新发送|稍后再试|恢复/u;
 const forbiddenPlaceholders = [
   "待确认",
   "以实际为准",
@@ -515,6 +513,9 @@ export function assertPrdV2Structure(document) {
   if (!document || document.protocol !== "workbench.prd.v2") {
     throw smokeError("PRD_V2_PROTOCOL_REQUIRED", "Document protocol is not workbench.prd.v2");
   }
+  if (document.revision?.status !== "draft") {
+    throw smokeError("PRD_REVISION_INVALID", "Production smoke PRD revision must remain a draft");
+  }
   const additionalSections = document.sections?.businessRequirements?.additionalSections;
   const expectedTableOfContents = prdTableOfContentsEntriesFor(
     Array.isArray(additionalSections) ? additionalSections.map((section) => section?.title) : [],
@@ -575,6 +576,7 @@ export function assertPrdV2Structure(document) {
     degradation: degradation.applicable ? "concrete" : "not-applicable",
     diagramCount: diagrams.length,
     protocol: document.protocol,
+    revisionStatus: document.revision.status,
     safetyRowCount: safetyRows.length,
     schemaVersion: 2,
     tableOfContentsCount: document.tableOfContents.entries.length,
@@ -598,10 +600,13 @@ export function assertPrdSmokeBusinessSemantics(document) {
     throw smokeError("PRD_SMOKE_TOPIC_INVALID", "PRD channels do not keep only the requested in-app channel enabled");
   }
 
+  const introduction = document.sections?.introduction;
+  const businessRequirements = document.sections?.businessRequirements;
+  const degradation = document.sections?.degradation;
   const visibleText = visibleTextSegments({
-    businessRequirements: document.sections?.businessRequirements,
-    degradation: document.sections?.degradation,
-    introduction: document.sections?.introduction,
+    businessRequirements,
+    degradation,
+    introduction,
   }).join("\n");
   for (const requirement of smokeThemeRequirements) {
     if (!requirement.terms.some((term) => visibleText.includes(term))) {
@@ -612,11 +617,48 @@ export function assertPrdSmokeBusinessSemantics(document) {
     }
   }
 
-  const unrelatedTerm = unrelatedSmokeBusinessTerms.find((term) => visibleText.includes(term));
+  const unrelatedTerm = visibleText.match(unrelatedSmokeBusinessPattern)?.[0];
   if (unrelatedTerm) {
     throw smokeError(
       "PRD_SMOKE_UNRELATED_CONTENT",
       `PRD contains unrelated task-domain content: ${unrelatedTerm}`,
+    );
+  }
+
+  for (const [label, section] of [
+    ["background", introduction?.background],
+    ["core rules", businessRequirements?.coreRules],
+    ["acceptance criteria", businessRequirements?.acceptanceCriteria],
+  ]) {
+    const sectionText = visibleTextSegments(section).join("\n");
+    if (!smokeSectionThemePattern.test(sectionText)) {
+      throw smokeError(
+        "PRD_SMOKE_TOPIC_INVALID",
+        `PRD ${label} is not grounded in the requested order-notification topic`,
+      );
+    }
+  }
+
+  const diagrams = businessRequirements?.flowAndPages?.diagrams;
+  if (
+    !Array.isArray(diagrams)
+    || diagrams.some((diagram) => !smokeDiagramThemePattern.test(visibleTextSegments(diagram).join("\n")))
+  ) {
+    throw smokeError(
+      "PRD_SMOKE_TOPIC_INVALID",
+      "Each PRD diagram must describe the requested order-notification flow",
+    );
+  }
+
+  const degradationText = visibleTextSegments(degradation).join("\n");
+  if (
+    degradation?.applicable !== true
+    || !smokeDegradationTopicPattern.test(degradationText)
+    || !smokeDegradationRecoveryPattern.test(degradationText)
+  ) {
+    throw smokeError(
+      "PRD_SMOKE_TOPIC_INVALID",
+      "PRD degradation must contain a concrete order-notification recovery plan",
     );
   }
   return {
@@ -660,6 +702,7 @@ function visibleTextSegments(value) {
   const visibleKeys = new Set([
     "actor",
     "description",
+    "group",
     "label",
     "notes",
     "outcome",

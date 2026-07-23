@@ -166,6 +166,16 @@ test("rejects forbidden requirement-document placeholder wording", () => {
   );
 });
 
+test("requires the production smoke PRD revision to remain a draft", () => {
+  const document = orderNotificationPrdFixture();
+  document.revision.status = "approved";
+
+  assert.throws(
+    () => assertPrdV2Structure(document),
+    (error) => error?.code === "PRD_REVISION_INVALID",
+  );
+});
+
 test("requires the production smoke PRD to match the order-notification topic", () => {
   const document = orderNotificationPrdFixture();
   assert.deepEqual(assertPrdSmokeBusinessSemantics(document), {
@@ -213,6 +223,91 @@ test("rejects unrelated task-domain content in the production smoke PRD", () => 
   assert.throws(
     () => assertPrdSmokeBusinessSemantics(unrelated),
     (error) => error?.code === "PRD_SMOKE_UNRELATED_CONTENT",
+  );
+
+  for (const phrase of ["任务页面", "任务执行入口", "任务状态", "任务权限", "任务记录"]) {
+    const nearSynonym = orderNotificationPrdFixture();
+    nearSynonym.sections.introduction.background.blocks[0].content[0].text += ` ${phrase}`;
+    assert.throws(
+      () => assertPrdSmokeBusinessSemantics(nearSynonym),
+      (error) => error?.code === "PRD_SMOKE_UNRELATED_CONTENT",
+      phrase,
+    );
+  }
+
+  const diagramGroupDrift = orderNotificationPrdFixture();
+  diagramGroupDrift.sections.businessRequirements.flowAndPages.diagrams[0].nodes[0].group = "任务能力";
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(diagramGroupDrift),
+    (error) => error?.code === "PRD_SMOKE_UNRELATED_CONTENT",
+  );
+});
+
+test("allows task wording that remains grounded in notification delivery", () => {
+  const document = orderNotificationPrdFixture();
+  document.sections.degradation.content[0].text += " 通知发送任务由队列调度，失败后生成重试任务。";
+
+  assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
+});
+
+test("requires the order-notification topic in each critical PRD section", () => {
+  for (const mutate of [
+    (document) => {
+      document.sections.introduction.background = replaceStringFragments(
+        replaceStringFragments(document.sections.introduction.background, "订单", "业务"),
+        "通知",
+        "消息",
+      );
+    },
+    (document) => {
+      document.sections.businessRequirements.coreRules = replaceStringFragments(
+        replaceStringFragments(document.sections.businessRequirements.coreRules, "订单", "业务"),
+        "通知",
+        "消息",
+      );
+    },
+    (document) => {
+      document.sections.businessRequirements.acceptanceCriteria = replaceStringFragments(
+        replaceStringFragments(document.sections.businessRequirements.acceptanceCriteria, "订单", "业务"),
+        "通知",
+        "消息",
+      );
+    },
+  ]) {
+    const document = orderNotificationPrdFixture();
+    mutate(document);
+    assert.throws(
+      () => assertPrdSmokeBusinessSemantics(document),
+      (error) => error?.code === "PRD_SMOKE_TOPIC_INVALID",
+    );
+  }
+});
+
+test("requires both diagrams and degradation to describe order-notification recovery", () => {
+  const diagramDrift = orderNotificationPrdFixture();
+  diagramDrift.sections.businessRequirements.flowAndPages.diagrams[1] = replaceStringFragments(
+    replaceStringFragments(
+      replaceStringFragments(diagramDrift.sections.businessRequirements.flowAndPages.diagrams[1], "订单", "业务"),
+      "通知",
+      "消息",
+    ),
+    "发送",
+    "执行",
+  );
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(diagramDrift),
+    (error) => error?.code === "PRD_SMOKE_TOPIC_INVALID",
+  );
+
+  const degradationDrift = orderNotificationPrdFixture();
+  degradationDrift.sections.degradation = replaceStringFragments(
+    replaceStringFragments(degradationDrift.sections.degradation, "重试", "人工处理"),
+    "恢复",
+    "人工介入",
+  );
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(degradationDrift),
+    (error) => error?.code === "PRD_SMOKE_TOPIC_INVALID",
   );
 });
 
@@ -437,7 +532,10 @@ function orderNotificationPrdFixture() {
   let document = structuredClone(prdDocumentV2Example);
   for (const [source, replacement] of [
     ["产品工作台", "电商订单中心"],
+    ["当前项目", "电商订单中心"],
     ["目标业务用户", "已登录消费者"],
+    ["提交区", "通知设置区"],
+    ["运行状态区", "发送状态区"],
     ["任务处理", "通知发送"],
     ["任务页面", "通知设置页"],
     ["任务状态", "发送状态"],

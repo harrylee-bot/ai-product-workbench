@@ -28,14 +28,30 @@ import {
 } from "./workbench-motion";
 
 const PRD_GENERATION_STAGE_COPY: Partial<Record<RunGenerationStage, string>> = {
+  thinking: "理解需求",
   "collecting-prd-context": "整理资料",
   "structuring-prd": "规划结构",
   "drafting-prd": "编写说明书",
   "validating-prd": "检查说明书",
 };
 
+const PRD_PREPARING_COPY = "准备中";
+
 function prdGenerationStageCopy(stage: RunGenerationStage | null): string | null {
   return stage ? PRD_GENERATION_STAGE_COPY[stage] ?? null : null;
+}
+
+function activePrdStatusCopy({
+  isActiveGeneration,
+  isPrdRun,
+  stage,
+}: {
+  isActiveGeneration: boolean;
+  isPrdRun: boolean;
+  stage: RunGenerationStage | null;
+}): string | null {
+  if (!isActiveGeneration || !isPrdRun) return null;
+  return prdGenerationStageCopy(stage) ?? PRD_PREPARING_COPY;
 }
 
 export function LeftInspector({
@@ -44,6 +60,7 @@ export function LeftInspector({
   canCancel,
   generationProgress,
   generationStage,
+  isPrdRun,
   isOverview,
   onCancel,
   onSelectTask,
@@ -59,6 +76,7 @@ export function LeftInspector({
   canCancel: boolean;
   generationProgress: number;
   generationStage: RunGenerationStage | null;
+  isPrdRun: boolean;
   isOverview: boolean;
   onCancel: () => void;
   onSelectTask: (task: string) => void;
@@ -79,7 +97,11 @@ export function LeftInspector({
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
   const currentTaskCopy = (
-    (isWorking ? prdGenerationStageCopy(generationStage) : null)
+    activePrdStatusCopy({
+      isActiveGeneration: runStatus === "queued" || runStatus === "running",
+      isPrdRun,
+      stage: generationStage,
+    })
     ?? runPhaseLabel
     ?? currentActivity?.label
     ?? prompt
@@ -229,6 +251,7 @@ export function ProjectTranscriptPanel({
   failure,
   generationProgress,
   generationStage,
+  isPrdRun,
   isOverview,
   messages,
   onRetry,
@@ -247,6 +270,7 @@ export function ProjectTranscriptPanel({
   failure: Run["failure"];
   generationProgress: number;
   generationStage: RunGenerationStage | null;
+  isPrdRun: boolean;
   isOverview: boolean;
   messages: WorkbenchRunMessageItem[];
   onRetry: () => void;
@@ -274,7 +298,11 @@ export function ProjectTranscriptPanel({
     || runStatus === "running"
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
-  const currentPrdStageCopy = isWorking ? prdGenerationStageCopy(generationStage) : null;
+  const currentPrdStageCopy = activePrdStatusCopy({
+    isActiveGeneration: runStatus === "queued" || runStatus === "running",
+    isPrdRun,
+    stage: generationStage,
+  });
   const statusCopy = submissionError
     ? "提交失败"
     : runStatus === "failed"
@@ -305,7 +333,7 @@ export function ProjectTranscriptPanel({
     && (Boolean(selectedTask) || Boolean(runBodyCopy))
     && (Boolean(selectedTask) || isOverview || !(phase === "complete" && isGenerated));
   const hasExpandedBody = showPromptChip || Boolean(bodyCopy);
-  const prdBodyless = projectMode === "document" && !hasExpandedBody;
+  const prdBodyless = isPrdRun && projectMode === "document" && !hasExpandedBody;
   const expandedHeight = hasExpandedBody ? "auto" : 126;
 
   useEffect(() => {
@@ -471,6 +499,7 @@ export function MobileRunStatus({
   canRetry,
   failure,
   generationStage,
+  isPrdRun,
   onCancel,
   onRetry,
   runPhaseLabel,
@@ -481,6 +510,7 @@ export function MobileRunStatus({
   canRetry: boolean;
   failure: Run["failure"];
   generationStage: RunGenerationStage | null;
+  isPrdRun: boolean;
   onCancel: () => void;
   onRetry: () => void;
   runPhaseLabel: string | null;
@@ -491,7 +521,11 @@ export function MobileRunStatus({
     || runStatus === "running"
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
-  const currentPrdStageCopy = working ? prdGenerationStageCopy(generationStage) : null;
+  const currentPrdStageCopy = activePrdStatusCopy({
+    isActiveGeneration: runStatus === "queued" || runStatus === "running",
+    isPrdRun,
+    stage: generationStage,
+  });
   const label = runStatus === "failed"
     ? failure?.message ?? "运行失败"
     : runStatus === "cancelled"

@@ -244,6 +244,7 @@ export type ProjectScreenViewContract = {
     failure: Run["failure"];
     generationProgress: number;
     generationStage: RunGenerationStage | null;
+    isPrdRun: boolean;
     messages: WorkbenchRunMessageItem[];
     onCancel: () => void;
     onRetry: () => void;
@@ -313,6 +314,7 @@ export function ProjectScreenView({
         canCancel={runPanels.canCancel}
         generationProgress={runPanels.generationProgress}
         generationStage={runPanels.generationStage}
+        isPrdRun={runPanels.isPrdRun}
         isOverview={root.isGeneratedOverview}
         onCancel={runPanels.onCancel}
         onSelectTask={runPanels.onSelectTask}
@@ -331,6 +333,7 @@ export function ProjectScreenView({
         failure={runPanels.failure}
         generationProgress={runPanels.generationProgress}
         generationStage={runPanels.generationStage}
+        isPrdRun={runPanels.isPrdRun}
         isOverview={root.isGeneratedOverview}
         messages={runPanels.messages}
         phase={root.phase}
@@ -349,6 +352,7 @@ export function ProjectScreenView({
         canRetry={runPanels.canRetry}
         failure={runPanels.failure}
         generationStage={runPanels.generationStage}
+        isPrdRun={runPanels.isPrdRun}
         onCancel={runPanels.onCancel}
         onRetry={runPanels.onRetry}
         runPhaseLabel={runPanels.runPhaseLabel}

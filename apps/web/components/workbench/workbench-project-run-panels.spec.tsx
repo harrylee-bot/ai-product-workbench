@@ -20,6 +20,7 @@ const baseProps: TranscriptPanelProps = {
   failure: null,
   generationProgress: 30,
   generationStage: null,
+  isPrdRun: true,
   isOverview: false,
   messages: [],
   onRetry: vi.fn(),
@@ -82,6 +83,37 @@ describe("ProjectTranscriptPanel", () => {
     expect(agentCard.dataset.prdBodyless).toBe("true");
   });
 
+  it("uses a neutral PRD preparation label before the first real stage event", () => {
+    const { container } = renderRunSurfaces({
+      generationStage: null,
+      projectMode: "document",
+      runPhaseLabel: "正在生成需求文档",
+    });
+
+    const taskStack = container.querySelector<HTMLElement>('[data-panel-motion="task-stack"]');
+    const agentCard = getAgentCard(container);
+    const mobileStatus = container.querySelector<HTMLElement>('[aria-live="polite"]');
+    expect(taskStack).not.toBeNull();
+    expect(mobileStatus).not.toBeNull();
+    expect(within(taskStack!).getAllByText("准备中")).toHaveLength(2);
+    expect(within(agentCard).getByText("准备中")).not.toBeNull();
+    expect(within(mobileStatus!).getByText("准备中")).not.toBeNull();
+    expect(screen.queryByText("正在生成需求文档")).toBeNull();
+  });
+
+  it("shows the real understanding stage instead of the pre-event fallback", () => {
+    const { container } = renderRunSurfaces({
+      generationStage: "thinking",
+      projectMode: "document",
+      runPhaseLabel: "正在生成需求文档",
+    });
+
+    expect(screen.getAllByText("理解需求")).toHaveLength(4);
+    expect(screen.queryByText("准备中")).toBeNull();
+    expect(screen.queryByText("正在生成需求文档")).toBeNull();
+    expect(getAgentCard(container).dataset.prdBodyless).toBe("true");
+  });
+
   it("leaves prototype-only stage copy and ellipsis behavior unchanged", () => {
     const { container } = renderRunSurfaces({
       generationStage: "generating-ui",
@@ -99,6 +131,19 @@ describe("ProjectTranscriptPanel", () => {
     expect(card.textContent).toContain("正在生成真实结算界面...");
     expect(card.dataset.prdBodyless).toBeUndefined();
     expect(container.querySelectorAll(".workbench-stage-ellipsis")).toHaveLength(2);
+  });
+
+  it("preserves a prototype status while the selected canvas is still a document", () => {
+    const { container } = renderRunSurfaces({
+      generationStage: null,
+      isPrdRun: false,
+      projectMode: "document",
+      runPhaseLabel: "正在准备原型生成",
+    });
+
+    expect(screen.getAllByText("正在准备原型生成")).toHaveLength(4);
+    expect(screen.queryByText("准备中")).toBeNull();
+    expect(getAgentCard(container).dataset.prdBodyless).toBeUndefined();
   });
 
   it("reveals the prompt chip only after substantive body content arrives", () => {
@@ -145,8 +190,11 @@ function renderPanel(overrides: Partial<TranscriptPanelProps> = {}) {
 function renderRunSurfaces({
   generationStage,
   projectMode,
+  isPrdRun = projectMode === "document",
   runPhaseLabel,
-}: Pick<TranscriptPanelProps, "generationStage" | "projectMode" | "runPhaseLabel">) {
+}: Pick<TranscriptPanelProps, "generationStage" | "projectMode" | "runPhaseLabel"> & {
+  isPrdRun?: boolean;
+}) {
   return render(
     <>
       <LeftInspector
@@ -155,6 +203,7 @@ function renderRunSurfaces({
         canCancel={false}
         generationProgress={0}
         generationStage={generationStage}
+        isPrdRun={isPrdRun}
         isOverview={false}
         onCancel={vi.fn()}
         onSelectTask={vi.fn()}
@@ -166,13 +215,14 @@ function renderRunSurfaces({
         selectedTask={null}
         zoomLabel="100%"
       />
-      {panelElement({ generationStage, projectMode, runPhaseLabel })}
+      {panelElement({ generationStage, isPrdRun, projectMode, runPhaseLabel })}
       <MobileRunStatus
         busy={false}
         canCancel={false}
         canRetry={false}
         failure={null}
         generationStage={generationStage}
+        isPrdRun={isPrdRun}
         onCancel={vi.fn()}
         onRetry={vi.fn()}
         runPhaseLabel={runPhaseLabel}
