@@ -81,6 +81,12 @@ const GENERATION_STAGE_PROTOCOL = "workbench.runtime.generation-stage.v1";
 const ARTIFACT_DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1";
 const PROTOTYPE_PATCH_PUBLICATION_PROTOCOL = "workbench.runtime.prototype-patch-publication.v1";
 const VALIDATED_RUNTIME_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1";
+const PRD_GENERATION_STAGE_SEQUENCE = [
+  "collecting-prd-context",
+  "structuring-prd",
+  "drafting-prd",
+  "validating-prd",
+] as const;
 const RUN_PAGE_SIZE = 100;
 const MAX_RUN_RECOVERY_PAGES = 100;
 const KNOWLEDGE_GRANT_TOKEN = /wbkg1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
@@ -187,6 +193,10 @@ const generationStageArtifactSchema = z.object({
   runtimeAttemptId: z.string().min(1).max(240),
   toolCallId: z.string().min(1).max(512),
   stage: z.enum([
+    "collecting-prd-context",
+    "structuring-prd",
+    "drafting-prd",
+    "validating-prd",
     "design-system",
     "mapping-components",
     "creating-flows",
@@ -406,6 +416,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     let inputRequired: RuntimeInputRequired | null = null;
     let activeNode: string | null = null;
     let resultToolCallId: string | null = null;
+    const prototypeRequested = execution.request.requestedArtifactKinds.includes("prototype");
     let partEffects: RuntimeProgressEvent[] | null = null;
     const emitEvent = async (event: RuntimeProgressEvent) => {
       if (!partEffects) throw new Error("RUNTIME_EFFECT_WITHOUT_EXTERNAL_IDENTITY");
@@ -415,6 +426,9 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       string,
       Extract<RuntimeProgressEvent, { type: "generation.stage" }>["stage"]
     >();
+    const emittedStageSequence: Array<
+      Extract<RuntimeProgressEvent, { type: "generation.stage" }>["stage"]
+    > = [];
     const emittedDraftSources = new Map<string, string>();
     const emittedPatchSources = new Map<string, string>();
     const patchRevisions = baselineState.revisions;
@@ -450,6 +464,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       }
       await emitEvent({ type: "generation.stage", stage, sourceEventId });
       emittedStageSources.set(sourceEventId, stage);
+      emittedStageSequence.push(stage);
     };
     const emitDraft = async (
       artifactIndex: number,
@@ -477,6 +492,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       submissions: ReturnType<typeof validatedArtifactDraftSubmissions>,
     ) => {
       for (const submission of submissions) {
+        assertPrdGenerationStagesComplete(submission.draft, emittedStageSequence);
         const sourceEventId = runtimeToolSourceId(
           execution.runtimeAttemptId,
           ARTIFACT_DRAFT_PUBLISH_TOOL,
@@ -586,6 +602,9 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         throw new Error("RUNTIME_PROTOTYPE_PATCH_FINAL_CHECKPOINT_MISSING");
       }
       assertRuntimeResultCheckpoints(submission.result, latestCheckpoints);
+      for (const draft of submission.result.artifacts) {
+        assertPrdGenerationStagesComplete(draft, emittedStageSequence);
+      }
       for (const [artifactIndex, draft] of submission.result.artifacts.entries()) {
         const sourceEventId = runtimeToolSourceId(
           execution.runtimeAttemptId,
@@ -720,7 +739,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           assistantText += delta;
           const visibleDelta = capabilityOutput.push(delta);
           if (visibleDelta) {
-            if (resultToolCallId && visibleDelta.trim()) {
+            if (prototypeRequested && resultToolCallId && visibleDelta.trim()) {
               await emitStage(
                 "summarizing",
                 runtimeToolSourceId(execution.runtimeAttemptId, "assistant-summary", resultToolCallId),
@@ -832,7 +851,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       throw new Error("RUNTIME_PROVIDER_TEXT_TERMINAL_PROJECTION_CONFLICT");
     }
     if (finalVisibleDelta) {
-      if (resultToolCallId && finalVisibleDelta.trim()) {
+      if (prototypeRequested && resultToolCallId && finalVisibleDelta.trim()) {
         await emitStage(
           "summarizing",
           runtimeToolSourceId(execution.runtimeAttemptId, "assistant-summary", resultToolCallId),
@@ -1744,9 +1763,25 @@ function assertRuntimeResultCheckpoints(
     }
   }
   for (const [artifactIndex, finalDraft] of result.artifacts.entries()) {
-    if (finalDraft.kind === "prototype" && !latestCheckpoints.has(artifactIndex)) {
+    if (
+      (finalDraft.kind === "prd" || finalDraft.kind === "prototype")
+      && !latestCheckpoints.has(artifactIndex)
+    ) {
       throw new Error("RUNTIME_ARTIFACT_DRAFT_CHECKPOINT_MISSING");
     }
+  }
+}
+
+function assertPrdGenerationStagesComplete(
+  draft: RuntimeArtifactDraft,
+  observed: ReadonlyArray<Extract<RuntimeProgressEvent, { type: "generation.stage" }>["stage"]>,
+) {
+  if (draft.kind !== "prd") return;
+  if (
+    observed.length !== PRD_GENERATION_STAGE_SEQUENCE.length
+    || observed.some((stage, index) => stage !== PRD_GENERATION_STAGE_SEQUENCE[index])
+  ) {
+    throw new Error("RUNTIME_ARTIFACT_PRD_GENERATION_STAGES_INCOMPLETE");
   }
 }
 

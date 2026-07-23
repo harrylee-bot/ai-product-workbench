@@ -45,6 +45,12 @@ const forbiddenPlaceholders = [
   "例子：",
   "提醒：",
 ];
+const prdGenerationStages = [
+  "collecting-prd-context",
+  "structuring-prd",
+  "drafting-prd",
+  "validating-prd",
+];
 
 export async function executePrdHttpSmoke({
   env = process.env,
@@ -241,6 +247,36 @@ export async function executePrdHttpSmoke({
     pass(evidence, now, "ready-prd-artifact-found", { artifactId, artifactVersionId });
 
     const runEvents = await replayRunEvents(client, runId);
+    const unexpectedGenerationStage = runEvents.find((event) => (
+      event.type === "run.generation.stage.changed"
+      && event.payload.stage !== "thinking"
+      && !prdGenerationStages.includes(event.payload.stage)
+    ));
+    if (unexpectedGenerationStage) {
+      throw smokeError(
+        "PRD_GENERATION_STAGES_INVALID",
+        "PRD Run persisted a non-PRD generation stage",
+      );
+    }
+    const generationStageEvents = runEvents.filter((event) => (
+      event.type === "run.generation.stage.changed"
+      && prdGenerationStages.includes(event.payload.stage)
+    ));
+    const observedStages = generationStageEvents.map((event) => event.payload.stage);
+    if (
+      observedStages.length !== prdGenerationStages.length
+      || observedStages.some((stage, index) => stage !== prdGenerationStages[index])
+    ) {
+      throw smokeError(
+        "PRD_GENERATION_STAGES_INVALID",
+        "PRD Run did not persist the four real template-generation stages exactly once and in order",
+      );
+    }
+    pass(evidence, now, "prd-generation-stages-verified", {
+      sequences: generationStageEvents.map((event) => event.sequence),
+      stages: observedStages,
+    });
+
     const draftEvent = runEvents.find((event) => (
       event.type === "artifact.draft.created"
       && event.payload.kind === "prd"
@@ -251,6 +287,12 @@ export async function executePrdHttpSmoke({
       throw smokeError(
         "PRD_DRAFT_EVENT_MISSING",
         "PRD Run did not publish a real artifact.draft.created event for its ready ArtifactVersion",
+      );
+    }
+    if (draftEvent.sequence <= generationStageEvents.at(-1).sequence) {
+      throw smokeError(
+        "PRD_DRAFT_EVENT_ORDER_INVALID",
+        "PRD draft was published before the validation stage completed",
       );
     }
     pass(evidence, now, "prd-draft-event-verified", {

@@ -132,6 +132,22 @@ Prototype rule:
 
 ## PRD / Requirement Document Writing
 
+For every PRD Run, report real work transitions with
+`workbench_generation_stage_update`. Call these stages exactly once and in this
+order, immediately before the named work begins:
+
+1. `collecting-prd-context` before reading the fixed references, Runtime facts,
+   authorized sources, and any pinned Knowledge needed by the request.
+2. `structuring-prd` before mapping those facts into the fixed document sections
+   and Typed IR references.
+3. `drafting-prd` before authoring the complete PRD candidate.
+4. `validating-prd` immediately before the first complete draft validation and
+   `workbench_artifact_draft_publish` call.
+
+Never call these stages on a timer, repeat them to imply progress, or use a
+Prototype stage for a PRD. The visible status must describe the real current
+work; draft publication and final submission remain the only completion facts.
+
 Whenever `requestedArtifactKinds` contains `prd`, first read both
 `references/requirement-doc-template/structure.md` and
 `references/requirement-doc-template/quality-standards.md`, regardless of the
@@ -236,7 +252,7 @@ The response protocol is `workbench.knowledge-retrieval-result.v1`. It already c
 
 ## Runtime Result
 
-For Prototype generation, report real work transitions with the trusted
+For Prototype generation, report real work transitions with the same trusted
 `workbench_generation_stage_update` tool. Call each applicable stage once, immediately
 before the work begins, in this order: `design-system`, `mapping-components`,
 `creating-flows`, `generating-ui`. Never call stages on a timer and never use this tool

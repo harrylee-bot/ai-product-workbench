@@ -387,7 +387,15 @@ function prototypePatchToolMessages(
 }
 
 function generationStageToolMessages(
-  stage: "design-system" | "mapping-components" | "creating-flows" | "generating-ui",
+  stage:
+    | "collecting-prd-context"
+    | "structuring-prd"
+    | "drafting-prd"
+    | "validating-prd"
+    | "design-system"
+    | "mapping-components"
+    | "creating-flows"
+    | "generating-ui",
   {
     runId = "run_1",
     runtimeAttemptId = "attempt_1",
@@ -729,14 +737,7 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalEvent).toHaveBeenCalledTimes(1);
     expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
       expect.objectContaining({ externalEventId: "fresh-final-event" }),
-      [
-        {
-          type: "generation.stage",
-          stage: "summarizing",
-          sourceEventId: expect.stringMatching(/^deerflow:[0-9a-f]{64}$/u),
-        },
-        { type: "text.delta", delta: "done" },
-      ],
+      [{ type: "text.delta", delta: "done" }],
     );
     expect(runtimeObserver.onEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ activityId: "deerflow:must-not-run" }),
@@ -1539,6 +1540,56 @@ describe("DeerFlow runtime adapter", () => {
       stage: "design-system",
       sourceEventId: expect.stringMatching(/^deerflow:[0-9a-f]{64}$/u),
     }]);
+  });
+
+  it("accepts the complete PRD stage sequence without applying Prototype summarizing", async () => {
+    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const messages = [
+      { type: "human", content: "current turn" },
+      ...generationStageToolMessages("collecting-prd-context", {
+        toolCallId: "stage-prd-collecting",
+      }),
+      ...generationStageToolMessages("structuring-prd", { toolCallId: "stage-prd-structuring" }),
+      ...generationStageToolMessages("drafting-prd", { toolCallId: "stage-prd-drafting" }),
+      ...generationStageToolMessages("validating-prd", { toolCallId: "stage-prd-validating" }),
+      ...artifactDraftToolMessages(prdDraft, 0, "prd-stage-checkpoint"),
+      ...validatedResultToolMessages({
+        protocol: "workbench.runtime.result.v1",
+        message: "done",
+        artifacts: [prdDraft],
+      }, "prd-stage-test-result"),
+      { type: "ai", content: "需求说明书已生成。", additional_kwargs: {} },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([{
+          id: "prd-stage-event",
+          event: "values",
+          data: { messages },
+        }], { runId: "external_run_prd_stage" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prd"] },
+    }), runtimeObserver);
+
+    expect(runtimeObserver.onEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.type === "generation.stage")
+      .map((event) => event.stage)).toEqual([
+        "collecting-prd-context",
+        "structuring-prd",
+        "drafting-prd",
+        "validating-prd",
+      ]);
   });
 
   it("derives the same generation-stage source after an adapter restart and full values replay", async () => {
@@ -2367,6 +2418,79 @@ describe("DeerFlow runtime adapter", () => {
         request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
       }), observer())).rejects.toThrow(state.expected);
     }
+  });
+
+  it("fails closed when a PRD final has no independently published checkpoint", async () => {
+    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([{
+          id: "prd-missing-checkpoint",
+          event: "values",
+          data: {
+            messages: [
+              { type: "human", content: "current turn" },
+              ...validatedResultToolMessages({
+                protocol: "workbench.runtime.result.v1",
+                message: "missing checkpoint",
+                artifacts: [prdDraft],
+              }, "prd-missing-checkpoint-result"),
+            ],
+          },
+        }], { runId: "external_run_prd_missing_checkpoint" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prd"] },
+    }), observer())).rejects.toThrow("RUNTIME_ARTIFACT_DRAFT_CHECKPOINT_MISSING");
+  });
+
+  it("rejects a PRD checkpoint before all four real generation stages complete", async () => {
+    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const messages = [
+      { type: "human", content: "current turn" },
+      ...generationStageToolMessages("collecting-prd-context", {
+        toolCallId: "incomplete-prd-collecting",
+      }),
+      ...generationStageToolMessages("structuring-prd", {
+        toolCallId: "incomplete-prd-structuring",
+      }),
+      ...generationStageToolMessages("drafting-prd", {
+        toolCallId: "incomplete-prd-drafting",
+      }),
+      ...artifactDraftToolMessages(prdDraft, 0, "incomplete-prd-checkpoint"),
+      ...validatedResultToolMessages({
+        protocol: "workbench.runtime.result.v1",
+        message: "invalid",
+        artifacts: [prdDraft],
+      }, "incomplete-prd-result"),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([{
+          id: "incomplete-prd-stage-event",
+          event: "values",
+          data: { messages },
+        }], { runId: "external_run_incomplete_prd_stage" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prd"] },
+    }), observer())).rejects.toThrow("RUNTIME_ARTIFACT_PRD_GENERATION_STAGES_INCOMPLETE");
   });
 
   it("rejects undeclared and forged-scope Artifact checkpoint ToolMessages", async () => {
@@ -3570,12 +3694,35 @@ function successfulRuntimeResponse({
   assistantText?: string;
   artifacts?: unknown[];
 } = {}) {
+  const prdStages = artifacts.some((artifact) => (
+    artifact !== null
+    && typeof artifact === "object"
+    && !Array.isArray(artifact)
+    && "kind" in artifact
+    && artifact.kind === "prd"
+  ))
+    ? [
+        ...generationStageToolMessages("collecting-prd-context", {
+          toolCallId: "successful-prd-collecting",
+        }),
+        ...generationStageToolMessages("structuring-prd", {
+          toolCallId: "successful-prd-structuring",
+        }),
+        ...generationStageToolMessages("drafting-prd", {
+          toolCallId: "successful-prd-drafting",
+        }),
+        ...generationStageToolMessages("validating-prd", {
+          toolCallId: "successful-prd-validating",
+        }),
+      ]
+    : [];
   return runtimeStreamResponse([{
     id: eventId,
     event: "values",
     data: {
       messages: [
         { type: "human", content: "current turn" },
+        ...prdStages,
         ...artifacts.flatMap((artifact, artifactIndex) => (
           artifactDraftToolMessages(artifact, artifactIndex, `successful-artifact-${artifactIndex}`)
         )),

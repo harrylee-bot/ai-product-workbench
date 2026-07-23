@@ -36,9 +36,11 @@ CANVAS_TOOL_NAMES = (
     "rename_screen",
     "navigate_canvas",
 )
-PROTOTYPE_TOOL_NAMES = (
+ARTIFACT_PROGRESS_TOOL_NAMES = (
     "workbench_generation_stage_update",
     "workbench_artifact_draft_publish",
+)
+PROTOTYPE_ONLY_TOOL_NAMES = (
     "workbench_prototype_patch_publish",
 )
 KNOWLEDGE_TOOL_NAME = "workbench_knowledge_retrieve"
@@ -51,11 +53,13 @@ RUNTIME_ARTIFACT_KINDS = (
     "data",
 )
 _CANVAS_TOOL_NAME_SET = frozenset(CANVAS_TOOL_NAMES)
-_PROTOTYPE_TOOL_NAME_SET = frozenset(PROTOTYPE_TOOL_NAMES)
+_ARTIFACT_PROGRESS_TOOL_NAME_SET = frozenset(ARTIFACT_PROGRESS_TOOL_NAMES)
+_PROTOTYPE_ONLY_TOOL_NAME_SET = frozenset(PROTOTYPE_ONLY_TOOL_NAMES)
 _RUNTIME_ARTIFACT_KIND_SET = frozenset(RUNTIME_ARTIFACT_KINDS)
 _POLICY_KEY = "workbench_canvas_tools"
 _POLICY_KEYS = frozenset({"declaredTools"})
 _CANVAS_BLOCK_CODE = "WORKBENCH_CANVAS_TOOL_NOT_DECLARED"
+_ARTIFACT_PROGRESS_BLOCK_CODE = "WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED"
 _PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
 _KNOWLEDGE_BLOCK_CODE = "WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"
 
@@ -156,6 +160,9 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         self._declared_canvas = frozenset(
             normalized_canvas["declaredTools"] if normalized_canvas is not None else ()
         )
+        self._artifact_progress_enabled = normalized_kinds is not None and any(
+            kind in {"prd", "prototype"} for kind in normalized_kinds
+        )
         self._prototype_enabled = normalized_kinds is not None and "prototype" in normalized_kinds
         self._knowledge_enabled = knowledge_enabled is True
 
@@ -165,7 +172,9 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             name = _tool_name(tool)
             if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
                 continue
-            if name in _PROTOTYPE_TOOL_NAME_SET and not self._prototype_enabled:
+            if name in _ARTIFACT_PROGRESS_TOOL_NAME_SET and not self._artifact_progress_enabled:
+                continue
+            if name in _PROTOTYPE_ONLY_TOOL_NAME_SET and not self._prototype_enabled:
                 continue
             if name == KNOWLEDGE_TOOL_NAME and not self._knowledge_enabled:
                 continue
@@ -178,7 +187,9 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return None
         if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
             block_code = _CANVAS_BLOCK_CODE
-        elif name in _PROTOTYPE_TOOL_NAME_SET and not self._prototype_enabled:
+        elif name in _ARTIFACT_PROGRESS_TOOL_NAME_SET and not self._artifact_progress_enabled:
+            block_code = _ARTIFACT_PROGRESS_BLOCK_CODE
+        elif name in _PROTOTYPE_ONLY_TOOL_NAME_SET and not self._prototype_enabled:
             block_code = _PROTOTYPE_BLOCK_CODE
         elif name == KNOWLEDGE_TOOL_NAME and not self._knowledge_enabled:
             block_code = _KNOWLEDGE_BLOCK_CODE

@@ -49,6 +49,7 @@ class GenerationStageToolTests(unittest.TestCase):
                 "workbench": {
                     "runId": "run_1",
                     "runtimeAttemptId": "attempt_1",
+                    "requestedArtifactKinds": ["prototype"],
                 },
             },
             tool_call_id="call_1",
@@ -86,6 +87,55 @@ class GenerationStageToolTests(unittest.TestCase):
         runtime = SimpleNamespace(context={}, tool_call_id="call_1")
         with self.assertRaisesRegex(ValueError, "WORKBENCH_RUNTIME_SCOPE_MISSING"):
             workbench_generation_stage_update.func(runtime, "generating-ui")
+
+    def test_accepts_each_prd_stage_for_a_prd_run(self) -> None:
+        stages = (
+            "collecting-prd-context",
+            "structuring-prd",
+            "drafting-prd",
+            "validating-prd",
+        )
+        for stage in stages:
+            with self.subTest(stage=stage):
+                runtime = SimpleNamespace(
+                    context={
+                        "workbench": {
+                            "runId": "run_1",
+                            "runtimeAttemptId": "attempt_1",
+                            "requestedArtifactKinds": ["prd"],
+                        },
+                    },
+                    tool_call_id=f"call_{stage}",
+                )
+                content, artifact = workbench_generation_stage_update.func(runtime, stage)
+                self.assertEqual(json.loads(content)["stage"], stage)
+                self.assertEqual(artifact["stage"], stage)
+
+    def test_rejects_a_stage_from_the_wrong_artifact_family(self) -> None:
+        prd_runtime = SimpleNamespace(
+            context={
+                "workbench": {
+                    "runId": "run_1",
+                    "runtimeAttemptId": "attempt_1",
+                    "requestedArtifactKinds": ["prd"],
+                },
+            },
+            tool_call_id="call_1",
+        )
+        prototype_runtime = SimpleNamespace(
+            context={
+                "workbench": {
+                    "runId": "run_1",
+                    "runtimeAttemptId": "attempt_1",
+                    "requestedArtifactKinds": ["prototype"],
+                },
+            },
+            tool_call_id="call_2",
+        )
+        with self.assertRaisesRegex(ValueError, "WORKBENCH_PROTOTYPE_STAGE_NOT_REQUESTED"):
+            workbench_generation_stage_update.func(prd_runtime, "generating-ui")
+        with self.assertRaisesRegex(ValueError, "WORKBENCH_PRD_STAGE_NOT_REQUESTED"):
+            workbench_generation_stage_update.func(prototype_runtime, "drafting-prd")
 
 
 if __name__ == "__main__":

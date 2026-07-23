@@ -68,7 +68,8 @@ spec.loader.exec_module(middleware_module)
 
 CANVAS_TOOL_NAMES = middleware_module.CANVAS_TOOL_NAMES
 KNOWLEDGE_TOOL_NAME = middleware_module.KNOWLEDGE_TOOL_NAME
-PROTOTYPE_TOOL_NAMES = middleware_module.PROTOTYPE_TOOL_NAMES
+ARTIFACT_PROGRESS_TOOL_NAMES = middleware_module.ARTIFACT_PROGRESS_TOOL_NAMES
+PROTOTYPE_ONLY_TOOL_NAMES = middleware_module.PROTOTYPE_ONLY_TOOL_NAMES
 WorkbenchToolScopeMiddleware = middleware_module.WorkbenchToolScopeMiddleware
 normalize_workbench_canvas_policy = middleware_module.normalize_workbench_canvas_policy
 normalize_workbench_requested_artifact_kinds = (
@@ -109,7 +110,8 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
     def setUp(self) -> None:
         self.all_tools = [
             FakeTool("workbench_runtime_result_submit"),
-            *map(FakeTool, PROTOTYPE_TOOL_NAMES),
+            *map(FakeTool, ARTIFACT_PROGRESS_TOOL_NAMES),
+            *map(FakeTool, PROTOTYPE_ONLY_TOOL_NAMES),
             FakeTool(KNOWLEDGE_TOOL_NAME),
             *map(FakeTool, CANVAS_TOOL_NAMES),
         ]
@@ -231,18 +233,30 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
         self.assertIs(allowed, sentinel)
 
-    def test_prototype_tools_are_visible_only_when_prototype_is_requested(self) -> None:
+    def test_artifact_progress_tools_are_visible_for_prd_and_prototype(self) -> None:
         self.assertEqual(
             self.visible_names(None, ["document"]),
             ["workbench_runtime_result_submit"],
         )
         self.assertEqual(
+            self.visible_names(None, ["prd"]),
+            ["workbench_runtime_result_submit", *ARTIFACT_PROGRESS_TOOL_NAMES],
+        )
+        self.assertEqual(
             self.visible_names(None, ["prototype"]),
-            ["workbench_runtime_result_submit", *PROTOTYPE_TOOL_NAMES],
+            [
+                "workbench_runtime_result_submit",
+                *ARTIFACT_PROGRESS_TOOL_NAMES,
+                *PROTOTYPE_ONLY_TOOL_NAMES,
+            ],
         )
         self.assertEqual(
             self.visible_names(None, ["prd", "prototype"]),
-            ["workbench_runtime_result_submit", *PROTOTYPE_TOOL_NAMES],
+            [
+                "workbench_runtime_result_submit",
+                *ARTIFACT_PROGRESS_TOOL_NAMES,
+                *PROTOTYPE_ONLY_TOOL_NAMES,
+            ],
         )
 
     def test_requested_artifact_kind_policy_is_copied_and_malformed_input_is_fail_closed(self) -> None:
@@ -256,7 +270,11 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         observed = middleware.wrap_model_call(FakeModelRequest(self.all_tools), lambda scoped: scoped)
         self.assertEqual(
             [tool.name for tool in observed.tools],
-            ["workbench_runtime_result_submit", *PROTOTYPE_TOOL_NAMES],
+            [
+                "workbench_runtime_result_submit",
+                *ARTIFACT_PROGRESS_TOOL_NAMES,
+                *PROTOTYPE_ONLY_TOOL_NAMES,
+            ],
         )
 
         malformed = [
@@ -332,7 +350,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertEqual(result.tool_call_id, "call-1")
         self.assertEqual(result.content, "Error: WORKBENCH_CANVAS_TOOL_NOT_DECLARED")
 
-    def test_non_prototype_execution_is_rejected_without_calling_handler(self) -> None:
+    def test_non_artifact_execution_rejects_progress_tools_without_calling_handler(self) -> None:
         called = False
 
         def handler(_request):
@@ -340,7 +358,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             called = True
             return object()
 
-        for name in PROTOTYPE_TOOL_NAMES:
+        for name in ARTIFACT_PROGRESS_TOOL_NAMES:
             with self.subTest(name=name):
                 result = WorkbenchToolScopeMiddleware(None, ["document"]).wrap_tool_call(
                     FakeToolRequest(name),
@@ -349,12 +367,26 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 self.assertFalse(called)
                 self.assertEqual(result.status, "error")
                 self.assertEqual(result.name, name)
+                self.assertEqual(result.content, "Error: WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED")
+
+    def test_prd_execution_allows_progress_but_rejects_prototype_patch(self) -> None:
+        sentinel = object()
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        for name in ARTIFACT_PROGRESS_TOOL_NAMES:
+            with self.subTest(name=name):
+                self.assertIs(
+                    middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel),
+                    sentinel,
+                )
+        for name in PROTOTYPE_ONLY_TOOL_NAMES:
+            with self.subTest(name=name):
+                result = middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel)
                 self.assertEqual(result.content, "Error: WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED")
 
     def test_prototype_execution_is_allowed_when_prototype_is_requested(self) -> None:
         sentinel = object()
         middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
-        for name in PROTOTYPE_TOOL_NAMES:
+        for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
             with self.subTest(name=name):
                 self.assertIs(
                     middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel),
@@ -423,7 +455,7 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(observed, sentinel)
 
-    async def test_async_prototype_tool_execution_is_fail_closed(self) -> None:
+    async def test_async_artifact_progress_execution_is_fail_closed(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, ["document"])
         called = False
 
@@ -437,7 +469,73 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
             handler,
         )
         self.assertFalse(called)
-        self.assertEqual(blocked.content, "Error: WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED")
+        self.assertEqual(blocked.content, "Error: WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED")
+
+    async def test_async_prd_and_prototype_model_binding_enforces_artifact_visibility_matrix(
+        self,
+    ) -> None:
+        tools = [
+            FakeTool("workbench_runtime_result_submit"),
+            *map(FakeTool, ARTIFACT_PROGRESS_TOOL_NAMES),
+            *map(FakeTool, PROTOTYPE_ONLY_TOOL_NAMES),
+        ]
+
+        async def handler(request):
+            return request
+
+        prd_result = await WorkbenchToolScopeMiddleware(None, ["prd"]).awrap_model_call(
+            FakeModelRequest(tools),
+            handler,
+        )
+        self.assertEqual(
+            [tool.name for tool in prd_result.tools],
+            ["workbench_runtime_result_submit", *ARTIFACT_PROGRESS_TOOL_NAMES],
+        )
+
+        prototype_result = await WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+        ).awrap_model_call(FakeModelRequest(tools), handler)
+        self.assertEqual(
+            [tool.name for tool in prototype_result.tools],
+            [
+                "workbench_runtime_result_submit",
+                *ARTIFACT_PROGRESS_TOOL_NAMES,
+                *PROTOTYPE_ONLY_TOOL_NAMES,
+            ],
+        )
+
+    async def test_async_prd_and_prototype_tool_execution_enforces_artifact_scope_matrix(
+        self,
+    ) -> None:
+        called: list[str] = []
+        sentinel = object()
+
+        async def handler(request):
+            called.append(request.tool_call["name"])
+            return sentinel
+
+        prd_middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        for name in ARTIFACT_PROGRESS_TOOL_NAMES:
+            with self.subTest(scope="prd", name=name):
+                self.assertIs(
+                    await prd_middleware.awrap_tool_call(FakeToolRequest(name), handler),
+                    sentinel,
+                )
+        for name in PROTOTYPE_ONLY_TOOL_NAMES:
+            with self.subTest(scope="prd", name=name):
+                blocked = await prd_middleware.awrap_tool_call(FakeToolRequest(name), handler)
+                self.assertEqual(blocked.content, "Error: WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED")
+                self.assertNotIn(name, called)
+
+        prototype_middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
+            with self.subTest(scope="prototype", name=name):
+                self.assertIs(
+                    await prototype_middleware.awrap_tool_call(FakeToolRequest(name), handler),
+                    sentinel,
+                )
+                self.assertIn(name, called)
 
     async def test_async_knowledge_tool_execution_is_fail_closed(self) -> None:
         middleware = WorkbenchToolScopeMiddleware()

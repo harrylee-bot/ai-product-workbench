@@ -300,17 +300,6 @@ export class RunProcessor {
       externalRunId = submission.mode === "join" ? submission.externalRunId : null;
       const providerTextState = await this.attempts.providerTextState(claim);
       fullText = providerTextState.durableVisibleAssistantText;
-      if (
-        submission.mode === "submit"
-        && prepared.request.requestedArtifactKinds?.includes("prd")
-      ) {
-        await this.persistProgress(claim, {
-          type: "phase",
-          phase: "planning",
-          label: "正在整理需求结构",
-          progress: null,
-        });
-      }
       const knowledgeTool = submission.mode === "submit"
         ? await this.knowledgeToolGrants.issue({
             runId,
@@ -946,15 +935,7 @@ export class RunProcessor {
       const nextRank = generationStageRank(event.stage);
       if (nextRank < currentRank) throw new Error("RUNTIME_GENERATION_STAGE_REGRESSION");
       if (nextRank === currentRank) throw new Error("RUNTIME_GENERATION_STAGE_DUPLICATE");
-      if (
-        nextRank <= generationStageRank("generating-ui")
-        && nextRank !== currentRank + 1
-      ) {
-        throw new Error("RUNTIME_GENERATION_STAGE_TRANSITION_INVALID");
-      }
-      if (event.stage === "screen-streaming" && currentStage !== "generating-ui") {
-        throw new Error("RUNTIME_GENERATION_STAGE_TRANSITION_INVALID");
-      }
+      assertGenerationStageTransition(currentStage, event.stage);
     } else if (generationStageRank(event.stage) <= generationStageRank("generating-ui")) {
       throw new Error("RUNTIME_GENERATION_STAGE_TRANSITION_INVALID");
     }
@@ -1080,8 +1061,8 @@ export class RunProcessor {
       }
 
       validateRuntimeArtifactDraftOperation(request, event.draft);
-      if (event.draft.kind === "prototype") {
-        await assertPrototypeDraftStageReady(tx, runId, run.attempt);
+      if (event.draft.kind === "prd" || event.draft.kind === "prototype") {
+        await assertArtifactDraftStageReady(tx, runId, run.attempt, event.draft.kind);
       }
       const target = event.draft.operation.kind === "revise"
         ? await lockRuntimeArtifactDraftTarget(tx, run, event.draft)
@@ -2385,6 +2366,9 @@ function validateRuntimeArtifactDraftOperation(
   request: StartRunRequest,
   draft: RuntimeArtifactDraft,
 ) {
+  if (!request.requestedArtifactKinds.includes(draft.kind)) {
+    throw new Error("RUNTIME_ARTIFACT_KIND_NOT_REQUESTED");
+  }
   if (request.workflow !== "edit") {
     if (draft.operation.kind !== "create") {
       throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
@@ -2566,10 +2550,11 @@ function assertRuntimeArtifactDraftIdentity(
   }
 }
 
-async function assertPrototypeDraftStageReady(
+async function assertArtifactDraftStageReady(
   tx: Prisma.TransactionClient,
   runId: string,
   attempt: number,
+  kind: "prd" | "prototype",
 ) {
   const latestEvents = await tx.runEvent.findMany({
     where: { runId, type: "run.generation.stage.changed" },
@@ -2578,7 +2563,12 @@ async function assertPrototypeDraftStageReady(
     select: { payload: true },
   });
   const currentStage = currentGenerationStage(latestEvents, attempt);
-  if (!currentStage || generationStageRank(currentStage) < generationStageRank("generating-ui")) {
+  const ready = kind === "prd"
+    ? currentStage === "validating-prd"
+    : currentStage !== undefined
+      && (prototypeGenerationStageSequence as readonly RunGenerationStage[]).includes(currentStage)
+      && generationStageRank(currentStage) >= generationStageRank("generating-ui");
+  if (!ready) {
     throw new Error("RUNTIME_ARTIFACT_DRAFT_STAGE_TOO_EARLY");
   }
 }
@@ -3270,6 +3260,10 @@ function runtimeFinalizationActivitySourceId(attemptId: string, activityId: stri
 
 const generationStagePresentations = {
   "thinking": { rank: 0, phase: "understanding", label: "正在理解需求" },
+  "collecting-prd-context": { rank: 1, phase: "retrieving_knowledge", label: "正在整理项目资料" },
+  "structuring-prd": { rank: 2, phase: "planning", label: "正在规划文档结构" },
+  "drafting-prd": { rank: 3, phase: "generating", label: "正在编写需求说明书" },
+  "validating-prd": { rank: 4, phase: "validating", label: "正在检查需求说明书" },
   "design-system": { rank: 1, phase: "planning", label: "正在生成设计系统" },
   "mapping-components": { rank: 2, phase: "planning", label: "正在映射组件" },
   "creating-flows": { rank: 3, phase: "planning", label: "正在创建用户流程" },
@@ -3282,6 +3276,42 @@ const generationStagePresentations = {
   phase: Extract<RuntimeProgressEvent, { type: "phase" }>["phase"];
   label: string;
 }>;
+
+const prototypeGenerationStageSequence = [
+  "thinking",
+  "design-system",
+  "mapping-components",
+  "creating-flows",
+  "generating-ui",
+  "screen-streaming",
+  "summarizing",
+  "screen-stable",
+] as const satisfies readonly RunGenerationStage[];
+
+const prdGenerationStageSequence = [
+  "thinking",
+  "collecting-prd-context",
+  "structuring-prd",
+  "drafting-prd",
+  "validating-prd",
+] as const satisfies readonly RunGenerationStage[];
+
+function assertGenerationStageTransition(
+  current: RunGenerationStage,
+  next: RunGenerationStage,
+) {
+  const sequences: readonly (readonly RunGenerationStage[])[] = [
+    prototypeGenerationStageSequence,
+    prdGenerationStageSequence,
+  ];
+  const sequence = current === "thinking"
+    ? sequences.find((candidate) => candidate[1] === next)
+    : sequences.find((candidate) => candidate.includes(current));
+  const currentIndex = sequence?.indexOf(current) ?? -1;
+  if (!sequence || currentIndex < 0 || sequence[currentIndex + 1] !== next) {
+    throw new Error("RUNTIME_GENERATION_STAGE_TRANSITION_INVALID");
+  }
+}
 
 function generationStageRank(stage: RunGenerationStage) {
   const presentation = generationStagePresentations[stage];

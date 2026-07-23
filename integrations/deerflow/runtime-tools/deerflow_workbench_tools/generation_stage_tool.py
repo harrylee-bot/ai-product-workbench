@@ -12,11 +12,28 @@ from deerflow.tools.types import Runtime
 
 GENERATION_STAGE_PROTOCOL = "workbench.runtime.generation-stage.v1"
 GenerationStage = Literal[
+    "collecting-prd-context",
+    "structuring-prd",
+    "drafting-prd",
+    "validating-prd",
     "design-system",
     "mapping-components",
     "creating-flows",
     "generating-ui",
 ]
+
+PRD_STAGES = frozenset({
+    "collecting-prd-context",
+    "structuring-prd",
+    "drafting-prd",
+    "validating-prd",
+})
+PROTOTYPE_STAGES = frozenset({
+    "design-system",
+    "mapping-components",
+    "creating-flows",
+    "generating-ui",
+})
 
 
 @tool(
@@ -46,6 +63,16 @@ def workbench_generation_stage_update(
         scope.get("runtimeAttemptId"),
         "WORKBENCH_RUNTIME_ATTEMPT_ID_INVALID",
     )
+    requested_artifact_kinds = scope.get("requestedArtifactKinds")
+    if (
+        not isinstance(requested_artifact_kinds, list)
+        or any(not isinstance(kind, str) for kind in requested_artifact_kinds)
+    ):
+        raise ValueError("WORKBENCH_REQUESTED_ARTIFACT_KINDS_INVALID")
+    if stage in PRD_STAGES and "prd" not in requested_artifact_kinds:
+        raise ValueError("WORKBENCH_PRD_STAGE_NOT_REQUESTED")
+    if stage in PROTOTYPE_STAGES and "prototype" not in requested_artifact_kinds:
+        raise ValueError("WORKBENCH_PROTOTYPE_STAGE_NOT_REQUESTED")
     tool_call_id = _required_identifier(
         getattr(runtime, "tool_call_id", None),
         "WORKBENCH_TOOL_CALL_ID_INVALID",

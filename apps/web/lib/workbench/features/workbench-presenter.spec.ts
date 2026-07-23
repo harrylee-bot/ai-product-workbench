@@ -148,6 +148,10 @@ describe("Workbench Run presenter", () => {
     stage: RunGenerationStage;
   }>([
     { stage: "thinking", expectedPhase: "generating", expectedProgress: 0 },
+    { stage: "collecting-prd-context", expectedPhase: "generating", expectedProgress: 0 },
+    { stage: "structuring-prd", expectedPhase: "generating", expectedProgress: 0 },
+    { stage: "drafting-prd", expectedPhase: "generating", expectedProgress: 0 },
+    { stage: "validating-prd", expectedPhase: "generating", expectedProgress: 0 },
     { stage: "design-system", expectedPhase: "generating", expectedProgress: 0 },
     { stage: "mapping-components", expectedPhase: "generating", expectedProgress: 0 },
     { stage: "creating-flows", expectedPhase: "generating", expectedProgress: 0 },

@@ -35,7 +35,7 @@ describe("ProjectTranscriptPanel", () => {
     const { container } = renderPanel({ prompt: "生成支付改造需求说明书" });
     const card = getAgentCard(container);
 
-    expect(card.style.height).toBe("auto");
+    expect(card.style.height).toBe("126px");
     expect(screen.queryByText("暂无新的运行消息。")).toBeNull();
     expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
     expect(screen.getByText("正在整理需求结构")).not.toBeNull();
@@ -45,7 +45,7 @@ describe("ProjectTranscriptPanel", () => {
 
   it("reveals the prompt chip only after substantive body content arrives", () => {
     const rendered = renderPanel({ prompt: "生成支付改造需求说明书" });
-    expect(getAgentCard(rendered.container).style.height).toBe("auto");
+    expect(getAgentCard(rendered.container).style.height).toBe("126px");
     expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
 
     rendered.rerender(panelElement({

@@ -6514,7 +6514,7 @@ export interface components {
             items: components["schemas"]["RunApproval"][];
         };
         /** @enum {string} */
-        RunGenerationStage: "thinking" | "design-system" | "mapping-components" | "creating-flows" | "generating-ui" | "screen-streaming" | "summarizing" | "screen-stable";
+        RunGenerationStage: "thinking" | "collecting-prd-context" | "structuring-prd" | "drafting-prd" | "validating-prd" | "design-system" | "mapping-components" | "creating-flows" | "generating-ui" | "screen-streaming" | "summarizing" | "screen-stable";
         RunList: {
             items: {
                 id: string;

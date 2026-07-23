@@ -128,9 +128,20 @@ class ArtifactDraftToolTests(unittest.TestCase):
                 "workbench": {
                     "runId": "run_1",
                     "runtimeAttemptId": "attempt_1",
+                    "requestedArtifactKinds": ["prototype"],
                 },
             },
             tool_call_id="call_1",
+        )
+        self.prd_runtime = SimpleNamespace(
+            context={
+                "workbench": {
+                    "runId": "run_1",
+                    "runtimeAttemptId": "attempt_1",
+                    "requestedArtifactKinds": ["prd"],
+                },
+            },
+            tool_call_id="call_prd",
         )
         result = json.loads(PROTOTYPE_EXAMPLE_PATH.read_text(encoding="utf-8"))
         self.draft = result["artifacts"][0]
@@ -187,7 +198,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
 
     def test_accepts_a_complete_prd_v2_draft_and_rejects_an_incomplete_safety_table(self) -> None:
         content, artifact = workbench_artifact_draft_publish.func(
-            self.runtime,
+            self.prd_runtime,
             0,
             self.prd_draft,
         )
@@ -198,7 +209,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
         invalid = copy.deepcopy(self.prd_draft)
         invalid["content"]["sections"]["safetyBaseline"]["rows"].pop()
         invalid_content, invalid_artifact = workbench_artifact_draft_publish.func(
-            self.runtime,
+            self.prd_runtime,
             0,
             invalid,
         )
@@ -208,7 +219,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
 
     def test_rejects_the_unmaterialized_prd_reference_draft(self) -> None:
         content, artifact = workbench_artifact_draft_publish.func(
-            self.runtime,
+            self.prd_runtime,
             0,
             self.prd_reference_draft,
         )
@@ -232,7 +243,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
             "title": "真实工单需求说明书",
         }
         content, artifact = workbench_artifact_draft_publish.func(
-            self.runtime,
+            self.prd_runtime,
             0,
             partial,
         )
@@ -260,6 +271,12 @@ class ArtifactDraftToolTests(unittest.TestCase):
     def test_rejects_an_unstable_artifact_index(self) -> None:
         with self.assertRaisesRegex(ValueError, "WORKBENCH_ARTIFACT_DRAFT_INDEX_INVALID"):
             workbench_artifact_draft_publish.func(self.runtime, 20, self.draft)
+
+    def test_rejects_a_draft_kind_not_requested_by_the_run(self) -> None:
+        with self.assertRaisesRegex(ValueError, "WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED"):
+            workbench_artifact_draft_publish.func(self.prd_runtime, 0, self.draft)
+        with self.assertRaisesRegex(ValueError, "WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED"):
+            workbench_artifact_draft_publish.func(self.runtime, 0, self.prd_draft)
 
 
 if __name__ == "__main__":

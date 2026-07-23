@@ -1409,6 +1409,39 @@ describe("Runtime Artifact draft staging and publication", () => {
     });
   });
 
+  it("rejects a Prototype draft for a PRD-only Run before staging", async () => {
+    const { source, event } = createDraftFixture();
+    const { processor, tx } = draftStagingHarness();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      id: "run-1",
+      projectId: "project-1",
+      attempt: 1,
+      request: {
+        prompt: "Generate the requirement document",
+        modelId: "quality",
+        workflow: "generate",
+        generationIntent: null,
+        targetSurface: "app",
+        designStyle: { kind: "automatic" },
+        sourceIds: ["file-1"],
+        artifactTargets: [],
+        requestedArtifactKinds: ["prd"],
+      },
+      knowledgeReleaseId: "knowledge-release-1",
+    });
+
+    await expect(processor.persistArtifactDraft(
+      executionClaim,
+      event,
+      [source],
+      [],
+    )).rejects.toThrow("RUNTIME_ARTIFACT_KIND_NOT_REQUESTED");
+
+    expect(tx.artifact.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
   it("authorizes a Generate create draft from independently pinned source target assets", async () => {
     const { asset, event } = createDraftFixture();
     const { processor, tx } = draftStagingHarness();
@@ -1660,6 +1693,52 @@ describe("Runtime Artifact draft staging and publication", () => {
       executionClaim,
       event,
       [source],
+      [],
+    )).rejects.toThrow("RUNTIME_ARTIFACT_DRAFT_STAGE_TOO_EARLY");
+
+    expect(tx.artifact.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
+    expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a PRD checkpoint before validating-prd is persisted", async () => {
+    const draft = runtimePrdResultStarter.artifacts[0]!;
+    const event = {
+      type: "artifact.draft" as const,
+      artifactIndex: 0,
+      sourceEventId: "deerflow:early-prd-draft",
+      draft,
+      checkpointScreens: [],
+    };
+    const { processor, tx } = draftStagingHarness();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      id: "run-1",
+      projectId: "project-1",
+      attempt: 1,
+      request: {
+        prompt: "Generate the requirement document",
+        modelId: "quality",
+        workflow: "generate",
+        generationIntent: null,
+        targetSurface: "web",
+        designStyle: { kind: "automatic" },
+        sourceIds: [],
+        artifactTargets: [],
+        requestedArtifactKinds: ["prd"],
+      },
+      knowledgeReleaseId: null,
+    });
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "drafting-prd" } },
+      { payload: { attempt: 1, stage: "structuring-prd" } },
+      { payload: { attempt: 1, stage: "collecting-prd-context" } },
+      { payload: { attempt: 1, stage: "thinking" } },
+    ]);
+
+    await expect(processor.persistArtifactDraft(
+      executionClaim,
+      event,
+      [],
       [],
     )).rejects.toThrow("RUNTIME_ARTIFACT_DRAFT_STAGE_TOO_EARLY");
 
@@ -3504,7 +3583,7 @@ describe("Run durable snapshots", () => {
     expect(canvasToolGrants.issue).not.toHaveBeenCalled();
   });
 
-  it("advances a returned PRD through planning, validation, and publication", async () => {
+  it("advances a returned PRD through validation and publication after Runtime work", async () => {
     const runtime = {
       execute: vi.fn(async () => ({
         protocol: "workbench.runtime.result.v1" as const,
@@ -3570,12 +3649,6 @@ describe("Run durable snapshots", () => {
     expect(persistProgress.mock.calls).toEqual([
       [executionClaim, {
         type: "phase",
-        phase: "planning",
-        label: "正在整理需求结构",
-        progress: null,
-      }],
-      [executionClaim, {
-        type: "phase",
         phase: "validating",
         label: "正在校验需求说明书",
         progress: null,
@@ -3587,16 +3660,13 @@ describe("Run durable snapshots", () => {
         progress: null,
       }],
     ]);
-    expect(persistProgress.mock.invocationCallOrder[0]).toBeLessThan(
-      runtime.execute.mock.invocationCallOrder[0]!,
-    );
     expect(runtime.execute.mock.invocationCallOrder[0]).toBeLessThan(
+      persistProgress.mock.invocationCallOrder[0]!,
+    );
+    expect(persistProgress.mock.invocationCallOrder[0]).toBeLessThan(
       persistProgress.mock.invocationCallOrder[1]!,
     );
     expect(persistProgress.mock.invocationCallOrder[1]).toBeLessThan(
-      persistProgress.mock.invocationCallOrder[2]!,
-    );
-    expect(persistProgress.mock.invocationCallOrder[2]).toBeLessThan(
       publishResult.mock.invocationCallOrder[0]!,
     );
   });
@@ -3659,9 +3729,7 @@ describe("Run durable snapshots", () => {
       waitingInput: true,
     });
 
-    expect(persistProgress.mock.calls.map(([, event]) => event.label)).toEqual([
-      "正在整理需求结构",
-    ]);
+    expect(persistProgress).not.toHaveBeenCalled();
     expect(waitForInput).toHaveBeenCalledTimes(1);
     expect(publishResult).not.toHaveBeenCalled();
   });
@@ -4161,6 +4229,59 @@ describe("Run durable snapshots", () => {
         type: "run.phase.changed",
       }),
     ]);
+  });
+
+  it("persists the ordered PRD stages with one short truthful status each", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      attempt: 1,
+      phase: "understanding",
+      phaseLabel: "正在理解需求",
+    });
+    const persistedStages = ["thinking"];
+    tx.runEvent.findMany.mockImplementation(async () => (
+      [...persistedStages].reverse().map((stage) => ({ payload: { attempt: 1, stage } }))
+    ));
+    const { processor } = processorWithTransaction(tx);
+    const stages = [
+      ["collecting-prd-context", "retrieving_knowledge", "正在整理项目资料"],
+      ["structuring-prd", "planning", "正在规划文档结构"],
+      ["drafting-prd", "generating", "正在编写需求说明书"],
+      ["validating-prd", "validating", "正在检查需求说明书"],
+    ] as const;
+
+    for (const [stage, phase, label] of stages) {
+      await processor.persistProgress(executionClaim, {
+        type: "generation.stage",
+        stage,
+        sourceEventId: `deerflow:${stage}`,
+      });
+      persistedStages.push(stage);
+      expect(tx.run.update).toHaveBeenCalledWith({
+        where: { id: "run-1" },
+        data: { phase, phaseLabel: label, progress: null },
+      });
+    }
+  });
+
+  it("rejects switching between PRD and Prototype stage families", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      attempt: 1,
+      phase: "retrieving_knowledge",
+      phaseLabel: "正在整理项目资料",
+    });
+    tx.runEvent.findMany.mockResolvedValue([
+      { payload: { attempt: 1, stage: "collecting-prd-context" } },
+      { payload: { attempt: 1, stage: "thinking" } },
+    ]);
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.persistProgress(executionClaim, {
+      type: "generation.stage",
+      stage: "mapping-components",
+      sourceEventId: "deerflow:cross-family-stage",
+    })).rejects.toThrow("RUNTIME_GENERATION_STAGE_TRANSITION_INVALID");
   });
 
   it("treats a persisted generation-stage source replay as a no-op before regression checks", async () => {

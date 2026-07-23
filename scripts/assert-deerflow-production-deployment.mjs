@@ -259,16 +259,22 @@ assertDeepEqual(
   WORKBENCH_CANVAS_TOOLS.map((tool) => tool.name),
   "Workbench tool-scope middleware must use the canonical eight Canvas tools in order",
 );
-const prototypeToolTuple = /PROTOTYPE_TOOL_NAMES = \(\n([\s\S]*?)\n\)/u.exec(toolScopeMiddlewareSource);
-assert(prototypeToolTuple, "Workbench tool-scope middleware Prototype tuple is missing");
+const artifactProgressToolTuple = /ARTIFACT_PROGRESS_TOOL_NAMES = \(\n([\s\S]*?)\n\)/u.exec(toolScopeMiddlewareSource);
+assert(artifactProgressToolTuple, "Workbench tool-scope middleware Artifact progress tuple is missing");
 assertDeepEqual(
-  [...prototypeToolTuple[1].matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]),
+  [...artifactProgressToolTuple[1].matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]),
   [
     "workbench_generation_stage_update",
     "workbench_artifact_draft_publish",
-    "workbench_prototype_patch_publish",
   ],
-  "Workbench tool-scope middleware must use the three Prototype-only tools in order",
+  "Workbench tool-scope middleware must expose Stage and Draft to PRD and Prototype Runs",
+);
+const prototypeOnlyToolTuple = /PROTOTYPE_ONLY_TOOL_NAMES = \(\n([\s\S]*?)\n\)/u.exec(toolScopeMiddlewareSource);
+assert(prototypeOnlyToolTuple, "Workbench tool-scope middleware Prototype-only tuple is missing");
+assertDeepEqual(
+  [...prototypeOnlyToolTuple[1].matchAll(/"([a-z_]+)"/gu)].map((match) => match[1]),
+  ["workbench_prototype_patch_publish"],
+  "Workbench tool-scope middleware must keep Prototype patch publication Prototype-only",
 );
 assert(
   /workbench_canvas_tools:\s*canvasToolCapability\s*\?\s*\{\s*declaredTools:/u.test(runtimeAdapter)
@@ -316,11 +322,17 @@ assert(
 );
 assert(
   patchContractTestSource.includes("test_async_model_and_tool_paths_enforce_the_same_scope")
+    && patchContractTestSource.includes(
+      "test_async_prd_and_prototype_model_binding_enforces_artifact_visibility_matrix",
+    )
+    && patchContractTestSource.includes(
+      "test_async_prd_and_prototype_tool_execution_enforces_artifact_scope_matrix",
+    )
     && patchContractTestSource.includes("test_missing_or_malformed_policy_hides_all_eight_canvas_tools")
     && patchContractTestSource.includes("test_knowledge_execution_is_blocked_without_calling_the_handler")
     && patchContractTestSource.includes("test_async_knowledge_tool_execution_is_fail_closed")
     && patchContractTestSource.includes("test_async_non_canvas_tool_is_not_affected_by_malformed_policy"),
-  "DeerFlow patch contract must cover sync/async fail-closed and non-Canvas behavior",
+  "DeerFlow patch contract must cover async PRD/Prototype visibility, fail-closed, and non-Canvas behavior",
 );
 assert(
   patchRequestContextTestSource.includes("test_only_an_authenticated_internal_caller_can_deliver_workbench_channels")

@@ -284,6 +284,7 @@ export function ProjectTranscriptPanel({
   const showPromptChip = Boolean(prompt || selectedTask)
     && (Boolean(selectedTask) || Boolean(runBodyCopy))
     && (Boolean(selectedTask) || isOverview || !(phase === "complete" && isGenerated));
+  const expandedHeight = showPromptChip || bodyCopy ? "auto" : "126px";
 
   useEffect(() => {
     if (phase === "generating" || phase === "refining") {
@@ -321,7 +322,8 @@ export function ProjectTranscriptPanel({
       data-panel-motion="agent-card"
       data-phase={phase}
       initial={{ opacity: 0, x: -10 }}
-      style={{ height: transcriptOpen ? "auto" : "52px", width: transcriptOpen ? "280px" : "64px" }}
+      layout="size"
+      style={{ height: transcriptOpen ? expandedHeight : "52px", width: transcriptOpen ? "280px" : "64px" }}
       transition={{ ...panelTransition, delay: 0.10 }}
     >
       <div className="workbench-agent-card-base-bg absolute inset-0" />

@@ -47,6 +47,10 @@ export const runPhaseSchema = z.enum([
 
 export const runGenerationStageSchema = z.enum([
   "thinking",
+  "collecting-prd-context",
+  "structuring-prd",
+  "drafting-prd",
+  "validating-prd",
   "design-system",
   "mapping-components",
   "creating-flows",

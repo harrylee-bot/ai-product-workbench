@@ -14,6 +14,12 @@ const smokeUuid = "11111111-2222-4333-8444-555555555555";
 const email = "prd-smoke@example.test";
 const password = "email-password-must-not-leak";
 const existingCookie = "workbench.session_token=existing-session-must-not-leak";
+const prdGenerationStages = [
+  "collecting-prd-context",
+  "structuring-prd",
+  "drafting-prd",
+  "validating-prd",
+];
 const prdReferenceFingerprint = JSON.parse(readFileSync(new URL(
   "../integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
   import.meta.url,
@@ -112,6 +118,46 @@ test("rejects a Prototype from a PRD-only production Run", async (t) => {
   assert.equal(result.failure.code, "PROTOTYPE_ARTIFACT_FORBIDDEN");
   assert.equal(result.evidence.projectRetained, true);
   assert.equal(result.evidence.projectUrl, `${fake.origin}/projects/project-smoke`);
+  assertNoSecretOrPrdBody(result, [existingCookie]);
+});
+
+test("rejects a PRD Run that skips a real template-generation stage", async (t) => {
+  const fake = await startFakeWorkbench({
+    generationStages: prdGenerationStages.slice(0, -1),
+  });
+  t.after(fake.close);
+
+  const result = await executePrdHttpSmoke({
+    env: smokeEnvironment(fake.origin, {
+      WORKBENCH_PRD_SMOKE_SESSION_COOKIE: existingCookie,
+    }),
+    now: fixedNow,
+    randomUUID: () => smokeUuid,
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failure.code, "PRD_GENERATION_STAGES_INVALID");
+  assertNoSecretOrPrdBody(result, [existingCookie]);
+});
+
+test("rejects a PRD Run that reports a Prototype generation stage", async (t) => {
+  const fake = await startFakeWorkbench({
+    generationStages: [...prdGenerationStages, "generating-ui"],
+  });
+  t.after(fake.close);
+
+  const result = await executePrdHttpSmoke({
+    env: smokeEnvironment(fake.origin, {
+      WORKBENCH_PRD_SMOKE_SESSION_COOKIE: existingCookie,
+    }),
+    now: fixedNow,
+    randomUUID: () => smokeUuid,
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failure.code, "PRD_GENERATION_STAGES_INVALID");
   assertNoSecretOrPrdBody(result, [existingCookie]);
 });
 
@@ -224,7 +270,10 @@ function assertNoSecretOrPrdBody(result, forbiddenValues) {
   assert.equal(serialized.includes("依赖异常时保留用户输入"), false);
 }
 
-async function startFakeWorkbench({ artifactKind = "prd" } = {}) {
+async function startFakeWorkbench({
+  artifactKind = "prd",
+  generationStages = prdGenerationStages,
+} = {}) {
   const state = {
     apiCookies: [],
     authCalls: 0,
@@ -236,7 +285,7 @@ async function startFakeWorkbench({ artifactKind = "prd" } = {}) {
     submissionBody: null,
   };
   const server = http.createServer((request, response) => {
-    void handleFakeRequest(request, response, state, artifactKind).catch(() => {
+    void handleFakeRequest(request, response, state, artifactKind, generationStages).catch(() => {
       if (!response.headersSent) response.writeHead(500, { "Content-Type": "application/json" });
       if (!response.writableEnded) response.end(JSON.stringify({ code: "FAKE_SERVER_FAILURE" }));
     });
@@ -251,7 +300,7 @@ async function startFakeWorkbench({ artifactKind = "prd" } = {}) {
   };
 }
 
-async function handleFakeRequest(request, response, state, artifactKind) {
+async function handleFakeRequest(request, response, state, artifactKind, generationStages) {
   const url = new URL(request.url ?? "/", "http://fake.test");
   const method = request.method ?? "GET";
   if (!["GET", "HEAD"].includes(method)) state.mutationOrigins.push(request.headers.origin ?? "");
@@ -311,7 +360,13 @@ async function handleFakeRequest(request, response, state, artifactKind) {
     ));
   }
   if (method === "GET" && url.pathname === "/api/v1/runs/run-smoke/events") {
-    return sendRunEventStream(response, [prdDraftEventFixture()]);
+    const stageEvents = generationStages.map((stage, index) => (
+      prdGenerationStageEventFixture(stage, index + 1)
+    ));
+    return sendRunEventStream(response, [
+      ...stageEvents,
+      prdDraftEventFixture(stageEvents.length + 1),
+    ]);
   }
   if (method === "GET" && url.pathname === "/api/v1/projects/project-smoke/artifacts") {
     return sendJson(response, 200, {
@@ -496,7 +551,23 @@ function replaceStringFragments(value, source, replacement) {
   return value;
 }
 
-function prdDraftEventFixture() {
+function prdGenerationStageEventFixture(stage, sequence) {
+  return {
+    protocol: "workbench.run.v1",
+    id: `event-stage-${sequence}`,
+    projectId: "project-smoke",
+    threadId: "thread-smoke",
+    runId: "run-smoke",
+    requestId: "request-smoke",
+    sequence,
+    occurredAt: `2026-07-23T09:00:0${sequence}.000Z`,
+    traceId: "trace-smoke",
+    type: "run.generation.stage.changed",
+    payload: { attempt: 1, stage },
+  };
+}
+
+function prdDraftEventFixture(sequence) {
   return {
     protocol: "workbench.run.v1",
     id: "event-draft-smoke",
@@ -504,7 +575,7 @@ function prdDraftEventFixture() {
     threadId: "thread-smoke",
     runId: "run-smoke",
     requestId: "request-smoke",
-    sequence: 3,
+    sequence,
     occurredAt: "2026-07-23T09:00:30.000Z",
     traceId: "trace-smoke",
     type: "artifact.draft.created",

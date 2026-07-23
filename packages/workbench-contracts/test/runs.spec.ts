@@ -265,6 +265,10 @@ describe("Run generation stage contract", () => {
   it("accepts only the evidence-backed generation stages", () => {
     const stages = [
       "thinking",
+      "collecting-prd-context",
+      "structuring-prd",
+      "drafting-prd",
+      "validating-prd",
       "design-system",
       "mapping-components",
       "creating-flows",

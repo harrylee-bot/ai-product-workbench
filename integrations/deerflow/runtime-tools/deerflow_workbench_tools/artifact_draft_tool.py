@@ -52,6 +52,15 @@ def workbench_artifact_draft_publish(
         "WORKBENCH_TOOL_CALL_ID_INVALID",
         maximum_length=512,
     )
+    requested_artifact_kinds = scope.get("requestedArtifactKinds")
+    if (
+        not isinstance(requested_artifact_kinds, list)
+        or any(not isinstance(kind, str) for kind in requested_artifact_kinds)
+    ):
+        raise ValueError("WORKBENCH_REQUESTED_ARTIFACT_KINDS_INVALID")
+    draft_kind = draft.get("kind") if isinstance(draft, dict) else None
+    if not isinstance(draft_kind, str) or draft_kind not in requested_artifact_kinds:
+        raise ValueError("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED")
 
     validation = validate_runtime_artifact_draft(draft)
     payload: dict[str, Any] = {
