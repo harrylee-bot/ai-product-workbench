@@ -33,6 +33,13 @@ const runtimeProviderModel = "fake-quality-model";
 const prdV2DocumentId = "e2e-prd";
 const prdV2WorkOrderName = "Workbench PostgreSQL E2E";
 const prdV2Title = `${prdV2WorkOrderName}需求说明书`;
+const prdGenerationStageSequence = [
+  "collecting-prd-context",
+  "structuring-prd",
+  "drafting-prd",
+  "validating-prd",
+];
+const successPrdCheckpointToolCallId = "e2e-prd-checkpoint";
 const verbose = process.env.WORKBENCH_E2E_VERBOSE === "1";
 
 const services = [];
@@ -557,6 +564,24 @@ async function runSuccessScenario(client, outsiderClient) {
   assert.equal(events.at(-1)?.data.type, "run.completed");
   assert.ok(events.some((event) => event.data.type === "artifact.version.created"));
   assert.ok(events.some((event) => event.data.type === "message.delta"));
+  assert.deepEqual(
+    events
+      .filter((event) => event.data.type === "run.generation.stage.changed")
+      .map((event) => event.data.payload.stage),
+    ["thinking", ...prdGenerationStageSequence],
+  );
+  const prdCheckpointIndex = events.findIndex(
+    (event) => event.data.type === "artifact.draft.created",
+  );
+  const prdReadyIndex = events.findIndex(
+    (event) => event.data.type === "artifact.version.created",
+  );
+  assert.ok(
+    prdCheckpointIndex > events.findLastIndex(
+      (event) => event.data.type === "run.generation.stage.changed",
+    ) && prdCheckpointIndex < prdReadyIndex,
+    "the PRD checkpoint was not persisted after validation and before ready publication",
+  );
 
   const cursorIndex = Math.max(0, Math.floor(events.length / 2) - 1);
   const cursor = events[cursorIndex].data.sequence;
@@ -3423,17 +3448,18 @@ async function writeApprovalRuntimeStream(response) {
 
 async function writeSuccessfulRuntimeStream(response, requestBody) {
   const scope = runtimeScopeFromRequest(requestBody);
+  const draft = {
+    kind: "prd",
+    title: prdV2Title,
+    schemaVersion: 2,
+    operation: { kind: "create" },
+    content: minimalPrdDocument(),
+    citations: [],
+  };
   const result = {
     protocol: "workbench.runtime.result.v1",
     message: "E2E generated response",
-    artifacts: [{
-      kind: "prd",
-      title: prdV2Title,
-      schemaVersion: 2,
-      operation: { kind: "create" },
-      content: minimalPrdDocument(),
-      citations: [],
-    }],
+    artifacts: [draft],
   };
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -3456,6 +3482,22 @@ async function writeSuccessfulRuntimeStream(response, requestBody) {
     values: {
       messages: [
         { type: "human", content: "Workbench E2E request" },
+        ...prdGenerationStageSequence.flatMap((stage) => {
+          const toolCallId = `e2e-prd-stage-${stage}`;
+          return declaredToolMessages(
+            "workbench_generation_stage_update",
+            toolCallId,
+            validatedGenerationStageArtifact(stage, { ...scope, toolCallId }),
+          );
+        }),
+        ...declaredToolMessages(
+          "workbench_artifact_draft_publish",
+          successPrdCheckpointToolCallId,
+          validatedArtifactDraftArtifact(draft, {
+            ...scope,
+            toolCallId: successPrdCheckpointToolCallId,
+          }),
+        ),
         ...declaredToolMessages(
           "workbench_runtime_result_submit",
           "e2e-result-submit",
