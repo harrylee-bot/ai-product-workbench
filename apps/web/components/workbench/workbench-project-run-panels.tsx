@@ -298,6 +298,10 @@ export function ProjectTranscriptPanel({
     || runStatus === "running"
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
+  const isActivePrdGeneration = isPrdRun
+    && projectMode === "document"
+    && selectedTask === null
+    && (runStatus === "queued" || runStatus === "running");
   const currentPrdStageCopy = activePrdStatusCopy({
     isActiveGeneration: runStatus === "queued" || runStatus === "running",
     isPrdRun,
@@ -327,9 +331,12 @@ export function ProjectTranscriptPanel({
     runStatus === "waiting_input" ? "请在确认弹层中选择后继续。" : null,
     runStatus === "succeeded" ? "产物已发布到当前项目画布。" : null,
   ].find((copy): copy is string => typeof copy === "string" && copy.trim().length > 0)?.trim() ?? null;
-  const bodyCopy = runBodyCopy ?? (isWorking ? null : "暂无新的运行消息。");
+  const bodyCopy = isActivePrdGeneration
+    ? null
+    : runBodyCopy ?? (isWorking ? null : "暂无新的运行消息。");
   const isAgentWorking = isWorking;
-  const showPromptChip = Boolean(prompt || selectedTask)
+  const showPromptChip = !isActivePrdGeneration
+    && Boolean(prompt || selectedTask)
     && (Boolean(selectedTask) || Boolean(runBodyCopy))
     && (Boolean(selectedTask) || isOverview || !(phase === "complete" && isGenerated));
   const hasExpandedBody = showPromptChip || Boolean(bodyCopy);

@@ -146,23 +146,85 @@ describe("ProjectTranscriptPanel", () => {
     expect(getAgentCard(container).dataset.prdBodyless).toBeUndefined();
   });
 
-  it("reveals the prompt chip only after substantive body content arrives", () => {
-    const rendered = renderPanel({ prompt: "生成支付改造需求说明书" });
+  it("keeps active PRD generation compact across streaming assistant deltas", () => {
+    const rendered = renderPanel({
+      generationStage: "structuring-prd",
+      prompt: "生成支付改造需求说明书",
+    });
     expect(getAgentCard(rendered.container).style.height).toBe("126px");
     expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
 
     rendered.rerender(panelElement({
-      messages: [{ id: "message-1", status: "streaming", text: "正在梳理业务规则", working: true }],
-    }));
-    expect(getAgentCard(rendered.container).style.height).toBe("auto");
-
-    rendered.rerender(panelElement({
+      generationStage: "structuring-prd",
       messages: [{ id: "message-1", status: "streaming", text: "正在梳理业务规则", working: true }],
       prompt: "生成支付改造需求说明书",
     }));
-    expect(getAgentCard(rendered.container).style.height).toBe("auto");
+    expect(getAgentCard(rendered.container).style.height).toBe("126px");
+    expect(screen.queryByText("正在梳理业务规则")).toBeNull();
+    expect(screen.getByText("规划结构")).not.toBeNull();
+
+    rendered.rerender(panelElement({
+      generationStage: "drafting-prd",
+      messages: [
+        { id: "message-1", status: "streaming", text: "正在梳理业务规则", working: true },
+        { id: "message-2", status: "streaming", text: "正在补充验收标准", working: true },
+      ],
+      prompt: "生成支付改造需求说明书",
+    }));
+    const card = getAgentCard(rendered.container);
+    expect(card.style.height).toBe("126px");
+    expect(card.style.maxHeight).toBe("126px");
+    expect(card.dataset.prdBodyless).toBe("true");
+    expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
+    expect(screen.queryByText("正在梳理业务规则")).toBeNull();
+    expect(screen.queryByText("正在补充验收标准")).toBeNull();
+    expect(card.dataset.generationStage).toBe("drafting-prd");
+  });
+
+  it.each(["succeeded", "failed"] as const)("keeps PRD %s terminal content expanded", (runStatus) => {
+    const { container } = renderPanel({
+      messages: [{ id: "message-1", status: "completed", text: "已完成需求说明书", working: false }],
+      prompt: "生成支付改造需求说明书",
+      runStatus,
+    });
+
+    expect(getAgentCard(container).style.height).toBe("auto");
     expect(screen.getByText("生成支付改造需求说明书")).not.toBeNull();
-    expect(screen.getByText("正在梳理业务规则").classList.contains("overflow-y-auto")).toBe(true);
+    expect(screen.getByText("已完成需求说明书")).not.toBeNull();
+  });
+
+  it("expands an active PRD when the user selects a history task", () => {
+    const { container } = renderPanel({
+      activities: [{
+        detail: "已完成业务规则梳理",
+        id: "activity-1",
+        label: "梳理业务规则",
+        status: "succeeded",
+        terminal: true,
+        working: false,
+      }],
+      messages: [{ id: "message-1", status: "streaming", text: "正在补充验收标准", working: true }],
+      selectedTask: "梳理业务规则",
+    });
+
+    expect(getAgentCard(container).style.height).toBe("auto");
+    expect(screen.getByText("梳理业务规则")).not.toBeNull();
+    expect(screen.getByText("已完成业务规则梳理")).not.toBeNull();
+  });
+
+  it("keeps non-PRD streaming content expanded", () => {
+    const { container } = renderPanel({
+      generationStage: "generating-ui",
+      isPrdRun: false,
+      messages: [{ id: "message-1", status: "streaming", text: "正在生成真实界面", working: true }],
+      prompt: "生成会员中心原型",
+      projectMode: "document",
+      runPhaseLabel: "正在生成真实界面",
+    });
+
+    expect(getAgentCard(container).style.height).toBe("auto");
+    expect(screen.getByText("生成会员中心原型")).not.toBeNull();
+    expect(screen.getAllByText("正在生成真实界面")).toHaveLength(2);
   });
 
   it("reserves the full history height for a selected task", () => {
