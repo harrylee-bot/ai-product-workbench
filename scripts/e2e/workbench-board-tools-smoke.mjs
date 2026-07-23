@@ -341,6 +341,9 @@ await context.route("**/api/v1/**", async (route) => {
       latestRun: captureCompletedBaseline ? completedRun : null,
     }, { etag: `"${board.revision}"` });
   }
+  if (method === "GET" && path === `/api/v1/runs/${completedRun.id}`) {
+    return json(route, completedRun);
+  }
   if (method === "GET" && path === `/api/v1/runs/${completedRun.id}/approvals`) {
     return json(route, { items: [] });
   }

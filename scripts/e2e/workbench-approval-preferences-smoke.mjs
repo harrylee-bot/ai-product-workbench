@@ -379,6 +379,9 @@ async function routeWorkbenchApi(route) {
     await runStreamReady;
     return sse(route, resumedRunEvents().filter((event) => event.sequence > cursor));
   }
+  if (method === "GET" && requestPath === `/api/v1/runs/${waitingRun.id}`) {
+    return json(route, currentRun);
+  }
   if (method === "GET" && requestPath === "/api/v1/identity/me") {
     return json(route, {
       id: "principal-1",
