@@ -21,7 +21,17 @@
           "changedAt": "2026-07-23T00:00:00.000Z",
           "changedById": null
         },
-        "assumptions": [],
+        "assumptions": [
+          {
+            "id": "assumption-main",
+            "statement": "默认用户已具备使用核心功能所需的账号与权限。",
+            "status": "open",
+            "impact": "medium",
+            "owner": null,
+            "introducedInRevision": 1,
+            "citationIds": []
+          }
+        ],
         "citations": [],
         "sections": {
           "executiveSummary": {
