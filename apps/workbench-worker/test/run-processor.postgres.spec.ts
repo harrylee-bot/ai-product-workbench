@@ -220,7 +220,16 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
   it("keeps the staging draft unpublished when cancellation wins publication", async () => {
     const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
     const canceller = new PrismaClient({ datasourceUrl: databaseUrl! });
-    const fixture = await seedRunFixture(worker, "publish");
+    const fixture = await seedRunFixture(worker, "publish", () => ({
+      prompt: "Publish a document",
+      modelId: "quality",
+      workflow: "generate",
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      sourceIds: [],
+      artifactTargets: [],
+      requestedArtifactKinds: ["document"],
+    }));
     const claim = await claimRunFixture(worker, fixture);
     const draft = documentDraft("Cancelled document", "must roll back");
     const checkpointProcessor = new RunProcessor(
