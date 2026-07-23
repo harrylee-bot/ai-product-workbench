@@ -7,11 +7,11 @@ import {
   type PrdReferenceEvidenceBoundaries,
 } from "../src/runtime/runtime-prd-reference-evidence.js";
 
-const SANDBOX_ROOT = "/mnt/skills/public/workbench";
+const SANDBOX_ROOT = "/mnt/skills/public";
 const referenceContent = new Map(PRD_RUNTIME_REFERENCE_FILES.map((reference) => [
   reference.relativePath,
   readFileSync(new URL(
-    `../../../integrations/deerflow/skills/workbench/${reference.relativePath}`,
+    `../../../integrations/deerflow/skills/${reference.relativePath}`,
     import.meta.url,
   ), "utf8"),
 ]));
@@ -25,32 +25,32 @@ describe("PRD Runtime reference evidence", () => {
   it("accepts exactly one verified read of every pinned reference across DeerFlow path shapes", () => {
     const fixture = validFixture();
     const messages = fixture.state.messages as Array<Record<string, unknown>>;
-    const qualityCall = messages.find((message) => (
+    const structureCall = messages.find((message) => (
       JSON.stringify(message.tool_calls ?? []).includes("read-reference-1")
     ));
-    const qualityToolCall = (qualityCall?.tool_calls as Array<Record<string, unknown>>)[0]!;
-    qualityToolCall.args = {
-      description: "Read quality rules",
-      path: "/mnt/skills/public/workbench/references/requirement-doc-template/./quality-standards.md",
+    const structureToolCall = (structureCall?.tool_calls as Array<Record<string, unknown>>)[0]!;
+    structureToolCall.args = {
+      description: "Read structure rules",
+      path: "/mnt/skills/public/requirement-doc-template/references/./structure.md",
     };
-    const exampleCall = messages.find((message) => (
-      JSON.stringify(message.tool_calls ?? []).includes("read-reference-2")
+    const schemaCall = messages.find((message) => (
+      JSON.stringify(message.tool_calls ?? []).includes("read-reference-3")
     ));
-    const exampleToolCall = (exampleCall?.tool_calls as Array<Record<string, unknown>>)[0]!;
-    delete exampleToolCall.name;
-    delete exampleToolCall.args;
-    exampleToolCall.function = {
+    const schemaToolCall = (schemaCall?.tool_calls as Array<Record<string, unknown>>)[0]!;
+    delete schemaToolCall.name;
+    delete schemaToolCall.args;
+    schemaToolCall.function = {
       name: "read_file",
       arguments: JSON.stringify({
-        description: "Read complete envelope",
-        path: "/mnt/skills/public/workbench/references/requirement-doc-template/../prd-runtime-result.example.json",
+        description: "Read PRD transport schema",
+        path: "/mnt/skills/public/workbench/references/./prd-runtime-result.schema.json",
       }),
     };
-    const exampleResponse = messages.find((message) => message.tool_call_id === "read-reference-2")!;
-    const exampleContent = exampleResponse.content as string;
-    exampleResponse.content = [
-      { type: "text", text: exampleContent.slice(0, 10_000) },
-      { type: "text", text: exampleContent.slice(10_000) },
+    const schemaResponse = messages.find((message) => message.tool_call_id === "read-reference-3")!;
+    const schemaContent = schemaResponse.content as string;
+    schemaResponse.content = [
+      { type: "text", text: schemaContent.slice(0, 10_000) },
+      { type: "text", text: schemaContent.slice(10_000) },
     ];
 
     expect(() => assertPrdReferenceReadEvidence(fixture.state, fixture.boundaries)).not.toThrow();
@@ -137,7 +137,7 @@ describe("PRD Runtime reference evidence", () => {
         const pair = referenceReadPair(PRD_RUNTIME_REFERENCE_FILES[0], "wrong-root-reference-retry");
         const declaration = pair[0] as { tool_calls: Array<{ args: { path: string } }> };
         declaration.tool_calls[0]!.args.path =
-          "/app/skills/public/workbench/references/requirement-doc-template/structure.md";
+          "/app/skills/public/requirement-doc-template/SKILL.md";
         (pair[1] as Record<string, unknown>).status = "error";
         (pair[1] as Record<string, unknown>).content = "Error: use the /mnt skill path";
         return { pair, beforeCollecting: false };
@@ -180,7 +180,7 @@ describe("PRD Runtime reference evidence", () => {
     replaceReferencePath(
       fixture,
       "structure.md",
-      "/mnt/user-data/uploads/references/requirement-doc-template/structure.md",
+      "/mnt/user-data/uploads/requirement-doc-template/references/structure.md",
     );
 
     expect(() => assertPrdReferenceReadEvidence(fixture.state, fixture.boundaries))
@@ -321,7 +321,10 @@ function toolPair(
 }
 
 function replaceReferencePath(fixture: Fixture, suffix: string, path: string) {
-  const declaration = fixture.state.messages.find((message) => JSON.stringify(message).includes(suffix)) as {
+  const declaration = fixture.state.messages.find((messageValue) => {
+    const message = messageValue as Record<string, unknown>;
+    return Array.isArray(message.tool_calls) && JSON.stringify(message.tool_calls).includes(suffix);
+  }) as {
     tool_calls: Array<{ args: { path: string } }>;
   };
   declaration.tool_calls[0]!.args.path = path;

@@ -73,8 +73,7 @@ export const REQUIRED_GENERATED_CONTRACTS = Object.freeze([
   "packages/workbench-contracts/openapi/baseline/workbench.v1.yaml",
   "packages/workbench-contracts/openapi/workbench.v1.yaml",
   "integrations/deerflow/skills/workbench/references/runtime-result.schema.json",
-  "integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json",
-  "integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
+  "integrations/deerflow/skills/workbench/references/prd-runtime-result.schema.json",
   "integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs",
 ]);
 

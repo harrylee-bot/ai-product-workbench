@@ -13,6 +13,10 @@ const outputPath = path.join(
   repoRoot,
   "integrations/deerflow/skills/workbench/references/runtime-result.schema.json",
 );
+const prdOutputPath = path.join(
+  repoRoot,
+  "integrations/deerflow/skills/workbench/references/prd-runtime-result.schema.json",
+);
 const document = YAML.parse(await readFile(openApiPath, "utf8"));
 const schemas = document?.components?.schemas;
 if (!schemas?.RuntimeResult) throw new Error("OpenAPI does not define RuntimeResult");
@@ -30,16 +34,55 @@ const generated = `${JSON.stringify({
   ...rewriteRefs(schemas.RuntimeResult),
   $defs: definitions,
 }, null, 2)}\n`;
+const prdNames = dependencyClosure("RuntimeArtifactDraftPrdV2", schemas);
+const prdDefinitions = Object.fromEntries(
+  [...prdNames]
+    .sort()
+    .map((name) => [name, rewriteRefs(schemas[name])]),
+);
+const prdGenerated = `${JSON.stringify({
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  title: "产品工作台 PRD Runtime Result",
+  type: "object",
+  properties: {
+    protocol: {
+      type: "string",
+      enum: ["workbench.runtime.result.v1"],
+    },
+    message: {
+      type: "string",
+      maxLength: 100_000,
+    },
+    artifacts: {
+      type: "array",
+      items: { $ref: "#/$defs/RuntimeArtifactDraftPrdV2" },
+      minItems: 1,
+      maxItems: 1,
+    },
+  },
+  required: ["protocol", "message", "artifacts"],
+  additionalProperties: false,
+  $defs: prdDefinitions,
+}, null, 2)}\n`;
+
+const outputs = [
+  { path: outputPath, content: generated, label: "Runtime result schema" },
+  { path: prdOutputPath, content: prdGenerated, label: "PRD Runtime result schema" },
+];
 
 if (process.argv.includes("--check")) {
-  const existing = await readFile(outputPath, "utf8").catch(() => "");
-  if (existing !== generated) {
-    throw new Error("Runtime result schema is stale; run npm run runtime:schema");
+  for (const output of outputs) {
+    const existing = await readFile(output.path, "utf8").catch(() => "");
+    if (existing !== output.content) {
+      throw new Error(`${output.label} is stale; run npm run runtime:schema`);
+    }
   }
-  process.stdout.write("DeerFlow Runtime result schema is current\n");
+  process.stdout.write("DeerFlow Runtime result schemas are current\n");
 } else {
-  await writeFile(outputPath, generated);
-  process.stdout.write(`Generated ${path.relative(repoRoot, outputPath)}\n`);
+  for (const output of outputs) {
+    await writeFile(output.path, output.content);
+    process.stdout.write(`Generated ${path.relative(repoRoot, output.path)}\n`);
+  }
 }
 
 function dependencyClosure(rootName, allSchemas) {

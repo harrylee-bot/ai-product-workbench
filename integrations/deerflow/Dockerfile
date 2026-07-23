@@ -10,7 +10,7 @@ ARG DEERFLOW_BASE_IMAGE
 ARG DEERFLOW_NODE_IMAGE
 ARG DEERFLOW_SOURCE_COMMIT
 ARG WORKBENCH_SOURCE_COMMIT
-ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=c0ec774326c36820a5b5a0e908ae74f7ac64270187249158522a232a5d2dbdca
+ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=623b91e4f65863e3fa4f914e1ed2a7934726cefb55e6aff64d367781be6d4f94
 
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
@@ -25,6 +25,7 @@ LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
 COPY --from=validator-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=validator-runtime /usr/local/LICENSE /usr/share/licenses/node/LICENSE
 COPY integrations/deerflow/skills/workbench/ /app/skills/public/workbench/
+COPY integrations/deerflow/skills/requirement-doc-template/ /app/skills/public/requirement-doc-template/
 COPY integrations/deerflow/runtime-tools/deerflow_workbench_tools/ /app/backend/deerflow_workbench_tools/
 COPY integrations/deerflow/runtime-tools/config.fragment.yaml /opt/workbench/deerflow/config.fragment.yaml
 COPY deploy/deerflow-extensions.production.json /app/backend/extensions_config.workbench.json

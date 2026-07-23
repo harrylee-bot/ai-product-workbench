@@ -1,8 +1,8 @@
 import {
   canonicalJson,
-  prdDocumentV2Example,
   type ArtifactVersionDetail,
 } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import {

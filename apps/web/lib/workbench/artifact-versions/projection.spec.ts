@@ -1,9 +1,10 @@
 import {
-  prdDocumentV2Example,
   prdSafetyBaselineItems,
+  prdTableOfContentsEntriesFor,
   type ArtifactVersionDetail,
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import { describe, expect, it } from "vitest";
 
 import { prdDocument } from "../../../components/workbench/workbench-prd-test-fixture";
@@ -40,6 +41,25 @@ describe("ArtifactVersion comparison projection", () => {
     for (const item of prdSafetyBaselineItems) {
       expect(projection.text).toContain(item.requirement);
     }
+  });
+
+  it("projects additional 2.5+ business sections between acceptance and degradation", () => {
+    const document = structuredClone(prdDocumentV2Example);
+    document.sections.businessRequirements.additionalSections = [{
+      title: "2.5 配置规则",
+      blocks: [{
+        id: "additional-config-rule",
+        type: "paragraph",
+        content: [{ type: "text", text: "补充业务配置规则及对应结果。", marks: [] }],
+      }],
+    }];
+    document.tableOfContents.entries = prdTableOfContentsEntriesFor(["2.5 配置规则"]);
+
+    const projection = projectArtifactVersion(inlineVersion("prd", document));
+
+    expect(projection.text).toContain("### 2.5 配置规则\n\n补充业务配置规则及对应结果。");
+    expect(projection.text.indexOf("### 2.5 配置规则"))
+      .toBeLessThan(projection.text.indexOf("## 3 业务降级方案（必填）"));
   });
 
   it("uses preferred code text and canonical JSON as deterministic fallbacks", () => {

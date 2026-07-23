@@ -39,86 +39,7 @@ from deerflow_workbench_tools.artifact_draft_tool import (
 
 ROOT = Path(__file__).resolve().parents[3]
 PROTOTYPE_EXAMPLE_PATH = ROOT / "integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json"
-PRD_EXAMPLE_PATH = ROOT / "integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json"
-PRD_FINGERPRINT_PATH = (
-    ROOT
-    / "integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json"
-)
-
-
-def _replace_exact_strings(value: object, replacements: dict[str, str]) -> object:
-    if isinstance(value, str):
-        return replacements.get(value, value)
-    if isinstance(value, list):
-        return [_replace_exact_strings(item, replacements) for item in value]
-    if isinstance(value, dict):
-        return {
-            key: _replace_exact_strings(item, replacements)
-            for key, item in value.items()
-        }
-    return value
-
-
-def _rewrite_reference_business_text(value: str) -> str:
-    replacements = (
-        ("产品工作台", "服务运营门户"),
-        ("目标业务用户", "业务经办人员"),
-        ("任务处理", "申请受理"),
-        ("任务页面", "申请界面"),
-        ("任务状态", "申请进度"),
-        ("任务记录", "申请记录"),
-        ("任务编号", "申请编号"),
-        ("任务", "申请"),
-        ("用户", "经办人员"),
-        ("提交", "发起"),
-        ("处理", "受理"),
-        ("状态", "进度"),
-        ("结果", "办理回执"),
-        ("异常", "故障"),
-        ("恢复", "续办"),
-        ("权限", "操作资格"),
-        ("校验", "检查"),
-        ("输入", "表单内容"),
-        ("页面", "界面"),
-        ("成功", "办结"),
-        ("失败", "未办结"),
-        ("重试", "重新办理"),
-        ("重复", "多次"),
-        ("阶段", "环节"),
-        ("需求说明书", "业务规格文档"),
-        ("验收标准", "交付检查"),
-        ("业务降级方案", "应急处置方案"),
-        ("需求安全基线", "安全自查"),
-    )
-    rewritten = value
-    for source, target in replacements:
-        rewritten = rewritten.replace(source, target)
-    if rewritten == value:
-        raise AssertionError(f"Reference business text was not materialized: {value}")
-    return rewritten
-
-
-def _materialize_prd_reference(reference: dict[str, object]) -> dict[str, object]:
-    draft = copy.deepcopy(reference)
-    fingerprint = json.loads(PRD_FINGERPRINT_PATH.read_text(encoding="utf-8"))
-    id_replacements = {
-        sample_id: f"real-{index:02d}-{sample_id}"
-        for index, sample_id in enumerate(fingerprint["sampleIds"], start=1)
-    }
-    business_replacements = {
-        sample_text: _rewrite_reference_business_text(sample_text)
-        for sample_text in fingerprint["businessText"]
-    }
-    draft = _replace_exact_strings(draft, {**id_replacements, **business_replacements})
-    draft["title"] = "真实工单需求说明书"
-    content = draft["content"]
-    content["documentId"] = "prd-real-work-order"
-    content["title"] = "真实工单需求说明书"
-    content["cover"] = {
-        "workOrderName": "真实工单",
-        "title": "真实工单需求说明书",
-    }
-    return draft
+PRD_EXAMPLE_PATH = ROOT / "integrations/deerflow/test-fixtures/prd-runtime-result.example.json"
 
 
 class ArtifactDraftToolTests(unittest.TestCase):
@@ -146,8 +67,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
         result = json.loads(PROTOTYPE_EXAMPLE_PATH.read_text(encoding="utf-8"))
         self.draft = result["artifacts"][0]
         prd_result = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
-        self.prd_reference_draft = prd_result["artifacts"][0]
-        self.prd_draft = _materialize_prd_reference(self.prd_reference_draft)
+        self.prd_draft = prd_result["artifacts"][0]
 
     def test_binds_a_valid_draft_to_the_runtime_scope(self) -> None:
         content, artifact = workbench_artifact_draft_publish.func(
@@ -216,57 +136,6 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertEqual(json.loads(invalid_content)["ok"], False)
         self.assertEqual(invalid_artifact["ok"], False)
         self.assertNotIn("draft", invalid_artifact)
-
-    def test_rejects_the_unmaterialized_prd_reference_draft(self) -> None:
-        content, artifact = workbench_artifact_draft_publish.func(
-            self.prd_runtime,
-            0,
-            self.prd_reference_draft,
-        )
-
-        response = json.loads(content)
-        self.assertEqual(response["ok"], False)
-        self.assertEqual(artifact["ok"], False)
-        self.assertTrue(any(
-            issue["path"] == ["content", "documentId"]
-            for issue in response["issues"]
-        ))
-        self.assertNotIn("draft", artifact)
-
-    def test_rejects_a_partially_materialized_prd_reference_draft(self) -> None:
-        partial = copy.deepcopy(self.prd_reference_draft)
-        partial["title"] = "真实工单需求说明书"
-        partial["content"]["documentId"] = "prd-real-work-order"
-        partial["content"]["title"] = "真实工单需求说明书"
-        partial["content"]["cover"] = {
-            "workOrderName": "真实工单",
-            "title": "真实工单需求说明书",
-        }
-        content, artifact = workbench_artifact_draft_publish.func(
-            self.prd_runtime,
-            0,
-            partial,
-        )
-
-        response = json.loads(content)
-        self.assertEqual(response["ok"], False)
-        residue_issues = [
-            issue for issue in response["issues"]
-            if issue["path"][:1] == ["content"]
-            and ("sample business content" in issue["message"] or "sample ID" in issue["message"])
-        ]
-        residue_paths = {tuple(issue["path"]) for issue in residue_issues}
-        self.assertIn((
-            "content", "sections", "introduction", "background", "blocks", 0, "id",
-        ), residue_paths)
-        self.assertIn((
-            "content", "sections", "businessRequirements", "coreRules", "blocks", 0, "id",
-        ), residue_paths)
-        self.assertIn((
-            "content", "sections", "businessRequirements", "summary", 0, "text",
-        ), residue_paths)
-        self.assertEqual(len(residue_issues), len(residue_paths))
-        self.assertNotIn("draft", artifact)
 
     def test_rejects_an_unstable_artifact_index(self) -> None:
         with self.assertRaisesRegex(ValueError, "WORKBENCH_ARTIFACT_DRAFT_INDEX_INVALID"):

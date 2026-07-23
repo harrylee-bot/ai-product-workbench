@@ -9,8 +9,8 @@ import { RunsService } from "../src/modules/runs/runs.service.js";
 import { createHash } from "node:crypto";
 import {
   canonicalJson,
-  prdDocumentV2Example,
 } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
 const designSystemContent = {

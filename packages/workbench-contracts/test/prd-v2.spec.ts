@@ -5,10 +5,11 @@ import {
   artifactVersionInlineDetailSchema,
   createArtifactVersionRequestSchema,
   prdDocumentSchema,
-  prdDocumentV2Example,
   prdDocumentV2Schema,
+  prdTableOfContentsEntriesFor,
   runtimeResultSchema,
 } from "../src/index.js";
+import { prdDocumentV2Example } from "../src/prd-example.js";
 
 function cloneExample() {
   return structuredClone(prdDocumentV2Example);
@@ -22,6 +23,20 @@ function acceptanceTable(document: ReturnType<typeof cloneExample>) {
 
 function text(value: string) {
   return [{ type: "text" as const, text: value, marks: [] }];
+}
+
+function withAdditionalBusinessSections(...titles: string[]) {
+  const document = cloneExample();
+  document.sections.businessRequirements.additionalSections = titles.map((title, index) => ({
+    title,
+    blocks: [{
+      id: `additional-business-section-${index + 5}`,
+      type: "paragraph" as const,
+      content: text(`补充说明第 ${index + 5} 项业务约束及其可验收结果。`),
+    }],
+  }));
+  document.tableOfContents.entries = prdTableOfContentsEntriesFor(titles);
+  return document;
 }
 
 const affirmativeSafetyFacts = [
@@ -177,6 +192,86 @@ describe("workbench.prd.v2", () => {
       "productArchitecture",
     ]);
     expect(parsed.sections.safetyBaseline.rows).toHaveLength(21);
+  });
+
+  it("defaults legacy v2 documents to no additional business sections", () => {
+    const legacy = cloneExample();
+    delete (legacy.sections.businessRequirements as {
+      additionalSections?: unknown;
+    }).additionalSections;
+
+    const parsed = prdDocumentV2Schema.parse(legacy);
+
+    expect(parsed.sections.businessRequirements.additionalSections).toEqual([]);
+    expect(parsed.tableOfContents.entries).toHaveLength(11);
+    expect(deployedRuntimeResultValidator.validate({
+      protocol: "workbench.runtime.result.v1",
+      message: "需求说明书已生成。",
+      artifacts: [{
+        kind: "prd",
+        schemaVersion: 2,
+        title: legacy.title,
+        operation: { kind: "create" },
+        citations: [],
+        content: legacy,
+      }],
+    }).valid).toBe(true);
+  });
+
+  it("accepts consecutive 2.5+ business sections and inserts them into the manual TOC", () => {
+    const document = withAdditionalBusinessSections("2.5 配置规则", "2.6 结果说明");
+    const parsed = prdDocumentV2Schema.parse(document);
+
+    expect(parsed.sections.businessRequirements.additionalSections.map((section) => section.title)).toEqual([
+      "2.5 配置规则",
+      "2.6 结果说明",
+    ]);
+    expect(parsed.tableOfContents.entries.slice(8, 13)).toEqual([
+      "2.4 验收标准",
+      "2.5 配置规则",
+      "2.6 结果说明",
+      "3. 业务降级方案（必填）",
+      "4. 需求安全基线要求（必填）",
+    ]);
+    expect(deployedRuntimeResultValidator.validate({
+      protocol: "workbench.runtime.result.v1",
+      message: "需求说明书已生成。",
+      artifacts: [{
+        kind: "prd",
+        schemaVersion: 2,
+        title: document.title,
+        operation: { kind: "create" },
+        citations: [],
+        content: document,
+      }],
+    }).valid).toBe(true);
+  });
+
+  it("rejects non-consecutive additional business sections and TOC drift", () => {
+    const numberingGap = withAdditionalBusinessSections("2.6 配置规则");
+    expect(prdDocumentV2Schema.safeParse(numberingGap).success).toBe(false);
+
+    const tocDrift = withAdditionalBusinessSections("2.5 配置规则");
+    tocDrift.tableOfContents.entries[9] = "2.5 另一个标题";
+    expect(prdDocumentV2Schema.safeParse(tocDrift).success).toBe(false);
+  });
+
+  it("includes additional business sections in IR uniqueness and semantic evidence validation", () => {
+    const duplicateId = withAdditionalBusinessSections("2.5 配置规则");
+    duplicateId.sections.businessRequirements.additionalSections[0]!.blocks[0]!.id = "background-main";
+    expect(prdDocumentV2Schema.safeParse(duplicateId).success).toBe(false);
+
+    const safetyEvidence = withAdditionalBusinessSections("2.5 接口规则");
+    safetyEvidence.sections.businessRequirements.additionalSections[0]!.blocks[0] = {
+      id: "additional-api-rule",
+      type: "paragraph",
+      content: text("本需求新增 API 接口并完成 API 台账填报。"),
+    };
+    expect(prdDocumentV2Schema.safeParse(safetyEvidence).success).toBe(false);
+
+    safetyEvidence.sections.safetyBaseline.rows[16]!.applicability = "是";
+    safetyEvidence.sections.safetyBaseline.rows[16]!.remarks = "新增 API 接口需要完成台账填报。";
+    expect(prdDocumentV2Schema.safeParse(safetyEvidence).success).toBe(true);
   });
 
   it("rejects cover drift, channel drift, missing diagrams, and safety row drift", () => {

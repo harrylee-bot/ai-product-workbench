@@ -1,7 +1,7 @@
 import {
   boardNodeProtocol,
-  prdDocumentV2Example,
 } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import {
   boardPlacementsForArtifact,
   canonicalJson,
@@ -19,7 +19,7 @@ import { PrismaCanvasToolGrantIssuer } from "../src/runtime/canvas-tool-grant.se
 import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
 import { RuntimeSubmissionUnknownError } from "../src/runtime/runtime.port.js";
 import { RuntimeLivenessError } from "../src/runtime/runtime-liveness.js";
-import { runtimePrdResultStarter } from "../src/runtime/runtime-prd-guidance.js";
+import { runtimePrdResultFixture } from "./runtime-prd-result.fixture.js";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
 const executionClaim = {
@@ -310,7 +310,7 @@ describe("RunProcessor shared cancellation poller", () => {
 
 describe("Artifact Board placement", () => {
   it("uses the reference square placement for a PRD", () => {
-    const prd = runtimePrdResultStarter.artifacts.find((artifact) => artifact.kind === "prd");
+    const prd = runtimePrdResultFixture.artifacts.find((artifact) => artifact.kind === "prd");
     expect(prd).toBeDefined();
 
     expect(boardPlacementsForArtifact(prd!)).toEqual([{
@@ -1702,7 +1702,7 @@ describe("Runtime Artifact draft staging and publication", () => {
   });
 
   it("rejects a PRD checkpoint before validating-prd is persisted", async () => {
-    const draft = runtimePrdResultStarter.artifacts[0]!;
+    const draft = runtimePrdResultFixture.artifacts[0]!;
     const event = {
       type: "artifact.draft" as const,
       artifactIndex: 0,

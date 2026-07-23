@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { randomUUID as nodeRandomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as nodeDelay } from "node:timers/promises";
@@ -10,17 +9,13 @@ import {
   artifactVersionDetailSchema,
   prdChannelKinds,
   prdSafetyBaselineItems,
-  prdTableOfContentsEntries,
+  prdTableOfContentsEntriesFor,
   runEventSchema,
 } from "@workbench/workbench-contracts";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const writeConfirmation = "CREATE_ISOLATED_PRD_SMOKE_PROJECT";
 const terminalRunStatuses = new Set(["succeeded", "failed", "cancelled"]);
-const prdReferenceFingerprint = JSON.parse(readFileSync(new URL(
-  "../integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
-  import.meta.url,
-), "utf8"));
 const smokeThemeRequirements = [
   { label: "已登录消费者", terms: ["已登录消费者", "登录消费者"] },
   { label: "订单", terms: ["订单"] },
@@ -29,6 +24,13 @@ const smokeThemeRequirements = [
   { label: "发送结果记录", terms: ["发送结果记录", "发送记录", "通知记录", "结果记录"] },
   { label: "失败重试", terms: ["失败重试", "发送失败", "重试"] },
   { label: "权限反馈", terms: ["权限反馈", "无权限", "权限"] },
+];
+const unrelatedSmokeBusinessTerms = [
+  "工作台任务页面",
+  "任务处理入口",
+  "提交任务",
+  "创建任务",
+  "任务编号",
 ];
 const forbiddenPlaceholders = [
   "待确认",
@@ -513,11 +515,16 @@ export function assertPrdV2Structure(document) {
   if (!document || document.protocol !== "workbench.prd.v2") {
     throw smokeError("PRD_V2_PROTOCOL_REQUIRED", "Document protocol is not workbench.prd.v2");
   }
+  const additionalSections = document.sections?.businessRequirements?.additionalSections;
+  const expectedTableOfContents = prdTableOfContentsEntriesFor(
+    Array.isArray(additionalSections) ? additionalSections.map((section) => section?.title) : [],
+  );
   if (
-    document.tableOfContents?.entries?.length !== 11
-    || JSON.stringify(document.tableOfContents.entries) !== JSON.stringify(prdTableOfContentsEntries)
+    !Array.isArray(additionalSections)
+    || document.tableOfContents?.entries?.length !== expectedTableOfContents.length
+    || JSON.stringify(document.tableOfContents.entries) !== JSON.stringify(expectedTableOfContents)
   ) {
-    throw smokeError("PRD_TABLE_OF_CONTENTS_INVALID", "PRD v2 does not contain the canonical 11-entry table of contents");
+    throw smokeError("PRD_TABLE_OF_CONTENTS_INVALID", "PRD v2 table of contents does not match its fixed and optional business sections");
   }
   const channels = document.sections?.introduction?.usageScenarios?.channelTable?.rows;
   if (
@@ -605,29 +612,17 @@ export function assertPrdSmokeBusinessSemantics(document) {
     }
   }
 
-  const sampleIds = new Set(prdReferenceFingerprint.sampleIds);
-  const copiedId = typedIds(document).find((id) => sampleIds.has(id));
-  if (copiedId) {
-    throw smokeError("PRD_REFERENCE_CONTENT_FORBIDDEN", "PRD contains a nested ID copied from the Runtime reference example");
-  }
-  const normalizedCandidates = [
-    ...stringValues(document),
-    ...visibleTextSegments(document),
-  ].map(normalizedFingerprintText);
-  const copiedBusinessText = prdReferenceFingerprint.businessText
-    .map(normalizedFingerprintText)
-    .find((reference) => normalizedCandidates.some((candidate) => (
-      candidate.includes(reference)
-      || isNearCopiedFingerprintText(candidate, reference)
-    )));
-  if (copiedBusinessText) {
-    throw smokeError("PRD_REFERENCE_CONTENT_FORBIDDEN", "PRD contains business content copied from the Runtime reference example");
+  const unrelatedTerm = unrelatedSmokeBusinessTerms.find((term) => visibleText.includes(term));
+  if (unrelatedTerm) {
+    throw smokeError(
+      "PRD_SMOKE_UNRELATED_CONTENT",
+      `PRD contains unrelated task-domain content: ${unrelatedTerm}`,
+    );
   }
   return {
-    referenceBusinessMatches: 0,
-    referenceIdMatches: 0,
     theme: "order-status-notification",
     themeRequirementCount: smokeThemeRequirements.length,
+    unrelatedBusinessMatches: 0,
   };
 }
 
@@ -658,86 +653,6 @@ function stringValues(value) {
   if (Array.isArray(value)) return value.flatMap(stringValues);
   if (value && typeof value === "object") return Object.values(value).flatMap(stringValues);
   return [];
-}
-
-function normalizedFingerprintText(value) {
-  return value.normalize("NFKC").replace(/[\s\p{P}\p{S}]+/gu, "").toLocaleLowerCase("und");
-}
-
-function isNearCopiedFingerprintText(candidate, reference) {
-  const candidateLength = [...candidate].length;
-  const referenceLength = [...reference].length;
-  if (candidateLength < 16 || referenceLength < 16) return false;
-  const lengthTolerance = Math.max(2, Math.floor(candidateLength / 12));
-  if (Math.abs(candidateLength - referenceLength) > lengthTolerance) return false;
-  return sequenceMatcherRatioAtLeast(candidate, reference, 0.94);
-}
-
-function sequenceMatcherRatioAtLeast(leftValue, rightValue, threshold) {
-  const left = [...leftValue];
-  const right = [...rightValue];
-  if (left.length + right.length === 0) return true;
-
-  const rightIndices = new Map();
-  for (const [index, character] of right.entries()) {
-    const indices = rightIndices.get(character) ?? [];
-    indices.push(index);
-    rightIndices.set(character, indices);
-  }
-  const pending = [[0, left.length, 0, right.length]];
-  let matchingCharacters = 0;
-  while (pending.length > 0) {
-    const [leftLow, leftHigh, rightLow, rightHigh] = pending.pop();
-    const [leftStart, rightStart, size] = longestContiguousMatch(
-      left,
-      rightIndices,
-      leftLow,
-      leftHigh,
-      rightLow,
-      rightHigh,
-    );
-    if (size === 0) continue;
-    matchingCharacters += size;
-    if (leftLow < leftStart && rightLow < rightStart) {
-      pending.push([leftLow, leftStart, rightLow, rightStart]);
-    }
-    if (leftStart + size < leftHigh && rightStart + size < rightHigh) {
-      pending.push([leftStart + size, leftHigh, rightStart + size, rightHigh]);
-    }
-  }
-  return (2 * matchingCharacters) / (left.length + right.length) >= threshold;
-}
-
-function longestContiguousMatch(left, rightIndices, leftLow, leftHigh, rightLow, rightHigh) {
-  let bestLeft = leftLow;
-  let bestRight = rightLow;
-  let bestSize = 0;
-  let previousLengths = new Map();
-  for (let leftIndex = leftLow; leftIndex < leftHigh; leftIndex += 1) {
-    const currentLengths = new Map();
-    for (const rightIndex of rightIndices.get(left[leftIndex]) ?? []) {
-      if (rightIndex < rightLow) continue;
-      if (rightIndex >= rightHigh) break;
-      const size = (previousLengths.get(rightIndex - 1) ?? 0) + 1;
-      currentLengths.set(rightIndex, size);
-      if (size > bestSize) {
-        bestLeft = leftIndex - size + 1;
-        bestRight = rightIndex - size + 1;
-        bestSize = size;
-      }
-    }
-    previousLengths = currentLengths;
-  }
-  return [bestLeft, bestRight, bestSize];
-}
-
-function typedIds(value) {
-  if (Array.isArray(value)) return value.flatMap(typedIds);
-  if (!value || typeof value !== "object") return [];
-  return Object.entries(value).flatMap(([key, item]) => [
-    ...(key === "id" && typeof item === "string" ? [item] : []),
-    ...typedIds(item),
-  ]);
 }
 
 function visibleTextSegments(value) {

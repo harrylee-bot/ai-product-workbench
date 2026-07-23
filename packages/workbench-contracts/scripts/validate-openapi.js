@@ -612,8 +612,15 @@ assert(JSON.stringify(schemas.PrdDocumentV2.required) === JSON.stringify([
 ]), "PrdDocumentV2 must retain the complete requirement-document structure");
 assert(literalValue(schemas.PrdDocumentV2.properties.tableOfContents.properties.title) === "目 录", "PrdDocumentV2 must retain the fixed table-of-contents title");
 assert(schemas.PrdDocumentV2.properties.tableOfContents.properties.entries.minItems === 11
-  && schemas.PrdDocumentV2.properties.tableOfContents.properties.entries.maxItems === 11,
-"PrdDocumentV2 must retain exactly 11 table-of-contents entries");
+  && schemas.PrdDocumentV2.properties.tableOfContents.properties.entries.maxItems === 61,
+"PrdDocumentV2 must retain 11 fixed table-of-contents entries and allow up to 50 additional business sections");
+const additionalPrdSections = schemas.PrdDocumentV2.properties.sections.properties.businessRequirements.properties.additionalSections;
+assert(additionalPrdSections.items.$ref === "#/components/schemas/PrdAdditionalBusinessSection"
+  && additionalPrdSections.maxItems === 50
+  && JSON.stringify(additionalPrdSections.default) === "[]",
+"PrdDocumentV2 additional business sections must default to an empty, bounded typed array");
+assert(!schemas.PrdDocumentV2.properties.sections.properties.businessRequirements.required.includes("additionalSections"),
+  "PrdDocumentV2 must accept legacy v2 input without additional business sections");
 assert(schemas.PrdDocumentV2.properties.sections.properties.introduction.properties.usageScenarios.properties.channelTable.properties.rows.minItems === 3
   && schemas.PrdDocumentV2.properties.sections.properties.introduction.properties.usageScenarios.properties.channelTable.properties.rows.maxItems === 3,
 "PrdDocumentV2 must retain exactly three canonical channel rows");

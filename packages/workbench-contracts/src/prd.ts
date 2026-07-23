@@ -447,6 +447,19 @@ export const prdTableOfContentsEntries = [
   "4. 需求安全基线要求（必填）",
 ] as const;
 
+const prdAdditionalSectionTocIndex = 9;
+export const prdAdditionalBusinessSectionLimit = 50;
+
+export function prdTableOfContentsEntriesFor(
+  additionalSectionTitles: readonly string[] = [],
+): string[] {
+  return [
+    ...prdTableOfContentsEntries.slice(0, prdAdditionalSectionTocIndex),
+    ...additionalSectionTitles,
+    ...prdTableOfContentsEntries.slice(prdAdditionalSectionTocIndex),
+  ];
+}
+
 export const prdChannelKinds = ["inApp", "wapH5", "miniProgram"] as const;
 
 export const prdChannelLabels: Record<typeof prdChannelKinds[number], string> = {
@@ -533,6 +546,13 @@ export const prdSafetyBaselineRowSchema = z.object({
 const prdV2SectionSchema = z.object({
   title: z.string().min(1).max(240),
   blocks: z.array(prdBlockSchema).min(1).max(500),
+}).strict();
+
+export const prdAdditionalBusinessSectionSchema = prdV2SectionSchema.extend({
+  title: z.string()
+    .min(5)
+    .max(240)
+    .regex(/^2\.(?:[5-9]|[1-9]\d+)\s+\S/u, "additional business section title must use 2.5+ numbering"),
 }).strict();
 
 const prdV2ForbiddenPlaceholders = [
@@ -727,7 +747,7 @@ export const prdDocumentV2Schema = z.object({
     title: z.literal("目 录"),
     entries: z.array(z.string().min(1).max(240))
       .min(prdTableOfContentsEntries.length)
-      .max(prdTableOfContentsEntries.length),
+      .max(prdTableOfContentsEntries.length + prdAdditionalBusinessSectionLimit),
   }).strict(),
   assumptions: z.array(prdAssumptionSchema).max(500),
   citations: z.array(artifactCitationSchema).max(1_000),
@@ -756,6 +776,9 @@ export const prdDocumentV2Schema = z.object({
         diagrams: z.array(prdDiagramSchema).min(2).max(2),
       }).strict(),
       acceptanceCriteria: prdV2SectionSchema.extend({ title: z.literal("2.4 验收标准") }).strict(),
+      additionalSections: z.array(prdAdditionalBusinessSectionSchema)
+        .max(prdAdditionalBusinessSectionLimit)
+        .default([]),
     }).strict(),
     degradation: z.object({
       title: z.literal("3 业务降级方案（必填）"),
@@ -776,9 +799,30 @@ export const prdDocumentV2Schema = z.object({
     addIssue(context, ["cover", "title"], "document title and cover title must equal <workOrderName>需求说明书");
   }
 
+  for (const [index, section] of document.sections.businessRequirements.additionalSections.entries()) {
+    const expectedPrefix = `2.${index + 5} `;
+    if (!section.title.startsWith(expectedPrefix)) {
+      addIssue(
+        context,
+        ["sections", "businessRequirements", "additionalSections", index, "title"],
+        `additional business section title must start with ${expectedPrefix}`,
+      );
+    }
+  }
+
+  const expectedTableOfContentsEntries = prdTableOfContentsEntriesFor(
+    document.sections.businessRequirements.additionalSections.map((section) => section.title),
+  );
+  if (document.tableOfContents.entries.length !== expectedTableOfContentsEntries.length) {
+    addIssue(
+      context,
+      ["tableOfContents", "entries"],
+      "table of contents must contain every fixed and additional business section",
+    );
+  }
   for (const [index, entry] of document.tableOfContents.entries.entries()) {
-    if (entry !== prdTableOfContentsEntries[index]) {
-      addIssue(context, ["tableOfContents", "entries", index], `table of contents entry must be ${prdTableOfContentsEntries[index]}`);
+    if (entry !== expectedTableOfContentsEntries[index]) {
+      addIssue(context, ["tableOfContents", "entries", index], `table of contents entry must be ${expectedTableOfContentsEntries[index]}`);
     }
   }
 
@@ -873,7 +917,7 @@ export const prdDocumentV2Schema = z.object({
     }
   }
 
-  const sectionEntries = [
+  const sectionEntries: Array<readonly [string, z.infer<typeof prdV2SectionSchema>]> = [
     ["background", document.sections.introduction.background],
     ["scope", document.sections.introduction.scope],
     ["usageScenarios", document.sections.introduction.usageScenarios],
@@ -881,7 +925,10 @@ export const prdDocumentV2Schema = z.object({
     ["coreRules", document.sections.businessRequirements.coreRules],
     ["flowAndPages", document.sections.businessRequirements.flowAndPages],
     ["acceptanceCriteria", document.sections.businessRequirements.acceptanceCriteria],
-  ] as const;
+    ...document.sections.businessRequirements.additionalSections.map((section, index) => (
+      [`additionalSections.${index}`, section] as const
+    )),
+  ];
   const allBlocks = sectionEntries.flatMap(([, section]) => section.blocks);
   const allIds = [
     document.documentId,
@@ -1169,6 +1216,7 @@ function prdV2BodyEvidenceSegments(
     document.sections.businessRequirements.pageLinks,
     document.sections.businessRequirements.coreRules,
     document.sections.businessRequirements.flowAndPages,
+    ...document.sections.businessRequirements.additionalSections,
   ];
   if (includeAcceptanceCriteria) {
     blockSections.push(document.sections.businessRequirements.acceptanceCriteria);
@@ -1232,7 +1280,7 @@ function isSemanticChannelTable(block: z.infer<typeof prdTableBlockSchema>): boo
 export type PrdDocumentV1 = z.infer<typeof prdDocumentV1Schema>;
 export type PrdDocumentV2 = z.infer<typeof prdDocumentV2Schema>;
 export type PrdDocument = PrdDocumentV1 | PrdDocumentV2;
-export const prdDocumentSchema: z.ZodType<PrdDocument> = z.union([
+export const prdDocumentSchema: z.ZodType<PrdDocument, z.ZodTypeDef, unknown> = z.union([
   prdDocumentV1Schema,
   prdDocumentV2Schema,
 ]);

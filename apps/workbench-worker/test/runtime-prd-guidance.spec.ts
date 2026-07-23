@@ -3,13 +3,11 @@ import { fileURLToPath } from "node:url";
 import { prdSafetyBaselineItems } from "@workbench/workbench-contracts";
 import { describe, expect, it } from "vitest";
 
-import {
-  runtimePrdResultGuidance,
-  runtimePrdResultStarter,
-} from "../src/runtime/runtime-prd-guidance.js";
+import { runtimePrdResultGuidance } from "../src/runtime/runtime-prd-guidance.js";
+import { runtimePrdResultFixture } from "./runtime-prd-result.fixture.js";
 
 const prdStructureSource = readFileSync(fileURLToPath(new URL(
-  "../../../integrations/deerflow/skills/workbench/references/requirement-doc-template/structure.md",
+  "../../../integrations/deerflow/skills/requirement-doc-template/references/structure.md",
   import.meta.url,
 )), "utf8");
 
@@ -17,17 +15,22 @@ describe("runtimePrdResultGuidance", () => {
   it("routes new PRDs to the installed v2 reference without injecting sample business content", () => {
     const guidance = runtimePrdResultGuidance(["prd"], "generate");
 
-    expect(runtimePrdResultStarter.artifacts[0]).toMatchObject({
+    expect(runtimePrdResultFixture.artifacts[0]).toMatchObject({
       kind: "prd",
       schemaVersion: 2,
       content: { protocol: "workbench.prd.v2" },
     });
-    expect(guidance).toContain("each required Runtime reference exactly once");
+    expect(guidance).toContain("each required reference exactly once in this order");
     expect(guidance).toContain(
-      "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
+      "/mnt/skills/public/requirement-doc-template/SKILL.md",
     );
+    expect(guidance).toContain(
+      "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
+    );
+    expect(guidance).toContain("Never use a filled PRD example as an authoring source");
+    expect(guidance).not.toContain("prd-runtime-result.example.json");
     expect(guidance).not.toContain("<workbench_prd_result_starter>");
-    expect(guidance).not.toContain(JSON.stringify(runtimePrdResultStarter));
+    expect(guidance).not.toContain(JSON.stringify(runtimePrdResultFixture));
   });
 
   it("keeps Worker guidance aligned with the installed requirement-document semantics", () => {
@@ -41,9 +44,9 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("不涉及 is invalid when the PRD body contains an affirmative fact");
     expect(guidance).toContain("IDs globally unique across the document and every nested IR entity");
     expect(guidance).toContain("requirement/criterion references bidirectional");
-    for (const item of prdSafetyBaselineItems) {
-      expect(prdStructureSource).toContain(`| ${item.sequence} | ${item.requirement} | ${item.scope} |`);
-    }
+    expect(prdSafetyBaselineItems).toHaveLength(21);
+    expect(prdStructureSource).toContain("Use the 21-row safety baseline table from the template");
+    expect(prdStructureSource).toContain("new API: row 17 `是`");
   });
 
   it("fails fast if an invalid mixed PRD and Prototype request reaches Worker guidance", () => {

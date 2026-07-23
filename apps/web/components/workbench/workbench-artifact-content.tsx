@@ -555,6 +555,9 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
             </div>
           </PrdV2BlockSection>
           <PrdV2BlockSection section={businessRequirements.acceptanceCriteria} />
+          {businessRequirements.additionalSections.map((section) => (
+            <PrdV2BlockSection section={section} key={section.title} />
+          ))}
         </section>
 
         <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-v2-degradation">
@@ -582,7 +585,8 @@ type PrdV2BlockSectionValue =
   | PrdDocumentV2["sections"]["businessRequirements"]["pageLinks"]
   | PrdDocumentV2["sections"]["businessRequirements"]["coreRules"]
   | PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["acceptanceCriteria"];
+  | PrdDocumentV2["sections"]["businessRequirements"]["acceptanceCriteria"]
+  | PrdDocumentV2["sections"]["businessRequirements"]["additionalSections"][number];
 
 function PrdV2BlockSection({
   children,

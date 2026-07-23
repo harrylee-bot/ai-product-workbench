@@ -25,22 +25,22 @@ import {
   runtimeThreadUuid,
   runtimeResumeValue,
 } from "../src/runtime/deerflow-runtime.adapter.js";
-import { runtimePrdResultStarter } from "../src/runtime/runtime-prd-guidance.js";
 import { PRD_RUNTIME_REFERENCE_FILES } from "../src/runtime/runtime-prd-reference-evidence.js";
 import type {
   RuntimeExecution,
   RuntimeExecutionObserver,
 } from "../src/runtime/runtime.port.js";
 import { S3RuntimeReadyBlobReader } from "../src/storage/s3-runtime-ready-blob-reader.js";
+import { runtimePrdResultFixture } from "./runtime-prd-result.fixture.js";
 
 const prdRuntimeResultExample = JSON.parse(readFileSync(new URL(
-  "../../../integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json",
+  "../../../integrations/deerflow/test-fixtures/prd-runtime-result.example.json",
   import.meta.url,
 ), "utf8")) as unknown;
 const prdRuntimeReferenceContent = new Map(PRD_RUNTIME_REFERENCE_FILES.map((reference) => [
   reference.relativePath,
   readFileSync(new URL(
-    `../../../integrations/deerflow/skills/workbench/${reference.relativePath}`,
+    `../../../integrations/deerflow/skills/${reference.relativePath}`,
     import.meta.url,
   ), "utf8"),
 ]));
@@ -440,7 +440,7 @@ function prdReferenceReadToolMessages(toolCallPrefix = "prd-reference-read") {
           name: "read_file",
           args: {
             description: `Read ${reference.relativePath}`,
-            path: `/mnt/skills/public/workbench/${reference.relativePath}`,
+            path: `/mnt/skills/public/${reference.relativePath}`,
           },
         }],
       },
@@ -648,7 +648,7 @@ describe("DeerFlow runtime adapter", () => {
 
   it("keeps raw graph nodes in provider diagnostics without publishing them as activity labels", async () => {
     const prompt = "生成一份支付 改造\n需求说明书";
-    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const prdDraft = runtimePrdResultFixture.artifacts[0]!;
     const finalState = {
       node: "lead_agent",
       messages: [
@@ -1467,7 +1467,7 @@ describe("DeerFlow runtime adapter", () => {
         submittedBody = JSON.parse(String(init.body));
         return successfulRuntimeResponse({
           runId: "external_run_prd_guidance",
-          artifacts: [runtimePrdResultStarter.artifacts[0]],
+          artifacts: [runtimePrdResultFixture.artifacts[0]],
         });
       }
       throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
@@ -1483,20 +1483,25 @@ describe("DeerFlow runtime adapter", () => {
     }), observer());
 
     const content = submittedBody?.input.messages[0]?.content ?? "";
-    expect(content).toContain("each required Runtime reference exactly once");
+    expect(content).toContain("each required reference exactly once");
     expect(content).toContain(
-      "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
+      "/mnt/skills/public/requirement-doc-template/SKILL.md",
     );
+    expect(content).toContain(
+      "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
+    );
+    expect(content).toContain("Never use a filled PRD example as an authoring source");
+    expect(content).not.toContain("prd-runtime-result.example.json");
     expect(content).toContain("regardless of the natural-language prompt");
     expect(content).toContain("only when the requirement body makes that dimension relevant");
     expect(content).toContain("不涉及 is invalid when the PRD body contains an affirmative fact");
     expect(content).not.toContain("<workbench_prd_result_starter>");
-    expect(content).not.toContain(JSON.stringify(runtimePrdResultStarter));
+    expect(content).not.toContain(JSON.stringify(runtimePrdResultFixture));
     expect(content).toMatch(/<\/workbench_prd_result_contract>\nBuild the product$/u);
   });
 
   it("keeps the Worker PRD starter aligned with the DeerFlow reference", () => {
-    expect(runtimePrdResultStarter).toEqual(runtimeResultSchema.parse(prdRuntimeResultExample));
+    expect(runtimePrdResultFixture).toEqual(runtimeResultSchema.parse(prdRuntimeResultExample));
   });
 
   it("sends the tokenless per-run Canvas declaration as an explicit configurable policy", async () => {
@@ -1736,7 +1741,7 @@ describe("DeerFlow runtime adapter", () => {
   });
 
   it("accepts the complete PRD stage sequence without applying Prototype summarizing", async () => {
-    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const prdDraft = runtimePrdResultFixture.artifacts[0]!;
     const messages = [
       { type: "human", content: "current turn" },
       ...generationStageToolMessages("collecting-prd-context", {
@@ -2615,7 +2620,7 @@ describe("DeerFlow runtime adapter", () => {
   });
 
   it("fails closed when a PRD final has no independently published checkpoint", async () => {
-    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const prdDraft = runtimePrdResultFixture.artifacts[0]!;
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = new URL(String(input));
       if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
@@ -2647,7 +2652,7 @@ describe("DeerFlow runtime adapter", () => {
   });
 
   it("rejects a PRD checkpoint before all four real generation stages complete", async () => {
-    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const prdDraft = runtimePrdResultFixture.artifacts[0]!;
     const messages = [
       { type: "human", content: "current turn" },
       ...generationStageToolMessages("collecting-prd-context", {
@@ -2688,7 +2693,7 @@ describe("DeerFlow runtime adapter", () => {
   });
 
   it("rejects a PRD checkpoint when the model did not read the pinned Runtime references", async () => {
-    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const prdDraft = runtimePrdResultFixture.artifacts[0]!;
     const messages = [
       { type: "human", content: "current turn" },
       ...generationStageToolMessages("collecting-prd-context"),

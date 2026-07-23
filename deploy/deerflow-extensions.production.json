@@ -1,6 +1,9 @@
 {
   "mcpServers": {},
   "skills": {
+    "requirement-doc-template": {
+      "enabled": true
+    },
     "workbench": {
       "enabled": true
     }

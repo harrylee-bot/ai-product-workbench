@@ -3,11 +3,11 @@ import type { Response } from "express";
 import {
   canonicalJson,
   createArtifactVersionRequestSchema,
-  prdDocumentV2Example,
   type CreateArtifactVersionRequest,
   type PrdDocument,
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import { hashRequest } from "../src/common/idempotency.js";
 import { ArtifactsController } from "../src/modules/artifacts/artifacts.controller.js";
 import { ArtifactsService } from "../src/modules/artifacts/artifacts.service.js";

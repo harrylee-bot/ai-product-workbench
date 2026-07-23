@@ -5,8 +5,9 @@ import {
   prdDocumentSchema,
   prdDocumentV1Schema,
   prdDocumentV2Schema,
-  prdDocumentV2Example,
+  prdTableOfContentsEntriesFor,
 } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import { describe, expect, it } from "vitest";
 
 import { prdDocument } from "../../../components/workbench/workbench-prd-test-fixture";
@@ -40,6 +41,42 @@ describe("PRD Tiptap projection", () => {
     expect(prdDocumentV2Schema.parse(result)).toEqual(source);
     expect(editor.getJSON().content?.some((node) => node.type === "prdFixedBlock")).toBe(true);
     editor.destroy();
+  });
+
+  it("round-trips and edits PRD v2 additional business sections with a synchronized TOC", () => {
+    const source = structuredClone(prdDocumentV2Example);
+    source.sections.businessRequirements.additionalSections = [{
+      title: "2.5 配置规则",
+      blocks: [{
+        id: "additional-config-rule",
+        type: "paragraph",
+        content: [{ type: "text", text: "补充业务配置规则及对应结果。", marks: [] }],
+      }],
+    }];
+    source.tableOfContents.entries = prdTableOfContentsEntriesFor(["2.5 配置规则"]);
+    const projected = prdDocumentToTiptap(source);
+
+    expect(findJsonNode(projected, (node) => (
+      node.attrs?.sectionKey === "v2:businessRequirements.additionalSections.0"
+    ))).not.toBeNull();
+    replaceNodeText(
+      projected,
+      ["sections", "businessRequirements", "additionalSections", 0, "title"],
+      "2.5 结果规则",
+    );
+    replaceNodeText(
+      projected,
+      ["sections", "businessRequirements", "additionalSections", 0, "blocks", 0, "content"],
+      "补充后的业务结果规则。",
+    );
+
+    const result = prdDocumentV2Schema.parse(applyTiptapToPrdDocument(source, projected));
+
+    expect(result.sections.businessRequirements.additionalSections[0]).toMatchObject({
+      title: "2.5 结果规则",
+      blocks: [{ content: [{ type: "text", text: "补充后的业务结果规则。", marks: [] }] }],
+    });
+    expect(result.tableOfContents.entries[9]).toBe("2.5 结果规则");
   });
 
   it("edits allowed PRD v2 fields while preserving its fixed template structures", () => {

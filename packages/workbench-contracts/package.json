@@ -23,6 +23,11 @@
       "types": "./dist/prototype.d.ts",
       "import": "./dist/prototype.js",
       "default": "./dist/prototype.js"
+    },
+    "./test-fixtures": {
+      "types": "./dist/prd-example.d.ts",
+      "import": "./dist/prd-example.js",
+      "default": "./dist/prd-example.js"
     }
   },
   "files": [

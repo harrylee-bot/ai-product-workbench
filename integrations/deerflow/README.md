@@ -5,8 +5,8 @@
 ## 生产形态
 
 - Runtime assistant 固定为 DeerFlow 内置 `lead_agent`。
-- 本目录的 `skills/workbench/` 必须随 DeerFlow 镜像或部署，以只读方式出现在 `DEER_FLOW_SKILLS_PATH/public/workbench/`。
-- `workbench` 必须被 DeerFlow 识别为已启用的 `public` skill；不得安装到某个用户的 `skills/custom/` 后宣称全租户可用。
+- 本目录的 `skills/workbench/` 与原样 vendored `skills/requirement-doc-template/` 必须随 DeerFlow 镜像或部署，以只读方式出现在各自的 `DEER_FLOW_SKILLS_PATH/public/` 子目录。
+- `workbench` 与 `requirement-doc-template` 必须被 DeerFlow 识别为已启用的 `public` skill；不得安装到某个用户的 `skills/custom/` 后宣称全租户可用。
 - 不使用 DeerFlow 的 legacy shared agent/skill fallback。Workbench 用户仍通过 `X-DeerFlow-Owner-User-Id` 获得独立的 Thread、上传和运行上下文。
 - Runtime Worker 只持有与 DeerFlow `DEER_FLOW_INTERNAL_AUTH_TOKEN` 对应的服务令牌。该令牌不具备管理员权限。
 - DeerFlow 部署必须注册本仓库 `runtime-tools/` 中 5 个核心受信工具：`workbench_artifact_draft_publish`、`workbench_generation_stage_update`、`workbench_prototype_patch_publish`、`workbench_knowledge_retrieve`、`workbench_runtime_result_submit`。Draft 和 Stage 对 PRD/Prototype Run 可见，Patch 仅对 Prototype Run 可见；它们把真实草稿、工作阶段与单屏 typed patch 保存为绑定 Run、RuntimeAttempt 与 `tool_call_id` 的 ToolMessage artifact。时间值只控制前端动画时长，不控制阶段触发。Patch 只允许稳定 Prototype ID 操作，不接受 selector/DOM mutation、共享 token/asset/variable 更改或模型自报的 scope/source ID。Result submit 工具使用随仓库生成的单文件 Zod bundle，在同一 Run 内返回精确 issue path，并把唯一成功结果保存为 ToolMessage artifact；Worker 只接受当前用户轮次的该 artifact 并再次执行相同合同。完整 Knowledge capability 只能由 DeerFlow request-scoped `runtime.context.secrets.WORKBENCH_KNOWLEDGE_CAPABILITY` 注入；不得放入 `configurable`，也不得写入 message/state、模型参数、checkpoint、trace、事件、日志或工具结果。模型可见 `<workbench_context>` 只包含 tokenless reference。Knowledge 工具的 `Idempotency-Key` 只由稳定 `tool_call_id` 加固定 v1 域前缀后取 SHA-256，必须跨 capability token 轮换保持不变，且不得包含 token、查询正文或原始 tool call id。未注册 Knowledge 工具或所用 DeerFlow commit 不具备 request-scoped secret 隔离与持久化脱敏时，带 Knowledge Release 的 Run 必须 fail closed。
@@ -19,6 +19,9 @@
 ```text
 <repository-root>/integrations/deerflow/skills/workbench/
   -> derived image: /app/skills/public/workbench/
+
+<repository-root>/integrations/deerflow/skills/requirement-doc-template/
+  -> derived image: /app/skills/public/requirement-doc-template/
 
 <repository-root>/integrations/deerflow/runtime-tools/deerflow_workbench_tools/
   -> derived image: /app/backend/deerflow_workbench_tools/
@@ -40,9 +43,9 @@ Source patch manifest 同时固定 canonical upstream repository、upstream comm
 
 编排固定以下边界：
 
-- 镜像内的上游 skills 保持不可变；本仓库 `integrations/deerflow/skills/workbench` 在派生镜像构建时嵌入 `/app/skills/public/workbench`。该受控 public 根只有 `workbench`，避免继承旧 custom skill 或服务器手工副本。
+- 镜像内的上游 skills 保持不可变；本仓库的 `workbench` 与 canonical `requirement-doc-template` 在派生镜像构建时嵌入各自的 `/app/skills/public/` 子目录。受控 public 根只包含这两个 skill，避免继承旧 custom skill 或服务器手工副本。
 - `runtime-tools/deerflow_workbench_tools` 在派生镜像构建时嵌入 `/app/backend/deerflow_workbench_tools`。当前包没有独立 `pyproject.toml`，而 DeerFlow 启动时已把 `/app/backend` 放入 Python import path，因此生产形态不执行临时 `pip install`，也不挂载主机源码。
-- `deploy/deerflow-extensions.production.json` 只显式启用 public `workbench`，不继承旧 custom skill、旧 MCP server 或管理员 bootstrap 状态。
+- `deploy/deerflow-extensions.production.json` 只显式启用 public `workbench` 与 canonical `requirement-doc-template`，不继承旧 custom skill、旧 MCP server 或管理员 bootstrap 状态。
 - Gateway 同时加入受控 provider egress 与 Workbench internal network，内部别名固定为 `deerflow`；2026 只发布到宿主 `127.0.0.1` 供运维探测。
 - `DEER_FLOW_AUTH_DISABLED=0` 且环境固定为 production；Runtime 服务令牌只从 `WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN` 注入。
 

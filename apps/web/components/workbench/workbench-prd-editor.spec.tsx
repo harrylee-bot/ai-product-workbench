@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts";
+import {
+  prdTableOfContentsEntriesFor,
+} from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -60,5 +63,29 @@ describe("WorkbenchPrdArtifactEditor", () => {
     expect(await screen.findByRole("heading", { name: "示例工单需求说明书" })).not.toBeNull();
     expect(rendered.container.querySelectorAll("[data-prd-fixed-block]").length).toBeGreaterThan(10);
     expect((screen.getByRole("button", { name: "保存 PRD" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("renders an additional PRD v2 business section in the editor", async () => {
+    const document = structuredClone(prdDocumentV2Example);
+    document.sections.businessRequirements.additionalSections = [{
+      title: "2.5 配置规则",
+      blocks: [{
+        id: "additional-config-rule",
+        type: "paragraph",
+        content: [{ type: "text", text: "补充业务配置规则及对应结果。", marks: [] }],
+      }],
+    }];
+    document.tableOfContents.entries = prdTableOfContentsEntriesFor(["2.5 配置规则"]);
+
+    render(
+      <WorkbenchPrdArtifactEditor
+        document={document}
+        onDocumentCommit={vi.fn(async () => undefined)}
+        reference={{ artifactId: "artifact-1", artifactVersionId: "version-v2-extra", projectId: "project-1" }}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "2.5 配置规则" })).not.toBeNull();
+    expect(screen.getByText("补充业务配置规则及对应结果。")).not.toBeNull();
   });
 });

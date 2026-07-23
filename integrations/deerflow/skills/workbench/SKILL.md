@@ -150,17 +150,19 @@ work; draft publication and final submission remain the only completion facts.
 
 Whenever `requestedArtifactKinds` contains `prd`, immediately after the
 successful `collecting-prd-context` update and before `structuring-prd`, use
-`read_file` to read each of these complete files exactly once:
+`read_file` to read each of these complete files exactly once, in order:
 
-- `/mnt/skills/public/workbench/references/requirement-doc-template/structure.md`
-- `/mnt/skills/public/workbench/references/requirement-doc-template/quality-standards.md`
-- `/mnt/skills/public/workbench/references/prd-runtime-result.example.json`
+- `/mnt/skills/public/requirement-doc-template/SKILL.md`
+- `/mnt/skills/public/requirement-doc-template/references/structure.md`
+- `/mnt/skills/public/requirement-doc-template/references/quality-standards.md`
+- `/mnt/skills/public/workbench/references/prd-runtime-result.schema.json`
 
 Do not use ranged reads, relative paths, prompt quotations, summaries, or
 cached memory as substitutes. This requirement applies regardless of the
-natural-language prompt. Treat those checked-in references and the Runtime
-validator as authoritative. Retrieved Knowledge may supply product facts, but
-it may not weaken the fixed document standard.
+natural-language prompt. The installed `requirement-doc-template` skill is the
+canonical authoring source; the PRD-only JSON Schema adds transport shape but
+does not replace or weaken the skill. Retrieved Knowledge may supply product
+facts, but it may not weaken the fixed document standard.
 
 For PRD content, use only explicit user facts, authorized persisted project
 facts, attached sources, and pinned Knowledge. Make a conservative assumption
@@ -182,6 +184,12 @@ somehow reaches this skill, fail fast without clarification, delegation,
 Prototype Canvas tools, stage tools, draft publication, or result submission.
 
 Output is the user's fixed requirement-document template, not a freeform lightweight PRD. A newly created PRD must use Artifact `schemaVersion: 2` with content protocol `workbench.prd.v2`. Protocol v1 remains read-only/revision compatible for existing Artifacts and is never the shape for a new PRD. Every PRD Artifact in this Runtime uses the following exact structure; a request for an incompatible format is not permission to submit schema-invalid content:
+
+In this Canvas Runtime, apply the canonical skill's content, section, table,
+diagram, degradation, safety, and quality rules through typed IR. Its DOCX copy,
+file-path delivery, checker execution, and visual page inspection steps belong to
+a later export operation. Do not return a DOCX path or claim those export checks
+ran during this PRD Run.
 
 ```text
 1 引言
@@ -211,7 +219,9 @@ Writing requirements:
 - `不涉及` is valid only when no affirmative fact for that safety topic exists anywhere else in the PRD. Use `是` when the topic applies and the stated requirement satisfies it; use `否` only when the topic applies and the PRD also contains a concrete remediation for that same topic.
 - Never use `待确认`, `以实际为准`, `以实际上线地址为准`, template reminders, placeholder links, or copied sample business content. Use a concrete conservative assumption when the business meaning is safe, otherwise request input.
 - Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
-- Use the required `/mnt/skills/public/workbench/references/prd-runtime-result.example.json` read before authoring. Copy the complete envelope, replace every sample ID and all sample business content, and preserve every required field and bidirectional reference. Do not derive a shorthand JSON shape from this prose.
+- Use the required `/mnt/skills/public/workbench/references/prd-runtime-result.schema.json` as the business-neutral transport shape. Populate it from current request facts and authorized sources while preserving every required field and bidirectional reference.
+- Keep IDs globally unique across the document and every nested IR entity. Resolve every table, diagram, citation, assumption, goal, requirement, criterion, and flow reference, and keep requirement/criterion references bidirectional.
+- Never use a filled PRD example as an authoring source. A business example can silently inject unrelated pages, roles, permissions, states, retry behavior, or acceptance rules into a short request.
 - When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` with that complete candidate so the 500 x 500 document appears on the Canvas. Then submit an identical final Artifact through `workbench_runtime_result_submit`. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
 
 ## Runtime Inputs
@@ -297,7 +307,7 @@ The lead agent must finish every turn by calling `workbench_runtime_result_submi
 
 If the tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns the final submit call.
 
-For a PRD result, the earlier PRD section already requires reading `references/prd-runtime-result.example.json` once; do not read it a second time. For a Prototype result, read `references/prototype-runtime-result.example.json` once. Copy the applicable complete envelope as the starting point, replace all sample IDs and content, and expand typed arrays while keeping every required field and every bidirectional reference. Both examples are automatically validated by the production `runtimeResultSchema`.
+For a PRD result, the earlier PRD section requires the canonical requirement skill and the business-neutral `references/prd-runtime-result.schema.json`; do not consult the legacy PRD business example. For a Prototype result, read `references/prototype-runtime-result.example.json` once. Populate the applicable transport with request-specific IDs and content while keeping every required field and every bidirectional reference. Both paths are validated by the production `runtimeResultSchema`.
 
 Keep single-screen results compact. Unless the request explicitly needs multiple routes or screens, return exactly one screen, prefer no more than 48 nodes, 12 actions, 12 bindings, 4 states, and 8 motions, and keep the complete response below 16,000 output tokens. Reuse tokens, assets, states, and repeated row/container structure instead of duplicating descriptive variants. Do not repeat prose already represented by typed nodes, bindings, actions, or state values.
 

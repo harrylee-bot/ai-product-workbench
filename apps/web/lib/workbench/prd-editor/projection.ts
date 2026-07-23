@@ -3,6 +3,7 @@ import {
   prdChannelLabels,
   prdSafetyBaselineItems,
   prdSectionKeys,
+  prdTableOfContentsEntriesFor,
   type PrdBlock,
   type PrdDocument,
   type PrdDocumentV1,
@@ -88,6 +89,21 @@ function prdDocumentV2ToTiptap(document: PrdDocumentV2): JSONContent {
         fixedBlock(diagramText(diagram), "diagram")
       ))),
       section("v2:businessRequirements.acceptanceCriteria"),
+      ...document.sections.businessRequirements.additionalSections.map((additionalSection, index) => {
+        const key = `v2:businessRequirements.additionalSections.${index}`;
+        const projection = byKey.get(key);
+        if (!projection) throw new Error(`Missing PRD v2 editor section: ${key}`);
+        return sectionToTiptap(
+          projection,
+          stringField(
+            [...projection.path, "title"],
+            additionalSection.title,
+            "section-title",
+            "heading",
+            2,
+          ),
+        );
+      }),
       {
         type: "prdSection",
         attrs: { sectionKey: "v2:degradation", dataId: "section-v2-degradation" },
@@ -144,6 +160,9 @@ export function applyTiptapToPrdDocument(
   if (next.protocol === "workbench.prd.v2") {
     normalizeV2Title(next);
     rebuildSectionBlocks(v2SectionProjections(next), content);
+    next.tableOfContents.entries = prdTableOfContentsEntriesFor(
+      next.sections.businessRequirements.additionalSections.map((section) => section.title),
+    );
     next.sections.degradation.applicable = inlinePlainText(next.sections.degradation.content).trim() !== "不涉及";
     return next;
   }
@@ -223,6 +242,11 @@ function v2SectionProjections(document: PrdDocumentV2): PrdSectionProjection[] {
       path: ["sections", "businessRequirements", "acceptanceCriteria"],
       section: document.sections.businessRequirements.acceptanceCriteria,
     },
+    ...document.sections.businessRequirements.additionalSections.map((section, index) => ({
+      key: `v2:businessRequirements.additionalSections.${index}`,
+      path: ["sections", "businessRequirements", "additionalSections", index],
+      section,
+    })),
   ];
 }
 
@@ -772,6 +796,11 @@ function isV2EditablePath(path: readonly PathPart[]): boolean {
   if (pathEquals(path, ["title"])) return true;
   if (pathEquals(path, ["sections", "businessRequirements", "summary"])) return true;
   if (pathEquals(path, ["sections", "degradation", "content"])) return true;
+  if (
+    pathStartsWith(path, ["sections", "businessRequirements", "additionalSections"])
+    && typeof path[3] === "number"
+    && (path[4] === "title" || path[4] === "blocks")
+  ) return true;
   return [
     ["sections", "introduction", "background", "blocks"],
     ["sections", "introduction", "scope", "blocks"],

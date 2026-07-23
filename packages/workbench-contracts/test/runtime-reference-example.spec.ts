@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -11,7 +12,7 @@ const prototypeExamplePath = fileURLToPath(new URL(
 ));
 const prototypeExampleSource = readFileSync(prototypeExamplePath, "utf8");
 const prdExamplePath = fileURLToPath(new URL(
-  "../../../integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json",
+  "../../../integrations/deerflow/test-fixtures/prd-runtime-result.example.json",
   import.meta.url,
 ));
 const prdExampleSource = readFileSync(prdExamplePath, "utf8");
@@ -22,34 +23,20 @@ const workbenchSkillPath = fileURLToPath(new URL(
 const workbenchSkillSource = readFileSync(workbenchSkillPath, "utf8");
 const normalizedWorkbenchSkillSource = workbenchSkillSource.replace(/\s+/gu, " ");
 const prdStructurePath = fileURLToPath(new URL(
-  "../../../integrations/deerflow/skills/workbench/references/requirement-doc-template/structure.md",
+  "../../../integrations/deerflow/skills/requirement-doc-template/references/structure.md",
   import.meta.url,
 ));
 const prdStructureSource = readFileSync(prdStructurePath, "utf8");
 const prdQualityPath = fileURLToPath(new URL(
-  "../../../integrations/deerflow/skills/workbench/references/requirement-doc-template/quality-standards.md",
+  "../../../integrations/deerflow/skills/requirement-doc-template/references/quality-standards.md",
   import.meta.url,
 ));
 const prdQualitySource = readFileSync(prdQualityPath, "utf8");
-const prdSourceProfilePath = fileURLToPath(new URL(
-  "../../../integrations/deerflow/skills/workbench/references/requirement-doc-template/source-profile.json",
+const prdTransportSchemaPath = fileURLToPath(new URL(
+  "../../../integrations/deerflow/skills/workbench/references/prd-runtime-result.schema.json",
   import.meta.url,
 ));
-const prdSourceProfile = JSON.parse(readFileSync(prdSourceProfilePath, "utf8")) as {
-  protocol: string;
-  sourceSkill: { name: string; files: Array<{ path: string; sha256: string }> };
-  runtimeAdaptation: { format: string; semanticAnchors: string[] };
-};
-const prdFingerprintPath = fileURLToPath(new URL(
-  "../../../integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
-  import.meta.url,
-));
-const prdFingerprint = JSON.parse(readFileSync(prdFingerprintPath, "utf8")) as {
-  protocol: string;
-  sourceDocumentSha256: string;
-  businessText: string[];
-  sampleIds: string[];
-};
+const prdTransportSchemaSource = readFileSync(prdTransportSchemaPath, "utf8");
 
 describe("DeerFlow PRD Runtime Result reference", () => {
   it("stays compact and valid against the production Runtime result schema", () => {
@@ -67,9 +54,11 @@ describe("DeerFlow PRD Runtime Result reference", () => {
   });
 
   it("loads the versioned template references without embedding a second starter", () => {
-    expect(workbenchSkillSource).toContain("references/requirement-doc-template/structure.md");
-    expect(workbenchSkillSource).toContain("references/requirement-doc-template/quality-standards.md");
-    expect(workbenchSkillSource).toContain("references/prd-runtime-result.example.json");
+    expect(workbenchSkillSource).toContain("/mnt/skills/public/requirement-doc-template/SKILL.md");
+    expect(workbenchSkillSource).toContain("/mnt/skills/public/requirement-doc-template/references/structure.md");
+    expect(workbenchSkillSource).toContain("/mnt/skills/public/requirement-doc-template/references/quality-standards.md");
+    expect(workbenchSkillSource).toContain("references/prd-runtime-result.schema.json");
+    expect(workbenchSkillSource).not.toContain("prd-runtime-result.example.json");
     expect(workbenchSkillSource).not.toContain("prd-runtime-inline-example");
     expect(workbenchSkillSource).not.toContain('"protocol":"workbench.prd.v1"');
     expect(workbenchSkillSource).not.toContain("produce a complete `workbench.prd.v1`");
@@ -87,53 +76,46 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(normalizedWorkbenchSkillSource).toContain("returning `ok:true`");
   });
 
-  it("tracks the exact local requirement skill snapshot and its runtime semantics", () => {
-    expect(prdSourceProfile).toMatchObject({
-      protocol: "workbench.requirement-doc-template-source-profile.v1",
-      sourceSkill: { name: "requirement-doc-template" },
-      runtimeAdaptation: { format: "workbench.prd.v2" },
-    });
-    expect(prdSourceProfile.sourceSkill.files).toHaveLength(5);
-    for (const file of prdSourceProfile.sourceSkill.files) {
-      expect(file.sha256).toMatch(/^[0-9a-f]{64}$/u);
-    }
-    const runtimeAuthoringSource = [
-      workbenchSkillSource,
-      prdStructureSource,
-      prdQualitySource,
-    ].join("\n");
-    for (const anchor of prdSourceProfile.runtimeAdaptation.semanticAnchors) {
-      expect(runtimeAuthoringSource).toContain(anchor);
+  it("vendors the complete canonical requirement-document skill byte for byte", () => {
+    const files = [
+      ["SKILL.md", "f59cf65306078cdcdc7cc98486860a47f20ff80b81f0a849af381494183c78e1"],
+      ["agents/openai.yaml", "f93eee46ee2b76146c7d2b212f6c26da3c16b28d566eac0a3158c92f9425afc0"],
+      ["assets/requirement-template.docx", "3070777f5c624be731bd264f72955ca4d15d5ac68d20867318ce8c0081789ebf"],
+      ["references/quality-standards.md", "45e76fe4c178e8609cd1dd3c4a6c9642c280a219b0470295b3204e469a6b4168"],
+      ["references/structure.md", "2b6bc148797504455de52dec18b18be0d66f13e2af6f0381a5886427d7e7c6eb"],
+      ["scripts/docx_quality_check.py", "722aa28067ef0d34233191275440285dcee68b0764eb55d65f5bec8e16b8cf21"],
+    ] as const;
+    for (const [relativePath, expectedDigest] of files) {
+      const source = readFileSync(fileURLToPath(new URL(
+        `../../../integrations/deerflow/skills/requirement-doc-template/${relativePath}`,
+        import.meta.url,
+      )));
+      expect(createHash("sha256").update(source).digest("hex")).toBe(expectedDigest);
     }
   });
 
-  it("fingerprints the complete sample business body and nested sample IDs", () => {
-    expect(prdFingerprint.protocol).toBe("workbench.prd-reference-fingerprint.v1");
-    expect(prdFingerprint.sourceDocumentSha256).toMatch(/^[0-9a-f]{64}$/u);
-    expect(prdFingerprint.businessText.length).toBeGreaterThanOrEqual(30);
-    expect(prdFingerprint.sampleIds.length).toBeGreaterThanOrEqual(60);
-    expect(prdFingerprint.businessText).toContain("页面入口：产品工作台 > 当前项目 > 任务页面。");
-    expect(prdFingerprint.businessText).toContain("无任务权限的用户不可创建任务；合法请求在处理中禁用重复提交，同一请求只形成一条任务记录。");
-    expect(prdFingerprint.sampleIds).toContain("requirement-main");
-    expect(prdFingerprint.sampleIds).toContain("acceptance-recovery");
+  it("keeps the filled test fixture outside model-visible and production validation paths", () => {
+    expect(prdExamplePath).toContain("integrations/deerflow/test-fixtures/");
+    expect(workbenchSkillSource).not.toContain("任务页面");
+    expect(prdTransportSchemaSource).not.toContain("任务页面");
+    expect(prdTransportSchemaSource).not.toContain("提交任务");
+    expect(prdTransportSchemaSource).not.toContain("prd-example");
   });
 
   it("keeps every safety-baseline meaning model-visible", () => {
     expect(prdSafetyBaselineItems).toHaveLength(21);
-    for (const item of prdSafetyBaselineItems) {
-      expect(prdStructureSource).toContain(`| ${item.sequence} | ${item.requirement} | ${item.scope} |`);
-    }
-    expect(prdStructureSource).toContain("`是`: the topic applies");
-    expect(prdStructureSource).toContain("`否`: the topic applies but is not yet compliant");
-    expect(prdStructureSource).toContain("`不涉及`: no affirmative fact");
-    expect(prdQualitySource).toContain("A positive body fact and `不涉及` are contradictory and invalid");
+    expect(prdStructureSource).toContain("Use the 21-row safety baseline table from the template");
+    expect(prdStructureSource).toContain("public/user-facing page: row 2 `是`");
+    expect(prdStructureSource).toContain("new API: row 17 `是`");
+    expect(prdQualitySource).toContain("Keep the standard 21-row safety baseline table");
+    expect(prdQualitySource).toContain("Determine each value from explicit requirement facts outside the safety table");
   });
 
   it("publishes the validator's typed IR invariants to the authoring model", () => {
-    expect(prdStructureSource).toContain("globally unique across the whole document");
-    expect(prdStructureSource).toContain("requirement-to-criterion references are bidirectional");
-    expect(prdStructureSource).toContain("Every diagram edge references declared nodes");
-    expect(prdStructureSource).toContain("A revision retains `documentId`");
+    expect(workbenchSkillSource).toContain("globally unique across the document");
+    expect(workbenchSkillSource).toContain("requirement/criterion references bidirectional");
+    expect(prdTransportSchemaSource).toContain('"PrdDiagramEdge"');
+    expect(workbenchSkillSource).toContain("A revision returns the complete next PRD/Prototype document");
   });
 });
 

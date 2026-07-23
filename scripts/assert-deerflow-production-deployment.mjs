@@ -123,6 +123,7 @@ for (const requiredLine of [
   "COPY --from=validator-runtime /usr/local/bin/node /usr/local/bin/node",
   "COPY --from=validator-runtime /usr/local/LICENSE /usr/share/licenses/node/LICENSE",
   "COPY integrations/deerflow/skills/workbench/ /app/skills/public/workbench/",
+  "COPY integrations/deerflow/skills/requirement-doc-template/ /app/skills/public/requirement-doc-template/",
   "COPY integrations/deerflow/runtime-tools/deerflow_workbench_tools/ /app/backend/deerflow_workbench_tools/",
   `COPY integrations/deerflow/source-patches/${patchCommit}/ /opt/workbench/deerflow/source-patch/`,
   "USER root",
@@ -254,16 +255,20 @@ assert(
 );
 const prdReferencePins = [
   [
-    "/mnt/skills/public/workbench/references/requirement-doc-template/structure.md",
-    "b82b551cf748db5e55cd703a4f953b344d5535b6d80ff9f032b1a0d983a24976",
+    "/mnt/skills/public/requirement-doc-template/SKILL.md",
+    "f59cf65306078cdcdc7cc98486860a47f20ff80b81f0a849af381494183c78e1",
   ],
   [
-    "/mnt/skills/public/workbench/references/requirement-doc-template/quality-standards.md",
-    "ef2813d4d0b791f2783ab50f379712960f2c40e1f967b13cfea92d318f289315",
+    "/mnt/skills/public/requirement-doc-template/references/structure.md",
+    "2b6bc148797504455de52dec18b18be0d66f13e2af6f0381a5886427d7e7c6eb",
   ],
   [
-    "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
-    "de8e0c1a7824eb3d42369ca498eca53c6e5c4df1f71bf30ecf356d8d6ac9f2ba",
+    "/mnt/skills/public/requirement-doc-template/references/quality-standards.md",
+    "45e76fe4c178e8609cd1dd3c4a6c9642c280a219b0470295b3204e469a6b4168",
+  ],
+  [
+    "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
+    "bd2f09b81bf8538a33ccf9eb0942d364c23dedf071979dad991fe09812f9e747",
   ],
 ];
 assert(
@@ -376,7 +381,7 @@ assert(
     && patchContractTestSource.includes("test_async_knowledge_tool_execution_is_fail_closed")
     && patchContractTestSource.includes("test_async_non_canvas_tool_is_not_affected_by_malformed_policy")
     && patchContractTestSource.includes(
-      "test_prd_gate_allows_three_ordered_reference_reads_in_one_batch",
+      "test_prd_gate_allows_ordered_reference_reads_in_one_batch",
     )
     && patchContractTestSource.includes(
       "test_prd_gate_enforces_stage_draft_final_sequence_and_allows_correction",
@@ -433,25 +438,38 @@ for (const requiredPreflightText of [
 
 assertDeepEqual(Object.keys(extensions).sort(), ["mcpServers", "skills"], "production extensions may contain only MCP and skill state");
 assertDeepEqual(extensions.mcpServers, {}, "production extensions must not inherit legacy MCP servers");
-assertDeepEqual(extensions.skills, { workbench: { enabled: true } }, "only the public workbench skill may be explicitly enabled");
+assertDeepEqual(extensions.skills, {
+  "requirement-doc-template": { enabled: true },
+  workbench: { enabled: true },
+}, "only the canonical requirement-document and workbench skills may be explicitly enabled");
 assertDeepEqual(
   listShippedPublicSkills(),
-  ["workbench"],
-  "the mounted production public-skill root may contain only workbench",
+  ["requirement-doc-template", "workbench"],
+  "the production public-skill root must contain only the canonical requirement-document and workbench skills",
 );
+for (const [relativePath, expectedDigest] of [
+  ["SKILL.md", "f59cf65306078cdcdc7cc98486860a47f20ff80b81f0a849af381494183c78e1"],
+  ["agents/openai.yaml", "f93eee46ee2b76146c7d2b212f6c26da3c16b28d566eac0a3158c92f9425afc0"],
+  ["assets/requirement-template.docx", "3070777f5c624be731bd264f72955ca4d15d5ac68d20867318ce8c0081789ebf"],
+  ["references/quality-standards.md", "45e76fe4c178e8609cd1dd3c4a6c9642c280a219b0470295b3204e469a6b4168"],
+  ["references/structure.md", "2b6bc148797504455de52dec18b18be0d66f13e2af6f0381a5886427d7e7c6eb"],
+  ["scripts/docx_quality_check.py", "722aa28067ef0d34233191275440285dcee68b0764eb55d65f5bec8e16b8cf21"],
+]) {
+  const source = readFileSync(new URL(
+    `integrations/deerflow/skills/requirement-doc-template/${relativePath}`,
+    root,
+  ));
+  assert(
+    sha256(source) === expectedDigest,
+    `vendored requirement-doc-template file does not match the canonical source: ${relativePath}`,
+  );
+}
 assert(
   existsSync(new URL(
     "integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs",
     root,
   )),
   "the exact Runtime result validator bundle must be shipped",
-);
-assert(
-  existsSync(new URL(
-    "integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
-    root,
-  )),
-  "the generated PRD reference fingerprint must be shipped",
 );
 
 assertDeepEqual(fragment, {

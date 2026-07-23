@@ -59,16 +59,20 @@ PRD_STAGE_SEQUENCE = (
 )
 PRD_REFERENCE_FILES = (
     (
-        "/mnt/skills/public/workbench/references/requirement-doc-template/structure.md",
-        "b82b551cf748db5e55cd703a4f953b344d5535b6d80ff9f032b1a0d983a24976",
+        "/mnt/skills/public/requirement-doc-template/SKILL.md",
+        "f59cf65306078cdcdc7cc98486860a47f20ff80b81f0a849af381494183c78e1",
     ),
     (
-        "/mnt/skills/public/workbench/references/requirement-doc-template/quality-standards.md",
-        "ef2813d4d0b791f2783ab50f379712960f2c40e1f967b13cfea92d318f289315",
+        "/mnt/skills/public/requirement-doc-template/references/structure.md",
+        "2b6bc148797504455de52dec18b18be0d66f13e2af6f0381a5886427d7e7c6eb",
     ),
     (
-        "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
-        "de8e0c1a7824eb3d42369ca498eca53c6e5c4df1f71bf30ecf356d8d6ac9f2ba",
+        "/mnt/skills/public/requirement-doc-template/references/quality-standards.md",
+        "45e76fe4c178e8609cd1dd3c4a6c9642c280a219b0470295b3204e469a6b4168",
+    ),
+    (
+        "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
+        "bd2f09b81bf8538a33ccf9eb0942d364c23dedf071979dad991fe09812f9e747",
     ),
 )
 RUNTIME_ARTIFACT_KINDS = (
@@ -89,7 +93,7 @@ _CANVAS_BLOCK_CODE = "WORKBENCH_CANVAS_TOOL_NOT_DECLARED"
 _ARTIFACT_PROGRESS_BLOCK_CODE = "WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED"
 _PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
 _KNOWLEDGE_BLOCK_CODE = "WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"
-_PRD_REFERENCE_ROOT = "/mnt/skills/public/workbench/"
+_PRD_REFERENCE_ROOT = "/mnt/skills/public/"
 _PRD_REFERENCE_RELATIVE_PATHS = tuple(
     path.removeprefix(_PRD_REFERENCE_ROOT) for path, _digest in PRD_REFERENCE_FILES
 )

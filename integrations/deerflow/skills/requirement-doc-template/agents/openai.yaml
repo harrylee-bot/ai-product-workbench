@@ -1,0 +1,4 @@
+interface:
+  display_name: "需求文档模板"
+  short_description: "严格按固定Word模板与规范要求生成中文需求说明书"
+  default_prompt: "Use $requirement-doc-template to draft or complete a Chinese requirement document in my standard Word format and quality rules."

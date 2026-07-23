@@ -4,7 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import {
   prdSafetyBaselineIntro,
   prdSafetyBaselineItems,
-  prdTableOfContentsEntries,
+  prdTableOfContentsEntriesFor,
   type PrdBlock,
   type PrdDocument,
   type PrdDocumentV1,
@@ -332,6 +332,7 @@ describe("Workbench Artifact content", () => {
       "2.2 核心业务规则/功能说明",
       "2.3 核心流程/状态/页面要求",
       "2.4 验收标准",
+      "2.5 支付结果说明",
       "3 业务降级方案（必填）",
       "4 需求安全基线要求（必填）",
     ]) {
@@ -346,6 +347,7 @@ describe("Workbench Artifact content", () => {
     expect(rendered.container.querySelectorAll("[data-prd-diagram]")).toHaveLength(2);
     expect(rendered.container.querySelectorAll("[data-prd-diagram-node]")).toHaveLength(8);
     expect(rendered.container.querySelectorAll("[data-prd-diagram-edge]")).toHaveLength(6);
+    expect(screen.getByText("支付结果页展示订单编号、支付状态和后续操作入口。")).not.toBeNull();
     const safetyRows = rendered.container.querySelectorAll("[data-prd-safety-row]");
     expect(safetyRows).toHaveLength(prdSafetyBaselineItems.length);
     expect(screen.getByText("范围")).not.toBeNull();
@@ -1110,7 +1112,7 @@ function prdV2Document(): PrdDocumentV2 {
     }],
     tableOfContents: {
       title: "目 录",
-      entries: [...prdTableOfContentsEntries],
+      entries: prdTableOfContentsEntriesFor(["2.5 支付结果说明"]),
     },
     assumptions: [],
     citations: [],
@@ -1215,6 +1217,10 @@ function prdV2Document(): PrdDocumentV2 {
             })),
           }],
         },
+        additionalSections: [{
+          title: "2.5 支付结果说明",
+          blocks: [paragraph("v2-payment-result", "支付结果页展示订单编号、支付状态和后续操作入口。")],
+        }],
       },
       degradation: {
         title: "3 业务降级方案（必填）",

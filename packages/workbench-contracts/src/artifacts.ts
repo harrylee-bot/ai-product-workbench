@@ -169,7 +169,7 @@ export const artifactVersionInlineLegacyDetailSchema: z.ZodType<ArtifactVersionI
   artifactVersionInlineDataDetailSchema,
 ]);
 
-export const artifactVersionInlineDetailSchema: z.ZodType<ArtifactVersionInlineDetail> = z.union([
+export const artifactVersionInlineDetailSchema: z.ZodType<ArtifactVersionInlineDetail, z.ZodTypeDef, unknown> = z.union([
   artifactVersionInlineLegacyDetailSchema,
   artifactVersionInlinePrdV2DetailSchema,
 ]);
@@ -218,7 +218,7 @@ export const artifactVersionBlobDetailSchema: z.ZodType<ArtifactVersionBlobDetai
 
 export type ArtifactVersionDetail = ArtifactVersionInlineDetail | ArtifactVersionBlobDetail;
 
-export const artifactVersionDetailSchema: z.ZodType<ArtifactVersionDetail> = z.union([
+export const artifactVersionDetailSchema: z.ZodType<ArtifactVersionDetail, z.ZodTypeDef, unknown> = z.union([
   artifactVersionInlineDetailSchema,
   artifactVersionBlobDetailSchema,
 ]);
@@ -321,7 +321,7 @@ export const publicArtifactVersionInlineLegacyDetailSchema: z.ZodType<PublicArti
   publicArtifactVersionInlineDataDetailSchema,
 ]);
 
-export const publicArtifactVersionInlineDetailSchema: z.ZodType<PublicArtifactVersionInlineDetail> = z.union([
+export const publicArtifactVersionInlineDetailSchema: z.ZodType<PublicArtifactVersionInlineDetail, z.ZodTypeDef, unknown> = z.union([
   publicArtifactVersionInlineLegacyDetailSchema,
   publicArtifactVersionInlinePrdV2DetailSchema,
 ]);
@@ -357,7 +357,7 @@ export const publicArtifactVersionBlobDetailSchema: z.ZodType<PublicArtifactVers
 
 export type PublicArtifactVersionDetail = PublicArtifactVersionInlineDetail | PublicArtifactVersionBlobDetail;
 
-export const publicArtifactVersionDetailSchema: z.ZodType<PublicArtifactVersionDetail> = z.union([
+export const publicArtifactVersionDetailSchema: z.ZodType<PublicArtifactVersionDetail, z.ZodTypeDef, unknown> = z.union([
   publicArtifactVersionInlineDetailSchema,
   publicArtifactVersionBlobDetailSchema,
 ]);
@@ -478,7 +478,7 @@ export const createArtifactVersionRequestLegacySchema: z.ZodType<CreateArtifactV
   createPrototypeArtifactVersionRequestSchema,
 ]);
 
-export const createArtifactVersionRequestSchema: z.ZodType<CreateArtifactVersionRequest> = z.union([
+export const createArtifactVersionRequestSchema: z.ZodType<CreateArtifactVersionRequest, z.ZodTypeDef, unknown> = z.union([
   createArtifactVersionRequestLegacySchema,
   createPrdV2ArtifactVersionRequestSchema,
 ]);

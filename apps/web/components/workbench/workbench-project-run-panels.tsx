@@ -27,6 +27,17 @@ import {
   workbenchEase,
 } from "./workbench-motion";
 
+const PRD_GENERATION_STAGE_COPY: Partial<Record<RunGenerationStage, string>> = {
+  "collecting-prd-context": "整理资料",
+  "structuring-prd": "规划结构",
+  "drafting-prd": "编写说明书",
+  "validating-prd": "检查说明书",
+};
+
+function prdGenerationStageCopy(stage: RunGenerationStage | null): string | null {
+  return stage ? PRD_GENERATION_STAGE_COPY[stage] ?? null : null;
+}
+
 export function LeftInspector({
   actionBusy,
   activities,
@@ -62,12 +73,17 @@ export function LeftInspector({
   const [stackOpen, setStackOpen] = useState(true);
   const [activeTaskVisible, setActiveTaskVisible] = useState(true);
   const currentActivity = [...activities].reverse().find((activity) => activity.working);
-  const currentTaskCopy = (runPhaseLabel ?? currentActivity?.label ?? prompt) || "等待任务";
   const historyItems = activities.filter((activity) => activity.terminal);
   const isWorking = runStatus === "queued"
     || runStatus === "running"
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
+  const currentTaskCopy = (
+    (isWorking ? prdGenerationStageCopy(generationStage) : null)
+    ?? runPhaseLabel
+    ?? currentActivity?.label
+    ?? prompt
+  ) || "等待任务";
   const currentTaskWorking = activeTaskVisible && isWorking;
   const effectiveStackOpen = stackOpen && !isOverview;
   const currentTaskHeight = activeTaskVisible ? 38 : 0;
@@ -258,6 +274,7 @@ export function ProjectTranscriptPanel({
     || runStatus === "running"
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
+  const currentPrdStageCopy = isWorking ? prdGenerationStageCopy(generationStage) : null;
   const statusCopy = submissionError
     ? "提交失败"
     : runStatus === "failed"
@@ -268,7 +285,10 @@ export function ProjectTranscriptPanel({
           ? "等待您的确认"
           : runStatus === "succeeded"
             ? "运行已完成"
-            : runPhaseLabel ?? currentActivity?.label ?? (isOverview ? "正在处理" : "准备就绪");
+            : currentPrdStageCopy
+              ?? runPhaseLabel
+              ?? currentActivity?.label
+              ?? (isOverview ? "正在处理" : "准备就绪");
   const runBodyCopy = [
     selectedActivity?.detail,
     latestMessage?.text,
@@ -284,7 +304,9 @@ export function ProjectTranscriptPanel({
   const showPromptChip = Boolean(prompt || selectedTask)
     && (Boolean(selectedTask) || Boolean(runBodyCopy))
     && (Boolean(selectedTask) || isOverview || !(phase === "complete" && isGenerated));
-  const expandedHeight = showPromptChip || bodyCopy ? "auto" : "126px";
+  const hasExpandedBody = showPromptChip || Boolean(bodyCopy);
+  const prdBodyless = projectMode === "document" && !hasExpandedBody;
+  const expandedHeight = hasExpandedBody ? "auto" : 126;
 
   useEffect(() => {
     if (phase === "generating" || phase === "refining") {
@@ -321,9 +343,17 @@ export function ProjectTranscriptPanel({
       data-generation-stage={generationStage ?? undefined}
       data-panel-motion="agent-card"
       data-phase={phase}
+      data-prd-bodyless={transcriptOpen && prdBodyless ? "true" : undefined}
       initial={{ opacity: 0, x: -10 }}
-      layout="size"
-      style={{ height: transcriptOpen ? expandedHeight : "52px", width: transcriptOpen ? "280px" : "64px" }}
+      layout={projectMode === "document" ? undefined : "size"}
+      style={{
+        height: transcriptOpen ? expandedHeight : 52,
+        maxHeight: transcriptOpen && prdBodyless ? 126 : undefined,
+        maxWidth: transcriptOpen && prdBodyless ? 280 : undefined,
+        minHeight: transcriptOpen && prdBodyless ? 126 : undefined,
+        minWidth: transcriptOpen && prdBodyless ? 280 : undefined,
+        width: transcriptOpen ? 280 : 64,
+      }}
       transition={{ ...panelTransition, delay: 0.10 }}
     >
       <div className="workbench-agent-card-base-bg absolute inset-0" />
@@ -461,6 +491,7 @@ export function MobileRunStatus({
     || runStatus === "running"
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
+  const currentPrdStageCopy = working ? prdGenerationStageCopy(generationStage) : null;
   const label = runStatus === "failed"
     ? failure?.message ?? "运行失败"
     : runStatus === "cancelled"
@@ -469,7 +500,7 @@ export function MobileRunStatus({
         ? "运行已完成"
         : runStatus === "waiting_input"
           ? "等待确认"
-          : runPhaseLabel ?? "正在运行";
+          : currentPrdStageCopy ?? runPhaseLabel ?? "正在运行";
 
   return (
     <motion.div

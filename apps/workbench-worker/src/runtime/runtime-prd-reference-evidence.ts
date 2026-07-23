@@ -2,20 +2,24 @@ import { createHash } from "node:crypto";
 import { posix } from "node:path";
 
 const READ_FILE_TOOL = "read_file";
-const PRD_REFERENCE_ROOT = "/mnt/skills/public/workbench";
+const PRD_REFERENCE_ROOT = "/mnt/skills/public";
 
 export const PRD_RUNTIME_REFERENCE_FILES = [
   {
-    relativePath: "references/requirement-doc-template/structure.md",
-    sha256: "b82b551cf748db5e55cd703a4f953b344d5535b6d80ff9f032b1a0d983a24976",
+    relativePath: "requirement-doc-template/SKILL.md",
+    sha256: "f59cf65306078cdcdc7cc98486860a47f20ff80b81f0a849af381494183c78e1",
   },
   {
-    relativePath: "references/requirement-doc-template/quality-standards.md",
-    sha256: "ef2813d4d0b791f2783ab50f379712960f2c40e1f967b13cfea92d318f289315",
+    relativePath: "requirement-doc-template/references/structure.md",
+    sha256: "2b6bc148797504455de52dec18b18be0d66f13e2af6f0381a5886427d7e7c6eb",
   },
   {
-    relativePath: "references/prd-runtime-result.example.json",
-    sha256: "de8e0c1a7824eb3d42369ca498eca53c6e5c4df1f71bf30ecf356d8d6ac9f2ba",
+    relativePath: "requirement-doc-template/references/quality-standards.md",
+    sha256: "45e76fe4c178e8609cd1dd3c4a6c9642c280a219b0470295b3204e469a6b4168",
+  },
+  {
+    relativePath: "workbench/references/prd-runtime-result.schema.json",
+    sha256: "bd2f09b81bf8538a33ccf9eb0942d364c23dedf071979dad991fe09812f9e747",
   },
 ] as const;
 

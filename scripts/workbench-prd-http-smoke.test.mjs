@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import http from "node:http";
 import test from "node:test";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import {
   assertPrdSmokeBusinessSemantics,
   assertPrdV2Structure,
@@ -20,10 +19,6 @@ const prdGenerationStages = [
   "drafting-prd",
   "validating-prd",
 ];
-const prdReferenceFingerprint = JSON.parse(readFileSync(new URL(
-  "../integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
-  import.meta.url,
-), "utf8"));
 
 test("runs the isolated PRD v2 HTTP flow through Better Auth email sign-in", async (t) => {
   const fake = await startFakeWorkbench();
@@ -174,10 +169,9 @@ test("rejects forbidden requirement-document placeholder wording", () => {
 test("requires the production smoke PRD to match the order-notification topic", () => {
   const document = orderNotificationPrdFixture();
   assert.deepEqual(assertPrdSmokeBusinessSemantics(document), {
-    referenceBusinessMatches: 0,
-    referenceIdMatches: 0,
     theme: "order-status-notification",
     themeRequirementCount: 7,
+    unrelatedBusinessMatches: 0,
   });
 
   document.title = "其他主题需求说明书";
@@ -212,41 +206,13 @@ test("requires order-notification facts in the business body instead of metadata
   );
 });
 
-test("rejects reference business content and nested IDs in the production smoke PRD", () => {
-  const copiedId = orderNotificationPrdFixture();
-  copiedId.sections.businessRequirements.coreRules.blocks[0].id = "goal-main";
-  assert.throws(
-    () => assertPrdSmokeBusinessSemantics(copiedId),
-    (error) => error?.code === "PRD_REFERENCE_CONTENT_FORBIDDEN",
-  );
-
-  const copiedText = orderNotificationPrdFixture();
-  copiedText.sections.introduction.background.blocks[0].content[0].text =
+test("rejects unrelated task-domain content in the production smoke PRD", () => {
+  const unrelated = orderNotificationPrdFixture();
+  unrelated.sections.introduction.background.blocks[0].content[0].text =
     "现有产品工作台已提供业务任务处理入口，但处理状态、异常恢复和结果确认信息不完整，用户难以判断任务是否闭环。本需求调整工作台任务页面及配套处理能力，使用户能够提交必要信息、跟踪处理状态并确认最终结果。";
   assert.throws(
-    () => assertPrdSmokeBusinessSemantics(copiedText),
-    (error) => error?.code === "PRD_REFERENCE_CONTENT_FORBIDDEN",
-  );
-
-  const nearCopiedText = orderNotificationPrdFixture();
-  nearCopiedText.sections.introduction.background.blocks[0].content[0].text =
-    "当前产品工作台已提供业务任务处理入口，但处理状态、异常恢复和结果确认信息不完整，用户难以判断任务是否闭环。本需求调整工作台任务页面及配套处理能力，使用户能够提交必要信息、跟踪处理状态并确认最终结果。";
-  assert.throws(
-    () => assertPrdSmokeBusinessSemantics(nearCopiedText),
-    (error) => error?.code === "PRD_REFERENCE_CONTENT_FORBIDDEN",
-  );
-
-  const movedChunk = orderNotificationPrdFixture();
-  const longestReference = [...prdReferenceFingerprint.businessText]
-    .sort((left, right) => [...right].length - [...left].length)[0];
-  const referenceCharacters = [...longestReference];
-  movedChunk.sections.introduction.background.blocks[0].content[0].text = [
-    ...referenceCharacters.slice(7),
-    ...referenceCharacters.slice(0, 7),
-  ].join("");
-  assert.throws(
-    () => assertPrdSmokeBusinessSemantics(movedChunk),
-    (error) => error?.code === "PRD_REFERENCE_CONTENT_FORBIDDEN",
+    () => assertPrdSmokeBusinessSemantics(unrelated),
+    (error) => error?.code === "PRD_SMOKE_UNRELATED_CONTENT",
   );
 });
 
@@ -468,16 +434,25 @@ function prdVersionFixture() {
 }
 
 function orderNotificationPrdFixture() {
-  const idReplacements = Object.fromEntries(prdReferenceFingerprint.sampleIds.map(
-    (id, index) => [id, `smoke-${index + 1}-${id}`],
-  ));
-  const businessReplacements = Object.fromEntries(prdReferenceFingerprint.businessText.map(
-    (text) => [text, rewriteReferenceBusinessText(text)],
-  ));
-  const document = replaceExactStrings(
-    structuredClone(prdDocumentV2Example),
-    { ...idReplacements, ...businessReplacements },
-  );
+  let document = structuredClone(prdDocumentV2Example);
+  for (const [source, replacement] of [
+    ["产品工作台", "电商订单中心"],
+    ["目标业务用户", "已登录消费者"],
+    ["任务处理", "通知发送"],
+    ["任务页面", "通知设置页"],
+    ["任务状态", "发送状态"],
+    ["任务记录", "发送记录"],
+    ["任务编号", "通知编号"],
+    ["任务", "通知"],
+    ["提交", "保存"],
+    ["处理", "发送"],
+    ["结果", "发送结果"],
+    ["输入", "设置内容"],
+    ["阶段", "发送阶段"],
+    ["重复", "多次"],
+  ]) {
+    document = replaceStringFragments(document, source, replacement);
+  }
   document.documentId = "prd-smoke-order-notification";
   document.title = "电商订单状态通知设置需求说明书";
   document.cover = {
@@ -498,44 +473,6 @@ function orderNotificationPrdFixture() {
   document.sections.businessRequirements.coreRules.blocks[2].content[0].text =
     "本需求修改现有订单通知功能逻辑；通知设置数据与发送状态均执行完整性和一致性校验。";
   return document;
-}
-
-function rewriteReferenceBusinessText(value) {
-  const replacements = [
-    ["产品工作台", "电商订单中心"],
-    ["目标业务用户", "已登录消费者"],
-    ["核心流程", "订单通知流程"],
-    ["任务处理", "通知发送"],
-    ["任务页面", "通知设置页"],
-    ["任务状态", "发送状态"],
-    ["任务记录", "发送记录"],
-    ["任务编号", "通知编号"],
-    ["任务", "通知"],
-    ["用户", "消费者"],
-    ["提交", "保存"],
-    ["处理", "发送"],
-    ["结果", "发送结果"],
-    ["输入", "设置内容"],
-    ["阶段", "发送阶段"],
-    ["重复", "多次"],
-  ];
-  const rewritten = replacements.reduce(
-    (current, [source, target]) => current.replaceAll(source, target),
-    value,
-  );
-  if (rewritten === value) throw new Error(`Smoke fixture did not materialize: ${value}`);
-  return rewritten;
-}
-
-function replaceExactStrings(value, replacements) {
-  if (typeof value === "string") return replacements[value] ?? value;
-  if (Array.isArray(value)) return value.map((item) => replaceExactStrings(item, replacements));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(
-      ([key, item]) => [key, replaceExactStrings(item, replacements)],
-    ));
-  }
-  return value;
 }
 
 function replaceStringFragments(value, source, replacement) {

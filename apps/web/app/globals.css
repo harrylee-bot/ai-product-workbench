@@ -1574,6 +1574,15 @@ textarea:focus-visible {
   will-change: width, height, transform, opacity;
 }
 
+.workbench-agent-card[data-prd-bodyless="true"] {
+  width: 280px !important;
+  min-width: 280px !important;
+  max-width: 280px !important;
+  height: 126px !important;
+  min-height: 126px !important;
+  max-height: 126px !important;
+}
+
 .workbench-agent-card-base-bg {
   background: linear-gradient(112deg, #121315 0%, #18191b 56%, #17181a 100%);
 }
@@ -1647,6 +1656,15 @@ textarea:focus-visible {
   background-repeat: no-repeat;
   background-size: 82% 104%, 76% 102%, 100% 100%;
   animation: workbench-agent-surface-shift 4.2s linear infinite;
+}
+
+.workbench-agent-card--generating[data-prd-bodyless="true"] .workbench-agent-card-base-bg {
+  animation: none;
+}
+
+.workbench-agent-card--generating[data-prd-bodyless="true"]::before {
+  animation: none;
+  opacity: 0;
 }
 
 .workbench-agent-card--generating .workbench-agent-card-shade {

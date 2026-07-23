@@ -4,9 +4,9 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   boardNodeProtocol,
-  prdDocumentV2Example,
   type ArtifactVersionDetail,
 } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import type { BoardFlowNode } from "@/lib/workbench/features/board";
 import { prototypeEditorDocumentFixture } from "@/lib/workbench/prototype-editor/test-fixtures";
 import type { RunArtifactDraftProjection } from "@/lib/workbench/run/reducer";

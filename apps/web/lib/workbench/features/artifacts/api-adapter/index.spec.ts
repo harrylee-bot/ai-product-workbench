@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 
 import { createWorkbenchApiClient } from "../../../api/client";
 import {

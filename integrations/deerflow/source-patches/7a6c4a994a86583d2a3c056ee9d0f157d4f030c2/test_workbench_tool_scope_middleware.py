@@ -131,8 +131,8 @@ def policy(*declared: str) -> dict:
 
 def _skill_root() -> Path:
     candidates = (
-        PATCH_ROOT.parents[1] / "skills" / "workbench",
-        Path("/app/skills/public/workbench"),
+        PATCH_ROOT.parents[1] / "skills",
+        Path("/app/skills/public"),
     )
     for candidate in candidates:
         if candidate.is_dir():
@@ -143,7 +143,7 @@ def _skill_root() -> Path:
 SKILL_ROOT = _skill_root()
 REFERENCE_CONTENT = {
     virtual_path: (
-        SKILL_ROOT / virtual_path.removeprefix("/mnt/skills/public/workbench/")
+        SKILL_ROOT / virtual_path.removeprefix("/mnt/skills/public/")
     ).read_text(encoding="utf-8")
     for virtual_path, _digest in PRD_REFERENCE_FILES
 }
@@ -593,7 +593,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 self.assertEqual(blocked.tool_call_id, "call-1")
                 self.assertIn("stage='collecting-prd-context'", blocked.content)
 
-    def test_prd_gate_allows_three_ordered_reference_reads_in_one_batch(self) -> None:
+    def test_prd_gate_allows_ordered_reference_reads_in_one_batch(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
         messages = prd_messages(stage_count=1, references=False)
         reference_calls = [
@@ -627,7 +627,10 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             observed = middleware.wrap_tool_call(request, handler)
             self.assertEqual(observed.status, "success")
             self.assertEqual(observed.content, REFERENCE_CONTENT[path])
-        self.assertEqual(called, [f"parallel-reference-{index}" for index in range(3)])
+        self.assertEqual(
+            called,
+            [f"parallel-reference-{index}" for index in range(len(PRD_REFERENCE_FILES))],
+        )
 
     def test_prd_gate_deterministically_blocks_duplicate_and_misordered_batch_reads(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
@@ -683,7 +686,10 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
     def test_prd_gate_requires_exact_unranged_path_and_pinned_handler_content(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
         structure_path, expected_digest = PRD_REFERENCE_FILES[0]
-        alias_path = structure_path.replace("/structure.md", "/./structure.md")
+        alias_path = structure_path.replace(
+            "/requirement-doc-template/",
+            "/requirement-doc-template/./",
+        )
         alias_request = request_in_state(
             prd_messages(stage_count=1, references=False),
             "read_file",

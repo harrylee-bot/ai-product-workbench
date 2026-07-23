@@ -224,6 +224,9 @@ function projectPrdV2Document(document: PrdDocumentV2): string {
     );
   }
   appendPrdV2Section(lines, businessRequirements.acceptanceCriteria);
+  for (const section of businessRequirements.additionalSections) {
+    appendPrdV2Section(lines, section);
+  }
   lines.push(
     "",
     `## ${degradation.title}`,
@@ -275,7 +278,8 @@ type PrdV2ProjectionSection =
   | PrdDocumentV2["sections"]["businessRequirements"]["pageLinks"]
   | PrdDocumentV2["sections"]["businessRequirements"]["coreRules"]
   | PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["acceptanceCriteria"];
+  | PrdDocumentV2["sections"]["businessRequirements"]["acceptanceCriteria"]
+  | PrdDocumentV2["sections"]["businessRequirements"]["additionalSections"][number];
 
 function appendPrdV2Section(lines: string[], section: PrdV2ProjectionSection) {
   lines.push("", `### ${section.title}`, "");

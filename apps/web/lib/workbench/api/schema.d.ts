@@ -2947,6 +2947,10 @@ export interface components {
             content: components["schemas"]["PrototypeDocument"];
         };
         ArtifactVersionInlineDetail: components["schemas"]["ArtifactVersionInlinePrdDetail"] | components["schemas"]["ArtifactVersionInlinePrototypeDetail"] | components["schemas"]["ArtifactVersionInlineDesignSystemDetail"] | components["schemas"]["ArtifactVersionInlineImageDetail"] | components["schemas"]["ArtifactVersionInlineCodeDetail"] | components["schemas"]["ArtifactVersionInlineDocumentDetail"] | components["schemas"]["ArtifactVersionInlineDataDetail"];
+        PrdAdditionalBusinessSection: {
+            title: string;
+            blocks: components["schemas"]["PrdBlock"][];
+        };
         PrdChannelRow: {
             sequence: number;
             /** @enum {string} */
@@ -3058,6 +3062,8 @@ export interface components {
                         title: "2.4 验收标准";
                         blocks: components["schemas"]["PrdBlock"][];
                     };
+                    /** @default [] */
+                    additionalSections: components["schemas"]["PrdAdditionalBusinessSection"][];
                 };
                 degradation: {
                     /** @enum {string} */

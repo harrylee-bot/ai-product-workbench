@@ -200,6 +200,30 @@
       ],
       "additionalProperties": false
     },
+    "PrdAdditionalBusinessSection": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 240,
+          "pattern": "^2\\.(?:[5-9]|[1-9]\\d+)\\s+\\S"
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdBlock"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        }
+      },
+      "required": [
+        "title",
+        "blocks"
+      ],
+      "additionalProperties": false
+    },
     "PrdAssumption": {
       "type": "object",
       "properties": {
@@ -699,7 +723,7 @@
                 "maxLength": 240
               },
               "minItems": 11,
-              "maxItems": 11
+              "maxItems": 61
             }
           },
           "required": [
@@ -956,6 +980,14 @@
                     "blocks"
                   ],
                   "additionalProperties": false
+                },
+                "additionalSections": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/PrdAdditionalBusinessSection"
+                  },
+                  "maxItems": 50,
+                  "default": []
                 }
               },
               "required": [

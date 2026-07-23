@@ -109,7 +109,7 @@ export const runtimeArtifactDraftPrdV2Schema = z.object({
   operation: runtimeArtifactOperationSchema,
 }).strict();
 
-export const runtimeArtifactDraftPrdSchema: z.ZodType<RuntimeArtifactDraft> = z.union([
+export const runtimeArtifactDraftPrdSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTypeDef, unknown> = z.union([
   runtimeArtifactDraftPrdV1RevisionSchema,
   runtimeArtifactDraftPrdV2Schema,
 ]);
@@ -154,7 +154,7 @@ export const runtimeArtifactDraftDataSchema = z.object({
   operation: runtimeArtifactOperationSchema,
 }).strict();
 
-export const runtimeArtifactDraftContractSchema: z.ZodType<RuntimeArtifactDraft> = z.union([
+export const runtimeArtifactDraftContractSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTypeDef, unknown> = z.union([
   runtimeArtifactDraftPrdSchema,
   runtimeArtifactDraftPrototypeSchema,
   runtimeArtifactDraftImageSchema,
@@ -163,7 +163,7 @@ export const runtimeArtifactDraftContractSchema: z.ZodType<RuntimeArtifactDraft>
   runtimeArtifactDraftDataSchema,
 ]).describe("A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.");
 
-export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft> = z.discriminatedUnion("kind", [
+export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTypeDef, unknown> = z.discriminatedUnion("kind", [
   z.object({
     ...runtimeArtifactDraftBaseShape,
     kind: z.literal("prd"),
@@ -202,13 +202,13 @@ export type RuntimeResult = {
   artifacts: RuntimeArtifactDraft[];
 };
 
-export const runtimeResultContractSchema: z.ZodType<RuntimeResult> = z.object({
+export const runtimeResultContractSchema: z.ZodType<RuntimeResult, z.ZodTypeDef, unknown> = z.object({
   protocol: z.literal("workbench.runtime.result.v1"),
   message: z.string().max(100_000),
   artifacts: z.array(runtimeArtifactDraftContractSchema).max(20),
 }).strict();
 
-export const runtimeResultSchema: z.ZodType<RuntimeResult> = z.object({
+export const runtimeResultSchema: z.ZodType<RuntimeResult, z.ZodTypeDef, unknown> = z.object({
   protocol: z.literal("workbench.runtime.result.v1"),
   message: z.string().max(100_000),
   artifacts: z.array(runtimeArtifactDraftSchema).max(20),

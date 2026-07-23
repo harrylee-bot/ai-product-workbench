@@ -43,23 +43,30 @@ const prdGenerationStageSequence = [
 const successPrdCheckpointToolCallId = "e2e-prd-checkpoint";
 const prdReferenceFixtures = [
   {
-    path: "/mnt/skills/public/workbench/references/requirement-doc-template/structure.md",
+    path: "/mnt/skills/public/requirement-doc-template/SKILL.md",
     source: new URL(
-      "../integrations/deerflow/skills/workbench/references/requirement-doc-template/structure.md",
+      "../integrations/deerflow/skills/requirement-doc-template/SKILL.md",
       import.meta.url,
     ),
   },
   {
-    path: "/mnt/skills/public/workbench/references/requirement-doc-template/quality-standards.md",
+    path: "/mnt/skills/public/requirement-doc-template/references/structure.md",
     source: new URL(
-      "../integrations/deerflow/skills/workbench/references/requirement-doc-template/quality-standards.md",
+      "../integrations/deerflow/skills/requirement-doc-template/references/structure.md",
       import.meta.url,
     ),
   },
   {
-    path: "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
+    path: "/mnt/skills/public/requirement-doc-template/references/quality-standards.md",
     source: new URL(
-      "../integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json",
+      "../integrations/deerflow/skills/requirement-doc-template/references/quality-standards.md",
+      import.meta.url,
+    ),
+  },
+  {
+    path: "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
+    source: new URL(
+      "../integrations/deerflow/skills/workbench/references/prd-runtime-result.schema.json",
       import.meta.url,
     ),
   },
@@ -101,7 +108,8 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 try {
   console.log(`[e2e] target database: ${databaseName}`);
   await buildWorkspaces();
-  const { prdDocumentV2Example, prdDocumentV2Schema } = await import("@workbench/workbench-contracts");
+  const { prdDocumentV2Schema } = await import("@workbench/workbench-contracts");
+  const { prdDocumentV2Example } = await import("@workbench/workbench-contracts/test-fixtures");
   prdV2DocumentFixture = prdDocumentV2Schema.parse(buildPrdV2DocumentFixture(prdDocumentV2Example));
   await rebuildSchemas();
   await migrateDatabase();

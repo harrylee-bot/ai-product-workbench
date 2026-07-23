@@ -4998,6 +4998,24 @@ components:
           code: "#/components/schemas/ArtifactVersionInlineCodeDetail"
           document: "#/components/schemas/ArtifactVersionInlineDocumentDetail"
           data: "#/components/schemas/ArtifactVersionInlineDataDetail"
+    PrdAdditionalBusinessSection:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 5
+          maxLength: 240
+          pattern: ^2\.(?:[5-9]|[1-9]\d+)\s+\S
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdBlock"
+          minItems: 1
+          maxItems: 500
+      required:
+        - title
+        - blocks
+      additionalProperties: false
     PrdChannelRow:
       type: object
       properties:
@@ -5229,7 +5247,7 @@ components:
                 minLength: 1
                 maxLength: 240
               minItems: 11
-              maxItems: 11
+              maxItems: 61
           required:
             - title
             - entries
@@ -5413,6 +5431,12 @@ components:
                     - title
                     - blocks
                   additionalProperties: false
+                additionalSections:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdAdditionalBusinessSection"
+                  maxItems: 50
+                  default: []
               required:
                 - title
                 - summary

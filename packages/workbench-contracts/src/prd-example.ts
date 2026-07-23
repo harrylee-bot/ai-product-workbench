@@ -291,6 +291,7 @@ export const prdDocumentV2Example = prdDocumentV2Schema.parse({
           },
         ],
       },
+      additionalSections: [],
     },
     degradation: {
       title: "3 业务降级方案（必填）",
