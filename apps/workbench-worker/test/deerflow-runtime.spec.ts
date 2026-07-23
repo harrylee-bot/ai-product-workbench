@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import {
@@ -6,6 +7,7 @@ import {
   canonicalJson,
   canonicalPrototypeScreenProjection,
   projectPrototypeScreen,
+  runtimeResultSchema,
   type CanvasAgentToolDescriptor,
   type PrdDocument,
 } from "@workbench/workbench-contracts";
@@ -24,11 +26,17 @@ import {
   runtimeThreadUuid,
   runtimeResumeValue,
 } from "../src/runtime/deerflow-runtime.adapter.js";
+import { runtimePrdResultStarter } from "../src/runtime/runtime-prd-guidance.js";
 import type {
   RuntimeExecution,
   RuntimeExecutionObserver,
 } from "../src/runtime/runtime.port.js";
 import { S3RuntimeReadyBlobReader } from "../src/storage/s3-runtime-ready-blob-reader.js";
+
+const prdRuntimeResultExample = JSON.parse(readFileSync(new URL(
+  "../../../integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json",
+  import.meta.url,
+), "utf8")) as unknown;
 
 function workerConfig() {
   return {
@@ -1221,6 +1229,8 @@ describe("DeerFlow runtime adapter", () => {
     expect(submittedBody.input.messages[0].content)
       .toMatch(/^\/workbench\n<workbench_context>\n/u);
     expect(submittedBody.input.messages[0].content).toMatch(/<\/workbench_context>\nBuild the product$/u);
+    expect(submittedBody.input.messages[0].content)
+      .not.toContain("<workbench_prd_result_contract>");
     expect(submittedBody.context.workbench.requestedArtifactKinds).toEqual([]);
     expect(submittedBody.config.configurable.workbench_canvas_tools).toBeNull();
     expect(runtimeObserver.onSubmissionStarted).toHaveBeenCalledTimes(1);
@@ -1234,6 +1244,46 @@ describe("DeerFlow runtime adapter", () => {
       }),
       expect.any(Array),
     );
+  });
+
+  it("injects a complete schema-valid PRD starter into PRD runtime inputs", async () => {
+    let submittedBody: {
+      input: { messages: Array<{ content: string }> };
+    } | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        submittedBody = JSON.parse(String(init.body));
+        return successfulRuntimeResponse({
+          runId: "external_run_prd_guidance",
+          artifacts: [runtimePrdResultStarter.artifacts[0]],
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    const baseExecution = execution();
+
+    await adapter.execute(execution({
+      request: {
+        ...baseExecution.request,
+        requestedArtifactKinds: ["prd"],
+      },
+    }), observer());
+
+    const content = submittedBody?.input.messages[0]?.content ?? "";
+    const match = /<workbench_prd_result_contract>\n[^\n]+\n([\s\S]*?)\n<\/workbench_prd_result_contract>/u
+      .exec(content);
+    expect(match?.[1]).toBeTruthy();
+    expect(runtimeResultSchema.parse(JSON.parse(match![1]!))).toEqual(runtimePrdResultStarter);
+    expect(content).toMatch(/<\/workbench_prd_result_contract>\nBuild the product$/u);
+  });
+
+  it("keeps the Worker PRD starter aligned with the DeerFlow reference", () => {
+    expect(runtimePrdResultStarter).toEqual(runtimeResultSchema.parse(prdRuntimeResultExample));
   });
 
   it("sends the tokenless per-run Canvas declaration as an explicit configurable policy", async () => {

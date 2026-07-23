@@ -65,6 +65,7 @@ import {
   RuntimeProviderLivenessBudget,
   raceWithAbort,
 } from "./runtime-liveness.js";
+import { runtimePrdResultGuidance } from "./runtime-prd-guidance.js";
 
 export {
   assistantTextDelta,
@@ -990,6 +991,9 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       requestedArtifactKinds: execution.request.requestedArtifactKinds,
       outputContract: "workbench.runtime.result.v1",
     };
+    const resultGuidance = runtimePrdResultGuidance(
+      execution.request.requestedArtifactKinds,
+    );
     return {
       input: execution.resume ? null : {
         messages: [{
@@ -999,6 +1003,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
             "<workbench_context>",
             JSON.stringify(context),
             "</workbench_context>",
+            ...(resultGuidance ? [resultGuidance] : []),
             execution.request.prompt,
           ].join("\n"),
         }],
