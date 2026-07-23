@@ -65,6 +65,11 @@ test("all candidate Node Dockerfiles use the hardened Alpine helper", async () =
   assert.match(workflow, /NGINX_IMAGE: .*nginx:stable-alpine/u);
 });
 
+test("the Web image gives production type checking enough heap", async () => {
+  const source = await readFile(path.join(root, "apps/web/Dockerfile"), "utf8");
+  assert.match(source, /NODE_OPTIONS=--max-old-space-size=4096/u);
+});
+
 test("the Web and CI builds pin their Linux x64 native dependencies", async () => {
   const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
