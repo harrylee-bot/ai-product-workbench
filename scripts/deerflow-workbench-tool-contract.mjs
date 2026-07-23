@@ -26,6 +26,11 @@ export const WORKBENCH_TRUSTED_TOOLS = Object.freeze([
     group: "workbench",
     use: "deerflow_workbench_tools.runtime_result_tool:workbench_runtime_result_submit",
   }),
+  Object.freeze({
+    name: "read_file",
+    group: "workbench",
+    use: "deerflow_workbench_tools.prd_reference_tool:workbench_prd_reference_read",
+  }),
 ]);
 
 export const WORKBENCH_CANVAS_TOOLS = Object.freeze([
@@ -85,7 +90,6 @@ export const WORKBENCH_SKILL_ALLOWED_TOOLS = Object.freeze([
   ...WORKBENCH_RUNTIME_TOOL_NAMES,
   "bash",
   "ls",
-  "read_file",
   "write_file",
   "str_replace",
   "present_file",

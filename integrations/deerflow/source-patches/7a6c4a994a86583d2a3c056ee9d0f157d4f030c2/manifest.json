@@ -15,18 +15,18 @@
   },
   "toolScopeMiddleware": {
     "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
-    "sha256": "dae68e0a2087d19ae9641d4be5339b2feca5d3b0a70f3160fd0e2fe89a02910a"
+    "sha256": "ab21e9fc2fbc6bbdc77f7c7d6b308705a547abafd8b1215cf7154d171865117e"
   },
   "additionalSources": [
     {
       "path": "deerflow/tools/builtins/task_tool.py",
       "upstreamSha256": "bbbf58869ea4e24a8c230695478fb5d09fd35c2e4dbb2c16bc5052871027ee95",
-      "patchedSha256": "a2f92a7a7105b685a12f2552fb671aed34626d9b7ec96a10c4c6a936fe288cfb",
+      "patchedSha256": "482292649c09ca8112ab30bd5e96baa9032aeccbfe3e3770000e1fbb41309317",
       "replacements": [
         {
           "anchor": "    # Create executor\n",
           "position": "before",
-          "insertion": "    # Product Workbench publication, Knowledge, and Canvas tools are parent-run scoped. A\n    # subagent must never rediscover them from the inherited global tool group.\n    _workbench_parent_run_tool_names = frozenset(\n        {\n            \"workbench_generation_stage_update\",\n            \"workbench_artifact_draft_publish\",\n            \"workbench_prototype_patch_publish\",\n            \"workbench_knowledge_retrieve\",\n            \"get_visible_screens\",\n            \"get_selected_screens\",\n            \"view_screen\",\n            \"select_screen\",\n            \"quick_edit\",\n            \"duplicate_screen\",\n            \"rename_screen\",\n            \"navigate_canvas\",\n        }\n    )\n    tools = [\n        tool\n        for tool in tools\n        if getattr(tool, \"name\", None) not in _workbench_parent_run_tool_names\n    ]\n\n"
+          "insertion": "    # Product Workbench publication, Knowledge, PRD reference, and Canvas tools are parent-run scoped. A\n    # subagent must never rediscover them from the inherited global tool group.\n    _workbench_parent_run_tool_names = frozenset(\n        {\n            \"workbench_generation_stage_update\",\n            \"workbench_artifact_draft_publish\",\n            \"workbench_prototype_patch_publish\",\n            \"workbench_knowledge_retrieve\",\n            \"read_file\",\n            \"get_visible_screens\",\n            \"get_selected_screens\",\n            \"view_screen\",\n            \"select_screen\",\n            \"quick_edit\",\n            \"duplicate_screen\",\n            \"rename_screen\",\n            \"navigate_canvas\",\n        }\n    )\n    tools = [\n        tool\n        for tool in tools\n        if getattr(tool, \"name\", None) not in _workbench_parent_run_tool_names\n    ]\n\n"
         }
       ]
     }
@@ -84,7 +84,7 @@
     "sha256": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb"
   },
   "contractTest": {
-    "sha256": "827d3b5276efc0b720341f5ead5ed51383c410ba75eac45040fc4b84de360663"
+    "sha256": "ae23d1040f398a41c23b6270e83ad981cd38b80cbcd031d13f55a10a03f3cff2"
   },
   "requestContextTest": {
     "sha256": "c75b5d10b7a4e2b7c4dc6f7c2f7adb0e5546b6d6cda82ef02dbcb21741ec3e32"

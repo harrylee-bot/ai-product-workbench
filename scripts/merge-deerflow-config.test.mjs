@@ -49,7 +49,7 @@ test("is idempotent when the exact entries already exist", async (t) => {
   }
 });
 
-for (const conflictingToolName of ["workbench_knowledge_retrieve", "rename_screen"]) {
+for (const conflictingToolName of ["workbench_knowledge_retrieve", "read_file", "rename_screen"]) {
   test(`fails closed on a same-name conflicting tool: ${conflictingToolName}`, async (t) => {
     const fixture = await createFixture({ conflictingToolName });
     t.after(fixture.cleanup);
@@ -114,7 +114,7 @@ async function createFixture(options = {}) {
       : tool
   ));
   const fragmentTools = canonicalTools
-    .filter((tool) => options.invalidFragment !== "missing" || tool.name !== "navigate_canvas");
+    .filter((tool) => options.invalidFragment !== "missing" || tool.name !== "read_file");
   if (options.invalidFragment === "extra") {
     fragmentTools.push({
       name: "untrusted_extra_tool",

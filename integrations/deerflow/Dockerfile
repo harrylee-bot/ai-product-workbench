@@ -10,7 +10,7 @@ ARG DEERFLOW_BASE_IMAGE
 ARG DEERFLOW_NODE_IMAGE
 ARG DEERFLOW_SOURCE_COMMIT
 ARG WORKBENCH_SOURCE_COMMIT
-ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=623b91e4f65863e3fa4f914e1ed2a7934726cefb55e6aff64d367781be6d4f94
+ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=293420e84ac84c336b918db0394038b5c7237052cdc2f5abc7144e70c7250c66
 
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
@@ -48,6 +48,8 @@ RUN test "${DEERFLOW_SOURCE_COMMIT}" = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2
       uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_tool_scope_middleware.py \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
       uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_request_context.py \
+    && PYTHONPATH=/app/backend/packages/harness:/app/backend \
+      uv run --no-sync python -c 'import hashlib; from types import SimpleNamespace; from deerflow_workbench_tools.prd_reference_tool import workbench_prd_reference_read; tool = workbench_prd_reference_read; schema = tool.tool_call_schema.model_json_schema(); properties = schema.get("properties", {}); expected_paths = ["/mnt/skills/public/requirement-doc-template/SKILL.md", "/mnt/skills/public/requirement-doc-template/references/structure.md", "/mnt/skills/public/requirement-doc-template/references/quality-standards.md", "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json"]; assert tool.name == "read_file" and list(properties) == ["description", "path"] and schema.get("required") == ["description", "path"] and properties["path"].get("enum") == expected_paths and "start_line" not in properties and "end_line" not in properties; content = tool.func(runtime=SimpleNamespace(context={"workbench": {"requestedArtifactKinds": ["prd"]}}), description="Verify the pinned PRD skill", path=expected_paths[0]); assert hashlib.sha256(content.encode("utf-8")).hexdigest() == "f59cf65306078cdcdc7cc98486860a47f20ff80b81f0a849af381494183c78e1"' \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
       uv run --no-sync python -c 'from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result; result = validate_runtime_result({}); assert result["protocol"] == "workbench.runtime.validation.v1" and result["ok"] is False and result["issues"]' \
     && python3 /opt/workbench/deerflow/source-patch/apply.py \

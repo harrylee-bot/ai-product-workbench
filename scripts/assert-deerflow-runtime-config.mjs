@@ -12,6 +12,12 @@ import {
   WORKBENCH_TOOL_GROUP,
 } from "./deerflow-workbench-tool-contract.mjs";
 
+const PRD_REFERENCE_READER_TOOL = Object.freeze({
+  name: "read_file",
+  group: "workbench",
+  use: "deerflow_workbench_tools.prd_reference_tool:workbench_prd_reference_read",
+});
+
 try {
   const configPath = argumentValue("--config");
   const providerEnvPath = argumentValue("--provider-env");
@@ -87,6 +93,11 @@ function validateConfig(config, providerEnv) {
   assert(Array.isArray(config.tools), "tools must be an array");
   const workbenchGroups = config.tool_groups.filter((group) => group?.name === WORKBENCH_TOOL_GROUP.name);
   assert(workbenchGroups.length === 1 && deepEqual(workbenchGroups[0], WORKBENCH_TOOL_GROUP), "effective config must contain the canonical Workbench tool group");
+  const referenceReaders = config.tools.filter((tool) => tool?.name === PRD_REFERENCE_READER_TOOL.name);
+  assert(
+    referenceReaders.length === 1 && deepEqual(referenceReaders[0], PRD_REFERENCE_READER_TOOL),
+    "effective config must contain exactly the canonical read_file tool",
+  );
   for (const expectedTool of WORKBENCH_RUNTIME_TOOLS) {
     const matches = config.tools.filter((tool) => tool?.name === expectedTool.name);
     assert(matches.length === 1 && deepEqual(matches[0], expectedTool), `effective config must contain the canonical ${expectedTool.name} tool`);

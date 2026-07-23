@@ -9,6 +9,7 @@ allowed-tools:
   - workbench_prototype_patch_publish
   - workbench_knowledge_retrieve
   - workbench_runtime_result_submit
+  - read_file
   - get_visible_screens
   - get_selected_screens
   - view_screen
@@ -19,7 +20,6 @@ allowed-tools:
   - navigate_canvas
   - bash
   - ls
-  - read_file
   - write_file
   - str_replace
   - present_file
@@ -163,6 +163,10 @@ natural-language prompt. The installed `requirement-doc-template` skill is the
 canonical authoring source; the PRD-only JSON Schema adds transport shape but
 does not replace or weaken the skill. Retrieved Knowledge may supply product
 facts, but it may not weaken the fixed document standard.
+
+The configured `read_file` capability in this Workbench Runtime is a PRD-only
+reference reader. It accepts only the four exact paths above; do not use it for
+uploads, project files, other skills, or arbitrary filesystem access.
 
 For PRD content, use only explicit user facts, authorized persisted project
 facts, attached sources, and pinned Knowledge. Make a conservative assumption

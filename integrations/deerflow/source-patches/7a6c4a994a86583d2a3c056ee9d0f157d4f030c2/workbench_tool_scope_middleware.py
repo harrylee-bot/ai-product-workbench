@@ -3,8 +3,9 @@
 Scoped tools stay registered in ToolNode so DeerFlow can route a declared call.
 The model-visible schemas and execution path are independently reduced for every
 run. Canvas tools use their tokenless configurable declaration. Prototype-only
-publication tools and Knowledge visibility are enabled only by trusted fields in
-``context.workbench``. Missing or malformed policy never grants ambient access.
+publication tools, the PRD reference reader, and Knowledge visibility are enabled
+only by trusted fields in ``context.workbench``. Missing or malformed policy never
+grants ambient access.
 """
 
 from __future__ import annotations
@@ -93,6 +94,7 @@ _CANVAS_BLOCK_CODE = "WORKBENCH_CANVAS_TOOL_NOT_DECLARED"
 _ARTIFACT_PROGRESS_BLOCK_CODE = "WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED"
 _PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
 _KNOWLEDGE_BLOCK_CODE = "WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"
+_PRD_REFERENCE_BLOCK_CODE = "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED"
 _PRD_REFERENCE_ROOT = "/mnt/skills/public/"
 _PRD_REFERENCE_RELATIVE_PATHS = tuple(
     path.removeprefix(_PRD_REFERENCE_ROOT) for path, _digest in PRD_REFERENCE_FILES
@@ -525,6 +527,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 continue
             if name == KNOWLEDGE_TOOL_NAME and not self._knowledge_enabled:
                 continue
+            if name == READ_FILE_TOOL_NAME and not self._prd_gate_enabled:
+                continue
             visible.append(tool)
         return request if len(visible) == len(request.tools) else request.override(tools=visible)
 
@@ -540,6 +544,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             block_code = _PROTOTYPE_BLOCK_CODE
         elif name == KNOWLEDGE_TOOL_NAME and not self._knowledge_enabled:
             block_code = _KNOWLEDGE_BLOCK_CODE
+        elif name == READ_FILE_TOOL_NAME and not self._prd_gate_enabled:
+            block_code = _PRD_REFERENCE_BLOCK_CODE
         else:
             return None
         tool_call_id = request.tool_call.get("id")
@@ -621,7 +627,15 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         args = _tool_args(request.tool_call.get("args"))
         path = args.get("path")
         if not _reference_like_path(path):
-            return None
+            successful_references, _reference_invalid = _reference_progress(request.state)
+            missing_references = _missing_reference_indexes(successful_references)
+            expected_index = missing_references[0] if missing_references else len(PRD_REFERENCE_FILES) - 1
+            expected_path = PRD_REFERENCE_FILES[expected_index][0]
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PRD_REFERENCE_PATH_INVALID",
+                f"Use the exact absolute Runtime path '{expected_path}'.",
+            )
         reference_index = _reference_index(path)
         successful_references, reference_invalid = _reference_progress(request.state)
         stage_count, stage_invalid = _stage_progress(request.state)

@@ -22,7 +22,7 @@ type Fixture = {
 };
 
 describe("PRD Runtime reference evidence", () => {
-  it("accepts exactly one verified read of every pinned reference across DeerFlow path shapes", () => {
+  it("accepts exactly one verified read across DeerFlow message shapes", () => {
     const fixture = validFixture();
     const messages = fixture.state.messages as Array<Record<string, unknown>>;
     const structureCall = messages.find((message) => (
@@ -31,7 +31,7 @@ describe("PRD Runtime reference evidence", () => {
     const structureToolCall = (structureCall?.tool_calls as Array<Record<string, unknown>>)[0]!;
     structureToolCall.args = {
       description: "Read structure rules",
-      path: "/mnt/skills/public/requirement-doc-template/references/./structure.md",
+      path: "/mnt/skills/public/requirement-doc-template/references/structure.md",
     };
     const schemaCall = messages.find((message) => (
       JSON.stringify(message.tool_calls ?? []).includes("read-reference-3")
@@ -43,7 +43,7 @@ describe("PRD Runtime reference evidence", () => {
       name: "read_file",
       arguments: JSON.stringify({
         description: "Read PRD transport schema",
-        path: "/mnt/skills/public/workbench/references/./prd-runtime-result.schema.json",
+        path: "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
       }),
     };
     const schemaResponse = messages.find((message) => message.tool_call_id === "read-reference-3")!;
@@ -175,16 +175,17 @@ describe("PRD Runtime reference evidence", () => {
     }
   });
 
-  it("rejects a matching reference suffix under an untrusted root", () => {
-    const fixture = validFixture();
-    replaceReferencePath(
-      fixture,
-      "structure.md",
+  it("rejects aliases and matching reference suffixes outside the exact root", () => {
+    for (const path of [
+      "/mnt/skills/public/requirement-doc-template/references/./structure.md",
       "/mnt/user-data/uploads/requirement-doc-template/references/structure.md",
-    );
+    ]) {
+      const fixture = validFixture();
+      replaceReferencePath(fixture, "structure.md", path);
 
-    expect(() => assertPrdReferenceReadEvidence(fixture.state, fixture.boundaries))
-      .toThrow("RUNTIME_ARTIFACT_PRD_REFERENCE_PATH_INVALID");
+      expect(() => assertPrdReferenceReadEvidence(fixture.state, fixture.boundaries))
+        .toThrow("RUNTIME_ARTIFACT_PRD_REFERENCE_PATH_INVALID");
+    }
   });
 
   it("rejects ranged reads even when their response happens to contain the complete file", () => {
@@ -258,6 +259,51 @@ describe("PRD Runtime reference evidence", () => {
       ...afterStructuring.boundaries,
       structuringDeclarationIndex: afterStructuring.boundaries.collectingResponseIndex + 1,
     })).toThrow("RUNTIME_ARTIFACT_PRD_REFERENCE_ORDER_INVALID");
+  });
+
+  it("rejects verified reference declarations or responses outside canonical order", () => {
+    const declarationsOutOfOrder = validFixture();
+    const declarationStart = declarationIndex(
+      declarationsOutOfOrder.state.messages,
+      "read-reference-0",
+    );
+    const firstDeclaration = declarationsOutOfOrder.state.messages[declarationStart]!;
+    const firstResponse = declarationsOutOfOrder.state.messages[declarationStart + 1]!;
+    const secondDeclaration = declarationsOutOfOrder.state.messages[declarationStart + 2]!;
+    const secondResponse = declarationsOutOfOrder.state.messages[declarationStart + 3]!;
+    declarationsOutOfOrder.state.messages.splice(
+      declarationStart,
+      4,
+      secondDeclaration,
+      firstDeclaration,
+      firstResponse,
+      secondResponse,
+    );
+
+    expect(() => assertPrdReferenceReadEvidence(
+      declarationsOutOfOrder.state,
+      declarationsOutOfOrder.boundaries,
+    )).toThrow("RUNTIME_ARTIFACT_PRD_REFERENCE_ORDER_INVALID");
+
+    const responsesOutOfOrder = validFixture();
+    const responseStart = declarationIndex(responsesOutOfOrder.state.messages, "read-reference-0");
+    const canonicalFirstDeclaration = responsesOutOfOrder.state.messages[responseStart]!;
+    const canonicalFirstResponse = responsesOutOfOrder.state.messages[responseStart + 1]!;
+    const canonicalSecondDeclaration = responsesOutOfOrder.state.messages[responseStart + 2]!;
+    const canonicalSecondResponse = responsesOutOfOrder.state.messages[responseStart + 3]!;
+    responsesOutOfOrder.state.messages.splice(
+      responseStart,
+      4,
+      canonicalFirstDeclaration,
+      canonicalSecondDeclaration,
+      canonicalSecondResponse,
+      canonicalFirstResponse,
+    );
+
+    expect(() => assertPrdReferenceReadEvidence(
+      responsesOutOfOrder.state,
+      responsesOutOfOrder.boundaries,
+    )).toThrow("RUNTIME_ARTIFACT_PRD_REFERENCE_ORDER_INVALID");
   });
 });
 

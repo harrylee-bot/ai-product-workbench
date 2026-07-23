@@ -17,6 +17,9 @@ tools:
   - name: workbench_runtime_result_submit
     group: workbench
     use: deerflow_workbench_tools.runtime_result_tool:workbench_runtime_result_submit
+  - name: read_file
+    group: workbench
+    use: deerflow_workbench_tools.prd_reference_tool:workbench_prd_reference_read
   - name: get_visible_screens
     group: workbench
     use: deerflow_workbench_tools.canvas_tool:get_visible_screens

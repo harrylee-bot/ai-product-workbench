@@ -33,6 +33,7 @@ export type PrdReferenceEvidenceBoundaries = {
 type ReferenceCall = {
   toolCallId: string;
   declarationIndex: number;
+  declarationOrder: number;
   reference: (typeof PRD_RUNTIME_REFERENCE_FILES)[number];
   exactPath: boolean;
   ranged: boolean;
@@ -68,13 +69,15 @@ export function assertPrdReferenceReadEvidence(
       calls.push({
         toolCallId: call.id,
         declarationIndex: index,
+        declarationOrder: calls.length,
         reference,
-        exactPath: normalizedPath === `${PRD_REFERENCE_ROOT}/${reference.relativePath}`,
+        exactPath: call.path === `${PRD_REFERENCE_ROOT}/${reference.relativePath}`,
         ranged: call.ranged,
       });
     }
   }
 
+  const canonicalVerifiedReads: Array<{ call: ReferenceCall; response: ReferenceResponse }> = [];
   for (const reference of PRD_RUNTIME_REFERENCE_FILES) {
     const matchingCalls = calls.filter((call) => call.reference.relativePath === reference.relativePath);
     if (matchingCalls.length === 0) {
@@ -132,6 +135,18 @@ export function assertPrdReferenceReadEvidence(
       || verified.response.messageIndex >= boundaries.structuringDeclarationIndex
       || verified.response.messageIndex >= boundaries.draftingDeclarationIndex
       || verified.response.messageIndex >= boundaries.artifactDeclarationIndex
+    ) {
+      throw new Error("RUNTIME_ARTIFACT_PRD_REFERENCE_ORDER_INVALID");
+    }
+    canonicalVerifiedReads.push(verified);
+  }
+
+  for (let index = 1; index < canonicalVerifiedReads.length; index += 1) {
+    const previous = canonicalVerifiedReads[index - 1]!;
+    const current = canonicalVerifiedReads[index]!;
+    if (
+      current.call.declarationOrder <= previous.call.declarationOrder
+      || current.response.messageIndex <= previous.response.messageIndex
     ) {
       throw new Error("RUNTIME_ARTIFACT_PRD_REFERENCE_ORDER_INVALID");
     }

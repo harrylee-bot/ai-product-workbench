@@ -69,6 +69,7 @@ spec.loader.exec_module(middleware_module)
 
 CANVAS_TOOL_NAMES = middleware_module.CANVAS_TOOL_NAMES
 KNOWLEDGE_TOOL_NAME = middleware_module.KNOWLEDGE_TOOL_NAME
+READ_FILE_TOOL_NAME = middleware_module.READ_FILE_TOOL_NAME
 ARTIFACT_PROGRESS_TOOL_NAMES = middleware_module.ARTIFACT_PROGRESS_TOOL_NAMES
 PROTOTYPE_ONLY_TOOL_NAMES = middleware_module.PROTOTYPE_ONLY_TOOL_NAMES
 PRD_REFERENCE_FILES = middleware_module.PRD_REFERENCE_FILES
@@ -198,10 +199,10 @@ def append_references(messages: list[dict], *, status_by_index: dict[int, str] |
     responses = []
     for index, (path, _digest) in enumerate(PRD_REFERENCE_FILES):
         call_id = f"reference-{index}"
-        calls.append(call("read_file", call_id, {"description": "Read PRD reference", "path": path}))
+        calls.append(call(READ_FILE_TOOL_NAME, call_id, {"path": path}))
         status = (status_by_index or {}).get(index, "success")
         responses.append(tool_message(
-            "read_file",
+            READ_FILE_TOOL_NAME,
             call_id,
             REFERENCE_CONTENT[path] if status == "success" else "Error: read failed",
             status=status,
@@ -254,6 +255,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
     def setUp(self) -> None:
         self.all_tools = [
             FakeTool("workbench_runtime_result_submit"),
+            FakeTool(READ_FILE_TOOL_NAME),
             *map(FakeTool, ARTIFACT_PROGRESS_TOOL_NAMES),
             *map(FakeTool, PROTOTYPE_ONLY_TOOL_NAMES),
             FakeTool(KNOWLEDGE_TOOL_NAME),
@@ -384,7 +386,11 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
         self.assertEqual(
             self.visible_names(None, ["prd"]),
-            ["workbench_runtime_result_submit", *ARTIFACT_PROGRESS_TOOL_NAMES],
+            [
+                "workbench_runtime_result_submit",
+                READ_FILE_TOOL_NAME,
+                *ARTIFACT_PROGRESS_TOOL_NAMES,
+            ],
         )
         self.assertEqual(
             self.visible_names(None, ["prototype"]),
@@ -597,10 +603,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
         messages = prd_messages(stage_count=1, references=False)
         reference_calls = [
-            call("read_file", f"parallel-reference-{index}", {
-                "description": "Read complete PRD reference",
-                "path": path,
-            })
+            call(READ_FILE_TOOL_NAME, f"parallel-reference-{index}", {"path": path})
             for index, (path, _digest) in enumerate(PRD_REFERENCE_FILES)
         ]
         messages.append({"type": "ai", "content": "", "tool_calls": reference_calls})
@@ -609,9 +612,9 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         for index, (path, _digest) in enumerate(PRD_REFERENCE_FILES):
             call_id = f"parallel-reference-{index}"
             request = FakeToolRequest(
-                "read_file",
+                READ_FILE_TOOL_NAME,
                 call_id,
-                {"description": "Read complete PRD reference", "path": path},
+                {"path": path},
                 state,
             )
 
@@ -620,7 +623,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 return middleware_module.ToolMessage(
                     content=REFERENCE_CONTENT[current_path],
                     tool_call_id=current_id,
-                    name="read_file",
+                    name=READ_FILE_TOOL_NAME,
                     status="success",
                 )
 
@@ -699,6 +702,16 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         alias = middleware.wrap_tool_call(alias_request, lambda _request: object())
         self.assertIn("WORKBENCH_PRD_REFERENCE_PATH_INVALID", alias.content)
         self.assertIn(structure_path, alias.content)
+
+        unrelated_request = request_in_state(
+            prd_messages(stage_count=1, references=False),
+            READ_FILE_TOOL_NAME,
+            "unrelated-reference",
+            {"path": "/mnt/user-data/private.txt"},
+        )
+        unrelated = middleware.wrap_tool_call(unrelated_request, lambda _request: object())
+        self.assertIn("WORKBENCH_PRD_REFERENCE_PATH_INVALID", unrelated.content)
+        self.assertIn(structure_path, unrelated.content)
 
         ranged_request = request_in_state(
             prd_messages(stage_count=1, references=False),
@@ -933,16 +946,24 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         blocked = middleware.wrap_tool_call(current_final, lambda _request: sentinel)
         self.assertIn("WORKBENCH_PRD_COLLECTING_STAGE_REQUIRED", blocked.content)
 
-    def test_prd_gate_does_not_affect_prototype_non_prd_or_mixed_runs(self) -> None:
-        sentinel = object()
+    def test_prd_reference_reader_is_blocked_outside_exact_prd_runs(self) -> None:
         path = PRD_REFERENCE_FILES[0][0]
         for requested_kinds in (["prototype"], ["document"], ["prd", "prototype"]):
             with self.subTest(requested_kinds=requested_kinds):
                 middleware = WorkbenchToolScopeMiddleware(None, requested_kinds)
-                request = FakeToolRequest("read_file", args={"path": path})
-                self.assertIs(
-                    middleware.wrap_tool_call(request, lambda _request: sentinel),
-                    sentinel,
+                called = False
+
+                def handler(_request):
+                    nonlocal called
+                    called = True
+                    return object()
+
+                request = FakeToolRequest(READ_FILE_TOOL_NAME, args={"path": path})
+                blocked = middleware.wrap_tool_call(request, handler)
+                self.assertFalse(called)
+                self.assertEqual(
+                    blocked.content,
+                    "Error: WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
                 )
 
 
@@ -1014,6 +1035,7 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         tools = [
             FakeTool("workbench_runtime_result_submit"),
+            FakeTool(READ_FILE_TOOL_NAME),
             *map(FakeTool, ARTIFACT_PROGRESS_TOOL_NAMES),
             *map(FakeTool, PROTOTYPE_ONLY_TOOL_NAMES),
         ]
@@ -1027,7 +1049,11 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [tool.name for tool in prd_result.tools],
-            ["workbench_runtime_result_submit", *ARTIFACT_PROGRESS_TOOL_NAMES],
+            [
+                "workbench_runtime_result_submit",
+                READ_FILE_TOOL_NAME,
+                *ARTIFACT_PROGRESS_TOOL_NAMES,
+            ],
         )
 
         prototype_result = await WorkbenchToolScopeMiddleware(
@@ -1082,6 +1108,19 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
                     sentinel,
                 )
                 self.assertIn(name, called)
+
+        blocked_reference = await prototype_middleware.awrap_tool_call(
+            FakeToolRequest(
+                READ_FILE_TOOL_NAME,
+                args={"path": PRD_REFERENCE_FILES[0][0]},
+            ),
+            handler,
+        )
+        self.assertEqual(
+            blocked_reference.content,
+            "Error: WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
+        )
+        self.assertNotIn(READ_FILE_TOOL_NAME, called)
 
     async def test_async_knowledge_tool_execution_is_fail_closed(self) -> None:
         middleware = WorkbenchToolScopeMiddleware()

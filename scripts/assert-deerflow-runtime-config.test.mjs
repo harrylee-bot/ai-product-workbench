@@ -20,7 +20,9 @@ test("accepts the pinned OpenAI-compatible model and canonical Workbench tools",
   try {
     const result = runCheck(fixture);
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).status, "valid");
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.status, "valid");
+    assert.equal(report.workbenchToolCount, WORKBENCH_RUNTIME_TOOLS.length);
   } finally {
     fixture.cleanup();
   }
@@ -64,6 +66,32 @@ test("rejects inline provider credentials and unapproved base URL references", (
     fixture.cleanup();
   }
 });
+
+for (const [mutation, article] of [["missing", "a"], ["altered", "an"]]) {
+  test(`rejects ${article} ${mutation} canonical PRD reference reader`, () => {
+    const tools = structuredClone(WORKBENCH_RUNTIME_TOOLS);
+    const readerIndex = tools.findIndex((tool) => tool.name === "read_file");
+    assert.notEqual(readerIndex, -1, "canonical contract must define the restricted read_file tool");
+    if (mutation === "missing") {
+      tools.splice(readerIndex, 1);
+    } else {
+      tools[readerIndex].use = "untrusted.module:read_file";
+    }
+    const fixture = createFixture({
+      config: {
+        ...validConfig(),
+        tools,
+      },
+    });
+    try {
+      const result = runCheck(fixture);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /canonical read_file tool/u);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+}
 
 function createFixture({ config = validConfig(), providerEnv = null } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "workbench-deerflow-runtime-config-"));
