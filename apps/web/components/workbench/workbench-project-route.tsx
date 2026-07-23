@@ -320,6 +320,66 @@ function getDocumentViewport(containerWidth = 1440, containerHeight = 900): View
   };
 }
 
+export function observePersistedPrdNodes(
+  previousNodeIds: ReadonlySet<string> | null,
+  nodes: readonly BoardFlowNode[],
+  initialTargetNodeId = "",
+): {
+  nodeIds: Set<string>;
+  target: BoardFlowNode | null;
+} {
+  const prdNodes = nodes.filter(isPersistedPrdNode);
+  const nodeIds = new Set(prdNodes.map((node) => node.id));
+  return {
+    nodeIds,
+    target: previousNodeIds === null
+      ? prdNodes.find((node) => node.id === initialTargetNodeId) ?? null
+      : previousNodeIds.size === 0 ? prdNodes[0] ?? null : null,
+  };
+}
+
+export function getPersistedPrdViewport(
+  node: BoardFlowNode,
+  containerWidth: number,
+  containerHeight: number,
+): Viewport {
+  return getPrdNodeViewport(
+    node.position,
+    node.workbench.size?.width ?? 1120,
+    containerWidth,
+    containerHeight,
+  );
+}
+
+function getPrdNodeViewport(
+  position: { x: number; y: number },
+  nodeWidth: number,
+  containerWidth: number,
+  containerHeight: number,
+): Viewport {
+  const documentViewport = getDocumentViewport(containerWidth, containerHeight);
+  const targetLeft = containerWidth < 768
+    ? 24
+    : Math.max(320, documentViewport.x);
+  const availableWidth = Math.max(1, containerWidth - targetLeft - 40);
+  const zoom = Math.max(
+    0.04,
+    Math.min(documentViewport.zoom, availableWidth / nodeWidth),
+  );
+
+  return {
+    x: targetLeft - position.x * zoom,
+    y: documentViewport.y - position.y * zoom,
+    zoom,
+  };
+}
+
+function isPersistedPrdNode(node: BoardFlowNode): boolean {
+  return node.workbench.kind === "artifact"
+    && node.data.nodeType === "artifact"
+    && node.data.artifactKind === "prd";
+}
+
 function getGeneratedViewport(
   containerWidth = 1440,
   containerHeight = 900,
@@ -527,21 +587,45 @@ export function projectRunBoardNodes({
   drafts,
   persistedBoardNodes,
   projectId,
+  requestedArtifactKinds = [],
   runStatus,
 }: {
   drafts: readonly RunArtifactDraftProjection[];
   persistedBoardNodes: readonly BoardFlowNode[];
   projectId: string;
+  requestedArtifactKinds?: readonly Run["requestedArtifactKinds"][number][];
   runStatus: Run["status"] | null;
 }): WorkbenchNode[] {
   const persisted = persistedBoardNodesToWorkbench(persistedBoardNodes, projectId);
-  if (drafts.length === 0) return persisted;
-
   const draftNodes = runtimeDraftsToWorkbench(
     drafts,
     projectId,
     nextAvailableDraftX(persisted),
   );
+  if (
+    workbenchRunIsActive(runStatus)
+    && requestedArtifactKinds.includes("prd")
+    && !persistedBoardNodes.some(isPersistedPrdNode)
+    && !drafts.some((draft) => draft.kind === "prd")
+  ) {
+    const height = 1440;
+    const width = 1120;
+    draftNodes.push({
+      data: { phase: "generating", title: "需求文档" },
+      deletable: false,
+      draggable: false,
+      height,
+      id: `run-pending:${projectId}:prd:document`,
+      position: { x: nextAvailableDraftX([...persisted, ...draftNodes]), y: 0 },
+      selectable: false,
+      selected: false,
+      style: { height, width },
+      type: "documentCanvas",
+      width,
+    } satisfies DocumentCanvasNode);
+  }
+  if (draftNodes.length === 0) return persisted;
+
   if (workbenchRunIsActive(runStatus)) {
     return mergeDraftNodes(persisted, draftNodes, false);
   }
@@ -697,6 +781,7 @@ function newClientSessionId(): string {
 }
 
 const EMPTY_BOARD_NODES: BoardFlowNode[] = [];
+const EMPTY_REQUESTED_ARTIFACT_KINDS: Run["requestedArtifactKinds"] = [];
 
 export function WorkbenchProjectRoute() {
   return (
@@ -1167,6 +1252,8 @@ function WorkbenchProjectRouteInner() {
               onSubmitRunApproval: runActions.submitApproval,
               prompt: persistedPrompt,
               prototypePatchProjector: workbench.runController.prototypePatchProjector,
+              requestedArtifactKinds: workbench.currentRun?.requestedArtifactKinds
+                ?? EMPTY_REQUESTED_ARTIFACT_KINDS,
               runActionBusy: runActions.busy,
               runActionError: runActions.error,
               runActivities: workbench.runActivities,
@@ -1325,6 +1412,7 @@ type ProjectScreenProps = {
     onSubmitRunApproval: ReturnType<typeof useWorkbenchRunActions>["submitApproval"];
     prompt: string;
     prototypePatchProjector: PrototypePatchProjectorStore;
+    requestedArtifactKinds: Run["requestedArtifactKinds"];
     runActionBusy: boolean;
     runActionError: unknown;
     runActivities: WorkbenchRunActivityItem[];
@@ -1415,6 +1503,7 @@ function ProjectScreen({
     onSubmitRunApproval,
     prompt,
     prototypePatchProjector,
+    requestedArtifactKinds,
     runActionBusy,
     runActionError,
     runActivities,
@@ -1501,6 +1590,15 @@ function ProjectScreen({
   );
   const viewportInitializedRef = useWorkbenchProjectRef(projectSession, () => false);
   const viewportTransitionKeyRef = useWorkbenchProjectRef(projectSession, () => "");
+  const persistedPrdViewportRef = useWorkbenchProjectRef(projectSession, () => ({
+    focusedNodeIds: new Set<string>(),
+    observedNodeIds: null as Set<string> | null,
+    pendingNodeId: null as string | null,
+  }));
+  const activePrdViewportRunRef = useWorkbenchProjectRef(
+    projectSession,
+    () => null as string | null,
+  );
   const {
     getNodesBounds,
     getViewport,
@@ -2189,6 +2287,7 @@ function ProjectScreen({
       drafts: draftArtifacts,
       persistedBoardNodes,
       projectId,
+      requestedArtifactKinds,
       runStatus,
     });
     const matchesCurrentProject = readWorkbenchProjectId() === projectId;
@@ -2245,6 +2344,7 @@ function ProjectScreen({
     phase,
     projectId,
     projectMode,
+    requestedArtifactKinds,
     runStatus,
     scheduleReadyToast,
     lastProjectModeRef,
@@ -2347,6 +2447,101 @@ function ProjectScreen({
     setZoomLabel,
     viewportInitializedRef,
     viewportTransitionKeyRef,
+  ]);
+
+  useEffect(() => {
+    const tracker = persistedPrdViewportRef.current;
+    const initialTargetNodeId = tracker.observedNodeIds === null
+      && readWorkbenchProjectId() === projectId
+      ? readWorkbenchBoardNodeId()
+      : "";
+    const observation = observePersistedPrdNodes(
+      tracker.observedNodeIds,
+      persistedBoardNodes,
+      initialTargetNodeId,
+    );
+    tracker.observedNodeIds = observation.nodeIds;
+    if (observation.target && !tracker.focusedNodeIds.has(observation.target.id)) {
+      tracker.pendingNodeId = observation.target.id;
+    }
+
+    const target = tracker.pendingNodeId
+      ? persistedBoardNodes.find((node) => (
+          node.id === tracker.pendingNodeId && isPersistedPrdNode(node)
+        )) ?? null
+      : null;
+    if (!target) {
+      tracker.pendingNodeId = null;
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      if (!projectSession.isCurrent()) return;
+      const stage = stageRef.current?.getBoundingClientRect();
+      if (!stage || stage.width <= 0 || stage.height <= 0) return;
+
+      const nextViewport = getPersistedPrdViewport(target, stage.width, stage.height);
+      tracker.pendingNodeId = null;
+      tracker.focusedNodeIds.add(target.id);
+      manualZoomRef.current = true;
+      setBoardViewport(nextViewport);
+      setZoomLabel(`${Math.round(nextViewport.zoom * boardZoomDisplayRatio * 100)}%`);
+      void setViewport(nextViewport, { duration: 320 });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    manualZoomRef,
+    persistedBoardNodes,
+    persistedPrdViewportRef,
+    projectSession,
+    setBoardViewport,
+    setViewport,
+    setZoomLabel,
+  ]);
+
+  useEffect(() => {
+    if (
+      !runId
+      || !workbenchRunIsActive(runStatus)
+      || !requestedArtifactKinds.includes("prd")
+      || activePrdViewportRunRef.current === runId
+    ) return;
+
+    const target = nodes.find((node) => node.type === "documentCanvas");
+    if (!target) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (!projectSession.isCurrent()) return;
+      const stage = stageRef.current?.getBoundingClientRect();
+      if (!stage || stage.width <= 0 || stage.height <= 0) return;
+
+      const size = workbenchNodeCanvasSize(target);
+      const nextViewport = getPrdNodeViewport(
+        target.position,
+        size.width || 1120,
+        stage.width,
+        stage.height,
+      );
+      activePrdViewportRunRef.current = runId;
+      manualZoomRef.current = true;
+      setBoardViewport(nextViewport);
+      setZoomLabel(`${Math.round(nextViewport.zoom * boardZoomDisplayRatio * 100)}%`);
+      void setViewport(nextViewport, { duration: 320 });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    activePrdViewportRunRef,
+    manualZoomRef,
+    nodes,
+    projectSession,
+    requestedArtifactKinds,
+    runId,
+    runStatus,
+    setBoardViewport,
+    setViewport,
+    setZoomLabel,
   ]);
 
   const updateZoomLabel = useCallback(() => {

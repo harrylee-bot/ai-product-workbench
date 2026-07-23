@@ -11,7 +11,9 @@ import { workbenchRunIsActive } from "@/lib/workbench/run";
 
 import {
   boardNodesForPhase,
+  getPersistedPrdViewport,
   mergeCanvasNodeSelection,
+  observePersistedPrdNodes,
   projectReadyPrototypePreviewArtifacts,
   projectRunBoardNodes,
   runtimeDraftsToWorkbench,
@@ -126,6 +128,103 @@ describe("Mini Workbench Run preview", () => {
   it("never materializes transient presentation nodes for an idle or completed Run", () => {
     expect(boardNodesForPhase("idle", "board", 0, "真实支付工作流")).toEqual([]);
     expect(boardNodesForPhase("complete", "generated", 1, "真实支付工作流")).toEqual([]);
+  });
+
+  it("projects a client-only PRD skeleton only until a real PRD Draft or Board node exists", () => {
+    const pending = projectRunBoardNodes({
+      drafts: [],
+      persistedBoardNodes: [],
+      projectId: "project-real",
+      requestedArtifactKinds: ["prd"],
+      runStatus: "running",
+    });
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      data: { phase: "generating", title: "需求文档" },
+      deletable: false,
+      draggable: false,
+      id: "run-pending:project-real:prd:document",
+      position: { x: 0, y: 0 },
+      selectable: false,
+      selected: false,
+      style: { height: 1440, width: 1120 },
+      type: "documentCanvas",
+    });
+    expect(pending[0]?.data).not.toHaveProperty("artifact");
+
+    const draft = draftProjection({
+      artifactId: "artifact-prd",
+      artifactVersionId: "version-prd-draft",
+      kind: "prd",
+    });
+    expect(projectRunBoardNodes({
+      drafts: [draft],
+      persistedBoardNodes: [],
+      projectId: "project-real",
+      requestedArtifactKinds: ["prd"],
+      runStatus: "running",
+    }).map((node) => node.id)).toEqual(["run-draft:artifact-prd:document"]);
+
+    expect(projectRunBoardNodes({
+      drafts: [],
+      persistedBoardNodes: [persistedPrdNode({
+        id: "board-node-prd",
+        position: { x: 0, y: 0 },
+      })],
+      projectId: "project-real",
+      requestedArtifactKinds: ["prd"],
+      runStatus: "running",
+    }).map((node) => node.id)).toEqual(["board-node-prd"]);
+
+    expect(projectRunBoardNodes({
+      drafts: [],
+      persistedBoardNodes: [],
+      projectId: "project-real",
+      requestedArtifactKinds: ["prd"],
+      runStatus: "succeeded",
+    })).toEqual([]);
+  });
+
+  it("targets only the first empty-to-persisted PRD transition", () => {
+    const prd = persistedPrdNode({
+      id: "board-node-prd",
+      position: { x: 0, y: 0 },
+    });
+    const prototype = persistedPrototypeNode({
+      artifactId: "artifact-prototype",
+      artifactVersionId: "version-prototype",
+      id: "board-node-prototype",
+      position: { x: 0, y: 0 },
+      screenId: "screen-main",
+    });
+
+    const initial = observePersistedPrdNodes(null, []);
+    expect(initial.target).toBeNull();
+    const withoutPrd = observePersistedPrdNodes(initial.nodeIds, [prototype]);
+    expect(withoutPrd.target).toBeNull();
+    const published = observePersistedPrdNodes(withoutPrd.nodeIds, [prototype, prd]);
+    expect(published.target?.id).toBe("board-node-prd");
+    expect(observePersistedPrdNodes(published.nodeIds, [prototype, prd]).target).toBeNull();
+    expect(observePersistedPrdNodes(null, [prd]).target).toBeNull();
+    expect(observePersistedPrdNodes(null, [prd], "board-node-prd").target?.id)
+      .toBe("board-node-prd");
+  });
+
+  it("anchors a newly persisted PRD beyond the inspector and preserves its document top", () => {
+    const prd = persistedPrdNode({
+      id: "board-node-prd",
+      position: { x: 600, y: 400 },
+    });
+    const viewport = getPersistedPrdViewport(prd, 1440, 900);
+    const projectedLeft = viewport.x + prd.position.x * viewport.zoom;
+    const projectedTop = viewport.y + prd.position.y * viewport.zoom;
+    const projectedRight = projectedLeft + prd.workbench.size!.width * viewport.zoom;
+
+    expect(projectedLeft).toBeGreaterThanOrEqual(320);
+    expect(projectedTop).toBeCloseTo(92, 5);
+    expect(projectedRight).toBeLessThanOrEqual(1400);
+    expect(viewport.zoom).toBeCloseTo((0.93 / (63 / 34)) * 0.88, 5);
   });
 
   it("does not import ephemeral interaction overrides from the Board store", () => {
@@ -576,6 +675,34 @@ function persistedPrototypeNode({
       kind: "artifact",
       order: 0,
       size: { height: 844, width: 390 },
+    },
+  };
+}
+
+function persistedPrdNode({
+  id,
+  position,
+}: {
+  id: string;
+  position: { x: number; y: number };
+}): BoardFlowNode {
+  return {
+    data: {
+      artifactKind: "prd",
+      nodeType: "artifact",
+      protocol: boardNodeProtocol,
+      title: "Persisted PRD",
+    },
+    id,
+    position,
+    style: { height: 3001, width: 1154 },
+    type: "artifact",
+    workbench: {
+      artifactId: "artifact-prd",
+      artifactVersionId: "version-prd",
+      kind: "artifact",
+      order: 0,
+      size: { height: 3001, width: 1154 },
     },
   };
 }

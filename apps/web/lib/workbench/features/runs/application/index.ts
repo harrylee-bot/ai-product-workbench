@@ -24,12 +24,27 @@ export function useWorkbenchRuns(
   });
 }
 
-export function useWorkbenchRun(runId: string) {
+export type WorkbenchRunQueryOptions = {
+  enabled?: boolean;
+  refetchIntervalMs?: number | false;
+};
+
+export function useWorkbenchRun(
+  runId: string,
+  {
+    enabled = true,
+    refetchIntervalMs = false,
+  }: WorkbenchRunQueryOptions = {},
+) {
   const service = useWorkbenchRunsApi();
   return useQuery({
     queryKey: workbenchQueryKeys.run(runId),
     queryFn: () => service.getRun(runId),
-    enabled: Boolean(runId),
+    enabled: Boolean(runId) && enabled,
+    refetchInterval: (query) => {
+      if (refetchIntervalMs === false || isTerminalStatus(query.state.data?.status)) return false;
+      return refetchIntervalMs;
+    },
   });
 }
 
@@ -125,4 +140,8 @@ export function useSubmitWorkbenchRunApproval({
       ]);
     },
   });
+}
+
+function isTerminalStatus(status: Run["status"] | undefined): boolean {
+  return status === "succeeded" || status === "failed" || status === "cancelled";
 }

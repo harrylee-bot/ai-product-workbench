@@ -298,6 +298,235 @@ describe("Board store CAS lifecycle", () => {
     });
   });
 
+  it("merges a server-created PRD node while preserving a dirty local viewport", () => {
+    const store = createBoardStore(board);
+    store.getState().setViewport({ x: 30, y: 40, zoom: 0.63 });
+
+    store.getState().reconcileFromServer(boardWithPrd(board, 2), '"2"');
+
+    expect(store.getState()).toMatchObject({
+      serverRevision: 2,
+      etag: '"2"',
+      viewport: { x: 30, y: 40, zoom: 0.63 },
+      dirty: true,
+      saveStatus: "dirty",
+      activeSaveVersion: null,
+      lastSaveError: null,
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1", "node-prd"]);
+    expect(store.getState().prepareSave()).toMatchObject({
+      baseRevision: 2,
+      ifMatch: '"2"',
+      request: {
+        viewport: { x: 30, y: 40, zoom: 0.63 },
+        nodes: [
+          { id: "node-1" },
+          { id: "node-prd", data: { artifactKind: "prd" } },
+        ],
+      },
+    });
+  });
+
+  it("invalidates an in-flight viewport save and rebases it over a server-created PRD node", () => {
+    const store = createBoardStore(board);
+    store.getState().setViewport({ x: 30, y: 40, zoom: 0.63 });
+    const staleSnapshot = store.getState().prepareSave()!;
+    store.getState().setViewport({ x: 50, y: 60, zoom: 0.7 });
+
+    store.getState().reconcileFromServer(boardWithPrd(board, 2), '"2"');
+    store.getState().failSave(staleSnapshot, new WorkbenchApiError({
+      type: "about:blank",
+      title: "Precondition failed",
+      status: 412,
+      code: "REVISION_CONFLICT",
+    }));
+
+    expect(store.getState()).toMatchObject({
+      serverRevision: 2,
+      viewport: { x: 50, y: 60, zoom: 0.7 },
+      dirty: true,
+      saveStatus: "dirty",
+      activeSaveVersion: null,
+      lastSaveError: null,
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1", "node-prd"]);
+    expect(store.getState().prepareSave()).toMatchObject({
+      baseRevision: 2,
+      ifMatch: '"2"',
+      editVersion: expect.any(Number),
+      request: {
+        viewport: { x: 50, y: 60, zoom: 0.7 },
+        nodes: [
+          { id: "node-1" },
+          { id: "node-prd", data: { artifactKind: "prd" } },
+        ],
+      },
+    });
+    expect(store.getState().activeSaveVersion).not.toBe(staleSnapshot.editVersion);
+  });
+
+  it("recovers a stale viewport save conflict when the refreshed revision only adds a PRD", () => {
+    const store = createBoardStore(board);
+    store.getState().setViewport({ x: 50, y: 60, zoom: 0.7 });
+    const staleSnapshot = store.getState().prepareSave()!;
+    store.getState().failSave(staleSnapshot, new WorkbenchApiError({
+      type: "about:blank",
+      title: "Precondition failed",
+      status: 412,
+      code: "REVISION_CONFLICT",
+    }));
+    expect(store.getState().saveStatus).toBe("conflict");
+
+    store.getState().reconcileFromServer(boardWithPrd(board, 2), '"2"');
+
+    expect(store.getState()).toMatchObject({
+      serverRevision: 2,
+      viewport: { x: 50, y: 60, zoom: 0.7 },
+      dirty: true,
+      saveStatus: "dirty",
+      retrySaveSnapshot: null,
+      lastSaveError: null,
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1", "node-prd"]);
+    expect(store.getState().prepareSave()).toMatchObject({
+      baseRevision: 2,
+      ifMatch: '"2"',
+      request: {
+        viewport: { x: 50, y: 60, zoom: 0.7 },
+        nodes: [
+          { id: "node-1" },
+          { id: "node-prd", data: { artifactKind: "prd" } },
+        ],
+      },
+    });
+  });
+
+  it("rebases a retryable viewport save error over a server-created PRD", () => {
+    const store = createBoardStore(board);
+    store.getState().setViewport({ x: 50, y: 60, zoom: 0.7 });
+    const failedSnapshot = store.getState().prepareSave()!;
+    store.getState().failSave(failedSnapshot, new Error("network disconnected"));
+
+    expect(store.getState()).toMatchObject({
+      dirty: true,
+      saveStatus: "error",
+      retrySaveSnapshot: failedSnapshot,
+    });
+
+    store.getState().reconcileFromServer(boardWithPrd(board, 2), '"2"');
+
+    expect(store.getState()).toMatchObject({
+      serverRevision: 2,
+      viewport: { x: 50, y: 60, zoom: 0.7 },
+      dirty: true,
+      saveStatus: "dirty",
+      retrySaveSnapshot: null,
+      lastSaveError: null,
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1", "node-prd"]);
+    const rebasedSnapshot = store.getState().prepareSave()!;
+    expect(rebasedSnapshot.idempotencyKey).not.toBe(failedSnapshot.idempotencyKey);
+    expect(rebasedSnapshot).toMatchObject({
+      baseRevision: 2,
+      ifMatch: '"2"',
+      request: {
+        viewport: { x: 50, y: 60, zoom: 0.7 },
+        nodes: [
+          { id: "node-1" },
+          { id: "node-prd", data: { artifactKind: "prd" } },
+        ],
+      },
+    });
+  });
+
+  it("keeps the PRD node outside existing local undo history", () => {
+    const store = createBoardStore(board);
+    applyProjectNodeChanges(store, [{
+      id: "node-1",
+      type: "position",
+      position: { x: 110, y: 210 },
+      dragging: false,
+    }]);
+    const savedSnapshot = store.getState().prepareSave()!;
+    const savedBoard: Board = {
+      ...board,
+      revision: 2,
+      ...savedSnapshot.request,
+    };
+    store.getState().completeSave(savedSnapshot, savedBoard, '"2"');
+    store.getState().setViewport({ x: 30, y: 40, zoom: 0.63 });
+    store.getState().reconcileFromServer(boardWithPrd(savedBoard, 3), '"3"');
+
+    store.getState().undo();
+
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1", "node-prd"]);
+    expect(store.getState().nodes[0]?.position).toEqual({ x: 100, y: 200 });
+  });
+
+  it("keeps conflicts for PRD additions when local Board content is also dirty", () => {
+    const store = createBoardStore(board);
+    applyProjectNodeChanges(store, [{
+      id: "node-1",
+      type: "position",
+      position: { x: 130, y: 230 },
+      dragging: false,
+    }]);
+
+    store.getState().reconcileFromServer(boardWithPrd(board, 2), '"2"');
+
+    expect(store.getState()).toMatchObject({
+      serverRevision: 1,
+      dirty: true,
+      saveStatus: "conflict",
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1"]);
+    expect(store.getState().nodes[0]?.position).toEqual({ x: 130, y: 230 });
+  });
+
+  it("keeps conflicts for non-PRD server artifact additions", () => {
+    const store = createBoardStore(board);
+    store.getState().setViewport({ x: 30, y: 40, zoom: 0.63 });
+    const remote = boardWithPrd(board, 2);
+    remote.nodes[1] = {
+      ...remote.nodes[1]!,
+      data: {
+        protocol: boardNodeProtocol,
+        nodeType: "artifact",
+        title: "Prototype",
+        artifactKind: "prototype",
+      },
+    };
+
+    store.getState().reconcileFromServer(remote, '"2"');
+
+    expect(store.getState()).toMatchObject({
+      serverRevision: 1,
+      dirty: true,
+      saveStatus: "conflict",
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1"]);
+  });
+
+  it("keeps conflicts when a remote PRD addition also changes existing Board content", () => {
+    const store = createBoardStore(board);
+    store.getState().setViewport({ x: 30, y: 40, zoom: 0.63 });
+    const remote = boardWithPrd(board, 2);
+    remote.nodes[0] = {
+      ...remote.nodes[0]!,
+      position: { x: 999, y: 999 },
+    };
+
+    store.getState().reconcileFromServer(remote, '"2"');
+
+    expect(store.getState()).toMatchObject({
+      serverRevision: 1,
+      viewport: { x: 30, y: 40, zoom: 0.63 },
+      dirty: true,
+      saveStatus: "conflict",
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1"]);
+  });
+
   it("replays local conflict state against the latest server revision with a new CAS command", () => {
     const store = createBoardStore(board);
     store.getState().setViewport({ x: 30, y: 40, zoom: 0.63 });
@@ -878,6 +1107,32 @@ function connectedBoard(): Board {
     edges: [
       { id: "edge-internal", sourceNodeId: "node-1", targetNodeId: "node-2", kind: "flow", data: {} },
       { id: "edge-external", sourceNodeId: "node-2", targetNodeId: "node-3", kind: "flow", data: {} },
+    ],
+  };
+}
+
+function boardWithPrd(source: Board, revision: number): Board {
+  return {
+    ...source,
+    revision,
+    nodes: [
+      ...source.nodes,
+      {
+        id: "node-prd",
+        kind: "artifact",
+        parentNodeId: null,
+        order: source.nodes.filter((node) => node.parentNodeId === null).length,
+        position: { x: 0, y: 0 },
+        size: { width: 1_154, height: 3_001 },
+        artifactId: "artifact-prd",
+        artifactVersionId: "version-prd-1",
+        data: {
+          protocol: boardNodeProtocol,
+          nodeType: "artifact",
+          title: "签到打卡活动需求说明书",
+          artifactKind: "prd",
+        },
+      },
     ],
   };
 }

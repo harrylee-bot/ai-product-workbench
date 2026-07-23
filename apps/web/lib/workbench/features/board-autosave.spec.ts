@@ -259,6 +259,148 @@ describe("Board autosave coordinator", () => {
     await coordinator.dispose();
   });
 
+  it("tails an in-flight viewport save over a server-created PRD node", async () => {
+    const store = createBoardStore(board);
+    const first = deferred<BoardAutosaveResult>();
+    const snapshots: BoardSaveSnapshot[] = [];
+    const save = vi.fn((snapshot: BoardSaveSnapshot) => {
+      snapshots.push(snapshot);
+      return snapshots.length === 1 ? first.promise : Promise.resolve(saved(snapshot));
+    });
+    const coordinator = createBoardAutosaveCoordinator({
+      store,
+      save,
+      debounceMs: 20,
+      visibilityTarget: null,
+      pageLifecycleTarget: null,
+    });
+
+    store.getState().setViewport({ x: 20, y: 30, zoom: 0.8 });
+    const flushing = coordinator.flush();
+    expect(save).toHaveBeenCalledOnce();
+    store.getState().setViewport({ x: 40, y: 50, zoom: 0.9 });
+    store.getState().reconcileFromServer(boardWithPrd(2), '"2"');
+    first.reject(new WorkbenchApiError({
+      type: "about:blank",
+      title: "Precondition failed",
+      status: 412,
+      code: "REVISION_CONFLICT",
+    }));
+
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    await flushing;
+
+    expect(snapshots[1]).toMatchObject({
+      baseRevision: 2,
+      ifMatch: '"2"',
+      request: {
+        viewport: { x: 40, y: 50, zoom: 0.9 },
+        nodes: [{ id: "node-prd", data: { artifactKind: "prd" } }],
+      },
+    });
+    expect(store.getState()).toMatchObject({
+      serverRevision: 3,
+      dirty: false,
+      saveStatus: "clean",
+      viewport: { x: 40, y: 50, zoom: 0.9 },
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-prd"]);
+    await coordinator.dispose();
+  });
+
+  it("resumes autosave when a refresh proves a 412 was caused only by a PRD addition", async () => {
+    const store = createBoardStore(board);
+    const snapshots: BoardSaveSnapshot[] = [];
+    const save = vi.fn(async (snapshot: BoardSaveSnapshot) => {
+      snapshots.push(snapshot);
+      if (snapshots.length === 1) {
+        throw new WorkbenchApiError({
+          type: "about:blank",
+          title: "Precondition failed",
+          status: 412,
+          code: "REVISION_CONFLICT",
+        });
+      }
+      return saved(snapshot);
+    });
+    const coordinator = createBoardAutosaveCoordinator({
+      store,
+      save,
+      debounceMs: 20,
+      visibilityTarget: null,
+      pageLifecycleTarget: null,
+    });
+
+    store.getState().setViewport({ x: 40, y: 50, zoom: 0.9 });
+    await coordinator.flush();
+    expect(store.getState().saveStatus).toBe("conflict");
+
+    store.getState().reconcileFromServer(boardWithPrd(2), '"2"');
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+
+    expect(snapshots[1]).toMatchObject({
+      baseRevision: 2,
+      ifMatch: '"2"',
+      request: {
+        viewport: { x: 40, y: 50, zoom: 0.9 },
+        nodes: [{ id: "node-prd", data: { artifactKind: "prd" } }],
+      },
+    });
+    expect(store.getState()).toMatchObject({
+      serverRevision: 3,
+      dirty: false,
+      saveStatus: "clean",
+    });
+    expect(snapshots[1]?.idempotencyKey).not.toBe(snapshots[0]?.idempotencyKey);
+    await coordinator.dispose();
+  });
+
+  it("resumes autosave when a refresh follows a retryable error with only a PRD addition", async () => {
+    const store = createBoardStore(board);
+    const snapshots: BoardSaveSnapshot[] = [];
+    const save = vi.fn(async (snapshot: BoardSaveSnapshot) => {
+      snapshots.push(snapshot);
+      if (snapshots.length === 1) throw new Error("network disconnected");
+      return saved(snapshot);
+    });
+    const coordinator = createBoardAutosaveCoordinator({
+      store,
+      save,
+      debounceMs: 20,
+      visibilityTarget: null,
+      pageLifecycleTarget: null,
+    });
+
+    store.getState().setViewport({ x: 40, y: 50, zoom: 0.9 });
+    await coordinator.flush();
+    expect(store.getState()).toMatchObject({
+      dirty: true,
+      saveStatus: "error",
+      retrySaveSnapshot: snapshots[0],
+    });
+
+    store.getState().reconcileFromServer(boardWithPrd(2), '"2"');
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+
+    expect(snapshots[1]?.idempotencyKey).not.toBe(snapshots[0]?.idempotencyKey);
+    expect(snapshots[1]).toMatchObject({
+      baseRevision: 2,
+      ifMatch: '"2"',
+      request: {
+        viewport: { x: 40, y: 50, zoom: 0.9 },
+        nodes: [{ id: "node-prd", data: { artifactKind: "prd" } }],
+      },
+    });
+    expect(store.getState()).toMatchObject({
+      serverRevision: 3,
+      dirty: false,
+      saveStatus: "clean",
+    });
+    await coordinator.dispose();
+  });
+
   it("best-effort flushes on hidden visibility and pagehide", async () => {
     const store = createBoardStore(board);
     const visibility = new FakeVisibilityTarget();
@@ -396,6 +538,29 @@ function saved(snapshot: BoardSaveSnapshot): BoardAutosaveResult {
       ...snapshot.request,
     },
     etag: `"${snapshot.baseRevision + 1}"`,
+  };
+}
+
+function boardWithPrd(revision: number): Board {
+  return {
+    ...board,
+    revision,
+    nodes: [{
+      id: "node-prd",
+      kind: "artifact",
+      parentNodeId: null,
+      order: 0,
+      position: { x: 0, y: 0 },
+      size: { width: 1_154, height: 3_001 },
+      artifactId: "artifact-prd",
+      artifactVersionId: "version-prd-1",
+      data: {
+        protocol: boardNodeProtocol,
+        nodeType: "artifact",
+        title: "签到打卡活动需求说明书",
+        artifactKind: "prd",
+      },
+    }],
   };
 }
 

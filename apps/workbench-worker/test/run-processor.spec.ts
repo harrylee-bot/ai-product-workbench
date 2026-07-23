@@ -3321,6 +3321,73 @@ describe("Run durable snapshots", () => {
     expect(canvasToolGrants.issue).not.toHaveBeenCalled();
   });
 
+  it("announces PRD generation before the first provider submission", async () => {
+    const runtime = {
+      execute: vi.fn(async () => ({
+        protocol: "workbench.runtime.result.v1" as const,
+        message: "done",
+        artifacts: [],
+      })),
+    };
+    const db = { run: { findUnique: vi.fn(async () => ({ status: "running" })) } };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals & {
+      bindings: { ensure: ReturnType<typeof vi.fn> };
+      attempts: {
+        ensure: ReturnType<typeof vi.fn>;
+        claim: ReturnType<typeof vi.fn>;
+        submissionContext: ReturnType<typeof vi.fn>;
+        providerTextState: ReturnType<typeof vi.fn>;
+      };
+    };
+    const prepared = durableExecutionPrepared();
+    prepared.request.requestedArtifactKinds = ["prd"];
+    const persistProgress = vi.fn(async () => undefined);
+    const publishResult = vi.fn(async () => undefined);
+    Object.assign(internals, {
+      prepare: vi.fn(async () => prepared),
+      bindings: {
+        ensure: vi.fn(async () => ({
+          id: "binding-1",
+          adapter: "deerflow",
+          externalThreadId: "external-thread-1",
+        })),
+      },
+      attempts: {
+        ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
+        claim: vi.fn(async () => executionClaim),
+        submissionContext: vi.fn(async () => ({
+          mode: "submit",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+        })),
+        providerTextState: vi.fn(async () => emptyProviderTextState()),
+      },
+      persistProgress,
+      publishResult,
+    });
+
+    await expect(processor.execute("run-1")).resolves.toEqual({
+      runId: "run-1",
+      artifactCount: 0,
+    });
+
+    expect(persistProgress).toHaveBeenCalledWith(executionClaim, {
+      type: "phase",
+      phase: "generating",
+      label: "正在生成需求文档",
+      progress: null,
+    });
+    expect(persistProgress.mock.invocationCallOrder[0]).toBeLessThan(
+      runtime.execute.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it("keeps reconciliation UNKNOWN and releases it without issuing new grants", async () => {
     const ambiguity = new RuntimeSubmissionUnknownError(
       "RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE",

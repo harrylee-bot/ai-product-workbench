@@ -16,11 +16,13 @@ import {
   useCancelWorkbenchRun,
   useRetryWorkbenchRun,
   useSubmitWorkbenchRunApproval,
+  useWorkbenchRun,
 } from "./index";
 
 const timestamp = "2026-07-15T00:00:00.000Z";
 const mocks = vi.hoisted(() => ({
   cancelRun: vi.fn(),
+  getRun: vi.fn(),
   retryRun: vi.fn(),
   submitRunApproval: vi.fn(),
 }));
@@ -31,6 +33,30 @@ vi.mock("../api-adapter", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("Run reconciliation query", () => {
+  it("polls an active Run and stops after the authoritative status is terminal", async () => {
+    const queryClient = client();
+    const active = run("1", "running");
+    mocks.getRun.mockResolvedValue(active);
+    const rendered = renderHook(
+      () => useWorkbenchRun(active.id, { refetchIntervalMs: 3_000 }),
+      { wrapper: wrapper(queryClient) },
+    );
+
+    await waitFor(() => expect(rendered.result.current.data).toEqual(active));
+    const query = queryClient.getQueryCache().find({
+      queryKey: workbenchQueryKeys.run(active.id),
+    });
+    const interval = query ? Reflect.get(query.options, "refetchInterval") : undefined;
+    expect(typeof interval).toBe("function");
+    if (typeof interval !== "function" || !query) throw new Error("Missing Run poll interval");
+    expect(interval(query)).toBe(3_000);
+
+    queryClient.setQueryData(workbenchQueryKeys.run(active.id), run("1", "succeeded"));
+    expect(interval(query)).toBe(false);
+  });
 });
 
 describe("Project-scoped Run mutations", () => {

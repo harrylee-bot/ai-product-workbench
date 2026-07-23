@@ -16,6 +16,7 @@ import { isWorkbenchApiError } from "../api/problem-details";
 import {
   boardToFlow,
   flowToBoardRequest,
+  orderFlowNodesByHierarchy,
   type BoardFlowEdge,
   type BoardFlowNode,
 } from "./adapter";
@@ -137,6 +138,7 @@ export type BoardStore = StoreApi<BoardStoreState>;
 export function createBoardStore(board: Board, etag = revisionEtag(board.revision)): BoardStore {
   const initial = serverState(board, etag);
   const saveSessionId = nanoid(24);
+  let confirmedServerRequest = canonicalBoardRequestFromBoard(board);
 
   return createStore<BoardStoreState>((set, get) => ({
     ...initial,
@@ -375,6 +377,7 @@ export function createBoardStore(board: Board, etag = revisionEtag(board.revisio
       });
     },
     replaceFromServer(nextBoard, nextEtag = revisionEtag(nextBoard.revision)) {
+      confirmedServerRequest = canonicalBoardRequestFromBoard(nextBoard);
       set((state) => ({
         ...serverState(nextBoard, nextEtag),
         editVersion: state.editVersion + 1,
@@ -396,6 +399,7 @@ export function createBoardStore(board: Board, etag = revisionEtag(board.revisio
       if (nextBoard.revision === state.serverRevision) return;
       const retrySnapshot = state.retrySaveSnapshot;
       if (retrySnapshot && savedBoardMatchesSnapshot(nextBoard, retrySnapshot)) {
+        confirmedServerRequest = canonicalBoardRequestFromBoard(nextBoard);
         if (state.editVersion === retrySnapshot.editVersion) {
           set({
             ...serverState(nextBoard, nextEtag),
@@ -416,6 +420,39 @@ export function createBoardStore(board: Board, etag = revisionEtag(board.revisio
             lastSaveError: null,
           });
         }
+        return;
+      }
+      const prdAdditions = nextBoard.revision > state.serverRevision
+        && (
+          state.saveStatus === "dirty"
+          || state.saveStatus === "saving"
+          || state.saveStatus === "conflict"
+          || (state.saveStatus === "error" && retrySnapshot !== null)
+        )
+        && localBoardContentMatchesServer(state, confirmedServerRequest)
+        ? serverPrdAdditions(confirmedServerRequest, nextBoard)
+        : null;
+      if (prdAdditions) {
+        const nextProjection = boardToFlow(nextBoard);
+        const additionIds = new Set(prdAdditions.map((node) => node.id));
+        const addedFlowNodes = nextProjection.nodes.filter((node) => additionIds.has(node.id));
+        const viewportDirty = !viewportEquals(state.viewport, nextBoard.viewport);
+        confirmedServerRequest = canonicalBoardRequestFromBoard(nextBoard);
+        set({
+          serverRevision: nextBoard.revision,
+          etag: normalizeEtag(nextEtag),
+          nodes: mergeRemoteNodes(state.nodes, nextProjection.nodes),
+          editVersion: state.editVersion + (
+            state.saveStatus !== "dirty" && viewportDirty ? 1 : 0
+          ),
+          dirty: viewportDirty,
+          saveStatus: viewportDirty ? "dirty" : "clean",
+          activeSaveVersion: null,
+          retrySaveSnapshot: null,
+          lastSaveError: null,
+          historyPast: mergeRemoteAdditionsIntoHistory(state.historyPast, addedFlowNodes),
+          historyFuture: mergeRemoteAdditionsIntoHistory(state.historyFuture, addedFlowNodes),
+        });
         return;
       }
       if (state.dirty || state.saveStatus === "saving") {
@@ -450,6 +487,7 @@ export function createBoardStore(board: Board, etag = revisionEtag(board.revisio
         state.replaceFromServer(nextBoard, nextEtag);
         return;
       }
+      confirmedServerRequest = canonicalBoardRequestFromBoard(nextBoard);
       set({
         serverRevision: nextBoard.revision,
         etag: normalizeEtag(nextEtag),
@@ -488,6 +526,7 @@ export function createBoardStore(board: Board, etag = revisionEtag(board.revisio
       set((state) => {
         if (state.activeSaveVersion !== snapshot.editVersion) return state;
         assertMatchingBoard(state, savedBoard);
+        confirmedServerRequest = canonicalBoardRequestFromBoard(savedBoard);
 
         if (state.editVersion !== snapshot.editVersion) {
           return {
@@ -705,6 +744,86 @@ function savedBoardMatchesSnapshot(board: Board, snapshot: BoardSaveSnapshot): b
     }),
     canonicalBoardRequest(snapshot.request),
   );
+}
+
+function canonicalBoardRequestFromBoard(board: Board): ReplaceBoardRequest {
+  return structuredClone(canonicalBoardRequest({
+    viewport: board.viewport,
+    nodes: board.nodes,
+    edges: board.edges,
+  }));
+}
+
+function localBoardContentMatchesServer(
+  state: Pick<BoardStoreState, "viewport" | "nodes" | "edges">,
+  serverRequest: ReplaceBoardRequest,
+): boolean {
+  const localRequest = canonicalBoardRequest(flowToBoardRequest(
+    state.viewport,
+    state.nodes,
+    state.edges,
+  ));
+  return equal(localRequest.nodes, serverRequest.nodes)
+    && equal(localRequest.edges, serverRequest.edges);
+}
+
+function serverPrdAdditions(
+  currentServerRequest: ReplaceBoardRequest,
+  nextBoard: Board,
+): Board["nodes"] | null {
+  const nextRequest = canonicalBoardRequestFromBoard(nextBoard);
+  if (
+    !equal(nextRequest.viewport, currentServerRequest.viewport)
+    || !equal(nextRequest.edges, currentServerRequest.edges)
+    || nextRequest.nodes.length <= currentServerRequest.nodes.length
+  ) {
+    return null;
+  }
+
+  const nextNodesById = new Map(nextRequest.nodes.map((node) => [node.id, node]));
+  for (const currentNode of currentServerRequest.nodes) {
+    if (!equal(nextNodesById.get(currentNode.id), currentNode)) return null;
+  }
+
+  const currentNodeIds = new Set(currentServerRequest.nodes.map((node) => node.id));
+  const additions = nextRequest.nodes.filter((node) => !currentNodeIds.has(node.id));
+  return additions.length > 0 && additions.every(isRootPrdArtifactNode) ? additions : null;
+}
+
+function isRootPrdArtifactNode(node: Board["nodes"][number]): boolean {
+  return node.kind === "artifact"
+    && node.parentNodeId === null
+    && node.artifactId !== null
+    && node.artifactVersionId !== null
+    && node.data.nodeType === "artifact"
+    && node.data.artifactKind === "prd";
+}
+
+function mergeRemoteNodes(
+  localNodes: BoardFlowNode[],
+  remoteNodes: BoardFlowNode[],
+): BoardFlowNode[] {
+  const localNodesById = new Map(localNodes.map((node) => [node.id, node]));
+  return remoteNodes.map((remoteNode) => localNodesById.get(remoteNode.id) ?? remoteNode);
+}
+
+function mergeRemoteAdditionsIntoHistory(
+  history: BoardHistorySnapshot[],
+  additions: BoardFlowNode[],
+): BoardHistorySnapshot[] {
+  if (additions.length === 0 || history.length === 0) return history;
+  return history.map((snapshot) => {
+    const existingIds = new Set(snapshot.nodes.map((node) => node.id));
+    const missing = additions.filter((node) => !existingIds.has(node.id));
+    if (missing.length === 0) return snapshot;
+    return {
+      ...snapshot,
+      nodes: orderFlowNodesByHierarchy([
+        ...snapshot.nodes,
+        ...structuredClone(missing),
+      ]),
+    };
+  });
 }
 
 function canonicalBoardRequest(request: ReplaceBoardRequest): ReplaceBoardRequest {

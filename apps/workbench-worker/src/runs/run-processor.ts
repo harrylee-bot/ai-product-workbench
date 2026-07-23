@@ -300,6 +300,17 @@ export class RunProcessor {
       externalRunId = submission.mode === "join" ? submission.externalRunId : null;
       const providerTextState = await this.attempts.providerTextState(claim);
       fullText = providerTextState.durableVisibleAssistantText;
+      if (
+        submission.mode === "submit"
+        && prepared.request.requestedArtifactKinds?.includes("prd")
+      ) {
+        await this.persistProgress(claim, {
+          type: "phase",
+          phase: "generating",
+          label: "正在生成需求文档",
+          progress: null,
+        });
+      }
       const knowledgeTool = submission.mode === "submit"
         ? await this.knowledgeToolGrants.issue({
             runId,

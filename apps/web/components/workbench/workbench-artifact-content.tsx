@@ -229,12 +229,14 @@ export function WorkbenchArtifactContent({
   if (version.kind === "prd") {
     if (editable && !isPublic && onPrdDocumentCommit) {
       return (
-        <WorkbenchPrdArtifactEditor
-          document={version.content}
-          editingBusy={editingBusy}
-          onDocumentCommit={onPrdDocumentCommit}
-          reference={reference}
-        />
+        <div className="nowheel h-full w-full">
+          <WorkbenchPrdArtifactEditor
+            document={version.content}
+            editingBusy={editingBusy}
+            onDocumentCommit={onPrdDocumentCommit}
+            reference={reference}
+          />
+        </div>
       );
     }
     return <PrdArtifact document={version.content} />;
@@ -409,7 +411,7 @@ function readBlobTextPreview(blob: Blob): Promise<string> {
 
 function PrdArtifact({ document }: { document: PrdDocument }) {
   return (
-    <article className="h-full w-full overflow-auto bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed]">
+    <article className="nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed]">
       <h2 className="mb-[42px] text-[50px] font-semibold leading-none tracking-normal text-[#f1f3f4]">
         {document.title}
       </h2>

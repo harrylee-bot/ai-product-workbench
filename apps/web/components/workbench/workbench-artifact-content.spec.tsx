@@ -229,11 +229,14 @@ describe("Workbench Artifact content", () => {
   it("renders the persisted structured PRD instead of demo copy", () => {
     mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdDocument()));
 
-    render(<WorkbenchArtifactContent reference={reference()} />);
+    const rendered = render(<WorkbenchArtifactContent reference={reference()} />);
 
     expect(screen.getByRole("heading", { name: "Production PRD" })).not.toBeNull();
     expect(screen.getByText("Real executive summary")).not.toBeNull();
     expect(screen.queryByText(/打卡签到功能需求文档/)).toBeNull();
+    const article = rendered.container.querySelector("article");
+    expect(article?.classList.contains("nowheel")).toBe(true);
+    expect(article?.classList.contains("overflow-auto")).toBe(true);
   });
 
   it("preserves PRD inline marks, links, citations, and references in view mode", () => {
@@ -286,6 +289,8 @@ describe("Workbench Artifact content", () => {
 
     expect(screen.getByRole("textbox", { name: "PRD 编辑器" })).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Production PRD" })).not.toBeNull();
+    expect(screen.getByRole("textbox", { name: "PRD 编辑器" }).closest(".nowheel"))
+      .not.toBeNull();
     expect((screen.getByRole("button", { name: "保存 PRD" }) as HTMLButtonElement).disabled).toBe(true);
   });
 

@@ -2,7 +2,7 @@
 
 import type { Run, RunEvent } from "@workbench/workbench-contracts";
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { workbenchQueryKeys } from "../query/keys";
 import {
@@ -15,8 +15,12 @@ import { useWorkbenchTransport } from "../transport/context";
 import {
   createWorkbenchPrototypePatchProjector,
 } from "./prototype-patches";
+import { useWorkbenchRun } from "./runs";
 
 type RunControllerConnectionState = "idle" | RunStreamState;
+
+const RUN_RECONCILIATION_INTERVAL_MS = 3_000;
+const RUN_STREAM_RECOVERY_DELAY_MS = 3_000;
 
 export function useWorkbenchRunController({
   run,
@@ -27,6 +31,10 @@ export function useWorkbenchRunController({
 }) {
   const { baseUrl } = useWorkbenchTransport();
   const queryClient = useQueryClient();
+  const runQuery = useWorkbenchRun(run?.id ?? "", {
+    enabled: enabled && Boolean(run),
+    refetchIntervalMs: RUN_RECONCILIATION_INTERVAL_MS,
+  });
   const prototypePatchProjector = useMemo(
     () => createWorkbenchPrototypePatchProjector({ baseUrl }),
     [baseUrl],
@@ -34,73 +42,221 @@ export function useWorkbenchRunController({
   const runIdentity = run
     ? `${run.id}:${run.requestId}:${run.projectId}:${run.threadId}`
     : "none";
+  const cachedRun = run
+    ? queryClient.getQueryData<Run>(workbenchQueryKeys.run(run.id))
+    : undefined;
+  const observedRun = selectLatestRun(run, cachedRun, runQuery.data);
   const initialProjection = useMemo(
-    () => run ? createRunProjection(run) : null,
-    // The identity fields define the event stream; status changes are supplied by events/query cache.
+    () => observedRun
+      ? createRunProjectionAtSequence(observedRun, observedRun.lastEventSequence)
+      : null,
+    // Identity changes reset the stream. Status changes are reconciled without discarding live details.
     [runIdentity],
   );
   const [projection, setProjection] = useState<RunProjectionState | null>(initialProjection);
   const [connectionState, setConnectionState] = useState<RunControllerConnectionState>("idle");
   const [error, setError] = useState<unknown>(null);
   const [subscriptionVersion, setSubscriptionVersion] = useState(0);
+  const projectionRef = useRef<RunProjectionState | null>(initialProjection);
+  const cursorRef = useRef({ runIdentity, sequence: initialProjection?.lastSequence ?? 0 });
+  const terminalRefreshRef = useRef<string | null>(null);
 
   useEffect(() => {
+    projectionRef.current = initialProjection;
+    cursorRef.current = { runIdentity, sequence: initialProjection?.lastSequence ?? 0 };
+    terminalRefreshRef.current = null;
     setProjection(initialProjection);
-  }, [initialProjection]);
+  }, [initialProjection, runIdentity]);
 
   useEffect(() => () => prototypePatchProjector.dispose(), [prototypePatchProjector]);
 
   useEffect(() => {
-    if (!run || !enabled || (isTerminalStatus(run.status) && run.lastEventSequence === 0)) {
-      prototypePatchProjector.setScope(run ? {
-        attempt: run.attempt,
-        projectId: run.projectId,
-        requestId: run.requestId,
-        runId: run.id,
+    if (!observedRun || runIdentity === "none") return;
+
+    const current = projectionRef.current;
+    if (current && isTerminalStatus(current.status) && !isTerminalStatus(observedRun.status)) {
+      return;
+    }
+
+    const terminal = isTerminalStatus(observedRun.status);
+    const reconciled = reconcileProjectionWithRun(current, observedRun, terminal);
+    if (reconciled !== current) {
+      projectionRef.current = reconciled;
+      setProjection(reconciled);
+    }
+    if (!terminal) return;
+
+    cursorRef.current = {
+      runIdentity,
+      sequence: Math.max(cursorRef.current.sequence, observedRun.lastEventSequence),
+    };
+    setConnectionState("closed");
+    setError(null);
+    queryClient.setQueryData<Run>(workbenchQueryKeys.run(observedRun.id), observedRun);
+
+    const terminalRefreshKey = [
+      observedRun.id,
+      observedRun.attempt,
+      observedRun.status,
+      observedRun.lastEventSequence,
+    ].join(":");
+    if (terminalRefreshRef.current === terminalRefreshKey) return;
+    terminalRefreshRef.current = terminalRefreshKey;
+    invalidateForTerminalRun(queryClient, observedRun);
+  }, [observedRun, queryClient, runIdentity]);
+
+  const observedRunIsTerminal = observedRun ? isTerminalStatus(observedRun.status) : false;
+
+  useEffect(() => {
+    const streamRun = selectLatestRun(
+      run,
+      run ? queryClient.getQueryData<Run>(workbenchQueryKeys.run(run.id)) : undefined,
+    );
+    if (!streamRun || !enabled || isTerminalStatus(streamRun.status)) {
+      prototypePatchProjector.setScope(streamRun ? {
+        attempt: streamRun.attempt,
+        projectId: streamRun.projectId,
+        requestId: streamRun.requestId,
+        runId: streamRun.id,
       } : null);
-      setConnectionState(run && isTerminalStatus(run.status) ? "closed" : "idle");
+      setConnectionState(streamRun && isTerminalStatus(streamRun.status) ? "closed" : "idle");
       return;
     }
 
     const abortController = new AbortController();
-    let current = createRunProjection(run);
-    const recoveryBoundary = run.lastEventSequence;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    const afterSequence = cursorRef.current.runIdentity === runIdentity
+      ? cursorRef.current.sequence
+      : streamRun.lastEventSequence;
+    let current = projectionRef.current?.runId === streamRun.id
+      ? projectionRef.current
+      : createRunProjectionAtSequence(streamRun, afterSequence);
+    if (current.lastSequence !== afterSequence) {
+      current = { ...current, lastSequence: afterSequence };
+      projectionRef.current = current;
+    }
     prototypePatchProjector.setScope({
-      attempt: run.attempt,
-      projectId: run.projectId,
-      requestId: run.requestId,
-      runId: run.id,
+      attempt: streamRun.attempt,
+      projectId: streamRun.projectId,
+      requestId: streamRun.requestId,
+      runId: streamRun.id,
     });
+    if (projectionRef.current !== current) projectionRef.current = current;
     setProjection(current);
     setError(null);
 
     void subscribeRunEvents({
-      runId: run.id,
+      runId: streamRun.id,
+      afterSequence,
       baseUrl,
       signal: abortController.signal,
       onStateChange: setConnectionState,
       onEvent(event) {
         current = reduceRunEvent(current, event);
+        projectionRef.current = current;
+        cursorRef.current = { runIdentity, sequence: current.lastSequence };
         prototypePatchProjector.ingest(event);
         const projectionOnlyEvent = isPrototypePatchProjectionEvent(event);
-        if (
-          current.lastSequence >= recoveryBoundary
-          && !projectionOnlyEvent
-        ) setProjection(current);
-        if (!projectionOnlyEvent) updateRunCache(queryClient, run, current);
+        if (current.lastSequence >= afterSequence && !projectionOnlyEvent) setProjection(current);
+        if (!projectionOnlyEvent) updateRunCache(queryClient, streamRun, current);
         invalidateForRunEvent(queryClient, event);
       },
     }).catch((streamError: unknown) => {
       if (abortController.signal.aborted) return;
       setError(streamError);
       setConnectionState("closed");
+      reconnectTimer = setTimeout(() => {
+        const latest = queryClient.getQueryData<Run>(workbenchQueryKeys.run(streamRun.id));
+        if (latest && isTerminalStatus(latest.status)) return;
+        setSubscriptionVersion((value) => value + 1);
+      }, RUN_STREAM_RECOVERY_DELAY_MS);
     });
 
-    return () => abortController.abort();
-  }, [baseUrl, enabled, prototypePatchProjector, queryClient, runIdentity, subscriptionVersion]);
+    return () => {
+      abortController.abort();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
+  }, [
+    baseUrl,
+    enabled,
+    observedRunIsTerminal,
+    prototypePatchProjector,
+    queryClient,
+    runIdentity,
+    subscriptionVersion,
+  ]);
 
   const reconnect = useCallback(() => setSubscriptionVersion((value) => value + 1), []);
   return { projection, prototypePatchProjector, connectionState, error, reconnect };
+}
+
+function selectLatestRun(
+  ...candidates: Array<Run | null | undefined>
+): Run | undefined {
+  const identity = candidates.find((candidate): candidate is Run => Boolean(candidate));
+  if (!identity) return undefined;
+
+  return candidates.reduce<Run | undefined>((latest, candidate) => {
+    if (!candidate || !hasSameRunIdentity(identity, candidate)) return latest;
+    if (!latest || candidate.lastEventSequence > latest.lastEventSequence) return candidate;
+    if (candidate.lastEventSequence < latest.lastEventSequence) return latest;
+    if (isTerminalStatus(latest.status) && !isTerminalStatus(candidate.status)) return latest;
+    return candidate;
+  }, undefined);
+}
+
+function createRunProjectionAtSequence(run: Run, sequence: number): RunProjectionState {
+  return {
+    ...createRunProjection(run),
+    lastSequence: sequence,
+  };
+}
+
+function reconcileProjectionWithRun(
+  current: RunProjectionState | null,
+  run: Run,
+  adoptSequence: boolean,
+): RunProjectionState {
+  if (!current || !hasSameProjectionIdentity(current, run)) {
+    return createRunProjectionAtSequence(run, run.lastEventSequence);
+  }
+
+  const attemptChanged = current.attempt !== run.attempt;
+  const terminal = isTerminalStatus(run.status);
+  const clearsDrafts = attemptChanged || run.status === "failed" || run.status === "cancelled";
+  return {
+    ...current,
+    status: run.status,
+    lastSequence: adoptSequence
+      ? Math.max(current.lastSequence, run.lastEventSequence)
+      : current.lastSequence,
+    phase: run.phase,
+    phaseLabel: run.phaseLabel,
+    progress: run.status === "succeeded" ? 1 : run.progress,
+    attempt: run.attempt,
+    generationStage: attemptChanged ? null : current.generationStage,
+    generationStageAttempt: attemptChanged ? null : current.generationStageAttempt,
+    draftArtifacts: clearsDrafts ? {} : current.draftArtifacts,
+    draftArtifactOrder: clearsDrafts ? [] : current.draftArtifactOrder,
+    pendingInputs: terminal ? {} : current.pendingInputs,
+    pendingInputOrder: terminal ? [] : current.pendingInputOrder,
+    failure: run.failure,
+    cancellationReason: run.cancellationReason,
+  };
+}
+
+function hasSameRunIdentity(left: Run, right: Run): boolean {
+  return left.id === right.id
+    && left.requestId === right.requestId
+    && left.projectId === right.projectId
+    && left.threadId === right.threadId;
+}
+
+function hasSameProjectionIdentity(projection: RunProjectionState, run: Run): boolean {
+  return projection.runId === run.id
+    && projection.requestId === run.requestId
+    && projection.projectId === run.projectId
+    && projection.threadId === run.threadId;
 }
 
 function updateRunCache(
@@ -119,6 +275,29 @@ function updateRunCache(
     failure: projection.failure,
     cancellationReason: projection.cancellationReason,
   }));
+}
+
+function invalidateForTerminalRun(
+  queryClient: ReturnType<typeof useQueryClient>,
+  run: Run,
+): void {
+  void Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: workbenchQueryKeys.runLists(run.projectId, run.threadId),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: workbenchQueryKeys.entryLists(run.projectId, run.threadId),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: workbenchQueryKeys.board(run.projectId),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: workbenchQueryKeys.artifacts(run.projectId),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: workbenchQueryKeys.bootstraps(run.projectId),
+    }),
+  ]);
 }
 
 function invalidateForRunEvent(

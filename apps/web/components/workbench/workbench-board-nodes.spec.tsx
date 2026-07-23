@@ -36,6 +36,34 @@ afterEach(() => {
 });
 
 describe("Workbench generated screen node", () => {
+  it("renders the pending document skeleton for a client-only PRD node", () => {
+    const DocumentCanvas = artboardNodeTypes.documentCanvas;
+    const rendered = render(<DocumentCanvas {...({
+      data: {
+        phase: "generating",
+        title: "需求文档",
+      },
+      deletable: false,
+      draggable: false,
+      dragging: false,
+      id: "run-pending:project-real:prd:document",
+      isConnectable: false,
+      positionAbsoluteX: 0,
+      positionAbsoluteY: 0,
+      selectable: false,
+      selected: false,
+      type: "documentCanvas",
+      zIndex: 0,
+    } satisfies ComponentProps<typeof DocumentCanvas>)} />);
+
+    expect(screen.getByText("正在生成：需求文档")).not.toBeNull();
+    expect(rendered.container.querySelector('[data-workbench-artifact-state="pending"]'))
+      .not.toBeNull();
+    expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]"))
+      .not.toBeNull();
+    expect(mocks.artifactContent).not.toHaveBeenCalled();
+  });
+
   it("renders the real Draft Artifact while refining instead of a fabricated skeleton", () => {
     const GeneratedScreen = artboardNodeTypes.generatedScreen;
     const reference = {
