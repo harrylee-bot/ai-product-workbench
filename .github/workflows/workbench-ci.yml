@@ -329,6 +329,7 @@ jobs:
         run: npm run build
         env:
           WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: https://uploads.workbench.example.test/workbench
+          WORKBENCH_TYPES_PREVALIDATED: "1"
 
       - name: Validate Workbench route bundles
         run: npm run bundle:workbench:check

@@ -299,6 +299,10 @@ try {
       const pendingEvents = events.filter((event) => event.sequence > afterSequence);
       return sse(route, pendingEvents);
     }
+    if (method === "GET" && requestPath === `/api/v1/runs/${run.id}`) {
+      assert(runSubmitted, "Run must not be refreshed before SubmissionIntent submit succeeds");
+      return json(route, run);
+    }
     if (method === "GET" && requestPath === "/api/v1/identity/me") {
       return json(route, {
         id: "principal-1",
