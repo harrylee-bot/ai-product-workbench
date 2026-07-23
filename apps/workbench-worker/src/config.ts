@@ -1,5 +1,6 @@
 import { decodeKnowledgeToolSecret } from "@workbench/workbench-knowledge";
 import { decodeCanvasToolCapabilitySecret } from "@workbench/workbench-canvas-tools";
+import { runtimeExecuteQueueOptions } from "@workbench/workbench-contracts";
 
 export type WorkerConfig = ReturnType<typeof loadWorkerConfig>;
 
@@ -43,6 +44,12 @@ export function loadWorkerConfig() {
     }
   }
   const deerFlowTimeoutMs = positiveInteger("DEERFLOW_TIMEOUT_MS", 600_000);
+  const deerFlowSubmissionTimeoutMs = boundedInteger(
+    "DEERFLOW_SUBMISSION_TIMEOUT_MS",
+    120_000,
+    1_000,
+    10 * 60_000,
+  );
   const runtimeExecutionLeaseMs = boundedInteger(
     "WORKBENCH_RUNTIME_EXECUTION_LEASE_MS",
     45_000,
@@ -55,8 +62,33 @@ export function loadWorkerConfig() {
     1_000,
     120_000,
   );
+  const runtimeProviderStateMode = enumValue(
+    "WORKBENCH_RUNTIME_PROVIDER_STATE_MODE",
+    ["legacy-read", "shadow-verify", "projection-required"] as const,
+    "legacy-read",
+  );
+  const runtimeExecutionMaximumWallClockMs = boundedInteger(
+    "WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS",
+    30 * 60_000,
+    60_000,
+    4 * 60 * 60_000,
+  );
+  const runtimeExecutionDeadlineCancelMs = boundedInteger(
+    "WORKBENCH_RUNTIME_EXECUTION_DEADLINE_CANCEL_MS",
+    30_000,
+    1_000,
+    5 * 60_000,
+  );
   if (runtimeExecutionHeartbeatMs * 2 >= runtimeExecutionLeaseMs) {
     throw new Error("WORKBENCH_RUNTIME_EXECUTION_HEARTBEAT_MS must be less than half the execution lease");
+  }
+  if (
+    runtimeExecutionMaximumWallClockMs + runtimeExecutionDeadlineCancelMs
+      >= runtimeExecuteQueueOptions.expireInSeconds * 1_000
+  ) {
+    throw new Error(
+      "Runtime max wall clock plus deadline cancellation must be less than the pg-boss handler deadline",
+    );
   }
   return {
     databaseUrl,
@@ -70,7 +102,13 @@ export function loadWorkerConfig() {
       .map((item) => item.trim())
       .filter(Boolean),
     deerFlowTimeoutMs,
-    deerFlowIdleTimeoutMs: positiveInteger("DEERFLOW_IDLE_TIMEOUT_MS", 120_000),
+    deerFlowSubmissionTimeoutMs,
+    deerFlowIdleTimeoutMs: boundedInteger(
+      "DEERFLOW_IDLE_TIMEOUT_MS",
+      120_000,
+      1_000,
+      10 * 60_000,
+    ),
     // Keep queue execution and cancellation polling bounded even if an
     // operator supplies an unexpectedly large environment value.
     concurrency: boundedInteger("WORKBENCH_RUNTIME_CONCURRENCY", 2, 1, 64),
@@ -88,6 +126,9 @@ export function loadWorkerConfig() {
     ),
     runtimeExecutionLeaseMs,
     runtimeExecutionHeartbeatMs,
+    runtimeExecutionMaximumWallClockMs,
+    runtimeExecutionDeadlineCancelMs,
+    runtimeProviderStateMode,
     runtimeExecutionReconcileIntervalMs: boundedInteger(
       "WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS",
       5_000,
@@ -208,6 +249,18 @@ function boundedInteger(name: string, fallback: number, minimum: number, maximum
     throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
   }
   return parsed;
+}
+
+function enumValue<const T extends readonly string[]>(
+  name: string,
+  values: T,
+  fallback: T[number],
+): T[number] {
+  const value = optional(name) ?? fallback;
+  if (!values.includes(value)) {
+    throw new Error(`${name} must be one of: ${values.join(", ")}`);
+  }
+  return value;
 }
 
 function trimTrailingSlash(value: string) {

@@ -11,7 +11,8 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:postgres": "node ../../scripts/assert-runtime-provider-state-test-database.mjs && vitest run test/runtime-attempt.postgres.spec.ts"
   },
   "dependencies": {
     "@workbench/workbench-canvas-tools": "0.1.0",

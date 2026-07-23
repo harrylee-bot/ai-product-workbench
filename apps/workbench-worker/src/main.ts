@@ -46,8 +46,11 @@ async function main() {
       ownerPrefix: `runtime-worker:${process.pid}:${randomUUID()}`,
       leaseMs: config.runtimeExecutionLeaseMs,
       heartbeatMs: config.runtimeExecutionHeartbeatMs,
+      maximumWallClockMs: config.runtimeExecutionMaximumWallClockMs,
+      deadlineCancelMs: config.runtimeExecutionDeadlineCancelMs,
       cancellationPollIntervalMs: config.runtimeCancellationPollIntervalMs,
       cancellationQueryBatchSize: config.runtimeCancellationQueryBatchSize,
+      providerStateMode: config.runtimeProviderStateMode,
     },
   );
   const boss = new PgBoss({

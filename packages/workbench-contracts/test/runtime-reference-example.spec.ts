@@ -4,15 +4,36 @@ import { describe, expect, it } from "vitest";
 
 import { runtimeResultSchema } from "../src/runtime.js";
 
-const examplePath = fileURLToPath(new URL(
+const prototypeExamplePath = fileURLToPath(new URL(
   "../../../integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json",
   import.meta.url,
 ));
-const exampleSource = readFileSync(examplePath, "utf8");
+const prototypeExampleSource = readFileSync(prototypeExamplePath, "utf8");
+const prdExamplePath = fileURLToPath(new URL(
+  "../../../integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json",
+  import.meta.url,
+));
+const prdExampleSource = readFileSync(prdExamplePath, "utf8");
+
+describe("DeerFlow PRD Runtime Result reference", () => {
+  it("stays compact and valid against the production Runtime result schema", () => {
+    const example = JSON.parse(prdExampleSource) as unknown;
+    const result = runtimeResultSchema.parse(example);
+
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.artifacts[0]).toMatchObject({
+      kind: "prd",
+      schemaVersion: 1,
+      operation: { kind: "create" },
+    });
+    expect(Buffer.byteLength(prdExampleSource, "utf8")).toBeLessThan(16_000);
+    expect(prdExampleSource.split("\n").length).toBeLessThan(400);
+  });
+});
 
 describe("DeerFlow Prototype Runtime Result reference", () => {
   it("stays compact and valid against the production Runtime result schema", () => {
-    const example = JSON.parse(exampleSource) as unknown;
+    const example = JSON.parse(prototypeExampleSource) as unknown;
     const result = runtimeResultSchema.parse(example);
 
     expect(result.artifacts).toHaveLength(1);
@@ -28,12 +49,12 @@ describe("DeerFlow Prototype Runtime Result reference", () => {
         source: { kind: "state", stateId: "state-ready", field: "submitLabel" },
       }),
     ]));
-    expect(Buffer.byteLength(exampleSource, "utf8")).toBeLessThan(16_000);
-    expect(exampleSource.split("\n").length).toBeLessThan(400);
+    expect(Buffer.byteLength(prototypeExampleSource, "utf8")).toBeLessThan(16_000);
+    expect(prototypeExampleSource.split("\n").length).toBeLessThan(400);
   });
 
   it("accepts canonical date inputs through the complete Runtime result envelope", () => {
-    const example = JSON.parse(exampleSource) as {
+    const example = JSON.parse(prototypeExampleSource) as {
       artifacts: Array<{
         content: {
           nodes: Array<{ id: string; inputType?: string }>;

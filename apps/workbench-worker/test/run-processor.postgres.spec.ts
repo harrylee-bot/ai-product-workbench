@@ -1548,6 +1548,7 @@ function postgresDeerFlowConfig() {
     deerFlowInternalToken: "internal",
     deerFlowStreamMode: ["messages", "values"],
     deerFlowTimeoutMs: 5_000,
+    deerFlowSubmissionTimeoutMs: 5_000,
     deerFlowIdleTimeoutMs: 5_000,
   } as never;
 }

@@ -77,6 +77,14 @@ test("reserves forensic release authority for the migrator role", () => {
     provisioner,
     /GRANT SELECT ON TABLE[^\n]+ready_object_integrity_retention_releases/u,
   );
+  assert.match(
+    provisioner,
+    /REVOKE DELETE, TRUNCATE ON TABLE[^\n]+runtime_provider_states/u,
+  );
+  assert.match(
+    provisioner,
+    /GRANT SELECT, INSERT, UPDATE ON TABLE[^\n]+runtime_provider_states/u,
+  );
 });
 
 function run(overrides) {

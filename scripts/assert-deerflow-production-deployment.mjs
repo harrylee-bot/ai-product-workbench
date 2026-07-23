@@ -161,7 +161,7 @@ assert(
   "DeerFlow lead-agent upstream source hash drifted",
 );
 assert(
-  patchManifest.agent?.patchedSha256 === "6bae0682d26cac465e5f7783e2878254bb45212bb1d88e4da9c937a5ae31aa49",
+  patchManifest.agent?.patchedSha256 === "6d03a535d9d4f45d3a1725363ef80e943af5db934df2ec068f4427e6b0c8295d",
   "DeerFlow lead-agent patched source hash drifted",
 );
 assert(
@@ -177,7 +177,7 @@ const subagentToolPatch = patchManifest.additionalSources[0];
 assert(
   subagentToolPatch.path === "deerflow/tools/builtins/task_tool.py"
     && subagentToolPatch.upstreamSha256 === "bbbf58869ea4e24a8c230695478fb5d09fd35c2e4dbb2c16bc5052871027ee95"
-    && subagentToolPatch.patchedSha256 === "3e14b348c6f1941fd3fe0a08d4bf75a539f451d50ab186aecd3de2db21c198de",
+    && subagentToolPatch.patchedSha256 === "a2f92a7a7105b685a12f2552fb671aed34626d9b7ec96a10c4c6a936fe288cfb",
   "DeerFlow subagent tool filter must bind the audited upstream and patched hashes",
 );
 assert(
@@ -187,10 +187,11 @@ assert(
       && replacement.insertion.includes('"workbench_generation_stage_update"')
       && replacement.insertion.includes('"workbench_artifact_draft_publish"')
       && replacement.insertion.includes('"workbench_prototype_patch_publish"')
+      && replacement.insertion.includes('"workbench_knowledge_retrieve"')
       && replacement.insertion.includes('"navigate_canvas"')
       && replacement.insertion.includes("getattr(tool, \"name\", None)")
   )),
-  "DeerFlow subagent patch must remove parent-run publication and Canvas tools before executor creation",
+  "DeerFlow subagent patch must remove parent-run publication, Knowledge, and Canvas tools before executor creation",
 );
 assert(
   Array.isArray(patchManifest.gatewaySources)
@@ -201,7 +202,7 @@ const gatewayContextPatch = patchManifest.gatewaySources[0];
 assert(
   gatewayContextPatch.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34"
-    && gatewayContextPatch.patchedSha256 === "b248817f54e62a63a4777acaf9058a806b9695cb987c4cc5e4fa9eefd5b04440",
+    && gatewayContextPatch.patchedSha256 === "502363759cfa83b9bc4011da39bdde02b1df53e2aa883b735e7e33605f57ae82",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -227,8 +228,11 @@ assert(
     && patchManifest.agent.insertion.includes("workbench_canvas_policy_from_runnable_config(config)")
     && patchManifest.agent.insertion.includes(
       "workbench_requested_artifact_kinds_from_runnable_config(config)",
+    )
+    && patchManifest.agent.insertion.includes(
+      "workbench_knowledge_enabled_from_runnable_config(config)",
     ),
-  "DeerFlow lead-agent patch must freeze per-Run Canvas and Artifact policies into the middleware",
+  "DeerFlow lead-agent patch must freeze per-Run Canvas, Artifact, and Knowledge policies into the middleware",
 );
 assert(
   sha256(toolScopeMiddlewareSource)
@@ -240,6 +244,9 @@ assert(
     && toolScopeMiddlewareSource.includes('config.get("configurable")')
     && toolScopeMiddlewareSource.includes(
       "def workbench_requested_artifact_kinds_from_runnable_config(config: Any) -> Any:",
+    )
+    && toolScopeMiddlewareSource.includes(
+      "def workbench_knowledge_enabled_from_runnable_config(config: Any) -> Any:",
     )
     && toolScopeMiddlewareSource.includes('context.get("workbench")')
     && !toolScopeMiddlewareSource.includes("runtime.config"),
@@ -271,6 +278,10 @@ assert(
 assert(
   /requestedArtifactKinds:\s*\[\.\.\.execution\.request\.requestedArtifactKinds\]/u.test(runtimeAdapter),
   "Runtime Worker must send requested Artifact kinds through the trusted Workbench context",
+);
+assert(
+  /\.\.\.\(knowledgeToolCapability \? \{ knowledgeEnabled: true \} : \{\}\)/u.test(runtimeAdapter),
+  "Runtime Worker must declare Knowledge visibility only when a request-scoped capability exists",
 );
 assert(
   /subagent_enabled:\s*execution\.request\.requestedArtifactKinds\.some\([\s\S]*?kind === "prototype" \|\| kind === "code"/u
@@ -306,14 +317,40 @@ assert(
 assert(
   patchContractTestSource.includes("test_async_model_and_tool_paths_enforce_the_same_scope")
     && patchContractTestSource.includes("test_missing_or_malformed_policy_hides_all_eight_canvas_tools")
+    && patchContractTestSource.includes("test_knowledge_execution_is_blocked_without_calling_the_handler")
+    && patchContractTestSource.includes("test_async_knowledge_tool_execution_is_fail_closed")
     && patchContractTestSource.includes("test_async_non_canvas_tool_is_not_affected_by_malformed_policy"),
   "DeerFlow patch contract must cover sync/async fail-closed and non-Canvas behavior",
 );
 assert(
   patchRequestContextTestSource.includes("test_only_an_authenticated_internal_caller_can_deliver_workbench_channels")
     && patchRequestContextTestSource.includes("test_untrusted_context_is_fail_closed_and_persistence_config_is_redacted")
+    && patchRequestContextTestSource.includes("test_knowledge_visibility_requires_the_exact_true_flag_and_capability")
     && patchRequestContextTestSource.includes("test_malformed_scope_does_not_create_a_runtime_secret_channel"),
   "DeerFlow request-context contract must cover caller auth, redaction, and malformed scope",
+);
+assert(
+  /self\._knowledge_enabled = knowledge_enabled is True/u.test(toolScopeMiddlewareSource)
+    && /name == KNOWLEDGE_TOOL_NAME and not self\._knowledge_enabled/u.test(toolScopeMiddlewareSource)
+    && toolScopeMiddlewareSource.includes("WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"),
+  "DeerFlow middleware must hide and block Knowledge unless the trusted scope is exactly true",
+);
+const taskToolPatch = patchManifest.additionalSources.find(
+  (entry) => entry.path === "deerflow/tools/builtins/task_tool.py",
+);
+const taskToolPatchText = JSON.stringify(taskToolPatch?.replacements ?? []);
+assert(
+  taskToolPatchText.includes("workbench_knowledge_retrieve")
+    && taskToolPatchText.includes("_workbench_parent_run_tool_names")
+    && taskToolPatchText.includes('if getattr(tool, \\"name\\", None) not in _workbench_parent_run_tool_names'),
+  "DeerFlow subagents must remove Knowledge and every parent-Run publication/Canvas tool",
+);
+const gatewayPatchText = JSON.stringify(patchManifest.gatewaySources);
+assert(
+  gatewayPatchText.includes('scope.get(\\"knowledgeEnabled\\") is True')
+    && gatewayPatchText.includes('WORKBENCH_KNOWLEDGE_CAPABILITY\\" not in secrets')
+    && gatewayPatchText.includes('secrets.pop(\\"WORKBENCH_KNOWLEDGE_CAPABILITY\\", None)'),
+  "DeerFlow Gateway must couple Knowledge visibility and capability in both directions",
 );
 for (const requiredPreflightText of [
   "TOOL_SCOPE_PATCH_MANIFEST=",

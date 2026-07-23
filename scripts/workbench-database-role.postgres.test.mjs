@@ -99,6 +99,38 @@ testWithAdmin("transfers existing schema ownership and keeps runtime append-only
       );
       await assert.rejects(runtime.query("DELETE FROM workbench.run_events"), /permission denied/u);
       await assert.rejects(runtime.query("TRUNCATE workbench.run_events"), /permission denied/u);
+      const providerStatePrivileges = await runtime.query(`
+        SELECT
+          has_table_privilege(current_user, 'workbench.runtime_provider_states', 'SELECT') AS "canSelect",
+          has_table_privilege(current_user, 'workbench.runtime_provider_states', 'INSERT') AS "canInsert",
+          has_table_privilege(current_user, 'workbench.runtime_provider_states', 'UPDATE') AS "canUpdate",
+          has_table_privilege(current_user, 'workbench.runtime_provider_states', 'DELETE') AS "canDelete",
+          has_table_privilege(current_user, 'workbench.runtime_provider_states', 'TRUNCATE') AS "canTruncate"
+      `);
+      assert.deepEqual(providerStatePrivileges.rows[0], {
+        canSelect: true,
+        canInsert: true,
+        canUpdate: true,
+        canDelete: false,
+        canTruncate: false,
+      });
+      await runtime.query(`
+        INSERT INTO workbench.runtime_provider_states (runtime_attempt_id, state_sha256)
+        VALUES ('attempt_role_1', '${"a".repeat(64)}')
+      `);
+      await runtime.query(`
+        UPDATE workbench.runtime_provider_states
+        SET state_sha256 = '${"b".repeat(64)}'
+        WHERE runtime_attempt_id = 'attempt_role_1'
+      `);
+      await assert.rejects(
+        runtime.query("DELETE FROM workbench.runtime_provider_states"),
+        /permission denied/u,
+      );
+      await assert.rejects(
+        runtime.query("TRUNCATE workbench.runtime_provider_states"),
+        /permission denied/u,
+      );
       await assert.rejects(runtime.query("CREATE SCHEMA runtime_escape"), /permission denied/u);
 
       const incidentValues = [
@@ -261,6 +293,10 @@ async function createAdminOwnedFixture(databaseUrl) {
         failure_code TEXT,
         storage_deleted_at TIMESTAMPTZ
       );
+      CREATE TABLE workbench.runtime_provider_states (
+        runtime_attempt_id TEXT PRIMARY KEY,
+        state_sha256 CHAR(64) NOT NULL
+      );
     `);
     await admin.query("SET search_path TO workbench");
     await admin.query(readFileSync(
@@ -288,7 +324,7 @@ async function assertFixtureOwnership(databaseUrl, migratorRole) {
       WHERE namespace.nspname IN ('workbench', 'workbench_jobs')
         AND relation.relname IN (
           'fixture_table', 'fixture_view', 'fixture_materialized',
-          'fixture_sequence', 'fixture_job'
+          'fixture_sequence', 'fixture_job', 'runtime_provider_states'
         )
       UNION ALL
       SELECT 'function:' || proname, pg_get_userbyid(proowner)
@@ -309,6 +345,7 @@ async function assertFixtureOwnership(databaseUrl, migratorRole) {
       "relation:fixture_sequence",
       "relation:fixture_table",
       "relation:fixture_view",
+      "relation:runtime_provider_states",
       "schema:workbench",
       "schema:workbench_jobs",
       "type:fixture_key",

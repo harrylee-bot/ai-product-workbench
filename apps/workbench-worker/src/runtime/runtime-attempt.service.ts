@@ -4,7 +4,13 @@ import { Prisma, type PrismaClient } from "@workbench/workbench-db";
 import { lockRunStatus } from "../runs/run-state-lock.js";
 import {
   rebuildRuntimeProviderTextState,
+  assertRuntimeProviderProjection,
+  createRuntimeProviderProjection,
+  reduceRuntimeProviderProjection,
+  runtimeProviderTextStateFromProjection,
+  runtimeProviderTextStateFromLegacy,
   runtimeProviderTextReplayEventLimit,
+  type RuntimeProviderProjection,
   type RuntimeProviderTextEvent,
 } from "./runtime-assistant-text.js";
 import {
@@ -33,6 +39,7 @@ type ClaimScopeRow = {
   submissionUnknownAt: Date | null;
   externalEventSequence: number;
   lastExternalEventId: string | null;
+  attempt: number;
 };
 
 const runtimeExecutionTransactionOptions = {
@@ -53,6 +60,8 @@ export type RuntimeExternalEventInput = {
   event: string;
   payload: JsonValue;
 };
+
+export type RuntimeProviderStateMode = "legacy-read" | "shadow-verify" | "projection-required";
 
 export class RuntimeExecutionClaimBusyError extends Error {
   constructor() {
@@ -76,6 +85,8 @@ export class RuntimeAttemptService {
   constructor(
     private readonly db: PrismaClient,
     private readonly leaseMs = 45_000,
+    private readonly providerStateMode: RuntimeProviderStateMode = "projection-required",
+    private readonly onShadowMismatch: (error: unknown) => void = () => undefined,
   ) {}
 
   async ensure(runId: string, attempt: number, binding: RuntimeBindingRecord) {
@@ -112,6 +123,12 @@ export class RuntimeAttemptService {
       ) {
         throw new RuntimeExecutionClaimBusyError();
       }
+      await this.ensureProviderProjectionTx(tx, {
+        runId,
+        attemptId,
+        attempt: scope.attempt,
+        externalEventSequence: scope.externalEventSequence,
+      });
       const epoch = Math.max(scope.runEpoch, scope.attemptEpoch) + 1;
       const leaseExpiresAt = new Date(scope.databaseNow.getTime() + this.leaseMs);
       const runClaimed = await tx.run.updateMany({
@@ -197,6 +214,44 @@ export class RuntimeAttemptService {
   }
 
   async providerTextState(claim: RuntimeExecutionClaim) {
+    if (this.providerStateMode === "projection-required") {
+      return this.providerTextStateProjection(claim);
+    }
+    const legacy = await this.providerTextStateLegacy(claim);
+    if (this.providerStateMode === "shadow-verify") {
+      void this.verifyProjectionShadow(claim, legacy).catch(this.onShadowMismatch);
+    }
+    return runtimeProviderTextStateFromLegacy(legacy);
+  }
+
+  private async providerTextStateProjection(claim: RuntimeExecutionClaim) {
+    return this.db.$transaction(async (tx) => {
+      const scope = await this.assertClaimTx(tx, claim);
+      const [projectionRow, draft] = await Promise.all([
+        tx.runtimeProviderState.findUnique({
+          where: { runtimeAttemptId: claim.attemptId },
+        }),
+        tx.runDraft.findUnique({
+          where: { runId: claim.runId },
+          select: { content: true },
+        }),
+      ]);
+      if (!projectionRow) throw new Error("RUNTIME_PROVIDER_STATE_MISSING");
+      const projection = providerProjectionFromRow(projectionRow);
+      if (
+        projection.runId !== claim.runId
+        || projection.lastAppliedSequence !== scope.externalEventSequence
+      ) {
+        throw new Error("RUNTIME_PROVIDER_STATE_SEQUENCE_GAP");
+      }
+      return runtimeProviderTextStateFromProjection(
+        projection,
+        runtimeDraftText(draft?.content),
+      );
+    }, runtimeExecutionTransactionOptions);
+  }
+
+  private async providerTextStateLegacy(claim: RuntimeExecutionClaim) {
     return this.db.$transaction(async (tx) => {
       await this.assertClaimTx(tx, claim);
       const rows = await tx.$queryRaw<Array<RuntimeProviderTextEvent & { payload: Prisma.JsonValue }>>(
@@ -233,6 +288,57 @@ export class RuntimeAttemptService {
         truncated,
       });
     });
+  }
+
+  private async verifyProjectionShadow(
+    claim: RuntimeExecutionClaim,
+    legacy: Awaited<ReturnType<RuntimeAttemptService["providerTextStateLegacy"]>>,
+  ) {
+    const projected = await this.providerTextStateProjection(claim);
+    const normalizedLegacy = runtimeProviderTextStateFromLegacy(legacy);
+    if (
+      projected.rawAssistantText !== normalizedLegacy.rawAssistantText
+      || projected.visibleAssistantText !== normalizedLegacy.visibleAssistantText
+      || projected.redactionBuffer !== normalizedLegacy.redactionBuffer
+      || projected.durableVisibleAssistantText !== normalizedLegacy.durableVisibleAssistantText
+      || projected.committedFinalization?.externalEventId
+        !== normalizedLegacy.committedFinalization?.externalEventId
+    ) {
+      throw new Error("RUNTIME_PROVIDER_STATE_SHADOW_MISMATCH");
+    }
+  }
+
+  async externalEventProcessed(
+    claim: RuntimeExecutionClaim,
+    input: RuntimeExternalEventInput,
+  ): Promise<boolean> {
+    assertExternalRunId(input.externalRunId);
+    assertExternalEvent(input);
+    const payloadSha256 = sha256Canonical(jsonValueSchema.parse(input.payload));
+    return this.db.$transaction(async (tx) => {
+      const scope = await this.assertClaimTx(tx, claim);
+      if (scope.externalRunId !== input.externalRunId || scope.attemptStatus !== "running") {
+        throw new RuntimeExecutionFencedError();
+      }
+      const existing = await tx.runtimeExternalEvent.findUnique({
+        where: {
+          runtimeAttemptId_externalEventId: {
+            runtimeAttemptId: claim.attemptId,
+            externalEventId: input.externalEventId,
+          },
+        },
+        select: {
+          runId: true,
+          externalRunId: true,
+          event: true,
+          payloadSha256: true,
+          status: true,
+        },
+      });
+      if (!existing) return false;
+      assertExternalEventReplay(existing, claim, input, payloadSha256);
+      return existing.status === "processed";
+    }, runtimeExecutionTransactionOptions);
   }
 
   async authorizeSubmission(claim: RuntimeExecutionClaim): Promise<void> {
@@ -445,7 +551,33 @@ export class RuntimeAttemptService {
         });
       }
 
+      const projectionRow = await tx.runtimeProviderState.findUnique({
+        where: { runtimeAttemptId: claim.attemptId },
+      });
+      if (!projectionRow) throw new Error("RUNTIME_PROVIDER_STATE_MISSING");
+      const projection = providerProjectionFromRow(projectionRow);
+      if (projection.lastAppliedSequence !== sequence - 1) {
+        throw new Error("RUNTIME_PROVIDER_STATE_SEQUENCE_GAP");
+      }
+      const nextProjection = reduceRuntimeProviderProjection(projection, {
+        runtimeAttemptId: claim.attemptId,
+        runId: claim.runId,
+        attempt: scope.attempt,
+        externalEventId: input.externalEventId,
+        sequence,
+        event: input.event,
+        payload,
+        payloadSha256,
+      }).state;
+
       await applyEffects(tx);
+      const draft = await tx.runDraft.findUnique({
+        where: { runId: claim.runId },
+        select: { content: true },
+      });
+      if (runtimeDraftText(draft?.content) !== nextProjection.visibleAssistantText) {
+        throw new Error("RUNTIME_PROVIDER_STATE_DRAFT_CONFLICT");
+      }
       const processed = await tx.runtimeExternalEvent.updateMany({
         where: {
           runtimeAttemptId: claim.attemptId,
@@ -454,13 +586,25 @@ export class RuntimeAttemptService {
         },
         data: { status: "processed", processedAt: scope.databaseNow },
       });
+      if (processed.count !== 1) throw new RuntimeExecutionFencedError();
+      const projected = await tx.runtimeProviderState.updateMany({
+        where: {
+          runtimeAttemptId: claim.attemptId,
+          runId: claim.runId,
+          projectionVersion: projection.projectionVersion,
+          lastAppliedSequence: projection.lastAppliedSequence,
+          stateSha256: projection.stateSha256,
+        },
+        data: providerProjectionData(nextProjection),
+      });
       const checkpointed = checkpointProviderCursor
         ? await tx.runtimeAttempt.updateMany({
             where: claimAttemptWhere(claim),
             data: { lastExternalEventId: input.externalEventId },
           })
         : { count: 1 };
-      if (processed.count !== 1 || checkpointed.count !== 1) {
+      if (projected.count !== 1) throw new Error("RUNTIME_PROVIDER_STATE_CAS_CONFLICT");
+      if (checkpointed.count !== 1) {
         throw new RuntimeExecutionFencedError();
       }
       return { created: true, sequence };
@@ -509,6 +653,73 @@ export class RuntimeAttemptService {
       throw new RuntimeExecutionFencedError();
     }
     return scope;
+  }
+
+  private async ensureProviderProjectionTx(
+    tx: Prisma.TransactionClient,
+    scope: {
+      runId: string;
+      attemptId: string;
+      attempt: number;
+      externalEventSequence: number;
+    },
+  ): Promise<void> {
+    const existing = await tx.runtimeProviderState.findUnique({
+      where: { runtimeAttemptId: scope.attemptId },
+    });
+    if (existing) {
+      const projection = providerProjectionFromRow(existing);
+      if (
+        projection.runId !== scope.runId
+        || projection.lastAppliedSequence > scope.externalEventSequence
+      ) {
+        throw new Error("RUNTIME_PROVIDER_STATE_SCOPE_INVALID");
+      }
+      return;
+    }
+    if (scope.externalEventSequence !== 0) {
+      throw new Error("RUNTIME_PROVIDER_STATE_MISSING");
+    }
+
+    const [previous, draft] = await Promise.all([
+      tx.runtimeAttempt.findFirst({
+        where: {
+          runId: scope.runId,
+          attempt: { lt: scope.attempt },
+          providerState: { isNot: null },
+        },
+        orderBy: { attempt: "desc" },
+        select: { providerState: true },
+      }),
+      tx.runDraft.findUnique({
+        where: { runId: scope.runId },
+        select: { content: true },
+      }),
+    ]);
+    const previousProjection = previous?.providerState
+      ? providerProjectionFromRow(previous.providerState)
+      : null;
+    const durableText = runtimeDraftText(draft?.content);
+    if (!previousProjection && durableText !== "") {
+      throw new Error("RUNTIME_PROVIDER_STATE_BACKFILL_REQUIRED");
+    }
+    if (previousProjection && previousProjection.visibleAssistantText !== durableText) {
+      throw new Error("RUNTIME_PROVIDER_STATE_DRAFT_CONFLICT");
+    }
+    const projection = createRuntimeProviderProjection({
+      runtimeAttemptId: scope.attemptId,
+      runId: scope.runId,
+      snapshot: previousProjection
+        ? {
+            rawAssistantText: previousProjection.rawAssistantText,
+            visibleAssistantText: previousProjection.visibleAssistantText,
+            redactionBuffer: previousProjection.redactionBuffer,
+          }
+        : undefined,
+    });
+    await tx.runtimeProviderState.create({
+      data: providerProjectionData(projection),
+    });
   }
 
   async beginCancellation(runId: string, attemptId: string) {
@@ -578,6 +789,7 @@ export class RuntimeAttemptService {
         attempt."submission_unknown_at" AS "submissionUnknownAt",
         attempt."external_event_sequence" AS "externalEventSequence",
         attempt."last_external_event_id" AS "lastExternalEventId"
+        , attempt."attempt" AS "attempt"
       FROM "runs" AS run
       JOIN "runtime_attempts" AS attempt ON attempt."run_id" = run."id"
       WHERE run."id" = ${runId}
@@ -587,6 +799,51 @@ export class RuntimeAttemptService {
     if (!rows[0]) throw new RuntimeExecutionFencedError();
     return rows[0];
   }
+}
+
+function providerProjectionFromRow(row: {
+  runtimeAttemptId: string;
+  runId: string;
+  projectionVersion: number;
+  lastAppliedSequence: number;
+  lastExternalEventId: string | null;
+  rawAssistantText: string;
+  visibleAssistantText: string;
+  redactionBuffer: string;
+  finalizationExternalEventId: string | null;
+  finalizationPayloadSha256: string | null;
+  stateSha256: string;
+}): RuntimeProviderProjection {
+  return assertRuntimeProviderProjection({
+    protocol: "workbench.runtime-provider-state.v2",
+    runtimeAttemptId: row.runtimeAttemptId,
+    runId: row.runId,
+    projectionVersion: row.projectionVersion as 2,
+    lastAppliedSequence: row.lastAppliedSequence,
+    lastExternalEventId: row.lastExternalEventId,
+    rawAssistantText: row.rawAssistantText,
+    visibleAssistantText: row.visibleAssistantText,
+    redactionBuffer: row.redactionBuffer,
+    finalizationExternalEventId: row.finalizationExternalEventId,
+    finalizationPayloadSha256: row.finalizationPayloadSha256,
+    stateSha256: row.stateSha256,
+  });
+}
+
+function providerProjectionData(state: RuntimeProviderProjection) {
+  return {
+    runtimeAttemptId: state.runtimeAttemptId,
+    runId: state.runId,
+    projectionVersion: state.projectionVersion,
+    lastAppliedSequence: state.lastAppliedSequence,
+    lastExternalEventId: state.lastExternalEventId,
+    rawAssistantText: state.rawAssistantText,
+    visibleAssistantText: state.visibleAssistantText,
+    redactionBuffer: state.redactionBuffer,
+    finalizationExternalEventId: state.finalizationExternalEventId,
+    finalizationPayloadSha256: state.finalizationPayloadSha256,
+    stateSha256: state.stateSha256,
+  };
 }
 
 const executionAttemptStatuses = new Set(["pending", "submitting", "submission_unknown", "running"]);

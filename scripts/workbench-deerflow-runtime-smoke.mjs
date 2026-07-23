@@ -36,6 +36,7 @@ const config = {
   deerFlowInternalToken: internalToken,
   deerFlowStreamMode: ["messages", "values"],
   deerFlowTimeoutMs: numberFromEnv("DEERFLOW_TIMEOUT_MS", 180_000),
+  deerFlowSubmissionTimeoutMs: numberFromEnv("DEERFLOW_SUBMISSION_TIMEOUT_MS", 120_000),
   deerFlowIdleTimeoutMs: numberFromEnv("DEERFLOW_IDLE_TIMEOUT_MS", 60_000),
   concurrency: 1,
   s3Bucket: "runtime-smoke-unused",
@@ -86,12 +87,11 @@ const result = await runtime.execute({
   designStyleSnapshot: null,
   resume: null,
   providerTextState: {
-    protocol: "workbench.runtime-provider-text-state.v1",
+    protocol: "workbench.runtime-provider-text-state.v2",
     rawAssistantText: "",
     visibleAssistantText: "",
     durableVisibleAssistantText: "",
     redactionBuffer: "",
-    processedExternalEventIds: [],
     committedFinalization: null,
   },
   submission: {
@@ -103,6 +103,7 @@ const result = await runtime.execute({
   onExternalRunCreated: async (id) => {
     externalRunId = id;
   },
+  isExternalEventProcessed: async () => false,
   onExternalEvent: async (_part, effects) => {
     events.push(...effects);
   },

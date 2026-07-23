@@ -15,6 +15,7 @@ import {
 import { PrismaCanvasToolGrantIssuer } from "../src/runtime/canvas-tool-grant.service.js";
 import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
 import { RuntimeSubmissionUnknownError } from "../src/runtime/runtime.port.js";
+import { RuntimeLivenessError } from "../src/runtime/runtime-liveness.js";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
 const executionClaim = {
@@ -50,6 +51,114 @@ describe("Runtime retry classification", () => {
       .toBe(false);
     expect(isRetryableRuntimeError(new Error("socket closed before the runtime stream completed")))
       .toBe(true);
+    expect(isRetryableRuntimeError(new RuntimeLivenessError(
+      "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+      true,
+    ))).toBe(true);
+    expect(isRetryableRuntimeError(new RuntimeLivenessError(
+      "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      false,
+    ))).toBe(false);
+  });
+});
+
+describe("Runtime wall-clock terminalization", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("bounds an abort-ignoring provider, cancels it, and terminalizes with a stable code", async () => {
+    const runtime = {
+      execute: vi.fn(async () => new Promise<never>(() => undefined)),
+      cancel: vi.fn(async () => ({
+        externalRunId: "external-run-1",
+        externalStatus: "interrupted",
+        found: true,
+      })),
+    };
+    const db = {
+      run: { findUnique: vi.fn(async () => ({ status: "running" })) },
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+      undefined,
+      { maximumWallClockMs: 900, deadlineCancelMs: 100 },
+    );
+    const internals = processor as unknown as ProcessorInternals & {
+      bindings: { ensure: ReturnType<typeof vi.fn> };
+      attempts: {
+        ensure: ReturnType<typeof vi.fn>;
+        claim: ReturnType<typeof vi.fn>;
+        submissionContext: ReturnType<typeof vi.fn>;
+        providerTextState: ReturnType<typeof vi.fn>;
+        attachExternalRun: ReturnType<typeof vi.fn>;
+      };
+    };
+    Object.assign(internals, {
+      prepare: vi.fn(async () => durableExecutionPrepared()),
+      bindings: {
+        ensure: vi.fn(async () => ({
+          id: "binding-1",
+          adapter: "deerflow",
+          externalThreadId: "external-thread-1",
+        })),
+      },
+      attempts: {
+        ensure: vi.fn(async () => ({ id: "runtime-attempt-1", startedAt: now })),
+        claim: vi.fn(async () => executionClaim),
+        submissionContext: vi.fn(async () => ({
+          mode: "join",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+          externalRunId: "external-run-1",
+          lastExternalEventId: null,
+        })),
+        providerTextState: vi.fn(async () => emptyProviderTextState()),
+        attachExternalRun: vi.fn(async () => undefined),
+      },
+    });
+    const failRun = vi.spyOn(internals, "failRun").mockResolvedValue(undefined);
+
+    const execution = processor.execute("run-1", [], undefined, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+    const observed = execution.catch((error: unknown) => error);
+    for (let index = 0; index < 10 && runtime.execute.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    expect(runtime.execute).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(899);
+    expect(runtime.cancel).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(observed).resolves.toMatchObject({
+      code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      retryable: false,
+    });
+    expect(runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        runtimeAttemptId: "runtime-attempt-1",
+        externalThreadId: "external-thread-1",
+        externalRunId: "external-run-1",
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
+      false,
+      executionClaim,
+    );
   });
 });
 
@@ -86,12 +195,11 @@ function durableExecutionPrepared() {
 
 function emptyProviderTextState(visibleAssistantText = "") {
   return {
-    protocol: "workbench.runtime-provider-text-state.v1" as const,
+    protocol: "workbench.runtime-provider-text-state.v2" as const,
     rawAssistantText: visibleAssistantText,
     visibleAssistantText,
     durableVisibleAssistantText: visibleAssistantText,
     redactionBuffer: "",
-    processedExternalEventIds: [],
     committedFinalization: null,
   };
 }

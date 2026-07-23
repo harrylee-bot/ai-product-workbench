@@ -94,6 +94,11 @@ async function grantRuntimePrivileges(client, runtimeRole, migratorRole) {
   await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${appSchema}."run_events" FROM ${runtimeRole}`);
   await client.query(`GRANT SELECT, INSERT ON TABLE ${appSchema}."run_events" TO ${runtimeRole}`);
 
+  // Provider state is a rebuildable projection, but runtime writers only
+  // advance it. Direct deletion/truncation is reserved for migrator-led repair.
+  await client.query(`REVOKE DELETE, TRUNCATE ON TABLE ${appSchema}."runtime_provider_states" FROM ${runtimeRole}`);
+  await client.query(`GRANT SELECT, INSERT, UPDATE ON TABLE ${appSchema}."runtime_provider_states" TO ${runtimeRole}`);
+
   // Runtime records and deduplicates integrity incidents, but neither runtime
   // nor table-wide grants may erase evidence or issue a forensic retention release.
   await client.query(`REVOKE DELETE, TRUNCATE ON TABLE ${appSchema}."ready_object_integrity_incidents" FROM ${runtimeRole}`);

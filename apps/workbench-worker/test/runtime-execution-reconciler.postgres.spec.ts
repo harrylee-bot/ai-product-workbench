@@ -11,6 +11,48 @@ const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
 describeWithPostgres("RuntimeExecutionReconciler PostgreSQL admission", () => {
+  it("proves pg-boss expiration is an active-handler deadline that aborts job.signal", async () => {
+    const boss = runtimeBoss(databaseUrl!, "runtime-expiration-semantics-test");
+    const queueName = `runtime.expiration.${randomUUID()}`;
+    let resolveEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      resolveEntered = resolve;
+    });
+    let observedSignal: AbortSignal | null = null;
+
+    try {
+      await boss.start();
+      await boss.createQueue(queueName, {
+        policy: "short",
+        retryLimit: 0,
+        expireInSeconds: 1,
+      });
+      await boss.work(queueName, {
+        includeMetadata: true,
+        pollingIntervalSeconds: 1,
+      }, async (jobs) => {
+        observedSignal = jobs[0]!.signal;
+        resolveEntered();
+        return new Promise<never>(() => undefined);
+      });
+      const jobId = await boss.send(queueName, { probe: true });
+      expect(jobId).toBeTruthy();
+      await entered;
+      expect(observedSignal!.aborted).toBe(false);
+
+      await waitUntil(async () => {
+        const jobs = await boss.findJobs(queueName);
+        return jobs.some((job) => job.id === jobId && job.state === "failed");
+      }, 10_000);
+
+      expect(observedSignal!.aborted).toBe(true);
+    } finally {
+      await boss.offWork(queueName).catch(() => undefined);
+      await boss.deleteQueue(queueName).catch(() => undefined);
+      await boss.stop({ graceful: false }).catch(() => undefined);
+    }
+  }, 20_000);
+
   it("admits one recovery job per Run and does not let retained failures block other Runs", async () => {
     const dbA = new PrismaClient({ datasourceUrl: databaseUrl! });
     const dbB = new PrismaClient({ datasourceUrl: databaseUrl! });
@@ -65,6 +107,15 @@ describeWithPostgres("RuntimeExecutionReconciler PostgreSQL admission", () => {
     }
   }, 120_000);
 });
+
+async function waitUntil(predicate: () => Promise<boolean>, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("RUNTIME_EXPIRATION_SEMANTICS_TIMEOUT");
+}
 
 function runtimeBoss(connectionString: string, applicationName: string) {
   const url = new URL(connectionString);

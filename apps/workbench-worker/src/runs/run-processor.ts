@@ -51,6 +51,11 @@ import {
   runtimeExternalFinalizationEvent,
 } from "../runtime/runtime.port.js";
 import {
+  RuntimeLivenessError,
+  RuntimeWallClockBudget,
+  raceWithAbort,
+} from "../runtime/runtime-liveness.js";
+import {
   RuntimeAttemptService,
   RuntimeExecutionClaimBusyError,
   RuntimeExecutionCancelledError,
@@ -163,6 +168,8 @@ export class RunProcessor {
   private readonly prototypePatches: PrototypePatchService;
   private readonly executionOwnerPrefix: string;
   private readonly executionHeartbeatMs: number;
+  private readonly executionMaximumWallClockMs: number;
+  private readonly executionDeadlineCancelMs: number;
   private readonly cancellationPollIntervalMs: number;
   private readonly cancellationQueryBatchSize: number;
 
@@ -177,17 +184,26 @@ export class RunProcessor {
       ownerPrefix?: string;
       leaseMs?: number;
       heartbeatMs?: number;
+      maximumWallClockMs?: number;
+      deadlineCancelMs?: number;
       cancellationPollIntervalMs?: number;
       cancellationQueryBatchSize?: number;
+      providerStateMode?: import("../runtime/runtime-attempt.service.js").RuntimeProviderStateMode;
     } = {},
   ) {
     this.events = new RunEventStore(db);
     this.bindings = new RuntimeBindingService(db, runtime);
     const leaseMs = execution.leaseMs ?? 45_000;
-    this.attempts = new RuntimeAttemptService(db, leaseMs);
+    this.attempts = new RuntimeAttemptService(
+      db,
+      leaseMs,
+      execution.providerStateMode ?? "projection-required",
+    );
     this.prototypePatches = prototypePatches ?? new PrototypePatchService(db);
     this.executionOwnerPrefix = execution.ownerPrefix ?? "runtime-worker";
     this.executionHeartbeatMs = execution.heartbeatMs ?? 15_000;
+    this.executionMaximumWallClockMs = execution.maximumWallClockMs ?? 30 * 60_000;
+    this.executionDeadlineCancelMs = execution.deadlineCancelMs ?? 30_000;
     this.cancellationPollIntervalMs = execution.cancellationPollIntervalMs ?? 1_000;
     this.cancellationQueryBatchSize = execution.cancellationQueryBatchSize ?? 100;
     if (!Number.isSafeInteger(this.cancellationPollIntervalMs)
@@ -203,6 +219,15 @@ export class RunProcessor {
     if (this.executionHeartbeatMs >= leaseMs) {
       throw new Error("RUNTIME_EXECUTION_HEARTBEAT_INTERVAL_INVALID");
     }
+    if (!Number.isSafeInteger(this.executionMaximumWallClockMs)
+      || this.executionMaximumWallClockMs < 1) {
+      throw new Error("RUNTIME_EXECUTION_MAX_WALL_CLOCK_INVALID");
+    }
+    if (!Number.isSafeInteger(this.executionDeadlineCancelMs)
+      || this.executionDeadlineCancelMs < 1
+      || this.executionDeadlineCancelMs >= this.executionMaximumWallClockMs) {
+      throw new Error("RUNTIME_EXECUTION_DEADLINE_CANCEL_INVALID");
+    }
   }
 
   async execute(
@@ -211,6 +236,7 @@ export class RunProcessor {
     jobSignal?: AbortSignal,
     retry = { retryCount: 0, retryLimit: 0 },
   ) {
+    const handlerStartedAtMs = Date.now();
     let prepared: Awaited<ReturnType<RunProcessor["prepare"]>>;
     try {
       prepared = await this.prepare(runId, approvalIds);
@@ -228,15 +254,25 @@ export class RunProcessor {
     }
     if (!prepared) return { runId, skipped: true };
 
+    const wallClock = new RuntimeWallClockBudget(
+      this.executionMaximumWallClockMs,
+      handlerStartedAtMs,
+    );
     const controller = new AbortController();
     this.active.set(runId, controller);
     this.startCancellationPoller();
-    const signal = jobSignal ? AbortSignal.any([jobSignal, controller.signal]) : controller.signal;
+    const signal = AbortSignal.any([
+      ...(jobSignal ? [jobSignal] : []),
+      controller.signal,
+      wallClock.signal,
+    ]);
 
     let fullText = prepared.previousAssistantText;
     let runtimeAttemptId: string | null = null;
     let claim: RuntimeExecutionClaim | null = null;
     let submission: RuntimeSubmissionState | null = null;
+    let externalThreadId: string | null = null;
+    let externalRunId: string | null = null;
     let heartbeatTimer: NodeJS.Timeout | null = null;
 
     try {
@@ -245,8 +281,15 @@ export class RunProcessor {
         workbenchThreadId: prepared.thread.id,
         workbenchPrincipalId: prepared.run.createdById,
       }, signal);
+      externalThreadId = binding.externalThreadId;
       const runtimeAttempt = await this.attempts.ensure(runId, prepared.run.attempt, binding);
       runtimeAttemptId = runtimeAttempt.id;
+      wallClock.rebase(
+        runtimeAttempt.startedAt instanceof Date
+          ? runtimeAttempt.startedAt.getTime()
+          : handlerStartedAtMs,
+      );
+      if (wallClock.signal.aborted) throw wallClock.signal.reason;
       claim = await this.attempts.claim(
         runId,
         runtimeAttempt.id,
@@ -254,6 +297,7 @@ export class RunProcessor {
       );
       heartbeatTimer = this.startExecutionHeartbeat(claim, controller);
       submission = await this.attempts.submissionContext(claim);
+      externalRunId = submission.mode === "join" ? submission.externalRunId : null;
       const providerTextState = await this.attempts.providerTextState(claim);
       fullText = providerTextState.durableVisibleAssistantText;
       const knowledgeTool = submission.mode === "submit"
@@ -279,7 +323,7 @@ export class RunProcessor {
             snapshot: prepared.request.canvasSnapshot ?? null,
           })
         : null;
-      const outcome = await this.runtime.execute({
+      const outcome = await raceWithAbort(this.runtime.execute({
         runId,
         runtimeAttemptId: runtimeAttempt.id,
         attempt: prepared.run.attempt,
@@ -300,9 +344,13 @@ export class RunProcessor {
         submission,
       }, {
         onSubmissionStarted: () => this.attempts.authorizeSubmission(claim!),
-        onExternalRunCreated: async (externalRunId) => {
-          await this.attempts.attachExternalRun(claim!, externalRunId);
+        onExternalRunCreated: async (candidateExternalRunId) => {
+          await this.attempts.attachExternalRun(claim!, candidateExternalRunId);
+          externalRunId = candidateExternalRunId;
         },
+        isExternalEventProcessed: (part) => (
+          this.attempts.externalEventProcessed(claim!, part)
+        ),
         onExternalEvent: async (part, effects) => {
           let nextFullText = fullText;
           await this.attempts.processExternalEvent(claim!, part, async (tx) => {
@@ -352,7 +400,7 @@ export class RunProcessor {
           });
           fullText = nextFullText;
         },
-      }, signal);
+      }, signal), signal);
 
       if (outcome.protocol === "workbench.runtime.input-required.v1") {
         await this.waitForInput(claim, outcome);
@@ -365,7 +413,10 @@ export class RunProcessor {
         outcome,
       );
       return { runId, artifactCount: outcome.artifacts.length };
-    } catch (error) {
+    } catch (caught) {
+      const error = wallClock.signal.aborted
+        ? wallClock.signal.reason
+        : caught;
       const status = await this.db.run.findUnique({ where: { id: runId }, select: { status: true } });
       if (status?.status === "cancelling" || status?.status === "cancelled" || error instanceof RuntimeCancelledError) {
         return { runId, cancellationPending: status?.status !== "cancelled" };
@@ -378,11 +429,25 @@ export class RunProcessor {
         await this.attempts.markSubmissionUnknown(claim, publicErrorMessage(error.cause ?? error));
         return { runId, submissionUnknown: true };
       }
+      if (
+        error instanceof RuntimeLivenessError
+        && error.code === "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED"
+        && claim
+        && runtimeAttemptId
+      ) {
+        await this.cancelDeadlineExceededProvider({
+          claim,
+          runtimeAttemptId,
+          principalId: prepared.run.createdById,
+          externalThreadId,
+          externalRunId,
+        });
+      }
       const retryable = isRetryableRuntimeError(error);
       if (retryable && retry.retryCount < retry.retryLimit) {
         if (claim) {
           await this.attempts.recordRetryableError(claim, {
-            code: "RUNTIME_EXECUTION_RETRYABLE",
+            code: runtimeExecutionErrorCode(error, "RUNTIME_EXECUTION_RETRYABLE"),
             detail: publicErrorMessage(error),
           });
         }
@@ -391,9 +456,35 @@ export class RunProcessor {
       }
       throw error;
     } finally {
+      wallClock.stop();
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       this.active.delete(runId);
       this.stopCancellationPollerIfIdle();
+    }
+  }
+
+  private async cancelDeadlineExceededProvider(input: {
+    claim: RuntimeExecutionClaim;
+    runtimeAttemptId: string;
+    principalId: string;
+    externalThreadId: string | null;
+    externalRunId: string | null;
+  }): Promise<void> {
+    if (!input.externalThreadId) return;
+    const cleanupSignal = AbortSignal.timeout(this.executionDeadlineCancelMs);
+    try {
+      await raceWithAbort(this.runtime.cancel({
+        runId: input.claim.runId,
+        runtimeAttemptId: input.runtimeAttemptId,
+        principalId: input.principalId,
+        externalThreadId: input.externalThreadId,
+        externalRunId: input.externalRunId,
+      }, async (candidateExternalRunId) => {
+        await this.attempts.attachExternalRun(input.claim, candidateExternalRunId);
+      }, cleanupSignal), cleanupSignal);
+    } catch {
+      // The local deadline remains authoritative. The claim-fenced terminal
+      // transition below prevents late provider callbacks from mutating state.
     }
   }
 
@@ -1995,6 +2086,7 @@ export class RunProcessor {
     claim: RuntimeExecutionClaim | null = null,
   ) {
     const message = publicErrorMessage(error);
+    const code = runtimeExecutionErrorCode(error);
     await this.db.$transaction(async (tx) => {
       if (claim) {
         try {
@@ -2016,7 +2108,7 @@ export class RunProcessor {
         data: {
           status: "failed",
           finishedAt: new Date(),
-          errorCode: "RUNTIME_EXECUTION_FAILED",
+          errorCode: code,
           errorDetail: message,
           errorRetryable: retryable,
           ...releasedExecutionLease(),
@@ -2040,7 +2132,7 @@ export class RunProcessor {
               status: "failed",
               startedAt: attempt.startedAt ?? failedAt,
               finishedAt: failedAt,
-              errorCode: "RUNTIME_EXECUTION_FAILED",
+              errorCode: code,
               errorDetail: message,
               errorRetryable: retryable,
               ...releasedExecutionLease(),
@@ -2054,7 +2146,7 @@ export class RunProcessor {
       await this.prototypePatches.discardRunTx(tx, runId, failedAt);
       await this.cleanupRunStagingArtifacts(tx, runId);
       await this.events.append(tx, runId, "run.failed", {
-        code: "RUNTIME_EXECUTION_FAILED",
+        code,
         message,
         retryable,
       });
@@ -3183,6 +3275,7 @@ function publicErrorMessage(error: unknown) {
 }
 
 export function isRetryableRuntimeError(error: unknown) {
+  if (error instanceof RuntimeLivenessError) return error.retryable;
   if (!(error instanceof Error)) return true;
   if (error.name === "ZodError") return false;
   return ![
@@ -3223,6 +3316,15 @@ export function isRetryableRuntimeError(error: unknown) {
     "RUNTIME_TOOL_",
     "RUN_EVENT_SOURCE_",
   ].some((prefix) => error.message.startsWith(prefix));
+}
+
+function runtimeExecutionErrorCode(
+  error: unknown,
+  fallback = "RUNTIME_EXECUTION_FAILED",
+): string {
+  return error instanceof RuntimeLivenessError
+    ? error.code
+    : fallback;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

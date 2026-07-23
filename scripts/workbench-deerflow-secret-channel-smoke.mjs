@@ -48,6 +48,7 @@ const config = {
   deerFlowInternalToken: internalToken,
   deerFlowStreamMode: ["messages", "values"],
   deerFlowTimeoutMs: numberFromEnv("DEERFLOW_TIMEOUT_MS", 300_000),
+  deerFlowSubmissionTimeoutMs: numberFromEnv("DEERFLOW_SUBMISSION_TIMEOUT_MS", 120_000),
   deerFlowIdleTimeoutMs: numberFromEnv("DEERFLOW_IDLE_TIMEOUT_MS", 120_000),
   concurrency: 1,
   s3Bucket: "secret-channel-smoke-unused",
@@ -164,6 +165,7 @@ async function executePositive() {
     onExternalRunCreated: async (id) => {
       externalRunId = id;
     },
+    isExternalEventProcessed: async () => false,
     onExternalEvent: async (_part, effects) => events.push(...effects),
     onExternalFinalization: async (_part, effects) => events.push(...effects),
   });
@@ -386,12 +388,11 @@ function internalClient() {
 
 function emptyTextState() {
   return {
-    protocol: "workbench.runtime-provider-text-state.v1",
+    protocol: "workbench.runtime-provider-text-state.v2",
     rawAssistantText: "",
     visibleAssistantText: "",
     durableVisibleAssistantText: "",
     redactionBuffer: "",
-    processedExternalEventIds: [],
     committedFinalization: null,
   };
 }

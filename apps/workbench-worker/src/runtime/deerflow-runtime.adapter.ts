@@ -43,6 +43,7 @@ import {
   createRuntimeFinalizationPayload,
   createRuntimeProviderTextCheckpoint,
   extractAssistantTextFrame,
+  projectCompleteVisibleAssistantText,
 } from "./runtime-assistant-text.js";
 import type {
   RuntimeSource,
@@ -60,6 +61,10 @@ import {
   RuntimeSubmissionUnknownError,
   runtimeExternalFinalizationEvent,
 } from "./runtime.port.js";
+import {
+  RuntimeProviderLivenessBudget,
+  raceWithAbort,
+} from "./runtime-liveness.js";
 
 export {
   assistantTextDelta,
@@ -265,6 +270,32 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     observer: RuntimeExecutionObserver,
     signal?: AbortSignal,
   ): Promise<RuntimeOutcome> {
+    const liveness = new RuntimeProviderLivenessBudget(
+      this.config.deerFlowSubmissionTimeoutMs,
+      this.config.deerFlowIdleTimeoutMs,
+      signal,
+    );
+    try {
+      return await raceWithAbort(
+        this.executeWithLiveness(
+          execution,
+          observer,
+          liveness.signal,
+          () => liveness.providerActivity(),
+        ),
+        liveness.signal,
+      );
+    } finally {
+      liveness.stop();
+    }
+  }
+
+  private async executeWithLiveness(
+    execution: RuntimeExecution,
+    observer: RuntimeExecutionObserver,
+    signal: AbortSignal,
+    onProviderActivity: () => void,
+  ): Promise<RuntimeOutcome> {
     const submission = execution.submission;
     let baselineState = submission.mode === "reconcile"
       ? null
@@ -328,7 +359,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           ? submission.lastExternalEventId ?? undefined
           : undefined,
         streamMode: this.streamMode(),
-        streamIdleReconnect: this.config.deerFlowIdleTimeoutMs,
+        streamIdleReconnect: Math.min(
+          30_000,
+          Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
+        ),
       });
     } else {
       if (submission.mode === "reconcile") {
@@ -372,9 +406,6 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     let activeNode: string | null = null;
     let resultToolCallId: string | null = null;
     let partEffects: RuntimeProgressEvent[] | null = null;
-    const seenExternalEventIds = new Set(
-      execution.providerTextState.processedExternalEventIds,
-    );
     const emitEvent = async (event: RuntimeProgressEvent) => {
       if (!partEffects) throw new Error("RUNTIME_EFFECT_WITHOUT_EXTERNAL_IDENTITY");
       partEffects.push(event);
@@ -636,21 +667,12 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     };
     try {
       for await (const part of stream) {
+        onProviderActivity();
         // DeerFlow terminates its Redis-backed stream with an un-ID'd end/null
         // sentinel. The SDK carries the previous SSE ID onto that frame, so it
         // must not enter the durable business-event inbox or advance the cursor.
         if (part.event === "end") {
           if (part.data !== null) throw new Error("DEERFLOW_STREAM_END_INVALID");
-          continue;
-        }
-        if (part.id && seenExternalEventIds.has(part.id)) {
-          if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
-          await observer.onExternalEvent({
-            externalRunId,
-            externalEventId: part.id,
-            event: part.event,
-            payload: jsonValueSchema.parse(part.data),
-          }, []);
           continue;
         }
         partEffects = [];
@@ -661,6 +683,18 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         }
         await externalRunPersistence;
         if (signal?.aborted) throw abortError(signal);
+        const externalPart = part.id
+          ? {
+              externalRunId,
+              externalEventId: part.id,
+              event: part.event,
+              payload: jsonValueSchema.parse(part.data),
+            }
+          : null;
+        if (externalPart && await observer.isExternalEventProcessed(externalPart)) {
+          partEffects = null;
+          continue;
+        }
 
         const node = extractNode(part.data);
         if (node && node !== activeNode) {
@@ -700,14 +734,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           if (effects.length > 0) throw new Error("RUNTIME_EXTERNAL_EVENT_ID_MISSING");
           continue;
         }
-        await observer.onExternalEvent({
-          externalRunId,
-          externalEventId: part.id,
-          event: part.event,
-          payload: jsonValueSchema.parse(part.data),
-        }, effects);
+        await observer.onExternalEvent(externalPart!, effects);
         visibleAssistantText += visibleTextDeltaFromEffects(effects);
-        seenExternalEventIds.add(part.id);
       }
     } catch (error) {
       let persistenceError: unknown = null;
@@ -775,6 +803,18 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       ? assistantTextDelta(assistantText, terminalFrame.text, terminalFrame.kind)
       : "";
     const terminalRawAssistantText = `${assistantText}${terminalRawDelta}`;
+    const outcome = inputRequired
+      ? assertNoKnowledgeGrant(inputRequired)
+      : assertNoKnowledgeGrant(
+          resolveRuntimeResult(finalState, execution.request.requestedArtifactKinds, execution),
+        );
+    if (execution.providerTextState.committedFinalization) {
+      if (terminalRawDelta) throw new Error("RUNTIME_PROVIDER_TEXT_EVENT_AFTER_FINALIZATION");
+      if (projectCompleteVisibleAssistantText(assistantText) !== visibleAssistantText) {
+        throw new Error("RUNTIME_PROVIDER_TEXT_TERMINAL_PROJECTION_CONFLICT");
+      }
+      return outcome;
+    }
     const providerTextCheckpoint = createRuntimeProviderTextCheckpoint(
       providerTextBeforeFinalization,
       terminalRawAssistantText,
@@ -798,18 +838,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         );
       }
     }
-    const outcome = inputRequired
-      ? assertNoKnowledgeGrant(inputRequired)
-      : assertNoKnowledgeGrant(
-          resolveRuntimeResult(finalState, execution.request.requestedArtifactKinds, execution),
-        );
     const derivedFinalizationEffects = partEffects;
     partEffects = null;
-    const finalizationEffects = execution.providerTextState.committedFinalization
-      ? execution.providerTextState.committedFinalization.payload.effects as RuntimeProgressEvent[]
-      : derivedFinalizationEffects;
-    await observer.onExternalFinalization(
-      runtimeFinalizationPart(
+    const finalizationEffects = derivedFinalizationEffects;
+    const finalizationPart = runtimeFinalizationPart(
         execution,
         externalRunId,
         finalState,
@@ -817,9 +849,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       finalizationEffects,
       providerTextCheckpoint.terminal.visibleAssistantText,
       providerTextCheckpoint,
-      ),
-      finalizationEffects,
-    );
+      );
+    await observer.onExternalFinalization(finalizationPart, finalizationEffects);
     return outcome;
   }
 
@@ -987,6 +1018,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           runId: execution.runId,
           runtimeAttemptId: execution.runtimeAttemptId,
           requestedArtifactKinds: [...execution.request.requestedArtifactKinds],
+          ...(knowledgeToolCapability ? { knowledgeEnabled: true } : {}),
           canvasTools: canvasToolCapability?.reference ?? null,
           prototypePatchBaselines,
         },

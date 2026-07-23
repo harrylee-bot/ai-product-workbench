@@ -1,7 +1,9 @@
 import {
   createRuntimeFinalizationPayload,
+  createRuntimeProviderProjection,
   createRuntimeProviderTextCheckpoint,
   projectIncompleteVisibleAssistantText,
+  reduceRuntimeProviderProjection,
   rebuildRuntimeProviderTextState,
   runtimeExternalFinalizationEvent,
   sha256Canonical,
@@ -88,5 +90,130 @@ describe("durable Runtime provider text state", () => {
         payloadSha256: sha256Canonical(payload),
       }],
     })).toThrow("RUNTIME_PROVIDER_TEXT_REPLAY_LIMIT_EXCEEDED");
+  });
+});
+
+describe("Runtime provider-state v2 reducer", () => {
+  it("applies one verified event and advances a canonical hash", () => {
+    const initial = createRuntimeProviderProjection({
+      runtimeAttemptId: "attempt-1",
+      runId: "run-1",
+    });
+    const payload = { type: "ai", content: "synthetic delta" };
+
+    const reduced = reduceRuntimeProviderProjection(initial, {
+      runtimeAttemptId: "attempt-1",
+      runId: "run-1",
+      attempt: 1,
+      externalEventId: "event-1",
+      sequence: 1,
+      event: "messages",
+      payload,
+      payloadSha256: sha256Canonical(payload),
+    });
+
+    expect(reduced.providerTextEffect).toEqual({
+      type: "text.delta",
+      delta: "synthetic delta",
+    });
+    expect(reduced.state).toMatchObject({
+      lastAppliedSequence: 1,
+      lastExternalEventId: "event-1",
+      rawAssistantText: "synthetic delta",
+      visibleAssistantText: "synthetic delta",
+      finalizationExternalEventId: null,
+    });
+    expect(reduced.state.stateSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(reduced.state.stateSha256).not.toBe(initial.stateSha256);
+  });
+
+  it("reuses redaction and commits only a bound terminal checkpoint", () => {
+    const token = `wbkg1.${"a".repeat(80)}.${"b".repeat(43)}`;
+    const before = projectIncompleteVisibleAssistantText(`before ${token}`);
+    const initial = createRuntimeProviderProjection({
+      runtimeAttemptId: "attempt-1",
+      runId: "run-1",
+      snapshot: before,
+    });
+    const checkpoint = createRuntimeProviderTextCheckpoint(before, `before ${token}`);
+    const payload = createRuntimeFinalizationPayload({
+      messagesSha256: "a".repeat(64),
+      outcomeSha256: "b".repeat(64),
+      effects: [],
+      visibleAssistantText: "before [knowledge capability redacted]",
+      providerTextCheckpoint: checkpoint,
+    });
+    const reduced = reduceRuntimeProviderProjection(initial, {
+      runtimeAttemptId: "attempt-1",
+      runId: "run-1",
+      attempt: 1,
+      externalEventId: "finalization-1",
+      sequence: 1,
+      event: runtimeExternalFinalizationEvent,
+      payload,
+      payloadSha256: sha256Canonical(payload),
+    });
+
+    expect(reduced.state).toMatchObject({
+      lastAppliedSequence: 1,
+      lastExternalEventId: null,
+      rawAssistantText: `before ${token}`,
+      visibleAssistantText: "before [knowledge capability redacted]",
+      redactionBuffer: "",
+      finalizationExternalEventId: "finalization-1",
+      finalizationPayloadSha256: sha256Canonical(payload),
+    });
+    expect(reduced.providerTextEffect).toEqual({
+      type: "text.final",
+      text: "before [knowledge capability redacted]",
+    });
+  });
+
+  it("fails closed on a corrupted state, sequence gap, or event after finalization", () => {
+    const initial = createRuntimeProviderProjection({
+      runtimeAttemptId: "attempt-1",
+      runId: "run-1",
+    });
+    const payload = { synthetic: true };
+    const event = {
+      runtimeAttemptId: "attempt-1",
+      runId: "run-1",
+      attempt: 1,
+      externalEventId: "event-1",
+      sequence: 1,
+      event: "synthetic.noop",
+      payload,
+      payloadSha256: sha256Canonical(payload),
+    };
+
+    expect(() => reduceRuntimeProviderProjection(
+      { ...initial, stateSha256: "f".repeat(64) },
+      event,
+    )).toThrow("RUNTIME_PROVIDER_STATE_HASH_MISMATCH");
+    expect(() => reduceRuntimeProviderProjection(initial, {
+      ...event,
+      sequence: 2,
+    })).toThrow("RUNTIME_PROVIDER_STATE_SEQUENCE_GAP");
+
+    const before = projectIncompleteVisibleAssistantText("");
+    const checkpoint = createRuntimeProviderTextCheckpoint(before, "");
+    const finalization = createRuntimeFinalizationPayload({
+      messagesSha256: "a".repeat(64),
+      outcomeSha256: "b".repeat(64),
+      effects: [],
+      visibleAssistantText: "",
+      providerTextCheckpoint: checkpoint,
+    });
+    const finalized = reduceRuntimeProviderProjection(initial, {
+      ...event,
+      externalEventId: "finalization-1",
+      event: runtimeExternalFinalizationEvent,
+      payload: finalization,
+      payloadSha256: sha256Canonical(finalization),
+    }).state;
+    expect(() => reduceRuntimeProviderProjection(finalized, {
+      ...event,
+      sequence: 2,
+    })).toThrow("RUNTIME_PROVIDER_TEXT_EVENT_AFTER_FINALIZATION");
   });
 });

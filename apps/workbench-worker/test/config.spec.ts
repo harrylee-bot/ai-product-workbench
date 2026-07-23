@@ -1,5 +1,12 @@
 import { loadWorkerConfig, pgConnectionString } from "../src/config.js";
 
+function stubMinimumWorkerConfig() {
+  vi.stubEnv("WORKBENCH_DATABASE_URL", "postgresql://localhost/workbench?schema=workbench");
+  vi.stubEnv("DEERFLOW_LANGGRAPH_URL", "https://deerflow.test/api/");
+  vi.stubEnv("DEERFLOW_GATEWAY_URL", "https://deerflow.test/");
+  vi.stubEnv("WORKBENCH_S3_BUCKET", "workbench");
+}
+
 describe("worker database configuration", () => {
   beforeEach(() => {
     vi.stubEnv("WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID", "runtime-access");
@@ -37,6 +44,10 @@ describe("worker database configuration", () => {
         runtimeReadyBlobS3AccessKeyId: "runtime-access",
         runtimeExecutionLeaseMs: 45_000,
         runtimeExecutionHeartbeatMs: 15_000,
+        runtimeExecutionMaximumWallClockMs: 1_800_000,
+        runtimeExecutionDeadlineCancelMs: 30_000,
+        deerFlowSubmissionTimeoutMs: 120_000,
+        runtimeProviderStateMode: "legacy-read",
         runtimeExecutionReconcileIntervalMs: 5_000,
         runtimeExecutionReconcileBatchSize: 100,
         concurrency: 2,
@@ -58,9 +69,32 @@ describe("worker database configuration", () => {
   });
 
   it.each([
+    "legacy-read",
+    "shadow-verify",
+    "projection-required",
+  ] as const)("accepts the %s Runtime provider-state mode", (mode) => {
+    stubMinimumWorkerConfig();
+    vi.stubEnv("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE", mode);
+
+    expect(loadWorkerConfig().runtimeProviderStateMode).toBe(mode);
+  });
+
+  it("rejects an unknown Runtime provider-state mode", () => {
+    stubMinimumWorkerConfig();
+    vi.stubEnv("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE", "implicit-fallback");
+
+    expect(() => loadWorkerConfig()).toThrow(
+      "WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be one of: legacy-read, shadow-verify, projection-required",
+    );
+  });
+
+  it.each([
     ["WORKBENCH_RUNTIME_CONCURRENCY", "65"],
     ["WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS", "249"],
     ["WORKBENCH_RUNTIME_CANCELLATION_QUERY_BATCH_SIZE", "1001"],
+    ["WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS", "59999"],
+    ["WORKBENCH_RUNTIME_EXECUTION_DEADLINE_CANCEL_MS", "999"],
+    ["DEERFLOW_SUBMISSION_TIMEOUT_MS", "999"],
   ])("rejects an unbounded %s value", (name, value) => {
     vi.stubEnv("WORKBENCH_DATABASE_URL", "postgresql://localhost/workbench?schema=workbench");
     vi.stubEnv("DEERFLOW_LANGGRAPH_URL", "https://deerflow.test/api/");
@@ -95,6 +129,16 @@ describe("worker database configuration", () => {
     vi.stubEnv("WORKBENCH_RUNTIME_EXECUTION_HEARTBEAT_MS", "15000");
 
     expect(() => loadWorkerConfig()).toThrow(/less than half the execution lease/u);
+  });
+
+  it("keeps application terminalization inside the pg-boss handler deadline", () => {
+    stubMinimumWorkerConfig();
+    vi.stubEnv("WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS", "2080000");
+    vi.stubEnv("WORKBENCH_RUNTIME_EXECUTION_DEADLINE_CANCEL_MS", "30000");
+
+    expect(() => loadWorkerConfig()).toThrow(
+      /must be less than the pg-boss handler deadline/u,
+    );
   });
 
   it("requires the Knowledge tool endpoint and signing secret as one configuration unit", () => {

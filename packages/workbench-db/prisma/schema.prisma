@@ -876,6 +876,7 @@ model RuntimeAttempt {
   canvasAgentSession         CanvasAgentSession?
   prototypePatchApplications PrototypePatchApplication[]
   externalEvents             RuntimeExternalEvent[]
+  providerState              RuntimeProviderState?
 
   @@unique([runId, attempt])
   @@unique([id, runId])
@@ -884,6 +885,28 @@ model RuntimeAttempt {
   @@index([externalThreadId, status])
   @@index([status, executionLeaseExpiresAt])
   @@map("runtime_attempts")
+}
+
+model RuntimeProviderState {
+  runtimeAttemptId            String         @id @map("runtime_attempt_id")
+  runId                       String         @map("run_id")
+  projectionVersion           Int            @map("projection_version")
+  lastAppliedSequence         Int            @default(0) @map("last_applied_sequence")
+  lastExternalEventId         String?        @map("last_external_event_id") @db.VarChar(1024)
+  rawAssistantText            String         @default("") @map("raw_assistant_text")
+  visibleAssistantText        String         @default("") @map("visible_assistant_text")
+  redactionBuffer             String         @default("") @map("redaction_buffer")
+  finalizationExternalEventId String?        @map("finalization_external_event_id") @db.VarChar(1024)
+  finalizationPayloadSha256   String?        @map("finalization_payload_sha256") @db.Char(64)
+  stateSha256                 String         @map("state_sha256") @db.Char(64)
+  builtAt                     DateTime       @default(now()) @map("built_at") @db.Timestamptz(6)
+  updatedAt                   DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
+  runtimeAttempt              RuntimeAttempt @relation(fields: [runtimeAttemptId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([runtimeAttemptId, runId])
+  @@index([runId])
+  @@index([projectionVersion, lastAppliedSequence])
+  @@map("runtime_provider_states")
 }
 
 model RuntimeExternalEvent {

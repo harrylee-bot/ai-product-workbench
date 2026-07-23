@@ -142,6 +142,7 @@ export type RuntimeExternalEventPart = {
 export type RuntimeExecutionObserver = {
   onSubmissionStarted: () => Promise<void>;
   onExternalRunCreated: (externalRunId: string) => Promise<void>;
+  isExternalEventProcessed: (part: RuntimeExternalEventPart) => Promise<boolean>;
   onExternalEvent: (
     part: RuntimeExternalEventPart,
     effects: RuntimeProgressEvent[],

@@ -46,6 +46,10 @@ const readyObjectIntegrityMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260720030000_ready_object_integrity_incidents/migration.sql",
   import.meta.url,
 ), "utf8");
+const runtimeProviderStateMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260723010000_runtime_provider_state_v2/migration.sql",
+  import.meta.url,
+), "utf8");
 const extensionProvisioning = await readFile(new URL(
   "../deploy/workbench-postgres-extensions.sql",
   import.meta.url,
@@ -80,7 +84,7 @@ test("export packaging backfill restores the mutation guard", () => {
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 66, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 67, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -231,6 +235,27 @@ test("Runtime execution durability fences owners, submissions, and external even
   assert.match(runtimeExecutionDurabilityMigration, /RUNTIME_EXTERNAL_EVENT_IMMUTABLE/u);
 });
 
+test("Runtime provider state v2 is scoped, monotonic, bounded, and finalization-bound", () => {
+  assert.match(runtimeProviderStateMigration, /^BEGIN;/u);
+  assert.match(runtimeProviderStateMigration, /CREATE TABLE "runtime_provider_states"/u);
+  assert.match(runtimeProviderStateMigration, /runtime_provider_states_attempt_scope_fkey/u);
+  assert.match(runtimeProviderStateMigration, /FOREIGN KEY \("runtime_attempt_id", "run_id"\)/u);
+  assert.match(runtimeProviderStateMigration, /last_applied_sequence_nonnegative_check/u);
+  assert.match(runtimeProviderStateMigration, /char_length\("redaction_buffer"\) <= 4096/u);
+  assert.match(runtimeProviderStateMigration, /RUNTIME_PROVIDER_STATE_MONOTONICITY_INVALID/u);
+  assert.match(runtimeProviderStateMigration, /RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT/u);
+  assert.match(runtimeProviderStateMigration, /RUNTIME_PROVIDER_STATE_FINALIZATION_INVALID/u);
+  assert.match(runtimeProviderStateMigration, /event\."payload_sha256"/u);
+  assert.match(runtimeProviderStateMigration, /SET search_path = pg_catalog\s+AS/u);
+  assert.match(runtimeProviderStateMigration, /FROM %I\."runtime_attempts"/u);
+  assert.match(runtimeProviderStateMigration, /FROM %I\."runtime_external_events"/u);
+  assert.match(runtimeProviderStateMigration, /TG_TABLE_SCHEMA/u);
+  assert.doesNotMatch(runtimeProviderStateMigration, /public\."runtime_(?:attempts|external_events)"/u);
+  assert.match(runtimeProviderStateMigration, /COMMIT;\s*$/u);
+  assert.doesNotMatch(runtimeProviderStateMigration, /DELETE FROM "runtime_external_events"/u);
+  assert.doesNotMatch(runtimeProviderStateMigration, /UPDATE "runtime_external_events"/u);
+});
+
 test("all application trigger functions use a fixed trusted search path", () => {
   assert.match(triggerSearchPathMigration, /FROM pg_trigger AS trigger/u);
   assert.match(triggerSearchPathMigration, /trigger\."tgisinternal" = FALSE/u);
@@ -275,6 +300,8 @@ test("database roles keep migrations separate from runtime DML", () => {
   assert.match(databaseRoleProvisioning, /WORKBENCH_POSTGRES_MIGRATOR_USER/u);
   assert.match(databaseRoleProvisioning, /WORKBENCH_POSTGRES_RUNTIME_USER/u);
   assert.match(databaseRoleProvisioning, /REVOKE UPDATE, DELETE, TRUNCATE ON TABLE .*run_events/u);
+  assert.match(databaseRoleProvisioning, /REVOKE DELETE, TRUNCATE ON TABLE .*runtime_provider_states/u);
+  assert.match(databaseRoleProvisioning, /GRANT SELECT, INSERT, UPDATE ON TABLE .*runtime_provider_states/u);
   assert.match(databaseRoleProvisioning, /REVOKE DELETE, TRUNCATE ON TABLE .*ready_object_integrity_incidents/u);
   assert.match(databaseRoleProvisioning, /REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE .*ready_object_integrity_retention_releases/u);
   assert.match(databaseRoleProvisioning, /schemaIdentifier\("workbench_jobs"\)/u);

@@ -143,6 +143,7 @@ Writing requirements:
 - `3 业务降级方案（必填）` cannot be empty. Use `不涉及` only when no meaningful degradation exists; otherwise provide a concrete fallback plan.
 - `4 需求安全基线要求（必填）` must include safety baseline self-check content. Online canvas may use a compact table, but values in `是否涉及` may only be `是`, `否`, or `不涉及`.
 - Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
+- Before authoring a PRD, read `references/prd-runtime-result.example.json` once and copy its complete envelope as the starting point. Replace the sample IDs and content, expand the typed blocks, and preserve every required inline object and bidirectional goal/requirement/criterion/flow reference. Do not invent a shorthand PRD shape from the prose outline above.
 
 ## Runtime Inputs
 
@@ -227,7 +228,7 @@ The lead agent must finish every turn by calling `workbench_runtime_result_submi
 
 If the tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns the final submit call.
 
-For a Prototype result, read `references/prototype-runtime-result.example.json` once and copy its complete envelope as the starting point. Replace its sample IDs/content and expand the typed arrays while keeping every required field and every bidirectional reference. The example is intentionally compact and is automatically validated by the production `runtimeResultSchema`.
+For a PRD result, read `references/prd-runtime-result.example.json` once. For a Prototype result, read `references/prototype-runtime-result.example.json` once. Copy the applicable complete envelope as the starting point, replace its sample IDs/content, and expand the typed arrays while keeping every required field and every bidirectional reference. Both examples are intentionally compact and are automatically validated by the production `runtimeResultSchema`.
 
 Keep single-screen results compact. Unless the request explicitly needs multiple routes or screens, return exactly one screen, prefer no more than 48 nodes, 12 actions, 12 bindings, 4 states, and 8 motions, and keep the complete response below 16,000 output tokens. Reuse tokens, assets, states, and repeated row/container structure instead of duplicating descriptive variants. Do not repeat prose already represented by typed nodes, bindings, actions, or state values.
 

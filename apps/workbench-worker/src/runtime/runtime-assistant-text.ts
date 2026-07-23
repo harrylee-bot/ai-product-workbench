@@ -9,18 +9,19 @@ import { z } from "zod";
 
 export const runtimeExternalFinalizationEvent = "workbench.runtime.finalization.v2";
 export const runtimeProviderTextReplayEventLimit = 10_000;
+export const runtimeProviderStateProjectionVersion = 2;
 
-const RUNTIME_PROVIDER_TEXT_MAX_LENGTH = 16_000_000;
-const RUNTIME_REDACTION_BUFFER_MAX_LENGTH = 4_096;
+export const runtimeProviderTextMaxLength = 16_000_000;
+export const runtimeRedactionBufferMaxLength = 4_096;
 const KNOWLEDGE_GRANT_PREFIX = "wbkg1.";
 const CANVAS_GRANT_PREFIX = "wbct1.";
 const CAPABILITY_TOKEN_CHARACTER = /^[A-Za-z0-9_.-]$/u;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const providerTextSnapshotSchema = z.object({
-  rawAssistantText: z.string().max(RUNTIME_PROVIDER_TEXT_MAX_LENGTH),
-  visibleAssistantText: z.string().max(RUNTIME_PROVIDER_TEXT_MAX_LENGTH),
-  redactionBuffer: z.string().max(RUNTIME_REDACTION_BUFFER_MAX_LENGTH),
+  rawAssistantText: z.string().max(runtimeProviderTextMaxLength),
+  visibleAssistantText: z.string().max(runtimeProviderTextMaxLength),
+  redactionBuffer: z.string().max(runtimeRedactionBufferMaxLength),
 }).strict();
 
 export const runtimeProviderTextCheckpointSchema = z.object({
@@ -36,7 +37,7 @@ export const runtimeFinalizationPayloadSchema = z.object({
   effects: z.array(jsonValueSchema),
   visibleFinalEffect: z.object({
     type: z.literal("text.final"),
-    text: z.string().max(RUNTIME_PROVIDER_TEXT_MAX_LENGTH),
+    text: z.string().max(runtimeProviderTextMaxLength),
   }).strict(),
   effectsSha256: sha256Schema,
   providerTextCheckpoint: runtimeProviderTextCheckpointSchema,
@@ -47,13 +48,22 @@ export type RuntimeProviderTextSnapshot = z.infer<typeof providerTextSnapshotSch
 export type RuntimeProviderTextCheckpoint = z.infer<typeof runtimeProviderTextCheckpointSchema>;
 export type RuntimeFinalizationPayload = z.infer<typeof runtimeFinalizationPayloadSchema>;
 
-export type RuntimeProviderTextState = RuntimeProviderTextSnapshot & {
+export type LegacyRuntimeProviderTextState = RuntimeProviderTextSnapshot & {
   protocol: "workbench.runtime-provider-text-state.v1";
   durableVisibleAssistantText: string;
   processedExternalEventIds: string[];
   committedFinalization: {
     externalEventId: string;
     payload: RuntimeFinalizationPayload;
+  } | null;
+};
+
+export type RuntimeProviderTextState = RuntimeProviderTextSnapshot & {
+  protocol: "workbench.runtime-provider-text-state.v2";
+  durableVisibleAssistantText: string;
+  committedFinalization: {
+    externalEventId: string;
+    payloadSha256: string;
   } | null;
 };
 
@@ -67,11 +77,27 @@ export type RuntimeProviderTextEvent = {
   payloadSha256: string;
 };
 
+export type RuntimeProviderProjection = RuntimeProviderTextSnapshot & {
+  protocol: "workbench.runtime-provider-state.v2";
+  runtimeAttemptId: string;
+  runId: string;
+  projectionVersion: typeof runtimeProviderStateProjectionVersion;
+  lastAppliedSequence: number;
+  lastExternalEventId: string | null;
+  finalizationExternalEventId: string | null;
+  finalizationPayloadSha256: string | null;
+  stateSha256: string;
+};
+
+export type RuntimeProviderProjectionEvent = RuntimeProviderTextEvent & {
+  runId: string;
+};
+
 export class CapabilityRedactionFilter {
   private buffer: string;
 
   constructor(buffer = "") {
-    if (buffer.length > RUNTIME_REDACTION_BUFFER_MAX_LENGTH) {
+    if (buffer.length > runtimeRedactionBufferMaxLength) {
       throw new Error("RUNTIME_REDACTION_BUFFER_INVALID");
     }
     this.buffer = buffer;
@@ -90,7 +116,7 @@ export class CapabilityRedactionFilter {
           index >= match!.prefix.length && !CAPABILITY_TOKEN_CHARACTER.test(character)
         ));
         if (boundary < 0) {
-          if (this.buffer.length > RUNTIME_REDACTION_BUFFER_MAX_LENGTH) {
+          if (this.buffer.length > runtimeRedactionBufferMaxLength) {
             output += `[${match!.kind} capability redacted]`;
             this.buffer = "";
           }
@@ -220,7 +246,7 @@ export function rebuildRuntimeProviderTextState(input: {
   durableVisibleAssistantText: string;
   events: RuntimeProviderTextEvent[];
   truncated: boolean;
-}): RuntimeProviderTextState {
+}): LegacyRuntimeProviderTextState {
   const events = [...input.events].sort(compareProviderTextEvents);
   for (const event of events) {
     if (sha256Canonical(event.payload) !== event.payloadSha256) {
@@ -297,6 +323,190 @@ export function rebuildRuntimeProviderTextState(input: {
   };
 }
 
+export function runtimeProviderTextStateFromProjection(
+  projection: RuntimeProviderProjection,
+  durableVisibleAssistantText: string,
+): RuntimeProviderTextState {
+  assertRuntimeProviderProjection(projection);
+  if (projection.visibleAssistantText !== durableVisibleAssistantText) {
+    throw new Error("RUNTIME_PROVIDER_STATE_DRAFT_CONFLICT");
+  }
+  return {
+    protocol: "workbench.runtime-provider-text-state.v2",
+    rawAssistantText: projection.rawAssistantText,
+    visibleAssistantText: projection.visibleAssistantText,
+    redactionBuffer: projection.redactionBuffer,
+    durableVisibleAssistantText,
+    committedFinalization: projection.finalizationExternalEventId
+      ? {
+          externalEventId: projection.finalizationExternalEventId,
+          payloadSha256: projection.finalizationPayloadSha256!,
+        }
+      : null,
+  };
+}
+
+export function runtimeProviderTextStateFromLegacy(
+  legacy: LegacyRuntimeProviderTextState,
+): RuntimeProviderTextState {
+  const snapshot = legacy.committedFinalization
+    ? legacy.committedFinalization.payload.providerTextCheckpoint.terminal
+    : {
+        rawAssistantText: legacy.rawAssistantText,
+        visibleAssistantText: legacy.visibleAssistantText,
+        redactionBuffer: legacy.redactionBuffer,
+      };
+  return {
+    protocol: "workbench.runtime-provider-text-state.v2",
+    ...snapshot,
+    durableVisibleAssistantText: legacy.durableVisibleAssistantText,
+    committedFinalization: legacy.committedFinalization
+      ? {
+          externalEventId: legacy.committedFinalization.externalEventId,
+          payloadSha256: sha256Canonical(legacy.committedFinalization.payload),
+        }
+      : null,
+  };
+}
+
+export function createRuntimeProviderProjection(input: {
+  runtimeAttemptId: string;
+  runId: string;
+  snapshot?: RuntimeProviderTextSnapshot;
+}): RuntimeProviderProjection {
+  const snapshot = input.snapshot ?? emptyProviderTextSnapshot();
+  assertProjectionIdentity(input.runtimeAttemptId, input.runId);
+  assertProviderTextSnapshotEither(snapshot);
+  return withRuntimeProviderProjectionHash({
+    protocol: "workbench.runtime-provider-state.v2",
+    runtimeAttemptId: input.runtimeAttemptId,
+    runId: input.runId,
+    projectionVersion: runtimeProviderStateProjectionVersion,
+    lastAppliedSequence: 0,
+    lastExternalEventId: null,
+    ...snapshot,
+    finalizationExternalEventId: null,
+    finalizationPayloadSha256: null,
+  });
+}
+
+export function reduceRuntimeProviderProjection(
+  current: RuntimeProviderProjection,
+  event: RuntimeProviderProjectionEvent,
+): {
+  state: RuntimeProviderProjection;
+  providerTextEffect:
+    | { type: "text.delta"; delta: string }
+    | { type: "text.final"; text: string }
+    | null;
+} {
+  assertRuntimeProviderProjection(current);
+  if (event.runtimeAttemptId !== current.runtimeAttemptId || event.runId !== current.runId) {
+    throw new Error("RUNTIME_PROVIDER_STATE_EVENT_SCOPE_INVALID");
+  }
+  if (event.sequence !== current.lastAppliedSequence + 1) {
+    throw new Error("RUNTIME_PROVIDER_STATE_SEQUENCE_GAP");
+  }
+  if (sha256Canonical(event.payload) !== event.payloadSha256) {
+    throw new Error("RUNTIME_PROVIDER_TEXT_EVENT_INTEGRITY_ERROR");
+  }
+  if (current.finalizationExternalEventId) {
+    throw new Error("RUNTIME_PROVIDER_TEXT_EVENT_AFTER_FINALIZATION");
+  }
+
+  if (event.event === runtimeExternalFinalizationEvent) {
+    const payload = parseRuntimeFinalizationPayload(event.payload);
+    if (canonicalJson(payload.providerTextCheckpoint.before) !== canonicalJson(providerSnapshot(current))) {
+      throw new Error("RUNTIME_PROVIDER_STATE_FINALIZATION_CHECKPOINT_CONFLICT");
+    }
+    const terminal = payload.providerTextCheckpoint.terminal;
+    return {
+      state: withRuntimeProviderProjectionHash({
+        ...projectionWithoutHash(current),
+        lastAppliedSequence: event.sequence,
+        ...terminal,
+        finalizationExternalEventId: event.externalEventId,
+        finalizationPayloadSha256: event.payloadSha256,
+      }),
+      providerTextEffect: {
+        type: "text.final",
+        text: terminal.visibleAssistantText,
+      },
+    };
+  }
+
+  const nextSnapshot = applyProviderTextEvent(
+    providerSnapshot(current),
+    event.event,
+    event.payload,
+  );
+  const visibleDelta = nextSnapshot.visibleAssistantText.slice(current.visibleAssistantText.length);
+  return {
+    state: withRuntimeProviderProjectionHash({
+      ...projectionWithoutHash(current),
+      lastAppliedSequence: event.sequence,
+      lastExternalEventId: event.externalEventId,
+      ...nextSnapshot,
+    }),
+    providerTextEffect: visibleDelta ? { type: "text.delta", delta: visibleDelta } : null,
+  };
+}
+
+export function assertRuntimeProviderProjection(
+  state: RuntimeProviderProjection,
+): RuntimeProviderProjection {
+  assertProjectionIdentity(state.runtimeAttemptId, state.runId);
+  if (
+    state.protocol !== "workbench.runtime-provider-state.v2"
+    || state.projectionVersion !== runtimeProviderStateProjectionVersion
+  ) {
+    throw new Error("RUNTIME_PROVIDER_STATE_VERSION_INVALID");
+  }
+  if (!Number.isSafeInteger(state.lastAppliedSequence) || state.lastAppliedSequence < 0) {
+    throw new Error("RUNTIME_PROVIDER_STATE_SEQUENCE_INVALID");
+  }
+  if (
+    state.lastAppliedSequence === 0
+    && (
+      state.lastExternalEventId !== null
+      || state.finalizationExternalEventId !== null
+      || state.finalizationPayloadSha256 !== null
+    )
+  ) {
+    throw new Error("RUNTIME_PROVIDER_STATE_INITIAL_SHAPE_INVALID");
+  }
+  if (
+    (state.finalizationExternalEventId === null)
+      !== (state.finalizationPayloadSha256 === null)
+    || (state.finalizationPayloadSha256 !== null && !sha256Schema.safeParse(state.finalizationPayloadSha256).success)
+  ) {
+    throw new Error("RUNTIME_PROVIDER_STATE_FINALIZATION_SHAPE_INVALID");
+  }
+  if (state.finalizationExternalEventId !== null) {
+    assertProviderTextSnapshot(providerSnapshot(state), true);
+  } else {
+    assertProviderTextSnapshotEither(providerSnapshot(state));
+  }
+  if (!sha256Schema.safeParse(state.stateSha256).success) {
+    throw new Error("RUNTIME_PROVIDER_STATE_HASH_INVALID");
+  }
+  const expected = sha256Canonical(projectionWithoutHash(state));
+  if (state.stateSha256 !== expected) {
+    throw new Error("RUNTIME_PROVIDER_STATE_HASH_MISMATCH");
+  }
+  return state;
+}
+
+export function withRuntimeProviderProjectionHash(
+  state: Omit<RuntimeProviderProjection, "stateSha256">,
+): RuntimeProviderProjection {
+  const projected = {
+    ...state,
+    stateSha256: sha256Canonical(state),
+  };
+  return assertRuntimeProviderProjection(projected);
+}
+
 export function sha256Canonical(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
@@ -361,8 +571,52 @@ function assertProviderTextSnapshot(snapshot: RuntimeProviderTextSnapshot, termi
   }
 }
 
+function assertProviderTextSnapshotEither(snapshot: RuntimeProviderTextSnapshot) {
+  try {
+    assertProviderTextSnapshot(snapshot, false);
+  } catch (incompleteError) {
+    try {
+      assertProviderTextSnapshot(snapshot, true);
+    } catch {
+      throw incompleteError;
+    }
+  }
+}
+
 function emptyProviderTextSnapshot(): RuntimeProviderTextSnapshot {
   return { rawAssistantText: "", visibleAssistantText: "", redactionBuffer: "" };
+}
+
+function providerSnapshot(state: RuntimeProviderTextSnapshot): RuntimeProviderTextSnapshot {
+  return {
+    rawAssistantText: state.rawAssistantText,
+    visibleAssistantText: state.visibleAssistantText,
+    redactionBuffer: state.redactionBuffer,
+  };
+}
+
+function projectionWithoutHash(
+  state: Omit<RuntimeProviderProjection, "stateSha256"> | RuntimeProviderProjection,
+): Omit<RuntimeProviderProjection, "stateSha256"> {
+  return {
+    protocol: state.protocol,
+    runtimeAttemptId: state.runtimeAttemptId,
+    runId: state.runId,
+    projectionVersion: state.projectionVersion,
+    lastAppliedSequence: state.lastAppliedSequence,
+    lastExternalEventId: state.lastExternalEventId,
+    rawAssistantText: state.rawAssistantText,
+    visibleAssistantText: state.visibleAssistantText,
+    redactionBuffer: state.redactionBuffer,
+    finalizationExternalEventId: state.finalizationExternalEventId,
+    finalizationPayloadSha256: state.finalizationPayloadSha256,
+  };
+}
+
+function assertProjectionIdentity(runtimeAttemptId: string, runId: string) {
+  if (!runtimeAttemptId || runtimeAttemptId.length > 1_024 || !runId || runId.length > 1_024) {
+    throw new Error("RUNTIME_PROVIDER_STATE_IDENTITY_INVALID");
+  }
 }
 
 function compareProviderTextEvents(left: RuntimeProviderTextEvent, right: RuntimeProviderTextEvent) {

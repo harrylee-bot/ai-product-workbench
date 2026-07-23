@@ -41,6 +41,10 @@ Target Prototype snapshots may include `assets` containing verified binary metad
 
 PRD and Prototype content must satisfy the complete schemas in `runtime-result.schema.json`; do not substitute free-form Markdown or an abbreviated object. Prototype `variables` and state `values` are explicit runtime data sources: every variable/state binding must resolve to one of them, and binding node/value types must match the schema. Forms, submit/reset button types, submit ownership, and select options are explicit IR fields; do not rely on renderer inference.
 
+### PRD authoring fast path
+
+Read and copy `prd-runtime-result.example.json` as one complete create-result template before authoring a PRD. It includes every required section, typed inline content, and valid bidirectional goal/requirement/acceptance/flow references. Replace its sample IDs and content, then expand the typed blocks without deleting required fields. Do not derive a JSON shape from the human-readable document outline.
+
 A state-backed binding uses `{"kind":"state","stateId":"state-ready","field":"submitLabel"}`. `stateId` must match one `states[].id`, and `field` must be a key in that state's `values`; a state source never uses `key` or `path`.
 
 A Prototype `date` input uses a string variable whose value is either empty or a real calendar date in canonical `YYYY-MM-DD` form. Locale-formatted dates, timestamps, timezone suffixes, and impossible dates are invalid.

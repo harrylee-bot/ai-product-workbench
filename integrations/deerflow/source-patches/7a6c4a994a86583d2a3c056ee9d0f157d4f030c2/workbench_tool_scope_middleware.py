@@ -3,7 +3,7 @@
 Scoped tools stay registered in ToolNode so DeerFlow can route a declared call.
 The model-visible schemas and execution path are independently reduced for every
 run. Canvas tools use their tokenless configurable declaration. Prototype-only
-publication tools are enabled only by the trusted requested Artifact kinds in
+publication tools and Knowledge visibility are enabled only by trusted fields in
 ``context.workbench``. Missing or malformed policy never grants ambient access.
 """
 
@@ -41,6 +41,7 @@ PROTOTYPE_TOOL_NAMES = (
     "workbench_artifact_draft_publish",
     "workbench_prototype_patch_publish",
 )
+KNOWLEDGE_TOOL_NAME = "workbench_knowledge_retrieve"
 RUNTIME_ARTIFACT_KINDS = (
     "prd",
     "prototype",
@@ -56,6 +57,7 @@ _POLICY_KEY = "workbench_canvas_tools"
 _POLICY_KEYS = frozenset({"declaredTools"})
 _CANVAS_BLOCK_CODE = "WORKBENCH_CANVAS_TOOL_NOT_DECLARED"
 _PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
+_KNOWLEDGE_BLOCK_CODE = "WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"
 
 
 def normalize_workbench_canvas_policy(value: Any) -> dict[str, list[str]] | None:
@@ -109,6 +111,19 @@ def workbench_requested_artifact_kinds_from_runnable_config(config: Any) -> Any:
     return scope.get("requestedArtifactKinds")
 
 
+def workbench_knowledge_enabled_from_runnable_config(config: Any) -> Any:
+    """Read the Knowledge visibility grant only from trusted runtime context."""
+    if not isinstance(config, Mapping):
+        return None
+    context = config.get("context")
+    if not isinstance(context, Mapping):
+        return None
+    scope = context.get("workbench")
+    if not isinstance(scope, Mapping):
+        return None
+    return scope.get("knowledgeEnabled")
+
+
 def _tool_name(tool: Any) -> str | None:
     name = getattr(tool, "name", None)
     if isinstance(name, str):
@@ -129,7 +144,12 @@ def _tool_name(tool: Any) -> str | None:
 class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
     """Apply request-scoped Workbench declarations to model and ToolNode calls."""
 
-    def __init__(self, canvas_policy: Any = None, requested_artifact_kinds: Any = None):
+    def __init__(
+        self,
+        canvas_policy: Any = None,
+        requested_artifact_kinds: Any = None,
+        knowledge_enabled: Any = None,
+    ):
         super().__init__()
         normalized_canvas = normalize_workbench_canvas_policy(canvas_policy)
         normalized_kinds = normalize_workbench_requested_artifact_kinds(requested_artifact_kinds)
@@ -137,6 +157,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             normalized_canvas["declaredTools"] if normalized_canvas is not None else ()
         )
         self._prototype_enabled = normalized_kinds is not None and "prototype" in normalized_kinds
+        self._knowledge_enabled = knowledge_enabled is True
 
     def _filter_tools(self, request: ModelRequest) -> ModelRequest:
         visible = []
@@ -145,6 +166,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
                 continue
             if name in _PROTOTYPE_TOOL_NAME_SET and not self._prototype_enabled:
+                continue
+            if name == KNOWLEDGE_TOOL_NAME and not self._knowledge_enabled:
                 continue
             visible.append(tool)
         return request if len(visible) == len(request.tools) else request.override(tools=visible)
@@ -157,6 +180,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             block_code = _CANVAS_BLOCK_CODE
         elif name in _PROTOTYPE_TOOL_NAME_SET and not self._prototype_enabled:
             block_code = _PROTOTYPE_BLOCK_CODE
+        elif name == KNOWLEDGE_TOOL_NAME and not self._knowledge_enabled:
+            block_code = _KNOWLEDGE_BLOCK_CODE
         else:
             return None
         tool_call_id = request.tool_call.get("id")

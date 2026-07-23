@@ -45,7 +45,9 @@ export const runtimeExecuteQueueOptions = {
   retryDelay: 2,
   retryBackoff: true,
   retryDelayMax: 60,
-  expireInSeconds: 15 * 60,
+  // This is pg-boss' handler deadline, not queue age. The application owns a
+  // shorter 30-minute Run wall-clock budget and bounded provider cleanup.
+  expireInSeconds: 35 * 60,
   heartbeatSeconds: 30,
   deleteAfterSeconds: 7 * 24 * 60 * 60,
   notify: true,

@@ -30,7 +30,7 @@ describe("shared pg-boss queue definitions", () => {
       retryDelay: 2,
       retryBackoff: true,
       retryDelayMax: 60,
-      expireInSeconds: 900,
+      expireInSeconds: 2_100,
       heartbeatSeconds: 30,
       deleteAfterSeconds: 604_800,
       notify: true,

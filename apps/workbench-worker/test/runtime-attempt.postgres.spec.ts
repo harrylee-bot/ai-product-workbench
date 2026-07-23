@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { RunEventStore } from "../src/runs/run-event.store.js";
+import {
+  createRuntimeFinalizationPayload,
+  createRuntimeProviderTextCheckpoint,
+  projectIncompleteVisibleAssistantText,
+  sha256Canonical,
+} from "../src/runtime/runtime-assistant-text.js";
 import { RuntimeAttemptService } from "../src/runtime/runtime-attempt.service.js";
+import { RuntimeProviderStateBackfill } from "../src/runtime/runtime-provider-state-backfill.js";
 
-const databaseUrl =
-  process.env.WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL
-  ?? process.env.WORKBENCH_TEST_DATABASE_URL;
+const databaseUrl = process.env.WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
 describeWithPostgres("RuntimeAttempt PostgreSQL cancellation fences", () => {
@@ -117,6 +122,128 @@ describeWithPostgres("RuntimeAttempt PostgreSQL cancellation fences", () => {
 });
 
 describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", () => {
+  it("reproduces the legacy 7,686-event provider-state replay path", async () => {
+    const queries: string[] = [];
+    const db = new PrismaClient({
+      datasourceUrl: databaseUrl!,
+      log: [{ emit: "event", level: "query" }],
+    });
+    db.$on("query", (event) => queries.push(event.query));
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture, 120_000);
+    const incidentEventCount = 7_686;
+    const syntheticPayload = { synthetic: true };
+
+    try {
+      await db.runtimeAttempt.update({
+        where: { id: fixture.runtimeAttemptId! },
+        data: {
+          externalEventSequence: incidentEventCount,
+          lastExternalEventId: `synthetic-${incidentEventCount}`,
+        },
+      });
+      await db.$executeRaw(Prisma.sql`
+        INSERT INTO "runtime_external_events" (
+          "id", "runtime_attempt_id", "run_id", "external_run_id",
+          "external_event_id", "sequence", "event", "payload", "payload_sha256"
+        )
+        SELECT
+          ${`baseline_${fixture.runtimeAttemptId!}_`} || series::TEXT,
+          ${fixture.runtimeAttemptId!},
+          ${fixture.runId},
+          ${fixture.externalRunId},
+          'synthetic-' || series::TEXT,
+          series,
+          'synthetic.noop',
+          ${JSON.stringify(syntheticPayload)}::JSONB,
+          ${sha256Canonical(syntheticPayload)}
+        FROM generate_series(1, ${incidentEventCount}) AS series
+      `);
+      await db.$executeRaw(Prisma.sql`
+        UPDATE "runtime_external_events"
+        SET "status" = 'processed', "processed_at" = CURRENT_TIMESTAMP
+        WHERE "runtime_attempt_id" = ${fixture.runtimeAttemptId!}
+      `);
+
+      const legacyService = new RuntimeAttemptService(db, 120_000, "legacy-read");
+      queries.length = 0;
+      const state = await legacyService.providerTextState(claim);
+
+      expect(state).toMatchObject({
+        protocol: "workbench.runtime-provider-text-state.v2",
+        rawAssistantText: "",
+        visibleAssistantText: "",
+        durableVisibleAssistantText: "",
+        committedFinalization: null,
+      });
+      expect("processedExternalEventIds" in state).toBe(false);
+      expect(queries.some((query) => query.toLowerCase().includes("runtime_external_events"))).toBe(true);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it.each([7_686, 12_000])(
+    "reads one projection without historical JSON after %i processed events",
+    async (eventCount) => {
+      const queries: string[] = [];
+      const db = new PrismaClient({
+        datasourceUrl: databaseUrl!,
+        log: [{ emit: "event", level: "query" }],
+      });
+      db.$on("query", (event) => queries.push(event.query));
+      const fixture = await seedAttemptFixture(db, true);
+      const { claim } = await activateExternalRun(db, fixture, 120_000);
+      const operator = new RuntimeProviderStateBackfill(db);
+
+      try {
+        await seedSyntheticProcessedEvents(db, fixture, eventCount);
+        await db.runtimeProviderState.delete({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        });
+        await operator.processBatch({
+          candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
+          mode: "apply",
+          batchSize: 10,
+        });
+        const service = new RuntimeAttemptService(db, 120_000, "projection-required");
+        const durations: number[] = [];
+        queries.length = 0;
+        for (let sample = 0; sample < 5; sample += 1) {
+          const startedAt = performance.now();
+          const state = await service.providerTextState(claim);
+          durations.push(performance.now() - startedAt);
+          expect(state).toMatchObject({
+            protocol: "workbench.runtime-provider-text-state.v2",
+            rawAssistantText: "",
+            visibleAssistantText: "",
+            durableVisibleAssistantText: "",
+            committedFinalization: null,
+          });
+          expect("processedExternalEventIds" in state).toBe(false);
+        }
+        const normalizedQueries = queries.map((query) => query.toLowerCase());
+        expect(normalizedQueries.some((query) => query.includes("runtime_external_events"))).toBe(false);
+        expect(Math.max(...durations)).toBeLessThan(5_000);
+        const sorted = [...durations].sort((left, right) => left - right);
+        console.log(JSON.stringify({
+          protocol: "workbench.runtime-provider-state-read-metrics.v1",
+          eventCount,
+          samples: durations.length,
+          queryCount: queries.length,
+          p50Ms: Number(sorted[Math.floor(sorted.length * 0.5)]!.toFixed(2)),
+          p95Ms: Number(sorted[Math.floor(sorted.length * 0.95)]!.toFixed(2)),
+          maxMs: Number(Math.max(...durations).toFixed(2)),
+        }));
+      } finally {
+        await cleanupFixture(db, fixture);
+        await db.$disconnect();
+      }
+    },
+    120_000,
+  );
+
   it("commits a slow external event atomically beyond Prisma's default transaction timeout", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
     const fixture = await seedAttemptFixture(db, true);
@@ -276,6 +403,387 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
   }, 120_000);
 });
 
+describeWithPostgres("RuntimeProviderState PostgreSQL invariants", () => {
+  it("accepts a scoped initial projection and rejects invalid shape and scope", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+
+    try {
+      await expect(db.runtimeProviderState.create({
+        data: initialProviderState(fixture),
+      })).resolves.toMatchObject({
+        runtimeAttemptId: fixture.runtimeAttemptId,
+        runId: fixture.runId,
+        projectionVersion: 2,
+        lastAppliedSequence: 0,
+      });
+      await expect(db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: { runId: `other_${fixture.runId}` },
+      })).rejects.toThrow(/RUNTIME_PROVIDER_STATE_(IDENTITY_IMMUTABLE|SCOPE_INVALID)/u);
+      await expect(db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: { projectionVersion: 0 },
+      })).rejects.toThrow();
+      await expect(db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: { stateSha256: "not-a-hash" },
+      })).rejects.toThrow();
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("binds cursors and finalization hashes and prevents gaps or terminal advancement", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture);
+    const first = externalEvent(fixture, "projection-event-1");
+    const second = externalEvent(fixture, "projection-event-2");
+    const third = externalEvent(fixture, "projection-event-3");
+
+    try {
+      await service.processExternalEvent(claim, first, async () => undefined);
+      await seedProcessedExternalEvents(db, fixture, [second, third], 2);
+      await expect(db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: {
+          lastAppliedSequence: 3,
+          lastExternalEventId: third.externalEventId,
+          stateSha256: "b".repeat(64),
+        },
+      })).rejects.toThrow(/RUNTIME_PROVIDER_STATE_MONOTONICITY_INVALID/u);
+
+      await db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: {
+          lastAppliedSequence: 2,
+          lastExternalEventId: second.externalEventId,
+          stateSha256: "b".repeat(64),
+        },
+      });
+      await db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: {
+          lastAppliedSequence: 3,
+          lastExternalEventId: third.externalEventId,
+          stateSha256: "c".repeat(64),
+        },
+      });
+      await db.runtimeAttempt.update({
+        where: { id: fixture.runtimeAttemptId! },
+        data: {
+          status: "succeeded",
+          finishedAt: new Date(),
+          executionOwnerId: null,
+          executionHeartbeatAt: null,
+          executionLeaseExpiresAt: null,
+        },
+      });
+      await expect(db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: { projectionVersion: 3, stateSha256: "d".repeat(64) },
+      })).rejects.toThrow(/RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT/u);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("requires a processed finalization event with the exact payload hash", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture);
+    const checkpoint = createRuntimeProviderTextCheckpoint(
+      projectIncompleteVisibleAssistantText(""),
+      "",
+    );
+    const payload = createRuntimeFinalizationPayload({
+      messagesSha256: "a".repeat(64),
+      outcomeSha256: "b".repeat(64),
+      effects: [],
+      visibleAssistantText: "",
+      providerTextCheckpoint: checkpoint,
+    });
+    const finalizationId = "projection-finalization-1";
+
+    try {
+      await service.processExternalFinalization(claim, {
+        externalRunId: fixture.externalRunId,
+        externalEventId: finalizationId,
+        event: "workbench.runtime.finalization.v2",
+        payload,
+      }, async () => undefined);
+      await expect(db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: { finalizationPayloadSha256: "f".repeat(64) },
+      })).rejects.toThrow(/RUNTIME_PROVIDER_STATE_FINALIZATION_INVALID/u);
+      await expect(db.runtimeProviderState.findUniqueOrThrow({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+        finalizationExternalEventId: finalizationId,
+        finalizationPayloadSha256: sha256Canonical(payload),
+      });
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+});
+
+describeWithPostgres("RuntimeProviderState PostgreSQL backfill", () => {
+  it("supports dry-run, apply, resume verification, and hash-conflict failure", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture);
+    const inputs = [
+      externalEvent(fixture, "backfill-event-1"),
+      externalEvent(fixture, "backfill-event-2"),
+    ];
+    const operator = new RuntimeProviderStateBackfill(db);
+    const candidateSha = "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6";
+
+    try {
+      for (const input of inputs) {
+        await service.processExternalEvent(claim, input, async () => undefined);
+      }
+      await db.runtimeProviderState.delete({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      });
+
+      const dryRun = await operator.processBatch({
+        candidateSha,
+        mode: "dry-run",
+        batchSize: 10,
+      });
+      expect(dryRun.checkpoints).toHaveLength(1);
+      expect(dryRun.checkpoints[0]).toMatchObject({
+        status: "would-create",
+        eventCount: 2,
+        lastSequence: 2,
+      });
+      expect(dryRun.coverage).toMatchObject({
+        built: 0,
+        missing: 1,
+        activeMissing: 1,
+        rolloutBlocked: true,
+      });
+
+      const applied = await operator.processBatch({
+        candidateSha,
+        mode: "apply",
+        batchSize: 10,
+      });
+      expect(applied.checkpoints[0]).toMatchObject({
+        status: "created",
+        eventCount: 2,
+        lastSequence: 2,
+      });
+      expect(applied.coverage).toMatchObject({
+        built: 1,
+        verified: 1,
+        missing: 0,
+        lagging: 0,
+        hashMismatch: 0,
+        rolloutBlocked: false,
+      });
+
+      const verified = await operator.processBatch({
+        candidateSha,
+        mode: "verify-only",
+        batchSize: 10,
+      });
+      expect(verified.checkpoints[0]?.status).toBe("verified");
+
+      await db.runtimeProviderState.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: { stateSha256: "f".repeat(64) },
+      });
+      await expect(operator.processBatch({
+        candidateSha,
+        mode: "verify-only",
+        batchSize: 10,
+      })).rejects.toThrow(/RUNTIME_PROVIDER_STATE_HASH_MISMATCH/u);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("rebuilds terminal finalization and carries only its text snapshot into a later attempt", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture);
+    const checkpoint = createRuntimeProviderTextCheckpoint(
+      projectIncompleteVisibleAssistantText(""),
+      "",
+    );
+    const payload = createRuntimeFinalizationPayload({
+      messagesSha256: "a".repeat(64),
+      outcomeSha256: "b".repeat(64),
+      effects: [],
+      visibleAssistantText: "",
+      providerTextCheckpoint: checkpoint,
+    });
+    const secondAttemptId = `attempt_${randomUUID().replaceAll("-", "")}`;
+    const operator = new RuntimeProviderStateBackfill(db);
+
+    try {
+      await service.processExternalFinalization(claim, {
+        externalRunId: fixture.externalRunId,
+        externalEventId: "backfill-terminal-finalization",
+        event: "workbench.runtime.finalization.v2",
+        payload,
+      }, async () => undefined);
+      await db.runtimeProviderState.delete({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      });
+      await db.runtimeAttempt.create({
+        data: {
+          id: secondAttemptId,
+          runId: fixture.runId,
+          runtimeBindingId: fixture.binding.id,
+          attempt: 2,
+          adapter: fixture.binding.adapter,
+          externalThreadId: fixture.binding.externalThreadId,
+        },
+      });
+
+      const applied = await operator.processBatch({
+        candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
+        mode: "apply",
+        batchSize: 10,
+      });
+
+      expect(applied.checkpoints).toHaveLength(2);
+      await expect(db.runtimeProviderState.findUniqueOrThrow({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+        lastAppliedSequence: 1,
+        finalizationExternalEventId: "backfill-terminal-finalization",
+        finalizationPayloadSha256: sha256Canonical(payload),
+      });
+      await expect(db.runtimeProviderState.findUniqueOrThrow({
+        where: { runtimeAttemptId: secondAttemptId },
+      })).resolves.toMatchObject({
+        lastAppliedSequence: 0,
+        finalizationExternalEventId: null,
+        finalizationPayloadSha256: null,
+        rawAssistantText: "",
+        visibleAssistantText: "",
+      });
+      expect(applied.coverage).toMatchObject({
+        totalAttempts: 2,
+        verified: 2,
+        rolloutBlocked: false,
+      });
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("rejects an attempt whose historical inbox still contains a pending event", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    await activateExternalRun(db, fixture);
+    const input = externalEvent(fixture, "backfill-pending-event");
+    const operator = new RuntimeProviderStateBackfill(db);
+
+    try {
+      await db.runtimeAttempt.update({
+        where: { id: fixture.runtimeAttemptId! },
+        data: { externalEventSequence: 1 },
+      });
+      await db.runtimeExternalEvent.create({
+        data: {
+          runtimeAttemptId: fixture.runtimeAttemptId!,
+          runId: fixture.runId,
+          externalRunId: fixture.externalRunId,
+          externalEventId: input.externalEventId,
+          sequence: 1,
+          event: input.event,
+          payload: input.payload,
+          payloadSha256: sha256Canonical(input.payload),
+        },
+      });
+      await db.runtimeProviderState.delete({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      });
+
+      await expect(operator.processBatch({
+        candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
+        mode: "apply",
+        batchSize: 10,
+      })).rejects.toThrow(/RUNTIME_PROVIDER_STATE_BACKFILL_PENDING_EVENT/u);
+      await expect(db.runtimeProviderState.count({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toBe(0);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("rejects a historical sequence gap without creating a projection", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    await activateExternalRun(db, fixture);
+    const operator = new RuntimeProviderStateBackfill(db);
+    let guardDisabled = false;
+
+    try {
+      await db.runtimeAttempt.update({
+        where: { id: fixture.runtimeAttemptId! },
+        data: { externalEventSequence: 2 },
+      });
+      await db.runtimeProviderState.delete({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      });
+      await db.$executeRawUnsafe(
+        'ALTER TABLE "runtime_external_events" DISABLE TRIGGER "runtime_external_event_guard"',
+      );
+      guardDisabled = true;
+      const payload = { synthetic: true };
+      await db.$executeRaw(Prisma.sql`
+        INSERT INTO "runtime_external_events" (
+          "id", "runtime_attempt_id", "run_id", "external_run_id",
+          "external_event_id", "sequence", "event", "payload", "payload_sha256",
+          "status", "processed_at"
+        ) VALUES
+          (${`gap_1_${fixture.runtimeAttemptId!}`}, ${fixture.runtimeAttemptId!}, ${fixture.runId},
+           ${fixture.externalRunId}, 'gap-event-1', 1, 'synthetic.noop',
+           ${JSON.stringify(payload)}::JSONB, ${sha256Canonical(payload)}, 'processed', CURRENT_TIMESTAMP),
+          (${`gap_3_${fixture.runtimeAttemptId!}`}, ${fixture.runtimeAttemptId!}, ${fixture.runId},
+           ${fixture.externalRunId}, 'gap-event-3', 3, 'synthetic.noop',
+           ${JSON.stringify(payload)}::JSONB, ${sha256Canonical(payload)}, 'processed', CURRENT_TIMESTAMP)
+      `);
+      await db.$executeRawUnsafe(
+        'ALTER TABLE "runtime_external_events" ENABLE TRIGGER "runtime_external_event_guard"',
+      );
+      guardDisabled = false;
+
+      await expect(operator.processBatch({
+        candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
+        mode: "apply",
+        batchSize: 10,
+      })).rejects.toThrow(/RUNTIME_PROVIDER_STATE_BACKFILL_SEQUENCE_GAP/u);
+      await expect(db.runtimeProviderState.count({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toBe(0);
+    } finally {
+      if (guardDisabled) {
+        await db.$executeRawUnsafe(
+          'ALTER TABLE "runtime_external_events" ENABLE TRIGGER "runtime_external_event_guard"',
+        );
+      }
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+});
+
 type AttemptFixture = {
   principalId: string;
   workspaceId: string;
@@ -290,6 +798,23 @@ type AttemptFixture = {
     externalThreadId: string;
   };
 };
+
+function initialProviderState(fixture: AttemptFixture) {
+  if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
+  return {
+    runtimeAttemptId: fixture.runtimeAttemptId,
+    runId: fixture.runId,
+    projectionVersion: 2,
+    lastAppliedSequence: 0,
+    lastExternalEventId: null,
+    rawAssistantText: "",
+    visibleAssistantText: "",
+    redactionBuffer: "",
+    finalizationExternalEventId: null,
+    finalizationPayloadSha256: null,
+    stateSha256: "a".repeat(64),
+  };
+}
 
 async function seedAttemptFixture(db: PrismaClient, withAttempt: boolean): Promise<AttemptFixture> {
   const suffix = randomUUID().replaceAll("-", "");
@@ -432,6 +957,81 @@ function externalEvent(fixture: AttemptFixture, externalEventId: string) {
   } as const;
 }
 
+async function seedProcessedExternalEvents(
+  db: PrismaClient,
+  fixture: AttemptFixture,
+  inputs: ReturnType<typeof externalEvent>[],
+  firstSequence: number,
+) {
+  if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
+  const finalSequence = firstSequence + inputs.length - 1;
+  await db.runtimeAttempt.update({
+    where: { id: fixture.runtimeAttemptId },
+    data: { externalEventSequence: finalSequence },
+  });
+  for (const [offset, input] of inputs.entries()) {
+    await db.runtimeExternalEvent.create({
+      data: {
+        runtimeAttemptId: fixture.runtimeAttemptId,
+        runId: fixture.runId,
+        externalRunId: fixture.externalRunId,
+        externalEventId: input.externalEventId,
+        sequence: firstSequence + offset,
+        event: input.event,
+        payload: input.payload,
+        payloadSha256: sha256Canonical(input.payload),
+      },
+    });
+    await db.runtimeExternalEvent.update({
+      where: {
+        runtimeAttemptId_externalEventId: {
+          runtimeAttemptId: fixture.runtimeAttemptId,
+          externalEventId: input.externalEventId,
+        },
+      },
+      data: { status: "processed", processedAt: new Date() },
+    });
+  }
+}
+
+async function seedSyntheticProcessedEvents(
+  db: PrismaClient,
+  fixture: AttemptFixture,
+  eventCount: number,
+) {
+  if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
+  const payload = { synthetic: true };
+  await db.runtimeAttempt.update({
+    where: { id: fixture.runtimeAttemptId },
+    data: {
+      externalEventSequence: eventCount,
+      lastExternalEventId: `synthetic-${eventCount}`,
+    },
+  });
+  await db.$executeRaw(Prisma.sql`
+    INSERT INTO "runtime_external_events" (
+      "id", "runtime_attempt_id", "run_id", "external_run_id",
+      "external_event_id", "sequence", "event", "payload", "payload_sha256"
+    )
+    SELECT
+      ${`projection_${fixture.runtimeAttemptId}_`} || series::TEXT,
+      ${fixture.runtimeAttemptId},
+      ${fixture.runId},
+      ${fixture.externalRunId},
+      'synthetic-' || series::TEXT,
+      series,
+      'synthetic.noop',
+      ${JSON.stringify(payload)}::JSONB,
+      ${sha256Canonical(payload)}
+    FROM generate_series(1, ${eventCount}) AS series
+  `);
+  await db.$executeRaw(Prisma.sql`
+    UPDATE "runtime_external_events"
+    SET "status" = 'processed', "processed_at" = CURRENT_TIMESTAMP
+    WHERE "runtime_attempt_id" = ${fixture.runtimeAttemptId}
+  `);
+}
+
 async function processWithActivityEffect(
   db: PrismaClient,
   service: RuntimeAttemptService,
@@ -475,7 +1075,7 @@ function activitySourceId(externalEventId: string) {
 
 async function durableEventState(db: PrismaClient, fixture: AttemptFixture) {
   if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
-  const [attempt, run, inbox, events] = await Promise.all([
+  const [attempt, run, providerState, inbox, events] = await Promise.all([
     db.runtimeAttempt.findUniqueOrThrow({
       where: { id: fixture.runtimeAttemptId },
       select: { lastExternalEventId: true, externalEventSequence: true },
@@ -483,6 +1083,14 @@ async function durableEventState(db: PrismaClient, fixture: AttemptFixture) {
     db.run.findUniqueOrThrow({
       where: { id: fixture.runId },
       select: { eventSequence: true },
+    }),
+    db.runtimeProviderState.findUniqueOrThrow({
+      where: { runtimeAttemptId: fixture.runtimeAttemptId },
+      select: {
+        lastAppliedSequence: true,
+        lastExternalEventId: true,
+        finalizationExternalEventId: true,
+      },
     }),
     db.runtimeExternalEvent.findMany({
       where: { runtimeAttemptId: fixture.runtimeAttemptId },
@@ -503,6 +1111,7 @@ async function durableEventState(db: PrismaClient, fixture: AttemptFixture) {
   ]);
   return {
     attempt,
+    providerState,
     runEventSequence: run.eventSequence,
     inbox,
     events,
@@ -512,6 +1121,11 @@ async function durableEventState(db: PrismaClient, fixture: AttemptFixture) {
 function emptyDurableEventState() {
   return {
     attempt: { lastExternalEventId: null, externalEventSequence: 0 },
+    providerState: {
+      lastAppliedSequence: 0,
+      lastExternalEventId: null,
+      finalizationExternalEventId: null,
+    },
     runEventSequence: 0,
     inbox: [],
     events: [],
@@ -526,6 +1140,11 @@ function expectedDurableEventState(
     attempt: {
       lastExternalEventId: inputs.at(-1)?.externalEventId ?? null,
       externalEventSequence: inputs.length,
+    },
+    providerState: {
+      lastAppliedSequence: inputs.length,
+      lastExternalEventId: inputs.at(-1)?.externalEventId ?? null,
+      finalizationExternalEventId: null,
     },
     runEventSequence: inputs.length,
     inbox: inputs.map((input, index) => ({

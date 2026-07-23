@@ -290,6 +290,14 @@ jobs:
       - name: Run server and worker tests
         run: npm test
 
+      - name: Run Runtime provider-state PostgreSQL integration
+        env:
+          WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=runtime_provider_state_test
+        run: |
+          WORKBENCH_DATABASE_URL="$WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL" \
+            npm --workspace @workbench/workbench-db run migrate:deploy
+          npm --workspace @workbench/workbench-worker run test:postgres
+
       - name: Run real PostgreSQL API and Worker workflows
         env:
           WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_test

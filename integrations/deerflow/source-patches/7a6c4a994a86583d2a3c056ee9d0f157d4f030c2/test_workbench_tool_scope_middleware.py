@@ -67,6 +67,7 @@ middleware_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(middleware_module)
 
 CANVAS_TOOL_NAMES = middleware_module.CANVAS_TOOL_NAMES
+KNOWLEDGE_TOOL_NAME = middleware_module.KNOWLEDGE_TOOL_NAME
 PROTOTYPE_TOOL_NAMES = middleware_module.PROTOTYPE_TOOL_NAMES
 WorkbenchToolScopeMiddleware = middleware_module.WorkbenchToolScopeMiddleware
 normalize_workbench_canvas_policy = middleware_module.normalize_workbench_canvas_policy
@@ -76,6 +77,9 @@ normalize_workbench_requested_artifact_kinds = (
 workbench_canvas_policy_from_runnable_config = middleware_module.workbench_canvas_policy_from_runnable_config
 workbench_requested_artifact_kinds_from_runnable_config = (
     middleware_module.workbench_requested_artifact_kinds_from_runnable_config
+)
+workbench_knowledge_enabled_from_runnable_config = (
+    middleware_module.workbench_knowledge_enabled_from_runnable_config
 )
 
 
@@ -106,11 +110,21 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.all_tools = [
             FakeTool("workbench_runtime_result_submit"),
             *map(FakeTool, PROTOTYPE_TOOL_NAMES),
+            FakeTool(KNOWLEDGE_TOOL_NAME),
             *map(FakeTool, CANVAS_TOOL_NAMES),
         ]
 
-    def visible_names(self, descriptor, requested_artifact_kinds=None) -> list[str]:
-        middleware = WorkbenchToolScopeMiddleware(descriptor, requested_artifact_kinds)
+    def visible_names(
+        self,
+        descriptor,
+        requested_artifact_kinds=None,
+        knowledge_enabled=None,
+    ) -> list[str]:
+        middleware = WorkbenchToolScopeMiddleware(
+            descriptor,
+            requested_artifact_kinds,
+            knowledge_enabled,
+        )
         observed = middleware.wrap_model_call(FakeModelRequest(self.all_tools), lambda scoped: scoped)
         return [tool.name for tool in observed.tools]
 
@@ -168,6 +182,54 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 {"context": {"workbench": []}}
             )
         )
+
+    def test_knowledge_visibility_is_read_only_from_trusted_runtime_context(self) -> None:
+        self.assertIs(
+            workbench_knowledge_enabled_from_runnable_config(
+                {"context": {"workbench": {"knowledgeEnabled": True}}}
+            ),
+            True,
+        )
+        self.assertIsNone(
+            workbench_knowledge_enabled_from_runnable_config(
+                {"configurable": {"knowledgeEnabled": True}}
+            )
+        )
+        self.assertIsNone(
+            workbench_knowledge_enabled_from_runnable_config(
+                {"context": {"workbench": []}}
+            )
+        )
+
+    def test_knowledge_tool_is_visible_only_for_the_exact_true_grant(self) -> None:
+        for disabled in (None, False, 1, "true", {}, []):
+            with self.subTest(disabled=disabled):
+                self.assertNotIn(KNOWLEDGE_TOOL_NAME, self.visible_names(None, None, disabled))
+        self.assertIn(KNOWLEDGE_TOOL_NAME, self.visible_names(None, None, True))
+
+    def test_knowledge_execution_is_blocked_without_calling_the_handler(self) -> None:
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        blocked = WorkbenchToolScopeMiddleware().wrap_tool_call(
+            FakeToolRequest(KNOWLEDGE_TOOL_NAME),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertEqual(blocked.status, "error")
+        self.assertEqual(blocked.name, KNOWLEDGE_TOOL_NAME)
+        self.assertEqual(blocked.content, "Error: WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED")
+
+        sentinel = object()
+        allowed = WorkbenchToolScopeMiddleware(None, None, True).wrap_tool_call(
+            FakeToolRequest(KNOWLEDGE_TOOL_NAME),
+            lambda _request: sentinel,
+        )
+        self.assertIs(allowed, sentinel)
 
     def test_prototype_tools_are_visible_only_when_prototype_is_requested(self) -> None:
         self.assertEqual(
@@ -376,6 +438,22 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(called)
         self.assertEqual(blocked.content, "Error: WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED")
+
+    async def test_async_knowledge_tool_execution_is_fail_closed(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware()
+        called = False
+
+        async def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        blocked = await middleware.awrap_tool_call(
+            FakeToolRequest(KNOWLEDGE_TOOL_NAME),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertEqual(blocked.content, "Error: WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED")
 
 
 if __name__ == "__main__":

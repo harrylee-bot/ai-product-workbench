@@ -33,6 +33,7 @@ class WorkbenchRequestContextTests(unittest.TestCase):
                     "runId": "run-1",
                     "runtimeAttemptId": "attempt-1",
                     "requestedArtifactKinds": ["prototype"],
+                    "knowledgeEnabled": True,
                     "canvasTools": None,
                     "prototypePatchBaselines": [],
                 },
@@ -50,6 +51,7 @@ class WorkbenchRequestContextTests(unittest.TestCase):
             config["context"]["workbench"]["requestedArtifactKinds"],
             ["prototype"],
         )
+        self.assertIs(config["context"]["workbench"]["knowledgeEnabled"], True)
         self.assertEqual(
             config["context"]["secrets"],
             {
@@ -146,6 +148,55 @@ class WorkbenchRequestContextTests(unittest.TestCase):
                     allow_workbench_context=True,
                 )
                 self.assertNotIn("workbench", config.get("context", {}))
+
+    def test_knowledge_visibility_requires_the_exact_true_flag_and_capability(self) -> None:
+        for flag, secret, enabled, secret_forwarded in (
+            (True, "knowledge-secret", True, True),
+            (True, None, False, False),
+            (None, "orphan-secret", False, False),
+        ):
+            with self.subTest(flag=flag, secret=secret):
+                scope = {"runId": "run-1", "runtimeAttemptId": "attempt-1"}
+                if flag is not None:
+                    scope["knowledgeEnabled"] = flag
+                context = {"workbench": scope}
+                if secret is not None:
+                    context["secrets"] = {"WORKBENCH_KNOWLEDGE_CAPABILITY": secret}
+                config = build_run_config("thread-1", None, None)
+                merge_run_context_overrides(
+                    config,
+                    context,
+                    allow_workbench_context=True,
+                )
+                self.assertEqual(
+                    config["context"]["workbench"].get("knowledgeEnabled") is True,
+                    enabled,
+                )
+                self.assertEqual(
+                    "WORKBENCH_KNOWLEDGE_CAPABILITY" in config["context"].get("secrets", {}),
+                    secret_forwarded,
+                )
+
+    def test_malformed_knowledge_visibility_flag_fails_closed(self) -> None:
+        for flag in (False, 1, "true", {}, []):
+            with self.subTest(flag=flag):
+                config = build_run_config("thread-1", None, None)
+                merge_run_context_overrides(
+                    config,
+                    {
+                        "workbench": {
+                            "runId": "run-1",
+                            "runtimeAttemptId": "attempt-1",
+                            "knowledgeEnabled": flag,
+                        },
+                        "secrets": {
+                            "WORKBENCH_KNOWLEDGE_CAPABILITY": "must-not-pass",
+                        },
+                    },
+                    allow_workbench_context=True,
+                )
+                self.assertNotIn("workbench", config.get("context", {}))
+                self.assertNotIn("secrets", config.get("context", {}))
 
 
 if __name__ == "__main__":

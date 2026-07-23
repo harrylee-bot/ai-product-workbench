@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 import {
+  createRuntimeFinalizationPayload,
+  createRuntimeProviderProjection,
+  createRuntimeProviderTextCheckpoint,
+  projectIncompleteVisibleAssistantText,
+} from "../src/runtime/runtime-assistant-text.js";
+import {
   RuntimeAttemptService,
   type RuntimeExecutionClaim,
 } from "../src/runtime/runtime-attempt.service.js";
@@ -28,6 +34,7 @@ type HarnessState = {
   submissionUnknownAt: Date | null;
   externalEventSequence: number;
   lastExternalEventId: string | null;
+  attempt: number;
 };
 
 function rawSqlText(query: unknown): string {
@@ -55,9 +62,14 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
     submissionUnknownAt: null,
     externalEventSequence: 0,
     lastExternalEventId: null,
+    attempt: 1,
     ...overrides,
   };
   const externalEvents = new Map<string, Record<string, unknown>>();
+  let providerProjection = createRuntimeProviderProjection({
+    runtimeAttemptId: "runtime-attempt-1",
+    runId: "run-1",
+  });
 
   const runMatches = (where: Record<string, unknown>) => (
     (where.id === undefined || where.id === "run-1")
@@ -141,6 +153,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
     runtimeAttempt: {
       findUnique: vi.fn(async () => attemptRow()),
       findUniqueOrThrow: vi.fn(async () => attemptRow()),
+      findFirst: vi.fn(async () => null),
       updateMany: vi.fn(async ({ where, data }: {
         where: Record<string, unknown>;
         data: Record<string, unknown>;
@@ -153,6 +166,32 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
         assignAttempt(data);
         return attemptRow();
       }),
+    },
+    runtimeProviderState: {
+      findUnique: vi.fn(async () => providerProjection),
+      create: vi.fn(async ({ data }: { data: typeof providerProjection }) => {
+        providerProjection = { ...data };
+        return providerProjection;
+      }),
+      updateMany: vi.fn(async ({ where, data }: {
+        where: Record<string, unknown>;
+        data: Partial<typeof providerProjection>;
+      }) => {
+        if (
+          where.runtimeAttemptId !== providerProjection.runtimeAttemptId
+          || where.runId !== providerProjection.runId
+          || where.projectionVersion !== providerProjection.projectionVersion
+          || where.lastAppliedSequence !== providerProjection.lastAppliedSequence
+          || where.stateSha256 !== providerProjection.stateSha256
+        ) {
+          return { count: 0 };
+        }
+        providerProjection = { ...providerProjection, ...data };
+        return { count: 1 };
+      }),
+    },
+    runDraft: {
+      findUnique: vi.fn(async () => null),
     },
     runtimeExternalEvent: {
       findUnique: vi.fn(async ({ where }: {
@@ -180,12 +219,14 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
       const eventSnapshot = new Map(
         [...externalEvents].map(([key, value]) => [key, { ...value }]),
       );
+      const projectionSnapshot = { ...providerProjection };
       try {
         return await callback(tx);
       } catch (error) {
         Object.assign(state, stateSnapshot);
         externalEvents.clear();
         for (const [key, value] of eventSnapshot) externalEvents.set(key, value);
+        providerProjection = projectionSnapshot;
         throw error;
       }
     }),
@@ -195,6 +236,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
     tx,
     state,
     externalEvents,
+    providerProjection: () => providerProjection,
     service: new RuntimeAttemptService(db as never, leaseMs),
   };
 }
@@ -436,6 +478,126 @@ describe("RuntimeAttemptService", () => {
     }
   });
 
+  it("reads only the verified projection and draft in projection-required mode", async () => {
+    const { db, service, tx } = harness({
+      runOwnerId: claimA.ownerId,
+      attemptOwnerId: claimA.ownerId,
+      runEpoch: claimA.epoch,
+      attemptEpoch: claimA.epoch,
+      runLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+    });
+
+    await expect(service.providerTextState(claimA)).resolves.toEqual({
+      protocol: "workbench.runtime-provider-text-state.v2",
+      rawAssistantText: "",
+      visibleAssistantText: "",
+      durableVisibleAssistantText: "",
+      redactionBuffer: "",
+      committedFinalization: null,
+    });
+    expect(tx.$queryRaw.mock.calls.every(([query]) => (
+      !rawSqlText(query).includes("runtime_external_events")
+    ))).toBe(true);
+    expect(db.$transaction).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      { maxWait: 10_000, timeout: 30_000 },
+    );
+  });
+
+  it.each([
+    {
+      name: "missing projection",
+      prepare: ({ tx }: ReturnType<typeof harness>) => {
+        tx.runtimeProviderState.findUnique.mockResolvedValueOnce(null);
+      },
+      error: "RUNTIME_PROVIDER_STATE_MISSING",
+    },
+    {
+      name: "unknown projection version",
+      prepare: ({ providerProjection }: ReturnType<typeof harness>) => {
+        providerProjection().projectionVersion = 3 as 2;
+      },
+      error: "RUNTIME_PROVIDER_STATE_VERSION_INVALID",
+    },
+    {
+      name: "projection hash mismatch",
+      prepare: ({ providerProjection }: ReturnType<typeof harness>) => {
+        providerProjection().stateSha256 = "b".repeat(64);
+      },
+      error: "RUNTIME_PROVIDER_STATE_HASH_MISMATCH",
+    },
+    {
+      name: "projection sequence gap",
+      state: { externalEventSequence: 1 },
+      prepare: () => undefined,
+      error: "RUNTIME_PROVIDER_STATE_SEQUENCE_GAP",
+    },
+    {
+      name: "durable draft conflict",
+      prepare: ({ tx }: ReturnType<typeof harness>) => {
+        tx.runDraft.findUnique.mockResolvedValueOnce({ content: { text: "different" } });
+      },
+      error: "RUNTIME_PROVIDER_STATE_DRAFT_CONFLICT",
+    },
+  ])("fails closed on $name", async ({ state: stateOverride = {}, prepare, error }) => {
+    const context = harness({
+      runOwnerId: claimA.ownerId,
+      attemptOwnerId: claimA.ownerId,
+      runEpoch: claimA.epoch,
+      attemptEpoch: claimA.epoch,
+      runLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+      ...stateOverride,
+    });
+    prepare(context);
+
+    await expect(context.service.providerTextState(claimA)).rejects.toThrow(error);
+  });
+
+  it("checks replay identity without selecting or loading payload JSON", async () => {
+    const { service, tx } = harness({
+      runOwnerId: claimA.ownerId,
+      attemptOwnerId: claimA.ownerId,
+      runEpoch: claimA.epoch,
+      attemptEpoch: claimA.epoch,
+      runLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+    });
+    const input = {
+      externalRunId: "external-run-1",
+      externalEventId: "event-replay-check",
+      event: "synthetic.noop",
+      payload: { synthetic: true },
+    } as const;
+    await service.processExternalEvent(claimA, input, async () => undefined);
+
+    await expect(service.externalEventProcessed(claimA, input)).resolves.toBe(true);
+    await expect(service.externalEventProcessed(claimA, {
+      ...input,
+      payload: { synthetic: false },
+    })).rejects.toThrow("RUNTIME_EXTERNAL_EVENT_IDENTITY_CONFLICT");
+    await expect(service.externalEventProcessed(claimA, {
+      ...input,
+      externalEventId: "event-new",
+    })).resolves.toBe(false);
+    expect(tx.runtimeExternalEvent.findUnique).toHaveBeenLastCalledWith(expect.objectContaining({
+      select: {
+        runId: true,
+        externalRunId: true,
+        event: true,
+        payloadSha256: true,
+        status: true,
+      },
+    }));
+  });
+
   it("uses the bounded inbox transaction budget for external finalization", async () => {
     const { db, service } = harness({
       runOwnerId: claimA.ownerId,
@@ -448,11 +610,22 @@ describe("RuntimeAttemptService", () => {
       externalRunId: "external-run-1",
     });
 
+    const checkpoint = createRuntimeProviderTextCheckpoint(
+      projectIncompleteVisibleAssistantText(""),
+      "",
+    );
+    const payload = createRuntimeFinalizationPayload({
+      messagesSha256: "a".repeat(64),
+      outcomeSha256: "b".repeat(64),
+      effects: [],
+      visibleAssistantText: "",
+      providerTextCheckpoint: checkpoint,
+    });
     await service.processExternalFinalization(claimA, {
       externalRunId: "external-run-1",
       externalEventId: "finalization-1",
       event: runtimeExternalFinalizationEvent,
-      payload: { protocol: "workbench.runtime-finalization.v2" },
+      payload,
     }, async () => undefined);
 
     expect(db.$transaction).toHaveBeenCalledWith(

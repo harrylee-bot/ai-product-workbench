@@ -40,6 +40,7 @@ function workerConfig() {
     deerFlowInternalToken: "internal",
     deerFlowStreamMode: ["messages", "values"],
     deerFlowTimeoutMs: 5_000,
+    deerFlowSubmissionTimeoutMs: 5_000,
     deerFlowIdleTimeoutMs: 5_000,
     concurrency: 1,
     knowledgeTool: null,
@@ -136,12 +137,11 @@ function execution(overrides: Partial<RuntimeExecution> = {}): RuntimeExecution 
     designStyleSnapshot: null,
     resume: null,
     providerTextState: {
-      protocol: "workbench.runtime-provider-text-state.v1",
+      protocol: "workbench.runtime-provider-text-state.v2",
       rawAssistantText: "",
       visibleAssistantText: "",
       durableVisibleAssistantText: "",
       redactionBuffer: "",
-      processedExternalEventIds: [],
       committedFinalization: null,
     },
     submission: {
@@ -437,6 +437,7 @@ function observer(): RuntimeExecutionObserver & {
   return {
     onSubmissionStarted: vi.fn(async () => undefined),
     onExternalRunCreated: vi.fn(async () => undefined),
+    isExternalEventProcessed: vi.fn(async () => false),
     onExternalEvent: vi.fn(async (_part, effects) => {
       for (const event of effects) await onEvent(event);
     }),
@@ -672,6 +673,106 @@ describe("DeerFlow runtime adapter", () => {
         payload: repeatedPayload,
       }),
     ]);
+  });
+
+  it("skips every in-memory effect when the provider replays a processed event", async () => {
+    const finalState = {
+      messages: [
+        { type: "human", content: "current turn" },
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [],
+        }, "processed-replay-result"),
+        { type: "ai", content: "done" },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([
+          {
+            id: "processed-replay-event",
+            event: "values",
+            data: {
+              node: "must-not-run",
+              messages: [{ type: "ai", content: "must-not-emit" }],
+            },
+          },
+          { id: "fresh-final-event", event: "values", data: finalState },
+        ], { runId: "external_run_processed_replay" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    runtimeObserver.isExternalEventProcessed.mockImplementation(async (part) => (
+      part.externalEventId === "processed-replay-event"
+    ));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution(), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "done",
+    });
+
+    expect(runtimeObserver.isExternalEventProcessed).toHaveBeenCalledTimes(2);
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledTimes(1);
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ externalEventId: "fresh-final-event" }),
+      [
+        {
+          type: "generation.stage",
+          stage: "summarizing",
+          sourceEventId: expect.stringMatching(/^deerflow:[0-9a-f]{64}$/u),
+        },
+        { type: "text.delta", delta: "done" },
+      ],
+    );
+    expect(runtimeObserver.onEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ activityId: "deerflow:must-not-run" }),
+    );
+  });
+
+  it("does not persist finalization again after resuming a committed terminal projection", async () => {
+    const token = `wbkg1.${"a".repeat(80)}.${"b".repeat(43)}`;
+    const terminalText = `before ${token}`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return successfulRuntimeResponse({
+          runId: "external_run_finalized_resume",
+          assistantText: terminalText,
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      providerTextState: {
+        protocol: "workbench.runtime-provider-text-state.v2",
+        rawAssistantText: terminalText,
+        visibleAssistantText: "before [knowledge capability redacted]",
+        durableVisibleAssistantText: "before [knowledge capability redacted]",
+        redactionBuffer: "",
+        committedFinalization: {
+          externalEventId: "workbench-finalization:committed",
+          payloadSha256: "a".repeat(64),
+        },
+      },
+    }), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "done",
+    });
+
+    expect(runtimeObserver.onExternalFinalization).not.toHaveBeenCalled();
   });
 
   it("routes effects recovered only from the terminal thread state through finalization", async () => {
@@ -2471,6 +2572,9 @@ describe("DeerFlow runtime adapter", () => {
       secrets: { WORKBENCH_KNOWLEDGE_CAPABILITY: string };
     }).secrets.WORKBENCH_KNOWLEDGE_CAPABILITY;
     const capability = JSON.parse(secretValue) as { token: string; [key: string]: unknown };
+    expect((submittedBody?.context as {
+      workbench: { knowledgeEnabled: boolean };
+    }).workbench.knowledgeEnabled).toBe(true);
     expect(JSON.stringify(submittedBody?.input)).not.toMatch(/wbkg1|runtime\/knowledge\/retrieve/u);
     expect(JSON.stringify(submittedBody?.metadata)).not.toMatch(/wbkg1|runtime\/knowledge\/retrieve/u);
     expect(JSON.stringify(submittedBody).match(/wbkg1\./gu)).toHaveLength(1);
@@ -2529,6 +2633,9 @@ describe("DeerFlow runtime adapter", () => {
       },
     });
     expect((submittedBody?.context as Record<string, unknown>)).not.toHaveProperty("secrets");
+    expect((submittedBody?.context as {
+      workbench: Record<string, unknown>;
+    }).workbench).not.toHaveProperty("knowledgeEnabled");
     expect(JSON.stringify(submittedBody)).not.toMatch(/WORKBENCH_KNOWLEDGE_CAPABILITY|wbkg1/u);
   });
 
@@ -3215,7 +3322,7 @@ describe("DeerFlow runtime adapter", () => {
       mediaType: "image/png",
       byteSize: image.byteLength,
       sha256: sha256(image),
-    }, undefined);
+    }, expect.any(AbortSignal));
     expect(uploads).toHaveLength(1);
     expect(uploads[0]?.includes(image)).toBe(true);
     const input = runRequest?.input as { messages: Array<{ content: string }> };
@@ -3384,12 +3491,14 @@ function successfulRuntimeResponse({
   eventId = "event-1",
   includeContentLocation = true,
   message = "done",
+  assistantText = message,
   artifacts = [],
 }: {
   runId?: string;
   eventId?: string;
   includeContentLocation?: boolean;
   message?: string;
+  assistantText?: string;
   artifacts?: unknown[];
 } = {}) {
   return runtimeStreamResponse([{
@@ -3406,7 +3515,7 @@ function successfulRuntimeResponse({
           message,
           artifacts,
         }),
-        { type: "ai", content: message },
+        { type: "ai", content: assistantText },
       ],
     },
   }], { runId, includeContentLocation });
