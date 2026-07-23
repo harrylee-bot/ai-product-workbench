@@ -574,7 +574,7 @@ type PrdV2EvidenceRule = {
 const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
   1: {
     positive: /(?:新增|新开发|修改|调整|变更|改造).{0,20}(?:功能|接口|逻辑|页面|能力)|(?:功能|接口|逻辑|页面|能力).{0,20}(?:新增|修改|调整|变更|改造)/u,
-    negative: /(?:不涉及|无需|未|不)(?:新增|修改|调整|变更|改造)/u,
+    negative: /(?:不涉及|无需).{0,20}(?:功能|接口|逻辑|页面|能力).{0,12}(?:新增|修改|调整|变更|改造)|(?:不涉及|无需|未|不)(?:新增|修改|调整|变更|改造)/u,
   },
   2: {
     positive: /(?:面向|开放给|提供给).{0,12}(?:公众用户|公众|外部用户|游客|未登录用户)|(?:公众用户|游客|未登录用户).{0,12}(?:访问|使用|查看|进入)/u,
@@ -582,7 +582,7 @@ const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
   },
   3: {
     positive: /(?:新增|开通|开放|暴露).{0,12}(?:公网|互联网|外网)(?:入口|域名|地址|服务|页面|接口|暴露面)?/u,
-    negative: /(?:不|未)(?:新增|开通|开放|暴露).{0,12}(?:公网|互联网|外网)|不涉及/u,
+    negative: /(?:不涉及|不新增|未新增|不开通|未开通|不开放|未开放|不暴露|未暴露).{0,12}(?:公网|互联网|外网)|(?:公网|互联网|外网).{0,12}(?:不涉及|不新增|未新增|不开通|未开通|不开放|未开放|不暴露|未暴露)/u,
   },
   4: {
     positive: /(?:管理后台|运营后台|后台).{0,24}(?:个人信息|手机号|身份证|敏感信息).{0,24}(?:脱敏|导出)|(?:个人信息|手机号|身份证|敏感信息).{0,24}(?:后台).{0,24}(?:脱敏|导出)/u,
@@ -640,7 +640,7 @@ const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
     negative: /(?:不新增|未新增|无新增|不涉及).{0,12}(?:API|接口)|(?:API|接口).{0,12}(?:不新增|未新增|无新增|不涉及)/iu,
   },
   18: {
-    positive: /(?:敏感信息|跨系统).{0,20}(?:API|接口|调用|传输)|(?:接口|调用|传输).{0,20}(?:敏感信息|跨系统)|(?:接口鉴权|访问控制|加密传输)/iu,
+    positive: /(?:敏感信息|跨系统).{0,20}(?:API|接口|调用|传输)|(?:API|接口|调用|传输).{0,20}(?:敏感信息|跨系统)|(?:API|接口|敏感信息|跨系统).{0,24}(?:鉴权|访问控制|加密传输)|(?:鉴权|访问控制|加密传输).{0,24}(?:API|接口|敏感信息|跨系统)/iu,
     negative: /(?:不涉及|不包含|无).{0,12}(?:敏感信息|跨系统)|(?:不跨系统|无跨系统调用)/u,
   },
   19: {
@@ -658,15 +658,44 @@ const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
 };
 
 const prdV2SafetyRemediationPattern = /(?:整改|改造|补齐|补充|完善|修复|接入|上线前需|上线前必须|发布前需|发布前必须|需(?:完成|增加|补充|接入|改造)|应(?:完成|增加|补充|接入|改造))/u;
-const prdV2GeneralNegativeEvidencePattern = /(?:不涉及|无需|无须|明确排除|不在本次.{0,8}范围)/u;
 
 const prdV2AcceptanceDimensions = [
-  { key: "visibility", label: "页面或入口可见性", pattern: /(?:可见|展示|显示|入口|页面|标签|Tab)/iu },
-  { key: "rules", label: "输入或业务规则", pattern: /(?:规则|校验|必填|输入|数据|重复|排序|筛选)/u },
-  { key: "permission", label: "权限控制", pattern: /(?:权限|授权|角色|无权)/u },
-  { key: "state", label: "状态流转与结果", pattern: /(?:状态|流转|提交|审核|结果|成功|完成)/u },
-  { key: "empty", label: "空状态", pattern: /(?:空态|空状态|暂无|无数据|尚未提交)/u },
-  { key: "failureRecovery", label: "失败或异常恢复", pattern: /(?:失败|异常|错误|重试|恢复|降级)/u },
+  {
+    key: "visibility",
+    label: "页面或入口可见性",
+    pattern: /(?:可见|展示|显示|入口|页面|标签|Tab)/iu,
+    relevancePattern: /(?:可见|展示|显示|入口|页面|标签|Tab)/iu,
+  },
+  {
+    key: "rules",
+    label: "输入或业务规则",
+    pattern: /(?:规则|校验|必填|输入|数据|重复|排序|筛选)/u,
+    relevancePattern: /(?:业务规则|校验|必填|输入|重复|排序|筛选)/u,
+  },
+  {
+    key: "permission",
+    label: "权限控制",
+    pattern: /(?:权限|授权|角色|无权)/u,
+    relevancePattern: /(?:权限|授权|无权)|(?:角色.{0,16}(?:不可|只能|允许|禁止|访问|操作|可)|(?:不可|只能|允许|禁止|访问|操作|可).{0,16}角色)/u,
+  },
+  {
+    key: "state",
+    label: "状态流转与结果",
+    pattern: /(?:状态|流转|提交|审核|结果|成功|完成)/u,
+    relevancePattern: /(?:状态|流转|提交|审核|发布|撤回|生效|下线)/u,
+  },
+  {
+    key: "empty",
+    label: "空状态",
+    pattern: /(?:空态|空状态|暂无|无数据|尚未提交)/u,
+    relevancePattern: /(?:空态|空状态|暂无|无数据|尚未提交)/u,
+  },
+  {
+    key: "failureRecovery",
+    label: "失败或异常恢复",
+    pattern: /(?:失败|异常|错误|重试|恢复|降级)/u,
+    relevancePattern: /(?:失败|异常|错误|重试|恢复|降级)/u,
+  },
 ] as const;
 
 const prdChannelEvidenceRules: Record<typeof prdChannelKinds[number], PrdV2EvidenceRule> = {
@@ -815,15 +844,18 @@ export const prdDocumentV2Schema = z.object({
     if (row.applicability !== "不涉及" && !row.remarks) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "remarks"], "a safety row marked 是 or 否 must include its requirement evidence or remediation note");
     }
-    if (row.applicability === "不涉及") continue;
     const evidenceRule = prdV2SafetyEvidenceRules[row.sequence];
+    if (row.applicability === "不涉及") {
+      if (hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule)) {
+        addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body");
+      }
+      continue;
+    }
     if (!hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule)) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 是 or 否 requires affirmative semantic evidence in the requirement body");
     }
     if (row.applicability === "否" && !safetyEvidenceSegments.some((segment) => (
-      evidenceRule.positive.test(segment)
-      && !(evidenceRule.negative?.test(segment) ?? false)
-      && !prdV2GeneralNegativeEvidencePattern.test(segment)
+      isAffirmativeEvidenceSegment(segment, evidenceRule)
       && prdV2SafetyRemediationPattern.test(segment)
     ))) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 否 requires a concrete remediation for the same safety topic in the requirement body");
@@ -886,9 +918,6 @@ export const prdDocumentV2Schema = z.object({
   if (!acceptanceTable) {
     addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], "acceptance criteria must contain a 序号/验收项/验收标准 table");
   } else {
-    if (acceptanceTable.rows.length < prdV2AcceptanceDimensions.length) {
-      addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance criteria must contain at least ${prdV2AcceptanceDimensions.length} independently testable rows`);
-    }
     const [sequenceColumn, itemColumn, standardColumn] = acceptanceTable.columns;
     const normalizedItems: string[] = [];
     const normalizedStandards: string[] = [];
@@ -916,12 +945,19 @@ export const prdDocumentV2Schema = z.object({
     for (const duplicate of duplicateValues(normalizedStandards.filter(Boolean))) {
       addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance standards must be distinct: ${duplicate}`);
     }
-    const dimensionRows = prdV2AcceptanceDimensions.map((dimension) => (
+    const acceptanceEvidenceSegments = acceptanceRelevanceEvidenceSegments(document);
+    const relevantDimensions = prdV2AcceptanceDimensions.filter((dimension) => (
+      hasAffirmativeEvidence(acceptanceEvidenceSegments, { positive: dimension.relevancePattern })
+    ));
+    if (acceptanceTable.rows.length < relevantDimensions.length) {
+      addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance criteria must contain at least ${relevantDimensions.length} independently testable rows for the relevant requirement dimensions`);
+    }
+    const dimensionRows = relevantDimensions.map((dimension) => (
       itemTexts.flatMap((item, rowIndex) => dimension.pattern.test(item) ? [rowIndex] : [])
     ));
     for (const [dimensionIndex, rows] of dimensionRows.entries()) {
       if (rows.length === 0) {
-        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance criteria must cover ${prdV2AcceptanceDimensions[dimensionIndex]?.label}`);
+        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance criteria must cover ${relevantDimensions[dimensionIndex]?.label}`);
       }
     }
     if (dimensionRows.every((rows) => rows.length > 0) && !hasDistinctAcceptanceCoverage(dimensionRows)) {
@@ -1115,15 +1151,28 @@ function prdBlockEvidenceSegments(block: z.infer<typeof prdBlockSchema>): string
 }
 
 function requirementEvidenceSegments(document: z.infer<typeof prdDocumentV2Schema>): string[] {
-  const blockSections = [
+  return prdV2BodyEvidenceSegments(document, true);
+}
+
+function acceptanceRelevanceEvidenceSegments(document: z.infer<typeof prdDocumentV2Schema>): string[] {
+  return prdV2BodyEvidenceSegments(document, false);
+}
+
+function prdV2BodyEvidenceSegments(
+  document: z.infer<typeof prdDocumentV2Schema>,
+  includeAcceptanceCriteria: boolean,
+): string[] {
+  const blockSections: Array<z.infer<typeof prdV2SectionSchema>> = [
     document.sections.introduction.background,
     document.sections.introduction.scope,
     document.sections.introduction.usageScenarios,
     document.sections.businessRequirements.pageLinks,
     document.sections.businessRequirements.coreRules,
     document.sections.businessRequirements.flowAndPages,
-    document.sections.businessRequirements.acceptanceCriteria,
   ];
+  if (includeAcceptanceCriteria) {
+    blockSections.push(document.sections.businessRequirements.acceptanceCriteria);
+  }
   const diagrams = document.sections.businessRequirements.flowAndPages.diagrams;
   return [
     ...splitEvidenceText(inlinePlainText(document.sections.businessRequirements.summary)),
@@ -1138,11 +1187,14 @@ function requirementEvidenceSegments(document: z.infer<typeof prdDocumentV2Schem
 }
 
 function hasAffirmativeEvidence(segments: readonly string[], rule: PrdV2EvidenceRule): boolean {
-  return segments.some((segment) => (
+  return segments.some((segment) => isAffirmativeEvidenceSegment(segment, rule));
+}
+
+function isAffirmativeEvidenceSegment(segment: string, rule: PrdV2EvidenceRule): boolean {
+  return (
     rule.positive.test(segment)
     && !(rule.negative?.test(segment) ?? false)
-    && !prdV2GeneralNegativeEvidencePattern.test(segment)
-  ));
+  );
 }
 
 function normalizeSemanticText(value: string): string {

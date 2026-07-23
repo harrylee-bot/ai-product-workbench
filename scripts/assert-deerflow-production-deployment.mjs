@@ -379,6 +379,13 @@ assert(
   )),
   "the exact Runtime result validator bundle must be shipped",
 );
+assert(
+  existsSync(new URL(
+    "integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
+    root,
+  )),
+  "the generated PRD reference fingerprint must be shipped",
+);
 
 assertDeepEqual(fragment, {
   tool_groups: [WORKBENCH_TOOL_GROUP],

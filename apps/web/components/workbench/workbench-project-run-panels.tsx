@@ -282,6 +282,7 @@ export function ProjectTranscriptPanel({
   const bodyCopy = runBodyCopy ?? (isWorking ? null : "暂无新的运行消息。");
   const isAgentWorking = isWorking;
   const showPromptChip = Boolean(prompt || selectedTask)
+    && (Boolean(selectedTask) || Boolean(runBodyCopy))
     && (Boolean(selectedTask) || isOverview || !(phase === "complete" && isGenerated));
 
   useEffect(() => {

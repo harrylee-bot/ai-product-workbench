@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID as nodeRandomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as nodeDelay } from "node:timers/promises";
@@ -10,11 +11,25 @@ import {
   prdChannelKinds,
   prdSafetyBaselineItems,
   prdTableOfContentsEntries,
+  runEventSchema,
 } from "@workbench/workbench-contracts";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const writeConfirmation = "CREATE_ISOLATED_PRD_SMOKE_PROJECT";
 const terminalRunStatuses = new Set(["succeeded", "failed", "cancelled"]);
+const prdReferenceFingerprint = JSON.parse(readFileSync(new URL(
+  "../integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
+  import.meta.url,
+), "utf8"));
+const smokeThemeRequirements = [
+  { label: "已登录消费者", terms: ["已登录消费者", "登录消费者"] },
+  { label: "订单", terms: ["订单"] },
+  { label: "通知开关", terms: ["通知开关", "开启通知", "关闭通知"] },
+  { label: "订单状态分类", terms: ["订单状态分类", "状态分类"] },
+  { label: "发送结果记录", terms: ["发送结果记录", "发送记录", "通知记录", "结果记录"] },
+  { label: "失败重试", terms: ["失败重试", "发送失败", "重试"] },
+  { label: "权限反馈", terms: ["权限反馈", "无权限", "权限"] },
+];
 const forbiddenPlaceholders = [
   "待确认",
   "以实际为准",
@@ -225,6 +240,24 @@ export async function executePrdHttpSmoke({
     evidence.artifactVersionId = artifactVersionId;
     pass(evidence, now, "ready-prd-artifact-found", { artifactId, artifactVersionId });
 
+    const runEvents = await replayRunEvents(client, runId);
+    const draftEvent = runEvents.find((event) => (
+      event.type === "artifact.draft.created"
+      && event.payload.kind === "prd"
+      && event.payload.artifactId === artifactId
+      && event.payload.artifactVersionId === artifactVersionId
+    ));
+    if (!draftEvent) {
+      throw smokeError(
+        "PRD_DRAFT_EVENT_MISSING",
+        "PRD Run did not publish a real artifact.draft.created event for its ready ArtifactVersion",
+      );
+    }
+    pass(evidence, now, "prd-draft-event-verified", {
+      artifactIndex: draftEvent.payload.artifactIndex,
+      sequence: draftEvent.sequence,
+    });
+
     const rawVersion = await client.json(
       `/api/v1/artifacts/${encodeURIComponent(artifactId)}/versions/${encodeURIComponent(artifactVersionId)}`,
     );
@@ -250,6 +283,8 @@ export async function executePrdHttpSmoke({
     }
     const structure = assertPrdV2Structure(version.content);
     pass(evidence, now, "prd-v2-contract-verified", structure);
+    const semantics = assertPrdSmokeBusinessSemantics(version.content);
+    pass(evidence, now, "prd-business-semantics-verified", semantics);
 
     const completed = await client.json(
       `/api/v1/projects/${encodeURIComponent(projectId)}/bootstrap?threadId=${encodeURIComponent(threadId)}`,
@@ -343,7 +378,7 @@ function createHttpClient({ baseUrl, cookie, fetchImpl, requestTimeoutMs }) {
       const url = new URL(pathname, baseUrl);
       if (url.origin !== baseUrl.origin) throw smokeError("REQUEST_ORIGIN_INVALID", "Smoke request escaped the configured Web origin");
       const headers = new Headers(options.headers ?? {});
-      headers.set("Accept", "application/json");
+      if (!headers.has("Accept")) headers.set("Accept", "application/json");
       headers.set("User-Agent", "workbench-production-prd-http-smoke/1");
       if (options.authenticated !== false && activeCookie) headers.set("Cookie", activeCookie);
       if (!["GET", "HEAD"].includes(method)) headers.set("Origin", baseUrl.origin);
@@ -377,6 +412,35 @@ function createHttpClient({ baseUrl, cookie, fetchImpl, requestTimeoutMs }) {
       return response;
     },
   };
+}
+
+async function replayRunEvents(client, runId) {
+  const response = await client.request(
+    `/api/v1/runs/${encodeURIComponent(runId)}/events?afterSequence=0`,
+    { headers: { Accept: "text/event-stream" } },
+  );
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("text/event-stream")) {
+    throw smokeError("RUN_EVENT_STREAM_INVALID", "Run event replay did not return an SSE response");
+  }
+  const events = [];
+  for (const frame of (await response.text()).split(/\r?\n\r?\n/gu)) {
+    const data = frame.split(/\r?\n/gu)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n");
+    if (!data) continue;
+    let candidate;
+    try {
+      candidate = JSON.parse(data);
+    } catch {
+      throw smokeError("RUN_EVENT_STREAM_INVALID", "Run event replay contained invalid JSON data");
+    }
+    const parsed = runEventSchema.safeParse(candidate);
+    if (!parsed.success) throw contractError("RUN_EVENT_CONTRACT_INVALID", parsed.error);
+    events.push(parsed.data);
+  }
+  return events;
 }
 
 async function waitForRun({ client, deadline, pollIntervalMs, projectId, runId, sleep, threadId }) {
@@ -468,6 +532,63 @@ export function assertPrdV2Structure(document) {
   };
 }
 
+export function assertPrdSmokeBusinessSemantics(document) {
+  if (
+    document.title !== "电商订单状态通知设置需求说明书"
+    || document.cover?.workOrderName !== "电商订单状态通知设置"
+    || document.cover?.title !== "电商订单状态通知设置需求说明书"
+  ) {
+    throw smokeError("PRD_SMOKE_TOPIC_INVALID", "PRD title and cover do not match the requested order-notification topic");
+  }
+  const channels = document.sections?.introduction?.usageScenarios?.channelTable?.rows;
+  if (
+    channels?.[0]?.enabled !== true
+    || channels?.[1]?.enabled !== false
+    || channels?.[2]?.enabled !== false
+  ) {
+    throw smokeError("PRD_SMOKE_TOPIC_INVALID", "PRD channels do not keep only the requested in-app channel enabled");
+  }
+
+  const visibleText = visibleTextSegments({
+    businessRequirements: document.sections?.businessRequirements,
+    degradation: document.sections?.degradation,
+    introduction: document.sections?.introduction,
+  }).join("\n");
+  for (const requirement of smokeThemeRequirements) {
+    if (!requirement.terms.some((term) => visibleText.includes(term))) {
+      throw smokeError(
+        "PRD_SMOKE_TOPIC_INVALID",
+        `PRD does not contain the requested ${requirement.label} requirement`,
+      );
+    }
+  }
+
+  const sampleIds = new Set(prdReferenceFingerprint.sampleIds);
+  const copiedId = typedIds(document).find((id) => sampleIds.has(id));
+  if (copiedId) {
+    throw smokeError("PRD_REFERENCE_CONTENT_FORBIDDEN", "PRD contains a nested ID copied from the Runtime reference example");
+  }
+  const normalizedCandidates = [
+    ...stringValues(document),
+    ...visibleTextSegments(document),
+  ].map(normalizedFingerprintText);
+  const copiedBusinessText = prdReferenceFingerprint.businessText
+    .map(normalizedFingerprintText)
+    .find((reference) => normalizedCandidates.some((candidate) => (
+      candidate.includes(reference)
+      || isNearCopiedFingerprintText(candidate, reference)
+    )));
+  if (copiedBusinessText) {
+    throw smokeError("PRD_REFERENCE_CONTENT_FORBIDDEN", "PRD contains business content copied from the Runtime reference example");
+  }
+  return {
+    referenceBusinessMatches: 0,
+    referenceIdMatches: 0,
+    theme: "order-status-notification",
+    themeRequirementCount: smokeThemeRequirements.length,
+  };
+}
+
 function smokeProjectTitle(smokeId, now) {
   return `[SMOKE] PRD HTTP ${timestamp(now).slice(0, 10)} ${smokeId.slice(0, 8)}`;
 }
@@ -495,6 +616,118 @@ function stringValues(value) {
   if (Array.isArray(value)) return value.flatMap(stringValues);
   if (value && typeof value === "object") return Object.values(value).flatMap(stringValues);
   return [];
+}
+
+function normalizedFingerprintText(value) {
+  return value.normalize("NFKC").replace(/[\s\p{P}\p{S}]+/gu, "").toLocaleLowerCase("und");
+}
+
+function isNearCopiedFingerprintText(candidate, reference) {
+  const candidateLength = [...candidate].length;
+  const referenceLength = [...reference].length;
+  if (candidateLength < 16 || referenceLength < 16) return false;
+  const lengthTolerance = Math.max(2, Math.floor(candidateLength / 12));
+  if (Math.abs(candidateLength - referenceLength) > lengthTolerance) return false;
+  return sequenceMatcherRatioAtLeast(candidate, reference, 0.94);
+}
+
+function sequenceMatcherRatioAtLeast(leftValue, rightValue, threshold) {
+  const left = [...leftValue];
+  const right = [...rightValue];
+  if (left.length + right.length === 0) return true;
+
+  const rightIndices = new Map();
+  for (const [index, character] of right.entries()) {
+    const indices = rightIndices.get(character) ?? [];
+    indices.push(index);
+    rightIndices.set(character, indices);
+  }
+  const pending = [[0, left.length, 0, right.length]];
+  let matchingCharacters = 0;
+  while (pending.length > 0) {
+    const [leftLow, leftHigh, rightLow, rightHigh] = pending.pop();
+    const [leftStart, rightStart, size] = longestContiguousMatch(
+      left,
+      rightIndices,
+      leftLow,
+      leftHigh,
+      rightLow,
+      rightHigh,
+    );
+    if (size === 0) continue;
+    matchingCharacters += size;
+    if (leftLow < leftStart && rightLow < rightStart) {
+      pending.push([leftLow, leftStart, rightLow, rightStart]);
+    }
+    if (leftStart + size < leftHigh && rightStart + size < rightHigh) {
+      pending.push([leftStart + size, leftHigh, rightStart + size, rightHigh]);
+    }
+  }
+  return (2 * matchingCharacters) / (left.length + right.length) >= threshold;
+}
+
+function longestContiguousMatch(left, rightIndices, leftLow, leftHigh, rightLow, rightHigh) {
+  let bestLeft = leftLow;
+  let bestRight = rightLow;
+  let bestSize = 0;
+  let previousLengths = new Map();
+  for (let leftIndex = leftLow; leftIndex < leftHigh; leftIndex += 1) {
+    const currentLengths = new Map();
+    for (const rightIndex of rightIndices.get(left[leftIndex]) ?? []) {
+      if (rightIndex < rightLow) continue;
+      if (rightIndex >= rightHigh) break;
+      const size = (previousLengths.get(rightIndex - 1) ?? 0) + 1;
+      currentLengths.set(rightIndex, size);
+      if (size > bestSize) {
+        bestLeft = leftIndex - size + 1;
+        bestRight = rightIndex - size + 1;
+        bestSize = size;
+      }
+    }
+    previousLengths = currentLengths;
+  }
+  return [bestLeft, bestRight, bestSize];
+}
+
+function typedIds(value) {
+  if (Array.isArray(value)) return value.flatMap(typedIds);
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, item]) => [
+    ...(key === "id" && typeof item === "string" ? [item] : []),
+    ...typedIds(item),
+  ]);
+}
+
+function visibleTextSegments(value) {
+  const segments = [];
+  const visibleKeys = new Set([
+    "actor",
+    "description",
+    "label",
+    "notes",
+    "outcome",
+    "remarks",
+    "statement",
+    "successMetric",
+    "text",
+    "title",
+    "trigger",
+  ]);
+  const visit = (current) => {
+    const fragments = [];
+    if (Array.isArray(current)) {
+      for (const item of current) fragments.push(...visit(item));
+    } else if (current && typeof current === "object") {
+      for (const [key, item] of Object.entries(current)) {
+        if (visibleKeys.has(key) && typeof item === "string") fragments.push(item);
+        else fragments.push(...visit(item));
+      }
+    }
+    if (fragments.length > 1) segments.push(fragments.join(""));
+    return fragments;
+  };
+  visit(value);
+  return segments;
 }
 
 async function responseJson(response, code) {

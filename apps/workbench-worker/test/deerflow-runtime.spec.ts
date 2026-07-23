@@ -1293,6 +1293,9 @@ describe("DeerFlow runtime adapter", () => {
 
     const content = submittedBody?.input.messages[0]?.content ?? "";
     expect(content).toContain("references/prd-runtime-result.example.json exactly once");
+    expect(content).toContain("regardless of the natural-language prompt");
+    expect(content).toContain("only when the requirement body makes that dimension relevant");
+    expect(content).toContain("不涉及 is invalid when the PRD body contains an affirmative fact");
     expect(content).not.toContain("<workbench_prd_result_starter>");
     expect(content).not.toContain(JSON.stringify(runtimePrdResultStarter));
     expect(content).toMatch(/<\/workbench_prd_result_contract>\nBuild the product$/u);

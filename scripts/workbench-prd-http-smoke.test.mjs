@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import test from "node:test";
 import { prdDocumentV2Example } from "@workbench/workbench-contracts";
 import {
+  assertPrdSmokeBusinessSemantics,
   assertPrdV2Structure,
   executePrdHttpSmoke,
 } from "./workbench-prd-http-smoke.mjs";
@@ -12,6 +14,10 @@ const smokeUuid = "11111111-2222-4333-8444-555555555555";
 const email = "prd-smoke@example.test";
 const password = "email-password-must-not-leak";
 const existingCookie = "workbench.session_token=existing-session-must-not-leak";
+const prdReferenceFingerprint = JSON.parse(readFileSync(new URL(
+  "../integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json",
+  import.meta.url,
+), "utf8"));
 
 test("runs the isolated PRD v2 HTTP flow through Better Auth email sign-in", async (t) => {
   const fake = await startFakeWorkbench();
@@ -27,7 +33,7 @@ test("runs the isolated PRD v2 HTTP flow through Better Auth email sign-in", asy
     sleep: async () => undefined,
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, `${result.failure?.code}: ${result.failure?.message}`);
   assert.equal(result.evidence.result, "PASS");
   assert.equal(result.evidence.authMode, "email");
   assert.equal(result.evidence.projectRetained, true);
@@ -58,7 +64,7 @@ test("uses an explicit existing session cookie without calling the sign-in route
     sleep: async () => undefined,
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, `${result.failure?.code}: ${result.failure?.message}`);
   assert.equal(result.evidence.authMode, "session-cookie");
   assert.equal(fake.state.authCalls, 0);
   assert.ok(fake.state.apiCookies.every((cookie) => cookie === existingCookie));
@@ -116,6 +122,85 @@ test("rejects forbidden requirement-document placeholder wording", () => {
   assert.throws(
     () => assertPrdV2Structure(document),
     (error) => error?.code === "PRD_PLACEHOLDER_FORBIDDEN",
+  );
+});
+
+test("requires the production smoke PRD to match the order-notification topic", () => {
+  const document = orderNotificationPrdFixture();
+  assert.deepEqual(assertPrdSmokeBusinessSemantics(document), {
+    referenceBusinessMatches: 0,
+    referenceIdMatches: 0,
+    theme: "order-status-notification",
+    themeRequirementCount: 7,
+  });
+
+  document.title = "其他主题需求说明书";
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(document),
+    (error) => error?.code === "PRD_SMOKE_TOPIC_INVALID",
+  );
+});
+
+test("requires order-notification facts in the business body instead of metadata", () => {
+  const document = orderNotificationPrdFixture();
+  document.sections.introduction = replaceStringFragments(
+    document.sections.introduction,
+    "权限",
+    "授权",
+  );
+  document.sections.businessRequirements = replaceStringFragments(
+    document.sections.businessRequirements,
+    "权限",
+    "授权",
+  );
+  document.sections.degradation = replaceStringFragments(
+    document.sections.degradation,
+    "权限",
+    "授权",
+  );
+  assert.equal(JSON.stringify(document.assumptions).includes("权限"), true);
+
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(document),
+    (error) => error?.code === "PRD_SMOKE_TOPIC_INVALID",
+  );
+});
+
+test("rejects reference business content and nested IDs in the production smoke PRD", () => {
+  const copiedId = orderNotificationPrdFixture();
+  copiedId.sections.businessRequirements.coreRules.blocks[0].id = "goal-main";
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(copiedId),
+    (error) => error?.code === "PRD_REFERENCE_CONTENT_FORBIDDEN",
+  );
+
+  const copiedText = orderNotificationPrdFixture();
+  copiedText.sections.introduction.background.blocks[0].content[0].text =
+    "现有产品工作台已提供业务任务处理入口，但处理状态、异常恢复和结果确认信息不完整，用户难以判断任务是否闭环。本需求调整工作台任务页面及配套处理能力，使用户能够提交必要信息、跟踪处理状态并确认最终结果。";
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(copiedText),
+    (error) => error?.code === "PRD_REFERENCE_CONTENT_FORBIDDEN",
+  );
+
+  const nearCopiedText = orderNotificationPrdFixture();
+  nearCopiedText.sections.introduction.background.blocks[0].content[0].text =
+    "当前产品工作台已提供业务任务处理入口，但处理状态、异常恢复和结果确认信息不完整，用户难以判断任务是否闭环。本需求调整工作台任务页面及配套处理能力，使用户能够提交必要信息、跟踪处理状态并确认最终结果。";
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(nearCopiedText),
+    (error) => error?.code === "PRD_REFERENCE_CONTENT_FORBIDDEN",
+  );
+
+  const movedChunk = orderNotificationPrdFixture();
+  const longestReference = [...prdReferenceFingerprint.businessText]
+    .sort((left, right) => [...right].length - [...left].length)[0];
+  const referenceCharacters = [...longestReference];
+  movedChunk.sections.introduction.background.blocks[0].content[0].text = [
+    ...referenceCharacters.slice(7),
+    ...referenceCharacters.slice(0, 7),
+  ].join("");
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(movedChunk),
+    (error) => error?.code === "PRD_REFERENCE_CONTENT_FORBIDDEN",
   );
 });
 
@@ -225,6 +310,9 @@ async function handleFakeRequest(request, response, state, artifactKind) {
       state.runPolls === 1 ? "queued" : state.runPolls === 2 ? "running" : "succeeded",
     ));
   }
+  if (method === "GET" && url.pathname === "/api/v1/runs/run-smoke/events") {
+    return sendRunEventStream(response, [prdDraftEventFixture()]);
+  }
   if (method === "GET" && url.pathname === "/api/v1/projects/project-smoke/artifacts") {
     return sendJson(response, 200, {
       items: [artifactKind === "prototype" ? prototypeArtifactFixture() : prdArtifactFixture()],
@@ -312,7 +400,7 @@ function prdVersionFixture() {
     artifactVersionId: "version-smoke",
     checksum: "a".repeat(64),
     citations: [],
-    content: structuredClone(prdDocumentV2Example),
+    content: orderNotificationPrdFixture(),
     contentMode: "inline",
     createdAt: "2026-07-23T09:01:00.000Z",
     createdByRunId: "run-smoke",
@@ -321,6 +409,115 @@ function prdVersionFixture() {
     schemaVersion: 2,
     status: "ready",
     version: 1,
+  };
+}
+
+function orderNotificationPrdFixture() {
+  const idReplacements = Object.fromEntries(prdReferenceFingerprint.sampleIds.map(
+    (id, index) => [id, `smoke-${index + 1}-${id}`],
+  ));
+  const businessReplacements = Object.fromEntries(prdReferenceFingerprint.businessText.map(
+    (text) => [text, rewriteReferenceBusinessText(text)],
+  ));
+  const document = replaceExactStrings(
+    structuredClone(prdDocumentV2Example),
+    { ...idReplacements, ...businessReplacements },
+  );
+  document.documentId = "prd-smoke-order-notification";
+  document.title = "电商订单状态通知设置需求说明书";
+  document.cover = {
+    workOrderName: "电商订单状态通知设置",
+    title: "电商订单状态通知设置需求说明书",
+  };
+  document.sections.introduction.background.blocks[0].content[0].text =
+    "电商订单中心当前缺少统一的端内状态通知设置，已登录消费者无法按订单状态管理提醒。本需求新增通知开关、状态分类和发送记录，并补齐失败重试及权限反馈。";
+  document.sections.introduction.usageScenarios.blocks[0].content[0].text =
+    "已登录消费者从订单中心端内入口进入通知设置页，按订单状态分类开启或关闭通知，并查看发送结果记录。";
+  document.sections.introduction.usageScenarios.channelTable.rows = [
+    { sequence: 1, channel: "inApp", enabled: true },
+    { sequence: 2, channel: "wapH5", enabled: false },
+    { sequence: 3, channel: "miniProgram", enabled: false },
+  ];
+  document.sections.businessRequirements.summary[0].text =
+    "总体目标：已登录消费者可配置订单状态通知开关，查看发送结果记录，并在发送失败时重试或获得明确权限反馈。";
+  document.sections.businessRequirements.coreRules.blocks[2].content[0].text =
+    "本需求修改现有订单通知功能逻辑；通知设置数据与发送状态均执行完整性和一致性校验。";
+  return document;
+}
+
+function rewriteReferenceBusinessText(value) {
+  const replacements = [
+    ["产品工作台", "电商订单中心"],
+    ["目标业务用户", "已登录消费者"],
+    ["核心流程", "订单通知流程"],
+    ["任务处理", "通知发送"],
+    ["任务页面", "通知设置页"],
+    ["任务状态", "发送状态"],
+    ["任务记录", "发送记录"],
+    ["任务编号", "通知编号"],
+    ["任务", "通知"],
+    ["用户", "消费者"],
+    ["提交", "保存"],
+    ["处理", "发送"],
+    ["结果", "发送结果"],
+    ["输入", "设置内容"],
+    ["阶段", "发送阶段"],
+    ["重复", "多次"],
+  ];
+  const rewritten = replacements.reduce(
+    (current, [source, target]) => current.replaceAll(source, target),
+    value,
+  );
+  if (rewritten === value) throw new Error(`Smoke fixture did not materialize: ${value}`);
+  return rewritten;
+}
+
+function replaceExactStrings(value, replacements) {
+  if (typeof value === "string") return replacements[value] ?? value;
+  if (Array.isArray(value)) return value.map((item) => replaceExactStrings(item, replacements));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(
+      ([key, item]) => [key, replaceExactStrings(item, replacements)],
+    ));
+  }
+  return value;
+}
+
+function replaceStringFragments(value, source, replacement) {
+  if (typeof value === "string") return value.replaceAll(source, replacement);
+  if (Array.isArray(value)) {
+    return value.map((item) => replaceStringFragments(item, source, replacement));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(
+      ([key, item]) => [key, replaceStringFragments(item, source, replacement)],
+    ));
+  }
+  return value;
+}
+
+function prdDraftEventFixture() {
+  return {
+    protocol: "workbench.run.v1",
+    id: "event-draft-smoke",
+    projectId: "project-smoke",
+    threadId: "thread-smoke",
+    runId: "run-smoke",
+    requestId: "request-smoke",
+    sequence: 3,
+    occurredAt: "2026-07-23T09:00:30.000Z",
+    traceId: "trace-smoke",
+    type: "artifact.draft.created",
+    payload: {
+      attempt: 1,
+      artifactIndex: 0,
+      artifactId: "artifact-smoke",
+      artifactVersionId: "version-smoke",
+      kind: "prd",
+      checksum: "a".repeat(64),
+      draftChecksum: "b".repeat(64),
+      screens: [],
+    },
   };
 }
 
@@ -333,4 +530,11 @@ async function requestJson(request) {
 function sendJson(response, status, body, headers = {}) {
   response.writeHead(status, { "Content-Type": "application/json", ...headers });
   response.end(JSON.stringify(body));
+}
+
+function sendRunEventStream(response, events) {
+  response.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8" });
+  response.end(events.map((event) => (
+    `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+  )).join(""));
 }

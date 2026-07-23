@@ -24,6 +24,140 @@ function text(value: string) {
   return [{ type: "text" as const, text: value, marks: [] }];
 }
 
+const affirmativeSafetyFacts = [
+  "本需求修改现有功能逻辑。",
+  "本页面面向公众用户开放访问。",
+  "本需求新增公网访问入口。",
+  "管理后台展示手机号等个人信息并执行脱敏，支持受控导出。",
+  "管理后台操作页面启用包含姓名、手机号和操作时间的水印。",
+  "管理后台查询页面要求输入查询条件后查询数据。",
+  "管理后台接入 4A 统一身份管理并保留日志。",
+  "管理后台尚未接入 4A，当前使用独立账号体系。",
+  "后台配置内容启用敏感词过滤。",
+  "后台配置内容在前台展示并执行先审后发。",
+  "页面展示隐私政策并在采集前取得用户同意。",
+  "业务运行于微信小程序并提供小程序页面入口。",
+  "页面采集身份证号码并在提交前获取主动授权。",
+  "页面启用一键登录并在登录前取得用户同意。",
+  "用户操作后跳转第三方应用页面。",
+  "系统与第三方公司进行接口对接和数据交互。",
+  "本需求新增 API 接口并完成 API 台账填报。",
+  "系统通过跨系统接口调用传输敏感信息，并采用接口鉴权和加密传输。",
+  "系统落库存储用户信息并进行加密保护。",
+  "系统采集业务数据，并明确采集方式、渠道、格式和流程。",
+  "提交信息和任务状态执行完整性与一致性校验。",
+] as const;
+
+const negativeOrAbsentSafetyFacts = [
+  "本需求不涉及功能逻辑变更。",
+  "本需求仅限内部员工使用，不面向公众用户。",
+  "本需求不新增公网访问入口。",
+  "本需求不采集或展示个人信息。",
+  "本需求不涉及管理后台水印。",
+  "本需求不涉及后台查询页面。",
+  "本需求不涉及管理后台身份管理。",
+  null,
+  "本需求不涉及后台配置或敏感词过滤。",
+  "本需求不涉及后台配置内容的前台展示。",
+  "本需求不涉及隐私政策或隐私协议变更。",
+  "本需求不启用 APP 或小程序。",
+  "本需求不采集身份证、银行卡或生物识别信息。",
+  "本需求不启用一键登录或免密登录。",
+  "本需求不跳转第三方页面或应用。",
+  "本需求不与第三方公司进行接口对接。",
+  "本需求不新增 API 接口。",
+  "本需求不涉及敏感信息或跨系统调用。",
+  "本需求不存储用户信息或重要数据。",
+  "本需求不采集用户数据。",
+  "本需求无需校验数据完整性与一致性。",
+] as const;
+
+function withoutSafetyEvidence() {
+  const document = cloneExample();
+  document.sections.introduction.background.blocks[0] = {
+    id: "background-main",
+    type: "paragraph",
+    content: text("现有产品工作台提供业务处理能力，本需求用于明确业务目标和执行边界。"),
+  };
+  document.sections.businessRequirements.coreRules.blocks = document.sections.businessRequirements.coreRules.blocks
+    .filter((block) => block.id !== "safety-facts");
+  for (const row of document.sections.safetyBaseline.rows) {
+    row.applicability = "不涉及";
+    row.remarks = null;
+  }
+  return document;
+}
+
+function replaceBodyTerms(value: unknown, replacements: readonly (readonly [RegExp, string])[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) replaceBodyTerms(item, replacements);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    if (typeof child === "string") {
+      (value as Record<string, unknown>)[key] = replacements.reduce(
+        (result, [pattern, replacement]) => result.replace(pattern, replacement),
+        child,
+      );
+    } else {
+      replaceBodyTerms(child, replacements);
+    }
+  }
+}
+
+function withoutEmptyOrFailureRequirements() {
+  const document = cloneExample();
+  const replacements = [
+    [/(?:空态|空状态|暂无|无数据|尚未提交)/gu, "初始提示"],
+    [/(?:失败|异常|错误|重试|恢复|降级)/gu, "继续处理"],
+  ] as const;
+  replaceBodyTerms(document.sections.introduction, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.summary, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.pageLinks, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.coreRules, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.flowAndPages, replacements);
+  document.sections.degradation.applicable = false;
+  document.sections.degradation.content = text("不涉及");
+
+  const table = acceptanceTable(document);
+  table.rows = table.rows.filter((row) => {
+    const item = row.cells.find((cell) => cell.columnId === table.columns[1]?.id);
+    return !/(?:空态|空状态|暂无|无数据|尚未提交|失败|异常|错误|重试|恢复|降级)/u.test(
+      item?.content.map((inline) => inline.type === "text" || inline.type === "link" ? inline.text : inline.label ?? "").join("") ?? "",
+    );
+  });
+  for (const [index, row] of table.rows.entries()) {
+    const sequence = row.cells.find((cell) => cell.columnId === table.columns[0]?.id);
+    if (sequence) sequence.content = text(String(index + 1));
+  }
+  return document;
+}
+
+function withoutPermissionOrStateRequirements() {
+  const document = cloneExample();
+  const replacements = [
+    [/(?:权限|授权|无权)/gu, "资格"],
+    [/(?:状态|流转)/gu, "阶段"],
+    [/(?:提交|审核|发布|撤回|生效|下线)/gu, "处理"],
+  ] as const;
+  replaceBodyTerms(document.sections.introduction, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.summary, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.pageLinks, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.coreRules, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.flowAndPages.blocks, replacements);
+  replaceBodyTerms(document.sections.businessRequirements.flowAndPages.diagrams, replacements);
+  replaceBodyTerms(document.sections.degradation, replacements);
+
+  const table = acceptanceTable(document);
+  table.rows = table.rows.filter((row) => row.id !== "acceptance-permission" && row.id !== "acceptance-state");
+  for (const [index, row] of table.rows.entries()) {
+    const sequence = row.cells.find((cell) => cell.columnId === table.columns[0]?.id);
+    if (sequence) sequence.content = text(String(index + 1));
+  }
+  return document;
+}
+
 const deployedRuntimeResultSchema = JSON.parse(readFileSync(
   new URL("../../../integrations/deerflow/skills/workbench/references/runtime-result.schema.json", import.meta.url),
   "utf8",
@@ -275,93 +409,90 @@ describe("workbench.prd.v2", () => {
     expect(prdDocumentV2Schema.safeParse(remediated).success).toBe(true);
   });
 
-  it("defines affirmative semantic evidence for all 21 safety rows", () => {
-    const facts = [
-      "本需求修改现有功能逻辑。",
-      "本页面面向公众用户开放访问。",
-      "本需求新增公网访问入口。",
-      "管理后台展示手机号等个人信息并执行脱敏，支持受控导出。",
-      "管理后台操作页面启用包含姓名、手机号和操作时间的水印。",
-      "管理后台查询页面要求输入查询条件后查询数据。",
-      "管理后台接入 4A 统一身份管理并保留日志。",
-      "管理后台尚未接入 4A，当前使用独立账号体系。",
-      "后台配置内容启用敏感词过滤。",
-      "后台配置内容在前台展示并执行先审后发。",
-      "页面展示隐私政策并在采集前取得用户同意。",
-      "业务运行于微信小程序并提供小程序页面入口。",
-      "页面采集身份证号码并在提交前获取主动授权。",
-      "页面启用一键登录并在登录前取得用户同意。",
-      "用户操作后跳转第三方应用页面。",
-      "系统与第三方公司进行接口对接和数据交互。",
-      "本需求新增 API 接口并完成 API 台账填报。",
-      "系统通过跨系统接口调用传输敏感信息，并采用接口鉴权和加密传输。",
-      "系统落库存储用户信息并进行加密保护。",
-      "系统采集业务数据，并明确采集方式、渠道、格式和流程。",
-      "提交信息和任务状态执行完整性与一致性校验。",
-    ];
-    expect(facts).toHaveLength(21);
+  it("rejects 不涉及 for all 21 safety rows when the body contains affirmative evidence", () => {
+    expect(affirmativeSafetyFacts).toHaveLength(21);
 
-    for (const [index, fact] of facts.entries()) {
-      const document = cloneExample();
-      for (const row of document.sections.safetyBaseline.rows) {
-        row.applicability = "不涉及";
-        row.remarks = null;
-      }
+    for (const [index, fact] of affirmativeSafetyFacts.entries()) {
+      const document = withoutSafetyEvidence();
       document.sections.businessRequirements.coreRules.blocks.push({
         id: `safety-evidence-${index + 1}`,
         type: "paragraph",
-        content: text(fact!),
+        content: text(fact),
       });
-      document.sections.safetyBaseline.rows[index] = {
-        sequence: index + 1,
-        applicability: "是",
-        remarks: `第 ${index + 1} 项已根据正文事实完成自查。`,
-      };
+
+      const result = prdDocumentV2Schema.safeParse(document);
+      expect(result.success, `safety row ${index + 1}`).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues, `safety row ${index + 1}`).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            path: ["sections", "safetyBaseline", "rows", index, "applicability"],
+            message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
+          }),
+        ]));
+      }
+    }
+  });
+
+  it("accepts 不涉及 for all 21 safety rows when the body has negative or no evidence", () => {
+    expect(negativeOrAbsentSafetyFacts).toHaveLength(21);
+
+    for (const [index, fact] of negativeOrAbsentSafetyFacts.entries()) {
+      const document = withoutSafetyEvidence();
+      if (fact) {
+        document.sections.businessRequirements.coreRules.blocks.push({
+          id: `negative-safety-evidence-${index + 1}`,
+          type: "paragraph",
+          content: text(fact),
+        });
+      }
       expect(prdDocumentV2Schema.safeParse(document).success, `safety row ${index + 1}`).toBe(true);
     }
   });
 
-  it("does not treat explicit safety exclusions as affirmative evidence", () => {
-    const exclusions = [
-      [1, "本需求不涉及功能逻辑变更。"],
-      [12, "本需求不启用小程序。"],
-      [13, "本需求不采集身份证、银行卡或生物识别信息。"],
-      [14, "本需求不启用一键登录。"],
-      [15, "本需求不跳转第三方页面或应用。"],
-      [16, "本需求不与第三方公司进行接口对接。"],
-      [17, "本需求不新增 API 接口。"],
-      [18, "本需求不涉及敏感信息或跨系统调用。"],
-      [19, "本需求不存储用户信息或重要数据。"],
-      [20, "本需求不采集用户数据。"],
-      [21, "本需求无需校验数据完整性与一致性。"],
-    ] as const;
+  it("keeps safety negation scoped to its own topic", () => {
+    const document = withoutSafetyEvidence();
+    document.sections.businessRequirements.coreRules.blocks.push({
+      id: "mixed-topic-api-evidence",
+      type: "paragraph",
+      content: text("本需求不涉及本次活动投放渠道调整及全部营销相关能力，但新增 API 接口并完成台账填报。"),
+    });
 
-    for (const [sequence, fact] of exclusions) {
-      const document = cloneExample();
-      document.sections.businessRequirements.coreRules.blocks = document.sections.businessRequirements.coreRules.blocks
-        .filter((block) => block.id !== "safety-facts");
-      if (sequence === 1) {
-        document.sections.introduction.background.blocks[0] = {
-          id: "background-main",
-          type: "paragraph",
-          content: text("现有产品工作台提供业务任务入口，用户可提交任务并查看处理结果。"),
-        };
-      }
-      for (const row of document.sections.safetyBaseline.rows) {
-        row.applicability = "不涉及";
-        row.remarks = null;
-      }
-      document.sections.businessRequirements.coreRules.blocks.push({
-        id: `negative-safety-evidence-${sequence}`,
-        type: "paragraph",
-        content: text(fact),
-      });
-      document.sections.safetyBaseline.rows[sequence - 1] = {
-        sequence,
-        applicability: "是",
-        remarks: "不得使用否定事实支持涉及结论。",
-      };
-      expect(prdDocumentV2Schema.safeParse(document).success, `safety row ${sequence}`).toBe(false);
+    const result = prdDocumentV2Schema.safeParse(document);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 16, "applicability"],
+          message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
+        }),
+      ]));
+    }
+  });
+
+  it("requires sensitive or cross-system API context for safety row 18", () => {
+    const ordinaryAccessControl = withoutSafetyEvidence();
+    ordinaryAccessControl.sections.businessRequirements.coreRules.blocks.push({
+      id: "ordinary-access-control",
+      type: "paragraph",
+      content: text("管理后台按业务角色执行访问控制。"),
+    });
+    expect(prdDocumentV2Schema.safeParse(ordinaryAccessControl).success).toBe(true);
+
+    const sensitiveApi = withoutSafetyEvidence();
+    sensitiveApi.sections.businessRequirements.coreRules.blocks.push({
+      id: "sensitive-api-access-control",
+      type: "paragraph",
+      content: text("跨系统 API 接口传输敏感信息，并采用接口鉴权、访问控制和加密传输。"),
+    });
+    const result = prdDocumentV2Schema.safeParse(sensitiveApi);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 17, "applicability"],
+          message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
+        }),
+      ]));
     }
   });
 
@@ -380,6 +511,56 @@ describe("workbench.prd.v2", () => {
     rows[6]!.cells[1]!.content = text("结果一致性");
     rows[6]!.cells[2]!.content = text("页面结果与任务记录保持一致。 ");
     expect(prdDocumentV2Schema.safeParse(missingRecovery).success).toBe(false);
+  });
+
+  it("requires only acceptance dimensions that are clearly relevant in the requirement body", () => {
+    const compact = withoutEmptyOrFailureRequirements();
+    expect(acceptanceTable(compact).rows).toHaveLength(4);
+    expect(prdDocumentV2Schema.safeParse(compact).success).toBe(true);
+
+    const missingRelevantPermission = withoutEmptyOrFailureRequirements();
+    const permissionRow = acceptanceTable(missingRelevantPermission).rows.find((row) => row.id === "acceptance-permission");
+    const item = permissionRow?.cells.find((cell) => cell.columnId === acceptanceTable(missingRelevantPermission).columns[1]?.id);
+    if (!item) throw new Error("missing permission acceptance row");
+    item.content = text("并发操作约束");
+    const result = prdDocumentV2Schema.safeParse(missingRelevantPermission);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.message === "acceptance criteria must cover 权限控制")).toBe(true);
+    }
+
+    const missingRelevantState = withoutEmptyOrFailureRequirements();
+    const visibilityRow = acceptanceTable(missingRelevantState).rows.find((row) => row.id === "acceptance-visible");
+    const visibilityItem = visibilityRow?.cells.find((cell) => cell.columnId === acceptanceTable(missingRelevantState).columns[1]?.id);
+    if (!visibilityItem) throw new Error("missing visibility acceptance row");
+    visibilityItem.content = text("页面与阶段可见性");
+    const stateRow = acceptanceTable(missingRelevantState).rows.find((row) => row.id === "acceptance-state");
+    const stateItem = stateRow?.cells.find((cell) => cell.columnId === acceptanceTable(missingRelevantState).columns[1]?.id);
+    if (!stateItem) throw new Error("missing state acceptance row");
+    stateItem.content = text("处理顺序约束");
+    const stateResult = prdDocumentV2Schema.safeParse(missingRelevantState);
+    expect(stateResult.success).toBe(false);
+    if (!stateResult.success) {
+      expect(stateResult.error.issues.some((issue) => issue.message === "acceptance criteria must cover 状态流转与结果")).toBe(true);
+    }
+  });
+
+  it("does not infer permission or state acceptance from persona roles or generic completion results", () => {
+    const document = withoutPermissionOrStateRequirements();
+    document.sections.businessRequirements.coreRules.blocks.push({
+      id: "persona-operator",
+      type: "persona",
+      name: "运营人员",
+      description: text("目标使用角色为运营人员。"),
+      needs: ["快速查看待办事项。"],
+      painPoints: ["信息分散导致处理效率偏低。"],
+    }, {
+      id: "generic-completion-result",
+      type: "paragraph",
+      content: text("运营人员完成页面浏览后记录处理结果。"),
+    });
+
+    expect(prdDocumentV2Schema.safeParse(document).success).toBe(true);
   });
 
   it("rejects semantic duplicate channel tables and channel fact contradictions", () => {
@@ -423,6 +604,11 @@ describe("workbench.prd.v2", () => {
     };
     miniProgram.sections.introduction.usageScenarios.channelTable.rows[0]!.enabled = false;
     miniProgram.sections.introduction.usageScenarios.channelTable.rows[2]!.enabled = true;
+    miniProgram.sections.safetyBaseline.rows[11] = {
+      sequence: 12,
+      applicability: "是",
+      remarks: "小程序业务已按正文完成安全自查。",
+    };
     expect(prdDocumentV2Schema.safeParse(miniProgram).success).toBe(true);
   });
 

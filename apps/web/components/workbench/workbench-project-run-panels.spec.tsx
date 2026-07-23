@@ -32,19 +32,21 @@ afterEach(cleanup);
 
 describe("ProjectTranscriptPanel", () => {
   it("keeps a bodyless PRD run compact without an invented empty-message paragraph", () => {
-    const { container } = renderPanel();
+    const { container } = renderPanel({ prompt: "生成支付改造需求说明书" });
     const card = getAgentCard(container);
 
     expect(card.style.height).toBe("auto");
     expect(screen.queryByText("暂无新的运行消息。")).toBeNull();
+    expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
     expect(screen.getByText("正在整理需求结构")).not.toBeNull();
     expect(card.querySelector(".workbench-status-spinner")).not.toBeNull();
     expect(card.querySelectorAll(".workbench-agent-bubble > span > span")).toHaveLength(2);
   });
 
-  it("sizes the PRD status card from its visible prompt and body content", () => {
+  it("reveals the prompt chip only after substantive body content arrives", () => {
     const rendered = renderPanel({ prompt: "生成支付改造需求说明书" });
     expect(getAgentCard(rendered.container).style.height).toBe("auto");
+    expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
 
     rendered.rerender(panelElement({
       messages: [{ id: "message-1", status: "streaming", text: "正在梳理业务规则", working: true }],
@@ -56,6 +58,7 @@ describe("ProjectTranscriptPanel", () => {
       prompt: "生成支付改造需求说明书",
     }));
     expect(getAgentCard(rendered.container).style.height).toBe("auto");
+    expect(screen.getByText("生成支付改造需求说明书")).not.toBeNull();
     expect(screen.getByText("正在梳理业务规则").classList.contains("overflow-y-auto")).toBe(true);
   });
 

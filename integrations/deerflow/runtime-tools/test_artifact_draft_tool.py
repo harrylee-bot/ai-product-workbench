@@ -40,10 +40,76 @@ from deerflow_workbench_tools.artifact_draft_tool import (
 ROOT = Path(__file__).resolve().parents[3]
 PROTOTYPE_EXAMPLE_PATH = ROOT / "integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json"
 PRD_EXAMPLE_PATH = ROOT / "integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json"
+PRD_FINGERPRINT_PATH = (
+    ROOT
+    / "integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json"
+)
+
+
+def _replace_exact_strings(value: object, replacements: dict[str, str]) -> object:
+    if isinstance(value, str):
+        return replacements.get(value, value)
+    if isinstance(value, list):
+        return [_replace_exact_strings(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _replace_exact_strings(item, replacements)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _rewrite_reference_business_text(value: str) -> str:
+    replacements = (
+        ("产品工作台", "服务运营门户"),
+        ("目标业务用户", "业务经办人员"),
+        ("任务处理", "申请受理"),
+        ("任务页面", "申请界面"),
+        ("任务状态", "申请进度"),
+        ("任务记录", "申请记录"),
+        ("任务编号", "申请编号"),
+        ("任务", "申请"),
+        ("用户", "经办人员"),
+        ("提交", "发起"),
+        ("处理", "受理"),
+        ("状态", "进度"),
+        ("结果", "办理回执"),
+        ("异常", "故障"),
+        ("恢复", "续办"),
+        ("权限", "操作资格"),
+        ("校验", "检查"),
+        ("输入", "表单内容"),
+        ("页面", "界面"),
+        ("成功", "办结"),
+        ("失败", "未办结"),
+        ("重试", "重新办理"),
+        ("重复", "多次"),
+        ("阶段", "环节"),
+        ("需求说明书", "业务规格文档"),
+        ("验收标准", "交付检查"),
+        ("业务降级方案", "应急处置方案"),
+        ("需求安全基线", "安全自查"),
+    )
+    rewritten = value
+    for source, target in replacements:
+        rewritten = rewritten.replace(source, target)
+    if rewritten == value:
+        raise AssertionError(f"Reference business text was not materialized: {value}")
+    return rewritten
 
 
 def _materialize_prd_reference(reference: dict[str, object]) -> dict[str, object]:
     draft = copy.deepcopy(reference)
+    fingerprint = json.loads(PRD_FINGERPRINT_PATH.read_text(encoding="utf-8"))
+    id_replacements = {
+        sample_id: f"real-{index:02d}-{sample_id}"
+        for index, sample_id in enumerate(fingerprint["sampleIds"], start=1)
+    }
+    business_replacements = {
+        sample_text: _rewrite_reference_business_text(sample_text)
+        for sample_text in fingerprint["businessText"]
+    }
+    draft = _replace_exact_strings(draft, {**id_replacements, **business_replacements})
     draft["title"] = "真实工单需求说明书"
     content = draft["content"]
     content["documentId"] = "prd-real-work-order"
@@ -52,16 +118,6 @@ def _materialize_prd_reference(reference: dict[str, object]) -> dict[str, object
         "workOrderName": "真实工单",
         "title": "真实工单需求说明书",
     }
-    sections = content["sections"]
-    sections["introduction"]["background"]["blocks"][0]["content"][0]["text"] = (
-        "现有真实业务任务入口缺少连续状态与异常恢复反馈，本需求补齐提交、处理、恢复和结果确认能力。"
-    )
-    sections["businessRequirements"]["summary"][0]["text"] = (
-        "总体目标：让业务用户完成真实任务提交、状态跟踪、异常恢复和结果确认闭环。"
-    )
-    sections["degradation"]["content"][0]["text"] = (
-        "依赖暂时不可用时保留已填写内容并阻止重复提交，页面说明失败原因和影响范围；状态同步延迟时展示最后可信状态与更新时间，权限校验失败时不创建任务。恢复后允许从原任务继续查询或安全重试，重复请求复用既有结果，并记录异常、恢复时间与最终状态，供业务、研发和测试核对处理一致性。"
-    )
     return draft
 
 
@@ -164,6 +220,41 @@ class ArtifactDraftToolTests(unittest.TestCase):
             issue["path"] == ["content", "documentId"]
             for issue in response["issues"]
         ))
+        self.assertNotIn("draft", artifact)
+
+    def test_rejects_a_partially_materialized_prd_reference_draft(self) -> None:
+        partial = copy.deepcopy(self.prd_reference_draft)
+        partial["title"] = "真实工单需求说明书"
+        partial["content"]["documentId"] = "prd-real-work-order"
+        partial["content"]["title"] = "真实工单需求说明书"
+        partial["content"]["cover"] = {
+            "workOrderName": "真实工单",
+            "title": "真实工单需求说明书",
+        }
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.runtime,
+            0,
+            partial,
+        )
+
+        response = json.loads(content)
+        self.assertEqual(response["ok"], False)
+        residue_issues = [
+            issue for issue in response["issues"]
+            if issue["path"][:1] == ["content"]
+            and ("sample business content" in issue["message"] or "sample ID" in issue["message"])
+        ]
+        residue_paths = {tuple(issue["path"]) for issue in residue_issues}
+        self.assertIn((
+            "content", "sections", "introduction", "background", "blocks", 0, "id",
+        ), residue_paths)
+        self.assertIn((
+            "content", "sections", "businessRequirements", "coreRules", "blocks", 0, "id",
+        ), residue_paths)
+        self.assertIn((
+            "content", "sections", "businessRequirements", "summary", 0, "text",
+        ), residue_paths)
+        self.assertEqual(len(residue_issues), len(residue_paths))
         self.assertNotIn("draft", artifact)
 
     def test_rejects_an_unstable_artifact_index(self) -> None:

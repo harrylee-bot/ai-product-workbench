@@ -34,6 +34,11 @@ The backend has already validated access, created the local user message/run, bo
 
 ## First Decision
 
+Inspect `requestedArtifactKinds` before classifying the product change. When it
+contains `prd`, the fixed PRD profile in this skill is mandatory even when the
+user's wording does not contain `PRD`, `需求文档`, or `需求说明书`. Prompt wording
+never downgrades a requested PRD to a generic summary or advice response.
+
 Classify the turn before doing work:
 
 - Greeting or general chat: return a user-facing `message` with an empty `artifacts` array. Do not call sub-agents or coding tools.
@@ -42,16 +47,26 @@ Classify the turn before doing work:
 - Completely new system or standalone page with no existing architecture to inherit: use `brand_new_system`.
 - Short or one-sentence product request with ordinary missing details: use `one_sentence_completion` and infer conventional details from product architecture, business-domain knowledge, and historical cases.
 - Missing high-risk or blocking facts for a product change: use DeerFlow's clarification interrupt before producing a result.
-- PRD drafting: produce a complete `workbench.prd.v2` Artifact document. When revising an existing PRD, preserve the target Artifact's current v1 or v2 protocol.
+- PRD drafting: whenever `requestedArtifactKinds` contains `prd`, produce a complete fixed-template `workbench.prd.v2` Artifact document. When revising an existing PRD, preserve the target Artifact's current v1 or v2 protocol.
 - Prototype/code generation: create or refine specs first, then use DeerFlow's coding/prototype execution capability and return the requested Artifact kinds.
 - Export request: use the dedicated 产品工作台 export workflow; do not invent an export Artifact in a generation Run.
 
 `task` delegation is available only when `requestedArtifactKinds` contains
-`prototype` or `code`. Never delegate merely to read or summarize this skill.
+`prototype` or `code` and does not contain `prd`. Never delegate merely to read
+or summarize this skill, and never begin Prototype/code work while a PRD in the
+same request remains unsubmitted or unaccepted.
 For PRD, document, image, and data Runs, the lead agent must work directly and
 finish with `workbench_runtime_result_submit`.
 
 ## Requirement Modes
+
+The modes in this section govern Prototype/code architecture and may identify
+existing source facts for a PRD. They are not permission to invent PRD scope.
+In particular, a PRD never inherits the speculative asset, activity,
+audit/publish, reporting, AI-generation, backend-configuration, frontend-loop,
+preview, or data-feedback additions described by `new_capability` or
+`one_sentence_completion` unless those facts are present in the user input,
+authorized project history, attached sources, or pinned Knowledge.
 
 ### historical_extension
 
@@ -117,17 +132,41 @@ Prototype rule:
 
 ## PRD / Requirement Document Writing
 
-When the user asks to generate, rewrite, optimize, or regenerate a PRD / 需求文档 / 需求说明书, first read both `references/requirement-doc-template/structure.md` and `references/requirement-doc-template/quality-standards.md`. Treat those checked-in references and the Runtime validator as authoritative. Retrieved Knowledge may supply product facts, but it may not weaken the fixed document standard.
+Whenever `requestedArtifactKinds` contains `prd`, first read both
+`references/requirement-doc-template/structure.md` and
+`references/requirement-doc-template/quality-standards.md`, regardless of the
+natural-language prompt. Treat those checked-in references and the Runtime
+validator as authoritative. Retrieved Knowledge may supply product facts, but
+it may not weaken the fixed document standard.
 
-Default output is the user's requirement-document template, not a freeform lightweight PRD. A newly created PRD must use Artifact `schemaVersion: 2` with content protocol `workbench.prd.v2`. Protocol v1 remains read-only/revision compatible for existing Artifacts and is never the shape for a new PRD. The persisted document must use this structure unless the user explicitly asks for another format:
+For PRD content, use only explicit user facts, authorized persisted project
+facts, attached sources, and pinned Knowledge. Make a conservative assumption
+only when the business meaning remains clear and record it in `assumptions`.
+Keep unresolved implementation details in assumptions or delivery metadata,
+not as invented PRD requirements. Do not add assets, activity configuration,
+audit/publish, reporting, AI generation, backend configuration, frontend
+experience, preview, or data feedback merely to make a short request look like
+a larger product loop. Ask for clarification when a missing fact changes
+business scope, compliance, money or inventory, permissions, production data,
+irreversible publication, or acceptance meaning.
+
+A request for both PRD and Prototype/code is sequential, not parallel. The
+Runtime contract rejects a Run whose `requestedArtifactKinds` mixes `prd` with
+`prototype` or `code`; callers must submit two Runs instead. The PRD-only Run
+must complete with `workbench_runtime_result_submit` returning `ok:true` before
+a later Prototype/code Run may use that persisted PRD. If invalid mixed input
+somehow reaches this skill, fail fast without clarification, delegation,
+Prototype Canvas tools, stage tools, draft publication, or result submission.
+
+Output is the user's fixed requirement-document template, not a freeform lightweight PRD. A newly created PRD must use Artifact `schemaVersion: 2` with content protocol `workbench.prd.v2`. Protocol v1 remains read-only/revision compatible for existing Artifacts and is never the shape for a new PRD. Every PRD Artifact in this Runtime uses the following exact structure; a request for an incompatible format is not permission to submit schema-invalid content:
 
 ```text
 1 引言
-1.1 项目背景
-1.2 文档范围
-1.3 使用场景（必填）
+1.1项目背景
+1.2文档范围
+1.3使用场景（必填）
 2 业务需求
-2.1 页面链接
+2.1页面链接
 2.2 核心业务规则/功能说明
 2.3 核心流程/状态/页面要求（必须包含产品流程图和产品架构图）
 2.4 验收标准
@@ -146,6 +185,7 @@ Writing requirements:
 - `2.3` must contain exactly one `productFlow` followed by exactly one `productArchitecture`; each diagram needs explanatory text and product-language nodes and relations.
 - `2.4` must contain a testable `序号 / 验收项 / 验收标准` table covering visibility, rules, permissions, state flow, result, empty state, and error recovery when relevant.
 - `4 需求安全基线要求（必填）` must contain all 21 canonical rows. Values in `是否涉及` may only be `是`, `否`, or `不涉及`; put explanations in `remarks`. Derive each value from requirement facts outside the safety table.
+- `不涉及` is valid only when no affirmative fact for that safety topic exists anywhere else in the PRD. Use `是` when the topic applies and the stated requirement satisfies it; use `否` only when the topic applies and the PRD also contains a concrete remediation for that same topic.
 - Never use `待确认`, `以实际为准`, `以实际上线地址为准`, template reminders, placeholder links, or copied sample business content. Use a concrete conservative assumption when the business meaning is safe, otherwise request input.
 - Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
 - Read `references/prd-runtime-result.example.json` exactly once before authoring. Copy the complete envelope, replace every sample ID and all sample business content, and preserve every required field and bidirectional reference. Do not derive a shorthand JSON shape from this prose.

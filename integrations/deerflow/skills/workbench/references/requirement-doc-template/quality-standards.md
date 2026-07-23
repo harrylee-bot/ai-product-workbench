@@ -6,6 +6,7 @@ Apply these gates before publishing or submitting a PRD candidate.
 
 - Artifact title, document title, cover title, and work-order name are consistent: `<工单名称>需求说明书`.
 - Cover, version history, manual table of contents, and fixed sections 1 through 4 are present and ordered.
+- Version history uses supplied identities only when authorized context contains them; otherwise it uses the role fallbacks `需求方`, `业务评审人`, `研发评审人`, and `测试评审人` instead of invented names.
 - Every heading has substantive content. No deleted heading remains in the table of contents.
 - Exactly one typed channel table, one product-flow diagram, one product-architecture diagram, one degradation section, and one complete 21-row safety table exist.
 
@@ -17,6 +18,7 @@ Apply these gates before publishing or submitting a PRD candidate.
 - Permission rules, success state, empty state, failure state, retry, duplicate prevention, and recovery are explicit when relevant.
 - Acceptance rows can be converted directly into test cases and do not merely restate the feature name.
 - Background and requirement details are related but not copied verbatim across sections.
+- Short prompts remain narrow. Assumptions may complete only business meaning that is already clear; they do not add assets, audit/publish, reporting, AI, backend/frontend loops, preview, or data feedback without source facts.
 
 ## Forbidden Output
 
@@ -37,6 +39,14 @@ Apply these gates before publishing or submitting a PRD candidate.
 - `applicability` contains only `是`, `否`, or `不涉及`.
 - Remarks do not leak into `applicability`.
 - Every `是` or `否` is supported by a fact elsewhere in the requirement. Safety row wording cannot be used as its own evidence.
+- Every `不涉及` has no affirmative fact for the same topic elsewhere in the requirement. A positive body fact and `不涉及` are contradictory and invalid.
+
+## Typed IR Integrity
+
+- IDs are globally unique across the document and all nested entities.
+- Table cells, diagram edges, citations, assumptions, and inline references resolve only to declared targets.
+- Requirement-to-acceptance references are bidirectional, and goal and flow references resolve to declared entities.
+- Revisions retain the document identity, advance its revision, and preserve unchanged semantic entity IDs.
 
 ## Runtime Publication
 

@@ -204,7 +204,7 @@ test("creates byte-identical manifest and inventory for the same repository snap
   assert.equal(first.manifest.status.clean, true);
   assert.equal(first.manifest.criticalArtifacts.migrations.entryCount, 1);
   assert.equal(first.manifest.criticalArtifacts.migrations.status, "complete");
-  assert.equal(first.manifest.criticalArtifacts.generatedContracts.entryCount, 4);
+  assert.equal(first.manifest.criticalArtifacts.generatedContracts.entryCount, 6);
   assert.equal(first.manifest.criticalArtifacts.knowledgeVaultConfiguration.entryCount, 4);
   assert.equal(first.manifest.criticalArtifacts.remediationControl.entryCount, 2);
   assert.ok(first.manifest.criticalArtifacts.evidenceContracts.entryCount >= 2);
@@ -373,6 +373,8 @@ async function createRepositoryFixture({ referencedAsset = null, orphanAsset = n
     ["packages/workbench-db/prisma/migrations/20260718000000_fixture/migration.sql", "SELECT 1;\n"],
     ["integrations/deerflow/README.md", "# DeerFlow\n"],
     ["integrations/deerflow/skills/workbench/references/runtime-result.schema.json", "{}\n"],
+    ["integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json", "{}\n"],
+    ["integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_fingerprint.json", "{}\n"],
     ["integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs", "export {};\n"],
     ["scripts/workbench-hard-cut-manifest.mjs", "export {};\n"],
     ["docs/workbench-hard-cut-deletion-manifest.json", "{}\n"],

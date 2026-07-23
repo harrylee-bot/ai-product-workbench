@@ -137,6 +137,19 @@ export function refineRunWorkflowArtifactTargets(
   request: RunWorkflowArtifactTargetInput,
   context: z.RefinementCtx,
 ): void {
+  const requestsPrd = request.requestedArtifactKinds.includes("prd");
+  const requestsPrototypeWork = request.requestedArtifactKinds.some(
+    (kind) => kind === "prototype" || kind === "code",
+  );
+  if (requestsPrd && requestsPrototypeWork) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["requestedArtifactKinds"],
+      message: "PRD and Prototype/code must be requested in two sequential Runs: complete the PRD Run first",
+    });
+    return;
+  }
+
   if (request.workflow === "edit") {
     if (request.generationIntent !== null) {
       context.addIssue({
