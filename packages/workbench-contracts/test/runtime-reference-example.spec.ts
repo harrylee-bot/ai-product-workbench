@@ -14,6 +14,11 @@ const prdExamplePath = fileURLToPath(new URL(
   import.meta.url,
 ));
 const prdExampleSource = readFileSync(prdExamplePath, "utf8");
+const workbenchSkillPath = fileURLToPath(new URL(
+  "../../../integrations/deerflow/skills/workbench/SKILL.md",
+  import.meta.url,
+));
+const workbenchSkillSource = readFileSync(workbenchSkillPath, "utf8");
 
 describe("DeerFlow PRD Runtime Result reference", () => {
   it("stays compact and valid against the production Runtime result schema", () => {
@@ -28,6 +33,18 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     });
     expect(Buffer.byteLength(prdExampleSource, "utf8")).toBeLessThan(16_000);
     expect(prdExampleSource.split("\n").length).toBeLessThan(400);
+  });
+
+  it("keeps the schema-safe PRD starter inline in the injected skill", () => {
+    const match = /<!-- prd-runtime-inline-example:start -->\s*```json\s*([\s\S]*?)\s*```\s*<!-- prd-runtime-inline-example:end -->/u
+      .exec(workbenchSkillSource);
+    expect(match?.[1]).toBeTruthy();
+    const inlineExample = JSON.parse(match![1]!) as unknown;
+    const referenceExample = JSON.parse(prdExampleSource) as unknown;
+
+    expect(runtimeResultSchema.parse(inlineExample)).toEqual(
+      runtimeResultSchema.parse(referenceExample),
+    );
   });
 });
 
