@@ -23,6 +23,7 @@ __pycache__/
 .vercel
 .playwright-cli
 agent-skills
-.claude/
+.claude/*
+!.claude/launch.json
 /packages/workbench-db/generated/
 /apps/workbench-figma-importer/build/

@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
 import { Editor, type JSONContent } from "@tiptap/core";
-import { prdDocumentSchema } from "@workbench/workbench-contracts";
+import {
+  prdDocumentSchema,
+  prdDocumentV1Schema,
+  prdDocumentV2Schema,
+  prdDocumentV2Example,
+} from "@workbench/workbench-contracts";
 import { describe, expect, it } from "vitest";
 
 import { prdDocument } from "../../../components/workbench/workbench-prd-test-fixture";
@@ -17,10 +22,65 @@ describe("PRD Tiptap projection", () => {
     const projected = prdDocumentToTiptap(source);
     const result = applyTiptapToPrdDocument(source, projected);
 
-    expect(prdDocumentSchema.parse(result)).toEqual(source);
+    expect(prdDocumentV1Schema.parse(result)).toEqual(source);
     expect(result.sections.executiveSummary.blocks[0]).toEqual(
       source.sections.executiveSummary.blocks[0],
     );
+  });
+
+  it("round-trips PRD v2 through Tiptap without changing fixed template data", () => {
+    const source = structuredClone(prdDocumentV2Example);
+    const editor = new Editor({
+      extensions: workbenchPrdExtensions,
+      content: prdDocumentToTiptap(source),
+    });
+
+    const result = applyTiptapToPrdDocument(source, editor.getJSON());
+
+    expect(prdDocumentV2Schema.parse(result)).toEqual(source);
+    expect(editor.getJSON().content?.some((node) => node.type === "prdFixedBlock")).toBe(true);
+    editor.destroy();
+  });
+
+  it("edits allowed PRD v2 fields while preserving its fixed template structures", () => {
+    const source = structuredClone(prdDocumentV2Example);
+    const projected = prdDocumentToTiptap(source);
+    replaceNodeText(projected, ["title"], "编辑后工单");
+    replaceNodeText(
+      projected,
+      ["sections", "introduction", "background", "blocks", 0, "content"],
+      "编辑后的项目背景。",
+    );
+    replaceNodeText(
+      projected,
+      ["sections", "businessRequirements", "summary"],
+      "编辑后的业务需求总览。",
+    );
+    replaceNodeText(
+      projected,
+      ["sections", "degradation", "content"],
+      "依赖异常时保留用户输入和可信状态，暂停重复提交并展示具体原因、影响范围、恢复入口和最近更新时间；系统恢复后复用既有任务结果，校验权限、状态和数据一致性，完整记录异常发生、恢复与最终处理过程，供业务、研发和测试共同复核。".repeat(2),
+    );
+    removeFixedBlocks(projected);
+
+    const result = prdDocumentV2Schema.parse(applyTiptapToPrdDocument(source, projected));
+
+    expect(result.protocol).toBe("workbench.prd.v2");
+    if (result.protocol !== "workbench.prd.v2") throw new Error("expected PRD v2");
+    expect(result.title).toBe("编辑后工单需求说明书");
+    expect(result.cover).toEqual({
+      workOrderName: "编辑后工单",
+      title: "编辑后工单需求说明书",
+    });
+    expect(result.sections.introduction.background.blocks[0]).toMatchObject({
+      content: [{ type: "text", text: "编辑后的项目背景。", marks: [] }],
+    });
+    expect(result.sections.introduction.usageScenarios.channelTable)
+      .toEqual(source.sections.introduction.usageScenarios.channelTable);
+    expect(result.sections.businessRequirements.flowAndPages.diagrams)
+      .toEqual(source.sections.businessRequirements.flowAndPages.diagrams);
+    expect(result.sections.safetyBaseline).toEqual(source.sections.safetyBaseline);
+    expect(result.tableOfContents).toEqual(source.tableOfContents);
   });
 
   it("uses Tiptap transactions and undo while preserving semantic references", () => {
@@ -40,7 +100,7 @@ describe("PRD Tiptap projection", () => {
     expect(titleRange).not.toBeNull();
     editor.chain().setTextSelection(titleRange!).insertContent("Edited PRD").run();
 
-    const edited = prdDocumentSchema.parse(
+    const edited = prdDocumentV1Schema.parse(
       applyTiptapToPrdDocument(source, editor.getJSON()),
     );
     expect(edited.title).toBe("Edited PRD");
@@ -82,7 +142,7 @@ describe("PRD Tiptap projection", () => {
       content: [{ type: "text", text: "Replacement problem" }],
     }];
 
-    const result = prdDocumentSchema.parse(applyTiptapToPrdDocument(source, projected));
+    const result = prdDocumentV1Schema.parse(applyTiptapToPrdDocument(source, projected));
     expect(result.sections.executiveSummary.blocks.map((block) => block.id)).toEqual(["problem"]);
     expect(result.sections.problem.blocks).toEqual([{
       id: "new-problem",
@@ -105,7 +165,7 @@ describe("PRD Tiptap projection", () => {
       }],
     }];
 
-    const result = prdDocumentSchema.parse(applyTiptapToPrdDocument(source, projected));
+    const result = prdDocumentV1Schema.parse(applyTiptapToPrdDocument(source, projected));
     expect(result.sections.scope.blocks[0]).toEqual({
       id: "scope-list",
       type: "bulletList",
@@ -151,7 +211,7 @@ describe("PRD Tiptap projection", () => {
       })),
     }];
 
-    const result = prdDocumentSchema.parse(applyTiptapToPrdDocument(source, projected));
+    const result = prdDocumentV1Schema.parse(applyTiptapToPrdDocument(source, projected));
     const rebuilt = result.sections.executiveSummary.blocks[1];
     expect(rebuilt).toMatchObject({
       id: "summary-table",
@@ -192,4 +252,17 @@ function findJsonNode(
     if (found) return found;
   }
   return null;
+}
+
+function replaceNodeText(node: JSONContent, path: Array<string | number>, text: string) {
+  const target = findJsonNode(node, (candidate) => (
+    candidate.attrs?.prdPath === JSON.stringify(path)
+  ));
+  expect(target).not.toBeNull();
+  target!.content = [{ type: "text", text }];
+}
+
+function removeFixedBlocks(node: JSONContent) {
+  node.content = (node.content ?? []).filter((child) => child.type !== "prdFixedBlock");
+  for (const child of node.content) removeFixedBlocks(child);
 }

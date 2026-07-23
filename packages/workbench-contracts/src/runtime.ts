@@ -2,7 +2,12 @@ import { z } from "zod";
 import { approvalDecisionSchema, approvalOptionsSchema } from "./approvals.js";
 import { artifactCitationSchema, type ArtifactCitation } from "./citations.js";
 import { jsonValueSchema, type JsonValue } from "./common.js";
-import { prdDocumentSchema, type PrdDocument } from "./prd.js";
+import {
+  prdDocumentSchema,
+  prdDocumentV1Schema,
+  prdDocumentV2Schema,
+  type PrdDocument,
+} from "./prd.js";
 import {
   type PrototypePatchCheckpointScreen,
   type RuntimePrototypePatchInput,
@@ -27,28 +32,53 @@ export const runtimeArtifactOperationSchema = z.discriminatedUnion("kind", [
 const runtimeArtifactDraftBaseShape = {
   title: z.string().min(1).max(240),
   citations: z.array(runtimeCitationSchema).max(1_000),
-  operation: runtimeArtifactOperationSchema,
 };
 
-export type RuntimeArtifactDraft = {
+type RuntimeArtifactDraftBase = {
   title: string;
   citations: ArtifactCitation[];
-  operation: { kind: "create" } | { kind: "revise"; target: RunArtifactTarget };
-} & (
-  | { kind: "prd"; schemaVersion: 1; content: PrdDocument }
-  | { kind: "prototype"; schemaVersion: 1; content: PrototypeDocument }
-  | { kind: "image" | "code" | "document" | "data"; schemaVersion: number; content: JsonValue }
+};
+
+type RuntimeArtifactOperation =
+  | { kind: "create" }
+  | { kind: "revise"; target: RunArtifactTarget };
+
+export type RuntimeArtifactDraft = RuntimeArtifactDraftBase & (
+  | {
+      kind: "prd";
+      schemaVersion: 1 | 2;
+      content: PrdDocument;
+      operation: RuntimeArtifactOperation;
+    }
+  | {
+      kind: "prototype";
+      schemaVersion: 1;
+      content: PrototypeDocument;
+      operation: RuntimeArtifactOperation;
+    }
+  | {
+      kind: "image" | "code" | "document" | "data";
+      schemaVersion: number;
+      content: JsonValue;
+      operation: RuntimeArtifactOperation;
+    }
 );
 
-export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft> = z.discriminatedUnion("kind", [
-  z.object({ ...runtimeArtifactDraftBaseShape, kind: z.literal("prd"), schemaVersion: z.literal(1), content: prdDocumentSchema }).strict(),
-  z.object({ ...runtimeArtifactDraftBaseShape, kind: z.literal("prototype"), schemaVersion: z.literal(1), content: prototypeDocumentSchema }).strict(),
-  z.object({ ...runtimeArtifactDraftBaseShape, kind: z.literal("image"), schemaVersion: z.number().int().positive(), content: jsonValueSchema }).strict(),
-  z.object({ ...runtimeArtifactDraftBaseShape, kind: z.literal("code"), schemaVersion: z.number().int().positive(), content: jsonValueSchema }).strict(),
-  z.object({ ...runtimeArtifactDraftBaseShape, kind: z.literal("document"), schemaVersion: z.number().int().positive(), content: jsonValueSchema }).strict(),
-  z.object({ ...runtimeArtifactDraftBaseShape, kind: z.literal("data"), schemaVersion: z.number().int().positive(), content: jsonValueSchema }).strict(),
-]).superRefine((draft, context) => {
-  if (draft.kind !== "prd") return;
+function refineRuntimePrdDraft(
+  draft: {
+    title: string;
+    citations: ArtifactCitation[];
+    content: PrdDocument;
+  },
+  context: z.RefinementCtx,
+) {
+  if (draft.title !== draft.content.title) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["title"],
+      message: "PRD Artifact title must match the document and cover title",
+    });
+  }
   const contentCitations = [...draft.content.citations].sort((left, right) => left.id.localeCompare(right.id));
   const draftCitations = [...draft.citations].sort((left, right) => left.id.localeCompare(right.id));
   if (JSON.stringify(contentCitations) !== JSON.stringify(draftCitations)) {
@@ -58,6 +88,112 @@ export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft> = z.dis
       message: "PRD draft citations must exactly match content citations",
     });
   }
+}
+
+export const runtimeArtifactDraftPrdV1RevisionSchema = z.object({
+  ...runtimeArtifactDraftBaseShape,
+  kind: z.literal("prd"),
+  schemaVersion: z.literal(1),
+  content: prdDocumentV1Schema,
+  operation: z.object({
+    kind: z.literal("revise"),
+    target: runArtifactTargetSchema,
+  }).strict(),
+}).strict();
+
+export const runtimeArtifactDraftPrdV2Schema = z.object({
+  ...runtimeArtifactDraftBaseShape,
+  kind: z.literal("prd"),
+  schemaVersion: z.literal(2),
+  content: prdDocumentV2Schema,
+  operation: runtimeArtifactOperationSchema,
+}).strict();
+
+export const runtimeArtifactDraftPrdSchema: z.ZodType<RuntimeArtifactDraft> = z.union([
+  runtimeArtifactDraftPrdV1RevisionSchema,
+  runtimeArtifactDraftPrdV2Schema,
+]);
+
+export const runtimeArtifactDraftPrototypeSchema = z.object({
+  ...runtimeArtifactDraftBaseShape,
+  kind: z.literal("prototype"),
+  schemaVersion: z.literal(1),
+  content: prototypeDocumentSchema,
+  operation: runtimeArtifactOperationSchema,
+}).strict();
+
+export const runtimeArtifactDraftImageSchema = z.object({
+  ...runtimeArtifactDraftBaseShape,
+  kind: z.literal("image"),
+  schemaVersion: z.number().int().positive(),
+  content: jsonValueSchema,
+  operation: runtimeArtifactOperationSchema,
+}).strict();
+
+export const runtimeArtifactDraftCodeSchema = z.object({
+  ...runtimeArtifactDraftBaseShape,
+  kind: z.literal("code"),
+  schemaVersion: z.number().int().positive(),
+  content: jsonValueSchema,
+  operation: runtimeArtifactOperationSchema,
+}).strict();
+
+export const runtimeArtifactDraftDocumentSchema = z.object({
+  ...runtimeArtifactDraftBaseShape,
+  kind: z.literal("document"),
+  schemaVersion: z.number().int().positive(),
+  content: jsonValueSchema,
+  operation: runtimeArtifactOperationSchema,
+}).strict();
+
+export const runtimeArtifactDraftDataSchema = z.object({
+  ...runtimeArtifactDraftBaseShape,
+  kind: z.literal("data"),
+  schemaVersion: z.number().int().positive(),
+  content: jsonValueSchema,
+  operation: runtimeArtifactOperationSchema,
+}).strict();
+
+export const runtimeArtifactDraftContractSchema: z.ZodType<RuntimeArtifactDraft> = z.union([
+  runtimeArtifactDraftPrdSchema,
+  runtimeArtifactDraftPrototypeSchema,
+  runtimeArtifactDraftImageSchema,
+  runtimeArtifactDraftCodeSchema,
+  runtimeArtifactDraftDocumentSchema,
+  runtimeArtifactDraftDataSchema,
+]).describe("A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.");
+
+export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft> = z.discriminatedUnion("kind", [
+  z.object({
+    ...runtimeArtifactDraftBaseShape,
+    kind: z.literal("prd"),
+    schemaVersion: z.union([z.literal(1), z.literal(2)]),
+    content: prdDocumentSchema,
+    operation: runtimeArtifactOperationSchema,
+  }).strict(),
+  runtimeArtifactDraftPrototypeSchema,
+  runtimeArtifactDraftImageSchema,
+  runtimeArtifactDraftCodeSchema,
+  runtimeArtifactDraftDocumentSchema,
+  runtimeArtifactDraftDataSchema,
+]).superRefine((draft, context) => {
+  if (draft.kind !== "prd") return;
+  const expectedSchemaVersion = draft.content.protocol === "workbench.prd.v2" ? 2 : 1;
+  if (draft.schemaVersion !== expectedSchemaVersion) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["schemaVersion"],
+      message: `PRD schemaVersion must be ${expectedSchemaVersion} for ${draft.content.protocol}`,
+    });
+  }
+  if (draft.operation.kind === "create" && draft.content.protocol !== "workbench.prd.v2") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["content", "protocol"],
+      message: "New PRD Artifacts must use workbench.prd.v2; v1 is revision-only",
+    });
+  }
+  refineRuntimePrdDraft(draft, context);
 });
 
 export type RuntimeResult = {
@@ -65,6 +201,12 @@ export type RuntimeResult = {
   message: string;
   artifacts: RuntimeArtifactDraft[];
 };
+
+export const runtimeResultContractSchema: z.ZodType<RuntimeResult> = z.object({
+  protocol: z.literal("workbench.runtime.result.v1"),
+  message: z.string().max(100_000),
+  artifacts: z.array(runtimeArtifactDraftContractSchema).max(20),
+}).strict();
 
 export const runtimeResultSchema: z.ZodType<RuntimeResult> = z.object({
   protocol: z.literal("workbench.runtime.result.v1"),

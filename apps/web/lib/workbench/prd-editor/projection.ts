@@ -1,26 +1,129 @@
 import type { JSONContent } from "@tiptap/core";
 import {
+  prdChannelLabels,
+  prdSafetyBaselineItems,
   prdSectionKeys,
   type PrdBlock,
   type PrdDocument,
+  type PrdDocumentV1,
+  type PrdDocumentV2,
   type PrdInline,
-  type PrdSectionKey,
 } from "@workbench/workbench-contracts";
 
 type PathPart = string | number;
 type FieldRole = "body" | "block-title" | "metadata" | "section-title" | "title";
 type PrdTextMark = Extract<PrdInline, { type: "text" }>["marks"][number];
+type PrdEditableSection = { title: string; blocks: PrdBlock[] };
+type PrdSectionProjection = {
+  key: string;
+  path: readonly PathPart[];
+  section: PrdEditableSection;
+};
+
+const prdV2TitleSuffix = "需求说明书";
 
 export function prdDocumentToTiptap(document: PrdDocument): JSONContent {
+  return document.protocol === "workbench.prd.v2"
+    ? prdDocumentV2ToTiptap(document)
+    : prdDocumentV1ToTiptap(document);
+}
+
+function prdDocumentV1ToTiptap(document: PrdDocumentV1): JSONContent {
   return {
     type: "doc",
     content: [
       stringField(["title"], document.title, "title", "heading", 1, undefined, document.documentId),
-      ...prdSectionKeys.map((key, index) => sectionToTiptap(document, key, index)),
+      ...v1SectionProjections(document).map((projection, index) => sectionToTiptap(
+        projection,
+        stringField(
+          [...projection.path, "title"],
+          projection.section.title,
+          "section-title",
+          "heading",
+          2,
+          `${index + 1}. `,
+        ),
+      )),
     ],
   };
 }
 
+function prdDocumentV2ToTiptap(document: PrdDocumentV2): JSONContent {
+  const sections = v2SectionProjections(document);
+  const byKey = new Map(sections.map((section) => [section.key, section]));
+  const section = (key: string, trailing: JSONContent[] = []) => {
+    const projection = byKey.get(key);
+    if (!projection) throw new Error(`Missing PRD v2 editor section: ${key}`);
+    return sectionToTiptap(
+      projection,
+      fixedBlock(projection.section.title, "subsection-title"),
+      trailing,
+    );
+  };
+
+  return {
+    type: "doc",
+    content: [
+      stringField(["title"], document.title, "title", "heading", 1, undefined, document.documentId),
+      fixedBlock(versionHistoryText(document), "table"),
+      fixedBlock([
+        document.tableOfContents.title,
+        ...document.tableOfContents.entries,
+      ].join("\n"), "table"),
+      fixedBlock(document.sections.introduction.title, "section-title"),
+      section("v2:introduction.background"),
+      section("v2:introduction.scope"),
+      section("v2:introduction.usageScenarios", [
+        fixedBlock(channelTableText(document), "table"),
+      ]),
+      fixedBlock(document.sections.businessRequirements.title, "section-title"),
+      inlineField(
+        ["sections", "businessRequirements", "summary"],
+        document.sections.businessRequirements.summary,
+        "body",
+      ),
+      section("v2:businessRequirements.pageLinks"),
+      section("v2:businessRequirements.coreRules"),
+      section("v2:businessRequirements.flowAndPages", document.sections.businessRequirements.flowAndPages.diagrams.map((diagram) => (
+        fixedBlock(diagramText(diagram), "diagram")
+      ))),
+      section("v2:businessRequirements.acceptanceCriteria"),
+      {
+        type: "prdSection",
+        attrs: { sectionKey: "v2:degradation", dataId: "section-v2-degradation" },
+        content: [
+          fixedBlock(document.sections.degradation.title, "section-title"),
+          inlineField(
+            ["sections", "degradation", "content"],
+            document.sections.degradation.content,
+            "body",
+          ),
+        ],
+      },
+      {
+        type: "prdSection",
+        attrs: { sectionKey: "v2:safetyBaseline", dataId: "section-v2-safety-baseline" },
+        content: [
+          fixedBlock(document.sections.safetyBaseline.title, "section-title"),
+          fixedBlock(safetyBaselineText(document), "table"),
+        ],
+      },
+    ],
+  };
+}
+
+export function applyTiptapToPrdDocument(
+  base: PrdDocumentV1,
+  content: JSONContent,
+): PrdDocumentV1;
+export function applyTiptapToPrdDocument(
+  base: PrdDocumentV2,
+  content: JSONContent,
+): PrdDocumentV2;
+export function applyTiptapToPrdDocument(
+  base: PrdDocument,
+  content: JSONContent,
+): PrdDocument;
 export function applyTiptapToPrdDocument(
   base: PrdDocument,
   content: JSONContent,
@@ -31,64 +134,124 @@ export function applyTiptapToPrdDocument(
     const valueKind = stringAttribute(node, "prdValueKind");
     if (!encodedPath || (valueKind !== "string" && valueKind !== "inline")) return;
     const path = decodePath(encodedPath);
-    if (!path) return;
+    if (!path || (next.protocol === "workbench.prd.v2" && !isV2EditablePath(path))) return;
     const value = valueKind === "string"
       ? stringFromContent(node.content)
       : inlinesFromContent(node.content);
     setPathValue(next, path, value);
   });
+
+  if (next.protocol === "workbench.prd.v2") {
+    normalizeV2Title(next);
+    rebuildSectionBlocks(v2SectionProjections(next), content);
+    next.sections.degradation.applicable = inlinePlainText(next.sections.degradation.content).trim() !== "不涉及";
+    return next;
+  }
+
+  rebuildSectionBlocks(v1SectionProjections(next), content);
+  return next;
+}
+
+function rebuildSectionBlocks(
+  projections: readonly PrdSectionProjection[],
+  content: JSONContent,
+) {
   const updatedBlocks = new Map(
-    prdSectionKeys.flatMap((key) => next.sections[key].blocks).map((block) => [block.id, block]),
+    projections.flatMap(({ section }) => section.blocks).map((block) => [block.id, block]),
   );
   const sectionNodes = new Map(
     (content.content ?? []).flatMap((node) => {
       const sectionKey = stringAttribute(node, "sectionKey");
-      return node.type === "prdSection" && isPrdSectionKey(sectionKey)
+      return node.type === "prdSection" && sectionKey
         ? [[sectionKey, node] as const]
         : [];
     }),
   );
-  for (const key of prdSectionKeys) {
-    const sectionNode = sectionNodes.get(key);
+  for (const projection of projections) {
+    const sectionNode = sectionNodes.get(projection.key);
     if (!sectionNode) continue;
-    next.sections[key].blocks = (sectionNode.content ?? []).flatMap((node, index) => {
-      if (stringAttribute(node, "prdRole") === "section-title") return [];
-      const block = blockFromTiptapNode(node, key, index, updatedBlocks);
+    projection.section.blocks = (sectionNode.content ?? []).flatMap((node, index) => {
+      if (node.type === "prdFixedBlock" || stringAttribute(node, "prdRole") === "section-title") return [];
+      const block = blockFromTiptapNode(node, projection.key, index, updatedBlocks);
       return block ? [block] : [];
     });
   }
-  return next;
+}
+
+function v1SectionProjections(document: PrdDocumentV1): PrdSectionProjection[] {
+  return prdSectionKeys.map((key) => ({
+    key,
+    path: ["sections", key],
+    section: document.sections[key],
+  }));
+}
+
+function v2SectionProjections(document: PrdDocumentV2): PrdSectionProjection[] {
+  return [
+    {
+      key: "v2:introduction.background",
+      path: ["sections", "introduction", "background"],
+      section: document.sections.introduction.background,
+    },
+    {
+      key: "v2:introduction.scope",
+      path: ["sections", "introduction", "scope"],
+      section: document.sections.introduction.scope,
+    },
+    {
+      key: "v2:introduction.usageScenarios",
+      path: ["sections", "introduction", "usageScenarios"],
+      section: document.sections.introduction.usageScenarios,
+    },
+    {
+      key: "v2:businessRequirements.pageLinks",
+      path: ["sections", "businessRequirements", "pageLinks"],
+      section: document.sections.businessRequirements.pageLinks,
+    },
+    {
+      key: "v2:businessRequirements.coreRules",
+      path: ["sections", "businessRequirements", "coreRules"],
+      section: document.sections.businessRequirements.coreRules,
+    },
+    {
+      key: "v2:businessRequirements.flowAndPages",
+      path: ["sections", "businessRequirements", "flowAndPages"],
+      section: document.sections.businessRequirements.flowAndPages,
+    },
+    {
+      key: "v2:businessRequirements.acceptanceCriteria",
+      path: ["sections", "businessRequirements", "acceptanceCriteria"],
+      section: document.sections.businessRequirements.acceptanceCriteria,
+    },
+  ];
 }
 
 function sectionToTiptap(
-  document: PrdDocument,
-  key: PrdSectionKey,
-  index: number,
+  projection: PrdSectionProjection,
+  heading: JSONContent,
+  trailing: JSONContent[] = [],
 ): JSONContent {
-  const section = document.sections[key];
   return {
     type: "prdSection",
-    attrs: { sectionKey: key, dataId: `section-${key}` },
+    attrs: { sectionKey: projection.key, dataId: `section-${projection.key.replace(/[^A-Za-z0-9]+/gu, "-")}` },
     content: [
-      stringField(
-        ["sections", key, "title"],
-        section.title,
-        "section-title",
-        "heading",
-        2,
-        `${index + 1}. `,
-      ),
-      ...section.blocks.flatMap((block, blockIndex) => blockToTiptap(key, block, blockIndex)),
+      heading,
+      ...projection.section.blocks.flatMap((block, blockIndex) => blockToTiptap(
+        projection.path,
+        block,
+        blockIndex,
+      )),
+      ...trailing,
     ],
   };
 }
 
 function blockToTiptap(
-  sectionKey: PrdSectionKey,
+  sectionPath: readonly PathPart[],
   block: PrdBlock,
   blockIndex: number,
 ): JSONContent[] {
-  const path: PathPart[] = ["sections", sectionKey, "blocks", blockIndex];
+  const path: PathPart[] = [...sectionPath, "blocks", blockIndex];
   switch (block.type) {
     case "paragraph":
       return [inlineField([...path, "content"], block.content, "body", "paragraph", undefined, block.id)];
@@ -266,6 +429,67 @@ function staticField(text: string): JSONContent {
   };
 }
 
+function fixedBlock(
+  text: string,
+  variant: "diagram" | "section-title" | "subsection-title" | "table",
+): JSONContent {
+  return { type: "prdFixedBlock", attrs: { text, variant } };
+}
+
+function versionHistoryText(document: PrdDocumentV2): string {
+  return [
+    "版 本 历 史",
+    "版本/状态 | 作者 | 参与者 | 起止日期 | 备注",
+    ...document.versionHistory.map((entry) => [
+      entry.status,
+      entry.author,
+      entry.participants.join("、"),
+      `${entry.startDate} 至 ${entry.endDate}`,
+      entry.notes,
+    ].join(" | ")),
+  ].join("\n");
+}
+
+function channelTableText(document: PrdDocumentV2): string {
+  const table = document.sections.introduction.usageScenarios.channelTable;
+  return [
+    table.title,
+    "序号 | 活动投放的可选渠道 | 是否投放",
+    ...table.rows.map((row) => (
+      `${row.sequence} | ${prdChannelLabels[row.channel]} | ${row.enabled ? "☑是 □否" : "□是 ☑否"}`
+    )),
+  ].join("\n");
+}
+
+type PrdV2Diagram = PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]["diagrams"][number];
+
+function diagramText(diagram: PrdV2Diagram): string {
+  const labels = new Map(diagram.nodes.map((node) => [node.id, node.label]));
+  return [
+    diagram.title,
+    diagram.description,
+    `节点：${diagram.nodes.map((node) => node.label).join(" -> ")}`,
+    "节点关系：",
+    ...diagram.edges.map((edge) => (
+      `${labels.get(edge.from) ?? edge.from} -> ${labels.get(edge.to) ?? edge.to}${edge.label ? `（${edge.label}）` : ""}`
+    )),
+  ].join("\n");
+}
+
+function safetyBaselineText(document: PrdDocumentV2): string {
+  return [
+    document.sections.safetyBaseline.intro,
+    "",
+    "序号 | 需求安全基线内容 | 范围 | 是否涉及 | 备注",
+    ...document.sections.safetyBaseline.rows.map((row, index) => {
+      const baseline = prdSafetyBaselineItems[index];
+      return baseline
+        ? `${row.sequence} | ${baseline.requirement} | ${baseline.scope} | ${row.applicability} | ${row.remarks ?? "-"}`
+        : "";
+    }),
+  ].join("\n");
+}
+
 function labelNode(text: string): JSONContent {
   return { type: "prdLabel", attrs: { text } };
 }
@@ -309,7 +533,7 @@ function inlineToTiptap(inline: PrdInline): JSONContent {
 
 function blockFromTiptapNode(
   node: JSONContent,
-  sectionKey: PrdSectionKey,
+  sectionKey: string,
   index: number,
   updatedBlocks: ReadonlyMap<string, PrdBlock>,
 ): PrdBlock | null {
@@ -544,8 +768,45 @@ function editorIrId(value: string | null, fallback: string): string {
   return `editor-${seed || "block"}`;
 }
 
-function isPrdSectionKey(value: string | null): value is PrdSectionKey {
-  return value !== null && (prdSectionKeys as readonly string[]).includes(value);
+function isV2EditablePath(path: readonly PathPart[]): boolean {
+  if (pathEquals(path, ["title"])) return true;
+  if (pathEquals(path, ["sections", "businessRequirements", "summary"])) return true;
+  if (pathEquals(path, ["sections", "degradation", "content"])) return true;
+  return [
+    ["sections", "introduction", "background", "blocks"],
+    ["sections", "introduction", "scope", "blocks"],
+    ["sections", "introduction", "usageScenarios", "blocks"],
+    ["sections", "businessRequirements", "pageLinks", "blocks"],
+    ["sections", "businessRequirements", "coreRules", "blocks"],
+    ["sections", "businessRequirements", "flowAndPages", "blocks"],
+    ["sections", "businessRequirements", "acceptanceCriteria", "blocks"],
+  ].some((prefix) => pathStartsWith(path, prefix));
+}
+
+function pathEquals(path: readonly PathPart[], expected: readonly PathPart[]): boolean {
+  return path.length === expected.length && pathStartsWith(path, expected);
+}
+
+function pathStartsWith(path: readonly PathPart[], prefix: readonly PathPart[]): boolean {
+  return prefix.every((part, index) => path[index] === part);
+}
+
+function normalizeV2Title(document: PrdDocumentV2) {
+  const editedTitle = document.title.trim();
+  const workOrderName = editedTitle.endsWith(prdV2TitleSuffix)
+    ? editedTitle.slice(0, -prdV2TitleSuffix.length).trim()
+    : editedTitle;
+  const title = workOrderName ? `${workOrderName}${prdV2TitleSuffix}` : "";
+  document.title = title;
+  document.cover.workOrderName = workOrderName;
+  document.cover.title = title;
+}
+
+function inlinePlainText(inlines: readonly PrdInline[]): string {
+  return inlines.map((inline) => {
+    if (inline.type === "citation" || inline.type === "reference") return inline.label ?? "";
+    return inline.text;
+  }).join("");
 }
 
 function cloneValue<T>(value: T): T {

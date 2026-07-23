@@ -1568,10 +1568,8 @@ textarea:focus-visible {
 
 .workbench-agent-card {
   border: 1px solid rgba(255,255,255,0.08);
-  transition:
-    width 340ms cubic-bezier(0.16, 1, 0.3, 1),
-    height 340ms cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: width, height, transform, opacity;
+  transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: width, transform, opacity;
 }
 
 .workbench-agent-card-base-bg {
@@ -1600,10 +1598,7 @@ textarea:focus-visible {
     rgba(166, 126, 255, 0.24) 82%,
     rgba(67, 207, 194, 0.48)
   );
-  background-size: 180% 180%;
-  animation:
-    workbench-agent-border-orbit 5.2s linear infinite,
-    workbench-agent-border-pan 2.8s ease-in-out infinite;
+  background-size: 100% 100%;
 }
 
 .workbench-agent-card--active .workbench-agent-card-base-bg {
@@ -1614,42 +1609,20 @@ textarea:focus-visible {
 }
 
 .workbench-agent-card--generating {
-  border-color: transparent !important;
+  border-color: rgba(121, 103, 233, 0.34) !important;
   box-shadow:
-    inset 0 0 0 1px rgba(136, 120, 255, 0.24),
-    inset 0 -1px 0 rgba(146, 98, 255, 0.62),
-    inset 1px 0 0 rgba(146, 98, 255, 0.64),
-    0 0 0 1px rgba(72, 203, 190, 0.09),
-    -13px 10px 38px -28px rgba(128, 90, 255, 0.9),
-    14px -12px 42px -32px rgba(72, 203, 190, 0.85),
+    inset 0 -1px 0 rgba(121, 91, 255, 0.34),
     0 24px 88px -46px rgba(0, 0, 0, 0.95);
 }
 
 .workbench-agent-card--generating::before {
-  position: absolute;
-  inset: 0;
-  content: "";
-  pointer-events: none;
-  border-radius: inherit;
-  z-index: 1;
-  background:
-    radial-gradient(circle at center, rgba(62, 157, 184, 0.17), transparent 61%),
-    radial-gradient(circle at center, rgba(126, 82, 205, 0.22), transparent 64%);
-  background-position: 106% -8%, -12% 88%;
-  background-repeat: no-repeat;
-  background-size: 74% 90%, 72% 88%;
-  animation: workbench-agent-color-wash 4.2s linear infinite;
+  content: none;
 }
 
 .workbench-agent-card--generating .workbench-agent-card-base-bg {
   background:
-    radial-gradient(circle at center, rgba(56, 128, 158, 0.19), transparent 62%),
-    radial-gradient(circle at center, rgba(116, 79, 198, 0.23), transparent 64%),
-    linear-gradient(112deg, #18191b 0%, #1b1b20 56%, #17181b 100%);
-  background-position: -28% 14%, 94% 82%, 0 0;
-  background-repeat: no-repeat;
-  background-size: 82% 104%, 76% 102%, 100% 100%;
-  animation: workbench-agent-surface-shift 4.2s linear infinite;
+    radial-gradient(ellipse 56% 46% at 82% 0%, rgba(64, 151, 141, 0.07), transparent 100%),
+    linear-gradient(112deg, #151619 0%, #19191d 56%, #18171d 100%);
 }
 
 .workbench-agent-card--generating .workbench-agent-card-shade {
@@ -1670,7 +1643,6 @@ textarea:focus-visible {
     rgba(65, 169, 190, 0.92) 100%
   );
   background-size: 100% 100%;
-  animation: workbench-agent-border-orbit 3.8s linear infinite;
   padding: 1.5px;
 }
 

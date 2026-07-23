@@ -52,6 +52,14 @@ function literalValue(schema) {
   return Array.isArray(schema?.enum) && schema.enum.length === 1 ? schema.enum[0] : undefined;
 }
 
+function literalValues(schema) {
+  const directValue = literalValue(schema);
+  if (directValue !== undefined) return [directValue];
+  return (schema?.oneOf ?? schema?.anyOf ?? [])
+    .map((entry) => literalValue(resolveSchema(entry)))
+    .filter((value) => value !== undefined);
+}
+
 function resolveSchema(schema) {
   return schema?.$ref ? resolvePointer(schema.$ref) : schema;
 }
@@ -416,8 +424,8 @@ for (const forbiddenField of ["token", "tokenHash", "storageKey", "createdById"]
 }
 assert(!schemas.ShareGrant.properties.tokenHash && !schemas.ShareGrant.properties.token, "ShareGrant must not expose bearer-token material");
 assert(JSON.stringify(refNames(schemas.PublicArtifactVersionDetail)) === JSON.stringify([
-  "PublicArtifactVersionInlineDetail", "PublicArtifactVersionBlobDetail",
-]), "PublicArtifactVersionDetail must be an inline/blob union");
+  "PublicArtifactVersionInlineDetail", "PublicArtifactVersionInlinePrdV2Detail", "PublicArtifactVersionBlobDetail",
+]), "PublicArtifactVersionDetail must preserve the legacy inline branch and add PRD v2 independently");
 for (const forbiddenField of ["createdByRunId", "knowledgeReleaseId", "contentBlobId", "storageKey", "tokenHash"]) {
   assert(!schemas.PublicArtifactVersionBlobDetail.properties[forbiddenField], `PublicArtifactVersionBlobDetail must not expose ${forbiddenField}`);
 }
@@ -593,7 +601,31 @@ assert(JSON.stringify(refNames(schemas.PrdBlock)) === JSON.stringify(expectedPrd
 assert(JSON.stringify(refNames(schemas.PrdInline)) === JSON.stringify([
   "PrdTextInline", "PrdLinkInline", "PrdCitationInline", "PrdReferenceInline",
 ]), "PrdInline whitelist changed without a protocol version bump");
-assert(literalValue(schemas.PrdDocument.properties.protocol) === "workbench.prd.v1", "PrdDocument protocol must be workbench.prd.v1");
+assert(JSON.stringify(refNames(schemas.PrdDocument)) === JSON.stringify([
+  "PrdDocumentV1", "PrdDocumentV2",
+]), "PrdDocument must expose the supported v1/v2 protocol union");
+assert(literalValue(schemas.PrdDocumentV1.properties.protocol) === "workbench.prd.v1", "PrdDocumentV1 protocol must be workbench.prd.v1");
+assert(literalValue(schemas.PrdDocumentV2.properties.protocol) === "workbench.prd.v2", "PrdDocumentV2 protocol must be workbench.prd.v2");
+assert(JSON.stringify(schemas.PrdDocumentV2.required) === JSON.stringify([
+  "protocol", "documentId", "title", "revision", "cover", "versionHistory",
+  "tableOfContents", "assumptions", "citations", "sections",
+]), "PrdDocumentV2 must retain the complete requirement-document structure");
+assert(literalValue(schemas.PrdDocumentV2.properties.tableOfContents.properties.title) === "目 录", "PrdDocumentV2 must retain the fixed table-of-contents title");
+assert(schemas.PrdDocumentV2.properties.tableOfContents.properties.entries.minItems === 11
+  && schemas.PrdDocumentV2.properties.tableOfContents.properties.entries.maxItems === 11,
+"PrdDocumentV2 must retain exactly 11 table-of-contents entries");
+assert(schemas.PrdDocumentV2.properties.sections.properties.introduction.properties.usageScenarios.properties.channelTable.properties.rows.minItems === 3
+  && schemas.PrdDocumentV2.properties.sections.properties.introduction.properties.usageScenarios.properties.channelTable.properties.rows.maxItems === 3,
+"PrdDocumentV2 must retain exactly three canonical channel rows");
+assert(schemas.PrdDocumentV2.properties.sections.properties.businessRequirements.properties.flowAndPages.properties.diagrams.minItems === 2
+  && schemas.PrdDocumentV2.properties.sections.properties.businessRequirements.properties.flowAndPages.properties.diagrams.maxItems === 2,
+"PrdDocumentV2 must retain the product-flow and product-architecture diagrams");
+assert(schemas.PrdDocumentV2.properties.sections.properties.safetyBaseline.properties.rows.minItems === 21
+  && schemas.PrdDocumentV2.properties.sections.properties.safetyBaseline.properties.rows.maxItems === 21,
+"PrdDocumentV2 must retain the complete 21-row safety baseline");
+assert(JSON.stringify(schemas.PrdSafetyBaselineRow.properties.applicability.enum) === JSON.stringify([
+  "是", "否", "不涉及",
+]), "PRD safety applicability must remain a closed three-value contract");
 
 const expectedPrototypeNodes = [
   "PrototypeFrameNode", "PrototypeFormNode", "PrototypeTextNode", "PrototypeIconNode",
@@ -611,10 +643,11 @@ for (const field of ["screens", "nodes", "tokens", "assets", "states", "actions"
 }
 
 assert(JSON.stringify(refNames(schemas.ArtifactVersionDetail)) === JSON.stringify([
-  "ArtifactVersionInlineDetail", "ArtifactVersionBlobDetail",
-]), "ArtifactVersionDetail must be an inline/blob union");
+  "ArtifactVersionInlineDetail", "ArtifactVersionInlinePrdV2Detail", "ArtifactVersionBlobDetail",
+]), "ArtifactVersionDetail must preserve the legacy inline branch and add PRD v2 independently");
 for (const [schemaName, kind] of [
   ["ArtifactVersionInlinePrdDetail", "prd"],
+  ["ArtifactVersionInlinePrdV2Detail", "prd"],
   ["ArtifactVersionInlinePrototypeDetail", "prototype"],
   ["ArtifactVersionInlineDesignSystemDetail", "design_system"],
   ["ArtifactVersionInlineImageDetail", "image"],
@@ -624,12 +657,16 @@ for (const [schemaName, kind] of [
 ]) {
   assert(literalValue(schemas[schemaName].properties.kind) === kind, `${schemaName} must retain kind ${kind}`);
 }
-assert(literalValue(schemas.ArtifactVersionInlinePrdDetail.properties?.schemaVersion) === 1, "Inline PRD schemaVersion must be 1");
+assert(literalValue(schemas.ArtifactVersionInlinePrdDetail.properties?.schemaVersion) === 1, "Inline PRD v1 schemaVersion must be 1");
+assert(literalValue(schemas.ArtifactVersionInlinePrdV2Detail.properties?.schemaVersion) === 2, "Inline PRD v2 schemaVersion must be 2");
+assert(schemas.ArtifactVersionInlinePrdDetail.properties?.content?.$ref === "#/components/schemas/PrdDocumentV1", "Inline PRD v1 must retain the legacy response shape");
+assert(schemas.ArtifactVersionInlinePrdV2Detail.properties?.content?.$ref === "#/components/schemas/PrdDocumentV2", "Inline PRD v2 must use the fixed requirement-document contract");
 assert(literalValue(schemas.ArtifactVersionInlinePrototypeDetail.properties?.schemaVersion) === 1, "Inline Prototype schemaVersion must be 1");
 assert(literalValue(schemas.ArtifactVersionInlineDesignSystemDetail.properties?.schemaVersion) === 1, "Inline Design System schemaVersion must be 1");
 assert(schemas.Artifact.required.includes("revision"), "Artifact must expose its mutable revision");
 for (const schemaName of [
-  "ArtifactVersionBlobDetail", "ArtifactVersionInlinePrdDetail", "ArtifactVersionInlinePrototypeDetail",
+  "ArtifactVersionBlobDetail", "ArtifactVersionInlinePrdDetail", "ArtifactVersionInlinePrdV2Detail",
+  "ArtifactVersionInlinePrototypeDetail",
   "ArtifactVersionInlineDesignSystemDetail",
   "ArtifactVersionInlineImageDetail", "ArtifactVersionInlineCodeDetail",
   "ArtifactVersionInlineDocumentDetail", "ArtifactVersionInlineDataDetail",
@@ -643,7 +680,6 @@ assert(JSON.stringify(refNames(schemas.RuntimeArtifactDraft)) === JSON.stringify
 ]), "RuntimeArtifactDraft must be kind-discriminated");
 assert(schemas.RuntimeArtifactDraft.description.includes("top-level citations exactly match"), "RuntimeArtifactDraft must document its citation equality refinement");
 for (const [schemaName, kind] of [
-  ["RuntimeArtifactDraftPrd", "prd"],
   ["RuntimeArtifactDraftPrototype", "prototype"],
   ["RuntimeArtifactDraftImage", "image"],
   ["RuntimeArtifactDraftCode", "code"],
@@ -652,7 +688,19 @@ for (const [schemaName, kind] of [
 ]) {
   assert(literalValue(schemas[schemaName].properties.kind) === kind, `${schemaName} must retain kind ${kind}`);
 }
-assert(literalValue(schemas.RuntimeArtifactDraftPrd.properties.schemaVersion) === 1, "Runtime PRD draft schemaVersion must be 1");
+assert(JSON.stringify(refNames(schemas.RuntimeArtifactDraftPrd)) === JSON.stringify([
+  "RuntimeArtifactDraftPrdV1Revision", "RuntimeArtifactDraftPrdV2",
+]), "Runtime PRD drafts must expose version-paired v1 revision and v2 branches");
+for (const [schemaName, version, contentSchema] of [
+  ["RuntimeArtifactDraftPrdV1Revision", 1, "PrdDocumentV1"],
+  ["RuntimeArtifactDraftPrdV2", 2, "PrdDocumentV2"],
+]) {
+  assert(literalValue(schemas[schemaName].properties.kind) === "prd", `${schemaName} must retain kind prd`);
+  assert(literalValue(schemas[schemaName].properties.schemaVersion) === version, `${schemaName} must bind schemaVersion ${version}`);
+  assert(schemas[schemaName].properties.content.$ref === `#/components/schemas/${contentSchema}`, `${schemaName} must bind ${contentSchema}`);
+}
+assert(literalValue(schemas.RuntimeArtifactDraftPrdV1Revision.properties.operation.properties.kind) === "revise", "Runtime PRD v1 must remain revision-only");
+assert(JSON.stringify(schemas.RuntimeArtifactDraftPrdV2.properties.operation.oneOf.map((option) => literalValue(option.properties.kind))) === JSON.stringify(["create", "revise"]), "Runtime PRD v2 must allow create and revise operations");
 assert(literalValue(schemas.RuntimeArtifactDraftPrototype.properties.schemaVersion) === 1, "Runtime Prototype draft schemaVersion must be 1");
 for (const schemaName of ["RuntimeArtifactDraftImage", "RuntimeArtifactDraftCode", "RuntimeArtifactDraftDocument", "RuntimeArtifactDraftData"]) {
   assert(schemas[schemaName].properties.content.$ref === "#/components/schemas/JsonValue", `${schemaName} must use JsonValue`);

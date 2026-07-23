@@ -9,7 +9,6 @@ import {
   projectPrototypeScreen,
   runtimeResultSchema,
   type CanvasAgentToolDescriptor,
-  type PrdDocument,
 } from "@workbench/workbench-contracts";
 import { createKnowledgeToolGrant, verifyKnowledgeToolGrant } from "@workbench/workbench-knowledge";
 import { afterEach } from "vitest";
@@ -952,16 +951,8 @@ describe("DeerFlow runtime adapter", () => {
 
   it("requires one validated submit ToolMessage from the current turn", () => {
     const result = {
-      protocol: "workbench.runtime.result.v1" as const,
+      ...runtimeResultSchema.parse(prdRuntimeResultExample),
       message: "done",
-      artifacts: [{
-        kind: "prd" as const,
-        title: "PRD",
-        schemaVersion: 1 as const,
-        operation: { kind: "create" as const },
-        content: minimalPrdDocument(),
-        citations: [],
-      }],
     };
     expect(resolveRuntimeResult({
       values: {
@@ -977,6 +968,32 @@ describe("DeerFlow runtime adapter", () => {
     });
     expect(() => resolveRuntimeResult({ workbench_result: result }, ["prd"], execution()))
       .toThrow("RUNTIME_RESULT_SUBMISSION_MISSING");
+  });
+
+  it("rejects Runtime artifacts outside the explicitly requested kinds", () => {
+    const result = {
+      ...runtimeResultSchema.parse(prdRuntimeResultExample),
+      artifacts: [
+        ...runtimeResultSchema.parse(prdRuntimeResultExample).artifacts,
+        {
+          kind: "prototype" as const,
+          title: "Unexpected prototype",
+          schemaVersion: 1 as const,
+          operation: { kind: "create" as const },
+          content: minimalPrototypeDocument(),
+          citations: [],
+        },
+      ],
+    };
+
+    expect(() => resolveRuntimeResult({
+      values: {
+        messages: [
+          { type: "human", content: "只生成 PRD" },
+          ...validatedResultToolMessages(result),
+        ],
+      },
+    }, ["prd"], execution())).toThrow("RUNTIME_ARTIFACTS_UNREQUESTED:prototype");
   });
 
   it("accepts Node-canonical numeric payloads and rejects nested result tampering", () => {
@@ -1246,7 +1263,7 @@ describe("DeerFlow runtime adapter", () => {
     );
   });
 
-  it("injects a complete schema-valid PRD starter into PRD runtime inputs", async () => {
+  it("routes PRD runtime inputs to the installed v2 reference without embedding sample content", async () => {
     let submittedBody: {
       input: { messages: Array<{ content: string }> };
     } | undefined;
@@ -1275,10 +1292,9 @@ describe("DeerFlow runtime adapter", () => {
     }), observer());
 
     const content = submittedBody?.input.messages[0]?.content ?? "";
-    const match = /<workbench_prd_result_contract>\n[^\n]+\n([\s\S]*?)\n<\/workbench_prd_result_contract>/u
-      .exec(content);
-    expect(match?.[1]).toBeTruthy();
-    expect(runtimeResultSchema.parse(JSON.parse(match![1]!))).toEqual(runtimePrdResultStarter);
+    expect(content).toContain("references/prd-runtime-result.example.json exactly once");
+    expect(content).not.toContain("<workbench_prd_result_starter>");
+    expect(content).not.toContain(JSON.stringify(runtimePrdResultStarter));
     expect(content).toMatch(/<\/workbench_prd_result_contract>\nBuild the product$/u);
   });
 
@@ -3695,110 +3711,5 @@ function minimalPrototypeDocument() {
     actions: [],
     bindings: [],
     motions: [],
-  };
-}
-
-function minimalPrdDocument(): PrdDocument {
-  const text = (value: string) => [{ type: "text" as const, text: value, marks: [] }];
-
-  return {
-    protocol: "workbench.prd.v1",
-    documentId: "prd-doc",
-    title: "PRD",
-    revision: {
-      number: 1,
-      status: "draft",
-      summary: "Initial test revision",
-      changedAt: "2026-07-12T00:00:00.000Z",
-      changedById: null,
-    },
-    assumptions: [],
-    citations: [],
-    sections: {
-      executiveSummary: {
-        title: "Executive summary",
-        blocks: [{ id: "summary", type: "paragraph", content: text("Summary") }],
-      },
-      problem: {
-        title: "Problem",
-        blocks: [{ id: "problem", type: "paragraph", content: text("Problem") }],
-      },
-      goals: {
-        title: "Goals",
-        blocks: [{
-          id: "goal-main",
-          type: "goal",
-          title: "Main goal",
-          description: text("Goal description"),
-          successMetric: "A measurable result",
-          priority: "primary",
-        }],
-      },
-      targetUsers: {
-        title: "Target users",
-        blocks: [{
-          id: "persona-main",
-          type: "persona",
-          name: "Primary user",
-          description: text("User description"),
-          needs: ["Complete the workflow"],
-          painPoints: ["Current workflow is slow"],
-        }],
-      },
-      scope: {
-        title: "Scope",
-        blocks: [{
-          id: "scope-list",
-          type: "bulletList",
-          items: [{ id: "scope-item", content: text("In scope") }],
-        }],
-      },
-      requirements: {
-        title: "Requirements",
-        blocks: [{
-          id: "requirement-main",
-          type: "requirement",
-          title: "Core requirement",
-          description: text("Requirement description"),
-          priority: "must",
-          goalIds: ["goal-main"],
-          acceptanceCriterionIds: ["criterion-main"],
-        }],
-      },
-      userFlows: {
-        title: "User flows",
-        blocks: [{
-          id: "flow-main",
-          type: "flow",
-          title: "Primary flow",
-          actor: "Primary user",
-          trigger: "Starts the workflow",
-          steps: [{ id: "flow-step", text: "Complete the action", requirementIds: ["requirement-main"] }],
-          outcome: "The workflow completes",
-        }],
-      },
-      acceptanceCriteria: {
-        title: "Acceptance criteria",
-        blocks: [{
-          id: "criterion-main",
-          type: "acceptanceCriterion",
-          requirementIds: ["requirement-main"],
-          given: text("Given valid input"),
-          when: text("When the user submits"),
-          then: text("Then the action succeeds"),
-        }],
-      },
-      risksAndDependencies: {
-        title: "Risks and dependencies",
-        blocks: [{
-          id: "risk-main",
-          type: "risk",
-          description: text("Delivery risk"),
-          likelihood: "low",
-          impact: "medium",
-          mitigation: text("Monitor the dependency"),
-        }],
-      },
-    },
   };
 }

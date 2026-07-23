@@ -336,6 +336,7 @@ export class ArtifactsService {
   ): Promise<CreateArtifactVersionResult> {
     validateIdempotencyKey(idempotencyKey);
     await this.requireAuthorizedArtifact(principalId, artifactId, "edit");
+    const documentSchemaVersion = editableDocumentSchemaVersion(request);
     const requestHash = hashRequest(request);
     const replay = await this.findEditReceipt(artifactId, idempotencyKey);
     if (replay) return resolveEditReplay(replay, principalId, requestHash);
@@ -395,7 +396,9 @@ export class ArtifactsService {
           || artifact.currentVersionId !== base.id
           || base.projectId !== artifact.projectId
           || base.status !== "ready"
-          || base.schemaVersion !== 1
+          || (request.kind === "prototype"
+            ? base.schemaVersion !== 1
+            : base.schemaVersion !== 1 && base.schemaVersion !== 2)
           || base.content === null
           || base.contentBlobId !== null
         ) {
@@ -410,6 +413,18 @@ export class ArtifactsService {
           assertPrototypeEditContinuity(baseDocument, request.document, base.assets);
         } else {
           const baseDocument = prdDocumentSchema.parse(base.content);
+          if (prdDocumentSchemaVersion(baseDocument) !== base.schemaVersion) {
+            throw artifactVersionWriteConflictProblem(
+              "ARTIFACT_VERSION_BASE_NOT_CURRENT",
+              "baseArtifactVersionId must be the current ready inline version",
+            );
+          }
+          if (base.schemaVersion !== documentSchemaVersion) {
+            throw artifactVersionWriteConflictProblem(
+              "ARTIFACT_DOCUMENT_SCHEMA_VERSION_MISMATCH",
+              "Edited PrdDocument must retain the base schema version",
+            );
+          }
           assertPrdEditContinuity(baseDocument, request.document);
           if (base.assets.length > 0) {
             throw artifactVersionWriteConflictProblem(
@@ -431,7 +446,7 @@ export class ArtifactsService {
             artifactId,
             projectId: artifact.projectId,
             version: (latest?.version ?? 0) + 1,
-            schemaVersion: 1,
+            schemaVersion: documentSchemaVersion,
             status: "staging",
             content: request.document as Prisma.InputJsonValue,
             checksum,
@@ -1021,6 +1036,14 @@ function assertPrdEditContinuity(base: PrdDocument, next: PrdDocument) {
       "Edited PrdDocument must retain the base citations",
     );
   }
+}
+
+function editableDocumentSchemaVersion(request: CreateArtifactVersionRequest): 1 | 2 {
+  return request.kind === "prd" ? prdDocumentSchemaVersion(request.document) : 1;
+}
+
+function prdDocumentSchemaVersion(document: PrdDocument): 1 | 2 {
+  return document.protocol === "workbench.prd.v2" ? 2 : 1;
 }
 
 function assertPrototypeEditContinuity(

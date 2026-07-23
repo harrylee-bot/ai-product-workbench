@@ -70,6 +70,48 @@ const PrdSection = Node.create({
   },
 });
 
+const PrdFixedBlock = Node.create({
+  name: "prdFixedBlock",
+  group: "block",
+  atom: true,
+  isolating: true,
+  selectable: false,
+  addAttributes() {
+    return {
+      text: {
+        default: "",
+        parseHTML: (element) => element.getAttribute("data-prd-fixed-text") ?? "",
+        renderHTML: (attributes) => ({ "data-prd-fixed-text": attributes.text }),
+      },
+      variant: {
+        default: "table",
+        parseHTML: (element) => element.getAttribute("data-prd-fixed-block") ?? "table",
+        renderHTML: (attributes) => ({ "data-prd-fixed-block": attributes.variant }),
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "div[data-prd-fixed-block]" }];
+  },
+  renderHTML({ HTMLAttributes, node }) {
+    const className = node.attrs.variant === "section-title"
+      ? "mb-[20px] mt-[8px] whitespace-pre-wrap text-[30px] font-semibold leading-[1.25] text-[#f1f3f4]"
+      : node.attrs.variant === "subsection-title"
+        ? "mb-[18px] whitespace-pre-wrap text-[22px] font-semibold leading-[1.35] text-[#f1f3f4]"
+        : node.attrs.variant === "diagram"
+          ? "my-[24px] whitespace-pre-wrap border-y border-white/[0.12] py-[18px] text-[14px] leading-[23px] text-[#d8dce2]"
+          : "my-[20px] whitespace-pre-wrap border border-white/[0.12] p-[14px] text-[13px] leading-[22px] text-[#c7cad0]";
+    return [
+      "div",
+      mergeAttributes(HTMLAttributes, {
+        class: className,
+        contenteditable: "false",
+      }),
+      node.attrs.text,
+    ];
+  },
+});
+
 const PrdCard = Node.create({
   name: "prdCard",
   group: "block",
@@ -227,6 +269,7 @@ export const workbenchPrdExtensions: Extensions = [
     updateDocument: false,
   }),
   PrdFieldAttributes,
+  PrdFixedBlock,
   PrdSection,
   PrdCard,
   PrdLabel,

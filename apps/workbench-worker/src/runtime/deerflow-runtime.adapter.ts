@@ -993,6 +993,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     };
     const resultGuidance = runtimePrdResultGuidance(
       execution.request.requestedArtifactKinds,
+      execution.request.workflow,
     );
     return {
       input: execution.resume ? null : {
@@ -1564,6 +1565,15 @@ export function resolveRuntimeResult(
   const result = submissions[0]!.result;
   const missing = requestedKinds.filter((kind) => !result.artifacts.some((artifact) => artifact.kind === kind));
   if (missing.length) throw new Error(`RUNTIME_ARTIFACTS_MISSING:${missing.join(",")}`);
+  const requested = new Set(requestedKinds);
+  const unrequested = [...new Set(
+    result.artifacts
+      .map((artifact) => artifact.kind)
+      .filter((kind) => !requested.has(kind)),
+  )];
+  if (unrequested.length) {
+    throw new Error(`RUNTIME_ARTIFACTS_UNREQUESTED:${unrequested.join(",")}`);
+  }
   return result;
 }
 

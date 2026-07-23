@@ -112,6 +112,7 @@ export function WorkbenchPrdArtifactEditor({
     try {
       await onDocumentCommit(reference, parsed.data);
       baselineRef.current = parsed.data;
+      editor?.commands.setContent(prdDocumentToTiptap(parsed.data), { emitUpdate: false });
       setDraft(parsed.data);
       setDirty(false);
     } catch (cause) {
@@ -119,7 +120,7 @@ export function WorkbenchPrdArtifactEditor({
     } finally {
       setSaving(false);
     }
-  }, [dirty, draft, editingBusy, onDocumentCommit, reference, saving]);
+  }, [dirty, draft, editingBusy, editor, onDocumentCommit, reference, saving]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

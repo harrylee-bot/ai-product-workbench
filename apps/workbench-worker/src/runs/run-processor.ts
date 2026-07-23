@@ -306,8 +306,8 @@ export class RunProcessor {
       ) {
         await this.persistProgress(claim, {
           type: "phase",
-          phase: "generating",
-          label: "正在生成需求文档",
+          phase: "planning",
+          label: "正在整理需求结构",
           progress: null,
         });
       }
@@ -416,6 +416,21 @@ export class RunProcessor {
       if (outcome.protocol === "workbench.runtime.input-required.v1") {
         await this.waitForInput(claim, outcome);
         return { runId, approvalCount: outcome.approvals.length, waitingInput: true };
+      }
+      if (outcome.artifacts.some((artifact) => artifact.kind === "prd")) {
+        await this.persistProgress(claim, {
+          type: "phase",
+          phase: "validating",
+          label: "正在校验需求说明书",
+          progress: null,
+        });
+        validateRuntimeArtifactOperations(prepared.request, outcome);
+        await this.persistProgress(claim, {
+          type: "phase",
+          phase: "publishing",
+          label: "正在发布需求说明书",
+          progress: null,
+        });
       }
       await this.publishResult(
         claim,
@@ -2308,7 +2323,7 @@ export function boardPlacementsForArtifact(
   return [{
     key: "root",
     size: draft.kind === "prd"
-      ? { width: 1120, height: 1440 }
+      ? { width: 500, height: 500 }
       : { width: 800, height: 600 },
     data: {
       protocol: boardNodeProtocol,
@@ -2333,6 +2348,15 @@ export function validateRuntimeArtifactOperations(
   request: StartRunRequest,
   result: RuntimeResult,
 ) {
+  const requestedKinds = new Set(request.requestedArtifactKinds);
+  const unrequestedKinds = [...new Set(
+    result.artifacts
+      .map((draft) => draft.kind)
+      .filter((kind) => !requestedKinds.has(kind)),
+  )];
+  if (unrequestedKinds.length > 0) {
+    throw new Error(`RUNTIME_ARTIFACTS_UNREQUESTED:${unrequestedKinds.join(",")}`);
+  }
   const revisions = result.artifacts.filter((draft) => draft.operation.kind === "revise");
   if (request.workflow !== "edit") {
     if (revisions.length > 0) throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
@@ -2627,6 +2651,9 @@ function assertRuntimeArtifactRevisionContent(
     if (selectedScreenIds.length > 0) throw new Error("RUNTIME_ARTIFACT_REVISION_SCREEN_INVALID");
     if (next.documentId !== base.documentId || next.revision.number <= base.revision.number) {
       throw new Error("RUNTIME_ARTIFACT_REVISION_CONTINUITY_INVALID");
+    }
+    if (canonicalJson(next.citations) !== canonicalJson(base.citations)) {
+      throw new Error("RUNTIME_ARTIFACT_REVISION_CITATIONS_INVALID");
     }
     return;
   }

@@ -25,6 +25,7 @@ import {
 import { useMemo } from "react";
 
 import type { WorkbenchApiClient } from "../../../api/client";
+import type { components } from "../../../api/schema";
 import { isWorkbenchBlob } from "../../../transport/blob";
 import { useWorkbenchTransport } from "../../../transport/context";
 import {
@@ -98,7 +99,7 @@ export class WorkbenchArtifactsApi {
           "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey),
         },
       },
-      body: createArtifactVersionRequestSchema.parse(request),
+      body: createArtifactVersionRequestSchema.parse(request) as components["schemas"]["CreateArtifactVersionRequest"],
     });
     return versioned(
       artifactVersionDetailSchema,

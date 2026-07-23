@@ -50,6 +50,10 @@ const runtimeProviderStateMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260723010000_runtime_provider_state_v2/migration.sql",
   import.meta.url,
 ), "utf8");
+const prdV2ArtifactVersionGuardsMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260723020000_prd_v2_artifact_version_guards/migration.sql",
+  import.meta.url,
+), "utf8");
 const extensionProvisioning = await readFile(new URL(
   "../deploy/workbench-postgres-extensions.sql",
   import.meta.url,
@@ -84,7 +88,7 @@ test("export packaging backfill restores the mutation guard", () => {
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 67, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 68, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -254,6 +258,52 @@ test("Runtime provider state v2 is scoped, monotonic, bounded, and finalization-
   assert.match(runtimeProviderStateMigration, /COMMIT;\s*$/u);
   assert.doesNotMatch(runtimeProviderStateMigration, /DELETE FROM "runtime_external_events"/u);
   assert.doesNotMatch(runtimeProviderStateMigration, /UPDATE "runtime_external_events"/u);
+});
+
+test("PRD ArtifactVersion guards bind v1 and v2 schemas to their exact protocols", () => {
+  assert.match(prdV2ArtifactVersionGuardsMigration, /^BEGIN;/u);
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /CREATE OR REPLACE FUNCTION "guard_artifact_version_update"\(\)/u,
+  );
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /CREATE OR REPLACE FUNCTION "guard_artifact_version_edit_receipt"\(\)/u,
+  );
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /NEW\."schema_version" IS DISTINCT FROM 1\s+AND NEW\."schema_version" IS DISTINCT FROM 2/u,
+  );
+  assert.match(prdV2ArtifactVersionGuardsMigration, /CASE NEW\."schema_version"/u);
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /WHEN 1 THEN NEW\."content"->>'protocol' IS DISTINCT FROM 'workbench\.prd\.v1'/u,
+  );
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /WHEN 2 THEN NEW\."content"->>'protocol' IS DISTINCT FROM 'workbench\.prd\.v2'/u,
+  );
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /jsonb_typeof\(NEW\."content"\) IS DISTINCT FROM 'object'/u,
+  );
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /NEW\."content"->'citations' IS DISTINCT FROM NEW\."citations"/u,
+  );
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /artifact_kind IN \('prototype', 'design_system'\)[\s\S]*NEW\."schema_version" IS DISTINCT FROM 1/u,
+  );
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /artifact_kind = 'prd'::"ArtifactKind"[\s\S]*base_schema_version IS DISTINCT FROM result_schema_version[\s\S]*result_schema_version IS DISTINCT FROM 1[\s\S]*result_schema_version IS DISTINCT FROM 2/u,
+  );
+  assert.match(
+    prdV2ArtifactVersionGuardsMigration,
+    /ALTER FUNCTION %I\.%I\(\) SET search_path TO %s/u,
+  );
+  assert.match(prdV2ArtifactVersionGuardsMigration, /COMMIT;\s*$/u);
 });
 
 test("all application trigger functions use a fixed trusted search path", () => {

@@ -833,9 +833,99 @@ async function runConstraintChecks(db) {
     await insertVersion(db, { version: 0 });
   }, constraint("23514", "artifact_versions_version_positive_check"));
 
-  await expectReject(db, "ArtifactVersion schema version must match PRD v1", async () => {
+  await expectAccept(db, "ArtifactVersion accepts the PRD v1 schema and protocol pair", async () => {
+    await insertVersion(db);
+  });
+
+  await expectAccept(db, "ArtifactVersion accepts the PRD v2 schema and protocol pair", async () => {
+    await insertVersion(db, {
+      schemaVersion: 2,
+      content: { protocol: "workbench.prd.v2", citations: [] },
+    });
+  });
+
+  await expectReject(db, "ArtifactVersion rejects PRD schema v1 with protocol v2", async () => {
+    await insertVersion(db, {
+      content: { protocol: "workbench.prd.v2", citations: [] },
+    });
+  }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
+
+  await expectReject(db, "ArtifactVersion rejects PRD schema v2 with protocol v1", async () => {
     await insertVersion(db, { schemaVersion: 2 });
+  }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
+
+  await expectReject(db, "ArtifactVersion rejects an unsupported PRD schema version", async () => {
+    await insertVersion(db, {
+      schemaVersion: 3,
+      content: { protocol: "workbench.prd.v2", citations: [] },
+    });
   }, trigger("23514", "ARTIFACT_SCHEMA_VERSION_INVALID"));
+
+  await expectReject(db, "ArtifactVersion rejects a PRD document with a missing protocol", async () => {
+    await insertVersion(db, {
+      schemaVersion: 2,
+      content: { citations: [] },
+    });
+  }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
+
+  await expectReject(db, "ArtifactVersion rejects a PRD document with a null protocol", async () => {
+    await insertVersion(db, {
+      schemaVersion: 2,
+      content: { protocol: null, citations: [] },
+    });
+  }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
+
+  await expectReject(db, "ArtifactVersion rejects a scalar PRD document", async () => {
+    await insertVersion(db, {
+      schemaVersion: 2,
+      content: "workbench.prd.v2",
+    });
+  }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
+
+  await expectReject(db, "Prototype ArtifactVersion remains schema v1 only", async () => {
+    await insertVersion(db, {
+      artifactId: "artifact-prototype",
+      schemaVersion: 2,
+      content: { protocol: "workbench.prototype.v1", assets: [] },
+    });
+  }, trigger("23514", "ARTIFACT_SCHEMA_VERSION_INVALID"));
+
+  await expectReject(db, "Design System ArtifactVersion remains schema v1 only", async () => {
+    await insertVersion(db, {
+      artifactId: "artifact-design-a",
+      schemaVersion: 2,
+      content: designSystemDocumentFixture(),
+      createdByRunId: null,
+    });
+  }, trigger("23514", "ARTIFACT_SCHEMA_VERSION_INVALID"));
+
+  await expectAccept(db, "ArtifactVersion edit receipt accepts PRD v1 continuity", async () => {
+    await insertPrdEditReceiptCandidate(db, {
+      baseSchemaVersion: 1,
+      resultSchemaVersion: 1,
+    });
+  });
+
+  await expectAccept(db, "ArtifactVersion edit receipt accepts PRD v2 continuity", async () => {
+    await insertPrdEditReceiptCandidate(db, {
+      baseSchemaVersion: 2,
+      resultSchemaVersion: 2,
+    });
+  });
+
+  await expectReject(db, "ArtifactVersion edit receipt rejects PRD v1 to v2 conversion", async () => {
+    await insertPrdEditReceiptCandidate(db, {
+      baseSchemaVersion: 1,
+      resultSchemaVersion: 2,
+    });
+  }, trigger("23514", "ARTIFACT_VERSION_EDIT_RECEIPT_RESULT_INVALID"));
+
+  await expectReject(db, "ArtifactVersion edit receipt rejects PRD v2 to v1 conversion", async () => {
+    await insertPrdEditReceiptCandidate(db, {
+      baseSchemaVersion: 2,
+      resultSchemaVersion: 1,
+    });
+  }, trigger("23514", "ARTIFACT_VERSION_EDIT_RECEIPT_RESULT_INVALID"));
 
   await expectReject(db, "ArtifactVersion checksum must be lowercase SHA-256", async () => {
     await insertVersion(db, { checksum: "not-a-sha256" });
@@ -4774,6 +4864,65 @@ async function insertVersion(db, overrides = {}) {
     version.createdByRunId,
     version.knowledgeReleaseId,
   ]);
+}
+
+async function insertPrdEditReceiptCandidate(db, {
+  baseSchemaVersion,
+  resultSchemaVersion,
+}) {
+  const revisionResult = await db.query(`
+    SELECT "revision"
+    FROM "artifacts"
+    WHERE "id" = 'artifact-a'
+  `);
+  assert.equal(revisionResult.rowCount, 1);
+  const initialRevision = revisionResult.rows[0].revision;
+  const document = (schemaVersion) => ({
+    protocol: `workbench.prd.v${schemaVersion}`,
+    citations: [],
+  });
+
+  await insertVersion(db, {
+    id: "candidate-edit-base-version",
+    version: 110,
+    schemaVersion: baseSchemaVersion,
+    status: "ready",
+    content: document(baseSchemaVersion),
+    checksum: "1".repeat(64),
+    createdByRunId: null,
+  });
+  await db.query(`
+    UPDATE "artifacts"
+    SET "current_version_id" = 'candidate-edit-base-version'
+    WHERE "id" = 'artifact-a'
+  `);
+
+  await insertVersion(db, {
+    id: "candidate-edit-result-version",
+    version: 111,
+    schemaVersion: resultSchemaVersion,
+    status: "ready",
+    content: document(resultSchemaVersion),
+    checksum: "2".repeat(64),
+    createdByRunId: null,
+  });
+  await db.query(`
+    UPDATE "artifacts"
+    SET "current_version_id" = 'candidate-edit-result-version'
+    WHERE "id" = 'artifact-a'
+  `);
+
+  await db.query(`
+    INSERT INTO "artifact_version_edit_receipts" (
+      "id", "artifact_id", "base_artifact_version_id", "result_artifact_version_id",
+      "expected_artifact_revision", "result_artifact_revision", "created_by_id",
+      "idempotency_key", "request_hash"
+    ) VALUES (
+      'candidate-prd-edit-receipt', 'artifact-a',
+      'candidate-edit-base-version', 'candidate-edit-result-version',
+      $1, $2, 'principal-a', 'candidate-prd-edit', repeat('3', 64)
+    )
+  `, [initialRevision + 1, initialRevision + 2]);
 }
 
 async function insertPrototypeCandidate(db, options = {}) {

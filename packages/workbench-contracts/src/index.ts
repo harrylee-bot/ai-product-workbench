@@ -17,6 +17,7 @@ export * from "./import-sources.js";
 export * from "./invitations.js";
 export * from "./knowledge.js";
 export * from "./prd.js";
+export * from "./prd-example.js";
 export * from "./preview-rpc.js";
 export * from "./previews.js";
 export * from "./projects.js";

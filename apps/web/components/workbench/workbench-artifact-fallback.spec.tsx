@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   WorkbenchArtifactFallback,
+  WorkbenchDocumentLoading,
   workbenchPendingArtifactTitle,
 } from "./workbench-artifact-fallback";
 
@@ -37,6 +38,18 @@ describe("Workbench artifact fallback", () => {
 
     expect(screen.getByText("正在细化：订单详情 · 界面 2")).toBeTruthy();
     expect(screen.queryByText("产物不可用")).toBeNull();
+  });
+
+  it("uses the reference document loading copy without a skeleton or spinner", () => {
+    const rendered = render(
+      <WorkbenchDocumentLoading />,
+    );
+
+    expect(screen.getByText("Loading document...")).toBeTruthy();
+    expect(rendered.container.querySelector("[data-motion]")).toBeNull();
+    expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeNull();
+    expect(rendered.container.querySelector(".animate-spin")).toBeNull();
+    expect(screen.queryByText("正在生成：需求文档")).toBeNull();
   });
 
   it("fails closed when a completed node has no persisted artifact", () => {

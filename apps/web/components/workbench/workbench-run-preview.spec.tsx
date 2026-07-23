@@ -2,7 +2,11 @@
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { boardNodeProtocol, type ArtifactVersionDetail } from "@workbench/workbench-contracts";
+import {
+  boardNodeProtocol,
+  prdDocumentV2Example,
+  type ArtifactVersionDetail,
+} from "@workbench/workbench-contracts";
 import type { BoardFlowNode } from "@/lib/workbench/features/board";
 import { prototypeEditorDocumentFixture } from "@/lib/workbench/prototype-editor/test-fixtures";
 import type { RunArtifactDraftProjection } from "@/lib/workbench/run/reducer";
@@ -11,6 +15,7 @@ import { workbenchRunIsActive } from "@/lib/workbench/run";
 
 import {
   boardNodesForPhase,
+  createPrdVersionEditRequest,
   getPersistedPrdViewport,
   mergeCanvasNodeSelection,
   observePersistedPrdNodes,
@@ -18,6 +23,7 @@ import {
   projectRunBoardNodes,
   runtimeDraftsToWorkbench,
 } from "./workbench-project-route";
+import { prdDocument } from "./workbench-prd-test-fixture";
 import {
   MiniWorkbenchPreview,
   WorkbenchRunPreviewProvider,
@@ -25,6 +31,23 @@ import {
 } from "./workbench-run-preview";
 
 afterEach(cleanup);
+
+describe("PRD immutable version editing", () => {
+  it("keeps legacy v1 and fixed-template v2 documents on their matching revision contracts", () => {
+    const legacyDocument = prdDocument();
+
+    expect(createPrdVersionEditRequest("version-v1", legacyDocument)).toEqual({
+      kind: "prd",
+      baseArtifactVersionId: "version-v1",
+      document: legacyDocument,
+    });
+    expect(createPrdVersionEditRequest("version-v2", prdDocumentV2Example)).toEqual({
+      kind: "prd",
+      baseArtifactVersionId: "version-v2",
+      document: prdDocumentV2Example,
+    });
+  });
+});
 
 describe("Mini Workbench Run preview", () => {
   it("renders real project, prompt, activity, and message data without synthetic Run copy", async () => {
@@ -130,28 +153,13 @@ describe("Mini Workbench Run preview", () => {
     expect(boardNodesForPhase("complete", "generated", 1, "真实支付工作流")).toEqual([]);
   });
 
-  it("projects a client-only PRD skeleton only until a real PRD Draft or Board node exists", () => {
-    const pending = projectRunBoardNodes({
+  it("keeps Thinking free of fake PRD nodes and materializes only a real Draft or Board", () => {
+    expect(projectRunBoardNodes({
       drafts: [],
       persistedBoardNodes: [],
       projectId: "project-real",
-      requestedArtifactKinds: ["prd"],
       runStatus: "running",
-    });
-
-    expect(pending).toHaveLength(1);
-    expect(pending[0]).toMatchObject({
-      data: { phase: "generating", title: "需求文档" },
-      deletable: false,
-      draggable: false,
-      id: "run-pending:project-real:prd:document",
-      position: { x: 0, y: 0 },
-      selectable: false,
-      selected: false,
-      style: { height: 1440, width: 1120 },
-      type: "documentCanvas",
-    });
-    expect(pending[0]?.data).not.toHaveProperty("artifact");
+    })).toEqual([]);
 
     const draft = draftProjection({
       artifactId: "artifact-prd",
@@ -162,7 +170,6 @@ describe("Mini Workbench Run preview", () => {
       drafts: [draft],
       persistedBoardNodes: [],
       projectId: "project-real",
-      requestedArtifactKinds: ["prd"],
       runStatus: "running",
     }).map((node) => node.id)).toEqual(["run-draft:artifact-prd:document"]);
 
@@ -173,7 +180,6 @@ describe("Mini Workbench Run preview", () => {
         position: { x: 0, y: 0 },
       })],
       projectId: "project-real",
-      requestedArtifactKinds: ["prd"],
       runStatus: "running",
     }).map((node) => node.id)).toEqual(["board-node-prd"]);
 
@@ -181,7 +187,6 @@ describe("Mini Workbench Run preview", () => {
       drafts: [],
       persistedBoardNodes: [],
       projectId: "project-real",
-      requestedArtifactKinds: ["prd"],
       runStatus: "succeeded",
     })).toEqual([]);
   });
@@ -211,20 +216,50 @@ describe("Mini Workbench Run preview", () => {
       .toBe("board-node-prd");
   });
 
-  it("anchors a newly persisted PRD beyond the inspector and preserves its document top", () => {
+  it("normalizes an oversized persisted PRD and anchors it beyond the inspector", () => {
     const prd = persistedPrdNode({
       id: "board-node-prd",
       position: { x: 600, y: 400 },
     });
+    const [normalized] = projectRunBoardNodes({
+      drafts: [],
+      persistedBoardNodes: [prd],
+      projectId: "project-real",
+      runStatus: null,
+    });
     const viewport = getPersistedPrdViewport(prd, 1440, 900);
     const projectedLeft = viewport.x + prd.position.x * viewport.zoom;
     const projectedTop = viewport.y + prd.position.y * viewport.zoom;
-    const projectedRight = projectedLeft + prd.workbench.size!.width * viewport.zoom;
+    const projectedRight = projectedLeft + 500 * viewport.zoom;
 
+    expect(normalized).toMatchObject({
+      height: 500,
+      style: { height: 500, width: 500 },
+      width: 500,
+    });
     expect(projectedLeft).toBeGreaterThanOrEqual(320);
     expect(projectedTop).toBeCloseTo(92, 5);
     expect(projectedRight).toBeLessThanOrEqual(1400);
-    expect(viewport.zoom).toBeCloseTo((0.93 / (63 / 34)) * 0.88, 5);
+    expect(viewport.zoom).toBeCloseTo((563 / 500) * 0.88, 5);
+  });
+
+  it("renders a 500px PRD at the source-measured 563px width at 93%", () => {
+    const persisted = persistedPrdNode({
+      id: "board-node-prd-square",
+      position: { x: 0, y: 0 },
+    });
+    const square = {
+      ...persisted,
+      style: { height: 500, width: 500 },
+      workbench: {
+        ...persisted.workbench,
+        size: { height: 500, width: 500 },
+      },
+    } satisfies BoardFlowNode;
+    const viewport = getPersistedPrdViewport(square, 1501, 855);
+
+    expect(viewport.zoom).toBeCloseTo(563 / 500, 5);
+    expect(square.workbench.size!.width * viewport.zoom).toBeCloseTo(563, 5);
   });
 
   it("does not import ephemeral interaction overrides from the Board store", () => {
@@ -416,7 +451,7 @@ describe("Mini Workbench Run preview", () => {
       position: { x: 0, y: 0 },
       selectable: false,
       selected: false,
-      style: { height: 1440, width: 1120 },
+      style: { height: 500, width: 500 },
       type: "documentCanvas",
     });
   });

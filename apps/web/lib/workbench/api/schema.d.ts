@@ -2295,8 +2295,8 @@ export interface components {
             acceptanceCriteria: components["schemas"]["PrdSection"];
             risksAndDependencies: components["schemas"]["PrdSection"];
         };
-        /** @description PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract. */
-        PrdDocument: {
+        /** @description Legacy PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract. */
+        PrdDocumentV1: {
             /** @enum {string} */
             protocol: "workbench.prd.v1";
             documentId: string;
@@ -2326,7 +2326,7 @@ export interface components {
             kind: "prd";
             /** @enum {number} */
             schemaVersion: 1;
-            content: components["schemas"]["PrdDocument"];
+            content: components["schemas"]["PrdDocumentV1"];
         };
         PrototypeNavigateAction: {
             id: string;
@@ -2947,7 +2947,153 @@ export interface components {
             content: components["schemas"]["PrototypeDocument"];
         };
         ArtifactVersionInlineDetail: components["schemas"]["ArtifactVersionInlinePrdDetail"] | components["schemas"]["ArtifactVersionInlinePrototypeDetail"] | components["schemas"]["ArtifactVersionInlineDesignSystemDetail"] | components["schemas"]["ArtifactVersionInlineImageDetail"] | components["schemas"]["ArtifactVersionInlineCodeDetail"] | components["schemas"]["ArtifactVersionInlineDocumentDetail"] | components["schemas"]["ArtifactVersionInlineDataDetail"];
-        ArtifactVersionDetail: components["schemas"]["ArtifactVersionInlineDetail"] | components["schemas"]["ArtifactVersionBlobDetail"];
+        PrdChannelRow: {
+            sequence: number;
+            /** @enum {string} */
+            channel: "inApp" | "wapH5" | "miniProgram";
+            enabled: boolean;
+        };
+        PrdDiagramEdge: {
+            id: string;
+            from: string;
+            to: string;
+            label: string | null;
+        };
+        PrdDiagramNode: {
+            id: string;
+            label: string;
+            group: string | null;
+        };
+        PrdDiagram: {
+            id: string;
+            /** @enum {string} */
+            kind: "productFlow" | "productArchitecture";
+            /** @enum {string} */
+            title: "图1 产品流程图" | "图2 产品架构图";
+            description: string;
+            nodes: components["schemas"]["PrdDiagramNode"][];
+            edges: components["schemas"]["PrdDiagramEdge"][];
+        };
+        PrdSafetyBaselineRow: {
+            sequence: number;
+            /** @enum {string} */
+            applicability: "是" | "否" | "不涉及";
+            remarks: string | null;
+        };
+        PrdVersionHistoryEntry: {
+            /** @enum {string} */
+            status: "讨论稿" | "评审中" | "已定稿";
+            author: string;
+            participants: string[];
+            startDate: string;
+            endDate: string;
+            notes: string;
+        };
+        /** @description PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract. */
+        PrdDocumentV2: {
+            /** @enum {string} */
+            protocol: "workbench.prd.v2";
+            documentId: string;
+            title: string;
+            revision: components["schemas"]["PrdRevision"];
+            cover: {
+                workOrderName: string;
+                title: string;
+            };
+            versionHistory: components["schemas"]["PrdVersionHistoryEntry"][];
+            tableOfContents: {
+                /** @enum {string} */
+                title: "目 录";
+                entries: string[];
+            };
+            assumptions: components["schemas"]["PrdAssumption"][];
+            citations: components["schemas"]["ArtifactCitation"][];
+            sections: {
+                introduction: {
+                    /** @enum {string} */
+                    title: "1 引言";
+                    background: {
+                        /** @enum {string} */
+                        title: "1.1项目背景";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    scope: {
+                        /** @enum {string} */
+                        title: "1.2文档范围";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    usageScenarios: {
+                        /** @enum {string} */
+                        title: "1.3使用场景（必填）";
+                        blocks: components["schemas"]["PrdBlock"][];
+                        channelTable: {
+                            /** @enum {string} */
+                            title: "活动投放渠道";
+                            rows: components["schemas"]["PrdChannelRow"][];
+                        };
+                    };
+                };
+                businessRequirements: {
+                    /** @enum {string} */
+                    title: "2 业务需求";
+                    summary: components["schemas"]["PrdInlineContent"];
+                    pageLinks: {
+                        /** @enum {string} */
+                        title: "2.1页面链接";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    coreRules: {
+                        /** @enum {string} */
+                        title: "2.2 核心业务规则/功能说明";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    flowAndPages: {
+                        /** @enum {string} */
+                        title: "2.3 核心流程/状态/页面要求";
+                        blocks: components["schemas"]["PrdBlock"][];
+                        diagrams: components["schemas"]["PrdDiagram"][];
+                    };
+                    acceptanceCriteria: {
+                        /** @enum {string} */
+                        title: "2.4 验收标准";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                };
+                degradation: {
+                    /** @enum {string} */
+                    title: "3 业务降级方案（必填）";
+                    applicable: boolean;
+                    content: components["schemas"]["PrdInlineContent"];
+                };
+                safetyBaseline: {
+                    /** @enum {string} */
+                    title: "4 需求安全基线要求（必填）";
+                    /** @enum {string} */
+                    intro: "该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。";
+                    rows: components["schemas"]["PrdSafetyBaselineRow"][];
+                };
+            };
+        };
+        ArtifactVersionInlinePrdV2Detail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            status: components["schemas"]["ArtifactVersionStatus"];
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            createdByRunId: string | null;
+            knowledgeReleaseId: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /** @enum {string} */
+            kind: "prd";
+            /** @enum {number} */
+            schemaVersion: 2;
+            content: components["schemas"]["PrdDocumentV2"];
+        };
+        ArtifactVersionDetail: components["schemas"]["ArtifactVersionInlineDetail"] | components["schemas"]["ArtifactVersionInlinePrdV2Detail"] | components["schemas"]["ArtifactVersionBlobDetail"];
         /** @description Prototype favourites identify one screen while non-Prototype favourites cannot expose a screen target. */
         ArtifactVersionFavoriteListItem: {
             artifactId: string;
@@ -4288,23 +4434,23 @@ export interface components {
         CreateArtifactRequest: components["schemas"]["CreateImageArtifactRequest"];
         CreatePrdArtifactVersionRequest: {
             baseArtifactVersionId: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "prd";
-            document: components["schemas"]["PrdDocument"];
+            document: components["schemas"]["PrdDocumentV1"];
+        };
+        CreatePrdV2ArtifactVersionRequest: {
+            baseArtifactVersionId: string;
+            /** @enum {string} */
+            kind: "prd";
+            document: components["schemas"]["PrdDocumentV2"];
         };
         CreatePrototypeArtifactVersionRequest: {
             baseArtifactVersionId: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "prototype";
             document: components["schemas"]["PrototypeDocument"];
         };
-        CreateArtifactVersionRequest: components["schemas"]["CreatePrdArtifactVersionRequest"] | components["schemas"]["CreatePrototypeArtifactVersionRequest"];
+        CreateArtifactVersionRequest: components["schemas"]["CreatePrdArtifactVersionRequest"] | components["schemas"]["CreatePrototypeArtifactVersionRequest"] | components["schemas"]["CreatePrdV2ArtifactVersionRequest"];
         CreateDesignSystemRequest: {
             title: string;
             document: components["schemas"]["DesignSystemDocument"];
@@ -5311,6 +5457,7 @@ export interface components {
             /** @description Unique partNumber values in strictly ascending order */
             parts: components["schemas"]["UploadedPart"][];
         };
+        PrdDocument: components["schemas"]["PrdDocumentV1"] | components["schemas"]["PrdDocumentV2"];
         /** @enum {string} */
         PrdSectionKey: "executiveSummary" | "problem" | "goals" | "targetUsers" | "scope" | "requirements" | "userFlows" | "acceptanceCriteria" | "risksAndDependencies";
         /** @enum {string} */
@@ -5982,6 +6129,46 @@ export interface components {
             contentMode: "blob";
             blob: components["schemas"]["PublicArtifactContentBlob"];
         };
+        PublicArtifactVersionInlineCodeDetail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "code";
+            schemaVersion: number;
+            content: components["schemas"]["JsonValue"];
+        };
+        PublicArtifactVersionInlineDataDetail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "data";
+            schemaVersion: number;
+            content: components["schemas"]["JsonValue"];
+        };
         PublicDesignSystemFontAsset: {
             id: string;
             name: string;
@@ -6024,6 +6211,88 @@ export interface components {
             principles: components["schemas"]["DesignSystemPrinciple"][];
             guidelines: components["schemas"]["DesignSystemGuideline"][];
             components: components["schemas"]["DesignSystemComponent"][];
+        };
+        PublicArtifactVersionInlineDesignSystemDetail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "design_system";
+            /** @enum {number} */
+            schemaVersion: 1;
+            content: components["schemas"]["PublicDesignSystemDocument"];
+        };
+        PublicArtifactVersionInlineDocumentDetail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "document";
+            schemaVersion: number;
+            content: components["schemas"]["JsonValue"];
+        };
+        PublicArtifactVersionInlineImageDetail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "image";
+            schemaVersion: number;
+            content: components["schemas"]["JsonValue"];
+        };
+        PublicArtifactVersionInlinePrdDetail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "prd";
+            /** @enum {number} */
+            schemaVersion: 1;
+            content: components["schemas"]["PrdDocumentV1"];
         };
         PublicPrototypeFontAsset: {
             id: string;
@@ -6075,7 +6344,29 @@ export interface components {
             bindings: components["schemas"]["PrototypeBinding"][];
             motions: components["schemas"]["PrototypeMotion"][];
         };
-        PublicArtifactVersionInlineDetail: {
+        PublicArtifactVersionInlinePrototypeDetail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "prototype";
+            /** @enum {number} */
+            schemaVersion: 1;
+            content: components["schemas"]["PublicPrototypeDocument"];
+        };
+        PublicArtifactVersionInlineDetail: components["schemas"]["PublicArtifactVersionInlinePrdDetail"] | components["schemas"]["PublicArtifactVersionInlinePrototypeDetail"] | components["schemas"]["PublicArtifactVersionInlineDesignSystemDetail"] | components["schemas"]["PublicArtifactVersionInlineImageDetail"] | components["schemas"]["PublicArtifactVersionInlineCodeDetail"] | components["schemas"]["PublicArtifactVersionInlineDocumentDetail"] | components["schemas"]["PublicArtifactVersionInlineDataDetail"];
+        PublicArtifactVersionInlinePrdV2Detail: {
             artifactId: string;
             artifactVersionId: string;
             version: number;
@@ -6090,108 +6381,10 @@ export interface components {
             /** @enum {string} */
             kind: "prd";
             /** @enum {number} */
-            schemaVersion: 1;
-            content: components["schemas"]["PrdDocument"];
-        } | {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /** @enum {string} */
-            kind: "prototype";
-            /** @enum {number} */
-            schemaVersion: 1;
-            content: components["schemas"]["PublicPrototypeDocument"];
-        } | {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /** @enum {string} */
-            kind: "design_system";
-            /** @enum {number} */
-            schemaVersion: 1;
-            content: components["schemas"]["PublicDesignSystemDocument"];
-        } | {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /** @enum {string} */
-            kind: "image";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
-        } | {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /** @enum {string} */
-            kind: "code";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
-        } | {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /** @enum {string} */
-            kind: "document";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
-        } | {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /** @enum {string} */
-            kind: "data";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
+            schemaVersion: 2;
+            content: components["schemas"]["PrdDocumentV2"];
         };
-        PublicArtifactVersionDetail: components["schemas"]["PublicArtifactVersionInlineDetail"] | components["schemas"]["PublicArtifactVersionBlobDetail"];
+        PublicArtifactVersionDetail: components["schemas"]["PublicArtifactVersionInlineDetail"] | components["schemas"]["PublicArtifactVersionInlinePrdV2Detail"] | components["schemas"]["PublicArtifactVersionBlobDetail"];
         PublicProjectReleaseArtifactPin: {
             position: number;
             artifactId: string;
@@ -6393,6 +6586,10 @@ export interface components {
         RuntimeArtifactDraftCode: {
             title: string;
             citations: components["schemas"]["ArtifactCitation"][];
+            /** @enum {string} */
+            kind: "code";
+            schemaVersion: number;
+            content: components["schemas"]["JsonValue"];
             operation: {
                 /** @enum {string} */
                 kind: "create";
@@ -6401,17 +6598,14 @@ export interface components {
                 kind: "revise";
                 target: components["schemas"]["RunArtifactTarget"];
             };
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "code";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
         };
         RuntimeArtifactDraftData: {
             title: string;
             citations: components["schemas"]["ArtifactCitation"][];
+            /** @enum {string} */
+            kind: "data";
+            schemaVersion: number;
+            content: components["schemas"]["JsonValue"];
             operation: {
                 /** @enum {string} */
                 kind: "create";
@@ -6420,17 +6614,14 @@ export interface components {
                 kind: "revise";
                 target: components["schemas"]["RunArtifactTarget"];
             };
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "data";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
         };
         RuntimeArtifactDraftDocument: {
             title: string;
             citations: components["schemas"]["ArtifactCitation"][];
+            /** @enum {string} */
+            kind: "document";
+            schemaVersion: number;
+            content: components["schemas"]["JsonValue"];
             operation: {
                 /** @enum {string} */
                 kind: "create";
@@ -6439,36 +6630,14 @@ export interface components {
                 kind: "revise";
                 target: components["schemas"]["RunArtifactTarget"];
             };
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "document";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
         };
         RuntimeArtifactDraftImage: {
             title: string;
             citations: components["schemas"]["ArtifactCitation"][];
-            operation: {
-                /** @enum {string} */
-                kind: "create";
-            } | {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "image";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
-        };
-        RuntimeArtifactDraftPrd: {
-            title: string;
-            citations: components["schemas"]["ArtifactCitation"][];
             operation: {
                 /** @enum {string} */
                 kind: "create";
@@ -6477,18 +6646,29 @@ export interface components {
                 kind: "revise";
                 target: components["schemas"]["RunArtifactTarget"];
             };
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+        };
+        RuntimeArtifactDraftPrdV1Revision: {
+            title: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** @enum {string} */
             kind: "prd";
             /** @enum {number} */
             schemaVersion: 1;
-            content: components["schemas"]["PrdDocument"];
+            content: components["schemas"]["PrdDocumentV1"];
+            operation: {
+                /** @enum {string} */
+                kind: "revise";
+                target: components["schemas"]["RunArtifactTarget"];
+            };
         };
-        RuntimeArtifactDraftPrototype: {
+        RuntimeArtifactDraftPrdV2: {
             title: string;
             citations: components["schemas"]["ArtifactCitation"][];
+            /** @enum {string} */
+            kind: "prd";
+            /** @enum {number} */
+            schemaVersion: 2;
+            content: components["schemas"]["PrdDocumentV2"];
             operation: {
                 /** @enum {string} */
                 kind: "create";
@@ -6497,14 +6677,24 @@ export interface components {
                 kind: "revise";
                 target: components["schemas"]["RunArtifactTarget"];
             };
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+        };
+        RuntimeArtifactDraftPrd: components["schemas"]["RuntimeArtifactDraftPrdV1Revision"] | components["schemas"]["RuntimeArtifactDraftPrdV2"];
+        RuntimeArtifactDraftPrototype: {
+            title: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** @enum {string} */
             kind: "prototype";
             /** @enum {number} */
             schemaVersion: 1;
             content: components["schemas"]["PrototypeDocument"];
+            operation: {
+                /** @enum {string} */
+                kind: "create";
+            } | {
+                /** @enum {string} */
+                kind: "revise";
+                target: components["schemas"]["RunArtifactTarget"];
+            };
         };
         /** @description A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract. */
         RuntimeArtifactDraft: components["schemas"]["RuntimeArtifactDraftPrd"] | components["schemas"]["RuntimeArtifactDraftPrototype"] | components["schemas"]["RuntimeArtifactDraftImage"] | components["schemas"]["RuntimeArtifactDraftCode"] | components["schemas"]["RuntimeArtifactDraftDocument"] | components["schemas"]["RuntimeArtifactDraftData"];
@@ -6585,7 +6775,6 @@ export interface components {
             operations: components["schemas"]["PrototypePatchOperations"];
             resultingChecksum: components["schemas"]["PrototypePatchChecksum"];
         };
-        /** @description A Runtime result revises each target Artifact at most once; enforced by the runtime Zod contract. */
         RuntimeResult: {
             /** @enum {string} */
             protocol: "workbench.runtime.result.v1";

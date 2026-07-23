@@ -1,6 +1,6 @@
-import type { PrdDocument } from "@workbench/workbench-contracts";
+import type { PrdDocumentV1 } from "@workbench/workbench-contracts";
 
-export function prdDocument(): PrdDocument {
+export function prdDocument(): PrdDocumentV1 {
   const text = (value: string) => [{ type: "text" as const, text: value, marks: [] }];
   return {
     protocol: "workbench.prd.v1",

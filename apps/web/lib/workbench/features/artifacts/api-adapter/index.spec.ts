@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts";
 
 import { createWorkbenchApiClient } from "../../../api/client";
 import {
@@ -154,6 +155,41 @@ describe("Artifacts API contracts", () => {
       "artifact-version:request-1",
     )).resolves.toEqual({ value: detail, etag: '"3"' });
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("creates a PRD v2 ArtifactVersion through the generated API boundary", async () => {
+    const requestBody = {
+      kind: "prd" as const,
+      baseArtifactVersionId: "version-1",
+      document: prdDocumentV2Example,
+    };
+    const detail = {
+      artifactId: "artifact-1",
+      artifactVersionId: "version-2",
+      version: 2,
+      kind: "prd" as const,
+      schemaVersion: 2,
+      status: "ready" as const,
+      checksum: "b".repeat(64),
+      citations: [],
+      createdByRunId: null,
+      knowledgeReleaseId: null,
+      createdAt,
+      contentMode: "inline" as const,
+      content: prdDocumentV2Example,
+    };
+    const fetch = vi.fn(async (request: Request) => {
+      expect(await request.json()).toEqual(requestBody);
+      return Response.json(detail, { status: 201, headers: { ETag: '"3"' } });
+    });
+    const service = createService(fetch);
+
+    await expect(service.createArtifactVersion(
+      "artifact-1",
+      requestBody,
+      '"2"',
+      "artifact-version:prd-v2",
+    )).resolves.toEqual({ value: detail, etag: '"3"' });
   });
 
   it("accepts the strict Blob metadata union and rejects internal storage fields", async () => {

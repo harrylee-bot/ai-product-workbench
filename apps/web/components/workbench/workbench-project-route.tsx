@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import type {
   ArtifactVersionDetail,
+  CreateArtifactVersionRequest,
   DesignPresetCatalogItem,
   CanvasScreenSummary,
   CanvasScreenReference,
@@ -195,9 +196,31 @@ export function projectReadyPrototypePreviewArtifacts(
   });
 }
 
+export function createPrdVersionEditRequest(
+  baseArtifactVersionId: string,
+  document: PrdDocument,
+): CreateArtifactVersionRequest {
+  if (document.protocol === "workbench.prd.v1") {
+    return {
+      kind: "prd",
+      baseArtifactVersionId,
+      document,
+    };
+  }
+  return {
+    kind: "prd",
+    baseArtifactVersionId,
+    document,
+  };
+}
+
 
 const boardZoomDisplayRatio = 63 / 34;
 const generatedOverviewActualZoom = 0.155;
+const prdCanvasSize = 500;
+// The source renders its 500px PRD at about 563 CSS px while displaying 93% zoom.
+const prdViewportZoomAt93Percent = 563 / prdCanvasSize;
+const prdZoomDisplayRatio = 0.93 / prdViewportZoomAt93Percent;
 
 const selectedArtboardBounds = {
   height: 1880,
@@ -307,7 +330,7 @@ function getBoardViewport(containerWidth = 1440, containerHeight = 900): Viewpor
 
 function getDocumentViewport(containerWidth = 1440, containerHeight = 900): Viewport {
   const responsiveScale = containerWidth < 1500 ? 0.88 : 1;
-  const zoom = (0.93 / boardZoomDisplayRatio) * responsiveScale;
+  const zoom = prdViewportZoomAt93Percent * responsiveScale;
   const targetLeft = containerWidth < 1500
     ? Math.round(containerWidth * 0.315)
     : Math.round(containerWidth * 0.313);
@@ -345,7 +368,7 @@ export function getPersistedPrdViewport(
 ): Viewport {
   return getPrdNodeViewport(
     node.position,
-    node.workbench.size?.width ?? 1120,
+    prdCanvasSize,
     containerWidth,
     containerHeight,
   );
@@ -462,6 +485,9 @@ function persistedBoardNodesToWorkbench(
     if (artifactKind === "prd") {
       return {
         ...common,
+        height: prdCanvasSize,
+        style: { ...common.style, height: prdCanvasSize, width: prdCanvasSize },
+        width: prdCanvasSize,
         data: {
           artifact,
           phase: "complete",
@@ -538,10 +564,14 @@ export function runtimeDraftsToWorkbench(
       continue;
     }
     if (draft.kind === "prd") {
-      const height = 1440;
-      const width = 1120;
+      const height = prdCanvasSize;
+      const width = prdCanvasSize;
       nodes.push({
-        data: { artifact: reference, phase: "refining", title: "需求文档" },
+        data: {
+          artifact: reference,
+          phase: "refining",
+          title: runtimeDraftTitle(draft.kind),
+        },
         draggable: false,
         height,
         id: `run-draft:${draft.artifactId}:document`,
@@ -587,13 +617,11 @@ export function projectRunBoardNodes({
   drafts,
   persistedBoardNodes,
   projectId,
-  requestedArtifactKinds = [],
   runStatus,
 }: {
   drafts: readonly RunArtifactDraftProjection[];
   persistedBoardNodes: readonly BoardFlowNode[];
   projectId: string;
-  requestedArtifactKinds?: readonly Run["requestedArtifactKinds"][number][];
   runStatus: Run["status"] | null;
 }): WorkbenchNode[] {
   const persisted = persistedBoardNodesToWorkbench(persistedBoardNodes, projectId);
@@ -602,28 +630,6 @@ export function projectRunBoardNodes({
     projectId,
     nextAvailableDraftX(persisted),
   );
-  if (
-    workbenchRunIsActive(runStatus)
-    && requestedArtifactKinds.includes("prd")
-    && !persistedBoardNodes.some(isPersistedPrdNode)
-    && !drafts.some((draft) => draft.kind === "prd")
-  ) {
-    const height = 1440;
-    const width = 1120;
-    draftNodes.push({
-      data: { phase: "generating", title: "需求文档" },
-      deletable: false,
-      draggable: false,
-      height,
-      id: `run-pending:${projectId}:prd:document`,
-      position: { x: nextAvailableDraftX([...persisted, ...draftNodes]), y: 0 },
-      selectable: false,
-      selected: false,
-      style: { height, width },
-      type: "documentCanvas",
-      width,
-    } satisfies DocumentCanvasNode);
-  }
   if (draftNodes.length === 0) return persisted;
 
   if (workbenchRunIsActive(runStatus)) {
@@ -2287,7 +2293,6 @@ function ProjectScreen({
       drafts: draftArtifacts,
       persistedBoardNodes,
       projectId,
-      requestedArtifactKinds,
       runStatus,
     });
     const matchesCurrentProject = readWorkbenchProjectId() === projectId;
@@ -2485,7 +2490,7 @@ function ProjectScreen({
       tracker.focusedNodeIds.add(target.id);
       manualZoomRef.current = true;
       setBoardViewport(nextViewport);
-      setZoomLabel(`${Math.round(nextViewport.zoom * boardZoomDisplayRatio * 100)}%`);
+      setZoomLabel(`${Math.round(nextViewport.zoom * prdZoomDisplayRatio * 100)}%`);
       void setViewport(nextViewport, { duration: 320 });
     });
 
@@ -2519,14 +2524,14 @@ function ProjectScreen({
       const size = workbenchNodeCanvasSize(target);
       const nextViewport = getPrdNodeViewport(
         target.position,
-        size.width || 1120,
+        size.width || prdCanvasSize,
         stage.width,
         stage.height,
       );
       activePrdViewportRunRef.current = runId;
       manualZoomRef.current = true;
       setBoardViewport(nextViewport);
-      setZoomLabel(`${Math.round(nextViewport.zoom * boardZoomDisplayRatio * 100)}%`);
+      setZoomLabel(`${Math.round(nextViewport.zoom * prdZoomDisplayRatio * 100)}%`);
       void setViewport(nextViewport, { duration: 320 });
     });
 
@@ -2571,7 +2576,9 @@ function ProjectScreen({
       return;
     }
 
-    const displayZoom = current.zoom * boardZoomDisplayRatio;
+    const displayZoom = current.zoom * (
+      projectMode === "document" ? prdZoomDisplayRatio : boardZoomDisplayRatio
+    );
     setZoomLabel(`${Math.round(displayZoom * 100)}%`);
   }, [boardViewport.zoom, getViewport, phase, projectMode, setZoomLabel]);
 
@@ -3122,11 +3129,7 @@ function ProjectScreen({
     const result = await createPrdVersion.mutateAsync({
       ifMatch: prdArtifactQuery.data.etag,
       idempotencyKey: prdDocumentEditIdempotencyKey(reference.artifactVersionId, document),
-      request: {
-        kind: "prd",
-        baseArtifactVersionId: reference.artifactVersionId,
-        document,
-      },
+      request: createPrdVersionEditRequest(reference.artifactVersionId, document),
     });
     if (!projectSession.isCurrent() || activeRunRef.current) return;
     const updatedNodeIds = onReplaceArtifactVersionPins(
@@ -3329,7 +3332,9 @@ function ProjectScreen({
       ? generatedOverviewActualZoom
       : projectMode === "generated" && displayZoom <= 0.28
       ? displayZoom
-      : displayZoom / boardZoomDisplayRatio;
+      : displayZoom / (
+          projectMode === "document" ? prdZoomDisplayRatio : boardZoomDisplayRatio
+        );
     const rect = stageRef.current?.getBoundingClientRect();
     const nextViewport = rect && projectMode === "generated" && displayZoom === 0.1
       ? {

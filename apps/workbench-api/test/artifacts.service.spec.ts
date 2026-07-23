@@ -1,4 +1,8 @@
-import type { ArtifactVersionDetail } from "@workbench/workbench-contracts";
+import {
+  canonicalJson,
+  prdDocumentV2Example,
+  type ArtifactVersionDetail,
+} from "@workbench/workbench-contracts";
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import {
@@ -257,6 +261,36 @@ describe("ArtifactsService", () => {
         ],
       },
     }));
+  });
+
+  it("reads and lists a ready inline PRD v2 version", async () => {
+    const prdVersion = {
+      ...inlineVersion,
+      artifactId: "artifact_prd",
+      schemaVersion: 2,
+      content: prdDocumentV2Example,
+      checksum: createHash("sha256").update(canonicalJson(prdDocumentV2Example)).digest("hex"),
+      artifact: { kind: "prd" as const },
+    };
+    const db = createDb();
+    db.artifact.findFirst.mockResolvedValue({ id: "artifact_prd" });
+    db.artifactVersion.findFirst.mockResolvedValue(prdVersion);
+    db.artifactVersion.findMany.mockResolvedValue([prdVersion]);
+    const service = createService(db);
+
+    await expect(service.getVersion("principal_1", "artifact_prd", "version_1"))
+      .resolves.toMatchObject({
+        detail: {
+          kind: "prd",
+          schemaVersion: 2,
+          contentMode: "inline",
+          content: prdDocumentV2Example,
+        },
+      });
+    await expect(service.listVersions("principal_1", "artifact_prd"))
+      .resolves.toMatchObject({
+        items: [{ kind: "prd", schemaVersion: 2, contentMode: "inline" }],
+      });
   });
 
   it("reads a Run-created staging version by exact id and rejects ordinary staging", async () => {

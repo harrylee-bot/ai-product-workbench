@@ -1,4 +1,7 @@
-import { boardNodeProtocol } from "@workbench/workbench-contracts";
+import {
+  boardNodeProtocol,
+  prdDocumentV2Example,
+} from "@workbench/workbench-contracts";
 import {
   boardPlacementsForArtifact,
   canonicalJson,
@@ -16,6 +19,7 @@ import { PrismaCanvasToolGrantIssuer } from "../src/runtime/canvas-tool-grant.se
 import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
 import { RuntimeSubmissionUnknownError } from "../src/runtime/runtime.port.js";
 import { RuntimeLivenessError } from "../src/runtime/runtime-liveness.js";
+import { runtimePrdResultStarter } from "../src/runtime/runtime-prd-guidance.js";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
 const executionClaim = {
@@ -305,6 +309,22 @@ describe("RunProcessor shared cancellation poller", () => {
 });
 
 describe("Artifact Board placement", () => {
+  it("uses the reference square placement for a PRD", () => {
+    const prd = runtimePrdResultStarter.artifacts.find((artifact) => artifact.kind === "prd");
+    expect(prd).toBeDefined();
+
+    expect(boardPlacementsForArtifact(prd!)).toEqual([{
+      key: "root",
+      size: { width: 500, height: 500 },
+      data: {
+        protocol: boardNodeProtocol,
+        nodeType: "artifact",
+        title: prd!.title,
+        artifactKind: "prd",
+      },
+    }]);
+  });
+
   it("creates one durable Board node per Prototype screen", () => {
     const placements = boardPlacementsForArtifact({
       kind: "prototype",
@@ -682,6 +702,21 @@ describe("Runtime Artifact publication operations", () => {
       workflow: "generate",
     }, revision)).toThrow("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
   });
+
+  it("rejects result kinds that the Run did not request", () => {
+    expect(() => validateRuntimeArtifactOperations({
+      ...editRequest,
+      workflow: "generate",
+      artifactTargets: [],
+      requestedArtifactKinds: ["prd"],
+    }, {
+      ...revision,
+      artifacts: [{
+        ...revision.artifacts[0]!,
+        operation: { kind: "create" },
+      }],
+    })).toThrow("RUNTIME_ARTIFACTS_UNREQUESTED:prototype");
+  });
 });
 
 describe("Runtime Artifact revision publication", () => {
@@ -771,6 +806,92 @@ describe("Runtime Artifact revision publication", () => {
     return { draft, processor, target, tx };
   }
 
+  function prdRevisionHarness(baseSchemaVersion = 2) {
+    const baseContent = prdDocumentV2Example;
+    const nextContent = {
+      ...baseContent,
+      revision: {
+        ...baseContent.revision,
+        number: baseContent.revision.number + 1,
+        summary: "Runtime revision",
+      },
+    };
+    const target = {
+      artifactId: "artifact-prd-target",
+      artifactVersionId: "version-prd-base",
+      screenIds: [],
+    };
+    const tx = {
+      $queryRaw: vi.fn(async (query: unknown) => (
+        rawSqlText(query).includes('FROM "artifact_version_assets"')
+          ? []
+          : [{
+              id: target.artifactId,
+              kind: "prd",
+              currentVersionId: target.artifactVersionId,
+            }]
+      )),
+      artifactVersion: {
+        findUnique: vi.fn(async () => ({
+          id: target.artifactVersionId,
+          artifactId: target.artifactId,
+          projectId: "project-1",
+          version: 1,
+          schemaVersion: baseSchemaVersion,
+          status: "ready",
+          content: baseContent,
+          contentBlobId: null,
+          knowledgeReleaseId: null,
+        })),
+        findFirst: vi.fn(async () => ({
+          id: "version-prd-next",
+          artifactId: target.artifactId,
+          projectId: "project-1",
+          version: 2,
+          schemaVersion: 2,
+          status: "staging",
+          content: nextContent,
+          contentBlobId: null,
+          checksum: sha256Canonical(nextContent),
+          citations: [],
+          runtimeDraftIndex: 0,
+          runtimeDraftTitle: nextContent.title,
+          artifact: {
+            id: target.artifactId,
+            kind: "prd",
+            currentVersionId: target.artifactVersionId,
+          },
+        })),
+        update: vi.fn(async () => ({
+          id: "version-prd-next",
+          artifactId: target.artifactId,
+          version: 2,
+        })),
+      },
+      artifact: { update: vi.fn(async () => ({ revision: 2 })) },
+      boardNode: {
+        findMany: vi.fn(async () => [{ id: "node-prd", data: {} }]),
+        update: vi.fn(async () => ({})),
+      },
+    };
+    const processor = new RunProcessor(
+      {} as never,
+      {} as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    ) as unknown as ProcessorInternals;
+    const draft = {
+      kind: "prd" as const,
+      schemaVersion: 2 as const,
+      title: nextContent.title,
+      citations: [],
+      operation: { kind: "revise" as const, target },
+      content: nextContent,
+    };
+    return { draft, processor, target, tx };
+  }
+
   it("promotes the staged next immutable version and advances existing Board pins", async () => {
     const { draft, processor, target, tx } = revisionHarness();
     await expect(processor.promoteStagedArtifactRevision(
@@ -802,6 +923,68 @@ describe("Runtime Artifact revision publication", () => {
       where: { id: "node-home" },
       data: expect.objectContaining({ artifactVersionId: "version-next" }),
     });
+  });
+
+  it("promotes a PRD v2 revision over a matching v2 base", async () => {
+    const { draft, processor, target, tx } = prdRevisionHarness();
+
+    await expect(processor.promoteStagedArtifactRevision(
+      tx,
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      "board-1",
+      draft,
+      0,
+    )).resolves.toEqual({
+      id: "version-prd-next",
+      artifactId: target.artifactId,
+      version: 2,
+    });
+    expect(tx.artifactVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-prd-next" },
+      data: { status: "ready" },
+      select: { id: true, artifactId: true, version: true },
+    });
+  });
+
+  it("rejects a PRD v2 revision when the base schema version differs", async () => {
+    const { draft, processor, tx } = prdRevisionHarness(1);
+
+    await expect(processor.promoteStagedArtifactRevision(
+      tx,
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      "board-1",
+      draft,
+      0,
+    )).rejects.toThrow("RUNTIME_ARTIFACT_REVISION_BASE_INVALID");
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a PRD revision that replaces the base citations", async () => {
+    const { draft, processor, target, tx } = prdRevisionHarness();
+    const citation = {
+      id: "citation-new",
+      documentId: "knowledge-document-new",
+      chunkId: "knowledge-chunk-new",
+      sourcePath: "knowledge/new.md",
+      title: "New source",
+      quote: "A source introduced only by the revision.",
+      locator: { heading: "New", startLine: 1, endLine: 1 },
+    };
+    const changedDraft = {
+      ...draft,
+      citations: [citation],
+      content: { ...draft.content, citations: [citation] },
+    };
+
+    await expect(processor.promoteStagedArtifactRevision(
+      tx,
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      "board-1",
+      changedDraft,
+      0,
+    )).rejects.toThrow("RUNTIME_ARTIFACT_REVISION_CITATIONS_INVALID");
+    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
+    expect(tx.artifact.update).not.toHaveBeenCalled();
   });
 
   it("rejects a selected-screen edit that mutates an unselected screen", async () => {
@@ -3321,12 +3504,19 @@ describe("Run durable snapshots", () => {
     expect(canvasToolGrants.issue).not.toHaveBeenCalled();
   });
 
-  it("announces PRD generation before the first provider submission", async () => {
+  it("advances a returned PRD through planning, validation, and publication", async () => {
     const runtime = {
       execute: vi.fn(async () => ({
         protocol: "workbench.runtime.result.v1" as const,
         message: "done",
-        artifacts: [],
+        artifacts: [{
+          kind: "prd" as const,
+          schemaVersion: 1 as const,
+          title: "Requirements",
+          citations: [],
+          operation: { kind: "create" as const },
+          content: {},
+        }],
       })),
     };
     const db = { run: { findUnique: vi.fn(async () => ({ status: "running" })) } };
@@ -3374,18 +3564,173 @@ describe("Run durable snapshots", () => {
 
     await expect(processor.execute("run-1")).resolves.toEqual({
       runId: "run-1",
-      artifactCount: 0,
+      artifactCount: 1,
     });
 
-    expect(persistProgress).toHaveBeenCalledWith(executionClaim, {
-      type: "phase",
-      phase: "generating",
-      label: "正在生成需求文档",
-      progress: null,
-    });
+    expect(persistProgress.mock.calls).toEqual([
+      [executionClaim, {
+        type: "phase",
+        phase: "planning",
+        label: "正在整理需求结构",
+        progress: null,
+      }],
+      [executionClaim, {
+        type: "phase",
+        phase: "validating",
+        label: "正在校验需求说明书",
+        progress: null,
+      }],
+      [executionClaim, {
+        type: "phase",
+        phase: "publishing",
+        label: "正在发布需求说明书",
+        progress: null,
+      }],
+    ]);
     expect(persistProgress.mock.invocationCallOrder[0]).toBeLessThan(
       runtime.execute.mock.invocationCallOrder[0]!,
     );
+    expect(runtime.execute.mock.invocationCallOrder[0]).toBeLessThan(
+      persistProgress.mock.invocationCallOrder[1]!,
+    );
+    expect(persistProgress.mock.invocationCallOrder[1]).toBeLessThan(
+      persistProgress.mock.invocationCallOrder[2]!,
+    );
+    expect(persistProgress.mock.invocationCallOrder[2]).toBeLessThan(
+      publishResult.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not enter PRD validation or saving when PRD generation requires input", async () => {
+    const runtime = {
+      execute: vi.fn(async () => ({
+        protocol: "workbench.runtime.input-required.v1" as const,
+        approvals: [],
+      })),
+    };
+    const db = { run: { findUnique: vi.fn(async () => ({ status: "running" })) } };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals & {
+      bindings: { ensure: ReturnType<typeof vi.fn> };
+      attempts: {
+        ensure: ReturnType<typeof vi.fn>;
+        claim: ReturnType<typeof vi.fn>;
+        submissionContext: ReturnType<typeof vi.fn>;
+        providerTextState: ReturnType<typeof vi.fn>;
+      };
+    };
+    const prepared = durableExecutionPrepared();
+    prepared.request.requestedArtifactKinds = ["prd"];
+    const persistProgress = vi.fn(async () => undefined);
+    const waitForInput = vi.fn(async () => undefined);
+    const publishResult = vi.fn(async () => undefined);
+    Object.assign(internals, {
+      prepare: vi.fn(async () => prepared),
+      bindings: {
+        ensure: vi.fn(async () => ({
+          id: "binding-1",
+          adapter: "deerflow",
+          externalThreadId: "external-thread-1",
+        })),
+      },
+      attempts: {
+        ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
+        claim: vi.fn(async () => executionClaim),
+        submissionContext: vi.fn(async () => ({
+          mode: "submit",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+        })),
+        providerTextState: vi.fn(async () => emptyProviderTextState()),
+      },
+      persistProgress,
+      waitForInput,
+      publishResult,
+    });
+
+    await expect(processor.execute("run-1")).resolves.toEqual({
+      runId: "run-1",
+      approvalCount: 0,
+      waitingInput: true,
+    });
+
+    expect(persistProgress.mock.calls.map(([, event]) => event.label)).toEqual([
+      "正在整理需求结构",
+    ]);
+    expect(waitForInput).toHaveBeenCalledTimes(1);
+    expect(publishResult).not.toHaveBeenCalled();
+  });
+
+  it("does not write PRD phases for a prototype-only RuntimeResult", async () => {
+    const runtime = {
+      execute: vi.fn(async () => ({
+        protocol: "workbench.runtime.result.v1" as const,
+        message: "done",
+        artifacts: [{
+          kind: "prototype" as const,
+          schemaVersion: 1 as const,
+          title: "Prototype",
+          citations: [],
+          operation: { kind: "create" as const },
+          content: {},
+        }],
+      })),
+    };
+    const db = { run: { findUnique: vi.fn(async () => ({ status: "running" })) } };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals & {
+      bindings: { ensure: ReturnType<typeof vi.fn> };
+      attempts: {
+        ensure: ReturnType<typeof vi.fn>;
+        claim: ReturnType<typeof vi.fn>;
+        submissionContext: ReturnType<typeof vi.fn>;
+        providerTextState: ReturnType<typeof vi.fn>;
+      };
+    };
+    const prepared = durableExecutionPrepared();
+    prepared.request.requestedArtifactKinds = ["prototype"];
+    const persistProgress = vi.fn(async () => undefined);
+    const publishResult = vi.fn(async () => undefined);
+    Object.assign(internals, {
+      prepare: vi.fn(async () => prepared),
+      bindings: {
+        ensure: vi.fn(async () => ({
+          id: "binding-1",
+          adapter: "deerflow",
+          externalThreadId: "external-thread-1",
+        })),
+      },
+      attempts: {
+        ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
+        claim: vi.fn(async () => executionClaim),
+        submissionContext: vi.fn(async () => ({
+          mode: "submit",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+        })),
+        providerTextState: vi.fn(async () => emptyProviderTextState()),
+      },
+      persistProgress,
+      publishResult,
+    });
+
+    await expect(processor.execute("run-1")).resolves.toEqual({
+      runId: "run-1",
+      artifactCount: 1,
+    });
+
+    expect(persistProgress).not.toHaveBeenCalled();
+    expect(publishResult).toHaveBeenCalledTimes(1);
   });
 
   it("keeps reconciliation UNKNOWN and releases it without issuing new grants", async () => {

@@ -76,31 +76,6 @@ function unionOptions(schema: ZodTypeAny): ZodTypeAny[] {
   return [...options];
 }
 
-function discriminatedOptionsByKind(
-  schema: ZodTypeAny,
-  expectedKinds: readonly string[],
-  label: string,
-) {
-  const options = unionOptions(schema);
-  const byKind = new Map<string, ZodTypeAny>();
-  for (const option of options) {
-    const kindSchema = unwrapToObject(option).shape.kind as ZodTypeAny | undefined;
-    const value = kindSchema && typeName(kindSchema) === "ZodLiteral"
-      ? (kindSchema as unknown as { _def: { value: unknown } })._def.value
-      : undefined;
-    if (typeof value !== "string" || byKind.has(value)) {
-      throw new Error(`${label} must have one unique string literal kind per option`);
-    }
-    byKind.set(value, option);
-  }
-  const actualKinds = [...byKind.keys()].sort();
-  const expected = [...expectedKinds].sort();
-  if (JSON.stringify(actualKinds) !== JSON.stringify(expected)) {
-    throw new Error(`${label} kind set changed: expected ${expected.join(", ")}; found ${actualKinds.join(", ")}`);
-  }
-  return byKind;
-}
-
 function buildSchemaCatalog() {
   const catalog = [
     ...schemasFrom(commonSchemas),
@@ -111,7 +86,13 @@ function buildSchemaCatalog() {
     ...schemasFrom(prdSchemas),
     ...schemasFrom(prototypeSchemas),
     ...schemasFrom(prototypePatchSchemas),
-    ...schemasFrom(artifactSchemas),
+    ...schemasFrom(artifactSchemas, (name) => ![
+      "artifactVersionInlineDetailSchema",
+      "artifactVersionInlineLegacyDetailSchema",
+      "createArtifactVersionRequestLegacySchema",
+      "publicArtifactVersionInlineDetailSchema",
+      "publicArtifactVersionInlineLegacyDetailSchema",
+    ].includes(name)),
     ...schemasFrom(boardSchemas),
     ...schemasFrom(canvasAgentSchemas),
     ...schemasFrom(bootstrapSchemas),
@@ -136,40 +117,24 @@ function buildSchemaCatalog() {
 
   const designStyles = unionOptions(runSchemas.runDesignStyleSchema);
   catalog.push(
+    { name: "ArtifactVersionInlineDetail", schema: artifactSchemas.artifactVersionInlineLegacyDetailSchema },
+    { name: "PublicArtifactVersionInlineDetail", schema: artifactSchemas.publicArtifactVersionInlineLegacyDetailSchema },
     { name: "RunDesignStyleAutomatic", schema: designStyles[0]! },
     { name: "RunDesignStylePreset", schema: designStyles[1]! },
     { name: "RunDesignStyleArtifact", schema: designStyles[2]! },
   );
 
-  const artifactInlineDetails = discriminatedOptionsByKind(
-    artifactSchemas.artifactVersionInlineDetailSchema,
-    ["prd", "prototype", "image", "code", "document", "data", "design_system"],
-    "ArtifactVersionInlineDetail",
-  );
   catalog.push(
-    { name: "ArtifactVersionInlinePrdDetail", schema: artifactInlineDetails.get("prd")! },
-    { name: "ArtifactVersionInlinePrototypeDetail", schema: artifactInlineDetails.get("prototype")! },
-    { name: "ArtifactVersionInlineDesignSystemDetail", schema: artifactInlineDetails.get("design_system")! },
-    { name: "ArtifactVersionInlineImageDetail", schema: artifactInlineDetails.get("image")! },
-    { name: "ArtifactVersionInlineCodeDetail", schema: artifactInlineDetails.get("code")! },
-    { name: "ArtifactVersionInlineDocumentDetail", schema: artifactInlineDetails.get("document")! },
-    { name: "ArtifactVersionInlineDataDetail", schema: artifactInlineDetails.get("data")! },
-  );
-
-  const runtimeDrafts = discriminatedOptionsByKind(
-    runtimeSchemas.runtimeArtifactDraftSchema,
-    ["prd", "prototype", "image", "code", "document", "data"],
-    "RuntimeArtifactDraft",
-  );
-  catalog.push(
-    { name: "RuntimeArtifactDraftPrd", schema: runtimeDrafts.get("prd")! },
-    { name: "RuntimeArtifactDraftPrototype", schema: runtimeDrafts.get("prototype")! },
-    { name: "RuntimeArtifactDraftImage", schema: runtimeDrafts.get("image")! },
-    { name: "RuntimeArtifactDraftCode", schema: runtimeDrafts.get("code")! },
-    { name: "RuntimeArtifactDraftDocument", schema: runtimeDrafts.get("document")! },
-    { name: "RuntimeArtifactDraftData", schema: runtimeDrafts.get("data")! },
-    { name: "RuntimeArtifactDraft", schema: runtimeSchemas.runtimeArtifactDraftSchema },
-    { name: "RuntimeResult", schema: runtimeSchemas.runtimeResultSchema },
+    { name: "RuntimeArtifactDraftPrdV1Revision", schema: runtimeSchemas.runtimeArtifactDraftPrdV1RevisionSchema },
+    { name: "RuntimeArtifactDraftPrdV2", schema: runtimeSchemas.runtimeArtifactDraftPrdV2Schema },
+    { name: "RuntimeArtifactDraftPrd", schema: runtimeSchemas.runtimeArtifactDraftPrdSchema },
+    { name: "RuntimeArtifactDraftPrototype", schema: runtimeSchemas.runtimeArtifactDraftPrototypeSchema },
+    { name: "RuntimeArtifactDraftImage", schema: runtimeSchemas.runtimeArtifactDraftImageSchema },
+    { name: "RuntimeArtifactDraftCode", schema: runtimeSchemas.runtimeArtifactDraftCodeSchema },
+    { name: "RuntimeArtifactDraftDocument", schema: runtimeSchemas.runtimeArtifactDraftDocumentSchema },
+    { name: "RuntimeArtifactDraftData", schema: runtimeSchemas.runtimeArtifactDraftDataSchema },
+    { name: "RuntimeArtifactDraft", schema: runtimeSchemas.runtimeArtifactDraftContractSchema },
+    { name: "RuntimeResult", schema: runtimeSchemas.runtimeResultContractSchema },
   );
 
   const seenNames = new Set<string>();
@@ -295,7 +260,8 @@ const reviewedEffectSchemas: readonly ReviewedEffect[] = [
   { label: "ListUploadParts.order", schema: fileSchemas.listUploadPartsResponseSchema, description: "Multipart part numbers are unique and strictly ascending; enforced by the runtime Zod contract." },
   { label: "CompleteFileUpload.order", schema: fileSchemas.completeFileUploadRequestSchema, description: "Multipart part numbers are unique and strictly ascending; enforced by the runtime Zod contract." },
   { label: "PrdInlineMarks.unique", schema: prdSchemas.prdInlineMarksSchema, description: "Inline marks are unique; enforced by the runtime Zod contract." },
-  { label: "PrdDocument.semanticGraph", schema: prdSchemas.prdDocumentSchema, description: "PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract." },
+  { label: "PrdDocumentV1.semanticGraph", schema: prdSchemas.prdDocumentV1Schema, description: "Legacy PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract." },
+  { label: "PrdDocumentV2.templateAndSemanticGraph", schema: prdSchemas.prdDocumentV2Schema, description: "PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract." },
   { label: "UpdateProject.nonEmpty", schema: projectSchemas.updateProjectRequestSchema, description: "At least one mutable Project field is required; enforced by the runtime Zod contract." },
   { label: "ProjectReleaseBoardNode.artifactReference", schema: releaseSchemas.projectReleaseBoardNodeSchema, description: "A release Board node pins both artifact and version ids or neither; enforced by the runtime Zod contract." },
   { label: "ProjectReleaseBoardSnapshot.graph", schema: releaseSchemas.projectReleaseBoardSnapshotSchema, description: "Release Board node and edge ids are unique and every edge endpoint exists; enforced by the runtime Zod contract." },
@@ -327,7 +293,7 @@ const reviewedEffectSchemas: readonly ReviewedEffect[] = [
   { label: "CreateSubmissionIntent.request", schema: submissionIntentSchemas.createSubmissionIntentRequestSchema, description: "SubmissionIntent attachment sources are unique, Redesign has a durable source slot, and workflow target semantics directly share the live Run refinement without duplicate validation issues." },
   { label: "SubmissionIntent.lifecycle", schema: submissionIntentSchemas.submissionIntentSchema, description: "SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints." },
   { label: "ThreadEntry.envelope", schema: threadSchemas.threadEntrySchema, description: "Entry role and kind match the versioned content variant; enforced by the runtime Zod contract." },
-  { label: "RuntimeArtifactDraft.citations", schema: runtimeSchemas.runtimeArtifactDraftSchema, description: "A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract." },
+  { label: "RuntimeArtifactDraft.citations", schema: runtimeSchemas.runtimeArtifactDraftSchema, description: "A PRD draft's protocol and schema version agree, v1 remains revision-only, and its title and top-level citations exactly match its content; enforced by the runtime Zod contract." },
   { label: "RuntimeResult.revisions", schema: runtimeSchemas.runtimeResultSchema, description: "A Runtime result revises each target Artifact at most once; enforced by the runtime Zod contract." },
   { label: "RuntimeExecuteJob.approvalIds", schema: queueSchemas.runtimeExecuteJobSchema, description: "Runtime execution approval ids are unique; enforced by the runtime Zod contract." },
   { label: "CanvasAgent.id", schema: canvasAgentSchemas.canvasAgentIdSchema, description: "Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract." },
@@ -459,6 +425,85 @@ function normalizeRecursiveJsonValueReferences(document: unknown) {
     Object.values(record).forEach(visit);
   };
   visit(document);
+}
+
+function normalizeVersionedPrdUnions(document: unknown) {
+  const schemas = (document as {
+    components?: { schemas?: Record<string, Record<string, unknown>> };
+  }).components?.schemas;
+  if (!schemas) throw new Error("Generated OpenAPI document is missing component schemas");
+
+  const normalizeOneOf = (name: string, expectedRefs: readonly string[]) => {
+    const schema = schemas[name];
+    if (!schema) throw new Error(`Generated OpenAPI document is missing ${name}`);
+    const entries = Array.isArray(schema.oneOf)
+      ? schema.oneOf
+      : Array.isArray(schema.anyOf)
+        ? schema.anyOf
+        : null;
+    if (!entries) throw new Error(`${name} must be a union`);
+    const flattened = entries.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [entry];
+      const record = entry as Record<string, unknown>;
+      const nested = Array.isArray(record.oneOf)
+        ? record.oneOf
+        : Array.isArray(record.anyOf)
+          ? record.anyOf
+          : null;
+      return nested ?? [entry];
+    });
+    const refs = flattened.map((entry) => (
+      entry && typeof entry === "object" ? (entry as Record<string, unknown>).$ref : undefined
+    ));
+    if (JSON.stringify(refs) !== JSON.stringify(expectedRefs)) {
+      throw new Error(`${name} union branches changed: ${JSON.stringify(refs)}`);
+    }
+    schema.oneOf = flattened;
+    delete schema.anyOf;
+  };
+
+  normalizeOneOf("ArtifactVersionDetail", [
+    "#/components/schemas/ArtifactVersionInlineDetail",
+    "#/components/schemas/ArtifactVersionInlinePrdV2Detail",
+    "#/components/schemas/ArtifactVersionBlobDetail",
+  ]);
+  normalizeOneOf("PublicArtifactVersionDetail", [
+    "#/components/schemas/PublicArtifactVersionInlineDetail",
+    "#/components/schemas/PublicArtifactVersionInlinePrdV2Detail",
+    "#/components/schemas/PublicArtifactVersionBlobDetail",
+  ]);
+  normalizeOneOf("CreateArtifactVersionRequest", [
+    "#/components/schemas/CreatePrdArtifactVersionRequest",
+    "#/components/schemas/CreatePrototypeArtifactVersionRequest",
+    "#/components/schemas/CreatePrdV2ArtifactVersionRequest",
+  ]);
+
+  const runtimeDraft = schemas.RuntimeArtifactDraft;
+  const runtimeEntries = Array.isArray(runtimeDraft?.oneOf)
+    ? runtimeDraft.oneOf
+    : Array.isArray(runtimeDraft?.anyOf)
+      ? runtimeDraft.anyOf
+      : null;
+  const expectedRuntimeRefs = [
+    "#/components/schemas/RuntimeArtifactDraftPrdV1Revision",
+    "#/components/schemas/RuntimeArtifactDraftPrdV2",
+    "#/components/schemas/RuntimeArtifactDraftPrototype",
+    "#/components/schemas/RuntimeArtifactDraftImage",
+    "#/components/schemas/RuntimeArtifactDraftCode",
+    "#/components/schemas/RuntimeArtifactDraftDocument",
+    "#/components/schemas/RuntimeArtifactDraftData",
+  ];
+  const actualRuntimeRefs = runtimeEntries?.map((entry) => (
+    entry && typeof entry === "object" ? (entry as Record<string, unknown>).$ref : undefined
+  ));
+  if (JSON.stringify(actualRuntimeRefs) !== JSON.stringify(expectedRuntimeRefs)) {
+    throw new Error(`RuntimeArtifactDraft union branches changed: ${JSON.stringify(actualRuntimeRefs)}`);
+  }
+  runtimeDraft.oneOf = [
+    { $ref: "#/components/schemas/RuntimeArtifactDraftPrd" },
+    ...runtimeEntries!.slice(2),
+  ];
+  delete runtimeDraft.anyOf;
 }
 
 function auditNonStructuralSchemas(catalog: readonly { name: string; schema: ZodTypeAny }[]) {
@@ -808,6 +853,7 @@ export function buildWorkbenchOpenApiDocument() {
   // zod-to-openapi 7.3.4 adds a redundant nullable allOf beside references to
   // the sole recursive schema. JsonValue already includes null in its component definition.
   normalizeRecursiveJsonValueReferences(document);
+  normalizeVersionedPrdUnions(document);
   assertNoInvalidNullableReferences(document);
   return document;
 }

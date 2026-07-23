@@ -3,6 +3,7 @@ import type { Response } from "express";
 import {
   canonicalJson,
   createArtifactVersionRequestSchema,
+  prdDocumentV2Example,
   type CreateArtifactVersionRequest,
   type PrdDocument,
   type PrototypeDocument,
@@ -148,6 +149,18 @@ function prdDocument(revision: number, title = "PRD"): PrdDocument {
     },
   };
 }
+
+function prdDocumentV2(revision: number): PrdDocument {
+  return {
+    ...prdDocumentV2Example,
+    revision: {
+      ...prdDocumentV2Example.revision,
+      number: revision,
+      summary: "Manual edit",
+      changedAt: "2026-07-14T01:00:00.000Z",
+    },
+  };
+}
 const checksum = createHash("sha256").update(canonicalJson(request.document)).digest("hex");
 const readyVersion = {
   id: "version_2",
@@ -182,6 +195,7 @@ function receipt(resultVersion = readyVersion) {
 function createHarness(options: {
   artifactKind?: string;
   artifactRevision?: number;
+  baseSchemaVersion?: number;
   currentVersionId?: string | null;
   initialReceipt?: ReturnType<typeof receipt> | null;
   transactionReceipt?: ReturnType<typeof receipt> | null;
@@ -192,7 +206,7 @@ function createHarness(options: {
     artifactId: "artifact_1",
     projectId: "project_1",
     version: 1,
-    schemaVersion: 1,
+    schemaVersion: options.baseSchemaVersion ?? 1,
     status: "ready",
     content: prototypeDocument(1),
     contentBlobId: null,
@@ -245,6 +259,100 @@ function createHarness(options: {
   };
   const service = new ArtifactsService(db as never, {} as never);
   return { db, tx, service };
+}
+
+function createPrdEditHarness(input: {
+  baseDocument: PrdDocument;
+  baseSchemaVersion: 1 | 2;
+  document: PrdDocument;
+}) {
+  const artifactId = `artifact_prd_v${input.baseSchemaVersion}`;
+  const baseArtifactVersionId = `version_prd_v${input.baseSchemaVersion}_1`;
+  const resultArtifactVersionId = `version_prd_v${input.baseSchemaVersion}_2`;
+  const editIdempotencyKey = `prd-version:v${input.baseSchemaVersion}:key-1`;
+  const command: CreateArtifactVersionRequest = {
+    kind: "prd",
+    baseArtifactVersionId,
+    document: input.document,
+  };
+  const savedSchemaVersion = input.document.protocol === "workbench.prd.v2" ? 2 : 1;
+  const ready = {
+    id: resultArtifactVersionId,
+    artifactId,
+    version: 2,
+    schemaVersion: savedSchemaVersion,
+    status: "ready" as const,
+    content: command.document,
+    contentBlobId: null,
+    checksum: createHash("sha256").update(canonicalJson(command.document)).digest("hex"),
+    citations: [],
+    createdByRunId: null,
+    knowledgeReleaseId: "knowledge_1",
+    createdAt,
+    artifact: { kind: "prd" as const },
+  };
+  let persistedReceipt: Record<string, unknown> | null = null;
+  const receiptForKey = async ({
+    where,
+  }: {
+    where?: { artifactId_idempotencyKey?: { idempotencyKey?: string } };
+  }) => (
+    where?.artifactId_idempotencyKey?.idempotencyKey === editIdempotencyKey
+      ? persistedReceipt
+      : null
+  );
+  const baseVersion = {
+    id: baseArtifactVersionId,
+    artifactId,
+    projectId: "project_1",
+    version: 1,
+    schemaVersion: input.baseSchemaVersion,
+    status: "ready",
+    content: input.baseDocument,
+    contentBlobId: null,
+    citations: [],
+    knowledgeReleaseId: "knowledge_1",
+    assets: [],
+  };
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{
+      id: artifactId,
+      projectId: "project_1",
+      kind: "prd",
+      revision: 5,
+      currentVersionId: baseArtifactVersionId,
+    }]),
+    projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner" }) },
+    artifactVersionEditReceipt: {
+      findUnique: vi.fn().mockImplementation(receiptForKey),
+      create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
+        persistedReceipt = { ...data, resultVersion: ready };
+        return data;
+      }),
+    },
+    artifactVersion: {
+      findUnique: vi.fn().mockResolvedValue(baseVersion),
+      findFirst: vi.fn().mockResolvedValue({ version: 1 }),
+      create: vi.fn().mockResolvedValue({ id: resultArtifactVersionId }),
+      update: vi.fn().mockResolvedValue(ready),
+    },
+    artifactVersionAsset: { createMany: vi.fn() },
+    artifact: { update: vi.fn().mockResolvedValue({ revision: 6 }) },
+  };
+  const db = {
+    artifact: { findFirst: vi.fn().mockResolvedValue({ id: artifactId }) },
+    artifactVersionEditReceipt: { findUnique: vi.fn().mockImplementation(receiptForKey) },
+    $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+  };
+  return {
+    artifactId,
+    command,
+    db,
+    editIdempotencyKey,
+    resultArtifactVersionId,
+    service: new ArtifactsService(db as never, {} as never),
+    tx,
+  };
 }
 
 describe("ArtifactVersion user edit command", () => {
@@ -374,6 +482,14 @@ describe("ArtifactVersion user edit command", () => {
       response: expect.objectContaining({ code: "ARTIFACT_VERSION_BASE_NOT_CURRENT" }),
     });
 
+    const unsupportedPrototypeBase = createHarness({ baseSchemaVersion: 2 });
+    await expect(unsupportedPrototypeBase.service.createVersion(
+      "principal_1", "artifact_1", 5, "artifact-version:prototype-v2", request,
+    )).rejects.toMatchObject({
+      status: 409,
+      response: expect.objectContaining({ code: "ARTIFACT_VERSION_BASE_NOT_CURRENT" }),
+    });
+
     const changedDocumentId = createHarness();
     await expect(changedDocumentId.service.createVersion(
       "principal_1",
@@ -410,106 +526,89 @@ describe("ArtifactVersion user edit command", () => {
     expect(() => createArtifactVersionRequestSchema.parse({ ...prdRequest, document: request.document })).toThrow();
   });
 
-  it("publishes a PRD version while retaining its document identity and citations", async () => {
-    const baseDocument = prdDocument(1);
-    const prdRequest: CreateArtifactVersionRequest = {
-      kind: "prd",
-      baseArtifactVersionId: "version_1",
+  const prdEditFixtures: Array<{
+    baseDocument: PrdDocument;
+    document: PrdDocument;
+    schemaVersion: 1 | 2;
+    staleDocument: PrdDocument;
+  }> = [
+    {
+      baseDocument: prdDocument(1),
       document: prdDocument(2, "Edited PRD"),
-    };
-    const ready = {
-      id: "version_2",
-      artifactId: "artifact_prd",
-      version: 2,
       schemaVersion: 1,
-      status: "ready" as const,
-      content: prdRequest.document,
-      contentBlobId: null,
-      checksum: createHash("sha256").update(canonicalJson(prdRequest.document)).digest("hex"),
-      citations: [],
-      createdByRunId: null,
-      knowledgeReleaseId: "knowledge_1",
-      createdAt,
-      artifact: { kind: "prd" as const },
-    };
-    let receipt: Record<string, unknown> | null = null;
-    const baseVersion = {
-      id: "version_1",
-      artifactId: "artifact_prd",
-      projectId: "project_1",
-      version: 1,
-      schemaVersion: 1,
-      status: "ready",
-      content: baseDocument,
-      contentBlobId: null,
-      citations: [],
-      knowledgeReleaseId: "knowledge_1",
-      assets: [],
-    };
-    const tx = {
-      $queryRaw: vi.fn().mockResolvedValue([{
-        id: "artifact_prd",
-        projectId: "project_1",
-        kind: "prd",
-        revision: 5,
-        currentVersionId: "version_1",
-      }]),
-      projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner" }) },
-      artifactVersionEditReceipt: {
-        findUnique: vi.fn().mockImplementation(async ({ where }: { where?: { artifactId_idempotencyKey?: { idempotencyKey?: string } } }) => (
-          where?.artifactId_idempotencyKey?.idempotencyKey === "prd-version:key-1" ? receipt : null
-        )),
-        create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
-          receipt = { ...data, resultVersion: ready };
-          return data;
+      staleDocument: prdDocument(1, "Stale"),
+    },
+    {
+      baseDocument: prdDocumentV2(1),
+      document: prdDocumentV2(2),
+      schemaVersion: 2,
+      staleDocument: prdDocumentV2(1),
+    },
+  ];
+
+  for (const fixture of prdEditFixtures) {
+    it(`publishes a PRD v${fixture.schemaVersion} version without changing its schema`, async () => {
+      const harness = createPrdEditHarness({
+        baseDocument: fixture.baseDocument,
+        baseSchemaVersion: fixture.schemaVersion,
+        document: fixture.document,
+      });
+
+      const result = await harness.service.createVersion(
+        "principal_1",
+        harness.artifactId,
+        5,
+        harness.editIdempotencyKey,
+        harness.command,
+      );
+      expect(result).toMatchObject({
+        artifactRevision: 6,
+        detail: {
+          artifactVersionId: harness.resultArtifactVersionId,
+          kind: "prd",
+          schemaVersion: fixture.schemaVersion,
+          content: fixture.document,
+        },
+      });
+      expect(harness.tx.artifactVersion.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          schemaVersion: fixture.schemaVersion,
+          content: fixture.document,
         }),
-      },
-      artifactVersion: {
-        findUnique: vi.fn().mockResolvedValue(baseVersion),
-        findFirst: vi.fn().mockResolvedValue({ version: 1 }),
-        create: vi.fn().mockResolvedValue({ id: "version_2" }),
-        update: vi.fn().mockResolvedValue(ready),
-      },
-      artifactVersionAsset: { createMany: vi.fn() },
-      artifact: { update: vi.fn().mockResolvedValue({ revision: 6 }) },
-    };
-    const db = {
-      artifact: { findFirst: vi.fn().mockResolvedValue({ id: "artifact_prd" }) },
-      artifactVersionEditReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
-      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    };
-    const service = new ArtifactsService(db as never, {} as never);
+      });
+      expect(harness.tx.artifactVersionAsset.createMany).not.toHaveBeenCalled();
 
-    const result = await service.createVersion(
-      "principal_1",
-      "artifact_prd",
-      5,
-      "prd-version:key-1",
-      prdRequest,
-    );
-    expect(result).toMatchObject({
-      artifactRevision: 6,
-      detail: { artifactVersionId: "version_2", kind: "prd", content: prdRequest.document },
+      await expect(harness.service.createVersion(
+        "principal_1",
+        harness.artifactId,
+        5,
+        `prd-version:v${fixture.schemaVersion}:stale`,
+        { ...harness.command, document: fixture.staleDocument },
+      )).rejects.toMatchObject({
+        status: 409,
+        response: expect.objectContaining({ code: "ARTIFACT_DOCUMENT_REVISION_CONFLICT" }),
+      });
     });
-    expect(tx.artifactVersionAsset.createMany).not.toHaveBeenCalled();
-    expect(tx.artifactVersionEditReceipt.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        artifactId: "artifact_prd",
-        baseArtifactVersionId: "version_1",
-        resultArtifactVersionId: "version_2",
-      }),
+  }
+
+  it("rejects changing a PRD schema version during a manual revision", async () => {
+    const harness = createPrdEditHarness({
+      baseDocument: prdDocument(1),
+      baseSchemaVersion: 1,
+      document: prdDocumentV2(2),
     });
 
-    await expect(service.createVersion(
+    await expect(harness.service.createVersion(
       "principal_1",
-      "artifact_prd",
+      harness.artifactId,
       5,
-      "prd-version:stale",
-      { ...prdRequest, document: prdDocument(1, "Stale") },
+      harness.editIdempotencyKey,
+      harness.command,
     )).rejects.toMatchObject({
       status: 409,
-      response: expect.objectContaining({ code: "ARTIFACT_DOCUMENT_REVISION_CONFLICT" }),
+      response: expect.objectContaining({ code: "ARTIFACT_DOCUMENT_SCHEMA_VERSION_MISMATCH" }),
     });
+    expect(harness.tx.artifactVersion.create).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,9 @@
-import type { ArtifactVersionDetail, PrototypeDocument } from "@workbench/workbench-contracts";
+import {
+  prdDocumentV2Example,
+  prdSafetyBaselineItems,
+  type ArtifactVersionDetail,
+  type PrototypeDocument,
+} from "@workbench/workbench-contracts";
 import { describe, expect, it } from "vitest";
 
 import { prdDocument } from "../../../components/workbench/workbench-prd-test-fixture";
@@ -15,7 +20,26 @@ describe("ArtifactVersion comparison projection", () => {
     expect(projection.text).toContain("# Production PRD");
     expect(projection.text).toContain("## 1. Executive summary");
     expect(projection.text).toContain("Initial summary sourceEvidenceGoal");
-    expect(projection.text).toContain("Given Given");
+    expect(projection.text).toContain("前置条件：Given");
+    expect(projection.text).toContain("触发操作：When");
+    expect(projection.text).toContain("预期结果：Then");
+    expect(projection.text).toContain("缓解措施：Mitigate");
+  });
+
+  it("projects the complete v2 template with both diagrams and every canonical safety item", () => {
+    const projection = projectArtifactVersion(inlineVersion("prd", prdDocumentV2Example));
+
+    expect(projection.text).toContain("# 示例工单需求说明书");
+    expect(projection.text).toContain("## 版 本 历 史");
+    expect(projection.text).toContain("## 目 录");
+    expect(projection.text).toContain("### 1.1项目背景");
+    expect(projection.text).toContain("### 2.4 验收标准");
+    expect(projection.text).toContain("#### 图1 产品流程图");
+    expect(projection.text).toContain("#### 图2 产品架构图");
+    expect(projection.text).toContain("| 序号 | 活动投放的可选渠道 | 是否投放 |");
+    for (const item of prdSafetyBaselineItems) {
+      expect(projection.text).toContain(item.requirement);
+    }
   });
 
   it("uses preferred code text and canonical JSON as deterministic fallbacks", () => {

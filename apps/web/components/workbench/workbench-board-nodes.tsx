@@ -16,7 +16,14 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getStroke } from "perfect-freehand";
-import { createContext, type ReactNode, useContext } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import type {
   BoardNodeData,
   PrdDocument,
@@ -36,6 +43,7 @@ import { WorkbenchArtifactPreferenceActions } from "./workbench-artifact-prefere
 import {
   WorkbenchArtifactFallback,
   WorkbenchArtifactSkeleton,
+  WorkbenchDocumentLoading,
 } from "./workbench-artifact-fallback";
 import {
   panelTransition,
@@ -680,7 +688,42 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
   const artifactVersions = useContext(WorkbenchArtifactVersionContext);
   const prdEditor = useContext(WorkbenchPrdEditContext);
   const isLoading = data.phase === "generating" || data.phase === "refining";
+  const artifactVersionId = data.artifact?.artifactVersionId ?? null;
+  const [displayTitle, setDisplayTitle] = useState(data.title);
+  const [resolvedArtifactVersionId, setResolvedArtifactVersionId] = useState<string | null>(
+    () => isLoading ? null : artifactVersionId,
+  );
+  const showLoading = isLoading && (
+    artifactVersionId === null || resolvedArtifactVersionId !== artifactVersionId
+  );
   const editing = Boolean(selected && data.artifact && prdEditor.enabled && !isLoading);
+
+  useEffect(() => {
+    setDisplayTitle(data.title);
+  }, [artifactVersionId, data.title]);
+
+  useEffect(() => {
+    if (artifactVersionId === null) {
+      setResolvedArtifactVersionId(null);
+      return;
+    }
+    if (!isLoading || data.suppressEntrance) {
+      setResolvedArtifactVersionId(artifactVersionId);
+      return;
+    }
+
+    setResolvedArtifactVersionId(null);
+  }, [artifactVersionId, data.suppressEntrance, isLoading]);
+
+  const handleArtifactVersionStateChange = useCallback((state: "error" | "pending" | "ready") => {
+    if (artifactVersionId !== null && state !== "pending") {
+      setResolvedArtifactVersionId(artifactVersionId);
+    }
+  }, [artifactVersionId]);
+
+  const handleArtifactTitleChange = useCallback((title: string) => {
+    setDisplayTitle(title);
+  }, []);
 
   return (
     <section className={cn(
@@ -691,14 +734,15 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
         color="#7467f6"
         handleClassName="!size-[8px] !border !border-[#7467f6] !bg-[#dfe2ff]"
         isVisible={isWorkbenchNodeResizeVisible(canResizeNodes, selected)}
+        keepAspectRatio
         lineClassName="!border-[#7467f6]"
-        minHeight={520}
-        minWidth={520}
+        minHeight={500}
+        minWidth={500}
       />
       {(selected || isLoading) && <div className="pointer-events-none absolute inset-0 z-20 border-[2px] border-[#7467f6]" />}
       <div className="absolute left-0 top-[-31px] z-30 flex items-center gap-[7px] text-[14px] font-medium leading-none text-[#f1f3f4]">
         <FileTextIcon className="size-[14px]" />
-        {data.title}
+        {displayTitle}
       </div>
       {selected && data.artifact && (
         <div className="nodrag nopan absolute right-0 top-[-31px] z-30 flex h-[24px] items-center gap-[10px] text-[#d8dce2]">
@@ -723,48 +767,47 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
         </div>
       )}
       <div className="absolute inset-0 overflow-hidden bg-[#1d1d1f]">
-        <AnimatePresence initial={false} mode="wait">
-          {isLoading && !data.artifact ? (
+        {data.artifact ? (
+          <motion.div
+            animate={showLoading ? { opacity: 0, y: 5 } : { opacity: 1, y: 0 }}
+            aria-hidden={showLoading}
+            className="absolute inset-0"
+            initial={data.suppressEntrance || !isLoading ? false : { opacity: 0, y: 5 }}
+            inert={showLoading}
+            transition={data.suppressEntrance
+              ? { duration: 0 }
+              : { delay: showLoading ? 0 : 0.18, duration: 0.32, ease: workbenchEase }}
+          >
+            <WorkbenchArtifactContent
+              editable={editing}
+              editingBusy={prdEditor.busy}
+              onArtifactTitleChange={handleArtifactTitleChange}
+              onArtifactVersionStateChange={handleArtifactVersionStateChange}
+              onPrdDocumentCommit={prdEditor.onDocumentCommit}
+              pendingContent={null}
+              reference={data.artifact}
+            />
+          </motion.div>
+        ) : !isLoading ? (
+          <div className="absolute inset-0 px-[38px] py-[34px]">
+            <WorkbenchArtifactFallback
+              phase="complete"
+              title={data.title}
+              variant="document"
+            />
+          </div>
+        ) : null}
+        <AnimatePresence initial={false}>
+          {showLoading && (
             <motion.div
               animate={{ opacity: 1 }}
-              className="absolute inset-0"
+              className="absolute inset-0 z-10"
               exit={{ opacity: 0 }}
               initial={{ opacity: 0 }}
               key="document-loading"
               transition={{ duration: 0.22, ease: workbenchEase }}
             >
-              <WorkbenchArtifactFallback
-                phase={data.phase === "refining" ? "refining" : "generating"}
-                title={data.title}
-                variant="document"
-              />
-              <GeneratingWash mode="document" />
-            </motion.div>
-          ) : (
-            <motion.div
-              animate={{ opacity: 1, y: 0 }}
-              className={cn("absolute inset-0", !data.artifact && "px-[38px] py-[34px]")}
-              initial={data.suppressEntrance ? false : { opacity: 0, y: 5 }}
-              key="document-content"
-              transition={data.suppressEntrance
-                ? { duration: 0 }
-                : { duration: 0.32, ease: workbenchEase }}
-            >
-              {data.artifact ? (
-                <WorkbenchArtifactContent
-                  editable={editing}
-                  editingBusy={prdEditor.busy}
-                  onPrdDocumentCommit={prdEditor.onDocumentCommit}
-                  reference={data.artifact}
-                />
-              ) : (
-                <WorkbenchArtifactFallback
-                  phase="complete"
-                  title={data.title}
-                  variant="document"
-                />
-              )}
-              {isLoading && <GeneratingWash mode="light" />}
+              <WorkbenchDocumentLoading />
             </motion.div>
           )}
         </AnimatePresence>

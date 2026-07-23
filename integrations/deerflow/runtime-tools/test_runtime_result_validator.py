@@ -17,6 +17,7 @@ from deerflow_workbench_tools.runtime_result_validator import (
 
 ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_PATH = ROOT / "integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json"
+PRD_EXAMPLE_PATH = ROOT / "integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json"
 
 
 class RuntimeResultValidatorTests(unittest.TestCase):
@@ -54,6 +55,39 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         paths = {tuple(issue["path"]) for issue in result["issues"]}
         self.assertIn(("artifacts", 0, "content", "bindings", 0, "source", "stateId"), paths)
         self.assertIn(("artifacts", 0, "content", "bindings", 0, "source", "field"), paths)
+
+    def test_rejects_the_unmaterialized_prd_reference_example(self) -> None:
+        candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
+
+        result = validate_runtime_result(candidate)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(
+            issue["path"] == ["artifacts", 0, "content", "documentId"]
+            and "reference example" in issue["message"]
+            for issue in result["issues"]
+        ))
+
+    def test_rejects_a_large_prd_reference_copy_after_renaming_the_cover(self) -> None:
+        candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
+        artifact = candidate["artifacts"][0]
+        artifact["title"] = "真实工单需求说明书"
+        content = artifact["content"]
+        content["documentId"] = "prd-real-work-order"
+        content["title"] = "真实工单需求说明书"
+        content["cover"] = {
+            "workOrderName": "真实工单",
+            "title": "真实工单需求说明书",
+        }
+
+        result = validate_runtime_result(candidate)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(
+            issue["path"] == ["artifacts", 0, "content"]
+            and "sample business content" in issue["message"]
+            for issue in result["issues"]
+        ))
 
     def test_validates_one_draft_without_result_path_prefixes(self) -> None:
         draft = copy.deepcopy(self.example["artifacts"][0])

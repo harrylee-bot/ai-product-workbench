@@ -7,7 +7,10 @@ import {
 } from "../src/common/problem-details.js";
 import { RunsService } from "../src/modules/runs/runs.service.js";
 import { createHash } from "node:crypto";
-import { canonicalJson } from "@workbench/workbench-contracts";
+import {
+  canonicalJson,
+  prdDocumentV2Example,
+} from "@workbench/workbench-contracts";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
 const designSystemContent = {
@@ -764,7 +767,7 @@ describe("Run immutable Import Source snapshots", () => {
     )).rejects.toMatchObject({ status: 409 });
   });
 
-  it("locks ready Artifact targets and freezes their request order and idempotency", async () => {
+  it("locks ready PRD v1/v2 targets and freezes their request order and idempotency", async () => {
     const targetedRequest = {
       ...request,
       workflow: "edit" as const,
@@ -775,7 +778,7 @@ describe("Run immutable Import Source snapshots", () => {
     };
     const ready = createHarness({
       targetVersions: [
-        { id: "version_target_1", artifactId: "artifact_target_1", kind: "prd", schemaVersion: 1, content: null, contentBlobId: null },
+        { id: "version_target_1", artifactId: "artifact_target_1", kind: "prd", schemaVersion: 2, content: prdDocumentV2Example, contentBlobId: null },
         { id: "version_target_2", artifactId: "artifact_target_2", kind: "prd", schemaVersion: 1, content: null, contentBlobId: null },
       ],
     });
@@ -808,7 +811,7 @@ describe("Run immutable Import Source snapshots", () => {
 
     const retry = createHarness({
       targetVersions: [
-        { id: "version_target_1", artifactId: "artifact_target_1", kind: "prd", schemaVersion: 1, content: null, contentBlobId: null },
+        { id: "version_target_1", artifactId: "artifact_target_1", kind: "prd", schemaVersion: 2, content: prdDocumentV2Example, contentBlobId: null },
         { id: "version_target_2", artifactId: "artifact_target_2", kind: "prd", schemaVersion: 1, content: null, contentBlobId: null },
       ],
     });
@@ -945,6 +948,24 @@ describe("Run immutable Import Source snapshots", () => {
       }),
     });
     expect(blobBacked.tx.run.create).not.toHaveBeenCalled();
+
+    const unsupportedSchema = createHarness({
+      targetVersions: [{ ...targetVersion, schemaVersion: 2 }],
+    });
+    await expect(unsupportedSchema.service.start(
+      "principal_1",
+      "thread_1",
+      "run:key:generate-prototype-v2:12345678",
+      generatePrototypeRequest,
+    )).rejects.toMatchObject({
+      status: 400,
+      response: expect.objectContaining({
+        errors: {
+          artifactTargets: ["Select screens from a ready inline Prototype in this Project"],
+        },
+      }),
+    });
+    expect(unsupportedSchema.tx.run.create).not.toHaveBeenCalled();
   });
 
   it("returns the same 404 for missing, cross-Project, and non-ready target versions", async () => {

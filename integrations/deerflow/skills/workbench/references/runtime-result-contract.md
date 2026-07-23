@@ -43,7 +43,7 @@ PRD and Prototype content must satisfy the complete schemas in `runtime-result.s
 
 ### PRD authoring fast path
 
-Read and copy `prd-runtime-result.example.json` as one complete create-result template before authoring a PRD. It includes every required section, typed inline content, and valid bidirectional goal/requirement/acceptance/flow references. Replace its sample IDs and content, then expand the typed blocks without deleting required fields. Do not derive a JSON shape from the human-readable document outline.
+Read and copy `prd-runtime-result.example.json` as one complete create-result template before authoring a PRD. New PRDs use Artifact schemaVersion 2 and `workbench.prd.v2`; v1 exists only for compatibility with older Artifacts. The example includes the cover, version history, manual table of contents, fixed sections, typed channel table, both product diagrams, degradation plan, 21-row safety baseline, typed inline content, and valid bidirectional goal/requirement/acceptance/flow references. Replace every sample ID and all sample business content, then expand typed blocks without deleting required fields. Do not derive a JSON shape from the human-readable outline.
 
 A state-backed binding uses `{"kind":"state","stateId":"state-ready","field":"submitLabel"}`. `stateId` must match one `states[].id`, and `field` must be a key in that state's `values`; a state source never uses `key` or `path`.
 

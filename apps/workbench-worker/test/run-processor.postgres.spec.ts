@@ -310,7 +310,16 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
 
   it("commits publication and ordered completion events when the success fence wins", async () => {
     const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
-    const fixture = await seedRunFixture(worker, "publish");
+    const fixture = await seedRunFixture(worker, "publish", () => ({
+      prompt: "Publish a document",
+      modelId: "quality",
+      workflow: "generate",
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      sourceIds: [],
+      artifactTargets: [],
+      requestedArtifactKinds: ["document"],
+    }));
     const claim = await claimRunFixture(worker, fixture);
     const processor = new RunProcessor(
       worker,

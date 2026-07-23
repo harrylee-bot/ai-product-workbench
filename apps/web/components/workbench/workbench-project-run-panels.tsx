@@ -248,8 +248,6 @@ export function ProjectTranscriptPanel({
   const isGenerated = projectMode === "generated";
   const promptCopy = prompt || "当前运行";
   const displayedPromptCopy = selectedTask || promptCopy;
-  const isDocument = projectMode === "document";
-  const showPromptChip = Boolean(prompt || selectedTask);
   const selectedActivity = selectedTask
     ? [...activities].reverse().find((activity) => activity.label === selectedTask)
     : null;
@@ -271,21 +269,20 @@ export function ProjectTranscriptPanel({
           : runStatus === "succeeded"
             ? "运行已完成"
             : runPhaseLabel ?? currentActivity?.label ?? (isOverview ? "正在处理" : "准备就绪");
-  const bodyCopy = selectedActivity?.detail
-    ?? latestMessage?.text
-    ?? currentActivity?.detail
-    ?? failure?.message
-    ?? cancellationReason
-    ?? (submissionError instanceof Error ? submissionError.message : null)
-    ?? (runStatus === "waiting_input" ? "请在确认弹层中选择后继续。" : null)
-    ?? (runStatus === "succeeded" ? "产物已发布到当前项目画布。" : null)
-    ?? "暂无新的运行消息。";
+  const runBodyCopy = [
+    selectedActivity?.detail,
+    latestMessage?.text,
+    currentActivity?.detail,
+    failure?.message,
+    cancellationReason,
+    submissionError instanceof Error ? submissionError.message : null,
+    runStatus === "waiting_input" ? "请在确认弹层中选择后继续。" : null,
+    runStatus === "succeeded" ? "产物已发布到当前项目画布。" : null,
+  ].find((copy): copy is string => typeof copy === "string" && copy.trim().length > 0)?.trim() ?? null;
+  const bodyCopy = runBodyCopy ?? (isWorking ? null : "暂无新的运行消息。");
   const isAgentWorking = isWorking;
-  const expandedPanelHeight = selectedTask
-    ? "326px"
-    : isDocument
-    ? "calc(100vh - 260px)"
-    : `${isGenerated ? (isOverview ? 188 : phase === "complete" ? 126 : 326) : 126}px`;
+  const showPromptChip = Boolean(prompt || selectedTask)
+    && (Boolean(selectedTask) || isOverview || !(phase === "complete" && isGenerated));
 
   useEffect(() => {
     if (phase === "generating" || phase === "refining") {
@@ -323,7 +320,7 @@ export function ProjectTranscriptPanel({
       data-panel-motion="agent-card"
       data-phase={phase}
       initial={{ opacity: 0, x: -10 }}
-      style={{ height: transcriptOpen ? expandedPanelHeight : "52px", width: transcriptOpen ? "280px" : "64px" }}
+      style={{ height: transcriptOpen ? "auto" : "52px", width: transcriptOpen ? "280px" : "64px" }}
       transition={{ ...panelTransition, delay: 0.10 }}
     >
       <div className="workbench-agent-card-base-bg absolute inset-0" />
@@ -348,12 +345,12 @@ export function ProjectTranscriptPanel({
       {transcriptOpen && (
       <motion.div
         animate={{ opacity: 1 }}
-        className="relative z-20 flex h-full flex-col px-[16px] pb-[18px] pt-[70px] text-[#f1f3f4]"
+        className="relative z-20 flex flex-col px-[16px] pb-[18px] pt-[70px] text-[#f1f3f4]"
         exit={{ opacity: 0 }}
         initial={{ opacity: 0 }}
         transition={{ duration: 0.16, ease: workbenchEase }}
       >
-        {showPromptChip && (selectedTask || isOverview || !(phase === "complete" && isGenerated)) && (
+        {showPromptChip && (
         <div
           className="mb-[18px] flex h-[46px] w-full items-center gap-[9px] rounded-[14px] border border-white/[0.10] bg-[#2b2d31]/84 px-[12px] text-left text-[13px] font-medium text-[#d8dce2]"
         >
@@ -370,21 +367,26 @@ export function ProjectTranscriptPanel({
           </button>
         </div>
         )}
-        <div className="relative min-h-0 flex-1 overflow-hidden text-[15px] leading-[24px] text-[#f4f6fa]">
+        <div className="relative min-h-0 text-[15px] leading-[24px] text-[#f4f6fa]">
           <AnimatePresence initial={false} mode="sync">
           <motion.div
             animate={{ opacity: 1, y: 0 }}
-            className={cn("absolute inset-0", (isGenerated || selectedTask) && "flex flex-col")}
+            className="flex min-h-0 flex-col"
             exit={{ opacity: 0, y: -4 }}
             initial={{ opacity: 0, y: 4 }}
             key={selectedTask || `${projectMode}-${phase}`}
             transition={{ duration: 0.22, ease: workbenchEase }}
           >
           <>
-            <p className="max-h-[166px] overflow-hidden whitespace-normal text-[14px] leading-[23px]">
+            {bodyCopy && (
+            <p className="nowheel min-h-0 max-h-[166px] overflow-y-auto whitespace-normal pr-[4px] text-[14px] leading-[23px]">
               {bodyCopy}
             </p>
-            <div className="mt-[18px] flex items-center gap-[9px] text-[15px] italic leading-[21px] text-[#d8dce2]">
+            )}
+            <div className={cn(
+              "flex shrink-0 items-center gap-[9px] text-[15px] italic leading-[21px] text-[#d8dce2]",
+              bodyCopy && "mt-[18px]",
+            )}>
               {isAgentWorking ? (
                 <span className="workbench-status-spinner size-[14px] animate-spin rounded-full border-2 border-[#d8dce2]/70 border-t-transparent" />
               ) : runStatus === "failed" || runStatus === "cancelled" || submissionError ? (

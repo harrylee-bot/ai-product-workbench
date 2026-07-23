@@ -30,11 +30,15 @@ const canvasToolSecret = Buffer.alloc(32, 41).toString("base64url");
 const canvasVisualFixtureBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const runtimeCatalogModelId = "quality";
 const runtimeProviderModel = "fake-quality-model";
+const prdV2DocumentId = "e2e-prd";
+const prdV2WorkOrderName = "Workbench PostgreSQL E2E";
+const prdV2Title = `${prdV2WorkOrderName}需求说明书`;
 const verbose = process.env.WORKBENCH_E2E_VERBOSE === "1";
 
 const services = [];
 let fakeRuntime;
 let cleanupPromise;
+let prdV2DocumentFixture;
 
 class LogBuffer {
   constructor(name) {
@@ -62,6 +66,8 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 try {
   console.log(`[e2e] target database: ${databaseName}`);
   await buildWorkspaces();
+  const { prdDocumentV2Example, prdDocumentV2Schema } = await import("@workbench/workbench-contracts");
+  prdV2DocumentFixture = prdDocumentV2Schema.parse(buildPrdV2DocumentFixture(prdDocumentV2Example));
   await rebuildSchemas();
   await migrateDatabase();
 
@@ -595,6 +601,8 @@ async function runSuccessScenario(client, outsiderClient) {
   const artifact = completed.body.artifacts[0];
   assert.equal(artifact.kind, "prd");
   assert.equal(artifact.currentVersion.status, "ready");
+  assert.equal(artifact.currentVersion.kind, "prd");
+  assert.equal(artifact.currentVersion.schemaVersion, 2);
   assert.equal(artifact.currentVersion.createdByRunId, first.body.id);
   assert.equal(artifact.revision, 1);
 
@@ -621,6 +629,8 @@ async function runSuccessScenario(client, outsiderClient) {
   );
   assert.equal(versionPage.body.items.length, 1);
   assert.equal(versionPage.body.items[0].artifactVersionId, artifact.currentVersion.artifactVersionId);
+  assert.equal(versionPage.body.items[0].kind, "prd");
+  assert.equal(versionPage.body.items[0].schemaVersion, 2);
   assert.equal(versionPage.body.items[0].contentMode, "inline");
 
   const versionDetail = await client.json(
@@ -630,7 +640,13 @@ async function runSuccessScenario(client, outsiderClient) {
   const versionEtag = versionDetail.headers.get("etag");
   assert.match(versionEtag ?? "", /^"[a-f0-9]{64}"$/);
   assert.equal(versionDetail.body.contentMode, "inline");
-  assert.equal(versionDetail.body.content.protocol, "workbench.prd.v1");
+  assert.equal(versionDetail.body.kind, "prd");
+  assert.equal(versionDetail.body.schemaVersion, 2);
+  assert.equal(versionDetail.body.content.protocol, "workbench.prd.v2");
+  assert.equal(versionDetail.body.content.documentId, prdV2DocumentId);
+  assert.equal(versionDetail.body.content.title, prdV2Title);
+  assert.equal(versionDetail.body.content.cover.workOrderName, prdV2WorkOrderName);
+  assert.equal(versionDetail.body.content.cover.title, prdV2Title);
   assert.equal(versionDetail.body.knowledgeReleaseId, null);
   const versionNotModified = await client.json(
     "GET",
@@ -660,6 +676,8 @@ async function runSuccessScenario(client, outsiderClient) {
   );
   assert.ok(artifactNode, "Worker did not add the ArtifactVersion to the Board");
   assert.equal(artifactNode.artifactId, artifact.id);
+  assert.equal(artifactNode.data.artifactKind, "prd");
+  assert.deepEqual(artifactNode.size, { width: 500, height: 500 });
   const userEntry = completed.body.entries.find(
     (entry) => entry.role === "user" && entry.content?.type === "user.prompt",
   );
@@ -719,6 +737,8 @@ async function runSuccessScenario(client, outsiderClient) {
       r.design_style_snapshot#>>'{source,checksum}' AS design_style_preset_checksum,
       r.design_style_snapshot_sha256,
       count(DISTINCT av.id)::int AS artifact_version_count,
+      max(av.schema_version)::int AS artifact_schema_version,
+      max(av.content->>'protocol') AS artifact_protocol,
       count(DISTINCT bn.id)::int AS board_node_count,
       to_regnamespace('workbench_jobs') IS NOT NULL AS queue_schema_exists
     FROM workbench.runs r
@@ -740,6 +760,8 @@ async function runSuccessScenario(client, outsiderClient) {
   assert.equal(persisted.rows[0]?.design_style_preset_checksum, selectedPreset.checksum);
   assert.match(persisted.rows[0]?.design_style_snapshot_sha256, /^[0-9a-f]{64}$/);
   assert.equal(persisted.rows[0]?.artifact_version_count, 1);
+  assert.equal(persisted.rows[0]?.artifact_schema_version, 2);
+  assert.equal(persisted.rows[0]?.artifact_protocol, "workbench.prd.v2");
   assert.equal(persisted.rows[0]?.board_node_count, 1);
   assert.equal(persisted.rows[0]?.queue_schema_exists, true);
   await assertPersistedRunSources(first.body.id, sourceFixtures, sourceSnapshots);
@@ -3406,8 +3428,8 @@ async function writeSuccessfulRuntimeStream(response, requestBody) {
     message: "E2E generated response",
     artifacts: [{
       kind: "prd",
-      title: "E2E Product Requirement Document",
-      schemaVersion: 1,
+      title: prdV2Title,
+      schemaVersion: 2,
       operation: { kind: "create" },
       content: minimalPrdDocument(),
       citations: [],
@@ -4180,111 +4202,26 @@ function minimalPrototypeDocument() {
 }
 
 function minimalPrdDocument() {
-  const text = (value) => [{ type: "text", text: value, marks: [] }];
-  return {
-    protocol: "workbench.prd.v1",
-    documentId: "e2e-prd",
-    title: "E2E Product Requirement Document",
-    revision: {
-      number: 1,
-      status: "draft",
-      summary: "Initial E2E revision",
-      changedAt: "2026-07-12T00:00:00.000Z",
-      changedById: null,
-    },
-    assumptions: [],
-    citations: [],
-    sections: {
-      executiveSummary: {
-        title: "Executive summary",
-        blocks: [{ id: "summary", type: "paragraph", content: text("Deterministic summary") }],
-      },
-      problem: {
-        title: "Problem",
-        blocks: [{ id: "problem", type: "paragraph", content: text("Deterministic problem") }],
-      },
-      goals: {
-        title: "Goals",
-        blocks: [{
-          id: "goal-main",
-          type: "goal",
-          title: "Main goal",
-          description: text("Deliver a deterministic artifact"),
-          successMetric: "One validated ArtifactVersion",
-          priority: "primary",
-        }],
-      },
-      targetUsers: {
-        title: "Target users",
-        blocks: [{
-          id: "persona-main",
-          type: "persona",
-          name: "E2E user",
-          description: text("A deterministic test user"),
-          needs: ["Read the generated PRD"],
-          painPoints: ["Invalid contracts"],
-        }],
-      },
-      scope: {
-        title: "Scope",
-        blocks: [{
-          id: "scope-list",
-          type: "bulletList",
-          items: [{ id: "scope-item", content: text("Artifact publication") }],
-        }],
-      },
-      requirements: {
-        title: "Requirements",
-        blocks: [{
-          id: "requirement-main",
-          type: "requirement",
-          title: "Publish a valid Artifact",
-          description: text("The runtime returns strict PRD IR"),
-          priority: "must",
-          goalIds: ["goal-main"],
-          acceptanceCriterionIds: ["criterion-main"],
-        }],
-      },
-      userFlows: {
-        title: "User flows",
-        blocks: [{
-          id: "flow-main",
-          type: "flow",
-          title: "Generate PRD",
-          actor: "E2E user",
-          trigger: "Submit a generation request",
-          steps: [{
-            id: "flow-step",
-            text: "Wait for publication",
-            requirementIds: ["requirement-main"],
-          }],
-          outcome: "The PRD is readable through the Artifact API",
-        }],
-      },
-      acceptanceCriteria: {
-        title: "Acceptance criteria",
-        blocks: [{
-          id: "criterion-main",
-          type: "acceptanceCriterion",
-          requirementIds: ["requirement-main"],
-          given: text("Given a valid Run"),
-          when: text("When DeerFlow completes"),
-          then: text("Then an immutable PRD version is published"),
-        }],
-      },
-      risksAndDependencies: {
-        title: "Risks and dependencies",
-        blocks: [{
-          id: "risk-main",
-          type: "risk",
-          description: text("The runtime could return an invalid contract"),
-          likelihood: "low",
-          impact: "high",
-          mitigation: text("Validate before publication"),
-        }],
-      },
-    },
-  };
+  assert.ok(prdV2DocumentFixture, "PRD v2 fixture was not initialized");
+  return structuredClone(prdV2DocumentFixture);
+}
+
+function buildPrdV2DocumentFixture(example) {
+  const document = structuredClone(example);
+  document.documentId = prdV2DocumentId;
+  document.title = prdV2Title;
+  document.cover.workOrderName = prdV2WorkOrderName;
+  document.cover.title = prdV2Title;
+  document.revision.summary = "Initial deterministic E2E version";
+  document.sections.introduction.background.blocks[0].content[0].text =
+    "本 E2E 工作台覆盖确定性的需求说明书生成、状态反馈与结果确认，确保用户能够从项目入口提交请求、跟踪运行状态并读取最终产物。";
+  document.sections.businessRequirements.summary[0].text =
+    "总体目标：E2E 用户通过端内入口提交生成请求，连续跟踪处理状态，并完成异常恢复与结果确认。";
+  document.sections.businessRequirements.flowAndPages.blocks[1].content[0].text =
+    "两张图分别描述从请求提交到结果确认的正常与异常路径，以及页面、运行能力、状态记录和验收反馈之间的产品关系。";
+  document.sections.degradation.content[0].text =
+    "运行依赖发生故障时，页面保留用户已经填写的内容并阻止重复提交，清楚展示失败原因、影响范围和可执行的重试入口；状态同步延迟时继续显示最后一次可信状态及其更新时间，不提前标记成功；权限校验不可用时按无权限处理且不创建运行；产物读取失败时保留运行编号并允许稍后刷新。服务恢复后，用户可以从原运行继续查询或安全重试，幂等请求必须复用已有结果，同时记录异常时间、恢复时间和最终状态，供业务、研发与测试共同核验。";
+  return document;
 }
 
 async function holdCancellationStream(request, response, state, run) {

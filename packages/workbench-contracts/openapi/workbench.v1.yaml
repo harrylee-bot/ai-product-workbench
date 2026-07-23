@@ -2490,7 +2490,7 @@ components:
         - acceptanceCriteria
         - risksAndDependencies
       additionalProperties: false
-    PrdDocument:
+    PrdDocumentV1:
       type: object
       properties:
         protocol:
@@ -2529,7 +2529,7 @@ components:
         - citations
         - sections
       additionalProperties: false
-      description: PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract.
+      description: Legacy PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract.
     ArtifactVersionInlinePrdDetail:
       type: object
       properties:
@@ -2582,7 +2582,7 @@ components:
           enum:
             - 1
         content:
-          $ref: "#/components/schemas/PrdDocument"
+          $ref: "#/components/schemas/PrdDocumentV1"
       required:
         - artifactId
         - artifactVersionId
@@ -4998,9 +4998,563 @@ components:
           code: "#/components/schemas/ArtifactVersionInlineCodeDetail"
           document: "#/components/schemas/ArtifactVersionInlineDocumentDetail"
           data: "#/components/schemas/ArtifactVersionInlineDataDetail"
+    PrdChannelRow:
+      type: object
+      properties:
+        sequence:
+          type: integer
+          minimum: 1
+          maximum: 3
+        channel:
+          type: string
+          enum:
+            - inApp
+            - wapH5
+            - miniProgram
+        enabled:
+          type: boolean
+      required:
+        - sequence
+        - channel
+        - enabled
+      additionalProperties: false
+    PrdDiagramEdge:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        from:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        to:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        label:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 240
+      required:
+        - id
+        - from
+        - to
+        - label
+      additionalProperties: false
+    PrdDiagramNode:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        label:
+          type: string
+          minLength: 1
+          maxLength: 240
+        group:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 120
+      required:
+        - id
+        - label
+        - group
+      additionalProperties: false
+    PrdDiagram:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        kind:
+          type: string
+          enum:
+            - productFlow
+            - productArchitecture
+        title:
+          type: string
+          enum:
+            - 图1 产品流程图
+            - 图2 产品架构图
+        description:
+          type: string
+          minLength: 20
+          maxLength: 2000
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdDiagramNode"
+          minItems: 4
+          maxItems: 40
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdDiagramEdge"
+          minItems: 3
+          maxItems: 80
+      required:
+        - id
+        - kind
+        - title
+        - description
+        - nodes
+        - edges
+      additionalProperties: false
+    PrdSafetyBaselineRow:
+      type: object
+      properties:
+        sequence:
+          type: integer
+          minimum: 1
+          maximum: 21
+        applicability:
+          type: string
+          enum:
+            - 是
+            - 否
+            - 不涉及
+        remarks:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 1000
+      required:
+        - sequence
+        - applicability
+        - remarks
+      additionalProperties: false
+    PrdVersionHistoryEntry:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - 讨论稿
+            - 评审中
+            - 已定稿
+        author:
+          type: string
+          minLength: 1
+          maxLength: 120
+        participants:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
+          minItems: 1
+          maxItems: 30
+        startDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        endDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        notes:
+          type: string
+          minLength: 1
+          maxLength: 1000
+      required:
+        - status
+        - author
+        - participants
+        - startDate
+        - endDate
+        - notes
+      additionalProperties: false
+    PrdDocumentV2:
+      type: object
+      properties:
+        protocol:
+          type: string
+          enum:
+            - workbench.prd.v2
+        documentId:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        revision:
+          $ref: "#/components/schemas/PrdRevision"
+        cover:
+          type: object
+          properties:
+            workOrderName:
+              type: string
+              minLength: 1
+              maxLength: 200
+            title:
+              type: string
+              minLength: 1
+              maxLength: 240
+          required:
+            - workOrderName
+            - title
+          additionalProperties: false
+        versionHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdVersionHistoryEntry"
+          minItems: 1
+          maxItems: 100
+        tableOfContents:
+          type: object
+          properties:
+            title:
+              type: string
+              enum:
+                - 目 录
+            entries:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 240
+              minItems: 11
+              maxItems: 11
+          required:
+            - title
+            - entries
+          additionalProperties: false
+        assumptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdAssumption"
+          maxItems: 500
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        sections:
+          type: object
+          properties:
+            introduction:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 1 引言
+                background:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.1项目背景
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                scope:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.2文档范围
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                usageScenarios:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.3使用场景（必填）
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                    channelTable:
+                      type: object
+                      properties:
+                        title:
+                          type: string
+                          enum:
+                            - 活动投放渠道
+                        rows:
+                          type: array
+                          items:
+                            $ref: "#/components/schemas/PrdChannelRow"
+                          minItems: 3
+                          maxItems: 3
+                      required:
+                        - title
+                        - rows
+                      additionalProperties: false
+                  required:
+                    - title
+                    - blocks
+                    - channelTable
+                  additionalProperties: false
+              required:
+                - title
+                - background
+                - scope
+                - usageScenarios
+              additionalProperties: false
+            businessRequirements:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 2 业务需求
+                summary:
+                  $ref: "#/components/schemas/PrdInlineContent"
+                pageLinks:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 2.1页面链接
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                coreRules:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 2.2 核心业务规则/功能说明
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                flowAndPages:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 2.3 核心流程/状态/页面要求
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                    diagrams:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdDiagram"
+                      minItems: 2
+                      maxItems: 2
+                  required:
+                    - title
+                    - blocks
+                    - diagrams
+                  additionalProperties: false
+                acceptanceCriteria:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 2.4 验收标准
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+              required:
+                - title
+                - summary
+                - pageLinks
+                - coreRules
+                - flowAndPages
+                - acceptanceCriteria
+              additionalProperties: false
+            degradation:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 3 业务降级方案（必填）
+                applicable:
+                  type: boolean
+                content:
+                  $ref: "#/components/schemas/PrdInlineContent"
+              required:
+                - title
+                - applicable
+                - content
+              additionalProperties: false
+            safetyBaseline:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 4 需求安全基线要求（必填）
+                intro:
+                  type: string
+                  enum:
+                    - |-
+                      该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：
+                      1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据
+                      2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；
+                      3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。
+                      建议：该表格请业务人员和开发人员共同参与自查并填写。
+                rows:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdSafetyBaselineRow"
+                  minItems: 21
+                  maxItems: 21
+              required:
+                - title
+                - intro
+                - rows
+              additionalProperties: false
+          required:
+            - introduction
+            - businessRequirements
+            - degradation
+            - safetyBaseline
+          additionalProperties: false
+      required:
+        - protocol
+        - documentId
+        - title
+        - revision
+        - cover
+        - versionHistory
+        - tableOfContents
+        - assumptions
+        - citations
+        - sections
+      additionalProperties: false
+      description: PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract.
+    ArtifactVersionInlinePrdV2Detail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          $ref: "#/components/schemas/ArtifactVersionStatus"
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdByRunId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        knowledgeReleaseId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 2
+        content:
+          $ref: "#/components/schemas/PrdDocumentV2"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdByRunId
+        - knowledgeReleaseId
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
     ArtifactVersionDetail:
-      anyOf:
+      oneOf:
         - $ref: "#/components/schemas/ArtifactVersionInlineDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlinePrdV2Detail"
         - $ref: "#/components/schemas/ArtifactVersionBlobDetail"
     ArtifactVersionFavoriteListItem:
       type: object
@@ -9391,7 +9945,25 @@ components:
           enum:
             - prd
         document:
-          $ref: "#/components/schemas/PrdDocument"
+          $ref: "#/components/schemas/PrdDocumentV1"
+      required:
+        - baseArtifactVersionId
+        - kind
+        - document
+      additionalProperties: false
+    CreatePrdV2ArtifactVersionRequest:
+      type: object
+      properties:
+        baseArtifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - prd
+        document:
+          $ref: "#/components/schemas/PrdDocumentV2"
       required:
         - baseArtifactVersionId
         - kind
@@ -9419,11 +9991,7 @@ components:
       oneOf:
         - $ref: "#/components/schemas/CreatePrdArtifactVersionRequest"
         - $ref: "#/components/schemas/CreatePrototypeArtifactVersionRequest"
-      discriminator:
-        propertyName: kind
-        mapping:
-          prd: "#/components/schemas/CreatePrdArtifactVersionRequest"
-          prototype: "#/components/schemas/CreatePrototypeArtifactVersionRequest"
+        - $ref: "#/components/schemas/CreatePrdV2ArtifactVersionRequest"
     CreateDesignSystemRequest:
       type: object
       properties:
@@ -12686,6 +13254,10 @@ components:
         - parts
       additionalProperties: false
       description: Multipart part numbers are unique and strictly ascending; enforced by the runtime Zod contract.
+    PrdDocument:
+      anyOf:
+        - $ref: "#/components/schemas/PrdDocumentV1"
+        - $ref: "#/components/schemas/PrdDocumentV2"
     PrdSectionKey:
       type: string
       enum:
@@ -14933,6 +15505,116 @@ components:
         - blob
       additionalProperties: false
       description: Public PRD and prototype blob details require schemaVersion 1 without exposing Blob identity.
+    PublicArtifactVersionInlineCodeDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - code
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
+    PublicArtifactVersionInlineDataDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - data
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
     PublicDesignSystemFontAsset:
       type: object
       properties:
@@ -15088,6 +15770,228 @@ components:
         - components
       additionalProperties: false
       description: Public Design System projections preserve the same semantic graph after private Blob identities are removed.
+    PublicArtifactVersionInlineDesignSystemDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - design_system
+        schemaVersion:
+          type: number
+          enum:
+            - 1
+        content:
+          $ref: "#/components/schemas/PublicDesignSystemDocument"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
+    PublicArtifactVersionInlineDocumentDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - document
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
+    PublicArtifactVersionInlineImageDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - image
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
+    PublicArtifactVersionInlinePrdDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 1
+        content:
+          $ref: "#/components/schemas/PrdDocumentV1"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
     PublicPrototypeFontAsset:
       type: object
       properties:
@@ -15279,392 +16183,141 @@ components:
         - motions
       additionalProperties: false
       description: Public Prototype projections preserve the same semantic graph after private Blob identities are removed.
+    PublicArtifactVersionInlinePrototypeDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prototype
+        schemaVersion:
+          type: number
+          enum:
+            - 1
+        content:
+          $ref: "#/components/schemas/PublicPrototypeDocument"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
     PublicArtifactVersionInlineDetail:
       oneOf:
-        - type: object
-          properties:
-            artifactId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            artifactVersionId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            version:
-              type: integer
-              exclusiveMinimum: 0
-            status:
-              type: string
-              enum:
-                - ready
-            checksum:
-              type: string
-              pattern: ^[a-f0-9]{64}$
-            citations:
-              type: array
-              items:
-                $ref: "#/components/schemas/ArtifactCitation"
-              maxItems: 1000
-            createdAt:
-              type: string
-              format: date-time
-            contentMode:
-              type: string
-              enum:
-                - inline
-            kind:
-              type: string
-              enum:
-                - prd
-            schemaVersion:
-              type: number
-              enum:
-                - 1
-            content:
-              $ref: "#/components/schemas/PrdDocument"
-          required:
-            - artifactId
-            - artifactVersionId
-            - version
-            - status
-            - checksum
-            - citations
-            - createdAt
-            - contentMode
-            - kind
-            - schemaVersion
-            - content
-          additionalProperties: false
-        - type: object
-          properties:
-            artifactId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            artifactVersionId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            version:
-              type: integer
-              exclusiveMinimum: 0
-            status:
-              type: string
-              enum:
-                - ready
-            checksum:
-              type: string
-              pattern: ^[a-f0-9]{64}$
-            citations:
-              type: array
-              items:
-                $ref: "#/components/schemas/ArtifactCitation"
-              maxItems: 1000
-            createdAt:
-              type: string
-              format: date-time
-            contentMode:
-              type: string
-              enum:
-                - inline
-            kind:
-              type: string
-              enum:
-                - prototype
-            schemaVersion:
-              type: number
-              enum:
-                - 1
-            content:
-              $ref: "#/components/schemas/PublicPrototypeDocument"
-          required:
-            - artifactId
-            - artifactVersionId
-            - version
-            - status
-            - checksum
-            - citations
-            - createdAt
-            - contentMode
-            - kind
-            - schemaVersion
-            - content
-          additionalProperties: false
-        - type: object
-          properties:
-            artifactId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            artifactVersionId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            version:
-              type: integer
-              exclusiveMinimum: 0
-            status:
-              type: string
-              enum:
-                - ready
-            checksum:
-              type: string
-              pattern: ^[a-f0-9]{64}$
-            citations:
-              type: array
-              items:
-                $ref: "#/components/schemas/ArtifactCitation"
-              maxItems: 1000
-            createdAt:
-              type: string
-              format: date-time
-            contentMode:
-              type: string
-              enum:
-                - inline
-            kind:
-              type: string
-              enum:
-                - design_system
-            schemaVersion:
-              type: number
-              enum:
-                - 1
-            content:
-              $ref: "#/components/schemas/PublicDesignSystemDocument"
-          required:
-            - artifactId
-            - artifactVersionId
-            - version
-            - status
-            - checksum
-            - citations
-            - createdAt
-            - contentMode
-            - kind
-            - schemaVersion
-            - content
-          additionalProperties: false
-        - type: object
-          properties:
-            artifactId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            artifactVersionId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            version:
-              type: integer
-              exclusiveMinimum: 0
-            status:
-              type: string
-              enum:
-                - ready
-            checksum:
-              type: string
-              pattern: ^[a-f0-9]{64}$
-            citations:
-              type: array
-              items:
-                $ref: "#/components/schemas/ArtifactCitation"
-              maxItems: 1000
-            createdAt:
-              type: string
-              format: date-time
-            contentMode:
-              type: string
-              enum:
-                - inline
-            kind:
-              type: string
-              enum:
-                - image
-            schemaVersion:
-              type: integer
-              exclusiveMinimum: 0
-            content:
-              $ref: "#/components/schemas/JsonValue"
-          required:
-            - artifactId
-            - artifactVersionId
-            - version
-            - status
-            - checksum
-            - citations
-            - createdAt
-            - contentMode
-            - kind
-            - schemaVersion
-            - content
-          additionalProperties: false
-        - type: object
-          properties:
-            artifactId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            artifactVersionId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            version:
-              type: integer
-              exclusiveMinimum: 0
-            status:
-              type: string
-              enum:
-                - ready
-            checksum:
-              type: string
-              pattern: ^[a-f0-9]{64}$
-            citations:
-              type: array
-              items:
-                $ref: "#/components/schemas/ArtifactCitation"
-              maxItems: 1000
-            createdAt:
-              type: string
-              format: date-time
-            contentMode:
-              type: string
-              enum:
-                - inline
-            kind:
-              type: string
-              enum:
-                - code
-            schemaVersion:
-              type: integer
-              exclusiveMinimum: 0
-            content:
-              $ref: "#/components/schemas/JsonValue"
-          required:
-            - artifactId
-            - artifactVersionId
-            - version
-            - status
-            - checksum
-            - citations
-            - createdAt
-            - contentMode
-            - kind
-            - schemaVersion
-            - content
-          additionalProperties: false
-        - type: object
-          properties:
-            artifactId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            artifactVersionId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            version:
-              type: integer
-              exclusiveMinimum: 0
-            status:
-              type: string
-              enum:
-                - ready
-            checksum:
-              type: string
-              pattern: ^[a-f0-9]{64}$
-            citations:
-              type: array
-              items:
-                $ref: "#/components/schemas/ArtifactCitation"
-              maxItems: 1000
-            createdAt:
-              type: string
-              format: date-time
-            contentMode:
-              type: string
-              enum:
-                - inline
-            kind:
-              type: string
-              enum:
-                - document
-            schemaVersion:
-              type: integer
-              exclusiveMinimum: 0
-            content:
-              $ref: "#/components/schemas/JsonValue"
-          required:
-            - artifactId
-            - artifactVersionId
-            - version
-            - status
-            - checksum
-            - citations
-            - createdAt
-            - contentMode
-            - kind
-            - schemaVersion
-            - content
-          additionalProperties: false
-        - type: object
-          properties:
-            artifactId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            artifactVersionId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            version:
-              type: integer
-              exclusiveMinimum: 0
-            status:
-              type: string
-              enum:
-                - ready
-            checksum:
-              type: string
-              pattern: ^[a-f0-9]{64}$
-            citations:
-              type: array
-              items:
-                $ref: "#/components/schemas/ArtifactCitation"
-              maxItems: 1000
-            createdAt:
-              type: string
-              format: date-time
-            contentMode:
-              type: string
-              enum:
-                - inline
-            kind:
-              type: string
-              enum:
-                - data
-            schemaVersion:
-              type: integer
-              exclusiveMinimum: 0
-            content:
-              $ref: "#/components/schemas/JsonValue"
-          required:
-            - artifactId
-            - artifactVersionId
-            - version
-            - status
-            - checksum
-            - citations
-            - createdAt
-            - contentMode
-            - kind
-            - schemaVersion
-            - content
-          additionalProperties: false
+        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrdDetail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrototypeDetail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlineDesignSystemDetail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlineImageDetail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlineCodeDetail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlineDocumentDetail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlineDataDetail"
+      discriminator:
+        propertyName: kind
+        mapping:
+          prd: "#/components/schemas/PublicArtifactVersionInlinePrdDetail"
+          prototype: "#/components/schemas/PublicArtifactVersionInlinePrototypeDetail"
+          design_system: "#/components/schemas/PublicArtifactVersionInlineDesignSystemDetail"
+          image: "#/components/schemas/PublicArtifactVersionInlineImageDetail"
+          code: "#/components/schemas/PublicArtifactVersionInlineCodeDetail"
+          document: "#/components/schemas/PublicArtifactVersionInlineDocumentDetail"
+          data: "#/components/schemas/PublicArtifactVersionInlineDataDetail"
+    PublicArtifactVersionInlinePrdV2Detail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 2
+        content:
+          $ref: "#/components/schemas/PrdDocumentV2"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
     PublicArtifactVersionDetail:
-      anyOf:
+      oneOf:
         - $ref: "#/components/schemas/PublicArtifactVersionInlineDetail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrdV2Detail"
         - $ref: "#/components/schemas/PublicArtifactVersionBlobDetail"
     PublicProjectReleaseArtifactPin:
       type: object
@@ -16362,6 +17015,15 @@ components:
           items:
             $ref: "#/components/schemas/ArtifactCitation"
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - code
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
         operation:
           oneOf:
             - type: object
@@ -16385,22 +17047,13 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - code
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
     RuntimeArtifactDraftData:
       type: object
@@ -16414,6 +17067,15 @@ components:
           items:
             $ref: "#/components/schemas/ArtifactCitation"
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - data
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
         operation:
           oneOf:
             - type: object
@@ -16437,22 +17099,13 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - data
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
     RuntimeArtifactDraftDocument:
       type: object
@@ -16466,6 +17119,15 @@ components:
           items:
             $ref: "#/components/schemas/ArtifactCitation"
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - document
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
         operation:
           oneOf:
             - type: object
@@ -16489,22 +17151,13 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - document
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
     RuntimeArtifactDraftImage:
       type: object
@@ -16518,6 +17171,15 @@ components:
           items:
             $ref: "#/components/schemas/ArtifactCitation"
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - image
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
         operation:
           oneOf:
             - type: object
@@ -16541,24 +17203,15 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - image
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
-    RuntimeArtifactDraftPrd:
+    RuntimeArtifactDraftPrdV1Revision:
       type: object
       properties:
         title:
@@ -16570,6 +17223,59 @@ components:
           items:
             $ref: "#/components/schemas/ArtifactCitation"
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 1
+        content:
+          $ref: "#/components/schemas/PrdDocumentV1"
+        operation:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - revise
+            target:
+              $ref: "#/components/schemas/RunArtifactTarget"
+          required:
+            - kind
+            - target
+          additionalProperties: false
+      required:
+        - title
+        - citations
+        - kind
+        - schemaVersion
+        - content
+        - operation
+      additionalProperties: false
+    RuntimeArtifactDraftPrdV2:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 2
+        content:
+          $ref: "#/components/schemas/PrdDocumentV2"
         operation:
           oneOf:
             - type: object
@@ -16593,24 +17299,18 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          type: number
-          enum:
-            - 1
-        content:
-          $ref: "#/components/schemas/PrdDocument"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
+    RuntimeArtifactDraftPrd:
+      anyOf:
+        - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV1Revision"
+        - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV2"
     RuntimeArtifactDraftPrototype:
       type: object
       properties:
@@ -16623,6 +17323,16 @@ components:
           items:
             $ref: "#/components/schemas/ArtifactCitation"
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - prototype
+        schemaVersion:
+          type: number
+          enum:
+            - 1
+        content:
+          $ref: "#/components/schemas/PrototypeDocument"
         operation:
           oneOf:
             - type: object
@@ -16646,25 +17356,16 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - prototype
-        schemaVersion:
-          type: number
-          enum:
-            - 1
-        content:
-          $ref: "#/components/schemas/PrototypeDocument"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
     RuntimeArtifactDraft:
+      description: A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.
       oneOf:
         - $ref: "#/components/schemas/RuntimeArtifactDraftPrd"
         - $ref: "#/components/schemas/RuntimeArtifactDraftPrototype"
@@ -16672,16 +17373,6 @@ components:
         - $ref: "#/components/schemas/RuntimeArtifactDraftCode"
         - $ref: "#/components/schemas/RuntimeArtifactDraftDocument"
         - $ref: "#/components/schemas/RuntimeArtifactDraftData"
-      discriminator:
-        propertyName: kind
-        mapping:
-          prd: "#/components/schemas/RuntimeArtifactDraftPrd"
-          prototype: "#/components/schemas/RuntimeArtifactDraftPrototype"
-          image: "#/components/schemas/RuntimeArtifactDraftImage"
-          code: "#/components/schemas/RuntimeArtifactDraftCode"
-          document: "#/components/schemas/RuntimeArtifactDraftDocument"
-          data: "#/components/schemas/RuntimeArtifactDraftData"
-      description: A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.
     RuntimeDesignAsset:
       type: object
       properties:
@@ -16979,7 +17670,6 @@ components:
         - message
         - artifacts
       additionalProperties: false
-      description: A Runtime result revises each target Artifact at most once; enforced by the runtime Zod contract.
     SetProjectMemberRoleRequest:
       type: object
       properties:

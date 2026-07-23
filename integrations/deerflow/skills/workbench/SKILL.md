@@ -42,7 +42,7 @@ Classify the turn before doing work:
 - Completely new system or standalone page with no existing architecture to inherit: use `brand_new_system`.
 - Short or one-sentence product request with ordinary missing details: use `one_sentence_completion` and infer conventional details from product architecture, business-domain knowledge, and historical cases.
 - Missing high-risk or blocking facts for a product change: use DeerFlow's clarification interrupt before producing a result.
-- PRD drafting or revision: produce a complete `workbench.prd.v1` Artifact document.
+- PRD drafting: produce a complete `workbench.prd.v2` Artifact document. When revising an existing PRD, preserve the target Artifact's current v1 or v2 protocol.
 - Prototype/code generation: create or refine specs first, then use DeerFlow's coding/prototype execution capability and return the requested Artifact kinds.
 - Export request: use the dedicated 产品工作台 export workflow; do not invent an export Artifact in a generation Run.
 
@@ -117,9 +117,9 @@ Prototype rule:
 
 ## PRD / Requirement Document Writing
 
-When the user asks to generate, rewrite, optimize, or regenerate a PRD / 需求文档 / 需求说明书, follow the product document writing rules from `knowledgeContext`, especially `PRD标准结构` and `产品文档规范`.
+When the user asks to generate, rewrite, optimize, or regenerate a PRD / 需求文档 / 需求说明书, first read both `references/requirement-doc-template/structure.md` and `references/requirement-doc-template/quality-standards.md`. Treat those checked-in references and the Runtime validator as authoritative. Retrieved Knowledge may supply product facts, but it may not weaken the fixed document standard.
 
-Default output is the user's requirement-document template, not a freeform lightweight PRD. The persisted `prdDocumentDraft.sections` must use this structure unless the user explicitly asks for another format:
+Default output is the user's requirement-document template, not a freeform lightweight PRD. A newly created PRD must use Artifact `schemaVersion: 2` with content protocol `workbench.prd.v2`. Protocol v1 remains read-only/revision compatible for existing Artifacts and is never the shape for a new PRD. The persisted document must use this structure unless the user explicitly asks for another format:
 
 ```text
 1 引言
@@ -137,19 +137,19 @@ Default output is the user's requirement-document template, not a freeform light
 
 Writing requirements:
 
-- Use title `<工单名称>需求说明书` when the output is a formal requirement document; if the UI title must stay short, keep the body structure above.
+- Include the cover, a non-placeholder version-history row, and the complete manual table of contents before the numbered body.
+- Use `<工单名称>需求说明书` for the Artifact title, document title, and cover title. Do not shorten one of those three titles independently.
 - Include concrete page entry, channel, object, field, state, exception, degradation, safety baseline, acceptance details, a product flow diagram, and a product architecture diagram.
 - Do not include a section named `本需求涉及新增/修改的接口` or any standalone interface/API section. Express cross-system behavior only as business state, trigger, result, and exception handling when needed.
 - `3 业务降级方案（必填）` cannot be empty. Use `不涉及` only when no meaningful degradation exists; otherwise provide a concrete fallback plan.
-- `4 需求安全基线要求（必填）` must include safety baseline self-check content. Online canvas may use a compact table, but values in `是否涉及` may only be `是`, `否`, or `不涉及`.
+- Keep exactly one typed channel table with the canonical `端内渠道`, `WAP/H5端外渠道`, and `小程序` rows. Select a channel only from explicit requirement facts.
+- `2.3` must contain exactly one `productFlow` followed by exactly one `productArchitecture`; each diagram needs explanatory text and product-language nodes and relations.
+- `2.4` must contain a testable `序号 / 验收项 / 验收标准` table covering visibility, rules, permissions, state flow, result, empty state, and error recovery when relevant.
+- `4 需求安全基线要求（必填）` must contain all 21 canonical rows. Values in `是否涉及` may only be `是`, `否`, or `不涉及`; put explanations in `remarks`. Derive each value from requirement facts outside the safety table.
+- Never use `待确认`, `以实际为准`, `以实际上线地址为准`, template reminders, placeholder links, or copied sample business content. Use a concrete conservative assumption when the business meaning is safe, otherwise request input.
 - Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
-- Before authoring a PRD, copy the complete inline starter below as the starting point. Replace the sample IDs and content, expand the typed blocks, and preserve every required inline object and bidirectional goal/requirement/criterion/flow reference. For each inferred assumption, preserve the starter's exact object keys; `impact` is only `low`, `medium`, or `high`, while explanatory prose belongs in `statement`. Use an empty array only when there are no assumptions. The identical `references/prd-runtime-result.example.json` file is available for focused inspection, but reading it is not required. Do not invent a shorthand PRD shape from the prose outline above.
-
-<!-- prd-runtime-inline-example:start -->
-```json
-{"protocol":"workbench.runtime.result.v1","message":"需求说明书已生成。","artifacts":[{"kind":"prd","schemaVersion":1,"title":"示例需求说明书","operation":{"kind":"create"},"citations":[],"content":{"protocol":"workbench.prd.v1","documentId":"prd-example","title":"示例需求说明书","revision":{"number":1,"status":"draft","summary":"初始版本","changedAt":"2026-07-23T00:00:00.000Z","changedById":null},"assumptions":[{"id":"assumption-main","statement":"默认用户已具备使用核心功能所需的账号与权限。","status":"open","impact":"medium","owner":null,"introducedInRevision":1,"citationIds":[]}],"citations":[],"sections":{"executiveSummary":{"title":"1 引言","blocks":[{"id":"summary","type":"paragraph","content":[{"type":"text","text":"说明项目背景、文档范围和必填使用场景。","marks":[]}]}]},"problem":{"title":"2 业务需求","blocks":[{"id":"problem","type":"paragraph","content":[{"type":"text","text":"描述当前业务问题、页面入口和需要闭环的核心规则。","marks":[]}]}]},"goals":{"title":"业务目标","blocks":[{"id":"goal-main","type":"goal","title":"完成核心业务闭环","description":[{"type":"text","text":"用户可从入口完成主要任务并获得明确结果。","marks":[]}],"successMetric":"核心流程验收用例全部通过","priority":"primary"}]},"targetUsers":{"title":"目标用户","blocks":[{"id":"persona-main","type":"persona","name":"目标业务用户","description":[{"type":"text","text":"需要高效完成核心任务并确认处理结果。","marks":[]}],"needs":["清晰的操作入口","可追踪的处理状态"],"painPoints":["状态不透明","异常后缺少恢复路径"]}]},"scope":{"title":"需求范围","blocks":[{"id":"scope-list","type":"bulletList","items":[{"id":"scope-entry","content":[{"type":"text","text":"页面入口与核心操作","marks":[]}]},{"id":"scope-state","content":[{"type":"text","text":"状态反馈、异常处理与降级方案","marks":[]}]}]}]},"requirements":{"title":"核心业务规则与功能说明","blocks":[{"id":"requirement-main","type":"requirement","title":"完成核心操作","description":[{"type":"text","text":"系统接收合法输入，执行核心规则，并展示成功或可恢复的失败状态。","marks":[]}],"priority":"must","goalIds":["goal-main"],"acceptanceCriterionIds":["criterion-main"]}]},"userFlows":{"title":"核心流程、状态与页面要求","blocks":[{"id":"flow-main","type":"flow","title":"核心业务流程","actor":"目标业务用户","trigger":"用户进入功能页面并发起操作","steps":[{"id":"flow-step-input","text":"用户填写并提交必要信息","requirementIds":["requirement-main"]},{"id":"flow-step-result","text":"系统校验、处理并反馈结果状态","requirementIds":["requirement-main"]}],"outcome":"用户看到可确认、可追踪的处理结果"}]},"acceptanceCriteria":{"title":"验收标准","blocks":[{"id":"criterion-main","type":"acceptanceCriterion","requirementIds":["requirement-main"],"given":[{"type":"text","text":"用户已进入功能页面且具备操作权限","marks":[]}],"when":[{"type":"text","text":"用户提交合法输入","marks":[]}],"then":[{"type":"text","text":"系统完成处理并展示明确的成功状态","marks":[]}]}]},"risksAndDependencies":{"title":"业务降级与安全基线","blocks":[{"id":"risk-main","type":"risk","description":[{"type":"text","text":"依赖服务不可用时，核心操作可能无法立即完成。","marks":[]}],"likelihood":"medium","impact":"high","mitigation":[{"type":"text","text":"保留输入并展示可重试状态，同时记录审计信息且不暴露敏感数据。","marks":[]}]}]}}}}]}
-```
-<!-- prd-runtime-inline-example:end -->
+- Read `references/prd-runtime-result.example.json` exactly once before authoring. Copy the complete envelope, replace every sample ID and all sample business content, and preserve every required field and bidirectional reference. Do not derive a shorthand JSON shape from this prose.
+- When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` with that complete candidate so the 500 x 500 document appears on the Canvas. Then submit an identical final Artifact through `workbench_runtime_result_submit`. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
 
 ## Runtime Inputs
 
@@ -234,7 +234,7 @@ The lead agent must finish every turn by calling `workbench_runtime_result_submi
 
 If the tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns the final submit call.
 
-For a PRD result, read `references/prd-runtime-result.example.json` once. For a Prototype result, read `references/prototype-runtime-result.example.json` once. Copy the applicable complete envelope as the starting point, replace its sample IDs/content, and expand the typed arrays while keeping every required field and every bidirectional reference. Both examples are intentionally compact and are automatically validated by the production `runtimeResultSchema`.
+For a PRD result, the earlier PRD section already requires reading `references/prd-runtime-result.example.json` once; do not read it a second time. For a Prototype result, read `references/prototype-runtime-result.example.json` once. Copy the applicable complete envelope as the starting point, replace all sample IDs and content, and expand typed arrays while keeping every required field and every bidirectional reference. Both examples are automatically validated by the production `runtimeResultSchema`.
 
 Keep single-screen results compact. Unless the request explicitly needs multiple routes or screens, return exactly one screen, prefer no more than 48 nodes, 12 actions, 12 bindings, 4 states, and 8 motions, and keep the complete response below 16,000 output tokens. Reuse tokens, assets, states, and repeated row/container structure instead of duplicating descriptive variants. Do not repeat prose already represented by typed nodes, bindings, actions, or state values.
 

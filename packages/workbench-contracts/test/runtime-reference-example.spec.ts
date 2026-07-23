@@ -28,23 +28,21 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(result.artifacts).toHaveLength(1);
     expect(result.artifacts[0]).toMatchObject({
       kind: "prd",
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: { kind: "create" },
     });
-    expect(Buffer.byteLength(prdExampleSource, "utf8")).toBeLessThan(16_000);
-    expect(prdExampleSource.split("\n").length).toBeLessThan(400);
+    expect(Buffer.byteLength(prdExampleSource, "utf8")).toBeLessThan(64_000);
+    expect(prdExampleSource.split("\n").length).toBeLessThan(1_200);
   });
 
-  it("keeps the schema-safe PRD starter inline in the injected skill", () => {
-    const match = /<!-- prd-runtime-inline-example:start -->\s*```json\s*([\s\S]*?)\s*```\s*<!-- prd-runtime-inline-example:end -->/u
-      .exec(workbenchSkillSource);
-    expect(match?.[1]).toBeTruthy();
-    const inlineExample = JSON.parse(match![1]!) as unknown;
-    const referenceExample = JSON.parse(prdExampleSource) as unknown;
-
-    expect(runtimeResultSchema.parse(inlineExample)).toEqual(
-      runtimeResultSchema.parse(referenceExample),
-    );
+  it("loads the versioned template references without embedding a second starter", () => {
+    expect(workbenchSkillSource).toContain("references/requirement-doc-template/structure.md");
+    expect(workbenchSkillSource).toContain("references/requirement-doc-template/quality-standards.md");
+    expect(workbenchSkillSource).toContain("references/prd-runtime-result.example.json");
+    expect(workbenchSkillSource).not.toContain("prd-runtime-inline-example");
+    expect(workbenchSkillSource).not.toContain('"protocol":"workbench.prd.v1"');
+    expect(workbenchSkillSource).not.toContain("produce a complete `workbench.prd.v1`");
+    expect(workbenchSkillSource).toContain("PRD drafting: produce a complete `workbench.prd.v2`");
   });
 });
 

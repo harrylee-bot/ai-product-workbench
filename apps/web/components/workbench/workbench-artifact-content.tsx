@@ -2,9 +2,13 @@
 
 import {
   isSafePrototypeOpenUrl,
+  prdChannelLabels,
+  prdSafetyBaselineItems,
   prdSectionKeys,
   type PrdBlock,
   type PrdDocument,
+  type PrdDocumentV1,
+  type PrdDocumentV2,
   type PrdInline,
   type PrototypeAction,
   type PrototypeDocument,
@@ -18,7 +22,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from "react";
-import { RefreshCwIcon } from "lucide-react";
+import { ArrowRightIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
@@ -100,12 +104,17 @@ function usePrototypeRuntime() {
 export function WorkbenchArtifactContent({
   editable = false,
   editingBusy = false,
+  onArtifactTitleChange,
+  onArtifactVersionStateChange,
   onDocumentCommit,
   onPrdDocumentCommit,
+  pendingContent,
   reference,
 }: {
   editable?: boolean;
   editingBusy?: boolean;
+  onArtifactTitleChange?: (title: string) => void;
+  onArtifactVersionStateChange?: (state: "error" | "pending" | "ready") => void;
   onDocumentCommit?: (
     reference: WorkbenchArtifactReference,
     document: PrototypeDocument,
@@ -114,6 +123,7 @@ export function WorkbenchArtifactContent({
     reference: WorkbenchArtifactReference,
     document: PrdDocument,
   ) => Promise<void>;
+  pendingContent?: ReactNode;
   reference: WorkbenchArtifactReference;
 }) {
   const isPublic = Boolean(reference.shareToken);
@@ -138,12 +148,30 @@ export function WorkbenchArtifactContent({
   );
   const query = isPublic ? publicQuery : privateQuery;
   const version = query.data?.value;
+  const artifactVersionState = query.isPending
+    ? "pending"
+    : query.isError || !version
+      ? "error"
+      : "ready";
   const readyQueryOwnsProjection = activePrototypeProjection?.phase === "finalized"
     && activePrototypeProjection.documentChecksum !== null
     && version?.status === "ready"
     && version.kind === "prototype"
     && version.contentMode === "inline"
     && version.checksum === activePrototypeProjection.documentChecksum;
+
+  useEffect(() => {
+    onArtifactVersionStateChange?.(artifactVersionState);
+  }, [artifactVersionState, onArtifactVersionStateChange]);
+
+  const resolvedPrdTitle = version?.kind === "prd"
+    && version.contentMode === "inline"
+    ? version.content.title
+    : null;
+
+  useEffect(() => {
+    if (resolvedPrdTitle) onArtifactTitleChange?.(resolvedPrdTitle);
+  }, [onArtifactTitleChange, resolvedPrdTitle]);
 
   useEffect(() => {
     if (
@@ -194,7 +222,9 @@ export function WorkbenchArtifactContent({
   }
 
   if (query.isPending) {
-    return <ArtifactStatus>Loading artifact...</ArtifactStatus>;
+    return pendingContent === undefined
+      ? <ArtifactStatus>Loading artifact...</ArtifactStatus>
+      : pendingContent;
   }
   if (query.isError || !version) {
     return (
@@ -227,7 +257,11 @@ export function WorkbenchArtifactContent({
     );
   }
   if (version.kind === "prd") {
-    if (editable && !isPublic && onPrdDocumentCommit) {
+    if (
+      editable
+      && !isPublic
+      && onPrdDocumentCommit
+    ) {
       return (
         <div className="nowheel h-full w-full">
           <WorkbenchPrdArtifactEditor
@@ -410,6 +444,12 @@ function readBlobTextPreview(blob: Blob): Promise<string> {
 }
 
 function PrdArtifact({ document }: { document: PrdDocument }) {
+  return document.protocol === "workbench.prd.v2"
+    ? <PrdArtifactV2 document={document} />
+    : <PrdArtifactV1 document={document} />;
+}
+
+function PrdArtifactV1({ document }: { document: PrdDocumentV1 }) {
   return (
     <article className="nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed]">
       <h2 className="mb-[42px] text-[50px] font-semibold leading-none tracking-normal text-[#f1f3f4]">
@@ -420,7 +460,7 @@ function PrdArtifact({ document }: { document: PrdDocument }) {
         return (
           <section className="mb-[46px] text-[22px] leading-[36px]" key={key}>
             <h3 className="mb-[22px] text-[35px] font-semibold leading-none text-[#f1f3f4]">
-              {sectionIndex + 1}. {section.title}
+              {formatPrdSectionTitle(section.title, sectionIndex + 1)}
             </h3>
             <div className="space-y-[18px]">
               {section.blocks.map((block) => <PrdBlockView block={block} key={block.id} />)}
@@ -430,6 +470,256 @@ function PrdArtifact({ document }: { document: PrdDocument }) {
       })}
     </article>
   );
+}
+
+function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
+  const { businessRequirements, degradation, introduction, safetyBaseline } = document.sections;
+  return (
+    <article
+      className="nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[20px] py-[28px] text-[16px] leading-[27px] text-[#e8eaed] sm:px-[38px] sm:py-[34px]"
+      data-prd-protocol={document.protocol}
+    >
+      <div className="mx-auto w-full max-w-[1120px]">
+        <header
+          className="flex min-h-[320px] flex-col justify-center border-b border-white/[0.12] py-[48px]"
+          data-prd-cover
+        >
+          <p className="mb-[14px] text-[13px] font-semibold text-[#aeb4bd]">{document.cover.workOrderName}</p>
+          <h1 className="max-w-[900px] text-[42px] font-semibold leading-[1.16] tracking-normal text-[#f1f3f4]">
+            {document.cover.title}
+          </h1>
+          <dl className="mt-[34px] flex flex-wrap gap-x-[32px] gap-y-[8px] text-[14px] text-[#c7cad0]">
+            <div className="flex gap-[8px]"><dt>文档版本</dt><dd>V{document.revision.number}</dd></div>
+            <div className="flex gap-[8px]"><dt>文档状态</dt><dd>{prdRevisionStatusLabel(document.revision.status)}</dd></div>
+            <div className="flex gap-[8px]"><dt>修订时间</dt><dd>{formatPrdDate(document.revision.changedAt)}</dd></div>
+          </dl>
+          <p className="mt-[10px] max-w-[760px] text-[14px] text-[#aeb4bd]">{document.revision.summary}</p>
+        </header>
+
+        <section className="border-b border-white/[0.12] py-[42px]" aria-labelledby="prd-version-history">
+          <h2 className="mb-[20px] text-[28px] font-semibold text-[#f1f3f4]" id="prd-version-history">版 本 历 史</h2>
+          <div className="overflow-x-auto border border-white/[0.12]">
+            <table className="w-full min-w-[780px] border-collapse text-[14px] leading-[22px]">
+              <thead className="bg-white/[0.05] text-[#f1f3f4]">
+                <tr>
+                  {[
+                    "版本/状态", "作者", "参与者", "起止日期", "备注",
+                  ].map((label) => <th className="border-b border-white/[0.12] px-[12px] py-[10px] text-left font-semibold" key={label}>{label}</th>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.08]">
+                {document.versionHistory.map((entry, index) => (
+                  <tr key={`${entry.startDate}-${entry.author}-${index}`}>
+                    <td className="px-[12px] py-[10px]">{entry.status}</td>
+                    <td className="px-[12px] py-[10px]">{entry.author}</td>
+                    <td className="px-[12px] py-[10px]">{entry.participants.join("、")}</td>
+                    <td className="px-[12px] py-[10px]">{entry.startDate} 至 {entry.endDate}</td>
+                    <td className="px-[12px] py-[10px]">{entry.notes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <nav className="border-b border-white/[0.12] py-[42px]" aria-label="需求说明书目录">
+          <h2 className="mb-[20px] text-center text-[28px] font-semibold text-[#f1f3f4]">{document.tableOfContents.title}</h2>
+          <ol className="mx-auto grid max-w-[760px] gap-x-[40px] gap-y-[8px] text-[15px] text-[#d8dce2] sm:grid-cols-2">
+            {document.tableOfContents.entries.map((entry) => (
+              <li className="border-b border-white/[0.07] py-[7px]" key={entry}>
+                {entry}
+              </li>
+            ))}
+          </ol>
+        </nav>
+
+        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-v2-introduction">
+          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-introduction">{introduction.title}</h2>
+          <PrdV2BlockSection section={introduction.background} />
+          <PrdV2BlockSection section={introduction.scope} />
+          <PrdV2BlockSection section={introduction.usageScenarios}>
+            <PrdChannelTable table={introduction.usageScenarios.channelTable} />
+          </PrdV2BlockSection>
+        </section>
+
+        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-v2-business-requirements">
+          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-business-requirements">{businessRequirements.title}</h2>
+          <p className="mt-[16px] max-w-[900px] text-[#d8dce2]">{renderPrdInlines(businessRequirements.summary)}</p>
+          <PrdV2BlockSection section={businessRequirements.pageLinks} />
+          <PrdV2BlockSection section={businessRequirements.coreRules} />
+          <PrdV2BlockSection section={businessRequirements.flowAndPages}>
+            <div className="mt-[26px] space-y-[34px]">
+              {businessRequirements.flowAndPages.diagrams.map((diagram) => (
+                <PrdDiagramView diagram={diagram} key={diagram.id} />
+              ))}
+            </div>
+          </PrdV2BlockSection>
+          <PrdV2BlockSection section={businessRequirements.acceptanceCriteria} />
+        </section>
+
+        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-v2-degradation">
+          <div className="flex flex-wrap items-baseline gap-x-[14px] gap-y-[6px]">
+            <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-degradation">{degradation.title}</h2>
+            <span className="text-[13px] font-semibold text-[#aeb4bd]">{degradation.applicable ? "适用" : "不涉及"}</span>
+          </div>
+          <p className="mt-[18px] max-w-[920px] text-[#d8dce2]">{renderPrdInlines(degradation.content)}</p>
+        </section>
+
+        <section className="py-[46px]" aria-labelledby="prd-v2-safety-baseline">
+          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-safety-baseline">{safetyBaseline.title}</h2>
+          <p className="mt-[18px] max-w-[980px] whitespace-pre-line text-[14px] leading-[24px] text-[#c7cad0]">{safetyBaseline.intro}</p>
+          <PrdSafetyBaselineTable rows={safetyBaseline.rows} />
+        </section>
+      </div>
+    </article>
+  );
+}
+
+type PrdV2BlockSectionValue =
+  | PrdDocumentV2["sections"]["introduction"]["background"]
+  | PrdDocumentV2["sections"]["introduction"]["scope"]
+  | PrdDocumentV2["sections"]["introduction"]["usageScenarios"]
+  | PrdDocumentV2["sections"]["businessRequirements"]["pageLinks"]
+  | PrdDocumentV2["sections"]["businessRequirements"]["coreRules"]
+  | PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]
+  | PrdDocumentV2["sections"]["businessRequirements"]["acceptanceCriteria"];
+
+function PrdV2BlockSection({
+  children,
+  section,
+}: {
+  children?: ReactNode;
+  section: PrdV2BlockSectionValue;
+}) {
+  return (
+    <section className="mt-[34px]">
+      <h3 className="mb-[16px] text-[22px] font-semibold text-[#f1f3f4]">{section.title}</h3>
+      <div className="space-y-[14px]">
+        {section.blocks.map((block) => <PrdBlockView block={block} key={block.id} />)}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function PrdChannelTable({
+  table,
+}: {
+  table: PrdDocumentV2["sections"]["introduction"]["usageScenarios"]["channelTable"];
+}) {
+  return (
+    <div className="mt-[24px] overflow-x-auto border border-white/[0.12]" data-prd-channel-table>
+      <table className="w-full min-w-[520px] border-collapse text-[14px] leading-[22px]">
+        <caption className="border-b border-white/[0.12] bg-white/[0.05] px-[12px] py-[10px] text-left font-semibold text-[#f1f3f4]">
+          {table.title}
+        </caption>
+        <thead>
+          <tr>
+            <th className="w-[72px] border-b border-white/[0.10] px-[12px] py-[10px] text-left">序号</th>
+            <th className="border-b border-white/[0.10] px-[12px] py-[10px] text-left">活动投放的可选渠道</th>
+            <th className="w-[120px] border-b border-white/[0.10] px-[12px] py-[10px] text-left">是否投放</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/[0.08]">
+          {table.rows.map((row) => (
+            <tr key={row.channel}>
+              <td className="px-[12px] py-[10px] tabular-nums">{row.sequence}</td>
+              <td className="px-[12px] py-[10px]">{prdChannelLabels[row.channel]}</td>
+              <td className="px-[12px] py-[10px]">{row.enabled ? "☑是 □否" : "□是 ☑否"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+type PrdDiagram = PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]["diagrams"][number];
+
+function PrdDiagramView({ diagram }: { diagram: PrdDiagram }) {
+  const nodeLabels = new Map(diagram.nodes.map((node) => [node.id, node.label]));
+  return (
+    <figure className="border-y border-white/[0.12] py-[24px]" data-prd-diagram={diagram.kind}>
+      <figcaption>
+        <h4 className="text-[18px] font-semibold text-[#f1f3f4]">{diagram.title}</h4>
+        <p className="mt-[6px] max-w-[880px] text-[14px] leading-[23px] text-[#aeb4bd]">{diagram.description}</p>
+      </figcaption>
+      <div className="mt-[18px] grid grid-cols-1 gap-[8px] sm:grid-cols-2 lg:grid-cols-3">
+        {diagram.nodes.map((node) => (
+          <div className="rounded-[4px] border border-white/[0.12] bg-white/[0.035] px-[12px] py-[10px]" data-prd-diagram-node key={node.id}>
+            <div className="font-semibold text-[#edf0f4]">{node.label}</div>
+            {node.group && <div className="mt-[2px] text-[12px] text-[#8f96a0]">{node.group}</div>}
+          </div>
+        ))}
+      </div>
+      <div className="mt-[20px]">
+        <h5 className="mb-[6px] text-[13px] font-semibold text-[#aeb4bd]">节点关系</h5>
+        <ol className="divide-y divide-white/[0.08] border-t border-white/[0.08]">
+          {diagram.edges.map((edge) => (
+            <li className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-[8px] py-[10px] text-[14px]" data-prd-diagram-edge key={edge.id}>
+              <span className="min-w-0 font-medium text-[#edf0f4]">{nodeLabels.get(edge.from) ?? edge.from}</span>
+              <ArrowRightIcon aria-hidden="true" className="size-[15px] text-[#8f96a0]" />
+              <span className="min-w-0 font-medium text-[#edf0f4]">{nodeLabels.get(edge.to) ?? edge.to}</span>
+              {edge.label && <span className="col-span-3 text-[12px] text-[#aeb4bd]">{edge.label}</span>}
+            </li>
+          ))}
+        </ol>
+      </div>
+    </figure>
+  );
+}
+
+function PrdSafetyBaselineTable({
+  rows,
+}: {
+  rows: PrdDocumentV2["sections"]["safetyBaseline"]["rows"];
+}) {
+  return (
+    <div className="mt-[24px] overflow-x-auto border border-white/[0.12]" data-prd-safety-table>
+      <table className="w-full min-w-[980px] border-collapse text-[13px] leading-[20px]">
+        <thead className="bg-white/[0.05] text-[#f1f3f4]">
+          <tr>
+            <th className="w-[58px] border-b border-white/[0.12] px-[10px] py-[10px] text-left">序号</th>
+            <th className="border-b border-white/[0.12] px-[10px] py-[10px] text-left">需求安全基线内容</th>
+            <th className="w-[210px] border-b border-white/[0.12] px-[10px] py-[10px] text-left">范围</th>
+            <th className="w-[90px] border-b border-white/[0.12] px-[10px] py-[10px] text-left">是否涉及</th>
+            <th className="w-[180px] border-b border-white/[0.12] px-[10px] py-[10px] text-left">备注</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/[0.08]">
+          {rows.map((row, index) => {
+            const baseline = prdSafetyBaselineItems[index];
+            if (!baseline) return null;
+            return (
+              <tr data-prd-safety-row key={row.sequence}>
+                <td className="px-[10px] py-[10px] align-top tabular-nums">{baseline.sequence}</td>
+                <td className="px-[10px] py-[10px] align-top">{baseline.requirement}</td>
+                <td className="px-[10px] py-[10px] align-top text-[#c7cad0]">{baseline.scope}</td>
+                <td className="px-[10px] py-[10px] align-top font-semibold">{row.applicability}</td>
+                <td className="px-[10px] py-[10px] align-top text-[#c7cad0]">{row.remarks ?? "-"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatPrdSectionTitle(title: string, sectionNumber: number) {
+  return /^\s*\d+(?:\.\d+)*(?:[.)、]|\s|(?=[\u3400-\u9fff]))/u.test(title)
+    ? title
+    : `${sectionNumber}. ${title}`;
+}
+
+function prdRevisionStatusLabel(status: PrdDocument["revision"]["status"]) {
+  if (status === "approved") return "已批准";
+  if (status === "inReview") return "评审中";
+  return "草稿";
+}
+
+function formatPrdDate(value: string) {
+  return value.slice(0, 10);
 }
 
 function PrdBlockView({ block }: { block: PrdBlock }) {
@@ -468,9 +758,9 @@ function PrdBlockView({ block }: { block: PrdBlock }) {
     case "acceptanceCriterion":
       return (
         <div className="rounded-[8px] border border-white/[0.10] bg-white/[0.04] p-[18px]">
-          <div><strong>Given</strong> {renderPrdInlines(block.given)}</div>
-          <div><strong>When</strong> {renderPrdInlines(block.when)}</div>
-          <div><strong>Then</strong> {renderPrdInlines(block.then)}</div>
+          <div><strong>前置条件：</strong>{renderPrdInlines(block.given)}</div>
+          <div><strong>触发操作：</strong>{renderPrdInlines(block.when)}</div>
+          <div><strong>预期结果：</strong>{renderPrdInlines(block.then)}</div>
         </div>
       );
     case "flow":
@@ -486,7 +776,7 @@ function PrdBlockView({ block }: { block: PrdBlock }) {
       return (
         <div className="rounded-[8px] border border-[#e6a05a]/30 bg-[#e6a05a]/[0.06] p-[18px]">
           <p>{renderPrdInlines(block.description)}</p>
-          <p className="text-[18px] text-[#c7cad0]">Mitigation: {renderPrdInlines(block.mitigation)}</p>
+          <p className="text-[18px] text-[#c7cad0]">缓解措施：{renderPrdInlines(block.mitigation)}</p>
         </div>
       );
     case "callout":

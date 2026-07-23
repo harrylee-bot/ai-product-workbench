@@ -19,6 +19,21 @@ export function workbenchPendingArtifactTitle(
     : `${subject} · 界面 ${index + 1}`;
 }
 
+export function WorkbenchDocumentLoading() {
+  return (
+    <div
+      aria-live="polite"
+      className="grid h-full w-full place-items-center px-[24px]"
+      data-workbench-artifact-state="pending"
+      data-workbench-artifact-variant="document"
+    >
+      <span className="text-[16px] font-medium text-[#c7cad0]">
+        Loading document...
+      </span>
+    </div>
+  );
+}
+
 export function WorkbenchArtifactFallback({
   phase,
   title,
