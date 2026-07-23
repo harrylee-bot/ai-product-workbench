@@ -22,6 +22,12 @@ test("production preflight keeps public registration and origin checks fail clos
   assert.match(result.stderr, /must be true or false/u);
 });
 
+test("production preflight rejects the legacy Runtime provider-state replay path", () => {
+  const result = runPreflight({ WORKBENCH_RUNTIME_PROVIDER_STATE_MODE: "legacy-read" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must be projection-required in production/u);
+});
+
 test("production preflight rejects a Canvas visual endpoint outside the tool origin", () => {
   const result = runPreflight({
     WORKBENCH_CANVAS_VISUAL_URL: "https://other.example.test/api/v1/runtime/canvas/visuals",
@@ -164,6 +170,7 @@ function runPreflight(overrides) {
     WORKBENCH_POSTGRES_RUNTIME_USER: "workbench_runtime",
     WORKBENCH_POSTGRES_RUNTIME_PASSWORD: "runtime",
     WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "false",
+    WORKBENCH_RUNTIME_PROVIDER_STATE_MODE: "projection-required",
     WORKBENCH_AUTH_CLIENT_IP_HEADER: "x-workbench-client-ip",
     WORKBENCH_EDGE_WIREGUARD_IP: "10.88.0.1",
     WORKBENCH_ORIGIN_WIREGUARD_IP: "10.88.0.2",

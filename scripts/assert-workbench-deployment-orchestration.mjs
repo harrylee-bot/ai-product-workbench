@@ -87,6 +87,24 @@ assert(
   envExample.includes("WORKBENCH_CANVAS_VISUAL_URL=https://aionbench.com/api/v1/runtime/canvas/visuals"),
   "deployment env must declare the Canvas visual capability base URL",
 );
+assert(
+  compose.services?.["workbench-worker"]?.environment?.WORKBENCH_RUNTIME_PROVIDER_STATE_MODE
+    === "${WORKBENCH_RUNTIME_PROVIDER_STATE_MODE:?WORKBENCH_RUNTIME_PROVIDER_STATE_MODE is required}",
+  "Runtime Worker must receive an explicit required provider-state mode",
+);
+assert(
+  envExample.includes("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE=projection-required"),
+  "deployment env must keep Runtime provider-state reads on the verified projection",
+);
+for (const [label, source] of [
+  ["server preflight", preflight],
+  ["production preflight", productionPreflight],
+]) {
+  assert(
+    source.includes("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required"),
+    `${label} must reject the legacy Runtime provider-state replay path`,
+  );
+}
 const preview = compose.services?.["workbench-preview"];
 assert(preview, "Preview service is required");
 assert(

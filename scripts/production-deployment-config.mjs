@@ -84,6 +84,7 @@ export const EFFECTIVE_CONFIG_FIELDS = Object.freeze([
   ["WORKBENCH_RUNTIME_EXECUTION_HEARTBEAT_MS", "positive-integer"],
   ["WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS", "positive-integer"],
   ["WORKBENCH_RUNTIME_EXECUTION_DEADLINE_CANCEL_MS", "positive-integer"],
+  ["WORKBENCH_RUNTIME_PROVIDER_STATE_MODE", "provider-state-mode"],
   ["WORKBENCH_RUNTIME_EXECUTION_RECONCILE_BATCH_SIZE", "positive-integer"],
   ["WORKBENCH_DEERFLOW_TIMEOUT_MS", "positive-integer"],
   ["WORKBENCH_DEERFLOW_SUBMISSION_TIMEOUT_MS", "positive-integer"],
@@ -541,6 +542,13 @@ function normalizeEffectiveValue(value, name, type) {
     assert(
       trimmed === "s3-if-none-match" || trimmed === "oss-forbid-overwrite",
       `${name} must be s3-if-none-match or oss-forbid-overwrite`,
+    );
+    return trimmed;
+  }
+  if (type === "provider-state-mode") {
+    assert(
+      trimmed === "projection-required",
+      `${name} must be projection-required`,
     );
     return trimmed;
   }

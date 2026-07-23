@@ -96,6 +96,7 @@ require_env WORKBENCH_IMPORT_S3_SECRET_ACCESS_KEY >/dev/null
 docling_url=$(require_env WORKBENCH_DOCLING_URL)
 auth_client_ip_header=$(require_env WORKBENCH_AUTH_CLIENT_IP_HEADER)
 public_registration_enabled=$(require_env WORKBENCH_PUBLIC_REGISTRATION_ENABLED)
+runtime_provider_state_mode=$(require_env WORKBENCH_RUNTIME_PROVIDER_STATE_MODE)
 edge_wireguard_ip=$(require_env WORKBENCH_EDGE_WIREGUARD_IP)
 origin_wireguard_ip=$(require_env WORKBENCH_ORIGIN_WIREGUARD_IP)
 origin_http_port=$(require_env WORKBENCH_ORIGIN_HTTP_PORT)
@@ -150,6 +151,8 @@ case "$public_registration_enabled" in
   true | false) ;;
   *) fail "WORKBENCH_PUBLIC_REGISTRATION_ENABLED must be true or false" ;;
 esac
+[ "$runtime_provider_state_mode" = "projection-required" ] \
+  || fail "WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required"
 validate_private_ipv4 WORKBENCH_EDGE_WIREGUARD_IP "$edge_wireguard_ip"
 validate_private_ipv4 WORKBENCH_ORIGIN_WIREGUARD_IP "$origin_wireguard_ip"
 [ "$edge_wireguard_ip" != "$origin_wireguard_ip" ] \

@@ -51,6 +51,12 @@ test("server preflight rejects an ambiguous public registration policy", () => {
   assert.match(result.stderr, /WORKBENCH_PUBLIC_REGISTRATION_ENABLED must be true or false/);
 });
 
+test("server preflight rejects the legacy Runtime provider-state replay path", () => {
+  const result = runPreflight({ WORKBENCH_RUNTIME_PROVIDER_STATE_MODE: "legacy-read" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must be projection-required/u);
+});
+
 test("server validation requires enterprise SSO for its local Dex profile", () => {
   const result = runPreflight({ WORKBENCH_ENTERPRISE_SSO_ENABLED: "false" });
   assert.notEqual(result.status, 0);
@@ -135,6 +141,7 @@ function runPreflight(overrides) {
     WORKBENCH_DOCLING_URL: "http://docling:5001",
     WORKBENCH_AUTH_CLIENT_IP_HEADER: "x-workbench-client-ip",
     WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "false",
+    WORKBENCH_RUNTIME_PROVIDER_STATE_MODE: "projection-required",
     WORKBENCH_EDGE_WIREGUARD_IP: "10.88.0.1",
     WORKBENCH_ORIGIN_WIREGUARD_IP: "10.88.0.2",
     WORKBENCH_EDGE_WIREGUARD_ENDPOINT: "8.130.160.177:51820",

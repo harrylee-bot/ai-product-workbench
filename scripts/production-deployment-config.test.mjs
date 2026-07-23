@@ -62,6 +62,10 @@ test("binds G1/G4/run attempt to the effective production topology without valid
     document.effectiveConfig.values.WORKBENCH_S3_EGRESS_UPSTREAM_HOST,
     "s3.internal.example.test",
   );
+  assert.equal(
+    document.effectiveConfig.values.WORKBENCH_RUNTIME_PROVIDER_STATE_MODE,
+    "projection-required",
+  );
   assert.equal(PRODUCTION_CONFIG_PATHS.some((file) => /server-validation|dex|minio|\.example/u.test(file)), false);
 
   const binding = deploymentConfigBinding(document, "f".repeat(64));
@@ -133,6 +137,33 @@ test("enforces conditional enterprise identity and rejects dormant Dex or OIDC c
     /OIDC_CLIENT_ID is required/u,
   );
 });
+
+test("binds provider-state mode into the signed configuration and rejects resealed drift", () => {
+  const document = deploymentDocument();
+  const effectiveConfigSha256 = document.effectiveConfig.sha256;
+  const configSha256 = document.configurationSha256;
+
+  document.effectiveConfig.values.WORKBENCH_RUNTIME_PROVIDER_STATE_MODE = "legacy-read";
+  resealDocument(document);
+
+  assert.notEqual(document.effectiveConfig.sha256, effectiveConfigSha256);
+  assert.notEqual(document.configurationSha256, configSha256);
+  assert.throws(
+    () => verifyProductionDeploymentConfig(document, { configSha256 }),
+    /WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required/u,
+  );
+});
+
+for (const mode of ["legacy-read", "shadow-verify"]) {
+  test(`refuses to sign a production configuration with provider-state mode ${mode}`, () => {
+    assert.throws(
+      () => deploymentDocument({
+        overrides: { WORKBENCH_RUNTIME_PROVIDER_STATE_MODE: mode },
+      }),
+      /WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required/u,
+    );
+  });
+}
 
 test("verifies the Cosign blob before parsing and exposes an exact downstream binding", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "workbench-deployment-config-"));

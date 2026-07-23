@@ -47,7 +47,7 @@ describe("worker database configuration", () => {
         runtimeExecutionMaximumWallClockMs: 1_800_000,
         runtimeExecutionDeadlineCancelMs: 30_000,
         deerFlowSubmissionTimeoutMs: 120_000,
-        runtimeProviderStateMode: "legacy-read",
+        runtimeProviderStateMode: "projection-required",
         runtimeExecutionReconcileIntervalMs: 5_000,
         runtimeExecutionReconcileBatchSize: 100,
         concurrency: 2,

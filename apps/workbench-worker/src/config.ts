@@ -65,7 +65,7 @@ export function loadWorkerConfig() {
   const runtimeProviderStateMode = enumValue(
     "WORKBENCH_RUNTIME_PROVIDER_STATE_MODE",
     ["legacy-read", "shadow-verify", "projection-required"] as const,
-    "legacy-read",
+    "projection-required",
   );
   const runtimeExecutionMaximumWallClockMs = boundedInteger(
     "WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS",

@@ -80,6 +80,7 @@ require_env WORKBENCH_POSTGRES_MIGRATOR_PASSWORD >/dev/null
 require_env WORKBENCH_POSTGRES_RUNTIME_USER >/dev/null
 require_env WORKBENCH_POSTGRES_RUNTIME_PASSWORD >/dev/null
 public_registration=$(require_env WORKBENCH_PUBLIC_REGISTRATION_ENABLED)
+runtime_provider_state_mode=$(require_env WORKBENCH_RUNTIME_PROVIDER_STATE_MODE)
 auth_ip_header=$(require_env WORKBENCH_AUTH_CLIENT_IP_HEADER)
 edge_wireguard_ip=$(require_env WORKBENCH_EDGE_WIREGUARD_IP)
 origin_wireguard_ip=$(require_env WORKBENCH_ORIGIN_WIREGUARD_IP)
@@ -125,6 +126,8 @@ case "$public_registration" in
   true | false) ;;
   *) fail "WORKBENCH_PUBLIC_REGISTRATION_ENABLED must be true or false" ;;
 esac
+[ "$runtime_provider_state_mode" = "projection-required" ] \
+  || fail "WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required in production"
 case "$s3_conditional_create_mode" in
   s3-if-none-match | oss-forbid-overwrite) ;;
   *) fail "WORKBENCH_S3_CONDITIONAL_CREATE_MODE must be s3-if-none-match or oss-forbid-overwrite" ;;
