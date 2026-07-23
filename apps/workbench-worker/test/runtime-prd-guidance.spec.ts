@@ -22,7 +22,10 @@ describe("runtimePrdResultGuidance", () => {
       schemaVersion: 2,
       content: { protocol: "workbench.prd.v2" },
     });
-    expect(guidance).toContain("references/prd-runtime-result.example.json exactly once");
+    expect(guidance).toContain("each required Runtime reference exactly once");
+    expect(guidance).toContain(
+      "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
+    );
     expect(guidance).not.toContain("<workbench_prd_result_starter>");
     expect(guidance).not.toContain(JSON.stringify(runtimePrdResultStarter));
   });

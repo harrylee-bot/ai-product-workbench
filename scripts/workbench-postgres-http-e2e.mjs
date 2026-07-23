@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import process from "node:process";
@@ -40,6 +41,33 @@ const prdGenerationStageSequence = [
   "validating-prd",
 ];
 const successPrdCheckpointToolCallId = "e2e-prd-checkpoint";
+const prdReferenceFixtures = [
+  {
+    path: "/mnt/skills/public/workbench/references/requirement-doc-template/structure.md",
+    source: new URL(
+      "../integrations/deerflow/skills/workbench/references/requirement-doc-template/structure.md",
+      import.meta.url,
+    ),
+  },
+  {
+    path: "/mnt/skills/public/workbench/references/requirement-doc-template/quality-standards.md",
+    source: new URL(
+      "../integrations/deerflow/skills/workbench/references/requirement-doc-template/quality-standards.md",
+      import.meta.url,
+    ),
+  },
+  {
+    path: "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
+    source: new URL(
+      "../integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json",
+      import.meta.url,
+    ),
+  },
+].map((fixture, index) => ({
+  ...fixture,
+  content: readFileSync(fixture.source, "utf8"),
+  toolCallId: `e2e-prd-reference-${index}`,
+}));
 const verbose = process.env.WORKBENCH_E2E_VERBOSE === "1";
 
 const services = [];
@@ -3477,36 +3505,46 @@ async function writeSuccessfulRuntimeStream(response, requestBody) {
     { langgraph_node: "generate_prd" },
   ], "2");
   await delay(250);
+  const messages = [{ type: "human", content: "Workbench E2E request" }];
+  const collectingStage = prdGenerationStageSequence[0];
+  const collectingToolCallId = `e2e-prd-stage-${collectingStage}`;
+  messages.push(...declaredToolMessages(
+    "workbench_generation_stage_update",
+    collectingToolCallId,
+    validatedGenerationStageArtifact(collectingStage, {
+      ...scope,
+      toolCallId: collectingToolCallId,
+    }),
+  ));
+  messages.push(...declaredPrdReferenceMessages());
+  for (const stage of prdGenerationStageSequence.slice(1)) {
+    const toolCallId = `e2e-prd-stage-${stage}`;
+    messages.push(...declaredToolMessages(
+      "workbench_generation_stage_update",
+      toolCallId,
+      validatedGenerationStageArtifact(stage, { ...scope, toolCallId }),
+    ));
+  }
+  messages.push(...declaredToolMessages(
+    "workbench_artifact_draft_publish",
+    successPrdCheckpointToolCallId,
+    validatedArtifactDraftArtifact(draft, {
+      ...scope,
+      toolCallId: successPrdCheckpointToolCallId,
+    }),
+  ));
+  messages.push(...declaredToolMessages(
+    "workbench_runtime_result_submit",
+    "e2e-result-submit",
+    validatedRuntimeResultArtifact(result, {
+      ...scope,
+      toolCallId: "e2e-result-submit",
+    }),
+  ));
   sendSse(response, "values", {
     node: "finalize",
     values: {
-      messages: [
-        { type: "human", content: "Workbench E2E request" },
-        ...prdGenerationStageSequence.flatMap((stage) => {
-          const toolCallId = `e2e-prd-stage-${stage}`;
-          return declaredToolMessages(
-            "workbench_generation_stage_update",
-            toolCallId,
-            validatedGenerationStageArtifact(stage, { ...scope, toolCallId }),
-          );
-        }),
-        ...declaredToolMessages(
-          "workbench_artifact_draft_publish",
-          successPrdCheckpointToolCallId,
-          validatedArtifactDraftArtifact(draft, {
-            ...scope,
-            toolCallId: successPrdCheckpointToolCallId,
-          }),
-        ),
-        ...declaredToolMessages(
-          "workbench_runtime_result_submit",
-          "e2e-result-submit",
-          validatedRuntimeResultArtifact(result, {
-            ...scope,
-            toolCallId: "e2e-result-submit",
-          }),
-        ),
-      ],
+      messages,
     },
   }, "3");
   response.end();
@@ -3864,6 +3902,27 @@ function declaredToolMessages(toolName, toolCallId, artifact, args = {}) {
       tool_call_id: toolCallId,
       artifact,
     },
+  ];
+}
+
+function declaredPrdReferenceMessages() {
+  return [
+    {
+      type: "ai",
+      content: "",
+      tool_calls: prdReferenceFixtures.map((fixture) => ({
+        id: fixture.toolCallId,
+        name: "read_file",
+        args: { path: fixture.path },
+      })),
+    },
+    ...prdReferenceFixtures.map((fixture) => ({
+      type: "tool",
+      name: "read_file",
+      tool_call_id: fixture.toolCallId,
+      content: fixture.content,
+      status: "success",
+    })),
   ];
 }
 

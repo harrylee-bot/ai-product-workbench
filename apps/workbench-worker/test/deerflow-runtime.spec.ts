@@ -26,6 +26,7 @@ import {
   runtimeResumeValue,
 } from "../src/runtime/deerflow-runtime.adapter.js";
 import { runtimePrdResultStarter } from "../src/runtime/runtime-prd-guidance.js";
+import { PRD_RUNTIME_REFERENCE_FILES } from "../src/runtime/runtime-prd-reference-evidence.js";
 import type {
   RuntimeExecution,
   RuntimeExecutionObserver,
@@ -36,6 +37,13 @@ const prdRuntimeResultExample = JSON.parse(readFileSync(new URL(
   "../../../integrations/deerflow/skills/workbench/references/prd-runtime-result.example.json",
   import.meta.url,
 ), "utf8")) as unknown;
+const prdRuntimeReferenceContent = new Map(PRD_RUNTIME_REFERENCE_FILES.map((reference) => [
+  reference.relativePath,
+  readFileSync(new URL(
+    `../../../integrations/deerflow/skills/workbench/${reference.relativePath}`,
+    import.meta.url,
+  ), "utf8"),
+]));
 
 function workerConfig() {
   return {
@@ -420,6 +428,33 @@ function generationStageToolMessages(
   );
 }
 
+function prdReferenceReadToolMessages(toolCallPrefix = "prd-reference-read") {
+  return PRD_RUNTIME_REFERENCE_FILES.flatMap((reference, index) => {
+    const toolCallId = `${toolCallPrefix}-${index}`;
+    return [
+      {
+        type: "ai",
+        content: "",
+        tool_calls: [{
+          id: toolCallId,
+          name: "read_file",
+          args: {
+            description: `Read ${reference.relativePath}`,
+            path: `/mnt/skills/public/workbench/${reference.relativePath}`,
+          },
+        }],
+      },
+      {
+        type: "tool",
+        name: "read_file",
+        tool_call_id: toolCallId,
+        content: prdRuntimeReferenceContent.get(reference.relativePath),
+        status: "success",
+      },
+    ];
+  });
+}
+
 function knowledgeDescriptor(secret: Uint8Array) {
   const issuedAt = new Date(Math.floor(Date.now() / 1_000) * 1_000);
   const expiresAt = new Date(issuedAt.getTime() + 10 * 60_000);
@@ -536,7 +571,12 @@ describe("DeerFlow runtime adapter", () => {
       expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
         expect.objectContaining({ externalEventId: "redaction-tail-event" }),
         expect.arrayContaining([
-          expect.objectContaining({ type: "activity", activityId: "deerflow:writer", status: "running" }),
+          expect.objectContaining({
+            type: "activity",
+            activityId: "deerflow:writer",
+            label: "writer",
+            status: "running",
+          }),
           { type: "text.delta", delta: "visible " },
         ]),
       );
@@ -604,6 +644,156 @@ describe("DeerFlow runtime adapter", () => {
       expect.any(Array),
     );
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps raw graph nodes in provider diagnostics without publishing them as activity labels", async () => {
+    const prompt = "生成一份支付 改造\n需求说明书";
+    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const finalState = {
+      node: "lead_agent",
+      messages: [
+        { type: "human", content: "current turn" },
+        ...generationStageToolMessages("collecting-prd-context", {
+          toolCallId: "public-activity-collecting",
+        }),
+        ...prdReferenceReadToolMessages("public-activity-reference"),
+        ...generationStageToolMessages("structuring-prd", {
+          toolCallId: "public-activity-structuring",
+        }),
+        ...generationStageToolMessages("drafting-prd", {
+          toolCallId: "public-activity-drafting",
+        }),
+        ...generationStageToolMessages("validating-prd", {
+          toolCallId: "public-activity-validating",
+        }),
+        ...artifactDraftToolMessages(prdDraft, 0, "public-activity-checkpoint"),
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [prdDraft],
+        }, "public-activity-result"),
+        { type: "ai", content: "done" },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([
+          {
+            id: "middleware-node-event",
+            event: "values",
+            data: {
+              node: "DynamicContextMiddleware.before_model",
+              messages: [{ type: "human", content: "current turn" }],
+            },
+          },
+          { id: "lead-agent-node-event", event: "values", data: finalState },
+        ], { runId: "external_run_public_activity" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, prompt, requestedArtifactKinds: ["prd"] },
+    }), runtimeObserver)).resolves.toMatchObject({ message: "done" });
+
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalEventId: "middleware-node-event",
+        payload: expect.objectContaining({ node: "DynamicContextMiddleware.before_model" }),
+      }),
+      [{
+        type: "activity",
+        activityId: expect.stringMatching(/^runtime:[0-9a-f]{64}$/u),
+        label: "生成一份支付 改造 需求说明书",
+        status: "running",
+        detail: null,
+      }],
+    );
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalEventId: "lead-agent-node-event",
+        payload: expect.objectContaining({ node: "lead_agent" }),
+      }),
+      expect.arrayContaining([{ type: "text.delta", delta: "done" }]),
+    );
+    const publicEffects = runtimeObserver.onExternalEvent.mock.calls
+      .flatMap(([, effects]) => effects);
+    expect(publicEffects.filter((event) => event.type === "activity")).toHaveLength(1);
+    expect(JSON.stringify(publicEffects)).not.toContain("DynamicContextMiddleware");
+    expect(JSON.stringify(publicEffects)).not.toContain("lead_agent");
+  });
+
+  it("preserves graph-node activity for a Prototype-only Run", async () => {
+    const prototype = minimalPrototypeArtifact();
+    const finalState = {
+      node: "prototype_writer",
+      messages: [
+        { type: "human", content: "current turn" },
+        ...artifactDraftToolMessages(prototype, 0, "prototype-activity-checkpoint"),
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [prototype],
+        }, "prototype-activity-result"),
+        { type: "ai", content: "done" },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([
+          {
+            id: "prototype-middleware-node-event",
+            event: "values",
+            data: {
+              node: "DynamicContextMiddleware.before_model",
+              messages: [{ type: "human", content: "current turn" }],
+            },
+          },
+          { id: "prototype-writer-node-event", event: "values", data: finalState },
+        ], { runId: "external_run_prototype_activity" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
+    }), runtimeObserver)).resolves.toMatchObject({ message: "done" });
+
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ externalEventId: "prototype-middleware-node-event" }),
+      [expect.objectContaining({
+        type: "activity",
+        activityId: "deerflow:DynamicContextMiddleware.before_model",
+        status: "running",
+      })],
+    );
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ externalEventId: "prototype-writer-node-event" }),
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "activity",
+          activityId: "deerflow:DynamicContextMiddleware.before_model",
+          status: "succeeded",
+        }),
+        expect.objectContaining({
+          type: "activity",
+          activityId: "deerflow:prototype_writer",
+          status: "running",
+        }),
+      ]),
+    );
   });
 
   it("rejects a malformed DeerFlow end sentinel without finalizing", async () => {
@@ -1293,7 +1483,10 @@ describe("DeerFlow runtime adapter", () => {
     }), observer());
 
     const content = submittedBody?.input.messages[0]?.content ?? "";
-    expect(content).toContain("references/prd-runtime-result.example.json exactly once");
+    expect(content).toContain("each required Runtime reference exactly once");
+    expect(content).toContain(
+      "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
+    );
     expect(content).toContain("regardless of the natural-language prompt");
     expect(content).toContain("only when the requirement body makes that dimension relevant");
     expect(content).toContain("不涉及 is invalid when the PRD body contains an affirmative fact");
@@ -1549,6 +1742,7 @@ describe("DeerFlow runtime adapter", () => {
       ...generationStageToolMessages("collecting-prd-context", {
         toolCallId: "stage-prd-collecting",
       }),
+      ...prdReferenceReadToolMessages("stage-prd-reference"),
       ...generationStageToolMessages("structuring-prd", { toolCallId: "stage-prd-structuring" }),
       ...generationStageToolMessages("drafting-prd", { toolCallId: "stage-prd-drafting" }),
       ...generationStageToolMessages("validating-prd", { toolCallId: "stage-prd-validating" }),
@@ -2491,6 +2685,74 @@ describe("DeerFlow runtime adapter", () => {
     await expect(adapter.execute(execution({
       request: { ...execution().request, requestedArtifactKinds: ["prd"] },
     }), observer())).rejects.toThrow("RUNTIME_ARTIFACT_PRD_GENERATION_STAGES_INCOMPLETE");
+  });
+
+  it("rejects a PRD checkpoint when the model did not read the pinned Runtime references", async () => {
+    const prdDraft = runtimePrdResultStarter.artifacts[0]!;
+    const messages = [
+      { type: "human", content: "current turn" },
+      ...generationStageToolMessages("collecting-prd-context"),
+      ...generationStageToolMessages("structuring-prd"),
+      ...generationStageToolMessages("drafting-prd"),
+      ...generationStageToolMessages("validating-prd"),
+      ...artifactDraftToolMessages(prdDraft),
+      ...validatedResultToolMessages({
+        protocol: "workbench.runtime.result.v1",
+        message: "must not pass",
+        artifacts: [prdDraft],
+      }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([{
+          id: "missing-prd-reference-evidence",
+          event: "values",
+          data: { messages },
+        }], { runId: "external_run_missing_prd_reference_evidence" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prd"] },
+    }), observer())).rejects.toThrow("RUNTIME_ARTIFACT_PRD_REFERENCE_READ_MISSING");
+  });
+
+  it("does not apply the PRD reference guard to a Prototype-only Run", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return successfulRuntimeResponse({
+          runId: "external_run_prototype_without_prd_references",
+          artifacts: [minimalPrototypeArtifact()],
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
+    }), observer())).resolves.toMatchObject({ message: "done" });
+  });
+
+  it("fails closed before provider I/O for a mixed PRD and Prototype request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prd", "prototype"] },
+    }), observer())).rejects.toThrow("RUNTIME_ARTIFACT_PRD_MIXED_REQUEST_INVALID");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects undeclared and forged-scope Artifact checkpoint ToolMessages", async () => {
@@ -3694,17 +3956,21 @@ function successfulRuntimeResponse({
   assistantText?: string;
   artifacts?: unknown[];
 } = {}) {
-  const prdStages = artifacts.some((artifact) => (
+  const hasPrd = artifacts.some((artifact) => (
     artifact !== null
     && typeof artifact === "object"
     && !Array.isArray(artifact)
     && "kind" in artifact
     && artifact.kind === "prd"
-  ))
+  ));
+  const collectingPrdContext = hasPrd
+    ? generationStageToolMessages("collecting-prd-context", {
+        toolCallId: "successful-prd-collecting",
+      })
+    : [];
+  const prdReferenceReads = hasPrd ? prdReferenceReadToolMessages("successful-prd-reference") : [];
+  const remainingPrdStages = hasPrd
     ? [
-        ...generationStageToolMessages("collecting-prd-context", {
-          toolCallId: "successful-prd-collecting",
-        }),
         ...generationStageToolMessages("structuring-prd", {
           toolCallId: "successful-prd-structuring",
         }),
@@ -3722,7 +3988,9 @@ function successfulRuntimeResponse({
     data: {
       messages: [
         { type: "human", content: "current turn" },
-        ...prdStages,
+        ...collectingPrdContext,
+        ...prdReferenceReads,
+        ...remainingPrdStages,
         ...artifacts.flatMap((artifact, artifactIndex) => (
           artifactDraftToolMessages(artifact, artifactIndex, `successful-artifact-${artifactIndex}`)
         )),

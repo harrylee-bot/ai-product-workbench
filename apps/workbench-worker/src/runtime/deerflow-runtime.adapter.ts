@@ -66,6 +66,7 @@ import {
   raceWithAbort,
 } from "./runtime-liveness.js";
 import { runtimePrdResultGuidance } from "./runtime-prd-guidance.js";
+import { assertPrdReferenceReadEvidence } from "./runtime-prd-reference-evidence.js";
 
 export {
   assistantTextDelta,
@@ -281,6 +282,14 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     observer: RuntimeExecutionObserver,
     signal?: AbortSignal,
   ): Promise<RuntimeOutcome> {
+    if (
+      execution.request.requestedArtifactKinds.includes("prd")
+      && execution.request.requestedArtifactKinds.some((kind) => (
+        kind === "prototype" || kind === "code"
+      ))
+    ) {
+      throw new Error("RUNTIME_ARTIFACT_PRD_MIXED_REQUEST_INVALID");
+    }
     const liveness = new RuntimeProviderLivenessBudget(
       this.config.deerFlowSubmissionTimeoutMs,
       this.config.deerFlowIdleTimeoutMs,
@@ -414,7 +423,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     );
     let finalState: unknown;
     let inputRequired: RuntimeInputRequired | null = null;
+    const collapsePrdActivity = execution.request.requestedArtifactKinds.length === 1
+      && execution.request.requestedArtifactKinds[0] === "prd";
     let activeNode: string | null = null;
+    let requestActivityStarted = false;
     let resultToolCallId: string | null = null;
     const prototypeRequested = execution.request.requestedArtifactKinds.includes("prototype");
     let partEffects: RuntimeProgressEvent[] | null = null;
@@ -490,9 +502,11 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     };
     const emitCheckpointDrafts = async (
       submissions: ReturnType<typeof validatedArtifactDraftSubmissions>,
+      assertReferenceEvidence: (draft: RuntimeArtifactDraft, declarationIndex: number) => void,
     ) => {
       for (const submission of submissions) {
         assertPrdGenerationStagesComplete(submission.draft, emittedStageSequence);
+        assertReferenceEvidence(submission.draft, submission.declarationIndex);
         const sourceEventId = runtimeToolSourceId(
           execution.runtimeAttemptId,
           ARTIFACT_DRAFT_PUBLISH_TOOL,
@@ -593,17 +607,24 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       }
       uncheckpointedPatchArtifacts.add(patch.artifactIndex);
     };
-    const emitResultDrafts = async (submission: {
-      result: RuntimeResult;
-      toolCallId: string;
-      messageIndex: number;
-    }) => {
+    const emitResultDrafts = async (
+      submission: {
+        result: RuntimeResult;
+        toolCallId: string;
+        declarationIndex: number;
+        messageIndex: number;
+      },
+      assertReferenceEvidence: (draft: RuntimeArtifactDraft, declarationIndex: number) => void,
+    ) => {
       if (uncheckpointedPatchArtifacts.size > 0) {
         throw new Error("RUNTIME_PROTOTYPE_PATCH_FINAL_CHECKPOINT_MISSING");
       }
       assertRuntimeResultCheckpoints(submission.result, latestCheckpoints);
       for (const draft of submission.result.artifacts) {
         assertPrdGenerationStagesComplete(draft, emittedStageSequence);
+      }
+      for (const draft of submission.result.artifacts) {
+        assertReferenceEvidence(draft, submission.declarationIndex);
       }
       for (const [artifactIndex, draft] of submission.result.artifacts.entries()) {
         const sourceEventId = runtimeToolSourceId(
@@ -636,6 +657,33 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       const resultSubmissions = validatedRuntimeSubmissions(state, execution);
       if (resultSubmissions.length > 1) throw new Error("RUNTIME_RESULT_SUBMISSION_MULTIPLE");
       const resultSubmission = resultSubmissions[0];
+      const assertReferenceEvidence = (
+        draft: RuntimeArtifactDraft,
+        artifactDeclarationIndex: number,
+      ) => {
+        if (
+          draft.kind !== "prd"
+          || !execution.request.requestedArtifactKinds.includes("prd")
+        ) return;
+        const collecting = stageSubmissions.find((submission) => (
+          submission.stage === "collecting-prd-context"
+        ));
+        const structuring = stageSubmissions.find((submission) => (
+          submission.stage === "structuring-prd"
+        ));
+        const drafting = stageSubmissions.find((submission) => (
+          submission.stage === "drafting-prd"
+        ));
+        if (!collecting || !structuring || !drafting) {
+          throw new Error("RUNTIME_ARTIFACT_PRD_GENERATION_STAGES_INCOMPLETE");
+        }
+        assertPrdReferenceReadEvidence(state, {
+          collectingResponseIndex: collecting.messageIndex,
+          structuringDeclarationIndex: structuring.declarationIndex,
+          draftingDeclarationIndex: drafting.declarationIndex,
+          artifactDeclarationIndex,
+        });
+      };
       assertCanvasToolCausality(
         state,
         execution.canvasTool?.reference.declaredTools ?? [],
@@ -674,14 +722,14 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           continue;
         }
         if (event.kind === "checkpoint") {
-          await emitCheckpointDrafts([event.submission]);
+          await emitCheckpointDrafts([event.submission], assertReferenceEvidence);
           continue;
         }
         if (event.kind === "patch") {
           await emitPatch(event.submission.patch, event.submission.sourceEventId);
           continue;
         }
-        await emitResultDrafts(event.submission);
+        await emitResultDrafts(event.submission, assertReferenceEvidence);
         resultToolCallId = event.submission.toolCallId;
       }
     };
@@ -717,7 +765,12 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         }
 
         const node = extractNode(part.data);
-        if (node && node !== activeNode) {
+        if (node && collapsePrdActivity && !requestActivityStarted) {
+          // Raw graph nodes remain in the persisted provider event above. PRD
+          // activity is request-scoped so middleware names never reach the UI.
+          await emitEvent(requestActivityEvent(execution, "running"));
+          requestActivityStarted = true;
+        } else if (node && !collapsePrdActivity && node !== activeNode) {
           if (activeNode) {
             await emitEvent(activityEvent(activeNode, "succeeded"));
           }
@@ -1655,6 +1708,7 @@ function validatedArtifactDraftSubmissions(
     artifactIndex: number;
     draft: RuntimeArtifactDraft;
     toolCallId: string;
+    declarationIndex: number;
     messageIndex: number;
   }> = [];
   for (const trusted of trustedToolMessages(
@@ -1688,6 +1742,7 @@ function validatedArtifactDraftSubmissions(
       artifactIndex: parsed.data.artifactIndex,
       draft: parsed.data.draft,
       toolCallId: trusted.toolCallId,
+      declarationIndex: trusted.declarationIndex,
       messageIndex: trusted.messageIndex,
     });
   }
@@ -1956,7 +2011,10 @@ function prototypePatchRevisionKey(artifactIndex: number, screenId: string) {
 function extractGenerationStageProgress(
   finalState: unknown,
   execution: Pick<RuntimeExecution, "runId" | "runtimeAttemptId">,
-): Array<Extract<RuntimeProgressEvent, { type: "generation.stage" }> & { messageIndex: number }> {
+): Array<Extract<RuntimeProgressEvent, { type: "generation.stage" }> & {
+  declarationIndex: number;
+  messageIndex: number;
+}> {
   const messages = runtimeMessages(finalState);
   const currentTurnStart = currentTurnStartIndex(messages);
   if (currentTurnStart < 0) return [];
@@ -1991,6 +2049,7 @@ function extractGenerationStageProgress(
         GENERATION_STAGE_TOOL,
         trusted.toolCallId,
       ),
+      declarationIndex: trusted.declarationIndex,
       messageIndex: trusted.messageIndex,
     }];
   });
@@ -2398,6 +2457,21 @@ function contentText(value: unknown): string {
     const text = stringValue(record?.text) ?? stringValue(record?.content);
     return text ? [text] : [];
   }).join("");
+}
+
+function requestActivityEvent(
+  execution: RuntimeExecution,
+  status: "running" | "succeeded",
+): RuntimeProgressEvent {
+  return {
+    type: "activity",
+    activityId: `runtime:${createHash("sha256")
+      .update(execution.runtimeAttemptId)
+      .digest("hex")}`,
+    status,
+    label: execution.request.prompt.replace(/\s+/gu, " ").trim().slice(0, 240),
+    detail: null,
+  };
 }
 
 function activityEvent(node: string, status: "running" | "succeeded"): RuntimeProgressEvent {

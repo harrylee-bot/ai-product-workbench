@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from pathlib import Path
 import sys
@@ -70,6 +71,8 @@ CANVAS_TOOL_NAMES = middleware_module.CANVAS_TOOL_NAMES
 KNOWLEDGE_TOOL_NAME = middleware_module.KNOWLEDGE_TOOL_NAME
 ARTIFACT_PROGRESS_TOOL_NAMES = middleware_module.ARTIFACT_PROGRESS_TOOL_NAMES
 PROTOTYPE_ONLY_TOOL_NAMES = middleware_module.PROTOTYPE_ONLY_TOOL_NAMES
+PRD_REFERENCE_FILES = middleware_module.PRD_REFERENCE_FILES
+PRD_STAGE_SEQUENCE = middleware_module.PRD_STAGE_SEQUENCE
 WorkbenchToolScopeMiddleware = middleware_module.WorkbenchToolScopeMiddleware
 normalize_workbench_canvas_policy = middleware_module.normalize_workbench_canvas_policy
 normalize_workbench_requested_artifact_kinds = (
@@ -98,12 +101,153 @@ class FakeModelRequest:
 
 
 class FakeToolRequest:
-    def __init__(self, name: str, call_id: str = "call-1"):
-        self.tool_call = {"name": name, "id": call_id}
+    def __init__(
+        self,
+        name: str,
+        call_id: str = "call-1",
+        args: dict | None = None,
+        state: dict | None = None,
+    ):
+        self.tool_call = {"name": name, "id": call_id, "args": dict(args or {})}
+        self.state = state or {
+            "messages": [
+                {"type": "human", "content": "current turn"},
+                {
+                    "type": "ai",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": call_id,
+                        "name": name,
+                        "args": dict(args or {}),
+                    }],
+                },
+            ],
+        }
 
 
 def policy(*declared: str) -> dict:
     return {"declaredTools": list(declared)}
+
+
+def _skill_root() -> Path:
+    candidates = (
+        PATCH_ROOT.parents[1] / "skills" / "workbench",
+        Path("/app/skills/public/workbench"),
+    )
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    raise RuntimeError("WORKBENCH_PRD_REFERENCE_SKILL_ROOT_MISSING")
+
+
+SKILL_ROOT = _skill_root()
+REFERENCE_CONTENT = {
+    virtual_path: (
+        SKILL_ROOT / virtual_path.removeprefix("/mnt/skills/public/workbench/")
+    ).read_text(encoding="utf-8")
+    for virtual_path, _digest in PRD_REFERENCE_FILES
+}
+
+
+def call(name: str, call_id: str, args: dict | None = None) -> dict:
+    return {"id": call_id, "name": name, "args": dict(args or {})}
+
+
+def tool_message(
+    name: str,
+    call_id: str,
+    content: str = "ok",
+    *,
+    artifact: dict | None = None,
+    status: str = "success",
+) -> dict:
+    message = {
+        "type": "tool",
+        "name": name,
+        "tool_call_id": call_id,
+        "content": content,
+        "status": status,
+    }
+    if artifact is not None:
+        message["artifact"] = artifact
+    return message
+
+
+def append_tool_batch(messages: list[dict], calls: list[dict], responses: list[dict]) -> None:
+    messages.append({"type": "ai", "content": "", "tool_calls": calls})
+    messages.extend(responses)
+
+
+def append_stage(messages: list[dict], stage: str, call_id: str) -> None:
+    append_tool_batch(
+        messages,
+        [call("workbench_generation_stage_update", call_id, {"stage": stage})],
+        [tool_message(
+            "workbench_generation_stage_update",
+            call_id,
+            artifact={
+                "protocol": "workbench.runtime.generation-stage.v1",
+                "stage": stage,
+            },
+        )],
+    )
+
+
+def append_references(messages: list[dict], *, status_by_index: dict[int, str] | None = None) -> None:
+    calls = []
+    responses = []
+    for index, (path, _digest) in enumerate(PRD_REFERENCE_FILES):
+        call_id = f"reference-{index}"
+        calls.append(call("read_file", call_id, {"description": "Read PRD reference", "path": path}))
+        status = (status_by_index or {}).get(index, "success")
+        responses.append(tool_message(
+            "read_file",
+            call_id,
+            REFERENCE_CONTENT[path] if status == "success" else "Error: read failed",
+            status=status,
+        ))
+    append_tool_batch(messages, calls, responses)
+
+
+def prd_messages(*, stage_count: int, references: bool, draft: bool = False) -> list[dict]:
+    messages: list[dict] = [{"type": "human", "content": "current PRD turn"}]
+    if stage_count > 0:
+        append_stage(messages, PRD_STAGE_SEQUENCE[0], "stage-0")
+    if references:
+        append_references(messages)
+    for index, stage in enumerate(PRD_STAGE_SEQUENCE[1:stage_count], start=1):
+        append_stage(messages, stage, f"stage-{index}")
+    if draft:
+        append_tool_batch(
+            messages,
+            [call("workbench_artifact_draft_publish", "draft-success", {
+                "artifact_index": 0,
+                "draft": {"kind": "prd"},
+            })],
+            [tool_message(
+                "workbench_artifact_draft_publish",
+                "draft-success",
+                artifact={
+                    "protocol": "workbench.runtime.artifact-draft.v1",
+                    "ok": True,
+                    "draft": {"kind": "prd"},
+                },
+            )],
+        )
+    return messages
+
+
+def request_in_state(
+    messages: list[dict],
+    name: str,
+    call_id: str,
+    args: dict | None = None,
+    *,
+    sibling_calls: list[dict] | None = None,
+) -> FakeToolRequest:
+    current_calls = sibling_calls or [call(name, call_id, args)]
+    messages.append({"type": "ai", "content": "", "tool_calls": current_calls})
+    return FakeToolRequest(name, call_id, args, {"messages": messages})
 
 
 class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
@@ -369,15 +513,22 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 self.assertEqual(result.name, name)
                 self.assertEqual(result.content, "Error: WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED")
 
-    def test_prd_execution_allows_progress_but_rejects_prototype_patch(self) -> None:
+    def test_prd_execution_starts_with_collecting_and_rejects_prototype_patch(self) -> None:
         sentinel = object()
         middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
-        for name in ARTIFACT_PROGRESS_TOOL_NAMES:
-            with self.subTest(name=name):
-                self.assertIs(
-                    middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel),
-                    sentinel,
-                )
+        collecting = FakeToolRequest(
+            "workbench_generation_stage_update",
+            args={"stage": "collecting-prd-context"},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(collecting, lambda _request: sentinel),
+            sentinel,
+        )
+        draft = middleware.wrap_tool_call(
+            FakeToolRequest("workbench_artifact_draft_publish"),
+            lambda _request: sentinel,
+        )
+        self.assertIn("WORKBENCH_PRD_COLLECTING_STAGE_REQUIRED", draft.content)
         for name in PROTOTYPE_ONLY_TOOL_NAMES:
             with self.subTest(name=name):
                 result = middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel)
@@ -406,6 +557,387 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
         self.assertIs(allowed, sentinel)
         self.assertIs(non_canvas, sentinel)
+
+    def test_prd_reference_pins_match_every_shipped_runtime_file(self) -> None:
+        for virtual_path, expected_digest in PRD_REFERENCE_FILES:
+            with self.subTest(path=virtual_path):
+                content = REFERENCE_CONTENT[virtual_path]
+                self.assertEqual(
+                    hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    expected_digest,
+                )
+                self.assertLess(len(content), 50_000)
+
+    def test_prd_gate_blocks_premature_structuring_draft_and_final_with_actions(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        for name, args in (
+            ("workbench_generation_stage_update", {"stage": "structuring-prd"}),
+            ("workbench_artifact_draft_publish", {}),
+            ("workbench_runtime_result_submit", {}),
+        ):
+            with self.subTest(name=name):
+                called = False
+
+                def handler(_request):
+                    nonlocal called
+                    called = True
+                    return object()
+
+                blocked = middleware.wrap_tool_call(
+                    FakeToolRequest(name, args=args),
+                    handler,
+                )
+                self.assertFalse(called)
+                self.assertEqual(blocked.status, "error")
+                self.assertEqual(blocked.name, name)
+                self.assertEqual(blocked.tool_call_id, "call-1")
+                self.assertIn("stage='collecting-prd-context'", blocked.content)
+
+    def test_prd_gate_allows_three_ordered_reference_reads_in_one_batch(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        messages = prd_messages(stage_count=1, references=False)
+        reference_calls = [
+            call("read_file", f"parallel-reference-{index}", {
+                "description": "Read complete PRD reference",
+                "path": path,
+            })
+            for index, (path, _digest) in enumerate(PRD_REFERENCE_FILES)
+        ]
+        messages.append({"type": "ai", "content": "", "tool_calls": reference_calls})
+        state = {"messages": messages}
+        called: list[str] = []
+        for index, (path, _digest) in enumerate(PRD_REFERENCE_FILES):
+            call_id = f"parallel-reference-{index}"
+            request = FakeToolRequest(
+                "read_file",
+                call_id,
+                {"description": "Read complete PRD reference", "path": path},
+                state,
+            )
+
+            def handler(_request, *, current_id=call_id, current_path=path):
+                called.append(current_id)
+                return middleware_module.ToolMessage(
+                    content=REFERENCE_CONTENT[current_path],
+                    tool_call_id=current_id,
+                    name="read_file",
+                    status="success",
+                )
+
+            observed = middleware.wrap_tool_call(request, handler)
+            self.assertEqual(observed.status, "success")
+            self.assertEqual(observed.content, REFERENCE_CONTENT[path])
+        self.assertEqual(called, [f"parallel-reference-{index}" for index in range(3)])
+
+    def test_prd_gate_deterministically_blocks_duplicate_and_misordered_batch_reads(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        structure_path = PRD_REFERENCE_FILES[0][0]
+        quality_path = PRD_REFERENCE_FILES[1][0]
+        messages = prd_messages(stage_count=1, references=False)
+        duplicate_calls = [
+            call("read_file", "first-structure", {"path": structure_path}),
+            call("read_file", "duplicate-structure", {"path": structure_path}),
+            call("read_file", "quality-after-duplicate", {"path": quality_path}),
+        ]
+        messages.append({"type": "ai", "content": "", "tool_calls": duplicate_calls})
+        state = {"messages": messages}
+        first = middleware.wrap_tool_call(
+            FakeToolRequest("read_file", "first-structure", {"path": structure_path}, state),
+            lambda _request: middleware_module.ToolMessage(
+                content=REFERENCE_CONTENT[structure_path],
+                tool_call_id="first-structure",
+                name="read_file",
+                status="success",
+            ),
+        )
+        self.assertEqual(first.status, "success")
+        for call_id, path in (
+            ("duplicate-structure", structure_path),
+            ("quality-after-duplicate", quality_path),
+        ):
+            called = False
+
+            def handler(_request):
+                nonlocal called
+                called = True
+                return object()
+
+            blocked = middleware.wrap_tool_call(
+                FakeToolRequest("read_file", call_id, {"path": path}, state),
+                handler,
+            )
+            self.assertFalse(called)
+            self.assertIn("WORKBENCH_PRD_REFERENCE_ORDER_INVALID", blocked.content)
+
+        wrong_order_messages = prd_messages(stage_count=1, references=False)
+        request = request_in_state(
+            wrong_order_messages,
+            "read_file",
+            "quality-first",
+            {"path": quality_path},
+        )
+        blocked = middleware.wrap_tool_call(request, lambda _request: object())
+        self.assertIn("WORKBENCH_PRD_REFERENCE_ORDER_INVALID", blocked.content)
+        self.assertIn(structure_path, blocked.content)
+
+    def test_prd_gate_requires_exact_unranged_path_and_pinned_handler_content(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        structure_path, expected_digest = PRD_REFERENCE_FILES[0]
+        alias_path = structure_path.replace("/structure.md", "/./structure.md")
+        alias_request = request_in_state(
+            prd_messages(stage_count=1, references=False),
+            "read_file",
+            "alias-reference",
+            {"path": alias_path},
+        )
+        alias = middleware.wrap_tool_call(alias_request, lambda _request: object())
+        self.assertIn("WORKBENCH_PRD_REFERENCE_PATH_INVALID", alias.content)
+        self.assertIn(structure_path, alias.content)
+
+        ranged_request = request_in_state(
+            prd_messages(stage_count=1, references=False),
+            "read_file",
+            "ranged-reference",
+            {"path": structure_path, "start_line": 1, "end_line": 20},
+        )
+        ranged = middleware.wrap_tool_call(ranged_request, lambda _request: object())
+        self.assertIn("WORKBENCH_PRD_REFERENCE_RANGE_FORBIDDEN", ranged.content)
+
+        hash_request = request_in_state(
+            prd_messages(stage_count=1, references=False),
+            "read_file",
+            "hash-mismatch",
+            {"path": structure_path},
+        )
+        mismatch = middleware.wrap_tool_call(
+            hash_request,
+            lambda _request: middleware_module.ToolMessage(
+                content=f"{REFERENCE_CONTENT[structure_path]}\nchanged",
+                tool_call_id="hash-mismatch",
+                name="read_file",
+                status="success",
+            ),
+        )
+        self.assertEqual(mismatch.status, "error")
+        self.assertIn("WORKBENCH_PRD_REFERENCE_CONTENT_MISMATCH", mismatch.content)
+        self.assertIn(expected_digest, mismatch.content)
+
+        failed_request = request_in_state(
+            prd_messages(stage_count=1, references=False),
+            "read_file",
+            "read-failed",
+            {"path": structure_path},
+        )
+        failed = middleware.wrap_tool_call(
+            failed_request,
+            lambda _request: middleware_module.ToolMessage(
+                content="Error: File not found",
+                tool_call_id="read-failed",
+                name="read_file",
+                status="success",
+            ),
+        )
+        self.assertEqual(failed.status, "error")
+        self.assertIn("WORKBENCH_PRD_REFERENCE_READ_FAILED", failed.content)
+
+    def test_prd_gate_enforces_stage_draft_final_sequence_and_allows_correction(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        structuring_messages = prd_messages(stage_count=1, references=True)
+        structuring = request_in_state(
+            structuring_messages,
+            "workbench_generation_stage_update",
+            "structuring-current",
+            {"stage": "structuring-prd"},
+        )
+        sentinel = object()
+        self.assertIs(
+            middleware.wrap_tool_call(structuring, lambda _request: sentinel),
+            sentinel,
+        )
+
+        without_draft = request_in_state(
+            prd_messages(stage_count=4, references=True),
+            "workbench_runtime_result_submit",
+            "final-before-draft",
+            {},
+        )
+        blocked_final = middleware.wrap_tool_call(without_draft, lambda _request: sentinel)
+        self.assertIn("WORKBENCH_PRD_DRAFT_REQUIRED", blocked_final.content)
+
+        draft_request = request_in_state(
+            prd_messages(stage_count=4, references=True),
+            "workbench_artifact_draft_publish",
+            "draft-current",
+            {},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(draft_request, lambda _request: sentinel),
+            sentinel,
+        )
+
+        complete_messages = prd_messages(stage_count=4, references=True, draft=True)
+        append_tool_batch(
+            complete_messages,
+            [call("workbench_runtime_result_submit", "early-final", {})],
+            [tool_message(
+                "workbench_runtime_result_submit",
+                "early-final",
+                "Error: WORKBENCH_PRD_DRAFT_REQUIRED",
+                status="error",
+            )],
+        )
+        corrected_final = request_in_state(
+            complete_messages,
+            "workbench_runtime_result_submit",
+            "corrected-final",
+            {},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(corrected_final, lambda _request: sentinel),
+            sentinel,
+        )
+
+        duplicate_draft = request_in_state(
+            prd_messages(stage_count=4, references=True, draft=True),
+            "workbench_artifact_draft_publish",
+            "duplicate-draft",
+            {},
+        )
+        duplicate = middleware.wrap_tool_call(duplicate_draft, lambda _request: sentinel)
+        self.assertIn("WORKBENCH_PRD_DRAFT_ALREADY_PUBLISHED", duplicate.content)
+
+        duplicate_final_messages = prd_messages(stage_count=4, references=True, draft=True)
+        final_calls = [
+            call("workbench_runtime_result_submit", "parallel-final-first", {}),
+            call("workbench_runtime_result_submit", "parallel-final-second", {}),
+        ]
+        duplicate_final_messages.append({
+            "type": "ai",
+            "content": "",
+            "tool_calls": final_calls,
+        })
+        duplicate_final_state = {"messages": duplicate_final_messages}
+        first_final = FakeToolRequest(
+            "workbench_runtime_result_submit",
+            "parallel-final-first",
+            {},
+            duplicate_final_state,
+        )
+        second_final = FakeToolRequest(
+            "workbench_runtime_result_submit",
+            "parallel-final-second",
+            {},
+            duplicate_final_state,
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(first_final, lambda _request: sentinel),
+            sentinel,
+        )
+        blocked_duplicate_final = middleware.wrap_tool_call(
+            second_final,
+            lambda _request: sentinel,
+        )
+        self.assertIn(
+            "WORKBENCH_PRD_PUBLICATION_BATCH_INVALID",
+            blocked_duplicate_final.content,
+        )
+
+    def test_prd_gate_ignores_failed_attempts_but_not_previous_turn_evidence(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        messages = prd_messages(stage_count=1, references=False)
+        structure_path = PRD_REFERENCE_FILES[0][0]
+        append_tool_batch(
+            messages,
+            [call("read_file", "failed-structure", {"path": structure_path})],
+            [tool_message(
+                "read_file",
+                "failed-structure",
+                "Error: transient read failure",
+                status="error",
+            )],
+        )
+        append_references(messages)
+        structuring = request_in_state(
+            messages,
+            "workbench_generation_stage_update",
+            "structuring-after-retry",
+            {"stage": "structuring-prd"},
+        )
+        sentinel = object()
+        self.assertIs(
+            middleware.wrap_tool_call(structuring, lambda _request: sentinel),
+            sentinel,
+        )
+
+        partial_batch = prd_messages(stage_count=1, references=False)
+        append_references(partial_batch, status_by_index={0: "error"})
+        retry_id = "retry-missing-structure"
+        retry = request_in_state(
+            partial_batch,
+            "read_file",
+            retry_id,
+            {"path": structure_path},
+        )
+        recovered = middleware.wrap_tool_call(
+            retry,
+            lambda _request: middleware_module.ToolMessage(
+                content=REFERENCE_CONTENT[structure_path],
+                tool_call_id=retry_id,
+                name="read_file",
+                status="success",
+            ),
+        )
+        self.assertEqual(recovered.status, "success")
+        partial_batch.append(tool_message(
+            "read_file",
+            retry_id,
+            REFERENCE_CONTENT[structure_path],
+        ))
+
+        recovered_structuring = request_in_state(
+            list(partial_batch),
+            "workbench_generation_stage_update",
+            "structuring-after-partial-batch-retry",
+            {"stage": "structuring-prd"},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(recovered_structuring, lambda _request: sentinel),
+            sentinel,
+        )
+        duplicate_after_recovery = request_in_state(
+            list(partial_batch),
+            "read_file",
+            "duplicate-quality-after-recovery",
+            {"path": PRD_REFERENCE_FILES[1][0]},
+        )
+        blocked_duplicate = middleware.wrap_tool_call(
+            duplicate_after_recovery,
+            lambda _request: sentinel,
+        )
+        self.assertIn("WORKBENCH_PRD_REFERENCE_ORDER_INVALID", blocked_duplicate.content)
+
+        previous_turn = prd_messages(stage_count=4, references=True, draft=True)
+        previous_turn.append({"type": "human", "content": "new PRD turn"})
+        current_final = request_in_state(
+            previous_turn,
+            "workbench_runtime_result_submit",
+            "new-turn-final",
+            {},
+        )
+        blocked = middleware.wrap_tool_call(current_final, lambda _request: sentinel)
+        self.assertIn("WORKBENCH_PRD_COLLECTING_STAGE_REQUIRED", blocked.content)
+
+    def test_prd_gate_does_not_affect_prototype_non_prd_or_mixed_runs(self) -> None:
+        sentinel = object()
+        path = PRD_REFERENCE_FILES[0][0]
+        for requested_kinds in (["prototype"], ["document"], ["prd", "prototype"]):
+            with self.subTest(requested_kinds=requested_kinds):
+                middleware = WorkbenchToolScopeMiddleware(None, requested_kinds)
+                request = FakeToolRequest("read_file", args={"path": path})
+                self.assertIs(
+                    middleware.wrap_tool_call(request, lambda _request: sentinel),
+                    sentinel,
+                )
 
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -516,12 +1048,20 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
             return sentinel
 
         prd_middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
-        for name in ARTIFACT_PROGRESS_TOOL_NAMES:
-            with self.subTest(scope="prd", name=name):
-                self.assertIs(
-                    await prd_middleware.awrap_tool_call(FakeToolRequest(name), handler),
-                    sentinel,
-                )
+        collecting = FakeToolRequest(
+            "workbench_generation_stage_update",
+            args={"stage": "collecting-prd-context"},
+        )
+        self.assertIs(
+            await prd_middleware.awrap_tool_call(collecting, handler),
+            sentinel,
+        )
+        blocked_draft = await prd_middleware.awrap_tool_call(
+            FakeToolRequest("workbench_artifact_draft_publish"),
+            handler,
+        )
+        self.assertIn("WORKBENCH_PRD_COLLECTING_STAGE_REQUIRED", blocked_draft.content)
+        self.assertNotIn("workbench_artifact_draft_publish", called)
         for name in PROTOTYPE_ONLY_TOOL_NAMES:
             with self.subTest(scope="prd", name=name):
                 blocked = await prd_middleware.awrap_tool_call(FakeToolRequest(name), handler)
@@ -552,6 +1092,74 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(called)
         self.assertEqual(blocked.content, "Error: WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED")
+
+    async def test_async_prd_gate_blocks_early_final_and_allows_corrected_final(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        called = False
+
+        async def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        blocked = await middleware.awrap_tool_call(
+            FakeToolRequest("workbench_runtime_result_submit"),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertEqual(blocked.status, "error")
+        self.assertIn("WORKBENCH_PRD_COLLECTING_STAGE_REQUIRED", blocked.content)
+
+        complete = request_in_state(
+            prd_messages(stage_count=4, references=True, draft=True),
+            "workbench_runtime_result_submit",
+            "async-final",
+            {},
+        )
+        observed = await middleware.awrap_tool_call(complete, handler)
+        self.assertTrue(called)
+        self.assertIsNotNone(observed)
+
+    async def test_async_prd_gate_validates_ordered_reference_handler_output(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        path = PRD_REFERENCE_FILES[0][0]
+        request = request_in_state(
+            prd_messages(stage_count=1, references=False),
+            "read_file",
+            "async-reference",
+            {"path": path},
+        )
+
+        async def valid_handler(_request):
+            return middleware_module.ToolMessage(
+                content=REFERENCE_CONTENT[path],
+                tool_call_id="async-reference",
+                name="read_file",
+                status="success",
+            )
+
+        observed = await middleware.awrap_tool_call(request, valid_handler)
+        self.assertEqual(observed.status, "success")
+        self.assertEqual(observed.content, REFERENCE_CONTENT[path])
+
+        mismatch_request = request_in_state(
+            prd_messages(stage_count=1, references=False),
+            "read_file",
+            "async-reference-mismatch",
+            {"path": path},
+        )
+
+        async def mismatch_handler(_request):
+            return middleware_module.ToolMessage(
+                content="wrong file",
+                tool_call_id="async-reference-mismatch",
+                name="read_file",
+                status="success",
+            )
+
+        mismatch = await middleware.awrap_tool_call(mismatch_request, mismatch_handler)
+        self.assertEqual(mismatch.status, "error")
+        self.assertIn("WORKBENCH_PRD_REFERENCE_CONTENT_MISMATCH", mismatch.content)
 
 
 if __name__ == "__main__":

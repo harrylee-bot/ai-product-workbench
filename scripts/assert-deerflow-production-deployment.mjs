@@ -252,6 +252,49 @@ assert(
     && !toolScopeMiddlewareSource.includes("runtime.config"),
   "Workbench tool-scope middleware must read only graph-factory RunnableConfig policy channels",
 );
+const prdReferencePins = [
+  [
+    "/mnt/skills/public/workbench/references/requirement-doc-template/structure.md",
+    "b82b551cf748db5e55cd703a4f953b344d5535b6d80ff9f032b1a0d983a24976",
+  ],
+  [
+    "/mnt/skills/public/workbench/references/requirement-doc-template/quality-standards.md",
+    "ef2813d4d0b791f2783ab50f379712960f2c40e1f967b13cfea92d318f289315",
+  ],
+  [
+    "/mnt/skills/public/workbench/references/prd-runtime-result.example.json",
+    "de8e0c1a7824eb3d42369ca498eca53c6e5c4df1f71bf30ecf356d8d6ac9f2ba",
+  ],
+];
+assert(
+  toolScopeMiddlewareSource.includes('self._prd_gate_enabled = normalized_kinds == ["prd"]')
+    && prdReferencePins.every(([path, digest]) => (
+      toolScopeMiddlewareSource.includes(`"${path}"`)
+        && toolScopeMiddlewareSource.includes(`"${digest}"`)
+    ))
+    && toolScopeMiddlewareSource.includes('hashlib.sha256(content.encode("utf-8")).hexdigest()')
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_REFERENCE_CONTENT_MISMATCH"),
+  "Workbench PRD gate must be PRD-only and bind exact Runtime reference paths and SHA-256 pins",
+);
+const prdErrorToolMessage = /def _error_tool_message\([\s\S]*?\n\s*\)\n\n\nclass WorkbenchToolScopeMiddleware/u
+  .exec(toolScopeMiddlewareSource)?.[0];
+assert(
+  prdErrorToolMessage?.includes("ToolMessage(")
+    && prdErrorToolMessage.includes("tool_call_id=(call_id")
+    && prdErrorToolMessage.includes("name=(name")
+    && prdErrorToolMessage.includes('status="error"'),
+  "Workbench PRD correction errors must return a direct ToolMessage on the original call identity",
+);
+assert(
+  toolScopeMiddlewareSource.includes(
+    "if name in {ARTIFACT_DRAFT_TOOL_NAME, RUNTIME_RESULT_TOOL_NAME}:",
+  )
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_PUBLICATION_BATCH_INVALID")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_DRAFT_REQUIRED")
+    && toolScopeMiddlewareSource.includes("_successful_prd_drafts(request.state)")
+    && toolScopeMiddlewareSource.includes("_successful_runtime_results(request.state)"),
+  "Workbench PRD gate must enforce one draft, one final result, and publication batch protection",
+);
 const middlewareToolTuple = /CANVAS_TOOL_NAMES = \(\n([\s\S]*?)\n\)/u.exec(toolScopeMiddlewareSource);
 assert(middlewareToolTuple, "Workbench tool-scope middleware Canvas tuple is missing");
 assertDeepEqual(
@@ -331,8 +374,20 @@ assert(
     && patchContractTestSource.includes("test_missing_or_malformed_policy_hides_all_eight_canvas_tools")
     && patchContractTestSource.includes("test_knowledge_execution_is_blocked_without_calling_the_handler")
     && patchContractTestSource.includes("test_async_knowledge_tool_execution_is_fail_closed")
-    && patchContractTestSource.includes("test_async_non_canvas_tool_is_not_affected_by_malformed_policy"),
-  "DeerFlow patch contract must cover async PRD/Prototype visibility, fail-closed, and non-Canvas behavior",
+    && patchContractTestSource.includes("test_async_non_canvas_tool_is_not_affected_by_malformed_policy")
+    && patchContractTestSource.includes(
+      "test_prd_gate_allows_three_ordered_reference_reads_in_one_batch",
+    )
+    && patchContractTestSource.includes(
+      "test_prd_gate_enforces_stage_draft_final_sequence_and_allows_correction",
+    )
+    && patchContractTestSource.includes(
+      "test_async_prd_gate_blocks_early_final_and_allows_corrected_final",
+    )
+    && patchContractTestSource.includes(
+      "test_prd_reference_pins_match_every_shipped_runtime_file",
+    ),
+  "DeerFlow patch contract must cover async scope enforcement and the self-correcting PRD workflow gate",
 );
 assert(
   patchRequestContextTestSource.includes("test_only_an_authenticated_internal_caller_can_deliver_workbench_channels")

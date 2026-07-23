@@ -148,9 +148,16 @@ Never call these stages on a timer, repeat them to imply progress, or use a
 Prototype stage for a PRD. The visible status must describe the real current
 work; draft publication and final submission remain the only completion facts.
 
-Whenever `requestedArtifactKinds` contains `prd`, first read both
-`references/requirement-doc-template/structure.md` and
-`references/requirement-doc-template/quality-standards.md`, regardless of the
+Whenever `requestedArtifactKinds` contains `prd`, immediately after the
+successful `collecting-prd-context` update and before `structuring-prd`, use
+`read_file` to read each of these complete files exactly once:
+
+- `/mnt/skills/public/workbench/references/requirement-doc-template/structure.md`
+- `/mnt/skills/public/workbench/references/requirement-doc-template/quality-standards.md`
+- `/mnt/skills/public/workbench/references/prd-runtime-result.example.json`
+
+Do not use ranged reads, relative paths, prompt quotations, summaries, or
+cached memory as substitutes. This requirement applies regardless of the
 natural-language prompt. Treat those checked-in references and the Runtime
 validator as authoritative. Retrieved Knowledge may supply product facts, but
 it may not weaken the fixed document standard.
@@ -204,7 +211,7 @@ Writing requirements:
 - `不涉及` is valid only when no affirmative fact for that safety topic exists anywhere else in the PRD. Use `是` when the topic applies and the stated requirement satisfies it; use `否` only when the topic applies and the PRD also contains a concrete remediation for that same topic.
 - Never use `待确认`, `以实际为准`, `以实际上线地址为准`, template reminders, placeholder links, or copied sample business content. Use a concrete conservative assumption when the business meaning is safe, otherwise request input.
 - Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
-- Read `references/prd-runtime-result.example.json` exactly once before authoring. Copy the complete envelope, replace every sample ID and all sample business content, and preserve every required field and bidirectional reference. Do not derive a shorthand JSON shape from this prose.
+- Use the required `/mnt/skills/public/workbench/references/prd-runtime-result.example.json` read before authoring. Copy the complete envelope, replace every sample ID and all sample business content, and preserve every required field and bidirectional reference. Do not derive a shorthand JSON shape from this prose.
 - When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` with that complete candidate so the 500 x 500 document appears on the Canvas. Then submit an identical final Artifact through `workbench_runtime_result_submit`. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
 
 ## Runtime Inputs
