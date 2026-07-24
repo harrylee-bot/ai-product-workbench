@@ -1023,10 +1023,25 @@ textarea:focus-visible {
   opacity: 0.62;
 }
 
+.workbench-stage-phase-wash[data-generation-stage="collecting-prd-context"]::before {
+  animation-duration: 3.8s;
+  opacity: 0.62;
+}
+
 .workbench-stage-phase-wash[data-generation-stage="design-system"]::before,
 .workbench-stage-phase-wash[data-generation-stage="mapping-components"]::before {
   animation-duration: 3.2s;
   opacity: 0.70;
+}
+
+.workbench-stage-phase-wash[data-generation-stage="structuring-prd"]::before {
+  animation-duration: 3.2s;
+  opacity: 0.70;
+}
+
+.workbench-stage-phase-wash[data-generation-stage="drafting-prd"]::before {
+  animation-duration: 2.5s;
+  opacity: 0.82;
 }
 
 .workbench-stage-phase-wash[data-generation-stage="generating-ui"]::before,
@@ -1036,6 +1051,11 @@ textarea:focus-visible {
 }
 
 .workbench-stage-phase-wash[data-generation-stage="summarizing"]::before {
+  animation-duration: 4.8s;
+  opacity: 0.48;
+}
+
+.workbench-stage-phase-wash[data-generation-stage="validating-prd"]::before {
   animation-duration: 4.8s;
   opacity: 0.48;
 }

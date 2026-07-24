@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { workbenchProjectCapabilities } from "@/lib/workbench/features/projects";
 
 import {
+  ProjectStageMotionFX,
   ProjectSuggestionPills,
   ProjectTopBar,
 } from "./workbench-project-chrome";
@@ -13,6 +14,120 @@ import { RenameProjectDialog } from "./workbench-rename-dialog";
 afterEach(cleanup);
 
 describe("workbench project chrome", () => {
+  it.each([
+    "collecting-prd-context",
+    "structuring-prd",
+    "drafting-prd",
+    "validating-prd",
+  ] as const)("keeps the PRD canvas motion mounted at %s", (generationStage) => {
+    const { container } = render(
+      <ProjectStageMotionFX
+        generationStage={generationStage}
+        isOverview={false}
+        isPrdRun
+        phase="generating"
+        projectMode="document"
+      />,
+    );
+
+    const motion = container.querySelector('[data-canvas-generation-motion="prd"]');
+    expect(motion).not.toBeNull();
+    expect(motion?.getAttribute("data-generation-stage")).toBe(generationStage);
+    expect(motion?.classList.contains("workbench-stage-phase-wash--prd")).toBe(true);
+  });
+
+  it("shows a static-capable PRD wash on reload before the durable stage arrives", () => {
+    const rendered = render(
+      <ProjectStageMotionFX
+        generationStage={null}
+        isOverview={false}
+        isPrdRun
+        phase="generating"
+        projectMode="document"
+      />,
+    );
+
+    const initialMotion = rendered.container.querySelector('[data-canvas-generation-motion="prd"]');
+    expect(initialMotion).not.toBeNull();
+    expect(initialMotion?.hasAttribute("data-generation-stage")).toBe(false);
+
+    rendered.rerender(
+      <ProjectStageMotionFX
+        generationStage="drafting-prd"
+        isOverview={false}
+        isPrdRun
+        phase="generating"
+        projectMode="document"
+      />,
+    );
+
+    const attachedMotion = rendered.container.querySelector('[data-canvas-generation-motion="prd"]');
+    expect(attachedMotion).toBe(initialMotion);
+    expect(attachedMotion?.getAttribute("data-generation-stage")).toBe("drafting-prd");
+  });
+
+  it("mounts PRD canvas motion when an active Run attaches after the document view", () => {
+    const rendered = render(
+      <ProjectStageMotionFX
+        generationStage={null}
+        isOverview={false}
+        isPrdRun={false}
+        phase="generating"
+        projectMode="document"
+      />,
+    );
+    expect(rendered.container.querySelector("[data-canvas-generation-motion]")).toBeNull();
+
+    rendered.rerender(
+      <ProjectStageMotionFX
+        generationStage="validating-prd"
+        isOverview={false}
+        isPrdRun
+        phase="refining"
+        projectMode="document"
+      />,
+    );
+
+    expect(rendered.container.querySelector('[data-canvas-generation-motion="prd"]'))
+      .not.toBeNull();
+  });
+
+  it("does not leak PRD canvas motion into prototype or terminal document states", () => {
+    const rendered = render(
+      <ProjectStageMotionFX
+        generationStage="drafting-prd"
+        isOverview={false}
+        isPrdRun={false}
+        phase="generating"
+        projectMode="document"
+      />,
+    );
+    expect(rendered.container.querySelector("[data-canvas-generation-motion]")).toBeNull();
+
+    rendered.rerender(
+      <ProjectStageMotionFX
+        generationStage="validating-prd"
+        isOverview={false}
+        isPrdRun
+        phase="complete"
+        projectMode="document"
+      />,
+    );
+    expect(rendered.container.querySelector("[data-canvas-generation-motion]")).toBeNull();
+
+    rendered.rerender(
+      <ProjectStageMotionFX
+        generationStage="generating-ui"
+        isOverview={false}
+        isPrdRun={false}
+        phase="generating"
+        projectMode="generated"
+      />,
+    );
+    expect(rendered.container.querySelector('[data-canvas-generation-motion="prototype"]'))
+      .not.toBeNull();
+  });
+
   it("uses the 产品工作台 brand and preserves viewer command permissions", () => {
     const onPreview = vi.fn();
     render(

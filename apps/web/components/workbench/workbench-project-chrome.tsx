@@ -72,27 +72,35 @@ export function ProjectChromeVignette({ isOverview }: { isOverview: boolean }) {
 
 export function ProjectStageMotionFX({
   generationStage,
+  isPrdRun,
   isOverview,
   phase,
   projectMode,
 }: {
   generationStage: RunGenerationStage | null;
+  isPrdRun: boolean;
   isOverview: boolean;
   phase: Phase;
   projectMode: ProjectMode;
 }) {
-  const showGenerationWash = projectMode === "generated" && (phase === "generating" || phase === "refining") && !isOverview;
+  const isActivePhase = phase === "generating" || phase === "refining";
+  const showPrdGenerationWash = isPrdRun && projectMode === "document" && isActivePhase;
+  const showPrototypeGenerationWash = projectMode === "generated" && isActivePhase && !isOverview;
+  const showGenerationWash = showPrdGenerationWash || showPrototypeGenerationWash;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[6] overflow-hidden">
       <AnimatePresence>
-          {showGenerationWash && (
+        {showGenerationWash && (
           <motion.div
-            animate={{ opacity: phase === "refining" ? 0.62 : 0.48 }}
+            animate={{ opacity: showPrdGenerationWash ? 0.64 : phase === "refining" ? 0.62 : 0.48 }}
+            aria-hidden="true"
             className={cn(
               "workbench-stage-phase-wash absolute inset-0",
+              showPrdGenerationWash && "workbench-stage-phase-wash--prd",
               phase === "refining" && "workbench-stage-phase-wash--refining",
             )}
+            data-canvas-generation-motion={showPrdGenerationWash ? "prd" : "prototype"}
             data-generation-stage={generationStage ?? undefined}
             exit={{ opacity: 0 }}
             initial={{ opacity: 0 }}

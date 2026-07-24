@@ -37,6 +37,10 @@ describe("Workbench motion contract", () => {
     expect(css).toMatch(/--workbench-selection:\s*rgb\(113 104 246\)/u);
     expect(css).toMatch(/data-generation-stage="generating-ui"/u);
     expect(css).toMatch(/data-generation-stage="screen-streaming"/u);
+    expect(css).toMatch(/data-generation-stage="collecting-prd-context"[^}]*animation-duration:\s*3\.8s/u);
+    expect(css).toMatch(/data-generation-stage="structuring-prd"[^}]*animation-duration:\s*3\.2s/u);
+    expect(css).toMatch(/data-generation-stage="drafting-prd"[^}]*animation-duration:\s*2\.5s/u);
+    expect(css).toMatch(/data-generation-stage="validating-prd"[^}]*animation-duration:\s*4\.8s/u);
   });
 
   it("applies the user reduced-motion preference to every application route", async () => {

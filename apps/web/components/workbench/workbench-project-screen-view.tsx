@@ -287,6 +287,7 @@ export function ProjectScreenView({
     >
       <ProjectStageMotionFX
         generationStage={runPanels.generationStage}
+        isPrdRun={runPanels.isPrdRun}
         isOverview={root.isGeneratedOverview}
         phase={root.phase}
         projectMode={root.projectMode}
