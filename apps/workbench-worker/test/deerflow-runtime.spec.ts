@@ -646,6 +646,93 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores comment-only SSE heartbeats with an SDK-inherited cursor", async () => {
+    const finalState = {
+      messages: [
+        { type: "human", content: "current turn" },
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [],
+        }, "heartbeat-result"),
+        { type: "ai", content: "done" },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        const payload = [
+          "id: provider-event-before-heartbeat",
+          "event: values",
+          `data: ${JSON.stringify(finalState)}`,
+          "",
+          ": heartbeat",
+          "",
+          "",
+        ].join("\n");
+        return new Response(payload, {
+          status: 200,
+          headers: {
+            "content-location": "/threads/deer_thread_1/runs/external_run_heartbeat",
+            "content-type": "text/event-stream",
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution(), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "done",
+    });
+
+    expect(runtimeObserver.isExternalEventProcessed).toHaveBeenCalledTimes(1);
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledTimes(1);
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalEventId: "provider-event-before-heartbeat",
+        event: "values",
+      }),
+      expect.any(Array),
+    );
+    expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses values-only streaming for an exact PRD request", async () => {
+    let streamMode: unknown;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        streamMode = (JSON.parse(String(init.body)) as Record<string, unknown>).stream_mode;
+        return successfulRuntimeResponse({
+          artifacts: runtimePrdResultFixture.artifacts,
+          message: runtimePrdResultFixture.message,
+          runId: "external_run_prd_values_only",
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: {
+        ...execution().request,
+        prompt: "生成一份支付改造需求说明书",
+        requestedArtifactKinds: ["prd"],
+      },
+    }), observer())).resolves.toMatchObject({ message: runtimePrdResultFixture.message });
+
+    expect(streamMode).toBe("values");
+  });
+
   it("keeps raw graph nodes in provider diagnostics without publishing them as activity labels", async () => {
     const prompt = "生成一份支付 改造\n需求说明书";
     const prdDraft = runtimePrdResultFixture.artifacts[0]!;

@@ -421,6 +421,7 @@ test("rejects Runtime metadata and unrequested order facts in the production smo
     "待付款订单触发通知。",
     "按待支付状态发送提醒。",
     "订单状态按支付、发货、收货分类。",
+    "订单状态分为完成、取消。",
   ]) {
     const document = orderNotificationPrdFixture();
     document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
@@ -508,11 +509,22 @@ test("allows explicit no-new-default and existing-setting constraints", () => {
     "通知开关不默认开启，沿用消费者现有设置。",
     "通知设置不新增默认开启规则。",
     "通知开关没有新的默认关闭状态，沿用现状。",
+    "本需求不新增默认开启或默认关闭状态。",
+    "不生成新的默认开启或默认关闭状态。",
+    "不存在系统新增默认开启或默认关闭状态。",
   ]) {
     const document = orderNotificationPrdFixture();
     document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
     assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document), phrase);
   }
+});
+
+test("does not treat cross-clause completion wording as an order-status enumeration", () => {
+  const document = orderNotificationPrdFixture();
+  document.sections.businessRequirements.coreRules.blocks[2].content[0].text += (
+    " 消费者可管理订单状态通知设置；系统可按既有分类和现有设置完成发送判断。"
+  );
+  assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
 });
 
 test("allows completion and cancellation wording outside order-category semantics", () => {

@@ -382,7 +382,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         lastEventId: submission.mode === "join"
           ? submission.lastExternalEventId ?? undefined
           : undefined,
-        streamMode: this.streamMode(),
+        streamMode: this.streamMode(execution.request.requestedArtifactKinds),
         streamIdleReconnect,
       });
     } else {
@@ -739,6 +739,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     try {
       for await (const part of stream) {
         onProviderActivity();
+        // The SDK retains the previous SSE ID across comment-only heartbeat
+        // frames and exposes them as an empty event. They carry no business
+        // data and must not advance the durable provider cursor.
+        if (!part.event && part.data === null) continue;
         // DeerFlow terminates its Redis-backed stream with an un-ID'd end/null
         // sentinel. The SDK carries the previous SSE ID onto that frame, so it
         // must not enter the durable business-event inbox or advance the cursor.
@@ -1085,7 +1089,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         }],
       },
       ...(execution.resume ? { command: { resume: runtimeResumeValue(execution.resume) } } : {}),
-      streamMode: this.streamMode(),
+      streamMode: this.streamMode(execution.request.requestedArtifactKinds),
       streamResumable: true,
       multitaskStrategy: "reject" as const,
       metadata: {
@@ -1133,12 +1137,18 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     };
   }
 
-  private streamMode(): StreamMode | StreamMode[] {
+  private streamMode(requestedArtifactKinds: readonly string[]): StreamMode | StreamMode[] {
     const modes = this.config.deerFlowStreamMode.map((mode) => {
       if (!STREAM_MODES.has(mode as StreamMode)) throw new Error(`DEERFLOW_STREAM_MODE_INVALID:${mode}`);
       return mode as StreamMode;
     });
     if (modes.length === 0) throw new Error("DEERFLOW_STREAM_MODE_MISSING");
+    // A PRD is delivered through durable stage/draft/result tools found in
+    // values snapshots. Persisting every token-sized messages event creates
+    // enough backpressure to outrun DeerFlow's retained stream buffer.
+    if (requestedArtifactKinds.length === 1 && requestedArtifactKinds[0] === "prd") {
+      return "values";
+    }
     return modes.length === 1 ? modes[0]! : modes;
   }
 
