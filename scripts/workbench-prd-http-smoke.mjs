@@ -58,7 +58,18 @@ const smokeRuntimeMetadataPattern = /(?:仅|只)(?:(?:需|需要)?(?:生成|产�
 const smokeInventedDefaultPattern = /(?:默认|初始|缺省|预设)(?:状态|值)?\s*(?:为|设为|设置为|设置成|设成|[:：=])?\s*[“”"'‘’]?(?:开启|关闭|打开|启用|停用)|(?:首次进入|首次打开|首次使用|首次访问|首次登录).{0,12}(?:自动|默认)(?:为用户)?(?:开启|关闭|打开|启用|停用)(?:通知|开关)?/gu;
 const smokeNegatedDefaultContextPattern = /(?:(?:不|未|无|非|没有|无需|并非|不得|禁止|取消)(?:(?:新增|生成|产生|创建|设置|设定|设|采用|使用|启用)(?:为)?)?(?:任何|新的|新)?|(?:未|不会|不应|不得)因(?:本需求|本次需求|本次改造)(?:新增|生成|产生|创建|设置|设定)(?:任何|新的|新)?|不(?:存在|出现)(?:(?:本需求|本次需求|本次改造)(?:所|而)?(?:新增|生成|产生|创建|设置|设定)的?)?|不存在(?:系统)?(?:新增|生成|产生|创建|设置|设定)?)[\s，,、]*$/u;
 const smokeNegatedDefaultSubjectContextPattern = /(?:不|未|无|非|没有|无需|并非|不得|禁止|取消)(?:新增|生成|产生|创建|设置|设定)(?:任何|新的|新)?(?:订单)?(?:通知开关|通知设置|开关设置)(?:的)?\s*$/u;
+const smokeProhibitedNewDefaultContextPattern = /不得出现(?:由)?(?:本需求|本次需求|本次改造)(?:所|而)?(?:新增|生成|产生|创建|设置|设定)的?[\s，,、]*$/u;
+const smokeDefaultStateTerm = String.raw`(?:默认|初始|缺省|预设)(?:状态|值)?\s*(?:为|设为|设置为|设置成|设成|[:：=])?\s*[“”"'‘’]?(?:开启|关闭|打开|启用|停用)[“”"'‘’]?(?:状态|值|规则|配置|设置|口径)?`;
+const smokeProhibitedNewDefaultTailPattern = new RegExp(
+  `^${smokeDefaultStateTerm}(?:\\s*(?:或|或者|和|及|与|、)\\s*${smokeDefaultStateTerm})*\\s*(?=[。！？；;\\n]|$)`,
+  "u",
+);
 const smokeNegatedDefaultPrefixConflictPattern = /(?:(?:不能|无法|难以|未能)(?:保证|确保|确认|确定)(?:是否)?|并非|不是|不代表|不意味着)\s*$/u;
+const smokeUncertaintyModifier = String.raw`(?:(?:完全|充分|正式|切实|有效|准确|清晰|最终|及时|可靠|真正|确实|绝对|进一步|始终|直接)(?:地)?\s*)*`;
+const smokeProhibitedNewDefaultPrefixConflictPattern = new RegExp(
+  `(?:不能|无法|难以|未能|尚未|不一定(?:能|能够)?)${smokeUncertaintyModifier}(?:保证|确保|确认|确定|承诺|判断|明确)(?:是否)?|并非|不是|不代表|不意味着`,
+  "u",
+);
 const smokeCoordinatedDefaultContextPattern = /(?:默认|初始|缺省|预设)(?:状态|值)?\s*(?:为|设为|设置为|设置成|设成|[:：=])?\s*[“”"'‘’]?(?:开启|关闭|打开|启用|停用)(?:状态|值)?\s*(?:或|或者|和|及|与|、)\s*$/u;
 const smokeDistinctOrderStatusValue = "(?:待付款|待支付|待发货|待收货|退款中|已退款)";
 const smokeCategoryClauseText = "[^。！？；;\\n]";
@@ -967,26 +978,49 @@ function inventedDefaultViolation(value) {
   for (const match of value.matchAll(smokeInventedDefaultPattern)) {
     const markerOffset = match[0].search(/(?:默认|初始|缺省|预设|自动)/u);
     const markerIndex = (match.index ?? 0) + markerOffset;
-    const precedingContext = value.slice(Math.max(0, markerIndex - 16), markerIndex);
-    if (negatedDefaultContextIsAllowed(precedingContext)) continue;
+    const precedingContext = precedingSemanticClause(value, markerIndex);
+    if (negatedDefaultContextIsAllowed(precedingContext, value.slice(markerIndex))) continue;
     const coordinated = precedingContext.match(smokeCoordinatedDefaultContextPattern);
     if (coordinated) {
       const firstMarkerOffset = coordinated[0].search(/(?:默认|初始|缺省|预设)/u);
       const firstMarkerIndex = markerIndex - coordinated[0].length + firstMarkerOffset;
-      const firstPrecedingContext = value.slice(Math.max(0, firstMarkerIndex - 16), firstMarkerIndex);
-      if (negatedDefaultContextIsAllowed(firstPrecedingContext)) continue;
+      const firstPrecedingContext = precedingSemanticClause(value, firstMarkerIndex);
+      if (negatedDefaultContextIsAllowed(firstPrecedingContext, value.slice(firstMarkerIndex))) continue;
     }
     return match[0];
   }
   return undefined;
 }
 
-function negatedDefaultContextIsAllowed(precedingContext) {
-  const negated = precedingContext.match(smokeNegatedDefaultContextPattern)
+function precedingSemanticClause(value, index) {
+  const start = Math.max(...["。", "！", "？", "；", ";", "\n"]
+    .map((separator) => value.lastIndexOf(separator, index - 1) + 1));
+  return value.slice(start, index);
+}
+
+function negatedDefaultContextIsAllowed(precedingContext, followingContext) {
+  let negated = precedingContext.match(smokeNegatedDefaultContextPattern)
     ?? precedingContext.match(smokeNegatedDefaultSubjectContextPattern);
+  let prohibitedNewDefault = false;
+  if (!negated) {
+    negated = precedingContext.match(smokeProhibitedNewDefaultContextPattern);
+    if (!negated || !smokeProhibitedNewDefaultTailPattern.test(followingContext)) return false;
+    prohibitedNewDefault = true;
+  }
   if (!negated) return false;
   const prefix = precedingContext.slice(0, negated.index ?? 0);
+  if (prohibitedNewDefault) {
+    return !smokeProhibitedNewDefaultPrefixConflictPattern.test(defaultConflictScope(prefix));
+  }
   return !smokeNegatedDefaultPrefixConflictPattern.test(prefix);
+}
+
+function defaultConflictScope(value) {
+  let start = 0;
+  for (const match of value.matchAll(/(?<![不非])但(?:是)?|不过|然而|可是|而是/gu)) {
+    start = (match.index ?? 0) + match[0].length;
+  }
+  return value.slice(start);
 }
 
 function unrelatedSmokeBusinessViolation(value) {
