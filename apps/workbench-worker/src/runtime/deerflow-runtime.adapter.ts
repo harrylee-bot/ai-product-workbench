@@ -1678,7 +1678,8 @@ function validatedRuntimeSubmissions(
   }> = [];
   for (const trusted of trustedToolMessages(messages, currentTurnStart, RUNTIME_RESULT_SUBMIT_TOOL)) {
     const message = trusted.message;
-    const parsed = validatedRuntimeResultArtifactSchema.safeParse(messageValue(message, "artifact"));
+    const rawArtifact = asRecord(messageValue(message, "artifact"));
+    const parsed = validatedRuntimeResultArtifactSchema.safeParse(rawArtifact);
     if (!parsed.success) throw new Error("RUNTIME_RESULT_SUBMISSION_INVALID", { cause: parsed.error });
     const envelope = {
       protocol: parsed.data.protocol,
@@ -1693,7 +1694,7 @@ function validatedRuntimeSubmissions(
       || parsed.data.toolCallId !== trusted.toolCallId
       || sha256CanonicalPayload(envelope) !== parsed.data.checksum
       || (parsed.data.ok
-        && sha256CanonicalPayload(parsed.data.result) !== parsed.data.resultChecksum)
+        && sha256CanonicalPayload(rawArtifact?.result) !== parsed.data.resultChecksum)
     ) {
       throw new Error("RUNTIME_RESULT_SUBMISSION_SCOPE_INVALID");
     }
@@ -1729,7 +1730,8 @@ function validatedArtifactDraftSubmissions(
     currentTurnStart,
     ARTIFACT_DRAFT_PUBLISH_TOOL,
   )) {
-    const parsed = artifactDraftArtifactSchema.safeParse(messageValue(trusted.message, "artifact"));
+    const rawArtifact = asRecord(messageValue(trusted.message, "artifact"));
+    const parsed = artifactDraftArtifactSchema.safeParse(rawArtifact);
     if (!parsed.success) throw new Error("RUNTIME_ARTIFACT_DRAFT_INVALID", { cause: parsed.error });
     const envelope = {
       protocol: parsed.data.protocol,
@@ -1745,7 +1747,7 @@ function validatedArtifactDraftSubmissions(
       || parsed.data.toolCallId !== trusted.toolCallId
       || sha256CanonicalPayload(envelope) !== parsed.data.checksum
       || (parsed.data.ok
-        && sha256CanonicalPayload(parsed.data.draft) !== parsed.data.draftChecksum)
+        && sha256CanonicalPayload(rawArtifact?.draft) !== parsed.data.draftChecksum)
     ) {
       throw new Error("RUNTIME_ARTIFACT_DRAFT_SCOPE_INVALID");
     }
@@ -1781,9 +1783,8 @@ function validatedPrototypePatchSubmissions(
     currentTurnStart,
     PROTOTYPE_PATCH_PUBLISH_TOOL,
   )) {
-    const parsed = prototypePatchArtifactSchema.safeParse(
-      messageValue(trusted.message, "artifact"),
-    );
+    const rawArtifact = asRecord(messageValue(trusted.message, "artifact"));
+    const parsed = prototypePatchArtifactSchema.safeParse(rawArtifact);
     if (!parsed.success) {
       throw new Error("RUNTIME_PROTOTYPE_PATCH_INVALID", { cause: parsed.error });
     }
@@ -1800,7 +1801,7 @@ function validatedPrototypePatchSubmissions(
       || parsed.data.toolCallId !== trusted.toolCallId
       || sha256CanonicalPayload(envelope) !== parsed.data.checksum
       || (parsed.data.ok
-        && sha256CanonicalPayload(parsed.data.patch) !== parsed.data.patchChecksum)
+        && sha256CanonicalPayload(rawArtifact?.patch) !== parsed.data.patchChecksum)
     ) {
       throw new Error("RUNTIME_PROTOTYPE_PATCH_SCOPE_INVALID");
     }

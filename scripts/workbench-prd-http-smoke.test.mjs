@@ -512,6 +512,7 @@ test("allows explicit no-new-default and existing-setting constraints", () => {
     "本需求不新增默认开启或默认关闭状态。",
     "不生成新的默认开启或默认关闭状态。",
     "不存在系统新增默认开启或默认关闭状态。",
+    "页面展示沿用现有设置，未因本需求生成新的默认开启或默认关闭状态。",
   ]) {
     const document = orderNotificationPrdFixture();
     document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;

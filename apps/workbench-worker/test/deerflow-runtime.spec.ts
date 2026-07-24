@@ -733,6 +733,47 @@ describe("DeerFlow runtime adapter", () => {
     expect(streamMode).toBe("values");
   });
 
+  it("verifies raw tool payload checksums before applying PRD schema defaults", async () => {
+    const draft = structuredClone(runtimePrdResultFixture.artifacts[0]!);
+    if (draft.kind !== "prd" || draft.content.protocol !== "workbench.prd.v2") {
+      throw new Error("PRD_TEST_FIXTURE_INVALID");
+    }
+    delete (draft.content.sections.businessRequirements as unknown as Record<string, unknown>)
+      .additionalSections;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return successfulRuntimeResponse({
+          artifacts: [draft],
+          message: "done",
+          runId: "external_run_prd_raw_checksum",
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: {
+        ...execution().request,
+        prompt: "生成一份支付改造需求说明书",
+        requestedArtifactKinds: ["prd"],
+      },
+    }), observer())).resolves.toMatchObject({
+      message: "done",
+      artifacts: [{
+        content: {
+          sections: {
+            businessRequirements: { additionalSections: [] },
+          },
+        },
+      }],
+    });
+  });
+
   it("keeps raw graph nodes in provider diagnostics without publishing them as activity labels", async () => {
     const prompt = "生成一份支付 改造\n需求说明书";
     const prdDraft = runtimePrdResultFixture.artifacts[0]!;
