@@ -923,6 +923,8 @@ describe("workbench.prd.v2", () => {
       "小程序已启用。",
       "APP 页面入口存在，小程序不涉及。",
       "APP 不涉及，小程序页面入口存在。",
+      "小程序不在本次投放范围内但订单通知业务运行于 APP 并提供 APP 页面入口。",
+      "订单通知业务运行于 APP 并提供 APP 页面入口但小程序不在本次投放范围内。",
     ].entries()) {
       const mixed = withoutSafetyEvidence();
       mixed.sections.businessRequirements.coreRules.blocks.push({
@@ -939,6 +941,79 @@ describe("workbench.prd.v2", () => {
             message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
           }),
         ]));
+      }
+    }
+  });
+
+  it("treats app surfaces outside the delivery scope as negative row 12 evidence", () => {
+    for (const surface of ["APP", "小程序"] as const) {
+      for (const exclusion of ["不在", "不属于"] as const) {
+        for (const action of ["投放", "发布", "运行", "启用", "加载"] as const) {
+          const scope = exclusion === "不在" ? "范围内" : "范围";
+          const fact = `WAP/H5 和${surface}${exclusion}本次${action}${scope}。`;
+          const excluded = withoutSafetyEvidence();
+          excluded.sections.businessRequirements.coreRules.blocks.push({
+            id: "no-functional-change",
+            type: "paragraph",
+            content: text("本需求不涉及功能逻辑变更。"),
+          });
+          excluded.sections.degradation.content.push(...text(fact));
+          excluded.sections.safetyBaseline.rows[11] = {
+            sequence: 12,
+            applicability: "不涉及",
+            remarks: null,
+          };
+          expect(runtimePrdDocumentV2Schema.safeParse(excluded).success, fact).toBe(true);
+
+          const misclassified = structuredClone(excluded);
+          misclassified.sections.safetyBaseline.rows[11] = {
+            sequence: 12,
+            applicability: "是",
+            remarks: "已检查 APP 与小程序双清单要求。",
+          };
+          const result = runtimePrdDocumentV2Schema.safeParse(misclassified);
+          expect(result.success, fact).toBe(false);
+          if (!result.success) {
+            expect(result.error.issues, fact).toEqual([
+              expect.objectContaining({
+                path: ["sections", "safetyBaseline", "rows", 11, "applicability"],
+                message: "a safety row marked 是 or 否 requires affirmative semantic evidence in the requirement body",
+              }),
+            ]);
+          }
+        }
+      }
+    }
+  });
+
+  it("keeps app surfaces outside the excluded scope as affirmative row 12 evidence", () => {
+    for (const fact of [
+      "APP 不在本次投放范围外。",
+      "小程序不属于本次发布范围之外。",
+      "APP 不在本次启用范围以外。",
+    ]) {
+      const document = withoutSafetyEvidence();
+      document.sections.businessRequirements.coreRules.blocks.push({
+        id: "no-functional-change",
+        type: "paragraph",
+        content: text("本需求不涉及功能逻辑变更。"),
+      });
+      document.sections.degradation.content.push(...text(fact));
+      document.sections.safetyBaseline.rows[11] = {
+        sequence: 12,
+        applicability: "不涉及",
+        remarks: null,
+      };
+
+      const result = runtimePrdDocumentV2Schema.safeParse(document);
+      expect(result.success, fact).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues, fact).toEqual([
+          expect.objectContaining({
+            path: ["sections", "safetyBaseline", "rows", 11, "applicability"],
+            message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
+          }),
+        ]);
       }
     }
   });
