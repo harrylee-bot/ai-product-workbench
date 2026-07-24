@@ -39,8 +39,11 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("regardless of the natural-language prompt");
     expect(guidance).toContain("Make conservative assumptions only when business meaning remains clear");
     expect(guidance).toContain("Do not invent assets, activity configuration, audit/publish, reporting, AI generation");
+    expect(guidance).toContain("PRD-only or no Prototype/code are Runtime metadata, not business scope");
+    expect(guidance).toContain("Do not invent default values, category members, enabled states");
     expect(guidance).toContain("role fallbacks 需求方, 业务评审人, 研发评审人, and 测试评审人");
     expect(guidance).toContain("only when the requirement body makes that dimension relevant");
+    expect(guidance).toContain("For 不涉及, set remarks to null");
     expect(guidance).toContain("不涉及 is invalid when the PRD body contains an affirmative fact");
     expect(guidance).toContain("IDs globally unique across the document and every nested IR entity");
     expect(guidance).toContain("requirement/criterion references bidirectional");

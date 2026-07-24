@@ -280,7 +280,7 @@ const prdReferencePins = [
   ],
   [
     "/mnt/skills/public/requirement-doc-template/references/structure.md",
-    "2b6bc148797504455de52dec18b18be0d66f13e2af6f0381a5886427d7e7c6eb",
+    "9d0a8f6efe520809cb4e6cf94dd4d4f55f6a21ef52338ccbb6667419a11352a5",
   ],
   [
     "/mnt/skills/public/requirement-doc-template/references/quality-standards.md",
@@ -560,7 +560,7 @@ for (const [relativePath, expectedDigest] of [
   ["agents/openai.yaml", "f93eee46ee2b76146c7d2b212f6c26da3c16b28d566eac0a3158c92f9425afc0"],
   ["assets/requirement-template.docx", "3070777f5c624be731bd264f72955ca4d15d5ac68d20867318ce8c0081789ebf"],
   ["references/quality-standards.md", "45e76fe4c178e8609cd1dd3c4a6c9642c280a219b0470295b3204e469a6b4168"],
-  ["references/structure.md", "2b6bc148797504455de52dec18b18be0d66f13e2af6f0381a5886427d7e7c6eb"],
+  ["references/structure.md", "9d0a8f6efe520809cb4e6cf94dd4d4f55f6a21ef52338ccbb6667419a11352a5"],
   ["scripts/docx_quality_check.py", "722aa28067ef0d34233191275440285dcee68b0764eb55d65f5bec8e16b8cf21"],
 ]) {
   const source = readFileSync(new URL(

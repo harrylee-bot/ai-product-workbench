@@ -65,7 +65,7 @@ PRD_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/requirement-doc-template/references/structure.md",
-        "2b6bc148797504455de52dec18b18be0d66f13e2af6f0381a5886427d7e7c6eb",
+        "9d0a8f6efe520809cb4e6cf94dd4d4f55f6a21ef52338ccbb6667419a11352a5",
     ),
     (
         "/mnt/skills/public/requirement-doc-template/references/quality-standards.md",

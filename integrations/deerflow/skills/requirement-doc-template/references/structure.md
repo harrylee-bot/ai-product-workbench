@@ -207,7 +207,43 @@ Keep the standard intro text:
 建议：该表格请业务人员和开发人员共同参与自查并填写。
 ```
 
-Use the 21-row safety baseline table from the template. Adjust `是否涉及` conservatively:
+Use the 21-row safety baseline table from the template. The authoring model
+cannot infer a safety row from its sequence number, so use the
+following canonical rows exactly as written; never reorder, paraphrase, merge,
+or shift a remark to another sequence.
+
+| 序号 | 需求安全基线内容 | 范围 |
+| --- | --- | --- |
+| 1 | 是否有新开发功能接口或现有功能接口逻辑变动 | 信息系统（包含前端、后端、管理后台） |
+| 2 | 业务功能是否面向公众用户 | 信息系统（包含前端、后端、管理后台） |
+| 3 | 是否涉及新开通公网暴露面 | 信息系统（包含前端、后端、管理后台） |
+| 4 | 管理后台涉及个人信息的内容要求脱敏展示，原则上不做非脱敏个人信息的导出功能。 | 管理后台 |
+| 5 | 管理后台所有操作页面要有水印功能，水印至少包括姓名、手机号、操作时间等信息 | 管理后台 |
+| 6 | 管理后台涉及查询的页面，不允许没有查询条件查询所有数据，必须输入查询条件后才可以查询数据； | 管理后台 |
+| 7 | 管理后台应接入4A统一管理，实现一点注销的功能，不允许有独立的账号体系；按4A要求实现日志留存，并实现风险预警功能； | 管理后台 |
+| 8 | 如未接入4A系统统一管理，应满足通行字的18项安全要求；要求细则找安全中心要； | 管理后台 |
+| 9 | 涉及后台配置内容的需要实现“敏感词过滤”能力； | 管理后台 |
+| 10 | 所有在前台展示的内容如为后台配置显示，均需要执行“先审后发”，1、具备“先审后发”能力，2、同步发布数据；3、内部发布上线和下线都需要经过“先审后发”。 | 前台展示 |
+| 11 | 是否涉及展示《隐私政策》：新业务场景《隐私政策》或已有《隐私政策》的变更需要进行法务及安全审核；《隐私政策》应为独立的文档，四次点击应能访问到独立的菜单；用户未同意《隐私政策》前，不得获取用户任何信息； | 前端页面 |
+| 12 | 如涉及加载到APP或小程序，APP、小程序业务应实现双清单功能，“用户信息收集清单”应动态准实时展现采集的个人信息具体内容；“第三方信息共享清单”应涵盖业务所有涉及到的第三方公司及内容； | 前端展示 底层接口获取数据 |
+| 13 | 前台页面涉及采集身份证号码、身份证照片、生物识别和银行卡信息时，应再次获取用户的主动授权同意。 | 前端页面 |
+| 14 | 是否涉及免密登录。免密登录的不能为无感知免密登录，需经过用户同意《数字生活隐私政策》后才可以进行免密登录。 | 前端页面 |
+| 15 | 是否涉及跳转第三方页面或应用。如涉及，应进行弹窗提示，文案应包含：即将跳转的业务名称、第三方公司名称、传的用户信息用户操作目的及第三方的《隐私政策》相关内容，可参考线上已有弹窗。 | 前端页面 |
+| 16 | 如涉及与第三方公司接口对接进行数据交互，应先查看对应的《数据使用审批单》无误后，才可以正式上线； | 前台、后台 |
+| 17 | API接口安全管理：如为新增API接口，需完成台账填报； | 信息系统（包含前端、后端、管理后台） |
+| 18 | 涉及用户敏感信息或跨系统的API是否采用加密传输，具备接口鉴权、访问控制等措施； | 信息系统（包含前端、后端、管理后台） |
+| 19 | 是否涉及用户信息或重要数据存储，是否进行加密存储； | 信息系统（包含前端、后端、管理后台） |
+| 20 | 是否涉及数据采集，是否建立数据采集规范，明确数采集方式、渠道、数据格式、采集流程等； | 信息系统（包含前端、后端、管理后台） |
+| 21 | 是否对采集到的数据进行完整性和一致性校验； | 信息系统（包含前端、后端、管理后台） |
+
+When producing typed PRD rows:
+
+- Return sequences 1 through 21 exactly once and in this order. The renderer supplies the canonical baseline content and scope from the sequence.
+- Set `applicability` only from explicit requirement facts outside this table.
+- For `不涉及`, set `remarks` to `null`; do not invent or paraphrase an explanation.
+- For `是` or `否`, make `remarks` describe evidence or remediation for that same canonical row only.
+
+Adjust `是否涉及` conservatively:
 - public/user-facing page: row 2 `是`
 - admin configured content shown on front-end and subject to review: row 10 `是`
 - new API: row 17 `是`

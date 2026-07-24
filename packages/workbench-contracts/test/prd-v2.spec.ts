@@ -504,6 +504,36 @@ describe("workbench.prd.v2", () => {
     expect(prdDocumentV2Schema.safeParse(remediated).success).toBe(true);
   });
 
+  it("requires null remarks for non-applicable safety rows on newly created PRDs", () => {
+    const document = cloneExample();
+    document.sections.safetyBaseline.rows[2]!.remarks = "本需求不涉及 App 或小程序。";
+    const candidate = {
+      protocol: "workbench.runtime.result.v1",
+      message: "需求说明书已生成。",
+      artifacts: [{
+        kind: "prd",
+        schemaVersion: 2,
+        title: document.title,
+        operation: { kind: "create" },
+        citations: document.citations,
+        content: document,
+      }],
+    };
+
+    expect(prdDocumentV2Schema.safeParse(document).success).toBe(true);
+    const result = runtimeResultSchema.safeParse(candidate);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["artifacts", 0, "content", "sections", "safetyBaseline", "rows", 2, "remarks"],
+          message: "A newly created PRD safety row marked 不涉及 must use null remarks",
+        }),
+      ]));
+    }
+  });
+
   it("rejects 不涉及 for all 21 safety rows when the body contains affirmative evidence", () => {
     expect(affirmativeSafetyFacts).toHaveLength(21);
 
@@ -541,6 +571,57 @@ describe("workbench.prd.v2", () => {
         });
       }
       expect(prdDocumentV2Schema.safeParse(document).success, `safety row ${index + 1}`).toBe(true);
+    }
+  });
+
+  it("distinguishes public consumer access from an internal consumer-rights admin console", () => {
+    for (const [index, fact] of [
+      "已登录消费者可以进入订单通知页面并配置提醒。",
+      "目标用户为已登录消费者。",
+      "页面面向已登录的消费者。",
+      "目标用户为已登录的消费者。",
+      "本功能支持已登录消费者在端内配置通知。",
+      "消费者使用通知设置功能。",
+    ].entries()) {
+      const consumerAccess = withoutSafetyEvidence();
+      consumerAccess.sections.businessRequirements.coreRules.blocks.push({
+        id: `consumer-access-evidence-${index + 1}`,
+        type: "paragraph",
+        content: text(fact),
+      });
+      const consumerResult = prdDocumentV2Schema.safeParse(consumerAccess);
+      expect(consumerResult.success, fact).toBe(false);
+      if (!consumerResult.success) {
+        expect(consumerResult.error.issues, fact).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            path: ["sections", "safetyBaseline", "rows", 1, "applicability"],
+            message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
+          }),
+        ]));
+      }
+    }
+
+    for (const [index, fact] of [
+      "消费者权益管理后台由内部客服人员操作。",
+      "消费者将由内部客服统一管理。",
+      "管理后台支持客服查看消费者订单。",
+      "页面面向内部客服展示消费者订单。",
+      "管理后台提供给内部客服查看消费者订单的能力。",
+      "本功能不支持消费者使用。",
+      "本功能不再支持消费者使用。",
+      "页面不再面向消费者。",
+      "页面尚未面向消费者。",
+      "消费者可以由客服查看其订单。",
+      "目标用户为内部客服，负责查看消费者订单。",
+      "服务对象包括内部客服和消费者信息管理员。",
+    ].entries()) {
+      const internalAdmin = withoutSafetyEvidence();
+      internalAdmin.sections.businessRequirements.coreRules.blocks.push({
+        id: `consumer-internal-admin-${index + 1}`,
+        type: "paragraph",
+        content: text(fact),
+      });
+      expect(prdDocumentV2Schema.safeParse(internalAdmin).success, fact).toBe(true);
     }
   });
 

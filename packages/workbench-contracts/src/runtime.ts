@@ -193,6 +193,17 @@ export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTy
       message: "New PRD Artifacts must use workbench.prd.v2; v1 is revision-only",
     });
   }
+  if (draft.operation.kind === "create" && draft.content.protocol === "workbench.prd.v2") {
+    for (const [index, row] of draft.content.sections.safetyBaseline.rows.entries()) {
+      if (row.applicability === "不涉及" && row.remarks !== null) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["content", "sections", "safetyBaseline", "rows", index, "remarks"],
+          message: "A newly created PRD safety row marked 不涉及 must use null remarks",
+        });
+      }
+    }
+  }
   refineRuntimePrdDraft(draft, context);
 });
 

@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-import { randomUUID as nodeRandomUUID } from "node:crypto";
+import { createHash, randomUUID as nodeRandomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as nodeDelay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   artifactVersionDetailSchema,
+  canonicalJson,
   prdChannelKinds,
   prdSafetyBaselineItems,
   prdTableOfContentsEntriesFor,
@@ -24,12 +25,41 @@ const smokeThemeRequirements = [
   { label: "发送结果记录", terms: ["发送结果记录", "发送记录", "通知记录", "结果记录"] },
   { label: "失败重试", terms: ["失败重试", "发送失败", "重试"] },
   { label: "权限反馈", terms: ["权限反馈", "无权限", "权限"] },
+  { label: "完整性和一致性校验", terms: ["完整性和一致性校验", "完整性、一致性校验"] },
+];
+const smokeExplicitConstraintRequirements = [
+  { label: "沿用消费者现有通知设置", pattern: /(?:沿用|保持)[^。！？；;\n]{0,12}(?:消费者)?(?:现有|既有|原有)[^。！？；;\n]{0,8}(?:通知)?设置/u },
+  { label: "不新增通知默认状态", pattern: /(?:不设|不设置|不新增|不改变).{0,12}(?:默认|初始)/u },
+  { label: "沿用订单中心既有分类", pattern: /(?:沿用|保持)[^。！？；;\n]{0,12}(?:订单中心)?(?:现有|既有|原有)[^。！？；;\n]{0,8}(?:状态)?分类/u },
+  { label: "不新增或枚举订单分类", pattern: /(?:不新增|不枚举|不列举).{0,12}(?:状态)?分类|(?:状态)?分类.{0,8}(?:不新增|不枚举|不列举)/u },
 ];
 const unrelatedSmokeBusinessPattern = /产品工作台|当前项目|提交区|运行状态区|任务(?:页面|处理|执行入口|状态|权限|记录|编号|能力|结果|闭环)|(?:发起|提交|创建|查询)任务/u;
 const smokeSectionThemePattern = /订单|通知/u;
 const smokeDiagramThemePattern = /订单|通知|发送/u;
 const smokeDegradationTopicPattern = /通知|发送/u;
 const smokeDegradationRecoveryPattern = /重试|再次发送|重新发送|稍后再试|恢复/u;
+const smokeRuntimeMetadataPattern = /(?:仅|只)(?:(?:需|需要)?(?:生成|产出|交付|提供|输出|包含)|(?:需|需要))\s*(?:一份)?(?:完整中文)?\s*(?:需求(?:说明书|文档)(?:\s*[（(]?PRD[）)]?)?|PRD)|(?:交付物|输出物|产出物|交付范围|本次产出)\s*(?:为|是|包括|包含|[:：]).{0,12}(?:完整中文)?\s*(?:需求(?:说明书|文档)(?:\s*[（(]?PRD[）)]?)?|PRD)|本需求.{0,8}(?:交付|输出|产出)\s*(?:一份)?(?:完整中文)?\s*(?:需求(?:说明书|文档)(?:\s*[（(]?PRD[）)]?)?|PRD)|(?:不(?:需要|交付|制作|生成|产出|提供|包含|输出)?|无需)(?:生成|产出|提供|包含|交付|制作|输出)?\s*.{0,12}(?:原型|图片|代码)|(?:原型|图片|代码)(?:[、,，/和及与]\s*(?:原型|图片|代码))*.{0,8}(?:不在|不属于).{0,12}(?:交付|输出|产出|范围)|PRD-only|Runtime metadata/iu;
+const smokeInventedDefaultPattern = /(?:默认|初始|缺省|预设)(?:状态|值)?\s*(?:为|设为|设置为|设置成|设成|[:：=])?\s*[“”"'‘’]?(?:开启|关闭|打开|启用|停用)|(?:首次进入|首次打开|首次使用|首次访问|首次登录).{0,12}(?:自动|默认)(?:为用户)?(?:开启|关闭|打开|启用|停用)(?:通知|开关)?/gu;
+const smokeNegatedDefaultContextPattern = /(?:不|未|无|非|没有|无需|并非|不得|禁止|取消)(?:(?:新增|设置|设|采用|使用|启用)(?:为)?)?(?:任何|新的|新)?[\s，,、]*$/u;
+const smokeDistinctOrderStatusValue = "(?:待付款|待支付|待发货|待收货|退款中|已退款)";
+const smokeInventedCategoryPattern = new RegExp(
+  `${smokeDistinctOrderStatusValue}|(?:订单状态|状态分类).{0,16}(?:为|按|包括|包含|分为|划分为|可选|选项|分类为|[:：]).{0,24}(?:支付|发货|收货|退款|完成|取消|已完成|已取消)`,
+  "u",
+);
+const smokeSafetyRemarkRules = new Map([
+  [1, {
+    positive: /(?:新增|修改|调整|变更|变动|改造).{0,24}(?:功能|逻辑|页面|能力)|(?:功能|逻辑|页面|能力).{0,24}(?:新增|修改|调整|变更|变动|改造)/u,
+    negative: /(?:不|未|无需)(?:发生|涉及|包含|进行)?(?:新增|修改|调整|变更|变动|改造)|(?:功能|逻辑|页面|能力).{0,12}(?:不|未)(?:发生|涉及|进行)?.{0,6}(?:新增|修改|调整|变更|变动|改造)/u,
+  }],
+  [2, {
+    positive: /(?:面向|开放给|提供给)\s*(?:已登录\s*的?\s*)?(?:消费者|公众用户|C端用户)|(?:目标用户|服务对象).{0,8}(?:消费者|公众用户|C端用户)|(?:消费者|公众用户|C端用户)(?:可|可以|能够|能|通过|从|在|访问|使用|查看|进入|配置)/iu,
+    negative: /(?:不再|尚未)\s*(?:面向|开放给|提供给).{0,16}(?:消费者|公众用户|C端用户)|(?:消费者|公众用户|C端用户).{0,16}(?:由|被).{0,12}(?:客服|内部|员工).{0,8}(?:管理|查看|操作)|(?:内部客服|员工).{0,12}(?:管理|查看|操作).{0,8}(?:消费者|公众用户|C端用户)/u,
+  }],
+  [21, {
+    positive: /(?:完整性.{0,12}一致性|一致性.{0,12}完整性).{0,12}(?:校验|检查|验证)|(?:校验|检查|验证).{0,12}(?:完整性.{0,12}一致性|一致性.{0,12}完整性)/u,
+    negative: /(?:不涉及|不进行|无需|不需要|未执行).{0,12}(?:完整性|一致性)|(?:完整性|一致性).{0,12}(?:不校验|无需校验|不涉及)/u,
+  }],
+]);
 const forbiddenPlaceholders = [
   "待确认",
   "以实际为准",
@@ -189,6 +219,7 @@ export async function executePrdHttpSmoke({
       throw smokeError("SUBMISSION_RUN_BINDING_INVALID", "Submitted intent did not bind to its returned Run");
     }
     assertOnlyPrdRequested(submitted.run);
+    const requestId = opaqueId(submitted?.run?.requestId, "submit.run.requestId");
     evidence.runId = runId;
     pass(evidence, now, "prd-run-submitted", { runId });
 
@@ -197,6 +228,7 @@ export async function executePrdHttpSmoke({
       deadline: Date.now() + config.timeoutMs,
       pollIntervalMs: config.pollIntervalMs,
       projectId,
+      requestId,
       runId,
       sleep,
       threadId,
@@ -208,6 +240,10 @@ export async function executePrdHttpSmoke({
     if (run.progress !== 1 || run.failure !== null) {
       throw smokeError("PRD_RUN_SUCCESS_INVALID", "Succeeded PRD Run did not report complete, failure-free state");
     }
+    if (!Number.isInteger(run.attempt) || run.attempt < 1) {
+      throw smokeError("PRD_RUN_ATTEMPT_INVALID", "Succeeded PRD Run did not report a positive execution attempt");
+    }
+    const runAttempt = run.attempt;
     pass(evidence, now, "prd-run-succeeded", { statuses });
 
     const artifactPage = await client.json(
@@ -247,6 +283,18 @@ export async function executePrdHttpSmoke({
     pass(evidence, now, "ready-prd-artifact-found", { artifactId, artifactVersionId });
 
     const runEvents = await replayRunEvents(client, runId);
+    const eventIdentityMismatch = runEvents.find((event) => (
+      event.projectId !== projectId
+      || event.threadId !== threadId
+      || event.runId !== runId
+      || event.requestId !== requestId
+    ));
+    if (eventIdentityMismatch) {
+      throw smokeError(
+        "PRD_RUN_EVENT_IDENTITY_INVALID",
+        "PRD Run event replay contains an event from a different project, Thread, Run, or request",
+      );
+    }
     const unexpectedGenerationStage = runEvents.find((event) => (
       event.type === "run.generation.stage.changed"
       && event.payload.stage !== "thinking"
@@ -266,6 +314,7 @@ export async function executePrdHttpSmoke({
     if (
       observedStages.length !== prdGenerationStages.length
       || observedStages.some((stage, index) => stage !== prdGenerationStages[index])
+      || generationStageEvents.some((event) => event.payload.attempt !== runAttempt)
     ) {
       throw smokeError(
         "PRD_GENERATION_STAGES_INVALID",
@@ -282,6 +331,7 @@ export async function executePrdHttpSmoke({
       && event.payload.kind === "prd"
       && event.payload.artifactId === artifactId
       && event.payload.artifactVersionId === artifactVersionId
+      && event.payload.attempt === runAttempt
     ));
     if (!draftEvent) {
       throw smokeError(
@@ -322,6 +372,21 @@ export async function executePrdHttpSmoke({
       || version.createdByRunId !== runId
     ) {
       throw smokeError("PRD_VERSION_IDENTITY_INVALID", "Ready PRD ArtifactVersion identity does not match the smoke Run");
+    }
+    if (draftEvent.payload.checksum !== version.checksum) {
+      throw smokeError(
+        "PRD_DRAFT_CHECKSUM_INVALID",
+        "PRD draft event checksum does not match the ready ArtifactVersion checksum",
+      );
+    }
+    const canonicalContentChecksum = createHash("sha256")
+      .update(canonicalJson(version.content))
+      .digest("hex");
+    if (version.checksum !== canonicalContentChecksum) {
+      throw smokeError(
+        "PRD_VERSION_CHECKSUM_INVALID",
+        "Ready PRD ArtifactVersion checksum does not match its canonical content",
+      );
     }
     const structure = assertPrdV2Structure(version.content);
     pass(evidence, now, "prd-v2-contract-verified", structure);
@@ -485,12 +550,17 @@ async function replayRunEvents(client, runId) {
   return events;
 }
 
-async function waitForRun({ client, deadline, pollIntervalMs, projectId, runId, sleep, threadId }) {
+async function waitForRun({ client, deadline, pollIntervalMs, projectId, requestId, runId, sleep, threadId }) {
   const statuses = [];
   while (Date.now() < deadline) {
     const run = await client.json(`/api/v1/runs/${encodeURIComponent(runId)}`);
-    if (run?.id !== runId || run?.projectId !== projectId || run?.threadId !== threadId) {
-      throw smokeError("RUN_IDENTITY_INVALID", "Polled Run does not belong to the smoke project and Thread");
+    if (
+      run?.id !== runId
+      || run?.projectId !== projectId
+      || run?.threadId !== threadId
+      || run?.requestId !== requestId
+    ) {
+      throw smokeError("RUN_IDENTITY_INVALID", "Polled Run does not belong to the smoke project, Thread, and request");
     }
     assertOnlyPrdRequested(run);
     if (!statuses.includes(run.status)) statuses.push(run.status);
@@ -600,6 +670,43 @@ export function assertPrdSmokeBusinessSemantics(document) {
     throw smokeError("PRD_SMOKE_TOPIC_INVALID", "PRD channels do not keep only the requested in-app channel enabled");
   }
 
+  const safetyRows = document.sections?.safetyBaseline?.rows;
+  if (!Array.isArray(safetyRows) || safetyRows.length !== prdSafetyBaselineItems.length) {
+    throw smokeError("PRD_SMOKE_SAFETY_INVALID", "PRD safety baseline is incomplete");
+  }
+  for (const row of safetyRows) {
+    const expectedApplicability = row.sequence === 1 || row.sequence === 2 || row.sequence === 21
+      ? "是"
+      : "不涉及";
+    if (row.applicability !== expectedApplicability) {
+      throw smokeError(
+        "PRD_SMOKE_SAFETY_INVALID",
+        `PRD safety row ${row.sequence} does not match the explicit order-notification facts`,
+      );
+    }
+    if (expectedApplicability === "不涉及" && row.remarks !== null) {
+      throw smokeError(
+        "PRD_SMOKE_SAFETY_INVALID",
+        `PRD safety row ${row.sequence} must not carry an unrelated remark`,
+      );
+    }
+    const expectedRemarkRule = smokeSafetyRemarkRules.get(row.sequence);
+    if (
+      expectedApplicability === "是"
+      && (
+        typeof row.remarks !== "string"
+        || row.remarks.trim() === ""
+        || !expectedRemarkRule?.positive.test(row.remarks)
+        || expectedRemarkRule.negative.test(row.remarks)
+      )
+    ) {
+      throw smokeError(
+        "PRD_SMOKE_SAFETY_INVALID",
+        `PRD safety row ${row.sequence} is missing evidence for its own canonical meaning`,
+      );
+    }
+  }
+
   const introduction = document.sections?.introduction;
   const businessRequirements = document.sections?.businessRequirements;
   const degradation = document.sections?.degradation;
@@ -608,11 +715,34 @@ export function assertPrdSmokeBusinessSemantics(document) {
     degradation,
     introduction,
   }).join("\n");
+  const sourceBoundaryViolation = tableDefaultValueViolation(document)
+    ?? tableCategoryValueViolation(document)
+    ?? semanticTextSegments(document)
+    .map((value) => (
+      value.match(smokeRuntimeMetadataPattern)?.[0]
+      ?? inventedDefaultViolation(value)
+      ?? value.match(smokeInventedCategoryPattern)?.[0]
+    ))
+    .find(Boolean);
+  if (sourceBoundaryViolation) {
+    throw smokeError(
+      "PRD_SMOKE_SOURCE_BOUNDARY_INVALID",
+      `PRD contains Runtime metadata or an unrequested business fact: ${sourceBoundaryViolation}`,
+    );
+  }
   for (const requirement of smokeThemeRequirements) {
     if (!requirement.terms.some((term) => visibleText.includes(term))) {
       throw smokeError(
         "PRD_SMOKE_TOPIC_INVALID",
         `PRD does not contain the requested ${requirement.label} requirement`,
+      );
+    }
+  }
+  for (const requirement of smokeExplicitConstraintRequirements) {
+    if (!requirement.pattern.test(visibleText)) {
+      throw smokeError(
+        "PRD_SMOKE_TOPIC_INVALID",
+        `PRD does not preserve the requested ${requirement.label} constraint`,
       );
     }
   }
@@ -663,7 +793,7 @@ export function assertPrdSmokeBusinessSemantics(document) {
   }
   return {
     theme: "order-status-notification",
-    themeRequirementCount: smokeThemeRequirements.length,
+    themeRequirementCount: smokeThemeRequirements.length + smokeExplicitConstraintRequirements.length,
     unrelatedBusinessMatches: 0,
   };
 }
@@ -677,6 +807,8 @@ function smokePrompt() {
     "这是隔离的生产验收 smoke，无需追问。",
     "请仅生成一份完整中文需求说明书，不生成原型、图片、代码或其他产物。",
     "主题：电商订单状态通知设置。目标用户是已登录消费者；支持端内通知开关、订单状态分类、发送结果记录、失败重试与权限反馈；本次不投放 WAP/H5 和小程序。",
+    "通知开关不设新的默认状态，沿用消费者现有设置；订单状态分类沿用订单中心既有分类，本需求不新增或枚举分类。",
+    "通知开关、订单状态分类映射和发送结果状态必须执行完整性和一致性校验。",
     "请基于这些明确前提完成可直接评审和验收的需求说明书。",
   ].join("\n");
 }
@@ -695,6 +827,125 @@ function stringValues(value) {
   if (Array.isArray(value)) return value.flatMap(stringValues);
   if (value && typeof value === "object") return Object.values(value).flatMap(stringValues);
   return [];
+}
+
+function semanticTextSegments(value) {
+  const segments = [];
+  const inlineTypes = new Set(["citation", "link", "reference", "text"]);
+  const visit = (current) => {
+    if (typeof current === "string") {
+      segments.push(current);
+      return;
+    }
+    if (Array.isArray(current)) {
+      if (
+        current.length > 0
+        && current.every((item) => (
+          item
+          && typeof item === "object"
+          && inlineTypes.has(item.type)
+        ))
+      ) {
+        segments.push(inlinePlainText(current));
+        return;
+      }
+      for (const item of current) visit(item);
+      return;
+    }
+    if (current && typeof current === "object") {
+      for (const item of Object.values(current)) visit(item);
+    }
+  };
+  visit(value);
+  return segments;
+}
+
+function tableDefaultValueViolation(value) {
+  const markerLabelPattern = /^(?:默认|初始|缺省|预设)(?:状态|值)?$/u;
+  const valuePattern = /^(?:[“”"'‘’\s])*(?:开启|关闭|打开|启用|停用|是|否|true|false)(?:[“”"'‘’\s。；;]*)$/iu;
+  const visit = (current) => {
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        const violation = visit(item);
+        if (violation) return violation;
+      }
+      return undefined;
+    }
+    if (!current || typeof current !== "object") return undefined;
+    if (current.type === "table" && Array.isArray(current.columns) && Array.isArray(current.rows)) {
+      const defaultColumnIds = new Set(current.columns
+        .filter((column) => markerLabelPattern.test(column?.label?.trim() ?? ""))
+        .map((column) => column.id));
+      for (const row of current.rows) {
+        const cells = Array.isArray(row?.cells) ? row.cells : [];
+        const cellTexts = cells.map((cell) => ({
+          columnId: cell?.columnId,
+          text: inlinePlainText(cell?.content).trim(),
+        }));
+        const columnValue = cellTexts.find((cell) => (
+          defaultColumnIds.has(cell.columnId)
+          && valuePattern.test(cell.text)
+        ));
+        if (columnValue) return `默认值: ${columnValue.text}`;
+        if (
+          cellTexts.some((cell) => markerLabelPattern.test(cell.text))
+          && cellTexts.some((cell) => valuePattern.test(cell.text))
+        ) {
+          return `默认值: ${cellTexts.find((cell) => valuePattern.test(cell.text))?.text}`;
+        }
+      }
+    }
+    for (const item of Object.values(current)) {
+      const violation = visit(item);
+      if (violation) return violation;
+    }
+    return undefined;
+  };
+  return visit(value);
+}
+
+function tableCategoryValueViolation(value) {
+  const columnPattern = /(?:订单状态|状态分类)/u;
+  const valuePattern = /^(?:待付款|待支付|待发货|待收货|已完成|已取消|退款中|已退款|支付|发货|收货|完成|取消)$/u;
+  const visit = (current) => {
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        const violation = visit(item);
+        if (violation) return violation;
+      }
+      return undefined;
+    }
+    if (!current || typeof current !== "object") return undefined;
+    if (current.type === "table" && Array.isArray(current.columns) && Array.isArray(current.rows)) {
+      const categoryColumnIds = new Set(current.columns
+        .filter((column) => columnPattern.test(column?.label ?? ""))
+        .map((column) => column.id));
+      for (const row of current.rows) {
+        const categoryValue = (Array.isArray(row?.cells) ? row.cells : []).find((cell) => (
+          categoryColumnIds.has(cell?.columnId)
+          && valuePattern.test(inlinePlainText(cell?.content).trim())
+        ));
+        if (categoryValue) return `订单状态分类: ${inlinePlainText(categoryValue.content).trim()}`;
+      }
+    }
+    for (const item of Object.values(current)) {
+      const violation = visit(item);
+      if (violation) return violation;
+    }
+    return undefined;
+  };
+  return visit(value);
+}
+
+function inventedDefaultViolation(value) {
+  for (const match of value.matchAll(smokeInventedDefaultPattern)) {
+    const markerOffset = match[0].search(/(?:默认|初始|缺省|预设|自动)/u);
+    const markerIndex = (match.index ?? 0) + markerOffset;
+    const precedingContext = value.slice(Math.max(0, markerIndex - 16), markerIndex);
+    if (smokeNegatedDefaultContextPattern.test(precedingContext)) continue;
+    return match[0];
+  }
+  return undefined;
 }
 
 function visibleTextSegments(value) {

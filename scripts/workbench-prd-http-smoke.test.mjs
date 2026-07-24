@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import http from "node:http";
 import test from "node:test";
+import { canonicalJson } from "@workbench/workbench-contracts";
 import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import {
   assertPrdSmokeBusinessSemantics,
@@ -70,6 +72,34 @@ test("uses an explicit existing session cookie without calling the sign-in route
   assert.equal(fake.state.authCalls, 0);
   assert.ok(fake.state.apiCookies.every((cookie) => cookie === existingCookie));
   assertNoSecretOrPrdBody(result, [existingCookie, email, password]);
+});
+
+test("fails the end-to-end HTTP smoke when the generated PRD violates source boundaries", async (t) => {
+  const invalidDocument = orderNotificationPrdFixture();
+  invalidDocument.assumptions.push({
+    id: "assumption-runtime-metadata-http",
+    statement: "无需产出原型。",
+    status: "open",
+    impact: "low",
+    owner: "需求方",
+    introducedInRevision: 1,
+    citationIds: [],
+  });
+  const fake = await startFakeWorkbench({ prdDocument: invalidDocument });
+  t.after(fake.close);
+
+  const result = await executePrdHttpSmoke({
+    env: smokeEnvironment(fake.origin, {
+      WORKBENCH_PRD_SMOKE_EMAIL: email,
+      WORKBENCH_PRD_SMOKE_PASSWORD: password,
+    }),
+    now: fixedNow,
+    randomUUID: () => smokeUuid,
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failure?.code, "PRD_SMOKE_SOURCE_BOUNDARY_INVALID");
 });
 
 test("fails closed before any HTTP write without the explicit write confirmation", async () => {
@@ -156,6 +186,82 @@ test("rejects a PRD Run that reports a Prototype generation stage", async (t) =>
   assertNoSecretOrPrdBody(result, [existingCookie]);
 });
 
+test("rejects PRD generation events that do not belong to the final Run attempt", async (t) => {
+  const fake = await startFakeWorkbench({ eventAttempt: 2 });
+  t.after(fake.close);
+
+  const result = await executePrdHttpSmoke({
+    env: smokeEnvironment(fake.origin, {
+      WORKBENCH_PRD_SMOKE_SESSION_COOKIE: existingCookie,
+    }),
+    now: fixedNow,
+    randomUUID: () => smokeUuid,
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failure.code, "PRD_GENERATION_STAGES_INVALID");
+  assertNoSecretOrPrdBody(result, [existingCookie]);
+});
+
+test("rejects PRD generation events from a different Runtime request", async (t) => {
+  const fake = await startFakeWorkbench({ eventRequestId: "request-other" });
+  t.after(fake.close);
+
+  const result = await executePrdHttpSmoke({
+    env: smokeEnvironment(fake.origin, {
+      WORKBENCH_PRD_SMOKE_SESSION_COOKIE: existingCookie,
+    }),
+    now: fixedNow,
+    randomUUID: () => smokeUuid,
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failure.code, "PRD_RUN_EVENT_IDENTITY_INVALID");
+  assertNoSecretOrPrdBody(result, [existingCookie]);
+});
+
+test("rejects a PRD draft event whose checksum differs from the ready version", async (t) => {
+  const fake = await startFakeWorkbench({ eventChecksum: "c".repeat(64) });
+  t.after(fake.close);
+
+  const result = await executePrdHttpSmoke({
+    env: smokeEnvironment(fake.origin, {
+      WORKBENCH_PRD_SMOKE_SESSION_COOKIE: existingCookie,
+    }),
+    now: fixedNow,
+    randomUUID: () => smokeUuid,
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failure.code, "PRD_DRAFT_CHECKSUM_INVALID");
+  assertNoSecretOrPrdBody(result, [existingCookie]);
+});
+
+test("rejects matching event and version checksums that do not hash the PRD content", async (t) => {
+  const forgedChecksum = "c".repeat(64);
+  const fake = await startFakeWorkbench({
+    eventChecksum: forgedChecksum,
+    versionChecksum: forgedChecksum,
+  });
+  t.after(fake.close);
+
+  const result = await executePrdHttpSmoke({
+    env: smokeEnvironment(fake.origin, {
+      WORKBENCH_PRD_SMOKE_SESSION_COOKIE: existingCookie,
+    }),
+    now: fixedNow,
+    randomUUID: () => smokeUuid,
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failure.code, "PRD_VERSION_CHECKSUM_INVALID");
+  assertNoSecretOrPrdBody(result, [existingCookie]);
+});
+
 test("rejects forbidden requirement-document placeholder wording", () => {
   const document = structuredClone(prdDocumentV2Example);
   document.sections.introduction.background.blocks[0].content[0].text = "待确认";
@@ -180,7 +286,7 @@ test("requires the production smoke PRD to match the order-notification topic", 
   const document = orderNotificationPrdFixture();
   assert.deepEqual(assertPrdSmokeBusinessSemantics(document), {
     theme: "order-status-notification",
-    themeRequirementCount: 7,
+    themeRequirementCount: 12,
     unrelatedBusinessMatches: 0,
   });
 
@@ -247,6 +353,246 @@ test("allows task wording that remains grounded in notification delivery", () =>
   const document = orderNotificationPrdFixture();
   document.sections.degradation.content[0].text += " 通知发送任务由队列调度，失败后生成重试任务。";
 
+  assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
+});
+
+test("rejects safety-row drift in the production smoke PRD", () => {
+  const wrongApplicability = orderNotificationPrdFixture();
+  wrongApplicability.sections.safetyBaseline.rows[1] = {
+    sequence: 2,
+    applicability: "不涉及",
+    remarks: null,
+  };
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(wrongApplicability),
+    (error) => error?.code === "PRD_SMOKE_SAFETY_INVALID",
+  );
+
+  const shiftedRemark = orderNotificationPrdFixture();
+  shiftedRemark.sections.safetyBaseline.rows[2].remarks = "本需求不投放小程序。";
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(shiftedRemark),
+    (error) => error?.code === "PRD_SMOKE_SAFETY_INVALID",
+  );
+
+  const swappedInvolvedRemarks = orderNotificationPrdFixture();
+  const rowOneRemark = swappedInvolvedRemarks.sections.safetyBaseline.rows[0].remarks;
+  swappedInvolvedRemarks.sections.safetyBaseline.rows[0].remarks =
+    swappedInvolvedRemarks.sections.safetyBaseline.rows[1].remarks;
+  swappedInvolvedRemarks.sections.safetyBaseline.rows[1].remarks = rowOneRemark;
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(swappedInvolvedRemarks),
+    (error) => error?.code === "PRD_SMOKE_SAFETY_INVALID",
+  );
+});
+
+test("rejects Runtime metadata and unrequested order facts in the production smoke PRD", () => {
+  for (const phrase of [
+    "本需求仅生成需求说明书，不生成原型。",
+    "本次仅交付需求文档（PRD）。",
+    "本次只输出 PRD。",
+    "交付物仅包含需求文档(PRD)。",
+    "本次只需要一份完整中文需求说明书。",
+    "本次仅提供 PRD。",
+    "本次交付物为完整需求说明书（PRD）。",
+    "交付范围：需求文档。",
+    "本次产出为 PRD。",
+    "输出物是需求说明书。",
+    "本需求交付一份需求文档。",
+    "本次无需原型。",
+    "本次不交付原型。",
+    "无需制作原型。",
+    "原型、代码不在本次交付范围内。",
+    "订单通知开关默认开启。",
+    "通知开关默认值为开启。",
+    "通知开关默认值：开启。",
+    "默认值为“开启”。",
+    "通知开关默认状态=开启。",
+    "通知开关默认设置成开启。",
+    "无需产出原型。",
+    "通知开关初始为开启。",
+    "开关初始值为关闭。",
+    "通知设置缺省为开启。",
+    "通知开关预设开启。",
+    "首次进入自动开启通知。",
+    "订单状态分类包括待付款、待发货、待收货。",
+    "订单状态分类包括待发货、待付款、待收货。",
+    "订单状态分类包括待付款/已完成。",
+    "待付款订单触发通知。",
+    "按待支付状态发送提醒。",
+    "订单状态按支付、发货、收货分类。",
+  ]) {
+    const document = orderNotificationPrdFixture();
+    document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
+    assert.throws(
+      () => assertPrdSmokeBusinessSemantics(document),
+      (error) => error?.code === "PRD_SMOKE_SOURCE_BOUNDARY_INVALID",
+      phrase,
+    );
+  }
+
+  const metadataOutsideBusinessSections = orderNotificationPrdFixture();
+  metadataOutsideBusinessSections.assumptions.push({
+    id: "assumption-runtime-metadata",
+    statement: "无需产出原型。",
+    status: "open",
+    impact: "low",
+    owner: "需求方",
+    introducedInRevision: 1,
+    citationIds: [],
+  });
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(metadataOutsideBusinessSections),
+    (error) => error?.code === "PRD_SMOKE_SOURCE_BOUNDARY_INVALID",
+  );
+
+  const splitInlineMetadata = orderNotificationPrdFixture();
+  splitInlineMetadata.sections.businessRequirements.coreRules.blocks.push({
+    id: "split-inline-runtime-metadata",
+    type: "paragraph",
+    content: [
+      { type: "text", text: "本次仅生成", marks: [] },
+      { type: "text", text: "需求文档", marks: ["strong"] },
+    ],
+  });
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(splitInlineMetadata),
+    (error) => error?.code === "PRD_SMOKE_SOURCE_BOUNDARY_INVALID",
+  );
+
+  const tableDefault = orderNotificationPrdFixture();
+  tableDefault.sections.businessRequirements.coreRules.blocks.push({
+    id: "invented-default-table",
+    type: "table",
+    columns: [
+      { id: "field", label: "字段" },
+      { id: "default-value", label: "默认值" },
+    ],
+    rows: [{
+      id: "notification-default-row",
+      cells: [
+        { columnId: "field", content: [{ type: "text", text: "通知开关", marks: [] }] },
+        { columnId: "default-value", content: [{ type: "text", text: "开启", marks: [] }] },
+      ],
+    }],
+  });
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(tableDefault),
+    (error) => error?.code === "PRD_SMOKE_SOURCE_BOUNDARY_INVALID",
+  );
+
+  const tableCategory = orderNotificationPrdFixture();
+  tableCategory.sections.businessRequirements.coreRules.blocks.push({
+    id: "invented-category-table",
+    type: "table",
+    columns: [
+      { id: "order-status", label: "订单状态" },
+      { id: "notification-rule", label: "通知规则" },
+    ],
+    rows: [{
+      id: "invented-completed-status",
+      cells: [
+        { columnId: "order-status", content: [{ type: "text", text: "已完成", marks: [] }] },
+        { columnId: "notification-rule", content: [{ type: "text", text: "发送通知", marks: [] }] },
+      ],
+    }],
+  });
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(tableCategory),
+    (error) => error?.code === "PRD_SMOKE_SOURCE_BOUNDARY_INVALID",
+  );
+});
+
+test("allows explicit no-new-default and existing-setting constraints", () => {
+  for (const phrase of [
+    "通知开关不默认开启，沿用消费者现有设置。",
+    "通知设置不新增默认开启规则。",
+    "通知开关没有新的默认关闭状态，沿用现状。",
+  ]) {
+    const document = orderNotificationPrdFixture();
+    document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
+    assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document), phrase);
+  }
+});
+
+test("allows completion and cancellation wording outside order-category semantics", () => {
+  for (const phrase of [
+    "通知发送已完成后展示结果记录。",
+    "消费者已取消本次通知重试。",
+  ]) {
+    const document = orderNotificationPrdFixture();
+    document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
+    assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document), phrase);
+  }
+});
+
+test("allows an explicit existing-default constraint beside unrelated boolean cells", () => {
+  const document = orderNotificationPrdFixture();
+  document.sections.businessRequirements.coreRules.blocks.push({
+    id: "existing-default-constraint-table",
+    type: "table",
+    columns: [
+      { id: "field", label: "字段" },
+      { id: "rule", label: "规则" },
+      { id: "visible", label: "是否展示" },
+    ],
+    rows: [{
+      id: "existing-notification-setting-row",
+      cells: [
+        { columnId: "field", content: [{ type: "text", text: "通知开关", marks: [] }] },
+        { columnId: "rule", content: [{ type: "text", text: "默认状态沿用消费者现有设置", marks: [] }] },
+        { columnId: "visible", content: [{ type: "text", text: "是", marks: [] }] },
+      ],
+    }],
+  });
+  assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
+});
+
+test("allows requirement-document wording in a legitimate version-history note", () => {
+  const document = orderNotificationPrdFixture();
+  document.versionHistory[0].notes = "本次产出需求说明书初稿，供业务、研发和测试评审。";
+  assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
+});
+
+test("requires every explicit no-invention constraint from the smoke prompt", () => {
+  for (const [source, replacement] of [
+    ["沿用消费者现有设置", "保留通知设置入口"],
+    ["不设新的默认状态", "保持通知设置可配置"],
+    ["沿用订单中心既有分类", "提供订单状态分类"],
+    ["不新增或枚举分类", "支持状态分类配置"],
+  ]) {
+    const document = orderNotificationPrdFixture();
+    document.sections.businessRequirements.coreRules.blocks[2].content[0].text =
+      document.sections.businessRequirements.coreRules.blocks[2].content[0].text.replace(source, replacement);
+    assert.throws(
+      () => assertPrdSmokeBusinessSemantics(document),
+      (error) => error?.code === "PRD_SMOKE_TOPIC_INVALID",
+      source,
+    );
+  }
+});
+
+test("rejects safety remarks with the right nouns but negative or shifted meaning", () => {
+  for (const [index, remarks] of [
+    [0, "现有功能不发生修改。"],
+    [1, "消费者订单由内部客服管理。"],
+    [1, "页面不再面向消费者。"],
+    [1, "页面尚未面向消费者。"],
+    [20, "本次不涉及完整性和一致性校验。"],
+  ]) {
+    const document = orderNotificationPrdFixture();
+    document.sections.safetyBaseline.rows[index].remarks = remarks;
+    assert.throws(
+      () => assertPrdSmokeBusinessSemantics(document),
+      (error) => error?.code === "PRD_SMOKE_SAFETY_INVALID",
+      remarks,
+    );
+  }
+});
+
+test("accepts a public-consumer safety remark with an explicit qualifier particle", () => {
+  const document = orderNotificationPrdFixture();
+  document.sections.safetyBaseline.rows[1].remarks = "订单通知设置功能面向已登录的消费者。";
   assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
 });
 
@@ -333,7 +679,12 @@ function assertNoSecretOrPrdBody(result, forbiddenValues) {
 
 async function startFakeWorkbench({
   artifactKind = "prd",
+  eventAttempt = 1,
+  eventChecksum = null,
+  eventRequestId = "request-smoke",
   generationStages = prdGenerationStages,
+  prdDocument = orderNotificationPrdFixture(),
+  versionChecksum = null,
 } = {}) {
   const state = {
     apiCookies: [],
@@ -346,7 +697,18 @@ async function startFakeWorkbench({
     submissionBody: null,
   };
   const server = http.createServer((request, response) => {
-    void handleFakeRequest(request, response, state, artifactKind, generationStages).catch(() => {
+    void handleFakeRequest(
+      request,
+      response,
+      state,
+      artifactKind,
+      eventAttempt,
+      eventChecksum,
+      eventRequestId,
+      generationStages,
+      prdDocument,
+      versionChecksum,
+    ).catch(() => {
       if (!response.headersSent) response.writeHead(500, { "Content-Type": "application/json" });
       if (!response.writableEnded) response.end(JSON.stringify({ code: "FAKE_SERVER_FAILURE" }));
     });
@@ -361,7 +723,18 @@ async function startFakeWorkbench({
   };
 }
 
-async function handleFakeRequest(request, response, state, artifactKind, generationStages) {
+async function handleFakeRequest(
+  request,
+  response,
+  state,
+  artifactKind,
+  eventAttempt,
+  eventChecksum,
+  eventRequestId,
+  generationStages,
+  prdDocument,
+  versionChecksum,
+) {
   const url = new URL(request.url ?? "/", "http://fake.test");
   const method = request.method ?? "GET";
   if (!["GET", "HEAD"].includes(method)) state.mutationOrigins.push(request.headers.origin ?? "");
@@ -422,11 +795,16 @@ async function handleFakeRequest(request, response, state, artifactKind, generat
   }
   if (method === "GET" && url.pathname === "/api/v1/runs/run-smoke/events") {
     const stageEvents = generationStages.map((stage, index) => (
-      prdGenerationStageEventFixture(stage, index + 1)
+      prdGenerationStageEventFixture(stage, index + 1, eventAttempt, eventRequestId)
     ));
     return sendRunEventStream(response, [
       ...stageEvents,
-      prdDraftEventFixture(stageEvents.length + 1),
+      prdDraftEventFixture(
+        stageEvents.length + 1,
+        eventAttempt,
+        eventChecksum ?? sha256Canonical(prdDocument),
+        eventRequestId,
+      ),
     ]);
   }
   if (method === "GET" && url.pathname === "/api/v1/projects/project-smoke/artifacts") {
@@ -439,7 +817,7 @@ async function handleFakeRequest(request, response, state, artifactKind, generat
     method === "GET"
     && url.pathname === "/api/v1/artifacts/artifact-smoke/versions/version-smoke"
   ) {
-    return sendJson(response, 200, prdVersionFixture());
+    return sendJson(response, 200, prdVersionFixture(prdDocument, versionChecksum));
   }
   return sendJson(response, 404, { code: "FAKE_ROUTE_NOT_FOUND" });
 }
@@ -470,11 +848,13 @@ function completedBootstrap() {
 
 function runFixture(status) {
   return {
+    attempt: status === "queued" ? 0 : 1,
     failure: null,
     id: "run-smoke",
     progress: status === "succeeded" ? 1 : status === "running" ? 0.5 : 0,
     projectId: "project-smoke",
     requestedArtifactKinds: ["prd"],
+    requestId: "request-smoke",
     status,
     threadId: "thread-smoke",
   };
@@ -510,13 +890,13 @@ function prototypeArtifactFixture() {
   };
 }
 
-function prdVersionFixture() {
+function prdVersionFixture(document = orderNotificationPrdFixture(), checksum = null) {
   return {
     artifactId: "artifact-smoke",
     artifactVersionId: "version-smoke",
-    checksum: "a".repeat(64),
+    checksum: checksum ?? sha256Canonical(document),
     citations: [],
-    content: orderNotificationPrdFixture(),
+    content: document,
     contentMode: "inline",
     createdAt: "2026-07-23T09:01:00.000Z",
     createdByRunId: "run-smoke",
@@ -569,7 +949,12 @@ function orderNotificationPrdFixture() {
   document.sections.businessRequirements.summary[0].text =
     "总体目标：已登录消费者可配置订单状态通知开关，查看发送结果记录，并在发送失败时重试或获得明确权限反馈。";
   document.sections.businessRequirements.coreRules.blocks[2].content[0].text =
-    "本需求修改现有订单通知功能逻辑；通知设置数据与发送状态均执行完整性和一致性校验。";
+    "本需求修改现有订单通知功能逻辑；通知开关不设新的默认状态，沿用消费者现有设置；订单状态分类沿用订单中心既有分类，不新增或枚举分类；通知设置数据与发送状态均执行完整性和一致性校验。";
+  document.sections.safetyBaseline.rows[1] = {
+    sequence: 2,
+    applicability: "是",
+    remarks: "订单通知设置功能面向已登录消费者。",
+  };
   return document;
 }
 
@@ -586,41 +971,50 @@ function replaceStringFragments(value, source, replacement) {
   return value;
 }
 
-function prdGenerationStageEventFixture(stage, sequence) {
+function sha256Canonical(value) {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function prdGenerationStageEventFixture(stage, sequence, attempt = 1, requestId = "request-smoke") {
   return {
     protocol: "workbench.run.v1",
     id: `event-stage-${sequence}`,
     projectId: "project-smoke",
     threadId: "thread-smoke",
     runId: "run-smoke",
-    requestId: "request-smoke",
+    requestId,
     sequence,
     occurredAt: `2026-07-23T09:00:0${sequence}.000Z`,
     traceId: "trace-smoke",
     type: "run.generation.stage.changed",
-    payload: { attempt: 1, stage },
+    payload: { attempt, stage },
   };
 }
 
-function prdDraftEventFixture(sequence) {
+function prdDraftEventFixture(
+  sequence,
+  attempt = 1,
+  checksum = "a".repeat(64),
+  requestId = "request-smoke",
+) {
   return {
     protocol: "workbench.run.v1",
     id: "event-draft-smoke",
     projectId: "project-smoke",
     threadId: "thread-smoke",
     runId: "run-smoke",
-    requestId: "request-smoke",
+    requestId,
     sequence,
     occurredAt: "2026-07-23T09:00:30.000Z",
     traceId: "trace-smoke",
     type: "artifact.draft.created",
     payload: {
-      attempt: 1,
+      attempt,
       artifactIndex: 0,
       artifactId: "artifact-smoke",
       artifactVersionId: "version-smoke",
       kind: "prd",
-      checksum: "a".repeat(64),
+      checksum,
       draftChecksum: "b".repeat(64),
       screens: [],
     },
