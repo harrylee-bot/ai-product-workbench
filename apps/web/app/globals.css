@@ -1658,15 +1658,6 @@ textarea:focus-visible {
   animation: workbench-agent-surface-shift 4.2s linear infinite;
 }
 
-.workbench-agent-card--generating[data-prd-bodyless="true"] .workbench-agent-card-base-bg {
-  animation: none;
-}
-
-.workbench-agent-card--generating[data-prd-bodyless="true"]::before {
-  animation: none;
-  opacity: 0;
-}
-
 .workbench-agent-card--generating .workbench-agent-card-shade {
   background: linear-gradient(90deg, rgba(7, 8, 10, 0.16), rgba(7, 8, 10, 0.03) 72%, transparent);
 }
