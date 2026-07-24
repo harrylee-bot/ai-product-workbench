@@ -104,7 +104,7 @@ Set checkboxes according to the requirement. Use `☑是 □否` or `□是 ☑�
 
 Keep exactly one channel table. A channel is selected only when the user input or structured requirement state explicitly enables it. Merely listing H5 or mini program as an option, or saying that it is excluded, must not select it.
 
-`端内渠道` is a generic delivery-channel label. It does not mean that the business loads into an APP and must not activate the APP/mini-program safety row. Likewise, `客户端`, `消费者端`, and `前端` are not APP evidence. Only an affirmative source fact that explicitly names APP or mini-program loading, publication, or operation can activate that row; a disabled or excluded APP/mini-program is negative evidence.
+`端内渠道` is a generic delivery-channel label. Preserve it literally; never expand it, `客户端`, `消费者端`, or `前端` into an affirmative APP or mini-program loading, publication, operation, or enabled-surface claim. Preserve explicit disabled or excluded APP/mini-program facts verbatim. Candidate-authored prose and `channel:inApp` are not source evidence; every Runtime `targetSurface` value, including `app` and `web`, is not source evidence and cannot activate safety row 12. Only an affirmative APP or mini-program fact from the user or an authorized source can activate that row; without one, row 12 is `不涉及` with no remarks.
 
 ## 2 业务需求
 
@@ -255,6 +255,6 @@ Adjust `是否涉及` conservatively:
 - cross-system calls or sensitive API controls: row 18 `是`
 - validation of submitted data or status consistency: row 21 `是`
 - keep privacy, app mini-program checklist, ID/bank/biometric collection, third-party jump, and data storage rows as `不涉及` unless explicitly present.
-- `端内渠道`, `客户端`, `消费者端`, and `前端` do not mean APP or mini-program. They must not activate row 12. Only an affirmative source fact that explicitly names APP or mini-program loading, publication, or operation can do so; an excluded or disabled APP/mini-program is negative evidence.
+- Preserve `端内渠道`, `客户端`, `消费者端`, and `前端` literally; never expand them into an affirmative APP or mini-program loading, publication, operation, or enabled-surface claim. Preserve explicit excluded or disabled APP/mini-program facts verbatim. Candidate-authored prose and `channel:inApp` are not source evidence; every Runtime `targetSurface` value, including `app` and `web`, is not source evidence and cannot activate row 12. Only an affirmative APP or mini-program fact from the user or an authorized source can do so; without one, row 12 is `不涉及` with no remarks.
 - The `是否涉及` value must be exactly one of `是`, `否`, or `不涉及`, with no punctuation or explanatory text in that cell.
 - Derive values from requirement facts outside the safety table. The wording of a safety row must never trigger its own `是` value.

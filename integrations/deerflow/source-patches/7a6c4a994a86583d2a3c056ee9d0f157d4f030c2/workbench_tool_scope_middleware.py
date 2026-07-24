@@ -62,11 +62,11 @@ PRD_STAGE_SEQUENCE = (
 PRD_REFERENCE_FILES = (
     (
         "/mnt/skills/public/requirement-doc-template/SKILL.md",
-        "6ce1d2094a833210b0578a4396c4c268e7c99a33b2a411b4f4bd11f4b9e69f84",
+        "82ec80d5b8d68916b2fb9259e30db9e0982645ae96e6d189a9d1dd3daf2baf0f",
     ),
     (
         "/mnt/skills/public/requirement-doc-template/references/structure.md",
-        "dadf6074dfe564f0231a837c3d972a14927af8c4688bbf60526581feb91967a4",
+        "7952eb98fadbbd992f1bdbd227953aacbcbcdea7fdef1f758987750a9ac5bf70",
     ),
     (
         "/mnt/skills/public/requirement-doc-template/references/quality-standards.md",

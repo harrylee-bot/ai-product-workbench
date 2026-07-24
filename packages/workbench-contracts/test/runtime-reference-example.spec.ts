@@ -85,11 +85,11 @@ describe("DeerFlow PRD Runtime Result reference", () => {
 
   it("vendors the complete canonical requirement-document skill byte for byte", () => {
     const files = [
-      ["SKILL.md", "6ce1d2094a833210b0578a4396c4c268e7c99a33b2a411b4f4bd11f4b9e69f84"],
+      ["SKILL.md", "82ec80d5b8d68916b2fb9259e30db9e0982645ae96e6d189a9d1dd3daf2baf0f"],
       ["agents/openai.yaml", "f93eee46ee2b76146c7d2b212f6c26da3c16b28d566eac0a3158c92f9425afc0"],
       ["assets/requirement-template.docx", "3070777f5c624be731bd264f72955ca4d15d5ac68d20867318ce8c0081789ebf"],
       ["references/quality-standards.md", "ad2206958aee116654a657b1c979e7a0228aee1e080e2a289712bd7ad82b1c76"],
-      ["references/structure.md", "dadf6074dfe564f0231a837c3d972a14927af8c4688bbf60526581feb91967a4"],
+      ["references/structure.md", "7952eb98fadbbd992f1bdbd227953aacbcbcdea7fdef1f758987750a9ac5bf70"],
       ["scripts/docx_quality_check.py", "722aa28067ef0d34233191275440285dcee68b0764eb55d65f5bec8e16b8cf21"],
     ] as const;
     for (const [relativePath, expectedDigest] of files) {

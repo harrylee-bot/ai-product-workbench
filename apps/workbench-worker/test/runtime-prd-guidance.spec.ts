@@ -14,6 +14,10 @@ const workbenchSkillSource = readFileSync(fileURLToPath(new URL(
   "../../../integrations/deerflow/skills/workbench/SKILL.md",
   import.meta.url,
 )), "utf8");
+const requirementSkillSource = readFileSync(fileURLToPath(new URL(
+  "../../../integrations/deerflow/skills/requirement-doc-template/SKILL.md",
+  import.meta.url,
+)), "utf8");
 
 describe("runtimePrdResultGuidance", () => {
   it("routes new PRDs to the installed v2 reference without injecting sample business content", () => {
@@ -48,6 +52,10 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("Do not invent assets, activity configuration, audit/publish, reporting, AI generation");
     expect(guidance).toContain("PRD-only or no Prototype/code are Runtime metadata, not business scope");
     expect(guidance).toContain("Do not invent default values, category members, enabled states");
+    expect(guidance).toContain("Never translate or expand 端内 or 端内渠道 into an affirmative APP");
+    expect(guidance).toContain("preserve explicit negative or excluded APP/mini-program facts verbatim");
+    expect(guidance).toContain("every Runtime targetSurface value, including app and web, are not source evidence");
+    expect(guidance).toContain("row 12 must be 不涉及 with null remarks");
     expect(guidance).toContain("Do not invent a concrete menu hierarchy");
     expect(guidance).toContain("role fallbacks 需求方, 业务评审人, 研发评审人, and 测试评审人");
     expect(guidance).toContain("only when the requirement body makes that dimension relevant");
@@ -72,10 +80,13 @@ describe("runtimePrdResultGuidance", () => {
     expect(workbenchSkillSource).toContain("content.sections.businessRequirements.additionalSections");
     expect(workbenchSkillSource).toContain("content.sections.degradation");
     expect(workbenchSkillSource).toContain("content.sections.safetyBaseline");
+    expect(workbenchSkillSource).toContain("Never translate or expand `端内` or `端内渠道` into an affirmative APP");
+    expect(workbenchSkillSource).toContain("every Runtime `targetSurface` value, including `app` and `web`, is not source evidence");
+    expect(requirementSkillSource).toContain("every Runtime `targetSurface` value, including `app` and `web`, is not source evidence");
     expect(prdSafetyBaselineItems).toHaveLength(21);
     expect(prdStructureSource).toContain("Use the 21-row safety baseline table from the template");
     expect(prdStructureSource).toContain("new API: row 17 `是`");
-    expect(prdStructureSource).toContain("They must not activate row 12");
+    expect(prdStructureSource).toContain("every Runtime `targetSurface` value, including `app` and `web`, is not source evidence");
   });
 
   it("fails fast if an invalid mixed PRD and Prototype request reaches Worker guidance", () => {
