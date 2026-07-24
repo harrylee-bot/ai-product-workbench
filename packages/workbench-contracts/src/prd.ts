@@ -593,10 +593,11 @@ type PrdV2EvidenceRule = {
 };
 
 const prdV2AppSurfacePositivePattern = /(?:\bAPP\b|小程序).{0,24}(?:加载|运行|发布|投放|启用|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行|启用).{0,16}(?:\bAPP\b|小程序)/iu;
-const prdV2AppSurfaceNegativePattern = /(?:不涉及|不启用|未启用|不再启用|不投放|未投放|不再投放|排除|禁用|不加载|未加载|不再加载|不发布|未发布|不再发布|不运行|未运行|不再运行).{0,48}(?:\bAPP\b|小程序)|(?:\bAPP\b|小程序).{0,24}(?:不涉及|不启用|未启用|不再启用|不投放|未投放|不再投放|排除|禁用|不加载|未加载|不再加载|不发布|未发布|不再发布|不运行|未运行|不再运行)|(?:\bAPP\b|小程序)[^。！？；;，,\n]{0,24}(?:不在|不属于)[^。！？；;，,\n]{0,16}(?:投放|发布|运行|启用|加载)范围(?![之以]?外)(?:之?内)?/iu;
+const prdV2AppSurfaceNegativePattern = /(?<!不)(?<!未)(?<!非)(?<!不是)(?<!并非)(?<!不再)(?<!没有)(?<!无需)(?<!无须)(?<!不必)(?<!未曾)(?<!不得)(?<!不能)(?<!不会)(?<!不应)(?<!不可)(?<!不宜)(?<!不建议)(?<!不予)(?<!禁止)(?<!避免)(?:不涉及|排除|禁用|不(?:再)?(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持)|未(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持))[^。！？；;\n]{0,48}(?:\bAPP\b|小程序)|(?:\bAPP\b|小程序)[^。！？；;\n]{0,24}(?<!不)(?<!未)(?<!非)(?<!不是)(?<!并非)(?<!不再)(?<!没有)(?<!无需)(?<!无须)(?<!不必)(?<!未曾)(?<!不得)(?<!不能)(?<!不会)(?<!不应)(?<!不可)(?<!不宜)(?<!不建议)(?<!不予)(?<!禁止)(?<!避免)(?:不涉及|排除|禁用|不(?:再)?(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持)|未(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持))|(?:\bAPP\b|小程序)[^。！？；;，,\n]{0,24}(?:不在|不属于)[^。！？；;，,\n]{0,16}(?:投放|发布|运行|启用|加载)范围(?![之以]?外)(?:之?内)?/iu;
 const prdV2AppSurfaceStrongActionPattern = /(?:\bAPP\b|小程序).{0,24}(?:加载|运行|发布|投放|启用|存在|提供|使用|开放)|(?:加载|运行|发布|投放|启用|存在|提供|使用|开放).{0,16}(?:\bAPP\b|小程序)/iu;
+const prdV2AppSurfaceIndependentPositivePattern = /(?:\bAPP\b|小程序)[^。！？；;，,\n]{0,24}(?:保持(?:现状|原状|不变|正常)|沿用(?:现状|原状|既有)|正常(?:运行|提供|开放|使用)?)/iu;
 const prdV2AppSurfaceAssertionDelimiterPattern = /([，,；;]|但(?:是)?|而(?:是)?|同时|并且|且)/u;
-const prdV2LegacyAppSurfacePositivePattern = /(?:APP|小程序).{0,24}(?:加载|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行).{0,16}(?:APP|小程序)/iu;
+const prdV2LegacyAppSurfacePositivePattern = /(?:APP|小程序).{0,24}(?:加载|投放|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行).{0,16}(?:APP|小程序)/iu;
 const prdV2LegacyAppSurfaceNegativePattern = /(?:不涉及|不启用|未启用|不投放|未投放|排除).{0,12}(?:APP|小程序)|(?:APP|小程序).{0,12}(?:不涉及|不启用|未启用|不投放|未投放|排除)/iu;
 
 function appSurfaceEvidenceAssertions(segment: string): string[] {
@@ -608,6 +609,7 @@ function appSurfaceEvidenceAssertions(segment: string): string[] {
     const right = parts[index + 1] ?? "";
     if (
       prdV2AppSurfaceStrongActionPattern.test(right)
+      || prdV2AppSurfaceIndependentPositivePattern.test(right)
       || prdV2AppSurfaceNegativePattern.test(right)
     ) {
       if (current.trim()) assertions.push(current);
