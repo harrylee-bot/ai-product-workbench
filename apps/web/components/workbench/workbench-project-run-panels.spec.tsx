@@ -44,12 +44,12 @@ describe("ProjectTranscriptPanel", () => {
     });
     const card = getAgentCard(container);
 
-    expect(card.style.height).toBe("126px");
-    expect(card.style.maxHeight).toBe("126px");
-    expect(card.style.minHeight).toBe("126px");
-    expect(card.style.width).toBe("280px");
-    expect(card.style.maxWidth).toBe("280px");
-    expect(card.style.minWidth).toBe("280px");
+    expect(card.style.height).toBe("92px");
+    expect(card.style.maxHeight).toBe("92px");
+    expect(card.style.minHeight).toBe("92px");
+    expect(card.style.width).toBe("200px");
+    expect(card.style.maxWidth).toBe("200px");
+    expect(card.style.minWidth).toBe("200px");
     expect(card.dataset.prdBodyless).toBe("true");
     expect(screen.queryByText("暂无新的运行消息。")).toBeNull();
     expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
@@ -174,7 +174,7 @@ describe("ProjectTranscriptPanel", () => {
       generationStage: "structuring-prd",
       prompt: "生成支付改造需求说明书",
     });
-    expect(getAgentCard(rendered.container).style.height).toBe("126px");
+    expect(getAgentCard(rendered.container).style.height).toBe("92px");
     expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
 
     rendered.rerender(panelElement({
@@ -182,7 +182,7 @@ describe("ProjectTranscriptPanel", () => {
       messages: [{ id: "message-1", status: "streaming", text: "正在梳理业务规则", working: true }],
       prompt: "生成支付改造需求说明书",
     }));
-    expect(getAgentCard(rendered.container).style.height).toBe("126px");
+    expect(getAgentCard(rendered.container).style.height).toBe("92px");
     expect(screen.queryByText("正在梳理业务规则")).toBeNull();
     expect(screen.getByText("规划结构")).not.toBeNull();
 
@@ -195,8 +195,8 @@ describe("ProjectTranscriptPanel", () => {
       prompt: "生成支付改造需求说明书",
     }));
     const card = getAgentCard(rendered.container);
-    expect(card.style.height).toBe("126px");
-    expect(card.style.maxHeight).toBe("126px");
+    expect(card.style.height).toBe("92px");
+    expect(card.style.maxHeight).toBe("92px");
     expect(card.dataset.prdBodyless).toBe("true");
     expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
     expect(screen.queryByText("正在梳理业务规则")).toBeNull();

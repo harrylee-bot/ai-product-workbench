@@ -6,6 +6,7 @@ import {
   createArtifactVersionRequestSchema,
   prdDocumentSchema,
   prdDocumentV2Schema,
+  runtimePrdDocumentV2Schema,
   prdTableOfContentsEntriesFor,
   runtimeResultSchema,
 } from "../src/index.js";
@@ -571,6 +572,111 @@ describe("workbench.prd.v2", () => {
         });
       }
       expect(prdDocumentV2Schema.safeParse(document).success, `safety row ${index + 1}`).toBe(true);
+    }
+  });
+
+  it("does not confuse generic in-app channels or excluded app surfaces with row 12 evidence", () => {
+    for (const [index, fact] of [
+      "渠道范围：本次仅覆盖端内通知相关设置，不投放 WAP/H5 端外渠道和小程序。",
+      "本需求选择端内渠道，APP 与小程序均不投放。",
+      "客户端、消费者端和前端均沿用现有页面。",
+      "mapping 页面入口保持不变。",
+      "HAPPY 业务页面保持不变。",
+      "DAPP 页面入口保持不变。",
+      "APPS 业务页面保持不变。",
+      "小程序不投放，但 APP 也未启用。",
+      "APP 业务并未运行，小程序不再发布。",
+      "本需求不涉及 APP 和小程序业务。",
+      "不投放 APP/小程序页面。",
+      "APP 业务并且未运行。",
+      "APP、小程序均不投放。",
+      "本需求不涉及 APP，小程序业务。",
+    ].entries()) {
+      const document = withoutSafetyEvidence();
+      document.sections.businessRequirements.coreRules.blocks.push({
+        id: `excluded-app-surface-${index + 1}`,
+        type: "paragraph",
+        content: text(fact),
+      });
+      expect(prdDocumentV2Schema.safeParse(document).success, fact).toBe(true);
+    }
+
+    const misclassified = withoutSafetyEvidence();
+    misclassified.sections.businessRequirements.coreRules.blocks.push({
+      id: "excluded-app-surface-misclassified",
+      type: "paragraph",
+      content: text("渠道范围：本次仅覆盖端内通知相关设置，不投放 WAP/H5 端外渠道和小程序。"),
+    });
+    misclassified.sections.safetyBaseline.rows[11]!.applicability = "是";
+    misclassified.sections.safetyBaseline.rows[11]!.remarks = "端内渠道需要核查双清单。";
+    expect(prdDocumentV2Schema.safeParse(misclassified).success).toBe(true);
+    const misclassifiedResult = runtimePrdDocumentV2Schema.safeParse(misclassified);
+    expect(misclassifiedResult.success).toBe(false);
+    if (!misclassifiedResult.success) {
+      expect(misclassifiedResult.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 11, "applicability"],
+          message: "a safety row marked 是 or 否 requires affirmative semantic evidence in the requirement body",
+        }),
+      ]));
+    }
+    expect(runtimeResultSchema.safeParse({
+      protocol: "workbench.runtime.result.v1",
+      message: "需求说明书已生成。",
+      artifacts: [{
+        kind: "prd",
+        schemaVersion: 2,
+        title: misclassified.title,
+        operation: { kind: "create" },
+        citations: misclassified.citations,
+        content: misclassified,
+      }],
+    }).success).toBe(false);
+
+    const affirmative = withoutSafetyEvidence();
+    affirmative.sections.businessRequirements.coreRules.blocks.push({
+      id: "affirmative-app-surface",
+      type: "paragraph",
+      content: text("小程序不投放，但订单通知业务运行于 APP 并提供 APP 页面入口。"),
+    });
+    const affirmativeResult = prdDocumentV2Schema.safeParse(affirmative);
+    expect(affirmativeResult.success).toBe(false);
+    if (!affirmativeResult.success) {
+      expect(affirmativeResult.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 11, "applicability"],
+          message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
+        }),
+      ]));
+    }
+
+    for (const [index, fact] of [
+      "APP 不投放且小程序业务正常运行。",
+      "小程序不投放同时 APP 业务正常运行。",
+      "旧 APP 不再运行，新 APP 正常运行并提供页面入口。",
+      "业务运行于 app。",
+      "端内 APP 页面入口启用。",
+      "APP 正常运行。",
+      "小程序已启用。",
+      "APP 页面入口存在，小程序不涉及。",
+      "APP 不涉及，小程序页面入口存在。",
+    ].entries()) {
+      const mixed = withoutSafetyEvidence();
+      mixed.sections.businessRequirements.coreRules.blocks.push({
+        id: `mixed-app-surface-${index + 1}`,
+        type: "paragraph",
+        content: text(fact),
+      });
+      const mixedResult = prdDocumentV2Schema.safeParse(mixed);
+      expect(mixedResult.success, fact).toBe(false);
+      if (!mixedResult.success) {
+        expect(mixedResult.error.issues, fact).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            path: ["sections", "safetyBaseline", "rows", 11, "applicability"],
+            message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
+          }),
+        ]));
+      }
     }
   });
 

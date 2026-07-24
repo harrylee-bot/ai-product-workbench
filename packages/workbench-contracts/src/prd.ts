@@ -589,7 +589,43 @@ const prdV2StandaloneApiHeadingPattern = /(?:接口|API)/iu;
 type PrdV2EvidenceRule = {
   positive: RegExp;
   negative?: RegExp;
+  isAffirmative?: (segment: string) => boolean;
 };
+
+const prdV2AppSurfacePositivePattern = /(?:\bAPP\b|小程序).{0,24}(?:加载|运行|发布|投放|启用|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行|启用).{0,16}(?:\bAPP\b|小程序)/iu;
+const prdV2AppSurfaceNegativePattern = /(?:不涉及|不启用|未启用|不再启用|不投放|未投放|不再投放|排除|禁用|不加载|未加载|不再加载|不发布|未发布|不再发布|不运行|未运行|不再运行).{0,48}(?:\bAPP\b|小程序)|(?:\bAPP\b|小程序).{0,24}(?:不涉及|不启用|未启用|不再启用|不投放|未投放|不再投放|排除|禁用|不加载|未加载|不再加载|不发布|未发布|不再发布|不运行|未运行|不再运行)/iu;
+const prdV2AppSurfaceStrongActionPattern = /(?:\bAPP\b|小程序).{0,24}(?:加载|运行|发布|投放|启用|存在|提供|使用|开放)|(?:加载|运行|发布|投放|启用|存在|提供|使用|开放).{0,16}(?:\bAPP\b|小程序)/iu;
+const prdV2AppSurfaceAssertionDelimiterPattern = /([，,；;]|但(?:是)?|而(?:是)?|同时|并且|且)/u;
+const prdV2LegacyAppSurfacePositivePattern = /(?:APP|小程序).{0,24}(?:加载|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行).{0,16}(?:APP|小程序)/iu;
+const prdV2LegacyAppSurfaceNegativePattern = /(?:不涉及|不启用|未启用|不投放|未投放|排除).{0,12}(?:APP|小程序)|(?:APP|小程序).{0,12}(?:不涉及|不启用|未启用|不投放|未投放|排除)/iu;
+
+function appSurfaceEvidenceAssertions(segment: string): string[] {
+  const parts = segment.split(prdV2AppSurfaceAssertionDelimiterPattern);
+  const assertions: string[] = [];
+  let current = parts[0] ?? "";
+  for (let index = 1; index < parts.length; index += 2) {
+    const delimiter = parts[index] ?? "";
+    const right = parts[index + 1] ?? "";
+    if (
+      prdV2AppSurfaceStrongActionPattern.test(right)
+      || prdV2AppSurfaceNegativePattern.test(right)
+    ) {
+      if (current.trim()) assertions.push(current);
+      current = right;
+    } else {
+      current += `${delimiter}${right}`;
+    }
+  }
+  if (current.trim()) assertions.push(current);
+  return assertions;
+}
+
+function hasAffirmativeAppSurfaceEvidence(segment: string): boolean {
+  return appSurfaceEvidenceAssertions(segment).some((assertion) => (
+    prdV2AppSurfacePositivePattern.test(assertion)
+    && !prdV2AppSurfaceNegativePattern.test(assertion)
+  ));
+}
 
 const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
   1: {
@@ -636,8 +672,9 @@ const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
     negative: /不涉及.{0,12}(?:隐私政策|隐私协议)|无需.{0,8}(?:隐私政策|隐私协议)/u,
   },
   12: {
-    positive: /(?:APP|小程序).{0,24}(?:加载|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行).{0,16}(?:APP|小程序)/iu,
-    negative: /(?:不涉及|不启用|未启用|不投放|未投放|排除).{0,12}(?:APP|小程序)|(?:APP|小程序).{0,12}(?:不涉及|不启用|未启用|不投放|未投放|排除)/iu,
+    positive: prdV2AppSurfacePositivePattern,
+    negative: prdV2AppSurfaceNegativePattern,
+    isAffirmative: hasAffirmativeAppSurfaceEvidence,
   },
   13: {
     positive: /(?:采集|收集|提交|上传).{0,16}(?:身份证|银行卡|生物识别)|(?:身份证|银行卡|生物识别).{0,16}(?:采集|收集|提交|上传|授权)/u,
@@ -895,7 +932,7 @@ export const prdDocumentV2Schema = z.object({
       }
       continue;
     }
-    if (!hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule)) {
+    if (!hasPersistedAffirmativeEvidence(safetyEvidenceSegments, row.sequence, evidenceRule)) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 是 or 否 requires affirmative semantic evidence in the requirement body");
     }
     if (row.applicability === "否" && !safetyEvidenceSegments.some((segment) => (
@@ -1238,7 +1275,24 @@ function hasAffirmativeEvidence(segments: readonly string[], rule: PrdV2Evidence
   return segments.some((segment) => isAffirmativeEvidenceSegment(segment, rule));
 }
 
+function hasPersistedAffirmativeEvidence(
+  segments: readonly string[],
+  sequence: number,
+  rule: PrdV2EvidenceRule,
+): boolean {
+  if (hasAffirmativeEvidence(segments, rule)) return true;
+  return sequence === 12 && segments.some(hasLegacyAffirmativeAppSurfaceEvidence);
+}
+
+function hasLegacyAffirmativeAppSurfaceEvidence(segment: string): boolean {
+  return (
+    prdV2LegacyAppSurfacePositivePattern.test(segment)
+    && !prdV2LegacyAppSurfaceNegativePattern.test(segment)
+  );
+}
+
 function isAffirmativeEvidenceSegment(segment: string, rule: PrdV2EvidenceRule): boolean {
+  if (rule.isAffirmative) return rule.isAffirmative(segment);
   return (
     rule.positive.test(segment)
     && !(rule.negative?.test(segment) ?? false)
@@ -1280,9 +1334,30 @@ function isSemanticChannelTable(block: z.infer<typeof prdTableBlockSchema>): boo
 export type PrdDocumentV1 = z.infer<typeof prdDocumentV1Schema>;
 export type PrdDocumentV2 = z.infer<typeof prdDocumentV2Schema>;
 export type PrdDocument = PrdDocumentV1 | PrdDocumentV2;
+
+export const runtimePrdDocumentV2Schema: z.ZodType<PrdDocumentV2, z.ZodTypeDef, unknown> = prdDocumentV2Schema.superRefine((document, context) => {
+  const row = document.sections.safetyBaseline.rows[11];
+  if (!row || row.applicability === "不涉及") return;
+  const evidenceSegments = requirementEvidenceSegments(document);
+  if (
+    !hasAffirmativeEvidence(evidenceSegments, prdV2SafetyEvidenceRules[12])
+    && evidenceSegments.some(hasLegacyAffirmativeAppSurfaceEvidence)
+  ) {
+    addIssue(
+      context,
+      ["sections", "safetyBaseline", "rows", 11, "applicability"],
+      "a safety row marked 是 or 否 requires affirmative semantic evidence in the requirement body",
+    );
+  }
+});
+
 export const prdDocumentSchema: z.ZodType<PrdDocument, z.ZodTypeDef, unknown> = z.union([
   prdDocumentV1Schema,
   prdDocumentV2Schema,
+]);
+export const runtimePrdDocumentSchema: z.ZodType<PrdDocument, z.ZodTypeDef, unknown> = z.union([
+  prdDocumentV1Schema,
+  runtimePrdDocumentV2Schema,
 ]);
 export type PrdBlock = z.infer<typeof prdBlockSchema>;
 export type PrdInline = z.infer<typeof prdInlineSchema>;

@@ -349,7 +349,7 @@ export function ProjectTranscriptPanel({
     && (Boolean(selectedTask) || isOverview || !(phase === "complete" && isGenerated));
   const hasExpandedBody = showPromptChip || Boolean(bodyCopy);
   const prdBodyless = isPrdRun && projectMode === "document" && !hasExpandedBody;
-  const expandedHeight = hasExpandedBody ? "auto" : 126;
+  const expandedHeight = hasExpandedBody ? "auto" : 92;
 
   useEffect(() => {
     if (phase === "generating" || phase === "refining") {
@@ -391,11 +391,11 @@ export function ProjectTranscriptPanel({
       layout={projectMode === "document" ? undefined : "size"}
       style={{
         height: transcriptOpen ? expandedHeight : 52,
-        maxHeight: transcriptOpen && prdBodyless ? 126 : undefined,
-        maxWidth: transcriptOpen && prdBodyless ? 280 : undefined,
-        minHeight: transcriptOpen && prdBodyless ? 126 : undefined,
-        minWidth: transcriptOpen && prdBodyless ? 280 : undefined,
-        width: transcriptOpen ? 280 : 64,
+        maxHeight: transcriptOpen && prdBodyless ? 92 : undefined,
+        maxWidth: transcriptOpen && prdBodyless ? 200 : undefined,
+        minHeight: transcriptOpen && prdBodyless ? 92 : undefined,
+        minWidth: transcriptOpen && prdBodyless ? 200 : undefined,
+        width: transcriptOpen ? (prdBodyless ? 200 : 280) : 64,
       }}
       transition={{ ...panelTransition, delay: 0.10 }}
     >
@@ -406,7 +406,9 @@ export function ProjectTranscriptPanel({
         aria-label={transcriptOpen ? "收起 Agent 状态" : "展开 Agent 状态"}
         className={cn(
           "workbench-agent-bubble absolute z-30 h-[26px] w-[44px] text-[#202124] transition-[left,top] duration-300 ease-out",
-          transcriptOpen ? "left-[12px] top-[16px]" : "left-[9px] top-[9px]",
+          transcriptOpen
+            ? prdBodyless ? "left-[12px] top-[10px]" : "left-[12px] top-[16px]"
+            : "left-[9px] top-[9px]",
         )}
         onClick={() => setTranscriptOpen((open) => !open)}
         title={transcriptOpen ? "收起 Agent 状态" : "展开 Agent 状态"}
@@ -421,7 +423,10 @@ export function ProjectTranscriptPanel({
       {transcriptOpen && (
       <motion.div
         animate={{ opacity: 1 }}
-        className="relative z-20 flex flex-col px-[16px] pb-[18px] pt-[70px] text-[#f1f3f4]"
+        className={cn(
+          "relative z-20 flex flex-col text-[#f1f3f4]",
+          prdBodyless ? "px-[12px] pb-[14px] pt-[54px]" : "px-[16px] pb-[18px] pt-[70px]",
+        )}
         exit={{ opacity: 0 }}
         initial={{ opacity: 0 }}
         transition={{ duration: 0.16, ease: workbenchEase }}

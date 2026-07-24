@@ -3,9 +3,9 @@ import { approvalDecisionSchema, approvalOptionsSchema } from "./approvals.js";
 import { artifactCitationSchema, type ArtifactCitation } from "./citations.js";
 import { jsonValueSchema, type JsonValue } from "./common.js";
 import {
-  prdDocumentSchema,
   prdDocumentV1Schema,
-  prdDocumentV2Schema,
+  runtimePrdDocumentSchema,
+  runtimePrdDocumentV2Schema,
   type PrdDocument,
 } from "./prd.js";
 import {
@@ -105,7 +105,7 @@ export const runtimeArtifactDraftPrdV2Schema = z.object({
   ...runtimeArtifactDraftBaseShape,
   kind: z.literal("prd"),
   schemaVersion: z.literal(2),
-  content: prdDocumentV2Schema,
+  content: runtimePrdDocumentV2Schema,
   operation: runtimeArtifactOperationSchema,
 }).strict();
 
@@ -168,7 +168,7 @@ export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTy
     ...runtimeArtifactDraftBaseShape,
     kind: z.literal("prd"),
     schemaVersion: z.union([z.literal(1), z.literal(2)]),
-    content: prdDocumentSchema,
+    content: runtimePrdDocumentSchema,
     operation: runtimeArtifactOperationSchema,
   }).strict(),
   runtimeArtifactDraftPrototypeSchema,

@@ -1575,12 +1575,13 @@ textarea:focus-visible {
 }
 
 .workbench-agent-card[data-prd-bodyless="true"] {
-  width: 280px !important;
-  min-width: 280px !important;
-  max-width: 280px !important;
-  height: 126px !important;
-  min-height: 126px !important;
-  max-height: 126px !important;
+  width: 200px !important;
+  min-width: 200px !important;
+  max-width: 200px !important;
+  height: 92px !important;
+  min-height: 92px !important;
+  max-height: 92px !important;
+  border-radius: 12px;
 }
 
 .workbench-agent-card-base-bg {

@@ -21,7 +21,7 @@ describe("Workbench motion contract", () => {
 
     expect(css).toMatch(/\.workbench-home-submit-spinner\s*\{\s*animation-duration:\s*1s;/u);
     expect(css).toMatch(/\.workbench-status-spinner\s*\{\s*animation-duration:\s*1s;/u);
-    expect(css).toMatch(/\.workbench-agent-card\[data-prd-bodyless="true"\][\s\S]*?width:\s*280px !important;[\s\S]*?height:\s*126px !important;/u);
+    expect(css).toMatch(/\.workbench-agent-card\[data-prd-bodyless="true"\][\s\S]*?width:\s*200px !important;[\s\S]*?height:\s*92px !important;/u);
     expect(css).toMatch(/\.workbench-agent-card--generating::before\s*\{[^}]*opacity:\s*0\.54;[^}]*animation:\s*workbench-agent-color-wash 4\.2s linear infinite;/u);
     expect(css).toMatch(/\.workbench-agent-card--generating \.workbench-agent-card-base-bg\s*\{[^}]*animation:\s*workbench-agent-surface-shift 4\.2s linear infinite;/u);
     expect(css).not.toMatch(/\.workbench-agent-card--generating\[data-prd-bodyless="true"\][^{]*\{[^}]*animation:\s*none;/u);
