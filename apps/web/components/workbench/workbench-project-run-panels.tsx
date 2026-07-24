@@ -96,12 +96,20 @@ export function LeftInspector({
     || runStatus === "running"
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
+  const terminalTaskCopy = runStatus === "succeeded"
+    ? "运行已完成"
+    : runStatus === "failed"
+      ? "运行失败"
+      : runStatus === "cancelled"
+        ? "运行已取消"
+        : null;
   const currentTaskCopy = (
     activePrdStatusCopy({
       isActiveGeneration: runStatus === "queued" || runStatus === "running",
       isPrdRun,
       stage: generationStage,
     })
+    ?? terminalTaskCopy
     ?? runPhaseLabel
     ?? currentActivity?.label
     ?? prompt

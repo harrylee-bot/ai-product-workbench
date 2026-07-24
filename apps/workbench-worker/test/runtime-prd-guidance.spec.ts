@@ -41,15 +41,18 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("Do not invent assets, activity configuration, audit/publish, reporting, AI generation");
     expect(guidance).toContain("PRD-only or no Prototype/code are Runtime metadata, not business scope");
     expect(guidance).toContain("Do not invent default values, category members, enabled states");
+    expect(guidance).toContain("Do not invent a concrete menu hierarchy");
     expect(guidance).toContain("role fallbacks 需求方, 业务评审人, 研发评审人, and 测试评审人");
     expect(guidance).toContain("only when the requirement body makes that dimension relevant");
     expect(guidance).toContain("For 不涉及, set remarks to null");
     expect(guidance).toContain("不涉及 is invalid when the PRD body contains an affirmative fact");
+    expect(guidance).toContain("端内渠道, 客户端, 消费者端, and 前端 do not prove APP or mini-program loading");
     expect(guidance).toContain("IDs globally unique across the document and every nested IR entity");
     expect(guidance).toContain("requirement/criterion references bidirectional");
     expect(prdSafetyBaselineItems).toHaveLength(21);
     expect(prdStructureSource).toContain("Use the 21-row safety baseline table from the template");
     expect(prdStructureSource).toContain("new API: row 17 `是`");
+    expect(prdStructureSource).toContain("They must not activate row 12");
   });
 
   it("fails fast if an invalid mixed PRD and Prototype request reaches Worker guidance", () => {

@@ -114,6 +114,29 @@ describe("ProjectTranscriptPanel", () => {
     expect(getAgentCard(container).dataset.prdBodyless).toBe("true");
   });
 
+  it.each([
+    ["succeeded", "运行已完成"],
+    ["failed", "运行失败"],
+    ["cancelled", "运行已取消"],
+  ] as const)("does not retain a stale PRD phase label after a %s Run", (runStatus, expectedCopy) => {
+    const { container } = renderRunSurfaces({
+      generationStage: "validating-prd",
+      projectMode: "document",
+      runPhaseLabel: "正在发布需求说明书",
+      runStatus,
+    });
+
+    const taskStack = container.querySelector<HTMLElement>('[data-panel-motion="task-stack"]');
+    const agentCard = getAgentCard(container);
+    const mobileStatus = container.querySelector<HTMLElement>('[aria-live="polite"]');
+    expect(taskStack).not.toBeNull();
+    expect(mobileStatus).not.toBeNull();
+    expect(within(taskStack!).getAllByText(expectedCopy).length).toBeGreaterThan(0);
+    expect(within(agentCard).getByText(expectedCopy)).not.toBeNull();
+    expect(within(mobileStatus!).getByText(expectedCopy)).not.toBeNull();
+    expect(screen.queryByText("正在发布需求说明书")).toBeNull();
+  });
+
   it("leaves prototype-only stage copy and ellipsis behavior unchanged", () => {
     const { container } = renderRunSurfaces({
       generationStage: "generating-ui",
@@ -254,8 +277,10 @@ function renderRunSurfaces({
   projectMode,
   isPrdRun = projectMode === "document",
   runPhaseLabel,
+  runStatus = "running",
 }: Pick<TranscriptPanelProps, "generationStage" | "projectMode" | "runPhaseLabel"> & {
   isPrdRun?: boolean;
+  runStatus?: TranscriptPanelProps["runStatus"];
 }) {
   return render(
     <>
@@ -273,11 +298,11 @@ function renderRunSurfaces({
         projectMode={projectMode}
         prompt="生成支付改造需求说明书"
         runPhaseLabel={runPhaseLabel}
-        runStatus="running"
+        runStatus={runStatus}
         selectedTask={null}
         zoomLabel="100%"
       />
-      {panelElement({ generationStage, isPrdRun, projectMode, runPhaseLabel })}
+      {panelElement({ generationStage, isPrdRun, projectMode, runPhaseLabel, runStatus })}
       <MobileRunStatus
         busy={false}
         canCancel={false}
@@ -288,7 +313,7 @@ function renderRunSurfaces({
         onCancel={vi.fn()}
         onRetry={vi.fn()}
         runPhaseLabel={runPhaseLabel}
-        runStatus="running"
+        runStatus={runStatus}
       />
     </>,
   );

@@ -28,13 +28,13 @@ class PrdReferenceSpec:
 PRD_REFERENCE_FILES: Final[Mapping[PrdReferencePath, PrdReferenceSpec]] = MappingProxyType({
     "/mnt/skills/public/requirement-doc-template/SKILL.md": PrdReferenceSpec(
         physical_path=Path("/app/skills/public/requirement-doc-template/SKILL.md"),
-        sha256="f59cf65306078cdcdc7cc98486860a47f20ff80b81f0a849af381494183c78e1",
+        sha256="d55e46cb0e4e852d179e21835dc2ad6257178d31a1aef0bd496749b30c728dd8",
     ),
     "/mnt/skills/public/requirement-doc-template/references/structure.md": PrdReferenceSpec(
         physical_path=Path(
             "/app/skills/public/requirement-doc-template/references/structure.md",
         ),
-        sha256="9d0a8f6efe520809cb4e6cf94dd4d4f55f6a21ef52338ccbb6667419a11352a5",
+        sha256="e16852bc92c6a466df9ed0d3785e28a4bb800364e3b665e5bb6be8447a710c7f",
     ),
     "/mnt/skills/public/requirement-doc-template/references/quality-standards.md": PrdReferenceSpec(
         physical_path=Path(

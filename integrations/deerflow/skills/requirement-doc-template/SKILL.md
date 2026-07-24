@@ -34,7 +34,7 @@ Use this skill to produce Chinese requirement documents that match the user's st
 9. Fill the degradation plan. If it truly does not apply, the body under the heading must contain only `不涉及`. If it applies, write a concrete fallback plan of at least 100 Chinese characters.
 10. Fill the 21-row safety baseline table. The `是否涉及` column may contain only `是`, `否`, or `不涉及`; add a remarks column only when extra explanation is necessary.
 11. Keep exactly one channel table. Determine selected channels from explicit requirement facts; a candidate channel name, a disabled option, or the safety-template wording is never evidence that the channel is enabled.
-12. Derive safety-baseline values only from requirement facts outside the safety table. Sensitive collection, app/mini-program, third-party jump, third-party data exchange, and storage rows remain `不涉及` unless the requirement explicitly includes them.
+12. Derive safety-baseline values only from requirement facts outside the safety table. Sensitive collection, app/mini-program, third-party jump, third-party data exchange, and storage rows remain `不涉及` unless the requirement explicitly includes them. Generic labels such as `端内渠道`, `客户端`, `消费者端`, or `前端` do not prove that the business loads into an APP or mini-program; a disabled or excluded APP/mini-program is negative evidence. Only a source-backed affirmative APP or mini-program fact can activate that safety row.
 13. Run the DOCX quality checker and fix all errors. Then render or visually inspect the final DOCX pages when tooling is available, especially page breaks, table wrapping, screenshots, diagrams, and safety table readability.
 
 ## Output Rules

@@ -104,6 +104,8 @@ Set checkboxes according to the requirement. Use `☑是 □否` or `□是 ☑�
 
 Keep exactly one channel table. A channel is selected only when the user input or structured requirement state explicitly enables it. Merely listing H5 or mini program as an option, or saying that it is excluded, must not select it.
 
+`端内渠道` is a generic delivery-channel label. It does not mean that the business loads into an APP and must not activate the APP/mini-program safety row. Likewise, `客户端`, `消费者端`, and `前端` are not APP evidence. Only an affirmative source fact that explicitly names APP or mini-program loading, publication, or operation can activate that row; a disabled or excluded APP/mini-program is negative evidence.
+
 ## 2 业务需求
 
 Use concise business language. The first paragraph may be:
@@ -116,7 +118,7 @@ Recommended subsections:
 
 Use bullets for:
 - page entry
-- physical page URL/route when provided; otherwise a reviewable logical entry such as `所属产品 > 模块 > 页面`
+- physical page URL/route when provided; otherwise a generic reviewable logical entry such as `所属产品 > 模块 > 页面`; never turn that example into a concrete navigation hierarchy or claim that an invented hierarchy is irrelevant to acceptance
 - target page or downstream system if any
 
 Do not paste a link as a substitute for requirements. Always describe what the linked page/system must do.
@@ -250,5 +252,6 @@ Adjust `是否涉及` conservatively:
 - cross-system calls or sensitive API controls: row 18 `是`
 - validation of submitted data or status consistency: row 21 `是`
 - keep privacy, app mini-program checklist, ID/bank/biometric collection, third-party jump, and data storage rows as `不涉及` unless explicitly present.
+- `端内渠道`, `客户端`, `消费者端`, and `前端` do not mean APP or mini-program. They must not activate row 12. Only an affirmative source fact that explicitly names APP or mini-program loading, publication, or operation can do so; an excluded or disabled APP/mini-program is negative evidence.
 - The `是否涉及` value must be exactly one of `是`, `否`, or `不涉及`, with no punctuation or explanatory text in that cell.
 - Derive values from requirement facts outside the safety table. The wording of a safety row must never trigger its own `是` value.
