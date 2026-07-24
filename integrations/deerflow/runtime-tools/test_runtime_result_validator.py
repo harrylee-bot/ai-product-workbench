@@ -73,6 +73,70 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn(("title",), {tuple(issue["path"]) for issue in result["issues"]})
 
+    def test_reports_actionable_prd_v2_paths_for_misnested_sections(self) -> None:
+        candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
+        draft = candidate["artifacts"][0]
+        content = draft["content"]
+        sections = content["sections"]
+        business = sections["businessRequirements"]
+        sections["acceptanceCriteria"] = business.pop("acceptanceCriteria")
+        sections["additionalSections"] = business.pop("additionalSections")
+        content["degradation"] = sections.pop("degradation")
+        content["safetyBaseline"] = sections.pop("safetyBaseline")
+
+        result = validate_runtime_artifact_draft(draft)
+
+        self.assertFalse(result["ok"])
+        self.assertNotIn("invalid_union", {issue["code"] for issue in result["issues"]})
+        paths = {tuple(issue["path"]) for issue in result["issues"]}
+        self.assertIn(
+            ("content", "sections", "businessRequirements", "acceptanceCriteria"),
+            paths,
+        )
+        self.assertIn(("content", "sections", "degradation"), paths)
+        self.assertIn(("content", "sections", "safetyBaseline"), paths)
+        self.assertNotIn(("content", "sections", "executiveSummary"), paths)
+
+    def test_keeps_an_ambiguous_union_when_no_schema_version_matches(self) -> None:
+        candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
+        draft = candidate["artifacts"][0]
+        draft["schemaVersion"] = 3
+
+        result = validate_runtime_artifact_draft(draft)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(
+            issue["code"] == "invalid_union" and issue["path"] == ["schemaVersion"]
+            for issue in result["issues"]
+        ))
+        self.assertFalse(any(
+            issue["code"] == "invalid_literal" and issue["path"] == ["schemaVersion"]
+            for issue in result["issues"]
+        ))
+
+    def test_keeps_an_ambiguous_union_when_no_token_type_matches(self) -> None:
+        candidate = copy.deepcopy(self.example)
+        candidate["artifacts"][0]["content"]["tokens"] = [{
+            "id": "token_bad",
+            "name": "Bad token",
+            "type": "bogus",
+            "value": 0,
+        }]
+
+        result = validate_runtime_result(candidate)
+
+        token_path = ["artifacts", 0, "content", "tokens", 0]
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(
+            issue["code"] == "invalid_union" and issue["path"] == token_path
+            for issue in result["issues"]
+        ))
+        self.assertFalse(any(
+            issue["code"] in {"invalid_enum_value", "invalid_literal"}
+            and issue["path"] == [*token_path, "type"]
+            for issue in result["issues"]
+        ))
+
     def test_runs_zod_graph_reference_refinements(self) -> None:
         candidate = copy.deepcopy(self.example)
         candidate["artifacts"][0]["content"]["nodes"][1]["parentId"] = "missing-parent"

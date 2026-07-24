@@ -10,6 +10,10 @@ const prdStructureSource = readFileSync(fileURLToPath(new URL(
   "../../../integrations/deerflow/skills/requirement-doc-template/references/structure.md",
   import.meta.url,
 )), "utf8");
+const workbenchSkillSource = readFileSync(fileURLToPath(new URL(
+  "../../../integrations/deerflow/skills/workbench/SKILL.md",
+  import.meta.url,
+)), "utf8");
 
 describe("runtimePrdResultGuidance", () => {
   it("routes new PRDs to the installed v2 reference without injecting sample business content", () => {
@@ -57,6 +61,17 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("端内渠道, 客户端, 消费者端, and 前端 do not prove APP or mini-program loading");
     expect(guidance).toContain("IDs globally unique across the document and every nested IR entity");
     expect(guidance).toContain("requirement/criterion references bidirectional");
+    expect(guidance).toContain("content.sections.businessRequirements.acceptanceCriteria");
+    expect(guidance).toContain("content.sections.businessRequirements.additionalSections");
+    expect(guidance).toContain("content.sections.degradation");
+    expect(guidance).toContain("content.sections.safetyBaseline");
+    expect(guidance).toContain("content.sections.businessRequirements also owns pageLinks, coreRules, and flowAndPages");
+    expect(guidance).toContain("Never put acceptanceCriteria or additionalSections directly under content.sections");
+    expect(guidance).toContain("never put degradation or safetyBaseline directly under content");
+    expect(workbenchSkillSource).toContain("content.sections.businessRequirements.acceptanceCriteria");
+    expect(workbenchSkillSource).toContain("content.sections.businessRequirements.additionalSections");
+    expect(workbenchSkillSource).toContain("content.sections.degradation");
+    expect(workbenchSkillSource).toContain("content.sections.safetyBaseline");
     expect(prdSafetyBaselineItems).toHaveLength(21);
     expect(prdStructureSource).toContain("Use the 21-row safety baseline table from the template");
     expect(prdStructureSource).toContain("new API: row 17 `是`");

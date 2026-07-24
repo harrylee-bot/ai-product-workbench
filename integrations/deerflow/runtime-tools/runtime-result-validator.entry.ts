@@ -75,12 +75,82 @@ async function main() {
     ok: false,
     candidateChecksum,
     artifactChecksums,
-    issues: parsed.error.issues.slice(0, MAX_ISSUES).map((issue): ValidationIssue => ({
-      code: issue.code,
-      path: issue.path,
-      message: issue.message,
-    })),
+    issues: actionableIssues(parsed.error.issues),
   });
+}
+
+function actionableIssues(rawIssues: readonly unknown[]): ValidationIssue[] {
+  const unique = new Map<string, ValidationIssue>();
+  for (const issue of rawIssues.flatMap(actionableIssue)) {
+    const key = JSON.stringify([issue.code, issue.path, issue.message]);
+    if (!unique.has(key)) unique.set(key, issue);
+    if (unique.size >= MAX_ISSUES) break;
+  }
+  return [...unique.values()];
+}
+
+function actionableIssue(rawIssue: unknown): ValidationIssue[] {
+  if (!isRecord(rawIssue)) return [];
+  const fallback = validationIssue(rawIssue);
+  if (rawIssue.code !== "invalid_union" || !Array.isArray(rawIssue.unionErrors)) {
+    return fallback ? [fallback] : [];
+  }
+
+  const alternative = uniquelyDiscriminatedAlternative(rawIssue);
+  return alternative
+    ? actionableIssues(alternative)
+    : (fallback ? [fallback] : []);
+}
+
+function uniquelyDiscriminatedAlternative(
+  unionIssue: Record<string, unknown>,
+): readonly unknown[] | null {
+  if (!Array.isArray(unionIssue.path) || !Array.isArray(unionIssue.unionErrors)) return null;
+  const alternatives = unionIssue.unionErrors.map((error) => (
+    isRecord(error) && Array.isArray(error.issues) ? error.issues : []
+  ));
+  const matching = alternatives.filter((issues) => (
+    directDiscriminantMismatchCount(unionIssue.path as unknown[], issues) === 0
+  ));
+  return matching.length === 1 ? matching[0] ?? null : null;
+}
+
+function directDiscriminantMismatchCount(
+  unionPath: readonly unknown[],
+  rawIssues: readonly unknown[],
+): number {
+  return rawIssues.filter((rawIssue) => {
+    if (
+      !isRecord(rawIssue)
+      || !["invalid_enum_value", "invalid_literal", "invalid_type", "invalid_union_discriminator"].includes(String(rawIssue.code))
+      || !Array.isArray(rawIssue.path)
+    ) {
+      return false;
+    }
+    if (rawIssue.path.length !== unionPath.length + 1) return false;
+    if (!unionPath.every((segment, index) => rawIssue.path?.[index] === segment)) return false;
+    return ["kind", "protocol", "schemaVersion", "type"].includes(String(rawIssue.path.at(-1)));
+  }).length;
+}
+
+function validationIssue(rawIssue: Record<string, unknown>): ValidationIssue | null {
+  if (
+    typeof rawIssue.code !== "string"
+    || typeof rawIssue.message !== "string"
+    || !Array.isArray(rawIssue.path)
+    || rawIssue.path.some((segment) => typeof segment !== "string" && typeof segment !== "number")
+  ) {
+    return null;
+  }
+  return {
+    code: rawIssue.code,
+    path: rawIssue.path as Array<string | number>,
+    message: rawIssue.message,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 async function readFileHandle() {
