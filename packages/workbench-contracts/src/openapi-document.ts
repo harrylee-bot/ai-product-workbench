@@ -83,7 +83,7 @@ function buildSchemaCatalog() {
     ...schemasFrom(citationSchemas),
     ...schemasFrom(designSystemSchemas),
     ...schemasFrom(designPresetSchemas),
-    ...schemasFrom(prdSchemas),
+    ...schemasFrom(prdSchemas, (name) => !name.startsWith("runtimePrdDocument")),
     ...schemasFrom(prototypeSchemas),
     ...schemasFrom(prototypePatchSchemas),
     ...schemasFrom(artifactSchemas, (name) => ![
@@ -262,6 +262,7 @@ const reviewedEffectSchemas: readonly ReviewedEffect[] = [
   { label: "PrdInlineMarks.unique", schema: prdSchemas.prdInlineMarksSchema, description: "Inline marks are unique; enforced by the runtime Zod contract." },
   { label: "PrdDocumentV1.semanticGraph", schema: prdSchemas.prdDocumentV1Schema, description: "Legacy PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract." },
   { label: "PrdDocumentV2.templateAndSemanticGraph", schema: prdSchemas.prdDocumentV2Schema, description: "PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract." },
+  { label: "RuntimePrdDocumentV2.strictSafetyEvidence", schema: prdSchemas.runtimePrdDocumentV2Schema, description: "New Runtime PRD v2 output applies the current affirmative safety-evidence semantics without granting compatibility to historically persisted row-12 classifications." },
   { label: "UpdateProject.nonEmpty", schema: projectSchemas.updateProjectRequestSchema, description: "At least one mutable Project field is required; enforced by the runtime Zod contract." },
   { label: "ProjectReleaseBoardNode.artifactReference", schema: releaseSchemas.projectReleaseBoardNodeSchema, description: "A release Board node pins both artifact and version ids or neither; enforced by the runtime Zod contract." },
   { label: "ProjectReleaseBoardSnapshot.graph", schema: releaseSchemas.projectReleaseBoardSnapshotSchema, description: "Release Board node and edge ids are unique and every edge endpoint exists; enforced by the runtime Zod contract." },
@@ -477,6 +478,29 @@ function normalizeVersionedPrdUnions(document: unknown) {
     "#/components/schemas/CreatePrototypeArtifactVersionRequest",
     "#/components/schemas/CreatePrdV2ArtifactVersionRequest",
   ]);
+
+  const runtimePrdV2 = schemas.RuntimeArtifactDraftPrdV2;
+  const runtimePrdV2Properties = runtimePrdV2?.properties as Record<string, unknown> | undefined;
+  const runtimePrdV2Content = runtimePrdV2Properties?.content as Record<string, unknown> | undefined;
+  const canonicalPrdV2 = schemas.PrdDocumentV2;
+  const expectedPrdV2Ref = "#/components/schemas/PrdDocumentV2";
+  if (!runtimePrdV2Properties || !runtimePrdV2Content || !canonicalPrdV2) {
+    throw new Error("Generated OpenAPI document is missing the Runtime PRD v2 content schema");
+  }
+  if (runtimePrdV2Content.$ref !== expectedPrdV2Ref) {
+    const withoutDescription = (schema: Record<string, unknown>) => {
+      const normalized = { ...schema };
+      delete normalized.description;
+      return normalized;
+    };
+    if (
+      JSON.stringify(withoutDescription(runtimePrdV2Content))
+      !== JSON.stringify(withoutDescription(canonicalPrdV2))
+    ) {
+      throw new Error("Runtime PRD v2 OpenAPI structure diverged from persisted PrdDocumentV2");
+    }
+    runtimePrdV2Properties.content = { $ref: expectedPrdV2Ref };
+  }
 
   const runtimeDraft = schemas.RuntimeArtifactDraft;
   const runtimeEntries = Array.isArray(runtimeDraft?.oneOf)

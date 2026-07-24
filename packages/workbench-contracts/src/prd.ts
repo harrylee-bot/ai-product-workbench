@@ -770,7 +770,7 @@ const prdChannelEvidenceRules: Record<typeof prdChannelKinds[number], PrdV2Evide
   },
 };
 
-export const prdDocumentV2Schema = z.object({
+const prdDocumentV2BaseSchema = z.object({
   protocol: z.literal("workbench.prd.v2"),
   documentId: artifactIrIdSchema,
   title: z.string().min(1).max(240),
@@ -830,7 +830,13 @@ export const prdDocumentV2Schema = z.object({
         .max(prdSafetyBaselineItems.length),
     }).strict(),
   }).strict(),
-}).strict().superRefine((document, context) => {
+}).strict();
+
+function refinePrdDocumentV2(
+  document: z.infer<typeof prdDocumentV2BaseSchema>,
+  context: z.RefinementCtx,
+  { allowLegacyAppSurfaceEvidence }: { allowLegacyAppSurfaceEvidence: boolean },
+): void {
   const expectedTitle = `${document.cover.workOrderName}需求说明书`;
   if (document.title !== expectedTitle || document.cover.title !== expectedTitle) {
     addIssue(context, ["cover", "title"], "document title and cover title must equal <workOrderName>需求说明书");
@@ -932,7 +938,10 @@ export const prdDocumentV2Schema = z.object({
       }
       continue;
     }
-    if (!hasPersistedAffirmativeEvidence(safetyEvidenceSegments, row.sequence, evidenceRule)) {
+    const hasEvidence = allowLegacyAppSurfaceEvidence
+      ? hasPersistedAffirmativeEvidence(safetyEvidenceSegments, row.sequence, evidenceRule)
+      : hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule);
+    if (!hasEvidence) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 是 or 否 requires affirmative semantic evidence in the requirement body");
     }
     if (row.applicability === "否" && !safetyEvidenceSegments.some((segment) => (
@@ -1171,6 +1180,14 @@ export const prdDocumentV2Schema = z.object({
       addIssue(context, ["sections", "blocks", blockIndex], "PRD must not contain a standalone interface or API chapter");
     }
   }
+}
+
+export const prdDocumentV2Schema = prdDocumentV2BaseSchema.superRefine((document, context) => {
+  refinePrdDocumentV2(document, context, { allowLegacyAppSurfaceEvidence: true });
+});
+
+export const runtimePrdDocumentV2Schema = prdDocumentV2BaseSchema.superRefine((document, context) => {
+  refinePrdDocumentV2(document, context, { allowLegacyAppSurfaceEvidence: false });
 });
 
 function inlinePlainText(inlines: readonly z.infer<typeof prdInlineSchema>[]) {
@@ -1334,22 +1351,6 @@ function isSemanticChannelTable(block: z.infer<typeof prdTableBlockSchema>): boo
 export type PrdDocumentV1 = z.infer<typeof prdDocumentV1Schema>;
 export type PrdDocumentV2 = z.infer<typeof prdDocumentV2Schema>;
 export type PrdDocument = PrdDocumentV1 | PrdDocumentV2;
-
-export const runtimePrdDocumentV2Schema: z.ZodType<PrdDocumentV2, z.ZodTypeDef, unknown> = prdDocumentV2Schema.superRefine((document, context) => {
-  const row = document.sections.safetyBaseline.rows[11];
-  if (!row || row.applicability === "不涉及") return;
-  const evidenceSegments = requirementEvidenceSegments(document);
-  if (
-    !hasAffirmativeEvidence(evidenceSegments, prdV2SafetyEvidenceRules[12])
-    && evidenceSegments.some(hasLegacyAffirmativeAppSurfaceEvidence)
-  ) {
-    addIssue(
-      context,
-      ["sections", "safetyBaseline", "rows", 11, "applicability"],
-      "a safety row marked 是 or 否 requires affirmative semantic evidence in the requirement body",
-    );
-  }
-});
 
 export const prdDocumentSchema: z.ZodType<PrdDocument, z.ZodTypeDef, unknown> = z.union([
   prdDocumentV1Schema,
