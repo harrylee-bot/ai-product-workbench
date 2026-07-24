@@ -214,7 +214,7 @@ const gatewayContextPatch = patchManifest.gatewaySources[0];
 assert(
   gatewayContextPatch.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34"
-    && gatewayContextPatch.patchedSha256 === "502363759cfa83b9bc4011da39bdde02b1df53e2aa883b735e7e33605f57ae82",
+    && gatewayContextPatch.patchedSha256 === "46c8c98fbdf94876603012d922c91ee7a2ece03c07a6ccf30d63a43086e1fdcb",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -234,6 +234,15 @@ assert(
       replacement.insertion.includes("sanitized_request_config")
     )),
   "DeerFlow Gateway patch must gate and redact request-scoped Workbench context",
+);
+const gatewayContextPatchText = JSON.stringify(gatewayContextPatch.replacements ?? []);
+assert(
+  gatewayContextPatchText.includes('sanitized.pop(\\"recursion_limit\\", None)')
+    && gatewayContextPatchText.includes("_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100")
+    && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200")
+    && gatewayContextPatchText.includes("_apply_workbench_lead_recursion_limit")
+    && gatewayContextPatchText.includes('requestedArtifactKinds\\") == [\\"prd\\"]'),
+  "DeerFlow Gateway patch must grant the bounded 200-step budget only to trusted PRD-only Runs",
 );
 assert(
   patchManifest.agent?.insertion?.includes("WorkbenchToolScopeMiddleware(")
@@ -481,7 +490,9 @@ assert(
   patchRequestContextTestSource.includes("test_only_an_authenticated_internal_caller_can_deliver_workbench_channels")
     && patchRequestContextTestSource.includes("test_untrusted_context_is_fail_closed_and_persistence_config_is_redacted")
     && patchRequestContextTestSource.includes("test_knowledge_visibility_requires_the_exact_true_flag_and_capability")
-    && patchRequestContextTestSource.includes("test_malformed_scope_does_not_create_a_runtime_secret_channel"),
+    && patchRequestContextTestSource.includes("test_malformed_scope_does_not_create_a_runtime_secret_channel")
+    && patchRequestContextTestSource.includes("test_exact_trusted_prd_scope_receives_the_named_recursion_budget")
+    && patchRequestContextTestSource.includes("test_non_prd_malformed_untrusted_and_forged_fields_keep_default_budget"),
   "DeerFlow request-context contract must cover caller auth, redaction, and malformed scope",
 );
 assert(

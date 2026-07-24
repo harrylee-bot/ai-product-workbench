@@ -35,12 +35,22 @@
     {
       "path": "app/gateway/services.py",
       "upstreamSha256": "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34",
-      "patchedSha256": "502363759cfa83b9bc4011da39bdde02b1df53e2aa883b735e7e33605f57ae82",
+      "patchedSha256": "46c8c98fbdf94876603012d922c91ee7a2ece03c07a6ccf30d63a43086e1fdcb",
       "replacements": [
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
           "position": "before",
           "insertion": "_WORKBENCH_CONTEXT_KEYS: frozenset[str] = frozenset({\"workbench\", \"secrets\"})\n_WORKBENCH_SECRET_KEYS: frozenset[str] = frozenset(\n    {\n        \"WORKBENCH_KNOWLEDGE_CAPABILITY\",\n        \"WORKBENCH_CANVAS_CAPABILITY\",\n    }\n)\n_WORKBENCH_REQUESTED_ARTIFACT_KINDS: frozenset[str] = frozenset(\n    {\"prd\", \"prototype\", \"image\", \"code\", \"document\", \"data\"}\n)\n_WORKBENCH_SCOPE_KEYS: frozenset[str] = frozenset(\n    {\n        \"runId\",\n        \"runtimeAttemptId\",\n        \"requestedArtifactKinds\",\n        \"knowledgeEnabled\",\n        \"canvasTools\",\n        \"prototypePatchBaselines\",\n    }\n)\n\n\ndef _is_trusted_internal_caller(request: Request | None) -> bool:\n    user = getattr(getattr(request, \"state\", None), \"user\", None)\n    return getattr(user, \"system_role\", None) == INTERNAL_SYSTEM_ROLE\n\n\ndef _strip_workbench_channels(value: Any) -> Any:\n    if not isinstance(value, Mapping):\n        return value\n    sanitized = dict(value)\n    for key in (*_WORKBENCH_CONTEXT_KEYS, *_WORKBENCH_SECRET_KEYS):\n        sanitized.pop(key, None)\n    return sanitized\n\n\ndef _sanitize_run_config(request_config: dict[str, Any] | None) -> dict[str, Any] | None:\n    \"\"\"Remove reserved Workbench channels before config persistence or execution.\"\"\"\n    if request_config is None:\n        return None\n    sanitized = dict(request_config)\n    for container_name in (\"configurable\", \"context\"):\n        if container_name in sanitized:\n            sanitized[container_name] = _strip_workbench_channels(sanitized[container_name])\n    for key in (*_WORKBENCH_CONTEXT_KEYS, *_WORKBENCH_SECRET_KEYS):\n        sanitized.pop(key, None)\n    return sanitized\n\n\ndef _normalize_workbench_scope(value: Any) -> dict[str, Any] | None:\n    if not isinstance(value, Mapping):\n        return None\n    if not set(value).issubset(_WORKBENCH_SCOPE_KEYS):\n        return None\n    run_id = value.get(\"runId\")\n    runtime_attempt_id = value.get(\"runtimeAttemptId\")\n    requested_artifact_kinds = value.get(\"requestedArtifactKinds\")\n    knowledge_enabled = value.get(\"knowledgeEnabled\")\n    if (\n        not isinstance(run_id, str)\n        or not run_id\n        or not isinstance(runtime_attempt_id, str)\n        or not runtime_attempt_id\n        or (knowledge_enabled is not None and knowledge_enabled is not True)\n        or (\n            requested_artifact_kinds is not None\n            and (\n                not isinstance(requested_artifact_kinds, list)\n                or len(requested_artifact_kinds) > len(_WORKBENCH_REQUESTED_ARTIFACT_KINDS)\n                or any(\n                    not isinstance(kind, str)\n                    or kind not in _WORKBENCH_REQUESTED_ARTIFACT_KINDS\n                    for kind in requested_artifact_kinds\n                )\n                or len(set(requested_artifact_kinds)) != len(requested_artifact_kinds)\n            )\n        )\n    ):\n        return None\n    return {key: value[key] for key in _WORKBENCH_SCOPE_KEYS if key in value}\n\n\ndef _normalize_workbench_secrets(value: Any) -> dict[str, str]:\n    if not isinstance(value, Mapping):\n        return {}\n    return {\n        key: secret\n        for key, secret in value.items()\n        if key in _WORKBENCH_SECRET_KEYS and isinstance(secret, str) and secret\n    }\n\n\n"
+        },
+        {
+          "anchor": "    sanitized = dict(request_config)\n    for container_name in (\"configurable\", \"context\"):\n",
+          "position": "replace",
+          "insertion": "    sanitized = dict(request_config)\n    sanitized.pop(\"recursion_limit\", None)\n    for container_name in (\"configurable\", \"context\"):\n"
+        },
+        {
+          "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
+          "position": "before",
+          "insertion": "_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100\n_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200\n\n\ndef _apply_workbench_lead_recursion_limit(\n    config: dict[str, Any],\n    *,\n    trusted_internal_caller: bool,\n) -> None:\n    normalized_scope = None\n    runtime_context = config.get(\"context\")\n    if trusted_internal_caller is True and isinstance(runtime_context, Mapping):\n        normalized_scope = _normalize_workbench_scope(runtime_context.get(\"workbench\"))\n    config[\"recursion_limit\"] = (\n        _WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT\n        if normalized_scope is not None\n        and normalized_scope.get(\"requestedArtifactKinds\") == [\"prd\"]\n        else _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT\n    )\n\n\n"
         },
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
@@ -54,8 +64,8 @@
         },
         {
           "anchor": "    config: dict[str, Any] = {\"recursion_limit\": 100}\n",
-          "position": "before",
-          "insertion": "    request_config = _sanitize_run_config(request_config)\n"
+          "position": "replace",
+          "insertion": "    request_config = _sanitize_run_config(request_config)\n    config: dict[str, Any] = {\n        \"recursion_limit\": _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT,\n    }\n"
         },
         {
           "anchor": "    owner_context_token = set_current_user(SimpleNamespace(id=owner_user_id)) if owner_user_id else None\n",
@@ -75,7 +85,7 @@
         {
           "anchor": "        merge_run_context_overrides(config, getattr(body, \"context\", None))\n",
           "position": "replace",
-          "insertion": "        merge_run_context_overrides(\n            config,\n            getattr(body, \"context\", None),\n            allow_workbench_context=trusted_internal_caller,\n        )\n"
+          "insertion": "        merge_run_context_overrides(\n            config,\n            getattr(body, \"context\", None),\n            allow_workbench_context=trusted_internal_caller,\n        )\n        _apply_workbench_lead_recursion_limit(\n            config,\n            trusted_internal_caller=trusted_internal_caller,\n        )\n"
         }
       ]
     }
@@ -87,6 +97,6 @@
     "sha256": "ae23d1040f398a41c23b6270e83ad981cd38b80cbcd031d13f55a10a03f3cff2"
   },
   "requestContextTest": {
-    "sha256": "c75b5d10b7a4e2b7c4dc6f7c2f7adb0e5546b6d6cda82ef02dbcb21741ec3e32"
+    "sha256": "a4cb17db889064abe9a6360e24aca1e861cfd9c99ee5b35298e0dd84beae2fe1"
   }
 }
