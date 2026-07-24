@@ -371,6 +371,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
 
     let stream: AsyncGenerator<{ id?: string; event: string; data: unknown }>;
     let submissionMayHaveBeenAccepted = false;
+    const streamIdleReconnect = Math.min(
+      30_000,
+      Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
+    );
     if (externalRunId) {
       stream = client.runs.joinStream(execution.externalThreadId, externalRunId, {
         signal,
@@ -379,10 +383,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           ? submission.lastExternalEventId ?? undefined
           : undefined,
         streamMode: this.streamMode(),
-        streamIdleReconnect: Math.min(
-          30_000,
-          Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
-        ),
+        streamIdleReconnect,
       });
     } else {
       if (submission.mode === "reconcile") {
@@ -411,6 +412,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         {
           ...runRequest,
           signal,
+          onDisconnect: "continue",
+          streamIdleReconnect,
           onRunCreated: ({ run_id }) => registerExternalRun(run_id),
         },
       );

@@ -1420,6 +1420,7 @@ describe("DeerFlow runtime adapter", () => {
     const submittedBody = JSON.parse(String(streamRequest?.init.body));
     expect(submittedBody).toMatchObject({
       assistant_id: "lead_agent",
+      on_disconnect: "continue",
       stream_resumable: true,
       metadata: {
         workbench_runtime_attempt_id: "attempt_1",
@@ -3237,6 +3238,76 @@ describe("DeerFlow runtime adapter", () => {
       expect.any(Array),
     );
   });
+
+  it("keeps a submitted run alive while the initial stream reconnects after idle", async () => {
+    const requests: Array<{ url: URL; init: RequestInit }> = [];
+    let submittedBody: Record<string, unknown> | null = null;
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      requests.push({ url, init });
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        submittedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        const initialState = JSON.stringify({
+          messages: [{ type: "human", content: "current turn" }],
+        });
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode([
+              "id: event-before-idle",
+              "event: values",
+              `data: ${initialState}`,
+              "",
+              "",
+            ].join("\n")));
+          },
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "text/event-stream",
+            "content-location": "/threads/deer_thread_1/runs/external_run_idle",
+            location: "/threads/deer_thread_1/runs/external_run_idle/stream",
+          },
+        });
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_idle/stream") {
+        return successfulRuntimeResponse({
+          runId: "external_run_idle",
+          eventId: "event-after-idle",
+          includeContentLocation: false,
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter({
+      ...workerConfig(),
+      deerFlowIdleTimeoutMs: 5_000,
+    }, { getObject: vi.fn() } as never);
+
+    try {
+      const result = await adapter.execute(execution(), runtimeObserver);
+
+      expect(result).toMatchObject({ protocol: "workbench.runtime.result.v1", message: "done" });
+      expect(submittedBody).toMatchObject({
+        on_disconnect: "continue",
+        stream_resumable: true,
+      });
+      expect(requests.filter((request) => request.init.method === "POST")).toHaveLength(1);
+      const reconnect = requests.find((request) => (
+        request.url.pathname.endsWith("/external_run_idle/stream")
+      ));
+      expect(reconnect?.init.method).toBe("GET");
+      expect(new Headers(reconnect?.init.headers).get("Last-Event-ID")).toBe("event-before-idle");
+      expect(runtimeObserver.onExternalRunCreated).toHaveBeenCalledWith("external_run_idle");
+    } finally {
+      random.mockRestore();
+    }
+  }, 10_000);
 
   it("recovers a missing externalRunId by attempt metadata and joins without another POST", async () => {
     const requests: Array<{ url: URL; init: RequestInit }> = [];
