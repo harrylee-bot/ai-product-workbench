@@ -331,7 +331,22 @@ test("rejects unrelated task-domain content in the production smoke PRD", () => 
     (error) => error?.code === "PRD_SMOKE_UNRELATED_CONTENT",
   );
 
-  for (const phrase of ["任务页面", "任务执行入口", "任务状态", "任务权限", "任务记录"]) {
+  for (const phrase of [
+    "任务页面",
+    "任务执行入口",
+    "任务状态",
+    "任务权限",
+    "任务记录",
+    "通知任务发送正常。系统更新任务状态。",
+    "通知任务发送正常！系统更新任务状态。",
+    "通知任务发送正常？系统更新任务状态。",
+    "通知任务发送正常；系统更新任务状态。",
+    "通知任务发送正常;系统更新任务状态。",
+    "通知任务发送正常\n系统更新任务状态。",
+    "通知任务" + "相关说明".repeat(9) + "任务状态",
+    "通知任务正常，产品工作台任务状态可见。",
+    "通知任务正常，打开任务页面查看任务状态。",
+  ]) {
     const nearSynonym = orderNotificationPrdFixture();
     nearSynonym.sections.introduction.background.blocks[0].content[0].text += ` ${phrase}`;
     assert.throws(
@@ -347,11 +362,40 @@ test("rejects unrelated task-domain content in the production smoke PRD", () => 
     () => assertPrdSmokeBusinessSemantics(diagramGroupDrift),
     (error) => error?.code === "PRD_SMOKE_UNRELATED_CONTENT",
   );
+
+  const crossBlockContext = orderNotificationPrdFixture();
+  crossBlockContext.sections.introduction.background.blocks.push(
+    {
+      id: "completed-notification-task",
+      type: "paragraph",
+      content: [{ type: "text", text: "同一通知任务已完成", marks: [] }],
+    },
+    {
+      id: "independent-task-status",
+      type: "paragraph",
+      content: [{ type: "text", text: "系统更新任务状态", marks: [] }],
+    },
+  );
+  assert.throws(
+    () => assertPrdSmokeBusinessSemantics(crossBlockContext),
+    (error) => error?.code === "PRD_SMOKE_UNRELATED_CONTENT",
+  );
 });
 
 test("allows task wording that remains grounded in notification delivery", () => {
   const document = orderNotificationPrdFixture();
-  document.sections.degradation.content[0].text += " 通知发送任务由队列调度，失败后生成重试任务。";
+  document.sections.degradation.content[0].text +=
+    " 通知发送任务由队列调度，发送任务处理失败后记录原因，重试任务状态可查询。";
+  document.sections.businessRequirements.acceptanceCriteria.blocks.push({
+    id: "notification-task-state-consistency",
+    type: "acceptanceCriterion",
+    requirementIds: [
+      document.sections.businessRequirements.acceptanceCriteria.blocks[0].requirementIds[0],
+    ],
+    given: [{ type: "text", text: "同一通知任务存在结果记录和重试判断", marks: [] }],
+    when: [{ type: "text", text: "系统查询或更新任务状态", marks: [] }],
+    then: [{ type: "text", text: "状态表达保持一致，不出现互斥状态冲突。", marks: [] }],
+  });
 
   assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
 });

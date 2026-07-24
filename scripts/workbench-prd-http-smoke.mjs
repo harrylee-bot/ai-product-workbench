@@ -33,7 +33,23 @@ const smokeExplicitConstraintRequirements = [
   { label: "沿用订单中心既有分类", pattern: /(?:沿用|保持)[^。！？；;\n]{0,12}(?:订单中心)?(?:现有|既有|原有)[^。！？；;\n]{0,8}(?:状态)?分类/u },
   { label: "不新增或枚举订单分类", pattern: /(?:不新增|不枚举|不列举).{0,12}(?:状态)?分类|(?:状态)?分类.{0,8}(?:不新增|不枚举|不列举)/u },
 ];
-const unrelatedSmokeBusinessPattern = /产品工作台|当前项目|提交区|运行状态区|任务(?:页面|处理|执行入口|状态|权限|记录|编号|能力|结果|闭环)|(?:发起|提交|创建|查询)任务/u;
+const unrelatedSmokeBusinessPattern = /产品工作台|当前项目|提交区|运行状态区|任务(?:页面|处理|执行入口|状态|权限|记录|编号|能力|结果|闭环)|(?:发起|提交|创建|查询)任务/gu;
+const contextualSmokeTaskTermPattern = /^任务(?:处理|状态)$/u;
+const groundedNotificationTaskPattern = /(?:通知|发送|重试)任务/u;
+const smokeVisibleTextKeys = new Set([
+  "actor",
+  "description",
+  "group",
+  "label",
+  "notes",
+  "outcome",
+  "remarks",
+  "statement",
+  "successMetric",
+  "text",
+  "title",
+  "trigger",
+]);
 const smokeSectionThemePattern = /订单|通知/u;
 const smokeDiagramThemePattern = /订单|通知|发送/u;
 const smokeDegradationTopicPattern = /通知|发送/u;
@@ -753,7 +769,11 @@ export function assertPrdSmokeBusinessSemantics(document) {
     }
   }
 
-  const unrelatedTerm = visibleText.match(unrelatedSmokeBusinessPattern)?.[0];
+  const unrelatedTerm = unrelatedSmokeBusinessSegments({
+    businessRequirements,
+    degradation,
+    introduction,
+  }).map(unrelatedSmokeBusinessViolation).find(Boolean);
   if (unrelatedTerm) {
     throw smokeError(
       "PRD_SMOKE_UNRELATED_CONTENT",
@@ -969,29 +989,80 @@ function negatedDefaultContextIsAllowed(precedingContext) {
   return !smokeNegatedDefaultPrefixConflictPattern.test(prefix);
 }
 
+function unrelatedSmokeBusinessViolation(value) {
+  for (const match of value.matchAll(unrelatedSmokeBusinessPattern)) {
+    const term = match[0];
+    if (
+      contextualSmokeTaskTermPattern.test(term)
+      && notificationTaskContextIsGrounded(value, match.index ?? 0, term.length)
+    ) continue;
+    return term;
+  }
+  return undefined;
+}
+
+function unrelatedSmokeBusinessSegments(value) {
+  const segments = [];
+  const inlineTypes = new Set(["citation", "link", "reference", "text"]);
+  const visit = (current) => {
+    if (Array.isArray(current)) {
+      if (
+        current.length > 0
+        && current.every((item) => (
+          item
+          && typeof item === "object"
+          && inlineTypes.has(item.type)
+        ))
+      ) {
+        const text = inlinePlainText(current);
+        if (text) segments.push(text);
+        return;
+      }
+      for (const item of current) visit(item);
+      return;
+    }
+    if (!current || typeof current !== "object") return;
+    if (current.type === "acceptanceCriterion") {
+      const text = ["given", "when", "then"]
+        .map((key) => inlinePlainText(current[key]))
+        .filter(Boolean)
+        .join(" ");
+      if (text) segments.push(text);
+      return;
+    }
+    for (const [key, item] of Object.entries(current)) {
+      if (smokeVisibleTextKeys.has(key) && typeof item === "string") segments.push(item);
+      else visit(item);
+    }
+  };
+  visit(value);
+  return segments;
+}
+
+function notificationTaskContextIsGrounded(value, matchIndex, matchLength) {
+  const isBoundary = (character) => /[。！？；;\n]/u.test(character);
+  let clauseStart = matchIndex;
+  let clauseEnd = matchIndex + matchLength;
+  while (clauseStart > 0 && !isBoundary(value[clauseStart - 1])) clauseStart -= 1;
+  while (clauseEnd < value.length && !isBoundary(value[clauseEnd])) clauseEnd += 1;
+  const relativeIndex = matchIndex - clauseStart;
+  const clause = value.slice(clauseStart, clauseEnd);
+  const context = clause.slice(
+    Math.max(0, relativeIndex - 32),
+    Math.min(clause.length, relativeIndex + matchLength + 32),
+  );
+  return groundedNotificationTaskPattern.test(context);
+}
+
 function visibleTextSegments(value) {
   const segments = [];
-  const visibleKeys = new Set([
-    "actor",
-    "description",
-    "group",
-    "label",
-    "notes",
-    "outcome",
-    "remarks",
-    "statement",
-    "successMetric",
-    "text",
-    "title",
-    "trigger",
-  ]);
   const visit = (current) => {
     const fragments = [];
     if (Array.isArray(current)) {
       for (const item of current) fragments.push(...visit(item));
     } else if (current && typeof current === "object") {
       for (const [key, item] of Object.entries(current)) {
-        if (visibleKeys.has(key) && typeof item === "string") fragments.push(item);
+        if (smokeVisibleTextKeys.has(key) && typeof item === "string") fragments.push(item);
         else fragments.push(...visit(item));
       }
     }
