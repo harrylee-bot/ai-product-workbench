@@ -246,6 +246,9 @@ When producing typed PRD rows:
 - For `是` or `否`, make `remarks` describe evidence or remediation for that same canonical row only.
 
 Adjust `是否涉及` conservatively:
+- construction, development, implementation, modification, or upgrade of a function, page, control, flow, state behavior, or business capability: row 1 `是`
+- row 1 never uses `否`; when it is `是`, its remarks must name the concrete changed function, page, interface, or logic
+- row 1 may be `不涉及` only when the requirement body explicitly states there is no function, page, interface, or logic change; reusing or not adding a default, setting, field, status, or category only narrows scope and is not global no-change evidence
 - public/user-facing page: row 2 `是`
 - admin configured content shown on front-end and subject to review: row 10 `是`
 - new API: row 17 `是`

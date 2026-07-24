@@ -627,10 +627,54 @@ function hasAffirmativeAppSurfaceEvidence(segment: string): boolean {
   ));
 }
 
+const prdV2FunctionalChangePositivePattern = /(?:新增|增加|新建|新开发|开发(?!人员|者|团队|同学|工程师)|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)?)|(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,20}(?:新增|增加|新建|修改|调整|改变|变更|变动|改造|升级)|(?:应|需|需要|必须|本次|本需求|本项目|目标是|计划).{0,12}(?:支持|提供|允许|启用|开放).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机))/u;
+const prdV2FunctionalChangeNegativePattern = /(?:不涉及|无需|没有|不存在|无).{0,20}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,16}(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级)|(?:不|未|无需|不再|尚未)(?:发生|涉及|包含|进行|需要)?(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机))|(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,16}(?:不|未|无|无需)(?:发生|涉及|包含|进行)?(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级)/u;
+const prdV2FunctionalChangeGlobalScopePattern = /(?:任何(?:功能|页面|接口|逻辑|能力)|功能接口|功能逻辑|业务逻辑|(?:功能|页面|接口|逻辑|能力).{0,16}(?:功能|页面|接口|逻辑|能力))/u;
+const prdV2FunctionalChangeBroadNoChangePattern = /(?:不涉及|没有|不存在|无|未发生|不会发生|不进行|无需进行).{0,48}(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,24}(?:变化|变更|变动|改动|调整|改造)|(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,32}(?:均|都|全部)?(?:没有|不存在|无|未发生|不会发生).{0,8}(?:变化|变更|变动|改动|调整|改造)|(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,32}(?:均|都|全部)?(?:保持|维持)(?:现状|原状|不变)/u;
+const prdV2FunctionalChangeExhaustiveNoChangePattern = /(?:不|未|无需)(?=[^。！？；;\n]{0,56}(?:新增|新建|建设|开发|搭建|构建|实现))(?=[^。！？；;\n]{0,56}(?:修改|调整|改变|变更|变动|改造|升级))[^。！？；;\n]{0,56}(?:任何(?:功能|页面|接口|逻辑|能力)|功能接口|功能逻辑|业务逻辑)/u;
+const prdV2FunctionalChangeClauseDelimiterPattern = /(?:[；;]|[，,]?(?:但(?:是)?|而(?:是)?|同时|并且|且))/u;
+const prdV2FunctionalChangeIndependentActionDelimiterPattern = /[，,](?=(?:(?:本次|本需求|本项目|另(?:外)?|随后|将|会|需|需要|计划)\s*)*(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级))/u;
+const prdV2FunctionalChangeCommaDelimiterPattern = /[，,]/u;
+
+function functionalChangeEvidenceAssertions(segment: string): string[] {
+  return segment
+    .split(prdV2FunctionalChangeClauseDelimiterPattern)
+    .flatMap((clause) => clause.split(prdV2FunctionalChangeIndependentActionDelimiterPattern))
+    .flatMap((clause) => (
+      hasExplicitNoFunctionalChangeAssertion(clause)
+        ? [clause]
+        : clause.split(prdV2FunctionalChangeCommaDelimiterPattern)
+    ))
+    .map((assertion) => assertion.trim())
+    .filter(Boolean);
+}
+
+function hasExplicitNoFunctionalChangeAssertion(assertion: string): boolean {
+  return prdV2FunctionalChangeGlobalScopePattern.test(assertion) && (
+    prdV2FunctionalChangeBroadNoChangePattern.test(assertion)
+    || prdV2FunctionalChangeExhaustiveNoChangePattern.test(assertion)
+  );
+}
+
+function hasAffirmativeFunctionalChangeEvidence(segment: string): boolean {
+  return functionalChangeEvidenceAssertions(segment).some((assertion) => (
+    prdV2FunctionalChangePositivePattern.test(assertion)
+    && !prdV2FunctionalChangeNegativePattern.test(assertion)
+    && !hasExplicitNoFunctionalChangeAssertion(assertion)
+  ));
+}
+
+function hasExplicitNoFunctionalChangeEvidence(segments: readonly string[]): boolean {
+  return segments.some((segment) => (
+    functionalChangeEvidenceAssertions(segment).some(hasExplicitNoFunctionalChangeAssertion)
+  ));
+}
+
 const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
   1: {
-    positive: /(?:新增|新开发|修改|调整|变更|改造).{0,20}(?:功能|接口|逻辑|页面|能力)|(?:功能|接口|逻辑|页面|能力).{0,20}(?:新增|修改|调整|变更|改造)/u,
-    negative: /(?:不涉及|无需).{0,20}(?:功能|接口|逻辑|页面|能力).{0,12}(?:新增|修改|调整|变更|改造)|(?:不涉及|无需|未|不)(?:新增|修改|调整|变更|改造)/u,
+    positive: prdV2FunctionalChangePositivePattern,
+    negative: prdV2FunctionalChangeNegativePattern,
+    isAffirmative: hasAffirmativeFunctionalChangeEvidence,
   },
   2: {
     positive: /(?:面向|开放给|提供给)\s*(?:(?:所有|全部|全体|已登录|未登录)\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|支持\s*(?:已登录\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)(?:可|可以|能够|能|通过|从|在|访问|使用|查看|进入|配置)|(?:目标用户|适用用户|服务对象)\s*(?:是|为|包括|包含|[:：])\s*(?:(?:所有|全部|全体|已登录|未登录)\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|(?:公众用户|游客|未登录用户|消费者|个人用户|C端用户)(?!可(?:以)?[由被]|能(?:够)?[由被])(?:(?:可|可以|能够|能|通过|从|在).{0,16}(?:访问|使用|查看|进入|配置)|(?:访问|使用|查看|进入|配置))/iu,
@@ -835,7 +879,13 @@ const prdDocumentV2BaseSchema = z.object({
 function refinePrdDocumentV2(
   document: z.infer<typeof prdDocumentV2BaseSchema>,
   context: z.RefinementCtx,
-  { allowLegacyAppSurfaceEvidence }: { allowLegacyAppSurfaceEvidence: boolean },
+  {
+    allowLegacyAppSurfaceEvidence,
+    enforceRuntimeRowOneSemantics,
+  }: {
+    allowLegacyAppSurfaceEvidence: boolean;
+    enforceRuntimeRowOneSemantics: boolean;
+  },
 ): void {
   const expectedTitle = `${document.cover.workOrderName}需求说明书`;
   if (document.title !== expectedTitle || document.cover.title !== expectedTitle) {
@@ -932,6 +982,32 @@ function refinePrdDocumentV2(
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "remarks"], "a safety row marked 是 or 否 must include its requirement evidence or remediation note");
     }
     const evidenceRule = prdV2SafetyEvidenceRules[row.sequence];
+    if (row.sequence === 1 && enforceRuntimeRowOneSemantics) {
+      const hasFunctionalChange = hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule);
+      if (row.applicability === "不涉及") {
+        if (hasFunctionalChange) {
+          addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "safety row 1 marked 不涉及 contradicts a requested function, page, interface, or logic change");
+        } else if (!hasExplicitNoFunctionalChangeEvidence(safetyEvidenceSegments)) {
+          addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "safety row 1 marked 不涉及 requires an explicit statement that no function, page, interface, or logic change exists");
+        }
+        continue;
+      }
+      if (row.applicability === "否") {
+        addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "safety row 1 must be 是 when a function, page, interface, or logic change exists; otherwise use 不涉及 with explicit negative evidence");
+        continue;
+      }
+      if (!hasFunctionalChange) {
+        addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "safety row 1 marked 是 requires a requested function, page, interface, or logic change in the requirement body");
+      }
+      if (!row.remarks || !hasAffirmativeFunctionalChangeEvidence(row.remarks)) {
+        addIssue(context, ["sections", "safetyBaseline", "rows", index, "remarks"], "safety row 1 marked 是 must name the concrete function, page, interface, or logic change");
+      }
+      continue;
+    }
+    if (row.sequence === 1 && row.applicability === "不涉及") {
+      // Persisted v2 documents remain readable; Runtime submission applies the strict row 1 rules above.
+      continue;
+    }
     if (row.applicability === "不涉及") {
       if (hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule)) {
         addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body");
@@ -1183,11 +1259,17 @@ function refinePrdDocumentV2(
 }
 
 export const prdDocumentV2Schema = prdDocumentV2BaseSchema.superRefine((document, context) => {
-  refinePrdDocumentV2(document, context, { allowLegacyAppSurfaceEvidence: true });
+  refinePrdDocumentV2(document, context, {
+    allowLegacyAppSurfaceEvidence: true,
+    enforceRuntimeRowOneSemantics: false,
+  });
 });
 
 export const runtimePrdDocumentV2Schema = prdDocumentV2BaseSchema.superRefine((document, context) => {
-  refinePrdDocumentV2(document, context, { allowLegacyAppSurfaceEvidence: false });
+  refinePrdDocumentV2(document, context, {
+    allowLegacyAppSurfaceEvidence: false,
+    enforceRuntimeRowOneSemantics: true,
+  });
 });
 
 function inlinePlainText(inlines: readonly z.infer<typeof prdInlineSchema>[]) {

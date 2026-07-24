@@ -10,7 +10,7 @@ ARG DEERFLOW_BASE_IMAGE
 ARG DEERFLOW_NODE_IMAGE
 ARG DEERFLOW_SOURCE_COMMIT
 ARG WORKBENCH_SOURCE_COMMIT
-ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=e4f2b5eb2ea017b4e2777e9dff58479e2f519f8c0573d8abe89b16d9d4540481
+ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=9f2428f6ab12e23b9ab36eb9c1e1f0588cf4a51332de27b33b7c0e62001e4ffc
 
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
@@ -49,7 +49,7 @@ RUN test "${DEERFLOW_SOURCE_COMMIT}" = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
       uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_request_context.py \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
-      uv run --no-sync python -c 'import hashlib; from types import SimpleNamespace; from deerflow_workbench_tools.prd_reference_tool import workbench_prd_reference_read; tool = workbench_prd_reference_read; schema = tool.tool_call_schema.model_json_schema(); properties = schema.get("properties", {}); expected_paths = ["/mnt/skills/public/requirement-doc-template/SKILL.md", "/mnt/skills/public/requirement-doc-template/references/structure.md", "/mnt/skills/public/requirement-doc-template/references/quality-standards.md", "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json"]; assert tool.name == "read_file" and list(properties) == ["description", "path"] and schema.get("required") == ["description", "path"] and properties["path"].get("enum") == expected_paths and "start_line" not in properties and "end_line" not in properties; content = tool.func(runtime=SimpleNamespace(context={"workbench": {"requestedArtifactKinds": ["prd"]}}), description="Verify the pinned PRD skill", path=expected_paths[0]); assert hashlib.sha256(content.encode("utf-8")).hexdigest() == "d55e46cb0e4e852d179e21835dc2ad6257178d31a1aef0bd496749b30c728dd8"' \
+      uv run --no-sync python -c 'import hashlib; from types import SimpleNamespace; from deerflow_workbench_tools.prd_reference_tool import workbench_prd_reference_read; tool = workbench_prd_reference_read; schema = tool.tool_call_schema.model_json_schema(); properties = schema.get("properties", {}); expected_paths = ["/mnt/skills/public/requirement-doc-template/SKILL.md", "/mnt/skills/public/requirement-doc-template/references/structure.md", "/mnt/skills/public/requirement-doc-template/references/quality-standards.md", "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json"]; assert tool.name == "read_file" and list(properties) == ["description", "path"] and schema.get("required") == ["description", "path"] and properties["path"].get("enum") == expected_paths and "start_line" not in properties and "end_line" not in properties; content = tool.func(runtime=SimpleNamespace(context={"workbench": {"requestedArtifactKinds": ["prd"]}}), description="Verify the pinned PRD skill", path=expected_paths[0]); assert hashlib.sha256(content.encode("utf-8")).hexdigest() == "6ce1d2094a833210b0578a4396c4c268e7c99a33b2a411b4f4bd11f4b9e69f84"' \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
       uv run --no-sync python -c 'from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result; result = validate_runtime_result({}); assert result["protocol"] == "workbench.runtime.validation.v1" and result["ok"] is False and result["issues"]' \
     && python3 /opt/workbench/deerflow/source-patch/apply.py \

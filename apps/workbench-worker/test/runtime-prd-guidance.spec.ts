@@ -46,6 +46,11 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("only when the requirement body makes that dimension relevant");
     expect(guidance).toContain("For 不涉及, set remarks to null");
     expect(guidance).toContain("不涉及 is invalid when the PRD body contains an affirmative fact");
+    expect(guidance).toContain("Any requested construction, development, implementation, modification, or upgrade");
+    expect(guidance).toContain("reusing existing defaults, settings, data, or category members only narrows scope");
+    expect(guidance).toContain("Row 1 never uses 否");
+    expect(guidance).toContain("remarks must name the concrete changed function, page, interface, or logic");
+    expect(guidance).toContain("a local statement about reusing or not adding a default, setting, field, status, or category is not global no-change evidence");
     expect(guidance).toContain("端内渠道, 客户端, 消费者端, and 前端 do not prove APP or mini-program loading");
     expect(guidance).toContain("IDs globally unique across the document and every nested IR entity");
     expect(guidance).toContain("requirement/criterion references bidirectional");

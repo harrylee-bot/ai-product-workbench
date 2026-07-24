@@ -596,6 +596,12 @@ test("accepts a public-consumer safety remark with an explicit qualifier particl
   assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
 });
 
+test("accepts a row 1 remark that describes construction of the requested capability", () => {
+  const document = orderNotificationPrdFixture();
+  document.sections.safetyBaseline.rows[0].remarks = "本次建设订单状态通知设置页面及相关业务能力。";
+  assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
+});
+
 test("requires the order-notification topic in each critical PRD section", () => {
   for (const mutate of [
     (document) => {

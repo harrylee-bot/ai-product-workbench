@@ -546,16 +546,276 @@ describe("workbench.prd.v2", () => {
         content: text(fact),
       });
 
-      const result = prdDocumentV2Schema.safeParse(document);
+      const result = index === 0
+        ? runtimePrdDocumentV2Schema.safeParse(document)
+        : prdDocumentV2Schema.safeParse(document);
       expect(result.success, `safety row ${index + 1}`).toBe(false);
       if (!result.success) {
         expect(result.error.issues, `safety row ${index + 1}`).toEqual(expect.arrayContaining([
           expect.objectContaining({
             path: ["sections", "safetyBaseline", "rows", index, "applicability"],
-            message: "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
+            message: index === 0
+              ? "safety row 1 marked 不涉及 contradicts a requested function, page, interface, or logic change"
+              : "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body",
           }),
         ]));
       }
+    }
+  });
+
+  it("treats building a business capability as safety row 1 evidence", () => {
+    const document = withoutSafetyEvidence();
+    document.sections.introduction.background.blocks.push({
+      id: "production-capability-build",
+      type: "paragraph",
+      content: text("本次建设“电商订单状态通知设置”能力，支持端内通知开关、订单状态分类、发送结果记录、失败重试与权限反馈。"),
+    });
+
+    expect(prdDocumentV2Schema.safeParse(document).success).toBe(true);
+    const rejected = runtimePrdDocumentV2Schema.safeParse(document);
+    expect(rejected.success).toBe(false);
+    if (!rejected.success) {
+      expect(rejected.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 0, "applicability"],
+          message: "safety row 1 marked 不涉及 contradicts a requested function, page, interface, or logic change",
+        }),
+      ]));
+    }
+
+    expect(runtimeResultSchema.safeParse({
+      protocol: "workbench.runtime.result.v1",
+      message: "需求说明书已生成。",
+      artifacts: [{
+        kind: "prd",
+        schemaVersion: 2,
+        title: document.title,
+        operation: { kind: "create" },
+        citations: document.citations,
+        content: document,
+      }],
+    }).success).toBe(false);
+
+    document.sections.safetyBaseline.rows[0] = {
+      sequence: 1,
+      applicability: "是",
+      remarks: "本次建设订单状态通知设置页面及相关业务能力。",
+    };
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(true);
+    expect(runtimeResultSchema.safeParse({
+      protocol: "workbench.runtime.result.v1",
+      message: "需求说明书已生成。",
+      artifacts: [{
+        kind: "prd",
+        schemaVersion: 2,
+        title: document.title,
+        operation: { kind: "create" },
+        citations: document.citations,
+        content: document,
+      }],
+    }).success).toBe(true);
+  });
+
+  it("allows safety row 1 to remain 不涉及 for explicit documentation-only scope", () => {
+    const document = withoutSafetyEvidence();
+    document.sections.introduction.background.blocks.push({
+      id: "documentation-only-scope",
+      type: "paragraph",
+      content: text("本次仅梳理现有页面和功能，不建设、开发、实现、修改或改造任何功能、页面和逻辑。"),
+    });
+
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(true);
+  });
+
+  it.each([
+    "本次不进行任何功能、页面或逻辑调整。",
+    "功能、页面、接口及逻辑均保持不变。",
+  ])("accepts common explicit global no-change wording for safety row 1: %s", (fact) => {
+    const document = withoutSafetyEvidence();
+    document.sections.introduction.background.blocks.push({
+      id: "explicit-global-no-change",
+      type: "paragraph",
+      content: text(fact),
+    });
+
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(true);
+  });
+
+  it("does not let a global no-change clause mask a later explicit change", () => {
+    const document = withoutSafetyEvidence();
+    document.sections.introduction.background.blocks.push({
+      id: "mixed-global-no-change",
+      type: "paragraph",
+      content: text("本次不进行任何功能、页面或逻辑调整，新增帮助页面。"),
+    });
+
+    const result = runtimePrdDocumentV2Schema.safeParse(document);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 0, "applicability"],
+          message: "safety row 1 marked 不涉及 contradicts a requested function, page, interface, or logic change",
+        }),
+      ]));
+    }
+  });
+
+  it.each([
+    "本需求不新增任何功能。",
+    "本需求不新增页面功能。",
+  ])("does not treat a local no-addition constraint as global no-change evidence: %s", (fact) => {
+    const document = withoutSafetyEvidence();
+    document.sections.introduction.background.blocks.push({
+      id: "local-no-addition-constraint",
+      type: "paragraph",
+      content: text(fact),
+    });
+
+    const result = runtimePrdDocumentV2Schema.safeParse(document);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 0, "applicability"],
+          message: "safety row 1 marked 不涉及 requires an explicit statement that no function, page, interface, or logic change exists",
+        }),
+      ]));
+    }
+  });
+
+  it("requires explicit global negative evidence before safety row 1 can be 不涉及", () => {
+    const document = withoutSafetyEvidence();
+
+    expect(prdDocumentV2Schema.safeParse(document).success).toBe(true);
+    const result = runtimePrdDocumentV2Schema.safeParse(document);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 0, "applicability"],
+          message: "safety row 1 marked 不涉及 requires an explicit statement that no function, page, interface, or logic change exists",
+        }),
+      ]));
+    }
+  });
+
+  it("keeps row 1 negation scoped to its clause", () => {
+    const document = withoutSafetyEvidence();
+    document.sections.introduction.background.blocks.push({
+      id: "mixed-functional-change-scope",
+      type: "paragraph",
+      content: text("本需求不新增接口，但调整现有页面逻辑。"),
+    });
+
+    const result = runtimePrdDocumentV2Schema.safeParse(document);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 0, "applicability"],
+          message: "safety row 1 marked 不涉及 contradicts a requested function, page, interface, or logic change",
+        }),
+      ]));
+    }
+
+    document.sections.safetyBaseline.rows[0] = {
+      sequence: 1,
+      applicability: "是",
+      remarks: "本次调整现有页面逻辑。",
+    };
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(true);
+  });
+
+  it.each([
+    "现有功能由开发人员维护，本次仅梳理需求文档。",
+    "订单状态变更会触发通知，本次仅梳理现有流程。",
+  ])("does not treat current-state wording as row 1 change evidence: %s", (fact) => {
+    const document = withoutSafetyEvidence();
+    document.sections.introduction.background.blocks.push({
+      id: "current-state-description",
+      type: "paragraph",
+      content: text(`${fact} 本需求不涉及功能逻辑变更。`),
+    });
+
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(true);
+  });
+
+  it("recognizes a newly added business control as row 1 change evidence", () => {
+    const document = withoutSafetyEvidence();
+    document.sections.businessRequirements.coreRules.blocks.push({
+      id: "new-notification-control",
+      type: "paragraph",
+      content: text("新增通知开关。"),
+    });
+
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(false);
+    document.sections.safetyBaseline.rows[0] = {
+      sequence: 1,
+      applicability: "是",
+      remarks: "新增通知开关控件。",
+    };
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(true);
+  });
+
+  it.each([
+    "新增订单状态。",
+    "调整订单状态。",
+  ])("recognizes an explicit order-state change as row 1 evidence: %s", (fact) => {
+    const document = withoutSafetyEvidence();
+    document.sections.businessRequirements.coreRules.blocks.push({
+      id: "order-state-change",
+      type: "paragraph",
+      content: text(fact),
+    });
+
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(false);
+    document.sections.safetyBaseline.rows[0] = {
+      sequence: 1,
+      applicability: "是",
+      remarks: fact,
+    };
+    expect(runtimePrdDocumentV2Schema.safeParse(document).success).toBe(true);
+  });
+
+  it("rejects 否 and vague remarks for safety row 1", () => {
+    const document = withoutSafetyEvidence();
+    document.sections.businessRequirements.coreRules.blocks.push({
+      id: "row-one-remediation",
+      type: "paragraph",
+      content: text("本次建设通知设置页面，上线前需补充改造页面权限逻辑。"),
+    });
+    document.sections.safetyBaseline.rows[0] = {
+      sequence: 1,
+      applicability: "否",
+      remarks: "上线前完成页面权限逻辑改造。",
+    };
+
+    const noResult = runtimePrdDocumentV2Schema.safeParse(document);
+    expect(noResult.success).toBe(false);
+    if (!noResult.success) {
+      expect(noResult.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 0, "applicability"],
+          message: "safety row 1 must be 是 when a function, page, interface, or logic change exists; otherwise use 不涉及 with explicit negative evidence",
+        }),
+      ]));
+    }
+
+    document.sections.safetyBaseline.rows[0] = {
+      sequence: 1,
+      applicability: "是",
+      remarks: "已完成安全自查。",
+    };
+    const vagueResult = runtimePrdDocumentV2Schema.safeParse(document);
+    expect(vagueResult.success).toBe(false);
+    if (!vagueResult.success) {
+      expect(vagueResult.error.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: ["sections", "safetyBaseline", "rows", 0, "remarks"],
+          message: "safety row 1 marked 是 must name the concrete function, page, interface, or logic change",
+        }),
+      ]));
     }
   });
 
@@ -571,7 +831,10 @@ describe("workbench.prd.v2", () => {
           content: text(fact),
         });
       }
-      expect(prdDocumentV2Schema.safeParse(document).success, `safety row ${index + 1}`).toBe(true);
+      const result = index === 0
+        ? runtimePrdDocumentV2Schema.safeParse(document)
+        : prdDocumentV2Schema.safeParse(document);
+      expect(result.success, `safety row ${index + 1}`).toBe(true);
     }
   });
 
