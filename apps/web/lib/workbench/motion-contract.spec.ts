@@ -22,9 +22,9 @@ describe("Workbench motion contract", () => {
     expect(css).toMatch(/\.workbench-home-submit-spinner\s*\{\s*animation-duration:\s*1s;/u);
     expect(css).toMatch(/\.workbench-status-spinner\s*\{\s*animation-duration:\s*1s;/u);
     expect(css).toMatch(/\.workbench-agent-card\[data-prd-bodyless="true"\][\s\S]*?width:\s*280px !important;[\s\S]*?height:\s*126px !important;/u);
-    expect(css).toMatch(/workbench-agent-surface-shift 4\.2s linear infinite/u);
-    expect(css).toMatch(/workbench-agent-color-wash 4\.2s linear infinite/u);
-    expect(css).not.toContain('.workbench-agent-card--generating[data-prd-bodyless="true"]');
+    expect(css).toMatch(/\.workbench-agent-card--generating::before\s*\{[^}]*opacity:\s*0\.54;[^}]*animation:\s*workbench-agent-color-wash 4\.2s linear infinite;/u);
+    expect(css).toMatch(/\.workbench-agent-card--generating \.workbench-agent-card-base-bg\s*\{[^}]*animation:\s*workbench-agent-surface-shift 4\.2s linear infinite;/u);
+    expect(css).not.toMatch(/\.workbench-agent-card--generating\[data-prd-bodyless="true"\][^{]*\{[^}]*animation:\s*none;/u);
     expect(css).toMatch(/workbench-agent-border-orbit 3\.4s linear infinite/u);
     expect(css).toMatch(/workbench-stage-ellipsis 900ms steps\(4, end\) infinite/u);
     expect(css).toMatch(/workbench-skeleton-fade 2\.5s ease-in-out infinite/u);
@@ -32,6 +32,7 @@ describe("Workbench motion contract", () => {
     expect(css).toMatch(/workbench-screen-border-orbit 3\.4s linear 1/u);
     expect(css).toMatch(/transition-duration:\s*150ms !important/u);
     expect(css).toMatch(/prefers-reduced-motion:\s*reduce/u);
+    expect(css).toMatch(/animation-duration:\s*1ms !important;[\s\S]*animation-iteration-count:\s*1 !important;/u);
     expect(css).toMatch(/--workbench-surface-container:\s*rgb\(22 23 24\)/u);
     expect(css).toMatch(/--workbench-selection:\s*rgb\(113 104 246\)/u);
     expect(css).toMatch(/data-generation-stage="generating-ui"/u);

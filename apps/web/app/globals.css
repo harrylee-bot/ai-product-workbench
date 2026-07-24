@@ -1644,6 +1644,7 @@ textarea:focus-visible {
   background-position: 106% -8%, -12% 88%;
   background-repeat: no-repeat;
   background-size: 74% 90%, 72% 88%;
+  opacity: 0.54;
   animation: workbench-agent-color-wash 4.2s linear infinite;
 }
 
