@@ -19,6 +19,8 @@ const baseConfigExample = readYaml("deploy/deerflow-config.base.example.yaml");
 const extensions = JSON.parse(readText("deploy/deerflow-extensions.production.json"));
 const fragment = readYaml("integrations/deerflow/runtime-tools/config.fragment.yaml");
 const workbenchSkill = readYamlFrontmatter("integrations/deerflow/skills/workbench/SKILL.md");
+const workbenchSkillSource = readText("integrations/deerflow/skills/workbench/SKILL.md");
+const normalizedWorkbenchSkillSource = workbenchSkillSource.replace(/\s+/gu, " ");
 const envExample = readText("deploy/workbench.env.example");
 const runtimeAdapter = readText("apps/workbench-worker/src/runtime/deerflow-runtime.adapter.ts");
 const preflight = readText("deploy/deerflow-production-preflight.sh");
@@ -473,6 +475,12 @@ assert(
       "test_prd_reference_reader_is_blocked_outside_exact_prd_runs",
     )
     && patchContractTestSource.includes(
+      "test_prd_clarification_is_hidden_and_blocked_without_calling_the_handler",
+    )
+    && patchContractTestSource.includes(
+      "test_real_middleware_chain_hides_clarification_from_prd_model_binding",
+    )
+    && patchContractTestSource.includes(
       "test_prd_gate_enforces_stage_draft_final_sequence_and_allows_correction",
     )
     && patchContractTestSource.includes(
@@ -500,6 +508,25 @@ assert(
     && /name == KNOWLEDGE_TOOL_NAME and not self\._knowledge_enabled/u.test(toolScopeMiddlewareSource)
     && toolScopeMiddlewareSource.includes("WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"),
   "DeerFlow middleware must hide and block Knowledge unless the trusted scope is exactly true",
+);
+assert(
+  toolScopeMiddlewareSource.includes('CLARIFICATION_TOOL_NAME = "ask_clarification"')
+    && /name == CLARIFICATION_TOOL_NAME and self\._prd_gate_enabled/u.test(toolScopeMiddlewareSource)
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED")
+    && toolScopeMiddlewareSource.includes("<workbench_prd_clarification_policy>")
+    && toolScopeMiddlewareSource.includes("Ignore any general instruction that requires clarification")
+    && /overrides\["system_message"\] = SystemMessage/u.test(toolScopeMiddlewareSource),
+  "PRD Runtime must override generic clarification instructions, hide the tool, and fail closed on execution",
+);
+assert(
+  normalizedWorkbenchSkillSource.includes("no free-form clarification resume path")
+    && normalizedWorkbenchSkillSource.includes("never call `ask_clarification`")
+    && normalizedWorkbenchSkillSource.includes("still complete the PRD")
+    && normalizedWorkbenchSkillSource.includes("only a non-PRD Run may request input")
+    && normalizedWorkbenchSkillSource.includes("cannot use clarification or end early")
+    && !normalizedWorkbenchSkillSource.includes("otherwise request input")
+    && !normalizedWorkbenchSkillSource.includes("or use clarification where"),
+  "Workbench skill must complete PRDs without the unsupported clarification path",
 );
 assert(
   toolScopeMiddlewareSource.includes('READ_FILE_TOOL_NAME = "read_file"')

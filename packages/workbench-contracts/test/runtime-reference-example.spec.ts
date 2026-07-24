@@ -71,6 +71,13 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(normalizedWorkbenchSkillSource).toContain("regardless of the natural-language prompt");
     expect(normalizedWorkbenchSkillSource).toContain("a PRD never inherits the speculative asset");
     expect(normalizedWorkbenchSkillSource).toContain("Make a conservative assumption");
+    expect(normalizedWorkbenchSkillSource).toContain("no free-form clarification resume path");
+    expect(normalizedWorkbenchSkillSource).toContain("never call `ask_clarification`");
+    expect(normalizedWorkbenchSkillSource).toContain("still complete the PRD");
+    expect(normalizedWorkbenchSkillSource).toContain("only a non-PRD Run may request input");
+    expect(normalizedWorkbenchSkillSource).toContain("cannot use clarification or end early");
+    expect(normalizedWorkbenchSkillSource).not.toContain("otherwise request input");
+    expect(normalizedWorkbenchSkillSource).not.toContain("or use clarification where");
     expect(normalizedWorkbenchSkillSource).toContain("Runtime contract rejects a Run");
     expect(normalizedWorkbenchSkillSource).toContain("PRD-only Run must complete");
     expect(normalizedWorkbenchSkillSource).toContain("returning `ok:true`");

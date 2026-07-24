@@ -46,7 +46,7 @@ Classify the turn before doing work:
 - Product change that creates a new module, workbench, AI capability, role, object, or cross-module loop: use `new_capability`.
 - Completely new system or standalone page with no existing architecture to inherit: use `brand_new_system`.
 - Short or one-sentence product request with ordinary missing details: use `one_sentence_completion` and infer conventional details from product architecture, business-domain knowledge, and historical cases.
-- Missing high-risk or blocking facts for a product change: use DeerFlow's clarification interrupt before producing a result.
+- Missing high-risk or blocking facts for a non-PRD product change: use DeerFlow's clarification interrupt before producing a result. A PRD-only Canvas Run is non-interruptible and follows the PRD rules below instead.
 - PRD drafting: whenever `requestedArtifactKinds` contains `prd`, produce a complete fixed-template `workbench.prd.v2` Artifact document. When revising an existing PRD, preserve the target Artifact's current v1 or v2 protocol.
 - Prototype/code generation: create or refine specs first, then use DeerFlow's coding/prototype execution capability and return the requested Artifact kinds.
 - Export request: use the dedicated 产品工作台 export workflow; do not invent an export Artifact in a generation Run.
@@ -99,7 +99,7 @@ Required behavior:
 - If retrieved knowledge contains a `ui_style_guide` (especially one with a tab bar or shared frame), follow that style for navigation, color, typography, and component conventions so the new system is visually consistent with the platform.
 - If no `ui_style_guide` exists, design from scratch with a clear information architecture, a reusable frame (header/nav/content/empty+error states), and the platform's audit/publish/reporting conventions where they apply.
 - Still place the new system within the broader product architecture where possible (roles, permissions, audit/publish, reporting, AI generation layer), but do not force-fit onto a historical page that does not exist.
-- Mark structural choices as assumptions and surface high-risk unknowns via `ask_clarification`.
+- Mark structural choices as assumptions. Only a non-PRD Run may surface high-risk unknowns via `ask_clarification`; a PRD-only Canvas Run follows the non-interruptible PRD rules below.
 
 ### one_sentence_completion
 
@@ -110,7 +110,7 @@ Required behavior:
 - Do not stop merely because the prompt is short.
 - Fill normal product details from architecture, domain knowledge, and historical cases.
 - Mark inferred details as assumptions in the final action.
-- Ask clarification only for high-risk facts: budget, prize cost, stock/probability, compliance, launch scope, destructive data migration, real production credentials, or irreversible publishing.
+- In a non-PRD Run, ask clarification only for high-risk facts: budget, prize cost, stock/probability, compliance, launch scope, destructive data migration, real production credentials, or irreversible publishing. In a PRD-only Canvas Run, apply the conservative scope and acceptance boundaries below and continue.
 
 ## Knowledge And Prototype Routing
 
@@ -175,9 +175,13 @@ Keep unresolved implementation details in assumptions or delivery metadata,
 not as invented PRD requirements. Do not add assets, activity configuration,
 audit/publish, reporting, AI generation, backend configuration, frontend
 experience, preview, or data feedback merely to make a short request look like
-a larger product loop. Ask for clarification when a missing fact changes
-business scope, compliance, money or inventory, permissions, production data,
-irreversible publication, or acceptance meaning.
+a larger product loop. A PRD-only Canvas Run has no free-form clarification
+resume path: never call `ask_clarification` and never end with a question instead
+of a result. When a missing fact changes business scope, compliance, money or
+inventory, permissions, production data, irreversible publication, or
+acceptance meaning, keep unsupported behavior out of committed scope, record a
+conservative typed assumption or acceptance boundary, and still complete the
+PRD through draft publication and Runtime result submission.
 
 A request for both PRD and Prototype/code is sequential, not parallel. The
 Runtime contract rejects a Run whose `requestedArtifactKinds` mixes `prd` with
@@ -222,7 +226,7 @@ Writing requirements:
 - `4 需求安全基线要求（必填）` must contain all 21 canonical rows. Values in `是否涉及` may only be `是`, `否`, or `不涉及`; put explanations in `remarks`. Derive each value from requirement facts outside the safety table.
 - `不涉及` is valid only when no affirmative fact for that safety topic exists anywhere else in the PRD. Use `是` when the topic applies and the stated requirement satisfies it; use `否` only when the topic applies and the PRD also contains a concrete remediation for that same topic.
 - Any requested construction, development, implementation, modification, or upgrade of a function, page, control, flow, state behavior, or business capability makes safety row 1 `是`. Row 1 never uses `否`; when it is `是`, its remarks must name the concrete changed function, page, interface, or logic. Use `不涉及` only when the requirement body explicitly states there is no function, page, interface, or logic change. Reusing or not adding a default, setting, field, status, or category only narrows scope and is not global no-change evidence.
-- Never use `待确认`, `以实际为准`, `以实际上线地址为准`, template reminders, placeholder links, or copied sample business content. Use a concrete conservative assumption when the business meaning is safe, otherwise request input.
+- Never use `待确认`, `以实际为准`, `以实际上线地址为准`, template reminders, placeholder links, or copied sample business content. Use a concrete conservative assumption when the business meaning is safe. In a PRD-only Canvas Run, when it is not safe, exclude the unsupported behavior from committed scope, record a typed assumption or acceptance boundary, and complete the PRD; only a non-PRD Run may request input.
 - Do not return only an advice list, summary, or generic background/goals document. The result must be reviewable and acceptance-ready.
 - Use the required `/mnt/skills/public/workbench/references/prd-runtime-result.schema.json` as the business-neutral transport shape. Populate it from current request facts and authorized sources while preserving every required field and bidirectional reference.
 - Keep IDs globally unique across the document and every nested IR entity. Resolve every table, diagram, citation, assumption, goal, requirement, criterion, and flow reference, and keep requirement/criterion references bidirectional.
@@ -270,7 +274,7 @@ The response protocol is `workbench.knowledge-retrieval-result.v1`. It already c
 - Never alter citation `id`, `documentId`, `chunkId`, `sourcePath`, `quote`, or `locator`; copy cited entries exactly into Artifact citations.
 - Use focused queries and reuse returned results within the turn. Do not use the capability for unrelated exploration.
 - Do not change `mode`, `routeScope`, Project, Release, or principal. The capability only permits `hybrid` + `production` for its pinned scope.
-- If the tool is missing for a Run with a pinned release, expires, or returns a non-success response, do not fabricate Knowledge results or silently substitute model memory. Return a safe unavailable message or use clarification where the requested Artifact cannot be produced without Knowledge.
+- If the tool is missing for a Run with a pinned release, expires, or returns a non-success response, do not fabricate Knowledge results or silently substitute model memory. A PRD-only Canvas Run cannot use clarification or end early: omit unsupported Knowledge-dependent claims, record the limitation as a typed assumption or acceptance boundary, and complete the PRD from explicit authorized facts. Only a non-PRD Run may return a safe unavailable message or use clarification when the requested Artifact cannot be produced without Knowledge.
 
 ## Runtime Result
 

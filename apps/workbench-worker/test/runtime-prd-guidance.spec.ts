@@ -38,6 +38,9 @@ describe("runtimePrdResultGuidance", () => {
 
     expect(guidance).toContain("regardless of the natural-language prompt");
     expect(guidance).toContain("Make conservative assumptions only when business meaning remains clear");
+    expect(guidance).toContain("no free-form clarification resume path");
+    expect(guidance).toContain("Never call ask_clarification");
+    expect(guidance).toContain("still complete the requested PRD");
     expect(guidance).toContain("Do not invent assets, activity configuration, audit/publish, reporting, AI generation");
     expect(guidance).toContain("PRD-only or no Prototype/code are Runtime metadata, not business scope");
     expect(guidance).toContain("Do not invent default values, category members, enabled states");

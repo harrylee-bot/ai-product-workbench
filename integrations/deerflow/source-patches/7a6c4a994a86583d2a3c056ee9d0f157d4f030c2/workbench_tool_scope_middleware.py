@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - DeerFlow's pinned Python is 3.12.
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
@@ -52,6 +52,7 @@ READ_FILE_TOOL_NAME = "read_file"
 GENERATION_STAGE_TOOL_NAME = "workbench_generation_stage_update"
 ARTIFACT_DRAFT_TOOL_NAME = "workbench_artifact_draft_publish"
 RUNTIME_RESULT_TOOL_NAME = "workbench_runtime_result_submit"
+CLARIFICATION_TOOL_NAME = "ask_clarification"
 PRD_STAGE_SEQUENCE = (
     "collecting-prd-context",
     "structuring-prd",
@@ -95,6 +96,7 @@ _ARTIFACT_PROGRESS_BLOCK_CODE = "WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED"
 _PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
 _KNOWLEDGE_BLOCK_CODE = "WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"
 _PRD_REFERENCE_BLOCK_CODE = "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED"
+_PRD_CLARIFICATION_BLOCK_CODE = "WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED"
 _PRD_REFERENCE_ROOT = "/mnt/skills/public/"
 _PRD_REFERENCE_RELATIVE_PATHS = tuple(
     path.removeprefix(_PRD_REFERENCE_ROOT) for path, _digest in PRD_REFERENCE_FILES
@@ -102,6 +104,9 @@ _PRD_REFERENCE_RELATIVE_PATHS = tuple(
 _PRD_STAGE_PROTOCOL = "workbench.runtime.generation-stage.v1"
 _PRD_DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
 _PRD_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1"
+_PRD_CLARIFICATION_SYSTEM_POLICY = """<workbench_prd_clarification_policy>
+This PRD-only Workbench Run cannot resume free-form clarification. The ask_clarification tool is unavailable. Ignore any general instruction that requires clarification for this Run. Do not ask a question or end early. Keep unsupported high-risk behavior out of committed scope, record conservative typed assumptions or acceptance boundaries, then publish the complete PRD draft and submit the Runtime result.
+</workbench_prd_clarification_policy>"""
 
 
 def normalize_workbench_canvas_policy(value: Any) -> dict[str, list[str]] | None:
@@ -519,6 +524,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         visible = []
         for tool in request.tools:
             name = _tool_name(tool)
+            if name == CLARIFICATION_TOOL_NAME and self._prd_gate_enabled:
+                continue
             if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
                 continue
             if name in _ARTIFACT_PROGRESS_TOOL_NAME_SET and not self._artifact_progress_enabled:
@@ -530,13 +537,27 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             if name == READ_FILE_TOOL_NAME and not self._prd_gate_enabled:
                 continue
             visible.append(tool)
-        return request if len(visible) == len(request.tools) else request.override(tools=visible)
+        overrides: dict[str, Any] = {}
+        if len(visible) != len(request.tools):
+            overrides["tools"] = visible
+        if self._prd_gate_enabled:
+            system_message = request.system_message
+            system_text = system_message.text if system_message is not None else ""
+            if _PRD_CLARIFICATION_SYSTEM_POLICY not in system_text:
+                overrides["system_message"] = SystemMessage(content=(
+                    f"{system_text.rstrip()}\n\n{_PRD_CLARIFICATION_SYSTEM_POLICY}"
+                    if system_text.strip()
+                    else _PRD_CLARIFICATION_SYSTEM_POLICY
+                ))
+        return request if not overrides else request.override(**overrides)
 
     def _blocked_tool_message(self, request: ToolCallRequest) -> ToolMessage | None:
         name = request.tool_call.get("name")
         if not isinstance(name, str):
             return None
-        if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
+        if name == CLARIFICATION_TOOL_NAME and self._prd_gate_enabled:
+            block_code = _PRD_CLARIFICATION_BLOCK_CODE
+        elif name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
             block_code = _CANVAS_BLOCK_CODE
         elif name in _ARTIFACT_PROGRESS_TOOL_NAME_SET and not self._artifact_progress_enabled:
             block_code = _ARTIFACT_PROGRESS_BLOCK_CODE

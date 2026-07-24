@@ -11,10 +11,10 @@ import unittest
 PATCH_ROOT = Path(__file__).resolve().parent
 
 
-def install_import_stubs() -> None:
+def install_import_stubs() -> bool:
     try:
         import langchain.agents.middleware.types  # noqa: F401
-        return
+        return False
     except ModuleNotFoundError:
         pass
 
@@ -25,6 +25,11 @@ def install_import_stubs() -> None:
 
     class AgentState(dict):
         pass
+
+    class SystemMessage:
+        def __init__(self, *, content):
+            self.content = content
+            self.text = content
 
     class ToolMessage:
         def __init__(self, **values):
@@ -51,13 +56,15 @@ def install_import_stubs() -> None:
     model_types.ModelCallResult = object
     model_types.ModelRequest = object
     model_types.ModelResponse = object
+    modules["langchain_core.messages"].SystemMessage = SystemMessage
     modules["langchain_core.messages"].ToolMessage = ToolMessage
     modules["langgraph.prebuilt.tool_node"].ToolCallRequest = object
     modules["langgraph.types"].Command = Command
     sys.modules.update(modules)
+    return True
 
 
-install_import_stubs()
+USING_IMPORT_STUBS = install_import_stubs()
 spec = importlib.util.spec_from_file_location(
     "workbench_tool_scope_middleware_under_test",
     PATCH_ROOT / "workbench_tool_scope_middleware.py",
@@ -68,10 +75,12 @@ middleware_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(middleware_module)
 
 CANVAS_TOOL_NAMES = middleware_module.CANVAS_TOOL_NAMES
+CLARIFICATION_TOOL_NAME = middleware_module.CLARIFICATION_TOOL_NAME
 KNOWLEDGE_TOOL_NAME = middleware_module.KNOWLEDGE_TOOL_NAME
 READ_FILE_TOOL_NAME = middleware_module.READ_FILE_TOOL_NAME
 ARTIFACT_PROGRESS_TOOL_NAMES = middleware_module.ARTIFACT_PROGRESS_TOOL_NAMES
 PROTOTYPE_ONLY_TOOL_NAMES = middleware_module.PROTOTYPE_ONLY_TOOL_NAMES
+RUNTIME_RESULT_TOOL_NAME = middleware_module.RUNTIME_RESULT_TOOL_NAME
 PRD_REFERENCE_FILES = middleware_module.PRD_REFERENCE_FILES
 PRD_STAGE_SEQUENCE = middleware_module.PRD_STAGE_SEQUENCE
 WorkbenchToolScopeMiddleware = middleware_module.WorkbenchToolScopeMiddleware
@@ -94,11 +103,15 @@ class FakeTool:
 
 
 class FakeModelRequest:
-    def __init__(self, tools):
+    def __init__(self, tools, system_message=None):
         self.tools = list(tools)
+        self.system_message = system_message
 
-    def override(self, *, tools):
-        return FakeModelRequest(tools)
+    def override(self, **overrides):
+        return FakeModelRequest(
+            overrides.get("tools", self.tools),
+            overrides.get("system_message", self.system_message),
+        )
 
 
 class FakeToolRequest:
@@ -408,6 +421,112 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 *PROTOTYPE_ONLY_TOOL_NAMES,
             ],
         )
+
+    def test_prd_clarification_is_hidden_and_blocked_without_calling_the_handler(self) -> None:
+        tools = [
+            FakeTool("workbench_runtime_result_submit"),
+            FakeTool(CLARIFICATION_TOOL_NAME),
+        ]
+        prd = WorkbenchToolScopeMiddleware(None, ["prd"])
+        base_system_text = "Base DeerFlow policy.\nTodo policy."
+        observed = prd.wrap_model_call(
+            FakeModelRequest(tools, middleware_module.SystemMessage(content=base_system_text)),
+            lambda scoped: scoped,
+        )
+        self.assertEqual(
+            [tool.name for tool in observed.tools],
+            ["workbench_runtime_result_submit"],
+        )
+        self.assertIn(
+            "<workbench_prd_clarification_policy>",
+            observed.system_message.text,
+        )
+        self.assertIn("Ignore any general instruction that requires clarification", observed.system_message.text)
+        self.assertTrue(observed.system_message.text.startswith(base_system_text))
+        self.assertEqual(observed.system_message.text.count(base_system_text), 1)
+        repeated = prd.wrap_model_call(observed, lambda scoped: scoped)
+        self.assertEqual(
+            repeated.system_message.text.count("<workbench_prd_clarification_policy>"),
+            1,
+        )
+        for non_exact_prd_scope in (
+            ["prototype"],
+            ["prd", "document"],
+            ["prd", "prd"],
+        ):
+            with self.subTest(non_exact_prd_scope=non_exact_prd_scope):
+                non_exact_prd = WorkbenchToolScopeMiddleware(None, non_exact_prd_scope)
+                observed_non_exact_prd = non_exact_prd.wrap_model_call(
+                    FakeModelRequest(tools),
+                    lambda scoped: scoped,
+                )
+                self.assertEqual(
+                    [tool.name for tool in observed_non_exact_prd.tools],
+                    ["workbench_runtime_result_submit", CLARIFICATION_TOOL_NAME],
+                )
+                self.assertIsNone(observed_non_exact_prd.system_message)
+
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        blocked = prd.wrap_tool_call(FakeToolRequest(CLARIFICATION_TOOL_NAME), handler)
+        self.assertFalse(called)
+        self.assertEqual(blocked.status, "error")
+        self.assertEqual(blocked.name, CLARIFICATION_TOOL_NAME)
+        self.assertEqual(blocked.content, "Error: WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED")
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires the pinned DeerFlow middleware stack")
+    def test_real_middleware_chain_hides_clarification_from_prd_model_binding(self) -> None:
+        from deerflow.agents.middlewares.clarification_middleware import ClarificationMiddleware
+        from deerflow.tools.builtins import ask_clarification_tool
+        from langchain.agents import create_agent
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage
+        from langchain_core.tools import StructuredTool
+
+        observed_tool_names: list[list[str]] = []
+
+        class CapturingModel(FakeMessagesListChatModel):
+            def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+                del tool_choice, kwargs
+                observed_tool_names.append([tool.name for tool in tools])
+                return self
+
+        def test_tool(name: str):
+            return StructuredTool.from_function(
+                lambda: "ok",
+                name=name,
+                description=f"Contract fixture for {name}",
+            )
+
+        expected = [
+            RUNTIME_RESULT_TOOL_NAME,
+            READ_FILE_TOOL_NAME,
+            *ARTIFACT_PROGRESS_TOOL_NAMES,
+        ]
+        graph = create_agent(
+            CapturingModel(responses=[AIMessage(content="done")]),
+            tools=[
+                test_tool(RUNTIME_RESULT_TOOL_NAME),
+                test_tool(READ_FILE_TOOL_NAME),
+                *[test_tool(name) for name in ARTIFACT_PROGRESS_TOOL_NAMES],
+                *[test_tool(name) for name in PROTOTYPE_ONLY_TOOL_NAMES],
+                ask_clarification_tool,
+            ],
+            middleware=[
+                WorkbenchToolScopeMiddleware(None, ["prd"]),
+                ClarificationMiddleware(),
+            ],
+        )
+        graph.invoke({"messages": [{"role": "user", "content": "Create a PRD"}]})
+
+        self.assertTrue(observed_tool_names)
+        self.assertEqual(observed_tool_names[-1], expected)
+        self.assertNotIn(CLARIFICATION_TOOL_NAME, observed_tool_names[-1])
 
     def test_requested_artifact_kind_policy_is_copied_and_malformed_input_is_fail_closed(self) -> None:
         source = ["prototype"]
@@ -1038,6 +1157,7 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
             FakeTool(READ_FILE_TOOL_NAME),
             *map(FakeTool, ARTIFACT_PROGRESS_TOOL_NAMES),
             *map(FakeTool, PROTOTYPE_ONLY_TOOL_NAMES),
+            FakeTool(CLARIFICATION_TOOL_NAME),
         ]
 
         async def handler(request):
@@ -1055,6 +1175,7 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
                 *ARTIFACT_PROGRESS_TOOL_NAMES,
             ],
         )
+        self.assertIn("<workbench_prd_clarification_policy>", prd_result.system_message.text)
 
         prototype_result = await WorkbenchToolScopeMiddleware(
             None,
@@ -1066,8 +1187,10 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
                 "workbench_runtime_result_submit",
                 *ARTIFACT_PROGRESS_TOOL_NAMES,
                 *PROTOTYPE_ONLY_TOOL_NAMES,
+                CLARIFICATION_TOOL_NAME,
             ],
         )
+        self.assertIsNone(prototype_result.system_message)
 
     async def test_async_prd_and_prototype_tool_execution_enforces_artifact_scope_matrix(
         self,
@@ -1080,6 +1203,15 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
             return sentinel
 
         prd_middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        blocked_clarification = await prd_middleware.awrap_tool_call(
+            FakeToolRequest(CLARIFICATION_TOOL_NAME),
+            handler,
+        )
+        self.assertEqual(
+            blocked_clarification.content,
+            "Error: WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED",
+        )
+        self.assertNotIn(CLARIFICATION_TOOL_NAME, called)
         collecting = FakeToolRequest(
             "workbench_generation_stage_update",
             args={"stage": "collecting-prd-context"},
@@ -1101,6 +1233,13 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(name, called)
 
         prototype_middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        self.assertIs(
+            await prototype_middleware.awrap_tool_call(
+                FakeToolRequest(CLARIFICATION_TOOL_NAME),
+                handler,
+            ),
+            sentinel,
+        )
         for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
             with self.subTest(scope="prototype", name=name):
                 self.assertIs(
