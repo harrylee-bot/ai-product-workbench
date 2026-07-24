@@ -419,6 +419,10 @@ test("rejects Runtime metadata and unrequested order facts in the production smo
     "并非不会因本需求新增默认开启。",
     "不是不应因本需求新增默认开启。",
     "不能保证不出现本需求新增的默认开启。",
+    "不能保证不新增通知开关默认启用。",
+    "不新增通知开关，默认启用。",
+    "不新增通知开关但默认启用。",
+    "未使用通知开关的默认启用状态。",
     "订单状态分类包括待付款、待发货、待收货。",
     "订单状态分类包括待发货、待付款、待收货。",
     "订单状态分类包括待付款/已完成。",
@@ -520,6 +524,9 @@ test("allows explicit no-new-default and existing-setting constraints", () => {
     "不存在系统新增默认开启或默认关闭状态。",
     "页面展示沿用现有设置，未因本需求生成新的默认开启或默认关闭状态。",
     "开关沿用消费者现有设置，不出现本需求新增的默认开启或默认关闭规则。",
+    "不新增通知开关默认启用或默认关闭状态。",
+    "不新增订单通知开关的默认启用或默认关闭状态。",
+    "系统读取消费者现有通知开关设置并展示，不设置新的默认启用或关闭状态。",
   ]) {
     const document = orderNotificationPrdFixture();
     document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
