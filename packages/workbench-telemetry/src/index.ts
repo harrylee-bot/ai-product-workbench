@@ -3,6 +3,7 @@ import {
   SpanKind,
   SpanStatusCode,
   context,
+  metrics,
   propagation,
   trace,
   type Attributes,
@@ -13,7 +14,13 @@ import {
 } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import {
+  MeterProvider,
+  PeriodicExportingMetricReader,
+  type PushMetricExporter,
+} from "@opentelemetry/sdk-metrics";
 import {
   AlwaysOffSampler,
   AlwaysOnSampler,
@@ -39,6 +46,7 @@ type TelemetryGlobal = typeof globalThis & {
 type TelemetryRuntimeState = {
   serviceName: string;
   provider: NodeTracerProvider;
+  meterProvider: MeterProvider;
   shutdownPromise: Promise<void> | null;
 };
 
@@ -48,23 +56,31 @@ export type InitializeTelemetryOptions = {
   environment?: string;
   env?: NodeJS.ProcessEnv;
   exporter?: SpanExporter | null;
+  metricExporter?: PushMetricExporter | null;
 };
 
 export type TelemetryLifecycle = {
   enabled: boolean;
   exporting: boolean;
+  forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 };
 
 export type TelemetryConfiguration = {
   disabled: boolean;
   exporterEndpoint: string | null;
+  metricExporterEndpoint: string | null;
   sampler: Sampler;
   batch: {
     maxQueueSize: number;
     maxExportBatchSize: number;
     scheduledDelayMillis: number;
     exportTimeoutMillis: number;
+  };
+  metrics: {
+    exportIntervalMillis: number;
+    exportTimeoutMillis: number;
+    cardinalityLimit: number;
   };
 };
 
@@ -77,9 +93,17 @@ export function telemetryConfigurationFromEnv(
     env.OTEL_EXPORTER_OTLP_PROTOCOL,
   );
   if (protocol && protocol !== "http/protobuf") {
-    throw new Error("Product Workbench tracing supports OTLP http/protobuf only");
+    throw new Error("Product Workbench telemetry supports OTLP http/protobuf only");
   }
   const exporterEndpoint = disabled ? null : resolveTraceEndpoint(env);
+  const metricProtocol = firstNonEmpty(
+    env.OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
+    env.OTEL_EXPORTER_OTLP_PROTOCOL,
+  );
+  if (metricProtocol && metricProtocol !== "http/protobuf") {
+    throw new Error("Product Workbench metrics supports OTLP http/protobuf only");
+  }
+  const metricExporterEndpoint = disabled ? null : resolveMetricEndpoint(env);
   const maxQueueSize = positiveIntegerEnv(env.OTEL_BSP_MAX_QUEUE_SIZE, 2_048);
   const maxExportBatchSize = positiveIntegerEnv(env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE, 512);
   if (maxExportBatchSize > maxQueueSize) {
@@ -88,12 +112,18 @@ export function telemetryConfigurationFromEnv(
   return {
     disabled,
     exporterEndpoint,
+    metricExporterEndpoint,
     sampler: samplerFromEnv(env),
     batch: {
       maxQueueSize,
       maxExportBatchSize,
       scheduledDelayMillis: nonNegativeIntegerEnv(env.OTEL_BSP_SCHEDULE_DELAY, 5_000),
       exportTimeoutMillis: positiveIntegerEnv(env.OTEL_BSP_EXPORT_TIMEOUT, 30_000),
+    },
+    metrics: {
+      exportIntervalMillis: positiveIntegerEnv(env.OTEL_METRIC_EXPORT_INTERVAL, 60_000),
+      exportTimeoutMillis: positiveIntegerEnv(env.OTEL_METRIC_EXPORT_TIMEOUT, 30_000),
+      cardinalityLimit: positiveIntegerEnv(env.WORKBENCH_OTEL_METRIC_CARDINALITY_LIMIT, 64),
     },
   };
 }
@@ -104,6 +134,7 @@ export function initializeTelemetry({
   environment = process.env.NODE_ENV || "development",
   env = process.env,
   exporter,
+  metricExporter,
 }: InitializeTelemetryOptions): TelemetryLifecycle {
   if (!serviceName.trim()) throw new Error("Telemetry serviceName is required");
   const configuration = telemetryConfigurationFromEnv(env);
@@ -115,7 +146,11 @@ export function initializeTelemetry({
     if (existing.serviceName !== serviceName) {
       throw new Error(`Telemetry is already initialized for ${existing.serviceName}`);
     }
-    return lifecycle(existing, Boolean(exporter) || Boolean(configuration.exporterEndpoint));
+    return lifecycle(
+      existing,
+      Boolean(exporter) || Boolean(configuration.exporterEndpoint)
+        || Boolean(metricExporter) || Boolean(configuration.metricExporterEndpoint),
+    );
   }
 
   const resolvedExporter = exporter === undefined
@@ -128,31 +163,172 @@ export function initializeTelemetry({
       ? new BatchSpanProcessor(resolvedExporter, configuration.batch)
       : new SimpleSpanProcessor(resolvedExporter)]
     : [];
+  const resolvedMetricExporter = metricExporter === undefined
+    ? configuration.metricExporterEndpoint
+      ? new OTLPMetricExporter({ url: configuration.metricExporterEndpoint })
+      : null
+    : metricExporter;
+  const metricReaders = resolvedMetricExporter
+    ? [new PeriodicExportingMetricReader({
+        exporter: resolvedMetricExporter,
+        exportIntervalMillis: configuration.metrics.exportIntervalMillis,
+        exportTimeoutMillis: configuration.metrics.exportTimeoutMillis,
+        cardinalityLimits: { default: configuration.metrics.cardinalityLimit },
+      })]
+    : [];
+  const resource = resourceFromAttributes({
+    "service.name": serviceName,
+    "service.namespace": "workbench",
+    "service.version": serviceVersion,
+    "deployment.environment.name": environment,
+  });
   const provider = new NodeTracerProvider({
-    resource: resourceFromAttributes({
-      "service.name": serviceName,
-      "service.namespace": "workbench",
-      "service.version": serviceVersion,
-      "deployment.environment.name": environment,
-    }),
+    resource,
     sampler: configuration.sampler,
     spanProcessors,
   });
+  const meterProvider = new MeterProvider({ resource, readers: metricReaders });
   provider.register({ propagator: new W3CTraceContextPropagator() });
+  metrics.setGlobalMeterProvider(meterProvider);
   const state: TelemetryRuntimeState = {
     serviceName,
     provider,
+    meterProvider,
     shutdownPromise: null,
   };
   globalObject[globalStateKey] = state;
-  return lifecycle(state, Boolean(resolvedExporter));
+  return lifecycle(state, Boolean(resolvedExporter) || Boolean(resolvedMetricExporter));
 }
 
 export function shutdownTelemetry(): Promise<void> {
   const state = (globalThis as TelemetryGlobal)[globalStateKey];
   if (!state) return Promise.resolve();
-  state.shutdownPromise ??= state.provider.shutdown();
+  state.shutdownPromise ??= Promise.all([
+    state.provider.shutdown(),
+    state.meterProvider.shutdown(),
+  ]).then(() => undefined);
   return state.shutdownPromise;
+}
+
+const providerStateOperations = new Set(["read", "update", "backfill", "shadow-verify"] as const);
+const providerStateOutcomes = new Set(["ok", "error", "conflict", "missing", "replay"] as const);
+const transactionOperations = new Set([
+  "provider-state-read",
+  "provider-state-update",
+  "provider-state-backfill",
+] as const);
+const transactionOutcomes = new Set(["ok", "error", "conflict", "timeout"] as const);
+const livenessOperations = new Set([
+  "queue-age",
+  "submission",
+  "provider-first-byte",
+  "stream-idle",
+  "wall-clock",
+  "lease-takeover",
+  "terminal-drift",
+  "abort",
+  "cancel",
+  "reconcile",
+] as const);
+const livenessOutcomes = new Set(["ok", "timeout", "cancelled", "error", "recovered"] as const);
+const knowledgeOperations = new Set(["catalog", "execution"] as const);
+const knowledgeOutcomes = new Set(["authorized", "hidden", "blocked", "error"] as const);
+const stableMetricErrorCode = /^[A-Z][A-Z0-9_]{0,63}$/u;
+
+export type RuntimeProviderStateMetric = {
+  operation: "read" | "update" | "backfill" | "shadow-verify";
+  outcome: "ok" | "error" | "conflict" | "missing" | "replay";
+  durationMs: number;
+  rowsApplied?: 0 | 1;
+  eventsApplied?: 0 | 1;
+  projectionLag?: number;
+  errorCode?: string;
+};
+
+export type RuntimeTransactionMetric = {
+  operation: "provider-state-read" | "provider-state-update" | "provider-state-backfill";
+  outcome: "ok" | "error" | "conflict" | "timeout";
+  waitMs: number;
+  durationMs: number;
+  errorCode?: string;
+};
+
+export type RuntimeLivenessMetric = {
+  operation:
+    | "queue-age"
+    | "submission"
+    | "provider-first-byte"
+    | "stream-idle"
+    | "wall-clock"
+    | "lease-takeover"
+    | "terminal-drift"
+    | "abort"
+    | "cancel"
+    | "reconcile";
+  outcome: "ok" | "timeout" | "cancelled" | "error" | "recovered";
+  durationMs?: number;
+  errorCode?: string;
+};
+
+export type KnowledgeVisibilityMetric = {
+  operation: "catalog" | "execution";
+  outcome: "authorized" | "hidden" | "blocked" | "error";
+  errorCode?: string;
+};
+
+export function recordRuntimeProviderStateMetric(event: RuntimeProviderStateMetric) {
+  assertMetricEnum(event.operation, providerStateOperations, "provider-state operation");
+  assertMetricEnum(event.outcome, providerStateOutcomes, "provider-state outcome");
+  assertMetricDuration(event.durationMs);
+  assertBinaryCount(event.rowsApplied, "rowsApplied");
+  assertBinaryCount(event.eventsApplied, "eventsApplied");
+  assertNonNegativeInteger(event.projectionLag, "projectionLag");
+  const attributes = metricAttributes(event.operation, event.outcome, event.errorCode, 2);
+  const instruments = runtimeMetricInstruments();
+  instruments.providerStateDuration.record(event.durationMs, attributes);
+  if (event.rowsApplied !== undefined) instruments.providerStateRowsApplied.record(event.rowsApplied, attributes);
+  if (event.eventsApplied !== undefined) instruments.providerStateEventsApplied.record(event.eventsApplied, attributes);
+  if (event.projectionLag !== undefined) instruments.providerStateProjectionLag.record(event.projectionLag, attributes);
+  if (event.outcome !== "ok" && event.outcome !== "replay") {
+    instruments.providerStateFailures.add(1, attributes);
+  }
+}
+
+export function recordRuntimeTransactionMetric(event: RuntimeTransactionMetric) {
+  assertMetricEnum(event.operation, transactionOperations, "transaction operation");
+  assertMetricEnum(event.outcome, transactionOutcomes, "transaction outcome");
+  assertMetricDuration(event.waitMs);
+  assertMetricDuration(event.durationMs);
+  if (event.waitMs > event.durationMs) {
+    throw new Error("Telemetry transaction waitMs must not exceed durationMs");
+  }
+  const attributes = metricAttributes(event.operation, event.outcome, event.errorCode);
+  const instruments = runtimeMetricInstruments();
+  instruments.transactionWait.record(event.waitMs, attributes);
+  instruments.transactionDuration.record(event.durationMs, attributes);
+  instruments.transactionEvents.add(1, attributes);
+  if (normalizedMetricErrorCode(event.errorCode) === "P2028") {
+    instruments.transactionP2028.add(1, attributes);
+  }
+}
+
+export function recordRuntimeLivenessMetric(event: RuntimeLivenessMetric) {
+  assertMetricEnum(event.operation, livenessOperations, "liveness operation");
+  assertMetricEnum(event.outcome, livenessOutcomes, "liveness outcome");
+  if (event.durationMs !== undefined) assertMetricDuration(event.durationMs);
+  const attributes = metricAttributes(event.operation, event.outcome, event.errorCode);
+  const instruments = runtimeMetricInstruments();
+  instruments.livenessEvents.add(1, attributes);
+  if (event.durationMs !== undefined) instruments.livenessDuration.record(event.durationMs, attributes);
+}
+
+export function recordKnowledgeVisibilityMetric(event: KnowledgeVisibilityMetric) {
+  assertMetricEnum(event.operation, knowledgeOperations, "Knowledge operation");
+  assertMetricEnum(event.outcome, knowledgeOutcomes, "Knowledge outcome");
+  runtimeMetricInstruments().knowledgeVisibility.add(
+    1,
+    metricAttributes(event.operation, event.outcome, event.errorCode),
+  );
 }
 
 export type HttpServerSpanOptions = {
@@ -347,6 +523,106 @@ function tracer() {
   return trace.getTracer(instrumentationName, instrumentationVersion);
 }
 
+let cachedRuntimeMetricInstruments: ReturnType<typeof createRuntimeMetricInstruments> | null = null;
+
+function runtimeMetricInstruments() {
+  cachedRuntimeMetricInstruments ??= createRuntimeMetricInstruments();
+  return cachedRuntimeMetricInstruments;
+}
+
+function createRuntimeMetricInstruments() {
+  const meter = metrics.getMeter(instrumentationName, instrumentationVersion);
+  return {
+    providerStateDuration: meter.createHistogram("workbench.runtime.provider_state.duration", {
+      description: "Runtime provider-state operation duration",
+      unit: "ms",
+    }),
+    providerStateRowsApplied: meter.createHistogram("workbench.runtime.provider_state.rows_applied", {
+      description: "Rows applied by one Runtime provider-state operation",
+      unit: "{row}",
+    }),
+    providerStateEventsApplied: meter.createHistogram("workbench.runtime.provider_state.events_applied", {
+      description: "Events applied by one Runtime provider-state operation",
+      unit: "{event}",
+    }),
+    providerStateProjectionLag: meter.createHistogram("workbench.runtime.provider_state.projection_lag", {
+      description: "Attempt sequence minus provider-state projection sequence",
+      unit: "{event}",
+    }),
+    providerStateFailures: meter.createCounter("workbench.runtime.provider_state.failures", {
+      description: "Runtime provider-state failures grouped by stable low-cardinality code",
+      unit: "{failure}",
+    }),
+    transactionWait: meter.createHistogram("workbench.runtime.transaction.wait", {
+      description: "Runtime database transaction acquisition wait",
+      unit: "ms",
+    }),
+    transactionDuration: meter.createHistogram("workbench.runtime.transaction.duration", {
+      description: "Runtime database transaction duration including acquisition wait",
+      unit: "ms",
+    }),
+    transactionEvents: meter.createCounter("workbench.runtime.transaction.events", {
+      description: "Runtime database transaction outcomes",
+      unit: "{transaction}",
+    }),
+    transactionP2028: meter.createCounter("workbench.runtime.transaction.p2028", {
+      description: "Runtime Prisma P2028 transaction failures",
+      unit: "{failure}",
+    }),
+    livenessEvents: meter.createCounter("workbench.runtime.liveness.events", {
+      description: "Runtime liveness state-machine outcomes",
+      unit: "{event}",
+    }),
+    livenessDuration: meter.createHistogram("workbench.runtime.liveness.duration", {
+      description: "Runtime submission, idle, wall-clock, cancel, and recovery duration",
+      unit: "ms",
+    }),
+    knowledgeVisibility: meter.createCounter("workbench.knowledge.visibility.events", {
+      description: "Knowledge catalog visibility and execution authorization outcomes",
+      unit: "{event}",
+    }),
+  };
+}
+
+function metricAttributes(
+  operation: string,
+  outcome: string,
+  errorCode?: string,
+  projectionVersion?: number,
+): Attributes {
+  return compactAttributes({
+    operation,
+    outcome,
+    "error.code": normalizedMetricErrorCode(errorCode),
+    "projection.version": projectionVersion,
+  });
+}
+
+function normalizedMetricErrorCode(errorCode?: string) {
+  if (errorCode === undefined) return undefined;
+  return stableMetricErrorCode.test(errorCode) ? errorCode : "OTHER";
+}
+
+function assertMetricEnum<T extends string>(value: T, values: ReadonlySet<T>, label: string) {
+  if (!values.has(value)) throw new Error(`Telemetry ${label} is invalid`);
+}
+
+function assertMetricDuration(value: number) {
+  if (!Number.isFinite(value) || value < 0 || value > 7 * 24 * 60 * 60 * 1_000) {
+    throw new Error("Telemetry durationMs is invalid");
+  }
+}
+
+function assertBinaryCount(value: 0 | 1 | undefined, label: string) {
+  if (value !== undefined && value !== 0 && value !== 1) throw new Error(`Telemetry ${label} must be 0 or 1`);
+}
+
+function assertNonNegativeInteger(value: number | undefined, label: string) {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+    throw new Error(`Telemetry ${label} must be a non-negative integer`);
+  }
+}
+
 function finishHttpSpan(span: Span, statusCode: number, aborted = false, errorThreshold = 500) {
   if (Number.isInteger(statusCode)) span.setAttribute("http.response.status_code", statusCode);
   if (aborted || statusCode >= errorThreshold) span.setStatus({ code: SpanStatusCode.ERROR });
@@ -425,6 +701,9 @@ function lifecycle(state: TelemetryRuntimeState, exporting: boolean): TelemetryL
   return {
     enabled: true,
     exporting,
+    forceFlush: async () => {
+      await Promise.all([state.provider.forceFlush(), state.meterProvider.forceFlush()]);
+    },
     shutdown: () => shutdownTelemetry(),
   };
 }
@@ -433,6 +712,7 @@ function disabledLifecycle(): TelemetryLifecycle {
   return {
     enabled: false,
     exporting: false,
+    forceFlush: async () => undefined,
     shutdown: async () => undefined,
   };
 }
@@ -452,6 +732,24 @@ function resolveTraceEndpoint(env: NodeJS.ProcessEnv): string | null {
     throw new Error("OTLP trace endpoint must be an http(s) URL without credentials, query, or fragment");
   }
   if (base) url.pathname = `${url.pathname.replace(/\/+$/u, "")}/v1/traces`;
+  return url.toString();
+}
+
+function resolveMetricEndpoint(env: NodeJS.ProcessEnv): string | null {
+  const direct = firstNonEmpty(env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT);
+  const base = direct ? null : firstNonEmpty(env.OTEL_EXPORTER_OTLP_ENDPOINT);
+  const candidate = direct || base;
+  if (!candidate) return null;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error("OTLP metric endpoint must be an absolute URL");
+  }
+  if (!/^https?:$/u.test(url.protocol) || url.username || url.password || url.hash || url.search) {
+    throw new Error("OTLP metric endpoint must be an http(s) URL without credentials, query, or fragment");
+  }
+  if (base) url.pathname = `${url.pathname.replace(/\/+$/u, "")}/v1/metrics`;
   return url.toString();
 }
 

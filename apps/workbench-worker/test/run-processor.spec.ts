@@ -9,9 +9,11 @@ import {
   mapRuntimeArtifactTarget,
   mapRuntimeSources,
   mapRuntimeDesignAssets,
+  publicErrorMessage,
   prototypeAssetPins,
   RunProcessor,
   RuntimeCancelledError,
+  runtimeExecutionErrorCode,
   sha256Canonical,
   validateRuntimeArtifactOperations,
 } from "../src/runs/run-processor.js";
@@ -53,6 +55,16 @@ describe("Runtime retry classification", () => {
     expect(isRetryableRuntimeError(new Error("DEERFLOW_STREAM_END_INVALID"))).toBe(false);
     expect(isRetryableRuntimeError(new Error("RUNTIME_EXTERNAL_EVENT_IDENTITY_CONFLICT")))
       .toBe(false);
+    expect(isRetryableRuntimeError(new Error("RUNTIME_PROVIDER_STATE_HASH_MISMATCH")))
+      .toBe(false);
+    expect(isRetryableRuntimeError(new Error("RUNTIME_PROVIDER_STATE_MISSING")))
+      .toBe(false);
+    expect(isRetryableRuntimeError(new Error("RUNTIME_PROVIDER_TEXT_EVENT_AFTER_FINALIZATION")))
+      .toBe(false);
+    expect(isRetryableRuntimeError(new Error("RUNTIME_PROVIDER_TEXT_EVENT_INTEGRITY_ERROR")))
+      .toBe(false);
+    expect(isRetryableRuntimeError(new Error("RUNTIME_PROVIDER_STATE_NOT_A_REAL_CODE")))
+      .toBe(true);
     expect(isRetryableRuntimeError(new Error("socket closed before the runtime stream completed")))
       .toBe(true);
     expect(isRetryableRuntimeError(new RuntimeLivenessError(
@@ -63,6 +75,44 @@ describe("Runtime retry classification", () => {
       "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
       false,
     ))).toBe(false);
+  });
+
+  it("persists allowlisted provider-state repair codes without exposing arbitrary errors", () => {
+    expect(runtimeExecutionErrorCode(new Error("RUNTIME_PROVIDER_STATE_SEQUENCE_GAP")))
+      .toBe("RUNTIME_PROVIDER_STATE_SEQUENCE_GAP");
+    expect(runtimeExecutionErrorCode(new Error("RUNTIME_PROVIDER_STATE_DRAFT_CONFLICT")))
+      .toBe("RUNTIME_PROVIDER_STATE_DRAFT_CONFLICT");
+    expect(runtimeExecutionErrorCode(new Error("RUNTIME_PROVIDER_TEXT_EVENT_AFTER_FINALIZATION")))
+      .toBe("RUNTIME_PROVIDER_TEXT_EVENT_AFTER_FINALIZATION");
+    expect(runtimeExecutionErrorCode(new Error("RUNTIME_PROVIDER_STATE_NOT_A_REAL_CODE")))
+      .toBe("RUNTIME_EXECUTION_FAILED");
+    expect(runtimeExecutionErrorCode(
+      new Error("RUNTIME_PROVIDER_STATE_NOT_A_REAL_CODE"),
+      "RUNTIME_EXECUTION_RETRYABLE",
+    )).toBe("RUNTIME_EXECUTION_RETRYABLE");
+  });
+
+  it("extracts an allowlisted invariant from a Prisma wrapper", () => {
+    const driverError = {
+      cause: {
+        kind: "postgres",
+        originalCode: "23514",
+        originalMessage: "RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT",
+      },
+    };
+    const prismaError = Object.assign(new Error(
+      "Invalid runtimeProviderState.update() invocation",
+    ), {
+      code: "P2004",
+      meta: { driverAdapterError: driverError },
+    });
+
+    expect(isRetryableRuntimeError(prismaError)).toBe(false);
+    expect(runtimeExecutionErrorCode(prismaError))
+      .toBe("RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT");
+    expect(publicErrorMessage(prismaError))
+      .toBe("RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT");
+    expect(publicErrorMessage(prismaError)).not.toContain("runtimeProviderState.update");
   });
 });
 

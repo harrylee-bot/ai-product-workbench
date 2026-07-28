@@ -23,6 +23,13 @@ const capabilities = {
     bolt: authRequired,
   },
 };
+const netlifyCapabilities = {
+  ...capabilities,
+  external: {
+    ...capabilities.external,
+    netlify: available,
+  },
+};
 
 afterEach(cleanup);
 
@@ -169,6 +176,53 @@ describe("ExportDialog persisted job state", () => {
     expect(screen.getByText("画布节点 1 个")).toBeTruthy();
     expect(screen.getByText("workbench-export.zip")).toBeTruthy();
     expect(screen.getByText(/2\.0 KB/)).toBeTruthy();
+  });
+
+  it("keeps the selected external target while its matching Export becomes ready", async () => {
+    const onPrepareExternalDelivery = vi.fn(async () => externalDelivery("export-html"));
+    const queued = {
+      ...exportJob({ format: "html", status: "queued" }),
+      packaging: "zip" as const,
+    };
+    const succeeded = {
+      ...exportJob({ format: "html", status: "succeeded" }),
+      packaging: "zip" as const,
+    };
+    const props = {
+      activeExportSelection: selection,
+      activeExternalDelivery: null,
+      busy: false,
+      capabilities: netlifyCapabilities,
+      capabilitiesError: null,
+      capabilitiesPending: false,
+      error: null,
+      hasSelection: true,
+      onCancelExport: vi.fn(),
+      onCancelExternalDelivery: vi.fn(),
+      onConfirmExternalDelivery: vi.fn(),
+      onCopyCode: vi.fn(),
+      onDownload: vi.fn(),
+      onOpenChange: vi.fn(),
+      onPrepareExternalDelivery,
+      onRetryCapabilities: vi.fn(async () => undefined),
+      onRetryExternalDelivery: vi.fn(),
+      onSelectAll: vi.fn(),
+      onStartExport: vi.fn(),
+      open: true,
+      selection,
+    };
+    const rendered = render(<ExportDialog {...props} activeExport={null} activeExportSelection={null} />);
+
+    fireEvent.click(screen.getByText("Netlify").closest("button")!);
+    expect(screen.getByText("Netlify").closest("button")?.getAttribute("aria-pressed")).toBe("true");
+
+    rendered.rerender(<ExportDialog {...props} activeExport={queued} />);
+    await waitFor(() => expect(screen.getByText("Netlify").closest("button")?.getAttribute("aria-pressed")).toBe("true"));
+
+    rendered.rerender(<ExportDialog {...props} activeExport={succeeded} />);
+    const prepare = await screen.findByRole("button", { name: "准备发布至 Netlify" });
+    fireEvent.click(prepare);
+    await waitFor(() => expect(onPrepareExternalDelivery).toHaveBeenCalledWith("Netlify"));
   });
 });
 

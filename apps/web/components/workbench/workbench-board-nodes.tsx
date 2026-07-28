@@ -120,6 +120,7 @@ export type GeneratedScreenData = {
 export type DocumentCanvasData = {
   artifact?: WorkbenchArtifactReference;
   phase: Phase;
+  previousArtifact?: WorkbenchArtifactReference;
   suppressEntrance?: boolean;
   title: string;
 };
@@ -689,47 +690,60 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
   const prdEditor = useContext(WorkbenchPrdEditContext);
   const isLoading = data.phase === "generating" || data.phase === "refining";
   const artifactVersionId = data.artifact?.artifactVersionId ?? null;
+  const previousArtifact = data.previousArtifact?.artifactVersionId === artifactVersionId
+    ? undefined
+    : data.previousArtifact;
   const [displayTitle, setDisplayTitle] = useState(data.title);
-  const [resolvedArtifactVersionId, setResolvedArtifactVersionId] = useState<string | null>(
-    () => isLoading ? null : artifactVersionId,
-  );
-  const showLoading = isLoading && (
-    artifactVersionId === null || resolvedArtifactVersionId !== artifactVersionId
-  );
+  const [artifactResolution, setArtifactResolution] = useState<{
+    artifactVersionId: string | null;
+    state: "error" | "pending" | "ready";
+  }>(() => ({
+    artifactVersionId,
+    state: isLoading && !data.suppressEntrance ? "pending" : "ready",
+  }));
+  const artifactState = artifactResolution.artifactVersionId === artifactVersionId
+    ? artifactResolution.state
+    : isLoading && !data.suppressEntrance ? "pending" : "ready";
+  const preservesPrevious = Boolean(previousArtifact && isLoading && artifactState !== "ready");
+  const showBlockingLoading = isLoading && artifactState === "pending" && !preservesPrevious;
+  const showRefreshLoading = isLoading && artifactState === "pending" && preservesPrevious;
+  const showRefreshError = isLoading && artifactState === "error" && preservesPrevious;
+  const hideIncomingArtifact = isLoading && artifactState === "pending";
   const editing = Boolean(selected && data.artifact && prdEditor.enabled && !isLoading);
 
   useEffect(() => {
     setDisplayTitle(data.title);
   }, [artifactVersionId, data.title]);
 
-  useEffect(() => {
-    if (artifactVersionId === null) {
-      setResolvedArtifactVersionId(null);
-      return;
-    }
-    if (!isLoading || data.suppressEntrance) {
-      setResolvedArtifactVersionId(artifactVersionId);
-      return;
-    }
-
-    setResolvedArtifactVersionId(null);
-  }, [artifactVersionId, data.suppressEntrance, isLoading]);
-
   const handleArtifactVersionStateChange = useCallback((state: "error" | "pending" | "ready") => {
-    if (artifactVersionId !== null && state !== "pending") {
-      setResolvedArtifactVersionId(artifactVersionId);
-    }
+    setArtifactResolution((current) => (
+      current.artifactVersionId === artifactVersionId && current.state === state
+        ? current
+        : { artifactVersionId, state }
+    ));
   }, [artifactVersionId]);
 
   const handleArtifactTitleChange = useCallback((title: string) => {
     setDisplayTitle(title);
   }, []);
 
+  const incomingArtifactContent = data.artifact ? (
+    <WorkbenchArtifactContent
+      editable={editing}
+      editingBusy={prdEditor.busy}
+      onArtifactTitleChange={handleArtifactTitleChange}
+      onArtifactVersionStateChange={handleArtifactVersionStateChange}
+      onPrdDocumentCommit={prdEditor.onDocumentCommit}
+      pendingContent={null}
+      reference={data.artifact}
+    />
+  ) : null;
+
   return (
     <section className={cn(
       "relative h-full w-full bg-[#1d1d1f] text-[#f1f3f4] shadow-[0_24px_90px_-44px_rgba(0,0,0,0.95)]",
       editing && "nodrag nopan",
-    )}>
+    )} data-workbench-artifact-refresh-state={preservesPrevious ? artifactState : undefined}>
       <NodeResizer
         color="#7467f6"
         handleClassName="!size-[8px] !border !border-[#7467f6] !bg-[#dfe2ff]"
@@ -767,26 +781,39 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
         </div>
       )}
       <div className="absolute inset-0 overflow-hidden bg-[#1d1d1f]">
-        {data.artifact ? (
+        {preservesPrevious && previousArtifact && (
+          <div className="absolute inset-0" data-workbench-artifact-layer="previous">
+            <WorkbenchArtifactContent
+              editable={false}
+              editingBusy={false}
+              onArtifactTitleChange={handleArtifactTitleChange}
+              onPrdDocumentCommit={prdEditor.onDocumentCommit}
+              pendingContent={undefined}
+              reference={previousArtifact}
+            />
+          </div>
+        )}
+        {showRefreshError ? (
+          <div
+            className="absolute right-[18px] top-[18px] z-10 h-[52px] max-w-[calc(100%-36px)] overflow-hidden rounded-[6px] border border-white/[0.10] shadow-[0_16px_48px_-24px_rgba(0,0,0,0.8)]"
+            data-workbench-artifact-layer="incoming"
+            key="incoming-refresh-error"
+          >
+            {incomingArtifactContent}
+          </div>
+        ) : data.artifact ? (
           <motion.div
-            animate={showLoading ? { opacity: 0, y: 5 } : { opacity: 1, y: 0 }}
-            aria-hidden={showLoading}
+            animate={hideIncomingArtifact ? { opacity: 0, y: 5 } : { opacity: 1, y: 0 }}
+            aria-hidden={hideIncomingArtifact}
             className="absolute inset-0"
+            data-workbench-artifact-layer="incoming"
             initial={data.suppressEntrance || !isLoading ? false : { opacity: 0, y: 5 }}
-            inert={showLoading}
+            inert={hideIncomingArtifact}
             transition={data.suppressEntrance
               ? { duration: 0 }
-              : { delay: showLoading ? 0 : 0.18, duration: 0.32, ease: workbenchEase }}
+              : { delay: hideIncomingArtifact ? 0 : 0.18, duration: 0.32, ease: workbenchEase }}
           >
-            <WorkbenchArtifactContent
-              editable={editing}
-              editingBusy={prdEditor.busy}
-              onArtifactTitleChange={handleArtifactTitleChange}
-              onArtifactVersionStateChange={handleArtifactVersionStateChange}
-              onPrdDocumentCommit={prdEditor.onDocumentCommit}
-              pendingContent={null}
-              reference={data.artifact}
-            />
+            {incomingArtifactContent}
           </motion.div>
         ) : !isLoading ? (
           <div className="absolute inset-0 px-[38px] py-[34px]">
@@ -798,7 +825,7 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
           </div>
         ) : null}
         <AnimatePresence initial={false}>
-          {showLoading && (
+          {showBlockingLoading && (
             <motion.div
               animate={{ opacity: 1 }}
               className="absolute inset-0 z-10"
@@ -807,7 +834,19 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
               key="document-loading"
               transition={{ duration: 0.22, ease: workbenchEase }}
             >
-              <WorkbenchDocumentLoading />
+              <WorkbenchDocumentLoading phase={data.phase === "refining" ? "refining" : "generating"} />
+            </motion.div>
+          )}
+          {showRefreshLoading && (
+            <motion.div
+              animate={{ opacity: 1 }}
+              className="pointer-events-none absolute inset-0 z-10"
+              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }}
+              key="document-refreshing"
+              transition={{ duration: 0.22, ease: workbenchEase }}
+            >
+              <WorkbenchDocumentLoading mode="refresh" phase="refining" />
             </motion.div>
           )}
         </AnimatePresence>

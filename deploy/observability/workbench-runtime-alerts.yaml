@@ -1,0 +1,78 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: workbench-runtime-remediation
+  labels:
+    app.kubernetes.io/name: workbench
+    app.kubernetes.io/component: runtime
+spec:
+  groups:
+    - name: workbench-runtime-provider-state
+      rules:
+        - alert: WorkbenchRuntimeProviderStateP2028
+          expr: increase(workbench_runtime_transaction_p2028_total[5m]) > 0
+          for: 0m
+          labels: { severity: critical, owner: operations }
+          annotations:
+            summary: Runtime provider-state hit a PostgreSQL transaction timeout
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#provider-state-p2028
+        - alert: WorkbenchRuntimeProjectionInvariant
+          expr: increase(workbench_runtime_provider_state_failures_total{operation=~"read|update|shadow-verify",error_code=~"RUNTIME_PROVIDER_STATE_.*"}[5m]) > 0
+          for: 0m
+          labels: { severity: critical, owner: data }
+          annotations:
+            summary: Runtime provider-state projection failed closed
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#projection-invariant
+        - alert: WorkbenchRuntimeProjectionLag
+          expr: increase(workbench_runtime_provider_state_projection_lag_sum[10m]) > 0
+          for: 5m
+          labels: { severity: critical, owner: operations }
+          annotations:
+            summary: Runtime provider-state projection lag is non-zero
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#projection-lag
+        - alert: WorkbenchRuntimeBackfillConflict
+          expr: increase(workbench_runtime_provider_state_failures_total{operation="backfill"}[5m]) > 0
+          for: 0m
+          labels: { severity: critical, owner: data }
+          annotations:
+            summary: Runtime provider-state backfill stopped on a conflict
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#backfill-conflict
+    - name: workbench-runtime-liveness
+      rules:
+        - alert: WorkbenchRuntimeWallClockNearLimit
+          expr: histogram_quantile(0.95, sum by (le) (rate(workbench_runtime_liveness_duration_milliseconds_bucket{operation="wall-clock"}[15m]))) > 1620000
+          for: 10m
+          labels: { severity: warning, owner: operations }
+          annotations:
+            summary: Runtime p95 wall clock exceeds 90 percent of the approved 1800000 ms budget
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#wall-clock
+        - alert: WorkbenchRuntimeLivenessTimeout
+          expr: increase(workbench_runtime_liveness_events_total{outcome="timeout"}[5m]) > 0
+          for: 0m
+          labels: { severity: critical, owner: operations }
+          annotations:
+            summary: Runtime submission, stream idle, or wall-clock budget expired
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#wall-clock
+        - alert: WorkbenchRuntimeTerminalRunDrift
+          expr: increase(workbench_runtime_liveness_events_total{operation="terminal-drift",outcome="error"}[5m]) > 0
+          for: 0m
+          labels: { severity: critical, owner: operations }
+          annotations:
+            summary: A terminal queue job left its Workbench Run active
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#terminal-run-drift
+        - alert: WorkbenchRuntimeLeaseTakeoverBurst
+          expr: increase(workbench_runtime_liveness_events_total{operation="lease-takeover",outcome="recovered"}[10m]) > 5
+          for: 5m
+          labels: { severity: warning, owner: operations }
+          annotations:
+            summary: Runtime lease takeovers increased above the operating baseline
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#lease-takeover
+    - name: workbench-knowledge-visibility
+      rules:
+        - alert: WorkbenchKnowledgeUnauthorizedExecution
+          expr: increase(workbench_knowledge_visibility_events_total{operation="execution",outcome="blocked"}[5m]) > 0
+          for: 0m
+          labels: { severity: critical, owner: security }
+          annotations:
+            summary: A request attempted Knowledge execution without an authorized catalog entry
+            runbook_url: docs/runbooks/workbench-runtime-provider-state-rollout.md#knowledge-visibility

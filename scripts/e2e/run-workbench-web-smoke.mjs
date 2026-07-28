@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  managedWorkbenchWebDistDir,
   waitForWorkbenchWeb,
   warmWorkbenchProtectedRoutes,
 } from "./workbench-web-startup.mjs";
@@ -17,7 +18,9 @@ const configuredOrigin = process.env.WORKBENCH_E2E_WEB_ORIGIN;
 const managedWebPort = configuredOrigin ? null : await reservePort();
 const origin = configuredOrigin ?? `http://127.0.0.1:${managedWebPort}`;
 const previewOrigin = process.env.WORKBENCH_E2E_PREVIEW_ORIGIN ?? "http://127.0.0.1:4300";
-const managedDistDir = managedWebPort === null ? null : `.next/e2e-${process.pid}-${managedWebPort}`;
+const managedDistDir = managedWebPort === null
+  ? null
+  : managedWorkbenchWebDistDir(process.pid, managedWebPort);
 const managedDistDirPath = managedDistDir === null
   ? null
   : path.join(webRootPath, managedDistDir);
@@ -31,6 +34,8 @@ const sourceTsconfigPath = path.join(webRootPath, "tsconfig.json");
 const sourceNextEnvPath = path.join(webRootPath, "next-env.d.ts");
 const sourceTsconfig = managedWebPort === null ? null : await readFile(sourceTsconfigPath);
 const sourceNextEnv = managedWebPort === null ? null : await readFile(sourceNextEnvPath);
+
+console.log("[fixture-browser] This lane intercepts auth, API, and SSE routes; it is not real-stack evidence.");
 
 if (managedDistDirPath && managedTsconfigPath) {
   await mkdir(managedDistDirPath, { recursive: true });
@@ -65,6 +70,7 @@ const server = managedWebPort === null
           ...process.env,
           WORKBENCH_E2E_WEB_ORIGIN: origin,
           WORKBENCH_E2E_PREVIEW_ORIGIN: previewOrigin,
+          WORKBENCH_E2E_EVIDENCE_LEVEL: "fixture",
           WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
           WORKBENCH_NEXT_DIST_DIR: managedDistDir,
           WORKBENCH_NEXT_TSCONFIG_PATH: managedTsconfigRelativePath,
@@ -89,6 +95,11 @@ const cleanupManagedFiles = () => {
     }
     if (managedDistDirPath) {
       await rm(managedDistDirPath, { recursive: true, force: true });
+      try {
+        await rmdir(path.dirname(managedDistDirPath));
+      } catch (error) {
+        if (error?.code !== "ENOENT" && error?.code !== "ENOTEMPTY") throw error;
+      }
     }
     if (managedTsconfigPath) {
       await rm(managedTsconfigPath, { force: true });
@@ -139,6 +150,7 @@ async function run(command, args, environment = {}) {
       ...process.env,
       WORKBENCH_E2E_WEB_ORIGIN: origin,
       WORKBENCH_E2E_PREVIEW_ORIGIN: previewOrigin,
+      WORKBENCH_E2E_EVIDENCE_LEVEL: "fixture",
       ...environment,
     },
     stdio: "inherit",

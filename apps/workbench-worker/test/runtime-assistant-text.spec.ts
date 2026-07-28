@@ -6,7 +6,10 @@ import {
   reduceRuntimeProviderProjection,
   rebuildRuntimeProviderTextState,
   runtimeExternalFinalizationEvent,
+  runtimeProviderTextStateFromLegacy,
+  runtimeProviderTextStateFromProjection,
   sha256Canonical,
+  type RuntimeProviderTextEvent,
 } from "../src/runtime/runtime-assistant-text.js";
 
 describe("durable Runtime provider text state", () => {
@@ -94,6 +97,88 @@ describe("durable Runtime provider text state", () => {
 });
 
 describe("Runtime provider-state v2 reducer", () => {
+  it("matches legacy replay across 7,686 representative events and the durable draft", () => {
+    const eventCount = 7_686;
+    const events: RuntimeProviderTextEvent[] = [];
+    let projection = createRuntimeProviderProjection({
+      runtimeAttemptId: "attempt-representative",
+      runId: "run-representative",
+    });
+    const append = (sequence: number, event: string, payload: RuntimeProviderTextEvent["payload"]) => {
+      const input = {
+        runtimeAttemptId: projection.runtimeAttemptId,
+        runId: projection.runId,
+        attempt: 1,
+        externalEventId: `synthetic-${sequence}`,
+        sequence,
+        event,
+        payload,
+        payloadSha256: sha256Canonical(payload),
+      };
+      projection = reduceRuntimeProviderProjection(projection, input).state;
+      events.push(input);
+    };
+
+    append(1, "messages", { type: "ai", content: "alpha " });
+    append(2, "updates", { phase: "synthetic-no-text" });
+    append(3, "values", {
+      messages: [{ type: "ai", content: "alpha beta" }],
+    });
+    append(4, "messages-tuple", [{ type: "ai", content: " gamma" }, { synthetic: true }]);
+    for (let sequence = 5; sequence < eventCount; sequence += 1) {
+      append(sequence, "updates", { sequence, synthetic: true });
+    }
+
+    const before = {
+      rawAssistantText: projection.rawAssistantText,
+      visibleAssistantText: projection.visibleAssistantText,
+      redactionBuffer: projection.redactionBuffer,
+    };
+    const finalization = createRuntimeFinalizationPayload({
+      messagesSha256: "a".repeat(64),
+      outcomeSha256: "b".repeat(64),
+      effects: [{
+        type: "phase",
+        phase: "validating",
+        label: "Synthetic validation",
+        progress: 1,
+      }],
+      visibleAssistantText: "alpha beta gamma",
+      providerTextCheckpoint: createRuntimeProviderTextCheckpoint(
+        before,
+        "alpha beta gamma",
+      ),
+    });
+    append(eventCount, runtimeExternalFinalizationEvent, finalization);
+
+    const durableDraftText = "alpha beta gamma";
+    const replayed = rebuildRuntimeProviderTextState({
+      currentRuntimeAttemptId: projection.runtimeAttemptId,
+      durableVisibleAssistantText: durableDraftText,
+      events,
+      truncated: false,
+    });
+
+    expect(events).toHaveLength(eventCount);
+    expect(finalization.effects).toEqual([{
+      type: "phase",
+      phase: "validating",
+      label: "Synthetic validation",
+      progress: 1,
+    }]);
+    expect(runtimeProviderTextStateFromLegacy(replayed)).toEqual(
+      runtimeProviderTextStateFromProjection(projection, durableDraftText),
+    );
+    expect(projection).toMatchObject({
+      lastAppliedSequence: eventCount,
+      rawAssistantText: "alpha beta gamma",
+      visibleAssistantText: durableDraftText,
+      redactionBuffer: "",
+      finalizationExternalEventId: `synthetic-${eventCount}`,
+      finalizationPayloadSha256: sha256Canonical(finalization),
+    });
+  });
+
   it("applies one verified event and advances a canonical hash", () => {
     const initial = createRuntimeProviderProjection({
       runtimeAttemptId: "attempt-1",

@@ -75,6 +75,20 @@ test("the migrator reconciles Runtime queues before services start", async () =>
     "workbench_test",
     "the destructive integration reset must be explicitly bound to the CI test database",
   );
+  const realStackBrowser = workflow.jobs?.["real-stack-browser"];
+  assert(realStackBrowser, "CI must include an isolated real-stack browser lane");
+  assert.deepEqual(realStackBrowser.needs, ["quality"]);
+  assert.equal(realStackBrowser.permissions?.contents, "read");
+  assert.equal(
+    realStackBrowser.env?.WORKBENCH_E2E_CONTROLLED_PROVIDER,
+    "controlled-local-deerflow",
+    "real-stack browser must declare the controlled provider evidence level",
+  );
+  assert.equal(realStackBrowser.env?.WORKBENCH_E2E_REAL_STACK_BROWSER_ONLY, "1");
+  assert.equal(realStackBrowser.env?.WORKBENCH_E2E_RECOVERY_TIMEOUT_MS, "360000");
+  const realStackRun = realStackBrowser.steps?.find((step) => step.name === "Run real-stack browser-only smoke");
+  assert.equal(realStackRun?.run, "npm run e2e:web:real-stack:browser-only");
+  assert.match(postgresHttpE2e, /WORKBENCH_E2E_RECOVERY_TIMEOUT_MS/u);
   for (const [name, source] of [
     ["PostgreSQL HTTP E2E", postgresHttpE2e],
     ["File Worker PostgreSQL integration", fileWorkerPostgres],

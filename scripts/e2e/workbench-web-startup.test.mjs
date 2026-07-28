@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  managedWorkbenchWebDistDir,
   waitForWorkbenchWeb,
   warmWorkbenchProtectedRoutes,
   WORKBENCH_HOME_WARMUP_PATH,
@@ -9,6 +10,14 @@ import {
   WORKBENCH_PROJECT_WARMUP_PATH,
   WORKBENCH_WEB_STARTUP_TIMEOUT_MS,
 } from "./workbench-web-startup.mjs";
+
+test("keeps managed fixture output outside the default Next typegen directory", () => {
+  const distDir = managedWorkbenchWebDistDir(123, 30_001);
+  assert.equal(distDir, ".next-fixture/e2e-123-30001");
+  assert.equal(distDir === ".next" || distDir.startsWith(".next/"), false);
+  assert.throws(() => managedWorkbenchWebDistDir(0, 30_001), /process id is invalid/u);
+  assert.throws(() => managedWorkbenchWebDistDir(123, 65_536), /port is invalid/u);
+});
 
 test("allows each protected route three minutes for shared-runner cold compilation", () => {
   assert.equal(WORKBENCH_WEB_STARTUP_TIMEOUT_MS, 180_000);

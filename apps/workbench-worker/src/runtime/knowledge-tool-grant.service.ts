@@ -4,6 +4,7 @@ import {
   type KnowledgeToolDescriptor,
 } from "@workbench/workbench-contracts";
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
+import { recordKnowledgeVisibilityMetric } from "@workbench/workbench-telemetry";
 import {
   createKnowledgeToolGrant,
   knowledgeToolGrantPayloadSha256,
@@ -39,7 +40,10 @@ export class PrismaKnowledgeToolGrantIssuer implements KnowledgeToolGrantIssuer 
   ) {}
 
   async issue(scope: KnowledgeToolGrantScope): Promise<KnowledgeToolDescriptor | null> {
-    if (!scope.releaseId) return null;
+    if (!scope.releaseId) {
+      recordKnowledgeVisibilityMetric({ operation: "catalog", outcome: "hidden" });
+      return null;
+    }
     if (!this.config) throw new Error("KNOWLEDGE_TOOL_NOT_CONFIGURED");
 
     const now = floorToSecond(new Date());
@@ -151,7 +155,7 @@ export class PrismaKnowledgeToolGrantIssuer implements KnowledgeToolGrantIssuer 
       now,
       maximumTtlSeconds: this.config.maximumTtlSeconds,
     });
-    return knowledgeToolDescriptorSchema.parse({
+    const descriptor = knowledgeToolDescriptorSchema.parse({
       protocol: "workbench.knowledge-tool.v1",
       endpoint: this.config.endpoint,
       token,
@@ -160,6 +164,8 @@ export class PrismaKnowledgeToolGrantIssuer implements KnowledgeToolGrantIssuer 
       mode: payload.mode,
       routeScope: payload.routeScope,
     });
+    recordKnowledgeVisibilityMetric({ operation: "catalog", outcome: "authorized" });
+    return descriptor;
   }
 }
 

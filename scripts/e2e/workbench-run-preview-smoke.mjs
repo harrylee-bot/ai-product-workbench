@@ -14,6 +14,7 @@ const origin = normalizedOrigin(
   process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://localhost:3000",
   "WORKBENCH_E2E_WEB_ORIGIN",
 );
+const evidenceLevel = process.env.WORKBENCH_E2E_EVIDENCE_LEVEL ?? "fixture";
 const timestamp = "2026-07-14T02:00:00.000Z";
 const projectTitle = "真实采购运行项目";
 const prompt = "为企业采购审批生成真实工作台";
@@ -692,6 +693,8 @@ try {
   assert(consoleErrors.length === 0, `Browser console errors: ${consoleErrors.join(" | ")}`);
 
   console.log(JSON.stringify({
+    evidenceLevel,
+    mockedTransport: true,
     ok: true,
     projectTitle,
     prompt,

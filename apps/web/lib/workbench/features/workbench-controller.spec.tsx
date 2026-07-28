@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { Board } from "@workbench/workbench-contracts";
+import type { Board, CanvasSnapshot } from "@workbench/workbench-contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -10,8 +10,10 @@ import { createBoardStore, type BoardSaveSnapshot } from "./board";
 import {
   resolveHomeSubmissionModel,
   resolveRunnableSubmissionModel,
+  submissionIntentRunRequest,
   useWorkbenchController,
 } from "./workbench-controller";
+import { WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE } from "../run";
 
 const mocks = vi.hoisted(() => ({
   archiveProject: vi.fn(),
@@ -143,6 +145,21 @@ afterEach(() => {
 });
 
 describe("Workbench Home Run boundary", () => {
+  it("rejects mixed PRD and Prototype work before a Home submission can create a Project", () => {
+    expect(() => resolveHomeSubmissionModel({
+      prompt: "Create a PRD and a prototype",
+      modelChoiceKey: "model:quality",
+      targetSurface: "app",
+      requestedArtifactKinds: ["prd", "prototype"],
+    }, [{
+      description: "Generate",
+      key: "model:quality",
+      label: "Quality",
+      modelId: "quality",
+      workflow: "generate",
+    }])).toThrow(WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE);
+  });
+
   it("rejects Edit and any Artifact targets before creating a Project", () => {
     const target = {
       artifactId: "artifact-1",
@@ -276,6 +293,67 @@ describe("Workbench Project targeted Generate boundary", () => {
       artifactTargets: [],
       requestedArtifactKinds: ["prototype"],
     }, [model])).toEqual(model);
+  });
+});
+
+describe("Workbench Run Canvas context boundary", () => {
+  const generateModel = {
+    description: "Generate",
+    key: "model:quality",
+    label: "Quality",
+    modelId: "quality",
+    workflow: "generate" as const,
+  };
+  const editModel = {
+    description: "Edit",
+    key: "workflow:edit:quality",
+    label: "Edit",
+    modelId: "quality",
+    workflow: "edit" as const,
+  };
+  const snapshot = {} as CanvasSnapshot;
+
+  it("does not capture or persist a Canvas snapshot for PRD-only Runs", () => {
+    const captureCanvasSnapshot = vi.fn(() => snapshot);
+    const request = submissionIntentRunRequest({
+      captureCanvasSnapshot,
+      modelChoiceKey: generateModel.key,
+      prompt: "Generate a product requirements document",
+      requestedArtifactKinds: ["prd"],
+      targetSurface: "app",
+    }, generateModel, { kind: "automatic" });
+
+    expect(captureCanvasSnapshot).not.toHaveBeenCalled();
+    expect(request.canvasSnapshot).toBeNull();
+  });
+
+  it("keeps Canvas context for Prototype and Edit Runs", () => {
+    const prototypeCapture = vi.fn(() => snapshot);
+    const prototypeRequest = submissionIntentRunRequest({
+      captureCanvasSnapshot: prototypeCapture,
+      modelChoiceKey: generateModel.key,
+      prompt: "Generate an interactive prototype",
+      requestedArtifactKinds: ["prototype"],
+      targetSurface: "app",
+    }, generateModel, { kind: "automatic" });
+    const editCapture = vi.fn(() => snapshot);
+    const editRequest = submissionIntentRunRequest({
+      captureCanvasSnapshot: editCapture,
+      modelChoiceKey: editModel.key,
+      prompt: "Change the selected screen",
+      requestedArtifactKinds: ["prototype"],
+      targetSurface: "app",
+      artifactTargets: [{
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+        screenIds: ["screen-1"],
+      }],
+    }, editModel, { kind: "automatic" });
+
+    expect(prototypeCapture).toHaveBeenCalledOnce();
+    expect(prototypeRequest.canvasSnapshot).toBe(snapshot);
+    expect(editCapture).toHaveBeenCalledOnce();
+    expect(editRequest.canvasSnapshot).toBe(snapshot);
   });
 });
 

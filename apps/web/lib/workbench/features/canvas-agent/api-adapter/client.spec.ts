@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CanvasClientStateSyncRequest } from "@workbench/workbench-contracts";
 
 import { WorkbenchCanvasAgentCommandApi } from "./client";
@@ -47,6 +47,51 @@ describe("WorkbenchCanvasAgentCommandApi", () => {
       acknowledgedAt: expect.any(String),
     });
     expect(wireBody.visualCapture).toBeNull();
+  });
+
+  it("does not cancel an in-flight idempotent state write when polling stops", async () => {
+    let resolveFetch!: (response: Response) => void;
+    const requests: Request[] = [];
+    const fetch = (request: Request): Promise<Response> => {
+      requests.push(request);
+      return new Promise((resolve) => {
+        resolveFetch = resolve;
+      });
+    };
+    const api = new WorkbenchCanvasAgentCommandApi({
+      baseUrl: "http://localhost/api/v1",
+      fetch,
+    });
+    const controller = new AbortController();
+
+    const synchronization = api.syncState("project-1", state(), controller.signal);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    controller.abort();
+
+    expect(requests[0]!.signal.aborted).toBe(false);
+    resolveFetch(json({
+      protocol: "workbench.canvas-client-state.v1",
+      activeSession: false,
+      canvasStateRevision: 2,
+    }));
+    await expect(synchronization).resolves.toMatchObject({
+      activeSession: false,
+      canvasStateRevision: 2,
+    });
+  });
+
+  it("does not start a state write after its polling scope was cancelled", async () => {
+    const fetch = vi.fn<(request: Request) => Promise<Response>>();
+    const api = new WorkbenchCanvasAgentCommandApi({
+      baseUrl: "http://localhost/api/v1",
+      fetch,
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(api.syncState("project-1", state(), controller.signal))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

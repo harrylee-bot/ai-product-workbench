@@ -1,3 +1,5 @@
+import { recordRuntimeLivenessMetric } from "@workbench/workbench-telemetry";
+
 export type RuntimeLivenessCode =
   | "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT"
   | "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT"
@@ -17,6 +19,7 @@ export class RuntimeProviderLivenessBudget {
   private readonly controller = new AbortController();
   private timer: NodeJS.Timeout | null = null;
   private phase: "submission" | "stream" = "submission";
+  private armedAtMs = performance.now();
 
   constructor(
     private readonly submissionTimeoutMs: number,
@@ -35,6 +38,11 @@ export class RuntimeProviderLivenessBudget {
 
   providerActivity(): void {
     if (this.signal.aborted) return;
+    recordRuntimeLivenessMetric({
+      operation: this.phase === "submission" ? "provider-first-byte" : "stream-idle",
+      outcome: "ok",
+      durationMs: performance.now() - this.armedAtMs,
+    });
     this.phase = "stream";
     this.arm();
   }
@@ -49,13 +57,19 @@ export class RuntimeProviderLivenessBudget {
     const timeoutMs = this.phase === "submission"
       ? this.submissionTimeoutMs
       : this.streamIdleTimeoutMs;
+    this.armedAtMs = performance.now();
     this.timer = setTimeout(() => {
-      this.controller.abort(new RuntimeLivenessError(
-        this.phase === "submission"
-          ? "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT"
-          : "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
-        true,
-      ));
+      const submission = this.phase === "submission";
+      const code = submission
+        ? "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT"
+        : "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT";
+      recordRuntimeLivenessMetric({
+        operation: submission ? "submission" : "stream-idle",
+        outcome: "timeout",
+        durationMs: performance.now() - this.armedAtMs,
+        errorCode: code,
+      });
+      this.controller.abort(new RuntimeLivenessError(code, true));
     }, timeoutMs);
     this.timer.unref?.();
   }
@@ -80,6 +94,12 @@ export class RuntimeWallClockBudget {
     this.stop();
     const remainingMs = this.maximumWallClockMs - Math.max(0, Date.now() - startedAtMs);
     if (remainingMs <= 0) {
+      recordRuntimeLivenessMetric({
+        operation: "wall-clock",
+        outcome: "timeout",
+        durationMs: this.maximumWallClockMs,
+        errorCode: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      });
       this.controller.abort(new RuntimeLivenessError(
         "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
         false,
@@ -87,6 +107,12 @@ export class RuntimeWallClockBudget {
       return;
     }
     this.timer = setTimeout(() => {
+      recordRuntimeLivenessMetric({
+        operation: "wall-clock",
+        outcome: "timeout",
+        durationMs: this.maximumWallClockMs,
+        errorCode: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      });
       this.controller.abort(new RuntimeLivenessError(
         "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
         false,

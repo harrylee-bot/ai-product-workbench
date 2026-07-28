@@ -48,6 +48,8 @@ type PendingWorkbenchRouteChange = {
   timeout: number;
 };
 
+const WORKBENCH_SUBMISSION_ERROR_TOAST_ID = "workbench-submission-error";
+
 export function WorkbenchRuntimeProvider() {
   const router = useRouter();
   const pathname = usePathname();
@@ -224,8 +226,13 @@ export function WorkbenchRuntimeProvider() {
   }, [prefetchProject, projectNavigation, resetHomePresentation]);
 
   useEffect(() => {
-    if (!workbench.submissionError) return;
-    toast.error(errorMessage(workbench.submissionError, "提交失败，请重试"));
+    if (!workbench.submissionError) {
+      toast.dismiss(WORKBENCH_SUBMISSION_ERROR_TOAST_ID);
+      return;
+    }
+    toast.error(errorMessage(workbench.submissionError, "提交失败，请重试"), {
+      id: WORKBENCH_SUBMISSION_ERROR_TOAST_ID,
+    });
   }, [workbench.submissionError]);
 
   const contextValue = useMemo<WorkbenchRuntimeContextValue>(() => ({

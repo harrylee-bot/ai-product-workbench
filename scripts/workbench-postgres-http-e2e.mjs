@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import process from "node:process";
@@ -11,6 +12,26 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import canonicalize from "canonicalize";
 import pg from "pg";
+import { chromium } from "playwright";
+import {
+  assertRealStackBrowserMode,
+  browserExternalRequestClass,
+  browserNetworkFailureClass,
+  browserOriginClass,
+  browserSseEventEvidence,
+  connectionErrorClass,
+  createScriptedNavigationAbortTracker,
+  hasRequiredBrowserSseEvidence,
+  httpOriginClass,
+  httpPathClass as browserPathClass,
+  persistedTerminalSseAbortAttribution,
+  shouldFailRealStackEvidenceForSourceDrift,
+} from "./workbench-browser-network-evidence.mjs";
+import {
+  diagnosticErrorClass,
+  diagnosticFakeRuntimeState,
+  diagnosticHttpSuccessEvidence,
+} from "./workbench-postgres-http-e2e-diagnostics.mjs";
 import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
 
 const { Client } = pg;
@@ -76,6 +97,27 @@ const prdReferenceFixtures = [
   toolCallId: `e2e-prd-reference-${index}`,
 }));
 const verbose = process.env.WORKBENCH_E2E_VERBOSE === "1";
+const runRealStackBrowser = process.env.WORKBENCH_E2E_REAL_STACK_BROWSER === "1";
+const realStackBrowserOnly = process.env.WORKBENCH_E2E_REAL_STACK_BROWSER_ONLY === "1";
+assertRealStackBrowserMode({ browserOnly: realStackBrowserOnly, enabled: runRealStackBrowser });
+const controlledProvider = process.env.WORKBENCH_E2E_CONTROLLED_PROVIDER ?? "controlled-local-deerflow";
+assert.equal(controlledProvider, "controlled-local-deerflow", "real-stack browser must use the approved controlled provider marker");
+const candidateSourceCommit = resolveCandidateSourceCommit();
+const candidateSourceSnapshot = resolveCandidateSourceSnapshot();
+// The controlled provider deliberately exhausts the real pg-boss retry policy.
+// Keep the longer budget scoped to that recovery assertion; ordinary scenarios
+// retain the shorter timeout so a hung service still fails promptly.
+const recoveryScenarioTimeoutMs = positiveInteger(
+  "WORKBENCH_E2E_RECOVERY_TIMEOUT_MS",
+  runRealStackBrowser ? 360_000 : scenarioTimeoutMs,
+);
+const controlledProviderDelayMs = runRealStackBrowser ? 3_000 : 250;
+const generationVisualViewports = [
+  { width: 375, height: 812 },
+  { width: 768, height: 1024 },
+  { width: 1440, height: 900 },
+];
+const pendingDocumentEvidenceLatencyMs = 10_000;
 
 const services = [];
 let fakeRuntime;
@@ -106,7 +148,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 try {
-  console.log(`[e2e] target database: ${databaseName}`);
+  console.log("[e2e] target database class: isolated-postgresql");
   await buildWorkspaces();
   const { prdDocumentV2Schema } = await import("@workbench/workbench-contracts");
   const { prdDocumentV2Example } = await import("@workbench/workbench-contracts/test-fixtures");
@@ -116,6 +158,11 @@ try {
 
   fakeRuntime = await startFakeDeerFlow(fakeRuntimeToken);
   const apiPort = await reservePort();
+  const webPort = runRealStackBrowser ? await reservePort() : null;
+  const webOrigin = webPort === null ? "http://127.0.0.1:3000" : `http://127.0.0.1:${webPort}`;
+  const previewPort = runRealStackBrowser ? await reservePort() : 4300;
+  const previewHost = "127.0.0.1";
+  const previewOrigin = `http://${previewHost}:${previewPort}`;
   const apiBaseUrl = `http://127.0.0.1:${apiPort}/api/v1`;
   const commonEnvironment = {
     ...process.env,
@@ -136,6 +183,10 @@ try {
     WORKBENCH_API_CANVAS_VISUAL_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-api-canvas-visual`,
     WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-runtime-ready`,
     WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-runtime-ready`,
+    WORKBENCH_EXPORT_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-export`,
+    WORKBENCH_EXPORT_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-export`,
+    WORKBENCH_PREVIEW_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-preview`,
+    WORKBENCH_PREVIEW_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-preview`,
   };
 
   const api = spawnService("workbench-api", process.execPath, ["apps/workbench-api/dist/main.js"], {
@@ -146,7 +197,7 @@ try {
     WORKBENCH_AUTH_MODE: "development",
     WORKBENCH_INVITATION_TOKEN_SECRET: invitationTokenSecret,
     WORKBENCH_INVITATION_TTL_HOURS: "168",
-    WORKBENCH_PREVIEW_ORIGIN: "http://127.0.0.1:4300",
+    WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
     WORKBENCH_PREVIEW_TOKEN_SECRET: previewTokenSecret,
     WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS: "60",
     WORKBENCH_CANVAS_TOOL_SECRET: canvasToolSecret,
@@ -172,10 +223,60 @@ try {
     DEERFLOW_INTERNAL_AUTH_TOKEN: fakeRuntimeToken,
     DEERFLOW_STREAM_MODE: "messages,values",
     DEERFLOW_TIMEOUT_MS: "30000",
-    DEERFLOW_IDLE_TIMEOUT_MS: "5000",
+    DEERFLOW_IDLE_TIMEOUT_MS: runRealStackBrowser ? "15000" : "5000",
   });
   await waitForProcessStart(worker, 750);
 
+  if (runRealStackBrowser) {
+    const exportWorker = spawnService("workbench-export-worker", process.execPath, ["apps/workbench-export-worker/dist/main.js"], {
+      ...commonEnvironment,
+      WORKBENCH_EXPORT_CHROMIUM_PATH: chromium.executablePath(),
+      WORKBENCH_EXPORT_CONCURRENCY: "1",
+      WORKBENCH_EXPORT_BROWSER_TIMEOUT_MS: "30000",
+      WORKBENCH_EXPORT_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-export`,
+      WORKBENCH_EXPORT_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-export`,
+    });
+    await waitForProcessStart(exportWorker, 1_000);
+
+    const preview = spawnService("workbench-preview-real-stack", process.execPath, ["apps/workbench-preview/dist/main.js"], {
+      ...commonEnvironment,
+      WORKBENCH_PREVIEW_HOST: "127.0.0.1",
+      WORKBENCH_PREVIEW_PORT: String(previewPort),
+      WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
+      WORKBENCH_WEB_ORIGIN: webOrigin,
+      WORKBENCH_PREVIEW_TOKEN_SECRET: previewTokenSecret,
+      WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS: "60",
+      WORKBENCH_PREVIEW_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-preview`,
+      WORKBENCH_PREVIEW_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-preview`,
+    });
+    await waitForHttp(`${previewOrigin}/healthz`, preview, scenarioTimeoutMs);
+  }
+
+  if (runRealStackBrowser) {
+    await runRealStackBrowserScenario({
+      commonEnvironment,
+      fakeRuntimeUrl: fakeRuntime.url,
+      previewOrigin,
+      recoveryScenarioTimeoutMs,
+      webOrigin,
+      webPort,
+    });
+  }
+
+  if (realStackBrowserOnly) {
+    console.log(JSON.stringify({
+      ok: true,
+      evidenceLevel: "real-stack",
+      databaseClass: "isolated-postgresql",
+      provider: controlledProvider,
+      candidate: {
+        sourceCommit: candidateSourceCommit,
+        sourceTreeAtStart: candidateSourceSnapshot.clean ? "clean" : "dirty",
+        candidateBound: candidateSourceSnapshot.clean,
+      },
+      legacyHttpScenarios: "not-run",
+    }));
+  } else {
   const client = createApiClient(apiBaseUrl);
   const outsiderClient = createApiClient(apiBaseUrl, {
     subject: "workbench-e2e-outsider",
@@ -187,19 +288,19 @@ try {
     email: "workbench-e2e-invitee@test.local",
     name: "Workbench E2E Invitee",
   });
-  const projectLifecycle = await runProjectLifecycleScenario(
+  await runProjectLifecycleScenario(
     client,
     outsiderClient,
     inviteeClient,
   );
-  const sseRevocation = await runSseRevocationScenario(client, outsiderClient);
+  await runSseRevocationScenario(client, outsiderClient);
   const success = await runSuccessScenario(client, outsiderClient);
-  const prototypePatch = await runPrototypePatchScenario(client);
-  const canvasGateway = await runCanvasGatewayScenario(client);
-  const sourceTargetGenerate = await runSourceTargetGeneratePrototypeScenario(client);
+  await runPrototypePatchScenario(client);
+  await runCanvasGatewayScenario(client);
+  await runSourceTargetGeneratePrototypeScenario(client);
   const approvals = await runApprovalScenario(client);
   const cancellation = await runCancellationScenario(client);
-  const retry = await runRetryScenario(client);
+  await runRetryScenario(client);
 
   assert.ok(fakeRuntime.state.threadCreates >= 4, "fake DeerFlow did not receive thread creation calls");
   assert.ok(fakeRuntime.state.successRuns >= 1, "fake DeerFlow did not receive the success Run");
@@ -278,37 +379,13 @@ try {
     assert.ok(!serializedRuntimeRequests.includes(receipt), "private Gateway receipt reached DeerFlow runtime context");
   }
 
-  console.log(JSON.stringify({
-    ok: true,
-    database: databaseName,
-    apiBaseUrl,
-    projectLifecycle,
-    sseRevocation,
-    success,
-    prototypePatch,
-    canvasGateway,
-    sourceTargetGenerate,
-    approvals,
-    cancellation,
-    retry,
-    fakeRuntime: {
-      threadCreates: fakeRuntime.state.threadCreates,
-      successRuns: fakeRuntime.state.successRuns,
-      prototypePatchRuns: fakeRuntime.state.prototypePatchRuns,
-      sourcePrototypeRuns: fakeRuntime.state.sourcePrototypeRuns,
-      generatePrototypeRuns: fakeRuntime.state.generatePrototypeRuns,
-      approvalRuns: fakeRuntime.state.approvalRuns,
-      approvalResumes: fakeRuntime.state.approvalResumes,
-      cancelRuns: fakeRuntime.state.cancelRuns,
-      canvasSeedRuns: fakeRuntime.state.canvasSeedRuns,
-      canvasQuickEditRuns: fakeRuntime.state.canvasQuickEditRuns,
-      canvasDirectEditRuns: fakeRuntime.state.canvasDirectEditRuns,
-      canvasToolCalls: fakeRuntime.state.canvasToolCalls.length,
-      objectReads: fakeRuntime.state.objectReads.length,
-      visualReads: fakeRuntime.state.visualReads.length,
-      gatewayUploads: fakeRuntime.state.gatewayUploads.length,
-    },
-  }, null, 2));
+  console.log(JSON.stringify(diagnosticHttpSuccessEvidence({
+    candidateSha: candidateSourceCommit,
+    controlledProvider,
+    fakeRuntimeState: fakeRuntime.state,
+    sourceClean: candidateSourceSnapshot.clean,
+  }), null, 2));
+  }
 } catch (error) {
   console.error("[e2e] FAILED", error instanceof Error ? error.stack ?? error.message : error);
   dumpLogs();
@@ -319,26 +396,23 @@ try {
 
 async function buildWorkspaces() {
   console.log("[e2e] validating and building Workbench packages");
-  await runCommand("contracts:validate", npm, [
-    "--workspace", "@workbench/workbench-contracts", "run", "validate:openapi",
-  ]);
-  await runCommand("contracts:build", npm, [
-    "--workspace", "@workbench/workbench-contracts", "run", "build",
-  ]);
-  await runCommand("database:generate", npm, [
-    "--workspace", "@workbench/workbench-db", "run", "generate",
-  ], { WORKBENCH_DATABASE_URL: databaseUrl });
-  await runCommand("preview-token:build", npm, [
-    "--workspace", "@workbench/workbench-preview-token", "run", "build",
-  ]);
-  await runCommand("canvas-tools:build", npm, [
-    "--workspace", "@workbench/workbench-canvas-tools", "run", "build",
-  ]);
+  await runCommand(
+    "workbench:prepare",
+    npm,
+    ["run", "workbench:prepare"],
+    { WORKBENCH_DATABASE_URL: databaseUrl },
+  );
   await runCommand("api:build", npm, [
     "--workspace", "@workbench/workbench-api", "run", "build",
   ]);
   await runCommand("worker:build", npm, [
     "--workspace", "@workbench/workbench-worker", "run", "build",
+  ]);
+  await runCommand("export-worker:build", npm, [
+    "--workspace", "@workbench/workbench-export-worker", "run", "build",
+  ]);
+  await runCommand("preview:build", npm, [
+    "--workspace", "@workbench/workbench-preview", "run", "build",
   ]);
 }
 
@@ -496,6 +570,63 @@ async function runSuccessScenario(client, outsiderClient) {
   const threadId = initial.body.threads[0].id;
   assert.equal(initial.body.selectedThreadId, threadId);
   assert.equal(initial.body.latestRun, null);
+
+  const beforeMixedPersistence = await browserProjectPersistenceCounts(project.body.id);
+  const beforeMixedQueueJobs = await runtimeExecuteQueueJobCount();
+  const beforeMixedProviderRequests = fakeRuntime.state.runRequests.length;
+  const mixedIdempotencyKey = `e2e-mixed-request-${randomUUID()}`;
+  const mixedRequest = {
+    prompt: "Create a PRD and a prototype",
+    modelId: runtimeCatalogModelId,
+    workflow: "generate",
+    generationIntent: null,
+    targetSurface: "web",
+    designStyle: { kind: "automatic" },
+    sourceIds: [],
+    artifactTargets: [],
+    requestedArtifactKinds: ["prd", "prototype"],
+    canvasSnapshot: null,
+  };
+  const mixedFirst = await createSubmissionIntent(client, {
+    threadId,
+    request: mixedRequest,
+    idempotencyKey: mixedIdempotencyKey,
+    expectedStatus: 400,
+  });
+  const mixedReplay = await createSubmissionIntent(client, {
+    threadId,
+    request: mixedRequest,
+    idempotencyKey: mixedIdempotencyKey,
+    expectedStatus: 400,
+  });
+  const { requestId: mixedFirstRequestId, ...mixedFirstProblem } = mixedFirst.body;
+  const { requestId: mixedReplayRequestId, ...mixedReplayProblem } = mixedReplay.body;
+  assert.match(mixedFirst.headers.get("content-type") ?? "", /^application\/problem\+json\b/u);
+  assert.match(String(mixedFirstRequestId), /^[0-9a-f-]{36}$/u);
+  assert.match(String(mixedReplayRequestId), /^[0-9a-f-]{36}$/u);
+  assert.notEqual(mixedReplayRequestId, mixedFirstRequestId);
+  assert.deepEqual(mixedReplayProblem, mixedFirstProblem);
+  assert.equal(mixedFirst.body.status, 400);
+  assert.equal(mixedFirst.body.code, "VALIDATION_ERROR");
+  assert.deepEqual(mixedFirst.body.errors?.["request.requestedArtifactKinds"], [
+    "PRD and Prototype/code must be requested in two sequential Runs: complete the PRD Run first",
+  ]);
+  assert.deepEqual(
+    await browserProjectPersistenceCounts(project.body.id),
+    beforeMixedPersistence,
+    "mixed request changed Project persistence",
+  );
+  assert.equal(
+    await runtimeExecuteQueueJobCount(),
+    beforeMixedQueueJobs,
+    "mixed request published a runtime.execute queue job",
+  );
+  assert.equal(
+    fakeRuntime.state.runRequests.length,
+    beforeMixedProviderRequests,
+    "mixed request reached the controlled provider",
+  );
+
   const sourceFixtures = await seedRunSourceFixtures({
     projectId: project.body.id,
     principalId: identity.body.id,
@@ -3074,6 +3205,7 @@ function eventIdentity(event) {
 
 async function startFakeDeerFlow(expectedToken) {
   const storageObjects = new Map();
+  const browserPrdFinalizationGate = controlledGate();
   const state = {
     threadCreates: 0,
     successRuns: 0,
@@ -3086,10 +3218,18 @@ async function startFakeDeerFlow(expectedToken) {
     canvasSeedRuns: 0,
     canvasQuickEditRuns: 0,
     canvasDirectEditRuns: 0,
+    browserPrototypeRuns: 0,
+    browserFailureSourceRunId: null,
+    browserFailureAttempts: 0,
+    browserFailureRejoinAttempts: 0,
+    browserFailureRecoveryRuns: 0,
+    browserFailureAcceptedRunId: null,
+    browserFailureAcceptedRunVisible: false,
     canvasToolCalls: [],
     activeCancelStreams: 0,
     objectReads: [],
     visualReads: [],
+    exportReads: [],
     gatewayUploads: [],
     gatewayReceipts: [],
     runRequests: [],
@@ -3100,8 +3240,15 @@ async function startFakeDeerFlow(expectedToken) {
   };
   const sockets = new Set();
   const server = http.createServer((request, response) => {
-    void handleFakeDeerFlow(request, response, expectedToken, state, storageObjects).catch((error) => {
-      state.requests.push({ error: error instanceof Error ? error.message : String(error) });
+    void handleFakeDeerFlow(
+      request,
+      response,
+      expectedToken,
+      state,
+      storageObjects,
+      browserPrdFinalizationGate,
+    ).catch((error) => {
+      state.requests.push({ errorClass: diagnosticErrorClass(error) });
       if (!response.headersSent) {
         response.writeHead(500, { "content-type": "application/json" });
       }
@@ -3127,7 +3274,11 @@ async function startFakeDeerFlow(expectedToken) {
       assert.ok(!storageObjects.has(storageKey), `duplicate fake S3 object key: ${storageKey}`);
       storageObjects.set(storageKey, { bytes: Buffer.from(bytes), mediaType });
     },
+    releaseBrowserPrdFinalization() {
+      browserPrdFinalizationGate.release();
+    },
     async close() {
+      browserPrdFinalizationGate.release();
       for (const socket of sockets) socket.destroy();
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
@@ -3135,10 +3286,17 @@ async function startFakeDeerFlow(expectedToken) {
   };
 }
 
-async function handleFakeDeerFlow(request, response, expectedToken, state, storageObjects) {
+async function handleFakeDeerFlow(
+  request,
+  response,
+  expectedToken,
+  state,
+  storageObjects,
+  browserPrdFinalizationGate,
+) {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const storagePrefix = `/${fakeStorageBucket}/`;
-  if (request.method === "GET" && url.pathname.startsWith(storagePrefix)) {
+  if ((request.method === "GET" || request.method === "HEAD") && url.pathname.startsWith(storagePrefix)) {
     const storageKey = url.pathname
       .slice(storagePrefix.length)
       .split("/")
@@ -3151,16 +3309,26 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
       return;
     }
     const read = { storageKey, byteSize: object.bytes.byteLength, sha256: sha256(object.bytes) };
-    if (storageKey.startsWith("canvas-visuals/")) state.visualReads.push(read);
+    const exportObject = storageKey.startsWith("pending/exports/") || storageKey.startsWith("blobs/");
+    if (exportObject) {
+      const role = storageAccessRole(request);
+      assert.ok(
+        storageKey.startsWith("pending/exports/") ? role === "export" : role === "export" || role === "preview",
+        `fake S3 read used an unexpected dedicated identity for ${storageKey}`,
+      );
+      state.exportReads.push({ ...read, role });
+    } else if (storageKey.startsWith("canvas-visuals/")) state.visualReads.push(read);
     else state.objectReads.push(read);
     response.writeHead(200, {
       "content-type": object.mediaType,
       "content-length": String(object.bytes.byteLength),
       etag: `\"${sha256(object.bytes)}\"`,
+      "x-amz-meta-sha256": sha256(object.bytes),
+      "x-amz-meta-byte-size": String(object.bytes.byteLength),
       "last-modified": new Date().toUTCString(),
       "x-amz-request-id": `e2e-${randomUUID()}`,
     });
-    response.end(object.bytes);
+    response.end(request.method === "HEAD" ? undefined : object.bytes);
     return;
   }
   if (request.method === "PUT" && url.pathname.startsWith(storagePrefix)) {
@@ -3169,11 +3337,13 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
       .split("/")
       .map((segment) => decodeURIComponent(segment))
       .join("/");
-    assert.match(storageKey, /^canvas-visuals\/[A-Za-z0-9][A-Za-z0-9._:-]*\//);
-    assert.match(
-      String(request.headers.authorization ?? ""),
-      new RegExp(`^AWS4-HMAC-SHA256 Credential=${fakeStorageAccessKeyId}-api-canvas-visual/`),
-      "Canvas visual PUT did not use the dedicated S3 identity",
+    const canvasVisual = storageKey.startsWith("canvas-visuals/");
+    const exportObject = storageKey.startsWith("pending/exports/") || storageKey.startsWith("blobs/");
+    assert.ok(canvasVisual || exportObject, `fake S3 rejected an unexpected object key class: ${storageKey.split("/")[0]}`);
+    assert.equal(
+      storageAccessRole(request),
+      canvasVisual ? "api-canvas-visual" : "export",
+      "S3 PUT did not use the dedicated object-storage identity",
     );
     const bytes = await readRequestBuffer(request, 2 * 1024 * 1024);
     const declaredLength = Number(request.headers["content-length"]);
@@ -3181,16 +3351,25 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
     const digest = sha256(bytes);
     const metadataDigest = request.headers["x-amz-meta-sha256"];
     assert.equal(metadataDigest, digest, "Canvas visual PUT omitted its immutable metadata digest");
-    const checksum = request.headers["x-amz-checksum-sha256"];
-    assert.equal(typeof checksum, "string", "Canvas visual PUT omitted its S3 checksum");
-    assert.equal(Buffer.from(checksum, "base64").toString("hex"), digest);
+    if (canvasVisual) {
+      const checksum = request.headers["x-amz-checksum-sha256"];
+      assert.equal(typeof checksum, "string", "Canvas visual PUT omitted its S3 checksum");
+      assert.equal(Buffer.from(checksum, "base64").toString("hex"), digest);
+    }
     const mediaType = String(request.headers["content-type"] ?? "application/octet-stream");
     storageObjects.set(storageKey, { bytes, mediaType });
-    state.storageWrites.push({ storageKey, byteSize: bytes.byteLength, mediaType, sha256: digest });
+    if (canvasVisual) state.storageWrites.push({ storageKey, byteSize: bytes.byteLength, mediaType, sha256: digest });
     response.writeHead(200, {
       etag: `"${digest}"`,
-      "x-amz-version-id": `e2e-${state.storageWrites.length}`,
+      "x-amz-version-id": `e2e-${state.storageWrites.length + 1}`,
     });
+    response.end();
+    return;
+  }
+  if (request.method === "DELETE" && url.pathname.startsWith(storagePrefix)) {
+    const storageKey = url.pathname.slice(storagePrefix.length).split("/").map(decodeURIComponent).join("/");
+    storageObjects.delete(storageKey);
+    response.writeHead(204);
     response.end();
     return;
   }
@@ -3305,7 +3484,18 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
     const externalThreadId = decodeURIComponent(runListMatch[1]);
     const runs = [...state.runtimeRuns.values()]
       .filter((run) => run.thread_id === externalThreadId)
+      .filter((run) => (
+        run.kind !== "browser-failure-accepted"
+        || (
+          run.run_id === state.browserFailureAcceptedRunId
+          && !state.browserFailureAcceptedRunVisible
+        )
+      ))
       .map(publicRuntimeRun);
+    if (state.browserFailureAcceptedRunId && !state.browserFailureAcceptedRunVisible) {
+      const accepted = state.runtimeRuns.get(state.browserFailureAcceptedRunId);
+      if (accepted?.thread_id === externalThreadId) state.browserFailureAcceptedRunVisible = true;
+    }
     state.requests.push({ method: request.method, path: url.pathname, kind: "run-list" });
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(runs));
@@ -3313,6 +3503,21 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
   }
 
   const runGetMatch = /^\/threads\/([^/]+)\/runs\/([^/]+)$/.exec(url.pathname);
+  const runJoinMatch = /^\/threads\/([^/]+)\/runs\/([^/]+)\/stream$/.exec(url.pathname);
+  if (request.method === "GET" && runJoinMatch) {
+    const run = state.runtimeRuns.get(decodeURIComponent(runJoinMatch[2]));
+    if (!run || run.thread_id !== decodeURIComponent(runJoinMatch[1])) {
+      response.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    if (run.kind === "browser-failure-accepted") {
+      state.browserFailureRejoinAttempts += 1;
+      state.requests.push({ method: request.method, path: url.pathname, kind: "browser-failure-rejoin" });
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ code: "CONTROLLED_BROWSER_STREAM_UNAVAILABLE" }));
+      return;
+    }
+  }
   if (request.method === "GET" && runGetMatch) {
     const run = state.runtimeRuns.get(decodeURIComponent(runGetMatch[2]));
     if (!run || run.thread_id !== decodeURIComponent(runGetMatch[1])) {
@@ -3343,6 +3548,37 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
   if (request.method === "POST" && /^\/threads\/[^/]+\/runs\/stream$/.test(url.pathname)) {
     const body = await readJsonRequest(request);
     const serialized = JSON.stringify(body);
+    const browserFailure = serialized.includes("E2E_BROWSER_FAILURE");
+    const browserVisualPrd = serialized.includes("synthetic browser test");
+    const workbenchRunId = body?.metadata?.workbench_run_id;
+    let browserFailureRecovery = false;
+    if (browserFailure) {
+      assert.equal(typeof workbenchRunId, "string", "controlled browser failure omitted the Workbench Run identity");
+      state.browserFailureSourceRunId ??= workbenchRunId;
+      if (workbenchRunId === state.browserFailureSourceRunId) {
+        state.browserFailureAttempts += 1;
+        const acceptedRunId = randomUUID();
+        state.browserFailureAcceptedRunId = acceptedRunId;
+        state.browserFailureAcceptedRunVisible = false;
+        state.runtimeRuns.set(acceptedRunId, {
+          run_id: acceptedRunId,
+          thread_id: decodeURIComponent(url.pathname.split("/")[2]),
+          assistant_id: body.assistant_id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          status: "error",
+          metadata: body.metadata ?? {},
+          multitask_strategy: body.multitask_strategy ?? null,
+          kind: "browser-failure-accepted",
+          closeStream: null,
+        });
+        state.requests.push({ method: request.method, path: url.pathname, kind: "browser-failure" });
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({ code: "CONTROLLED_BROWSER_RUNTIME_UNAVAILABLE" }));
+        return;
+      }
+      browserFailureRecovery = true;
+    }
     const cancellation = serialized.includes("E2E_CANCEL");
     const approval = serialized.includes("E2E_APPROVAL");
     const prototypePatch = serialized.includes("E2E_PROTOTYPE_PATCH");
@@ -3351,9 +3587,12 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
     const canvasSeed = serialized.includes("E2E_CANVAS_SEED");
     const canvasQuickEdit = serialized.includes("E2E_CANVAS_QUICK_EDIT");
     const canvasDirectEdit = serialized.includes("E2E_CANVAS_DIRECT_EDIT");
+    const prototypeGeneration = serialized.includes('"requestedArtifactKinds":["prototype"]');
     const resume = body?.input === null && body?.command?.resume !== undefined;
-    const kind = cancellation
-      ? "cancel"
+    const kind = browserFailureRecovery
+      ? "browser-failure-recovery"
+      : cancellation
+        ? "cancel"
       : resume
           ? "approval-resume"
           : approval
@@ -3370,6 +3609,8 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
                 ? "canvas-quick-edit"
                 : canvasDirectEdit
                   ? "canvas-direct-edit"
+                  : prototypeGeneration
+                    ? "prototype-generation"
                   : "success";
     const externalThreadId = decodeURIComponent(url.pathname.split("/")[2]);
     const externalRunId = randomUUID();
@@ -3389,7 +3630,11 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
     state.runRequests.push({ kind, body });
     state.requests.push({ method: request.method, path: url.pathname, kind, externalRunId });
     response.setHeader("content-location", `/threads/${externalThreadId}/runs/${externalRunId}`);
-    if (cancellation) {
+    if (browserFailureRecovery) {
+      state.browserFailureRecoveryRuns += 1;
+      await writeSuccessfulRuntimeStream(response, body);
+      run.status = "success";
+    } else if (cancellation) {
       state.cancelRuns += 1;
       await holdCancellationStream(request, response, state, run);
     } else if (resume) {
@@ -3424,9 +3669,23 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
       state.canvasDirectEditRuns += 1;
       await writeCanvasRuntimeStream(response, body, "direct-edit", state);
       run.status = "success";
+    } else if (prototypeGeneration) {
+      state.browserPrototypeRuns += 1;
+      await writePrototypeCreateRuntimeStream(response, body, {
+        kind: "prototype",
+        title: "Controlled browser prototype",
+        schemaVersion: 1,
+        operation: { kind: "create" },
+        content: interactiveBrowserPrototypeDocument(),
+        citations: [],
+      }, "Controlled browser prototype ready");
+      run.status = "success";
     } else {
       state.successRuns += 1;
-      await writeSuccessfulRuntimeStream(response, body);
+      await writeSuccessfulRuntimeStream(response, body, {
+        finalizationGate: browserVisualPrd ? browserPrdFinalizationGate : null,
+        streamStages: browserVisualPrd,
+      });
       run.status = "success";
     }
     run.updated_at = new Date().toISOString();
@@ -3435,6 +3694,14 @@ async function handleFakeDeerFlow(request, response, expectedToken, state, stora
 
   response.writeHead(404, { "content-type": "application/json" });
   response.end(JSON.stringify({ error: "not found" }));
+}
+
+function storageAccessRole(request) {
+  const match = /^AWS4-HMAC-SHA256 Credential=([^/]+)\//u.exec(
+    String(request.headers.authorization ?? ""),
+  );
+  const prefix = `${fakeStorageAccessKeyId}-`;
+  return match?.[1]?.startsWith(prefix) ? match[1].slice(prefix.length) : null;
 }
 
 function publicRuntimeRun(run) {
@@ -3482,7 +3749,11 @@ async function writeApprovalRuntimeStream(response) {
   response.end();
 }
 
-async function writeSuccessfulRuntimeStream(response, requestBody) {
+async function writeSuccessfulRuntimeStream(
+  response,
+  requestBody,
+  { finalizationGate = null, streamStages = false } = {},
+) {
   const scope = runtimeScopeFromRequest(requestBody);
   const draft = {
     kind: "prd",
@@ -3507,14 +3778,15 @@ async function writeSuccessfulRuntimeStream(response, requestBody) {
     { type: "AIMessageChunk", role: "assistant", content: "E2E generated" },
     { langgraph_node: "generate_prd" },
   ], "1");
-  await delay(250);
+  await delay(controlledProviderDelayMs);
   sendSse(response, "messages", [
     { type: "AIMessageChunk", role: "assistant", content: "E2E generated response" },
     { langgraph_node: "generate_prd" },
   ], "2");
-  await delay(250);
+  await delay(controlledProviderDelayMs);
   const messages = [{ type: "human", content: "Workbench E2E request" }];
-  const collectingStage = prdGenerationStageSequence[0];
+  const stageSnapshots = [];
+  const [collectingStage, ...remainingStages] = prdGenerationStageSequence;
   const collectingToolCallId = `e2e-prd-stage-${collectingStage}`;
   messages.push(...declaredToolMessages(
     "workbench_generation_stage_update",
@@ -3524,14 +3796,16 @@ async function writeSuccessfulRuntimeStream(response, requestBody) {
       toolCallId: collectingToolCallId,
     }),
   ));
+  stageSnapshots.push(structuredClone(messages));
   messages.push(...declaredPrdReferenceMessages());
-  for (const stage of prdGenerationStageSequence.slice(1)) {
+  for (const stage of remainingStages) {
     const toolCallId = `e2e-prd-stage-${stage}`;
     messages.push(...declaredToolMessages(
       "workbench_generation_stage_update",
       toolCallId,
       validatedGenerationStageArtifact(stage, { ...scope, toolCallId }),
     ));
+    stageSnapshots.push(structuredClone(messages));
   }
   messages.push(...declaredToolMessages(
     "workbench_artifact_draft_publish",
@@ -3541,6 +3815,7 @@ async function writeSuccessfulRuntimeStream(response, requestBody) {
       toolCallId: successPrdCheckpointToolCallId,
     }),
   ));
+  const draftSnapshot = structuredClone(messages);
   messages.push(...declaredToolMessages(
     "workbench_runtime_result_submit",
     "e2e-result-submit",
@@ -3549,12 +3824,30 @@ async function writeSuccessfulRuntimeStream(response, requestBody) {
       toolCallId: "e2e-result-submit",
     }),
   ));
-  sendSse(response, "values", {
-    node: "finalize",
-    values: {
-      messages,
-    },
-  }, "3");
+  if (streamStages) {
+    for (const [index, snapshot] of stageSnapshots.entries()) {
+      sendSse(response, "values", {
+        node: "generate_prd",
+        values: { messages: snapshot },
+      }, String(index + 3));
+      await delay(controlledProviderDelayMs);
+    }
+    sendSse(response, "values", {
+      node: "generate_prd",
+      values: { messages: draftSnapshot },
+    }, String(stageSnapshots.length + 3));
+    if (finalizationGate) await finalizationGate.wait();
+    else await delay(controlledProviderDelayMs);
+    sendSse(response, "values", {
+      node: "finalize",
+      values: { messages },
+    }, String(stageSnapshots.length + 4));
+  } else {
+    sendSse(response, "values", {
+      node: "finalize",
+      values: { messages },
+    }, "3");
+  }
   response.end();
 }
 
@@ -3741,6 +4034,7 @@ async function writeGeneratePrototypeRuntimeStream(response, requestBody) {
 async function writePrototypeCreateRuntimeStream(response, requestBody, draft, message) {
   const scope = runtimeScopeFromRequest(requestBody);
   const messages = [{ type: "human", content: "Workbench Prototype generation request" }];
+  const stageMessages = [];
   for (const stage of ["design-system", "mapping-components", "creating-flows", "generating-ui"]) {
     const stageToolCallId = `prototype-create-stage-${stage}`;
     messages.push(...declaredToolMessages(
@@ -3748,6 +4042,7 @@ async function writePrototypeCreateRuntimeStream(response, requestBody, draft, m
       stageToolCallId,
       validatedGenerationStageArtifact(stage, { ...scope, toolCallId: stageToolCallId }),
     ));
+    stageMessages.push(structuredClone(messages));
   }
   const draftToolCallId = "prototype-create-draft";
   messages.push(...declaredToolMessages(
@@ -3777,10 +4072,18 @@ async function writePrototypeCreateRuntimeStream(response, requestBody, draft, m
     { type: "AIMessageChunk", role: "assistant", content: message },
     { langgraph_node: "generate_prototype" },
   ], "1");
+  for (const [index, stageSnapshot] of stageMessages.entries()) {
+    await delay(controlledProviderDelayMs);
+    sendSse(response, "values", {
+      node: "generate_prototype",
+      values: { messages: stageSnapshot },
+    }, String(index + 2));
+  }
+  await delay(controlledProviderDelayMs);
   sendSse(response, "values", {
     node: "finalize",
     values: { messages },
-  }, "2");
+  }, String(stageMessages.length + 2));
   response.end();
 }
 
@@ -4310,6 +4613,20 @@ function minimalPrototypeDocument() {
   };
 }
 
+function interactiveBrowserPrototypeDocument() {
+  const document = minimalPrototypeDocument();
+  document.nodes[0].actionIds = ["action-open-preview-reference"];
+  document.actions = [{
+    id: "action-open-preview-reference",
+    nodeId: "frame-home",
+    event: "click",
+    kind: "openUrl",
+    target: "newWindow",
+    url: "https://example.com/preview-reference",
+  }];
+  return document;
+}
+
 function minimalPrdDocument() {
   assert.ok(prdV2DocumentFixture, "PRD v2 fixture was not initialized");
   return structuredClone(prdV2DocumentFixture);
@@ -4391,6 +4708,935 @@ async function readRequestBuffer(request, maximumBytes) {
   return Buffer.concat(chunks);
 }
 
+async function runRealStackBrowserScenario({
+  commonEnvironment,
+  fakeRuntimeUrl,
+  previewOrigin,
+  recoveryScenarioTimeoutMs,
+  webOrigin,
+  webPort,
+}) {
+  assert.ok(Number.isSafeInteger(webPort), "real-stack browser Web port was not reserved");
+  const evidenceStartedAt = new Date().toISOString();
+  const evidenceRunDirectory = evidenceStartedAt.replaceAll(":", "-");
+  const outputDir = path.join(
+    root,
+    "output",
+    "playwright",
+    "real-stack",
+    candidateSourceCommit,
+    evidenceRunDirectory,
+  );
+  const evidenceManifestPath = path.join(outputDir, "manifest.json");
+  const evidenceManifest = {
+    schemaVersion: 1,
+    evidenceLevel: "real-stack",
+    candidate: {
+      sourceCommit: candidateSourceCommit,
+      cleanAtStart: candidateSourceSnapshot.clean,
+      sourceEntryCountAtStart: candidateSourceSnapshot.entryCount,
+      sourceStatusDigestAtStart: candidateSourceSnapshot.digest,
+      candidateBound: false,
+    },
+    provider: controlledProvider,
+    startedAt: evidenceStartedAt,
+    finishedAt: null,
+    status: "running",
+    browser: null,
+    bffRequests: [],
+    colorScheme: "dark",
+    consoleErrors: [],
+    failedRequests: [],
+    terminalSseAborts: [],
+    navigation: [],
+    visualEvidence: [],
+    checks: {},
+    failure: null,
+  };
+  await mkdir(outputDir, { recursive: true });
+  await writeEvidenceManifest(evidenceManifestPath, evidenceManifest);
+  const oidcApiPort = await reservePort();
+  const oidcApiBaseUrl = `http://127.0.0.1:${oidcApiPort}/api/v1`;
+  const nextEnvPath = path.join(root, "apps", "web", "next-env.d.ts");
+  const originalNextEnv = await readFile(nextEnvPath);
+  const temporaryWebTsconfigPath = path.join(root, "apps", "web", ".tsconfig.real-stack.json");
+  let browser;
+  let context;
+  let web;
+  try {
+  await copyFile(
+    path.join(root, "apps", "web", "tsconfig.json"),
+    temporaryWebTsconfigPath,
+  );
+  web = spawnService("workbench-web-real-stack", npm, [
+    "--workspace", "@workbench/web", "exec", "--", "next", "dev", "--turbo",
+    "--hostname", "127.0.0.1", "--port", String(webPort),
+  ], {
+    ...commonEnvironment,
+    NODE_ENV: "test",
+    BETTER_AUTH_URL: webOrigin,
+    BETTER_AUTH_SECRET: "workbench-real-stack-browser-test-secret",
+    WORKBENCH_DATABASE_SCHEMA: "workbench",
+    WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "true",
+    NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "true",
+    WORKBENCH_API_INTERNAL_URL: oidcApiBaseUrl,
+    WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
+    WORKBENCH_NEXT_TSCONFIG_PATH: path.basename(temporaryWebTsconfigPath),
+  });
+  await waitForHttp(`${webOrigin}/login`, web, scenarioTimeoutMs);
+
+  const oidcApi = spawnService("workbench-api-real-stack", process.execPath, ["apps/workbench-api/dist/main.js"], {
+    ...commonEnvironment,
+    NODE_ENV: "test",
+    WORKBENCH_API_HOST: "127.0.0.1",
+    WORKBENCH_API_PORT: String(oidcApiPort),
+    WORKBENCH_WEB_ORIGIN: webOrigin,
+    WORKBENCH_AUTH_MODE: "oidc",
+    WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE: "netlify",
+    OIDC_ISSUER: webOrigin,
+    OIDC_AUDIENCE: "workbench",
+    OIDC_JWKS_URL: `${webOrigin}/api/auth/jwks`,
+    WORKBENCH_INVITATION_TOKEN_SECRET: invitationTokenSecret,
+    WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
+    WORKBENCH_PREVIEW_TOKEN_SECRET: previewTokenSecret,
+    WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS: "60",
+    WORKBENCH_CANVAS_TOOL_SECRET: canvasToolSecret,
+    WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS: "300",
+    WORKBENCH_CANVAS_COMMAND_TTL_SECONDS: "60",
+    WORKBENCH_CANVAS_INVOCATION_LEASE_SECONDS: "30",
+    DEERFLOW_LANGGRAPH_URL: fakeRuntimeUrl,
+    DEERFLOW_GATEWAY_URL: fakeRuntimeUrl,
+    DEERFLOW_INTERNAL_AUTH_TOKEN: fakeRuntimeToken,
+  });
+  await waitForHttp(`${oidcApiBaseUrl}/system/ready`, oidcApi, scenarioTimeoutMs);
+
+  browser = await chromium.launch({ headless: true });
+  evidenceManifest.browser = `chromium ${browser.version()}`;
+  context = await browser.newContext({ colorScheme: "dark", viewport: { width: 1440, height: 900 } });
+  const browserSseEvents = [];
+  const browserSseObservationFailures = [];
+  await context.exposeBinding("__workbenchRecordSseEvidence", (_source, value) => {
+    const evidence = browserSseEventEvidence(value);
+    if (evidence) browserSseEvents.push(evidence);
+    else browserSseObservationFailures.push({ class: "invalid-sse-event-evidence" });
+  });
+  await context.addInitScript(installBrowserSseEvidenceObserver, { webOrigin });
+  const page = await context.newPage();
+  const navigationEvidence = evidenceManifest.navigation;
+  const bffRequests = evidenceManifest.bffRequests;
+  const httpResponses = [];
+  const externalRequests = [];
+  const unknownRequests = [];
+  const externalRequestClassifications = [];
+  const sseSequences = [];
+  evidenceManifest.httpResponses = httpResponses;
+  evidenceManifest.externalRequests = externalRequests;
+  evidenceManifest.unknownRequests = unknownRequests;
+  evidenceManifest.sseEvents = browserSseEvents;
+  evidenceManifest.sseObservationFailures = browserSseObservationFailures;
+  evidenceManifest.sseReplayCursors = sseSequences;
+  const consoleErrors = evidenceManifest.consoleErrors;
+  const failedRequests = evidenceManifest.failedRequests;
+  const navigationAbortTracker = createScriptedNavigationAbortTracker();
+  const sseResponseEvidence = new WeakMap();
+  const terminalSseAbortCandidates = [];
+  const captureBrowserRequest = (request) => {
+    const originClass = browserOriginClass(request.url(), { previewOrigin, webOrigin });
+    if (originClass === "web") {
+      navigationAbortTracker.requestStarted(request, {
+        navigationRequest: request.isNavigationRequest(),
+      });
+    } else if (originClass !== "preview" && originClass !== "other-scheme") {
+      const method = request.method();
+      const resourceType = request.resourceType();
+      let initiatorOrigin = null;
+      let initiatorPathClass = null;
+      let isMainFrame = false;
+      try {
+        const frame = request.frame();
+        const initiatorUrl = new URL(frame.url());
+        initiatorOrigin = initiatorUrl.origin;
+        initiatorPathClass = browserPathClass(initiatorUrl.pathname);
+        isMainFrame = frame === page.mainFrame();
+      } catch {
+        // Requests without an attributable frame remain unknown and fail closed.
+      }
+      const evidence = { originClass, method, resourceType };
+      const classification = (async () => {
+        try {
+          const headers = await request.allHeaders();
+          const hasCredentials = Object.keys(headers).some((name) => (
+            name.toLowerCase() === "authorization" || name.toLowerCase() === "cookie"
+          ));
+          const requestClass = browserExternalRequestClass(request.url(), {
+            hasCredentials,
+            initiatorOrigin,
+            initiatorPathClass,
+            isMainFrame,
+            isNavigationRequest: request.isNavigationRequest(),
+            method,
+            redirected: request.redirectedFrom() !== null,
+            resourceType,
+            webOrigin,
+          });
+          return { ...evidence, requestClass };
+        } catch {
+          return { ...evidence, inspection: "failed", requestClass: null };
+        }
+      })();
+      externalRequestClassifications.push(classification);
+    }
+  };
+  page.on("request", captureBrowserRequest);
+  page.on("requestfinished", (request) => navigationAbortTracker.requestFinished(request));
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame() && new URL(frame.url()).origin === webOrigin) {
+      navigationAbortTracker.mainFrameNavigated();
+    }
+  });
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    const originClass = browserOriginClass(url.href, { previewOrigin, webOrigin });
+    const pathClass = browserPathClass(url.pathname);
+    const responseEvidence = {
+      originClass,
+      method: response.request().method(),
+      pathClass,
+      status: response.status(),
+    };
+    if (originClass === "preview" || (originClass === "web" && url.pathname.startsWith("/api/"))) {
+      httpResponses.push(responseEvidence);
+    }
+    if (originClass !== "web" || !url.pathname.startsWith("/api/v1/")) return;
+    bffRequests.push({ method: responseEvidence.method, pathClass, status: responseEvidence.status });
+    if (/\/runs\/[^/]+\/events$/u.test(url.pathname)) {
+      const after = url.searchParams.get("afterSequence");
+      const afterSequence = after === null ? null : Number(after);
+      if (afterSequence !== null) sseSequences.push(afterSequence);
+      sseResponseEvidence.set(response.request(), {
+        afterSequence,
+        status: response.status(),
+      });
+    }
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      consoleErrors.push({
+        sourceClass: browserUrlClass(message.location().url, { previewOrigin, webOrigin }),
+        type: "error",
+      });
+    }
+  });
+  page.on("requestfailed", (request) => {
+    const url = new URL(request.url());
+    const rawErrorText = request.failure()?.errorText ?? "unknown";
+    const abortAttribution = navigationAbortTracker.classifyFailure(request, rawErrorText);
+    const originClass = browserOriginClass(url.href, { previewOrigin, webOrigin });
+    const failure = {
+      originClass,
+      method: request.method(),
+      pathClass: originClass === "web" || originClass === "preview"
+        ? browserPathClass(url.pathname)
+        : "unknown-origin",
+      errorText: browserNetworkFailureClass(rawErrorText),
+      resourceType: request.resourceType(),
+      abortAttribution,
+    };
+    failedRequests.push(failure);
+    if (originClass === "web") {
+      const sseRoute = url.pathname.match(/^\/api\/v1\/runs\/([^/]+)\/events$/u);
+      if (abortAttribution === null && sseRoute) {
+        const responseEvidence = sseResponseEvidence.get(request);
+        terminalSseAbortCandidates.push({
+          afterSequence: responseEvidence?.afterSequence ?? null,
+          failure,
+          responseStatus: responseEvidence?.status ?? null,
+          runId: decodeURIComponent(sseRoute[1]),
+        });
+      }
+    }
+  });
+
+    const suffix = `${Date.now()}${Math.random().toString(36).slice(2, 8)}`.toLowerCase();
+    await runScriptedHardNavigation({
+      action: () => page.goto(`${webOrigin}/register`, { waitUntil: "networkidle" }),
+      kind: "goto",
+      navigationAbortTracker,
+      navigationEvidence,
+      page,
+      targetPathClass: "/register",
+    });
+    if (new URL(page.url()).pathname !== "/register") {
+      throw new Error(`registration route redirected to ${new URL(page.url()).pathname}`);
+    }
+    await page.getByRole("button", { name: "创建账号" }).click();
+    const registrationFields = await page.locator("#username, #email, #password").count();
+    if (registrationFields !== 3) {
+      const pageText = (await page.locator("body").innerText()).replace(/\s+/g, " ").trim().slice(0, 240);
+      throw new Error(`registration route did not render its form (fields=${registrationFields}, body=${JSON.stringify(pageText)})`);
+    }
+    await page.locator("#username").fill(`browser_${suffix}`.slice(0, 30));
+    await page.locator("#email").fill(`browser_${suffix}@example.test`);
+    await page.locator("#password").fill("BrowserRealStack!2026");
+    await runScriptedHardNavigation({
+      action: async () => {
+        const navigationResponse = page.waitForResponse((response) => (
+          response.request().isNavigationRequest()
+          && response.frame() === page.mainFrame()
+          && new URL(response.url()).origin === webOrigin
+          && new URL(response.url()).pathname === "/"
+        ), { timeout: scenarioTimeoutMs });
+        await page.getByRole("button", { name: "创建工作台" }).click();
+        const response = await navigationResponse;
+        await page.waitForURL(`${webOrigin}/`, { timeout: scenarioTimeoutMs });
+        return response;
+      },
+      kind: "form-submit",
+      navigationAbortTracker,
+      navigationEvidence,
+      page,
+      targetPathClass: "/",
+    });
+    await page.locator('textarea[aria-label="提示词"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+
+    await page.locator('textarea[aria-label="提示词"]').fill("Generate a product requirements document for the synthetic browser test");
+    await page.getByRole("button", { name: "提交提示" }).click();
+    await page.waitForURL(/\/projects\//u, { timeout: scenarioTimeoutMs });
+    const projectUrl = page.url();
+    await page.locator('[data-panel-motion="agent-card"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.locator('[data-canvas-generation-motion="prd"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.locator('[data-generation-stage="collecting-prd-context"]')
+      .first()
+      .waitFor({ state: "attached", timeout: scenarioTimeoutMs });
+    await waitFor(
+      () => sseSequences.length > 0,
+      scenarioTimeoutMs,
+      "initial browser SSE request did not expose a replay cursor",
+    );
+    const sseRequestCountBeforeReload = sseSequences.length;
+    const maximumCursorBeforeReload = Math.max(...sseSequences);
+    await runScriptedHardNavigation({
+      action: () => page.reload({ waitUntil: "domcontentloaded" }),
+      kind: "reload",
+      navigationAbortTracker,
+      navigationEvidence,
+      page,
+      targetPathClass: "/projects/:id",
+    });
+    await page.locator('[data-panel-motion="agent-card"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.locator('[data-canvas-generation-motion="prd"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await waitFor(
+      () => sseSequences
+        .slice(sseRequestCountBeforeReload)
+        .some((cursor) => cursor > maximumCursorBeforeReload),
+      scenarioTimeoutMs,
+      "active browser reload did not reconnect after the last consumed SSE sequence",
+    );
+    const reconnectCursor = sseSequences
+      .slice(sseRequestCountBeforeReload)
+      .find((cursor) => cursor > maximumCursorBeforeReload);
+    const reconnectMotion = await page.locator('[data-canvas-generation-motion="prd"]').evaluate((element) => ({
+      kind: element.getAttribute("data-canvas-generation-motion"),
+      stage: element.getAttribute("data-generation-stage"),
+    }));
+    assert.equal(reconnectMotion.kind, "prd", "active reload restored the wrong motion kind");
+
+    const visualEvidence = evidenceManifest.visualEvidence;
+    await captureActiveGenerationVisualEvidence({
+      evidence: visualEvidence,
+      kind: "prd",
+      outputDir,
+      page,
+    });
+    assertActiveGenerationVisualEvidence(visualEvidence, "prd");
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    const cdpSession = await context.newCDPSession(page);
+    await cdpSession.send("Network.enable");
+    const pendingDocument = page.locator('[data-workbench-artifact-state="pending"][data-workbench-artifact-variant="document"]');
+    let pendingDocumentEvidence = [];
+    try {
+      await cdpSession.send("Network.emulateNetworkConditions", {
+        offline: false,
+        latency: pendingDocumentEvidenceLatencyMs,
+        downloadThroughput: 5 * 1024 * 1024,
+        uploadThroughput: 5 * 1024 * 1024,
+      });
+      await pendingDocument.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      pendingDocumentEvidence = await capturePendingDocumentVisualEvidence({
+        outputDir,
+        page,
+        pendingDocument,
+      });
+      evidenceManifest.pendingDocumentEvidence = pendingDocumentEvidence;
+      assertPendingDocumentVisualEvidence(pendingDocumentEvidence);
+    } finally {
+      fakeRuntime.releaseBrowserPrdFinalization();
+      await cdpSession.send("Network.emulateNetworkConditions", {
+        offline: false,
+        latency: 0,
+        downloadThroughput: -1,
+        uploadThroughput: -1,
+      });
+      await cdpSession.detach();
+    }
+    await pendingDocument.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await runScriptedHardNavigation({
+      action: () => page.reload({ waitUntil: "networkidle" }),
+      kind: "reload",
+      navigationAbortTracker,
+      navigationEvidence,
+      page,
+      targetPathClass: "/projects/:id",
+    });
+    await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+
+    await runScriptedHardNavigation({
+      action: () => page.goto(projectUrl, { waitUntil: "networkidle" }),
+      kind: "goto",
+      navigationAbortTracker,
+      navigationEvidence,
+      page,
+      targetPathClass: "/projects/:id",
+    });
+    const projectId = new URL(projectUrl).pathname.split("/").at(-1);
+
+    await page.getByRole("button", { name: "导出", exact: true }).click();
+    const exportPanel = page.locator("[data-workbench-export-panel]");
+    await exportPanel.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    if (await exportPanel.getAttribute("data-export-state") === "empty") {
+      await exportPanel.getByRole("button", { name: "全选", exact: true }).click();
+    }
+    await waitFor(
+      async () => await exportPanel.getAttribute("data-export-state") === "selected",
+      scenarioTimeoutMs,
+      "product Export panel did not select the persisted Board",
+    );
+    const netlifyTarget = exportPanel.getByRole("button", { name: /Netlify/u });
+    await netlifyTarget.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    assert.equal(await netlifyTarget.isEnabled(), true, "controlled Netlify capability was unavailable in the product Export panel");
+    await netlifyTarget.click();
+
+    const exportCreationResponse = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && /^\/api\/v1\/projects\/[^/]+\/exports$/u.test(new URL(response.url()).pathname)
+    ), { timeout: scenarioTimeoutMs });
+    await exportPanel.getByRole("button", { name: "生成并准备 Netlify", exact: true }).click();
+    assert.equal((await exportCreationResponse).status(), 202, "product Export creation did not return 202");
+    const prepareDeliveryButton = exportPanel.getByRole("button", { name: "准备发布至 Netlify", exact: true });
+    await prepareDeliveryButton.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+
+    const deliveryCreationResponse = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && /^\/api\/v1\/exports\/[^/]+\/deliveries$/u.test(new URL(response.url()).pathname)
+    ), { timeout: scenarioTimeoutMs });
+    await prepareDeliveryButton.click();
+    assert.equal((await deliveryCreationResponse).status(), 201, "product External Delivery preparation did not return 201");
+    await exportPanel.locator("[data-external-delivery-confirmation]")
+      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const deliveryBeforeConfirmation = await latestBrowserExternalDelivery(projectId);
+    assert.equal(deliveryBeforeConfirmation.status, "pending_confirmation", "External Delivery was not pending confirmation");
+    assert.equal(deliveryBeforeConfirmation.attempt, 0, "pending External Delivery already had an execution attempt");
+    assert.equal(deliveryBeforeConfirmation.confirmedAt, null, "pending External Delivery was already confirmed");
+    assert.equal(deliveryBeforeConfirmation.transferAuthorizedAt, null, "pending External Delivery was already authorized");
+    assert.equal(deliveryBeforeConfirmation.queueJobs, 0, "pending External Delivery was queued before confirmation");
+
+    const deliveryConfirmationResponse = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && /^\/api\/v1\/export-deliveries\/[^/]+\/confirm$/u.test(new URL(response.url()).pathname)
+    ), { timeout: scenarioTimeoutMs });
+    await exportPanel.getByRole("button", { name: "确认发布至 Netlify", exact: true }).click();
+    assert.equal((await deliveryConfirmationResponse).status(), 202, "product External Delivery confirmation did not return 202");
+    await exportPanel.getByRole("button", { name: "重试发布 Netlify", exact: true })
+      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const deliveryAfterConfirmation = await latestBrowserExternalDelivery(projectId);
+    assert.equal(deliveryAfterConfirmation.id, deliveryBeforeConfirmation.id, "External Delivery identity changed after confirmation");
+    assert.equal(deliveryAfterConfirmation.status, "failed", "controlled unavailable external adapter did not fail closed");
+    assert.equal(deliveryAfterConfirmation.failureCode, "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED", "External Delivery lost its stable failure code");
+    assert.ok(deliveryAfterConfirmation.confirmedAt, "confirmed External Delivery omitted its confirmation timestamp");
+    assert.ok(deliveryAfterConfirmation.transferAuthorizedAt, "confirmed External Delivery omitted transfer authorization");
+    assert.ok(deliveryAfterConfirmation.queueJobs >= 1, "confirmed External Delivery did not enqueue durable work");
+    assert.ok(fakeRuntime.state.exportReads.some((read) => read.role === "export"), "Export Worker did not read the canonical object with its dedicated identity");
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await exportPanel.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+
+    assert.ok(projectId, "real-stack browser project URL has no project id");
+    const mixedPersistenceBefore = await browserProjectPersistenceCounts(projectId);
+    const mixedProviderRequestsBefore = fakeRuntime.state.runRequests.length;
+    const mixedSubmissionPostsBefore = bffRequests.filter((request) => (
+      request.method === "POST" && /\/threads\/:id\/submission-intents$/u.test(request.pathClass)
+    )).length;
+    const mixedComposer = page.locator('input[placeholder="您想更改或创建什么内容?"]');
+    await mixedComposer.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const mixedArtifactPrompt = "生成需求文档。然后生成原型";
+    await mixedComposer.fill(mixedArtifactPrompt);
+    await page.getByRole("button", { name: "提交项目请求" }).click();
+    await page.locator('[data-panel-motion="agent-card"]').getByText("提交失败", { exact: true })
+      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const mixedErrorMessage = "一次运行只能生成需求文档或原型。请先完成需求文档，再发起原型生成。";
+    const mixedErrorToast = page.locator('[data-sonner-toast][data-type="error"]')
+      .filter({ hasText: mixedErrorMessage });
+    await mixedErrorToast.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const mixedErrorToastText = (await mixedErrorToast.textContent())?.replace(/\s+/gu, " ").trim() ?? "";
+    assert.ok(mixedErrorToastText.includes(mixedErrorMessage), "mixed Composer rejection omitted its localized product message");
+    assert.doesNotMatch(
+      mixedErrorToastText,
+      /requestedArtifactKinds|two sequential Runs|\[\s*\{/u,
+      "mixed Composer rejection exposed its schema validation payload",
+    );
+    const mixedPersistenceAfter = await browserProjectPersistenceCounts(projectId);
+    const mixedSubmissionPostsAfter = bffRequests.filter((request) => (
+      request.method === "POST" && /\/threads\/:id\/submission-intents$/u.test(request.pathClass)
+    )).length;
+    const mixedProviderRequestsAdded = fakeRuntime.state.runRequests.length - mixedProviderRequestsBefore;
+    const mixedSubmissionPostsAdded = mixedSubmissionPostsAfter - mixedSubmissionPostsBefore;
+    assert.deepEqual(
+      mixedPersistenceAfter,
+      mixedPersistenceBefore,
+      "mixed Composer request created persistent side effects",
+    );
+    assert.equal(
+      mixedProviderRequestsAdded,
+      0,
+      "mixed Composer request reached the controlled provider",
+    );
+    assert.equal(
+      mixedSubmissionPostsAdded,
+      0,
+      "mixed Composer request crossed the client contract boundary",
+    );
+    assert.equal(await mixedComposer.inputValue(), mixedArtifactPrompt, "rejected mixed prompt was cleared from the Composer");
+    assert.equal(await page.locator('[data-phase="generating"]').count(), 0, "mixed Composer request left an active Run UI");
+    await mixedComposer.fill("");
+
+    await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.evaluate(() => {
+      const observations = [];
+      const observer = new MutationObserver(() => {
+        observations.push(...[...document.querySelectorAll("[data-canvas-generation-motion]")]
+          .map((element) => element.getAttribute("data-canvas-generation-motion")));
+      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-canvas-generation-motion"] });
+      globalThis.__workbenchPrototypeMotionObservations = observations;
+      globalThis.__workbenchPrototypeMotionObserver = observer;
+    });
+    await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).click();
+    await mixedErrorToast.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+    await page.locator('[data-canvas-generation-motion="prototype"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const prototypeObservations = await page.evaluate(() => {
+      globalThis.__workbenchPrototypeMotionObserver?.disconnect();
+      return globalThis.__workbenchPrototypeMotionObservations ?? [];
+    });
+    assert.ok(!prototypeObservations.includes("prd"), "prototype Run mounted a PRD generation wash after the stale PRD artifact");
+    const prototypeVisualEvidence = [];
+    await captureActiveGenerationVisualEvidence({
+      evidence: prototypeVisualEvidence,
+      kind: "prototype",
+      outputDir,
+      page,
+    });
+    evidenceManifest.prototypeVisualEvidence = prototypeVisualEvidence;
+    assertActiveGenerationVisualEvidence(prototypeVisualEvidence, "prototype");
+
+    await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const artifactPersistence = await assertBrowserArtifactPersistence(projectId);
+    evidenceManifest.artifactPersistence = artifactPersistence;
+    await runScriptedHardNavigation({
+      action: () => page.goto(projectUrl, { waitUntil: "networkidle" }),
+      kind: "goto",
+      navigationAbortTracker,
+      navigationEvidence,
+      page,
+      targetPathClass: "/projects/:id",
+    });
+
+    await context.addCookies([{
+      name: "workbench_preview_ambient_canary",
+      value: "must-not-reach-preview",
+      domain: "127.0.0.1",
+      path: "/preview",
+      httpOnly: false,
+      secure: false,
+      sameSite: "Lax",
+    }]);
+    const previewCanaryCookiePresent = (await context.cookies(`${previewOrigin}/preview/canary`))
+      .some((cookie) => cookie.name === "workbench_preview_ambient_canary");
+    assert.equal(previewCanaryCookiePresent, true, "Preview credential canary cookie was not installed");
+
+    const previewHttpResponseStart = httpResponses.length;
+    let previewEvidence = null;
+    const productPreviewRequestHeaders = [];
+    const captureProductPreviewRequest = (request) => {
+      if (new URL(request.url()).origin !== previewOrigin) return;
+      productPreviewRequestHeaders.push(request.allHeaders().then((headers) => ({
+        method: request.method(),
+        pathClass: browserPathClass(new URL(request.url()).pathname),
+        hasCookie: headers.cookie !== undefined,
+        hasAuthorization: headers.authorization !== undefined,
+      })));
+    };
+    page.on("request", captureProductPreviewRequest);
+    try {
+      await page.getByRole("button", { name: "预览项目" }).click();
+      const productPreview = page.locator("[data-project-preview]");
+      await productPreview.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      const productPreviewFrame = productPreview.locator("iframe[data-preview-capability]");
+      await productPreviewFrame.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      await productPreview.locator('[data-isolated-preview] [role="status"]')
+        .waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+      const embeddedPreview = await productPreviewFrame.evaluate((frame) => ({
+        credentialless: frame.getAttribute("credentialless"),
+        referrerPolicy: frame.getAttribute("referrerpolicy"),
+        sandbox: frame.getAttribute("sandbox"),
+        src: frame.getAttribute("src"),
+      }));
+      assert.equal(new URL(embeddedPreview.src).origin, previewOrigin, "product Preview iframe did not use the independent origin");
+      assert.equal(embeddedPreview.credentialless, "", "product Preview iframe was not credentialless");
+      assert.equal(embeddedPreview.referrerPolicy, "no-referrer", "product Preview iframe did not suppress referrers");
+      assert.equal(
+        embeddedPreview.sandbox,
+        "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox",
+        "product Preview iframe sandbox permissions drifted",
+      );
+      const productPreviewRequests = await Promise.all(productPreviewRequestHeaders);
+      assert.ok(productPreviewRequests.length > 0, "product Preview iframe did not request the independent origin");
+      assert.ok(
+        productPreviewRequests.every((request) => !request.hasCookie && !request.hasAuthorization),
+        "product Preview iframe carried ambient credentials",
+      );
+      assert.ok(
+        fakeRuntime.state.exportReads.some((read) => read.role === "preview"),
+        "product Preview did not read the canonical Export object with its dedicated identity",
+      );
+      const previewResponses = httpResponses
+        .slice(previewHttpResponseStart)
+        .filter((response) => response.originClass === "preview");
+      assert.ok(previewResponses.length > 0, "product Preview iframe did not receive an independent-origin response");
+      assert.ok(
+        previewResponses.every((response) => response.status >= 200 && response.status < 400),
+        "product Preview iframe received an unexpected HTTP status",
+      );
+      previewEvidence = {
+        domAssertions: {
+          credentialless: embeddedPreview.credentialless === "",
+          frameVisible: true,
+          independentOrigin: true,
+          loadingStatusDetached: true,
+          referrerPolicy: embeddedPreview.referrerPolicy,
+          sandbox: embeddedPreview.sandbox,
+        },
+        requestSecurity: {
+          authorizationBlocked: productPreviewRequests.every((request) => !request.hasAuthorization),
+          cookieBlocked: productPreviewRequests.every((request) => !request.hasCookie),
+          requestCount: productPreviewRequests.length,
+        },
+        requests: productPreviewRequests.map(({ method, pathClass }) => ({ method, pathClass })),
+        responses: previewResponses,
+      };
+      evidenceManifest.previewEvidence = previewEvidence;
+      await page.getByRole("button", { name: "退出预览" }).click();
+      await productPreview.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+    } catch (error) {
+      evidenceManifest.previewFailureDiagnostics = await captureBrowserPreviewFailure({
+        bffRequests,
+        outputDir,
+        page,
+        projectId,
+      });
+      throw error;
+    } finally {
+      page.off("request", captureProductPreviewRequest);
+    }
+
+    const composer = page.locator('input[placeholder="您想更改或创建什么内容?"]');
+    await composer.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await composer.fill("E2E_BROWSER_FAILURE: Generate a product requirements document for controlled recovery");
+    await page.getByRole("button", { name: "提交项目请求" }).click();
+    await page.locator('[data-phase="generating"]').first().waitFor({ state: "visible", timeout: recoveryScenarioTimeoutMs });
+    const retryButton = page.getByRole("button", { name: "重试当前运行" }).first();
+    await retryButton.waitFor({ state: "visible", timeout: recoveryScenarioTimeoutMs });
+    await page.locator('[data-panel-motion="agent-card"]').getByText("运行失败", { exact: true })
+      .waitFor({ state: "visible", timeout: recoveryScenarioTimeoutMs });
+    assert.equal(fakeRuntime.state.browserFailureAttempts, 1, "controlled browser failure issued a duplicate provider submission");
+    assert.ok(fakeRuntime.state.browserFailureRejoinAttempts > 0, "controlled browser failure did not rejoin the accepted provider Run");
+    const browserFailureQueueJob = (await queryDatabase(`
+      SELECT "state", "retry_count", "retry_limit"
+      FROM "workbench_jobs"."job"
+      WHERE "name" = 'runtime.execute'
+      ORDER BY "created_on" DESC
+      LIMIT 1
+    `)).rows[0];
+    assert.equal(browserFailureQueueJob?.state, "failed", "controlled browser failure queue job was not terminal");
+    assert.equal(
+      browserFailureQueueJob?.retry_count,
+      browserFailureQueueJob?.retry_limit,
+      "controlled browser failure did not exhaust the real pg-boss retry policy",
+    );
+    const browserFailureQueueRetries = Number(browserFailureQueueJob.retry_count);
+
+    const retryResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && /^\/api\/v1\/runs\/[^/]+\/retry$/u.test(new URL(response.url()).pathname)
+    ), { timeout: recoveryScenarioTimeoutMs });
+    await retryButton.click();
+    const retryResponse = await retryResponsePromise;
+    assert.equal(retryResponse.status(), 202, "browser Run retry did not return 202");
+    await page.locator('[data-phase="generating"]').first().waitFor({ state: "visible", timeout: recoveryScenarioTimeoutMs });
+    await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: recoveryScenarioTimeoutMs });
+    assert.equal(fakeRuntime.state.browserFailureRecoveryRuns, 1, "browser Run retry did not execute through the controlled provider");
+
+    await composer.fill("E2E_CANCEL: Generate a product requirements document for controlled cancellation");
+    await page.getByRole("button", { name: "提交项目请求" }).click();
+    await page.locator('[data-phase="generating"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await waitFor(
+      () => fakeRuntime.state.activeCancelStreams === 1,
+      scenarioTimeoutMs,
+      "controlled browser cancellation stream did not open",
+    );
+    const cancelButton = page.getByRole("button", { name: "取消当前任务" });
+    await cancelButton.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const cancelResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && /^\/api\/v1\/runs\/[^/]+\/cancel$/u.test(new URL(response.url()).pathname)
+    ), { timeout: scenarioTimeoutMs });
+    await cancelButton.click();
+    const cancelResponse = await cancelResponsePromise;
+    assert.equal(cancelResponse.status(), 202, "browser Run cancellation did not return 202");
+    await page.locator('[data-panel-motion="agent-card"]').getByText("运行已取消", { exact: true })
+      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await waitFor(
+      () => fakeRuntime.state.activeCancelStreams === 0,
+      scenarioTimeoutMs,
+      "controlled browser cancellation stream did not close",
+    );
+
+    await page.waitForTimeout(50);
+    const requiredBrowserTerminalSseEvents = ["run.completed", "run.failed"];
+    await waitFor(
+      () => hasRequiredBrowserSseEvidence(browserSseEvents, reconnectCursor),
+      scenarioTimeoutMs,
+      "browser SSE observer did not record reconnect, completed, and failed event evidence",
+    );
+    const terminalSseAborts = await attributePersistedTerminalSseAborts(terminalSseAbortCandidates);
+    evidenceManifest.terminalSseAborts = terminalSseAborts;
+    page.off("request", captureBrowserRequest);
+    const requestClassifications = await Promise.all(externalRequestClassifications);
+    for (const { requestClass, ...evidence } of requestClassifications) {
+      if (requestClass) externalRequests.push({ ...evidence, requestClass });
+      else unknownRequests.push(evidence);
+    }
+    assert.ok(bffRequests.some((request) => /\/runs\/:id\/events$/u.test(request.pathClass)), "browser did not open the real BFF SSE endpoint");
+    assert.ok(bffRequests.some((request) => request.method === "POST" && /\/runs\/:id\/retry$/u.test(request.pathClass) && request.status === 202), "browser did not retry the failed Run through the real BFF");
+    assert.ok(bffRequests.some((request) => request.method === "POST" && /\/runs\/:id\/cancel$/u.test(request.pathClass) && request.status === 202), "browser did not cancel the active Run through the real BFF");
+    const navigationAborts = failedRequests.filter((request) => (
+      request.abortAttribution?.cause === "scripted-hard-navigation"
+    ));
+    const unattributedFailedRequests = failedRequests.filter((request) => request.abortAttribution === null);
+    assert.equal(
+      unattributedFailedRequests.length,
+      0,
+      `real-stack browser had unattributed failed requests: ${JSON.stringify(unattributedFailedRequests)}`,
+    );
+    const expectedAbortCauses = new Set([
+      "scripted-hard-navigation",
+      "persisted-terminal-run-sse-cleanup",
+    ]);
+    const unexpectedFailedRequests = failedRequests.filter((request) => (
+      !expectedAbortCauses.has(request.abortAttribution?.cause)
+    ));
+    assert.equal(
+      unexpectedFailedRequests.length,
+      0,
+      `real-stack browser had unexpected failed requests: ${JSON.stringify(unexpectedFailedRequests)}`,
+    );
+    assert.equal(
+      unknownRequests.length,
+      0,
+      `real-stack browser issued requests to unknown origins: ${JSON.stringify(unknownRequests)}`,
+    );
+    assert.deepEqual(
+      externalRequests.map((request) => request.requestClass).sort(),
+      ["auth-spotlight-primary", "auth-spotlight-reveal"],
+      `real-stack browser external request evidence was incomplete: ${JSON.stringify(externalRequests)}`,
+    );
+    const unexpectedHttpResponses = httpResponses.filter((response) => (
+      response.status < 200 || response.status >= 400
+    ));
+    assert.equal(
+      unexpectedHttpResponses.length,
+      0,
+      `real-stack browser received unexpected HTTP responses: ${JSON.stringify(unexpectedHttpResponses)}`,
+    );
+    assert.equal(
+      browserSseObservationFailures.length,
+      0,
+      `real-stack browser observed invalid SSE evidence: ${JSON.stringify(browserSseObservationFailures)}`,
+    );
+    assert.ok(
+      browserSseEvents.some((event) => (
+        event.afterSequence === reconnectCursor && event.sequence > reconnectCursor
+      )),
+      "browser SSE observer did not prove forward replay after reconnect",
+    );
+    for (const terminalEventName of requiredBrowserTerminalSseEvents) {
+      assert.ok(
+        browserSseEvents.some((event) => event.eventName === terminalEventName),
+        `browser SSE observer did not record ${terminalEventName}`,
+      );
+    }
+    const persistedCancellationObserved = terminalSseAborts.some((request) => {
+      const attribution = request.abortAttribution;
+      return attribution?.cause === "persisted-terminal-run-sse-cleanup"
+        && attribution.terminalStatus === "cancelled"
+        && attribution.terminalEventType === "run.cancelled"
+        && Number.isSafeInteger(attribution.terminalSequence)
+        && attribution.terminalSequence > 0;
+    });
+    assert.ok(
+      browserSseEvents.some((event) => event.eventName === "run.cancelled")
+      || persistedCancellationObserved,
+      "browser cancellation lacked observed or persisted terminal SSE evidence",
+    );
+    assert.ok(previewEvidence, "product Preview evidence was not retained in the manifest");
+    assert.equal(
+      consoleErrors.length,
+      0,
+      `real-stack browser console errors: ${JSON.stringify(consoleErrors)}`,
+    );
+
+    const checks = {
+      betterAuthRegistration: true,
+      bffOidcApi: true,
+      workerArtifactPersistence: true,
+      prdPendingPanelAndMotion: true,
+      mixedRequestRejected: true,
+      prototypeAfterPrdMotion: true,
+      reconnectReload: true,
+      previewIndependentOriginAndSandbox: true,
+      previewCredentialCanaryBlocked: true,
+      releaseAndExportBuild: true,
+      externalDeliveryConfirmationGate: true,
+      runFailureRetry: true,
+      runCancellation: true,
+      failedNetworkRequestsAttributed: true,
+      externalRequestsClassified: true,
+      httpResponsesAllowlisted: true,
+      sseEventSequenceRecorded: true,
+    };
+    const controlledRuntime = {
+      failureSubmissions: fakeRuntime.state.browserFailureAttempts,
+      failureRejoins: fakeRuntime.state.browserFailureRejoinAttempts,
+      queueRetries: browserFailureQueueRetries,
+      recoveryRuns: fakeRuntime.state.browserFailureRecoveryRuns,
+      cancellationRuns: fakeRuntime.state.cancelRuns,
+    };
+    Object.assign(evidenceManifest, {
+      status: "passed",
+      browser: `chromium ${browser.version()}`,
+      visualEvidence,
+      pendingDocumentEvidence,
+      artifactPersistence,
+      mixedZeroSideEffects: {
+        persistenceCountsUnchanged: true,
+        providerRequestsAdded: mixedProviderRequestsAdded,
+        submissionPostsAdded: mixedSubmissionPostsAdded,
+      },
+      mixedErrorPresentation: {
+        localized: true,
+        schemaPayloadHidden: true,
+        dismissedBeforeNextRun: true,
+      },
+      externalDeliveryConfirmation: {
+        attemptBeforeConfirmation: deliveryBeforeConfirmation.attempt,
+        queueJobsBeforeConfirmation: deliveryBeforeConfirmation.queueJobs,
+        queueJobsAfterConfirmation: deliveryAfterConfirmation.queueJobs,
+        terminalStatus: deliveryAfterConfirmation.status,
+      },
+      bffRequests: bffRequests.map(({ method, pathClass, status }) => ({ method, pathClass, status })),
+      externalRequests,
+      httpResponses,
+      previewEvidence,
+      navigationAborts,
+      terminalSseAborts,
+      sseEvents: browserSseEvents,
+      sseReplayCursors: sseSequences,
+      controlledRuntime,
+      checks,
+    });
+    console.log(JSON.stringify({
+      evidenceLevel: "real-stack",
+      sourceCommit: candidateSourceCommit,
+      sourceTreeAtStart: candidateSourceSnapshot.clean ? "clean" : "dirty",
+      provider: controlledProvider,
+      browser: `chromium ${browser.version()}`,
+      evidenceManifest: path.relative(root, evidenceManifestPath),
+      checks,
+      controlledRuntime,
+      externalDelivery: {
+        attemptBeforeConfirmation: deliveryBeforeConfirmation.attempt,
+        queueJobsBeforeConfirmation: deliveryBeforeConfirmation.queueJobs,
+        queueJobsAfterConfirmation: deliveryAfterConfirmation.queueJobs,
+      },
+    }));
+  } catch (error) {
+    evidenceManifest.status = "failed";
+    evidenceManifest.failure = {
+      class: error instanceof Error ? error.name : "UnknownError",
+    };
+    throw error;
+  } finally {
+    await context?.close();
+    await browser?.close();
+    if (web) await stopService(web);
+    await rm(temporaryWebTsconfigPath, { force: true });
+    await writeFile(nextEnvPath, originalNextEnv);
+    const finishedSourceSnapshot = resolveCandidateSourceSnapshot();
+    const sourceDrift = finishedSourceSnapshot.digest !== candidateSourceSnapshot.digest;
+    Object.assign(evidenceManifest.candidate, {
+      cleanAtFinish: finishedSourceSnapshot.clean,
+      sourceEntryCountAtFinish: finishedSourceSnapshot.entryCount,
+      sourceStatusDigestAtFinish: finishedSourceSnapshot.digest,
+      sourceDrift,
+      candidateBound: candidateSourceSnapshot.clean
+        && finishedSourceSnapshot.clean
+        && !sourceDrift,
+    });
+    const sourceDriftFailure = shouldFailRealStackEvidenceForSourceDrift(
+      evidenceManifest.status,
+      sourceDrift,
+    );
+    if (sourceDriftFailure) {
+      evidenceManifest.status = "failed";
+      evidenceManifest.failure = { class: "SourceDriftError" };
+    }
+    evidenceManifest.finishedAt = new Date().toISOString();
+    const manifestSha256 = await writeEvidenceManifest(evidenceManifestPath, evidenceManifest);
+    console.log(`[e2e] evidence manifest: ${path.relative(root, evidenceManifestPath)} sha256=${manifestSha256}`);
+    if (sourceDriftFailure) throw new Error("REAL_STACK_SOURCE_DRIFT");
+  }
+}
+
+function controlledGate() {
+  let released = false;
+  let releasePromise;
+  const promise = new Promise((resolve) => {
+    releasePromise = resolve;
+  });
+  return {
+    wait: () => promise,
+    release: () => {
+      if (released) return;
+      released = true;
+      releasePromise();
+    },
+  };
+}
+
 function spawnService(name, command, args, environment) {
   const log = new LogBuffer(name);
   const child = spawn(command, args, {
@@ -4414,17 +5660,25 @@ function spawnService(name, command, args, environment) {
 
 async function waitForHttp(url, service, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
+  let lastConnectionErrorClass = null;
+  let lastHttpStatus = null;
   while (Date.now() < deadline) {
     assertServiceRunning(service);
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
       if (response.ok) return;
-    } catch {
-      // Service has not bound the port yet.
+      lastHttpStatus = response.status;
+    } catch (error) {
+      lastConnectionErrorClass = connectionErrorClass(error);
     }
     await delay(200);
   }
-  throw new Error(`${service.name} did not become ready within ${timeoutMs}ms`);
+  throw new Error(
+    `${service.name} did not become ready within ${timeoutMs}ms `
+    + `(originClass=${httpOriginClass(url)}, `
+    + `lastConnectionError=${lastConnectionErrorClass ?? "none"}, `
+    + `lastHttpStatus=${lastHttpStatus ?? "none"})`,
+  );
 }
 
 async function waitForProcessStart(service, milliseconds) {
@@ -4491,6 +5745,765 @@ async function waitFor(predicate, timeoutMs, message) {
   throw new Error(`${message}${lastError ? `: ${lastError instanceof Error ? lastError.message : lastError}` : ""}`);
 }
 
+async function runScriptedHardNavigation({
+  action,
+  kind,
+  navigationAbortTracker,
+  navigationEvidence,
+  page,
+  targetPathClass,
+}) {
+  const scope = navigationAbortTracker.beginNavigation({ kind, targetPathClass });
+  let recorded = false;
+  try {
+    const response = await action();
+    const actualPathClass = browserPathClass(new URL(page.url()).pathname);
+    const status = response?.status() ?? null;
+    navigationEvidence.push({
+      actualPathClass,
+      kind,
+      status,
+      targetPathClass,
+    });
+    recorded = true;
+    assert.ok(response, `browser ${kind} to ${targetPathClass} returned no main-resource response`);
+    assert.equal(status, 200, `browser ${kind} to ${targetPathClass} returned HTTP ${status}`);
+    assert.equal(
+      actualPathClass,
+      targetPathClass,
+      `browser ${kind} landed on ${actualPathClass} instead of ${targetPathClass}`,
+    );
+    return response;
+  } catch (error) {
+    if (!recorded) {
+      navigationEvidence.push({
+        actualPathClass: browserPathClass(new URL(page.url()).pathname),
+        errorClass: error instanceof Error ? error.name : "UnknownError",
+        kind,
+        status: null,
+        targetPathClass,
+      });
+    }
+    throw error;
+  } finally {
+    // Let Playwright deliver aborts caused by unloading the old document before
+    // closing the narrowly scoped attribution window.
+    await delay(0);
+    navigationAbortTracker.endNavigation(scope);
+  }
+}
+
+async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir, page }) {
+  const selector = `[data-canvas-generation-motion="${kind}"]`;
+  for (const reducedMotion of [false, true]) {
+    await page.emulateMedia({ reducedMotion: reducedMotion ? "reduce" : "no-preference" });
+    if (reducedMotion) await page.waitForTimeout(20);
+    for (const viewport of generationVisualViewports) {
+      await page.setViewportSize(viewport);
+      const motionElement = page.locator(selector);
+      await motionElement.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      const motion = await motionElement.evaluate(async (element) => {
+        const sample = () => {
+          const style = getComputedStyle(element);
+          const before = getComputedStyle(element, "::before");
+          return {
+            animationName: style.animationName,
+            animationDuration: style.animationDuration,
+            opacity: style.opacity,
+            transform: style.transform,
+            beforeAnimationName: before.animationName,
+            beforeAnimationDuration: before.animationDuration,
+            beforeAnimationIterationCount: before.animationIterationCount,
+            beforeBackgroundPosition: before.backgroundPosition,
+            beforeOpacity: before.opacity,
+            beforeTransform: before.transform,
+          };
+        };
+        const first = sample();
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        return { ...sample(), frames: [first, sample()] };
+      });
+      const layout = await page.evaluate((expectedKind) => {
+        const metric = (selector) => {
+          const element = document.querySelector(selector);
+          if (!(element instanceof HTMLElement)) return { visible: false, rect: null };
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          const visible = style.display !== "none"
+            && style.visibility !== "hidden"
+            && Number(style.opacity) > 0
+            && rect.width > 0
+            && rect.height > 0;
+          return {
+            visible,
+            rect: visible
+              ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }
+              : null,
+          };
+        };
+        const pendingArtifact = document.querySelector(
+          `[data-workbench-transient-artifact="${expectedKind}"] [data-workbench-artifact-state="pending"]`,
+        );
+        return {
+          agentCard: metric('[data-panel-motion="agent-card"]'),
+          taskStack: metric("[data-left-task-stack]"),
+          mobileRunStatus: metric("[data-mobile-run-status]"),
+          composer: metric("[data-project-composer]"),
+          pendingArtifact: metric(
+            `[data-workbench-transient-artifact="${expectedKind}"] .workbench-transient-artifact-surface`,
+          ),
+          pendingArtifactState: pendingArtifact instanceof HTMLElement
+            ? {
+                ariaLive: pendingArtifact.getAttribute("aria-live"),
+                hasSkeleton: pendingArtifact.querySelector("[data-workbench-artifact-skeleton]") !== null,
+                hasSpinner: pendingArtifact.querySelector(".workbench-artifact-spinner") !== null,
+                variant: pendingArtifact.getAttribute("data-workbench-artifact-variant"),
+              }
+            : null,
+          rightToolRail: metric("[data-right-tool-rail]"),
+          selectedAction: metric("[data-selected-action]"),
+          suggestions: metric("[data-project-suggestions]"),
+          utilityPill: metric("[data-utility-pill]"),
+        };
+      }, kind);
+      const runState = await page.locator('[data-panel-motion="agent-card"]').evaluate((element) => ({
+        phase: element.getAttribute("data-phase"),
+        stage: element.getAttribute("data-generation-stage"),
+        status: "active",
+        motionKind: document.querySelector("[data-canvas-generation-motion]")
+          ?.getAttribute("data-canvas-generation-motion") ?? null,
+      }));
+      const screenshotPath = path.join(
+        outputDir,
+        `workbench-real-stack-${kind}-${viewport.width}x${viewport.height}-${reducedMotion ? "reduced" : "normal"}.png`,
+      );
+      const bytes = await page.screenshot({ path: screenshotPath, fullPage: false });
+      evidence.push({
+        viewport: `${viewport.width}x${viewport.height}`,
+        reducedMotion,
+        colorScheme: "dark",
+        runState,
+        motion,
+        layout,
+        screenshot: path.relative(root, screenshotPath),
+        sha256: sha256(bytes),
+      });
+    }
+  }
+}
+
+function assertActiveGenerationVisualEvidence(evidence, kind) {
+  assert.equal(evidence.length, generationVisualViewports.length * 2, `${kind} visual matrix was incomplete`);
+  const expectedAnimationName = kind === "prd"
+    ? /workbench-stage-aurora-sweep/u
+    : /workbench-stage-sweep/u;
+  for (const item of evidence.filter((candidate) => !candidate.reducedMotion)) {
+    assert.equal(item.runState.motionKind, kind, `${kind} visual evidence captured the wrong motion kind`);
+    assert.match(item.motion.beforeAnimationName, expectedAnimationName, `normal-motion ${kind} wash was not active at ${item.viewport}`);
+    assert.notEqual(item.motion.beforeAnimationDuration, "0.001s", `normal-motion ${kind} wash used reduced duration at ${item.viewport}`);
+    assert.ok(
+      cssValueListMatches(item.motion.beforeAnimationIterationCount, "infinite"),
+      `normal-motion ${kind} wash did not repeat every animation at ${item.viewport}`,
+    );
+    assert.notEqual(
+      kind === "prd"
+        ? item.motion.frames[0].beforeBackgroundPosition
+        : item.motion.frames[0].beforeTransform,
+      kind === "prd"
+        ? item.motion.frames[1].beforeBackgroundPosition
+        : item.motion.frames[1].beforeTransform,
+      `normal-motion ${kind} wash did not advance between frames at ${item.viewport}`,
+    );
+  }
+  for (const item of evidence.filter((candidate) => candidate.reducedMotion)) {
+    assert.equal(item.runState.motionKind, kind, `${kind} reduced-motion evidence captured the wrong motion kind`);
+    assert.match(item.motion.beforeAnimationName, expectedAnimationName, `reduced-motion ${kind} wash lost its semantic animation at ${item.viewport}`);
+    assert.equal(item.motion.beforeAnimationDuration, "0.001s", `reduced-motion ${kind} wash did not collapse to 1ms at ${item.viewport}`);
+    assert.ok(
+      cssValueListMatches(item.motion.beforeAnimationIterationCount, "1"),
+      `reduced-motion ${kind} wash kept an animation repeating at ${item.viewport}`,
+    );
+    assert.equal(
+      kind === "prd"
+        ? item.motion.frames[0].beforeBackgroundPosition
+        : item.motion.frames[0].beforeTransform,
+      kind === "prd"
+        ? item.motion.frames[1].beforeBackgroundPosition
+        : item.motion.frames[1].beforeTransform,
+      `reduced-motion ${kind} wash continued moving at ${item.viewport}`,
+    );
+  }
+  for (const item of evidence) {
+    const [width, height] = item.viewport.split("x").map(Number);
+    assert.equal(item.layout.composer.visible, true, `Project Composer was not visible at ${kind} ${item.viewport}`);
+    assert.equal(item.layout.agentCard.visible, width >= 768, `Agent card breakpoint was incorrect at ${kind} ${item.viewport}`);
+    assert.equal(item.layout.taskStack.visible, width >= 1280, `task stack breakpoint was incorrect at ${kind} ${item.viewport}`);
+    assert.equal(item.layout.mobileRunStatus.visible, width < 768, `mobile Run status breakpoint was incorrect at ${kind} ${item.viewport}`);
+    assert.equal(item.layout.pendingArtifact.visible, true, `early ${kind} pending surface was not visible at ${item.viewport}`);
+    assert.equal(item.layout.rightToolRail.visible, true, `right tool rail was not visible at ${kind} ${item.viewport}`);
+    assert.equal(item.layout.suggestions.visible, true, `suggestions were not visible at ${kind} ${item.viewport}`);
+    assert.equal(item.layout.utilityPill.visible, true, `Utility Pill was not visible at ${kind} ${item.viewport}`);
+    assert.equal(item.layout.selectedAction.visible, false, `selected action remained visible during ${kind} Run at ${item.viewport}`);
+    assert.deepEqual(
+      item.layout.pendingArtifactState,
+      {
+        ariaLive: "polite",
+        hasSkeleton: true,
+        hasSpinner: true,
+        variant: kind === "prd" ? "document" : "prototype",
+      },
+      `early ${kind} pending surface lost truthful loading semantics at ${item.viewport}`,
+    );
+    for (const [name, region] of Object.entries(item.layout)) {
+      if (name === "pendingArtifactState") continue;
+      if (!region.visible || !region.rect) continue;
+      assert.ok(region.rect.left >= 0 && region.rect.top >= 0, `${name} escaped the top/left viewport at ${kind} ${item.viewport}`);
+      assert.ok(region.rect.right <= width && region.rect.bottom <= height, `${name} escaped the bottom/right viewport at ${kind} ${item.viewport}`);
+    }
+    for (const name of ["agentCard", "taskStack", "mobileRunStatus"]) {
+      assert.ok(
+        !rectanglesOverlap(item.layout[name].rect, item.layout.composer.rect),
+        `${name} overlapped the Project Composer at ${kind} ${item.viewport}`,
+      );
+    }
+    for (const [left, right] of [
+      ["utilityPill", "composer"],
+      ["suggestions", "composer"],
+      ["utilityPill", "suggestions"],
+      ["pendingArtifact", "agentCard"],
+      ["pendingArtifact", "taskStack"],
+      ["pendingArtifact", "mobileRunStatus"],
+      ["pendingArtifact", "composer"],
+      ["pendingArtifact", "rightToolRail"],
+      ["pendingArtifact", "suggestions"],
+      ["pendingArtifact", "utilityPill"],
+    ]) {
+      assert.ok(
+        !rectanglesOverlap(item.layout[left].rect, item.layout[right].rect),
+        `${left} overlapped ${right} at ${kind} ${item.viewport}`,
+      );
+    }
+  }
+}
+
+function cssValueListMatches(value, expected) {
+  const values = value.split(",").map((item) => item.trim()).filter(Boolean);
+  return values.length > 0 && values.every((item) => item === expected);
+}
+
+async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDocument }) {
+  const evidence = [];
+  for (const reducedMotion of [false, true]) {
+    await page.emulateMedia({ reducedMotion: reducedMotion ? "reduce" : "no-preference" });
+    if (reducedMotion) await page.waitForTimeout(20);
+    for (const viewport of generationVisualViewports) {
+      await page.setViewportSize(viewport);
+      await pendingDocument.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      const observation = await pendingDocument.evaluate(async (element) => {
+        const metric = (selector) => {
+          const candidate = document.querySelector(selector);
+          if (!(candidate instanceof HTMLElement)) return null;
+          const style = getComputedStyle(candidate);
+          const rect = candidate.getBoundingClientRect();
+          return style.display !== "none"
+            && style.visibility !== "hidden"
+            && Number(style.opacity) > 0
+            && rect.width > 0
+            && rect.height > 0
+            ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
+            : null;
+        };
+        const spinner = element.querySelector(".workbench-artifact-spinner");
+        const spinnerSample = () => spinner instanceof HTMLElement
+          ? {
+              animationDuration: getComputedStyle(spinner).animationDuration,
+              animationIterationCount: getComputedStyle(spinner).animationIterationCount,
+              transform: getComputedStyle(spinner).transform,
+            }
+          : null;
+        const firstSpinnerFrame = spinnerSample();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const rect = element.getBoundingClientRect();
+        return {
+          ariaLive: element.getAttribute("aria-live"),
+          colorScheme: "dark",
+          hasSkeleton: element.querySelector("[data-workbench-artifact-skeleton]") !== null,
+          hasSpinner: spinner !== null,
+          labelKind: element.textContent?.includes("正在细化") ? "refining" : "other",
+          reducedMotionMedia: matchMedia("(prefers-reduced-motion: reduce)").matches,
+          runState: {
+            phase: document.querySelector('[data-panel-motion="agent-card"]')?.getAttribute("data-phase") ?? null,
+            stage: document.querySelector('[data-canvas-generation-motion="prd"]')?.getAttribute("data-generation-stage") ?? null,
+            status: "active",
+            motionKind: "prd",
+          },
+          spinnerFrames: [firstSpinnerFrame, spinnerSample()],
+          rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+          occluders: {
+            composer: metric("[data-project-composer]"),
+            mobileRunStatus: metric("[data-mobile-run-status]"),
+            rightToolRail: metric("[data-right-tool-rail]"),
+            utilityPill: metric("[data-utility-pill]"),
+          },
+        };
+      });
+      const screenshotPath = path.join(
+        outputDir,
+        `workbench-real-stack-prd-pending-${viewport.width}x${viewport.height}-${reducedMotion ? "reduced" : "normal"}.png`,
+      );
+      const bytes = await page.screenshot({ path: screenshotPath, fullPage: false });
+      evidence.push({
+        ...observation,
+        viewport: `${viewport.width}x${viewport.height}`,
+        reducedMotion,
+        screenshot: path.relative(root, screenshotPath),
+        sha256: sha256(bytes),
+      });
+    }
+  }
+  return evidence;
+}
+
+function assertPendingDocumentVisualEvidence(evidence) {
+  assert.equal(evidence.length, generationVisualViewports.length * 2, "pending PRD visual matrix was incomplete");
+  for (const item of evidence) {
+    const [width, height] = item.viewport.split("x").map(Number);
+    assert.equal(item.ariaLive, "polite", `pending PRD document did not expose a polite live region at ${item.viewport}`);
+    assert.equal(item.hasSkeleton, true, `pending PRD document omitted its skeleton at ${item.viewport}`);
+    assert.equal(item.hasSpinner, true, `pending PRD document omitted its progress indicator at ${item.viewport}`);
+    assert.equal(item.labelKind, "refining", `runtime PRD draft did not expose refining context at ${item.viewport}`);
+    assert.equal(
+      item.reducedMotionMedia,
+      item.reducedMotion,
+      `pending PRD reduced-motion media state was incorrect at ${item.viewport}`,
+    );
+    assert.ok(
+      item.rect.left >= 0
+      && item.rect.top >= 0
+      && item.rect.right <= width
+      && item.rect.bottom <= height,
+      `pending PRD document escaped the viewport at ${item.viewport}`,
+    );
+    assert.ok(item.spinnerFrames.every(Boolean), `pending PRD spinner style was unavailable at ${item.viewport}`);
+    for (const [name, rect] of Object.entries(item.occluders)) {
+      assert.ok(
+        !rectanglesOverlap(item.rect, rect),
+        `pending PRD document was obscured by ${name} at ${item.viewport}`,
+      );
+    }
+    if (item.reducedMotion) {
+      assert.equal(item.spinnerFrames[1].animationDuration, "0.001s", `pending PRD spinner did not reduce motion at ${item.viewport}`);
+      assert.equal(item.spinnerFrames[1].animationIterationCount, "1", `pending PRD spinner kept repeating at ${item.viewport}`);
+      assert.equal(item.spinnerFrames[0].transform, item.spinnerFrames[1].transform, `pending PRD spinner moved with reduced motion at ${item.viewport}`);
+    } else {
+      assert.notEqual(item.spinnerFrames[1].animationDuration, "0.001s", `pending PRD spinner used reduced duration at ${item.viewport}`);
+      assert.notEqual(item.spinnerFrames[0].transform, item.spinnerFrames[1].transform, `pending PRD spinner did not advance at ${item.viewport}`);
+    }
+  }
+}
+
+function browserUrlClass(rawUrl, { previewOrigin, webOrigin }) {
+  if (!rawUrl) return "unknown";
+  try {
+    const url = new URL(rawUrl);
+    if (url.origin === webOrigin) return `web:${browserPathClass(url.pathname)}`;
+    if (url.origin === previewOrigin) return `preview:${browserPathClass(url.pathname)}`;
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? httpOriginClass(url.href)
+      : "other-scheme";
+  } catch {
+    return "invalid";
+  }
+}
+
+function installBrowserSseEvidenceObserver({ webOrigin }) {
+  const nativeFetch = globalThis.fetch;
+  if (typeof nativeFetch !== "function") return;
+  globalThis.fetch = async function workbenchEvidenceFetch(...args) {
+    const response = await nativeFetch.apply(this, args);
+    try {
+      const url = new URL(response.url);
+      if (
+        url.origin === webOrigin
+        && /^\/api\/v1\/runs\/[^/]+\/events$/u.test(url.pathname)
+        && response.headers.get("content-type")?.startsWith("text/event-stream")
+      ) {
+        const afterSequence = Number(url.searchParams.get("afterSequence") ?? "0");
+        const observed = response.clone();
+        void observeSseResponse(observed, afterSequence).catch(() => undefined);
+      }
+    } catch {
+      // The application owns fetch errors; evidence collection must stay observational.
+    }
+    return response;
+  };
+
+  async function observeSseResponse(response, afterSequence) {
+    const reader = response.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let eventName = "message";
+    let eventId = null;
+    let sawData = false;
+
+    const record = () => {
+      const sequence = Number(eventId);
+      const shouldRecord = sawData;
+      const recordedEventName = eventName;
+      eventName = "message";
+      eventId = null;
+      sawData = false;
+      if (!shouldRecord) return;
+      const binding = globalThis.__workbenchRecordSseEvidence;
+      if (typeof binding === "function") {
+        void Promise.resolve(binding({
+          afterSequence,
+          eventName: recordedEventName,
+          sequence,
+        })).catch(() => undefined);
+      }
+    };
+    const consumeLine = (rawLine) => {
+      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+      if (line === "") {
+        record();
+        return;
+      }
+      if (line.startsWith(":")) return;
+      const separator = line.indexOf(":");
+      const field = separator < 0 ? line : line.slice(0, separator);
+      const rawValue = separator < 0 ? "" : line.slice(separator + 1);
+      const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+      if (field === "event") eventName = value;
+      else if (field === "id") eventId = value;
+      else if (field === "data") sawData = true;
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      if (buffer.length > 1_048_576) {
+        const binding = globalThis.__workbenchRecordSseEvidence;
+        if (typeof binding === "function") {
+          void Promise.resolve(binding(null)).catch(() => undefined);
+        }
+        await reader.cancel();
+        return;
+      }
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0) {
+        consumeLine(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf("\n");
+      }
+      if (done) {
+        if (buffer) consumeLine(buffer);
+        record();
+        return;
+      }
+    }
+  }
+}
+
+async function pollBrowserJson(page, pathname, done, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await page.evaluate(async (path) => {
+      const response = await fetch(path, { cache: "no-store" });
+      return { status: response.status, body: await response.text() };
+    }, pathname);
+    if (result.status === 200) {
+      const body = JSON.parse(result.body);
+      if (done(body)) return body;
+    }
+    await delay(250);
+  }
+  throw new Error(`browser API endpoint did not reach a terminal state: ${pathname}`);
+}
+
+async function browserProjectPersistenceCounts(projectId) {
+  const result = await queryDatabase(`
+    SELECT
+      (SELECT count(*)::int FROM workbench.submission_intents WHERE project_id = $1) AS submission_intents,
+      (SELECT count(*)::int FROM workbench.runs WHERE project_id = $1) AS runs,
+      (
+        SELECT count(*)::int
+        FROM workbench.runtime_attempts attempt
+        JOIN workbench.runs run ON run.id = attempt.run_id
+        WHERE run.project_id = $1
+      ) AS runtime_attempts,
+      (
+        SELECT count(*)::int
+        FROM workbench.run_events event
+        JOIN workbench.runs run ON run.id = event.run_id
+        WHERE run.project_id = $1
+      ) AS run_events,
+      (SELECT count(*)::int FROM workbench.artifacts WHERE project_id = $1) AS artifacts,
+      (SELECT count(*)::int FROM workbench.artifact_versions WHERE project_id = $1) AS artifact_versions,
+      (SELECT count(*)::int FROM workbench.board_nodes WHERE project_id = $1) AS board_nodes
+  `, [projectId]);
+  const row = result.rows[0];
+  assert.ok(row, "browser Project persistence counts were unavailable");
+  return {
+    submissionIntents: Number(row.submission_intents),
+    runs: Number(row.runs),
+    runtimeAttempts: Number(row.runtime_attempts),
+    runEvents: Number(row.run_events),
+    artifacts: Number(row.artifacts),
+    artifactVersions: Number(row.artifact_versions),
+    boardNodes: Number(row.board_nodes),
+  };
+}
+
+async function runtimeExecuteQueueJobCount() {
+  const result = await queryDatabase(`
+    SELECT count(*)::int AS count
+    FROM workbench_jobs.job
+    WHERE name = 'runtime.execute'
+  `);
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+async function attributePersistedTerminalSseAborts(candidates) {
+  const attributed = [];
+  for (const candidate of candidates) {
+    const result = await queryDatabase(`
+      SELECT
+        run.status::text,
+        run.event_sequence,
+        terminal_event.sequence AS terminal_event_sequence,
+        terminal_event.type AS terminal_event_type
+      FROM workbench.runs run
+      LEFT JOIN LATERAL (
+        SELECT event.sequence, event.type
+        FROM workbench.run_events event
+        WHERE event.run_id = run.id
+        ORDER BY event.sequence DESC
+        LIMIT 1
+      ) terminal_event ON TRUE
+      WHERE run.id = $1
+    `, [candidate.runId]);
+    const row = result.rows[0];
+    const attribution = persistedTerminalSseAbortAttribution({
+      afterSequence: candidate.afterSequence,
+      failure: candidate.failure,
+      persistedRun: row
+        ? {
+            status: row.status,
+            eventSequence: Number(row.event_sequence),
+            terminalEventSequence: Number(row.terminal_event_sequence),
+            terminalEventType: row.terminal_event_type,
+          }
+        : null,
+      responseStatus: candidate.responseStatus,
+    });
+    if (!attribution) continue;
+    candidate.failure.abortAttribution = attribution;
+    attributed.push(candidate.failure);
+  }
+  return attributed;
+}
+
+async function latestBrowserExternalDelivery(projectId) {
+  const result = await queryDatabase(`
+    SELECT
+      delivery.id,
+      delivery.status::text,
+      delivery.attempt,
+      delivery.confirmed_at,
+      delivery.transfer_authorized_at,
+      delivery.failure_code,
+      (
+        SELECT count(*)::int
+        FROM workbench_jobs.job
+        WHERE name = 'export.delivery'
+          AND data->>'deliveryId' = delivery.id
+      ) AS queue_jobs
+    FROM workbench.external_export_deliveries delivery
+    JOIN workbench.export_jobs export_job ON export_job.id = delivery.export_job_id
+    JOIN workbench.project_releases release ON release.id = export_job.release_id
+    WHERE release.project_id = $1
+    ORDER BY delivery.created_at DESC
+    LIMIT 1
+  `, [projectId]);
+  const row = result.rows[0];
+  assert.ok(row, "browser Project External Delivery was not persisted");
+  return {
+    id: row.id,
+    status: row.status,
+    attempt: Number(row.attempt),
+    confirmedAt: row.confirmed_at,
+    transferAuthorizedAt: row.transfer_authorized_at,
+    failureCode: row.failure_code,
+    queueJobs: Number(row.queue_jobs),
+  };
+}
+
+async function captureBrowserPreviewFailure({ bffRequests, outputDir, page, projectId }) {
+  const diagnostics = {
+    bffRequests: bffRequests
+      .filter(({ pathClass }) => /(?:\/previews|\/projects\/:id\/previews)/u.test(pathClass))
+      .map(({ method, pathClass, status }) => ({ method, pathClass, status })),
+    database: null,
+    screenshot: null,
+    ui: null,
+  };
+
+  try {
+    diagnostics.ui = await page.locator("[data-project-preview]").evaluate((element) => {
+      const status = element.querySelector('[data-isolated-preview] [role="status"]')?.textContent?.trim();
+      return {
+        emptySelection: element.textContent?.includes("暂无可预览内容") ?? false,
+        hasCapabilityFrame: element.querySelector("iframe[data-preview-capability]") !== null,
+        status: status === "预览加载失败，请刷新重试"
+          ? "error"
+          : status === "正在准备预览..."
+            ? "preparing"
+            : status
+              ? "other"
+              : "absent",
+      };
+    });
+  } catch {
+    diagnostics.ui = { overlay: "absent" };
+  }
+
+  try {
+    const result = await queryDatabase(`
+      SELECT
+        export_job.status::text,
+        export_job.purpose::text,
+        export_job.failure_code,
+        (
+          SELECT count(*)::int
+          FROM workbench_jobs.job
+          WHERE name = 'export.build'
+            AND data->>'exportJobId' = export_job.id
+        ) AS queue_jobs
+      FROM workbench.project_previews preview
+      JOIN workbench.export_jobs export_job ON export_job.id = preview.export_job_id
+      WHERE preview.project_id = $1
+      ORDER BY preview.created_at DESC
+      LIMIT 1
+    `, [projectId]);
+    const row = result.rows[0];
+    diagnostics.database = row
+      ? {
+          persisted: true,
+          status: row.status,
+          purpose: row.purpose,
+          failureCode: row.failure_code,
+          queueJobs: Number(row.queue_jobs),
+        }
+      : { persisted: false };
+  } catch {
+    diagnostics.database = { query: "failed" };
+  }
+
+  try {
+    const screenshotPath = path.join(outputDir, "workbench-real-stack-preview-failure.png");
+    const bytes = await page.screenshot({ path: screenshotPath, fullPage: false });
+    diagnostics.screenshot = {
+      path: path.relative(root, screenshotPath),
+      sha256: sha256(bytes),
+    };
+  } catch {
+    diagnostics.screenshot = { capture: "failed" };
+  }
+
+  return diagnostics;
+}
+
+async function assertBrowserArtifactPersistence(projectId) {
+  const result = await queryDatabase(`
+    SELECT
+      run.status::text AS run_status,
+      run.event_sequence,
+      run.request->'requestedArtifactKinds' AS requested_artifact_kinds,
+      artifact.kind::text AS artifact_kind,
+      artifact.revision AS artifact_revision,
+      version.version,
+      version.status::text AS version_status,
+      version.checksum,
+      version.content,
+      (
+        SELECT count(*)::int
+        FROM workbench.runtime_attempts attempt
+        WHERE attempt.run_id = run.id
+      ) AS attempt_count,
+      (
+        SELECT count(*)::int
+        FROM workbench.runtime_attempts attempt
+        WHERE attempt.run_id = run.id AND attempt.status = 'succeeded'
+      ) AS succeeded_attempt_count,
+      EXISTS (
+        SELECT 1
+        FROM workbench.board_nodes node
+        WHERE node.project_id = run.project_id
+          AND node.artifact_id = version.artifact_id
+          AND node.artifact_version_id = version.id
+      ) AS board_pinned
+    FROM workbench.runs run
+    JOIN workbench.artifact_versions version ON version.created_by_run_id = run.id
+    JOIN workbench.artifacts artifact ON artifact.id = version.artifact_id
+    WHERE run.project_id = $1
+      AND version.status = 'ready'
+    ORDER BY run.created_at ASC
+  `, [projectId]);
+  const expectedKinds = ["prd", "prototype"];
+  const summary = {};
+  for (const expectedKind of expectedKinds) {
+    const row = result.rows.find((candidate) => (
+      Array.isArray(candidate.requested_artifact_kinds)
+      && candidate.requested_artifact_kinds.length === 1
+      && candidate.requested_artifact_kinds[0] === expectedKind
+      && candidate.artifact_kind === expectedKind
+    ));
+    assert.ok(row, `browser ${expectedKind} Run omitted its ready ArtifactVersion`);
+    assert.equal(row.run_status, "succeeded", `browser ${expectedKind} Run was not persisted as succeeded`);
+    assert.ok(Number(row.event_sequence) > 0, `browser ${expectedKind} Run omitted durable events`);
+    assert.ok(Number(row.attempt_count) >= 1, `browser ${expectedKind} Run omitted its RuntimeAttempt`);
+    assert.equal(row.succeeded_attempt_count, row.attempt_count, `browser ${expectedKind} RuntimeAttempt was not succeeded`);
+    assert.ok(Number(row.artifact_revision) >= 1, `browser ${expectedKind} Artifact revision did not advance`);
+    assert.ok(Number(row.version) >= 1, `browser ${expectedKind} ArtifactVersion version was invalid`);
+    assert.equal(row.version_status, "ready", `browser ${expectedKind} ArtifactVersion was not ready`);
+    if (expectedKind === "prototype") {
+      assert.ok(
+        Array.isArray(row.content.actions) && row.content.actions.length > 0,
+        "browser Prototype fixture was not interactive and could not enter product Preview",
+      );
+    }
+    assert.match(row.checksum, /^[0-9a-f]{64}$/u, `browser ${expectedKind} ArtifactVersion checksum was invalid`);
+    assert.equal(
+      row.checksum,
+      sha256(canonicalJson(row.content)),
+      `browser ${expectedKind} ArtifactVersion checksum did not match canonical content`,
+    );
+    assert.equal(row.board_pinned, true, `browser ${expectedKind} ArtifactVersion was not pinned to the Board`);
+    summary[expectedKind] = {
+      runStatus: row.run_status,
+      eventSequence: Number(row.event_sequence),
+      runtimeAttempts: Number(row.attempt_count),
+      artifactRevision: Number(row.artifact_revision),
+      artifactVersion: Number(row.version),
+      versionStatus: row.version_status,
+      checksumVerified: true,
+      createdByRunVerified: true,
+      boardPinned: true,
+    };
+  }
+  return summary;
+}
+
+function rectanglesOverlap(left, right) {
+  if (!left || !right) return false;
+  return left.left < right.right
+    && left.right > right.left
+    && left.top < right.bottom
+    && left.bottom > right.top;
+}
+
 async function reservePort() {
   const server = http.createServer();
   await new Promise((resolve, reject) => {
@@ -4501,6 +6514,62 @@ async function reservePort() {
   assert.ok(address && typeof address !== "string");
   await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   return address.port;
+}
+
+function resolveCandidateSourceCommit() {
+  const ciCommit = process.env.GITHUB_SHA?.trim();
+  if (ciCommit && /^[0-9a-f]{40}$/u.test(ciCommit)) return ciCommit;
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  assert.match(commit, /^[0-9a-f]{40}$/u, "candidate source commit is invalid");
+  return commit;
+}
+
+function resolveCandidateSourceSnapshot() {
+  const maximumSnapshotBytes = 64 * 1024 * 1024;
+  const status = execFileSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
+    cwd: root,
+    encoding: null,
+    maxBuffer: maximumSnapshotBytes,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const trackedDiff = execFileSync("git", ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], {
+    cwd: root,
+    encoding: null,
+    maxBuffer: maximumSnapshotBytes,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const untrackedNames = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+    cwd: root,
+    encoding: null,
+    maxBuffer: maximumSnapshotBytes,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const untrackedPaths = untrackedNames.toString("utf8").split("\0").filter(Boolean);
+  const untrackedHashes = untrackedPaths.length === 0
+    ? Buffer.alloc(0)
+    : execFileSync("git", ["hash-object", "--no-filters", "--", ...untrackedPaths], {
+        cwd: root,
+        encoding: null,
+        maxBuffer: maximumSnapshotBytes,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+  return {
+    clean: status.byteLength === 0,
+    digest: sha256(Buffer.concat([status, trackedDiff, untrackedNames, untrackedHashes])),
+    entryCount: status.byteLength === 0
+      ? 0
+      : status.toString("utf8").split("\0").filter(Boolean).length,
+  };
+}
+
+async function writeEvidenceManifest(manifestPath, manifest) {
+  const bytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(manifestPath, bytes);
+  return sha256(bytes);
 }
 
 async function cleanup() {
@@ -4536,16 +6605,8 @@ function dumpLogs() {
     console.error(`\n===== ${service.name} logs =====\n${service.log.value() || "(no output)"}`);
   }
   if (fakeRuntime) {
-    console.error(`\n===== fake DeerFlow state =====\n${diagnosticJson(fakeRuntime.state)}`);
+    console.error(`\n===== fake DeerFlow state =====\n${diagnosticFakeRuntimeState(fakeRuntime.state)}`);
   }
-}
-
-function diagnosticJson(value) {
-  return JSON.stringify(value, (key, candidate) => (
-    key === "WORKBENCH_CANVAS_CAPABILITY" || key === "WORKBENCH_KNOWLEDGE_CAPABILITY"
-      ? "[capability redacted]"
-      : candidate
-  ), 2);
 }
 
 function boundedAppend(current, incoming, limit = 256_000) {

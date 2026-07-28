@@ -69,8 +69,21 @@ export function toWorkbenchModelChoices(models: readonly RuntimeModel[]): Workbe
 
 export type WorkbenchProjectPhase = "idle" | "generating" | "refining" | "complete";
 export type WorkbenchProjectMode = "board" | "document" | "generated";
+export type WorkbenchRunMotionKind = "neutral" | "prd" | "prototype";
 export type WorkbenchRunStatus = RunStatus | "idle";
 export type WorkbenchGenerationProgress = 0 | 1 | 2 | 3;
+
+export function toWorkbenchRunMotionKind(
+  requestedArtifactKinds: Run["requestedArtifactKinds"],
+): WorkbenchRunMotionKind {
+  const requestsPrd = requestedArtifactKinds.includes("prd");
+  const requestsPrototype = requestedArtifactKinds.some(
+    (kind) => kind === "prototype" || kind === "code",
+  );
+
+  if (requestsPrd === requestsPrototype) return "neutral";
+  return requestsPrd ? "prd" : "prototype";
+}
 
 export type WorkbenchRunPresentation = {
   generationProgress: WorkbenchGenerationProgress;
@@ -87,17 +100,21 @@ export function toWorkbenchRunPresentation(
     return { generationProgress: 0, phase: "idle", runId: null, runStatus: "idle" };
   }
 
-  const projectedPhase = projection.generationStage
+  const active = isActiveRunStatus(projection.status);
+  const projectedPhase = active && projection.generationStage
     ? generationStageToWorkbenchPhase(projection.generationStage)
     : null;
   const phase = projection.status === "succeeded"
     ? "complete"
-    : projectedPhase
-      ?? (isActiveRunStatus(projection.status) ? "generating" : "idle");
+    : active
+      ? projectedPhase ?? "generating"
+      : "idle";
 
   const generationProgress = projection.status === "succeeded"
     ? 3
-    : generationStageToProgress(projection.generationStage);
+    : active
+      ? generationStageToProgress(projection.generationStage)
+      : 0;
 
   return {
     generationProgress,

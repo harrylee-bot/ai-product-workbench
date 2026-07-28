@@ -174,6 +174,6 @@ test("package scripts use the compiler-backed API watcher in local dev and CI", 
   );
   assert.match(
     rootPackage.scripts.test,
-    /^npm run workbench:prepare && npm run remediation:r0:test && npm run remediation:runtime:baseline:test && npm run runtime:provider-state:backfill:test && npm run dev:workbench:test &&/u,
+    /^npm run workbench:prepare && npm run remediation:r0:test && npm run remediation:runtime:baseline:test && npm run runtime:provider-state:backfill:test && npm run runtime:provider-state:rollout:test && npm run dev:workbench:test &&/u,
   );
 });

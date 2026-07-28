@@ -40,16 +40,32 @@ describe("Workbench artifact fallback", () => {
     expect(screen.queryByText("产物不可用")).toBeNull();
   });
 
-  it("uses the reference document loading copy without a skeleton or spinner", () => {
+  it("preserves the loading composition and status context for a pending document", () => {
     const rendered = render(
       <WorkbenchDocumentLoading />,
     );
 
-    expect(screen.getByText("Loading document...")).toBeTruthy();
-    expect(rendered.container.querySelector("[data-motion]")).toBeNull();
-    expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeNull();
+    expect(screen.getByText("正在生成：需求文档")).toBeTruthy();
+    expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeTruthy();
+    expect(rendered.container.querySelector(".workbench-artifact-spinner")).toBeTruthy();
     expect(rendered.container.querySelector(".animate-spin")).toBeNull();
+    expect(rendered.container.querySelector('[aria-live="polite"]')).toBeTruthy();
+  });
+
+  it("distinguishes a refining document from first-generation loading", () => {
+    render(<WorkbenchDocumentLoading phase="refining" />);
+
+    expect(screen.getByText("正在细化：需求文档")).toBeTruthy();
     expect(screen.queryByText("正在生成：需求文档")).toBeNull();
+  });
+
+  it("uses a non-blocking status without a skeleton while refreshing readable content", () => {
+    const rendered = render(<WorkbenchDocumentLoading mode="refresh" phase="refining" />);
+
+    expect(screen.getByRole("status").textContent).toContain("正在细化：需求文档");
+    expect(rendered.container.querySelector('[data-workbench-artifact-state="refreshing"]'))
+      .toBeTruthy();
+    expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeNull();
   });
 
   it("fails closed when a completed node has no persisted artifact", () => {

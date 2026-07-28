@@ -22,6 +22,8 @@ import {
   projectReadyPrototypePreviewArtifacts,
   projectRunBoardNodes,
   runtimeDraftsToWorkbench,
+  shouldAutoFitActivePrdViewport,
+  workbenchAgentTaskSelectionBoundary,
 } from "./workbench-project-route";
 import { prdDocument } from "./workbench-prd-test-fixture";
 import {
@@ -46,6 +48,49 @@ describe("PRD immutable version editing", () => {
       baseArtifactVersionId: "version-v2",
       document: prdDocumentV2Example,
     });
+  });
+});
+
+describe("active PRD interaction boundaries", () => {
+  it("resets a historical task selection when a same-prompt retry creates a new Run", () => {
+    const firstRun = workbenchAgentTaskSelectionBoundary({
+      projectMode: "document",
+      prompt: "梳理业务规则",
+      runId: "run-first",
+    });
+    const retryRun = workbenchAgentTaskSelectionBoundary({
+      projectMode: "document",
+      prompt: "梳理业务规则",
+      runId: "run-retry",
+    });
+
+    expect(retryRun).not.toBe(firstRun);
+    expect(workbenchAgentTaskSelectionBoundary({
+      projectMode: "document",
+      prompt: "梳理业务规则",
+      runId: "run-first",
+    })).toBe(firstRun);
+  });
+
+  it("stops active PRD auto-fit after the user adjusts that Run's viewport", () => {
+    expect(shouldAutoFitActivePrdViewport({
+      active: true,
+      autoFitRunId: "run-prd",
+      runId: "run-prd",
+      userAdjustedRunId: null,
+    })).toBe(true);
+    expect(shouldAutoFitActivePrdViewport({
+      active: true,
+      autoFitRunId: "run-prd",
+      runId: "run-prd",
+      userAdjustedRunId: "run-prd",
+    })).toBe(false);
+    expect(shouldAutoFitActivePrdViewport({
+      active: true,
+      autoFitRunId: "run-prd",
+      runId: "run-next",
+      userAdjustedRunId: "run-prd",
+    })).toBe(false);
   });
 });
 
@@ -242,6 +287,27 @@ describe("Mini Workbench Run preview", () => {
     expect(projectedRight).toBeLessThanOrEqual(1400);
     expect(viewport.zoom).toBeCloseTo((563 / 500) * 0.88, 5);
   });
+
+  it.each([
+    { containerHeight: 812, containerWidth: 375, expectedLeft: 24, expectedTop: 186, rightInset: 40 },
+    { containerHeight: 1024, containerWidth: 768, expectedLeft: 320, expectedTop: 92, rightInset: 80 },
+  ])(
+    "keeps an active PRD inside a $containerWidth px viewport after resize",
+    ({ containerHeight, containerWidth, expectedLeft, expectedTop, rightInset }) => {
+      const prd = persistedPrdNode({
+        id: "board-node-prd-responsive",
+        position: { x: 600, y: 400 },
+      });
+      const viewport = getPersistedPrdViewport(prd, containerWidth, containerHeight);
+      const projectedLeft = viewport.x + prd.position.x * viewport.zoom;
+      const projectedTop = viewport.y + prd.position.y * viewport.zoom;
+      const projectedRight = projectedLeft + 500 * viewport.zoom;
+
+      expect(projectedLeft).toBeCloseTo(expectedLeft, 5);
+      expect(projectedTop).toBeCloseTo(expectedTop, 5);
+      expect(projectedRight).toBeLessThanOrEqual(containerWidth - rightInset);
+    },
+  );
 
   it("renders a 500px PRD at the source-measured 563px width at 93%", () => {
     const persisted = persistedPrdNode({
@@ -508,6 +574,44 @@ describe("Mini Workbench Run preview", () => {
     });
   });
 
+  it("retains the previous persisted PRD reference while its edit Draft is active", () => {
+    const persisted = persistedPrdNode({
+      artifactId: "artifact-prd",
+      artifactVersionId: "version-before-edit",
+      id: "board-node-prd",
+      position: { x: 160, y: 120 },
+    });
+    const nodes = projectRunBoardNodes({
+      drafts: [draftProjection({
+        artifactId: "artifact-prd",
+        artifactVersionId: "version-edit-draft",
+        kind: "prd",
+      })],
+      persistedBoardNodes: [persisted],
+      projectId: "project-real",
+      runStatus: "running",
+    });
+
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({
+      data: {
+        artifact: {
+          artifactId: "artifact-prd",
+          artifactVersionId: "version-edit-draft",
+          projectId: "project-real",
+        },
+        phase: "refining",
+        previousArtifact: {
+          artifactId: "artifact-prd",
+          artifactVersionId: "version-before-edit",
+          projectId: "project-real",
+        },
+      },
+      id: "board-node-prd",
+      position: { x: 160, y: 120 },
+    });
+  });
+
   it("promotes a completed Draft until the final Board arrives, then suppresses duplicate entrance", () => {
     const draft = draftProjection({
       artifactId: "artifact-prototype",
@@ -715,9 +819,13 @@ function persistedPrototypeNode({
 }
 
 function persistedPrdNode({
+  artifactId = "artifact-prd",
+  artifactVersionId = "version-prd",
   id,
   position,
 }: {
+  artifactId?: string;
+  artifactVersionId?: string;
   id: string;
   position: { x: number; y: number };
 }): BoardFlowNode {
@@ -733,8 +841,8 @@ function persistedPrdNode({
     style: { height: 3001, width: 1154 },
     type: "artifact",
     workbench: {
-      artifactId: "artifact-prd",
-      artifactVersionId: "version-prd",
+      artifactId,
+      artifactVersionId,
       kind: "artifact",
       order: 0,
       size: { height: 3001, width: 1154 },

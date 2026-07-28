@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
 import { runtimeExecuteQueue } from "@workbench/workbench-contracts";
+import { recordRuntimeLivenessMetric } from "@workbench/workbench-telemetry";
 import { fromPrisma } from "pg-boss";
 
 type RuntimeExecuteQueueSender = {
@@ -54,9 +55,23 @@ export class RuntimeExecutionReconciler {
         LIMIT ${this.batchSize}
       `);
       for (const candidate of candidates) {
+        const startedAt = performance.now();
         try {
-          await this.reconcileRun(candidate.id);
+          const recovered = await this.reconcileRun(candidate.id);
+          if (recovered) {
+            recordRuntimeLivenessMetric({
+              operation: "reconcile",
+              outcome: "recovered",
+              durationMs: performance.now() - startedAt,
+            });
+          }
         } catch (error) {
+          recordRuntimeLivenessMetric({
+            operation: "reconcile",
+            outcome: "error",
+            durationMs: performance.now() - startedAt,
+            errorCode: "RUNTIME_EXECUTION_RECONCILE_FAILED",
+          });
           this.onError(error);
         }
       }
@@ -65,8 +80,8 @@ export class RuntimeExecutionReconciler {
     }
   }
 
-  async reconcileRun(runId: string): Promise<void> {
-    await this.db.$transaction(async (tx) => {
+  async reconcileRun(runId: string): Promise<boolean> {
+    return this.db.$transaction(async (tx) => {
       const candidates = await tx.$queryRaw<Array<{ id: string; threadId: string }>>(Prisma.sql`
         SELECT run."id", run."thread_id" AS "threadId"
         FROM "runs" AS run
@@ -79,7 +94,7 @@ export class RuntimeExecutionReconciler {
         FOR UPDATE SKIP LOCKED
       `);
       const candidate = candidates[0];
-      if (!candidate) return;
+      if (!candidate) return false;
 
       await this.queue.send(
         runtimeExecuteQueue,
@@ -90,6 +105,7 @@ export class RuntimeExecutionReconciler {
           db: fromPrisma(tx),
         },
       );
+      return true;
     });
   }
 }

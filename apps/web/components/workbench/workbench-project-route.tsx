@@ -96,6 +96,7 @@ import {
   deriveScreenContextState,
   type ScreenContextTarget,
   type WorkbenchModelCatalogState,
+  toWorkbenchRunMotionKind,
 } from "@/lib/workbench/features";
 import {
   applyPrototypeCanvasStyle,
@@ -175,6 +176,28 @@ type ProjectPrototypePreviewTarget = {
   reference: WorkbenchArtifactReference;
   title: string;
 };
+
+export function workbenchAgentTaskSelectionBoundary(input: {
+  projectMode: ProjectMode;
+  prompt: string;
+  runId: string | null;
+}) {
+  return JSON.stringify([input.projectMode, input.prompt, input.runId]);
+}
+
+export function shouldAutoFitActivePrdViewport(input: {
+  active: boolean;
+  autoFitRunId: string | null;
+  runId: string | null;
+  userAdjustedRunId: string | null;
+}) {
+  return Boolean(
+    input.active
+    && input.runId
+    && input.autoFitRunId === input.runId
+    && input.userAdjustedRunId !== input.runId
+  );
+}
 
 export function projectReadyPrototypePreviewArtifacts(
   targets: readonly ProjectPrototypePreviewTarget[],
@@ -384,7 +407,8 @@ function getPrdNodeViewport(
   const targetLeft = containerWidth < 768
     ? 24
     : Math.max(320, documentViewport.x);
-  const availableWidth = Math.max(1, containerWidth - targetLeft - 40);
+  const rightInset = containerWidth >= 768 && containerWidth < 1024 ? 80 : 40;
+  const availableWidth = Math.max(1, containerWidth - targetLeft - rightInset);
   const zoom = Math.max(
     0.04,
     Math.min(documentViewport.zoom, availableWidth / nodeWidth),
@@ -392,7 +416,7 @@ function getPrdNodeViewport(
 
   return {
     x: targetLeft - position.x * zoom,
-    y: documentViewport.y - position.y * zoom,
+    y: (containerWidth < 768 ? 186 : documentViewport.y) - position.y * zoom,
     zoom,
   };
 }
@@ -690,9 +714,17 @@ function mergeDraftNodes(
     const key = artifactNodeKeyFromNode(draftNode);
     const existing = key ? persistedByKey.get(key) : undefined;
     if (!existing) return draftNode;
+    const previousArtifact = existing.type === "documentCanvas"
+      && draftNode.type === "documentCanvas"
+      && existing.data.artifact?.artifactVersionId !== draftNode.data.artifact?.artifactVersionId
+      ? existing.data.artifact
+      : undefined;
     return {
       ...existing,
       ...draftNode,
+      data: previousArtifact
+        ? { ...draftNode.data, previousArtifact }
+        : draftNode.data,
       draggable: terminal ? existing.draggable : false,
       id: existing.id,
       position: { ...existing.position },
@@ -1605,6 +1637,10 @@ function ProjectScreen({
     projectSession,
     () => null as string | null,
   );
+  const userAdjustedPrdViewportRunRef = useWorkbenchProjectRef(
+    projectSession,
+    () => null as string | null,
+  );
   const {
     getNodesBounds,
     getViewport,
@@ -2171,9 +2207,14 @@ function ProjectScreen({
     nodesRef.current = nodes;
   }, [nodes, nodesRef]);
 
+  const agentTaskSelectionBoundary = workbenchAgentTaskSelectionBoundary({
+    projectMode,
+    prompt,
+    runId,
+  });
   useEffect(() => {
     setSelectedAgentTask(null);
-  }, [projectMode, prompt, setSelectedAgentTask]);
+  }, [agentTaskSelectionBoundary, setSelectedAgentTask]);
 
   const writeSelectedNodeUrl = useCallback((nodeIds: readonly string[]) => {
     writeWorkbenchBoardNodeUrl(projectId, nodeIds.length === 1 ? nodeIds[0]! : "");
@@ -2406,13 +2447,29 @@ function ProjectScreen({
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         const rect = stage.getBoundingClientRect();
-        const nextViewport = persistedBoardNodes.length > 0 && persistedBoardViewport
-          ? persistedBoardViewport
-          : projectMode === "document"
-          ? getDocumentViewport(rect.width, rect.height)
-          : projectMode === "generated"
-            ? getGeneratedViewport(rect.width, rect.height, phase)
-            : getBoardViewport(rect.width, rect.height);
+        const activePrdNode = shouldAutoFitActivePrdViewport({
+          active: activeRunRef.current,
+          autoFitRunId: activePrdViewportRunRef.current,
+          runId,
+          userAdjustedRunId: userAdjustedPrdViewportRunRef.current,
+        })
+          ? nodesRef.current.find((node) => node.type === "documentCanvas")
+          : undefined;
+        const activePrdSize = activePrdNode ? workbenchNodeCanvasSize(activePrdNode) : null;
+        const nextViewport = activePrdNode
+          ? getPrdNodeViewport(
+              activePrdNode.position,
+              activePrdSize?.width || prdCanvasSize,
+              rect.width,
+              rect.height,
+            )
+          : persistedBoardNodes.length > 0 && persistedBoardViewport
+            ? persistedBoardViewport
+            : projectMode === "document"
+              ? getDocumentViewport(rect.width, rect.height)
+              : projectMode === "generated"
+                ? getGeneratedViewport(rect.width, rect.height, phase)
+                : getBoardViewport(rect.width, rect.height);
         setBoardViewport(nextViewport);
         const isFirstViewport = !viewportInitializedRef.current;
         const previousMode = viewportTransitionKeyRef.current.split(":")[0] as ProjectMode | "";
@@ -2423,7 +2480,7 @@ function ProjectScreen({
         if (!manualZoomRef.current) {
           setZoomLabel(projectMode === "board" || (projectMode === "generated" && phase === "complete") ? "63%" : "93%");
         }
-        if (manualZoomRef.current && !didProjectModeChange && !isFirstViewport) {
+        if (manualZoomRef.current && !activePrdNode && !didProjectModeChange && !isFirstViewport) {
           return;
         }
         void setViewport(nextViewport, {
@@ -2442,16 +2499,21 @@ function ProjectScreen({
     };
   }, [
     manualZoomRef,
+    activePrdViewportRunRef,
+    activeRunRef,
+    nodesRef,
     persistedBoardNodes.length,
     persistedBoardViewport,
     phase,
     projectId,
     projectMode,
+    runId,
     setBoardViewport,
     setViewport,
     setZoomLabel,
     viewportInitializedRef,
     viewportTransitionKeyRef,
+    userAdjustedPrdViewportRunRef,
   ]);
 
   useEffect(() => {
@@ -2529,6 +2591,7 @@ function ProjectScreen({
         stage.height,
       );
       activePrdViewportRunRef.current = runId;
+      userAdjustedPrdViewportRunRef.current = null;
       manualZoomRef.current = true;
       setBoardViewport(nextViewport);
       setZoomLabel(`${Math.round(nextViewport.zoom * prdZoomDisplayRatio * 100)}%`);
@@ -2547,6 +2610,7 @@ function ProjectScreen({
     setBoardViewport,
     setViewport,
     setZoomLabel,
+    userAdjustedPrdViewportRunRef,
   ]);
 
   const updateZoomLabel = useCallback(() => {
@@ -3784,7 +3848,17 @@ function ProjectScreen({
       onFitSelection: fitSelection,
       onMoveEnd: (event, viewport) => {
         const poller = canvasAgentPollerRef.current;
-        if (event) poller?.cancelViewportMoveForUserGesture();
+        if (event) {
+          poller?.cancelViewportMoveForUserGesture();
+          manualZoomRef.current = true;
+          if (
+            runId
+            && activeRunRef.current
+            && requestedArtifactKinds.includes("prd")
+          ) {
+            userAdjustedPrdViewportRunRef.current = runId;
+          }
+        }
         const suppressPersistence = event === null
           && (poller?.consumeViewportMoveEnd(viewport) ?? false);
         updateZoomLabel();
@@ -4115,6 +4189,7 @@ function ProjectScreen({
       generationStage,
       isPrdRun: requestedArtifactKinds.includes("prd"),
       messages: runMessages,
+      motionKind: toWorkbenchRunMotionKind(requestedArtifactKinds),
       onCancel: () => {
         if (capabilities.canRun) void onCancelRun().catch(() => undefined);
       },

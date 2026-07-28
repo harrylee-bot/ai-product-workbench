@@ -1,10 +1,24 @@
 import { ConfigService } from "@nestjs/config";
 import { createKnowledgeToolGrant } from "@workbench/workbench-knowledge";
+
+const telemetry = vi.hoisted(() => ({
+  recordKnowledgeVisibilityMetric: vi.fn(),
+}));
+
+vi.mock("@workbench/workbench-telemetry", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@workbench/workbench-telemetry")>(),
+  recordKnowledgeVisibilityMetric: telemetry.recordKnowledgeVisibilityMetric,
+}));
+
 import { KnowledgeRetrievalConfig } from "../src/modules/knowledge/knowledge-retrieval.config.js";
 import { KnowledgeRetrievalError } from "../src/modules/knowledge/knowledge-retrieval.types.js";
 import { KnowledgeToolService } from "../src/modules/knowledge/knowledge-tool.service.js";
 
 describe("KnowledgeToolService", () => {
+  beforeEach(() => {
+    telemetry.recordKnowledgeVisibilityMetric.mockClear();
+  });
+
   it("returns a safe 503 before authorization data, ledger, or providers are accessed when providers are absent", async () => {
     const secret = Buffer.alloc(32, 31);
     const config = new KnowledgeRetrievalConfig(new ConfigService({
@@ -50,6 +64,27 @@ describe("KnowledgeToolService", () => {
       expect.objectContaining({ protocol: "workbench.knowledge-retrieval-result.v1" }),
     );
     expect(ledger.release).not.toHaveBeenCalled();
+    expect(telemetry.recordKnowledgeVisibilityMetric).toHaveBeenCalledWith({
+      operation: "execution",
+      outcome: "authorized",
+    });
+  });
+
+  it("records and blocks an execution request without a valid request-scoped capability", async () => {
+    const harness = configuredHarness();
+
+    const failure = await harness.service.retrieve(undefined, invocationId, request)
+      .catch((error: unknown) => error) as { status: number; getResponse(): unknown };
+
+    expect(failure.status).toBe(401);
+    expect(failure.getResponse()).toMatchObject({ code: "KNOWLEDGE_TOOL_GRANT_INVALID" });
+    expect(harness.ledger.reserve).not.toHaveBeenCalled();
+    expect(harness.provider).not.toHaveBeenCalled();
+    expect(telemetry.recordKnowledgeVisibilityMetric).toHaveBeenCalledExactlyOnceWith({
+      operation: "execution",
+      outcome: "blocked",
+      errorCode: "KNOWLEDGE_TOOL_GRANT_INVALID",
+    });
   });
 
   it("replays a committed receipt without entering the provider pipeline", async () => {

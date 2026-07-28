@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { requestedArtifactKindsForPrompt } from "./artifact-intent";
+import {
+  assertRunnableArtifactRequest,
+  requestedArtifactKindsForPrompt,
+  WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE,
+} from "./artifact-intent";
 
 describe("requestedArtifactKindsForPrompt", () => {
   it("routes an explicit PRD request to PRD", () => {
@@ -31,6 +35,21 @@ describe("requestedArtifactKindsForPrompt", () => {
       .toEqual(["prd", "prototype"]);
     expect(requestedArtifactKindsForPrompt("输出产品需求规格说明书和 UI"))
       .toEqual(["prd", "prototype"]);
+    expect(requestedArtifactKindsForPrompt("先做原型，再给 PRD"))
+      .toEqual(["prd", "prototype"]);
+    expect(requestedArtifactKindsForPrompt("Create a PRD and a prototype"))
+      .toEqual(["prd", "prototype"]);
+    expect(requestedArtifactKindsForPrompt("Prototype plus product requirements document"))
+      .toEqual(["prd", "prototype"]);
+  });
+
+  it("preserves explicit mixed requests across sentence boundaries", () => {
+    expect(requestedArtifactKindsForPrompt("生成需求文档。然后生成原型"))
+      .toEqual(["prd", "prototype"]);
+    expect(requestedArtifactKindsForPrompt("生成需求文档. 创建原型"))
+      .toEqual(["prd", "prototype"]);
+    expect(requestedArtifactKindsForPrompt("编写产品需求说明书\n制作页面原型"))
+      .toEqual(["prd", "prototype"]);
   });
 
   it("continues the PRD for an ordinary refinement in document mode", () => {
@@ -42,5 +61,16 @@ describe("requestedArtifactKindsForPrompt", () => {
   it("defaults a new product prompt to Prototype outside PRD context", () => {
     expect(requestedArtifactKindsForPrompt("做一个活动管理后台"))
       .toEqual(["prototype"]);
+  });
+
+  it("rejects mixed output kinds with a stable localized message", () => {
+    expect(() => assertRunnableArtifactRequest(["prd", "prototype"]))
+      .toThrow(WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE);
+    expect(() => assertRunnableArtifactRequest(["code", "prd"]))
+      .toThrow(WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE);
+    expect(() => assertRunnableArtifactRequest(["prd"]))
+      .not.toThrow();
+    expect(() => assertRunnableArtifactRequest(["prototype"]))
+      .not.toThrow();
   });
 });

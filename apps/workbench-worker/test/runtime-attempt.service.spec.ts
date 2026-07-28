@@ -4,6 +4,8 @@ import {
   createRuntimeProviderProjection,
   createRuntimeProviderTextCheckpoint,
   projectIncompleteVisibleAssistantText,
+  reduceRuntimeProviderProjection,
+  sha256Canonical,
 } from "../src/runtime/runtime-assistant-text.js";
 import {
   RuntimeAttemptService,
@@ -214,6 +216,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
     },
   };
   const db = {
+    $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (callback: (transaction: typeof tx) => unknown) => {
       const stateSnapshot = { ...state };
       const eventSnapshot = new Map(
@@ -507,6 +510,112 @@ describe("RuntimeAttemptService", () => {
     );
   });
 
+  it("requires a non-silent reporter in shadow-verify mode", () => {
+    expect(() => new RuntimeAttemptService(
+      {} as never,
+      45_000,
+      "shadow-verify",
+    )).toThrow("RUNTIME_PROVIDER_STATE_SHADOW_REPORTER_REQUIRED");
+  });
+
+  it("returns the projection before transaction-free historical shadow replay completes", async () => {
+    const context = harness({
+      runOwnerId: claimA.ownerId,
+      attemptOwnerId: claimA.ownerId,
+      runEpoch: claimA.epoch,
+      attemptEpoch: claimA.epoch,
+      runLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+    });
+    let finishReplay!: (rows: []) => void;
+    const replay = new Promise<[]>((resolve) => {
+      finishReplay = resolve;
+    });
+    context.db.$queryRaw.mockReturnValueOnce(replay);
+    const reporter = vi.fn();
+    const service = new RuntimeAttemptService(
+      context.db as never,
+      45_000,
+      "shadow-verify",
+      reporter,
+    );
+
+    await expect(service.providerTextState(claimA)).resolves.toMatchObject({
+      protocol: "workbench.runtime-provider-text-state.v2",
+      rawAssistantText: "",
+      visibleAssistantText: "",
+    });
+    expect(context.db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(reporter).not.toHaveBeenCalled();
+    expect(context.db.$transaction).toHaveBeenCalledTimes(1);
+
+    finishReplay([]);
+    await vi.waitFor(() => expect(context.db.$queryRaw).toHaveResolved());
+    expect(reporter).not.toHaveBeenCalled();
+    expect(context.db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports only hashed scope when transaction-free shadow replay finds a mismatch", async () => {
+    const context = harness({
+      runOwnerId: claimA.ownerId,
+      attemptOwnerId: claimA.ownerId,
+      runEpoch: claimA.epoch,
+      attemptEpoch: claimA.epoch,
+      runLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+      externalEventSequence: 1,
+    });
+    const noopPayload = { synthetic: true };
+    Object.assign(context.providerProjection(), reduceRuntimeProviderProjection(
+      context.providerProjection(),
+      {
+        runtimeAttemptId: claimA.attemptId,
+        runId: claimA.runId,
+        attempt: 1,
+        externalEventId: "event-1",
+        sequence: 1,
+        event: "synthetic.noop",
+        payload: noopPayload,
+        payloadSha256: sha256Canonical(noopPayload),
+      },
+    ).state);
+    const divergentPayload = { type: "ai", content: "wbkg1." };
+    context.db.$queryRaw.mockResolvedValueOnce([{
+      runtimeAttemptId: claimA.attemptId,
+      attempt: 1,
+      externalEventId: "event-1",
+      sequence: 1,
+      event: "messages",
+      payload: divergentPayload,
+      payloadSha256: sha256Canonical(divergentPayload),
+    }]);
+    const reporter = vi.fn();
+    const service = new RuntimeAttemptService(
+      context.db as never,
+      45_000,
+      "shadow-verify",
+      reporter,
+    );
+
+    await service.providerTextState(claimA);
+    await vi.waitFor(() => expect(reporter).toHaveBeenCalledTimes(1));
+
+    const finding = reporter.mock.calls[0]![0];
+    expect(finding).toMatchObject({
+      protocol: "workbench.runtime-provider-state-shadow-finding.v1",
+      code: "RUNTIME_PROVIDER_STATE_SHADOW_MISMATCH",
+      runIdSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      attemptIdSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+    expect(JSON.stringify(finding)).not.toContain(claimA.runId);
+    expect(JSON.stringify(finding)).not.toContain(claimA.attemptId);
+    expect(context.db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     {
       name: "missing projection",
@@ -557,6 +666,28 @@ describe("RuntimeAttemptService", () => {
     prepare(context);
 
     await expect(context.service.providerTextState(claimA)).rejects.toThrow(error);
+  });
+
+  it("attaches only a bounded numeric lag to projection sequence errors", async () => {
+    const context = harness({
+      runOwnerId: claimA.ownerId,
+      attemptOwnerId: claimA.ownerId,
+      runEpoch: claimA.epoch,
+      attemptEpoch: claimA.epoch,
+      runLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:01:00.000Z"),
+      attemptStatus: "running",
+      externalRunId: "external-run-1",
+      externalEventSequence: 3,
+    });
+
+    const error = await context.service.providerTextState(claimA).catch((failure: unknown) => failure);
+
+    expect(error).toMatchObject({
+      message: "RUNTIME_PROVIDER_STATE_SEQUENCE_GAP",
+      projectionLag: 3,
+    });
+    expect(JSON.stringify(error)).toBe("{}");
   });
 
   it("checks replay identity without selecting or loading payload JSON", async () => {

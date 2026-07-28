@@ -18,6 +18,7 @@ import {
   toWorkbenchProjectMode,
   toWorkbenchRunActivityItems,
   toWorkbenchRunMessageItems,
+  toWorkbenchRunMotionKind,
   toWorkbenchRunPresentation,
   toWorkbenchThreadMessageItem,
   visibleWorkbenchModelChoices,
@@ -139,6 +140,18 @@ describe("Workbench runtime choices and project mode", () => {
     expect(toWorkbenchProjectMode([prd], { ...run, requestedArtifactKinds: ["prototype"] })).toBe("document");
     expect(toWorkbenchProjectMode([prd, prototype], run)).toBe("generated");
   });
+
+  it.each([
+    [[], "neutral"],
+    [["document"], "neutral"],
+    [["prd"], "prd"],
+    [["prototype"], "prototype"],
+    [["code"], "prototype"],
+    [["prd", "prototype"], "neutral"],
+    [["prd", "code"], "neutral"],
+  ] as const)("derives Run motion kind from requested artifacts %j", (requestedArtifactKinds, expected) => {
+    expect(toWorkbenchRunMotionKind([...requestedArtifactKinds])).toBe(expected);
+  });
 });
 
 describe("Workbench Run presenter", () => {
@@ -185,6 +198,22 @@ describe("Workbench Run presenter", () => {
       generationProgress: 3,
       runId: run.id,
       runStatus: "succeeded",
+    });
+  });
+
+  it.each([
+    ["failed", "screen-streaming"],
+    ["cancelled", "summarizing"],
+  ] as const)("ignores a stale generation stage after a Run is %s", (status, generationStage) => {
+    expect(toWorkbenchRunPresentation(projection({
+      status,
+      generationStage,
+      generationStageAttempt: 1,
+    }))).toEqual({
+      phase: "idle",
+      generationProgress: 0,
+      runId: run.id,
+      runStatus: status,
     });
   });
 

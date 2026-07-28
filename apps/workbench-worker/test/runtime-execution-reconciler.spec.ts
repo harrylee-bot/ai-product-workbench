@@ -1,3 +1,7 @@
+const recordRuntimeLivenessMetric = vi.hoisted(() => vi.fn());
+
+vi.mock("@workbench/workbench-telemetry", () => ({ recordRuntimeLivenessMetric }));
+
 import { RuntimeExecutionReconciler } from "../src/runs/runtime-execution-reconciler.js";
 
 function deferred<T>() {
@@ -18,6 +22,8 @@ function rawSqlText(query: unknown) {
 }
 
 describe("RuntimeExecutionReconciler", () => {
+  beforeEach(() => recordRuntimeLivenessMetric.mockClear());
+
   it("atomically requeues every unowned or expired running Run with its thread group", async () => {
     const transactionQueries = vi.fn()
       .mockResolvedValueOnce([{ id: "run-1", threadId: "thread-1" }])
@@ -52,6 +58,11 @@ describe("RuntimeExecutionReconciler", () => {
     const lockedSql = rawSqlText(transactionQueries.mock.calls[0]?.[0]);
     expect(lockedSql).toContain("FOR UPDATE SKIP LOCKED");
     expect(lockedSql).toContain("thread_id");
+    expect(recordRuntimeLivenessMetric).toHaveBeenCalledTimes(2);
+    expect(recordRuntimeLivenessMetric).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reconcile",
+      outcome: "recovered",
+    }));
   });
 
   it("reports one enqueue failure and continues with the remaining candidates", async () => {
@@ -77,6 +88,11 @@ describe("RuntimeExecutionReconciler", () => {
 
     expect(onError).toHaveBeenCalledWith(failure);
     expect(queue.send).toHaveBeenCalledTimes(2);
+    expect(recordRuntimeLivenessMetric).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reconcile",
+      outcome: "error",
+      errorCode: "RUNTIME_EXECUTION_RECONCILE_FAILED",
+    }));
   });
 
   it("does not enqueue when the locked Run no longer needs recovery", async () => {

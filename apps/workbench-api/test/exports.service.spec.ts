@@ -302,6 +302,26 @@ describe("ExportJob API invariants", () => {
     });
   });
 
+  it("keeps the E2E external-delivery capability closed outside the test runtime", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalE2eTarget = process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE;
+    try {
+      process.env.NODE_ENV = "production";
+      process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE = "netlify";
+
+      expect(new ExportCapabilitiesConfig().catalog().external.netlify).toEqual({
+        available: false,
+        authentication: "required",
+        reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
+      });
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+      if (originalE2eTarget === undefined) delete process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE;
+      else process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE = originalE2eTarget;
+    }
+  });
+
   it("rejects client-controlled Figma options before persistence", async () => {
     const db = {
       projectRelease: { findFirst: vi.fn() },

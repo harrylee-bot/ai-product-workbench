@@ -112,6 +112,7 @@ export class WorkbenchCanvasAgentCommandApi implements CanvasAgentCommandTranspo
     state: CanvasClientStateSyncRequest,
     signal: AbortSignal,
   ): Promise<CanvasClientStateSyncResponse> {
+    signal.throwIfAborted();
     const response = await this.#fetch(new Request(
       `${this.#baseUrl}/projects/${encodeURIComponent(projectId)}/canvas-agent/state`,
       {
@@ -122,7 +123,6 @@ export class WorkbenchCanvasAgentCommandApi implements CanvasAgentCommandTranspo
         },
         credentials: "same-origin",
         body: JSON.stringify(state),
-        signal,
       },
     ));
     await throwForCanvasAgentResponse(response);

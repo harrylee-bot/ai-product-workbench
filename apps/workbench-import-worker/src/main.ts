@@ -1,6 +1,5 @@
 import { PgBoss, type JobWithMetadata } from "pg-boss";
 import { fromPrisma } from "pg-boss";
-import type { Prisma } from "@workbench/workbench-db";
 import {
   assertImportSourceProcessQueueConfiguration,
   importSourceProcessJobOptions,
@@ -23,6 +22,7 @@ import { UrlImportProvider } from "./import/url.provider.js";
 import { S3ImportStorageAdapter } from "./storage/s3-import-storage.adapter.js";
 
 const telemetry = initializeTelemetry({ serviceName: "workbench-import-worker" });
+type QueueTransaction = Parameters<typeof fromPrisma>[0];
 
 async function main() {
   const config = loadImportWorkerConfig();
@@ -82,7 +82,7 @@ async function main() {
     });
   });
 
-  const enqueueRetry = async (tx: Prisma.TransactionClient, payload: ImportSourceProcessJob) => {
+  const enqueueRetry = async (tx: QueueTransaction, payload: ImportSourceProcessJob) => {
     const jobId = await traceQueuePublish(importSourceProcessQueue, payload, (tracedPayload) => boss.send(importSourceProcessQueue, tracedPayload, {
       ...importSourceProcessJobOptions(payload),
       retryLimit: importSourceProcessQueueOptions.retryLimit,

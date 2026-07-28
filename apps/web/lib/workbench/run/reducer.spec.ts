@@ -106,6 +106,48 @@ describe("run reducer", () => {
     }))).toThrowError(/attempt mismatch: expected 2, received 1/);
   });
 
+  it.each([
+    {
+      expectedStatus: "cancelled",
+      label: "cancelled",
+      terminal: event(3, "run.cancelled", { reason: "Stopped" }),
+    },
+    {
+      expectedStatus: "succeeded",
+      label: "completed",
+      terminal: event(3, "run.completed", { artifactCount: 1 }),
+    },
+    {
+      expectedStatus: "failed",
+      label: "failed",
+      terminal: event(3, "run.failed", {
+        code: "runtime_error",
+        message: "Failed",
+        retryable: true,
+      }),
+    },
+  ] as const)("clears generation stage metadata when a Run is $label", ({
+    expectedStatus,
+    terminal,
+  }) => {
+    const started = reduceRunEvent(
+      createRunProjection(run),
+      event(1, "run.started", { attempt: 1 }),
+    );
+    const generating = reduceRunEvent(started, event(2, "run.generation.stage.changed", {
+      attempt: 1,
+      stage: "screen-streaming",
+    }));
+
+    const terminalProjection = reduceRunEvent(generating, terminal);
+
+    expect(terminalProjection).toMatchObject({
+      status: expectedStatus,
+      generationStage: null,
+      generationStageAttempt: null,
+    });
+  });
+
   it("upserts ordered Artifact drafts and preserves them through publication", () => {
     const started = reduceRunEvent(
       createRunProjection(run),

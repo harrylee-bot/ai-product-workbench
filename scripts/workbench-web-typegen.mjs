@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { access, rm } from "node:fs/promises";
+import { access, copyFile, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const execFileAsync = promisify(execFile);
@@ -15,10 +15,14 @@ export async function runWebTypegen({
 } = {}) {
   const before = await gitStatus(root, run);
   const distDir = resolveDistDir(web, environment.WORKBENCH_NEXT_DIST_DIR);
+  const temporaryTsconfigPath = path.join(web, ".tsconfig.workbench-typegen.json");
+  const nextEnvPath = path.join(web, "next-env.d.ts");
+  const originalNextEnv = await readFile(nextEnvPath);
 
   // Route declarations are derived output. Removing the complete Next output
   // directory prevents a stale route file from influencing tsc.
   await rm(distDir, { recursive: true, force: true });
+  await copyFile(path.join(web, "tsconfig.json"), temporaryTsconfigPath);
 
   const nextBin = path.join(repoRoot, "node_modules", "next", "dist", "bin", "next");
   const childEnvironment = {
@@ -27,12 +31,20 @@ export async function runWebTypegen({
     // non-production, so a loopback placeholder is sufficient and contains no secret.
     WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL:
       environment.WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL ?? "http://127.0.0.1:9000/workbench",
+    // Next resolves this setting from its project cwd, so keep the temporary
+    // config path relative to the Web workspace.
+    WORKBENCH_NEXT_TSCONFIG_PATH: path.basename(temporaryTsconfigPath),
   };
-  await run(process.execPath, [nextBin, "typegen"], {
-    cwd: web,
-    env: childEnvironment,
-    maxBuffer: 4 * 1024 * 1024,
-  });
+  try {
+    await run(process.execPath, [nextBin, "typegen"], {
+      cwd: web,
+      env: childEnvironment,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+  } finally {
+    await rm(temporaryTsconfigPath, { force: true });
+    await writeFile(nextEnvPath, originalNextEnv);
+  }
 
   const routeTypes = path.join(distDir, "types", "routes.d.ts");
   await access(routeTypes);

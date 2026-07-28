@@ -203,6 +203,9 @@ jobs:
     needs: [release-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      pr_production_image_count: ${{ steps.affected_production_images.outputs.count }}
+      pr_production_image_matrix: ${{ steps.affected_production_images.outputs.matrix }}
     services:
       postgres:
         image: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_CI_POSTGRES_IMAGE || 'pgvector/pgvector:pg16' }}
@@ -226,6 +229,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -244,6 +249,23 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Select affected PR production images
+        id: affected_production_images
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          matrix="$(node scripts/production-image-inventory.mjs \
+            --affected-matrix \
+            --base "$PR_BASE_SHA" \
+            --head "$PR_HEAD_SHA")"
+          count="$(node -e 'const matrix=JSON.parse(process.argv[1]); if (!Array.isArray(matrix.include)) process.exit(1); process.stdout.write(String(matrix.include.length))' "$matrix")"
+          node -e 'const matrix=JSON.parse(process.argv[1]); console.log(`[pr-images] selected ${matrix.include.map((entry) => entry.name).join(",") || "none"}`)' "$matrix"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
       - name: Prepare contracts and generated clients
         run: npm run workbench:prepare
@@ -279,7 +301,7 @@ jobs:
         run: npm --workspace @workbench/web run typegen
 
       - name: Check types
-        run: npm run typecheck
+        run: npm run typecheck:ci
 
       - name: Check Workbench lint
         run: npm run lint:workbench
@@ -322,8 +344,8 @@ jobs:
           WORKBENCH_RUN_BROWSER_INTEGRATION: "1"
         run: npm --workspace @workbench/workbench-export-worker test -- test/browser-export.integration.spec.ts
 
-      - name: Run Workbench browser smoke
-        run: npm run e2e:web
+      - name: Run Workbench fixture browser smoke
+        run: npm run e2e:web:fixture
 
       - name: Build production artifacts
         run: npm run build
@@ -333,6 +355,68 @@ jobs:
 
       - name: Validate Workbench route bundles
         run: npm run bundle:workbench:check
+
+  real-stack-browser:
+    name: Real-stack browser / controlled-local-deerflow
+    needs: [quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: workbench_real_stack_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d workbench_real_stack_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CI: true
+      WORKBENCH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_real_stack_test?schema=workbench
+      WORKBENCH_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_real_stack_test?schema=workbench
+      WORKBENCH_POSTGRES_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_real_stack_test
+      WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_real_stack_test
+      WORKBENCH_E2E_REAL_STACK_BROWSER: "1"
+      WORKBENCH_E2E_REAL_STACK_BROWSER_ONLY: "1"
+      WORKBENCH_E2E_RECOVERY_TIMEOUT_MS: "360000"
+      WORKBENCH_E2E_CONTROLLED_PROVIDER: controlled-local-deerflow
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Provision PostgreSQL extensions
+        run: npm run db:extensions:provision
+
+      - name: Install Chromium runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Run real-stack browser-only smoke
+        run: npm run e2e:web:real-stack:browser-only
+
+      - name: Upload real-stack browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: real-stack-browser-${{ github.sha }}-${{ github.run_attempt }}
+          path: output/playwright/real-stack/**
+          if-no-files-found: warn
+          retention-days: 14
 
   deployment-config:
     name: Compose, gateways, and Quartz behavior
@@ -402,6 +486,194 @@ jobs:
 
       - name: Test Quartz watcher atomic publication and shutdown
         run: bash apps/knowledge/test-quartz-watcher.sh
+
+  pr-production-images:
+    name: PR production image / ${{ matrix.name }}
+    if: github.event_name == 'pull_request' && needs.quality.outputs.pr_production_image_count != '0'
+    needs: [quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.quality.outputs.pr_production_image_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build and probe production target without publishing
+        env:
+          DEERFLOW_BASE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+          DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+          DEERFLOW_SOURCE_COMMIT: ${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+          NODE_IMAGE: ${{ vars.WORKBENCH_NODE_IMAGE }}
+          NGINX_IMAGE: ${{ vars.WORKBENCH_NGINX_IMAGE }}
+        run: |
+          set -euo pipefail
+          tag="workbench-pr-${{ matrix.name }}:${GITHUB_SHA}"
+          args=()
+          require_digest() {
+            name="$1"
+            value="$2"
+            test -n "$value" || { echo "$name is required for the PR production image build" >&2; return 1; }
+            printf '%s' "$value" | grep -Eq '@sha256:[a-f0-9]{64}$' || { echo "$name must be an immutable @sha256 reference" >&2; return 1; }
+          }
+          case "${{ matrix.name }}" in
+            web)
+              require_digest WORKBENCH_NODE_IMAGE "$NODE_IMAGE"
+              args+=(
+                --build-arg NODE_IMAGE="$NODE_IMAGE"
+                --build-arg WORKBENCH_PREVIEW_ORIGIN=https://preview.workbench.example.test
+                --build-arg WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https://uploads.workbench.example.test/workbench
+                --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL=https://workbench.example.test/knowledge
+                --build-arg NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=false
+              )
+              ;;
+            quartz)
+              require_digest WORKBENCH_NODE_IMAGE "$NODE_IMAGE"
+              require_digest WORKBENCH_NGINX_IMAGE "$NGINX_IMAGE"
+              args+=(
+                --build-arg NODE_IMAGE="$NODE_IMAGE"
+                --build-arg NGINX_IMAGE="$NGINX_IMAGE"
+                --build-arg QUARTZ_BASE_URL=workbench.example.test/knowledge
+                --build-arg KNOWLEDGE_WEB_URL=https://workbench.example.test
+              )
+              ;;
+            deerflow)
+              require_digest WORKBENCH_DEERFLOW_BASE_IMAGE_REF "$DEERFLOW_BASE_IMAGE"
+              require_digest WORKBENCH_DEERFLOW_NODE_IMAGE_REF "$DEERFLOW_NODE_IMAGE"
+              printf '%s' "$DEERFLOW_SOURCE_COMMIT" | grep -Eq '^[a-f0-9]{40}$'
+              args=(
+                --build-arg DEERFLOW_BASE_IMAGE="$DEERFLOW_BASE_IMAGE"
+                --build-arg DEERFLOW_NODE_IMAGE="$DEERFLOW_NODE_IMAGE"
+                --build-arg DEERFLOW_SOURCE_COMMIT="$DEERFLOW_SOURCE_COMMIT"
+                --build-arg WORKBENCH_SOURCE_COMMIT="$GITHUB_SHA"
+              )
+              ;;
+            *)
+              require_digest WORKBENCH_NODE_IMAGE "$NODE_IMAGE"
+              args+=(--build-arg NODE_IMAGE="$NODE_IMAGE")
+              ;;
+          esac
+          docker buildx build \
+            --load \
+            --file "${{ matrix.dockerfile }}" \
+            --target "${{ matrix.target }}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "$tag" \
+            "${args[@]}" \
+            "${{ matrix.context }}"
+          docker image inspect "$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' | grep -Fx "$GITHUB_SHA"
+
+          probe_log="$(mktemp)"
+          probe_container=""
+          cleanup_probe() {
+            if [ -n "$probe_container" ]; then
+              docker rm --force "$probe_container" >/dev/null 2>&1 || true
+            fi
+            rm -f "$probe_log"
+          }
+          trap cleanup_probe EXIT
+          expect_config_failure() {
+            expected="$1"
+            shift
+            : > "$probe_log"
+            if docker run --rm --network none "$@" "$tag" >"$probe_log" 2>&1; then
+              echo "production command unexpectedly started without required configuration" >&2
+              return 1
+            fi
+            grep -Fq "$expected" "$probe_log"
+          }
+          start_probe_container() {
+            probe_container="$(docker run --rm --network none --detach "$@" "$tag")"
+          }
+          stop_probe_container() {
+            docker stop --timeout 5 "$probe_container" >/dev/null
+            probe_container=""
+          }
+
+          case "${{ matrix.probe }}" in
+            node-config-fail-fast)
+              test -n "${{ matrix.command_path }}"
+              docker image inspect "$tag" --format '{{json .Config.Cmd}}' \
+                | grep -Fx "[\"node\",\"${{ matrix.command_path }}\"]"
+              docker run --rm --network none --entrypoint node "$tag" \
+                --check "${{ matrix.command_path }}"
+              expect_config_failure "Missing WORKBENCH_DATABASE_URL" \
+                --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp
+              ;;
+            migrator-config-fail-fast)
+              docker image inspect "$tag" --format '{{json .Config.Entrypoint}}' \
+                | grep -Fx '["/app/deploy/workbench-migrate.sh"]'
+              docker run --rm --network none --entrypoint /bin/sh "$tag" \
+                -n /app/deploy/workbench-migrate.sh
+              expect_config_failure "WORKBENCH_DATABASE_URL (migrator URL) is required" \
+                --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp
+              ;;
+            next-startup)
+              docker image inspect "$tag" --format '{{json .Config.Cmd}}' \
+                | grep -Fx '["npx","next","start","--hostname","0.0.0.0","--port","3000"]'
+              start_probe_container \
+                --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp
+              ready=0
+              for _ in $(seq 1 30); do
+                if docker exec "$probe_container" node -e \
+                  "const net=require('node:net');const socket=net.connect(3000,'127.0.0.1');socket.once('connect',()=>socket.destroy());socket.once('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1000).unref()"; then
+                  ready=1
+                  break
+                fi
+                sleep 1
+              done
+              test "$ready" = 1 || { docker logs "$probe_container" >&2; exit 1; }
+              stop_probe_container
+              ;;
+            nginx-startup)
+              docker image inspect "$tag" --format '{{json .Config.Entrypoint}}' \
+                | grep -Fx '["nginx","-g","daemon off;"]'
+              quartz_runtime_args=(
+                --read-only
+                --cap-drop ALL
+                --security-opt no-new-privileges:true
+                --tmpfs /var/cache/nginx:uid=101,gid=101,mode=1770
+                --tmpfs /var/run:uid=101,gid=101,mode=1770
+                --tmpfs /tmp:uid=101,gid=101,mode=1770
+              )
+              docker run --rm --network none "${quartz_runtime_args[@]}" \
+                --entrypoint nginx "$tag" -t
+              start_probe_container "${quartz_runtime_args[@]}"
+              ready=0
+              for _ in $(seq 1 20); do
+                if docker exec "$probe_container" wget -q -O /dev/null http://127.0.0.1:3000/__health; then
+                  ready=1
+                  break
+                fi
+                sleep 1
+              done
+              test "$ready" = 1 || { docker logs "$probe_container" >&2; exit 1; }
+              stop_probe_container
+              ;;
+            deerflow-runtime-syntax)
+              docker image inspect "$tag" --format '{{.Config.User}}' | grep -Fx '65532:65532'
+              docker run --rm --network none \
+                --read-only \
+                --cap-drop ALL \
+                --security-opt no-new-privileges:true \
+                --tmpfs /tmp:size=1073741824,uid=65532,gid=65532,mode=1770 \
+                --env UV_CACHE_DIR=/tmp/uv-cache \
+                --entrypoint /bin/sh "$tag" -ec \
+                'cd /app/backend
+                 uv run --no-sync uvicorn --help >/dev/null
+                 PYTHONPATH=/app/backend/packages/harness:/app/backend uv run --no-sync python -c "from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result; assert validate_runtime_result({})[\"ok\"] is False"'
+              ;;
+            *)
+              echo "unsupported production image probe: ${{ matrix.probe }}" >&2
+              exit 1
+              ;;
+          esac
 
   production-images:
     name: Production image / ${{ matrix.name }}

@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+
+const recordRuntimeLivenessMetric = vi.hoisted(() => vi.fn());
+
+vi.mock("@workbench/workbench-telemetry", () => ({ recordRuntimeLivenessMetric }));
+
 import { RuntimeCancellationReconciler } from "../src/runs/runtime-cancellation-reconciler.js";
 
 describe("RuntimeCancellationReconciler", () => {
+  beforeEach(() => recordRuntimeLivenessMetric.mockClear());
+
   it("requeues stale cancelling Runs with a singleton key", async () => {
     const findMany = vi.fn(async () => [{ id: "run-2" }, { id: "run-1" }]);
     const send = vi.fn(async () => "job-1");
@@ -34,6 +41,11 @@ describe("RuntimeCancellationReconciler", () => {
       { runId: "run-1" },
       { singletonKey: "run-1" },
     );
+    expect(recordRuntimeLivenessMetric).toHaveBeenCalledTimes(2);
+    expect(recordRuntimeLivenessMetric).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reconcile",
+      outcome: "recovered",
+    }));
   });
 
   it("does not overlap a slow reconciliation pass", async () => {
@@ -86,6 +98,11 @@ describe("RuntimeCancellationReconciler", () => {
       { singletonKey: "run-2" },
     );
     expect(onError).toHaveBeenCalledWith(firstError);
+    expect(recordRuntimeLivenessMetric).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reconcile",
+      outcome: "error",
+      errorCode: "RUNTIME_CANCELLATION_RECONCILE_FAILED",
+    }));
   });
 
   it("keeps start and stop idempotent", () => {

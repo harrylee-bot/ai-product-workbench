@@ -1,3 +1,7 @@
+const recordRuntimeLivenessMetric = vi.hoisted(() => vi.fn());
+
+vi.mock("@workbench/workbench-telemetry", () => ({ recordRuntimeLivenessMetric }));
+
 import {
   RuntimeLivenessError,
   RuntimeProviderLivenessBudget,
@@ -7,6 +11,7 @@ import {
 
 describe("Runtime liveness budgets", () => {
   beforeEach(() => {
+    recordRuntimeLivenessMetric.mockClear();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-23T00:00:00.000Z"));
   });
@@ -37,6 +42,23 @@ describe("Runtime liveness budgets", () => {
       expect(budget.signal.aborted).toBe(false);
     }
 
+    budget.stop();
+  });
+
+  it("distinguishes provider first-byte latency from subsequent stream idle intervals", () => {
+    const budget = new RuntimeProviderLivenessBudget(100, 250);
+
+    budget.providerActivity();
+    budget.providerActivity();
+
+    expect(recordRuntimeLivenessMetric).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      operation: "provider-first-byte",
+      outcome: "ok",
+    }));
+    expect(recordRuntimeLivenessMetric).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      operation: "stream-idle",
+      outcome: "ok",
+    }));
     budget.stop();
   });
 

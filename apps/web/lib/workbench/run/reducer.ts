@@ -222,6 +222,8 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
       return {
         ...next,
         status: "cancelled",
+        generationStage: null,
+        generationStageAttempt: null,
         draftArtifacts: {},
         draftArtifactOrder: [],
         pendingInputs: {},
@@ -233,6 +235,8 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
         ...next,
         status: "succeeded",
         progress: 1,
+        generationStage: null,
+        generationStageAttempt: null,
         pendingInputs: {},
         pendingInputOrder: [],
         artifactCount: event.payload.artifactCount,
@@ -241,6 +245,8 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
       return {
         ...next,
         status: "failed",
+        generationStage: null,
+        generationStageAttempt: null,
         draftArtifacts: {},
         draftArtifactOrder: [],
         pendingInputs: {},

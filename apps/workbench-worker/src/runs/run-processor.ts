@@ -36,6 +36,7 @@ import {
   type StartRunRequest,
 } from "@workbench/workbench-contracts";
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
+import { recordRuntimeLivenessMetric } from "@workbench/workbench-telemetry";
 import type {
   RuntimeArtifactTarget,
   RuntimeArtifactTargetAsset,
@@ -61,11 +62,14 @@ import {
   RuntimeExecutionCancelledError,
   RuntimeExecutionFencedError,
   type RuntimeExecutionClaim,
+  type RuntimeProviderStateMode,
+  type RuntimeProviderStateShadowFinding,
 } from "../runtime/runtime-attempt.service.js";
 import { RuntimeBindingService } from "../runtime/runtime-binding.service.js";
 import type { KnowledgeToolGrantIssuer } from "../runtime/knowledge-tool-grant.service.js";
 import type { CanvasToolGrantIssuer } from "../runtime/canvas-tool-grant.service.js";
 import { parseRuntimeFinalizationPayload } from "../runtime/runtime-assistant-text.js";
+import { knownRuntimeProviderStateErrorCode } from "../runtime/runtime-provider-state-error.js";
 import { withBoardRevisionOwner } from "./board-revision-owner.js";
 import {
   assertExactCanvasQuickEditTarget,
@@ -188,7 +192,8 @@ export class RunProcessor {
       deadlineCancelMs?: number;
       cancellationPollIntervalMs?: number;
       cancellationQueryBatchSize?: number;
-      providerStateMode?: import("../runtime/runtime-attempt.service.js").RuntimeProviderStateMode;
+      providerStateMode?: RuntimeProviderStateMode;
+      providerStateShadowReporter?: (finding: RuntimeProviderStateShadowFinding) => void;
     } = {},
   ) {
     this.events = new RunEventStore(db);
@@ -198,6 +203,7 @@ export class RunProcessor {
       db,
       leaseMs,
       execution.providerStateMode ?? "projection-required",
+      execution.providerStateShadowReporter,
     );
     this.prototypePatches = prototypePatches ?? new PrototypePatchService(db);
     this.executionOwnerPrefix = execution.ownerPrefix ?? "runtime-worker";
@@ -274,6 +280,7 @@ export class RunProcessor {
     let externalThreadId: string | null = null;
     let externalRunId: string | null = null;
     let heartbeatTimer: NodeJS.Timeout | null = null;
+    let wallClockOutcome: "ok" | "error" | "cancelled" | null = null;
 
     try {
       const binding = await this.bindings.ensure(prepared.thread.id, {
@@ -404,6 +411,7 @@ export class RunProcessor {
 
       if (outcome.protocol === "workbench.runtime.input-required.v1") {
         await this.waitForInput(claim, outcome);
+        wallClockOutcome = "ok";
         return { runId, approvalCount: outcome.approvals.length, waitingInput: true };
       }
       if (outcome.artifacts.some((artifact) => artifact.kind === "prd")) {
@@ -427,6 +435,7 @@ export class RunProcessor {
         fullText,
         outcome,
       );
+      wallClockOutcome = "ok";
       return { runId, artifactCount: outcome.artifacts.length };
     } catch (caught) {
       const error = wallClock.signal.aborted
@@ -434,6 +443,7 @@ export class RunProcessor {
         : caught;
       const status = await this.db.run.findUnique({ where: { id: runId }, select: { status: true } });
       if (status?.status === "cancelling" || status?.status === "cancelled" || error instanceof RuntimeCancelledError) {
+        wallClockOutcome = "cancelled";
         return { runId, cancellationPending: status?.status !== "cancelled" };
       }
       if (error instanceof RunTransitionRejectedError) return { runId, skipped: true };
@@ -442,6 +452,7 @@ export class RunProcessor {
       }
       if (error instanceof RuntimeSubmissionUnknownError && claim) {
         await this.attempts.markSubmissionUnknown(claim, publicErrorMessage(error.cause ?? error));
+        wallClockOutcome = "error";
         return { runId, submissionUnknown: true };
       }
       if (
@@ -469,8 +480,19 @@ export class RunProcessor {
       } else {
         await this.failRun(runId, runtimeAttemptId, error, retryable, claim);
       }
+      if (!(error instanceof RuntimeLivenessError && error.code === "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED")) {
+        wallClockOutcome = "error";
+      }
       throw error;
     } finally {
+      if (wallClockOutcome) {
+        recordRuntimeLivenessMetric({
+          operation: "wall-clock",
+          outcome: wallClockOutcome,
+          durationMs: Math.max(0, Date.now() - handlerStartedAtMs),
+          ...(wallClockOutcome === "error" ? { errorCode: "RUNTIME_EXECUTION_FAILED" } : {}),
+        });
+      }
       wallClock.stop();
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       this.active.delete(runId);
@@ -486,6 +508,7 @@ export class RunProcessor {
     externalRunId: string | null;
   }): Promise<void> {
     if (!input.externalThreadId) return;
+    const startedAt = performance.now();
     const cleanupSignal = AbortSignal.timeout(this.executionDeadlineCancelMs);
     try {
       await raceWithAbort(this.runtime.cancel({
@@ -497,7 +520,20 @@ export class RunProcessor {
       }, async (candidateExternalRunId) => {
         await this.attempts.attachExternalRun(input.claim, candidateExternalRunId);
       }, cleanupSignal), cleanupSignal);
+      recordRuntimeLivenessMetric({
+        operation: "cancel",
+        outcome: "cancelled",
+        durationMs: performance.now() - startedAt,
+      });
     } catch {
+      recordRuntimeLivenessMetric({
+        operation: "cancel",
+        outcome: cleanupSignal.aborted ? "timeout" : "error",
+        durationMs: performance.now() - startedAt,
+        errorCode: cleanupSignal.aborted
+          ? "RUNTIME_PROVIDER_CANCEL_TIMEOUT"
+          : "RUNTIME_PROVIDER_CANCEL_FAILED",
+      });
       // The local deadline remains authoritative. The claim-fenced terminal
       // transition below prevents late provider callbacks from mutating state.
     }
@@ -3337,13 +3373,16 @@ function generationStagePresentation(stage: RunGenerationStage) {
   return presentation;
 }
 
-function publicErrorMessage(error: unknown) {
+export function publicErrorMessage(error: unknown) {
+  const providerStateCode = knownRuntimeProviderStateErrorCode(error);
+  if (providerStateCode) return providerStateCode;
   const value = error instanceof Error ? error.message : "Runtime execution failed";
   return value.replace(/https?:\/\/[^\s]+/g, "[runtime endpoint]").slice(0, 1_000);
 }
 
 export function isRetryableRuntimeError(error: unknown) {
   if (error instanceof RuntimeLivenessError) return error.retryable;
+  if (knownRuntimeProviderStateErrorCode(error)) return false;
   if (!(error instanceof Error)) return true;
   if (error.name === "ZodError") return false;
   return ![
@@ -3386,13 +3425,14 @@ export function isRetryableRuntimeError(error: unknown) {
   ].some((prefix) => error.message.startsWith(prefix));
 }
 
-function runtimeExecutionErrorCode(
+export function runtimeExecutionErrorCode(
   error: unknown,
   fallback = "RUNTIME_EXECUTION_FAILED",
 ): string {
-  return error instanceof RuntimeLivenessError
-    ? error.code
-    : fallback;
+  if (error instanceof RuntimeLivenessError) return error.code;
+  const providerStateCode = knownRuntimeProviderStateErrorCode(error);
+  if (providerStateCode) return providerStateCode;
+  return fallback;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

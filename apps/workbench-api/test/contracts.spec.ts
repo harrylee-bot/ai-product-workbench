@@ -101,6 +101,32 @@ describe("workbench v1 contracts", () => {
     }).success).toBe(false);
   });
 
+  it.each([
+    "生成一份 PRD 和原型",
+    "先做原型，再给 PRD",
+    "Create a PRD and a prototype",
+    "Prototype plus product requirements document",
+  ])("rejects mixed PRD and Prototype requests before a Run can be created: %s", (prompt) => {
+    const request = {
+      prompt,
+      modelId: "quality",
+      workflow: "generate",
+      generationIntent: null,
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      requestedArtifactKinds: ["prd", "prototype"],
+    };
+    const result = startRunRequestSchema.safeParse(request);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(expect.objectContaining({
+        path: ["requestedArtifactKinds"],
+        message: "PRD and Prototype/code must be requested in two sequential Runs: complete the PRD Run first",
+      }));
+    }
+  });
+
   it("requires ordered immutable Run Import Source snapshots", () => {
     const timestamp = "2026-07-12T00:00:00.000Z";
     const source = {

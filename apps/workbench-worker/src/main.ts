@@ -11,6 +11,7 @@ import { prismaReadyObjectIntegrityRecorder } from "@workbench/workbench-content
 import {
   initializeTelemetry,
   queuePayload,
+  recordRuntimeLivenessMetric,
   traceQueueConsume,
 } from "@workbench/workbench-telemetry";
 import { loadWorkerConfig } from "./config.js";
@@ -51,6 +52,9 @@ async function main() {
       cancellationPollIntervalMs: config.runtimeCancellationPollIntervalMs,
       cancellationQueryBatchSize: config.runtimeCancellationQueryBatchSize,
       providerStateMode: config.runtimeProviderStateMode,
+      providerStateShadowReporter: (finding) => {
+        console.error("[runtime-provider-state-shadow]", JSON.stringify(finding));
+      },
     },
   );
   const boss = new PgBoss({
@@ -76,18 +80,37 @@ async function main() {
   }, async (jobs) => {
     const job = jobs[0] as JobWithMetadata<RuntimeExecuteJob> | undefined;
     if (!job) return;
-    return traceQueueConsume({
-      destination: runtimeExecuteQueue,
-      messageId: job.id,
-      retryCount: job.retryCount,
-      retryLimit: job.retryLimit,
-    }, job.data, () => {
-      const command = queuePayload<RuntimeExecuteJob>(job.data);
-      return processor.execute(command.runId, command.approvalIds ?? [], job.signal, {
+    const command = queuePayload<RuntimeExecuteJob>(job.data);
+    recordQueueAge(job);
+    try {
+      const result = await traceQueueConsume({
+        destination: runtimeExecuteQueue,
+        messageId: job.id,
         retryCount: job.retryCount,
         retryLimit: job.retryLimit,
-      });
-    });
+      }, job.data, () => (
+        processor.execute(command.runId, command.approvalIds ?? [], job.signal, {
+          retryCount: job.retryCount,
+          retryLimit: job.retryLimit,
+        })
+      ));
+      if (isRecord(result) && "artifactCount" in result) {
+        await recordTerminalRunDrift(command.runId);
+      }
+      return result;
+    } catch (error) {
+      if (job.signal.aborted) {
+        recordRuntimeLivenessMetric({
+          operation: "abort",
+          outcome: "cancelled",
+          errorCode: "RUNTIME_QUEUE_ABORTED",
+        });
+      }
+      if (job.retryCount >= job.retryLimit) {
+        await recordTerminalRunDrift(command.runId);
+      }
+      throw error;
+    }
   });
 
   await boss.work<RuntimeCancelJob>(runtimeCancelQueue, {
@@ -98,18 +121,47 @@ async function main() {
   }, async (jobs) => {
     const job = jobs[0] as JobWithMetadata<RuntimeCancelJob> | undefined;
     if (!job) return;
-    return traceQueueConsume({
-      destination: runtimeCancelQueue,
-      messageId: job.id,
-      retryCount: job.retryCount,
-      retryLimit: job.retryLimit,
-    }, job.data, () => {
-      const command = queuePayload<RuntimeCancelJob>(job.data);
-      return processor.cancel(command.runId, job.signal, {
+    const command = queuePayload<RuntimeCancelJob>(job.data);
+    const startedAt = performance.now();
+    recordQueueAge(job);
+    try {
+      const result = await traceQueueConsume({
+        destination: runtimeCancelQueue,
+        messageId: job.id,
         retryCount: job.retryCount,
         retryLimit: job.retryLimit,
+      }, job.data, () => (
+        processor.cancel(command.runId, job.signal, {
+          retryCount: job.retryCount,
+          retryLimit: job.retryLimit,
+        })
+      ));
+      recordRuntimeLivenessMetric({
+        operation: "cancel",
+        outcome: result.cancelled ? "cancelled" : "ok",
+        durationMs: performance.now() - startedAt,
       });
-    });
+      if (result.cancelled) await recordTerminalRunDrift(command.runId);
+      return result;
+    } catch (error) {
+      recordRuntimeLivenessMetric({
+        operation: "cancel",
+        outcome: job.signal.aborted ? "cancelled" : "error",
+        durationMs: performance.now() - startedAt,
+        errorCode: job.signal.aborted ? "RUNTIME_QUEUE_ABORTED" : "RUNTIME_CANCEL_JOB_FAILED",
+      });
+      if (job.signal.aborted) {
+        recordRuntimeLivenessMetric({
+          operation: "abort",
+          outcome: "cancelled",
+          errorCode: "RUNTIME_QUEUE_ABORTED",
+        });
+      }
+      if (job.retryCount >= job.retryLimit) {
+        await recordTerminalRunDrift(command.runId);
+      }
+      throw error;
+    }
   });
 
   const cancellationReconciler = new RuntimeCancellationReconciler(
@@ -147,6 +199,40 @@ async function main() {
 
 async function createQueues(boss: PgBoss) {
   await createAndAssertRuntimeQueues(boss);
+}
+
+function recordQueueAge(job: Pick<JobWithMetadata, "createdOn" | "startedOn">) {
+  recordRuntimeLivenessMetric({
+    operation: "queue-age",
+    outcome: "ok",
+    durationMs: Math.max(0, job.startedOn.getTime() - job.createdOn.getTime()),
+  });
+}
+
+async function recordTerminalRunDrift(runId: string) {
+  try {
+    const run = await db.run.findUnique({ where: { id: runId }, select: { status: true } });
+    const converged = run !== null && terminalRunStatuses.has(run.status);
+    recordRuntimeLivenessMetric({
+      operation: "terminal-drift",
+      outcome: converged ? "ok" : "error",
+      ...(converged
+        ? {}
+        : { errorCode: run ? "RUNTIME_TERMINAL_STATE_ACTIVE" : "RUNTIME_TERMINAL_STATE_MISSING" }),
+    });
+  } catch {
+    recordRuntimeLivenessMetric({
+      operation: "terminal-drift",
+      outcome: "error",
+      errorCode: "RUNTIME_TERMINAL_STATE_CHECK_FAILED",
+    });
+  }
+}
+
+const terminalRunStatuses = new Set(["succeeded", "failed", "cancelled"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 void main().catch(async (error) => {

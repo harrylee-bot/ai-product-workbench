@@ -1,6 +1,7 @@
 node_modules
 /storage/
 .next
+.next-fixture
 dist
 coverage
 output

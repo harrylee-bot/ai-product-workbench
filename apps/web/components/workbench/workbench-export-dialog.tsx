@@ -108,10 +108,24 @@ export function ExportDialog({
       ? exportTargetForExternalDelivery(activeExternalDelivery.target)
       : exportTargetForFormat(activeExport.format, activeExport.packaging)
     : null;
+  const restoredFromExternalDelivery = Boolean(
+    restoredTarget
+    && activeExport
+    && activeExternalDelivery?.exportJobId === activeExport.id,
+  );
 
   useEffect(() => {
-    if (restoredTarget) setSelectedTarget(restoredTarget);
-  }, [restoredTarget]);
+    if (!restoredTarget) return;
+    setSelectedTarget((current) => {
+      if (restoredFromExternalDelivery) return restoredTarget;
+      const currentDescriptor = exportTargetDescriptor(current);
+      const restoredDescriptor = exportTargetDescriptor(restoredTarget);
+      return currentDescriptor.format === restoredDescriptor.format
+        && currentDescriptor.packaging === restoredDescriptor.packaging
+        ? current
+        : restoredTarget;
+    });
+  }, [restoredFromExternalDelivery, restoredTarget]);
 
   const descriptor = exportTargetDescriptor(selectedTarget);
   const activeExportMatches = activeExport?.format === descriptor.format

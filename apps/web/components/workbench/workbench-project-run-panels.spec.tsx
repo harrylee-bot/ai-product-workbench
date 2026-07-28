@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { MotionConfig } from "framer-motion";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -35,8 +36,43 @@ const baseProps: TranscriptPanelProps = {
 
 afterEach(cleanup);
 
+describe("LeftInspector", () => {
+  it("only exposes the fixed task stack at desktop widths", () => {
+    const { container } = renderRunSurfaces({
+      generationStage: "structuring-prd",
+      projectMode: "document",
+      runPhaseLabel: "正在生成需求文档",
+    });
+
+    const taskStack = container.querySelector<HTMLElement>("[data-left-task-stack]");
+    expect(taskStack).not.toBeNull();
+    expect(taskStack!.classList.contains("max-xl:hidden")).toBe(true);
+  });
+});
+
 describe("ProjectTranscriptPanel", () => {
-  it("keeps a bodyless PRD run compact without an invented empty-message paragraph", () => {
+  it("keeps a queued PRD contextual before the first stage event", () => {
+    const { container } = renderRunSurfaces({
+      generationStage: null,
+      projectMode: "document",
+      runPhaseLabel: null,
+      runStatus: "queued",
+    });
+    const agentCard = getAgentCard(container);
+    const mobileStatus = container.querySelector<HTMLElement>("[data-mobile-run-status]");
+
+    expect(agentCard.style.height).toBe("auto");
+    expect(agentCard.dataset.prdBodyless).toBeUndefined();
+    expect(within(agentCard).getByText("生成支付改造需求说明书")).not.toBeNull();
+    expect(within(agentCard).getByText("正在处理需求文档，当前阶段：准备中")).not.toBeNull();
+    expect(within(agentCard).getByText("准备中")).not.toBeNull();
+    expect(agentCard.querySelector(".workbench-status-spinner")).not.toBeNull();
+    expect(mobileStatus).not.toBeNull();
+    expect(within(mobileStatus!).getByText("准备中")).not.toBeNull();
+    expect(within(mobileStatus!).getByText("生成支付改造需求说明书")).not.toBeNull();
+  });
+
+  it("keeps an active PRD run expanded with prompt and stage context", () => {
     const { container } = renderPanel({
       generationStage: "structuring-prd",
       prompt: "生成支付改造需求说明书",
@@ -44,16 +80,12 @@ describe("ProjectTranscriptPanel", () => {
     });
     const card = getAgentCard(container);
 
-    expect(card.style.height).toBe("92px");
-    expect(card.style.maxHeight).toBe("92px");
-    expect(card.style.minHeight).toBe("92px");
-    expect(card.style.width).toBe("200px");
-    expect(card.style.maxWidth).toBe("200px");
-    expect(card.style.minWidth).toBe("200px");
-    expect(card.dataset.prdBodyless).toBe("true");
-    expect(screen.queryByText("暂无新的运行消息。")).toBeNull();
-    expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
-    expect(screen.getByText("规划结构")).not.toBeNull();
+    expect(card.style.height).toBe("auto");
+    expect(card.style.width).toBe("280px");
+    expect(card.dataset.prdBodyless).toBeUndefined();
+    expect(screen.getByText("生成支付改造需求说明书")).not.toBeNull();
+    expect(screen.getAllByText("规划结构")).toHaveLength(1);
+    expect(screen.getByText("正在处理需求文档，当前阶段：规划结构")).not.toBeNull();
     expect(screen.queryByText("正在生成需求文档")).toBeNull();
     expect(card.querySelector(".workbench-status-spinner")).not.toBeNull();
     expect(card.querySelectorAll(".workbench-agent-bubble > span > span")).toHaveLength(2);
@@ -77,10 +109,11 @@ describe("ProjectTranscriptPanel", () => {
     expect(taskStack).not.toBeNull();
     expect(mobileStatus).not.toBeNull();
     expect(within(taskStack!).getAllByText(expectedCopy)).toHaveLength(2);
-    expect(within(agentCard).getByText(expectedCopy)).not.toBeNull();
+    expect(within(agentCard).getAllByText(expectedCopy)).toHaveLength(1);
+    expect(within(agentCard).getByText(`正在处理需求文档，当前阶段：${expectedCopy}`)).not.toBeNull();
     expect(within(mobileStatus!).getByText(expectedCopy)).not.toBeNull();
     expect(screen.queryByText("正在生成需求文档")).toBeNull();
-    expect(agentCard.dataset.prdBodyless).toBe("true");
+    expect(agentCard.dataset.prdBodyless).toBeUndefined();
   });
 
   it("uses a neutral PRD preparation label before the first real stage event", () => {
@@ -96,7 +129,8 @@ describe("ProjectTranscriptPanel", () => {
     expect(taskStack).not.toBeNull();
     expect(mobileStatus).not.toBeNull();
     expect(within(taskStack!).getAllByText("准备中")).toHaveLength(2);
-    expect(within(agentCard).getByText("准备中")).not.toBeNull();
+    expect(within(agentCard).getAllByText("准备中")).toHaveLength(1);
+    expect(within(agentCard).getByText("正在处理需求文档，当前阶段：准备中")).not.toBeNull();
     expect(within(mobileStatus!).getByText("准备中")).not.toBeNull();
     expect(screen.queryByText("正在生成需求文档")).toBeNull();
   });
@@ -111,7 +145,7 @@ describe("ProjectTranscriptPanel", () => {
     expect(screen.getAllByText("理解需求")).toHaveLength(4);
     expect(screen.queryByText("准备中")).toBeNull();
     expect(screen.queryByText("正在生成需求文档")).toBeNull();
-    expect(getAgentCard(container).dataset.prdBodyless).toBe("true");
+    expect(getAgentCard(container).dataset.prdBodyless).toBeUndefined();
   });
 
   it.each([
@@ -169,21 +203,21 @@ describe("ProjectTranscriptPanel", () => {
     expect(getAgentCard(container).dataset.prdBodyless).toBeUndefined();
   });
 
-  it("keeps active PRD generation compact across streaming assistant deltas", () => {
+  it("keeps active PRD generation contextual across streaming assistant deltas", () => {
     const rendered = renderPanel({
       generationStage: "structuring-prd",
       prompt: "生成支付改造需求说明书",
     });
-    expect(getAgentCard(rendered.container).style.height).toBe("92px");
-    expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
+    expect(getAgentCard(rendered.container).style.height).toBe("auto");
+    expect(screen.getByText("生成支付改造需求说明书")).not.toBeNull();
 
     rendered.rerender(panelElement({
       generationStage: "structuring-prd",
       messages: [{ id: "message-1", status: "streaming", text: "正在梳理业务规则", working: true }],
       prompt: "生成支付改造需求说明书",
     }));
-    expect(getAgentCard(rendered.container).style.height).toBe("92px");
-    expect(screen.queryByText("正在梳理业务规则")).toBeNull();
+    expect(getAgentCard(rendered.container).style.height).toBe("auto");
+    expect(screen.getByText("正在梳理业务规则")).not.toBeNull();
     expect(screen.getByText("规划结构")).not.toBeNull();
 
     rendered.rerender(panelElement({
@@ -195,13 +229,177 @@ describe("ProjectTranscriptPanel", () => {
       prompt: "生成支付改造需求说明书",
     }));
     const card = getAgentCard(rendered.container);
-    expect(card.style.height).toBe("92px");
-    expect(card.style.maxHeight).toBe("92px");
-    expect(card.dataset.prdBodyless).toBe("true");
-    expect(screen.queryByText("生成支付改造需求说明书")).toBeNull();
-    expect(screen.queryByText("正在梳理业务规则")).toBeNull();
-    expect(screen.queryByText("正在补充验收标准")).toBeNull();
+    expect(card.style.height).toBe("auto");
+    expect(card.style.maxHeight).toBe("");
+    expect(card.dataset.prdBodyless).toBeUndefined();
+    expect(screen.getByText("生成支付改造需求说明书")).not.toBeNull();
+    expect(screen.getByText("正在补充验收标准")).not.toBeNull();
     expect(card.dataset.generationStage).toBe("drafting-prd");
+  });
+
+  it("keeps PRD context visible while cancellation is in progress", () => {
+    const { container } = renderRunSurfaces({
+      generationStage: "drafting-prd",
+      projectMode: "document",
+      runPhaseLabel: "正在编写需求说明书",
+      runStatus: "cancelling",
+    });
+    const agentCard = getAgentCard(container);
+    const mobileStatus = container.querySelector<HTMLElement>("[data-mobile-run-status]");
+
+    expect(agentCard.style.height).toBe("auto");
+    expect(within(agentCard).getByText("正在取消")).not.toBeNull();
+    expect(within(agentCard).getByText("正在停止需求文档生成，请稍候。")).not.toBeNull();
+    expect(within(agentCard).getByText("生成支付改造需求说明书")).not.toBeNull();
+    expect(mobileStatus).not.toBeNull();
+    expect(within(mobileStatus!).getByText("正在取消")).not.toBeNull();
+    expect(within(mobileStatus!).getByText("生成支付改造需求说明书")).not.toBeNull();
+  });
+
+  it.each([
+    {
+      canRetry: true,
+      cancellationReason: null,
+      expectedDetail: "模型服务暂时不可用",
+      expectedRetry: true,
+      expectedStatus: "运行失败",
+      failure: { code: "RUNTIME_UNAVAILABLE", message: "模型服务暂时不可用", retryable: true },
+      runStatus: "failed" as const,
+    },
+    {
+      canRetry: false,
+      cancellationReason: "已由当前用户取消",
+      expectedDetail: "已由当前用户取消",
+      expectedRetry: false,
+      expectedStatus: "运行已取消",
+      failure: null,
+      runStatus: "cancelled" as const,
+    },
+  ])("keeps terminal PRD context and retry behavior after $runStatus", ({
+    canRetry,
+    cancellationReason,
+    expectedDetail,
+    expectedRetry,
+    expectedStatus,
+    failure,
+    runStatus,
+  }) => {
+    const onRetry = vi.fn();
+    const { container } = renderPanel({
+      cancellationReason,
+      canRetry,
+      failure,
+      generationStage: "validating-prd",
+      onRetry,
+      phase: "idle",
+      prompt: "生成支付改造需求说明书",
+      runStatus,
+    });
+    const agentCard = getAgentCard(container);
+
+    expect(agentCard.style.height).toBe("auto");
+    expect(agentCard.dataset.prdBodyless).toBeUndefined();
+    expect(within(agentCard).getByText("生成支付改造需求说明书")).not.toBeNull();
+    expect(within(agentCard).getByText(expectedDetail)).not.toBeNull();
+    expect(within(agentCard).getByText(expectedStatus)).not.toBeNull();
+    expect(agentCard.querySelector(".workbench-status-spinner")).toBeNull();
+    const retry = within(agentCard).queryByRole("button", { name: "重试当前运行" });
+    if (expectedRetry) {
+      expect(retry).not.toBeNull();
+      fireEvent.click(retry!);
+      expect(onRetry).toHaveBeenCalledOnce();
+    } else {
+      expect(retry).toBeNull();
+      expect(onRetry).not.toHaveBeenCalled();
+    }
+  });
+
+  it("restores queued PRD context on retry and keeps it deterministic after reconnect", () => {
+    const onRetry = vi.fn();
+    const rendered = renderPanel({
+      canRetry: true,
+      failure: { code: "RUNTIME_TIMEOUT", message: "运行超时", retryable: true },
+      generationStage: "validating-prd",
+      onRetry,
+      phase: "idle",
+      prompt: "生成支付改造需求说明书",
+      runStatus: "failed",
+    });
+    const originalCard = getAgentCard(rendered.container);
+    fireEvent.click(within(originalCard).getByRole("button", { name: "重试当前运行" }));
+
+    rendered.rerender(panelElement({
+      canRetry: false,
+      failure: null,
+      generationStage: null,
+      phase: "generating",
+      prompt: "生成支付改造需求说明书",
+      runPhaseLabel: null,
+      runStatus: "queued",
+    }));
+    expect(getAgentCard(rendered.container)).toBe(originalCard);
+    expect(within(originalCard).getByText("正在处理需求文档，当前阶段：准备中")).not.toBeNull();
+    expect(within(originalCard).getByText("生成支付改造需求说明书")).not.toBeNull();
+
+    rendered.rerender(panelElement({
+      canRetry: false,
+      failure: null,
+      generationStage: "drafting-prd",
+      messages: [],
+      phase: "generating",
+      prompt: "生成支付改造需求说明书",
+      runPhaseLabel: "正在恢复运行事件",
+      runStatus: "running",
+    }));
+    expect(getAgentCard(rendered.container)).toBe(originalCard);
+    expect(within(originalCard).getByText("正在处理需求文档，当前阶段：编写说明书")).not.toBeNull();
+    expect(within(originalCard).getByText("生成支付改造需求说明书")).not.toBeNull();
+    expect(screen.queryByText("正在恢复运行事件")).toBeNull();
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("keeps PRD semantics and bounded responsive surfaces under reduced motion", () => {
+    const { container } = render(
+      <MotionConfig reducedMotion="always">
+        {panelElement({
+          generationStage: "drafting-prd",
+          prompt: "生成支付改造需求说明书",
+          runStatus: "running",
+        })}
+        <MobileRunStatus
+          busy={false}
+          canCancel={false}
+          canRetry={false}
+          failure={null}
+          generationStage="drafting-prd"
+          isPrdRun
+          onCancel={vi.fn()}
+          onRetry={vi.fn()}
+          prompt="生成支付改造需求说明书"
+          runPhaseLabel="正在恢复运行事件"
+          runStatus="running"
+        />
+      </MotionConfig>,
+    );
+    const agentCard = getAgentCard(container);
+    const mobileStatus = container.querySelector<HTMLElement>("[data-mobile-run-status]");
+
+    expect(agentCard.style.width).toBe("280px");
+    expect(agentCard.style.height).toBe("auto");
+    expect(agentCard.classList.contains("left-[16px]")).toBe(true);
+    expect(agentCard.classList.contains("max-md:hidden")).toBe(true);
+    expect(within(agentCard).getByText("正在处理需求文档，当前阶段：编写说明书")).not.toBeNull();
+    expect(mobileStatus).not.toBeNull();
+    expect(mobileStatus!.classList.contains("left-[16px]")).toBe(true);
+    expect(mobileStatus!.classList.contains("right-[70px]")).toBe(true);
+    expect(mobileStatus!.classList.contains("md:hidden")).toBe(true);
+    expect(within(mobileStatus!).getByText("生成支付改造需求说明书")).not.toBeNull();
+
+    const desktopCardRight = 16 + Number.parseInt(agentCard.style.width, 10);
+    for (const viewportWidth of [768, 1_440]) {
+      expect(desktopCardRight).toBeLessThanOrEqual(viewportWidth);
+    }
+    expect(375 - 16 - 70).toBeGreaterThan(0);
   });
 
   it.each(["succeeded", "failed"] as const)("keeps PRD %s terminal content expanded", (runStatus) => {
@@ -233,6 +431,21 @@ describe("ProjectTranscriptPanel", () => {
     expect(getAgentCard(container).style.height).toBe("auto");
     expect(screen.getByText("梳理业务规则")).not.toBeNull();
     expect(screen.getByText("已完成业务规则梳理")).not.toBeNull();
+  });
+
+  it("ignores a task selection that does not belong to the current Run", () => {
+    const { container } = renderPanel({
+      activities: [],
+      generationStage: null,
+      prompt: "生成本次支付改造需求说明书",
+      runStatus: "running",
+      selectedTask: "上一次运行的旧任务",
+    });
+
+    expect(getAgentCard(container).style.height).toBe("auto");
+    expect(screen.queryByText("上一次运行的旧任务")).toBeNull();
+    expect(screen.getByText("生成本次支付改造需求说明书")).not.toBeNull();
+    expect(screen.getByText("正在处理需求文档，当前阶段：准备中")).not.toBeNull();
   });
 
   it("keeps non-PRD streaming content expanded", () => {
@@ -302,7 +515,14 @@ function renderRunSurfaces({
         selectedTask={null}
         zoomLabel="100%"
       />
-      {panelElement({ generationStage, isPrdRun, projectMode, runPhaseLabel, runStatus })}
+      {panelElement({
+        generationStage,
+        isPrdRun,
+        projectMode,
+        prompt: "生成支付改造需求说明书",
+        runPhaseLabel,
+        runStatus,
+      })}
       <MobileRunStatus
         busy={false}
         canCancel={false}
@@ -312,6 +532,7 @@ function renderRunSurfaces({
         isPrdRun={isPrdRun}
         onCancel={vi.fn()}
         onRetry={vi.fn()}
+        prompt="生成支付改造需求说明书"
         runPhaseLabel={runPhaseLabel}
         runStatus={runStatus}
       />

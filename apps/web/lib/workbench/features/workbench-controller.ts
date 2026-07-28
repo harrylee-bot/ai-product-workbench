@@ -29,7 +29,10 @@ import {
 import { workbenchQueryKeys } from "../query/keys";
 import { useWorkbenchProjectSession } from "../project-session";
 import type { Versioned } from "../transport/contracts";
-import { isValidEditArtifactTargets } from "../run";
+import {
+  assertRunnableArtifactRequest,
+  isValidEditArtifactTargets,
+} from "../run";
 import {
   createBoardAutosaveCoordinator,
   useWorkbenchBoardController,
@@ -842,11 +845,14 @@ async function loadBootstrap(
   return bootstrap;
 }
 
-function submissionIntentRunRequest(
+export function submissionIntentRunRequest(
   submission: WorkbenchRunSubmission,
   model: WorkbenchModelChoice,
   designStyle: RunDesignStyle,
 ): SubmissionIntentRunRequest {
+  const requestedArtifactKinds = submission.requestedArtifactKinds ?? [];
+  const needsCanvasContext = model.workflow === "edit"
+    || requestedArtifactKinds.includes("prototype");
   return {
     prompt: submission.prompt,
     modelId: model.modelId,
@@ -856,8 +862,12 @@ function submissionIntentRunRequest(
     designStyle,
     sourceIds: [...new Set(submission.sourceIds ?? [])],
     artifactTargets: submission.artifactTargets ?? [],
-    requestedArtifactKinds: submission.requestedArtifactKinds ?? [],
-    canvasSnapshot: submission.captureCanvasSnapshot?.() ?? submission.canvasSnapshot ?? null,
+    requestedArtifactKinds,
+    // Canvas snapshots are short-lived and only needed by Canvas-aware Runs.
+    // PRD-only requests must remain retryable after a provider backoff.
+    canvasSnapshot: needsCanvasContext
+      ? submission.captureCanvasSnapshot?.() ?? submission.canvasSnapshot ?? null
+      : null,
   };
 }
 
@@ -871,6 +881,7 @@ export function resolveRunnableSubmissionModel(
   submission: WorkbenchRunSubmission,
   modelChoices: readonly WorkbenchModelChoice[],
 ): WorkbenchModelChoice {
+  assertRunnableArtifactRequest(submission.requestedArtifactKinds ?? []);
   const model = modelChoices.find((choice) => choice.key === submission.modelChoiceKey);
   if (!model) throw new Error("Select an available runtime model before starting a Run");
   const artifactTargets = submission.artifactTargets ?? [];

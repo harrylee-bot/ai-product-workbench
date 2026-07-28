@@ -8,7 +8,10 @@ import {
   sha256Canonical,
 } from "../src/runtime/runtime-assistant-text.js";
 import { RuntimeAttemptService } from "../src/runtime/runtime-attempt.service.js";
-import { RuntimeProviderStateBackfill } from "../src/runtime/runtime-provider-state-backfill.js";
+import {
+  RuntimeProviderStateBackfill,
+  runtimeProviderStateBackfillEventPageSize,
+} from "../src/runtime/runtime-provider-state-backfill.js";
 
 const databaseUrl = process.env.WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -130,40 +133,11 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
     });
     db.$on("query", (event) => queries.push(event.query));
     const fixture = await seedAttemptFixture(db, true);
-    const { service, claim } = await activateExternalRun(db, fixture, 120_000);
+    const { claim } = await activateExternalRun(db, fixture, 120_000);
     const incidentEventCount = 7_686;
-    const syntheticPayload = { synthetic: true };
 
     try {
-      await db.runtimeAttempt.update({
-        where: { id: fixture.runtimeAttemptId! },
-        data: {
-          externalEventSequence: incidentEventCount,
-          lastExternalEventId: `synthetic-${incidentEventCount}`,
-        },
-      });
-      await db.$executeRaw(Prisma.sql`
-        INSERT INTO "runtime_external_events" (
-          "id", "runtime_attempt_id", "run_id", "external_run_id",
-          "external_event_id", "sequence", "event", "payload", "payload_sha256"
-        )
-        SELECT
-          ${`baseline_${fixture.runtimeAttemptId!}_`} || series::TEXT,
-          ${fixture.runtimeAttemptId!},
-          ${fixture.runId},
-          ${fixture.externalRunId},
-          'synthetic-' || series::TEXT,
-          series,
-          'synthetic.noop',
-          ${JSON.stringify(syntheticPayload)}::JSONB,
-          ${sha256Canonical(syntheticPayload)}
-        FROM generate_series(1, ${incidentEventCount}) AS series
-      `);
-      await db.$executeRaw(Prisma.sql`
-        UPDATE "runtime_external_events"
-        SET "status" = 'processed', "processed_at" = CURRENT_TIMESTAMP
-        WHERE "runtime_attempt_id" = ${fixture.runtimeAttemptId!}
-      `);
+      const expected = await seedRepresentativeProcessedEvents(db, fixture, incidentEventCount);
 
       const legacyService = new RuntimeAttemptService(db, 120_000, "legacy-read");
       queries.length = 0;
@@ -171,10 +145,13 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
 
       expect(state).toMatchObject({
         protocol: "workbench.runtime-provider-text-state.v2",
-        rawAssistantText: "",
-        visibleAssistantText: "",
-        durableVisibleAssistantText: "",
-        committedFinalization: null,
+        rawAssistantText: expected.visibleText,
+        visibleAssistantText: expected.visibleText,
+        durableVisibleAssistantText: expected.visibleText,
+        committedFinalization: {
+          externalEventId: expected.finalizationExternalEventId,
+          payloadSha256: expected.finalizationPayloadSha256,
+        },
       });
       expect("processedExternalEventIds" in state).toBe(false);
       expect(queries.some((query) => query.toLowerCase().includes("runtime_external_events"))).toBe(true);
@@ -198,15 +175,36 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
       const operator = new RuntimeProviderStateBackfill(db);
 
       try {
-        await seedSyntheticProcessedEvents(db, fixture, eventCount);
+        const expected = await seedRepresentativeProcessedEvents(db, fixture, eventCount);
         await db.runtimeProviderState.delete({
           where: { runtimeAttemptId: fixture.runtimeAttemptId! },
         });
-        await operator.processBatch({
+        queries.length = 0;
+        const backfillStartedAt = performance.now();
+        const backfill = await operator.processBatch({
           candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
           mode: "apply",
           batchSize: 10,
         });
+        const backfillDurationMs = performance.now() - backfillStartedAt;
+        expect(backfill.checkpoints[0]).toMatchObject({
+          eventCount,
+          lastSequence: eventCount,
+          status: "created",
+        });
+        const normalizedBackfillQueries = queries.map((query) => query.replace(/\s+/gu, " ").trim().toLowerCase());
+        const transactionStart = normalizedBackfillQueries.indexOf("begin");
+        const transactionFinish = normalizedBackfillQueries.indexOf("commit", transactionStart + 1);
+        const inboxReadIndexes = normalizedBackfillQueries
+          .map((query, index) => query.includes("runtime_external_events") ? index : -1)
+          .filter((index) => index >= 0);
+        expect(transactionStart).toBeGreaterThanOrEqual(0);
+        expect(transactionFinish).toBeGreaterThan(transactionStart);
+        expect(inboxReadIndexes).toHaveLength(Math.ceil(eventCount / runtimeProviderStateBackfillEventPageSize) + 1);
+        expect(inboxReadIndexes.every((index) => index < transactionStart)).toBe(true);
+        expect(normalizedBackfillQueries.slice(transactionStart, transactionFinish + 1))
+          .not.toEqual(expect.arrayContaining([expect.stringContaining("runtime_external_events")]));
+        expect(transactionFinish - transactionStart + 1).toBeLessThanOrEqual(8);
         const service = new RuntimeAttemptService(db, 120_000, "projection-required");
         const durations: number[] = [];
         queries.length = 0;
@@ -216,10 +214,13 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
           durations.push(performance.now() - startedAt);
           expect(state).toMatchObject({
             protocol: "workbench.runtime-provider-text-state.v2",
-            rawAssistantText: "",
-            visibleAssistantText: "",
-            durableVisibleAssistantText: "",
-            committedFinalization: null,
+            rawAssistantText: expected.visibleText,
+            visibleAssistantText: expected.visibleText,
+            durableVisibleAssistantText: expected.visibleText,
+            committedFinalization: {
+              externalEventId: expected.finalizationExternalEventId,
+              payloadSha256: expected.finalizationPayloadSha256,
+            },
           });
           expect("processedExternalEventIds" in state).toBe(false);
         }
@@ -235,6 +236,9 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
           p50Ms: Number(sorted[Math.floor(sorted.length * 0.5)]!.toFixed(2)),
           p95Ms: Number(sorted[Math.floor(sorted.length * 0.95)]!.toFixed(2)),
           maxMs: Number(Math.max(...durations).toFixed(2)),
+          backfillDurationMs: Number(backfillDurationMs.toFixed(2)),
+          backfillInboxQueryCount: inboxReadIndexes.length,
+          backfillTransactionQueryCount: transactionFinish - transactionStart + 1,
         }));
       } finally {
         await cleanupFixture(db, fixture);
@@ -994,13 +998,35 @@ async function seedProcessedExternalEvents(
   }
 }
 
-async function seedSyntheticProcessedEvents(
+async function seedRepresentativeProcessedEvents(
   db: PrismaClient,
   fixture: AttemptFixture,
   eventCount: number,
 ) {
   if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
-  const payload = { synthetic: true };
+  if (eventCount < 6) throw new Error("RUNTIME_ATTEMPT_REPRESENTATIVE_EVENT_COUNT_INVALID");
+  const noopPayload = { synthetic: true };
+  const deltaPayload = { type: "ai", content: "alpha " };
+  const cumulativePayload = {
+    messages: [{ type: "ai", content: "alpha beta" }],
+  };
+  const tuplePayload = [{ type: "ai", content: " gamma" }, { synthetic: true }];
+  const visibleText = "alpha beta gamma";
+  const finalization = createRuntimeFinalizationPayload({
+    messagesSha256: "a".repeat(64),
+    outcomeSha256: "b".repeat(64),
+    effects: [{
+      type: "phase",
+      phase: "validating",
+      label: "Synthetic validation",
+      progress: 1,
+    }],
+    visibleAssistantText: visibleText,
+    providerTextCheckpoint: createRuntimeProviderTextCheckpoint(
+      projectIncompleteVisibleAssistantText(visibleText),
+      visibleText,
+    ),
+  });
   await db.runtimeAttempt.update({
     where: { id: fixture.runtimeAttemptId },
     data: {
@@ -1020,9 +1046,27 @@ async function seedSyntheticProcessedEvents(
       ${fixture.externalRunId},
       'synthetic-' || series::TEXT,
       series,
-      'synthetic.noop',
-      ${JSON.stringify(payload)}::JSONB,
-      ${sha256Canonical(payload)}
+      CASE
+        WHEN series = 1 THEN 'messages'
+        WHEN series = 3 THEN 'values'
+        WHEN series = 4 THEN 'messages-tuple'
+        WHEN series = ${eventCount} THEN 'workbench.runtime.finalization.v2'
+        ELSE 'synthetic.noop'
+      END,
+      CASE
+        WHEN series = 1 THEN ${JSON.stringify(deltaPayload)}::JSONB
+        WHEN series = 3 THEN ${JSON.stringify(cumulativePayload)}::JSONB
+        WHEN series = 4 THEN ${JSON.stringify(tuplePayload)}::JSONB
+        WHEN series = ${eventCount} THEN ${JSON.stringify(finalization)}::JSONB
+        ELSE ${JSON.stringify(noopPayload)}::JSONB
+      END,
+      CASE
+        WHEN series = 1 THEN ${sha256Canonical(deltaPayload)}
+        WHEN series = 3 THEN ${sha256Canonical(cumulativePayload)}
+        WHEN series = 4 THEN ${sha256Canonical(tuplePayload)}
+        WHEN series = ${eventCount} THEN ${sha256Canonical(finalization)}
+        ELSE ${sha256Canonical(noopPayload)}
+      END
     FROM generate_series(1, ${eventCount}) AS series
   `);
   await db.$executeRaw(Prisma.sql`
@@ -1030,6 +1074,22 @@ async function seedSyntheticProcessedEvents(
     SET "status" = 'processed', "processed_at" = CURRENT_TIMESTAMP
     WHERE "runtime_attempt_id" = ${fixture.runtimeAttemptId}
   `);
+  await db.runDraft.upsert({
+    where: { runId: fixture.runId },
+    create: {
+      runId: fixture.runId,
+      content: { entryId: "synthetic-entry", text: visibleText },
+    },
+    update: {
+      version: { increment: 1 },
+      content: { entryId: "synthetic-entry", text: visibleText },
+    },
+  });
+  return {
+    visibleText,
+    finalizationExternalEventId: `synthetic-${eventCount}`,
+    finalizationPayloadSha256: sha256Canonical(finalization),
+  };
 }
 
 async function processWithActivityEffect(

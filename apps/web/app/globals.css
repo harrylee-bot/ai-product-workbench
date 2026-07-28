@@ -873,6 +873,20 @@ textarea:focus-visible {
   }
 }
 
+@keyframes workbench-stage-aurora-sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@keyframes workbench-stage-aurora-breath {
+  0%, 100% { opacity: 0.30; }
+  50% { opacity: 0.85; }
+}
+
+@keyframes workbench-artifact-spin {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes workbench-selection-breathe {
   0%, 100% {
     box-shadow:
@@ -1014,6 +1028,35 @@ textarea:focus-visible {
   animation: workbench-stage-sweep 4.4s ease-in-out infinite;
 }
 
+.workbench-stage-phase-wash--prd {
+  contain: paint;
+  will-change: opacity;
+}
+
+.workbench-stage-phase-wash--prd::before {
+  inset: 0;
+  background:
+    linear-gradient(
+      95deg,
+      transparent 0%,
+      rgba(145, 84, 231, 0.01) 8%,
+      rgba(145, 84, 231, 0.04) 15%,
+      rgba(145, 84, 231, 0.08) 22%,
+      rgba(96, 86, 240, 0.14) 38%,
+      rgba(64, 217, 198, 0.18) 54%,
+      rgba(66, 133, 244, 0.14) 70%,
+      rgba(66, 133, 244, 0.05) 82%,
+      rgba(66, 133, 244, 0.01) 91%,
+      transparent 100%
+    );
+  background-size: 200% 100%;
+  filter: none;
+  animation:
+    workbench-stage-aurora-sweep 2.5s linear infinite,
+    workbench-stage-aurora-breath 2.5s ease-in-out infinite;
+  will-change: background-position, opacity;
+}
+
 .workbench-stage-phase-wash[data-generation-stage="creating-flows"]::before {
   animation-duration: 2.5s;
 }
@@ -1068,6 +1111,56 @@ textarea:focus-visible {
 .workbench-stage-phase-wash--complete::before {
   animation-duration: 5.8s;
   opacity: 0.46;
+}
+
+.workbench-transient-artifact-slot {
+  inset: 92px 0 auto;
+  display: flex;
+  justify-content: center;
+}
+
+.workbench-transient-artifact-surface {
+  width: min(494px, calc(100vw - 64px));
+  aspect-ratio: 1;
+  background: #d2d0ca;
+}
+
+.workbench-transient-artifact-surface--prototype {
+  width: auto;
+  height: min(580px, calc(100vh - 250px));
+  aspect-ratio: 390 / 844;
+  background: #242629;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .workbench-transient-artifact-slot {
+    left: 320px;
+    right: 80px;
+  }
+
+  .workbench-transient-artifact-surface {
+    width: min(494px, 100%);
+  }
+
+  .workbench-transient-artifact-surface--prototype {
+    width: auto;
+    height: min(620px, calc(100vh - 300px));
+  }
+}
+
+@media (max-width: 767px) {
+  .workbench-transient-artifact-slot {
+    inset: 186px 40px auto 24px;
+  }
+
+  .workbench-transient-artifact-surface {
+    width: 100%;
+  }
+
+  .workbench-transient-artifact-surface--prototype {
+    width: auto;
+    height: min(372px, calc(100vh - 440px));
+  }
 }
 
 .workbench-overview-field {
@@ -1391,7 +1484,11 @@ textarea:focus-visible {
    above the wide Composer on narrow desktop/tablet canvases. */
 @media (min-width: 768px) and (max-width: 1023px) {
   .workbench-utility-bar {
-    bottom: 124px;
+    bottom: 166px;
+  }
+
+  .workbench-project-suggestions--document {
+    bottom: 220px !important;
   }
 }
 
@@ -2001,6 +2098,10 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
+.workbench-artifact-spinner {
+  animation: workbench-artifact-spin 1s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .workbench-shell *,
   .workbench-shell *::before,
@@ -2011,6 +2112,10 @@ textarea:focus-visible {
     animation-iteration-count: 1 !important;
     transition-delay: 0ms !important;
     transition-duration: 1ms !important;
+  }
+
+  .workbench-artifact-spinner {
+    animation: workbench-artifact-spin 1ms linear 1;
   }
 
   .workbench-generated-node {

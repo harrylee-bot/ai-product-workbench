@@ -11,10 +11,12 @@ import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
 import {
+  affectedProductionImageMatrix,
   assembleProductionImageManifest,
   assertPinnedWorkflowActions,
   assertProductionAcceptanceImageWorkflow,
   assertProductionWorkflowPermissions,
+  changedPathsForGitRange,
   loadProductionImageDigestBinding,
   loadVerifiedProductionImageManifest,
   productionImageDigestBinding,
@@ -131,6 +133,126 @@ test("keeps PR and quality jobs unprivileged and confines token writes to produc
     () => assertProductionWorkflowPermissions(unguardedPublisher),
     /production-only job condition/u,
   );
+});
+
+test("computes affected production images from target build inputs and shared packages", () => {
+  const imageNamesFor = (...changedPaths) => affectedProductionImageMatrix({ changedPaths })
+    .include.map((entry) => entry.name);
+
+  assert.deepEqual(imageNamesFor("apps/web/components/workbench/board.tsx"), ["web"]);
+  assert.deepEqual(imageNamesFor("apps/workbench-api/src/main.ts"), ["api", "api-migrator"]);
+  assert.deepEqual(imageNamesFor("scripts/reconcile-workbench-runtime-queues.mjs"), ["api-migrator"]);
+  assert.deepEqual(imageNamesFor("packages/workbench-export-core/src/index.ts"), ["export-worker"]);
+  assert.deepEqual(imageNamesFor("packages/workbench-contracts/src/runs.ts"), [
+    "api",
+    "api-migrator",
+    "export-worker",
+    "file-worker",
+    "import-worker",
+    "preview",
+    "runtime-worker",
+    "web",
+  ]);
+  assert.deepEqual(imageNamesFor("knowledge-vault/index.md"), ["quartz"]);
+  assert.deepEqual(imageNamesFor("integrations/deerflow/runtime-tools/config.fragment.yaml"), ["deerflow"]);
+  assert.deepEqual(imageNamesFor("apps/knowledge/docker-entrypoint.sh"), []);
+  assert.deepEqual(imageNamesFor("docs/operator-notes.md"), []);
+});
+
+test("uses deploy topology, lockfile, base-image controls, and fail-closed fallback inputs", () => {
+  const imageNamesFor = (...changedPaths) => affectedProductionImageMatrix({ changedPaths })
+    .include.map((entry) => entry.name);
+  const nodeImages = [
+    "api",
+    "api-migrator",
+    "export-worker",
+    "file-worker",
+    "import-worker",
+    "preview",
+    "runtime-worker",
+    "web",
+  ];
+
+  assert.deepEqual(imageNamesFor("package-lock.json"), nodeImages);
+  assert.deepEqual(imageNamesFor("deploy/prepare-node-image.sh"), [...nodeImages.slice(0, 6), "quartz", ...nodeImages.slice(6)]);
+  assert.deepEqual(imageNamesFor("deploy/deerflow-runtime-compose.yml"), ["deerflow"]);
+  assert.deepEqual(imageNamesFor("deploy/workbench-compose.yml"), requiredImageIds().filter((id) => id !== "deerflow"));
+  for (const path of [
+    ".dockerignore",
+    ".github/workflows/workbench-ci.yml",
+    "deploy/production-image-inventory.json",
+    "deploy/workbench.env.example",
+    "scripts/production-image-inventory.mjs",
+  ]) {
+    assert.deepEqual(imageNamesFor(path), requiredImageIds(), `${path} must conservatively select all images`);
+  }
+  assert.deepEqual(imageNamesFor("../outside-context"), requiredImageIds());
+  assert.deepEqual(
+    affectedProductionImageMatrix({
+      changedPaths: ["apps/web/app/page.tsx"],
+      readDockerfile: () => {
+        throw new Error("unreadable Dockerfile");
+      },
+    }).include.map((entry) => entry.name),
+    requiredImageIds(),
+  );
+});
+
+test("reads a deterministic null-delimited pull request Git range", () => {
+  const calls = [];
+  const paths = changedPathsForGitRange({
+    base: "a".repeat(40),
+    head: "b".repeat(40),
+    execute: (...args) => {
+      calls.push(args);
+      return "M\0apps/web/Dockerfile\0R100\0packages/workbench-contracts/src/old.ts\0packages/workbench-contracts/src/runs.ts\0";
+    },
+  });
+  assert.deepEqual(paths, [
+    "apps/web/Dockerfile",
+    "packages/workbench-contracts/src/old.ts",
+    "packages/workbench-contracts/src/runs.ts",
+  ]);
+  assert.deepEqual(calls[0][1], [
+    "diff",
+    "--name-status",
+    "--find-renames",
+    "--find-copies",
+    "--diff-filter=ACDMRTUXB",
+    "-z",
+    `${"a".repeat(40)}...${"b".repeat(40)}`,
+    "--",
+  ]);
+  assert.throws(
+    () => changedPathsForGitRange({ base: "HEAD", head: "b".repeat(40), execute: () => "" }),
+    /base commit must be a full lowercase SHA/u,
+  );
+});
+
+test("builds the computed image matrix with unprivileged image-specific runtime probes", () => {
+  const workflowPath = fileURLToPath(new URL("../.github/workflows/workbench-ci.yml", import.meta.url));
+  const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
+  const quality = workflow.jobs.quality;
+  const prJob = workflow.jobs["pr-production-images"];
+  assert.equal(quality.steps.find((step) => step.name === "Checkout").with["fetch-depth"], 0);
+  assert.match(quality.outputs.pr_production_image_matrix, /affected_production_images\.outputs\.matrix/u);
+  const selector = quality.steps.find((step) => step.id === "affected_production_images");
+  assert.match(selector.run, /--affected-matrix[\s\S]*--base[\s\S]*--head/u);
+  assert.deepEqual(prJob.permissions, { contents: "read" });
+  assert.match(prJob.strategy.matrix, /fromJSON\(needs\.quality\.outputs\.pr_production_image_matrix\)/u);
+  assert.match(prJob.if, /pr_production_image_count != '0'/u);
+  const build = prJob.steps.find((step) => step.name === "Build and probe production target without publishing");
+  assert.match(build.run, /docker buildx build[\s\S]*--load/u);
+  assert.match(build.run, /org\.opencontainers\.image\.revision=\$\{GITHUB_SHA\}/u);
+  assert.match(build.run, /docker run --rm --network none/u);
+  assert.match(build.run, /--read-only[\s\S]*--cap-drop ALL[\s\S]*--security-opt no-new-privileges:true/u);
+  assert.match(build.run, /node-config-fail-fast[\s\S]*--entrypoint node[\s\S]*--check/u);
+  assert.match(build.run, /migrator-config-fail-fast[\s\S]*Config\.Entrypoint/u);
+  assert.match(build.run, /next-startup[\s\S]*Config\.Cmd/u);
+  assert.match(build.run, /nginx-startup[\s\S]*--entrypoint nginx[\s\S]* -t/u);
+  assert.match(build.run, /deerflow-runtime-syntax[\s\S]*uv run --no-sync uvicorn --help/u);
+  assert.doesNotMatch(build.run, /--push/u);
+  assert.doesNotMatch(build.run, /cosign|docker push|docker login/u);
 });
 
 test("production acceptance workflow fails closed without same-run G4 download or release binding", () => {

@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
       screenId?: string;
     };
   }) => {
-    const artifactVersionState = mocks.artifactVersionState;
+    const artifactVersionState = mocks.artifactVersionStates[reference.artifactVersionId]
+      ?? mocks.artifactVersionState;
     useEffect(() => {
       onArtifactVersionStateChange?.(artifactVersionState);
     }, [artifactVersionState, onArtifactVersionStateChange]);
@@ -27,11 +28,17 @@ const mocks = vi.hoisted(() => ({
     }, [artifactVersionState, onArtifactTitleChange]);
     return (
       <div data-testid="real-artifact-content">
-        {`${reference.artifactVersionId}:${reference.screenId ?? "document"}`}
+        {artifactVersionState === "error" ? (
+          <>
+            <span>Artifact unavailable</span>
+            <button aria-label="重试加载产物" type="button" />
+          </>
+        ) : `${reference.artifactVersionId}:${reference.screenId ?? "document"}`}
       </div>
     );
   }),
   artifactVersionState: "ready" as "error" | "pending" | "ready",
+  artifactVersionStates: {} as Record<string, "error" | "pending" | "ready">,
   nodeResizer: vi.fn((_props: Record<string, unknown>) => null),
 }));
 
@@ -47,6 +54,7 @@ import { artboardNodeTypes } from "./workbench-board-nodes";
 
 beforeEach(() => {
   mocks.artifactVersionState = "ready";
+  mocks.artifactVersionStates = {};
 });
 
 afterEach(() => {
@@ -56,7 +64,7 @@ afterEach(() => {
 });
 
 describe("Workbench generated screen node", () => {
-  it("renders only the reference loading copy for a pending PRD node", () => {
+  it("renders loading composition for a pending PRD node", () => {
     const DocumentCanvas = artboardNodeTypes.documentCanvas;
     const rendered = render(<DocumentCanvas {...({
       data: {
@@ -76,13 +84,14 @@ describe("Workbench generated screen node", () => {
       zIndex: 0,
     } satisfies ComponentProps<typeof DocumentCanvas>)} />);
 
-    expect(screen.getByText("Loading document...")).not.toBeNull();
+    expect(screen.getByText("正在生成：需求文档")).not.toBeNull();
     expect(rendered.container.querySelector('[data-workbench-artifact-state="pending"]'))
       .not.toBeNull();
     expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]"))
-      .toBeNull();
+      .not.toBeNull();
     expect(rendered.container.querySelector('[data-motion="document-wash"]'))
       .toBeNull();
+    expect(rendered.container.querySelector(".workbench-artifact-spinner")).not.toBeNull();
     expect(rendered.container.querySelector(".animate-spin")).toBeNull();
     expect(mocks.artifactContent).not.toHaveBeenCalled();
     expect(mocks.nodeResizer.mock.calls.at(-1)?.[0]).toMatchObject({
@@ -120,7 +129,7 @@ describe("Workbench generated screen node", () => {
     mocks.artifactVersionState = "pending";
     const rendered = render(<DocumentCanvas {...props} />);
 
-    expect(screen.getByText("Loading document...")).not.toBeNull();
+    expect(screen.getByText("正在细化：需求文档")).not.toBeNull();
     expect(screen.queryByText("Loading artifact...")).toBeNull();
     expect(mocks.artifactContent).toHaveBeenCalledOnce();
     expect(screen.getByTestId("real-artifact-content").parentElement?.getAttribute("aria-hidden"))
@@ -129,7 +138,7 @@ describe("Workbench generated screen node", () => {
     mocks.artifactVersionState = "ready";
     rendered.rerender(<DocumentCanvas {...props} />);
     await waitFor(() => {
-      expect(screen.queryByText("Loading document...")).toBeNull();
+      expect(screen.queryByText("正在细化：需求文档")).toBeNull();
     });
     expect(screen.getByText("签到打卡活动需求说明书")).not.toBeNull();
     expect(screen.getByTestId("real-artifact-content").textContent)
@@ -146,6 +155,124 @@ describe("Workbench generated screen node", () => {
       pendingContent: null,
       reference,
     });
+  });
+
+  it("keeps the previous PRD readable while a refinement version resolves", async () => {
+    const DocumentCanvas = artboardNodeTypes.documentCanvas;
+    const previousArtifact = {
+      artifactId: "artifact-prd",
+      artifactVersionId: "version-prd-ready",
+      projectId: "project-real",
+    };
+    const artifact = {
+      ...previousArtifact,
+      artifactVersionId: "version-prd-refining",
+    };
+    const props = {
+      data: {
+        artifact,
+        phase: "refining",
+        previousArtifact,
+        title: "需求文档",
+      },
+      deletable: false,
+      draggable: false,
+      dragging: false,
+      id: "board-node-prd",
+      isConnectable: false,
+      positionAbsoluteX: 0,
+      positionAbsoluteY: 0,
+      selectable: false,
+      selected: false,
+      type: "documentCanvas",
+      zIndex: 0,
+    } satisfies ComponentProps<typeof DocumentCanvas>;
+    mocks.artifactVersionStates = {
+      "version-prd-ready": "ready",
+      "version-prd-refining": "pending",
+    };
+    const rendered = render(<DocumentCanvas {...props} />);
+
+    expect(screen.getByText("version-prd-ready:document")).not.toBeNull();
+    expect(screen.getByText("正在细化：需求文档")).not.toBeNull();
+    expect(rendered.container.querySelector('[data-workbench-artifact-layer="incoming"]')
+      ?.getAttribute("aria-hidden")).toBe("true");
+    expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeNull();
+
+    mocks.artifactVersionStates["version-prd-refining"] = "ready";
+    rendered.rerender(<DocumentCanvas {...props} />);
+    await waitFor(() => {
+      expect(screen.queryByText("正在细化：需求文档")).toBeNull();
+    });
+    expect(screen.queryByText("version-prd-ready:document")).toBeNull();
+    expect(screen.getByText("version-prd-refining:document")).not.toBeNull();
+    expect(rendered.container.querySelector('[data-workbench-artifact-layer="incoming"]')
+      ?.getAttribute("aria-hidden")).toBe("false");
+  });
+
+  it("preserves the previous PRD and exposes retry when the refinement query fails", async () => {
+    const DocumentCanvas = artboardNodeTypes.documentCanvas;
+    const props = {
+      data: {
+        artifact: {
+          artifactId: "artifact-prd",
+          artifactVersionId: "version-prd-refining",
+          projectId: "project-real",
+        },
+        phase: "refining",
+        previousArtifact: {
+          artifactId: "artifact-prd",
+          artifactVersionId: "version-prd-ready",
+          projectId: "project-real",
+        },
+        title: "需求文档",
+      },
+      deletable: false,
+      draggable: false,
+      dragging: false,
+      id: "board-node-prd",
+      isConnectable: false,
+      positionAbsoluteX: 0,
+      positionAbsoluteY: 0,
+      selectable: false,
+      selected: false,
+      type: "documentCanvas",
+      zIndex: 0,
+    } satisfies ComponentProps<typeof DocumentCanvas>;
+    mocks.artifactVersionStates = {
+      "version-prd-ready": "ready",
+      "version-prd-refining": "error",
+    };
+    const rendered = render(<DocumentCanvas {...props} />);
+
+    await waitFor(() => {
+      expect(rendered.container.querySelector('[data-workbench-artifact-refresh-state="error"]'))
+        .not.toBeNull();
+    });
+    expect(screen.getByText("version-prd-ready:document")).not.toBeNull();
+    expect(screen.getByText("Artifact unavailable")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "重试加载产物" })).not.toBeNull();
+    expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeNull();
+
+    mocks.artifactVersionStates["version-prd-refining"] = "pending";
+    rendered.rerender(<DocumentCanvas {...props} />);
+    await waitFor(() => {
+      expect(rendered.container.querySelector('[data-workbench-artifact-refresh-state="pending"]'))
+        .not.toBeNull();
+    });
+    expect(screen.getByText("version-prd-ready:document")).not.toBeNull();
+    expect(screen.getByText("正在细化：需求文档")).not.toBeNull();
+    expect(screen.queryByText("Artifact unavailable")).toBeNull();
+    expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeNull();
+
+    mocks.artifactVersionStates["version-prd-refining"] = "ready";
+    rendered.rerender(<DocumentCanvas {...props} />);
+    await waitFor(() => {
+      expect(rendered.container.querySelector("[data-workbench-artifact-refresh-state]"))
+        .toBeNull();
+    });
+    expect(screen.queryByText("version-prd-ready:document")).toBeNull();
+    expect(screen.getByText("version-prd-refining:document")).not.toBeNull();
   });
 
   it("renders the real Draft Artifact while refining instead of a fabricated skeleton", () => {

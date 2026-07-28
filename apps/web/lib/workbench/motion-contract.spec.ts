@@ -41,6 +41,10 @@ describe("Workbench motion contract", () => {
     expect(css).toMatch(/data-generation-stage="structuring-prd"[^}]*animation-duration:\s*3\.2s/u);
     expect(css).toMatch(/data-generation-stage="drafting-prd"[^}]*animation-duration:\s*2\.5s/u);
     expect(css).toMatch(/data-generation-stage="validating-prd"[^}]*animation-duration:\s*4\.8s/u);
+    expect(css).toMatch(/\.workbench-stage-phase-wash--prd\s*\{[^}]*contain:\s*paint;[^}]*will-change:\s*opacity;/u);
+    expect(css).toMatch(/\.workbench-stage-phase-wash--prd::before\s*\{[\s\S]*?background-size:\s*200%\s+100%;[\s\S]*?workbench-stage-aurora-sweep\s+2\.5s\s+linear\s+infinite,[\s\S]*?workbench-stage-aurora-breath\s+2\.5s\s+ease-in-out\s+infinite;[\s\S]*?will-change:\s*background-position,\s*opacity;/u);
+    expect(css).toMatch(/@keyframes\s+workbench-stage-aurora-sweep[\s\S]*?background-position:\s*200%\s+0[\s\S]*?background-position:\s*-200%\s+0/u);
+    expect(css).toMatch(/@keyframes\s+workbench-stage-aurora-breath[\s\S]*?opacity:\s*0\.30[\s\S]*?opacity:\s*0\.85/u);
   });
 
   it("applies the user reduced-motion preference to every application route", async () => {

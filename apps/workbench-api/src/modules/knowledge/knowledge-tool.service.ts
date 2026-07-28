@@ -10,6 +10,7 @@ import {
   KnowledgeToolGrantError,
   verifyKnowledgeToolGrant,
 } from "@workbench/workbench-knowledge";
+import { recordKnowledgeVisibilityMetric } from "@workbench/workbench-telemetry";
 import {
   knowledgeGrantUnauthorizedProblem,
   knowledgeRetrievalUnavailableProblem,
@@ -119,18 +120,47 @@ export class KnowledgeToolService {
 
   private verifyGrant(authorization: string | undefined) {
     if (!this.config.grantSecret) {
+      recordKnowledgeVisibilityMetric({
+        operation: "execution",
+        outcome: "error",
+        errorCode: "KNOWLEDGE_RETRIEVAL_NOT_CONFIGURED",
+      });
       throw knowledgeRetrievalUnavailableProblem(
         "KNOWLEDGE_RETRIEVAL_NOT_CONFIGURED",
         "Knowledge retrieval capability verification is not configured",
       );
     }
-    const token = bearerToken(authorization);
+    let token: string;
     try {
-      return verifyKnowledgeToolGrant(token, this.config.grantSecret, {
+      token = bearerToken(authorization);
+    } catch (error) {
+      recordKnowledgeVisibilityMetric({
+        operation: "execution",
+        outcome: "blocked",
+        errorCode: "KNOWLEDGE_TOOL_GRANT_INVALID",
+      });
+      throw error;
+    }
+    try {
+      const grant = verifyKnowledgeToolGrant(token, this.config.grantSecret, {
         maximumTtlSeconds: this.config.grantMaximumTtlSeconds,
       });
+      recordKnowledgeVisibilityMetric({ operation: "execution", outcome: "authorized" });
+      return grant;
     } catch (error) {
-      if (error instanceof KnowledgeToolGrantError) throw knowledgeGrantUnauthorizedProblem();
+      if (error instanceof KnowledgeToolGrantError) {
+        recordKnowledgeVisibilityMetric({
+          operation: "execution",
+          outcome: "blocked",
+          errorCode: "KNOWLEDGE_TOOL_GRANT_INVALID",
+        });
+        throw knowledgeGrantUnauthorizedProblem();
+      }
+      recordKnowledgeVisibilityMetric({
+        operation: "execution",
+        outcome: "error",
+        errorCode: "KNOWLEDGE_TOOL_GRANT_VERIFICATION_FAILED",
+      });
       throw error;
     }
   }

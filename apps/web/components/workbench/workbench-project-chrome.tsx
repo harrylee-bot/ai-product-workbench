@@ -24,6 +24,7 @@ import type {
   WorkbenchProjectCapabilities,
   WorkbenchProjectMode,
   WorkbenchProjectPhase,
+  WorkbenchRunMotionKind,
 } from "@/lib/workbench/features";
 import {
   openWorkbenchKnowledgePage,
@@ -35,9 +36,63 @@ import {
   viewTransition,
   workbenchEase,
 } from "./workbench-motion";
+import { WorkbenchArtifactFallback } from "./workbench-artifact-fallback";
 
 type Phase = WorkbenchProjectPhase;
 type ProjectMode = WorkbenchProjectMode;
+
+const PROTOTYPE_GENERATION_STAGES: readonly RunGenerationStage[] = [
+  "design-system",
+  "mapping-components",
+  "creating-flows",
+  "generating-ui",
+  "screen-streaming",
+  "summarizing",
+  "screen-stable",
+];
+
+const PRD_GENERATION_STAGES: readonly RunGenerationStage[] = [
+  "collecting-prd-context",
+  "structuring-prd",
+  "drafting-prd",
+  "validating-prd",
+];
+
+type ActiveProjectStageMotionKind = Exclude<WorkbenchRunMotionKind, "neutral">;
+
+function getProjectStageMotionKind({
+  generationStage,
+  isOverview,
+  motionKind,
+  phase,
+}: {
+  generationStage: RunGenerationStage | null;
+  isOverview: boolean;
+  motionKind: WorkbenchRunMotionKind;
+  phase: Phase;
+}): ActiveProjectStageMotionKind | null {
+  if (phase !== "generating" && phase !== "refining") {
+    return null;
+  }
+
+  const isPrototypeGenerationStage = generationStage !== null
+    && PROTOTYPE_GENERATION_STAGES.includes(generationStage);
+  const isPrdGenerationStage = generationStage !== null
+    && PRD_GENERATION_STAGES.includes(generationStage);
+  const stageMotionKind: ActiveProjectStageMotionKind | null = isPrototypeGenerationStage
+    ? "prototype"
+    : isPrdGenerationStage
+      ? "prd"
+      : null;
+
+  if (motionKind === "neutral") {
+    return stageMotionKind === "prototype" && isOverview ? null : stageMotionKind;
+  }
+
+  if (stageMotionKind !== null && stageMotionKind !== motionKind) return null;
+  if (motionKind === "prototype" && isOverview) return null;
+  return motionKind;
+}
 
 export function ProjectChromeVignette({ isOverview }: { isOverview: boolean }) {
   return (
@@ -72,26 +127,29 @@ export function ProjectChromeVignette({ isOverview }: { isOverview: boolean }) {
 
 export function ProjectStageMotionFX({
   generationStage,
-  isPrdRun,
   isOverview,
+  motionKind,
   phase,
-  projectMode,
+  showPendingArtifact = false,
 }: {
   generationStage: RunGenerationStage | null;
-  isPrdRun: boolean;
   isOverview: boolean;
+  motionKind: WorkbenchRunMotionKind;
   phase: Phase;
-  projectMode: ProjectMode;
+  showPendingArtifact?: boolean;
 }) {
-  const isActivePhase = phase === "generating" || phase === "refining";
-  const showPrdGenerationWash = isPrdRun && projectMode === "document" && isActivePhase;
-  const showPrototypeGenerationWash = projectMode === "generated" && isActivePhase && !isOverview;
-  const showGenerationWash = showPrdGenerationWash || showPrototypeGenerationWash;
+  const generationMotionKind = getProjectStageMotionKind({
+    generationStage,
+    isOverview,
+    motionKind,
+    phase,
+  });
+  const showPrdGenerationWash = generationMotionKind === "prd";
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[6] overflow-hidden">
       <AnimatePresence>
-        {showGenerationWash && (
+        {generationMotionKind !== null && (
           <motion.div
             animate={{ opacity: showPrdGenerationWash ? 0.64 : phase === "refining" ? 0.62 : 0.48 }}
             aria-hidden="true"
@@ -100,12 +158,38 @@ export function ProjectStageMotionFX({
               showPrdGenerationWash && "workbench-stage-phase-wash--prd",
               phase === "refining" && "workbench-stage-phase-wash--refining",
             )}
-            data-canvas-generation-motion={showPrdGenerationWash ? "prd" : "prototype"}
+            data-canvas-generation-motion={generationMotionKind}
             data-generation-stage={generationStage ?? undefined}
             exit={{ opacity: 0 }}
             initial={{ opacity: 0 }}
             transition={{ duration: 0.34, ease: workbenchEase }}
           />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showPendingArtifact && generationMotionKind !== null && (
+          <motion.div
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="workbench-transient-artifact-slot absolute"
+            data-generation-stage={generationStage ?? undefined}
+            data-workbench-transient-artifact={generationMotionKind}
+            exit={{ opacity: 0, scale: 0.985, y: 5 }}
+            initial={{ opacity: 0, scale: 0.985, y: 5 }}
+            transition={{ duration: 0.28, ease: workbenchEase }}
+          >
+            <div
+              className={cn(
+                "workbench-transient-artifact-surface overflow-hidden border border-[#7467f6] shadow-[0_24px_90px_-44px_rgba(0,0,0,0.95)]",
+                generationMotionKind === "prototype" && "workbench-transient-artifact-surface--prototype",
+              )}
+            >
+              <WorkbenchArtifactFallback
+                phase={phase === "refining" ? "refining" : "generating"}
+                title={generationMotionKind === "prd" ? "需求文档" : "原型界面"}
+                variant={generationMotionKind === "prd" ? "document" : "prototype"}
+              />
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
       <AnimatePresence>
@@ -175,9 +259,12 @@ export function ProjectSuggestionPills({
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "absolute left-1/2 z-40 flex w-[580px] max-w-[calc(100vw-32px)] -translate-x-1/2 gap-[8px]",
-        projectMode === "document" ? "bottom-[178px]" : "bottom-[122px]",
+        "workbench-project-suggestions absolute left-1/2 z-40 flex w-[580px] max-w-[calc(100vw-32px)] -translate-x-1/2 gap-[8px]",
+        projectMode === "document"
+          ? "workbench-project-suggestions--document bottom-[178px]"
+          : "bottom-[122px]",
       )}
+      data-project-suggestions
       initial={{ opacity: 0, y: 10 }}
       transition={{ ...viewTransition, delay: 0.22 }}
     >
@@ -198,6 +285,7 @@ export function ProjectSuggestionPills({
 }
 
 export function SelectedActionPill({
+  activeRun,
   availability,
   canOpenVersions,
   menuOpen,
@@ -209,6 +297,7 @@ export function SelectedActionPill({
   onToggleMenu,
   open,
 }: {
+  activeRun: boolean;
   availability: BoardNodeActionAvailability;
   canOpenVersions: boolean;
   menuOpen: boolean;
@@ -220,6 +309,8 @@ export function SelectedActionPill({
   onToggleMenu: () => void;
   open: boolean;
 }) {
+  if (activeRun) return null;
+
   return (
     <AnimatePresence>
       {open && (

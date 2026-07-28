@@ -109,6 +109,7 @@ export function LeftInspector({
       isPrdRun,
       stage: generationStage,
     })
+    ?? (runStatus === "cancelling" ? "正在取消" : null)
     ?? terminalTaskCopy
     ?? runPhaseLabel
     ?? currentActivity?.label
@@ -129,7 +130,7 @@ export function LeftInspector({
   return (
     <motion.aside
       animate={{ opacity: 1, x: 0, y: 0 }}
-            className="pointer-events-none absolute bottom-[16px] left-[16px] z-40 w-[280px] select-none max-md:hidden"
+      className="pointer-events-none absolute bottom-[16px] left-[16px] z-40 w-[280px] select-none max-xl:hidden"
       data-generation-progress={generationProgress}
       data-generation-stage={generationStage ?? undefined}
       data-left-task-stack
@@ -295,10 +296,11 @@ export function ProjectTranscriptPanel({
   const promptCopyTimerRef = useRef<number | null>(null);
   const isGenerated = projectMode === "generated";
   const promptCopy = prompt || "当前运行";
-  const displayedPromptCopy = selectedTask || promptCopy;
   const selectedActivity = selectedTask
     ? [...activities].reverse().find((activity) => activity.label === selectedTask)
     : null;
+  const effectiveSelectedTask = selectedActivity?.label ?? null;
+  const displayedPromptCopy = effectiveSelectedTask || promptCopy;
   const currentActivity = [...activities].reverse().find((activity) => activity.working)
     ?? activities.at(-1);
   const latestMessage = messages.at(-1);
@@ -306,10 +308,10 @@ export function ProjectTranscriptPanel({
     || runStatus === "running"
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
-  const isActivePrdGeneration = isPrdRun
+  const isContextualPrdRun = isPrdRun
     && projectMode === "document"
-    && selectedTask === null
-    && (runStatus === "queued" || runStatus === "running");
+    && effectiveSelectedTask === null
+    && isWorking;
   const currentPrdStageCopy = activePrdStatusCopy({
     isActiveGeneration: runStatus === "queued" || runStatus === "running",
     isPrdRun,
@@ -321,6 +323,8 @@ export function ProjectTranscriptPanel({
       ? "运行失败"
       : runStatus === "cancelled"
         ? "运行已取消"
+        : runStatus === "cancelling"
+          ? "正在取消"
         : runStatus === "waiting_input"
           ? "等待您的确认"
           : runStatus === "succeeded"
@@ -339,16 +343,19 @@ export function ProjectTranscriptPanel({
     runStatus === "waiting_input" ? "请在确认弹层中选择后继续。" : null,
     runStatus === "succeeded" ? "产物已发布到当前项目画布。" : null,
   ].find((copy): copy is string => typeof copy === "string" && copy.trim().length > 0)?.trim() ?? null;
-  const bodyCopy = isActivePrdGeneration
-    ? null
-    : runBodyCopy ?? (isWorking ? null : "暂无新的运行消息。");
+  const bodyCopy = runBodyCopy
+    ?? (isContextualPrdRun
+      ? runStatus === "cancelling"
+        ? "正在停止需求文档生成，请稍候。"
+        : currentPrdStageCopy
+        ? `正在处理需求文档，当前阶段：${currentPrdStageCopy}`
+        : "正在准备需求文档。"
+      : isWorking ? null : "暂无新的运行消息。");
   const isAgentWorking = isWorking;
-  const showPromptChip = !isActivePrdGeneration
-    && Boolean(prompt || selectedTask)
-    && (Boolean(selectedTask) || Boolean(runBodyCopy))
-    && (Boolean(selectedTask) || isOverview || !(phase === "complete" && isGenerated));
+  const showPromptChip = Boolean(prompt || effectiveSelectedTask)
+    && (isContextualPrdRun || Boolean(effectiveSelectedTask) || Boolean(runBodyCopy))
+    && (Boolean(effectiveSelectedTask) || isOverview || !(phase === "complete" && isGenerated));
   const hasExpandedBody = showPromptChip || Boolean(bodyCopy);
-  const prdBodyless = isPrdRun && projectMode === "document" && !hasExpandedBody;
   const expandedHeight = hasExpandedBody ? "auto" : 92;
 
   useEffect(() => {
@@ -386,16 +393,11 @@ export function ProjectTranscriptPanel({
       data-generation-stage={generationStage ?? undefined}
       data-panel-motion="agent-card"
       data-phase={phase}
-      data-prd-bodyless={transcriptOpen && prdBodyless ? "true" : undefined}
       initial={{ opacity: 0, x: -10 }}
       layout={projectMode === "document" ? undefined : "size"}
       style={{
         height: transcriptOpen ? expandedHeight : 52,
-        maxHeight: transcriptOpen && prdBodyless ? 92 : undefined,
-        maxWidth: transcriptOpen && prdBodyless ? 200 : undefined,
-        minHeight: transcriptOpen && prdBodyless ? 92 : undefined,
-        minWidth: transcriptOpen && prdBodyless ? 200 : undefined,
-        width: transcriptOpen ? (prdBodyless ? 200 : 280) : 64,
+        width: transcriptOpen ? 280 : 64,
       }}
       transition={{ ...panelTransition, delay: 0.10 }}
     >
@@ -407,7 +409,7 @@ export function ProjectTranscriptPanel({
         className={cn(
           "workbench-agent-bubble absolute z-30 h-[26px] w-[44px] text-[#202124] transition-[left,top] duration-300 ease-out",
           transcriptOpen
-            ? prdBodyless ? "left-[12px] top-[10px]" : "left-[12px] top-[16px]"
+            ? "left-[12px] top-[16px]"
             : "left-[9px] top-[9px]",
         )}
         onClick={() => setTranscriptOpen((open) => !open)}
@@ -425,7 +427,7 @@ export function ProjectTranscriptPanel({
         animate={{ opacity: 1 }}
         className={cn(
           "relative z-20 flex flex-col text-[#f1f3f4]",
-          prdBodyless ? "px-[12px] pb-[14px] pt-[54px]" : "px-[16px] pb-[18px] pt-[70px]",
+          "px-[16px] pb-[18px] pt-[70px]",
         )}
         exit={{ opacity: 0 }}
         initial={{ opacity: 0 }}
@@ -455,7 +457,7 @@ export function ProjectTranscriptPanel({
             className="flex min-h-0 flex-col"
             exit={{ opacity: 0, y: -4 }}
             initial={{ opacity: 0, y: 4 }}
-            key={selectedTask || `${projectMode}-${phase}`}
+            key={effectiveSelectedTask || `${projectMode}-${phase}`}
             transition={{ duration: 0.22, ease: workbenchEase }}
           >
           <>
@@ -522,6 +524,7 @@ export function MobileRunStatus({
   isPrdRun,
   onCancel,
   onRetry,
+  prompt,
   runPhaseLabel,
   runStatus,
 }: {
@@ -533,6 +536,7 @@ export function MobileRunStatus({
   isPrdRun: boolean;
   onCancel: () => void;
   onRetry: () => void;
+  prompt: string;
   runPhaseLabel: string | null;
   runStatus: Run["status"] | null;
 }) {
@@ -550,17 +554,24 @@ export function MobileRunStatus({
     ? failure?.message ?? "运行失败"
     : runStatus === "cancelled"
       ? "运行已取消"
+      : runStatus === "cancelling"
+        ? "正在取消"
       : runStatus === "succeeded"
         ? "运行已完成"
         : runStatus === "waiting_input"
           ? "等待确认"
           : currentPrdStageCopy ?? runPhaseLabel ?? "正在运行";
 
+  const showPromptContext = isPrdRun && working && prompt.trim().length > 0;
+
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
-      aria-live="polite"
-      className="absolute left-[16px] right-[70px] top-[76px] z-40 flex h-[42px] items-center gap-[9px] rounded-[13px] border border-white/[0.10] bg-[#1c1d20]/94 px-[11px] text-[12px] font-semibold text-[#f1f3f4] shadow-[0_18px_56px_-34px_rgba(0,0,0,0.95)] backdrop-blur-xl md:hidden"
+      className={cn(
+        "absolute left-[16px] right-[70px] top-[76px] z-40 flex items-center gap-[9px] rounded-[13px] border border-white/[0.10] bg-[#1c1d20]/94 px-[11px] text-[12px] font-semibold text-[#f1f3f4] shadow-[0_18px_56px_-34px_rgba(0,0,0,0.95)] backdrop-blur-xl md:hidden",
+        showPromptContext ? "min-h-[54px] py-[7px]" : "h-[42px]",
+      )}
+      data-mobile-run-status
       initial={{ opacity: 0, y: -5 }}
       transition={popoverTransition}
     >
@@ -571,10 +582,17 @@ export function MobileRunStatus({
       ) : (
         <CheckCircle2Icon className="size-[15px] shrink-0" />
       )}
-      <span className="min-w-0 flex-1 truncate">
-        {label}
-        {generationStage === "generating-ui" && (
-          <span aria-hidden="true" className="workbench-stage-ellipsis">...</span>
+      <span className="min-w-0 flex-1">
+        <span aria-live="polite" className="block truncate">
+          {label}
+          {generationStage === "generating-ui" && (
+            <span aria-hidden="true" className="workbench-stage-ellipsis">...</span>
+          )}
+        </span>
+        {showPromptContext && (
+          <span className="mt-[2px] block truncate text-[11px] font-medium text-[#aeb2b9]" data-mobile-run-prompt>
+            {prompt}
+          </span>
         )}
       </span>
       {working && canCancel && (

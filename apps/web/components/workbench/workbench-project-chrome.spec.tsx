@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MotionConfig } from "framer-motion";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { workbenchProjectCapabilities } from "@/lib/workbench/features/projects";
 
@@ -8,6 +9,7 @@ import {
   ProjectStageMotionFX,
   ProjectSuggestionPills,
   ProjectTopBar,
+  SelectedActionPill,
 } from "./workbench-project-chrome";
 import { RenameProjectDialog } from "./workbench-rename-dialog";
 
@@ -15,117 +17,240 @@ afterEach(cleanup);
 
 describe("workbench project chrome", () => {
   it.each([
+    null,
+    "thinking",
     "collecting-prd-context",
     "structuring-prd",
     "drafting-prd",
     "validating-prd",
-  ] as const)("keeps the PRD canvas motion mounted at %s", (generationStage) => {
+  ] as const)("uses the trusted PRD Run kind at stage %s", (generationStage) => {
     const { container } = render(
       <ProjectStageMotionFX
         generationStage={generationStage}
         isOverview={false}
-        isPrdRun
+        motionKind="prd"
         phase="generating"
-        projectMode="document"
       />,
     );
 
     const motion = container.querySelector('[data-canvas-generation-motion="prd"]');
     expect(motion).not.toBeNull();
-    expect(motion?.getAttribute("data-generation-stage")).toBe(generationStage);
+    expect(motion?.getAttribute("data-generation-stage")).toBe(generationStage ?? null);
     expect(motion?.classList.contains("workbench-stage-phase-wash--prd")).toBe(true);
   });
 
-  it("shows a static-capable PRD wash on reload before the durable stage arrives", () => {
+  it.each([
+    null,
+    "thinking",
+    "design-system",
+    "generating-ui",
+    "screen-stable",
+  ] as const)("uses the trusted Prototype Run kind at stage %s", (generationStage) => {
+    const { container } = render(
+      <ProjectStageMotionFX
+        generationStage={generationStage}
+        isOverview={false}
+        motionKind="prototype"
+        phase="generating"
+      />,
+    );
+
+    const motion = container.querySelector('[data-canvas-generation-motion="prototype"]');
+    expect(motion).not.toBeNull();
+    expect(motion?.getAttribute("data-generation-stage")).toBe(generationStage ?? null);
+    expect(motion?.classList.contains("workbench-stage-phase-wash--prd")).toBe(false);
+  });
+
+  it.each([null, "thinking"] as const)(
+    "keeps neutral Run motion unmounted at generic stage %s",
+    (generationStage) => {
+      const { container } = render(
+        <ProjectStageMotionFX
+          generationStage={generationStage}
+          isOverview={false}
+          motionKind="neutral"
+          phase="generating"
+        />,
+      );
+
+      expect(container.querySelector("[data-canvas-generation-motion]")).toBeNull();
+    },
+  );
+
+  it.each([
+    ["drafting-prd", "prd"],
+    ["generating-ui", "prototype"],
+  ] as const)("uses validated stage %s when the Run motion kind is neutral", (generationStage, expectedKind) => {
+    const { container } = render(
+      <ProjectStageMotionFX
+        generationStage={generationStage}
+        isOverview={false}
+        motionKind="neutral"
+        phase="generating"
+      />,
+    );
+
+    const motion = container.querySelector(
+      `[data-canvas-generation-motion="${expectedKind}"]`,
+    );
+    expect(motion).not.toBeNull();
+    expect(motion?.getAttribute("data-generation-stage")).toBe(generationStage);
+  });
+
+  it.each([
+    ["prd", "generating-ui"],
+    ["prototype", "drafting-prd"],
+  ] as const)("fails neutral when trusted %s motion conflicts with stage %s", (motionKind, generationStage) => {
+    const { container } = render(
+      <ProjectStageMotionFX
+        generationStage={generationStage}
+        isOverview={false}
+        motionKind={motionKind}
+        phase="generating"
+      />,
+    );
+
+    expect(container.querySelector("[data-canvas-generation-motion]")).toBeNull();
+  });
+
+  it.each(["complete", "idle"] as const)("clears motion when the project phase becomes %s", async (phase) => {
+    const rendered = render(
+      <ProjectStageMotionFX
+        generationStage="drafting-prd"
+        isOverview={false}
+        motionKind="prd"
+        phase="generating"
+      />,
+    );
+    expect(rendered.container.querySelector('[data-canvas-generation-motion="prd"]')).not.toBeNull();
+
+    rendered.rerender(
+      <ProjectStageMotionFX
+        generationStage="drafting-prd"
+        isOverview={false}
+        motionKind="prd"
+        phase={phase}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(rendered.container.querySelector("[data-canvas-generation-motion]")).toBeNull();
+    });
+  });
+
+  it("projects the same Prototype motion across startup and reconnect stage updates", () => {
     const rendered = render(
       <ProjectStageMotionFX
         generationStage={null}
         isOverview={false}
-        isPrdRun
+        motionKind="prototype"
         phase="generating"
-        projectMode="document"
       />,
     );
-
-    const initialMotion = rendered.container.querySelector('[data-canvas-generation-motion="prd"]');
+    const initialMotion = rendered.container.querySelector(
+      '[data-canvas-generation-motion="prototype"]',
+    );
     expect(initialMotion).not.toBeNull();
-    expect(initialMotion?.hasAttribute("data-generation-stage")).toBe(false);
 
     rendered.rerender(
       <ProjectStageMotionFX
-        generationStage="drafting-prd"
+        generationStage="thinking"
         isOverview={false}
-        isPrdRun
+        motionKind="prototype"
         phase="generating"
-        projectMode="document"
       />,
     );
-
-    const attachedMotion = rendered.container.querySelector('[data-canvas-generation-motion="prd"]');
-    expect(attachedMotion).toBe(initialMotion);
-    expect(attachedMotion?.getAttribute("data-generation-stage")).toBe("drafting-prd");
-  });
-
-  it("mounts PRD canvas motion when an active Run attaches after the document view", () => {
-    const rendered = render(
-      <ProjectStageMotionFX
-        generationStage={null}
-        isOverview={false}
-        isPrdRun={false}
-        phase="generating"
-        projectMode="document"
-      />,
-    );
-    expect(rendered.container.querySelector("[data-canvas-generation-motion]")).toBeNull();
-
-    rendered.rerender(
-      <ProjectStageMotionFX
-        generationStage="validating-prd"
-        isOverview={false}
-        isPrdRun
-        phase="refining"
-        projectMode="document"
-      />,
-    );
-
-    expect(rendered.container.querySelector('[data-canvas-generation-motion="prd"]'))
-      .not.toBeNull();
-  });
-
-  it("does not leak PRD canvas motion into prototype or terminal document states", () => {
-    const rendered = render(
-      <ProjectStageMotionFX
-        generationStage="drafting-prd"
-        isOverview={false}
-        isPrdRun={false}
-        phase="generating"
-        projectMode="document"
-      />,
-    );
-    expect(rendered.container.querySelector("[data-canvas-generation-motion]")).toBeNull();
-
-    rendered.rerender(
-      <ProjectStageMotionFX
-        generationStage="validating-prd"
-        isOverview={false}
-        isPrdRun
-        phase="complete"
-        projectMode="document"
-      />,
-    );
-    expect(rendered.container.querySelector("[data-canvas-generation-motion]")).toBeNull();
-
     rendered.rerender(
       <ProjectStageMotionFX
         generationStage="generating-ui"
         isOverview={false}
-        isPrdRun={false}
+        motionKind="prototype"
         phase="generating"
-        projectMode="generated"
       />,
     );
-    expect(rendered.container.querySelector('[data-canvas-generation-motion="prototype"]'))
-      .not.toBeNull();
+
+    const reconnectedMotion = rendered.container.querySelector(
+      '[data-canvas-generation-motion="prototype"]',
+    );
+    expect(reconnectedMotion).toBe(initialMotion);
+    expect(reconnectedMotion?.getAttribute("data-generation-stage")).toBe("generating-ui");
+  });
+
+  it("keeps motion semantics mounted when reduced motion is required", () => {
+    const { container } = render(
+      <MotionConfig reducedMotion="always">
+        <ProjectStageMotionFX
+          generationStage="thinking"
+          isOverview={false}
+          motionKind="prototype"
+          phase="generating"
+        />
+      </MotionConfig>,
+    );
+
+    expect(container.querySelector('[data-canvas-generation-motion="prototype"]')).not.toBeNull();
+  });
+
+  it.each([
+    ["prd", "document", "正在生成：需求文档"],
+    ["prototype", "prototype", "正在生成：原型界面"],
+  ] as const)(
+    "renders a transient %s pending surface before the first real artifact node exists",
+    (motionKind, variant, label) => {
+      const { container } = render(
+        <ProjectStageMotionFX
+          generationStage="thinking"
+          isOverview={false}
+          motionKind={motionKind}
+          phase="generating"
+          showPendingArtifact
+        />,
+      );
+
+      expect(container.querySelector(
+        `[data-workbench-transient-artifact="${motionKind}"]`,
+      )).not.toBeNull();
+      expect(container.querySelector(
+        `[data-workbench-artifact-state="pending"][data-workbench-artifact-variant="${variant}"]`,
+      )).not.toBeNull();
+      expect(screen.getByText(label)).not.toBeNull();
+      expect(container.querySelector(".react-flow__node")).toBeNull();
+      expect(container.querySelector("[data-workbench-generated-node]")).toBeNull();
+    },
+  );
+
+  it.each([
+    ["complete", "prd", "validating-prd"],
+    ["generating", "prd", "generating-ui"],
+    ["generating", "neutral", "thinking"],
+  ] as const)(
+    "does not render a transient artifact for phase %s, motion %s, stage %s",
+    (phase, motionKind, generationStage) => {
+      const { container } = render(
+        <ProjectStageMotionFX
+          generationStage={generationStage}
+          isOverview={false}
+          motionKind={motionKind}
+          phase={phase}
+          showPendingArtifact
+        />,
+      );
+
+      expect(container.querySelector("[data-workbench-transient-artifact]")).toBeNull();
+    },
+  );
+
+  it("does not mount Prototype motion over the generated overview field", () => {
+    const { container } = render(
+      <ProjectStageMotionFX
+        generationStage="thinking"
+        isOverview
+        motionKind="prototype"
+        phase="generating"
+      />,
+    );
+
+    expect(container.querySelector("[data-canvas-generation-motion]")).toBeNull();
   });
 
   it("uses the 产品工作台 brand and preserves viewer command permissions", () => {
@@ -179,6 +304,31 @@ describe("workbench project chrome", () => {
     );
 
     expect(screen.getByText("贴士：让产品工作台优化设计中的特定部分")).not.toBeNull();
+  });
+
+  it("unmounts selected-node actions for the full lifetime of an active Run", () => {
+    const props = {
+      availability: {
+        canCopyLink: true,
+        canDelete: true,
+        canDuplicate: true,
+        canRename: true,
+      },
+      canOpenVersions: true,
+      menuOpen: false,
+      onCopyLink: vi.fn(),
+      onDelete: vi.fn(),
+      onDuplicate: vi.fn(),
+      onOpenVersions: vi.fn(),
+      onRename: vi.fn(),
+      onToggleMenu: vi.fn(),
+      open: true,
+    };
+    const rendered = render(<SelectedActionPill {...props} activeRun={false} />);
+
+    expect(rendered.container.querySelector("[data-selected-action]")).not.toBeNull();
+    rendered.rerender(<SelectedActionPill {...props} activeRun />);
+    expect(rendered.container.querySelector("[data-selected-action]")).toBeNull();
   });
 
   it("submits the normalized rename and closes after success", async () => {

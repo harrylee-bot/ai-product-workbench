@@ -38,6 +38,7 @@ import type {
   WorkbenchProjectPhase,
   WorkbenchRunActivityItem,
   WorkbenchRunMessageItem,
+  WorkbenchRunMotionKind,
 } from "@/lib/workbench/features";
 import { ProjectLoadStatus } from "@/lib/workbench/features/projects";
 import {
@@ -246,6 +247,7 @@ export type ProjectScreenViewContract = {
     generationStage: RunGenerationStage | null;
     isPrdRun: boolean;
     messages: WorkbenchRunMessageItem[];
+    motionKind: WorkbenchRunMotionKind;
     onCancel: () => void;
     onRetry: () => void;
     onSelectTask: (task: string) => void;
@@ -271,6 +273,14 @@ export function ProjectScreenView({
 }: {
   controller: ProjectScreenViewContract;
 }) {
+  const showTransientPendingArtifact = canvas.activeRun
+    && (
+      (runPanels.motionKind === "prd"
+        && !canvas.nodes.some((node) => node.type === "documentCanvas"))
+      || (runPanels.motionKind === "prototype"
+        && !canvas.nodes.some((node) => node.type === "generatedScreen"))
+    );
+
   return (
     <motion.section
       animate={{ opacity: 1 }}
@@ -287,10 +297,10 @@ export function ProjectScreenView({
     >
       <ProjectStageMotionFX
         generationStage={runPanels.generationStage}
-        isPrdRun={runPanels.isPrdRun}
         isOverview={root.isGeneratedOverview}
+        motionKind={runPanels.motionKind}
         phase={root.phase}
-        projectMode={root.projectMode}
+        showPendingArtifact={showTransientPendingArtifact}
       />
       <ProjectChromeVignette isOverview={root.isGeneratedOverview} />
       <ProjectTopBar
@@ -356,10 +366,12 @@ export function ProjectScreenView({
         isPrdRun={runPanels.isPrdRun}
         onCancel={runPanels.onCancel}
         onRetry={runPanels.onRetry}
+        prompt={runPanels.prompt}
         runPhaseLabel={runPanels.runPhaseLabel}
         runStatus={runPanels.runStatus}
       />
       <SelectedActionPill
+        activeRun={canvas.activeRun}
         availability={canvas.selectedActionAvailability}
         canOpenVersions={Boolean(canvas.selectedArtifactReference)}
         menuOpen={canvas.selectedActionOpen}

@@ -1,4 +1,14 @@
 export const WORKBENCH_WEB_STARTUP_TIMEOUT_MS = 180_000;
+
+export function managedWorkbenchWebDistDir(processId, port) {
+  if (!Number.isSafeInteger(processId) || processId < 1) {
+    throw new Error("Managed Workbench Web process id is invalid");
+  }
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("Managed Workbench Web port is invalid");
+  }
+  return `.next-fixture/e2e-${processId}-${port}`;
+}
 export const WORKBENCH_PROJECT_WARMUP_PATH = "/projects/project-run-preview";
 export const WORKBENCH_HOME_WARMUP_PATH = "/";
 export const WORKBENCH_PROJECT_WARMUP_COOKIE =

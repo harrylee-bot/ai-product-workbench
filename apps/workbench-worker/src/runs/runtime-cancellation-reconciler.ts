@@ -1,5 +1,6 @@
 import { runtimeCancelQueue } from "@workbench/workbench-contracts";
 import type { PrismaClient } from "@workbench/workbench-db";
+import { recordRuntimeLivenessMetric } from "@workbench/workbench-telemetry";
 
 type RuntimeCancelQueueSender = {
   send(
@@ -48,13 +49,25 @@ export class RuntimeCancellationReconciler {
         select: { id: true },
       });
       for (const candidate of candidates) {
+        const startedAt = performance.now();
         try {
           await this.queue.send(
             runtimeCancelQueue,
             { runId: candidate.id },
             { singletonKey: candidate.id },
           );
+          recordRuntimeLivenessMetric({
+            operation: "reconcile",
+            outcome: "recovered",
+            durationMs: performance.now() - startedAt,
+          });
         } catch (error) {
+          recordRuntimeLivenessMetric({
+            operation: "reconcile",
+            outcome: "error",
+            durationMs: performance.now() - startedAt,
+            errorCode: "RUNTIME_CANCELLATION_RECONCILE_FAILED",
+          });
           this.onError(error);
         }
       }

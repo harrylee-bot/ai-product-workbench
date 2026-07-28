@@ -19,19 +19,36 @@ export function workbenchPendingArtifactTitle(
     : `${subject} · 界面 ${index + 1}`;
 }
 
-export function WorkbenchDocumentLoading() {
-  return (
-    <div
-      aria-live="polite"
-      className="grid h-full w-full place-items-center px-[24px]"
-      data-workbench-artifact-state="pending"
-      data-workbench-artifact-variant="document"
-    >
-      <span className="text-[16px] font-medium text-[#c7cad0]">
-        Loading document...
-      </span>
-    </div>
-  );
+export function WorkbenchDocumentLoading({
+  mode = "blocking",
+  phase = "generating",
+}: {
+  mode?: "blocking" | "refresh";
+  phase?: Extract<WorkbenchArtifactFallbackPhase, "generating" | "refining">;
+}) {
+  if (mode === "refresh") {
+    const label = phase === "refining" ? "正在细化：需求文档" : "正在刷新：需求文档";
+    return (
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className="pointer-events-none absolute inset-0"
+        data-workbench-artifact-state="refreshing"
+        role="status"
+      >
+        <div className="absolute right-[18px] top-[18px] flex max-w-[calc(100%-36px)] items-center gap-[9px] rounded-[6px] border border-white/[0.10] bg-[#202124]/92 px-[14px] py-[9px] text-[14px] font-semibold text-[#f1f3f4] shadow-[0_16px_48px_-24px_rgba(0,0,0,0.8)]">
+          <span aria-hidden="true" className="workbench-artifact-spinner size-[14px] shrink-0 rounded-full border-2 border-current border-t-transparent" />
+          <span className="min-w-0 truncate">{label}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return <WorkbenchArtifactFallback
+    phase={phase}
+    title="需求文档"
+    variant="document"
+  />;
 }
 
 export function WorkbenchArtifactFallback({
@@ -77,7 +94,7 @@ export function WorkbenchArtifactFallback({
             ? "bg-[#f1f3f0]/88 text-[#303235]"
             : "bg-[#2a2b2e]/88 text-[#f1f3f4]",
         )}>
-          <span className="size-[15px] shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          <span className="workbench-artifact-spinner size-[15px] shrink-0 rounded-full border-2 border-current border-t-transparent" />
           <span className="min-w-0 truncate">{label}</span>
         </div>
       </div>

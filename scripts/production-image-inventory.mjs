@@ -21,9 +21,95 @@ const CHAIN_ID_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const LEGACY_DEERFLOW_VALIDATOR_NODE_ROLLBACK_COMMITS = new Set([
   "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
 ]);
+const PULL_REQUEST_IMAGE_PROBES = Object.freeze({
+  api: { probe: "node-config-fail-fast", command_path: "apps/workbench-api/dist/main.js" },
+  "api-migrator": { probe: "migrator-config-fail-fast", command_path: "" },
+  deerflow: { probe: "deerflow-runtime-syntax", command_path: "" },
+  "export-worker": { probe: "node-config-fail-fast", command_path: "apps/workbench-export-worker/dist/main.js" },
+  "file-worker": { probe: "node-config-fail-fast", command_path: "apps/workbench-file-worker/dist/main.js" },
+  "import-worker": { probe: "node-config-fail-fast", command_path: "apps/workbench-import-worker/dist/main.js" },
+  preview: { probe: "node-config-fail-fast", command_path: "apps/workbench-preview/dist/main.js" },
+  quartz: { probe: "nginx-startup", command_path: "" },
+  "runtime-worker": { probe: "node-config-fail-fast", command_path: "apps/workbench-worker/dist/main.js" },
+  web: { probe: "next-startup", command_path: "" },
+});
+const PULL_REQUEST_IMAGE_GLOBAL_INPUTS = new Set([
+  ".dockerignore",
+  ".github/workflows/workbench-ci.yml",
+  "deploy/production-image-inventory.json",
+  "deploy/workbench.env.example",
+  "scripts/production-image-inventory.mjs",
+]);
 
 export function loadProductionImageInventory() {
   return JSON.parse(readText("deploy/production-image-inventory.json"));
+}
+
+export function affectedProductionImageMatrix({
+  changedPaths,
+  inventory = loadProductionImageInventory(),
+  readDockerfile = readText,
+} = {}) {
+  const allImages = inventory.candidateImages ?? [];
+  const allEntries = () => ({ include: allImages.map(pullRequestImageMatrixEntry) });
+  if (!Array.isArray(changedPaths)) return allEntries();
+
+  const normalizedPaths = [];
+  for (const changedPath of changedPaths) {
+    const normalized = normalizeRepositoryPath(changedPath);
+    if (!normalized) return allEntries();
+    normalizedPaths.push(normalized);
+  }
+  if (normalizedPaths.some((path) => PULL_REQUEST_IMAGE_GLOBAL_INPUTS.has(path))) return allEntries();
+
+  let inputsByImage;
+  try {
+    inputsByImage = new Map(allImages.map((image) => [
+      image.id,
+      productionTargetBuildInputs(image, readDockerfile(image.dockerfile)),
+    ]));
+  } catch {
+    return allEntries();
+  }
+
+  const selected = allImages.filter((image) => normalizedPaths.some((changedPath) => {
+    if (changedPath === image.composeFile) return true;
+    return [...inputsByImage.get(image.id)].some((input) => repositoryPathContains(input, changedPath));
+  }));
+  return { include: selected.map(pullRequestImageMatrixEntry) };
+}
+
+export function changedPathsForGitRange({ base, head, execute = execFileSync }) {
+  assert(COMMIT_PATTERN.test(base ?? ""), "affected image base commit must be a full lowercase SHA");
+  assert(COMMIT_PATTERN.test(head ?? ""), "affected image head commit must be a full lowercase SHA");
+  const output = execute(
+    "git",
+    [
+      "diff",
+      "--name-status",
+      "--find-renames",
+      "--find-copies",
+      "--diff-filter=ACDMRTUXB",
+      "-z",
+      `${base}...${head}`,
+      "--",
+    ],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const fields = String(output).split("\0");
+  if (fields.at(-1) === "") fields.pop();
+  const paths = [];
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index++];
+    assert(/^[ACDMRTUXB](?:\d{1,3})?$/u.test(status), "git returned an invalid affected-image change status");
+    const pathCount = status.startsWith("R") || status.startsWith("C") ? 2 : 1;
+    for (let pathIndex = 0; pathIndex < pathCount; pathIndex += 1) {
+      const path = fields[index++];
+      assert(path !== undefined && path.length > 0, "git returned an incomplete affected-image path record");
+      paths.push(path);
+    }
+  }
+  return [...new Set(paths)];
 }
 
 export function loadVerifiedProductionImageManifest({
@@ -258,6 +344,7 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
     "production image signer identity must bind the production branch workflow",
   );
   assertProductionImageMatrix({ ci, inventory, ids, workflowSource });
+  assertPullRequestProductionImageMatrix({ ci, inventory, ids });
   const acceptance = readYaml(".github/workflows/workbench-production-acceptance.yml");
   const acceptanceSource = readText(".github/workflows/workbench-production-acceptance.yml");
   assertProductionAcceptanceImageWorkflow({ workflow: acceptance, workflowSource: acceptanceSource });
@@ -432,6 +519,92 @@ function assertProductionImageMatrix({ ci, inventory, ids, workflowSource }) {
     "production-deployment-config.json",
   ]) {
     assert(workflowSource.includes(marker), `production image workflow is missing ${marker}`);
+  }
+}
+
+function assertPullRequestProductionImageMatrix({ ci, inventory, ids }) {
+  const quality = ci.jobs?.quality;
+  assert(
+    String(quality?.outputs?.pr_production_image_matrix).includes("steps.affected_production_images.outputs.matrix")
+      && String(quality?.outputs?.pr_production_image_count).includes("steps.affected_production_images.outputs.count"),
+    "quality must expose the affected PR production image matrix and count",
+  );
+  const qualityCheckout = quality?.steps?.find((step) => step.name === "Checkout");
+  assert(qualityCheckout?.with?.["fetch-depth"] === 0, "affected image discovery requires full PR Git history");
+  const selector = quality?.steps?.find((step) => step.id === "affected_production_images");
+  const selectorSource = String(selector?.run ?? "");
+  assert(
+    String(selector?.if).includes("github.event_name == 'pull_request'")
+      && String(selector?.env?.PR_BASE_SHA).includes("github.event.pull_request.base.sha")
+      && String(selector?.env?.PR_HEAD_SHA).includes("github.event.pull_request.head.sha")
+      && selectorSource.includes("production-image-inventory.mjs")
+      && selectorSource.includes("--affected-matrix")
+      && selectorSource.includes("--base")
+      && selectorSource.includes("--head"),
+    "quality must derive the PR image matrix from the exact pull request Git range",
+  );
+
+  const job = ci.jobs?.["pr-production-images"];
+  assert(job, "PR production image build job is required");
+  assert(
+    String(job.if).includes("github.event_name == 'pull_request'")
+      && String(job.if).includes("needs.quality.outputs.pr_production_image_count != '0'"),
+    "PR production image job must run for every non-empty affected image set",
+  );
+  assertDeepEqual(job.needs, ["quality"], "PR production image job must wait for quality");
+  assertDeepEqual(job.permissions, { contents: "read" }, "PR production image job must remain unprivileged");
+  assert(
+    String(job.strategy?.matrix).includes("fromJSON(needs.quality.outputs.pr_production_image_matrix)"),
+    "PR production image job must consume the computed affected-image matrix",
+  );
+  const matrix = affectedProductionImageMatrix({ inventory }).include;
+  const matrixById = new Map(matrix.map((entry) => [entry.name, entry]));
+  assertDeepEqual(
+    [...matrixById.keys()].sort(),
+    [...ids].sort(),
+    "PR production image fallback matrix and deploy inventory must contain the same image IDs",
+  );
+  for (const image of inventory.candidateImages) {
+    const entry = matrixById.get(image.id);
+    assert(entry, `PR production image fallback matrix is missing ${image.id}`);
+    assert(entry.dockerfile === image.dockerfile, `${image.id} PR Dockerfile differs from inventory`);
+    assert(entry.target === image.target, `${image.id} PR target differs from inventory`);
+    assert(entry.context === ".", `${image.id} PR build context must be the repository root`);
+    assert(typeof entry.probe === "string" && entry.probe.length > 0, `${image.id} PR runtime probe is missing`);
+  }
+  const buildStep = job.steps?.find((step) => step.name === "Build and probe production target without publishing");
+  assert(!buildStep?.if, "affected PR production image builds must not inherit a production-only step guard");
+  const buildSource = String(buildStep?.run ?? "");
+  for (const marker of [
+    "docker buildx build",
+    "--load",
+    "org.opencontainers.image.revision",
+    "docker image inspect",
+    "docker run --rm",
+    "DEERFLOW_BASE_IMAGE",
+    "DEERFLOW_NODE_IMAGE",
+    "DEERFLOW_SOURCE_COMMIT",
+    "WORKBENCH_NODE_IMAGE",
+    "WORKBENCH_NGINX_IMAGE",
+    "--network none",
+    "--read-only",
+    "--cap-drop ALL",
+    "--security-opt no-new-privileges:true",
+    "node-config-fail-fast",
+    "migrator-config-fail-fast",
+    "next-startup",
+    "nginx-startup",
+    "deerflow-runtime-syntax",
+    "--entrypoint node",
+    "--check",
+    "uv run --no-sync uvicorn --help",
+    "Config.Cmd",
+    "Config.Entrypoint",
+  ]) {
+    assert(buildSource.includes(marker), `PR production image build is missing ${marker}`);
+  }
+  for (const forbidden of ["--push", "docker push", "cosign", "docker/login-action"]) {
+    assert(!buildSource.includes(forbidden), `PR production image build must not execute ${forbidden}`);
   }
 }
 
@@ -697,6 +870,133 @@ function isImmutableUri(value) {
   return false;
 }
 
+function pullRequestImageMatrixEntry(image) {
+  const probe = PULL_REQUEST_IMAGE_PROBES[image.id];
+  assert(probe, `${image.id} PR production image probe is not defined`);
+  return {
+    name: image.id,
+    dockerfile: image.dockerfile,
+    target: image.target,
+    context: ".",
+    probe: probe.probe,
+    command_path: probe.command_path,
+  };
+}
+
+function productionTargetBuildInputs(image, dockerfileSource) {
+  assertImageDefinition(image);
+  const stages = [];
+  let currentStage;
+  for (const instruction of dockerfileInstructions(dockerfileSource)) {
+    if (instruction.keyword === "FROM") {
+      const match = instruction.value.match(/^(?:--platform=\S+\s+)?(\S+)\s+AS\s+(\S+)$/iu);
+      assert(match, `${image.id} Dockerfile FROM instructions must name every stage`);
+      currentStage = { name: match[2].toLowerCase(), parent: match[1].toLowerCase(), instructions: [] };
+      stages.push(currentStage);
+      continue;
+    }
+    if (currentStage) currentStage.instructions.push(instruction);
+  }
+
+  const stagesByName = new Map(stages.map((stage) => [stage.name, stage]));
+  const target = stagesByName.get(image.target.toLowerCase());
+  assert(target, `${image.id} Dockerfile target ${image.target} is missing`);
+  const inputs = new Set([image.dockerfile]);
+  const visited = new Set();
+  const visit = (stage) => {
+    if (visited.has(stage.name)) return;
+    visited.add(stage.name);
+    const parent = stagesByName.get(stage.parent);
+    if (parent) visit(parent);
+    for (const instruction of stage.instructions) {
+      if (instruction.keyword === "RUN" && /--mount=type=bind(?:,|\s)/u.test(instruction.value)) {
+        throw new Error(`${image.id} Dockerfile bind mount inputs require explicit inventory support`);
+      }
+      if (instruction.keyword !== "COPY" && instruction.keyword !== "ADD") continue;
+      const copy = parseDockerCopyInstruction(instruction.value, image.id);
+      if (copy.from) {
+        const sourceStage = stagesByName.get(copy.from.toLowerCase());
+        if (sourceStage) visit(sourceStage);
+        continue;
+      }
+      for (const source of copy.sources) inputs.add(source);
+    }
+  };
+  visit(target);
+  return inputs;
+}
+
+function dockerfileInstructions(source) {
+  assert(typeof source === "string" && source.length > 0, "Dockerfile source is required");
+  return source
+    .replace(/\\\r?\n/gu, " ")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => {
+      const match = line.match(/^([A-Z]+)\s+(.+)$/iu);
+      assert(match, `unsupported Dockerfile instruction: ${line}`);
+      return { keyword: match[1].toUpperCase(), value: match[2].trim() };
+    });
+}
+
+function parseDockerCopyInstruction(value, imageId) {
+  let remaining = value.trim();
+  let from;
+  while (remaining.startsWith("--")) {
+    const separator = remaining.search(/\s/u);
+    assert(separator > 2, `${imageId} Dockerfile COPY flag is invalid`);
+    const flag = remaining.slice(0, separator);
+    remaining = remaining.slice(separator).trimStart();
+    if (flag === "--from") {
+      const fromSeparator = remaining.search(/\s/u);
+      assert(fromSeparator > 0, `${imageId} Dockerfile COPY --from value is missing`);
+      from = remaining.slice(0, fromSeparator);
+      remaining = remaining.slice(fromSeparator).trimStart();
+    } else if (flag.startsWith("--from=")) {
+      from = flag.slice("--from=".length);
+    }
+  }
+
+  let values;
+  if (remaining.startsWith("[")) {
+    values = JSON.parse(remaining);
+    assert(Array.isArray(values) && values.every((entry) => typeof entry === "string"), `${imageId} Dockerfile JSON COPY is invalid`);
+  } else {
+    assert(!/["']/u.test(remaining), `${imageId} Dockerfile quoted COPY paths require JSON syntax`);
+    values = remaining.split(/\s+/u);
+  }
+  assert(values.length >= 2, `${imageId} Dockerfile COPY requires a source and destination`);
+  return {
+    from,
+    sources: from ? [] : values.slice(0, -1).map((source) => normalizeDockerBuildInput(source, imageId)),
+  };
+}
+
+function normalizeDockerBuildInput(value, imageId) {
+  assert(!/[$*?\[\]{}]/u.test(value), `${imageId} Dockerfile has a dynamic or globbed local build input`);
+  assert(!value.startsWith("/") && !value.includes("\\"), `${imageId} Dockerfile local build input is invalid`);
+  const normalized = value.replace(/^\.\//u, "").replace(/\/+$/u, "");
+  assert(
+    normalized === "" || normalized === "." || !normalized.split("/").some((part) => part === "" || part === ".."),
+    `${imageId} Dockerfile local build input escapes the build context`,
+  );
+  return normalized === "." ? "" : normalized;
+}
+
+function normalizeRepositoryPath(value) {
+  if (typeof value !== "string" || value.length === 0 || value.startsWith("/") || value.includes("\\") || value.includes("\0")) {
+    return null;
+  }
+  const normalized = value.replace(/^\.\//u, "").replace(/\/+$/u, "");
+  if (!normalized || normalized.split("/").some((part) => part === "" || part === "." || part === "..")) return null;
+  return normalized;
+}
+
+function repositoryPathContains(input, changedPath) {
+  return input === "" || changedPath === input || changedPath.startsWith(`${input}/`);
+}
+
 function assertImageDefinition(image) {
   for (const field of ["id", "composeFile", "composeService", "imageEnvironment", "dockerfile", "target"]) {
     assert(typeof image?.[field] === "string" && image[field].length > 0, `candidate image ${field} is required`);
@@ -736,7 +1036,12 @@ function parseArguments(argv) {
     if (argument === "--contract") {
       assert(!result.contract, "--contract must not be repeated");
       result.contract = true;
-    } else if (argument === "--manifest") index = singleValue(argument, "manifestPath", index);
+    } else if (argument === "--affected-matrix") {
+      assert(!result.affectedMatrix, "--affected-matrix must not be repeated");
+      result.affectedMatrix = true;
+    } else if (argument === "--base") index = singleValue(argument, "baseCommit", index);
+    else if (argument === "--head") index = singleValue(argument, "headCommit", index);
+    else if (argument === "--manifest") index = singleValue(argument, "manifestPath", index);
     else if (argument === "--bundle") index = singleValue(argument, "bundlePath", index);
     else if (argument === "--certificate-identity") index = singleValue(argument, "certificateIdentity", index);
     else if (argument === "--certificate-oidc-issuer") index = singleValue(argument, "certificateOidcIssuer", index);
@@ -769,6 +1074,22 @@ function parseArguments(argv) {
 
 function main() {
   const args = parseArguments(process.argv.slice(2));
+  if (args.affectedMatrix) {
+    assert(
+      !args.contract && !args.manifestPath && !args.assemble && !args.inspectLocalImages
+        && args.recordPaths.length === 0 && args.excludeImageIds.length === 0,
+      "--affected-matrix cannot be combined with manifest, contract, or assemble modes",
+    );
+    let changedPaths;
+    try {
+      changedPaths = changedPathsForGitRange({ base: args.baseCommit, head: args.headCommit });
+    } catch (error) {
+      console.error(`production image inventory: changed-file discovery failed; selecting all images (${error instanceof Error ? error.message : error})`);
+    }
+    process.stdout.write(`${JSON.stringify(affectedProductionImageMatrix({ changedPaths }))}\n`);
+    return;
+  }
+  assert(!args.baseCommit && !args.headCommit, "--base and --head require --affected-matrix");
   if (!args.contract && !args.manifestPath && !args.assemble) {
     assertProductionImageContract();
     console.log("Production image inventory contract passed.");
