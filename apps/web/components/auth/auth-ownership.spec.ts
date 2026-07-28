@@ -39,7 +39,7 @@ describe("authentication UI ownership", () => {
       "@/components/auth/auth-submit-button",
       "@/components/auth/auth-toast",
     ]);
-    await expectImports("app/(auth)/register/page.tsx", [
+    await expectImports("app/(auth)/register/register-page.tsx", [
       "@/components/auth/auth-icons",
       "@/components/auth/auth-toast",
     ]);

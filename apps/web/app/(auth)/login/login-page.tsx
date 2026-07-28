@@ -20,15 +20,19 @@ import {
   WORKBENCH_PASSWORD_MIN_LENGTH,
 } from "@/lib/auth/workbench-auth.shared";
 
-export function LoginPage({ enterpriseSsoEnabled }: { enterpriseSsoEnabled: boolean }) {
+export function LoginPage({
+  enterpriseSsoEnabled,
+  publicRegistrationEnabled,
+}: {
+  enterpriseSsoEnabled: boolean;
+  publicRegistrationEnabled: boolean;
+}) {
   const searchParams = useSearchParams();
   const { login, loginWithOidc } = useWorkbenchAuth();
   const [account, setAccount] = useState("");
   const [isSuccessful, setIsSuccessful] = useState(false);
   const [isSsoPending, setIsSsoPending] = useState(false);
   const nextPath = safeAuthReturnPath(searchParams.get("next"));
-  const publicRegistrationEnabled =
-    process.env.NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED === "true";
 
   const handleSubmit = async (formData: FormData) => {
     const accountValue = ((formData.get("account") as string) ?? "").trim();

@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const auth = vi.hoisted(() => ({
   login: vi.fn(),
@@ -19,20 +19,15 @@ vi.mock("next/navigation", () => ({
 
 import { LoginPage } from "./login-page";
 
-beforeEach(() => {
-  vi.stubEnv("NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED", "true");
-});
-
 afterEach(() => {
   auth.login.mockReset();
   auth.loginWithOidc.mockReset();
   cleanup();
-  vi.unstubAllEnvs();
 });
 
 describe("product account login page", () => {
   it("shows product credentials and optional SSO without starting a redirect", () => {
-    render(<LoginPage enterpriseSsoEnabled />);
+    render(<LoginPage enterpriseSsoEnabled publicRegistrationEnabled />);
 
     expect(screen.getByLabelText("用户名或邮箱")).toBeTruthy();
     expect(screen.getByLabelText("密码")).toBeTruthy();
@@ -45,15 +40,14 @@ describe("product account login page", () => {
   });
 
   it("hides self-registration when production policy is closed", () => {
-    vi.stubEnv("NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED", "false");
-    render(<LoginPage enterpriseSsoEnabled />);
+    render(<LoginPage enterpriseSsoEnabled publicRegistrationEnabled={false} />);
 
     expect(screen.queryByRole("link", { name: "创建一个" })).toBeNull();
     expect(screen.getByLabelText("用户名或邮箱")).toBeTruthy();
   });
 
   it("hides the enterprise SSO entry when it is not configured", () => {
-    render(<LoginPage enterpriseSsoEnabled={false} />);
+    render(<LoginPage enterpriseSsoEnabled={false} publicRegistrationEnabled />);
 
     expect(screen.getByLabelText("用户名或邮箱")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "企业 SSO 登录" })).toBeNull();
@@ -63,7 +57,7 @@ describe("product account login page", () => {
     const driver = userEvent.setup();
     auth.login.mockRejectedValueOnce(new Error("expected test rejection"));
     auth.loginWithOidc.mockResolvedValueOnce(undefined);
-    render(<LoginPage enterpriseSsoEnabled />);
+    render(<LoginPage enterpriseSsoEnabled publicRegistrationEnabled />);
 
     await driver.type(screen.getByLabelText("用户名或邮箱"), "Product.Owner");
     await driver.type(screen.getByLabelText("密码"), "Password1!");
