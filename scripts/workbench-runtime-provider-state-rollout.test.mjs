@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -241,6 +241,7 @@ test("detects receipt tampering and refuses out-of-order phases", async () => {
 });
 
 test("requires staging and production receipts outside the repository", async () => {
+  await mkdir(path.join(process.cwd(), "output"), { recursive: true });
   const root = await mkdtemp(path.join(process.cwd(), "output", "runtime-rollout-test-"));
   const observationPath = path.join(root, "backfill.json");
   await writeFile(observationPath, `${JSON.stringify(observationFor("backfill", {
