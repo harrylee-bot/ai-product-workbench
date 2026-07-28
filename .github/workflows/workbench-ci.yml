@@ -400,6 +400,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare contracts and generated clients
+        run: npm run workbench:prepare
+        env:
+          WORKBENCH_DATABASE_URL: ${{ env.WORKBENCH_DATABASE_URL }}
+
       - name: Provision PostgreSQL extensions
         run: npm run db:extensions:provision
 
