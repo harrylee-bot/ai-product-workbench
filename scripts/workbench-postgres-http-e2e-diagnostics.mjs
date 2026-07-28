@@ -105,7 +105,7 @@ export function diagnosticErrorClass(error) {
   return enumClass(connectionErrorClass(error), errorClasses, "UnknownError");
 }
 
-export function diagnosticHttpSuccessEvidence({
+export function httpDiagnosticSuccessEvidence({
   candidateSha,
   controlledProvider,
   fakeRuntimeState,
@@ -164,7 +164,7 @@ export function diagnosticFakeRuntimeState(input) {
       role: enumClass(record?.role, storageRoles),
     })),
     gatewayUploads: arrayOf(state.gatewayUploads).map((upload) => ({
-      pathClass: diagnosticHttpPathClass(upload?.path),
+      pathClass: httpDiagnosticPathClass(upload?.path),
       byteSize: byteSize(upload?.byteSize),
       matchedObjectCount: arrayOf(upload?.matchedStorageKeys).length,
     })),
@@ -173,7 +173,7 @@ export function diagnosticFakeRuntimeState(input) {
     })),
     requests: arrayOf(state.requests).map((request) => ({
       ...(request?.method ? { method: enumClass(request.method, httpMethods) } : {}),
-      ...(request?.path ? { pathClass: diagnosticHttpPathClass(request.path) } : {}),
+      ...(request?.path ? { pathClass: httpDiagnosticPathClass(request.path) } : {}),
       ...(request?.kind ? { kind: enumClass(request.kind, requestKinds) } : {}),
       ...(request?.errorClass ? { errorClass: enumClass(request.errorClass, errorClasses, "UnknownError") } : {}),
     })),
@@ -191,7 +191,7 @@ export function diagnosticFakeRuntimeState(input) {
   }, null, 2);
 }
 
-function diagnosticHttpPathClass(value) {
+function httpDiagnosticPathClass(value) {
   if (typeof value !== "string" || !value.startsWith("/")) return "unknown";
   let pathname;
   try {

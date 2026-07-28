@@ -30,7 +30,7 @@ import {
 import {
   diagnosticErrorClass,
   diagnosticFakeRuntimeState,
-  diagnosticHttpSuccessEvidence,
+  httpDiagnosticSuccessEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
 
@@ -379,7 +379,7 @@ try {
     assert.ok(!serializedRuntimeRequests.includes(receipt), "private Gateway receipt reached DeerFlow runtime context");
   }
 
-  console.log(JSON.stringify(diagnosticHttpSuccessEvidence({
+  console.log(JSON.stringify(httpDiagnosticSuccessEvidence({
     candidateSha: candidateSourceCommit,
     controlledProvider,
     fakeRuntimeState: fakeRuntime.state,
@@ -4778,7 +4778,6 @@ async function runRealStackBrowserScenario({
     BETTER_AUTH_SECRET: "workbench-real-stack-browser-test-secret",
     WORKBENCH_DATABASE_SCHEMA: "workbench",
     WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "true",
-    NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "true",
     WORKBENCH_API_INTERNAL_URL: oidcApiBaseUrl,
     WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
     WORKBENCH_NEXT_TSCONFIG_PATH: path.basename(temporaryWebTsconfigPath),

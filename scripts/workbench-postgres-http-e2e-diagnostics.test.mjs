@@ -5,7 +5,7 @@ import test from "node:test";
 import {
   diagnosticErrorClass,
   diagnosticFakeRuntimeState,
-  diagnosticHttpSuccessEvidence,
+  httpDiagnosticSuccessEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 
 const checksum = "a".repeat(64);
@@ -169,7 +169,7 @@ test("diagnostic error classification never retains exception messages", () => {
 
 test("successful HTTP evidence retains results without raw identities, origins, or payloads", () => {
   const secret = "customer-secret-identity-81726354";
-  const evidence = diagnosticHttpSuccessEvidence({
+  const evidence = httpDiagnosticSuccessEvidence({
     candidateSha: "a".repeat(40),
     controlledProvider: "controlled-local-deerflow",
     sourceClean: true,
@@ -225,7 +225,7 @@ test("successful HTTP evidence retains results without raw identities, origins, 
 
 test("successful HTTP evidence fails closed for invalid candidate and provider values", () => {
   const secret = "never-log-this-provider-or-candidate";
-  const evidence = diagnosticHttpSuccessEvidence({
+  const evidence = httpDiagnosticSuccessEvidence({
     candidateSha: secret,
     controlledProvider: secret,
     sourceClean: false,
@@ -245,7 +245,7 @@ test("the real-stack harness records error classes and delegates diagnostic seri
   const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
 
   assert.match(source, /from "\.\/workbench-postgres-http-e2e-diagnostics\.mjs";/u);
-  assert.match(source, /diagnosticHttpSuccessEvidence\(\{/u);
+  assert.match(source, /httpDiagnosticSuccessEvidence\(\{/u);
   assert.doesNotMatch(source, /database: databaseName,/u);
   assert.doesNotMatch(source, /apiBaseUrl,\n\s+projectLifecycle,/u);
   assert.match(source, /state\.requests\.push\(\{ errorClass: diagnosticErrorClass\(error\) \}\);/u);
