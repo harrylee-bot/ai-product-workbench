@@ -261,8 +261,8 @@ export function ProjectSuggestionPills({
       className={cn(
         "workbench-project-suggestions absolute left-1/2 z-40 flex w-[580px] max-w-[calc(100vw-32px)] -translate-x-1/2 gap-[8px]",
         projectMode === "document"
-          ? "workbench-project-suggestions--document bottom-[178px]"
-          : "bottom-[122px]",
+          ? "workbench-project-suggestions--document"
+          : "workbench-project-suggestions--prototype",
       )}
       data-project-suggestions
       initial={{ opacity: 0, y: 10 }}

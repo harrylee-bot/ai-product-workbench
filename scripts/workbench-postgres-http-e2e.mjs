@@ -5054,7 +5054,9 @@ async function runRealStackBrowserScenario({
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const cdpSession = await context.newCDPSession(page);
     await cdpSession.send("Network.enable");
-    const pendingDocument = page.locator('[data-workbench-artifact-state="pending"][data-workbench-artifact-variant="document"]');
+    const pendingDocument = page
+      .locator('[data-workbench-artifact-state="pending"][data-workbench-artifact-variant="document"]')
+      .filter({ hasText: "正在细化：需求文档" });
     let pendingDocumentEvidence = [];
     try {
       await cdpSession.send("Network.emulateNetworkConditions", {

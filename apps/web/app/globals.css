@@ -1486,10 +1486,6 @@ textarea:focus-visible {
   .workbench-utility-bar {
     bottom: 166px;
   }
-
-  .workbench-project-suggestions--document {
-    bottom: 220px !important;
-  }
 }
 
 @media (min-width: 1024px) {
@@ -1554,6 +1550,20 @@ textarea:focus-visible {
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.045),
     0 20px 64px -38px rgba(0,0,0,0.98);
+}
+
+.workbench-project-suggestions--document {
+  bottom: 178px;
+}
+
+.workbench-project-suggestions--prototype {
+  bottom: 122px;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .workbench-project-suggestions--document {
+    bottom: 220px;
+  }
 }
 
 .workbench-status-spinner {
