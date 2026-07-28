@@ -30,7 +30,7 @@ const typecheckScript = fileURLToPath(new URL("./workbench-typecheck-ci.mjs", im
 test("defaults to two 4096 MiB passes and validates configured memory", () => {
   assert.deepEqual(
     parseConfiguration({ argv: [], env: {}, memoryLimitMiB: 16 * 1024 }),
-    { heapMiB: 4096, passes: 2, requireCleanBaseline: false },
+    { heapMiB: 4096, passes: 2, requireCleanBaseline: false, minimumMemoryMiB: null },
   );
   assert.deepEqual(
     parseConfiguration({
@@ -38,19 +38,52 @@ test("defaults to two 4096 MiB passes and validates configured memory", () => {
       env: { WORKBENCH_TYPECHECK_HEAP_MIB: "6144", WORKBENCH_TYPECHECK_PASSES: "3" },
       memoryLimitMiB: 16 * 1024,
     }),
-    { heapMiB: 6144, passes: 1, requireCleanBaseline: false },
+    { heapMiB: 6144, passes: 1, requireCleanBaseline: false, minimumMemoryMiB: null },
   );
   assert.equal(
-    parseConfiguration({ argv: [], env: { CI: "true" }, memoryLimitMiB: 16 * 1024 }).requireCleanBaseline,
+    parseConfiguration({
+      argv: [],
+      env: { CI: "true" },
+      memoryLimitMiB: 16 * 1024,
+      platform: "linux",
+    }).requireCleanBaseline,
     true,
+  );
+  assert.equal(
+    parseConfiguration({
+      argv: [],
+      env: { CI: "true" },
+      memoryLimitMiB: 16 * 1024,
+      platform: "linux",
+    }).minimumMemoryMiB,
+    15 * 1024,
   );
   assert.equal(
     parseConfiguration({
       argv: [],
       env: { CI: "true", WORKBENCH_TYPECHECK_REQUIRE_CLEAN: "false" },
       memoryLimitMiB: 16 * 1024,
+      platform: "linux",
     }).requireCleanBaseline,
     true,
+  );
+  assert.throws(
+    () => parseConfiguration({
+      argv: [],
+      env: { CI: "true" },
+      memoryLimitMiB: 16 * 1024,
+      platform: "darwin",
+    }),
+    /requires Linux/u,
+  );
+  assert.throws(
+    () => parseConfiguration({
+      argv: [],
+      env: { CI: "true" },
+      memoryLimitMiB: 8 * 1024,
+      platform: "linux",
+    }),
+    /nominal 16 GiB host/u,
   );
   assert.throws(
     () => parseConfiguration({
@@ -188,6 +221,7 @@ test("the aggregate continues after a workspace failure and reports every target
       cwd: fixtureRoot,
       env: {
         ...process.env,
+        CI: "false",
         NPM_LOG: npmLog,
         PATH: `${binRoot}${path.delimiter}${process.env.PATH}`,
         WORKBENCH_TYPECHECK_HEAP_MIB: "128",
@@ -226,6 +260,9 @@ test("root typecheck scripts share the dynamic orchestrator", async () => {
   assert.equal(packageData.scripts.typecheck, "node scripts/workbench-typecheck-ci.mjs --passes=1");
   assert.equal(packageData.scripts["typecheck:ci"], "node scripts/workbench-typecheck-ci.mjs");
   assert.match(packageData.scripts["dev:workbench:test"], /workbench-typecheck-ci\.test\.mjs/u);
+
+  const workflow = await readFile(path.join(repoRoot, ".github/workflows/workbench-ci.yml"), "utf8");
+  assert.match(workflow, /WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 15360/u);
 });
 
 async function writeJson(filePath, value) {

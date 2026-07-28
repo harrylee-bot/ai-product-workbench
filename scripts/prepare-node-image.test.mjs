@@ -68,6 +68,10 @@ test("all candidate Node Dockerfiles use the hardened Alpine helper", async () =
 test("the Web image gives production type checking enough heap", async () => {
   const source = await readFile(path.join(root, "apps/web/Dockerfile"), "utf8");
   assert.match(source, /NODE_OPTIONS=--max-old-space-size=4096/u);
+  assert.doesNotMatch(source, /WORKBENCH_NEXT_BUILD_CPUS/u);
+
+  const nextConfig = await readFile(path.join(root, "apps/web/next.config.ts"), "utf8");
+  assert.doesNotMatch(nextConfig, /WORKBENCH_NEXT_BUILD_CPUS/u);
 });
 
 test("the Web and CI builds pin their Linux x64 native dependencies", async () => {

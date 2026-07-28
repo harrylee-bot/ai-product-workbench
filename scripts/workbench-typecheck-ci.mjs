@@ -22,6 +22,8 @@ import { execFile } from "node:child_process";
 const execFileAsync = promisify(execFile);
 const DEFAULT_HEAP_MIB = 4096;
 const DEFAULT_PASSES = 2;
+// A nominal 16 GiB Linux host exposes slightly less after kernel and hypervisor reservations.
+const DEFAULT_CI_MINIMUM_MEMORY_MIB = 15 * 1024;
 const RSS_SAMPLE_INTERVAL_MS = 50;
 
 export async function discoverWorkspaceInventory(repoRoot) {
@@ -90,7 +92,7 @@ export async function discoverWorkspaceInventory(repoRoot) {
   };
 }
 
-export function parseConfiguration({ argv, env, memoryLimitMiB }) {
+export function parseConfiguration({ argv, env, memoryLimitMiB, platform = process.platform }) {
   let configuredPasses = env.WORKBENCH_TYPECHECK_PASSES;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -114,16 +116,31 @@ export function parseConfiguration({ argv, env, memoryLimitMiB }) {
     configuredPasses?.trim() || String(DEFAULT_PASSES),
     "WORKBENCH_TYPECHECK_PASSES/--passes",
   );
-  const requireCleanBaseline = parseBoolean(env.CI ?? "false", "CI")
+  const ci = parseBoolean(env.CI ?? "false", "CI");
+  const requireCleanBaseline = ci
     || parseBoolean(env.WORKBENCH_TYPECHECK_REQUIRE_CLEAN ?? "false", "WORKBENCH_TYPECHECK_REQUIRE_CLEAN");
+  const minimumMemoryMiB = ci
+    ? parsePositiveInteger(
+      env.WORKBENCH_TYPECHECK_MIN_MEMORY_MIB?.trim() || String(DEFAULT_CI_MINIMUM_MEMORY_MIB),
+      "WORKBENCH_TYPECHECK_MIN_MEMORY_MIB",
+    )
+    : null;
 
   if (Number.isInteger(memoryLimitMiB) && memoryLimitMiB > 0 && heapMiB >= memoryLimitMiB) {
     throw new Error(
       `WORKBENCH_TYPECHECK_HEAP_MIB (${heapMiB}) must be below available memory (${memoryLimitMiB} MiB)`,
     );
   }
+  if (ci && platform !== "linux") {
+    throw new Error(`CI typecheck requires Linux; detected ${platform}`);
+  }
+  if (ci && (!Number.isInteger(memoryLimitMiB) || memoryLimitMiB < minimumMemoryMiB)) {
+    throw new Error(
+      `CI typecheck requires at least ${minimumMemoryMiB} MiB effective memory on a nominal 16 GiB host; detected ${memoryLimitMiB} MiB`,
+    );
+  }
 
-  return { heapMiB, passes, requireCleanBaseline };
+  return { heapMiB, passes, requireCleanBaseline, minimumMemoryMiB };
 }
 
 export function createNodeOptions(existingNodeOptions, heapMiB) {
@@ -240,6 +257,7 @@ async function main() {
     argv: process.argv.slice(2),
     env: process.env,
     memoryLimitMiB,
+    platform: process.platform,
   });
   const initialInventory = await discoverWorkspaceInventory(repoRoot);
   const initialInventoryDigest = inventoryDigest(initialInventory);
@@ -262,6 +280,7 @@ async function main() {
     node: process.version,
     heapMiB: configuration.heapMiB,
     availableMemoryMiB: memoryLimitMiB,
+    minimumMemoryMiB: configuration.minimumMemoryMiB,
     passes: configuration.passes,
     measurementStrategy,
     baselineSourceDigest: baselineSource.digest,

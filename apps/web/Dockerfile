@@ -22,19 +22,16 @@ ARG NEXT_PUBLIC_KNOWLEDGE_APP_URL
 ARG NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL
 ARG NEXT_PUBLIC_WORKBENCH_FORUM_URL
 ARG NEXT_PUBLIC_WORKBENCH_PRIVACY_URL
-ARG NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=false
 ARG WORKBENCH_PREVIEW_ORIGIN
 ARG WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL
 ENV NEXT_PUBLIC_KNOWLEDGE_APP_URL=$NEXT_PUBLIC_KNOWLEDGE_APP_URL
 ENV NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL=$NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL
 ENV NEXT_PUBLIC_WORKBENCH_FORUM_URL=$NEXT_PUBLIC_WORKBENCH_FORUM_URL
 ENV NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=$NEXT_PUBLIC_WORKBENCH_PRIVACY_URL
-ENV NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=$NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED
 ENV WORKBENCH_PREVIEW_ORIGIN=$WORKBENCH_PREVIEW_ORIGIN
 ENV WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=$WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL
 ENV NEXT_TELEMETRY_DISABLED=1 \
-    NODE_OPTIONS=--max-old-space-size=4096 \
-    WORKBENCH_NEXT_BUILD_CPUS=1
+    NODE_OPTIONS=--max-old-space-size=4096
 COPY apps/web apps/web
 COPY packages/workbench-contracts packages/workbench-contracts
 COPY packages/workbench-telemetry packages/workbench-telemetry
@@ -43,8 +40,8 @@ RUN npm --workspace @workbench/workbench-contracts run validate:openapi \
   && npm --workspace @workbench/workbench-telemetry run build \
   && npm --workspace @workbench/web run generate:workbench-api
 WORKDIR /app/apps/web
-# Type checking in a separate process avoids retaining the compiler heap while
-# Next starts its TypeScript worker on memory-constrained builders.
+# Type checking runs separately so the Next build can consume prevalidated output
+# without repeating compiler work.
 RUN npx next typegen && npx tsc -p tsconfig.json --noEmit
 ENV WORKBENCH_TYPES_PREVALIDATED=1
 RUN npm run build

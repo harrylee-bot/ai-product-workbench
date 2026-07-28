@@ -42,9 +42,6 @@ const nextConfig: NextConfig = {
     incomingRequests: false,
   },
   experimental: {
-    cpus: process.env.WORKBENCH_NEXT_BUILD_CPUS
-      ? Number.parseInt(process.env.WORKBENCH_NEXT_BUILD_CPUS, 10)
-      : undefined,
     prefetchInlining: true,
     cachedNavigations: true,
     appNewScrollHandler: true,
