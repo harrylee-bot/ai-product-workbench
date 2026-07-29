@@ -6,6 +6,7 @@ import {
   assertObservationMatchesPlanAndControl,
   loadProductionControlObservation,
 } from "./collect.mjs";
+import { assertProductionG11Observation } from "./g11-real-stack-manifest.mjs";
 
 export async function replayProductionControlObservation({
   entry,
@@ -30,6 +31,11 @@ export async function replayProductionControlObservation({
     plan,
     catalog,
     collectedTime: new Date(collectedAtUtc),
+  });
+  await assertProductionG11Observation({
+    observation: loaded.observation,
+    evidenceRoot: root,
+    plan,
   });
   assertLedgerEntryMatchesObservation({
     entry,

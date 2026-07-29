@@ -28,6 +28,7 @@ import {
   assertGateEntriesMatchCatalog,
   loadProductionAcceptanceControlCatalog,
 } from "./catalog.mjs";
+import { assertProductionG11Observation } from "./g11-real-stack-manifest.mjs";
 import { loadProductionAcceptancePlan } from "./plan.mjs";
 import { createStrictAjv2020, isCanonicalUtcDateTime } from "./schema.mjs";
 
@@ -98,6 +99,11 @@ export async function collectProductionAcceptanceEvidence({
         plan,
         catalog,
         collectedTime,
+      });
+      await assertProductionG11Observation({
+        observation: loaded.observation,
+        evidenceRoot: sourceRoot,
+        plan,
       });
       const packagedObservationPath = `observations/${expected.control.controlId}.json`;
       await copyArtifact(loaded.raw, path.join(destinationRoot, packagedObservationPath));

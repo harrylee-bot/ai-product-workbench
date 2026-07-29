@@ -38,7 +38,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -70,7 +70,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -102,7 +102,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -134,7 +134,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -167,7 +167,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -196,7 +196,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -229,7 +229,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -261,7 +261,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -293,7 +293,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -325,7 +325,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -357,7 +357,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -397,7 +397,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -433,7 +433,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -465,7 +465,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -502,7 +502,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -534,7 +534,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -566,7 +566,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -606,7 +606,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -638,7 +638,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -670,7 +670,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -707,7 +707,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -739,7 +739,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -771,7 +771,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -803,7 +803,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -831,7 +831,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -868,7 +868,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -896,7 +896,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -928,7 +928,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -956,7 +956,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -994,7 +994,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1027,7 +1027,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1060,7 +1060,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1093,7 +1093,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1125,7 +1125,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1158,7 +1158,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1190,7 +1190,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1226,7 +1226,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1258,7 +1258,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1291,7 +1291,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1319,7 +1319,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1349,7 +1349,7 @@
           ],
           "procedure": {
             "kind": "command",
-            "command": "node scripts/production-acceptance/run-control.mjs --control G11.ACCESSIBILITY.REDUCED_MOTION --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.ACCESSIBILITY.REDUCED_MOTION --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --evidence-root \"$WORKBENCH_EVIDENCE_ROOT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
           },
           "expectedObservation": "No release-blocking accessibility issue remains and reduced-motion behavior preserves every workflow.",
           "threshold": {
@@ -1360,7 +1360,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1377,7 +1377,7 @@
           ],
           "procedure": {
             "kind": "command",
-            "command": "node scripts/production-acceptance/run-control.mjs --control G11.BROWSER.VIEWPORT_MATRIX --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.BROWSER.VIEWPORT_MATRIX --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --evidence-root \"$WORKBENCH_EVIDENCE_ROOT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
           },
           "expectedObservation": "Every browser and viewport matrix cell completes with the same durable product result.",
           "threshold": {
@@ -1388,7 +1388,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1416,7 +1416,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1437,7 +1437,7 @@
           ],
           "procedure": {
             "kind": "command",
-            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.ACCOUNT_PROJECT --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.ACCOUNT_PROJECT --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --evidence-root \"$WORKBENCH_EVIDENCE_ROOT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
           },
           "expectedObservation": "Every account and project workflow reaches the specified durable state and every unauthorized path fails closed.",
           "threshold": {
@@ -1448,7 +1448,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1465,7 +1465,7 @@
           ],
           "procedure": {
             "kind": "command",
-            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.IMPORT_EXPORT_PREVIEW --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.IMPORT_EXPORT_PREVIEW --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --evidence-root \"$WORKBENCH_EVIDENCE_ROOT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
           },
           "expectedObservation": "Every content workflow and failure path reaches the specified durable, authorized, checksum-bound state.",
           "threshold": {
@@ -1476,7 +1476,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1497,7 +1497,7 @@
           ],
           "procedure": {
             "kind": "command",
-            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.RUN_CANVAS_PROTOTYPE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.PRODUCT.RUN_CANVAS_PROTOTYPE --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --evidence-root \"$WORKBENCH_EVIDENCE_ROOT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
           },
           "expectedObservation": "Every workflow preserves sequence, identity, authorization, idempotency, and immutable publication invariants.",
           "threshold": {
@@ -1508,7 +1508,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1533,7 +1533,7 @@
           ],
           "procedure": {
             "kind": "command",
-            "command": "node scripts/production-acceptance/run-control.mjs --control G11.QUALITY.CONSOLE_ERRORS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.QUALITY.CONSOLE_ERRORS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --evidence-root \"$WORKBENCH_EVIDENCE_ROOT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
           },
           "expectedObservation": "Unexpected console error count is zero.",
           "threshold": {
@@ -1545,7 +1545,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {
@@ -1562,7 +1562,7 @@
           ],
           "procedure": {
             "kind": "command",
-            "command": "node scripts/production-acceptance/run-control.mjs --control G11.QUALITY.FAILED_NETWORK_REQUESTS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
+            "command": "node scripts/production-acceptance/run-control.mjs --control G11.QUALITY.FAILED_NETWORK_REQUESTS --plan \"$WORKBENCH_ACCEPTANCE_PLAN\" --result \"$WORKBENCH_CONTROL_RESULT\" --evidence-root \"$WORKBENCH_EVIDENCE_ROOT\" --output \"$WORKBENCH_OBSERVATION_OUTPUT\""
           },
           "expectedObservation": "Unexpected failed network request count is zero.",
           "threshold": {
@@ -1574,7 +1574,7 @@
           "evidenceLevel": "E1",
           "tool": {
             "name": "workbench-production-control-runner",
-            "version": "sha256:a499d64c4d851914d0b3601dd94fdf8969134b12edf7b71be3beec78fe5389e4"
+            "version": "sha256:11a1ce998e4c9c9e8217af42c49c77d1fc3daacfe4154e751df8797a0225fac8"
           },
           "relatedFindingsOrDecisions": [
             {

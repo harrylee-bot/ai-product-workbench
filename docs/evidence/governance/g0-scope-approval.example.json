@@ -110,7 +110,16 @@
       "P-016",
       "P-017",
       "P-018",
-      "P-019"
+      "P-019",
+      "F-001",
+      "F-002",
+      "F-003",
+      "F-004",
+      "F-005",
+      "F-006",
+      "F-007",
+      "F-008",
+      "F-009"
     ]
   },
   "capabilities": [
@@ -348,6 +357,25 @@
           "Escalate unresolved production risk to the Release authority"
         ],
         "overdueAction": "Keep the risk unresolved and block production acceptance where applicable."
+      },
+      {
+        "scopeItemIds": [
+          "F-001",
+          "F-002",
+          "F-003",
+          "F-004",
+          "F-005",
+          "F-006",
+          "F-007",
+          "F-008",
+          "F-009"
+        ],
+        "targetDateUtc": "2098-12-01T00:00:00Z",
+        "escalationPath": [
+          "Escalate to the accountable owner",
+          "Escalate unresolved functional or visual risk to the Release authority"
+        ],
+        "overdueAction": "Keep the functional or visual finding unresolved and block its dependent gate."
       }
     ]
   },

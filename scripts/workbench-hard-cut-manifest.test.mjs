@@ -16,6 +16,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "@redocly/ajv/dist/2020.js";
+import sharp from "sharp";
 import YAML from "yaml";
 
 import {
@@ -40,6 +41,7 @@ import {
 } from "./production-deployment-config.mjs";
 import { productionDeploymentConfigFixtureEnvironment } from "./fixtures/production-deployment-config-fixture.mjs";
 import { createProductionBuildConfiguration } from "./write-production-build-configuration.mjs";
+import { PRODUCTION_G11_MANIFEST_EVIDENCE_KIND } from "./production-acceptance/g11-real-stack-manifest.mjs";
 
 const scopeId = "legacy-production-database";
 const validationNow = new Date("2026-07-19T08:00:00Z");
@@ -448,6 +450,12 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
   };
   const planRaw = Buffer.from(canonicalJsonFile(plan), "utf8");
   const planSha256 = addFile("governance/production-acceptance-plan.json", planRaw);
+  const g11Evidence = await createHardCutG11Evidence({
+    addFile,
+    binding: manifest.candidateBinding,
+    environment,
+    plan,
+  });
   const gates = controlCatalog.gates.map(({ gateId, controls }, index) => {
     const evidencePath = `gates/${gateId.toLowerCase()}.json`;
     const entries = controls.map((control) => {
@@ -468,6 +476,9 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
       };
       const observationPath = `observations/${control.controlId}.json`;
       const executedAtUtc = `2026-07-19T0${index + 1}:00:00Z`;
+      const observationEvidence = gateId === "G11" && control.controlId !== "G11.FIGMA.SCOPE"
+        ? structuredClone(g11Evidence.observationEvidence)
+        : [{ kind: "probe", uri: `file:./${rawEvidencePath}`, sha256: rawEvidenceSha256 }];
       const observation = {
         schemaVersion: "workbench.production-control-observation.v1",
         observationId: `observation-${control.controlId.toLowerCase()}`,
@@ -486,7 +497,7 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
           observedValue,
           summary: `${control.controlId} passed its protected threshold.`,
         },
-        evidence: [{ kind: "probe", uri: `file:./${rawEvidencePath}`, sha256: rawEvidenceSha256 }],
+        evidence: observationEvidence,
         retryRecords: [],
       };
       const observationRaw = Buffer.from(canonicalJsonFile(observation), "utf8");
@@ -511,7 +522,7 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
           { uri: `file:./${observationPath}`, sha256: observationSha256 },
           toolAttestation.artifact,
           toolAttestation.provenance,
-          { uri: `file:./${rawEvidencePath}`, sha256: rawEvidenceSha256 },
+          ...observationEvidence.map(({ uri, sha256 }) => ({ uri, sha256 })),
         ],
         retryRecords: [],
         relatedFindingsOrDecisions: control.relatedFindingsOrDecisions,
@@ -702,6 +713,273 @@ async function assertPackageRejected(fixture, document, expected) {
     }),
     expected,
   );
+}
+
+async function createHardCutG11Evidence({ addFile, binding, environment, plan }) {
+  const browsers = ["chromium", "firefox", "webkit"];
+  const states = ["prd-active", "prd-pending", "prototype-after-prd"];
+  const viewports = [
+    { id: "375x812", width: 375, height: 812 },
+    { id: "768x1024", width: 768, height: 1024 },
+    { id: "1440x900", width: 1440, height: 900 },
+  ];
+  const motions = ["normal", "reduced"];
+  const screenshotBuffers = new Map();
+  const marker = await sharp({
+    create: { width: 16, height: 16, channels: 3, background: "#f4f4f5" },
+  }).png().toBuffer();
+  for (const viewport of viewports) {
+    screenshotBuffers.set(viewport.id, await sharp({
+      create: { width: viewport.width, height: viewport.height, channels: 3, background: "#111214" },
+    }).composite([{ input: marker, left: 8, top: 8 }]).png().toBuffer());
+  }
+
+  const visualMatrix = [];
+  for (const browser of browsers) {
+    for (const state of states) {
+      for (const viewport of viewports) {
+        for (const motion of motions) {
+          const fileName = `${browser}-${state}-${viewport.id}-${motion}.png`;
+          const bytes = screenshotBuffers.get(viewport.id);
+          const screenshotPath = `raw/g11/screenshots/${fileName}`;
+          const screenshotSha256 = addFile(screenshotPath, bytes);
+          const semanticKind = state === "prototype-after-prd" ? "prototype" : "prd";
+          visualMatrix.push({
+            browser,
+            viewport: viewport.id,
+            motion,
+            state,
+            status: "PASS",
+            runState: {
+              requestedArtifactKinds: [semanticKind],
+              generationStage: semanticKind === "prototype" ? "generating-prototype" : "drafting-prd",
+              terminal: false,
+            },
+            motionEvidence: {
+              semanticKind,
+              animationName: semanticKind === "prototype" ? "prototype-ripple" : "prd-aurora",
+              animationDurationMs: motion === "reduced" ? 1 : 1_200,
+              frameChanged: motion === "normal",
+              reducedMotionMedia: motion === "reduced",
+            },
+            layout: {
+              withinViewport: true,
+              noOverlap: true,
+              promptContextVisible: true,
+              activityContextVisible: true,
+              pendingCompositionVisible: state === "prd-pending",
+              accessibleNamesPassed: true,
+            },
+            screenshot: {
+              kind: "browser-screenshot",
+              uri: `file:./${screenshotPath}`,
+              sha256: screenshotSha256,
+            },
+          });
+        }
+      }
+    }
+  }
+
+  const flows = [];
+  for (const [flowId, checks] of Object.entries(hardCutPassingG11FlowChecks())) {
+    const flowPath = `raw/g11/flows/${flowId}.json`;
+    const flowRaw = Buffer.from(canonicalJsonFile({
+      schemaVersion: "workbench.production-g11-flow-evidence.v1",
+      flowId,
+      binding,
+      result: "PASS",
+    }), "utf8");
+    const flowSha256 = addFile(flowPath, flowRaw);
+    flows.push({
+      flowId,
+      status: "PASS",
+      checks,
+      evidence: [{
+        kind: "browser-flow-evidence",
+        uri: `file:./${flowPath}`,
+        sha256: flowSha256,
+      }],
+    });
+  }
+
+  const manifest = {
+    schemaVersion: "workbench.production-g11-real-stack-manifest.v1",
+    manifestId: `g11-real-stack-${plan.payload.planId.slice(-24)}`,
+    plan: {
+      planId: plan.payload.planId,
+      payloadSha256: plan.payloadSha256,
+    },
+    binding,
+    environment,
+    deployment: {
+      stackKind: "deployed-production",
+      webOrigin: "https://workbench.example.com",
+      previewOrigin: "https://preview.example.com",
+      provider: {
+        class: "approved-production-provider",
+        id: "provider-production",
+        version: "2026.07.19",
+      },
+      sessionBoundary: "better-auth",
+      apiBoundary: "workbench-api",
+      sseBoundary: "workbench-sse",
+      queueBoundary: "pg-boss",
+      databaseBoundary: "postgresql",
+      artifactBoundary: "immutable-artifact-version",
+    },
+    harness: {
+      name: "playwright",
+      version: "1.58.2",
+      sourceCommit: binding.commitSha,
+      routeFulfillUsed: false,
+      syntheticSessionUsed: false,
+      syntheticApiUsed: false,
+      syntheticSseUsed: false,
+    },
+    startedAtUtc: "2026-07-19T06:15:00Z",
+    finishedAtUtc: "2026-07-19T06:55:00Z",
+    browsers: browsers.map((name, index) => ({ name, version: `140.0.${index + 1}` })),
+    visualMatrix,
+    flows,
+    unexpectedConsoleErrors: [],
+    unexpectedNetworkFailures: [],
+  };
+  const manifestRaw = Buffer.from(canonicalJsonFile(manifest), "utf8");
+  const manifestSha256 = addFile("raw/g11/manifest.json", manifestRaw);
+  const manifestReference = {
+    uri: "file:./raw/g11/manifest.json",
+    sha256: manifestSha256,
+  };
+  const evidence = [
+    ...visualMatrix.map(({ screenshot }) => structuredClone(screenshot)),
+    ...flows.flatMap((flow) => structuredClone(flow.evidence)),
+  ].sort(compareEvidenceReferences);
+  const observationEvidence = [
+    { kind: PRODUCTION_G11_MANIFEST_EVIDENCE_KIND, ...manifestReference },
+    ...evidence,
+  ].sort(compareEvidenceReferences);
+  return { manifest, manifestReference, evidence, observationEvidence };
+}
+
+function hardCutPassingG11FlowChecks() {
+  return {
+    "account-project": {
+      accountCreated: true,
+      loginCompleted: true,
+      invitationAccepted: true,
+      workspaceOpened: true,
+      projectOpened: true,
+      membershipRolesEnforced: true,
+      revokedAccessDenied: true,
+      expiredInvitationDenied: true,
+      unauthorizedPathsClosed: true,
+    },
+    prd: {
+      requestAccepted: true,
+      loadingCompositionRendered: true,
+      activePanelContextRendered: true,
+      stageSequenceContinuous: true,
+      readyArtifactPersisted: true,
+      checksumVerified: true,
+    },
+    "mixed-rejection": {
+      problemStatus: 422,
+      queuePublishCount: 0,
+      runCount: 0,
+      runtimeAttemptCount: 0,
+      artifactVersionCount: 0,
+      providerInvocationCount: 0,
+      sseEventCount: 0,
+    },
+    "prototype-after-prd": {
+      startedAfterPrd: true,
+      nullGapPrdMotionAbsent: true,
+      thinkingGapPrdMotionAbsent: true,
+      prototypeMotionRendered: true,
+      readyArtifactPersisted: true,
+    },
+    "refresh-reconnect": {
+      reconnectCursorAdvanced: true,
+      sequenceContinuous: true,
+      stateRestored: true,
+      artifactPersisted: true,
+    },
+    "preview-import-export": {
+      fileImportCompleted: true,
+      knowledgeImportCompleted: true,
+      exportCompleted: true,
+      previewLoaded: true,
+      explicitPublicationConfirmation: true,
+      failureRecoveryPassed: true,
+      checksumVerified: true,
+    },
+    "run-canvas-sse-artifact": {
+      runCompleted: true,
+      approvalPassed: true,
+      failurePassed: true,
+      cancelPassed: true,
+      retryPassed: true,
+      canvasGatewayUsed: true,
+      prototypePatchStableNodeIds: true,
+      sseDurable: true,
+      sequenceContinuous: true,
+      authorizationPassed: true,
+      idempotencyPreserved: true,
+      artifactPersisted: true,
+      checksumVerified: true,
+      revisionAdvanced: true,
+    },
+    "accessibility-preview-security": {
+      keyboardPassed: true,
+      focusPassed: true,
+      accessibleNamesPassed: true,
+      contrastPassed: true,
+      reducedMotionPassed: true,
+      previewIndependentOrigin: true,
+      previewCredentialless: true,
+      previewAllowSameOriginAbsent: true,
+      previewNoReferrer: true,
+      previewCapabilityValidated: true,
+      previewRpcPassed: true,
+      previewTimeoutProtected: true,
+      previewGenerationProtected: true,
+    },
+    "long-run-7686-plus": {
+      minimumEventCount: 7_686,
+      observedEventCount: 7_686,
+      crossedBoundary: true,
+      terminalStateCorrect: true,
+      retryRecoveryPassed: true,
+    },
+    "knowledge-null-valid": {
+      nullReleaseGrantAbsent: true,
+      nullReleaseSecretAbsent: true,
+      nullReleaseCatalogAbsent: true,
+      validPinnedReleaseVisible: true,
+      validPinnedReleaseInvocationPassed: true,
+      concurrentScopeIsolated: true,
+      secretsNotPersisted: true,
+    },
+    "provider-state-integrity": {
+      textComplete: true,
+      effectsComplete: true,
+      draftComplete: true,
+      artifactsComplete: true,
+      duplicateTextCount: 0,
+      lostTextCount: 0,
+      duplicateEffectCount: 0,
+      lostEffectCount: 0,
+      duplicateDraftCount: 0,
+      lostDraftCount: 0,
+      duplicateArtifactCount: 0,
+      lostArtifactCount: 0,
+    },
+  };
+}
+
+function compareEvidenceReferences(left, right) {
+  return `${left.uri}\0${left.kind ?? ""}`.localeCompare(`${right.uri}\0${right.kind ?? ""}`, "en");
 }
 
 function passingControlValue(threshold) {

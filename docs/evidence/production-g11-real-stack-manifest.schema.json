@@ -1,0 +1,368 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aionbench.com/schemas/workbench.production-g11-real-stack-manifest.v1.json",
+  "title": "Product Workbench production G11 real-stack evidence manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "manifestId",
+    "plan",
+    "binding",
+    "environment",
+    "deployment",
+    "harness",
+    "startedAtUtc",
+    "finishedAtUtc",
+    "browsers",
+    "visualMatrix",
+    "flows",
+    "unexpectedConsoleErrors",
+    "unexpectedNetworkFailures"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "workbench.production-g11-real-stack-manifest.v1" },
+    "manifestId": { "$ref": "#/$defs/identifier" },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planId", "payloadSha256"],
+      "properties": {
+        "planId": { "$ref": "#/$defs/identifier" },
+        "payloadSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "binding": { "$ref": "#/$defs/binding" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stackKind",
+        "webOrigin",
+        "previewOrigin",
+        "provider",
+        "sessionBoundary",
+        "apiBoundary",
+        "sseBoundary",
+        "queueBoundary",
+        "databaseBoundary",
+        "artifactBoundary"
+      ],
+      "properties": {
+        "stackKind": { "const": "deployed-production" },
+        "webOrigin": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "previewOrigin": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["class", "id", "version"],
+          "properties": {
+            "class": { "const": "approved-production-provider" },
+            "id": { "$ref": "#/$defs/identifier" },
+            "version": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        },
+        "sessionBoundary": { "const": "better-auth" },
+        "apiBoundary": { "const": "workbench-api" },
+        "sseBoundary": { "const": "workbench-sse" },
+        "queueBoundary": { "const": "pg-boss" },
+        "databaseBoundary": { "const": "postgresql" },
+        "artifactBoundary": { "const": "immutable-artifact-version" }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "sourceCommit",
+        "routeFulfillUsed",
+        "syntheticSessionUsed",
+        "syntheticApiUsed",
+        "syntheticSseUsed"
+      ],
+      "properties": {
+        "name": { "const": "playwright" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "sourceCommit": { "$ref": "#/$defs/commit" },
+        "routeFulfillUsed": { "const": false },
+        "syntheticSessionUsed": { "const": false },
+        "syntheticApiUsed": { "const": false },
+        "syntheticSseUsed": { "const": false }
+      }
+    },
+    "startedAtUtc": { "$ref": "#/$defs/utc" },
+    "finishedAtUtc": { "$ref": "#/$defs/utc" },
+    "browsers": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version"],
+        "properties": {
+          "name": { "$ref": "#/$defs/browser" },
+          "version": { "type": "string", "minLength": 1, "maxLength": 256 }
+        }
+      }
+    },
+    "visualMatrix": {
+      "type": "array",
+      "minItems": 54,
+      "maxItems": 54,
+      "items": { "$ref": "#/$defs/visualCell" }
+    },
+    "flows": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "items": { "$ref": "#/$defs/flow" }
+    },
+    "unexpectedConsoleErrors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/consoleError" }
+    },
+    "unexpectedNetworkFailures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/networkFailure" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "prefixedSha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$" },
+    "commit": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
+    "utc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "browser": { "enum": ["chromium", "firefox", "webkit"] },
+    "viewport": { "enum": ["375x812", "768x1024", "1440x900"] },
+    "motion": { "enum": ["normal", "reduced"] },
+    "visualState": { "enum": ["prd-active", "prd-pending", "prototype-after-prd"] },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "digest"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "digest": { "$ref": "#/$defs/prefixedSha256" }
+      }
+    },
+    "digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "images",
+        "configSha256",
+        "migrationSha256",
+        "deploymentConfigManifestSha256",
+        "imageManifestSha256",
+        "controlCatalogSha256"
+      ],
+      "properties": {
+        "images": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/image" } },
+        "configSha256": { "$ref": "#/$defs/sha256" },
+        "migrationSha256": { "$ref": "#/$defs/sha256" },
+        "deploymentConfigManifestSha256": { "$ref": "#/$defs/sha256" },
+        "imageManifestSha256": { "$ref": "#/$defs/sha256" },
+        "controlCatalogSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "deployId", "environmentId", "commitSha", "tag", "releaseChainId", "digests"],
+      "properties": {
+        "candidateId": { "$ref": "#/$defs/prefixedSha256" },
+        "deployId": { "$ref": "#/$defs/identifier" },
+        "environmentId": { "$ref": "#/$defs/identifier" },
+        "commitSha": { "$ref": "#/$defs/commit" },
+        "tag": { "$ref": "#/$defs/identifier" },
+        "releaseChainId": { "$ref": "#/$defs/prefixedSha256" },
+        "digests": { "$ref": "#/$defs/digests" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environmentId", "kind", "description", "region"],
+      "properties": {
+        "environmentId": { "$ref": "#/$defs/identifier" },
+        "kind": { "const": "production" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "region": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "uri", "sha256"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/identifier" },
+        "uri": {
+          "type": "string",
+          "pattern": "^file:\\.\\/raw\\/g11\\/[A-Za-z0-9][A-Za-z0-9._/-]*$",
+          "maxLength": 2048
+        },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "runState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestedArtifactKinds", "generationStage", "terminal"],
+      "properties": {
+        "requestedArtifactKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "enum": ["prd", "prototype"] }
+        },
+        "generationStage": { "type": ["string", "null"], "maxLength": 128 },
+        "terminal": { "type": "boolean" }
+      }
+    },
+    "motionEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semanticKind",
+        "animationName",
+        "animationDurationMs",
+        "frameChanged",
+        "reducedMotionMedia"
+      ],
+      "properties": {
+        "semanticKind": { "enum": ["prd", "prototype"] },
+        "animationName": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "animationDurationMs": { "type": "number", "minimum": 0, "maximum": 600000 },
+        "frameChanged": { "type": "boolean" },
+        "reducedMotionMedia": { "type": "boolean" }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "withinViewport",
+        "noOverlap",
+        "promptContextVisible",
+        "activityContextVisible",
+        "pendingCompositionVisible",
+        "accessibleNamesPassed"
+      ],
+      "properties": {
+        "withinViewport": { "type": "boolean" },
+        "noOverlap": { "type": "boolean" },
+        "promptContextVisible": { "type": "boolean" },
+        "activityContextVisible": { "type": "boolean" },
+        "pendingCompositionVisible": { "type": "boolean" },
+        "accessibleNamesPassed": { "type": "boolean" }
+      }
+    },
+    "visualCell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "browser",
+        "viewport",
+        "motion",
+        "state",
+        "status",
+        "runState",
+        "motionEvidence",
+        "layout",
+        "screenshot"
+      ],
+      "properties": {
+        "browser": { "$ref": "#/$defs/browser" },
+        "viewport": { "$ref": "#/$defs/viewport" },
+        "motion": { "$ref": "#/$defs/motion" },
+        "state": { "$ref": "#/$defs/visualState" },
+        "status": { "enum": ["PASS", "FAIL"] },
+        "runState": { "$ref": "#/$defs/runState" },
+        "motionEvidence": { "$ref": "#/$defs/motionEvidence" },
+        "layout": { "$ref": "#/$defs/layout" },
+        "screenshot": { "$ref": "#/$defs/reference" }
+      }
+    },
+    "flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flowId", "status", "checks", "evidence"],
+      "properties": {
+        "flowId": {
+          "enum": [
+            "account-project",
+            "prd",
+            "mixed-rejection",
+            "prototype-after-prd",
+            "refresh-reconnect",
+            "preview-import-export",
+            "run-canvas-sse-artifact",
+            "accessibility-preview-security",
+            "long-run-7686-plus",
+            "knowledge-null-valid",
+            "provider-state-integrity"
+          ]
+        },
+        "status": { "enum": ["PASS", "FAIL"] },
+        "checks": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "boolean" },
+              { "type": "integer", "minimum": 0 }
+            ]
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/reference" }
+        }
+      }
+    },
+    "consoleError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["browser", "viewport", "motion", "sourceClass", "type", "count"],
+      "properties": {
+        "browser": { "$ref": "#/$defs/browser" },
+        "viewport": { "$ref": "#/$defs/viewport" },
+        "motion": { "$ref": "#/$defs/motion" },
+        "sourceClass": { "$ref": "#/$defs/identifier" },
+        "type": { "const": "error" },
+        "count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "networkFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "browser",
+        "viewport",
+        "motion",
+        "originClass",
+        "method",
+        "pathClass",
+        "failureClass",
+        "resourceType",
+        "count"
+      ],
+      "properties": {
+        "browser": { "$ref": "#/$defs/browser" },
+        "viewport": { "$ref": "#/$defs/viewport" },
+        "motion": { "$ref": "#/$defs/motion" },
+        "originClass": { "$ref": "#/$defs/identifier" },
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] },
+        "pathClass": { "$ref": "#/$defs/identifier" },
+        "failureClass": { "$ref": "#/$defs/identifier" },
+        "resourceType": { "$ref": "#/$defs/identifier" },
+        "count": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

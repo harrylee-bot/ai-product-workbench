@@ -4,7 +4,12 @@ import { lstat, open, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { canonicalJson, canonicalJsonFile, sha256Bytes } from "../evidence-ledger.mjs";
+import {
+  canonicalJson,
+  canonicalJsonFile,
+  sha256Bytes,
+  sha256Canonical,
+} from "../evidence-ledger.mjs";
 import {
   ProductionAcceptanceContractError,
   loadProductionAcceptanceControlCatalog,
@@ -14,8 +19,14 @@ import {
   executionForControl,
 } from "./control-execution-registry.mjs";
 import { evaluateThreshold } from "./collect.mjs";
+import {
+  PRODUCTION_G11_MANIFEST_EVIDENCE_KIND,
+  PRODUCTION_G11_REAL_STACK_SCHEMA_PATH,
+  isProductionG11RealStackControl,
+  loadProductionG11RealStackManifest,
+} from "./g11-real-stack-manifest.mjs";
 import { loadProductionAcceptancePlan } from "./plan.mjs";
-import { isCanonicalUtcDateTime } from "./schema.mjs";
+import { createStrictAjv2020, isCanonicalUtcDateTime } from "./schema.mjs";
 
 export const CONTROL_RESULT_SCHEMA_VERSION = "workbench.production-control-result.v1";
 export const CONTROL_OBSERVATION_SCHEMA_VERSION = "workbench.production-control-observation.v1";
@@ -23,13 +34,20 @@ export const CONTROL_OBSERVATION_SCHEMA_VERSION = "workbench.production-control-
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDirectory, "../..");
 const runnerPath = path.join(repoRoot, PRODUCTION_CONTROL_RUNNER_PATH);
+const observationSchemaPath = path.join(repoRoot, "docs/evidence/production-control-observation.schema.json");
+const g11ManifestSchemaPath = path.join(repoRoot, PRODUCTION_G11_REAL_STACK_SCHEMA_PATH);
+const g11ManifestVerifierPath = path.join(repoRoot, "scripts/production-acceptance/g11-real-stack-manifest.mjs");
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const G11_MANIFEST_SCHEMA_SHA256 = "27a9288856135e4fbfc366400331057648a3a73c2b34dbba0894326b2584a3ba";
+const G11_MANIFEST_VERIFIER_SHA256 = "a1d6651c9bcc1ec14b6861dede06e04403db68a0fe78ca5053aadd678d74fd21";
+let observationValidatorPromise;
 
 export async function runProductionControl({
   controlId,
   planPath,
   resultPath,
+  evidenceRoot,
   outputPath,
 } = {}) {
   const findings = [];
@@ -37,6 +55,9 @@ export async function runProductionControl({
   if (!planPath) findings.push("planPath is required");
   if (!resultPath) findings.push("resultPath is required");
   if (!outputPath) findings.push("outputPath is required");
+  if (isProductionG11RealStackControl(controlId) && !evidenceRoot) {
+    findings.push("evidenceRoot is required for production G11 real-stack controls");
+  }
   if (findings.length > 0) throw new ProductionAcceptanceContractError(findings);
 
   const catalog = await loadProductionAcceptanceControlCatalog();
@@ -53,7 +74,19 @@ export async function runProductionControl({
   validateResult({ result, controlId, execution, expected, plan: loadedPlan.plan, runnerSha256, findings });
   if (findings.length > 0) throw new ProductionAcceptanceContractError(findings);
 
-  const thresholdPassed = evaluateThreshold(expected.control.threshold, result.observedValue);
+  let g11Evidence = null;
+  if (isProductionG11RealStackControl(controlId)) {
+    await assertProtectedG11ManifestSchema();
+    g11Evidence = await loadProductionG11RealStackManifest({
+      reference: result.execution.evidence,
+      evidenceRoot,
+      plan: loadedPlan.plan,
+      executedAtUtc: result.executedAtUtc,
+    });
+  }
+
+  const observedValue = g11Evidence?.derived.get(controlId) ?? result.observedValue;
+  const thresholdPassed = evaluateThreshold(expected.control.threshold, observedValue);
   const conditionalResult = validateConditionalResult({
     controlId,
     value: result.conditionalResult,
@@ -61,6 +94,12 @@ export async function runProductionControl({
   });
   const observation = {
     schemaVersion: CONTROL_OBSERVATION_SCHEMA_VERSION,
+    observationId: `observation-${sha256Canonical({
+      controlId,
+      planId: loadedPlan.plan.payload.planId,
+      executedAtUtc: result.executedAtUtc,
+      executionEvidenceSha256: result.execution.evidence.sha256,
+    }).slice(0, 48)}`,
     controlId,
     gateId: expected.gateId,
     catalog: {
@@ -69,8 +108,6 @@ export async function runProductionControl({
     },
     binding: loadedPlan.plan.payload.binding,
     environment: loadedPlan.plan.payload.environment,
-    capacityProfile: loadedPlan.plan.payload.capacityProfile,
-    conditionalResult,
     executedAtUtc: result.executedAtUtc,
     executor: result.executor,
     toolVersions: [expected.control.tool],
@@ -78,12 +115,31 @@ export async function runProductionControl({
     evidenceLevel: expected.control.evidenceLevel,
     result: {
       executionStatus: thresholdPassed && conditionalResultPassed(conditionalResult) ? "PASS" : "FAIL",
-      observedValue: result.observedValue,
-      summary: result.summary,
+      observedValue,
+      summary: g11Evidence
+        ? g11Summary(controlId, observedValue, g11Evidence.manifest.manifestId)
+        : result.summary,
     },
-    evidence: uniqueEvidence([result.execution.evidence, ...result.evidence]),
+    evidence: g11Evidence
+      ? uniqueEvidence([
+        {
+          kind: PRODUCTION_G11_MANIFEST_EVIDENCE_KIND,
+          uri: result.execution.evidence.uri,
+          sha256: result.execution.evidence.sha256,
+        },
+        ...g11Evidence.evidence,
+      ])
+      : uniqueEvidence([
+        {
+          kind: executionEvidenceKind(execution),
+          uri: result.execution.evidence.uri,
+          sha256: result.execution.evidence.sha256,
+        },
+        ...result.evidence,
+      ]),
     retryRecords: result.retryRecords,
   };
+  await validateObservationDocument(observation);
   const destination = await validateOutputPath(outputPath);
   const raw = Buffer.from(canonicalJsonFile(observation), "utf8");
   const handle = await open(destination, "wx", 0o600);
@@ -123,8 +179,15 @@ function validateResult({ result, controlId, execution, expected, plan, runnerSh
   validateExecution(result?.execution, execution, controlId, findings);
   validateToolAttestation(result?.toolAttestation, expected.control.tool, runnerSha256, findings);
   if (!Array.isArray(result?.evidence)) findings.push("control result evidence must be an array");
-  else for (const [index, reference] of result.evidence.entries()) validateReference(reference, `control result evidence[${index}]`, findings);
-  if (!Array.isArray(result?.retryRecords)) findings.push("control result retryRecords must be an array");
+  else {
+    if (isProductionG11RealStackControl(controlId) && result.evidence.length !== 0) {
+      findings.push(`${controlId} evidence must be derived exclusively from its G11 real-stack manifest`);
+    }
+    for (const [index, reference] of result.evidence.entries()) {
+      validateTypedReference(reference, `control result evidence[${index}]`, findings);
+    }
+  }
+  validateRetryRecords(result?.retryRecords, plan, findings);
 }
 
 function validateExecution(value, expected, controlId, findings) {
@@ -171,10 +234,52 @@ function executionSource(execution) {
     : { path: execution.path, section: execution.section };
 }
 
+function executionEvidenceKind(execution) {
+  return execution.kind === "command" ? execution.evidenceKind : "runbook-execution-evidence";
+}
+
+function g11Summary(controlId, observedValue, manifestId) {
+  return `${controlId} derived ${JSON.stringify(observedValue)} from validated G11 manifest ${manifestId}.`;
+}
+
 function validateReference(value, label, findings) {
   exactKeys(value, ["uri", "sha256"], label, findings);
   if (typeof value?.uri !== "string" || value.uri.length < 1 || value.uri.length > 2048) findings.push(`${label}.uri is invalid`);
   if (!SHA256_PATTERN.test(value?.sha256 ?? "")) findings.push(`${label}.sha256 is invalid`);
+}
+
+function validateTypedReference(value, label, findings) {
+  exactKeys(value, ["kind", "uri", "sha256"], label, findings);
+  if (!IDENTIFIER_PATTERN.test(value?.kind ?? "")) findings.push(`${label}.kind is invalid`);
+  if (typeof value?.uri !== "string" || value.uri.length < 1 || value.uri.length > 2048) findings.push(`${label}.uri is invalid`);
+  if (!SHA256_PATTERN.test(value?.sha256 ?? "")) findings.push(`${label}.sha256 is invalid`);
+}
+
+function validateRetryRecords(value, plan, findings) {
+  if (!Array.isArray(value)) {
+    findings.push("control result retryRecords must be an array");
+    return;
+  }
+  const attempts = new Set();
+  for (const [index, retry] of value.entries()) {
+    const label = `control result retryRecords[${index}]`;
+    exactKeys(retry, ["attempt", "executedAtUtc", "executionStatus", "reason", "evidence"], label, findings);
+    if (!Number.isSafeInteger(retry?.attempt) || retry.attempt < 1) findings.push(`${label}.attempt is invalid`);
+    else if (attempts.has(retry.attempt)) findings.push(`${label}.attempt is duplicated`);
+    else attempts.add(retry.attempt);
+    if (!isCanonicalUtcDateTime(retry?.executedAtUtc)) findings.push(`${label}.executedAtUtc is invalid`);
+    else if (new Date(retry.executedAtUtc) < new Date(plan.payload.createdAtUtc)) findings.push(`${label} predates the frozen plan`);
+    if (!["PASS", "FAIL", "BLOCKED", "INCONCLUSIVE"].includes(retry?.executionStatus)) {
+      findings.push(`${label}.executionStatus is invalid`);
+    }
+    if (typeof retry?.reason !== "string" || retry.reason.length < 1 || retry.reason.length > 4096) {
+      findings.push(`${label}.reason is invalid`);
+    }
+    if (!Array.isArray(retry?.evidence) || retry.evidence.length < 1) findings.push(`${label}.evidence must be a non-empty array`);
+    else for (const [evidenceIndex, reference] of retry.evidence.entries()) {
+      validateReference(reference, `${label}.evidence[${evidenceIndex}]`, findings);
+    }
+  }
 }
 
 function uniqueEvidence(values) {
@@ -183,6 +288,46 @@ function uniqueEvidence(values) {
     throw new ProductionAcceptanceContractError(["control result contains duplicate evidence URIs"]);
   }
   return sorted;
+}
+
+async function assertProtectedG11ManifestSchema() {
+  const [schemaArtifact, verifierArtifact] = await Promise.all([
+    readStableRegularFile(g11ManifestSchemaPath, "protected G11 manifest schema"),
+    readStableRegularFile(g11ManifestVerifierPath, "protected G11 manifest verifier"),
+  ]);
+  const schemaSha256 = sha256Bytes(schemaArtifact.bytes);
+  const verifierSha256 = sha256Bytes(verifierArtifact.bytes);
+  const findings = [];
+  if (schemaSha256 !== G11_MANIFEST_SCHEMA_SHA256) {
+    findings.push(
+      `protected G11 manifest schema SHA-256 mismatch: expected ${G11_MANIFEST_SCHEMA_SHA256}, got ${schemaSha256}`,
+    );
+  }
+  if (verifierSha256 !== G11_MANIFEST_VERIFIER_SHA256) {
+    findings.push(
+      `protected G11 manifest verifier SHA-256 mismatch: expected ${G11_MANIFEST_VERIFIER_SHA256}, got ${verifierSha256}`,
+    );
+  }
+  if (findings.length > 0) {
+    throw new ProductionAcceptanceContractError([
+      ...findings,
+    ]);
+  }
+}
+
+async function validateObservationDocument(observation) {
+  const validate = await observationSchemaValidator();
+  if (validate(observation)) return true;
+  throw new ProductionAcceptanceContractError((validate.errors ?? []).map((error) => (
+    `generated production control observation${error.instancePath || "/"} ${error.message}`
+  )));
+}
+
+async function observationSchemaValidator() {
+  observationValidatorPromise ??= readFile(observationSchemaPath, "utf8").then((raw) => (
+    createStrictAjv2020().compile(JSON.parse(raw))
+  ));
+  return observationValidatorPromise;
 }
 
 async function readCanonicalDocument(candidatePath, label) {
@@ -243,6 +388,7 @@ function parseArguments(argv) {
     ["--control", "controlId"],
     ["--plan", "planPath"],
     ["--result", "resultPath"],
+    ["--evidence-root", "evidenceRoot"],
     ["--output", "outputPath"],
   ]);
   for (let index = 0; index < argv.length; index += 1) {

@@ -87,6 +87,62 @@ G10 的容量 profile 必须把 `activeRuns=100`、`cancellationQueryBatchSize=1
 `pollerQpsPerReplica=4`、`cancelP95Ms=10000` 和 `recoveryMs=60000` 写入同一不可变证据，
 并绑定 candidate config 与 catalog digest。只跑一个 Run 或只证明配置范围不算容量验收。
 
+## G11 部署真实栈证据
+
+除 `G11.FIGMA.SCOPE` 外，G11 的七个正式控制项必须从同一份 canonical
+`workbench.production-g11-real-stack-manifest.v1` 派生。fixture browser smoke、
+`route.fulfill`、受控本地 provider、synthetic session/API/SSE 和 localhost 截图只能用于诊断，
+不得作为该 manifest 或生产 observation 的输入。
+
+证据根目录必须在源码仓库之外，并使用以下受限布局：
+
+```text
+<evidence-root>/
+  raw/g11/manifest.json
+  raw/g11/screenshots/*.png
+  raw/g11/flows/*
+  observations/*.json
+```
+
+Manifest 必须与冻结 plan 的 `planId`、`payloadSha256`、完整 `binding` 和 `environment`
+逐字节语义一致，绑定同一 candidate、deploy、environment、image/config/migration/catalog
+digest。被测 Web 与 Preview 必须是互不相同、无凭证和无查询参数的 HTTPS origin；provider
+必须是批准的生产 provider。浏览器集合必须精确为 Chromium、Firefox、WebKit。
+
+视觉矩阵必须完整且无重复：
+
+- 状态：`prd-active`、`prd-pending`、`prototype-after-prd`；
+- viewport：`375x812`、`768x1024`、`1440x900`；
+- motion：`normal`、`reduced`；
+- browser：Chromium、Firefox、WebKit。
+
+因此 manifest 必须包含正好 54 个 screenshot cell。每张 PNG 都必须位于
+`file:./raw/g11/screenshots/`，摘要、像素尺寸和非空画面由 runner 重新验证。Manifest 还必须
+完整记录 account/invitation/workspace/project/role/revocation、PRD、mixed request 零副作用拒绝、
+Prototype-after-PRD、refresh/reconnect、Preview/Import/Export、Run success/failure/cancel/retry、
+approval/Canvas/typed Prototype Patch/SSE/Artifact persistence、authorization/idempotency、
+7,686+ 长 Run、Knowledge null/valid、provider-state integrity，以及
+accessibility/Preview security 十一个 flow；所有 flow 原始证据也必须是 evidence root 内的
+不可变、摘要匹配文件。
+
+调用 runner 时显式传入 evidence root：
+
+```sh
+node scripts/production-acceptance/run-control.mjs \
+  --control "$CONTROL_ID" \
+  --plan "$WORKBENCH_ACCEPTANCE_PLAN" \
+  --result "$WORKBENCH_CONTROL_RESULT" \
+  --evidence-root "$WORKBENCH_EVIDENCE_ROOT" \
+  --output "$WORKBENCH_OBSERVATION_OUTPUT"
+```
+
+Runner 不接受 result 自报的 G11 `observedValue`。它必须先校验 manifest 与所有引用文件，
+再分别派生七个控制的 boolean 或错误计数，并把 manifest、54 张截图和 flow 原始证据写入
+typed observation evidence。任一缺项、重复项、路径逃逸、符号链接、摘要不符、错误部署绑定
+或 fixture 标记都必须 fail closed。`G11.FIGMA.SCOPE` 仍按 G0 中冻结的独立人工/N/A 决策执行，
+不能由浏览器 manifest 代签。独立 collection workflow 和最终 package replay 会再次读取同一
+manifest、重算全部引用摘要与七个 observed value；手工构造 observation 不能绕过 runner。
+
 ## Observation Source
 
 交给 workflow 的 source 是 canonical

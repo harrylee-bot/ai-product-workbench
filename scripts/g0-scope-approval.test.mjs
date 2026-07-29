@@ -77,12 +77,16 @@ test("keeps the repository example explicitly NOT RUN and never reports gate PAS
   assert.equal(report.candidateManifestVerified, false);
 });
 
-test("requires every current remediation finding through D-051", async (t) => {
+test("requires every current remediation finding including F-001 through F-009", async (t) => {
   assert.deepEqual(
     G0_FINDING_IDS.filter((id) => id.startsWith("D-")).slice(-18),
     ["D-034", "D-035", "D-036", "D-037", "D-038", "D-039", "D-040", "D-041", "D-042", "D-043", "D-044", "D-045", "D-046", "D-047", "D-048", "D-049", "D-050", "D-051"],
   );
-  assert.equal(G0_FINDING_IDS.length, 70);
+  assert.deepEqual(
+    G0_FINDING_IDS.filter((id) => id.startsWith("F-")),
+    ["F-001", "F-002", "F-003", "F-004", "F-005", "F-006", "F-007", "F-008", "F-009"],
+  );
+  assert.equal(G0_FINDING_IDS.length, 79);
 
   const legacy = await createFixture();
   t.after(legacy.cleanup);
@@ -111,7 +115,7 @@ test("requires every current remediation finding through D-051", async (t) => {
       document.responsibilityMatrix.schedule[1].scopeItemIds.filter((id) => document.scope.findingIds.includes(id));
   });
 
-  await expectFailure(() => legacy.verify(), /must contain (?:at least|exactly) 70/);
+  await expectFailure(() => legacy.verify(), /must contain (?:at least|exactly) 79/);
 });
 
 test("CLI returns exit code 2 for a valid NOT RUN example", async () => {
@@ -584,6 +588,7 @@ async function createFixture() {
         schedule([...G0_GATE_IDS]),
         schedule(G0_FINDING_IDS.filter((id) => id.startsWith("D-"))),
         schedule(G0_FINDING_IDS.filter((id) => id.startsWith("P-"))),
+        schedule(G0_FINDING_IDS.filter((id) => id.startsWith("F-"))),
       ],
     },
     waivers: [],

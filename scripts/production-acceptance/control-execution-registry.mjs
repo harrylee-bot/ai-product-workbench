@@ -2,6 +2,7 @@ const GENERAL_RUNBOOK = "docs/runbooks/workbench-production-acceptance-g6-g11.md
 const RECOVERY_RUNBOOK = "docs/runbooks/workbench-postgres-recovery-drill.md";
 
 const general = Object.freeze({ kind: "runbook", path: GENERAL_RUNBOOK, section: "执行控制项" });
+const g11RealStack = Object.freeze({ kind: "runbook", path: GENERAL_RUNBOOK, section: "G11 部署真实栈证据" });
 const recovery = Object.freeze({ kind: "runbook", path: RECOVERY_RUNBOOK, section: "执行演练" });
 const command = (argv, evidenceKind) => Object.freeze({ kind: "command", argv: Object.freeze(argv), evidenceKind });
 
@@ -46,14 +47,14 @@ export const CONTROL_EXECUTION_REGISTRY = Object.freeze({
   "G10.RECOVERY.FAILURE_MATRIX": general,
   "G10.SLO.BLOCKING_INCIDENTS": general,
   "G10.TOPOLOGY.CLEAN_HOST": general,
-  "G11.ACCESSIBILITY.REDUCED_MOTION": command(["node", "scripts/e2e/run-workbench-web-smoke.mjs"], "browser-smoke-report"),
-  "G11.BROWSER.VIEWPORT_MATRIX": command(["node", "scripts/e2e/run-workbench-web-smoke.mjs"], "browser-smoke-report"),
+  "G11.ACCESSIBILITY.REDUCED_MOTION": g11RealStack,
+  "G11.BROWSER.VIEWPORT_MATRIX": g11RealStack,
   "G11.FIGMA.SCOPE": general,
-  "G11.PRODUCT.ACCOUNT_PROJECT": command(["node", "scripts/e2e/workbench-navigation-guard-smoke.mjs"], "browser-smoke-report"),
-  "G11.PRODUCT.IMPORT_EXPORT_PREVIEW": command(["node", "scripts/e2e/workbench-export-recovery-smoke.mjs"], "browser-smoke-report"),
-  "G11.PRODUCT.RUN_CANVAS_PROTOTYPE": command(["node", "scripts/e2e/workbench-run-preview-smoke.mjs"], "browser-smoke-report"),
-  "G11.QUALITY.CONSOLE_ERRORS": command(["node", "scripts/e2e/run-workbench-web-smoke.mjs"], "browser-smoke-report"),
-  "G11.QUALITY.FAILED_NETWORK_REQUESTS": command(["node", "scripts/e2e/run-workbench-web-smoke.mjs"], "browser-smoke-report"),
+  "G11.PRODUCT.ACCOUNT_PROJECT": g11RealStack,
+  "G11.PRODUCT.IMPORT_EXPORT_PREVIEW": g11RealStack,
+  "G11.PRODUCT.RUN_CANVAS_PROTOTYPE": g11RealStack,
+  "G11.QUALITY.CONSOLE_ERRORS": g11RealStack,
+  "G11.QUALITY.FAILED_NETWORK_REQUESTS": g11RealStack,
 });
 
 export const PRODUCTION_CONTROL_RUNNER_PATH = "scripts/production-acceptance/run-control.mjs";

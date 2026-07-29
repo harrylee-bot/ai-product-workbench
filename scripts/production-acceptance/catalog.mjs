@@ -197,13 +197,20 @@ async function validateCatalogSemantics(document, findings) {
 
 function validateExecutableProcedure(control, runnerVersion, findings) {
   const procedure = control?.procedure;
-  const expectedCommand = `node ${PRODUCTION_CONTROL_RUNNER_PATH} --control ${control.controlId} --plan "$WORKBENCH_ACCEPTANCE_PLAN" --result "$WORKBENCH_CONTROL_RESULT" --output "$WORKBENCH_OBSERVATION_OUTPUT"`;
+  const evidenceRootArgument = requiresG11RealStackManifest(control.controlId)
+    ? ' --evidence-root "$WORKBENCH_EVIDENCE_ROOT"'
+    : "";
+  const expectedCommand = `node ${PRODUCTION_CONTROL_RUNNER_PATH} --control ${control.controlId} --plan "$WORKBENCH_ACCEPTANCE_PLAN" --result "$WORKBENCH_CONTROL_RESULT"${evidenceRootArgument} --output "$WORKBENCH_OBSERVATION_OUTPUT"`;
   if (procedure?.kind !== "command" || procedure.command !== expectedCommand) {
     findings.push(`${control.controlId} must execute the protected repository control runner`);
   }
   if (control.tool?.name !== PRODUCTION_CONTROL_RUNNER_NAME || control.tool?.version !== runnerVersion) {
     findings.push(`${control.controlId} tool identity must bind the protected runner source SHA-256`);
   }
+}
+
+function requiresG11RealStackManifest(controlId) {
+  return controlId.startsWith("G11.") && controlId !== "G11.FIGMA.SCOPE";
 }
 
 async function validateExecutionMapping(control, findings) {

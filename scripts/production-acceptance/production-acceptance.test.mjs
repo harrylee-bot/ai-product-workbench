@@ -17,6 +17,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import sharp from "sharp";
 import YAML from "yaml";
 
 import {
@@ -48,13 +49,21 @@ import {
 import {
   collectProductionAcceptanceEvidence,
   evaluateThreshold,
+  loadProductionControlObservation,
 } from "./collect.mjs";
+import { executionForControl } from "./control-execution-registry.mjs";
+import {
+  PRODUCTION_G11_MANIFEST_EVIDENCE_KIND,
+  PRODUCTION_G11_REAL_STACK_CONTROL_IDS,
+  loadProductionG11RealStackManifest,
+} from "./g11-real-stack-manifest.mjs";
 import { materializeProductionObservationSource } from "./materialize-source.mjs";
 import { prepareProductionApprovalPayload } from "./prepare-approval-payload.mjs";
 import {
   createProductionAcceptancePlan,
   loadProductionAcceptancePlan,
 } from "./plan.mjs";
+import { runProductionControl } from "./run-control.mjs";
 
 const PLAN_CREATED_AT = "2026-07-19T06:00:00Z";
 const OBSERVED_AT = "2026-07-19T07:00:00Z";
@@ -135,6 +144,169 @@ test("observation source materializer validates schema, hashes, and path confine
     expectedSha256: sha256Bytes(unsafeRaw),
     outputRoot: path.join(root, "unsafe-output"),
   }), /path|pattern/u);
+});
+
+test("production control runner derives every non-Figma G11 observation from one real-stack manifest", async (t) => {
+  const fixture = await createPreparedFixture();
+  t.after(fixture.cleanup);
+  const runnerObservations = path.join(fixture.root, "runner-observations");
+  await mkdir(runnerObservations);
+  const toolAttestation = await createRunnerToolAttestation(fixture);
+  const observationIds = new Map();
+
+  for (const controlId of PRODUCTION_G11_REAL_STACK_CONTROL_IDS) {
+    const expected = fixture.catalog.byControl.get(controlId).control;
+    const resultPath = path.join(fixture.rawDirectory, "g11", `${controlId}.result.json`);
+    await writeCanonical(resultPath, productionControlResult({
+      controlId,
+      execution: executionForControl(controlId),
+      executionEvidence: fixture.g11.manifestReference,
+      observedValue: expected.threshold.kind === "boolean" ? false : 99,
+      toolAttestation,
+    }));
+    const outputPath = path.join(runnerObservations, `${controlId}.json`);
+    await runProductionControl({
+      controlId,
+      planPath: fixture.planPath,
+      resultPath,
+      evidenceRoot: fixture.evidenceRoot,
+      outputPath,
+    });
+    const loaded = await loadProductionControlObservation({ sourcePath: outputPath });
+    assert.equal(loaded.observation.result.executionStatus, "PASS");
+    assert.equal(loaded.observation.result.observedValue, expected.threshold.kind === "boolean" ? true : 0);
+    assert.equal(loaded.observation.evidence.length, 66);
+    assert.equal(
+      loaded.observation.evidence.filter(({ kind }) => kind === PRODUCTION_G11_MANIFEST_EVIDENCE_KIND).length,
+      1,
+    );
+    observationIds.set(controlId, loaded.observation.observationId);
+  }
+
+  assert.equal(new Set(observationIds.values()).size, PRODUCTION_G11_REAL_STACK_CONTROL_IDS.length);
+  const controlId = PRODUCTION_G11_REAL_STACK_CONTROL_IDS[0];
+  const repeatedPath = path.join(runnerObservations, `${controlId}.repeat.json`);
+  await runProductionControl({
+    controlId,
+    planPath: fixture.planPath,
+    resultPath: path.join(fixture.rawDirectory, "g11", `${controlId}.result.json`),
+    evidenceRoot: fixture.evidenceRoot,
+    outputPath: repeatedPath,
+  });
+  const repeated = await loadProductionControlObservation({ sourcePath: repeatedPath });
+  assert.equal(repeated.observation.observationId, observationIds.get(controlId));
+});
+
+test("G11 real-stack verifier rejects fixture, binding, matrix, flow, and screenshot tampering", async (t) => {
+  const fixture = await createPreparedFixture();
+  t.after(fixture.cleanup);
+  const original = structuredClone(fixture.g11.manifest);
+  const load = async (manifest = original, referenceOverride) => {
+    const reference = await rewriteG11Manifest(fixture.g11.manifestPath, manifest);
+    return loadProductionG11RealStackManifest({
+      reference: referenceOverride ?? reference,
+      evidenceRoot: fixture.evidenceRoot,
+      plan: fixture.plan,
+      executedAtUtc: OBSERVED_AT,
+    });
+  };
+  assert.equal((await load()).evidence.length, 65);
+
+  const scenarios = [
+    {
+      name: "candidate binding",
+      pattern: /binding mismatch/u,
+      mutate(manifest) { manifest.binding.candidateId = `sha256:${"9".repeat(64)}`; },
+    },
+    {
+      name: "controlled provider",
+      pattern: /controlled-local|fixture marker/u,
+      mutate(manifest) { manifest.deployment.provider.id = "controlled-local-deerflow"; },
+    },
+    {
+      name: "HTTP origin",
+      pattern: /HTTPS origin/u,
+      mutate(manifest) { manifest.deployment.webOrigin = "http://workbench.example.com"; },
+    },
+    {
+      name: "single browser",
+      pattern: /browsers|fewer than 3/u,
+      mutate(manifest) { manifest.browsers = manifest.browsers.slice(0, 1); },
+    },
+    {
+      name: "missing matrix cell",
+      pattern: /54|fewer than 54/u,
+      mutate(manifest) { manifest.visualMatrix.pop(); },
+    },
+    {
+      name: "duplicate matrix cell",
+      pattern: /54 unique/u,
+      mutate(manifest) { manifest.visualMatrix[53] = structuredClone(manifest.visualMatrix[0]); },
+    },
+    {
+      name: "flow self-report",
+      pattern: /status differs/u,
+      mutate(manifest) {
+        manifest.flows.find(({ flowId }) => flowId === "prd").checks.checksumVerified = false;
+      },
+    },
+    {
+      name: "long Run boundary",
+      pattern: /status differs/u,
+      mutate(manifest) {
+        manifest.flows.find(({ flowId }) => flowId === "long-run-7686-plus").checks.observedEventCount = 7_685;
+      },
+    },
+    {
+      name: "Run cancel coverage",
+      pattern: /status differs/u,
+      mutate(manifest) {
+        manifest.flows.find(({ flowId }) => flowId === "run-canvas-sse-artifact").checks.cancelPassed = false;
+      },
+    },
+    {
+      name: "screenshot hash",
+      pattern: /screenshot cannot be verified.*SHA-256 mismatch/u,
+      mutate(manifest) { manifest.visualMatrix[0].screenshot.sha256 = "0".repeat(64); },
+    },
+  ];
+  for (const scenario of scenarios) {
+    const manifest = structuredClone(original);
+    scenario.mutate(manifest);
+    await assertContractFailure(() => load(manifest), scenario.pattern);
+  }
+
+  const correctReference = await rewriteG11Manifest(fixture.g11.manifestPath, original);
+  await assertContractFailure(() => load(original, {
+    ...correctReference,
+    sha256: "1".repeat(64),
+  }), /manifest cannot be verified.*SHA-256 mismatch/u);
+});
+
+test("collection independently replays G11 manifest values instead of trusting hand-built observations", async (t) => {
+  const fixture = await createPreparedFixture();
+  t.after(fixture.cleanup);
+  const manifest = structuredClone(fixture.g11.manifest);
+  manifest.unexpectedConsoleErrors.push({
+    browser: "chromium",
+    viewport: "1440x900",
+    motion: "normal",
+    sourceClass: "workbench-web",
+    type: "error",
+    count: 1,
+  });
+  const manifestReference = await rewriteG11Manifest(fixture.g11.manifestPath, manifest);
+  for (const controlId of PRODUCTION_G11_REAL_STACK_CONTROL_IDS) {
+    const observationPath = path.join(fixture.observationsDirectory, `${controlId}.json`);
+    const observation = JSON.parse(await readFile(observationPath, "utf8"));
+    const reference = observation.evidence.find(({ kind }) => kind === PRODUCTION_G11_MANIFEST_EVIDENCE_KIND);
+    reference.sha256 = manifestReference.sha256;
+    await writeCanonical(observationPath, observation);
+  }
+  await assertContractFailure(
+    () => collectPrepared(fixture, "g11-replay-tamper"),
+    /G11\.QUALITY\.CONSOLE_ERRORS observedValue was not derived/u,
+  );
 });
 
 test("plan, collection, and v3 assembly complete one candidate-bound path", async (t) => {
@@ -708,6 +880,7 @@ async function createPreparedFixture() {
   });
   const planPath = path.join(root, "production-acceptance-plan.json");
   await writeCanonical(planPath, plan);
+  const g11 = await createG11Fixture({ evidenceRoot, plan });
   const controls = catalog.document.gates.flatMap((gate) => gate.controls.map((control) => ({
     gateId: gate.gateId,
     control,
@@ -776,11 +949,13 @@ async function createPreparedFixture() {
         observedValue,
         summary: `${control.controlId} met its protected threshold.`,
       },
-      evidence: [{
-        kind: "probe",
-        uri: `file:./raw/${rawName}`,
-        sha256: sha256Bytes(raw),
-      }],
+      evidence: control.controlId.startsWith("G11.") && control.controlId !== "G11.FIGMA.SCOPE"
+        ? structuredClone(g11.observationEvidence)
+        : [{
+          kind: "probe",
+          uri: `file:./raw/${rawName}`,
+          sha256: sha256Bytes(raw),
+        }],
       retryRecords: [],
     };
     await writeCanonical(path.join(observationsDirectory, `${control.controlId}.json`), observation);
@@ -801,9 +976,344 @@ async function createPreparedFixture() {
     deploymentConfig: deploymentConfigDescriptor,
     plan,
     planPath,
+    g11,
     controls,
     collectionRoot: path.join(root, "collection"),
     cleanup: () => rm(root, { recursive: true, force: true }),
+  };
+}
+
+async function createG11Fixture({ evidenceRoot, plan }) {
+  const root = path.join(evidenceRoot, "raw", "g11");
+  const screenshotsDirectory = path.join(root, "screenshots");
+  const flowsDirectory = path.join(root, "flows");
+  await mkdir(screenshotsDirectory, { recursive: true });
+  await mkdir(flowsDirectory, { recursive: true });
+  const browsers = ["chromium", "firefox", "webkit"];
+  const states = ["prd-active", "prd-pending", "prototype-after-prd"];
+  const viewports = [
+    { id: "375x812", width: 375, height: 812 },
+    { id: "768x1024", width: 768, height: 1024 },
+    { id: "1440x900", width: 1440, height: 900 },
+  ];
+  const motions = ["normal", "reduced"];
+  const screenshotBuffers = new Map();
+  for (const viewport of viewports) {
+    const marker = await sharp({
+      create: { width: 16, height: 16, channels: 3, background: "#f4f4f5" },
+    }).png().toBuffer();
+    screenshotBuffers.set(viewport.id, await sharp({
+      create: { width: viewport.width, height: viewport.height, channels: 3, background: "#111214" },
+    }).composite([{ input: marker, left: 8, top: 8 }]).png().toBuffer());
+  }
+
+  const visualMatrix = [];
+  for (const browser of browsers) {
+    for (const state of states) {
+      for (const viewport of viewports) {
+        for (const motion of motions) {
+          const fileName = `${browser}-${state}-${viewport.id}-${motion}.png`;
+          const bytes = screenshotBuffers.get(viewport.id);
+          await writeFile(path.join(screenshotsDirectory, fileName), bytes);
+          const semanticKind = state === "prototype-after-prd" ? "prototype" : "prd";
+          visualMatrix.push({
+            browser,
+            viewport: viewport.id,
+            motion,
+            state,
+            status: "PASS",
+            runState: {
+              requestedArtifactKinds: [semanticKind],
+              generationStage: semanticKind === "prototype" ? "generating-prototype" : "drafting-prd",
+              terminal: false,
+            },
+            motionEvidence: {
+              semanticKind,
+              animationName: semanticKind === "prototype" ? "prototype-ripple" : "prd-aurora",
+              animationDurationMs: motion === "reduced" ? 1 : 1_200,
+              frameChanged: motion === "normal",
+              reducedMotionMedia: motion === "reduced",
+            },
+            layout: {
+              withinViewport: true,
+              noOverlap: true,
+              promptContextVisible: true,
+              activityContextVisible: true,
+              pendingCompositionVisible: state === "prd-pending",
+              accessibleNamesPassed: true,
+            },
+            screenshot: {
+              kind: "browser-screenshot",
+              uri: `file:./raw/g11/screenshots/${fileName}`,
+              sha256: sha256Bytes(bytes),
+            },
+          });
+        }
+      }
+    }
+  }
+
+  const flowChecks = passingG11FlowChecks();
+  const flows = [];
+  for (const [flowId, checks] of Object.entries(flowChecks)) {
+    const fileName = `${flowId}.json`;
+    const bytes = Buffer.from(canonicalJsonFile({
+      schemaVersion: "workbench.production-g11-flow-evidence.v1",
+      flowId,
+      binding: plan.payload.binding,
+      result: "PASS",
+    }), "utf8");
+    await writeFile(path.join(flowsDirectory, fileName), bytes);
+    flows.push({
+      flowId,
+      status: "PASS",
+      checks,
+      evidence: [{
+        kind: "browser-flow-evidence",
+        uri: `file:./raw/g11/flows/${fileName}`,
+        sha256: sha256Bytes(bytes),
+      }],
+    });
+  }
+
+  const manifest = {
+    schemaVersion: "workbench.production-g11-real-stack-manifest.v1",
+    manifestId: `g11-real-stack-${plan.payload.planId.slice(-24)}`,
+    plan: {
+      planId: plan.payload.planId,
+      payloadSha256: plan.payloadSha256,
+    },
+    binding: plan.payload.binding,
+    environment: plan.payload.environment,
+    deployment: {
+      stackKind: "deployed-production",
+      webOrigin: "https://workbench.example.com",
+      previewOrigin: "https://preview.example.com",
+      provider: {
+        class: "approved-production-provider",
+        id: "provider-production",
+        version: "2026.07.19",
+      },
+      sessionBoundary: "better-auth",
+      apiBoundary: "workbench-api",
+      sseBoundary: "workbench-sse",
+      queueBoundary: "pg-boss",
+      databaseBoundary: "postgresql",
+      artifactBoundary: "immutable-artifact-version",
+    },
+    harness: {
+      name: "playwright",
+      version: "1.58.2",
+      sourceCommit: plan.payload.binding.commitSha,
+      routeFulfillUsed: false,
+      syntheticSessionUsed: false,
+      syntheticApiUsed: false,
+      syntheticSseUsed: false,
+    },
+    startedAtUtc: "2026-07-19T06:15:00Z",
+    finishedAtUtc: "2026-07-19T06:55:00Z",
+    browsers: browsers.map((name, index) => ({ name, version: `140.0.${index + 1}` })),
+    visualMatrix,
+    flows,
+    unexpectedConsoleErrors: [],
+    unexpectedNetworkFailures: [],
+  };
+  const manifestPath = path.join(root, "manifest.json");
+  const manifestReference = await rewriteG11Manifest(manifestPath, manifest);
+  const evidence = [
+    ...visualMatrix.map(({ screenshot }) => structuredClone(screenshot)),
+    ...flows.flatMap((flow) => structuredClone(flow.evidence)),
+  ].sort((left, right) => left.uri.localeCompare(right.uri, "en"));
+  const observationEvidence = [
+    {
+      kind: PRODUCTION_G11_MANIFEST_EVIDENCE_KIND,
+      ...manifestReference,
+    },
+    ...evidence,
+  ].sort((left, right) => left.uri.localeCompare(right.uri, "en"));
+  return {
+    manifest,
+    manifestPath,
+    manifestReference,
+    evidence,
+    observationEvidence,
+  };
+}
+
+function passingG11FlowChecks() {
+  return {
+    "account-project": {
+      accountCreated: true,
+      loginCompleted: true,
+      invitationAccepted: true,
+      workspaceOpened: true,
+      projectOpened: true,
+      membershipRolesEnforced: true,
+      revokedAccessDenied: true,
+      expiredInvitationDenied: true,
+      unauthorizedPathsClosed: true,
+    },
+    prd: {
+      requestAccepted: true,
+      loadingCompositionRendered: true,
+      activePanelContextRendered: true,
+      stageSequenceContinuous: true,
+      readyArtifactPersisted: true,
+      checksumVerified: true,
+    },
+    "mixed-rejection": {
+      problemStatus: 422,
+      queuePublishCount: 0,
+      runCount: 0,
+      runtimeAttemptCount: 0,
+      artifactVersionCount: 0,
+      providerInvocationCount: 0,
+      sseEventCount: 0,
+    },
+    "prototype-after-prd": {
+      startedAfterPrd: true,
+      nullGapPrdMotionAbsent: true,
+      thinkingGapPrdMotionAbsent: true,
+      prototypeMotionRendered: true,
+      readyArtifactPersisted: true,
+    },
+    "refresh-reconnect": {
+      reconnectCursorAdvanced: true,
+      sequenceContinuous: true,
+      stateRestored: true,
+      artifactPersisted: true,
+    },
+    "preview-import-export": {
+      fileImportCompleted: true,
+      knowledgeImportCompleted: true,
+      exportCompleted: true,
+      previewLoaded: true,
+      explicitPublicationConfirmation: true,
+      failureRecoveryPassed: true,
+      checksumVerified: true,
+    },
+    "run-canvas-sse-artifact": {
+      runCompleted: true,
+      approvalPassed: true,
+      failurePassed: true,
+      cancelPassed: true,
+      retryPassed: true,
+      canvasGatewayUsed: true,
+      prototypePatchStableNodeIds: true,
+      sseDurable: true,
+      sequenceContinuous: true,
+      authorizationPassed: true,
+      idempotencyPreserved: true,
+      artifactPersisted: true,
+      checksumVerified: true,
+      revisionAdvanced: true,
+    },
+    "accessibility-preview-security": {
+      keyboardPassed: true,
+      focusPassed: true,
+      accessibleNamesPassed: true,
+      contrastPassed: true,
+      reducedMotionPassed: true,
+      previewIndependentOrigin: true,
+      previewCredentialless: true,
+      previewAllowSameOriginAbsent: true,
+      previewNoReferrer: true,
+      previewCapabilityValidated: true,
+      previewRpcPassed: true,
+      previewTimeoutProtected: true,
+      previewGenerationProtected: true,
+    },
+    "long-run-7686-plus": {
+      minimumEventCount: 7_686,
+      observedEventCount: 7_686,
+      crossedBoundary: true,
+      terminalStateCorrect: true,
+      retryRecoveryPassed: true,
+    },
+    "knowledge-null-valid": {
+      nullReleaseGrantAbsent: true,
+      nullReleaseSecretAbsent: true,
+      nullReleaseCatalogAbsent: true,
+      validPinnedReleaseVisible: true,
+      validPinnedReleaseInvocationPassed: true,
+      concurrentScopeIsolated: true,
+      secretsNotPersisted: true,
+    },
+    "provider-state-integrity": {
+      textComplete: true,
+      effectsComplete: true,
+      draftComplete: true,
+      artifactsComplete: true,
+      duplicateTextCount: 0,
+      lostTextCount: 0,
+      duplicateEffectCount: 0,
+      lostEffectCount: 0,
+      duplicateDraftCount: 0,
+      lostDraftCount: 0,
+      duplicateArtifactCount: 0,
+      lostArtifactCount: 0,
+    },
+  };
+}
+
+async function rewriteG11Manifest(manifestPath, manifest) {
+  const raw = Buffer.from(canonicalJsonFile(manifest), "utf8");
+  await writeFile(manifestPath, raw);
+  return { uri: "file:./raw/g11/manifest.json", sha256: sha256Bytes(raw) };
+}
+
+async function createRunnerToolAttestation(fixture) {
+  const directory = path.join(fixture.rawDirectory, "runner-attestation");
+  await mkdir(directory, { recursive: true });
+  const runnerRaw = await readFile(path.join(repoRoot, "scripts/production-acceptance/run-control.mjs"));
+  const runnerSha256 = sha256Bytes(runnerRaw);
+  const provenanceRaw = Buffer.from(canonicalJsonFile({
+    name: "workbench-production-control-runner",
+    subjectSha256: runnerSha256,
+  }), "utf8");
+  await writeFile(path.join(directory, "run-control.mjs"), runnerRaw);
+  await writeFile(path.join(directory, "provenance.json"), provenanceRaw);
+  const tool = fixture.catalog.byControl.get(PRODUCTION_G11_REAL_STACK_CONTROL_IDS[0]).control.tool;
+  return {
+    name: tool.name,
+    version: tool.version,
+    artifact: {
+      uri: "file:./raw/runner-attestation/run-control.mjs",
+      sha256: runnerSha256,
+    },
+    provenance: {
+      uri: "file:./raw/runner-attestation/provenance.json",
+      sha256: sha256Bytes(provenanceRaw),
+    },
+    provenanceSubjectSha256: runnerSha256,
+  };
+}
+
+function productionControlResult({
+  controlId,
+  execution,
+  executionEvidence,
+  observedValue,
+  toolAttestation,
+}) {
+  return {
+    schemaVersion: "workbench.production-control-result.v1",
+    controlId,
+    executedAtUtc: OBSERVED_AT,
+    executor: { id: "auditor-fixture", kind: "auditor" },
+    observedValue,
+    summary: "This untrusted summary and observed value must not control G11.",
+    conditionalResult: null,
+    execution: {
+      kind: execution.kind,
+      source: execution.kind === "command"
+        ? { argv: [...execution.argv], evidenceKind: execution.evidenceKind }
+        : { path: execution.path, section: execution.section },
+      evidence: structuredClone(executionEvidence),
+    },
+    toolAttestation: structuredClone(toolAttestation),
+    evidence: [],
+    retryRecords: [],
   };
 }
 

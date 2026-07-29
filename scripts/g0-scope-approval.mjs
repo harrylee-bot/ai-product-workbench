@@ -24,6 +24,7 @@ export const G0_GATE_IDS = Object.freeze(Array.from({ length: 13 }, (_, index) =
 export const G0_FINDING_IDS = Object.freeze([
   ...Array.from({ length: 51 }, (_, index) => `D-${String(index + 1).padStart(3, "0")}`),
   ...Array.from({ length: 19 }, (_, index) => `P-${String(index + 1).padStart(3, "0")}`),
+  ...Array.from({ length: 9 }, (_, index) => `F-${String(index + 1).padStart(3, "0")}`),
 ]);
 
 const EXECUTION_STATUSES = new Set(["PASS", "FAIL", "NOT RUN", "BLOCKED", "INCONCLUSIVE"]);
@@ -361,7 +362,7 @@ function validateSchedule(schedule, scopeItems, context) {
     if (expectArray(item.scopeItemIds, `${location}.scopeItemIds`, errors, 1)) {
       const localIds = new Set();
       for (const scopeItemId of item.scopeItemIds) {
-        if (typeof scopeItemId !== "string" || !/^(?:G(?:[0-9]|1[0-2])|(?:D|P)-\d{3})$/.test(scopeItemId)) {
+        if (typeof scopeItemId !== "string" || !/^(?:G(?:[0-9]|1[0-2])|(?:D|F|P)-\d{3})$/.test(scopeItemId)) {
           errors.push(`${location}.scopeItemIds contains invalid ID ${JSON.stringify(scopeItemId)}`);
           continue;
         }

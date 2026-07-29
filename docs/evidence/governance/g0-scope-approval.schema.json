@@ -221,12 +221,12 @@
         },
         "findingIds": {
           "type": "array",
-          "minItems": 70,
-          "maxItems": 70,
+          "minItems": 79,
+          "maxItems": 79,
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^(?:D|P)-[0-9]{3}$"
+            "pattern": "^(?:D|F|P)-[0-9]{3}$"
           }
         }
       }
@@ -408,7 +408,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^(?:G(?:[0-9]|1[0-2])|(?:D|P)-[0-9]{3})$"
+            "pattern": "^(?:G(?:[0-9]|1[0-2])|(?:D|F|P)-[0-9]{3})$"
           }
         },
         "targetDateUtc": {
@@ -506,7 +506,7 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^(?:D|P)-[0-9]{3}$"
+            "pattern": "^(?:D|F|P)-[0-9]{3}$"
           }
         },
         "businessReason": {
