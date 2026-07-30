@@ -52,6 +52,11 @@ test("the migrator reconciles Runtime queues before services start", async () =>
   assert.match(compose, /WORKBENCH_POSTGRES_ADMIN_URL/u);
 
   const workflow = YAML.parse(workflowSource);
+  assert.equal(
+    workflow.jobs?.quality?.["timeout-minutes"],
+    90,
+    "CI quality must leave enough time for the full test, PostgreSQL, browser, and build gates",
+  );
   const qualitySteps = workflow.jobs?.quality?.steps ?? [];
   const reconcileIndex = qualitySteps.findIndex((step) => step.name === "Reconcile runtime queue schema and policies");
   const testIndex = qualitySteps.findIndex((step) => step.run === "npm test");

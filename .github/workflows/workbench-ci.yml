@@ -202,7 +202,9 @@ jobs:
     name: Contracts, architecture, tests, and build
     needs: [release-chain]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The 10k+ test aggregate takes about 33 minutes before PostgreSQL,
+    # browser, and production build gates run; retain enough budget for all.
+    timeout-minutes: 90
     outputs:
       pr_production_image_count: ${{ steps.affected_production_images.outputs.count }}
       pr_production_image_matrix: ${{ steps.affected_production_images.outputs.matrix }}
