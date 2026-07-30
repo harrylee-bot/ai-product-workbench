@@ -65,10 +65,12 @@ describe("Workbench Import Sources dialog", () => {
     expect(screen.getByText("可用")).toBeTruthy();
     expect(screen.getByText("处理中")).toBeTruthy();
     expect(screen.getByText("导入失败")).toBeTruthy();
-    const readyButton = screen.getByRole("button", { name: "选择Ready site" });
-    const pendingButton = screen.getByRole("button", { name: "Example暂不可用" });
+    const readyButton = screen.getByRole("button", { name: "选择来源 Ready site" });
+    const pendingButton = screen.getByRole("button", { name: "来源暂不可用 Example" });
     expect((readyButton as HTMLButtonElement).disabled).toBe(false);
     expect((pendingButton as HTMLButtonElement).disabled).toBe(true);
+    expect(readyButton.getAttribute("aria-pressed")).toBe("false");
+    expect(readyButton.getAttribute("data-import-source-action")).toBe("toggle-selection");
     fireEvent.click(readyButton);
     expect(onSelected).toHaveBeenCalledWith(["source-ready"]);
   });

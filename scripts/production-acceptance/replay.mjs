@@ -14,6 +14,7 @@ export async function replayProductionControlObservation({
   plan,
   catalog,
   collectedAtUtc,
+  trustPolicy,
 } = {}) {
   const expected = catalog?.byControl?.get(entry?.entryId);
   if (!expected) {
@@ -36,6 +37,7 @@ export async function replayProductionControlObservation({
     observation: loaded.observation,
     evidenceRoot: root,
     plan,
+    trustPolicy,
   });
   assertLedgerEntryMatchesObservation({
     entry,

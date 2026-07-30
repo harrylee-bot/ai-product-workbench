@@ -49,7 +49,19 @@ let schemaValidatorPromise;
 
 export class ProductionAcceptanceContractError extends Error {
   constructor(findings) {
-    const normalized = [...new Set(Array.isArray(findings) ? findings : [String(findings)])].sort();
+    const input = Array.isArray(findings) ? findings : [findings];
+    const bounded = [];
+    const seen = new Set();
+    for (const finding of input) {
+      const normalizedFinding = String(finding)
+        .replace(/[\u0000-\u001f\u007f]/gu, " ")
+        .slice(0, 1_024);
+      if (seen.has(normalizedFinding)) continue;
+      seen.add(normalizedFinding);
+      if (bounded.length < 255) bounded.push(normalizedFinding);
+    }
+    if (seen.size > bounded.length) bounded.push("production acceptance findings were truncated");
+    const normalized = bounded.sort();
     super(`Production acceptance contract failed (${normalized.length} finding${normalized.length === 1 ? "" : "s"}):\n${normalized.map((finding) => `- ${finding}`).join("\n")}`);
     this.name = "ProductionAcceptanceContractError";
     this.findings = normalized;
@@ -198,7 +210,7 @@ async function validateCatalogSemantics(document, findings) {
 function validateExecutableProcedure(control, runnerVersion, findings) {
   const procedure = control?.procedure;
   const evidenceRootArgument = requiresG11RealStackManifest(control.controlId)
-    ? ' --evidence-root "$WORKBENCH_EVIDENCE_ROOT"'
+    ? ' --evidence-root "$WORKBENCH_EVIDENCE_ROOT" --trust-policy "$PRODUCTION_TRUST_POLICY" --trust-policy-sha256 "$PRODUCTION_TRUST_POLICY_SHA256"'
     : "";
   const expectedCommand = `node ${PRODUCTION_CONTROL_RUNNER_PATH} --control ${control.controlId} --plan "$WORKBENCH_ACCEPTANCE_PLAN" --result "$WORKBENCH_CONTROL_RESULT"${evidenceRootArgument} --output "$WORKBENCH_OBSERVATION_OUTPUT"`;
   if (procedure?.kind !== "command" || procedure.command !== expectedCommand) {

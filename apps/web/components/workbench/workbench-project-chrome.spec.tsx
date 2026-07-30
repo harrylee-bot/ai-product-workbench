@@ -291,6 +291,39 @@ describe("workbench project chrome", () => {
     expect(onPreview).toHaveBeenCalledWith();
   });
 
+  it("keeps Preview, Export, and Share named and operable at the 375px base breakpoint", () => {
+    const onPreview = vi.fn();
+    render(
+      <ProjectTopBar
+        capabilities={workbenchProjectCapabilities("owner")}
+        exportOpen={false}
+        onArchive={vi.fn()}
+        onBack={vi.fn()}
+        onDuplicate={vi.fn()}
+        onExport={vi.fn()}
+        onMembers={vi.fn()}
+        onPreview={onPreview}
+        onRename={vi.fn()}
+        onShare={vi.fn()}
+        onToggleMenu={vi.fn()}
+        projectMenuOpen={false}
+        projectTitle="结算体验优化"
+        shareOpen={false}
+      />,
+    );
+
+    const preview = screen.getByRole("button", { name: "预览项目" });
+    const exportButton = screen.getByRole("button", { name: "导出" });
+    const share = screen.getByRole("button", { name: "共享" });
+    expect(preview.classList.contains("hidden")).toBe(false);
+    expect(preview.getAttribute("data-project-action")).toBe("preview");
+    expect(exportButton.getAttribute("data-project-action")).toBe("export");
+    expect(share.getAttribute("data-project-action")).toBe("share");
+
+    fireEvent.click(preview);
+    expect(onPreview).toHaveBeenCalledOnce();
+  });
+
   it("keeps the generated-project suggestion branded as 产品工作台", () => {
     render(
       <ProjectSuggestionPills

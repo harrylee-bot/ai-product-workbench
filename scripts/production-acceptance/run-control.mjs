@@ -10,6 +10,7 @@ import {
   sha256Bytes,
   sha256Canonical,
 } from "../evidence-ledger.mjs";
+import { loadProductionTrustPolicy } from "../workbench-production-trust-policy.mjs";
 import {
   ProductionAcceptanceContractError,
   loadProductionAcceptanceControlCatalog,
@@ -39,8 +40,8 @@ const g11ManifestSchemaPath = path.join(repoRoot, PRODUCTION_G11_REAL_STACK_SCHE
 const g11ManifestVerifierPath = path.join(repoRoot, "scripts/production-acceptance/g11-real-stack-manifest.mjs");
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
-const G11_MANIFEST_SCHEMA_SHA256 = "27a9288856135e4fbfc366400331057648a3a73c2b34dbba0894326b2584a3ba";
-const G11_MANIFEST_VERIFIER_SHA256 = "a1d6651c9bcc1ec14b6861dede06e04403db68a0fe78ca5053aadd678d74fd21";
+const G11_MANIFEST_SCHEMA_SHA256 = "b076b48d943e6bb57c93d991011becc886759c3cb51fee541da7f4c0b0010dd4";
+const G11_MANIFEST_VERIFIER_SHA256 = "a3b9d0c2606d419c825b036146cfee3290ce492ee7a97f44b6fb7719bc318b22";
 let observationValidatorPromise;
 
 export async function runProductionControl({
@@ -48,6 +49,8 @@ export async function runProductionControl({
   planPath,
   resultPath,
   evidenceRoot,
+  trustPolicyPath,
+  expectedTrustPolicySha256,
   outputPath,
 } = {}) {
   const findings = [];
@@ -57,6 +60,12 @@ export async function runProductionControl({
   if (!outputPath) findings.push("outputPath is required");
   if (isProductionG11RealStackControl(controlId) && !evidenceRoot) {
     findings.push("evidenceRoot is required for production G11 real-stack controls");
+  }
+  if (isProductionG11RealStackControl(controlId) && !trustPolicyPath) {
+    findings.push("trustPolicyPath is required for production G11 real-stack controls");
+  }
+  if (isProductionG11RealStackControl(controlId) && !SHA256_PATTERN.test(expectedTrustPolicySha256 ?? "")) {
+    findings.push("expectedTrustPolicySha256 is required for production G11 real-stack controls");
   }
   if (findings.length > 0) throw new ProductionAcceptanceContractError(findings);
 
@@ -77,11 +86,18 @@ export async function runProductionControl({
   let g11Evidence = null;
   if (isProductionG11RealStackControl(controlId)) {
     await assertProtectedG11ManifestSchema();
+    const trustPolicy = await loadProductionTrustPolicy({
+      policyPath: trustPolicyPath,
+      expectedSha256: expectedTrustPolicySha256,
+    }).catch(() => {
+      throw new ProductionAcceptanceContractError(["G11 external production trust policy validation failed"]);
+    });
     g11Evidence = await loadProductionG11RealStackManifest({
       reference: result.execution.evidence,
       evidenceRoot,
       plan: loadedPlan.plan,
       executedAtUtc: result.executedAtUtc,
+      trustPolicy,
     });
   }
 
@@ -389,6 +405,8 @@ function parseArguments(argv) {
     ["--plan", "planPath"],
     ["--result", "resultPath"],
     ["--evidence-root", "evidenceRoot"],
+    ["--trust-policy", "trustPolicyPath"],
+    ["--trust-policy-sha256", "expectedTrustPolicySha256"],
     ["--output", "outputPath"],
   ]);
   for (let index = 0; index < argv.length; index += 1) {

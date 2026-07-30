@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aionbench.com/schemas/workbench.production-g11-real-stack-manifest.v1.json",
+  "$id": "https://aionbench.com/schemas/workbench.production-g11-real-stack-manifest.v2.json",
   "title": "Product Workbench production G11 real-stack evidence manifest",
   "type": "object",
   "additionalProperties": false,
@@ -12,6 +12,7 @@
     "environment",
     "deployment",
     "harness",
+    "collectorAttestation",
     "startedAtUtc",
     "finishedAtUtc",
     "browsers",
@@ -21,7 +22,7 @@
     "unexpectedNetworkFailures"
   ],
   "properties": {
-    "schemaVersion": { "const": "workbench.production-g11-real-stack-manifest.v1" },
+    "schemaVersion": { "const": "workbench.production-g11-real-stack-manifest.v2" },
     "manifestId": { "$ref": "#/$defs/identifier" },
     "plan": {
       "type": "object",
@@ -41,18 +42,26 @@
         "stackKind",
         "webOrigin",
         "previewOrigin",
+        "approvedThirdPartyOrigins",
         "provider",
         "sessionBoundary",
         "apiBoundary",
         "sseBoundary",
         "queueBoundary",
         "databaseBoundary",
-        "artifactBoundary"
+        "artifactBoundary",
+        "receipt"
       ],
       "properties": {
         "stackKind": { "const": "deployed-production" },
         "webOrigin": { "type": "string", "minLength": 1, "maxLength": 2048 },
         "previewOrigin": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "approvedThirdPartyOrigins": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2048 }
+        },
         "provider": {
           "type": "object",
           "additionalProperties": false,
@@ -68,7 +77,8 @@
         "sseBoundary": { "const": "workbench-sse" },
         "queueBoundary": { "const": "pg-boss" },
         "databaseBoundary": { "const": "postgresql" },
-        "artifactBoundary": { "const": "immutable-artifact-version" }
+        "artifactBoundary": { "const": "immutable-artifact-version" },
+        "receipt": { "$ref": "#/$defs/reference" }
       }
     },
     "harness": {
@@ -81,7 +91,9 @@
         "routeFulfillUsed",
         "syntheticSessionUsed",
         "syntheticApiUsed",
-        "syntheticSseUsed"
+        "syntheticSseUsed",
+        "source",
+        "traceCollection"
       ],
       "properties": {
         "name": { "const": "playwright" },
@@ -90,7 +102,77 @@
         "routeFulfillUsed": { "const": false },
         "syntheticSessionUsed": { "const": false },
         "syntheticApiUsed": { "const": false },
-        "syntheticSseUsed": { "const": false }
+        "syntheticSseUsed": { "const": false },
+        "source": { "$ref": "#/$defs/reference" },
+        "traceCollection": { "const": "playwright-sanitized-trace" }
+      }
+    },
+    "collectorAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "scopeId",
+        "signerId",
+        "signedAtUtc",
+        "trustPolicySha256",
+        "collector",
+        "evidenceClosureSha256",
+        "source",
+        "dataset",
+        "privacyReview",
+        "signature"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "workbench.production-g11-collector-attestation.v1" },
+        "scopeId": { "const": "production-g11.browser-evidence-collector" },
+        "signerId": { "$ref": "#/$defs/identifier" },
+        "signedAtUtc": { "$ref": "#/$defs/utc" },
+        "trustPolicySha256": { "$ref": "#/$defs/sha256" },
+        "collector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "harnessSha256",
+            "collectorSha256",
+            "schemaSha256",
+            "verifierSha256",
+            "runnerSha256",
+            "sanitizerAlgorithm",
+            "captureCount",
+            "assertionCount",
+            "unexpectedRuntimeFailureCount",
+            "nativeTraceCount",
+            "nativeTraceDeletedCount"
+          ],
+          "properties": {
+            "harnessSha256": { "$ref": "#/$defs/sha256" },
+            "collectorSha256": { "$ref": "#/$defs/sha256" },
+            "schemaSha256": { "$ref": "#/$defs/sha256" },
+            "verifierSha256": { "$ref": "#/$defs/sha256" },
+            "runnerSha256": { "$ref": "#/$defs/sha256" },
+            "sanitizerAlgorithm": { "const": "strict-allowlist-v1" },
+            "captureCount": { "const": 252 },
+            "assertionCount": { "type": "integer", "minimum": 252, "maximum": 1000000 },
+            "unexpectedRuntimeFailureCount": { "const": 0 },
+            "nativeTraceCount": { "const": 252 },
+            "nativeTraceDeletedCount": { "const": 252 }
+          }
+        },
+        "evidenceClosureSha256": { "$ref": "#/$defs/sha256" },
+        "source": { "$ref": "#/$defs/reference" },
+        "dataset": { "$ref": "#/$defs/reference" },
+        "privacyReview": { "$ref": "#/$defs/reference" },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["algorithm", "keyId", "value"],
+          "properties": {
+            "algorithm": { "const": "Ed25519" },
+            "keyId": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "value": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" }
+          }
+        }
       }
     },
     "startedAtUtc": { "$ref": "#/$defs/utc" },
@@ -208,6 +290,15 @@
         "sha256": { "$ref": "#/$defs/sha256" }
       }
     },
+    "scenarioBinding": {
+      "type": "object",
+      "minProperties": 2,
+      "maxProperties": 4,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
     "runState": {
       "type": "object",
       "additionalProperties": false,
@@ -230,15 +321,17 @@
         "semanticKind",
         "animationName",
         "animationDurationMs",
-        "frameChanged",
-        "reducedMotionMedia"
+        "reducedMotionMedia",
+        "targetSelector",
+        "sampleIntervalMs"
       ],
       "properties": {
         "semanticKind": { "enum": ["prd", "prototype"] },
         "animationName": { "type": "string", "minLength": 1, "maxLength": 256 },
         "animationDurationMs": { "type": "number", "minimum": 0, "maximum": 600000 },
-        "frameChanged": { "type": "boolean" },
-        "reducedMotionMedia": { "type": "boolean" }
+        "reducedMotionMedia": { "type": "boolean" },
+        "targetSelector": { "type": "string", "pattern": "^\\[data-[a-z0-9-]+(?:=[^\\]]+)?\\]$", "maxLength": 256 },
+        "sampleIntervalMs": { "type": "integer", "minimum": 16, "maximum": 10000 }
       }
     },
     "layout": {
@@ -266,31 +359,45 @@
       "additionalProperties": false,
       "required": [
         "browser",
+        "captureId",
+        "capturedAtUtc",
         "viewport",
         "motion",
         "state",
         "status",
+        "scenarioBinding",
         "runState",
         "motionEvidence",
         "layout",
-        "screenshot"
+        "screenshot",
+        "frameBefore",
+        "frameAfter",
+        "receipt",
+        "trace"
       ],
       "properties": {
         "browser": { "$ref": "#/$defs/browser" },
+        "captureId": { "$ref": "#/$defs/identifier" },
+        "capturedAtUtc": { "$ref": "#/$defs/utc" },
         "viewport": { "$ref": "#/$defs/viewport" },
         "motion": { "$ref": "#/$defs/motion" },
         "state": { "$ref": "#/$defs/visualState" },
         "status": { "enum": ["PASS", "FAIL"] },
+        "scenarioBinding": { "$ref": "#/$defs/scenarioBinding" },
         "runState": { "$ref": "#/$defs/runState" },
         "motionEvidence": { "$ref": "#/$defs/motionEvidence" },
         "layout": { "$ref": "#/$defs/layout" },
-        "screenshot": { "$ref": "#/$defs/reference" }
+        "screenshot": { "$ref": "#/$defs/reference" },
+        "frameBefore": { "$ref": "#/$defs/reference" },
+        "frameAfter": { "$ref": "#/$defs/reference" },
+        "receipt": { "$ref": "#/$defs/reference" },
+        "trace": { "$ref": "#/$defs/reference" }
       }
     },
     "flow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["flowId", "status", "checks", "evidence"],
+      "required": ["flowId", "status", "scenarioBinding", "checks", "evidence"],
       "properties": {
         "flowId": {
           "enum": [
@@ -308,6 +415,7 @@
           ]
         },
         "status": { "enum": ["PASS", "FAIL"] },
+        "scenarioBinding": { "$ref": "#/$defs/scenarioBinding" },
         "checks": {
           "type": "object",
           "minProperties": 1,
@@ -320,7 +428,8 @@
         },
         "evidence": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 20,
+          "maxItems": 20,
           "items": { "$ref": "#/$defs/reference" }
         }
       }

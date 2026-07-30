@@ -21,6 +21,7 @@ import {
   sha256Canonical,
   verifyEvidenceLedger,
 } from "../evidence-ledger.mjs";
+import { loadProductionTrustPolicy } from "../workbench-production-trust-policy.mjs";
 import {
   CONTROL_CATALOG_PACKAGE_PATH,
   DEFAULT_CONTROL_CATALOG_PATH,
@@ -49,6 +50,8 @@ export async function collectProductionAcceptanceEvidence({
   catalogPath = DEFAULT_CONTROL_CATALOG_PATH,
   observationsDirectory,
   evidenceRoot,
+  trustPolicyPath,
+  expectedTrustPolicySha256,
   outputRoot,
   collectedAtUtc,
 } = {}) {
@@ -56,9 +59,24 @@ export async function collectProductionAcceptanceEvidence({
   const catalog = await loadProductionAcceptanceControlCatalog({ catalogPath });
   const loadedPlan = await loadProductionAcceptancePlan({ planPath, catalog });
   const plan = loadedPlan.plan;
+  if (!trustPolicyPath || !SHA256_PATTERN.test(expectedTrustPolicySha256 ?? "")) {
+    throw new ProductionAcceptanceContractError([
+      "production evidence collection requires an externally pinned trust policy for G11 replay",
+    ]);
+  }
+  const trustPolicy = await loadProductionTrustPolicy({
+    policyPath: trustPolicyPath,
+    expectedSha256: expectedTrustPolicySha256,
+  }).catch(() => {
+    throw new ProductionAcceptanceContractError(["external production trust policy validation failed"]);
+  });
   const sourceRoot = await canonicalDirectory(evidenceRoot, "evidence root");
   const observationRoot = await canonicalDirectory(observationsDirectory, "observations directory");
   assertWithin(sourceRoot, observationRoot, "observations directory must be inside the evidence root");
+  await assertNoIncompleteSentinel(sourceRoot, "evidence root");
+  if (observationRoot !== sourceRoot) {
+    await assertNoIncompleteSentinel(observationRoot, "observations directory");
+  }
   const destinationRoot = path.resolve(outputRoot ?? "");
   await assertOutputRoot(destinationRoot, sourceRoot);
 
@@ -104,6 +122,7 @@ export async function collectProductionAcceptanceEvidence({
         observation: loaded.observation,
         evidenceRoot: sourceRoot,
         plan,
+        trustPolicy,
       });
       const packagedObservationPath = `observations/${expected.control.controlId}.json`;
       await copyArtifact(loaded.raw, path.join(destinationRoot, packagedObservationPath));
@@ -432,6 +451,16 @@ async function canonicalDirectory(candidatePath, label) {
   return canonicalPath;
 }
 
+async function assertNoIncompleteSentinel(root, label) {
+  try {
+    await lstat(path.join(root, ".incomplete"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw new ProductionAcceptanceContractError([`${label} completion state cannot be verified`]);
+  }
+  throw new ProductionAcceptanceContractError([`${label} contains an incomplete source sentinel`]);
+}
+
 async function assertOutputRoot(outputRoot, sourceRoot) {
   const canonicalRepo = await realpath(repoRoot);
   const canonicalParent = await realpath(path.dirname(outputRoot));
@@ -481,6 +510,8 @@ function parseArguments(argv) {
     ["--catalog", "catalogPath"],
     ["--observations", "observationsDirectory"],
     ["--evidence-root", "evidenceRoot"],
+    ["--trust-policy", "trustPolicyPath"],
+    ["--trust-policy-sha256", "expectedTrustPolicySha256"],
     ["--output-root", "outputRoot"],
     ["--collected-at", "collectedAtUtc"],
   ]);
@@ -491,7 +522,10 @@ function parseArguments(argv) {
     if (!value || value.startsWith("--")) throw new Error(`${argv[index - 1]} requires a value`);
     result[key] = value;
   }
-  for (const key of ["planPath", "observationsDirectory", "evidenceRoot", "outputRoot", "collectedAtUtc"]) {
+  for (const key of [
+    "planPath", "observationsDirectory", "evidenceRoot", "trustPolicyPath", "expectedTrustPolicySha256",
+    "outputRoot", "collectedAtUtc",
+  ]) {
     if (!result[key]) throw new Error(`${key} is required`);
   }
   return result;

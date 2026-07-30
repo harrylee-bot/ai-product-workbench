@@ -329,6 +329,7 @@ export async function verifyHardCutAcceptancePackage({
     acceptedAt,
     productionBinding,
     controlCatalog,
+    trustPolicy,
     findings,
   );
   if (findings.length) throw new HardCutAcceptanceValidationError(findings);
@@ -420,6 +421,7 @@ async function validateGateLedgers(
   acceptedAt,
   productionBinding,
   controlCatalog,
+  trustPolicy,
   findings,
 ) {
   const expectedBinding = manifest?.candidateBinding;
@@ -466,6 +468,7 @@ async function validateGateLedgers(
             plan: collection.plan,
             catalog: controlCatalog,
             collectedAtUtc: collection.summary.payload.collectedAtUtc,
+            trustPolicy,
           });
         } catch (error) {
           const details = error?.findings?.join("; ") ?? (error instanceof Error ? error.message : String(error));

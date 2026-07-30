@@ -121,7 +121,13 @@ export async function assembleProductionAcceptancePackage({
   const destination = await validateOutputPath(outputPath, [collectionDirectory, hardCutDirectory, approvalDirectory]);
 
   const catalog = await loadProductionAcceptanceControlCatalog({ catalogPath });
-  const collection = await loadAndVerifyCollection({ collectionDirectory, catalog });
+  const trustPolicy = await loadProductionTrustPolicy({
+    policyPath: trustPolicyPath,
+    expectedSha256: expectedTrustPolicySha256,
+  }).catch(() => {
+    throw new ProductionAcceptanceContractError(["production trust policy validation failed"]);
+  });
+  const collection = await loadAndVerifyCollection({ collectionDirectory, catalog, trustPolicy });
   const binding = collection.plan.payload.binding;
   let productionImages;
   try {
@@ -244,14 +250,6 @@ export async function assembleProductionAcceptancePackage({
   if (findings.length > 0) throw new ProductionAcceptanceContractError(findings);
 
   await validatePackageSchema(packageDocument);
-  const trustPolicy = await loadProductionTrustPolicy({
-    policyPath: trustPolicyPath,
-    expectedSha256: expectedTrustPolicySha256,
-  }).catch((error) => {
-    throw new ProductionAcceptanceContractError([
-      `production trust policy validation failed: ${error instanceof Error ? error.message : String(error)}`,
-    ]);
-  });
   if (trustPolicy.environmentId !== binding.environmentId) {
     throw new ProductionAcceptanceContractError([
       "production trust policy environment differs from the acceptance binding",
@@ -307,14 +305,22 @@ export async function assembleProductionAcceptancePackage({
 export async function loadVerifiedProductionAcceptanceCollection({
   collectionRoot,
   catalogPath = DEFAULT_CONTROL_CATALOG_PATH,
+  trustPolicyPath,
+  expectedTrustPolicySha256,
 } = {}) {
   const collectionDirectory = await canonicalExternalDirectory(collectionRoot, "collection root");
   const catalog = await loadProductionAcceptanceControlCatalog({ catalogPath });
-  const collection = await loadAndVerifyCollection({ collectionDirectory, catalog });
+  const trustPolicy = await loadProductionTrustPolicy({
+    policyPath: trustPolicyPath,
+    expectedSha256: expectedTrustPolicySha256,
+  }).catch(() => {
+    throw new ProductionAcceptanceContractError(["production trust policy validation failed"]);
+  });
+  const collection = await loadAndVerifyCollection({ collectionDirectory, catalog, trustPolicy });
   return Object.freeze({ collectionDirectory, catalog, ...collection });
 }
 
-async function loadAndVerifyCollection({ collectionDirectory, catalog }) {
+async function loadAndVerifyCollection({ collectionDirectory, catalog, trustPolicy }) {
   const summaryArtifact = await readCanonicalDocument(
     path.join(collectionDirectory, COLLECTION_PACKAGE_PATH),
     "production observation collection",
@@ -418,6 +424,7 @@ async function loadAndVerifyCollection({ collectionDirectory, catalog }) {
           plan: loadedPlan.plan,
           catalog,
           collectedAtUtc: summary.payload.collectedAtUtc,
+          trustPolicy,
         });
       } catch (error) {
         findings.push(`${entry.entryId} observation replay failed: ${error instanceof Error ? error.message : String(error)}`);

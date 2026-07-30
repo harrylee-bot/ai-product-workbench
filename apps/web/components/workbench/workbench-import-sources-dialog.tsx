@@ -636,7 +636,11 @@ function SourceRow({
     >
       <div className="flex min-w-0 items-center gap-[9px]">
         <button
-          aria-label={ready ? `${selected ? "取消选择" : "选择"}${importSourceLabel(source)}` : `${importSourceLabel(source)}暂不可用`}
+          aria-label={ready
+            ? `${selected ? "取消选择来源" : "选择来源"} ${importSourceLabel(source)}`
+            : `来源暂不可用 ${importSourceLabel(source)}`}
+          aria-pressed={ready ? selected : undefined}
+          data-import-source-action="toggle-selection"
           className={cn(
             "grid size-[24px] shrink-0 place-items-center rounded-[6px] border transition-colors duration-150",
             ready

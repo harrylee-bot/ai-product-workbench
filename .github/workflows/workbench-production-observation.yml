@@ -216,14 +216,18 @@ jobs:
           PLAN_SHA256: ${{ inputs.plan_sha256 }}
           SOURCE_URL: ${{ inputs.observation_source_url }}
           SOURCE_SHA256: ${{ inputs.observation_source_sha256 }}
+          TRUST_POLICY_URL: ${{ vars.WORKBENCH_PRODUCTION_TRUST_POLICY_URL }}
+          TRUST_POLICY_SHA256: ${{ vars.WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256 }}
         run: |
           set -euo pipefail
           printf '%s' "$PLAN_SHA256" | grep -Eq '^[a-f0-9]{64}$'
           printf '%s' "$SOURCE_SHA256" | grep -Eq '^[a-f0-9]{64}$'
-          node --input-type=module - "$PLAN_URL" "$SOURCE_URL" <<'NODE'
+          printf '%s' "$TRUST_POLICY_SHA256" | grep -Eq '^[a-f0-9]{64}$'
+          node --input-type=module - "$PLAN_URL" "$SOURCE_URL" "$TRUST_POLICY_URL" <<'NODE'
           import { validateImmutableHttpsUrl } from './scripts/verify-workbench-hard-cut-acceptance.mjs';
           validateImmutableHttpsUrl(process.argv[2]);
           validateImmutableHttpsUrl(process.argv[3]);
+          validateImmutableHttpsUrl(process.argv[4]);
           NODE
 
       - name: Download and hash plan and observation source
@@ -232,6 +236,8 @@ jobs:
           PLAN_SHA256: ${{ inputs.plan_sha256 }}
           SOURCE_URL: ${{ inputs.observation_source_url }}
           SOURCE_SHA256: ${{ inputs.observation_source_sha256 }}
+          TRUST_POLICY_URL: ${{ vars.WORKBENCH_PRODUCTION_TRUST_POLICY_URL }}
+          TRUST_POLICY_SHA256: ${{ vars.WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256 }}
         run: |
           set -euo pipefail
           input_root="$RUNNER_TEMP/workbench-observation-input"
@@ -241,8 +247,11 @@ jobs:
             --max-filesize 10485760 --output "$input_root/plan.json" "$PLAN_URL"
           curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-redirs 0 \
             --max-filesize 104857600 --output "$input_root/source.json" "$SOURCE_URL"
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-redirs 0 \
+            --max-filesize 1048576 --output "$input_root/production-trust-policy.json" "$TRUST_POLICY_URL"
           test "$(sha256sum "$input_root/plan.json" | awk '{print $1}')" = "$PLAN_SHA256"
           test "$(sha256sum "$input_root/source.json" | awk '{print $1}')" = "$SOURCE_SHA256"
+          test "$(sha256sum "$input_root/production-trust-policy.json" | awk '{print $1}')" = "$TRUST_POLICY_SHA256"
 
       - name: Verify plan binding against CI-owned candidate, G4, and catalog
         env:
@@ -321,6 +330,8 @@ jobs:
           PLAN_PATH: ${{ runner.temp }}/workbench-observation-input/plan.json
           EVIDENCE_ROOT: ${{ runner.temp }}/workbench-observation-source
           OUTPUT_ROOT: ${{ runner.temp }}/workbench-observation-output/collection
+          TRUST_POLICY_PATH: ${{ runner.temp }}/workbench-observation-input/production-trust-policy.json
+          TRUST_POLICY_SHA256: ${{ vars.WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256 }}
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/workbench-observation-output"
@@ -330,6 +341,8 @@ jobs:
             --plan "$PLAN_PATH" \
             --observations "$EVIDENCE_ROOT/observations" \
             --evidence-root "$EVIDENCE_ROOT" \
+            --trust-policy "$TRUST_POLICY_PATH" \
+            --trust-policy-sha256 "$TRUST_POLICY_SHA256" \
             --output-root "$OUTPUT_ROOT" \
             --collected-at "$collected_at"
           printf 'collected_at=%s\n' "$collected_at" >> "$GITHUB_OUTPUT"
@@ -341,6 +354,7 @@ jobs:
           RELEASE_CHAIN_RUN_ATTEMPT: ${{ steps.ci_run.outputs.run_attempt }}
           PLAN_SHA256: ${{ inputs.plan_sha256 }}
           SOURCE_SHA256: ${{ inputs.observation_source_sha256 }}
+          TRUST_POLICY_SHA256: ${{ vars.WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256 }}
           COLLECTED_AT: ${{ steps.collect.outputs.collected_at }}
           VERIFIER_COMMIT: ${{ vars.WORKBENCH_ACCEPTANCE_VERIFIER_COMMIT }}
         run: |
@@ -353,6 +367,7 @@ jobs:
             verifierCommit: process.env.VERIFIER_COMMIT,
             planSha256: process.env.PLAN_SHA256,
             observationSourceSha256: process.env.SOURCE_SHA256,
+            trustPolicySha256: process.env.TRUST_POLICY_SHA256,
             collectedAtUtc: process.env.COLLECTED_AT,
           };
           const canonical = (input) => Array.isArray(input)

@@ -86,6 +86,14 @@ describe("Workbench isolated Preview", () => {
 
     fireEvent.load(frame);
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    const root = frame.closest("[data-isolated-preview]");
+    expect(root?.getAttribute("data-preview-state")).toBe("ready");
+    expect(root?.getAttribute("data-preview-generation")).toBe("1");
+    expect(root?.getAttribute("data-preview-connection-generation")).toBe("1");
+    expect(root?.getAttribute("data-preview-connection-timeout-ms"))
+      .toBe(String(workbenchPreviewConnectionTimeoutMs));
+    expect(root?.getAttribute("data-preview-handshake-timeout-ms"))
+      .toBe(String(workbenchPreviewHandshakeTimeoutMs));
     expect(onCapabilityChange).toHaveBeenLastCalledWith(capability("first"));
     const rpc = penpal.connections[0]!;
     expect(rpc.handshake).toHaveBeenCalledWith(
@@ -234,14 +242,23 @@ describe("Workbench isolated Preview", () => {
     fireEvent.load(await screen.findByTitle("项目预览"));
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
     const firstConnection = penpal.connections[0]!;
+    const root = rendered.container.querySelector("[data-isolated-preview]");
+    expect(root?.getAttribute("data-preview-generation")).toBe("1");
+    expect(root?.getAttribute("data-preview-connection-generation")).toBe("1");
 
     rendered.rerender(<WorkbenchIsolatedPreview {...props} refreshKey={1} />);
     expect(firstConnection.destroy).toHaveBeenCalledOnce();
+    expect(root?.getAttribute("data-preview-state")).toBe("preparing");
+    expect(root?.getAttribute("data-preview-generation")).toBe("2");
+    expect(root?.hasAttribute("data-preview-connection-generation")).toBe(false);
     const refreshed = await screen.findByTitle("项目预览");
     await waitFor(() => expect(refreshed.getAttribute("src"))
       .toBe(`${previewOrigin}/preview/refreshed`));
     fireEvent.load(refreshed);
     await waitFor(() => expect(penpal.connections).toHaveLength(2));
+    await waitFor(() => expect(root?.getAttribute("data-preview-state")).toBe("ready"));
+    expect(root?.getAttribute("data-preview-generation")).toBe("2");
+    expect(root?.getAttribute("data-preview-connection-generation")).toBe("2");
 
     rendered.unmount();
     expect(penpal.connections[1]!.destroy).toHaveBeenCalledOnce();

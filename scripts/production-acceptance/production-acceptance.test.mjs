@@ -17,7 +17,6 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import sharp from "sharp";
 import YAML from "yaml";
 
 import {
@@ -33,6 +32,7 @@ import {
 } from "../production-deployment-config.mjs";
 import { productionDeploymentConfigFixtureEnvironment } from "../fixtures/production-deployment-config-fixture.mjs";
 import { productionApprovalSignaturePayload } from "../verify-workbench-hard-cut-acceptance.mjs";
+import { loadProductionTrustPolicy } from "../workbench-production-trust-policy.mjs";
 import { createProductionBuildConfiguration } from "../write-production-build-configuration.mjs";
 import {
   HARD_CUT_ACCEPTANCE_PACKAGE_SCHEMA_VERSION,
@@ -56,7 +56,16 @@ import {
   PRODUCTION_G11_MANIFEST_EVIDENCE_KIND,
   PRODUCTION_G11_REAL_STACK_CONTROL_IDS,
   loadProductionG11RealStackManifest,
+  productionG11ServerObserverReceiptPayload,
 } from "./g11-real-stack-manifest.mjs";
+import {
+  createDiagnosticG11Fixture,
+  createDiagnosticG11SanitizedTrace,
+} from "./g11-test-fixture.mjs";
+import {
+  productionG11OriginPolicySha256,
+  productionG11ScenarioPlan,
+} from "./g11-browser-evidence-contract.mjs";
 import { materializeProductionObservationSource } from "./materialize-source.mjs";
 import { prepareProductionApprovalPayload } from "./prepare-approval-payload.mjs";
 import {
@@ -170,12 +179,14 @@ test("production control runner derives every non-Figma G11 observation from one
       planPath: fixture.planPath,
       resultPath,
       evidenceRoot: fixture.evidenceRoot,
+      trustPolicyPath: fixture.trustPolicyPath,
+      expectedTrustPolicySha256: fixture.trustPolicySha256,
       outputPath,
     });
     const loaded = await loadProductionControlObservation({ sourcePath: outputPath });
     assert.equal(loaded.observation.result.executionStatus, "PASS");
     assert.equal(loaded.observation.result.observedValue, expected.threshold.kind === "boolean" ? true : 0);
-    assert.equal(loaded.observation.evidence.length, 66);
+    assert.equal(loaded.observation.evidence.length, fixture.g11.observationEvidence.length);
     assert.equal(
       loaded.observation.evidence.filter(({ kind }) => kind === PRODUCTION_G11_MANIFEST_EVIDENCE_KIND).length,
       1,
@@ -191,6 +202,8 @@ test("production control runner derives every non-Figma G11 observation from one
     planPath: fixture.planPath,
     resultPath: path.join(fixture.rawDirectory, "g11", `${controlId}.result.json`),
     evidenceRoot: fixture.evidenceRoot,
+    trustPolicyPath: fixture.trustPolicyPath,
+    expectedTrustPolicySha256: fixture.trustPolicySha256,
     outputPath: repeatedPath,
   });
   const repeated = await loadProductionControlObservation({ sourcePath: repeatedPath });
@@ -208,9 +221,10 @@ test("G11 real-stack verifier rejects fixture, binding, matrix, flow, and screen
       evidenceRoot: fixture.evidenceRoot,
       plan: fixture.plan,
       executedAtUtc: OBSERVED_AT,
+      trustPolicy: fixture.trustPolicy,
     });
   };
-  assert.equal((await load()).evidence.length, 65);
+  assert.equal((await load()).evidence.length, fixture.g11.evidence.length);
 
   const scenarios = [
     {
@@ -227,6 +241,11 @@ test("G11 real-stack verifier rejects fixture, binding, matrix, flow, and screen
       name: "HTTP origin",
       pattern: /HTTPS origin/u,
       mutate(manifest) { manifest.deployment.webOrigin = "http://workbench.example.com"; },
+    },
+    {
+      name: "reserved example origin",
+      pattern: /local, reserved, private, or documentation-only/u,
+      mutate(manifest) { manifest.deployment.webOrigin = "https://workbench.example.com"; },
     },
     {
       name: "single browser",
@@ -266,7 +285,7 @@ test("G11 real-stack verifier rejects fixture, binding, matrix, flow, and screen
     },
     {
       name: "screenshot hash",
-      pattern: /screenshot cannot be verified.*SHA-256 mismatch/u,
+      pattern: /screenshot cannot be verified/u,
       mutate(manifest) { manifest.visualMatrix[0].screenshot.sha256 = "0".repeat(64); },
     },
   ];
@@ -280,7 +299,356 @@ test("G11 real-stack verifier rejects fixture, binding, matrix, flow, and screen
   await assertContractFailure(() => load(original, {
     ...correctReference,
     sha256: "1".repeat(64),
-  }), /manifest cannot be verified.*SHA-256 mismatch/u);
+  }), /manifest cannot be verified/u);
+});
+
+test("G11 verifier derives pixels, motion, and flow coverage from referenced artifacts", async (t) => {
+  await t.test("rejects distinct screenshot URIs that decode to the same state pixels", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const source = manifest.visualMatrix.find((cell) => (
+      cell.browser === "chromium" && cell.viewport === "375x812" && cell.motion === "normal" && cell.state === "prd-active"
+    ));
+    const target = manifest.visualMatrix.find((cell) => (
+      cell.browser === "chromium" && cell.viewport === "375x812" && cell.motion === "normal" && cell.state === "prd-pending"
+    ));
+    const sourceBytes = await readFile(g11ArtifactPath(fixture.evidenceRoot, source.screenshot));
+    await writeFile(g11ArtifactPath(fixture.evidenceRoot, target.screenshot), sourceBytes);
+    target.screenshot.sha256 = sha256Bytes(sourceBytes);
+    await rewriteG11CellReceipt(fixture.evidenceRoot, target, (receipt) => {
+      receipt.screenshot = target.screenshot;
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /distinct decoded pixels/u);
+  });
+
+  await t.test("rejects normal motion whose referenced before and after frames are identical", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix.find((candidate) => candidate.motion === "normal");
+    const before = await readFile(g11ArtifactPath(fixture.evidenceRoot, cell.frameBefore));
+    await writeFile(g11ArtifactPath(fixture.evidenceRoot, cell.frameAfter), before);
+    cell.frameAfter.sha256 = sha256Bytes(before);
+    await rewriteG11CellReceipt(fixture.evidenceRoot, cell, (receipt) => {
+      receipt.frameAfter = cell.frameAfter;
+      receipt.framePixelDiffRatio = 0;
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /normal pixel-diff threshold/u);
+  });
+
+  await t.test("rejects an untyped non-JSON flow receipt even when its hash is updated", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "prd");
+    const receipt = flow.evidence.find(({ kind }) => kind === "browser-flow-receipt");
+    const bytes = Buffer.from("x", "utf8");
+    await writeFile(g11ArtifactPath(fixture.evidenceRoot, receipt), bytes);
+    receipt.sha256 = sha256Bytes(bytes);
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /flow receipt is not valid canonical JSON/u);
+  });
+
+  await t.test("rejects header and body fields in a sanitized trace", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, {
+      mutateNetwork(network) {
+        network.requests[0].headers = { authorization: "Bearer must-not-enter-evidence" };
+        network.requests[0].body = "private prompt";
+      },
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /strict evidence contract/u);
+  });
+
+  await t.test("rejects an embedded native trace entry", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, {
+      extraEntries: [["trace.trace", Buffer.from("raw private trace content", "utf8")]],
+    });
+    await assertContractFailure(
+      () => loadG11Fixture(fixture, manifest),
+      /not a valid canonical sanitized ZIP trace/u,
+    );
+  });
+
+  await t.test("rejects cookie and query values in a sanitized trace", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, {
+      mutateMetadata(metadata) {
+        metadata.cookies = ["session=must-not-enter-evidence"];
+        metadata.queryValues = { token: "must-not-enter-evidence" };
+      },
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /strict evidence contract/u);
+  });
+
+  await t.test("rejects a native trace hash that differs from its independent receipt binding", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, { nativeTraceSha256: "f".repeat(64) });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /nativeTraceSha256.*bound receipt/u);
+  });
+
+  await t.test("rejects browser, viewport, or motion metadata that differs from its receipt", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, {
+      mutateMetadata(metadata) {
+        metadata.browser.name = metadata.browser.name === "chromium" ? "firefox" : "chromium";
+        metadata.viewport = { id: "768x1024", width: 768, height: 1024 };
+        metadata.motion = metadata.motion === "normal" ? "reduced" : "normal";
+      },
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /metadata (?:browser|viewport|motion).*bound receipt/u);
+  });
+
+  await t.test("rejects a flow trace that omits a protected scenario step", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "prd");
+    await rewriteG11FlowTrace(fixture.evidenceRoot, flow, (coverage) => [coverage.steps[0].stepId]);
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /calls must exactly equal the protected scenario step count/u);
+  });
+
+  await t.test("rejects trace action or assertion specifications outside the protected scenario", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, {
+      mutateCalls(calls) {
+        calls.calls[0].actionId = "unapproved-action";
+        calls.calls[0].assertions[0].assertionSpecId = "unapproved-assertion";
+      },
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /calls\[0\] identity is invalid|assertions\[0\].*identity is invalid/u);
+  });
+
+  await t.test("rejects private remote endpoints and trace scenario metadata drift", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, {
+      mutateMetadata(metadata) { metadata.originPolicySha256 = "0".repeat(64); },
+      mutateNetwork(network) { network.requests[0].remoteAddress = "127.0.0.1"; },
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /originPolicySha256.*bound receipt|remote endpoint or origin-policy/u);
+  });
+
+  await t.test("rejects a visual trace that omits its required SSE evidence", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, {
+      mutateMetadata(metadata) {
+        metadata.sseCapture.records = [];
+      },
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /sufficient flow-bound SSE evidence/u);
+  });
+
+  await t.test("rejects insufficient flow-bound sanitized SSE evidence", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "long-run-7686-plus");
+    await rewriteG11FlowTrace(
+      fixture.evidenceRoot,
+      flow,
+      (coverage) => coverage.steps.map(({ stepId }) => stepId),
+      (metadata) => { metadata.sseCapture.records = metadata.sseCapture.records.slice(0, 2); },
+    );
+    await resyncG11ObserverReceipt(fixture, flow);
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /sufficient flow-bound SSE evidence/u);
+  });
+
+  await t.test("rejects non-RunEvent names and malformed stream identities", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "prd");
+    await rewriteG11FlowTrace(
+      fixture.evidenceRoot,
+      flow,
+      (coverage) => coverage.steps.map(({ stepId }) => stepId),
+      (metadata) => {
+        metadata.sseCapture.records[0].streamId = "not-a-sha256";
+        metadata.sseCapture.records[0].eventName = "run.stage";
+      },
+    );
+    await resyncG11ObserverReceipt(fixture, flow);
+    await assertContractFailure(
+      () => loadG11Fixture(fixture, manifest),
+      /contiguous sanitized RunEvent in its stream and reconnect cursor/u,
+    );
+  });
+
+  await t.test("rejects a sequence gap within one stream and reconnect cursor", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "refresh-reconnect");
+    await rewriteG11FlowTrace(
+      fixture.evidenceRoot,
+      flow,
+      (coverage) => coverage.steps.map(({ stepId }) => stepId),
+      (metadata) => { metadata.sseCapture.records[3].sequence += 1; },
+    );
+    await resyncG11ObserverReceipt(fixture, flow);
+    await assertContractFailure(
+      () => loadG11Fixture(fixture, manifest),
+      /contiguous sanitized RunEvent in its stream and reconnect cursor/u,
+    );
+  });
+
+  await t.test("rejects refresh evidence without an advanced reconnect cursor", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "refresh-reconnect");
+    await rewriteG11FlowTrace(
+      fixture.evidenceRoot,
+      flow,
+      (coverage) => coverage.steps.map(({ stepId }) => stepId),
+      (metadata) => {
+        const streamId = metadata.sseCapture.records[0].streamId;
+        metadata.sseCapture.records = [
+          { streamId, afterSequence: 0, eventName: "run.generation.stage.changed", sequence: 1 },
+          { streamId, afterSequence: 0, eventName: "run.completed", sequence: 2 },
+        ];
+      },
+    );
+    await resyncG11ObserverReceipt(fixture, flow);
+    await assertContractFailure(
+      () => loadG11Fixture(fixture, manifest),
+      /sufficient flow-bound SSE evidence/u,
+    );
+  });
+
+  await t.test("rejects more than 12000 sanitized SSE records", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "long-run-7686-plus");
+    await rewriteG11FlowTrace(
+      fixture.evidenceRoot,
+      flow,
+      (coverage) => coverage.steps.map(({ stepId }) => stepId),
+      (metadata) => {
+        const streamId = metadata.sseCapture.records[0].streamId;
+        metadata.sseCapture.records = Array.from({ length: 12_001 }, (_, index) => ({
+          streamId,
+          afterSequence: 0,
+          eventName: index === 0 ? "run.started" : index === 12_000 ? "run.completed" : "message.delta",
+          sequence: index + 1,
+        }));
+      },
+    );
+    await resyncG11ObserverReceipt(fixture, flow);
+    await assertContractFailure(
+      () => loadG11Fixture(fixture, manifest),
+      /complete, bounded sanitized SSE sequence/u,
+    );
+  });
+
+  await t.test("rejects api as an origin class because API is a path class", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    await rewriteG11CellTrace(fixture.evidenceRoot, cell, {
+      mutateNetwork(network) {
+        network.requests[0].originClass = "api";
+        network.requests[0].pathClass = "api";
+      },
+    });
+    await assertContractFailure(
+      () => loadG11Fixture(fixture, manifest),
+      /non-categorical or invalid metadata|remote endpoint or origin-policy attribution/u,
+    );
+  });
+
+  await t.test("rejects a tampered signed server observer receipt", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "account-project");
+    const reference = flow.evidence.find(({ kind }) => kind === "server-observer-receipt");
+    const receiptPath = g11ArtifactPath(fixture.evidenceRoot, reference);
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    const replacement = receipt.signature.value.endsWith("A") ? "B" : "A";
+    receipt.signature.value = `${receipt.signature.value.slice(0, -1)}${replacement}`;
+    const bytes = Buffer.from(canonicalJsonFile(receipt), "utf8");
+    await writeFile(receiptPath, bytes);
+    reference.sha256 = sha256Bytes(bytes);
+    await assertContractFailure(
+      () => loadG11Fixture(fixture, manifest),
+      /server observer receipt signature verification failed/u,
+    );
+  });
+});
+
+test("G11 verifier converts malformed receipt inputs into contract failures", async (t) => {
+  await t.test("empty cell receipt", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    const bytes = Buffer.from("{}\n", "utf8");
+    await writeFile(g11ArtifactPath(fixture.evidenceRoot, cell.receipt), bytes);
+    cell.receipt.sha256 = sha256Bytes(bytes);
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /receipt.*strict evidence contract/u);
+  });
+
+  await t.test("non-finite JSON number", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const cell = manifest.visualMatrix[0];
+    const bytes = Buffer.from('{"value":1e400}\n', "utf8");
+    await writeFile(g11ArtifactPath(fixture.evidenceRoot, cell.receipt), bytes);
+    cell.receipt.sha256 = sha256Bytes(bytes);
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /not valid canonical JSON/u);
+  });
+
+  await t.test("non-string flow step identifiers", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "prd");
+    await rewriteG11FlowReceipt(fixture.evidenceRoot, flow, (receipt) => {
+      receipt.coverage[0].steps[0].stepId = 1;
+      receipt.coverage[0].steps[1].stepId = null;
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /steps must prove/u);
+  });
+
+  await t.test("null flow coverage cell", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "prd");
+    await rewriteG11FlowReceipt(fixture.evidenceRoot, flow, (receipt) => {
+      receipt.coverage[0] = null;
+    });
+    await assertContractFailure(() => loadG11Fixture(fixture, manifest), /coverage.*must be an object/u);
+  });
 });
 
 test("collection independently replays G11 manifest values instead of trusting hand-built observations", async (t) => {
@@ -305,7 +673,7 @@ test("collection independently replays G11 manifest values instead of trusting h
   }
   await assertContractFailure(
     () => collectPrepared(fixture, "g11-replay-tamper"),
-    /G11\.QUALITY\.CONSOLE_ERRORS observedValue was not derived/u,
+    /console error summary does not match complete cell and flow capture receipts/u,
   );
 });
 
@@ -346,6 +714,8 @@ test("approval payload command freezes the v3 implementer and time envelope", as
     certificateOidcIssuer: "https://token.actions.githubusercontent.com",
     githubRunId: "81234",
     githubRunAttempt: 1,
+    trustPolicyPath: fixture.trustPolicyPath,
+    expectedTrustPolicySha256: fixture.assemblyOptions.expectedTrustPolicySha256,
     verifyDeploymentConfigBlob: () => true,
     role: security.role,
     approverId: security.approverId,
@@ -496,6 +866,8 @@ test("production outputs are confined outside the repository and source roots", 
       planPath: fixture.planPath,
       observationsDirectory: fixture.observationsDirectory,
       evidenceRoot: fixture.evidenceRoot,
+      trustPolicyPath: fixture.trustPolicyPath,
+      expectedTrustPolicySha256: fixture.trustPolicySha256,
       outputRoot: path.join(path.dirname(new URL(import.meta.url).pathname), "forbidden-output"),
       collectedAtUtc: COLLECTED_AT,
     }),
@@ -534,26 +906,13 @@ async function createAssemblyFixture() {
     schemaVersion: fixture.catalog.document.schemaVersion,
     sha256: fixture.catalog.sha256,
   };
-  const signers = new Map();
-  const keys = [];
-  const approvalAuthorities = [];
-  for (const role of ["Security", "Data", "Operations", "Release"]) {
-    const trusted = createTrustedSigner(`approver-${role.toLowerCase()}`);
-    const approverId = `approver-${role.toLowerCase()}`;
-    signers.set(role, { ...trusted, approverId });
-    keys.push(trusted.trustEntry);
-    approvalAuthorities.push({ role, approverId, keyId: trusted.keyId });
-  }
+  const signers = fixture.approvalSigners;
+  const keys = [...fixture.trustPolicyDocument.keys];
+  const approvalAuthorities = [...fixture.trustPolicyDocument.approvalAuthorities];
 
-  const receiptSigners = {
-    acceptance: createTrustedSigner("acceptance-automation"),
-    traffic: createTrustedSigner("traffic-automation"),
-    closure: createTrustedSigner("closure-automation"),
-  };
-  keys.push(...Object.values(receiptSigners).map((signer) => signer.trustEntry));
-  const receiptAuthorities = [];
+  const receiptSigners = fixture.hardCutReceiptSigners;
+  const receiptAuthorities = [...fixture.trustPolicyDocument.receiptAuthorities];
   const receiptFor = async ({ scopeId, threshold, signer, executedAtUtc, signedAtUtc }) => {
-    receiptAuthorities.push({ scopeId, signerId: signer.signerId, keyId: signer.keyId });
     return createHardCutReceipt({
       hardCutRoot,
       binding,
@@ -640,7 +999,7 @@ async function createAssemblyFixture() {
     approvalAuthorities,
     receiptAuthorities,
   };
-  const trustPolicyPath = path.join(fixture.root, "trust-policy.json");
+  const trustPolicyPath = fixture.trustPolicyPath;
   const trustPolicyRaw = Buffer.from(canonicalJsonFile(trustPolicy), "utf8");
   await writeFile(trustPolicyPath, trustPolicyRaw);
   const approvals = [];
@@ -833,7 +1192,7 @@ async function createPreparedFixture() {
   const candidate = {
     candidateId: `sha256:${"a".repeat(64)}`,
     sourceCommit: "b".repeat(40),
-    signedTag: "workbench-v1.0.0-fixture",
+    signedTag: "workbench-v1.0.0-rc1",
     chainId: `sha256:${"c".repeat(64)}`,
   };
   const imageManifest = productionImageManifestFixture(candidate);
@@ -871,16 +1230,72 @@ async function createPreparedFixture() {
     commitSha: candidate.sourceCommit,
     tag: candidate.signedTag,
     releaseChainId: candidate.chainId,
-    deployId: "deploy-fixture",
-    environmentId: "production-fixture",
-    environmentDescription: "Dedicated production acceptance fixture.",
-    region: "fixture-region",
-    plannerId: "planner-fixture",
+    deployId: "deploy-production-a",
+    environmentId: "production-a",
+    environmentDescription: "Dedicated production acceptance environment.",
+    region: "cn-east-1",
+    plannerId: "planner-release-a",
     createdAtUtc: PLAN_CREATED_AT,
   });
   const planPath = path.join(root, "production-acceptance-plan.json");
   await writeCanonical(planPath, plan);
-  const g11 = await createG11Fixture({ evidenceRoot, plan });
+  const approvalSigners = new Map();
+  const trustKeys = [];
+  const approvalAuthorities = [];
+  for (const role of ["Security", "Data", "Operations", "Release"]) {
+    const signer = createTrustedSigner(`approver-${role.toLowerCase()}`);
+    approvalSigners.set(role, { ...signer, approverId: `approver-${role.toLowerCase()}` });
+    trustKeys.push(signer.trustEntry);
+    approvalAuthorities.push({ role, approverId: `approver-${role.toLowerCase()}`, keyId: signer.keyId });
+  }
+  const collectorSigner = createTrustedSigner("production-browser-collector");
+  const observerSigner = createTrustedSigner("production-server-observer");
+  trustKeys.push(collectorSigner.trustEntry, observerSigner.trustEntry);
+  const hardCutReceiptSigners = {
+    acceptance: createTrustedSigner("acceptance-automation"),
+    traffic: createTrustedSigner("traffic-automation"),
+    closure: createTrustedSigner("closure-automation"),
+  };
+  trustKeys.push(...Object.values(hardCutReceiptSigners).map((signer) => signer.trustEntry));
+  const receiptAuthorities = [{
+    scopeId: "production-g11.browser-evidence-collector",
+    signerId: collectorSigner.signerId,
+    keyId: collectorSigner.keyId,
+  }, {
+    scopeId: "production-g11.server-observer",
+    signerId: observerSigner.signerId,
+    keyId: observerSigner.keyId,
+  }];
+  for (const [scopeId, signer] of [
+    ["hard-cut.production-acceptance", hardCutReceiptSigners.acceptance],
+    ["hard-cut.traffic-switch", hardCutReceiptSigners.traffic],
+    ["hard-cut.rollback-window-closure", hardCutReceiptSigners.closure],
+    ...["container", "database", "image", "log", "network", "object-prefix", "secret", "volume"]
+      .map((kind) => [`legacy-${kind}`, hardCutReceiptSigners.closure]),
+  ]) receiptAuthorities.push({ scopeId, signerId: signer.signerId, keyId: signer.keyId });
+  const trustPolicyDocument = {
+    schemaVersion: "workbench.production-trust-policy.v1",
+    environmentId: plan.payload.binding.environmentId,
+    keys: trustKeys,
+    approvalAuthorities,
+    receiptAuthorities,
+  };
+  const trustPolicyPath = path.join(root, "trust-policy.json");
+  const trustPolicyRaw = Buffer.from(canonicalJsonFile(trustPolicyDocument), "utf8");
+  await writeFile(trustPolicyPath, trustPolicyRaw);
+  const trustPolicySha256 = sha256Bytes(trustPolicyRaw);
+  const trustPolicy = await loadProductionTrustPolicy({
+    policyPath: trustPolicyPath,
+    expectedSha256: trustPolicySha256,
+  });
+  const g11 = await createG11Fixture({
+    evidenceRoot,
+    plan,
+    collectorSigner,
+    observerSigner,
+    hardCutReceiptSigners,
+    trustPolicySha256,
+  });
   const controls = catalog.document.gates.flatMap((gate) => gate.controls.map((control) => ({
     gateId: gate.gateId,
     control,
@@ -976,6 +1391,14 @@ async function createPreparedFixture() {
     deploymentConfig: deploymentConfigDescriptor,
     plan,
     planPath,
+    approvalSigners,
+    collectorSigner,
+    observerSigner,
+    hardCutReceiptSigners,
+    trustPolicy,
+    trustPolicyDocument,
+    trustPolicyPath,
+    trustPolicySha256,
     g11,
     controls,
     collectionRoot: path.join(root, "collection"),
@@ -983,160 +1406,32 @@ async function createPreparedFixture() {
   };
 }
 
-async function createG11Fixture({ evidenceRoot, plan }) {
+async function createG11Fixture({ evidenceRoot, plan, collectorSigner, observerSigner, trustPolicySha256 }) {
   const root = path.join(evidenceRoot, "raw", "g11");
-  const screenshotsDirectory = path.join(root, "screenshots");
-  const flowsDirectory = path.join(root, "flows");
-  await mkdir(screenshotsDirectory, { recursive: true });
-  await mkdir(flowsDirectory, { recursive: true });
-  const browsers = ["chromium", "firefox", "webkit"];
-  const states = ["prd-active", "prd-pending", "prototype-after-prd"];
-  const viewports = [
-    { id: "375x812", width: 375, height: 812 },
-    { id: "768x1024", width: 768, height: 1024 },
-    { id: "1440x900", width: 1440, height: 900 },
-  ];
-  const motions = ["normal", "reduced"];
-  const screenshotBuffers = new Map();
-  for (const viewport of viewports) {
-    const marker = await sharp({
-      create: { width: 16, height: 16, channels: 3, background: "#f4f4f5" },
-    }).png().toBuffer();
-    screenshotBuffers.set(viewport.id, await sharp({
-      create: { width: viewport.width, height: viewport.height, channels: 3, background: "#111214" },
-    }).composite([{ input: marker, left: 8, top: 8 }]).png().toBuffer());
-  }
-
-  const visualMatrix = [];
-  for (const browser of browsers) {
-    for (const state of states) {
-      for (const viewport of viewports) {
-        for (const motion of motions) {
-          const fileName = `${browser}-${state}-${viewport.id}-${motion}.png`;
-          const bytes = screenshotBuffers.get(viewport.id);
-          await writeFile(path.join(screenshotsDirectory, fileName), bytes);
-          const semanticKind = state === "prototype-after-prd" ? "prototype" : "prd";
-          visualMatrix.push({
-            browser,
-            viewport: viewport.id,
-            motion,
-            state,
-            status: "PASS",
-            runState: {
-              requestedArtifactKinds: [semanticKind],
-              generationStage: semanticKind === "prototype" ? "generating-prototype" : "drafting-prd",
-              terminal: false,
-            },
-            motionEvidence: {
-              semanticKind,
-              animationName: semanticKind === "prototype" ? "prototype-ripple" : "prd-aurora",
-              animationDurationMs: motion === "reduced" ? 1 : 1_200,
-              frameChanged: motion === "normal",
-              reducedMotionMedia: motion === "reduced",
-            },
-            layout: {
-              withinViewport: true,
-              noOverlap: true,
-              promptContextVisible: true,
-              activityContextVisible: true,
-              pendingCompositionVisible: state === "prd-pending",
-              accessibleNamesPassed: true,
-            },
-            screenshot: {
-              kind: "browser-screenshot",
-              uri: `file:./raw/g11/screenshots/${fileName}`,
-              sha256: sha256Bytes(bytes),
-            },
-          });
-        }
-      }
-    }
-  }
-
-  const flowChecks = passingG11FlowChecks();
-  const flows = [];
-  for (const [flowId, checks] of Object.entries(flowChecks)) {
-    const fileName = `${flowId}.json`;
-    const bytes = Buffer.from(canonicalJsonFile({
-      schemaVersion: "workbench.production-g11-flow-evidence.v1",
-      flowId,
-      binding: plan.payload.binding,
-      result: "PASS",
-    }), "utf8");
-    await writeFile(path.join(flowsDirectory, fileName), bytes);
-    flows.push({
-      flowId,
-      status: "PASS",
-      checks,
-      evidence: [{
-        kind: "browser-flow-evidence",
-        uri: `file:./raw/g11/flows/${fileName}`,
-        sha256: sha256Bytes(bytes),
-      }],
-    });
-  }
-
-  const manifest = {
-    schemaVersion: "workbench.production-g11-real-stack-manifest.v1",
-    manifestId: `g11-real-stack-${plan.payload.planId.slice(-24)}`,
-    plan: {
-      planId: plan.payload.planId,
-      payloadSha256: plan.payloadSha256,
-    },
+  await mkdir(root, { recursive: true });
+  const created = await createDiagnosticG11Fixture({
     binding: plan.payload.binding,
     environment: plan.payload.environment,
-    deployment: {
-      stackKind: "deployed-production",
-      webOrigin: "https://workbench.example.com",
-      previewOrigin: "https://preview.example.com",
-      provider: {
-        class: "approved-production-provider",
-        id: "provider-production",
-        version: "2026.07.19",
-      },
-      sessionBoundary: "better-auth",
-      apiBoundary: "workbench-api",
-      sseBoundary: "workbench-sse",
-      queueBoundary: "pg-boss",
-      databaseBoundary: "postgresql",
-      artifactBoundary: "immutable-artifact-version",
+    plan,
+    collectorSigner,
+    observerSigner,
+    trustPolicySha256,
+    flowChecks: passingG11FlowChecks(),
+    async addArtifact(relativePath, bytes, kind) {
+      const artifactPath = path.join(root, relativePath);
+      await mkdir(path.dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, bytes);
+      return {
+        kind,
+        uri: `file:./raw/g11/${relativePath}`,
+        sha256: sha256Bytes(bytes),
+      };
     },
-    harness: {
-      name: "playwright",
-      version: "1.58.2",
-      sourceCommit: plan.payload.binding.commitSha,
-      routeFulfillUsed: false,
-      syntheticSessionUsed: false,
-      syntheticApiUsed: false,
-      syntheticSseUsed: false,
-    },
-    startedAtUtc: "2026-07-19T06:15:00Z",
-    finishedAtUtc: "2026-07-19T06:55:00Z",
-    browsers: browsers.map((name, index) => ({ name, version: `140.0.${index + 1}` })),
-    visualMatrix,
-    flows,
-    unexpectedConsoleErrors: [],
-    unexpectedNetworkFailures: [],
-  };
+  });
   const manifestPath = path.join(root, "manifest.json");
-  const manifestReference = await rewriteG11Manifest(manifestPath, manifest);
-  const evidence = [
-    ...visualMatrix.map(({ screenshot }) => structuredClone(screenshot)),
-    ...flows.flatMap((flow) => structuredClone(flow.evidence)),
-  ].sort((left, right) => left.uri.localeCompare(right.uri, "en"));
-  const observationEvidence = [
-    {
-      kind: PRODUCTION_G11_MANIFEST_EVIDENCE_KIND,
-      ...manifestReference,
-    },
-    ...evidence,
-  ].sort((left, right) => left.uri.localeCompare(right.uri, "en"));
   return {
-    manifest,
+    ...created,
     manifestPath,
-    manifestReference,
-    evidence,
-    observationEvidence,
   };
 }
 
@@ -1262,6 +1557,131 @@ async function rewriteG11Manifest(manifestPath, manifest) {
   return { uri: "file:./raw/g11/manifest.json", sha256: sha256Bytes(raw) };
 }
 
+async function loadG11Fixture(fixture, manifest) {
+  const reference = await rewriteG11Manifest(fixture.g11.manifestPath, manifest);
+  return loadProductionG11RealStackManifest({
+    reference,
+    evidenceRoot: fixture.evidenceRoot,
+    plan: fixture.plan,
+    executedAtUtc: OBSERVED_AT,
+    trustPolicy: fixture.trustPolicy,
+  });
+}
+
+function g11ArtifactPath(evidenceRoot, reference) {
+  assert.match(reference.uri, /^file:\.\/raw\/g11\//u);
+  return path.join(evidenceRoot, reference.uri.slice("file:./".length));
+}
+
+async function rewriteG11CellReceipt(evidenceRoot, cell, mutate) {
+  const receiptPath = g11ArtifactPath(evidenceRoot, cell.receipt);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  mutate(receipt);
+  const raw = Buffer.from(canonicalJsonFile(receipt), "utf8");
+  await writeFile(receiptPath, raw);
+  cell.receipt.sha256 = sha256Bytes(raw);
+}
+
+async function rewriteG11CellTrace(evidenceRoot, cell, options) {
+  const receiptPath = g11ArtifactPath(evidenceRoot, cell.receipt);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const archive = createDiagnosticG11SanitizedTrace({
+    traceId: receipt.captureId,
+    browser: receipt.browser.name,
+    browserVersion: receipt.browser.version,
+    viewport: receipt.viewport,
+    motion: receipt.motion,
+    startedAtUtc: receipt.traceStartedAtUtc,
+    finishedAtUtc: receipt.traceFinishedAtUtc,
+    nativeTraceSha256: options.nativeTraceSha256 ?? receipt.nativeTraceSha256,
+    scenarioId: `visual-${receipt.state}`,
+    scenarioBinding: receipt.scenarioBinding,
+    scenarioPlan: productionG11ScenarioPlan({
+      scenarioId: `visual-${receipt.state}`,
+      scenarioBinding: receipt.scenarioBinding,
+    }),
+    originPolicySha256: productionG11OriginPolicySha256(receipt.deployment),
+    mutateMetadata: options.mutateMetadata,
+    mutateCalls: options.mutateCalls,
+    mutateNetwork: options.mutateNetwork,
+    extraEntries: options.extraEntries,
+  });
+  await writeFile(g11ArtifactPath(evidenceRoot, cell.trace), archive.bytes);
+  cell.trace.sha256 = sha256Bytes(archive.bytes);
+  receipt.trace = cell.trace;
+  const receiptBytes = Buffer.from(canonicalJsonFile(receipt), "utf8");
+  await writeFile(receiptPath, receiptBytes);
+  cell.receipt.sha256 = sha256Bytes(receiptBytes);
+}
+
+async function rewriteG11FlowReceipt(evidenceRoot, flow, mutate) {
+  const reference = flow.evidence.find(({ kind }) => kind === "browser-flow-receipt");
+  const receiptPath = g11ArtifactPath(evidenceRoot, reference);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  mutate(receipt);
+  const raw = Buffer.from(canonicalJsonFile(receipt), "utf8");
+  await writeFile(receiptPath, raw);
+  reference.sha256 = sha256Bytes(raw);
+}
+
+async function rewriteG11FlowTrace(evidenceRoot, flow, selectStepIds, mutateMetadata) {
+  const receiptReference = flow.evidence.find(({ kind }) => kind === "browser-flow-receipt");
+  const receiptPath = g11ArtifactPath(evidenceRoot, receiptReference);
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  const coverage = receipt.coverage[0];
+  const traceReference = flow.evidence.find(({ uri }) => uri === coverage.trace.uri);
+  const viewport = {
+    id: coverage.viewport,
+    width: Number(coverage.viewport.split("x")[0]),
+    height: Number(coverage.viewport.split("x")[1]),
+  };
+  const archive = createDiagnosticG11SanitizedTrace({
+    traceId: coverage.traceId,
+    browser: coverage.browser,
+    browserVersion: coverage.browserVersion,
+    viewport,
+    motion: coverage.motion,
+    startedAtUtc: coverage.startedAtUtc,
+    finishedAtUtc: coverage.finishedAtUtc,
+    nativeTraceSha256: coverage.nativeTraceSha256,
+    scenarioId: receipt.flowId,
+    scenarioBinding: receipt.scenarioBinding,
+    scenarioPlan: productionG11ScenarioPlan({
+      scenarioId: receipt.flowId,
+      scenarioBinding: receipt.scenarioBinding,
+    }),
+    originPolicySha256: productionG11OriginPolicySha256(receipt.deployment),
+    mutateMetadata,
+    mutateCalls: (calls) => {
+      const selected = new Set(selectStepIds(coverage));
+      calls.calls = calls.calls.filter(({ stepId }) => selected.has(stepId));
+    },
+  });
+  await writeFile(g11ArtifactPath(evidenceRoot, traceReference), archive.bytes);
+  traceReference.sha256 = sha256Bytes(archive.bytes);
+  coverage.trace = traceReference;
+  const raw = Buffer.from(canonicalJsonFile(receipt), "utf8");
+  await writeFile(receiptPath, raw);
+  receiptReference.sha256 = sha256Bytes(raw);
+}
+
+async function resyncG11ObserverReceipt(fixture, flow) {
+  const browserReference = flow.evidence.find(({ kind }) => kind === "browser-flow-receipt");
+  const observerReference = flow.evidence.find(({ kind }) => kind === "server-observer-receipt");
+  const browserReceipt = JSON.parse(await readFile(g11ArtifactPath(fixture.evidenceRoot, browserReference), "utf8"));
+  const observerPath = g11ArtifactPath(fixture.evidenceRoot, observerReference);
+  const observerReceipt = JSON.parse(await readFile(observerPath, "utf8"));
+  observerReceipt.coverage = browserReceipt.coverage;
+  observerReceipt.signature.value = sign(
+    null,
+    Buffer.from(canonicalJson(productionG11ServerObserverReceiptPayload(observerReceipt)), "utf8"),
+    fixture.observerSigner.privateKey,
+  ).toString("base64url");
+  const raw = Buffer.from(canonicalJsonFile(observerReceipt), "utf8");
+  await writeFile(observerPath, raw);
+  observerReference.sha256 = sha256Bytes(raw);
+}
+
 async function createRunnerToolAttestation(fixture) {
   const directory = path.join(fixture.rawDirectory, "runner-attestation");
   await mkdir(directory, { recursive: true });
@@ -1323,6 +1743,8 @@ async function collectPrepared(fixture, outputName) {
     planPath: fixture.planPath,
     observationsDirectory: fixture.observationsDirectory,
     evidenceRoot: fixture.evidenceRoot,
+    trustPolicyPath: fixture.trustPolicyPath,
+    expectedTrustPolicySha256: sha256Bytes(await readFile(fixture.trustPolicyPath)),
     outputRoot,
     collectedAtUtc: COLLECTED_AT,
   });

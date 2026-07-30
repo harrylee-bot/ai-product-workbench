@@ -28,6 +28,7 @@ const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDirectory, "../..");
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$/u;
 const KEY_ID_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
 export async function prepareProductionApprovalPayload({
   collectionRoot,
@@ -40,6 +41,8 @@ export async function prepareProductionApprovalPayload({
   githubRunId,
   githubRunAttempt,
   verifyDeploymentConfigBlob,
+  trustPolicyPath,
+  expectedTrustPolicySha256,
   role,
   approverId,
   keyId,
@@ -74,10 +77,16 @@ export async function prepareProductionApprovalPayload({
   }
   if (!approvalEvidencePath) findings.push("approvalEvidencePath is required");
   if (!outputPath) findings.push("outputPath is required");
+  if (!trustPolicyPath) findings.push("trustPolicyPath is required");
+  if (!SHA256_PATTERN.test(expectedTrustPolicySha256 ?? "")) findings.push("expectedTrustPolicySha256 is invalid");
   if (approverId === implementerId) findings.push("approverId must differ from implementerId");
   if (findings.length > 0) throw new ProductionAcceptanceContractError(findings);
 
-  const loadedCollection = await loadVerifiedProductionAcceptanceCollection({ collectionRoot });
+  const loadedCollection = await loadVerifiedProductionAcceptanceCollection({
+    collectionRoot,
+    trustPolicyPath,
+    expectedTrustPolicySha256,
+  });
   const binding = loadedCollection.plan.payload.binding;
   let productionImages;
   try {
@@ -321,6 +330,8 @@ function parseArguments(argv) {
     ["--certificate-oidc-issuer", "certificateOidcIssuer"],
     ["--github-run-id", "githubRunId"],
     ["--github-run-attempt", "githubRunAttempt"],
+    ["--trust-policy", "trustPolicyPath"],
+    ["--trust-policy-sha256", "expectedTrustPolicySha256"],
     ["--role", "role"],
     ["--approver-id", "approverId"],
     ["--key-id", "keyId"],

@@ -41,10 +41,17 @@ const workbenchPreviewCredentiallessProps = {
 } as IframeHTMLAttributes<HTMLIFrameElement> & { credentialless: string };
 
 type PreviewState =
-  | { status: "preparing"; url: null }
-  | { status: "loading"; url: string }
-  | { status: "ready"; url: string }
-  | { status: "error"; url: null };
+  | PreviewRuntimeState<"preparing", null>
+  | PreviewRuntimeState<"loading", string>
+  | PreviewRuntimeState<"ready", string>
+  | PreviewRuntimeState<"error", null>;
+
+type PreviewRuntimeState<Status extends string, Url extends string | null> = {
+  status: Status;
+  url: Url;
+  generation: number;
+  connectionGeneration: number | null;
+};
 
 export function WorkbenchIsolatedPreview({
   createPreview,
@@ -67,7 +74,7 @@ export function WorkbenchIsolatedPreview({
   const session = useWorkbenchProjectSession(sessionKey);
   const [state, setState] = useWorkbenchProjectState<PreviewState>(
     session,
-    () => ({ status: "preparing", url: null }),
+    () => ({ status: "preparing", url: null, generation: 0, connectionGeneration: null }),
   );
   const [renewalKey, setRenewalKey] = useWorkbenchProjectState(session, () => 0);
   const selectionKey = exportSelectionIdentityKey(selection);
@@ -92,7 +99,7 @@ export function WorkbenchIsolatedPreview({
     let renewalTimer: ReturnType<typeof setTimeout> | null = null;
     activePreviewRef.current = null;
     destroyPreviewConnection(connectionRef);
-    setState({ status: "preparing", url: null });
+    setState({ status: "preparing", url: null, generation, connectionGeneration: null });
     onCapabilityChangeRef.current?.(null);
 
     void createPreviewRef.current(selection, abortController.signal)
@@ -103,7 +110,7 @@ export function WorkbenchIsolatedPreview({
           configuredPreviewOrigin(),
         );
         activePreviewRef.current = { generation, capability: validated };
-        setState({ status: "loading", url: validated.url });
+        setState({ status: "loading", url: validated.url, generation, connectionGeneration: null });
         renewalTimer = setTimeout(() => {
           if (!current || activePreviewRef.current?.generation !== generation) return;
           setRenewalKey((key) => key + 1);
@@ -112,7 +119,7 @@ export function WorkbenchIsolatedPreview({
       .catch((error: unknown) => {
         if (!current || abortController.signal.aborted || isAbortError(error)) return;
         activePreviewRef.current = null;
-        setState({ status: "error", url: null });
+        setState({ status: "error", url: null, generation, connectionGeneration: null });
         onCapabilityChangeRef.current?.(null);
       });
 
@@ -145,7 +152,7 @@ export function WorkbenchIsolatedPreview({
     if (connectionRef.current?.generation === generation) {
       destroyPreviewConnection(connectionRef);
     }
-    setState({ status: "error", url: null });
+    setState({ status: "error", url: null, generation, connectionGeneration: null });
     onCapabilityChangeRef.current?.(null);
   };
 
@@ -177,6 +184,9 @@ export function WorkbenchIsolatedPreview({
       timeout: workbenchPreviewConnectionTimeoutMs,
     });
     connectionRef.current = { generation: active.generation, connection };
+    setState((current) => current.generation === active.generation
+      ? { ...current, connectionGeneration: active.generation }
+      : current);
 
     void connection.promise
       .then((remote) => remote.handshake(
@@ -193,14 +203,27 @@ export function WorkbenchIsolatedPreview({
           failPreview(active.generation);
           return;
         }
-        setState({ status: "ready", url: active.capability.url });
+        setState({
+          status: "ready",
+          url: active.capability.url,
+          generation: active.generation,
+          connectionGeneration: active.generation,
+        });
         onCapabilityChangeRef.current?.(active.capability);
       })
       .catch(() => failPreview(active.generation));
   };
 
   return (
-    <div className="relative h-full w-full" data-isolated-preview>
+    <div
+      className="relative h-full w-full"
+      data-isolated-preview
+      data-preview-connection-generation={state.connectionGeneration ?? undefined}
+      data-preview-connection-timeout-ms={workbenchPreviewConnectionTimeoutMs}
+      data-preview-generation={state.generation}
+      data-preview-handshake-timeout-ms={workbenchPreviewHandshakeTimeoutMs}
+      data-preview-state={state.status}
+    >
       {state.url && (
         <iframe
           {...workbenchPreviewCredentiallessProps}

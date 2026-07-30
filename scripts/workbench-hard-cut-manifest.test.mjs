@@ -16,7 +16,6 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "@redocly/ajv/dist/2020.js";
-import sharp from "sharp";
 import YAML from "yaml";
 
 import {
@@ -41,7 +40,7 @@ import {
 } from "./production-deployment-config.mjs";
 import { productionDeploymentConfigFixtureEnvironment } from "./fixtures/production-deployment-config-fixture.mjs";
 import { createProductionBuildConfiguration } from "./write-production-build-configuration.mjs";
-import { PRODUCTION_G11_MANIFEST_EVIDENCE_KIND } from "./production-acceptance/g11-real-stack-manifest.mjs";
+import { createDiagnosticG11Fixture } from "./production-acceptance/g11-test-fixture.mjs";
 
 const scopeId = "legacy-production-database";
 const validationNow = new Date("2026-07-19T08:00:00Z");
@@ -354,7 +353,7 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
   const candidate = {
     candidateId: `sha256:${"a".repeat(64)}`,
     sourceCommit: "1".repeat(40),
-    signedTag: "workbench-v1.0.0-fixture",
+    signedTag: "workbench-v1.0.0-rc1",
     chainId: `sha256:${"b".repeat(64)}`,
   };
   const productionImageManifest = productionImageManifestFixture(candidate);
@@ -401,8 +400,8 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
     status: "completed",
     candidateBinding: {
       candidateId: candidate.candidateId,
-      deployId: "deploy-fixture",
-      environmentId: "production-fixture",
+      deployId: "deploy-production-a",
+      environmentId: "production-a",
       commitSha: candidate.sourceCommit,
       tag: candidate.signedTag,
       releaseChainId: candidate.chainId,
@@ -420,13 +419,13 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
   const environment = {
     environmentId: manifest.candidateBinding.environmentId,
     kind: "production",
-    description: "Fixture production environment.",
-    region: "fixture",
+    description: "Dedicated production acceptance environment.",
+    region: "cn-east-1",
   };
   const planPayload = {
-    planId: "production-plan-hard-cut-fixture",
+    planId: "production-plan-hard-cut-a",
     createdAtUtc: "2026-07-19T00:00:00Z",
-    plannerId: "planner-fixture",
+    plannerId: "planner-release-a",
     catalog: {
       schemaVersion: controlCatalog.schemaVersion,
       catalogId: controlCatalog.catalogId,
@@ -450,11 +449,89 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
   };
   const planRaw = Buffer.from(canonicalJsonFile(plan), "utf8");
   const planSha256 = addFile("governance/production-acceptance-plan.json", planRaw);
+  const approvalSigners = new Map();
+  const approvalAuthorities = [];
+  const trustedKeys = ["Security", "Data", "Operations", "Release"].map((role) => {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const approverId = `approver-${role.toLowerCase()}`;
+    const publicKeyBytes = Buffer.from(publicKey.export({ type: "spki", format: "der" }));
+    const publicKeySha256 = sha256Bytes(publicKeyBytes);
+    const keyId = `sha256:${publicKeySha256}`;
+    approvalSigners.set(role, { privateKey, keyId, approverId });
+    approvalAuthorities.push({ role, approverId, keyId });
+    return {
+      keyId,
+      algorithm: "Ed25519",
+      publicKeySpkiBase64: publicKeyBytes.toString("base64"),
+      publicKeySha256,
+      validFromUtc: "2026-07-01T00:00:00Z",
+      validUntilUtc: "2026-08-01T00:00:00Z",
+      revokedAtUtc: null,
+    };
+  });
+  const collectorPair = generateKeyPairSync("ed25519");
+  const collectorPublicKeyBytes = Buffer.from(collectorPair.publicKey.export({ type: "spki", format: "der" }));
+  const collectorPublicKeySha256 = sha256Bytes(collectorPublicKeyBytes);
+  const collectorSigner = {
+    privateKey: collectorPair.privateKey,
+    signerId: "production-browser-collector",
+    keyId: `sha256:${collectorPublicKeySha256}`,
+  };
+  trustedKeys.push({
+    keyId: collectorSigner.keyId,
+    algorithm: "Ed25519",
+    publicKeySpkiBase64: collectorPublicKeyBytes.toString("base64"),
+    publicKeySha256: collectorPublicKeySha256,
+    validFromUtc: "2026-07-01T00:00:00Z",
+    validUntilUtc: "2026-08-01T00:00:00Z",
+    revokedAtUtc: null,
+  });
+  const observerPair = generateKeyPairSync("ed25519");
+  const observerPublicKeyBytes = Buffer.from(observerPair.publicKey.export({ type: "spki", format: "der" }));
+  const observerPublicKeySha256 = sha256Bytes(observerPublicKeyBytes);
+  const observerSigner = {
+    privateKey: observerPair.privateKey,
+    signerId: "production-server-observer",
+    keyId: `sha256:${observerPublicKeySha256}`,
+  };
+  trustedKeys.push({
+    keyId: observerSigner.keyId,
+    algorithm: "Ed25519",
+    publicKeySpkiBase64: observerPublicKeyBytes.toString("base64"),
+    publicKeySha256: observerPublicKeySha256,
+    validFromUtc: "2026-07-01T00:00:00Z",
+    validUntilUtc: "2026-08-01T00:00:00Z",
+    revokedAtUtc: null,
+  });
+  const receiptAuthorities = [{
+    scopeId: "legacy-production-database",
+    signerId: "hard-cut-automation",
+    keyId: trustedKeys[0].keyId,
+  }, {
+    scopeId: "production-g11.browser-evidence-collector",
+    signerId: collectorSigner.signerId,
+    keyId: collectorSigner.keyId,
+  }, {
+    scopeId: "production-g11.server-observer",
+    signerId: observerSigner.signerId,
+    keyId: observerSigner.keyId,
+  }];
+  const trustPolicyRaw = Buffer.from(`${JSON.stringify({
+    schemaVersion: "workbench.production-trust-policy.v1",
+    environmentId: manifest.candidateBinding.environmentId,
+    keys: trustedKeys,
+    approvalAuthorities,
+    receiptAuthorities,
+  })}\n`);
+  await writeFile(trustPolicyPath, trustPolicyRaw);
   const g11Evidence = await createHardCutG11Evidence({
     addFile,
     binding: manifest.candidateBinding,
+    collectorSigner,
+    observerSigner,
     environment,
     plan,
+    trustPolicySha256: sha256Bytes(trustPolicyRaw),
   });
   const gates = controlCatalog.gates.map(({ gateId, controls }, index) => {
     const evidencePath = `gates/${gateId.toLowerCase()}.json`;
@@ -572,38 +649,6 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
       payload: collectionPayload,
     }), "utf8")),
   }));
-  const approvalSigners = new Map();
-  const approvalAuthorities = [];
-  const trustedKeys = ["Security", "Data", "Operations", "Release"].map((role) => {
-    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const approverId = `approver-${role.toLowerCase()}`;
-    const publicKeyBytes = Buffer.from(publicKey.export({ type: "spki", format: "der" }));
-    const publicKeySha256 = sha256Bytes(publicKeyBytes);
-    const keyId = `sha256:${publicKeySha256}`;
-    approvalSigners.set(role, { privateKey, keyId, approverId });
-    approvalAuthorities.push({ role, approverId, keyId });
-    return {
-      keyId,
-      algorithm: "Ed25519",
-      publicKeySpkiBase64: publicKeyBytes.toString("base64"),
-      publicKeySha256,
-      validFromUtc: "2026-07-01T00:00:00Z",
-      validUntilUtc: "2026-08-01T00:00:00Z",
-      revokedAtUtc: null,
-    };
-  });
-  const trustPolicyRaw = Buffer.from(`${JSON.stringify({
-    schemaVersion: "workbench.production-trust-policy.v1",
-    environmentId: manifest.candidateBinding.environmentId,
-    keys: trustedKeys,
-    approvalAuthorities,
-    receiptAuthorities: [{
-      scopeId: "legacy-production-database",
-      signerId: "hard-cut-automation",
-      keyId: trustedKeys[0].keyId,
-    }],
-  })}\n`);
-  await writeFile(trustPolicyPath, trustPolicyRaw);
   const hardCutManifest = { path: "manifest.json", sha256: manifestSha256 };
   const approvals = ["Security", "Data", "Operations", "Release"].map((role, index) => {
     const evidencePath = `approvals/${role.toLowerCase()}.json`;
@@ -715,151 +760,28 @@ async function assertPackageRejected(fixture, document, expected) {
   );
 }
 
-async function createHardCutG11Evidence({ addFile, binding, environment, plan }) {
-  const browsers = ["chromium", "firefox", "webkit"];
-  const states = ["prd-active", "prd-pending", "prototype-after-prd"];
-  const viewports = [
-    { id: "375x812", width: 375, height: 812 },
-    { id: "768x1024", width: 768, height: 1024 },
-    { id: "1440x900", width: 1440, height: 900 },
-  ];
-  const motions = ["normal", "reduced"];
-  const screenshotBuffers = new Map();
-  const marker = await sharp({
-    create: { width: 16, height: 16, channels: 3, background: "#f4f4f5" },
-  }).png().toBuffer();
-  for (const viewport of viewports) {
-    screenshotBuffers.set(viewport.id, await sharp({
-      create: { width: viewport.width, height: viewport.height, channels: 3, background: "#111214" },
-    }).composite([{ input: marker, left: 8, top: 8 }]).png().toBuffer());
-  }
-
-  const visualMatrix = [];
-  for (const browser of browsers) {
-    for (const state of states) {
-      for (const viewport of viewports) {
-        for (const motion of motions) {
-          const fileName = `${browser}-${state}-${viewport.id}-${motion}.png`;
-          const bytes = screenshotBuffers.get(viewport.id);
-          const screenshotPath = `raw/g11/screenshots/${fileName}`;
-          const screenshotSha256 = addFile(screenshotPath, bytes);
-          const semanticKind = state === "prototype-after-prd" ? "prototype" : "prd";
-          visualMatrix.push({
-            browser,
-            viewport: viewport.id,
-            motion,
-            state,
-            status: "PASS",
-            runState: {
-              requestedArtifactKinds: [semanticKind],
-              generationStage: semanticKind === "prototype" ? "generating-prototype" : "drafting-prd",
-              terminal: false,
-            },
-            motionEvidence: {
-              semanticKind,
-              animationName: semanticKind === "prototype" ? "prototype-ripple" : "prd-aurora",
-              animationDurationMs: motion === "reduced" ? 1 : 1_200,
-              frameChanged: motion === "normal",
-              reducedMotionMedia: motion === "reduced",
-            },
-            layout: {
-              withinViewport: true,
-              noOverlap: true,
-              promptContextVisible: true,
-              activityContextVisible: true,
-              pendingCompositionVisible: state === "prd-pending",
-              accessibleNamesPassed: true,
-            },
-            screenshot: {
-              kind: "browser-screenshot",
-              uri: `file:./${screenshotPath}`,
-              sha256: screenshotSha256,
-            },
-          });
-        }
-      }
-    }
-  }
-
-  const flows = [];
-  for (const [flowId, checks] of Object.entries(hardCutPassingG11FlowChecks())) {
-    const flowPath = `raw/g11/flows/${flowId}.json`;
-    const flowRaw = Buffer.from(canonicalJsonFile({
-      schemaVersion: "workbench.production-g11-flow-evidence.v1",
-      flowId,
-      binding,
-      result: "PASS",
-    }), "utf8");
-    const flowSha256 = addFile(flowPath, flowRaw);
-    flows.push({
-      flowId,
-      status: "PASS",
-      checks,
-      evidence: [{
-        kind: "browser-flow-evidence",
-        uri: `file:./${flowPath}`,
-        sha256: flowSha256,
-      }],
-    });
-  }
-
-  const manifest = {
-    schemaVersion: "workbench.production-g11-real-stack-manifest.v1",
-    manifestId: `g11-real-stack-${plan.payload.planId.slice(-24)}`,
-    plan: {
-      planId: plan.payload.planId,
-      payloadSha256: plan.payloadSha256,
-    },
+async function createHardCutG11Evidence({
+  addFile,
+  binding,
+  collectorSigner,
+  observerSigner,
+  environment,
+  plan,
+  trustPolicySha256,
+}) {
+  return createDiagnosticG11Fixture({
     binding,
+    collectorSigner,
+    observerSigner,
     environment,
-    deployment: {
-      stackKind: "deployed-production",
-      webOrigin: "https://workbench.example.com",
-      previewOrigin: "https://preview.example.com",
-      provider: {
-        class: "approved-production-provider",
-        id: "provider-production",
-        version: "2026.07.19",
-      },
-      sessionBoundary: "better-auth",
-      apiBoundary: "workbench-api",
-      sseBoundary: "workbench-sse",
-      queueBoundary: "pg-boss",
-      databaseBoundary: "postgresql",
-      artifactBoundary: "immutable-artifact-version",
+    plan,
+    trustPolicySha256,
+    flowChecks: hardCutPassingG11FlowChecks(),
+    async addArtifact(relativePath, bytes, kind) {
+      const sha256 = addFile(`raw/g11/${relativePath}`, bytes);
+      return { kind, uri: `file:./raw/g11/${relativePath}`, sha256 };
     },
-    harness: {
-      name: "playwright",
-      version: "1.58.2",
-      sourceCommit: binding.commitSha,
-      routeFulfillUsed: false,
-      syntheticSessionUsed: false,
-      syntheticApiUsed: false,
-      syntheticSseUsed: false,
-    },
-    startedAtUtc: "2026-07-19T06:15:00Z",
-    finishedAtUtc: "2026-07-19T06:55:00Z",
-    browsers: browsers.map((name, index) => ({ name, version: `140.0.${index + 1}` })),
-    visualMatrix,
-    flows,
-    unexpectedConsoleErrors: [],
-    unexpectedNetworkFailures: [],
-  };
-  const manifestRaw = Buffer.from(canonicalJsonFile(manifest), "utf8");
-  const manifestSha256 = addFile("raw/g11/manifest.json", manifestRaw);
-  const manifestReference = {
-    uri: "file:./raw/g11/manifest.json",
-    sha256: manifestSha256,
-  };
-  const evidence = [
-    ...visualMatrix.map(({ screenshot }) => structuredClone(screenshot)),
-    ...flows.flatMap((flow) => structuredClone(flow.evidence)),
-  ].sort(compareEvidenceReferences);
-  const observationEvidence = [
-    { kind: PRODUCTION_G11_MANIFEST_EVIDENCE_KIND, ...manifestReference },
-    ...evidence,
-  ].sort(compareEvidenceReferences);
-  return { manifest, manifestReference, evidence, observationEvidence };
+  });
 }
 
 function hardCutPassingG11FlowChecks() {
@@ -976,10 +898,6 @@ function hardCutPassingG11FlowChecks() {
       lostArtifactCount: 0,
     },
   };
-}
-
-function compareEvidenceReferences(left, right) {
-  return `${left.uri}\0${left.kind ?? ""}`.localeCompare(`${right.uri}\0${right.kind ?? ""}`, "en");
 }
 
 function passingControlValue(threshold) {

@@ -469,7 +469,8 @@ export function ProjectTopBar({
       <div className="flex items-center gap-[4px] sm:gap-[8px]">
         <button
           aria-label="预览项目"
-          className="workbench-chrome-button group hidden size-[34px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] transition hover:border-white/[0.18] hover:bg-[#34353a]/94 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 sm:grid"
+          className="workbench-chrome-button group grid size-[34px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] transition hover:border-white/[0.18] hover:bg-[#34353a]/94 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
+          data-project-action="preview"
           onClick={() => onPreview()}
           disabled={!capabilities.canPreview}
           title={capabilities.canPreview ? "预览" : "当前角色无法创建预览"}
@@ -478,6 +479,7 @@ export function ProjectTopBar({
           <PlayIcon className="size-[17px]" />
         </button>
         <button
+          aria-label="导出"
           aria-pressed={exportOpen}
           className={cn(
             "workbench-chrome-pill flex h-[34px] items-center gap-[8px] rounded-full border px-[9px] text-[14px] font-semibold transition-colors sm:px-[14px]",
@@ -486,6 +488,7 @@ export function ProjectTopBar({
               : "border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] hover:bg-[#2b2c30]/90",
           )}
           data-global-panel-trigger
+          data-project-action="export"
           disabled={!capabilities.canExport}
           onClick={onExport}
           type="button"
@@ -494,6 +497,7 @@ export function ProjectTopBar({
           <span className="hidden sm:inline">导出</span>
         </button>
         <button
+          aria-label="共享"
           aria-pressed={shareOpen}
           className={cn(
             "workbench-chrome-pill flex h-[34px] items-center gap-[8px] rounded-full border px-[9px] text-[14px] font-semibold transition-colors sm:px-[14px]",
@@ -502,6 +506,7 @@ export function ProjectTopBar({
               : "border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] hover:bg-[#2b2c30]/90",
           )}
           data-global-panel-trigger
+          data-project-action="share"
           disabled={!capabilities.canShare}
           onClick={onShare}
           type="button"

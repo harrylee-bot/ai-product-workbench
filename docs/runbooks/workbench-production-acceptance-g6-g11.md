@@ -13,6 +13,13 @@
 任何一步中的 candidate、deploy、environment、release chain、镜像、配置、迁移、catalog 或证据
 摘要变化，都必须从 plan 重新开始。不得修改旧 ledger 或复用另一个候选的 observation。
 
+> **当前生产状态（2026-07-30）。** 本仓库已经提供 G11 合同、浏览器 harness、真实栈 collector、
+> verifier 和诊断 fixture；这些实现及其本地测试只证明采集与拒绝规则可执行，不是目标生产环境的
+> observation。截至本次修订，尚无同一冻结候选的真实生产观察材料、独立四方批准或实际
+> `hard-cut --enforce` PASS 回执。因此 G11/G12 不得记为 `PASS`：未开始生产采集时记录
+> `NOT RUN`，已有部分材料但证据闭环不足时记录 `INCONCLUSIVE`。不得把本地 fixture、collector
+> 合同测试或自签测试回执升级为生产验收结论。
+
 ## 权限边界
 
 `.github/workflows/workbench-production-observation.yml` 只能运行在
@@ -90,7 +97,7 @@ G10 的容量 profile 必须把 `activeRuns=100`、`cancellationQueryBatchSize=1
 ## G11 部署真实栈证据
 
 除 `G11.FIGMA.SCOPE` 外，G11 的七个正式控制项必须从同一份 canonical
-`workbench.production-g11-real-stack-manifest.v1` 派生。fixture browser smoke、
+`workbench.production-g11-real-stack-manifest.v2` 派生。fixture browser smoke、
 `route.fulfill`、受控本地 provider、synthetic session/API/SSE 和 localhost 截图只能用于诊断，
 不得作为该 manifest 或生产 observation 的输入。
 
@@ -99,8 +106,14 @@ G10 的容量 profile 必须把 `activeRuns=100`、`cancellationQueryBatchSize=1
 ```text
 <evidence-root>/
   raw/g11/manifest.json
+  raw/g11/collector/collect-g11-real-stack.mjs
+  raw/g11/harness/*.mjs
+  raw/g11/receipts/*.json
   raw/g11/screenshots/*.png
-  raw/g11/flows/*
+  raw/g11/frames/*.png
+  raw/g11/traces/*.zip
+  raw/g11/flows/*.json
+  raw/g11/flows/traces/*.zip
   observations/*.json
 ```
 
@@ -116,14 +129,107 @@ digest。被测 Web 与 Preview 必须是互不相同、无凭证和无查询参
 - motion：`normal`、`reduced`；
 - browser：Chromium、Firefox、WebKit。
 
-因此 manifest 必须包含正好 54 个 screenshot cell。每张 PNG 都必须位于
-`file:./raw/g11/screenshots/`，摘要、像素尺寸和非空画面由 runner 重新验证。Manifest 还必须
+因此 manifest 必须包含正好 54 个 screenshot cell。每个 cell 还必须绑定唯一 capture ID、
+canonical browser-cell receipt、独立 sanitized Playwright trace 以及 before/after PNG frame。Runner 会解码
+RGBA，验证尺寸、不透明度与可见像素熵，拒绝不同状态复用相同像素；normal motion 的目标区域
+必须达到像素变化阈值，reduced motion 必须保持静态。manifest 自报的 `frameChanged` 不再存在。
+Manifest 还必须
 完整记录 account/invitation/workspace/project/role/revocation、PRD、mixed request 零副作用拒绝、
 Prototype-after-PRD、refresh/reconnect、Preview/Import/Export、Run success/failure/cancel/retry、
 approval/Canvas/typed Prototype Patch/SSE/Artifact persistence、authorization/idempotency、
 7,686+ 长 Run、Knowledge null/valid、provider-state integrity，以及
-accessibility/Preview security 十一个 flow；所有 flow 原始证据也必须是 evidence root 内的
-不可变、摘要匹配文件。
+accessibility/Preview security 十一个 flow。每个 flow 必须提供一份 canonical typed receipt 和
+18 份互不复用的 sanitized Playwright trace，精确覆盖三浏览器、三 viewport 与 normal/reduced motion；
+receipt 中的步骤、rendered states、console/network capture、candidate/deployment binding 必须与
+manifest 逐项一致。任意非空文件或布尔自报不能替代 typed flow receipt。
+
+原生 Playwright trace 只允许在 evidence root 之外的临时目录生成。采集器必须先计算原生文件的
+SHA-256，再以严格 allowlist 生成 canonical stored ZIP；ZIP 只能含 `metadata.json`、`calls.json`、`network.json`，
+只保留浏览器/版本/viewport/motion、调用时序与状态、分类后的网络元数据、console 错误计数、
+原生 trace SHA-256，以及 `headersRemoved`、`bodiesRemoved`、`cookiesRemoved`、
+`queryValuesRemoved`、`nativeTraceExcluded`、`temporaryNativeTraceOutsideEvidenceRoot`、
+`nativeTraceDeleted` 的清理证明。不得保留 URL、query 值、header、cookie、
+请求/响应 body、DOM snapshot、source、prompt、response 或 resource payload。sanitized ZIP 写入成功后
+必须立即删除临时原生 trace；原生 trace、HAR 和浏览器 profile 均不得复制到 acceptance package、
+ledger、`storage/` 或 `knowledge-vault/`。Runner 会拒绝压缩 entry、ZIP extra/comment/间隙、额外 entry、
+非白名单字段、上下文不匹配、
+独立 receipt 与原生 trace SHA-256 不一致、重复 native hash、无界压缩内容及不完整采集。
+
+### 证据闭环与采集器来源
+
+受保护执行器必须从 clean checkout 调用 `collectProductionG11RealStack`，且 checkout HEAD 必须等于
+plan 中冻结的 commit。`outputDirectory` 必须不存在并位于源码仓库外，native trace 临时目录还必须
+位于 evidence root 外；collector 只在全部验证完成后把 staging 目录原子发布为最终目录。执行器必须
+显式提供 deployment、隔离 synthetic dataset、server observation、scenario secret、图片隐私审查、
+collector 签名和 server-observer 签名回调；缺少任一回调即失败，不能注入 test-only capture 实现。
+
+`collectorAttestation.source` 必须精确引用
+`file:./raw/g11/collector/collect-g11-real-stack.mjs`，kind 为 `browser-collector-source`。Verifier 会把
+该文件的字节和 SHA-256 与冻结候选中受保护的 collector 源码逐字节比较，并同时重算
+`collectorSha256`、`harnessSha256`、`schemaSha256`、`verifierSha256` 和 `runnerSha256`；只在
+attestation 里自报工具版本或摘要不成立。
+
+`evidenceClosureSha256` 覆盖的 closure 必须精确包含以下 495 个互不重复的本地引用：
+
+| Evidence kind | 数量 |
+| --- | ---: |
+| `browser-collector-source` | 1 |
+| `browser-harness-source` | 1 |
+| `production-deployment-receipt` | 1 |
+| `synthetic-browser-dataset-receipt` | 1 |
+| `browser-image-privacy-review` | 1 |
+| `browser-cell-receipt` | 54 |
+| `browser-screenshot` | 54 |
+| `browser-motion-frame` | 108 |
+| `playwright-sanitized-trace` | 252 |
+| `browser-flow-receipt` | 11 |
+| `server-observer-receipt` | 11 |
+| **合计** | **495** |
+
+`raw/g11/manifest.json` 不属于这 495 项；它作为单独的 canonical manifest reference 加入每个正式
+G11 observation，所以每项 observation 的完整 evidence 集合是一个 manifest 加上述 495 项。11 个
+flow 必须各有一份 browser flow receipt 和一份 Ed25519 server-observer receipt；observer key 必须只
+用于 `production-g11.server-observer` scope，receipt 必须绑定同一 plan、deployment、scenario plan、
+origin policy、18 个 capture coverage 和 server checks，且 11 个签名值不得复用。
+
+### Route 与 SSE 合同
+
+Sanitized network record 不能只按 HTTP 状态码判断成功。每条记录必须同时包含
+`routeTemplateId` 和 `routeBindingSha256`；后者是 route template 与该 scenario 稳定参数的 canonical
+SHA-256，不得保存原始项目、线程或 Run 标识。受保护拒绝路径固定为
+`projects.bootstrap`、`project-invitations.accept` 和 `threads.submission-intents`，并按 method、
+`originClass`、`pathClass`、route binding 与状态码共同匹配。`originClass` 只允许 `web`、`preview`、
+`approved-third-party`；`api` 和 `sse` 只能作为 `pathClass`。未分类路径、未声明 4xx、任意 5xx、
+transport failure、非 HTTPS origin、非全局可路由 remote address、DNS pin 不一致或 rebinding 均为
+unexpected failure；WebSocket 没有可审计 endpoint 时也必须 fail closed。
+
+每份 trace 的 `metadata.sseCapture` 必须精确为
+`{ complete, records: [{ streamId, afterSequence, eventName, sequence }] }`，`complete` 必须为 true，
+记录数上限为 12,000。`streamId` 是 canonical Run SSE pathname 的 SHA-256，只允许哈希值进入证据，
+不得保留原始 URL 或 Run ID；`eventName` 只能取权威 RunEvent allowlist 中的 18 个事件。Verifier 按
+`streamId` 和 `afterSequence` 分段要求 sequence 连续，并拒绝 reconnect cursor 的间隙或重叠。
+
+RunEvent allowlist 精确为：`run.queued`、`run.started`、`run.generation.stage.changed`、
+`run.phase.changed`、`run.input.required`、`run.input.submitted`、`message.started`、`message.delta`、
+`message.completed`、`activity.changed`、`artifact.draft.created`、
+`artifact.prototype.patch.created`、`artifact.prototype.patch.degraded`、`artifact.version.created`、
+`run.cancel.requested`、`run.cancelled`、`run.completed`、`run.failed`。新增或重命名事件必须先更新
+权威 RunEvent 合同、collector、verifier 和 hash pin，不能由采集回调临时放宽。
+
+场景级最小 SSE 证据如下；未列出的场景允许零条，但仍必须提供 `complete=true` 的有界 capture：
+
+| Scenario | 最小记录 | 必须包含 |
+| --- | ---: | --- |
+| 三个 `visual-*` 场景 | 1 | allowlist 中任一真实 RunEvent |
+| `prd` | 2 | `run.generation.stage.changed`、`run.completed` |
+| `refresh-reconnect` | 2 | 上述两个事件，且至少一个 `afterSequence > 0` |
+| `run-canvas-sse-artifact` | 3 | `run.started`、`artifact.prototype.patch.created`、`run.completed` |
+| `long-run-7686-plus` | 7,686 | `run.started`、`run.completed` |
+| `provider-state-integrity` | 4 | `message.delta`、`activity.changed`、`artifact.draft.created`、`artifact.version.created` |
+
+`mixed-rejection` 必须保留零副作用语义：其 protected flow 允许零条 SSE，但 browser 与 server checks
+必须共同证明 Run、queue publish、Runtime attempt、ArtifactVersion、provider invocation 和 SSE event
+计数均未增加。
 
 调用 runner 时显式传入 evidence root：
 
@@ -137,11 +243,13 @@ node scripts/production-acceptance/run-control.mjs \
 ```
 
 Runner 不接受 result 自报的 G11 `observedValue`。它必须先校验 manifest 与所有引用文件，
-再分别派生七个控制的 boolean 或错误计数，并把 manifest、54 张截图和 flow 原始证据写入
-typed observation evidence。任一缺项、重复项、路径逃逸、符号链接、摘要不符、错误部署绑定
-或 fixture 标记都必须 fail closed。`G11.FIGMA.SCOPE` 仍按 G0 中冻结的独立人工/N/A 决策执行，
-不能由浏览器 manifest 代签。独立 collection workflow 和最终 package replay 会再次读取同一
-manifest、重算全部引用摘要与七个 observed value；手工构造 observation 不能绕过 runner。
+再分别派生七个控制的 boolean 或错误计数，并把单独 manifest 与完整 495 项 closure 写入 typed
+observation evidence。该 closure 包含部署/采集回执、collector/harness source、54 张截图、108 张
+motion frame、252 份 sanitized Playwright trace、11 份 typed flow receipt 和 11 份独立签名的
+server-observer receipt。任一缺项、重复项、路径逃逸、符号链接、摘要不符、错误部署绑定或 fixture
+标记都必须 fail closed。`G11.FIGMA.SCOPE` 仍按 G0 中冻结的独立人工/N/A 决策执行，不能由浏览器
+manifest 代签。独立 collection workflow 和最终 package replay 会再次读取同一 manifest、重算全部
+引用摘要与七个 observed value；手工构造 observation 不能绕过 runner。
 
 ## Observation Source
 
@@ -173,6 +281,8 @@ node scripts/production-acceptance/collect.mjs \
   --plan "$PLAN" \
   --observations "$EXTERNAL_ROOT/source/observations" \
   --evidence-root "$EXTERNAL_ROOT/source" \
+  --trust-policy "$PRODUCTION_TRUST_POLICY" \
+  --trust-policy-sha256 "$PRODUCTION_TRUST_POLICY_SHA256" \
   --output-root "$EXTERNAL_ROOT/collection" \
   --collected-at "$COLLECTED_AT_UTC"
 ```
@@ -270,6 +380,12 @@ package verifier 和实际 hard-cut enforce。输出的 SHA-256 是 production a
 本地合同回归：
 
 ```sh
+npm run production:g11:evidence:test
 npm run production:acceptance:test
 node --test scripts/workbench-hard-cut-manifest.test.mjs scripts/evidence-ledger.test.mjs
 ```
+
+上述命令 PASS 只关闭 schema、collector、harness、verifier 和拒绝路径的本地合同回归，不改变
+G11/G12 的生产状态。只有受保护 production observation workflow 对同一冻结候选重放 48 个控制、
+四方独立批准完成，并且 assembler 实际执行 `hard-cut --enforce` PASS 后，才可把 G12 记为 `PASS`
+并宣称 production accepted。

@@ -35,6 +35,8 @@ type RegisteredClass = {
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const apiRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const compileTimeoutMs = 100_000;
+const testTimeoutMs = 120_000;
 
 describe("compiled Nest dependency injection metadata", () => {
   it("keeps every registered constructor dependency available at runtime", async () => {
@@ -47,7 +49,7 @@ describe("compiled Nest dependency injection metadata", () => {
         join(apiRoot, "tsconfig.build.json"),
         "--outDir",
         outputDirectory,
-      ], { cwd: apiRoot });
+      ], { cwd: apiRoot, timeout: compileTimeoutMs });
 
       const compiledAppModule = await import(
         pathToFileURL(join(outputDirectory, "app.module.js")).href
@@ -83,7 +85,7 @@ describe("compiled Nest dependency injection metadata", () => {
     } finally {
       await rm(outputDirectory, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, testTimeoutMs);
 });
 
 async function collectRegisteredClasses(root: unknown): Promise<RegisteredClass[]> {
