@@ -12,6 +12,7 @@ import YAML from "yaml";
 
 import {
   affectedProductionImageMatrix,
+  assertPullRequestProductionImageInventory,
   assembleProductionImageManifest,
   assertPinnedWorkflowActions,
   assertProductionAcceptanceImageWorkflow,
@@ -20,6 +21,7 @@ import {
   loadProductionImageDigestBinding,
   loadVerifiedProductionImageManifest,
   productionImageDigestBinding,
+  REQUIRED_PRODUCTION_IMAGE_IDS,
   verifyCosignManifestBlob,
   verifyLocalProductionImageBindings,
   verifyProductionImageManifest,
@@ -157,6 +159,59 @@ test("computes affected production images from target build inputs and shared pa
   assert.deepEqual(imageNamesFor("integrations/deerflow/runtime-tools/config.fragment.yaml"), ["deerflow"]);
   assert.deepEqual(imageNamesFor("apps/knowledge/docker-entrypoint.sh"), []);
   assert.deepEqual(imageNamesFor("docs/operator-notes.md"), []);
+});
+
+test("fails closed when a PR changes the candidate image inventory", () => {
+  const inventory = JSON.parse(readFileSync(
+    fileURLToPath(new URL("../deploy/production-image-inventory.json", import.meta.url)),
+    "utf8",
+  ));
+  const execute = (command, args) => {
+    assert.equal(command, "git");
+    assert.deepEqual(args, ["show", `${commit}:deploy/production-image-inventory.json`]);
+    return JSON.stringify(inventory);
+  };
+
+  assert.equal(assertPullRequestProductionImageInventory({
+    baseCommit: commit,
+    inventory,
+    execute,
+  }), true);
+
+  const removed = structuredClone(inventory);
+  removed.candidateImages.pop();
+  assert.throws(
+    () => assertPullRequestProductionImageInventory({ baseCommit: commit, inventory: removed, execute }),
+    /cannot remove deploy targets/u,
+  );
+
+  const added = structuredClone(inventory);
+  added.candidateImages.push({ ...added.candidateImages[0], id: "future-image" });
+  assert.equal(assertPullRequestProductionImageInventory({ baseCommit: commit, inventory: added, execute }), true);
+
+  const rewritten = structuredClone(inventory);
+  rewritten.candidateImages[0].target = "unexpected-target";
+  assert.throws(
+    () => assertPullRequestProductionImageInventory({ baseCommit: commit, inventory: rewritten, execute }),
+    /cannot rewrite deploy target/u,
+  );
+
+  assert.throws(
+    () => assertPullRequestProductionImageInventory({
+      baseCommit: commit,
+      inventory,
+      execute: () => { throw new Error("missing base"); },
+    }),
+    /base inventory could not be read/u,
+  );
+});
+
+test("keeps the deploy inventory on the exact production target set", () => {
+  const inventory = JSON.parse(readFileSync(
+    fileURLToPath(new URL("../deploy/production-image-inventory.json", import.meta.url)),
+    "utf8",
+  ));
+  assert.deepEqual(inventory.candidateImages.map((image) => image.id), REQUIRED_PRODUCTION_IMAGE_IDS);
 });
 
 test("uses deploy topology, lockfile, base-image controls, and fail-closed fallback inputs", () => {

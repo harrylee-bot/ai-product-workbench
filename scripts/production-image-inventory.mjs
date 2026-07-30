@@ -40,9 +40,72 @@ const PULL_REQUEST_IMAGE_GLOBAL_INPUTS = new Set([
   "deploy/workbench.env.example",
   "scripts/production-image-inventory.mjs",
 ]);
+// This is the deploy contract, not a convenience list for the PR matrix. A
+// missing target must fail the inventory contract instead of shrinking a job.
+export const REQUIRED_PRODUCTION_IMAGE_IDS = Object.freeze([
+  "api",
+  "api-migrator",
+  "deerflow",
+  "export-worker",
+  "file-worker",
+  "import-worker",
+  "preview",
+  "quartz",
+  "runtime-worker",
+  "web",
+]);
 
 export function loadProductionImageInventory() {
   return JSON.parse(readText("deploy/production-image-inventory.json"));
+}
+
+/**
+ * A PR must not be able to make the affected-image matrix disappear by
+ * deleting or rewriting the inventory that defines the matrix itself.
+ * Compare the candidate's inventory with the PR base before selecting any
+ * image. Existing deploy targets may not disappear from a PR inventory (a
+ * removal would otherwise turn the matrix into a false-green subset), while
+ * additions remain buildable as part of the current full inventory.
+ */
+export function assertPullRequestProductionImageInventory({
+  baseCommit,
+  inventory = loadProductionImageInventory(),
+  execute = execFileSync,
+} = {}) {
+  assert(COMMIT_PATTERN.test(baseCommit ?? ""), "PR production image base commit must be a full lowercase SHA");
+  let baseRaw;
+  try {
+    baseRaw = execute(
+      "git",
+      ["show", `${baseCommit}:deploy/production-image-inventory.json`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+  } catch {
+    throw new Error("PR production image base inventory could not be read");
+  }
+  let baseInventory;
+  try {
+    baseInventory = JSON.parse(String(baseRaw));
+  } catch {
+    throw new Error("PR production image base inventory is invalid JSON");
+  }
+  const baseImages = canonicalProductionImageInventory(baseInventory).candidateImages;
+  const candidateImages = canonicalProductionImageInventory(inventory).candidateImages;
+  const baseIds = new Set(baseImages.map((image) => image.id));
+  const candidateById = new Map(candidateImages.map((image) => [image.id, image]));
+  const candidateIds = new Set(candidateById.keys());
+  const missingIds = [...baseIds].filter((id) => !candidateIds.has(id)).sort();
+  assert(
+    missingIds.length === 0,
+    `PR production image inventory cannot remove deploy targets: ${missingIds.join(", ")}`,
+  );
+  for (const baseImage of baseImages) {
+    assert(
+      JSON.stringify(sortValue(candidateById.get(baseImage.id))) === JSON.stringify(sortValue(baseImage)),
+      `PR production image inventory cannot rewrite deploy target: ${baseImage.id}`,
+    );
+  }
+  return true;
 }
 
 export function affectedProductionImageMatrix({
@@ -210,8 +273,11 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
   const ids = inventory.candidateImages.map((entry) => entry.id);
   assert(new Set(ids).size === ids.length, "candidate image IDs must be unique");
   assertDeepEqual(ids, [...ids].sort(), "candidate image inventory must be sorted by id");
-  assert(ids.includes("import-worker"), "Import Worker must be a candidate image");
-  assert(ids.includes("deerflow"), "the derived DeerFlow runtime must be a candidate image");
+  assertDeepEqual(
+    ids,
+    REQUIRED_PRODUCTION_IMAGE_IDS,
+    "candidate image inventory must contain the exact production image IDs",
+  );
 
   const composeCache = new Map();
   for (const image of inventory.candidateImages) {
@@ -1079,13 +1145,19 @@ function main() {
         && args.recordPaths.length === 0 && args.excludeImageIds.length === 0,
       "--affected-matrix cannot be combined with manifest, contract, or assemble modes",
     );
+    const inventory = loadProductionImageInventory();
+    assertPullRequestProductionImageInventory({
+      baseCommit: args.baseCommit,
+      inventory,
+    });
+    assertProductionImageContract({ inventory });
     let changedPaths;
     try {
       changedPaths = changedPathsForGitRange({ base: args.baseCommit, head: args.headCommit });
     } catch (error) {
       console.error(`production image inventory: changed-file discovery failed; selecting all images (${error instanceof Error ? error.message : error})`);
     }
-    process.stdout.write(`${JSON.stringify(affectedProductionImageMatrix({ changedPaths }))}\n`);
+    process.stdout.write(`${JSON.stringify(affectedProductionImageMatrix({ changedPaths, inventory }))}\n`);
     return;
   }
   assert(!args.baseCommit && !args.headCommit, "--base and --head require --affected-matrix");
@@ -1187,6 +1259,17 @@ function sortValue(value) {
     return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortValue(value[key])]));
   }
   return value;
+}
+
+function canonicalProductionImageInventory(inventory) {
+  assert(inventory && typeof inventory === "object" && !Array.isArray(inventory), "production image inventory must be an object");
+  assert(Array.isArray(inventory.candidateImages), "production image inventory candidateImages must be an array");
+  return sortValue({
+    ...inventory,
+    candidateImages: [...inventory.candidateImages].sort((left, right) => (
+      String(left?.id ?? "").localeCompare(String(right?.id ?? ""), "en")
+    )),
+  });
 }
 
 function assert(condition, message) {
