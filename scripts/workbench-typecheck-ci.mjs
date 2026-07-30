@@ -22,7 +22,9 @@ import { execFile } from "node:child_process";
 const execFileAsync = promisify(execFile);
 const DEFAULT_HEAP_MIB = 4096;
 const DEFAULT_PASSES = 2;
-// A nominal 16 GiB Linux host exposes slightly less after kernel and hypervisor reservations.
+// Release evidence uses 15360 MiB because a nominal 16 GiB host exposes less
+// after kernel and hypervisor reservations. CI may set a stricter lower bound
+// appropriate for another Linux runner without changing the executed scope.
 const DEFAULT_CI_MINIMUM_MEMORY_MIB = 15 * 1024;
 const RSS_SAMPLE_INTERVAL_MS = 50;
 
@@ -136,7 +138,7 @@ export function parseConfiguration({ argv, env, memoryLimitMiB, platform = proce
   }
   if (ci && (!Number.isInteger(memoryLimitMiB) || memoryLimitMiB < minimumMemoryMiB)) {
     throw new Error(
-      `CI typecheck requires at least ${minimumMemoryMiB} MiB effective memory on a nominal 16 GiB host; detected ${memoryLimitMiB} MiB`,
+      `CI typecheck requires at least ${minimumMemoryMiB} MiB effective memory; detected ${memoryLimitMiB} MiB`,
     );
   }
 

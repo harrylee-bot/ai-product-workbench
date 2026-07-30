@@ -61,6 +61,15 @@ test("defaults to two 4096 MiB passes and validates configured memory", () => {
   assert.equal(
     parseConfiguration({
       argv: [],
+      env: { CI: "true", WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: "7168" },
+      memoryLimitMiB: 7_942,
+      platform: "linux",
+    }).minimumMemoryMiB,
+    7 * 1024,
+  );
+  assert.equal(
+    parseConfiguration({
+      argv: [],
       env: { CI: "true", WORKBENCH_TYPECHECK_REQUIRE_CLEAN: "false" },
       memoryLimitMiB: 16 * 1024,
       platform: "linux",
@@ -83,7 +92,7 @@ test("defaults to two 4096 MiB passes and validates configured memory", () => {
       memoryLimitMiB: 8 * 1024,
       platform: "linux",
     }),
-    /nominal 16 GiB host/u,
+    /requires at least 15360 MiB/u,
   );
   assert.throws(
     () => parseConfiguration({
@@ -262,7 +271,8 @@ test("root typecheck scripts share the dynamic orchestrator", async () => {
   assert.match(packageData.scripts["dev:workbench:test"], /workbench-typecheck-ci\.test\.mjs/u);
 
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/workbench-ci.yml"), "utf8");
-  assert.match(workflow, /WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 15360/u);
+  assert.match(workflow, /WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 7168/u);
+  assert.match(workflow, /name: Upload Linux typecheck evidence/u);
 });
 
 async function writeJson(filePath, value) {
