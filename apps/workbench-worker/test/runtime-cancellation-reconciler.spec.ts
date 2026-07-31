@@ -66,6 +66,23 @@ describe("RuntimeCancellationReconciler", () => {
     await Promise.all([first, second]);
   });
 
+  it("does not report recovery when the singleton queue rejects a duplicate job", async () => {
+    const findMany = vi.fn(async () => [{ id: "run-1" }]);
+    const send = vi.fn(async () => null);
+    const reconciler = new RuntimeCancellationReconciler(
+      { run: { findMany } } as never,
+      { send } as never,
+      5_000,
+      10,
+      60_000,
+    );
+
+    await reconciler.runOnce();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(recordRuntimeLivenessMetric).not.toHaveBeenCalled();
+  });
+
   it("reports a queue failure and continues with the remaining stale Runs", async () => {
     const firstError = new Error("queue unavailable");
     const findMany = vi.fn(async () => [{ id: "run-1" }, { id: "run-2" }]);

@@ -68,25 +68,45 @@ describeWithPostgres("RuntimeExecutionReconciler PostgreSQL admission", () => {
 
       const reconcilerA = new RuntimeExecutionReconciler(dbA, bossA, 10, 60_000);
       const reconcilerB = new RuntimeExecutionReconciler(dbB, bossB, 10, 60_000);
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.firstRunId);
-      await reconcilerA.reconcileRun(fixture.firstRunId);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.firstRunId,
+      ))).toBe(1);
+      expect(await reconcilerA.reconcileRun(fixture.firstRunId)).toBe(false);
 
       let firstJobs = await bossA.findJobs(runtimeExecuteQueue, { key: fixture.firstRunId });
       expect(firstJobs.map((job) => job.state)).toEqual(["created"]);
 
       await setQueueJobState(dbA, firstJobs[0]!.id, "active");
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.firstRunId);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.firstRunId,
+      ))).toBe(0);
       firstJobs = await bossA.findJobs(runtimeExecuteQueue, { key: fixture.firstRunId });
       expect(firstJobs.map((job) => job.state)).toEqual(["active"]);
 
       await setQueueJobState(dbA, firstJobs[0]!.id, "failed");
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.firstRunId);
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.firstRunId);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.firstRunId,
+      ))).toBe(1);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.firstRunId,
+      ))).toBe(0);
       firstJobs = await bossA.findJobs(runtimeExecuteQueue, { key: fixture.firstRunId });
       expect(firstJobs.map((job) => job.state).sort()).toEqual(["created", "failed"]);
 
       await createSecondRun(dbA, fixture);
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.secondRunId);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.secondRunId,
+      ))).toBe(1);
       await prioritizeRecoveryJobs(dbA, [fixture.firstRunId, fixture.secondRunId]);
       const fetched = await bossA.fetch<{ runId: string }>(runtimeExecuteQueue, {
         batchSize: 2,
@@ -137,9 +157,13 @@ async function reconcileConcurrently(
   second: RuntimeExecutionReconciler,
   runId: string,
 ) {
-  await Promise.all(Array.from({ length: 12 }, (_, index) => (
+  return Promise.all(Array.from({ length: 12 }, (_, index) => (
     index % 2 === 0 ? first : second
   ).reconcileRun(runId)));
+}
+
+function recoveryCount(results: boolean[]) {
+  return results.filter(Boolean).length;
 }
 
 async function seedFixture(db: PrismaClient) {

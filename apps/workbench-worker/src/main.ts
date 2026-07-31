@@ -17,6 +17,7 @@ import {
 import { loadWorkerConfig } from "./config.js";
 import { db } from "./db.js";
 import { DeerFlowRuntimeAdapter } from "./runtime/deerflow-runtime.adapter.js";
+import { RuntimeLivenessError } from "./runtime/runtime-liveness.js";
 import { PrismaKnowledgeToolGrantIssuer } from "./runtime/knowledge-tool-grant.service.js";
 import { PrismaCanvasToolGrantIssuer } from "./runtime/canvas-tool-grant.service.js";
 import { RunProcessor } from "./runs/run-processor.js";
@@ -144,11 +145,15 @@ async function main() {
       if (result.cancelled) await recordTerminalRunDrift(command.runId);
       return result;
     } catch (error) {
+      const providerCancelTimedOut = error instanceof RuntimeLivenessError
+        && error.code === "RUNTIME_PROVIDER_CANCEL_TIMEOUT";
       recordRuntimeLivenessMetric({
         operation: "cancel",
-        outcome: job.signal.aborted ? "cancelled" : "error",
+        outcome: providerCancelTimedOut ? "timeout" : job.signal.aborted ? "cancelled" : "error",
         durationMs: performance.now() - startedAt,
-        errorCode: job.signal.aborted ? "RUNTIME_QUEUE_ABORTED" : "RUNTIME_CANCEL_JOB_FAILED",
+        errorCode: providerCancelTimedOut
+          ? error.code
+          : job.signal.aborted ? "RUNTIME_QUEUE_ABORTED" : "RUNTIME_CANCEL_JOB_FAILED",
       });
       if (job.signal.aborted) {
         recordRuntimeLivenessMetric({

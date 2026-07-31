@@ -53,6 +53,7 @@ import {
 } from "../runtime/runtime.port.js";
 import {
   RuntimeLivenessError,
+  RuntimeProviderCancellationBudget,
   RuntimeWallClockBudget,
   raceWithAbort,
 } from "../runtime/runtime-liveness.js";
@@ -572,15 +573,24 @@ export class RunProcessor {
       return { runId, cancelled: true };
     }
 
-    const result = await this.runtime.cancel({
-      runId,
-      runtimeAttemptId: attempt.id,
-      principalId: run.createdById,
-      externalThreadId: attempt.externalThreadId,
-      externalRunId: attempt.externalRunId,
-    }, async (externalRunId) => {
-      await this.attempts.attachExternalRunForCancellation(attempt.id, externalRunId);
-    }, jobSignal);
+    const cancellationBudget = new RuntimeProviderCancellationBudget(
+      this.executionDeadlineCancelMs,
+      jobSignal,
+    );
+    let result: Awaited<ReturnType<RuntimePort["cancel"]>>;
+    try {
+      result = await raceWithAbort(this.runtime.cancel({
+        runId,
+        runtimeAttemptId: attempt.id,
+        principalId: run.createdById,
+        externalThreadId: attempt.externalThreadId,
+        externalRunId: attempt.externalRunId,
+      }, async (externalRunId) => {
+        await this.attempts.attachExternalRunForCancellation(attempt.id, externalRunId);
+      }, cancellationBudget.signal), cancellationBudget.signal);
+    } finally {
+      cancellationBudget.stop();
+    }
     if (!result.found) {
       const submissionAgeMs = attempt.startedAt
         ? Date.now() - attempt.startedAt.getTime()

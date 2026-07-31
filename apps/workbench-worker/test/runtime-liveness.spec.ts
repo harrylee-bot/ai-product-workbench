@@ -4,6 +4,7 @@ vi.mock("@workbench/workbench-telemetry", () => ({ recordRuntimeLivenessMetric }
 
 import {
   RuntimeLivenessError,
+  RuntimeProviderCancellationBudget,
   RuntimeProviderLivenessBudget,
   RuntimeWallClockBudget,
   raceWithAbort,
@@ -90,6 +91,18 @@ describe("Runtime liveness budgets", () => {
     expect(takeover.signal.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(takeover.signal.reason).toBeInstanceOf(RuntimeLivenessError);
+  });
+
+  it("bounds provider cancellation at the configured deadline", async () => {
+    const budget = new RuntimeProviderCancellationBudget(900);
+
+    await vi.advanceTimersByTimeAsync(899);
+    expect(budget.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(budget.signal.reason).toMatchObject({
+      code: "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
+      retryable: true,
+    });
   });
 
   it("returns control when a provider ignores abort", async () => {

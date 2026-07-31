@@ -3,6 +3,7 @@ import { recordRuntimeLivenessMetric } from "@workbench/workbench-telemetry";
 export type RuntimeLivenessCode =
   | "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT"
   | "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT"
+  | "RUNTIME_PROVIDER_CANCEL_TIMEOUT"
   | "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED";
 
 export class RuntimeLivenessError extends Error {
@@ -124,6 +125,31 @@ export class RuntimeWallClockBudget {
   stop(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+  }
+}
+
+export class RuntimeProviderCancellationBudget {
+  private readonly controller = new AbortController();
+  private readonly timer: NodeJS.Timeout;
+
+  constructor(timeoutMs: number, parentSignal?: AbortSignal) {
+    assertDuration(timeoutMs);
+    this.signal = parentSignal
+      ? AbortSignal.any([parentSignal, this.controller.signal])
+      : this.controller.signal;
+    this.timer = setTimeout(() => {
+      this.controller.abort(new RuntimeLivenessError(
+        "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
+        true,
+      ));
+    }, timeoutMs);
+    this.timer.unref?.();
+  }
+
+  readonly signal: AbortSignal;
+
+  stop(): void {
+    clearTimeout(this.timer);
   }
 }
 

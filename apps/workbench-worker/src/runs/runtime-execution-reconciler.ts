@@ -96,7 +96,7 @@ export class RuntimeExecutionReconciler {
       const candidate = candidates[0];
       if (!candidate) return false;
 
-      await this.queue.send(
+      const jobId = await this.queue.send(
         runtimeExecuteQueue,
         { runId: candidate.id },
         {
@@ -105,7 +105,7 @@ export class RuntimeExecutionReconciler {
           db: fromPrisma(tx),
         },
       );
-      return true;
+      return jobId !== null;
     });
   }
 }

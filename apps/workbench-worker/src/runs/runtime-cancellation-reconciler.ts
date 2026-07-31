@@ -51,16 +51,18 @@ export class RuntimeCancellationReconciler {
       for (const candidate of candidates) {
         const startedAt = performance.now();
         try {
-          await this.queue.send(
+          const jobId = await this.queue.send(
             runtimeCancelQueue,
             { runId: candidate.id },
             { singletonKey: candidate.id },
           );
-          recordRuntimeLivenessMetric({
-            operation: "reconcile",
-            outcome: "recovered",
-            durationMs: performance.now() - startedAt,
-          });
+          if (jobId !== null) {
+            recordRuntimeLivenessMetric({
+              operation: "reconcile",
+              outcome: "recovered",
+              durationMs: performance.now() - startedAt,
+            });
+          }
         } catch (error) {
           recordRuntimeLivenessMetric({
             operation: "reconcile",

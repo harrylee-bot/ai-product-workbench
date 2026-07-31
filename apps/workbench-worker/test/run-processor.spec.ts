@@ -4100,6 +4100,78 @@ describe("Run durable snapshots", () => {
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
+  it("returns control without finalizing when the cancellation provider ignores abort", async () => {
+    vi.useFakeTimers();
+    try {
+      let providerSignal: AbortSignal | undefined;
+      const runtime = {
+        cancel: vi.fn(async (
+          _scope: unknown,
+          _onExternalRunCreated: (externalRunId: string) => Promise<void>,
+          signal?: AbortSignal,
+        ) => {
+          providerSignal = signal;
+          return new Promise<never>(() => undefined);
+        }),
+      };
+      const db = {
+        run: {
+          findUnique: vi.fn(async () => ({
+            status: "cancelling",
+            createdById: "principal-1",
+            runtimeAttempts: [{
+              id: "runtime-attempt-1",
+              status: "running",
+              externalThreadId: "external-thread-1",
+              externalRunId: "external-run-1",
+            }],
+          })),
+        },
+      };
+      const processor = new RunProcessor(
+        db as never,
+        runtime as never,
+        noKnowledgeToolGrants(),
+        undefined,
+        prototypePatchCoordinator() as never,
+        undefined,
+        { deadlineCancelMs: 900 },
+      );
+      const internals = processor as unknown as ProcessorInternals;
+      Object.assign(internals, {
+        attempts: {
+          beginCancellation: vi.fn(async () => ({
+            id: "runtime-attempt-1",
+            status: "cancelling",
+            externalThreadId: "external-thread-1",
+            externalRunId: "external-run-1",
+            startedAt: new Date(),
+          })),
+        },
+      });
+      const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
+
+      const cancellation = processor.cancel("run-1");
+      const observed = cancellation.catch((error: unknown) => error);
+      for (let index = 0; index < 10 && runtime.cancel.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+      expect(runtime.cancel).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(899);
+      expect(providerSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(observed).resolves.toMatchObject({
+        code: "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
+        retryable: true,
+      });
+      expect(providerSignal?.aborted).toBe(true);
+      expect(finalizeCancellation).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps cancellation pending when an external Run may still appear", async () => {
     const attachExternalRun = vi.fn(async () => undefined);
     const runtime = {
