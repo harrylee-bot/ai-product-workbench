@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  captureStableMotionFrameEvidence,
   classifyMotionFrameEvidence,
   diagnosticErrorClass,
   diagnosticFakeRuntimeState,
+  evaluateMotionFrameEvidence,
   httpDiagnosticSuccessEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 
@@ -56,6 +58,92 @@ test("motion evidence tolerates duplicate early samples but never a replaced ele
     () => classifyMotionFrameEvidence([prdFrame("10% 0px"), prdFrame("20% 0px")], "unknown"),
     /must be prd or prototype/u,
   );
+});
+
+test("motion evidence binds advancement to the requested motion preference", () => {
+  const frames = (positions, connected = true) => positions.map((beforeBackgroundPosition) => ({
+    beforeBackgroundPosition,
+    connected,
+  }));
+  const moving = frames(["10% 0px", "20% 0px"]);
+  const still = frames(["10% 0px", "10% 0px"]);
+
+  assert.equal(evaluateMotionFrameEvidence(moving, "prd", false).matchesPreference, true);
+  assert.equal(evaluateMotionFrameEvidence(still, "prd", false).matchesPreference, false);
+  assert.equal(evaluateMotionFrameEvidence(still, "prd", true).matchesPreference, true);
+  assert.equal(evaluateMotionFrameEvidence(moving, "prd", true).matchesPreference, false);
+  assert.equal(evaluateMotionFrameEvidence(frames(["10% 0px", "10% 0px"], false), "prd", true).matchesPreference, false);
+  assert.throws(
+    () => evaluateMotionFrameEvidence(still, "prd", "false"),
+    /must be boolean/u,
+  );
+});
+
+test("motion capture retries replaced nodes and stops at the exact attempt bound", async () => {
+  const detached = {
+    frames: [
+      { beforeBackgroundPosition: "10% 0px", connected: true },
+      { beforeBackgroundPosition: "10% 0px", connected: false },
+    ],
+  };
+  const stable = {
+    frames: [
+      { beforeBackgroundPosition: "10% 0px", connected: true },
+      { beforeBackgroundPosition: "20% 0px", connected: true },
+    ],
+  };
+  let captures = 0;
+  let remountWaits = 0;
+  const recovered = await captureStableMotionFrameEvidence({
+    capture: async () => (++captures === 1 ? detached : stable),
+    kind: "prd",
+    maximumAttempts: 3,
+    waitForRemount: async () => { remountWaits += 1; },
+  });
+  assert.equal(recovered.captureAttempts, 2);
+  assert.equal(captures, 2);
+  assert.equal(remountWaits, 1);
+
+  captures = 0;
+  remountWaits = 0;
+  await assert.rejects(
+    captureStableMotionFrameEvidence({
+      capture: async () => { captures += 1; return detached; },
+      kind: "prd",
+      maximumAttempts: 3,
+      waitForRemount: async () => { remountWaits += 1; },
+    }),
+    /Unable to sample a stable connected prd motion element/u,
+  );
+  assert.equal(captures, 3);
+  assert.equal(remountWaits, 2);
+});
+
+test("motion capture normalizes a bounded remount timeout", async () => {
+  let captures = 0;
+  let remountWaits = 0;
+  await assert.rejects(
+    captureStableMotionFrameEvidence({
+      capture: async () => {
+        captures += 1;
+        return {
+          frames: [
+            { beforeTransform: "none", connected: true },
+            { beforeTransform: "none", connected: false },
+          ],
+        };
+      },
+      kind: "prototype",
+      maximumAttempts: 3,
+      waitForRemount: async () => {
+        remountWaits += 1;
+        throw new Error("locator timeout");
+      },
+    }),
+    /Unable to sample a stable connected prototype motion element/u,
+  );
+  assert.equal(captures, 1);
+  assert.equal(remountWaits, 1);
 });
 
 test("fake runtime diagnostics retain stable evidence without raw identities or payload context", () => {
@@ -378,10 +466,13 @@ test("the real-stack visual sampler rejects detached nodes without weakening fra
 
   assert.match(source, /const motionFrameSampleCount = 6;/u);
   assert.match(source, /const maximumMotionCaptureAttempts = 3;/u);
+  assert.match(source, /const motionElementRemountTimeoutMs = 5_000;/u);
   assert.match(source, /connected: element\.isConnected/u);
-  assert.match(source, /classifyMotionFrameEvidence\(motion\.frames, kind\)/u);
+  assert.match(source, /captureStableMotionFrameEvidence\(\{/u);
+  assert.match(source, /evaluateMotionFrameEvidence\(item\.motion\.frames, kind, item\.reducedMotion\)/u);
   assert.match(source, /frameEvidence\.stableConnected/u);
   assert.match(source, /frameEvidence\.advanced/u);
+  assert.match(source, /frameEvidence\.matchesPreference/u);
   assert.doesNotMatch(source, /setTimeout\(resolve, 180\)/u);
 });
 

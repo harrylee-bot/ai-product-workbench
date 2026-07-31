@@ -121,6 +121,47 @@ export function classifyMotionFrameEvidence(frames, kind) {
   };
 }
 
+export function evaluateMotionFrameEvidence(frames, kind, reducedMotion) {
+  if (typeof reducedMotion !== "boolean") {
+    throw new TypeError("Reduced-motion evidence must be boolean");
+  }
+  const evidence = classifyMotionFrameEvidence(frames, kind);
+  const expectedAdvanced = !reducedMotion;
+  return {
+    ...evidence,
+    expectedAdvanced,
+    matchesPreference: evidence.stableConnected && evidence.advanced === expectedAdvanced,
+  };
+}
+
+export async function captureStableMotionFrameEvidence({
+  capture,
+  kind,
+  maximumAttempts,
+  waitForRemount,
+}) {
+  if (typeof capture !== "function" || typeof waitForRemount !== "function") {
+    throw new TypeError("Motion capture and remount wait must be functions");
+  }
+  if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1) {
+    throw new TypeError("Maximum motion capture attempts must be a positive integer");
+  }
+
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    const motion = await capture(attempt);
+    if (classifyMotionFrameEvidence(motion?.frames, kind).stableConnected) {
+      return { ...motion, captureAttempts: attempt };
+    }
+    if (attempt === maximumAttempts) break;
+    try {
+      await waitForRemount(attempt);
+    } catch {
+      break;
+    }
+  }
+  throw new Error(`Unable to sample a stable connected ${kind} motion element`);
+}
+
 export function diagnosticErrorClass(error) {
   return enumClass(connectionErrorClass(error), errorClasses, "UnknownError");
 }

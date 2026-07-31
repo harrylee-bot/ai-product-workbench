@@ -28,9 +28,10 @@ import {
   shouldFailRealStackEvidenceForSourceDrift,
 } from "./workbench-browser-network-evidence.mjs";
 import {
-  classifyMotionFrameEvidence,
+  captureStableMotionFrameEvidence,
   diagnosticErrorClass,
   diagnosticFakeRuntimeState,
+  evaluateMotionFrameEvidence,
   httpDiagnosticSuccessEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
@@ -131,6 +132,7 @@ const browserCleanupTimeoutMs = 5_000;
 const motionFrameSampleCount = 6;
 const motionFrameSampleIntervalMs = 100;
 const maximumMotionCaptureAttempts = 3;
+const motionElementRemountTimeoutMs = 5_000;
 
 const services = [];
 let fakeRuntime;
@@ -5913,7 +5915,7 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
     ? /workbench-stage-aurora-sweep/u
     : /workbench-stage-sweep/u;
   for (const item of evidence.filter((candidate) => !candidate.reducedMotion)) {
-    const frameEvidence = classifyMotionFrameEvidence(item.motion.frames, kind);
+    const frameEvidence = evaluateMotionFrameEvidence(item.motion.frames, kind, item.reducedMotion);
     assert.equal(item.runState.motionKind, kind, `${kind} visual evidence captured the wrong motion kind`);
     assert.equal(
       frameEvidence.stableConnected,
@@ -5931,9 +5933,10 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
       true,
       `normal-motion ${kind} wash did not advance between frames at ${item.viewport}`,
     );
+    assert.equal(frameEvidence.matchesPreference, true, `normal-motion ${kind} evidence contradicted its media preference`);
   }
   for (const item of evidence.filter((candidate) => candidate.reducedMotion)) {
-    const frameEvidence = classifyMotionFrameEvidence(item.motion.frames, kind);
+    const frameEvidence = evaluateMotionFrameEvidence(item.motion.frames, kind, item.reducedMotion);
     assert.equal(item.runState.motionKind, kind, `${kind} reduced-motion evidence captured the wrong motion kind`);
     assert.equal(
       frameEvidence.stableConnected,
@@ -5951,6 +5954,7 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
       false,
       `reduced-motion ${kind} wash continued moving at ${item.viewport}`,
     );
+    assert.equal(frameEvidence.matchesPreference, true, `reduced-motion ${kind} evidence contradicted its media preference`);
   }
   for (const item of evidence) {
     const [width, height] = item.viewport.split("x").map(Number);
@@ -6006,8 +6010,8 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
 }
 
 async function captureStableMotionFrames(motionElement, kind) {
-  for (let attempt = 1; attempt <= maximumMotionCaptureAttempts; attempt += 1) {
-    const motion = await motionElement.evaluate(async (element, options) => {
+  return captureStableMotionFrameEvidence({
+    capture: () => motionElement.evaluate(async (element, options) => {
       const sample = () => {
         const style = getComputedStyle(element);
         const before = getComputedStyle(element, "::before");
@@ -6036,14 +6040,14 @@ async function captureStableMotionFrames(motionElement, kind) {
     }, {
       intervalMs: motionFrameSampleIntervalMs,
       sampleCount: motionFrameSampleCount,
-    });
-    const frameEvidence = classifyMotionFrameEvidence(motion.frames, kind);
-    if (frameEvidence.stableConnected) {
-      return { ...motion, captureAttempts: attempt };
-    }
-    await motionElement.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-  }
-  throw new Error(`Unable to sample a stable connected ${kind} motion element`);
+    }),
+    kind,
+    maximumAttempts: maximumMotionCaptureAttempts,
+    waitForRemount: () => motionElement.waitFor({
+      state: "visible",
+      timeout: motionElementRemountTimeoutMs,
+    }),
+  });
 }
 
 function cssValueListMatches(value, expected) {
