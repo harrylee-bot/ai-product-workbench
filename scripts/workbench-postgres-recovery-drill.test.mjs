@@ -13,6 +13,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import YAML from "yaml";
+
 import {
   RecoveryDrillError,
   assertReceiptContainsNoSecrets,
@@ -32,6 +34,48 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const cliPath = path.join(repoRoot, "scripts/workbench-postgres-recovery-drill.mjs");
 const sourceCommit = "1".repeat(40);
 const candidateId = `sha256:${"2".repeat(64)}`;
+
+test("quality runs and hashes the real isolated PostgreSQL recovery regression", async () => {
+  const packageData = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8"));
+  assert.equal(
+    packageData.scripts["g5:postgres-recovery:test"],
+    "node --test scripts/workbench-postgres-recovery-drill.test.mjs scripts/workbench-postgres-recovery-drill.postgres.test.mjs",
+  );
+  const workflow = YAML.parse(await readFile(
+    path.join(repoRoot, ".github/workflows/workbench-ci.yml"),
+    "utf8",
+  ));
+  const quality = workflow.jobs.quality;
+  const recovery = quality.steps.find((step) => step.id === "postgres_recovery");
+  assert.equal(
+    recovery.env.WORKBENCH_G5_DRILL_TEST_ADMIN_URL,
+    "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+  );
+  assert.match(recovery.run, /npm run g5:postgres-recovery:test 2>&1 \| tee/u);
+  assert.match(recovery.run, /sha256sum .*postgres-recovery\.log/u);
+  const upload = quality.steps.find((step) => step.name === "Upload isolated PostgreSQL recovery evidence");
+  assert.match(upload.if, /always\(\).*steps\.postgres_recovery\.outcome != 'skipped'/u);
+  assert.equal(upload.with["if-no-files-found"], "error");
+
+  assert.equal(
+    packageData.scripts["runtime:provider-state:migration-upgrade:test"],
+    "node --test scripts/workbench-runtime-migration-upgrade.postgres.test.mjs",
+  );
+  assert.match(
+    packageData.scripts["remediation:runtime:baseline:test"],
+    /workbench-postgres-recovery-drill\.test\.mjs/u,
+  );
+  const upgrade = quality.steps.find((step) => step.id === "runtime_migration_upgrade");
+  assert.equal(
+    upgrade.env.WORKBENCH_RUNTIME_MIGRATION_UPGRADE_TEST_ADMIN_URL,
+    "postgresql://postgres:postgres@127.0.0.1:5432/postgres",
+  );
+  assert.match(upgrade.run, /npm run runtime:provider-state:migration-upgrade:test 2>&1 \| tee/u);
+  assert.match(upgrade.run, /sha256sum .*runtime-migration-upgrade\.log/u);
+  const upgradeUpload = quality.steps.find((step) => step.name === "Upload Runtime migration upgrade evidence");
+  assert.match(upgradeUpload.if, /always\(\).*steps\.runtime_migration_upgrade\.outcome != 'skipped'/u);
+  assert.equal(upgradeUpload.with["if-no-files-found"], "error");
+});
 
 test("plan mode performs no database or Git commands and needs no secrets", async (t) => {
   const fixture = await outputFixture(t);

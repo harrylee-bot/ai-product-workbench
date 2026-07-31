@@ -82,7 +82,11 @@ test("the migrator reconciles Runtime queues before services start", async () =>
   );
   const realStackBrowser = workflow.jobs?.["real-stack-browser"];
   assert(realStackBrowser, "CI must include an isolated real-stack browser lane");
-  assert.deepEqual(realStackBrowser.needs, ["quality"]);
+  assert.deepEqual(
+    realStackBrowser.needs,
+    ["candidate-source-policy"],
+    "real-stack browser must share the candidate gate without depending on quality",
+  );
   assert.equal(realStackBrowser.permissions?.contents, "read");
   assert.equal(
     realStackBrowser.env?.WORKBENCH_E2E_CONTROLLED_PROVIDER,
@@ -96,6 +100,8 @@ test("the migrator reconciles Runtime queues before services start", async () =>
   );
   assert.ok(realStackPrepareIndex >= 0, "real-stack browser must prepare shared Workbench packages");
   const realStackRun = realStackBrowser.steps?.find((step) => step.name === "Run real-stack browser-only smoke");
+  const realStackCheckout = realStackBrowser.steps?.find((step) => step.name === "Checkout");
+  const realStackEvidence = realStackBrowser.steps?.find((step) => step.name === "Upload real-stack browser evidence");
   const realStackRunIndex = realStackBrowser.steps?.findIndex(
     (step) => step.name === "Run real-stack browser-only smoke",
   );
@@ -105,7 +111,15 @@ test("the migrator reconciles Runtime queues before services start", async () =>
   );
   assert.equal(realStackBrowser.steps?.[realStackPrepareIndex]?.run, "npm run workbench:prepare");
   assert.equal(realStackRun?.run, "npm run e2e:web:real-stack:browser-only");
+  assert.equal(realStackCheckout?.with?.ref, "${{ env.WORKBENCH_CANDIDATE_SHA }}");
+  assert.match(realStackEvidence?.with?.name, /env\.WORKBENCH_CANDIDATE_SHA/u);
+  assert.equal(realStackEvidence?.with?.["if-no-files-found"], "error");
   assert.match(postgresHttpE2e, /WORKBENCH_E2E_RECOVERY_TIMEOUT_MS/u);
+  assert.match(
+    postgresHttpE2e,
+    /\["WORKBENCH_CANDIDATE_SHA", process\.env\.WORKBENCH_CANDIDATE_SHA\][\s\S]*\["GITHUB_SHA", process\.env\.GITHUB_SHA\]/u,
+    "real-stack evidence must prefer the explicit candidate SHA over the synthetic PR merge SHA",
+  );
   for (const [name, source] of [
     ["PostgreSQL HTTP E2E", postgresHttpE2e],
     ["File Worker PostgreSQL integration", fileWorkerPostgres],

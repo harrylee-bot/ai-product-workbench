@@ -14,9 +14,36 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  WORKBENCH_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
+  candidate-source-policy:
+    name: Verify exact candidate source policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SHA"
+
+      - name: Verify pull request base ancestry
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git merge-base --is-ancestor "$PR_BASE_SHA" "$WORKBENCH_CANDIDATE_SHA"
+
   release-chain:
     name: Verify G0-G2 release chain
+    needs: [candidate-source-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -29,6 +56,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -198,16 +227,57 @@ jobs:
           path: output/verified-release-chain/
           if-no-files-found: error
 
+  pr-production-image-selection:
+    name: Select changed PR production images
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [candidate-source-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      count: ${{ steps.affected_production_images.outputs.count }}
+      matrix: ${{ steps.affected_production_images.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install inventory dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Select affected PR production images
+        id: affected_production_images
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SHA"
+          git merge-base --is-ancestor "$PR_BASE_SHA" "$WORKBENCH_CANDIDATE_SHA"
+          matrix="$(node scripts/production-image-inventory.mjs \
+            --affected-matrix \
+            --base "$PR_BASE_SHA" \
+            --head "$WORKBENCH_CANDIDATE_SHA")"
+          count="$(node -e 'const matrix=JSON.parse(process.argv[1]); if (!Array.isArray(matrix.include)) process.exit(1); process.stdout.write(String(matrix.include.length))' "$matrix")"
+          node -e 'const matrix=JSON.parse(process.argv[1]); console.log(`[pr-images] selected ${matrix.include.map((entry) => entry.name).join(",") || "none"}`)' "$matrix"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   quality:
     name: Contracts, architecture, tests, and build
-    needs: [release-chain]
+    needs: [candidate-source-policy, release-chain]
     runs-on: ubuntu-latest
     # The 10k+ test aggregate takes about 33 minutes before PostgreSQL,
     # browser, and production build gates run; retain enough budget for all.
     timeout-minutes: 90
-    outputs:
-      pr_production_image_count: ${{ steps.affected_production_images.outputs.count }}
-      pr_production_image_matrix: ${{ steps.affected_production_images.outputs.matrix }}
     services:
       postgres:
         image: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_CI_POSTGRES_IMAGE || 'pgvector/pgvector:pg16' }}
@@ -225,8 +295,9 @@ jobs:
 
     env:
       CI: true
-      # Private GitHub-hosted Linux runners expose about 8 GiB. The release
-      # evidence lane reruns this unchanged two-pass aggregate at 15360 MiB.
+      NODE_OPTIONS: --max-old-space-size=4096
+      # The hosted lane is a fast gate at runner capacity. Release evidence
+      # separately reruns this exact candidate at >=15360 MiB on Linux.
       WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 7168
       WORKBENCH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=workbench
       WORKBENCH_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=workbench
@@ -235,6 +306,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
           fetch-depth: 0
 
       - name: Use Node.js 22
@@ -255,23 +327,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Select affected PR production images
-        id: affected_production_images
-        if: github.event_name == 'pull_request'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          matrix="$(node scripts/production-image-inventory.mjs \
-            --affected-matrix \
-            --base "$PR_BASE_SHA" \
-            --head "$PR_HEAD_SHA")"
-          count="$(node -e 'const matrix=JSON.parse(process.argv[1]); if (!Array.isArray(matrix.include)) process.exit(1); process.stdout.write(String(matrix.include.length))' "$matrix")"
-          node -e 'const matrix=JSON.parse(process.argv[1]); console.log(`[pr-images] selected ${matrix.include.map((entry) => entry.name).join(",") || "none"}`)' "$matrix"
-          echo "count=$count" >> "$GITHUB_OUTPUT"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-
       - name: Prepare contracts and generated clients
         run: npm run workbench:prepare
 
@@ -284,6 +339,31 @@ jobs:
         env:
           WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_test
         run: npm run test:workbench:postgres-constraints
+
+      - name: Run Runtime migration upgrade and backfill regression
+        id: runtime_migration_upgrade
+        env:
+          WORKBENCH_RUNTIME_MIGRATION_UPGRADE_TEST_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: |
+          set -euo pipefail
+          evidence_dir="output/runtime-migration-upgrade-ci"
+          rm -rf "$evidence_dir"
+          mkdir -p "$evidence_dir"
+          set +e
+          npm run runtime:provider-state:migration-upgrade:test 2>&1 | tee "$evidence_dir/runtime-migration-upgrade.log"
+          upgrade_status="${PIPESTATUS[0]}"
+          set -e
+          sha256sum "$evidence_dir/runtime-migration-upgrade.log" > "$evidence_dir/runtime-migration-upgrade.log.sha256"
+          exit "$upgrade_status"
+
+      - name: Upload Runtime migration upgrade evidence
+        if: always() && steps.runtime_migration_upgrade.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-migration-upgrade-linux-${{ env.WORKBENCH_CANDIDATE_SHA }}-${{ github.run_attempt }}
+          path: output/runtime-migration-upgrade-ci/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Reconcile runtime queue schema and policies
         env:
@@ -323,7 +403,7 @@ jobs:
         if: always() && steps.typecheck.outcome != 'skipped'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: typecheck-linux-${{ github.sha }}-${{ github.run_attempt }}
+          name: typecheck-linux-${{ env.WORKBENCH_CANDIDATE_SHA }}-${{ github.run_attempt }}
           path: output/typecheck-ci/
           if-no-files-found: error
           retention-days: 14
@@ -344,6 +424,31 @@ jobs:
           WORKBENCH_DATABASE_URL="$WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL" \
             npm --workspace @workbench/workbench-db run migrate:deploy
           npm --workspace @workbench/workbench-worker run test:postgres
+
+      - name: Run isolated PostgreSQL recovery regression
+        id: postgres_recovery
+        env:
+          WORKBENCH_G5_DRILL_TEST_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: |
+          set -euo pipefail
+          evidence_dir="output/postgres-recovery-ci"
+          rm -rf "$evidence_dir"
+          mkdir -p "$evidence_dir"
+          set +e
+          npm run g5:postgres-recovery:test 2>&1 | tee "$evidence_dir/postgres-recovery.log"
+          recovery_status="${PIPESTATUS[0]}"
+          set -e
+          sha256sum "$evidence_dir/postgres-recovery.log" > "$evidence_dir/postgres-recovery.log.sha256"
+          exit "$recovery_status"
+
+      - name: Upload isolated PostgreSQL recovery evidence
+        if: always() && steps.postgres_recovery.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: postgres-recovery-linux-${{ env.WORKBENCH_CANDIDATE_SHA }}-${{ github.run_attempt }}
+          path: output/postgres-recovery-ci/
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Run real PostgreSQL API and Worker workflows
         env:
@@ -383,7 +488,7 @@ jobs:
 
   real-stack-browser:
     name: Real-stack browser / controlled-local-deerflow
-    needs: [quality]
+    needs: [candidate-source-policy]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -415,6 +520,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -443,19 +550,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: real-stack-browser-${{ github.sha }}-${{ github.run_attempt }}
+          name: real-stack-browser-${{ env.WORKBENCH_CANDIDATE_SHA }}-${{ github.run_attempt }}
           path: output/playwright/real-stack/**
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
   deployment-config:
     name: Compose, gateways, and Quartz behavior
-    needs: [release-chain]
+    needs: [candidate-source-policy, release-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -519,18 +628,29 @@ jobs:
 
   pr-production-images:
     name: PR production image / ${{ matrix.name }}
-    if: github.event_name == 'pull_request' && needs.quality.outputs.pr_production_image_count != '0'
-    needs: [quality]
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.pr-production-image-selection.outputs.count != '0'
+    needs: [pr-production-image-selection]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
+      packages: read
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.quality.outputs.pr_production_image_matrix) }}
+      matrix: ${{ fromJSON(needs.pr-production-image-selection.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -544,7 +664,8 @@ jobs:
           NGINX_IMAGE: ${{ vars.WORKBENCH_NGINX_IMAGE }}
         run: |
           set -euo pipefail
-          tag="workbench-pr-${{ matrix.name }}:${GITHUB_SHA}"
+          test "$(git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SHA"
+          tag="workbench-pr-${{ matrix.name }}:${WORKBENCH_CANDIDATE_SHA}"
           args=()
           require_digest() {
             name="$1"
@@ -580,7 +701,7 @@ jobs:
                 --build-arg DEERFLOW_BASE_IMAGE="$DEERFLOW_BASE_IMAGE"
                 --build-arg DEERFLOW_NODE_IMAGE="$DEERFLOW_NODE_IMAGE"
                 --build-arg DEERFLOW_SOURCE_COMMIT="$DEERFLOW_SOURCE_COMMIT"
-                --build-arg WORKBENCH_SOURCE_COMMIT="$GITHUB_SHA"
+                --build-arg WORKBENCH_SOURCE_COMMIT="$WORKBENCH_CANDIDATE_SHA"
               )
               ;;
             *)
@@ -592,11 +713,11 @@ jobs:
             --load \
             --file "${{ matrix.dockerfile }}" \
             --target "${{ matrix.target }}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.revision=${WORKBENCH_CANDIDATE_SHA}" \
             --tag "$tag" \
             "${args[@]}" \
             "${{ matrix.context }}"
-          docker image inspect "$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' | grep -Fx "$GITHUB_SHA"
+          docker image inspect "$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' | grep -Fx "$WORKBENCH_CANDIDATE_SHA"
 
           probe_log="$(mktemp)"
           probe_container=""
@@ -704,6 +825,20 @@ jobs:
               ;;
           esac
 
+  pr-production-images-fork-policy:
+    name: PR production image / fork authorization policy
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    needs: [candidate-source-policy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require a trusted branch for private production bases
+        run: |
+          echo "Fork pull requests cannot access the private immutable production base images." >&2
+          echo "A maintainer must rerun this exact commit from a branch in the base repository." >&2
+          exit 1
+
   production-images:
     name: Production image / ${{ matrix.name }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/production'
@@ -784,6 +919,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -991,6 +1128,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -1060,6 +1199,8 @@ jobs:
     steps:
       - name: Checkout candidate source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

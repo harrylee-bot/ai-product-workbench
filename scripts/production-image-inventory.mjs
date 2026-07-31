@@ -319,7 +319,7 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
   }
   assertDeepEqual(
     ci.jobs?.quality?.needs,
-    ["release-chain"],
+    ["candidate-source-policy", "release-chain"],
     "quality must wait for the verified G0-G2 release chain",
   );
   const fileWorkerPostgresStep = ci.jobs?.quality?.steps?.find(
@@ -335,7 +335,7 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
   );
   assertDeepEqual(
     ci.jobs?.["deployment-config"]?.needs,
-    ["release-chain"],
+    ["candidate-source-policy", "release-chain"],
     "deployment configuration must wait for the verified G0-G2 release chain",
   );
   assert(
@@ -437,10 +437,104 @@ export function assertProductionWorkflowPermissions(ci) {
       `${jobId} privileged permissions must be guarded by a production-only job condition`,
     );
   }
-  for (const jobId of ["release-chain", "quality", "deployment-config"]) {
+  for (const jobId of [
+    "candidate-source-policy",
+    "release-chain",
+    "pr-production-image-selection",
+    "quality",
+    "real-stack-browser",
+    "deployment-config",
+    "pr-production-images-fork-policy",
+  ]) {
     const permissions = ci.jobs?.[jobId]?.permissions ?? {};
     for (const permission of privilegedPermissions) {
       assert(permissions[permission] !== "write", `${jobId} must remain unprivileged on pull requests and untrusted pushes`);
+    }
+  }
+  assertDeepEqual(
+    ci.jobs?.["pr-production-images"]?.permissions,
+    { contents: "read", packages: "read" },
+    "PR production image job must have read-only source and package access",
+  );
+  for (const [jobId, job] of Object.entries(ci.jobs ?? {})) {
+    if (job.permissions?.packages === "read") {
+      assert(jobId === "pr-production-images", `${jobId} must not receive read access to GitHub Packages`);
+    }
+  }
+  const prImageJob = ci.jobs?.["pr-production-images"];
+  const forkPolicyJob = ci.jobs?.["pr-production-images-fork-policy"];
+  const candidatePolicyJob = ci.jobs?.["candidate-source-policy"];
+  assertDeepEqual(
+    candidatePolicyJob?.permissions,
+    { contents: "read" },
+    "candidate source policy must have read-only source access",
+  );
+  assert(candidatePolicyJob?.if === undefined, "candidate source policy must run for every workflow event");
+  const candidateCheckout = candidatePolicyJob?.steps?.find((step) => step.name === "Checkout");
+  assert(
+    String(candidateCheckout?.with?.ref).includes("env.WORKBENCH_CANDIDATE_SHA")
+      && candidateCheckout?.with?.["fetch-depth"] === 0
+      && candidateCheckout?.with?.["persist-credentials"] === false,
+    "candidate source policy must fetch the exact candidate without persisted credentials",
+  );
+  const exactCandidateCheck = candidatePolicyJob?.steps?.find(
+    (step) => step.name === "Verify exact candidate checkout",
+  );
+  assert(
+    String(exactCandidateCheck?.run).includes('git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SHA"'),
+    "candidate source policy must verify the exact checked-out SHA",
+  );
+  const ancestryCheck = candidatePolicyJob?.steps?.find(
+    (step) => step.name === "Verify pull request base ancestry",
+  );
+  assert(
+    String(ancestryCheck?.if).includes("github.event_name == 'pull_request'")
+      && String(ancestryCheck?.env?.PR_BASE_SHA).includes("github.event.pull_request.base.sha")
+      && String(ancestryCheck?.run).includes(
+        'git merge-base --is-ancestor "$PR_BASE_SHA" "$WORKBENCH_CANDIDATE_SHA"',
+      ),
+    "candidate source policy must reject PR heads that do not descend from the declared base",
+  );
+  for (const [jobId, expectedNeeds] of [
+    ["release-chain", ["candidate-source-policy"]],
+    ["pr-production-image-selection", ["candidate-source-policy"]],
+    ["quality", ["candidate-source-policy", "release-chain"]],
+    ["real-stack-browser", ["candidate-source-policy"]],
+    ["deployment-config", ["candidate-source-policy", "release-chain"]],
+    ["pr-production-images-fork-policy", ["candidate-source-policy"]],
+  ]) {
+    assertDeepEqual(
+      ci.jobs?.[jobId]?.needs,
+      expectedNeeds,
+      `${jobId} must depend on the exact candidate source policy`,
+    );
+  }
+  const forkPolicySource = JSON.stringify(forkPolicyJob ?? {});
+  assert(
+    String(prImageJob?.if).includes("github.event.pull_request.head.repo.full_name == github.repository")
+      && String(forkPolicyJob?.if).includes("github.event.pull_request.head.repo.full_name != github.repository")
+      && !forkPolicySource.includes("pr-production-image-selection")
+      && !forkPolicySource.includes("outputs.count")
+      && !forkPolicySource.includes("affected_production_images")
+      && !forkPolicySource.includes("actions/checkout")
+      && !forkPolicySource.includes("production-image-inventory.mjs")
+      && (forkPolicyJob?.steps ?? []).every((step) => step.uses === undefined)
+      && Object.keys(forkPolicyJob?.permissions ?? {}).length === 0
+      && String(forkPolicyJob?.steps?.[0]?.run).includes("exit 1"),
+    "fork PRs must fail independently in a zero-permission policy job without executing candidate code",
+  );
+  assert(
+    String(ci.env?.WORKBENCH_CANDIDATE_SHA).includes("github.event.pull_request.head.sha")
+      && String(ci.env?.WORKBENCH_CANDIDATE_SHA).includes("github.sha"),
+    "CI must resolve an explicit PR-head-or-push candidate SHA",
+  );
+  for (const [jobId, job] of Object.entries(ci.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (!String(step.uses ?? "").startsWith("actions/checkout@")) continue;
+      assert(
+        String(step.with?.ref).includes("env.WORKBENCH_CANDIDATE_SHA"),
+        `${jobId} checkout must bind to the explicit candidate SHA`,
+      );
     }
   }
   assert(
@@ -589,38 +683,62 @@ function assertProductionImageMatrix({ ci, inventory, ids, workflowSource }) {
 }
 
 function assertPullRequestProductionImageMatrix({ ci, inventory, ids }) {
-  const quality = ci.jobs?.quality;
+  const selection = ci.jobs?.["pr-production-image-selection"];
   assert(
-    String(quality?.outputs?.pr_production_image_matrix).includes("steps.affected_production_images.outputs.matrix")
-      && String(quality?.outputs?.pr_production_image_count).includes("steps.affected_production_images.outputs.count"),
-    "quality must expose the affected PR production image matrix and count",
+    String(selection?.outputs?.matrix).includes("steps.affected_production_images.outputs.matrix")
+      && String(selection?.outputs?.count).includes("steps.affected_production_images.outputs.count"),
+    "the independent selector must expose the affected PR production image matrix and count",
   );
-  const qualityCheckout = quality?.steps?.find((step) => step.name === "Checkout");
-  assert(qualityCheckout?.with?.["fetch-depth"] === 0, "affected image discovery requires full PR Git history");
-  const selector = quality?.steps?.find((step) => step.id === "affected_production_images");
+  assert(
+    String(selection?.if).includes("github.event_name == 'pull_request'")
+      && String(selection?.if).includes("github.event.pull_request.head.repo.full_name == github.repository"),
+    "the image selector must be limited to same-repository pull requests",
+  );
+  assertDeepEqual(
+    selection?.needs,
+    ["candidate-source-policy"],
+    "the image selector must depend on the exact candidate source policy",
+  );
+  assertDeepEqual(selection?.permissions, { contents: "read" }, "the image selector must remain unprivileged");
+  const selectionCheckout = selection?.steps?.find((step) => step.name === "Checkout");
+  assert(selectionCheckout?.with?.["fetch-depth"] === 0, "affected image discovery requires full PR Git history");
+  assert(
+    String(selectionCheckout?.with?.ref).includes("env.WORKBENCH_CANDIDATE_SHA"),
+    "affected image discovery must checkout the exact candidate SHA",
+  );
+  const selector = selection?.steps?.find((step) => step.id === "affected_production_images");
   const selectorSource = String(selector?.run ?? "");
   assert(
-    String(selector?.if).includes("github.event_name == 'pull_request'")
-      && String(selector?.env?.PR_BASE_SHA).includes("github.event.pull_request.base.sha")
-      && String(selector?.env?.PR_HEAD_SHA).includes("github.event.pull_request.head.sha")
+    String(selector?.env?.PR_BASE_SHA).includes("github.event.pull_request.base.sha")
       && selectorSource.includes("production-image-inventory.mjs")
       && selectorSource.includes("--affected-matrix")
       && selectorSource.includes("--base")
-      && selectorSource.includes("--head"),
-    "quality must derive the PR image matrix from the exact pull request Git range",
+      && selectorSource.includes('--head "$WORKBENCH_CANDIDATE_SHA"')
+      && selectorSource.includes('git merge-base --is-ancestor "$PR_BASE_SHA" "$WORKBENCH_CANDIDATE_SHA"')
+      && selectorSource.includes('git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SHA"'),
+    "the selector must derive the image matrix from the exact checked-out pull request Git range",
   );
 
   const job = ci.jobs?.["pr-production-images"];
   assert(job, "PR production image build job is required");
   assert(
     String(job.if).includes("github.event_name == 'pull_request'")
-      && String(job.if).includes("needs.quality.outputs.pr_production_image_count != '0'"),
+      && String(job.if).includes("github.event.pull_request.head.repo.full_name == github.repository")
+      && String(job.if).includes("needs.pr-production-image-selection.outputs.count != '0'"),
     "PR production image job must run for every non-empty affected image set",
   );
-  assertDeepEqual(job.needs, ["quality"], "PR production image job must wait for quality");
-  assertDeepEqual(job.permissions, { contents: "read" }, "PR production image job must remain unprivileged");
+  assertDeepEqual(
+    job.needs,
+    ["pr-production-image-selection"],
+    "PR production images must depend only on the independent image selector",
+  );
+  assertDeepEqual(
+    job.permissions,
+    { contents: "read", packages: "read" },
+    "PR production image job must have read-only source and package access",
+  );
   assert(
-    String(job.strategy?.matrix).includes("fromJSON(needs.quality.outputs.pr_production_image_matrix)"),
+    String(job.strategy?.matrix).includes("fromJSON(needs.pr-production-image-selection.outputs.matrix)"),
     "PR production image job must consume the computed affected-image matrix",
   );
   const matrix = affectedProductionImageMatrix({ inventory }).include;
@@ -638,9 +756,32 @@ function assertPullRequestProductionImageMatrix({ ci, inventory, ids }) {
     assert(entry.context === ".", `${image.id} PR build context must be the repository root`);
     assert(typeof entry.probe === "string" && entry.probe.length > 0, `${image.id} PR runtime probe is missing`);
   }
+  const registryLogin = job.steps?.find((step) => step.name === "Log in to GitHub Container Registry");
+  const checkout = job.steps?.find((step) => step.name === "Checkout");
   const buildStep = job.steps?.find((step) => step.name === "Build and probe production target without publishing");
+  assert(
+    registryLogin?.uses === "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9"
+      && registryLogin?.with?.registry === "ghcr.io"
+      && String(registryLogin?.with?.username).includes("github.actor")
+      && String(registryLogin?.with?.password).includes("github.token"),
+    "PR production image job must authenticate to GHCR with the read-only GitHub token",
+  );
+  assert(
+    checkout?.with?.["persist-credentials"] === false,
+    "PR production image checkout must not persist the source token into the candidate worktree",
+  );
+  assert(
+    job.steps.indexOf(registryLogin) < job.steps.indexOf(buildStep),
+    "PR production image job must authenticate to GHCR before building images",
+  );
   assert(!buildStep?.if, "affected PR production image builds must not inherit a production-only step guard");
   const buildSource = String(buildStep?.run ?? "");
+  assert(
+    buildSource.includes('git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SHA"')
+      && buildSource.includes("org.opencontainers.image.revision=${WORKBENCH_CANDIDATE_SHA}")
+      && !buildSource.includes("org.opencontainers.image.revision=${GITHUB_SHA}"),
+    "PR production images must bind checkout, tag, label, and inspection to the exact candidate SHA",
+  );
   for (const marker of [
     "docker buildx build",
     "--load",

@@ -6518,8 +6518,15 @@ async function reservePort() {
 }
 
 function resolveCandidateSourceCommit() {
-  const ciCommit = process.env.GITHUB_SHA?.trim();
-  if (ciCommit && /^[0-9a-f]{40}$/u.test(ciCommit)) return ciCommit;
+  for (const [name, value] of [
+    ["WORKBENCH_CANDIDATE_SHA", process.env.WORKBENCH_CANDIDATE_SHA],
+    ["GITHUB_SHA", process.env.GITHUB_SHA],
+  ]) {
+    const commit = value?.trim();
+    if (!commit) continue;
+    assert.match(commit, /^[0-9a-f]{40}$/u, `${name} must be a full lowercase Git commit`);
+    return commit;
+  }
   const commit = execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: root,
     encoding: "utf8",

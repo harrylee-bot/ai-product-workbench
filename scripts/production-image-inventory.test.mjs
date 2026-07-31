@@ -129,6 +129,74 @@ test("keeps PR and quality jobs unprivileged and confines token writes to produc
     /quality must not receive privileged|quality must remain unprivileged/u,
   );
 
+  const missingPackageRead = structuredClone(workflow);
+  delete missingPackageRead.jobs["pr-production-images"].permissions.packages;
+  assert.throws(
+    () => assertProductionWorkflowPermissions(missingPackageRead),
+    /PR production image job must have read-only source and package access/u,
+  );
+
+  const writablePrPackages = structuredClone(workflow);
+  writablePrPackages.jobs["pr-production-images"].permissions.packages = "write";
+  assert.throws(
+    () => assertProductionWorkflowPermissions(writablePrPackages),
+    /must not receive privileged|read-only source and package access/u,
+  );
+
+  const packageReadOutsideImageJob = structuredClone(workflow);
+  packageReadOutsideImageJob.jobs.quality.permissions = { contents: "read", packages: "read" };
+  assert.throws(
+    () => assertProductionWorkflowPermissions(packageReadOutsideImageJob),
+    /quality must not receive read access to GitHub Packages/u,
+  );
+
+  const forkReadableImages = structuredClone(workflow);
+  delete forkReadableImages.jobs["pr-production-images-fork-policy"];
+  assert.throws(
+    () => assertProductionWorkflowPermissions(forkReadableImages),
+    /pr-production-images-fork-policy must depend|fork PRs must fail independently/u,
+  );
+
+  for (const jobId of [
+    "release-chain",
+    "pr-production-image-selection",
+    "quality",
+    "real-stack-browser",
+    "deployment-config",
+    "pr-production-images-fork-policy",
+  ]) {
+    const missingCandidateGate = structuredClone(workflow);
+    missingCandidateGate.jobs[jobId].needs = [...missingCandidateGate.jobs[jobId].needs]
+      .filter((dependency) => dependency !== "candidate-source-policy");
+    assert.throws(
+      () => assertProductionWorkflowPermissions(missingCandidateGate),
+      new RegExp(`${jobId} must depend on the exact candidate source policy`, "u"),
+    );
+  }
+
+  const forkControlledPolicy = structuredClone(workflow);
+  forkControlledPolicy.jobs["pr-production-images-fork-policy"].if +=
+    " && needs.pr-production-image-selection.outputs.count != '0'";
+  assert.throws(
+    () => assertProductionWorkflowPermissions(forkControlledPolicy),
+    /fork PRs must fail independently in a zero-permission policy job/u,
+  );
+
+  const candidateCredentials = structuredClone(workflow);
+  candidateCredentials.jobs["candidate-source-policy"].steps
+    .find((step) => step.name === "Checkout").with["persist-credentials"] = true;
+  assert.throws(
+    () => assertProductionWorkflowPermissions(candidateCredentials),
+    /without persisted credentials/u,
+  );
+
+  const mergeRefCheckout = structuredClone(workflow);
+  delete mergeRefCheckout.jobs.quality.steps.find((step) => step.name === "Checkout").with.ref;
+  assert.throws(
+    () => assertProductionWorkflowPermissions(mergeRefCheckout),
+    /quality checkout must bind to the explicit candidate SHA/u,
+  );
+
   const unguardedPublisher = structuredClone(workflow);
   delete unguardedPublisher.jobs["production-images"].if;
   assert.throws(
@@ -287,18 +355,61 @@ test("reads a deterministic null-delimited pull request Git range", () => {
 test("builds the computed image matrix with unprivileged image-specific runtime probes", () => {
   const workflowPath = fileURLToPath(new URL("../.github/workflows/workbench-ci.yml", import.meta.url));
   const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
-  const quality = workflow.jobs.quality;
+  const selection = workflow.jobs["pr-production-image-selection"];
   const prJob = workflow.jobs["pr-production-images"];
-  assert.equal(quality.steps.find((step) => step.name === "Checkout").with["fetch-depth"], 0);
-  assert.match(quality.outputs.pr_production_image_matrix, /affected_production_images\.outputs\.matrix/u);
-  const selector = quality.steps.find((step) => step.id === "affected_production_images");
+  const candidatePolicy = workflow.jobs["candidate-source-policy"];
+  assert.deepEqual(candidatePolicy.permissions, { contents: "read" });
+  assert.equal(candidatePolicy.if, undefined);
+  assert.equal(candidatePolicy.steps.find((step) => step.name === "Checkout").with["fetch-depth"], 0);
+  assert.equal(
+    candidatePolicy.steps.find((step) => step.name === "Checkout").with["persist-credentials"],
+    false,
+  );
+  assert.deepEqual(workflow.jobs["release-chain"].needs, ["candidate-source-policy"]);
+  assert.deepEqual(workflow.jobs.quality.needs, ["candidate-source-policy", "release-chain"]);
+  assert.deepEqual(workflow.jobs["real-stack-browser"].needs, ["candidate-source-policy"]);
+  assert.deepEqual(workflow.jobs["deployment-config"].needs, ["candidate-source-policy", "release-chain"]);
+  assert.doesNotMatch(JSON.stringify(workflow.jobs["real-stack-browser"].needs), /quality/u);
+  assert.equal(selection.steps.find((step) => step.name === "Checkout").with["fetch-depth"], 0);
+  assert.equal(
+    selection.steps.find((step) => step.name === "Checkout").with.ref,
+    "${{ env.WORKBENCH_CANDIDATE_SHA }}",
+  );
+  assert.match(selection.outputs.matrix, /affected_production_images\.outputs\.matrix/u);
+  const selector = selection.steps.find((step) => step.id === "affected_production_images");
   assert.match(selector.run, /--affected-matrix[\s\S]*--base[\s\S]*--head/u);
-  assert.deepEqual(prJob.permissions, { contents: "read" });
-  assert.match(prJob.strategy.matrix, /fromJSON\(needs\.quality\.outputs\.pr_production_image_matrix\)/u);
-  assert.match(prJob.if, /pr_production_image_count != '0'/u);
+  assert.match(selector.run, /--head "\$WORKBENCH_CANDIDATE_SHA"/u);
+  assert.match(selector.run, /git merge-base --is-ancestor "\$PR_BASE_SHA" "\$WORKBENCH_CANDIDATE_SHA"/u);
+  assert.deepEqual(prJob.permissions, { contents: "read", packages: "read" });
+  assert.deepEqual(prJob.needs, ["pr-production-image-selection"]);
+  assert.deepEqual(selection.needs, ["candidate-source-policy"]);
+  assert.match(selection.if, /head\.repo\.full_name == github\.repository/u);
+  assert.match(prJob.strategy.matrix, /fromJSON\(needs\.pr-production-image-selection\.outputs\.matrix\)/u);
+  assert.match(prJob.if, /needs\.pr-production-image-selection\.outputs\.count != '0'/u);
+  assert.match(prJob.if, /head\.repo\.full_name == github\.repository/u);
+  assert.equal(
+    prJob.steps.find((step) => step.name === "Checkout").with["persist-credentials"],
+    false,
+  );
+  const registryLogin = prJob.steps.find((step) => step.name === "Log in to GitHub Container Registry");
+  assert.equal(registryLogin.uses, "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9");
+  assert.deepEqual(registryLogin.with, {
+    registry: "ghcr.io",
+    username: "${{ github.actor }}",
+    password: "${{ github.token }}",
+  });
+  const forkPolicy = workflow.jobs["pr-production-images-fork-policy"];
+  assert.deepEqual(forkPolicy.permissions, {});
+  assert.deepEqual(forkPolicy.needs, ["candidate-source-policy"]);
+  assert.match(forkPolicy.if, /head\.repo\.full_name != github\.repository/u);
+  assert.doesNotMatch(JSON.stringify(forkPolicy), /pr-production-image-selection|outputs\.count/u);
+  assert.equal(forkPolicy.steps.some((step) => step.uses), false);
+  assert.match(forkPolicy.steps[0].run, /exit 1/u);
   const build = prJob.steps.find((step) => step.name === "Build and probe production target without publishing");
+  assert(prJob.steps.indexOf(registryLogin) < prJob.steps.indexOf(build));
   assert.match(build.run, /docker buildx build[\s\S]*--load/u);
-  assert.match(build.run, /org\.opencontainers\.image\.revision=\$\{GITHUB_SHA\}/u);
+  assert.match(build.run, /org\.opencontainers\.image\.revision=\$\{WORKBENCH_CANDIDATE_SHA\}/u);
+  assert.doesNotMatch(build.run, /org\.opencontainers\.image\.revision=\$\{GITHUB_SHA\}/u);
   assert.match(build.run, /docker run --rm --network none/u);
   assert.match(build.run, /--read-only[\s\S]*--cap-drop ALL[\s\S]*--security-opt no-new-privileges:true/u);
   assert.match(build.run, /node-config-fail-fast[\s\S]*--entrypoint node[\s\S]*--check/u);

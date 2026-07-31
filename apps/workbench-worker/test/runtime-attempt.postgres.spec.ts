@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  PROTOTYPE_PATCH_MAX_PAYLOAD_BYTES,
+  assertPrototypePatchPayloadSize,
+} from "@workbench/workbench-contracts";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { RunEventStore } from "../src/runs/run-event.store.js";
 import {
@@ -407,6 +411,303 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
   }, 120_000);
 });
 
+describeWithPostgres("RuntimeAttempt PostgreSQL fault and concurrency fences", () => {
+  it.each([
+    ["before the pending insert", "before-pending-insert", "SIMULATED_CRASH_BEFORE_PENDING_INSERT"],
+    ["after the processed transition", "after-processed", "SIMULATED_CRASH_AFTER_PROCESSED_TRANSITION"],
+    ["after the projection CAS", "after-projection-cas", "SIMULATED_CRASH_AFTER_PROJECTION_CAS"],
+  ] as const)("rolls back every event effect %s", async (_label, faultPoint, errorMessage) => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture);
+    const faultedService = new RuntimeAttemptService(
+      databaseWithEventTransactionFault(db, faultPoint) as never,
+      120_000,
+    );
+    const input = externalEvent(fixture, `event-fault-${faultPoint}`);
+
+    try {
+      await expect(processWithActivityEffect(db, faultedService, claim, fixture, input))
+        .rejects.toThrow(errorMessage);
+
+      await expect(durableEventState(db, fixture)).resolves.toEqual(emptyDurableEventState());
+      await expect(processWithActivityEffect(db, service, claim, fixture, input))
+        .resolves.toEqual({ created: true, sequence: 1 });
+      await expect(durableEventState(db, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, [input]));
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("fences an expired owner after a new owner takes over at the next epoch", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service: firstService, claim: firstClaim } = await activateExternalRun(db, fixture);
+    const takeoverService = new RuntimeAttemptService(db, 120_000);
+    const expiredHeartbeatAt = new Date(Date.now() - 120_000);
+    const expiredLeaseAt = new Date(Date.now() - 60_000);
+    const input = externalEvent(fixture, "event-after-lease-takeover");
+
+    try {
+      await db.$transaction([
+        db.run.update({
+          where: { id: fixture.runId },
+          data: {
+            executionHeartbeatAt: expiredHeartbeatAt,
+            executionLeaseExpiresAt: expiredLeaseAt,
+          },
+        }),
+        db.runtimeAttempt.update({
+          where: { id: fixture.runtimeAttemptId! },
+          data: {
+            executionHeartbeatAt: expiredHeartbeatAt,
+            executionLeaseExpiresAt: expiredLeaseAt,
+          },
+        }),
+      ]);
+
+      const takeoverClaim = await takeoverService.claim(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        `runtime-takeover-pg:${randomUUID()}`,
+      );
+      expect(takeoverClaim).toMatchObject({
+        runId: firstClaim.runId,
+        attemptId: firstClaim.attemptId,
+        epoch: firstClaim.epoch + 1,
+      });
+      expect(takeoverClaim.ownerId).not.toBe(firstClaim.ownerId);
+
+      await expect(firstService.heartbeat(firstClaim)).rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+      await expect(processWithActivityEffect(db, firstService, firstClaim, fixture, input))
+        .rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+      await expect(durableEventState(db, fixture)).resolves.toEqual(emptyDurableEventState());
+      await expect(takeoverService.claim(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        `runtime-third-owner-pg:${randomUUID()}`,
+      )).rejects.toThrow("RUNTIME_EXECUTION_CLAIM_BUSY");
+
+      await expect(processWithActivityEffect(db, takeoverService, takeoverClaim, fixture, input))
+        .resolves.toEqual({ created: true, sequence: 1 });
+      await expect(durableEventState(db, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, [input]));
+      await expect(Promise.all([
+        db.run.findUniqueOrThrow({
+          where: { id: fixture.runId },
+          select: { executionOwnerId: true, executionEpoch: true },
+        }),
+        db.runtimeAttempt.findUniqueOrThrow({
+          where: { id: fixture.runtimeAttemptId! },
+          select: { executionOwnerId: true, executionEpoch: true },
+        }),
+      ])).resolves.toEqual([
+        { executionOwnerId: takeoverClaim.ownerId, executionEpoch: takeoverClaim.epoch },
+        { executionOwnerId: takeoverClaim.ownerId, executionEpoch: takeoverClaim.epoch },
+      ]);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("deduplicates the same event concurrently across two database connections", async () => {
+    const firstDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const secondDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(firstDb, true);
+    const { claim } = await activateExternalRun(firstDb, fixture);
+    const firstLockAcquired = deferred<void>();
+    const secondLockRequested = deferred<void>();
+    const releaseFirstLock = deferred<void>();
+    const firstService = new RuntimeAttemptService(
+      databaseWithLockScopeBarrier(firstDb, {
+        afterLockAcquired: firstLockAcquired,
+        releaseLock: releaseFirstLock,
+      }) as never,
+      120_000,
+    );
+    const secondService = new RuntimeAttemptService(
+      databaseWithLockScopeBarrier(secondDb, {
+        beforeLockRequest: secondLockRequested,
+      }) as never,
+      120_000,
+    );
+    const input = externalEvent(fixture, "event-concurrent-same-identity");
+    const firstEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
+      await appendActivityEffect(new RunEventStore(firstDb), tx, fixture, input.externalEventId);
+    });
+    const secondEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
+      await appendActivityEffect(new RunEventStore(secondDb), tx, fixture, input.externalEventId);
+    });
+    const firstOutcome = firstService.processExternalEvent(claim, input, firstEffects);
+    let secondOutcome: Promise<{ created: boolean; sequence: number }> | undefined;
+
+    try {
+      await firstLockAcquired.promise;
+      secondOutcome = secondService.processExternalEvent(claim, input, secondEffects);
+      await secondLockRequested.promise;
+      await expect(promiseStateAfter(secondOutcome, 100)).resolves.toBe("pending");
+
+      releaseFirstLock.resolve();
+      const results = await Promise.all([firstOutcome, secondOutcome]);
+
+      expect(results.map((result) => result.sequence)).toEqual([1, 1]);
+      expect(results.filter((result) => result.created)).toHaveLength(1);
+      expect(firstEffects.mock.calls.length + secondEffects.mock.calls.length).toBe(1);
+      await expect(durableEventState(firstDb, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, [input]));
+    } finally {
+      releaseFirstLock.resolve();
+      await Promise.allSettled([
+        firstOutcome,
+        ...(secondOutcome ? [secondOutcome] : []),
+      ]);
+      await cleanupFixture(firstDb, fixture);
+      await Promise.all([firstDb.$disconnect(), secondDb.$disconnect()]);
+    }
+  }, 120_000);
+
+  it("serializes adjacent events into contiguous sequences across two database connections", async () => {
+    const firstDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const secondDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(firstDb, true);
+    const { claim } = await activateExternalRun(firstDb, fixture);
+    const firstLockAcquired = deferred<void>();
+    const secondLockRequested = deferred<void>();
+    const releaseFirstLock = deferred<void>();
+    const firstService = new RuntimeAttemptService(
+      databaseWithLockScopeBarrier(firstDb, {
+        afterLockAcquired: firstLockAcquired,
+        releaseLock: releaseFirstLock,
+      }) as never,
+      120_000,
+    );
+    const secondService = new RuntimeAttemptService(
+      databaseWithLockScopeBarrier(secondDb, {
+        beforeLockRequest: secondLockRequested,
+      }) as never,
+      120_000,
+    );
+    const firstInput = externalEvent(fixture, "event-concurrent-adjacent-a");
+    const secondInput = externalEvent(fixture, "event-concurrent-adjacent-b");
+    const firstOutcome = processWithActivityEffect(
+      firstDb,
+      firstService,
+      claim,
+      fixture,
+      firstInput,
+    );
+    let secondOutcome: Promise<{ created: boolean; sequence: number }> | undefined;
+
+    try {
+      await firstLockAcquired.promise;
+      secondOutcome = processWithActivityEffect(
+        secondDb,
+        secondService,
+        claim,
+        fixture,
+        secondInput,
+      );
+      await secondLockRequested.promise;
+      await expect(promiseStateAfter(secondOutcome, 100)).resolves.toBe("pending");
+
+      releaseFirstLock.resolve();
+      const [firstResult, secondResult] = await Promise.all([firstOutcome, secondOutcome]);
+      const applied = [
+        { input: firstInput, result: firstResult },
+        { input: secondInput, result: secondResult },
+      ].sort((left, right) => left.result.sequence - right.result.sequence);
+
+      expect(applied.map(({ result }) => result)).toEqual([
+        { created: true, sequence: 1 },
+        { created: true, sequence: 2 },
+      ]);
+      await expect(durableEventState(firstDb, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, applied.map(({ input }) => input)));
+    } finally {
+      releaseFirstLock.resolve();
+      await Promise.allSettled([
+        firstOutcome,
+        ...(secondOutcome ? [secondOutcome] : []),
+      ]);
+      await cleanupFixture(firstDb, fixture);
+      await Promise.all([firstDb.$disconnect(), secondDb.$disconnect()]);
+    }
+  }, 120_000);
+
+  it("processes one current event at the typed patch payload budget without a historical payload scan", async () => {
+    const queries: string[] = [];
+    const db = new PrismaClient({
+      datasourceUrl: databaseUrl!,
+      log: [{ emit: "event", level: "query" }],
+    });
+    db.$on("query", (event) => queries.push(event.query));
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture);
+    const first = externalEvent(fixture, "event-before-large-payload");
+    const payloadOverhead = Buffer.byteLength(JSON.stringify({ syntheticText: "" }), "utf8");
+    const payload = {
+      syntheticText: "x".repeat(PROTOTYPE_PATCH_MAX_PAYLOAD_BYTES - payloadOverhead),
+    };
+    const current = {
+      externalRunId: fixture.externalRunId,
+      externalEventId: "event-typed-patch-payload-budget",
+      event: "synthetic.patch-payload",
+      payload,
+    } as const;
+
+    try {
+      expect(assertPrototypePatchPayloadSize(payload)).toBe(PROTOTYPE_PATCH_MAX_PAYLOAD_BYTES);
+      await service.processExternalEvent(claim, first, async () => undefined);
+
+      queries.length = 0;
+      await expect(service.processExternalEvent(claim, current, async () => undefined))
+        .resolves.toEqual({ created: true, sequence: 2 });
+      const transactionQueries = [...queries];
+      const inboxReads = transactionQueries.filter((query) => (
+        query.trimStart().toUpperCase().startsWith("SELECT")
+        && query.includes('"runtime_external_events"')
+      ));
+      expect(inboxReads).toHaveLength(1);
+      expect(inboxReads[0]).toMatch(/"external_event_id"\s*=\s*\$\d+/iu);
+      expect(inboxReads[0]).not.toMatch(/ORDER\s+BY|LIMIT\s+10001/iu);
+
+      await expect(db.runtimeExternalEvent.findUniqueOrThrow({
+        where: {
+          runtimeAttemptId_externalEventId: {
+            runtimeAttemptId: fixture.runtimeAttemptId!,
+            externalEventId: current.externalEventId,
+          },
+        },
+        select: { sequence: true, payload: true, payloadSha256: true, status: true },
+      })).resolves.toEqual({
+        sequence: 2,
+        payload,
+        payloadSha256: sha256Canonical(payload),
+        status: "processed",
+      });
+      await expect(Promise.all([
+        db.runtimeAttempt.findUniqueOrThrow({
+          where: { id: fixture.runtimeAttemptId! },
+          select: { externalEventSequence: true, lastExternalEventId: true },
+        }),
+        db.runtimeProviderState.findUniqueOrThrow({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+          select: { lastAppliedSequence: true, lastExternalEventId: true },
+        }),
+      ])).resolves.toEqual([
+        { externalEventSequence: 2, lastExternalEventId: current.externalEventId },
+        { lastAppliedSequence: 2, lastExternalEventId: current.externalEventId },
+      ]);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+});
+
 describeWithPostgres("RuntimeProviderState PostgreSQL invariants", () => {
   it("accepts a scoped initial projection and rejects invalid shape and scope", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
@@ -475,11 +776,16 @@ describeWithPostgres("RuntimeProviderState PostgreSQL invariants", () => {
           stateSha256: "c".repeat(64),
         },
       });
+      const started = await db.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+        select: { startedAt: true },
+      });
+      if (!started.startedAt) throw new Error("RUNTIME_ATTEMPT_STARTED_AT_MISSING");
       await db.runtimeAttempt.update({
         where: { id: fixture.runtimeAttemptId! },
         data: {
           status: "succeeded",
-          finishedAt: new Date(),
+          finishedAt: started.startedAt,
           executionOwnerId: null,
           executionHeartbeatAt: null,
           executionLeaseExpiresAt: null,
@@ -1260,6 +1566,110 @@ function databaseWithCursorCheckpointCrash(client: PrismaClient) {
   };
 }
 
+type EventTransactionFaultPoint =
+  | "before-pending-insert"
+  | "after-processed"
+  | "after-projection-cas";
+
+function databaseWithEventTransactionFault(
+  client: PrismaClient,
+  faultPoint: EventTransactionFaultPoint,
+) {
+  let injected = false;
+  const fail = (message: string) => {
+    injected = true;
+    throw new Error(message);
+  };
+  return {
+    $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      client.$transaction(async (tx) => callback(new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "runtimeExternalEvent") {
+            const delegate = Reflect.get(target, property, receiver) as object;
+            return new Proxy(delegate, {
+              get(delegateTarget, delegateProperty, delegateReceiver) {
+                const value = Reflect.get(delegateTarget, delegateProperty, delegateReceiver) as unknown;
+                if (delegateProperty === "create") {
+                  const create = (value as (...args: unknown[]) => Promise<unknown>).bind(delegateTarget);
+                  return async (...args: unknown[]) => {
+                    if (!injected && faultPoint === "before-pending-insert") {
+                      fail("SIMULATED_CRASH_BEFORE_PENDING_INSERT");
+                    }
+                    return create(...args);
+                  };
+                }
+                if (delegateProperty === "updateMany") {
+                  const updateMany = (value as (...args: unknown[]) => Promise<unknown>).bind(delegateTarget);
+                  return async (...args: unknown[]) => {
+                    const result = await updateMany(...args);
+                    if (!injected && faultPoint === "after-processed") {
+                      fail("SIMULATED_CRASH_AFTER_PROCESSED_TRANSITION");
+                    }
+                    return result;
+                  };
+                }
+                return typeof value === "function" ? value.bind(delegateTarget) : value;
+              },
+            });
+          }
+          if (property === "runtimeProviderState") {
+            const delegate = Reflect.get(target, property, receiver) as object;
+            return new Proxy(delegate, {
+              get(delegateTarget, delegateProperty, delegateReceiver) {
+                const value = Reflect.get(delegateTarget, delegateProperty, delegateReceiver) as unknown;
+                if (delegateProperty === "updateMany") {
+                  const updateMany = (value as (...args: unknown[]) => Promise<unknown>).bind(delegateTarget);
+                  return async (...args: unknown[]) => {
+                    const result = await updateMany(...args);
+                    if (!injected && faultPoint === "after-projection-cas") {
+                      fail("SIMULATED_CRASH_AFTER_PROJECTION_CAS");
+                    }
+                    return result;
+                  };
+                }
+                return typeof value === "function" ? value.bind(delegateTarget) : value;
+              },
+            });
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as Prisma.TransactionClient), { timeout: 30_000 }),
+  };
+}
+
+function databaseWithLockScopeBarrier(
+  client: PrismaClient,
+  barrier: {
+    beforeLockRequest?: Deferred<void>;
+    afterLockAcquired?: Deferred<void>;
+    releaseLock?: Deferred<void>;
+  },
+) {
+  let lockScopeIntercepted = false;
+  return {
+    $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      client.$transaction(async (tx) => callback(new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "$queryRaw") {
+            const queryRaw = target.$queryRaw.bind(target) as (...args: unknown[]) => Promise<unknown>;
+            return async (...args: unknown[]) => {
+              if (lockScopeIntercepted) return queryRaw(...args);
+              lockScopeIntercepted = true;
+              barrier.beforeLockRequest?.resolve();
+              const result = await queryRaw(...args);
+              barrier.afterLockAcquired?.resolve();
+              if (barrier.releaseLock) await barrier.releaseLock.promise;
+              return result;
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as Prisma.TransactionClient), { timeout: 30_000 }),
+  };
+}
+
 function databaseWithCommitResponseLoss(client: PrismaClient) {
   let injected = false;
   return {
@@ -1326,4 +1736,16 @@ function deferred<T>(): Deferred<T> {
     resolve = fulfill;
   });
   return { promise, resolve };
+}
+
+function promiseStateAfter<T>(promise: Promise<T>, durationMs: number) {
+  return Promise.race([
+    promise.then(
+      () => "settled" as const,
+      () => "settled" as const,
+    ),
+    new Promise<"pending">((resolve) => {
+      setTimeout(() => resolve("pending"), durationMs);
+    }),
+  ]);
 }

@@ -14,6 +14,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import YAML from "yaml";
+
 import {
   captureGitSourceSnapshot,
   createBaselineCleanGate,
@@ -273,6 +275,24 @@ test("root typecheck scripts share the dynamic orchestrator", async () => {
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/workbench-ci.yml"), "utf8");
   assert.match(workflow, /WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 7168/u);
   assert.match(workflow, /name: Upload Linux typecheck evidence/u);
+  const parsedWorkflow = YAML.parse(workflow);
+  const quality = parsedWorkflow.jobs.quality;
+  assert.equal(
+    parsedWorkflow.env.WORKBENCH_CANDIDATE_SHA,
+    "${{ github.event.pull_request.head.sha || github.sha }}",
+  );
+  assert.equal(quality.steps.find((step) => step.name === "Checkout").with.ref, "${{ env.WORKBENCH_CANDIDATE_SHA }}");
+  assert.equal(quality.env.NODE_OPTIONS, "--max-old-space-size=4096");
+  assert.match(
+    quality.steps.find((step) => step.name === "Upload Linux typecheck evidence").with.name,
+    /env\.WORKBENCH_CANDIDATE_SHA/u,
+  );
+  assert.equal(quality.steps.find((step) => step.name === "Check Workbench lint").run, "npm run lint:workbench");
+  assert.equal(quality.steps.find((step) => step.name === "Run server and worker tests").run, "npm test");
+  assert.equal(quality.steps.find((step) => step.name === "Build production artifacts").run, "npm run build");
+  for (const stepName of ["Check Workbench lint", "Run server and worker tests", "Build production artifacts"]) {
+    assert.equal(quality.steps.find((step) => step.name === stepName).env?.NODE_OPTIONS, undefined);
+  }
 });
 
 async function writeJson(filePath, value) {
