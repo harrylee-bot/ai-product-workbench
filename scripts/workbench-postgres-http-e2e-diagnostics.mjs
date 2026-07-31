@@ -101,6 +101,26 @@ const successfulHttpScenarioNames = [
   "retry",
 ];
 
+export function classifyMotionFrameEvidence(frames, kind) {
+  if (kind !== "prd" && kind !== "prototype") {
+    throw new TypeError("Motion evidence kind must be prd or prototype");
+  }
+  if (!Array.isArray(frames) || frames.length < 2) {
+    return { advanced: false, stableConnected: false };
+  }
+  const property = kind === "prd" ? "beforeBackgroundPosition" : "beforeTransform";
+  const stableConnected = frames.every((frame) => (
+    frame?.connected === true
+    && typeof frame[property] === "string"
+  ));
+  if (!stableConnected) return { advanced: false, stableConnected: false };
+  const firstValue = frames[0][property];
+  return {
+    advanced: frames.some((frame) => frame[property] !== firstValue),
+    stableConnected: true,
+  };
+}
+
 export function diagnosticErrorClass(error) {
   return enumClass(connectionErrorClass(error), errorClasses, "UnknownError");
 }

@@ -28,6 +28,7 @@ import {
   shouldFailRealStackEvidenceForSourceDrift,
 } from "./workbench-browser-network-evidence.mjs";
 import {
+  classifyMotionFrameEvidence,
   diagnosticErrorClass,
   diagnosticFakeRuntimeState,
   httpDiagnosticSuccessEvidence,
@@ -127,6 +128,9 @@ const generationVisualViewports = [
 ];
 const pendingDocumentEvidenceLatencyMs = 10_000;
 const browserCleanupTimeoutMs = 5_000;
+const motionFrameSampleCount = 6;
+const motionFrameSampleIntervalMs = 100;
+const maximumMotionCaptureAttempts = 3;
 
 const services = [];
 let fakeRuntime;
@@ -5833,27 +5837,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
       await page.setViewportSize(viewport);
       const motionElement = page.locator(selector);
       await motionElement.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-      const motion = await motionElement.evaluate(async (element) => {
-        const sample = () => {
-          const style = getComputedStyle(element);
-          const before = getComputedStyle(element, "::before");
-          return {
-            animationName: style.animationName,
-            animationDuration: style.animationDuration,
-            opacity: style.opacity,
-            transform: style.transform,
-            beforeAnimationName: before.animationName,
-            beforeAnimationDuration: before.animationDuration,
-            beforeAnimationIterationCount: before.animationIterationCount,
-            beforeBackgroundPosition: before.backgroundPosition,
-            beforeOpacity: before.opacity,
-            beforeTransform: before.transform,
-          };
-        };
-        const first = sample();
-        await new Promise((resolve) => setTimeout(resolve, 180));
-        return { ...sample(), frames: [first, sample()] };
-      });
+      const motion = await captureStableMotionFrames(motionElement, kind);
       const layout = await page.evaluate((expectedKind) => {
         const metric = (selector) => {
           const element = document.querySelector(selector);
@@ -5929,25 +5913,33 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
     ? /workbench-stage-aurora-sweep/u
     : /workbench-stage-sweep/u;
   for (const item of evidence.filter((candidate) => !candidate.reducedMotion)) {
+    const frameEvidence = classifyMotionFrameEvidence(item.motion.frames, kind);
     assert.equal(item.runState.motionKind, kind, `${kind} visual evidence captured the wrong motion kind`);
+    assert.equal(
+      frameEvidence.stableConnected,
+      true,
+      `normal-motion ${kind} wash was sampled from a replaced element at ${item.viewport}`,
+    );
     assert.match(item.motion.beforeAnimationName, expectedAnimationName, `normal-motion ${kind} wash was not active at ${item.viewport}`);
     assert.notEqual(item.motion.beforeAnimationDuration, "0.001s", `normal-motion ${kind} wash used reduced duration at ${item.viewport}`);
     assert.ok(
       cssValueListMatches(item.motion.beforeAnimationIterationCount, "infinite"),
       `normal-motion ${kind} wash did not repeat every animation at ${item.viewport}`,
     );
-    assert.notEqual(
-      kind === "prd"
-        ? item.motion.frames[0].beforeBackgroundPosition
-        : item.motion.frames[0].beforeTransform,
-      kind === "prd"
-        ? item.motion.frames[1].beforeBackgroundPosition
-        : item.motion.frames[1].beforeTransform,
+    assert.equal(
+      frameEvidence.advanced,
+      true,
       `normal-motion ${kind} wash did not advance between frames at ${item.viewport}`,
     );
   }
   for (const item of evidence.filter((candidate) => candidate.reducedMotion)) {
+    const frameEvidence = classifyMotionFrameEvidence(item.motion.frames, kind);
     assert.equal(item.runState.motionKind, kind, `${kind} reduced-motion evidence captured the wrong motion kind`);
+    assert.equal(
+      frameEvidence.stableConnected,
+      true,
+      `reduced-motion ${kind} wash was sampled from a replaced element at ${item.viewport}`,
+    );
     assert.match(item.motion.beforeAnimationName, expectedAnimationName, `reduced-motion ${kind} wash lost its semantic animation at ${item.viewport}`);
     assert.equal(item.motion.beforeAnimationDuration, "0.001s", `reduced-motion ${kind} wash did not collapse to 1ms at ${item.viewport}`);
     assert.ok(
@@ -5955,12 +5947,8 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
       `reduced-motion ${kind} wash kept an animation repeating at ${item.viewport}`,
     );
     assert.equal(
-      kind === "prd"
-        ? item.motion.frames[0].beforeBackgroundPosition
-        : item.motion.frames[0].beforeTransform,
-      kind === "prd"
-        ? item.motion.frames[1].beforeBackgroundPosition
-        : item.motion.frames[1].beforeTransform,
+      frameEvidence.advanced,
+      false,
       `reduced-motion ${kind} wash continued moving at ${item.viewport}`,
     );
   }
@@ -6015,6 +6003,47 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
       );
     }
   }
+}
+
+async function captureStableMotionFrames(motionElement, kind) {
+  for (let attempt = 1; attempt <= maximumMotionCaptureAttempts; attempt += 1) {
+    const motion = await motionElement.evaluate(async (element, options) => {
+      const sample = () => {
+        const style = getComputedStyle(element);
+        const before = getComputedStyle(element, "::before");
+        return {
+          connected: element.isConnected,
+          animationName: style.animationName,
+          animationDuration: style.animationDuration,
+          opacity: style.opacity,
+          transform: style.transform,
+          beforeAnimationName: before.animationName,
+          beforeAnimationDuration: before.animationDuration,
+          beforeAnimationIterationCount: before.animationIterationCount,
+          beforeBackgroundPosition: before.backgroundPosition,
+          beforeOpacity: before.opacity,
+          beforeTransform: before.transform,
+        };
+      };
+      const frames = [];
+      for (let index = 0; index < options.sampleCount; index += 1) {
+        const frame = sample();
+        frames.push(frame);
+        if (!frame.connected || index === options.sampleCount - 1) break;
+        await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
+      }
+      return { ...frames.at(-1), frames };
+    }, {
+      intervalMs: motionFrameSampleIntervalMs,
+      sampleCount: motionFrameSampleCount,
+    });
+    const frameEvidence = classifyMotionFrameEvidence(motion.frames, kind);
+    if (frameEvidence.stableConnected) {
+      return { ...motion, captureAttempts: attempt };
+    }
+    await motionElement.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+  }
+  throw new Error(`Unable to sample a stable connected ${kind} motion element`);
 }
 
 function cssValueListMatches(value, expected) {

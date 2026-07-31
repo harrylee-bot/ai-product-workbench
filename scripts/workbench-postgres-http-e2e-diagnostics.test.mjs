@@ -3,12 +3,60 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  classifyMotionFrameEvidence,
   diagnosticErrorClass,
   diagnosticFakeRuntimeState,
   httpDiagnosticSuccessEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 
 const checksum = "a".repeat(64);
+
+test("motion evidence tolerates duplicate early samples but never a replaced element", () => {
+  const prdFrame = (position, connected = true) => ({
+    connected,
+    beforeBackgroundPosition: position,
+    beforeTransform: "none",
+  });
+  const prototypeFrame = (transform, connected = true) => ({
+    connected,
+    beforeBackgroundPosition: "0% 0px",
+    beforeTransform: transform,
+  });
+
+  assert.deepEqual(
+    classifyMotionFrameEvidence([
+      prdFrame("10% 0px"),
+      prdFrame("10% 0px"),
+      prdFrame("20% 0px"),
+    ], "prd"),
+    { advanced: true, stableConnected: true },
+  );
+  assert.deepEqual(
+    classifyMotionFrameEvidence([
+      prototypeFrame("matrix(1, 0, 0, 1, 0, 0)"),
+      prototypeFrame("matrix(1, 0, 0, 1, 8, 0)"),
+    ], "prototype"),
+    { advanced: true, stableConnected: true },
+  );
+  assert.deepEqual(
+    classifyMotionFrameEvidence([
+      prdFrame("10% 0px"),
+      prdFrame("10% 0px"),
+    ], "prd"),
+    { advanced: false, stableConnected: true },
+  );
+  assert.deepEqual(
+    classifyMotionFrameEvidence([
+      prdFrame("10% 0px"),
+      prdFrame("20% 0px", false),
+    ], "prd"),
+    { advanced: false, stableConnected: false },
+  );
+  assert.throws(
+    () => classifyMotionFrameEvidence([prdFrame("10% 0px"), prdFrame("20% 0px")], "unknown"),
+    /must be prd or prototype/u,
+  );
+});
 
 test("fake runtime diagnostics retain stable evidence without raw identities or payload context", () => {
   const secret = "customer-secret-identity-81726354";
@@ -323,6 +371,18 @@ test("the real-stack browser records bounded Playwright cleanup before writing e
     "bounded browser cleanup must complete and be recorded before the evidence manifest is finalized",
   );
   assert.doesNotMatch(source, /await context\?\.close\(\)|await browser\?\.close\(\)/u);
+});
+
+test("the real-stack visual sampler rejects detached nodes without weakening frame movement", async () => {
+  const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /const motionFrameSampleCount = 6;/u);
+  assert.match(source, /const maximumMotionCaptureAttempts = 3;/u);
+  assert.match(source, /connected: element\.isConnected/u);
+  assert.match(source, /classifyMotionFrameEvidence\(motion\.frames, kind\)/u);
+  assert.match(source, /frameEvidence\.stableConnected/u);
+  assert.match(source, /frameEvidence\.advanced/u);
+  assert.doesNotMatch(source, /setTimeout\(resolve, 180\)/u);
 });
 
 test("the real-stack visual lane proves early pending surfaces and responsive control separation", async () => {
