@@ -490,7 +490,7 @@ jobs:
     name: Real-stack browser / controlled-local-deerflow
     needs: [candidate-source-policy]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     services:
@@ -739,10 +739,22 @@ jobs:
             grep -Fq "$expected" "$probe_log"
           }
           start_probe_container() {
-            probe_container="$(docker run --rm --network none --detach "$@" "$tag")"
+            probe_container="$(docker run --network none --detach "$@" "$tag")"
+          }
+          probe_container_is_running() {
+            docker inspect --format '{{.State.Running}}' "$probe_container" 2>/dev/null \
+              | grep -Fx true >/dev/null
+          }
+          report_probe_diagnostics() {
+            echo "production startup probe exited before becoming ready" >&2
+            docker logs "$probe_container" >&2 || true
+            docker inspect \
+              --format 'probe_status={{.State.Status}} probe_exit_code={{.State.ExitCode}} probe_error={{json .State.Error}}' \
+              "$probe_container" >&2 || true
           }
           stop_probe_container() {
             docker stop --timeout 5 "$probe_container" >/dev/null
+            docker rm "$probe_container" >/dev/null
             probe_container=""
           }
 
@@ -768,9 +780,15 @@ jobs:
               docker image inspect "$tag" --format '{{json .Config.Cmd}}' \
                 | grep -Fx '["npx","next","start","--hostname","0.0.0.0","--port","3000"]'
               start_probe_container \
+                --env WORKBENCH_PREVIEW_ORIGIN=https://preview.workbench.example.test \
+                --env WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https://uploads.workbench.example.test/workbench \
                 --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp
               ready=0
               for _ in $(seq 1 30); do
+                if ! probe_container_is_running; then
+                  report_probe_diagnostics
+                  exit 1
+                fi
                 if docker exec "$probe_container" node -e \
                   "const net=require('node:net');const socket=net.connect(3000,'127.0.0.1');socket.once('connect',()=>socket.destroy());socket.once('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1000).unref()"; then
                   ready=1
@@ -778,7 +796,7 @@ jobs:
                 fi
                 sleep 1
               done
-              test "$ready" = 1 || { docker logs "$probe_container" >&2; exit 1; }
+              test "$ready" = 1 || { report_probe_diagnostics; exit 1; }
               stop_probe_container
               ;;
             nginx-startup)
@@ -797,13 +815,17 @@ jobs:
               start_probe_container "${quartz_runtime_args[@]}"
               ready=0
               for _ in $(seq 1 20); do
+                if ! probe_container_is_running; then
+                  report_probe_diagnostics
+                  exit 1
+                fi
                 if docker exec "$probe_container" wget -q -O /dev/null http://127.0.0.1:3000/__health; then
                   ready=1
                   break
                 fi
                 sleep 1
               done
-              test "$ready" = 1 || { docker logs "$probe_container" >&2; exit 1; }
+              test "$ready" = 1 || { report_probe_diagnostics; exit 1; }
               stop_probe_container
               ;;
             deerflow-runtime-syntax)

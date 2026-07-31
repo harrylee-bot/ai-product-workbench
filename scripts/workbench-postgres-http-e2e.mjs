@@ -33,6 +33,14 @@ import {
   httpDiagnosticSuccessEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
+import {
+  runBoundedCleanup,
+  stopProcessTree,
+} from "./e2e/workbench-process-lifecycle.mjs";
+import {
+  waitForWorkbenchWeb,
+  warmWorkbenchProtectedRoutes,
+} from "./e2e/workbench-web-startup.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -118,6 +126,7 @@ const generationVisualViewports = [
   { width: 1440, height: 900 },
 ];
 const pendingDocumentEvidenceLatencyMs = 10_000;
+const browserCleanupTimeoutMs = 5_000;
 
 const services = [];
 let fakeRuntime;
@@ -4750,6 +4759,8 @@ async function runRealStackBrowserScenario({
     terminalSseAborts: [],
     navigation: [],
     visualEvidence: [],
+    webStartup: null,
+    browserCleanup: [],
     checks: {},
     failure: null,
   };
@@ -4782,7 +4793,13 @@ async function runRealStackBrowserScenario({
     WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
     WORKBENCH_NEXT_TSCONFIG_PATH: path.basename(temporaryWebTsconfigPath),
   });
-  await waitForHttp(`${webOrigin}/login`, web, scenarioTimeoutMs);
+  await waitForWorkbenchWeb(webOrigin, web.exited);
+  const warmedPaths = await warmWorkbenchProtectedRoutes(webOrigin, web.exited);
+  evidenceManifest.webStartup = {
+    mode: "development-prewarmed",
+    warmedPathClasses: warmedPaths.map((warmupPath) => browserPathClass(warmupPath)),
+  };
+  console.log(`[e2e] Workbench Web protected routes ready: ${warmedPaths.join(", ")}`);
 
   const oidcApi = spawnService("workbench-api-real-stack", process.execPath, ["apps/workbench-api/dist/main.js"], {
     ...commonEnvironment,
@@ -5591,8 +5608,20 @@ async function runRealStackBrowserScenario({
     };
     throw error;
   } finally {
-    await context?.close();
-    await browser?.close();
+    if (context) {
+      evidenceManifest.browserCleanup.push(await runBoundedCleanup(
+        "browser-context",
+        () => context.close(),
+        browserCleanupTimeoutMs,
+      ));
+    }
+    if (browser) {
+      evidenceManifest.browserCleanup.push(await runBoundedCleanup(
+        "browser",
+        () => browser.close(),
+        browserCleanupTimeoutMs,
+      ));
+    }
     if (web) await stopService(web);
     await rm(temporaryWebTsconfigPath, { force: true });
     await writeFile(nextEnvPath, originalNextEnv);
@@ -5642,6 +5671,7 @@ function spawnService(name, command, args, environment) {
   const log = new LogBuffer(name);
   const child = spawn(command, args, {
     cwd: root,
+    detached: process.platform !== "win32",
     env: environment,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -6596,16 +6626,7 @@ async function cleanup() {
 
 async function stopService(service) {
   if (service.spawnError || !service.child.pid) return;
-  if (service.child.exitCode !== null || service.child.signalCode !== null) return;
-  service.child.kill("SIGTERM");
-  const result = await Promise.race([
-    service.exited,
-    delay(10_000).then(() => null),
-  ]);
-  if (result === null && service.child.exitCode === null) {
-    service.child.kill("SIGKILL");
-    await Promise.race([service.exited, delay(2_000)]);
-  }
+  await stopProcessTree(service.child, service.exited);
 }
 
 function dumpLogs() {

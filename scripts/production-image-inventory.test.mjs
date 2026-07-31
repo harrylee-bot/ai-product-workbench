@@ -411,6 +411,16 @@ test("builds the computed image matrix with unprivileged image-specific runtime 
   assert.match(build.run, /org\.opencontainers\.image\.revision=\$\{WORKBENCH_CANDIDATE_SHA\}/u);
   assert.doesNotMatch(build.run, /org\.opencontainers\.image\.revision=\$\{GITHUB_SHA\}/u);
   assert.match(build.run, /docker run --rm --network none/u);
+  assert.match(build.run, /probe_container="\$\(docker run --network none --detach/u);
+  assert.doesNotMatch(build.run, /probe_container="\$\(docker run --rm --network none --detach/u);
+  assert.match(build.run, /probe_container_is_running[\s\S]*docker inspect --format '\{\{\.State\.Running\}\}'/u);
+  assert.match(build.run, /report_probe_diagnostics[\s\S]*docker logs "\$probe_container"/u);
+  assert.match(build.run, /probe_status=\{\{\.State\.Status\}\} probe_exit_code=\{\{\.State\.ExitCode\}\}/u);
+  assert.match(build.run, /docker rm "\$probe_container"/u);
+  assert.match(
+    build.run,
+    /next-startup[\s\S]*--env WORKBENCH_PREVIEW_ORIGIN=https:\/\/preview\.workbench\.example\.test[\s\S]*--env WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https:\/\/uploads\.workbench\.example\.test\/workbench/u,
+  );
   assert.match(build.run, /--read-only[\s\S]*--cap-drop ALL[\s\S]*--security-opt no-new-privileges:true/u);
   assert.match(build.run, /node-config-fail-fast[\s\S]*--entrypoint node[\s\S]*--check/u);
   assert.match(build.run, /migrator-config-fail-fast[\s\S]*Config\.Entrypoint/u);

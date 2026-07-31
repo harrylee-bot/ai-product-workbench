@@ -14,7 +14,7 @@
     "dev:workbench-import-worker": "npm run workbench:prepare && npm --workspace @workbench/workbench-import-worker run dev",
     "dev:workbench-export-worker": "npm run workbench:prepare && npm --workspace @workbench/workbench-export-worker run dev",
     "dev:workbench-preview": "npm run workbench:prepare && npm --workspace @workbench/workbench-preview run dev",
-    "dev:workbench:test": "node --test scripts/workbench-dev.test.mjs scripts/workbench-api-dev.test.mjs scripts/workbench-migration-contract.test.mjs scripts/workbench-typecheck-ci.test.mjs scripts/workbench-browser-network-evidence.test.mjs scripts/e2e/workbench-web-startup.test.mjs",
+    "dev:workbench:test": "node --test scripts/workbench-dev.test.mjs scripts/workbench-api-dev.test.mjs scripts/workbench-migration-contract.test.mjs scripts/workbench-typecheck-ci.test.mjs scripts/workbench-browser-network-evidence.test.mjs scripts/e2e/workbench-process-lifecycle.test.mjs scripts/e2e/workbench-web-startup.test.mjs",
     "dev:web": "npm --workspace @workbench/web run dev",
     "build": "npm run workbench:prepare && npm --workspace @workbench/workbench-api run build && npm --workspace @workbench/workbench-worker run build && npm --workspace @workbench/workbench-file-worker run build && npm --workspace @workbench/workbench-import-worker run build && npm --workspace @workbench/workbench-export-worker run build && npm --workspace @workbench/workbench-preview run build && npm --workspace @workbench/web run build && npm --workspace @workbench/figma-importer run package",
     "typecheck": "node scripts/workbench-typecheck-ci.mjs --passes=1",

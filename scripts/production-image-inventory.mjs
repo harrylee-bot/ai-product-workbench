@@ -782,6 +782,25 @@ function assertPullRequestProductionImageMatrix({ ci, inventory, ids }) {
       && !buildSource.includes("org.opencontainers.image.revision=${GITHUB_SHA}"),
     "PR production images must bind checkout, tag, label, and inspection to the exact candidate SHA",
   );
+  assert(
+    buildSource.includes('probe_container="$(docker run --network none --detach')
+      && !buildSource.includes('probe_container="$(docker run --rm --network none --detach'),
+    "detached startup probes must retain exited containers until diagnostics and cleanup complete",
+  );
+  assert(
+    buildSource.includes("probe_container_is_running")
+      && buildSource.includes("report_probe_diagnostics")
+      && buildSource.includes("docker logs \"$probe_container\"")
+      && buildSource.includes("probe_status={{.State.Status}}")
+      && buildSource.includes("probe_exit_code={{.State.ExitCode}}")
+      && buildSource.includes('docker rm "$probe_container"'),
+    "startup probes must fail immediately with bounded container-state diagnostics and explicit cleanup",
+  );
+  assert(
+    buildSource.includes("--env WORKBENCH_PREVIEW_ORIGIN=https://preview.workbench.example.test")
+      && buildSource.includes("--env WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https://uploads.workbench.example.test/workbench"),
+    "the Web startup probe must provide its required synthetic production runtime configuration",
+  );
   for (const marker of [
     "docker buildx build",
     "--load",

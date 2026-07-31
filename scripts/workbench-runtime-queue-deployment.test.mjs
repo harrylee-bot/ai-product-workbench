@@ -82,6 +82,11 @@ test("the migrator reconciles Runtime queues before services start", async () =>
   );
   const realStackBrowser = workflow.jobs?.["real-stack-browser"];
   assert(realStackBrowser, "CI must include an isolated real-stack browser lane");
+  assert.equal(
+    realStackBrowser["timeout-minutes"],
+    30,
+    "real-stack browser must include the bounded cold-route and recovery budgets",
+  );
   assert.deepEqual(
     realStackBrowser.needs,
     ["candidate-source-policy"],

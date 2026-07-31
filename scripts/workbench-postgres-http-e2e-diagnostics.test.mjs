@@ -292,6 +292,39 @@ test("the real-stack harness prepares every shared package before application bu
   assert.doesNotMatch(source, /runCommand\("canvas-tools:build"/u);
 });
 
+test("the real-stack browser prewarms protected routes and tears down complete process trees", async () => {
+  const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
+
+  assert.match(source, /from "\.\/e2e\/workbench-web-startup\.mjs";/u);
+  const webSpawn = source.indexOf('spawnService("workbench-web-real-stack"');
+  const waitForWeb = source.indexOf("await waitForWorkbenchWeb(webOrigin, web.exited);", webSpawn);
+  const warmRoutes = source.indexOf("await warmWorkbenchProtectedRoutes(webOrigin, web.exited);", waitForWeb);
+  const browserLaunch = source.indexOf("browser = await chromium.launch", warmRoutes);
+  assert.ok(
+    webSpawn >= 0 && webSpawn < waitForWeb && waitForWeb < warmRoutes && warmRoutes < browserLaunch,
+    "the browser must start only after the managed Web process and both protected routes are ready",
+  );
+  assert.match(source, /detached: process\.platform !== "win32"/u);
+  assert.match(source, /await stopProcessTree\(service\.child, service\.exited\);/u);
+  assert.doesNotMatch(source, /service\.child\.kill\("SIGTERM"\)/u);
+});
+
+test("the real-stack browser records bounded Playwright cleanup before writing evidence", async () => {
+  const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
+
+  const contextCleanup = source.indexOf('"browser-context",\n        () => context.close()');
+  const browserCleanup = source.indexOf('"browser",\n        () => browser.close()', contextCleanup);
+  const manifestWrite = source.indexOf(
+    "const manifestSha256 = await writeEvidenceManifest(evidenceManifestPath, evidenceManifest);",
+    browserCleanup,
+  );
+  assert.ok(
+    contextCleanup >= 0 && contextCleanup < browserCleanup && browserCleanup < manifestWrite,
+    "bounded browser cleanup must complete and be recorded before the evidence manifest is finalized",
+  );
+  assert.doesNotMatch(source, /await context\?\.close\(\)|await browser\?\.close\(\)/u);
+});
+
 test("the real-stack visual lane proves early pending surfaces and responsive control separation", async () => {
   const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
 
