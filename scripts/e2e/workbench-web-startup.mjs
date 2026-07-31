@@ -9,10 +9,16 @@ export function managedWorkbenchWebDistDir(processId, port) {
   }
   return `.next-fixture/e2e-${processId}-${port}`;
 }
+export const WORKBENCH_LOGIN_WARMUP_PATH = "/login";
+export const WORKBENCH_REGISTER_WARMUP_PATH = "/register";
 export const WORKBENCH_PROJECT_WARMUP_PATH = "/projects/project-run-preview";
 export const WORKBENCH_HOME_WARMUP_PATH = "/";
 export const WORKBENCH_PROJECT_WARMUP_COOKIE =
   "workbench.session_token=workbench-project-route-warmup";
+export const WORKBENCH_AUTH_ROUTE_WARMUPS = Object.freeze([
+  Object.freeze({ path: WORKBENCH_LOGIN_WARMUP_PATH, phase: "login route warmup" }),
+  Object.freeze({ path: WORKBENCH_REGISTER_WARMUP_PATH, phase: "register route warmup" }),
+]);
 export const WORKBENCH_PROTECTED_ROUTE_WARMUPS = Object.freeze([
   Object.freeze({ path: WORKBENCH_PROJECT_WARMUP_PATH, phase: "project route warmup" }),
   Object.freeze({ path: WORKBENCH_HOME_WARMUP_PATH, phase: "home route warmup" }),
@@ -28,7 +34,7 @@ export async function waitForWorkbenchWeb(
   } = {},
 ) {
   const deadline = startupDeadline(timeoutMs);
-  const loginUrl = new URL("/login", baseUrl);
+  const loginUrl = new URL(WORKBENCH_LOGIN_WARMUP_PATH, baseUrl);
 
   while (Date.now() < deadline) {
     const state = await requestWithinStartupBudget({
@@ -50,6 +56,20 @@ export async function waitForWorkbenchWeb(
   throw new Error(`Timed out waiting for Workbench Web at ${baseUrl}`);
 }
 
+export async function warmWorkbenchAuthRoutes(
+  baseUrl,
+  exitPromise,
+  {
+    fetchImpl = globalThis.fetch,
+    timeoutMs = WORKBENCH_WEB_STARTUP_TIMEOUT_MS,
+  } = {},
+) {
+  return warmWorkbenchRoutes(baseUrl, exitPromise, WORKBENCH_AUTH_ROUTE_WARMUPS, {
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
 export async function warmWorkbenchProtectedRoutes(
   baseUrl,
   exitPromise,
@@ -58,10 +78,24 @@ export async function warmWorkbenchProtectedRoutes(
     timeoutMs = WORKBENCH_WEB_STARTUP_TIMEOUT_MS,
   } = {},
 ) {
+  return warmWorkbenchRoutes(baseUrl, exitPromise, WORKBENCH_PROTECTED_ROUTE_WARMUPS, {
+    fetchImpl,
+    headers: { Cookie: WORKBENCH_PROJECT_WARMUP_COOKIE },
+    timeoutMs,
+  });
+}
+
+async function warmWorkbenchRoutes(
+  baseUrl,
+  exitPromise,
+  warmups,
+  { fetchImpl, headers, timeoutMs },
+) {
   const warmedPaths = [];
-  for (const warmup of WORKBENCH_PROTECTED_ROUTE_WARMUPS) {
-    await warmWorkbenchProtectedRoute(baseUrl, exitPromise, warmup, {
+  for (const warmup of warmups) {
+    await warmWorkbenchRoute(baseUrl, exitPromise, warmup, {
       fetchImpl,
+      headers,
       timeoutMs,
     });
     warmedPaths.push(warmup.path);
@@ -69,18 +103,18 @@ export async function warmWorkbenchProtectedRoutes(
   return warmedPaths;
 }
 
-async function warmWorkbenchProtectedRoute(
+async function warmWorkbenchRoute(
   baseUrl,
   exitPromise,
   warmup,
-  { fetchImpl, timeoutMs },
+  { fetchImpl, headers, timeoutMs },
 ) {
   const warmupUrl = new URL(warmup.path, baseUrl);
   const state = await requestWithinStartupBudget({
     url: warmupUrl,
     init: {
       redirect: "manual",
-      headers: { Cookie: WORKBENCH_PROJECT_WARMUP_COOKIE },
+      ...(headers ? { headers } : {}),
     },
     exitPromise,
     fetchImpl,

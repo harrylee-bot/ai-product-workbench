@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   managedWorkbenchWebDistDir,
   waitForWorkbenchWeb,
+  warmWorkbenchAuthRoutes,
   warmWorkbenchProtectedRoutes,
 } from "./workbench-web-startup.mjs";
 
@@ -122,8 +123,9 @@ process.once("SIGTERM", handleSignal);
 try {
   await waitForWorkbenchWeb(origin, serverExit);
   if (serverExit) {
-    const warmedPaths = await warmWorkbenchProtectedRoutes(origin, serverExit);
-    console.log(`Workbench Web E2E protected routes ready: ${warmedPaths.join(", ")}`);
+    const authPaths = await warmWorkbenchAuthRoutes(origin, serverExit);
+    const protectedPaths = await warmWorkbenchProtectedRoutes(origin, serverExit);
+    console.log(`Workbench Web E2E routes ready: ${[...authPaths, ...protectedPaths].join(", ")}`);
   }
   await run("node", ["scripts/e2e/workbench-run-preview-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-approval-preferences-smoke.mjs"]);

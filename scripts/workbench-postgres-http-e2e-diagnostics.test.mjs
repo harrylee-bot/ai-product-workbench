@@ -428,18 +428,24 @@ test("the real-stack harness prepares every shared package before application bu
   assert.doesNotMatch(source, /runCommand\("canvas-tools:build"/u);
 });
 
-test("the real-stack browser prewarms protected routes and tears down complete process trees", async () => {
+test("the real-stack browser prewarms auth and protected routes before launch", async () => {
   const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
 
   assert.match(source, /from "\.\/e2e\/workbench-web-startup\.mjs";/u);
   const webSpawn = source.indexOf('spawnService("workbench-web-real-stack"');
   const waitForWeb = source.indexOf("await waitForWorkbenchWeb(webOrigin, web.exited);", webSpawn);
-  const warmRoutes = source.indexOf("await warmWorkbenchProtectedRoutes(webOrigin, web.exited);", waitForWeb);
-  const browserLaunch = source.indexOf("browser = await chromium.launch", warmRoutes);
+  const warmAuthRoutes = source.indexOf("await warmWorkbenchAuthRoutes(webOrigin, web.exited);", waitForWeb);
+  const warmProtectedRoutes = source.indexOf("await warmWorkbenchProtectedRoutes(webOrigin, web.exited);", warmAuthRoutes);
+  const browserLaunch = source.indexOf("browser = await chromium.launch", warmProtectedRoutes);
   assert.ok(
-    webSpawn >= 0 && webSpawn < waitForWeb && waitForWeb < warmRoutes && warmRoutes < browserLaunch,
-    "the browser must start only after the managed Web process and both protected routes are ready",
+    webSpawn >= 0
+      && webSpawn < waitForWeb
+      && waitForWeb < warmAuthRoutes
+      && warmAuthRoutes < warmProtectedRoutes
+      && warmProtectedRoutes < browserLaunch,
+    "the browser must start only after every auth and protected entry route is ready",
   );
+  assert.match(source, /const warmedPaths = \[\.\.\.authPaths, \.\.\.protectedPaths\];/u);
   assert.match(source, /detached: process\.platform !== "win32"/u);
   assert.match(source, /await stopProcessTree\(service\.child, service\.exited\);/u);
   assert.doesNotMatch(source, /service\.child\.kill\("SIGTERM"\)/u);

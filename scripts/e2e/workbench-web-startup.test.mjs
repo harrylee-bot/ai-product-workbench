@@ -4,10 +4,13 @@ import test from "node:test";
 import {
   managedWorkbenchWebDistDir,
   waitForWorkbenchWeb,
+  warmWorkbenchAuthRoutes,
   warmWorkbenchProtectedRoutes,
   WORKBENCH_HOME_WARMUP_PATH,
+  WORKBENCH_LOGIN_WARMUP_PATH,
   WORKBENCH_PROJECT_WARMUP_COOKIE,
   WORKBENCH_PROJECT_WARMUP_PATH,
+  WORKBENCH_REGISTER_WARMUP_PATH,
   WORKBENCH_WEB_STARTUP_TIMEOUT_MS,
 } from "./workbench-web-startup.mjs";
 
@@ -19,7 +22,7 @@ test("keeps managed fixture output outside the default Next typegen directory", 
   assert.throws(() => managedWorkbenchWebDistDir(123, 65_536), /port is invalid/u);
 });
 
-test("allows each protected route three minutes for shared-runner cold compilation", () => {
+test("allows each browser entry route three minutes for shared-runner cold compilation", () => {
   assert.equal(WORKBENCH_WEB_STARTUP_TIMEOUT_MS, 180_000);
 });
 
@@ -38,8 +41,61 @@ test("waits for the managed Web login route to become ready", async () => {
   });
 
   assert.equal(requests.length, 2);
-  assert.equal(requests[1].url, "http://127.0.0.1:3000/login");
+  assert.equal(requests[1].url, `http://127.0.0.1:3000${WORKBENCH_LOGIN_WARMUP_PATH}`);
   assert.equal(requests[1].init.redirect, "manual");
+});
+
+test("warms login and registration through complete unauthenticated responses", async () => {
+  let completedBodies = 0;
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return new Response(new ReadableStream({
+      start(controller) {
+        setTimeout(() => {
+          completedBodies += 1;
+          controller.enqueue(new TextEncoder().encode("auth route ready"));
+          controller.close();
+        }, 10);
+      },
+    }), { status: 200 });
+  };
+
+  const warmedPaths = await warmWorkbenchAuthRoutes("http://127.0.0.1:3000", null, {
+    fetchImpl,
+    timeoutMs: 500,
+  });
+
+  assert.deepEqual(
+    requests.map(({ url }) => url),
+    [
+      `http://127.0.0.1:3000${WORKBENCH_LOGIN_WARMUP_PATH}`,
+      `http://127.0.0.1:3000${WORKBENCH_REGISTER_WARMUP_PATH}`,
+    ],
+  );
+  assert.deepEqual(warmedPaths, [WORKBENCH_LOGIN_WARMUP_PATH, WORKBENCH_REGISTER_WARMUP_PATH]);
+  for (const request of requests) {
+    assert.equal(request.init.redirect, "manual");
+    assert.equal(request.init.headers, undefined);
+  }
+  assert.equal(completedBodies, 2);
+});
+
+test("fails closed when registration warmup redirects", async () => {
+  let requestCount = 0;
+  await assert.rejects(
+    warmWorkbenchAuthRoutes("http://127.0.0.1:3000", null, {
+      fetchImpl: async () => {
+        requestCount += 1;
+        return requestCount === 1
+          ? new Response(null, { status: 200 })
+          : new Response(null, { status: 307, headers: { Location: "/login" } });
+      },
+      timeoutMs: 500,
+    }),
+    /register route warmup returned HTTP 307/u,
+  );
+  assert.equal(requestCount, 2);
 });
 
 test("warms every authenticated app entrypoint through the complete response", async () => {

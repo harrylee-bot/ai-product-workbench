@@ -41,6 +41,7 @@ import {
 } from "./e2e/workbench-process-lifecycle.mjs";
 import {
   waitForWorkbenchWeb,
+  warmWorkbenchAuthRoutes,
   warmWorkbenchProtectedRoutes,
 } from "./e2e/workbench-web-startup.mjs";
 
@@ -4800,12 +4801,14 @@ async function runRealStackBrowserScenario({
     WORKBENCH_NEXT_TSCONFIG_PATH: path.basename(temporaryWebTsconfigPath),
   });
   await waitForWorkbenchWeb(webOrigin, web.exited);
-  const warmedPaths = await warmWorkbenchProtectedRoutes(webOrigin, web.exited);
+  const authPaths = await warmWorkbenchAuthRoutes(webOrigin, web.exited);
+  const protectedPaths = await warmWorkbenchProtectedRoutes(webOrigin, web.exited);
+  const warmedPaths = [...authPaths, ...protectedPaths];
   evidenceManifest.webStartup = {
     mode: "development-prewarmed",
     warmedPathClasses: warmedPaths.map((warmupPath) => browserPathClass(warmupPath)),
   };
-  console.log(`[e2e] Workbench Web protected routes ready: ${warmedPaths.join(", ")}`);
+  console.log(`[e2e] Workbench Web routes ready: ${warmedPaths.join(", ")}`);
 
   const oidcApi = spawnService("workbench-api-real-stack", process.execPath, ["apps/workbench-api/dist/main.js"], {
     ...commonEnvironment,
