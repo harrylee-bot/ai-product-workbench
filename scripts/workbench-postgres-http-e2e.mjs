@@ -3221,6 +3221,7 @@ function eventIdentity(event) {
 
 async function startFakeDeerFlow(expectedToken) {
   const storageObjects = new Map();
+  const browserPrdDraftGate = controlledGate();
   const browserPrdFinalizationGate = controlledGate();
   const state = {
     threadCreates: 0,
@@ -3262,6 +3263,7 @@ async function startFakeDeerFlow(expectedToken) {
       expectedToken,
       state,
       storageObjects,
+      browserPrdDraftGate,
       browserPrdFinalizationGate,
     ).catch((error) => {
       state.requests.push({ errorClass: diagnosticErrorClass(error) });
@@ -3290,10 +3292,14 @@ async function startFakeDeerFlow(expectedToken) {
       assert.ok(!storageObjects.has(storageKey), `duplicate fake S3 object key: ${storageKey}`);
       storageObjects.set(storageKey, { bytes: Buffer.from(bytes), mediaType });
     },
+    releaseBrowserPrdDraft() {
+      browserPrdDraftGate.release();
+    },
     releaseBrowserPrdFinalization() {
       browserPrdFinalizationGate.release();
     },
     async close() {
+      browserPrdDraftGate.release();
       browserPrdFinalizationGate.release();
       for (const socket of sockets) socket.destroy();
       server.closeAllConnections?.();
@@ -3308,6 +3314,7 @@ async function handleFakeDeerFlow(
   expectedToken,
   state,
   storageObjects,
+  browserPrdDraftGate,
   browserPrdFinalizationGate,
 ) {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -3699,6 +3706,7 @@ async function handleFakeDeerFlow(
     } else {
       state.successRuns += 1;
       await writeSuccessfulRuntimeStream(response, body, {
+        draftGate: browserVisualPrd ? browserPrdDraftGate : null,
         finalizationGate: browserVisualPrd ? browserPrdFinalizationGate : null,
         streamStages: browserVisualPrd,
       });
@@ -3768,7 +3776,7 @@ async function writeApprovalRuntimeStream(response) {
 async function writeSuccessfulRuntimeStream(
   response,
   requestBody,
-  { finalizationGate = null, streamStages = false } = {},
+  { draftGate = null, finalizationGate = null, streamStages = false } = {},
 ) {
   const scope = runtimeScopeFromRequest(requestBody);
   const draft = {
@@ -3848,6 +3856,7 @@ async function writeSuccessfulRuntimeStream(
       }, String(index + 3));
       await delay(controlledProviderDelayMs);
     }
+    if (draftGate) await draftGate.wait();
     sendSse(response, "values", {
       node: "generate_prd",
       values: { messages: draftSnapshot },
@@ -5090,6 +5099,7 @@ async function runRealStackBrowserScenario({
         downloadThroughput: 5 * 1024 * 1024,
         uploadThroughput: 5 * 1024 * 1024,
       });
+      fakeRuntime.releaseBrowserPrdDraft();
       await pendingDocument.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
       pendingDocumentEvidence = await capturePendingDocumentVisualEvidence({
         outputDir,
@@ -5099,6 +5109,7 @@ async function runRealStackBrowserScenario({
       evidenceManifest.pendingDocumentEvidence = pendingDocumentEvidence;
       assertPendingDocumentVisualEvidence(pendingDocumentEvidence);
     } finally {
+      fakeRuntime.releaseBrowserPrdDraft();
       fakeRuntime.releaseBrowserPrdFinalization();
       await cdpSession.send("Network.emulateNetworkConditions", {
         offline: false,
@@ -5843,7 +5854,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
       const motionElement = page.locator(selector);
       await motionElement.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
       const motion = await captureStableMotionFrames(motionElement, kind);
-      const layout = await page.evaluate((expectedKind) => {
+      const layout = await page.evaluate(() => {
         const metric = (selector) => {
           const element = document.querySelector(selector);
           if (!(element instanceof HTMLElement)) return { visible: false, rect: null };
@@ -5861,31 +5872,17 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
               : null,
           };
         };
-        const pendingArtifact = document.querySelector(
-          `[data-workbench-transient-artifact="${expectedKind}"] [data-workbench-artifact-state="pending"]`,
-        );
         return {
           agentCard: metric('[data-panel-motion="agent-card"]'),
           taskStack: metric("[data-left-task-stack]"),
           mobileRunStatus: metric("[data-mobile-run-status]"),
           composer: metric("[data-project-composer]"),
-          pendingArtifact: metric(
-            `[data-workbench-transient-artifact="${expectedKind}"] .workbench-transient-artifact-surface`,
-          ),
-          pendingArtifactState: pendingArtifact instanceof HTMLElement
-            ? {
-                ariaLive: pendingArtifact.getAttribute("aria-live"),
-                hasSkeleton: pendingArtifact.querySelector("[data-workbench-artifact-skeleton]") !== null,
-                hasSpinner: pendingArtifact.querySelector(".workbench-artifact-spinner") !== null,
-                variant: pendingArtifact.getAttribute("data-workbench-artifact-variant"),
-              }
-            : null,
           rightToolRail: metric("[data-right-tool-rail]"),
           selectedAction: metric("[data-selected-action]"),
           suggestions: metric("[data-project-suggestions]"),
           utilityPill: metric("[data-utility-pill]"),
         };
-      }, kind);
+      });
       const runState = await page.locator('[data-panel-motion="agent-card"]').evaluate((element) => ({
         phase: element.getAttribute("data-phase"),
         stage: element.getAttribute("data-generation-stage"),
@@ -5965,23 +5962,11 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
     assert.equal(item.layout.agentCard.visible, width >= 768, `Agent card breakpoint was incorrect at ${kind} ${item.viewport}`);
     assert.equal(item.layout.taskStack.visible, width >= 1280, `task stack breakpoint was incorrect at ${kind} ${item.viewport}`);
     assert.equal(item.layout.mobileRunStatus.visible, width < 768, `mobile Run status breakpoint was incorrect at ${kind} ${item.viewport}`);
-    assert.equal(item.layout.pendingArtifact.visible, true, `early ${kind} pending surface was not visible at ${item.viewport}`);
     assert.equal(item.layout.rightToolRail.visible, true, `right tool rail was not visible at ${kind} ${item.viewport}`);
     assert.equal(item.layout.suggestions.visible, true, `suggestions were not visible at ${kind} ${item.viewport}`);
     assert.equal(item.layout.utilityPill.visible, true, `Utility Pill was not visible at ${kind} ${item.viewport}`);
     assert.equal(item.layout.selectedAction.visible, false, `selected action remained visible during ${kind} Run at ${item.viewport}`);
-    assert.deepEqual(
-      item.layout.pendingArtifactState,
-      {
-        ariaLive: "polite",
-        hasSkeleton: true,
-        hasSpinner: true,
-        variant: kind === "prd" ? "document" : "prototype",
-      },
-      `early ${kind} pending surface lost truthful loading semantics at ${item.viewport}`,
-    );
     for (const [name, region] of Object.entries(item.layout)) {
-      if (name === "pendingArtifactState") continue;
       if (!region.visible || !region.rect) continue;
       assert.ok(region.rect.left >= 0 && region.rect.top >= 0, `${name} escaped the top/left viewport at ${kind} ${item.viewport}`);
       assert.ok(region.rect.right <= width && region.rect.bottom <= height, `${name} escaped the bottom/right viewport at ${kind} ${item.viewport}`);
@@ -5996,13 +5981,6 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
       ["utilityPill", "composer"],
       ["suggestions", "composer"],
       ["utilityPill", "suggestions"],
-      ["pendingArtifact", "agentCard"],
-      ["pendingArtifact", "taskStack"],
-      ["pendingArtifact", "mobileRunStatus"],
-      ["pendingArtifact", "composer"],
-      ["pendingArtifact", "rightToolRail"],
-      ["pendingArtifact", "suggestions"],
-      ["pendingArtifact", "utilityPill"],
     ]) {
       assert.ok(
         !rectanglesOverlap(item.layout[left].rect, item.layout[right].rect),

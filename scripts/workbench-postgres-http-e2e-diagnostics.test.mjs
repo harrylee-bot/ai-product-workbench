@@ -482,15 +482,102 @@ test("the real-stack visual sampler rejects detached nodes without weakening fra
   assert.doesNotMatch(source, /setTimeout\(resolve, 180\)/u);
 });
 
-test("the real-stack visual lane proves early pending surfaces and responsive control separation", async () => {
+test("the real-stack PRD draft gate preserves pending evidence and always releases both gates", async () => {
   const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
 
-  assert.match(source, /data-workbench-transient-artifact/u);
-  assert.match(source, /pendingArtifactState/u);
+  const fakeRuntimeStart = source.indexOf("async function startFakeDeerFlow");
+  const fakeRuntimeEnd = source.indexOf("async function handleFakeDeerFlow", fakeRuntimeStart);
+  const fakeRuntime = source.slice(fakeRuntimeStart, fakeRuntimeEnd);
+  const cleanupStart = fakeRuntime.indexOf("async close() {");
+  const cleanupEnd = fakeRuntime.indexOf("for (const socket of sockets)", cleanupStart);
+  const cleanup = fakeRuntime.slice(cleanupStart, cleanupEnd);
+  assert.match(fakeRuntime, /const browserPrdDraftGate = controlledGate\(\);/u);
+  assert.match(fakeRuntime, /releaseBrowserPrdDraft\(\) \{\s+browserPrdDraftGate\.release\(\);/u);
+  assert.match(fakeRuntime, /releaseBrowserPrdFinalization\(\) \{\s+browserPrdFinalizationGate\.release\(\);/u);
+  assert.match(cleanup, /browserPrdDraftGate\.release\(\);/u);
+  assert.match(cleanup, /browserPrdFinalizationGate\.release\(\);/u);
+
+  assert.match(source, /draftGate: browserVisualPrd \? browserPrdDraftGate : null,/u);
+  const streamStart = source.indexOf("async function writeSuccessfulRuntimeStream");
+  const streamEnd = source.indexOf("async function writePrototypePatchRuntimeStream", streamStart);
+  const stream = source.slice(streamStart, streamEnd);
+  const draftGateWait = stream.indexOf("if (draftGate) await draftGate.wait();");
+  const draftSnapshotEmission = stream.indexOf("values: { messages: draftSnapshot }");
+  assert.ok(draftGateWait >= 0, "the browser PRD stream must wait for draft evidence capture");
+  assert.ok(
+    draftSnapshotEmission >= 0 && draftGateWait < draftSnapshotEmission,
+    "the browser PRD draft gate must be awaited before the draft snapshot is emitted",
+  );
+
+  const browserStart = source.indexOf("async function runRealStackBrowserScenario");
+  const browserEnd = source.indexOf("async function captureActiveGenerationVisualEvidence", browserStart);
+  const browserScenario = source.slice(browserStart, browserEnd);
+  const pendingEvidenceDeclaration = browserScenario.indexOf("let pendingDocumentEvidence = [];");
+  const networkEmulation = browserScenario.indexOf(
+    'await cdpSession.send("Network.emulateNetworkConditions", {',
+    pendingEvidenceDeclaration,
+  );
+  const draftRelease = browserScenario.indexOf(
+    "fakeRuntime.releaseBrowserPrdDraft();",
+    pendingEvidenceDeclaration,
+  );
+  const pendingCapture = browserScenario.indexOf(
+    "pendingDocumentEvidence = await capturePendingDocumentVisualEvidence",
+    pendingEvidenceDeclaration,
+  );
+  const pendingFinally = browserScenario.indexOf("} finally {", pendingCapture);
+  const finalizationRelease = browserScenario.indexOf(
+    "fakeRuntime.releaseBrowserPrdFinalization();",
+    pendingFinally,
+  );
+  const cdpDetach = browserScenario.indexOf("await cdpSession.detach();", pendingFinally);
+  assert.ok(
+    pendingEvidenceDeclaration >= 0
+      && networkEmulation >= 0
+      && draftRelease >= 0
+      && pendingCapture >= 0
+      && networkEmulation < draftRelease
+      && draftRelease < pendingCapture,
+    "the browser must enable network emulation before releasing the PRD draft gate and capturing evidence",
+  );
+  assert.ok(
+    pendingFinally >= 0 && pendingFinally < finalizationRelease && finalizationRelease < cdpDetach,
+    "the pending-evidence finally block must release the finalization gate",
+  );
+});
+
+test("the real-stack visual lane separates active motion from pending document assertions", async () => {
+  const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
+
+  const activeStart = source.indexOf("function assertActiveGenerationVisualEvidence");
+  const activeEnd = source.indexOf("async function captureStableMotionFrames", activeStart);
+  const pendingStart = source.indexOf("function assertPendingDocumentVisualEvidence", activeStart);
+  const pendingEnd = source.indexOf("function browserUrlClass", pendingStart);
+  assert.ok(
+    activeStart >= 0
+      && activeEnd > activeStart
+      && pendingStart > activeEnd
+      && pendingEnd > pendingStart,
+  );
+  const activeAssertions = source.slice(activeStart, activeEnd);
+  const pendingAssertions = source.slice(pendingStart, pendingEnd);
+  const pendingSemanticAssertions = [
+    ...source.matchAll(/assert\.(?:equal|ok|deepEqual)\(\s*item\.(?:ariaLive|hasSkeleton|hasSpinner)\b/gu),
+  ];
+
+  assert.doesNotMatch(activeAssertions, /pendingArtifact|hasSkeleton|hasSpinner|ariaLive|pending surface/u);
+  assert.equal(pendingSemanticAssertions.length, 3);
+  assert.ok(
+    pendingSemanticAssertions.every(({ index }) => index >= pendingStart && index < pendingEnd),
+    "pending document semantic assertions must remain in their dedicated assertion function",
+  );
+  assert.match(pendingAssertions, /item\.ariaLive/u);
+  assert.match(pendingAssertions, /item\.hasSkeleton/u);
+  assert.match(pendingAssertions, /item\.hasSpinner/u);
+  assert.match(pendingAssertions, /pending PRD document escaped the viewport/u);
+  assert.match(pendingAssertions, /pending PRD document was obscured by/u);
   assert.match(source, /selected action remained visible during/u);
   assert.match(source, /\["utilityPill", "composer"\]/u);
   assert.match(source, /\["suggestions", "composer"\]/u);
-  assert.match(source, /\["pendingArtifact", "mobileRunStatus"\]/u);
-  assert.match(source, /\["pendingArtifact", "rightToolRail"\]/u);
-  assert.match(source, /early \$\{kind\} pending surface was not visible/u);
+  assert.match(source, /capturePendingDocumentVisualEvidence\(\{/u);
 });
