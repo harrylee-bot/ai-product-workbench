@@ -12,6 +12,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import canonicalize from "canonicalize";
 import pg from "pg";
+import { PgBoss } from "pg-boss";
 import { chromium } from "playwright";
 import {
   assertRealStackBrowserMode,
@@ -110,7 +111,13 @@ const prdReferenceFixtures = [
 const verbose = process.env.WORKBENCH_E2E_VERBOSE === "1";
 const runRealStackBrowser = process.env.WORKBENCH_E2E_REAL_STACK_BROWSER === "1";
 const realStackBrowserOnly = process.env.WORKBENCH_E2E_REAL_STACK_BROWSER_ONLY === "1";
+const runRuntimeProcessConvergence = process.env.WORKBENCH_E2E_RUNTIME_PROCESS_CONVERGENCE === "1";
 assertRealStackBrowserMode({ browserOnly: realStackBrowserOnly, enabled: runRealStackBrowser });
+assert.equal(
+  runRuntimeProcessConvergence && runRealStackBrowser,
+  false,
+  "runtime process convergence and real-stack browser modes are mutually exclusive",
+);
 const controlledProvider = process.env.WORKBENCH_E2E_CONTROLLED_PROVIDER ?? "controlled-local-deerflow";
 assert.equal(controlledProvider, "controlled-local-deerflow", "real-stack browser must use the approved controlled provider marker");
 const candidateSourceCommit = resolveCandidateSourceCommit();
@@ -124,6 +131,13 @@ const recoveryScenarioTimeoutMs = positiveInteger(
 );
 const controlledProviderDelayMs = runRealStackBrowser ? 3_000 : 250;
 const controlledProviderHeartbeatMs = 2_000;
+const runtimeProcessConvergenceTimeoutMs = positiveInteger(
+  "WORKBENCH_E2E_RUNTIME_PROCESS_CONVERGENCE_TIMEOUT_MS",
+  120_000,
+);
+const runtimeExecuteQueueName = "runtime.execute";
+const runtimeCancelQueueName = "runtime.cancel";
+const runtimeTerminalJobStates = new Set(["cancelled", "completed", "failed"]);
 const generationVisualViewports = [
   { width: 375, height: 812 },
   { width: 768, height: 1024 },
@@ -227,9 +241,9 @@ try {
   });
   await waitForHttp(`${apiBaseUrl}/system/ready`, api, scenarioTimeoutMs);
 
-  const worker = spawnService("workbench-worker", process.execPath, ["apps/workbench-worker/dist/main.js"], {
+  const workerEnvironment = {
     ...commonEnvironment,
-    WORKBENCH_RUNTIME_CONCURRENCY: "2",
+    WORKBENCH_RUNTIME_CONCURRENCY: runRuntimeProcessConvergence ? "1" : "2",
     WORKBENCH_CANVAS_TOOL_URL: `${apiBaseUrl}/runtime/canvas/tools/execute`,
     WORKBENCH_CANVAS_VISUAL_URL: `${apiBaseUrl}/runtime/canvas/visuals`,
     WORKBENCH_CANVAS_TOOL_SECRET: canvasToolSecret,
@@ -241,7 +255,23 @@ try {
     DEERFLOW_STREAM_MODE: "messages,values",
     DEERFLOW_TIMEOUT_MS: "30000",
     DEERFLOW_IDLE_TIMEOUT_MS: runRealStackBrowser ? "15000" : "5000",
-  });
+    ...(runRuntimeProcessConvergence ? {
+      WORKBENCH_RUNTIME_EXECUTION_LEASE_MS: "10000",
+      WORKBENCH_RUNTIME_EXECUTION_HEARTBEAT_MS: "1000",
+      WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS: "1000",
+      WORKBENCH_RUNTIME_CANCEL_RECONCILE_INTERVAL_MS: "1000",
+      WORKBENCH_RUNTIME_CANCEL_RECONCILE_STALE_MS: "1000",
+      WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS: "250",
+      DEERFLOW_SUBMISSION_TIMEOUT_MS: "15000",
+    } : {}),
+  };
+  const spawnRuntimeWorker = (name) => spawnService(
+    name,
+    process.execPath,
+    ["apps/workbench-worker/dist/main.js"],
+    workerEnvironment,
+  );
+  const worker = spawnRuntimeWorker("workbench-worker");
   await waitForProcessStart(worker, 750);
 
   if (runRealStackBrowser) {
@@ -269,7 +299,14 @@ try {
     await waitForHttp(`${previewOrigin}/healthz`, preview, scenarioTimeoutMs);
   }
 
-  if (runRealStackBrowser) {
+  if (runRuntimeProcessConvergence) {
+    const client = createApiClient(apiBaseUrl);
+    await runRuntimeProcessConvergenceScenario({
+      client,
+      initialWorker: worker,
+      spawnRuntimeWorker,
+    });
+  } else if (runRealStackBrowser) {
     await runRealStackBrowserScenario({
       commonEnvironment,
       fakeRuntimeUrl: fakeRuntime.url,
@@ -280,7 +317,15 @@ try {
     });
   }
 
-  if (realStackBrowserOnly) {
+  if (runRuntimeProcessConvergence) {
+    console.log(JSON.stringify({
+      ok: true,
+      evidenceLevel: "process-level-real-stack",
+      databaseClass: "isolated-postgresql",
+      provider: controlledProvider,
+      candidateSha: candidateSourceCommit,
+    }));
+  } else if (realStackBrowserOnly) {
     console.log(JSON.stringify({
       ok: true,
       evidenceLevel: "real-stack",
@@ -532,6 +577,538 @@ async function startRunThroughSubmissionIntent(
   assert.equal(submitted.body.intent.status, "submitted");
   assert.equal(submitted.body.intent.runId, submitted.body.run.id);
   return { body: submitted.body.run, intent: submitted.body.intent };
+}
+
+async function runRuntimeProcessConvergenceScenario({
+  client,
+  initialWorker,
+  spawnRuntimeWorker,
+}) {
+  console.log("[e2e] running process-level Runtime convergence scenarios");
+  assert.equal(candidateSourceSnapshot.clean, true, "runtime process evidence requires a clean source tree");
+  assert.equal(candidateSourceCommit, currentSourceCommit(), "runtime process evidence candidate differs from HEAD");
+  const startedAt = new Date().toISOString();
+
+  const sigkill = await runSigkillTakeoverScenario({
+    client,
+    worker: initialWorker,
+    spawnRuntimeWorker,
+  });
+  const sigterm = await runSigtermCancellationScenario({
+    client,
+    worker: sigkill.replacementWorker,
+    spawnRuntimeWorker,
+  });
+
+  const finishedSourceSnapshot = resolveCandidateSourceSnapshot();
+  assert.equal(finishedSourceSnapshot.clean, true, "runtime process evidence source tree became dirty");
+  assert.equal(
+    finishedSourceSnapshot.digest,
+    candidateSourceSnapshot.digest,
+    "runtime process evidence source tree drifted during execution",
+  );
+  const evidence = {
+    protocol: "workbench.runtime-process-convergence-evidence.v1",
+    candidate: {
+      sourceCommit: candidateSourceCommit,
+      cleanAtStart: candidateSourceSnapshot.clean,
+      cleanAtFinish: finishedSourceSnapshot.clean,
+      sourceDrift: false,
+    },
+    environment: {
+      databaseClass: "isolated-postgresql",
+      provider: controlledProvider,
+      workerBoundary: "node-child-process",
+      queue: "pg-boss",
+    },
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    faultClock: {
+      queueDeadlineCompressed: true,
+      executionLeaseCompressed: true,
+      applicationBudgetsUnchanged: true,
+    },
+    scenarios: {
+      sigkillTakeover: sigkill.evidence,
+      sigtermCancellation: sigterm.evidence,
+    },
+    stagingOnly: [
+      "uncompressed pg-boss heartbeat and execution-lease wall clock",
+      "orchestrator-level container SIGKILL and replacement",
+      "immutable deployed image digest and deployment identity binding",
+    ],
+  };
+  assertRuntimeProcessEvidenceRedacted(evidence, [
+    ...sigkill.sensitiveValues,
+    ...sigterm.sensitiveValues,
+  ]);
+  const evidenceDir = path.join(root, "output/runtime-process-convergence");
+  const evidencePath = path.join(evidenceDir, "evidence.json");
+  await mkdir(evidenceDir, { recursive: true });
+  const manifestSha256 = await writeEvidenceManifest(evidencePath, evidence);
+  await writeFile(
+    path.join(evidenceDir, "evidence.json.sha256"),
+    `${manifestSha256}  evidence.json\n`,
+  );
+  console.log(`[e2e] runtime process evidence: ${path.relative(root, evidencePath)} sha256=${manifestSha256}`);
+}
+
+async function runSigkillTakeoverScenario({ client, worker, spawnRuntimeWorker }) {
+  const runId = await createRuntimeProcessFaultRun(
+    client,
+    "E2E_PROCESS_SIGKILL_RECOVERY",
+    "Runtime SIGKILL takeover",
+  );
+  const initial = await waitForRuntimeProcessClaim(runId, "process-sigkill-recovery");
+  const initialJobs = await runtimeQueueJobs(runId);
+  const activeJob = initialJobs.find((job) => (
+    job.name === runtimeExecuteQueueName && job.state === "active"
+  ));
+  assert.ok(activeJob, "SIGKILL scenario did not claim the runtime.execute job");
+  assert.equal(activeJob.retryLimit, 5, "SIGKILL scenario did not start with the production retry limit");
+
+  assert.equal(worker.child.kill("SIGKILL"), true, "failed to deliver SIGKILL to Runtime Worker");
+  const killed = await waitForServiceExit(worker, runtimeProcessConvergenceTimeoutMs);
+  assert.equal(killed.signal, "SIGKILL", "Runtime Worker did not terminate from SIGKILL");
+  await waitFor(
+    () => fakeRuntime.state.processFaults.get(runId)?.initialStreamClosed === true,
+    runtimeProcessConvergenceTimeoutMs,
+    "controlled provider did not observe the SIGKILL disconnect",
+  );
+
+  await expireRuntimeExecutionAfterCrash(runId, activeJob.id);
+  const replacementWorker = spawnRuntimeWorker("workbench-worker-after-sigkill");
+  await waitForProcessStart(replacementWorker, 750);
+  await waitFor(
+    () => fakeRuntime.state.processFaults.get(runId)?.rejoinActive === true,
+    runtimeProcessConvergenceTimeoutMs,
+    "replacement Worker did not rejoin the accepted provider Run",
+  );
+  const takeover = await waitForRuntimeProcessClaim(runId, "process-sigkill-recovery", initial.ownerId);
+  assert.ok(takeover.epoch > initial.epoch, "replacement Worker did not advance the execution epoch");
+  assert.notEqual(takeover.ownerId, initial.ownerId, "replacement Worker reused the stale execution owner");
+  await assertStaleRuntimeClaimFenced({
+    runId,
+    attemptId: initial.attemptId,
+    ownerId: initial.ownerId,
+    epoch: initial.epoch,
+  });
+
+  fakeRuntime.releaseProcessRecovery(runId);
+  await waitForRuntimeRunStatus(client, runId, "succeeded");
+  const terminal = await assertRuntimeProcessTerminalState(runId, "succeeded", {
+    requiredQueues: [runtimeExecuteQueueName],
+  });
+  const fault = fakeRuntime.state.processFaults.get(runId);
+  assert.equal(fault?.submissionCount, 1, "SIGKILL recovery duplicated provider submission");
+  assert.equal(fault?.rejoinCount, 1, "SIGKILL recovery did not use one provider rejoin");
+  assert.equal(fault?.rejoinFinished, true, "SIGKILL recovery provider stream did not finish");
+  assert.equal(fault?.cancelCount, 0, "SIGKILL recovery unexpectedly cancelled the provider Run");
+
+  return {
+    replacementWorker,
+    evidence: {
+      deliveredSignal: "SIGKILL",
+      observedExitSignal: killed.signal,
+      runIdSha256: sha256(runId),
+      runtimeAttemptIdSha256: sha256(initial.attemptId),
+      externalRunIdSha256: sha256(initial.externalRunId),
+      initialEpoch: initial.epoch,
+      takeoverEpoch: takeover.epoch,
+      ownerChanged: true,
+      staleOwnerFenced: true,
+      providerSubmissions: fault.submissionCount,
+      providerRejoins: fault.rejoinCount,
+      providerCancels: fault.cancelCount,
+      finalRunStatus: terminal.runStatus,
+      finalAttemptStatus: terminal.attemptStatus,
+      terminalEvents: terminal.terminalEvents,
+      jobs: terminal.jobs,
+    },
+    sensitiveValues: [
+      runId,
+      initial.attemptId,
+      initial.externalRunId,
+      initial.ownerId,
+      takeover.ownerId,
+      ...terminal.rawJobIds,
+    ],
+  };
+}
+
+async function runSigtermCancellationScenario({ client, worker, spawnRuntimeWorker }) {
+  const runId = await createRuntimeProcessFaultRun(
+    client,
+    "E2E_PROCESS_SIGTERM_CANCEL",
+    "Runtime SIGTERM cancellation",
+  );
+  const initial = await waitForRuntimeProcessClaim(runId, "process-sigterm-cancel");
+  assert.ok(
+    (await runtimeQueueJobs(runId)).some((job) => (
+      job.name === runtimeExecuteQueueName && job.state === "active"
+    )),
+    "SIGTERM scenario did not claim the runtime.execute job",
+  );
+
+  assert.equal(worker.child.kill("SIGTERM"), true, "failed to deliver SIGTERM to Runtime Worker");
+  await waitFor(
+    () => worker.log.value().includes("[worker] received SIGTERM"),
+    runtimeProcessConvergenceTimeoutMs,
+    "Runtime Worker did not enter its SIGTERM shutdown path",
+  );
+  fakeRuntime.disconnectProcessFault(runId);
+  const terminated = await waitForServiceExit(worker, runtimeProcessConvergenceTimeoutMs);
+  assert.equal(terminated.code, 0, "Runtime Worker did not complete graceful SIGTERM shutdown");
+  assert.equal(terminated.signal, null, "Runtime Worker was force-killed during SIGTERM shutdown");
+
+  const cancel = await client.json("POST", `/runs/${runId}/cancel`, {
+    headers: { "Idempotency-Key": `e2e-process-cancel-${randomUUID()}` },
+    expectedStatus: 202,
+  });
+  assert.ok(["cancelling", "cancelled"].includes(cancel.body.status));
+  await exhaustRuntimeCancelJob(runId);
+  const replacementWorker = spawnRuntimeWorker("workbench-worker-after-sigterm");
+  await waitForProcessStart(replacementWorker, 750);
+
+  await waitForRuntimeRunStatus(client, runId, "cancelled");
+  const terminal = await assertRuntimeProcessTerminalState(runId, "cancelled", {
+    requiredQueues: [runtimeExecuteQueueName, runtimeCancelQueueName],
+  });
+  const fault = fakeRuntime.state.processFaults.get(runId);
+  assert.equal(fault?.submissionCount, 1, "SIGTERM cancellation duplicated provider submission");
+  assert.equal(fault?.cancelCount, 1, "cancellation reconciler did not cancel the provider Run exactly once");
+  assert.ok(
+    terminal.jobs.filter((job) => job.name === runtimeCancelQueueName).length >= 2,
+    "cancellation reconciler did not replace the exhausted cancel job",
+  );
+
+  return {
+    replacementWorker,
+    evidence: {
+      deliveredSignal: "SIGTERM",
+      gracefulExitCode: terminated.code,
+      runIdSha256: sha256(runId),
+      runtimeAttemptIdSha256: sha256(initial.attemptId),
+      externalRunIdSha256: sha256(initial.externalRunId),
+      providerSubmissions: fault.submissionCount,
+      providerRejoins: fault.rejoinCount,
+      providerCancels: fault.cancelCount,
+      cancellationJobReconciled: true,
+      finalRunStatus: terminal.runStatus,
+      finalAttemptStatus: terminal.attemptStatus,
+      terminalEvents: terminal.terminalEvents,
+      jobs: terminal.jobs,
+    },
+    sensitiveValues: [
+      runId,
+      initial.attemptId,
+      initial.externalRunId,
+      initial.ownerId,
+      ...terminal.rawJobIds,
+    ],
+  };
+}
+
+async function createRuntimeProcessFaultRun(client, marker, title) {
+  const identity = await client.json("GET", "/identity/me");
+  const project = await client.json("POST", `/workspaces/${identity.body.defaultWorkspaceId}/projects`, {
+    body: { title },
+    expectedStatus: 201,
+  });
+  const bootstrap = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const threadId = bootstrap.body.threads[0]?.id;
+  assert.equal(typeof threadId, "string", "Runtime process fixture did not create a thread");
+  const run = await startRunThroughSubmissionIntent(client, {
+    threadId,
+    request: {
+      prompt: `${marker}: controlled synthetic process-lifecycle fixture`,
+      modelId: runtimeCatalogModelId,
+      workflow: "generate",
+      targetSurface: "web",
+      designStyle: { kind: "automatic" },
+      requestedArtifactKinds: ["prd"],
+    },
+    idempotencyKey: `e2e-process-${randomUUID()}`,
+  });
+  return run.body.id;
+}
+
+async function waitForRuntimeProcessClaim(runId, expectedKind, previousOwnerId = null) {
+  let observed = null;
+  await waitFor(async () => {
+    const fault = fakeRuntime.state.processFaults.get(runId);
+    if (!fault || fault.kind !== expectedKind) return false;
+    const current = await runtimeProcessState(runId);
+    if (
+      current.runStatus !== "running"
+      || current.attemptStatus !== "running"
+      || !current.ownerId
+      || !current.attemptOwnerId
+      || !current.attemptId
+      || !current.externalRunId
+      || current.ownerId !== current.attemptOwnerId
+      || (previousOwnerId !== null && current.ownerId === previousOwnerId)
+    ) return false;
+    observed = current;
+    return true;
+  }, runtimeProcessConvergenceTimeoutMs, `Runtime process claim was not established for ${expectedKind}`);
+  return observed;
+}
+
+async function runtimeProcessState(runId) {
+  const result = await queryDatabase(`
+    SELECT
+      run.status::text AS "runStatus",
+      run.execution_owner_id AS "ownerId",
+      run.execution_epoch AS epoch,
+      run.execution_lease_expires_at AS "leaseExpiresAt",
+      attempt.id AS "attemptId",
+      attempt.status::text AS "attemptStatus",
+      attempt.execution_owner_id AS "attemptOwnerId",
+      attempt.execution_epoch AS "attemptEpoch",
+      attempt.execution_lease_expires_at AS "attemptLeaseExpiresAt",
+      attempt.external_run_id AS "externalRunId"
+    FROM workbench.runs AS run
+    LEFT JOIN LATERAL (
+      SELECT candidate.*
+      FROM workbench.runtime_attempts AS candidate
+      WHERE candidate.run_id = run.id
+      ORDER BY candidate.attempt DESC
+      LIMIT 1
+    ) AS attempt ON TRUE
+    WHERE run.id = $1
+  `, [runId]);
+  const row = result.rows[0];
+  assert.ok(row, "Runtime process fixture Run disappeared");
+  return row;
+}
+
+async function expireRuntimeExecutionAfterCrash(runId, activeJobId) {
+  const result = await queryDatabase(`
+    WITH expired_run AS (
+      UPDATE workbench.runs
+      SET execution_heartbeat_at = clock_timestamp() - interval '2 seconds',
+          execution_lease_expires_at = clock_timestamp() - interval '1 second'
+      WHERE id = $1 AND status = 'running'
+      RETURNING id
+    ), expired_attempt AS (
+      UPDATE workbench.runtime_attempts
+      SET execution_heartbeat_at = clock_timestamp() - interval '2 seconds',
+          execution_lease_expires_at = clock_timestamp() - interval '1 second'
+      WHERE run_id = $1 AND status = 'running'
+      RETURNING id
+    ), exhausted_job AS (
+      UPDATE workbench_jobs.job_common
+      SET retry_limit = retry_count,
+          heartbeat_on = clock_timestamp() - interval '5 minutes'
+      WHERE id = $2::uuid
+        AND name = $3
+        AND singleton_key = $1
+        AND state = 'active'
+      RETURNING id
+    )
+    SELECT
+      (SELECT count(*)::int FROM expired_run) AS runs,
+      (SELECT count(*)::int FROM expired_attempt) AS attempts,
+      (SELECT count(*)::int FROM exhausted_job) AS jobs
+  `, [runId, activeJobId, runtimeExecuteQueueName]);
+  assert.deepEqual(result.rows[0], { runs: 1, attempts: 1, jobs: 1 });
+  await forceQueueSupervision(runtimeExecuteQueueName);
+  await waitFor(async () => (
+    (await runtimeQueueJobs(runId)).some((job) => (
+      job.id === activeJobId && job.name === runtimeExecuteQueueName && job.state === "failed"
+    ))
+  ), runtimeProcessConvergenceTimeoutMs, "pg-boss did not terminalize the crashed execution job");
+}
+
+async function exhaustRuntimeCancelJob(runId) {
+  const boss = runtimeControlBoss("runtime-process-cancel-fault");
+  try {
+    await boss.start();
+    const fetched = await boss.fetch(runtimeCancelQueueName, {
+      batchSize: 1,
+      includeMetadata: true,
+    });
+    assert.equal(fetched.length, 1, "controlled cancel consumer did not claim one job");
+    assert.equal(fetched[0]?.data?.runId, runId, "controlled cancel consumer claimed another Run");
+    const result = await queryDatabase(`
+      WITH exhausted_job AS (
+        UPDATE workbench_jobs.job_common
+        SET retry_limit = retry_count,
+            started_on = clock_timestamp() - interval '5 minutes'
+        WHERE id = $2::uuid
+          AND name = $3
+          AND singleton_key = $1
+          AND state = 'active'
+        RETURNING id
+      ), aged_run AS (
+        UPDATE workbench.runs
+        SET updated_at = (clock_timestamp() AT TIME ZONE 'UTC') - interval '5 seconds'
+        WHERE id = $1 AND status = 'cancelling'
+        RETURNING id
+      )
+      SELECT
+        (SELECT count(*)::int FROM exhausted_job) AS jobs,
+        (SELECT count(*)::int FROM aged_run) AS runs
+    `, [runId, fetched[0].id, runtimeCancelQueueName]);
+    assert.deepEqual(result.rows[0], { jobs: 1, runs: 1 });
+    await makeQueueSupervisionDue(runtimeCancelQueueName);
+    await boss.supervise(runtimeCancelQueueName);
+  } finally {
+    await boss.stop({ graceful: false }).catch(() => undefined);
+  }
+  await waitFor(async () => (
+    (await runtimeQueueJobs(runId)).some((job) => (
+      job.name === runtimeCancelQueueName && job.state === "failed"
+    ))
+  ), runtimeProcessConvergenceTimeoutMs, "pg-boss did not terminalize the faulted cancel job");
+}
+
+async function forceQueueSupervision(queueName) {
+  const boss = runtimeControlBoss("runtime-process-execution-supervisor");
+  try {
+    await boss.start();
+    await makeQueueSupervisionDue(queueName);
+    await boss.supervise(queueName);
+  } finally {
+    await boss.stop({ graceful: false }).catch(() => undefined);
+  }
+}
+
+function runtimeControlBoss(applicationName) {
+  const boss = new PgBoss({
+    connectionString: pgConnectionUrl(databaseUrl),
+    schema: "workbench_jobs",
+    application_name: applicationName,
+    schedule: false,
+    supervise: false,
+    migrate: false,
+    createSchema: false,
+    useListenNotify: false,
+  });
+  boss.on("error", (error) => console.error("[runtime-process-pg-boss]", diagnosticErrorClass(error)));
+  return boss;
+}
+
+async function makeQueueSupervisionDue(queueName) {
+  const result = await queryDatabase(`
+    UPDATE workbench_jobs.queue
+    SET monitor_on = clock_timestamp() - interval '5 minutes'
+    WHERE name = $1
+    RETURNING name
+  `, [queueName]);
+  assert.equal(result.rowCount, 1, `Runtime queue ${queueName} is missing`);
+}
+
+async function assertStaleRuntimeClaimFenced(claim) {
+  const { PrismaClient } = await import("@workbench/workbench-db");
+  const { RuntimeAttemptService } = await import(
+    "../apps/workbench-worker/dist/runtime/runtime-attempt.service.js"
+  );
+  const db = new PrismaClient({ datasourceUrl: databaseUrl });
+  let observedError = null;
+  try {
+    await new RuntimeAttemptService(db, 10_000).heartbeat(claim);
+  } catch (error) {
+    observedError = error;
+  } finally {
+    await db.$disconnect();
+  }
+  assert.equal(observedError?.message, "RUNTIME_EXECUTION_FENCED", "stale Runtime owner was not fenced");
+}
+
+async function waitForRuntimeRunStatus(client, runId, expectedStatus) {
+  await waitFor(async () => {
+    const current = await client.json("GET", `/runs/${runId}`);
+    return current.body.status === expectedStatus;
+  }, runtimeProcessConvergenceTimeoutMs, `Runtime Run did not converge to ${expectedStatus}`);
+}
+
+async function assertRuntimeProcessTerminalState(runId, expectedStatus, { requiredQueues }) {
+  await waitFor(async () => {
+    const jobs = await runtimeQueueJobs(runId);
+    return requiredQueues.every((name) => jobs.some((job) => job.name === name))
+      && jobs.every((job) => runtimeTerminalJobStates.has(job.state));
+  }, runtimeProcessConvergenceTimeoutMs, "Runtime queue jobs did not reach terminal states");
+  const state = await runtimeProcessState(runId);
+  assert.equal(state.runStatus, expectedStatus);
+  assert.equal(state.attemptStatus, expectedStatus);
+  assert.equal(state.ownerId, null, "terminal Run retained an execution owner");
+  assert.equal(state.attemptOwnerId, null, "terminal Runtime attempt retained an execution owner");
+  assert.equal(state.leaseExpiresAt, null, "terminal Run retained an execution lease");
+  assert.equal(state.attemptLeaseExpiresAt, null, "terminal Runtime attempt retained an execution lease");
+  const terminalResult = await queryDatabase(`
+    SELECT
+      count(*) FILTER (WHERE type = 'run.completed')::int AS completed,
+      count(*) FILTER (WHERE type = 'run.failed')::int AS failed,
+      count(*) FILTER (WHERE type = 'run.cancelled')::int AS cancelled
+    FROM workbench.run_events
+    WHERE run_id = $1
+  `, [runId]);
+  const terminalEvents = terminalResult.rows[0];
+  assert.deepEqual(
+    terminalEvents,
+    expectedStatus === "succeeded"
+      ? { completed: 1, failed: 0, cancelled: 0 }
+      : { completed: 0, failed: 0, cancelled: 1 },
+  );
+  const rawJobs = await runtimeQueueJobs(runId);
+  return {
+    runStatus: state.runStatus,
+    attemptStatus: state.attemptStatus,
+    terminalEvents,
+    jobs: rawJobs.map((job) => ({
+      jobIdSha256: sha256(job.id),
+      name: job.name,
+      state: job.state,
+      retryCount: job.retryCount,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+    })),
+    rawJobIds: rawJobs.map((job) => job.id),
+  };
+}
+
+async function runtimeQueueJobs(runId) {
+  const result = await queryDatabase(`
+    SELECT
+      id::text AS id,
+      name,
+      state::text AS state,
+      retry_count AS "retryCount",
+      retry_limit AS "retryLimit",
+      created_on AS "createdAt",
+      started_on AS "startedAt",
+      completed_on AS "completedAt"
+    FROM workbench_jobs.job_common
+    WHERE singleton_key = $1
+      AND name = ANY($2::text[])
+    ORDER BY created_on ASC, id ASC
+  `, [runId, [runtimeExecuteQueueName, runtimeCancelQueueName]]);
+  return result.rows;
+}
+
+async function waitForServiceExit(service, timeoutMs) {
+  return Promise.race([
+    service.exited,
+    delay(timeoutMs).then(() => {
+      throw new Error(`${service.name} did not exit within ${timeoutMs}ms`);
+    }),
+  ]);
+}
+
+function assertRuntimeProcessEvidenceRedacted(evidence, sensitiveValues) {
+  const serialized = JSON.stringify(evidence);
+  for (const sensitive of sensitiveValues) {
+    assert.equal(
+      typeof sensitive === "string" && sensitive.length > 0 && serialized.includes(sensitive),
+      false,
+      "runtime process evidence contains an unredacted identifier",
+    );
+  }
+  assert.doesNotMatch(serialized, /postgres(?:ql)?:\/\//iu);
+  assert.doesNotMatch(serialized, /(?:password|secret|capability|authorization|user prompt)/iu);
 }
 
 async function runSuccessScenario(client, outsiderClient) {
@@ -3243,6 +3820,7 @@ async function startFakeDeerFlow(expectedToken) {
     browserFailureRecoveryRuns: 0,
     browserFailureAcceptedRunId: null,
     browserFailureAcceptedRunVisible: false,
+    processFaults: new Map(),
     canvasToolCalls: [],
     activeCancelStreams: 0,
     objectReads: [],
@@ -3299,9 +3877,23 @@ async function startFakeDeerFlow(expectedToken) {
     releaseBrowserPrdFinalization() {
       browserPrdFinalizationGate.release();
     },
+    disconnectProcessFault(workbenchRunId) {
+      const fault = state.processFaults.get(workbenchRunId);
+      assert.ok(fault, "controlled provider process fault was not registered");
+      fault.closeInitialStream?.();
+    },
+    releaseProcessRecovery(workbenchRunId) {
+      const fault = state.processFaults.get(workbenchRunId);
+      assert.ok(fault, "controlled provider process recovery was not registered");
+      fault.recoveryGate.release();
+    },
     async close() {
       browserPrdDraftGate.release();
       browserPrdFinalizationGate.release();
+      for (const fault of state.processFaults.values()) {
+        fault.recoveryGate.release();
+        fault.closeInitialStream?.();
+      }
       for (const socket of sockets) socket.destroy();
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
@@ -3541,6 +4133,29 @@ async function handleFakeDeerFlow(
       response.end(JSON.stringify({ code: "CONTROLLED_BROWSER_STREAM_UNAVAILABLE" }));
       return;
     }
+    if (run.kind === "process-sigkill-recovery") {
+      const workbenchRunId = run.metadata?.workbench_run_id;
+      const fault = state.processFaults.get(workbenchRunId);
+      assert.ok(fault, "controlled SIGKILL recovery state is missing");
+      fault.rejoinCount += 1;
+      fault.rejoinActive = true;
+      state.requests.push({ method: request.method, path: url.pathname, kind: "process-rejoin" });
+      await fault.recoveryGate.wait();
+      await writeSuccessfulRuntimeStream(response, fault.requestBody);
+      run.status = "success";
+      run.updated_at = new Date().toISOString();
+      fault.rejoinActive = false;
+      fault.rejoinFinished = true;
+      return;
+    }
+    if (run.kind === "process-sigterm-cancel") {
+      const workbenchRunId = run.metadata?.workbench_run_id;
+      const fault = state.processFaults.get(workbenchRunId);
+      assert.ok(fault, "controlled SIGTERM cancellation state is missing");
+      fault.rejoinCount += 1;
+      await holdProcessFaultStream(request, response, fault);
+      return;
+    }
   }
   if (request.method === "GET" && runGetMatch) {
     const run = state.runtimeRuns.get(decodeURIComponent(runGetMatch[2]));
@@ -3564,6 +4179,8 @@ async function handleFakeDeerFlow(
     assert.equal(url.searchParams.get("action"), "interrupt");
     run.status = "interrupted";
     run.closeStream?.();
+    const processFault = state.processFaults.get(run.metadata?.workbench_run_id);
+    if (processFault) processFault.cancelCount += 1;
     state.requests.push({ method: request.method, path: url.pathname, kind: "run-cancel" });
     response.writeHead(204).end();
     return;
@@ -3572,6 +4189,8 @@ async function handleFakeDeerFlow(
   if (request.method === "POST" && /^\/threads\/[^/]+\/runs\/stream$/.test(url.pathname)) {
     const body = await readJsonRequest(request);
     const serialized = JSON.stringify(body);
+    const processSigkillRecovery = serialized.includes("E2E_PROCESS_SIGKILL_RECOVERY");
+    const processSigtermCancel = serialized.includes("E2E_PROCESS_SIGTERM_CANCEL");
     const browserFailure = serialized.includes("E2E_BROWSER_FAILURE");
     const browserVisualPrd = serialized.includes("synthetic browser test");
     const workbenchRunId = body?.metadata?.workbench_run_id;
@@ -3613,7 +4232,11 @@ async function handleFakeDeerFlow(
     const canvasDirectEdit = serialized.includes("E2E_CANVAS_DIRECT_EDIT");
     const prototypeGeneration = serialized.includes('"requestedArtifactKinds":["prototype"]');
     const resume = body?.input === null && body?.command?.resume !== undefined;
-    const kind = browserFailureRecovery
+    const kind = processSigkillRecovery
+      ? "process-sigkill-recovery"
+      : processSigtermCancel
+        ? "process-sigterm-cancel"
+      : browserFailureRecovery
       ? "browser-failure-recovery"
       : cancellation
         ? "cancel"
@@ -3654,7 +4277,24 @@ async function handleFakeDeerFlow(
     state.runRequests.push({ kind, body });
     state.requests.push({ method: request.method, path: url.pathname, kind, externalRunId });
     response.setHeader("content-location", `/threads/${externalThreadId}/runs/${externalRunId}`);
-    if (browserFailureRecovery) {
+    if (processSigkillRecovery || processSigtermCancel) {
+      assert.equal(typeof workbenchRunId, "string", "controlled process fault omitted Workbench Run identity");
+      const fault = {
+        cancelCount: 0,
+        closeInitialStream: null,
+        initialStreamActive: false,
+        initialStreamClosed: false,
+        kind,
+        recoveryGate: controlledGate(),
+        rejoinActive: false,
+        rejoinCount: 0,
+        rejoinFinished: false,
+        requestBody: body,
+        submissionCount: 1,
+      };
+      state.processFaults.set(workbenchRunId, fault);
+      await holdProcessFaultStream(request, response, fault);
+    } else if (browserFailureRecovery) {
       state.browserFailureRecoveryRuns += 1;
       await writeSuccessfulRuntimeStream(response, body);
       run.status = "success";
@@ -4709,6 +5349,41 @@ async function holdCancellationStream(request, response, state, run) {
     response.once("close", finish);
   });
   run.closeStream = null;
+}
+
+async function holdProcessFaultStream(request, response, fault) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    "x-workbench-controlled-provider": "process-fault",
+  });
+  response.flushHeaders?.();
+  fault.initialStreamActive = true;
+  await new Promise((resolve) => {
+    const heartbeat = setInterval(() => {
+      if (!response.destroyed && !response.writableEnded) {
+        response.write(": controlled-process-heartbeat\n\n");
+      }
+    }, 250);
+    heartbeat.unref();
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(heartbeat);
+      fault.initialStreamActive = false;
+      fault.initialStreamClosed = true;
+      fault.closeInitialStream = null;
+      resolve();
+    };
+    fault.closeInitialStream = () => {
+      if (!response.destroyed && !response.writableEnded) response.end();
+      finish();
+    };
+    request.once("aborted", finish);
+    response.once("close", finish);
+  });
 }
 
 function sendSse(response, event, value, id) {
@@ -6669,6 +7344,16 @@ function resolveCandidateSourceCommit() {
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();
   assert.match(commit, /^[0-9a-f]{40}$/u, "candidate source commit is invalid");
+  return commit;
+}
+
+function currentSourceCommit() {
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  assert.match(commit, /^[0-9a-f]{40}$/u, "current source commit is invalid");
   return commit;
 }
 

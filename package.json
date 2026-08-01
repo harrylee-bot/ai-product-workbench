@@ -75,6 +75,7 @@
     "test:workbench:postgres-constraints": "node scripts/workbench-postgres-constraints.mjs",
     "test:workbench:postgres-http-client": "node --test scripts/workbench-postgres-http-e2e-canvas-client.test.mjs",
     "test:workbench:postgres-http": "node scripts/workbench-postgres-http-e2e.mjs",
+    "runtime:process-convergence:postgres": "WORKBENCH_E2E_RUNTIME_PROCESS_CONVERGENCE=1 node scripts/workbench-postgres-http-e2e.mjs",
     "db:generate": "npm --workspace @workbench/workbench-db run generate",
     "db:migrate": "npm --workspace @workbench/workbench-db run migrate:dev",
     "db:extensions:check": "node scripts/assert-workbench-postgres-extensions.mjs --check",

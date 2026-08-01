@@ -2218,7 +2218,15 @@ export class RunProcessor {
   ) {
     const updated = await tx.run.updateMany({
       where: { id: runId, status: "cancelling" },
-      data: { status: "cancelled", cancellationReason: reason, finishedAt: new Date() },
+      data: {
+        status: "cancelled",
+        cancellationReason: reason,
+        finishedAt: new Date(),
+        errorCode: null,
+        errorDetail: null,
+        errorRetryable: null,
+        ...releasedExecutionLease(),
+      },
     });
     if (updated.count !== 1) return;
     const cancelledAt = new Date();
@@ -2231,6 +2239,10 @@ export class RunProcessor {
             status: "cancelled",
             startedAt: attempt.startedAt ?? cancelledAt,
             finishedAt: cancelledAt,
+            errorCode: null,
+            errorDetail: null,
+            errorRetryable: null,
+            ...releasedExecutionLease(),
           },
         });
       }
