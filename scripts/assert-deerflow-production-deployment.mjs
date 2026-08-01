@@ -552,6 +552,14 @@ assert(
     && taskToolPatchText.includes('if getattr(tool, \\"name\\", None) not in _workbench_parent_run_tool_names'),
   "DeerFlow subagents must remove Knowledge and every parent-Run publication, PRD reference, and Canvas tool",
 );
+assert(
+  patchContractTestSource.includes("test_async_authorized_knowledge_is_visible_and_executes")
+    && patchContractTestSource.includes("test_concurrent_opposite_knowledge_scopes_do_not_leak")
+    && patchContractTestSource.includes("test_real_subagent_executor_removes_parent_run_tools")
+    && patchContractTestSource.includes('patch.object(task_module, "SubagentExecutor", FakeExecutor)')
+    && patchContractTestSource.includes('[tool.name for tool in captured_executor_kwargs["tools"]]'),
+  "DeerFlow source-patch contract must dynamically prove async Knowledge isolation and subagent executor filtering",
+);
 const gatewayPatchText = JSON.stringify(patchManifest.gatewaySources);
 assert(
   gatewayPatchText.includes('scope.get(\\"knowledgeEnabled\\") is True')
