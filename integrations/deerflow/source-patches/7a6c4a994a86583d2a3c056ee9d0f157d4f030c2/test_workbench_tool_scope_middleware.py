@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib.util
 from pathlib import Path
 import sys
 import types
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 PATCH_ROOT = Path(__file__).resolve().parent
@@ -1087,6 +1090,183 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
 
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_authorized_knowledge_is_visible_and_executes(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, None, True)
+
+        async def model_handler(request):
+            return request
+
+        model_result = await middleware.awrap_model_call(
+            FakeModelRequest([
+                FakeTool("workbench_runtime_result_submit"),
+                FakeTool(KNOWLEDGE_TOOL_NAME),
+            ]),
+            model_handler,
+        )
+        self.assertEqual(
+            [tool.name for tool in model_result.tools],
+            ["workbench_runtime_result_submit", KNOWLEDGE_TOOL_NAME],
+        )
+
+        handler_calls = 0
+        sentinel = object()
+
+        async def tool_handler(_request):
+            nonlocal handler_calls
+            handler_calls += 1
+            return sentinel
+
+        observed = await middleware.awrap_tool_call(
+            FakeToolRequest(KNOWLEDGE_TOOL_NAME),
+            tool_handler,
+        )
+        self.assertIs(observed, sentinel)
+        self.assertEqual(handler_calls, 1)
+
+    async def test_concurrent_opposite_knowledge_scopes_do_not_leak(self) -> None:
+        both_model_calls_started = asyncio.Event()
+        release_model_calls = asyncio.Event()
+        started_count = 0
+        authorized_tool_calls = 0
+        unauthorized_tool_calls = 0
+        sentinel = object()
+
+        async def exercise_scope(enabled: bool):
+            nonlocal started_count, authorized_tool_calls, unauthorized_tool_calls
+            middleware = WorkbenchToolScopeMiddleware(None, None, enabled)
+
+            async def model_handler(request):
+                nonlocal started_count
+                started_count += 1
+                if started_count == 2:
+                    both_model_calls_started.set()
+                await release_model_calls.wait()
+                return request
+
+            model_result = await middleware.awrap_model_call(
+                FakeModelRequest([FakeTool(KNOWLEDGE_TOOL_NAME)]),
+                model_handler,
+            )
+
+            async def tool_handler(_request):
+                nonlocal authorized_tool_calls, unauthorized_tool_calls
+                if enabled:
+                    authorized_tool_calls += 1
+                else:
+                    unauthorized_tool_calls += 1
+                return sentinel
+
+            tool_result = await middleware.awrap_tool_call(
+                FakeToolRequest(KNOWLEDGE_TOOL_NAME),
+                tool_handler,
+            )
+            return [tool.name for tool in model_result.tools], tool_result
+
+        authorized = asyncio.create_task(exercise_scope(True))
+        unauthorized = asyncio.create_task(exercise_scope(False))
+        await asyncio.wait_for(both_model_calls_started.wait(), timeout=1)
+        release_model_calls.set()
+        authorized_result, unauthorized_result = await asyncio.gather(
+            authorized,
+            unauthorized,
+        )
+
+        self.assertEqual(authorized_result[0], [KNOWLEDGE_TOOL_NAME])
+        self.assertIs(authorized_result[1], sentinel)
+        self.assertEqual(unauthorized_result[0], [])
+        self.assertEqual(
+            unauthorized_result[1].content,
+            "Error: WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED",
+        )
+        self.assertEqual(authorized_tool_calls, 1)
+        self.assertEqual(unauthorized_tool_calls, 0)
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires the pinned DeerFlow executor stack")
+    async def test_real_subagent_executor_removes_parent_run_tools(self) -> None:
+        task_module = importlib.import_module("deerflow.tools.builtins.task_tool")
+
+        safe_tool = FakeTool("safe_subagent_tool")
+        parent_run_tools = [
+            FakeTool(KNOWLEDGE_TOOL_NAME),
+            FakeTool("workbench_artifact_draft_publish"),
+            FakeTool("view_screen"),
+        ]
+        captured_executor_kwargs = None
+        execute_calls: list[tuple[str, str]] = []
+
+        class FakeExecutor:
+            def __init__(self, **kwargs):
+                nonlocal captured_executor_kwargs
+                captured_executor_kwargs = kwargs
+
+            def execute_async(self, prompt, *, task_id):
+                execute_calls.append((prompt, task_id))
+                return task_id
+
+        terminal_result = SimpleNamespace(
+            status=task_module.SubagentStatus.COMPLETED,
+            ai_messages=[],
+            token_usage_records=[],
+            usage_reported=True,
+            result="opaque-success",
+            error=None,
+        )
+        app_config = SimpleNamespace(token_usage=SimpleNamespace(enabled=False))
+        subagent_config = SimpleNamespace(
+            model="inherit",
+            skills=None,
+            timeout_seconds=1,
+        )
+        runtime = SimpleNamespace(
+            state={},
+            context={},
+            config={
+                "configurable": {},
+                "metadata": {
+                    "model_name": "test-model",
+                    "tool_groups": ["test-group"],
+                },
+            },
+        )
+        stream_events: list[dict] = []
+
+        with (
+            patch.object(task_module, "get_app_config", return_value=app_config),
+            patch.object(task_module, "get_available_subagent_names", return_value=["general-purpose"]),
+            patch.object(task_module, "get_subagent_config", return_value=subagent_config),
+            patch.object(task_module, "resolve_runtime_user_id", return_value=None),
+            patch.object(task_module, "resolve_subagent_model_name", return_value="test-model"),
+            patch.object(task_module, "SubagentExecutor", FakeExecutor),
+            patch.object(task_module, "get_background_task_result", return_value=terminal_result),
+            patch.object(task_module, "cleanup_background_task"),
+            patch.object(task_module, "get_stream_writer", return_value=stream_events.append),
+            patch(
+                "deerflow.tools.get_available_tools",
+                return_value=[safe_tool, *parent_run_tools],
+            ),
+        ):
+            coroutine = getattr(task_module.task_tool, "coroutine", None)
+            self.assertTrue(callable(coroutine), "PINNED_SUBAGENT_TOOL_COROUTINE_MISSING")
+            result = await coroutine(
+                runtime=runtime,
+                description="scope contract",
+                prompt="opaque task",
+                subagent_type="general-purpose",
+                tool_call_id="scope-call",
+            )
+
+        self.assertEqual(result, "Task Succeeded. Result: opaque-success")
+        self.assertEqual(execute_calls, [("opaque task", "scope-call")])
+        self.assertIsNotNone(captured_executor_kwargs)
+        self.assertEqual(
+            [tool.name for tool in captured_executor_kwargs["tools"]],
+            [safe_tool.name],
+        )
+        self.assertEqual(
+            [event["type"] for event in stream_events],
+            ["task_started", "task_completed"],
+        )
+
     async def test_async_model_and_tool_paths_enforce_the_same_scope(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(policy("get_selected_screens"))
 
