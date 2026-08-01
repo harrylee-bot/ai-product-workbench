@@ -1,13 +1,19 @@
 #!/usr/bin/env node
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   assertCompleteHistory,
+  assertConcurrentOppositeScope,
   assertFinalOutputContainsEvidence,
+  assertKnowledgeCatalogHidden,
+  assertKnowledgeEvidenceAbsent,
   assertKnowledgeRetrievalProof,
   assertNoKnowledgeCapabilityLeak,
+  buildKnowledgeSmokeEvidence,
   readKnowledgeSmokeEnvironment,
-  redactKnowledgeCapability,
+  safeKnowledgeSmokeError,
 } from "./workbench-deerflow-knowledge-smoke-lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -16,13 +22,13 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const HISTORY_LIMIT = 100;
 const RUN_PAGE_SIZE = 100;
 const MAX_RUN_PAGES = 100;
+const execFileAsync = promisify(execFile);
 let database = null;
 
 try {
   await main();
 } catch (error) {
-  const message = error instanceof Error ? error.message : "Unknown Knowledge smoke failure";
-  process.stderr.write(`[knowledge-smoke] ${redactKnowledgeCapability(message)}\n`);
+  process.stderr.write(`[knowledge-smoke] ${safeKnowledgeSmokeError(error)}\n`);
   process.exitCode = 1;
 } finally {
   await database?.$disconnect().catch(() => undefined);
@@ -30,6 +36,7 @@ try {
 
 async function main() {
   const smoke = readKnowledgeSmokeEnvironment(process.env);
+  await assertCheckoutBinding(smoke.binding.candidateCommit);
   const workerDist = path.join(repoRoot, "apps/workbench-worker/dist");
   const [configModule, dbModule, adapterModule, grantModule, processorModule, storageModule, contracts, sdk] =
     await Promise.all([
@@ -50,14 +57,23 @@ async function main() {
   database = dbModule.db;
   await database.$connect();
 
-  const preflight = await loadAndAssertScope(database, smoke, contracts.startRunRequestSchema);
-  const identityHeaders = {
-    accept: "application/json",
-    "X-DeerFlow-Internal-Token": config.deerFlowInternalToken,
-    "X-DeerFlow-Owner-User-Id": smoke.principalId,
-  };
-  await assertPublicRuntimeSkill(config.deerFlowGatewayUrl, identityHeaders);
-  await assertRuntimeModel(config.deerFlowLangGraphUrl, identityHeaders, preflight.request.modelId);
+  const [validPreflight, nullPreflight] = await Promise.all([
+    loadAndAssertScope(database, smoke.valid, contracts.startRunRequestSchema, smoke),
+    loadAndAssertScope(database, smoke.nullRelease, contracts.startRunRequestSchema, smoke),
+  ]);
+  if (validPreflight.request.modelId !== nullPreflight.request.modelId) {
+    throw new Error("KNOWLEDGE_SMOKE_OPPOSITE_SCOPE_MODEL_MISMATCH");
+  }
+  if (validPreflight.threadId === nullPreflight.threadId) {
+    throw new Error("KNOWLEDGE_SMOKE_OPPOSITE_SCOPE_THREADS_MUST_DIFFER");
+  }
+  const validHeaders = identityHeaders(config, smoke.valid.principalId);
+  const nullHeaders = identityHeaders(config, smoke.nullRelease.principalId);
+  await Promise.all([
+    assertPublicRuntimeSkill(config.deerFlowGatewayUrl, validHeaders),
+    assertRuntimeModel(config.deerFlowLangGraphUrl, validHeaders, validPreflight.request.modelId),
+    assertRuntimeModel(config.deerFlowLangGraphUrl, nullHeaders, nullPreflight.request.modelId),
+  ]);
 
   const runtime = new adapterModule.DeerFlowRuntimeAdapter(
     config,
@@ -65,85 +81,98 @@ async function main() {
   );
   const issuer = new grantModule.PrismaKnowledgeToolGrantIssuer(database, config.knowledgeTool);
   const processor = new processorModule.RunProcessor(database, runtime, issuer);
-  const execution = await processor.execute(smoke.runId, [], undefined, {
-    retryCount: 0,
-    retryLimit: 0,
-  });
-  if (execution?.skipped || execution?.waitingInput || execution?.cancellationPending) {
-    throw new Error("KNOWLEDGE_SMOKE_RUN_DID_NOT_COMPLETE");
-  }
-
-  const persisted = await loadPersistedSurfaces(database, smoke);
-  const externalRunId = persisted.attempt.externalRunId;
-  if (!externalRunId) throw new Error("KNOWLEDGE_SMOKE_EXTERNAL_RUN_MISSING");
-  const client = new sdk.Client({
-    apiUrl: config.deerFlowLangGraphUrl,
-    apiKey: null,
-    timeoutMs: config.deerFlowTimeoutMs,
-    defaultHeaders: identityHeaders,
-  });
-  const [externalRun, externalRuns, thread, state, history] = await Promise.all([
-    client.runs.get(persisted.attempt.externalThreadId, externalRunId),
-    listAllRuns(client, persisted.attempt.externalThreadId),
-    client.threads.get(persisted.attempt.externalThreadId, {
-      include: ["values", "config", "context"],
-    }),
-    client.threads.getState(persisted.attempt.externalThreadId, undefined, { subgraphs: true }),
-    client.threads.getHistory(persisted.attempt.externalThreadId, { limit: HISTORY_LIMIT }),
+  const [validExecution, nullExecution] = await Promise.all([
+    executeRun(processor, smoke.valid.runId),
+    executeRun(processor, smoke.nullRelease.runId),
   ]);
-  assertCompleteHistory(history, HISTORY_LIMIT);
-  const selectedRuns = externalRuns.filter((run) => run?.run_id === externalRunId);
-  if (selectedRuns.length !== 1) throw new Error("KNOWLEDGE_SMOKE_EXTERNAL_RUN_LIST_MISMATCH");
+  void validExecution;
+  void nullExecution;
 
-  const deerFlowSurfaces = [externalRun, ...selectedRuns, thread, state, ...history];
-  const scanCount = assertNoKnowledgeCapabilityLeak([
-    { label: "deerflow-run", value: externalRun },
-    { label: "deerflow-run-list", value: selectedRuns },
-    { label: "deerflow-thread", value: thread },
-    { label: "deerflow-state", value: state },
-    { label: "deerflow-history", value: history },
-    { label: "workbench-run", value: persisted.run },
-    { label: "workbench-grants", value: persisted.grants },
+  const [validPersisted, nullPersisted] = await Promise.all([
+    loadPersistedSurfaces(database, smoke.valid),
+    loadPersistedSurfaces(database, smoke.nullRelease),
   ]);
-  const successfulInvocations = persisted.grants.flatMap((grant) => grant.invocations)
+  const [validExternal, nullExternal] = await Promise.all([
+    loadExternalSurfaces(config, sdk, validHeaders, validPersisted.attempt),
+    loadExternalSurfaces(config, sdk, nullHeaders, nullPersisted.attempt),
+  ]);
+  const validScanCount = assertNoKnowledgeCapabilityLeak([
+    ...validExternal.scanSurfaces,
+    { label: "valid-workbench-run", value: validPersisted.run },
+    { label: "valid-workbench-grants", value: validPersisted.grants },
+  ]);
+  const nullScanCount = assertNoKnowledgeCapabilityLeak([
+    ...nullExternal.scanSurfaces.map((surface) => ({
+      label: `null-${surface.label}`,
+      value: surface.value,
+    })),
+    { label: "null-workbench-run", value: nullPersisted.run },
+    { label: "null-workbench-grants", value: nullPersisted.grants },
+  ]);
+  const successfulInvocations = validPersisted.grants.flatMap((grant) => grant.invocations)
     .filter((invocation) => invocation.status === "succeeded" && invocation.response !== null);
   if (successfulInvocations.length === 0) {
     throw new Error("KNOWLEDGE_SMOKE_SUCCEEDED_INVOCATION_MISSING");
   }
   const proof = assertKnowledgeRetrievalProof({
-    deerFlowSurfaces,
+    deerFlowSurfaces: validExternal.deerFlowSurfaces,
     ledgerResponses: successfulInvocations.map((invocation) => invocation.response),
-    releaseId: smoke.releaseId,
+    releaseId: smoke.valid.releaseId,
     expectedProbe: smoke.expectedProbe,
     expectedCitation: smoke.expectedCitation,
   });
   assertFinalOutputContainsEvidence(
-    persisted.run.outputEntry?.content,
+    validPersisted.run.outputEntry?.content,
     smoke.expectedProbe,
     smoke.expectedCitation,
   );
+  if (nullPersisted.grants.length !== 0 || nullPersisted.invocationCount !== 0) {
+    throw new Error("KNOWLEDGE_SMOKE_NULL_RELEASE_ENDPOINT_NOT_ZERO");
+  }
+  const nullCatalog = assertKnowledgeCatalogHidden(nullExternal.deerFlowSurfaces);
+  assertKnowledgeEvidenceAbsent(
+    [...nullExternal.deerFlowSurfaces, nullPersisted.run, nullPersisted.grants],
+    smoke.expectedProbe,
+    smoke.expectedCitation,
+  );
+  const isolation = assertConcurrentOppositeScope({
+    valid: isolationSurface(smoke.valid, validPersisted, successfulInvocations.length),
+    nullRelease: isolationSurface(smoke.nullRelease, nullPersisted, 0),
+  });
 
-  process.stdout.write(`${JSON.stringify({
-    ok: true,
-    runId: smoke.runId,
-    runtimeAttemptId: persisted.attempt.id,
-    externalThreadId: persisted.attempt.externalThreadId,
-    externalRunId,
-    releaseId: smoke.releaseId,
-    assistantId: smoke.assistantId,
-    modelId: preflight.request.modelId,
-    successfulKnowledgeInvocations: successfulInvocations.length,
-    checkpointStatesScanned: history.length,
-    structuredValuesScanned: scanCount,
-    proof,
-    traceAudit: {
-      status: "external_gate_required",
-      reason: "DeerFlow/LangGraph Run API does not expose the deployment trace backend",
+  const forbiddenValues = [
+    ...scopeRawValues(smoke.valid, validPersisted),
+    ...scopeRawValues(smoke.nullRelease, nullPersisted),
+    smoke.expectedProbe,
+    smoke.expectedCitation,
+    smoke.valid.query,
+    smoke.nullRelease.query,
+  ];
+  const evidence = buildKnowledgeSmokeEvidence({
+    binding: smoke.binding,
+    valid: {
+      scopeIds: scopeRawValues(smoke.valid, validPersisted),
+      releaseId: smoke.valid.releaseId,
+      successfulInvocationCount: successfulInvocations.length,
+      checkpointStatesScanned: validExternal.history.length,
+      structuredValuesScanned: validScanCount,
+      proof,
     },
-  }, null, 2)}\n`);
+    nullRelease: {
+      scopeIds: scopeRawValues(smoke.nullRelease, nullPersisted),
+      grantCount: nullPersisted.grants.length,
+      endpointCalls: nullPersisted.invocationCount,
+      catalog: nullCatalog,
+      checkpointStatesScanned: nullExternal.history.length,
+      structuredValuesScanned: nullScanCount,
+    },
+    isolation,
+    forbiddenValues,
+  });
+  process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
 }
 
-async function loadAndAssertScope(db, smoke, startRunRequestSchema) {
+async function loadAndAssertScope(db, smoke, startRunRequestSchema, expectations) {
   const run = await db.run.findUnique({
     where: { id: smoke.runId },
     select: {
@@ -164,6 +193,7 @@ async function loadAndAssertScope(db, smoke, startRunRequestSchema) {
           id: true,
           status: true,
           project: { select: { id: true, workspaceId: true, status: true } },
+          runtimeBinding: { select: { id: true } },
         },
       },
       knowledgeRelease: {
@@ -185,25 +215,30 @@ async function loadAndAssertScope(db, smoke, startRunRequestSchema) {
     || run.projectId !== smoke.projectId
     || run.thread.project.id !== smoke.projectId
     || run.knowledgeReleaseId !== smoke.releaseId
-    || release?.id !== smoke.releaseId
+    || (smoke.releaseId === null ? release !== null : release?.id !== smoke.releaseId)
   ) {
     throw new Error("KNOWLEDGE_SMOKE_SCOPE_MISMATCH");
   }
   if (run.createdBy.status !== "active" || run.thread.status !== "active" || run.thread.project.status !== "active") {
     throw new Error("KNOWLEDGE_SMOKE_SCOPE_NOT_ACTIVE");
   }
+  if (run.thread.runtimeBinding !== null) {
+    throw new Error("KNOWLEDGE_SMOKE_REQUIRES_FRESH_RUNTIME_THREAD");
+  }
   const membership = await db.projectMember.findUnique({
     where: { projectId_principalId: { projectId: smoke.projectId, principalId: smoke.principalId } },
     select: { projectId: true },
   });
   if (!membership) throw new Error("KNOWLEDGE_SMOKE_PROJECT_MEMBERSHIP_MISSING");
-  if (
-    release.status !== "ready"
-    || !release.readyAt
-    || !release.chunksReadyAt
-    || (release.workspaceId !== null && release.workspaceId !== run.thread.project.workspaceId)
-  ) {
-    throw new Error("KNOWLEDGE_SMOKE_RELEASE_NOT_READY_OR_SCOPED");
+  if (smoke.releaseId !== null) {
+    if (
+      release?.status !== "ready"
+      || !release.readyAt
+      || !release.chunksReadyAt
+      || (release.workspaceId !== null && release.workspaceId !== run.thread.project.workspaceId)
+    ) {
+      throw new Error("KNOWLEDGE_SMOKE_RELEASE_NOT_READY_OR_SCOPED");
+    }
   }
   if (
     run.status !== "queued"
@@ -218,10 +253,13 @@ async function loadAndAssertScope(db, smoke, startRunRequestSchema) {
   if (!request.prompt.includes("workbench_knowledge_retrieve")) {
     throw new Error("KNOWLEDGE_SMOKE_TRUSTED_TOOL_NOT_REQUIRED_BY_PROMPT");
   }
-  if (request.prompt.includes(smoke.expectedProbe) || request.prompt.includes(smoke.expectedCitation)) {
+  if (
+    request.prompt.includes(expectations.expectedProbe)
+    || request.prompt.includes(expectations.expectedCitation)
+  ) {
     throw new Error("KNOWLEDGE_SMOKE_EXPECTATION_LEAKED_INTO_RUN_PROMPT");
   }
-  return { request };
+  return { request, threadId: run.threadId };
 }
 
 async function loadPersistedSurfaces(db, smoke) {
@@ -233,6 +271,7 @@ async function loadPersistedSurfaces(db, smoke) {
         status: true,
         errorCode: true,
         errorDetail: true,
+        knowledgeReleaseId: true,
         outputEntry: { select: { content: true } },
         draft: { select: { content: true } },
         events: { orderBy: { sequence: "asc" }, select: { type: true, payload: true } },
@@ -247,49 +286,135 @@ async function loadPersistedSurfaces(db, smoke) {
         externalRunId: true,
         errorCode: true,
         errorDetail: true,
+        startedAt: true,
+        finishedAt: true,
       },
     }),
   ]);
   if (!run || attempts.length !== 1) throw new Error("KNOWLEDGE_SMOKE_POST_RUN_STATE_MISSING");
   const attempt = attempts[0];
-  const grants = await db.knowledgeToolGrant.findMany({
-    where: {
-      runtimeAttemptId: attempt.id,
-      runId: smoke.runId,
-      principalId: smoke.principalId,
-      projectId: smoke.projectId,
-      releaseId: smoke.releaseId,
-    },
-    select: {
-      id: true,
-      runtimeAttemptId: true,
-      runId: true,
-      principalId: true,
-      projectId: true,
-      releaseId: true,
-      payloadSha256: true,
-      issuedAt: true,
-      expiresAt: true,
-      revokedAt: true,
-      invocations: {
-        select: {
-          id: true,
-          invocationId: true,
-          querySha256: true,
-          status: true,
-          attemptCount: true,
-          response: true,
-          responseSha256: true,
-          lastErrorCode: true,
+  const [grants, invocationCount] = await Promise.all([
+    db.knowledgeToolGrant.findMany({
+      where: { runtimeAttemptId: attempt.id, runId: smoke.runId },
+      select: {
+        id: true,
+        runtimeAttemptId: true,
+        runId: true,
+        principalId: true,
+        projectId: true,
+        releaseId: true,
+        payloadSha256: true,
+        issuedAt: true,
+        expiresAt: true,
+        revokedAt: true,
+        invocations: {
+          select: {
+            id: true,
+            invocationId: true,
+            querySha256: true,
+            status: true,
+            attemptCount: true,
+            response: true,
+            responseSha256: true,
+            lastErrorCode: true,
+          },
         },
       },
-    },
-  });
-  if (run.status !== "succeeded" || attempt.status !== "succeeded") {
+    }),
+    db.knowledgeRetrievalInvocation.count({ where: { runtimeAttemptId: attempt.id } }),
+  ]);
+  if (
+    run.status !== "succeeded"
+    || attempt.status !== "succeeded"
+    || !attempt.startedAt
+    || !attempt.finishedAt
+  ) {
     throw new Error("KNOWLEDGE_SMOKE_POST_RUN_NOT_SUCCEEDED");
   }
-  if (grants.length !== 1) throw new Error("KNOWLEDGE_SMOKE_GRANT_LEDGER_MISMATCH");
-  return { run, attempt, grants };
+  if (run.knowledgeReleaseId !== smoke.releaseId) throw new Error("KNOWLEDGE_SMOKE_POST_RUN_SCOPE_MISMATCH");
+  if (smoke.releaseId === null) {
+    if (grants.length !== 0 || invocationCount !== 0) {
+      throw new Error("KNOWLEDGE_SMOKE_NULL_RELEASE_ENDPOINT_NOT_ZERO");
+    }
+  } else if (
+    grants.length !== 1
+    || grants[0]?.principalId !== smoke.principalId
+    || grants[0]?.projectId !== smoke.projectId
+    || grants[0]?.releaseId !== smoke.releaseId
+  ) {
+    throw new Error("KNOWLEDGE_SMOKE_GRANT_LEDGER_MISMATCH");
+  }
+  return { run, attempt, grants, invocationCount };
+}
+
+async function executeRun(processor, runId) {
+  const execution = await processor.execute(runId, [], undefined, {
+    retryCount: 0,
+    retryLimit: 0,
+  });
+  if (execution?.skipped || execution?.waitingInput || execution?.cancellationPending) {
+    throw new Error("KNOWLEDGE_SMOKE_RUN_DID_NOT_COMPLETE");
+  }
+  return execution;
+}
+
+async function loadExternalSurfaces(config, sdk, headers, attempt) {
+  const externalRunId = attempt.externalRunId;
+  if (!externalRunId) throw new Error("KNOWLEDGE_SMOKE_EXTERNAL_RUN_MISSING");
+  const client = new sdk.Client({
+    apiUrl: config.deerFlowLangGraphUrl,
+    apiKey: null,
+    timeoutMs: config.deerFlowTimeoutMs,
+    defaultHeaders: headers,
+  });
+  const [externalRun, externalRuns, thread, state, history] = await Promise.all([
+    client.runs.get(attempt.externalThreadId, externalRunId),
+    listAllRuns(client, attempt.externalThreadId),
+    client.threads.get(attempt.externalThreadId, { include: ["values", "config", "context"] }),
+    client.threads.getState(attempt.externalThreadId, undefined, { subgraphs: true }),
+    client.threads.getHistory(attempt.externalThreadId, { limit: HISTORY_LIMIT }),
+  ]);
+  assertCompleteHistory(history, HISTORY_LIMIT);
+  const selectedRuns = externalRuns.filter((run) => run?.run_id === externalRunId);
+  if (selectedRuns.length !== 1) throw new Error("KNOWLEDGE_SMOKE_EXTERNAL_RUN_LIST_MISMATCH");
+  return {
+    history,
+    deerFlowSurfaces: [externalRun, ...selectedRuns, thread, state, ...history],
+    scanSurfaces: [
+      { label: "deerflow-run", value: externalRun },
+      { label: "deerflow-run-list", value: selectedRuns },
+      { label: "deerflow-thread", value: thread },
+      { label: "deerflow-state", value: state },
+      { label: "deerflow-history", value: history },
+    ],
+  };
+}
+
+function isolationSurface(scope, persisted, successfulInvocationCount) {
+  return {
+    runId: scope.runId,
+    runtimeAttemptId: persisted.attempt.id,
+    externalThreadId: persisted.attempt.externalThreadId,
+    externalRunId: persisted.attempt.externalRunId,
+    releaseId: scope.releaseId,
+    grantCount: persisted.grants.length,
+    invocationCount: persisted.invocationCount,
+    successfulInvocationCount,
+    startedAt: persisted.attempt.startedAt,
+    finishedAt: persisted.attempt.finishedAt,
+  };
+}
+
+function scopeRawValues(scope, persisted) {
+  return [
+    scope.runId,
+    scope.principalId,
+    scope.projectId,
+    scope.releaseId,
+    persisted.attempt.id,
+    persisted.attempt.externalThreadId,
+    persisted.attempt.externalRunId,
+  ].filter((value) => typeof value === "string" && value.length > 0);
 }
 
 async function listAllRuns(client, threadId) {
@@ -335,6 +460,29 @@ async function assertRuntimeModel(langGraphUrl, headers, expectedModel) {
   if (!names.includes(expectedModel)) throw new Error("DEERFLOW_PINNED_MODEL_UNAVAILABLE");
 }
 
+function identityHeaders(config, principalId) {
+  return {
+    accept: "application/json",
+    "X-DeerFlow-Internal-Token": config.deerFlowInternalToken,
+    "X-DeerFlow-Owner-User-Id": principalId,
+  };
+}
+
+async function assertCheckoutBinding(expectedCommit) {
+  let stdout;
+  try {
+    ({ stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    }));
+  } catch {
+    throw new Error("KNOWLEDGE_SMOKE_CANDIDATE_CHECKOUT_UNAVAILABLE");
+  }
+  if (stdout.trim() !== expectedCommit) {
+    throw new Error("KNOWLEDGE_SMOKE_CANDIDATE_CHECKOUT_MISMATCH");
+  }
+}
+
 async function responseJson(response, errorCode) {
   const text = await response.text();
   if (!response.ok) throw new Error(`${errorCode}:${response.status}`);
@@ -346,8 +494,8 @@ async function responseJson(response, errorCode) {
 }
 
 function importBuilt(base, relativePath) {
-  return import(pathToFileURL(path.join(base, relativePath)).href).catch((error) => {
-    throw new Error(`KNOWLEDGE_SMOKE_WORKER_BUILD_REQUIRED:${redactKnowledgeCapability(error.message)}`);
+  return import(pathToFileURL(path.join(base, relativePath)).href).catch(() => {
+    throw new Error("KNOWLEDGE_SMOKE_WORKER_BUILD_REQUIRED");
   });
 }
 
