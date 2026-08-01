@@ -464,11 +464,13 @@ jobs:
           evidence_dir="output/runtime-process-convergence"
           rm -rf "$evidence_dir"
           mkdir -p "$evidence_dir"
+          log_file="$(mktemp)"
           set +e
-          npm run runtime:process-convergence:postgres 2>&1 | tee "$evidence_dir/test.log"
-          convergence_status="${PIPESTATUS[0]}"
+          npm run runtime:process-convergence:postgres >"$log_file" 2>&1
+          convergence_status="$?"
           set -e
-          sha256sum "$evidence_dir/test.log" > "$evidence_dir/test.log.sha256"
+          cat "$log_file"
+          rm -f "$log_file"
           exit "$convergence_status"
 
       - name: Upload process-level Runtime convergence evidence
@@ -476,7 +478,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: runtime-process-convergence-linux-${{ env.WORKBENCH_CANDIDATE_SHA }}-${{ github.run_attempt }}
-          path: output/runtime-process-convergence/
+          path: |
+            output/runtime-process-convergence/evidence.json
+            output/runtime-process-convergence/evidence.json.sha256
           if-no-files-found: error
           retention-days: 14
 

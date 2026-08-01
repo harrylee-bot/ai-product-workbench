@@ -24,6 +24,7 @@ import { RunProcessor } from "./runs/run-processor.js";
 import { RuntimeCancellationReconciler } from "./runs/runtime-cancellation-reconciler.js";
 import { RuntimeExecutionReconciler } from "./runs/runtime-execution-reconciler.js";
 import { S3RuntimeReadyBlobReader } from "./storage/s3-runtime-ready-blob-reader.js";
+import { shutdownWorkerWithExitCode } from "./shutdown.js";
 
 const telemetry = initializeTelemetry({ serviceName: "workbench-runtime-worker" });
 
@@ -189,16 +190,23 @@ async function main() {
   await executionReconciler.runOnce();
   executionReconciler.start();
 
-  const shutdown = async (signal: string) => {
-    console.log(`[worker] received ${signal}`);
-    cancellationReconciler.stop();
-    executionReconciler.stop();
-    await boss.stop({ graceful: true, timeout: 30_000 });
-    await db.$disconnect();
-    await telemetry.shutdown();
+  const shutdownDependencies = {
+    log: (message: string) => console.log(message),
+    logError: (message: string, error: unknown) => console.error(message, error),
+    stopReconcilers: () => {
+      cancellationReconciler.stop();
+      executionReconciler.stop();
+    },
+    stopQueue: () => boss.stop({ graceful: true, timeout: 30_000 }),
+    disconnectDatabase: () => db.$disconnect(),
+    shutdownTelemetry: () => telemetry.shutdown(),
   };
-  process.once("SIGINT", () => void shutdown("SIGINT").finally(() => process.exit(0)));
-  process.once("SIGTERM", () => void shutdown("SIGTERM").finally(() => process.exit(0)));
+  const handleShutdown = (signal: string) => {
+    void shutdownWorkerWithExitCode(signal, shutdownDependencies)
+      .then((exitCode) => process.exit(exitCode));
+  };
+  process.once("SIGINT", () => handleShutdown("SIGINT"));
+  process.once("SIGTERM", () => handleShutdown("SIGTERM"));
   console.log(`[worker] listening on ${runtimeExecuteQueue}, ${runtimeCancelQueue}`);
 }
 
