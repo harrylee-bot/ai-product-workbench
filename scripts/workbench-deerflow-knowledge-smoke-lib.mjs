@@ -6,6 +6,8 @@ const CAPABILITY_TOKEN = /wbkg1\.[A-Za-z0-9_.-]*/gu;
 const MAX_SCAN_NODES = 1_000_000;
 const MAX_SCAN_DEPTH = 128;
 const MAX_EMBEDDED_JSON_BYTES = 2 * 1024 * 1024;
+const COMMIT_SHA = /^[a-f0-9]{40}$/u;
+const IMAGE_DIGEST = /^sha256:[a-f0-9]{64}$/u;
 
 const REQUIRED_ENVIRONMENT = Object.freeze([
   "DEERFLOW_GATEWAY_URL",
@@ -17,6 +19,10 @@ const REQUIRED_ENVIRONMENT = Object.freeze([
   "WORKBENCH_S3_BUCKET",
   "WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID",
   "WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY",
+  "WORKBENCH_SOURCE_COMMIT",
+  "WORKBENCH_RUNTIME_WORKER_IMAGE_REF",
+  "WORKBENCH_DEERFLOW_IMAGE_REF",
+  "WORKBENCH_DEERFLOW_IMAGE_DIGEST",
   "WORKBENCH_KNOWLEDGE_SMOKE_RUN_ID",
   "WORKBENCH_KNOWLEDGE_SMOKE_PRINCIPAL_ID",
   "WORKBENCH_KNOWLEDGE_SMOKE_PROJECT_ID",
@@ -24,6 +30,10 @@ const REQUIRED_ENVIRONMENT = Object.freeze([
   "WORKBENCH_KNOWLEDGE_SMOKE_QUERY",
   "WORKBENCH_KNOWLEDGE_SMOKE_EXPECTED_PROBE",
   "WORKBENCH_KNOWLEDGE_SMOKE_EXPECTED_CITATION",
+  "WORKBENCH_KNOWLEDGE_SMOKE_NULL_RUN_ID",
+  "WORKBENCH_KNOWLEDGE_SMOKE_NULL_PRINCIPAL_ID",
+  "WORKBENCH_KNOWLEDGE_SMOKE_NULL_PROJECT_ID",
+  "WORKBENCH_KNOWLEDGE_SMOKE_NULL_QUERY",
 ]);
 
 export function readKnowledgeSmokeEnvironment(environment) {
@@ -43,6 +53,23 @@ export function readKnowledgeSmokeEnvironment(environment) {
   assertSafeHttpUrl(values.DEERFLOW_LANGGRAPH_URL, "DEERFLOW_LANGGRAPH_URL");
   assertSafeHttpUrl(values.WORKBENCH_KNOWLEDGE_TOOL_URL, "WORKBENCH_KNOWLEDGE_TOOL_URL", true);
 
+  const candidateCommit = exactPattern(
+    values.WORKBENCH_SOURCE_COMMIT,
+    COMMIT_SHA,
+    "SOURCE_COMMIT",
+  );
+  const runtimeWorkerImageDigest = imageDigestFromRef(
+    values.WORKBENCH_RUNTIME_WORKER_IMAGE_REF,
+    "RUNTIME_WORKER_IMAGE_REF",
+  );
+  const deerFlowImageDigest = imageDigestFromRef(
+    values.WORKBENCH_DEERFLOW_IMAGE_REF,
+    "DEERFLOW_IMAGE_REF",
+  );
+  if (deerFlowImageDigest !== values.WORKBENCH_DEERFLOW_IMAGE_DIGEST) {
+    throw new Error("KNOWLEDGE_SMOKE_DEERFLOW_IMAGE_DIGEST_MISMATCH");
+  }
+
   const query = boundedText(values.WORKBENCH_KNOWLEDGE_SMOKE_QUERY, 1, 4_000, "QUERY");
   const expectedProbe = boundedText(
     values.WORKBENCH_KNOWLEDGE_SMOKE_EXPECTED_PROBE,
@@ -59,13 +86,34 @@ export function readKnowledgeSmokeEnvironment(environment) {
   if (query.includes(expectedProbe) || query.includes(expectedCitation)) {
     throw new Error("KNOWLEDGE_SMOKE_EXPECTATION_MUST_NOT_APPEAR_IN_QUERY");
   }
+  const nullQuery = boundedText(values.WORKBENCH_KNOWLEDGE_SMOKE_NULL_QUERY, 1, 4_000, "NULL_QUERY");
+  if (nullQuery.includes(expectedProbe) || nullQuery.includes(expectedCitation)) {
+    throw new Error("KNOWLEDGE_SMOKE_EXPECTATION_MUST_NOT_APPEAR_IN_NULL_QUERY");
+  }
+  if (values.WORKBENCH_KNOWLEDGE_SMOKE_NULL_RUN_ID === values.WORKBENCH_KNOWLEDGE_SMOKE_RUN_ID) {
+    throw new Error("KNOWLEDGE_SMOKE_OPPOSITE_SCOPE_RUNS_MUST_DIFFER");
+  }
 
   return Object.freeze({
-    runId: values.WORKBENCH_KNOWLEDGE_SMOKE_RUN_ID,
-    principalId: values.WORKBENCH_KNOWLEDGE_SMOKE_PRINCIPAL_ID,
-    projectId: values.WORKBENCH_KNOWLEDGE_SMOKE_PROJECT_ID,
-    releaseId: values.WORKBENCH_KNOWLEDGE_SMOKE_RELEASE_ID,
-    query,
+    binding: Object.freeze({
+      candidateCommit,
+      runtimeWorkerImageDigest,
+      deerFlowImageDigest,
+    }),
+    valid: Object.freeze({
+      runId: values.WORKBENCH_KNOWLEDGE_SMOKE_RUN_ID,
+      principalId: values.WORKBENCH_KNOWLEDGE_SMOKE_PRINCIPAL_ID,
+      projectId: values.WORKBENCH_KNOWLEDGE_SMOKE_PROJECT_ID,
+      releaseId: values.WORKBENCH_KNOWLEDGE_SMOKE_RELEASE_ID,
+      query,
+    }),
+    nullRelease: Object.freeze({
+      runId: values.WORKBENCH_KNOWLEDGE_SMOKE_NULL_RUN_ID,
+      principalId: values.WORKBENCH_KNOWLEDGE_SMOKE_NULL_PRINCIPAL_ID,
+      projectId: values.WORKBENCH_KNOWLEDGE_SMOKE_NULL_PROJECT_ID,
+      releaseId: null,
+      query: nullQuery,
+    }),
     expectedProbe,
     expectedCitation,
     assistantId,
@@ -141,6 +189,153 @@ export function assertKnowledgeRetrievalProof({
     ledgerResults: ledgerMatches.length,
     citationFingerprint: sharedFingerprint,
   });
+}
+
+export function assertKnowledgeCatalogHidden(deerFlowSurfaces) {
+  const transcript = collectToolTranscript(deerFlowSurfaces);
+  if (
+    transcript.declaredCallIds.size > 0
+    || transcript.namedToolMessages > 0
+    || transcript.results.length > 0
+  ) {
+    throw new Error("KNOWLEDGE_SMOKE_NULL_RELEASE_CATALOG_NOT_HIDDEN");
+  }
+  let capabilityMissingObserved = false;
+  for (const surface of deerFlowSurfaces) {
+    walkValue(surface, ({ value }) => {
+      capabilityMissingObserved ||= typeof value === "string"
+        && value.includes("WORKBENCH_KNOWLEDGE_CAPABILITY_MISSING");
+    });
+  }
+  if (capabilityMissingObserved) {
+    throw new Error("KNOWLEDGE_SMOKE_NULL_RELEASE_REACHED_CAPABILITY_DEFENSE");
+  }
+  return Object.freeze({
+    declaredToolCalls: 0,
+    namedToolMessages: 0,
+    retrievalResults: 0,
+    capabilityMissingObserved: false,
+  });
+}
+
+export function assertKnowledgeEvidenceAbsent(surfaces, expectedProbe, expectedCitation) {
+  let leaked = false;
+  for (const surface of surfaces) {
+    walkValue(surface, ({ value }) => {
+      leaked ||= typeof value === "string"
+        && (value.includes(expectedProbe) || value.includes(expectedCitation));
+    });
+  }
+  if (leaked) throw new Error("KNOWLEDGE_SMOKE_NULL_RELEASE_RETRIEVAL_EVIDENCE_LEAK");
+  return true;
+}
+
+export function assertConcurrentOppositeScope({ valid, nullRelease }) {
+  if (
+    !valid
+    || !nullRelease
+    || valid.runId === nullRelease.runId
+    || valid.runtimeAttemptId === nullRelease.runtimeAttemptId
+    || valid.externalThreadId === nullRelease.externalThreadId
+    || valid.externalRunId === nullRelease.externalRunId
+    || valid.releaseId === null
+    || nullRelease.releaseId !== null
+    || valid.grantCount !== 1
+    || valid.successfulInvocationCount < 1
+    || valid.invocationCount < valid.successfulInvocationCount
+    || nullRelease.grantCount !== 0
+    || nullRelease.invocationCount !== 0
+  ) {
+    throw new Error("KNOWLEDGE_SMOKE_OPPOSITE_SCOPE_ISOLATION_FAILED");
+  }
+  const validStartedAt = dateMillis(valid.startedAt);
+  const validFinishedAt = dateMillis(valid.finishedAt);
+  const nullStartedAt = dateMillis(nullRelease.startedAt);
+  const nullFinishedAt = dateMillis(nullRelease.finishedAt);
+  if (Math.max(validStartedAt, nullStartedAt) > Math.min(validFinishedAt, nullFinishedAt)) {
+    throw new Error("KNOWLEDGE_SMOKE_OPPOSITE_SCOPE_DID_NOT_OVERLAP");
+  }
+  return Object.freeze({
+    concurrentExecutionObserved: true,
+    distinctRuntimeScopes: true,
+    validScopeEndpointCalls: valid.invocationCount,
+    nullScopeEndpointCalls: 0,
+  });
+}
+
+export function buildKnowledgeSmokeEvidence({
+  binding,
+  valid,
+  nullRelease,
+  isolation,
+  forbiddenValues,
+}) {
+  if (
+    valid.successfulInvocationCount < 1
+    || valid.proof?.declaredToolCalls < 1
+    || nullRelease.grantCount !== 0
+    || nullRelease.endpointCalls !== 0
+    || nullRelease.catalog?.declaredToolCalls !== 0
+    || nullRelease.catalog?.namedToolMessages !== 0
+    || nullRelease.catalog?.retrievalResults !== 0
+    || nullRelease.catalog?.capabilityMissingObserved !== false
+  ) {
+    throw new Error("KNOWLEDGE_SMOKE_EVIDENCE_INCOMPLETE");
+  }
+  const evidence = {
+    schema: "workbench.deerflow-knowledge-deployed-evidence.v2",
+    result: "PASS",
+    binding: {
+      candidateCommit: binding.candidateCommit,
+      runtimeWorkerImageDigest: binding.runtimeWorkerImageDigest,
+      deerFlowImageDigest: binding.deerFlowImageDigest,
+    },
+    validPinnedRelease: {
+      scopeFingerprint: evidenceFingerprint("valid-scope", valid.scopeIds),
+      releaseFingerprint: evidenceFingerprint("knowledge-release", [valid.releaseId]),
+      catalogVisible: valid.proof.declaredToolCalls > 0,
+      invocationPassed: true,
+      successfulEndpointCalls: valid.successfulInvocationCount,
+      checkpointStatesScanned: valid.checkpointStatesScanned,
+      structuredValuesScanned: valid.structuredValuesScanned,
+      proof: valid.proof,
+    },
+    nullRelease: {
+      scopeFingerprint: evidenceFingerprint("null-scope", nullRelease.scopeIds),
+      releasePinned: false,
+      grantCount: nullRelease.grantCount,
+      endpointCalls: nullRelease.endpointCalls,
+      catalogHidden: true,
+      capabilityMissingObserved: nullRelease.catalog.capabilityMissingObserved,
+      checkpointStatesScanned: nullRelease.checkpointStatesScanned,
+      structuredValuesScanned: nullRelease.structuredValuesScanned,
+    },
+    concurrentOppositeScope: isolation,
+    secretsNotPersisted: true,
+  };
+  assertRedactedKnowledgeEvidence(evidence, forbiddenValues);
+  return Object.freeze(evidence);
+}
+
+export function assertRedactedKnowledgeEvidence(evidence, forbiddenValues = []) {
+  const serialized = JSON.stringify(evidence);
+  if (isCapabilityLeak(serialized)) {
+    throw new Error("KNOWLEDGE_SMOKE_EVIDENCE_CAPABILITY_LEAK");
+  }
+  for (const forbidden of forbiddenValues) {
+    if (typeof forbidden === "string" && forbidden.length > 0 && serialized.includes(forbidden)) {
+      throw new Error("KNOWLEDGE_SMOKE_EVIDENCE_RAW_VALUE_LEAK");
+    }
+  }
+  return evidence;
+}
+
+export function safeKnowledgeSmokeError(error) {
+  const message = redactKnowledgeCapability(error instanceof Error ? error.message : String(error));
+  const match = /^([A-Z][A-Z0-9_]{2,})(?::([0-9]{3}|[A-Z][A-Z0-9_]{2,}))?$/u.exec(message);
+  const safePrefix = match?.[1].startsWith("KNOWLEDGE_SMOKE_")
+    || match?.[1].startsWith("DEERFLOW_");
+  return match && safePrefix ? match[0] : "KNOWLEDGE_SMOKE_UNCLASSIFIED_FAILURE";
 }
 
 export function assertFinalOutputContainsEvidence(value, expectedProbe, expectedCitation) {
@@ -286,6 +481,17 @@ function citationFingerprint(releaseId, citation) {
   return createHash("sha256").update(canonical).digest("hex");
 }
 
+function evidenceFingerprint(domain, values) {
+  const canonical = [domain, ...values].map((value) => String(value ?? "")).join("\u0000");
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
+function dateMillis(value) {
+  const milliseconds = value instanceof Date ? value.getTime() : Date.parse(String(value));
+  if (!Number.isFinite(milliseconds)) throw new Error("KNOWLEDGE_SMOKE_INVALID_EXECUTION_WINDOW");
+  return milliseconds;
+}
+
 function walkValue(root, visitor) {
   const seen = new WeakSet();
   const stack = [{ value: root, key: null, path: "$", depth: 0 }];
@@ -356,6 +562,17 @@ function boundedText(value, minimum, maximum, label) {
     throw new Error(`KNOWLEDGE_SMOKE_INVALID_${label}`);
   }
   return value.normalize("NFC");
+}
+
+function exactPattern(value, pattern, label) {
+  if (!pattern.test(value)) throw new Error(`KNOWLEDGE_SMOKE_INVALID_${label}`);
+  return value;
+}
+
+function imageDigestFromRef(value, label) {
+  const separator = value.lastIndexOf("@");
+  if (separator <= 0) throw new Error(`KNOWLEDGE_SMOKE_INVALID_${label}`);
+  return exactPattern(value.slice(separator + 1), IMAGE_DIGEST, label);
 }
 
 function safeLabel(value) {
