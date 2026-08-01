@@ -4789,7 +4789,11 @@ describe("Run durable snapshots", () => {
     tx.artifact.deleteMany.mockResolvedValue({ count: 1 });
     const { db, processor } = processorWithTransaction(tx);
 
-    await processor.finalizeCancellation("run-1", "Cancelled before publishing");
+    await processor.finalizeCancellation(
+      "run-1",
+      "Cancelled before publishing",
+      "runtime-attempt-1",
+    );
 
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.run.updateMany).toHaveBeenCalledWith({
@@ -4797,6 +4801,24 @@ describe("Run durable snapshots", () => {
       data: expect.objectContaining({
         status: "cancelled",
         cancellationReason: "Cancelled before publishing",
+        errorCode: null,
+        errorDetail: null,
+        errorRetryable: null,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      }),
+    });
+    expect(tx.runtimeAttempt.update).toHaveBeenCalledWith({
+      where: { id: "runtime-attempt-1" },
+      data: expect.objectContaining({
+        status: "cancelled",
+        errorCode: null,
+        errorDetail: null,
+        errorRetryable: null,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
       }),
     });
     expect(tx.runEvent.create).toHaveBeenCalledWith({

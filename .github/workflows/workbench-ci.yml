@@ -455,6 +455,31 @@ jobs:
           WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_test
         run: npm run test:workbench:postgres-http
 
+      - name: Run process-level Runtime kill and convergence regression
+        id: runtime_process_convergence
+        env:
+          WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_test
+        run: |
+          set -euo pipefail
+          evidence_dir="output/runtime-process-convergence"
+          rm -rf "$evidence_dir"
+          mkdir -p "$evidence_dir"
+          set +e
+          npm run runtime:process-convergence:postgres 2>&1 | tee "$evidence_dir/test.log"
+          convergence_status="${PIPESTATUS[0]}"
+          set -e
+          sha256sum "$evidence_dir/test.log" > "$evidence_dir/test.log.sha256"
+          exit "$convergence_status"
+
+      - name: Upload process-level Runtime convergence evidence
+        if: always() && steps.runtime_process_convergence.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runtime-process-convergence-linux-${{ env.WORKBENCH_CANDIDATE_SHA }}-${{ github.run_attempt }}
+          path: output/runtime-process-convergence/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Run candidate-bound File Worker PostgreSQL integration
         env:
           WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_test
