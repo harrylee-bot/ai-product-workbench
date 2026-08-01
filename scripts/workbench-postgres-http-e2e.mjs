@@ -6387,39 +6387,49 @@ async function runtimeExecuteQueueJobCount() {
 async function attributePersistedTerminalSseAborts(candidates) {
   const attributed = [];
   for (const candidate of candidates) {
-    const result = await queryDatabase(`
-      SELECT
-        run.status::text,
-        run.event_sequence,
-        terminal_event.sequence AS terminal_event_sequence,
-        terminal_event.type AS terminal_event_type
-      FROM workbench.runs run
-      LEFT JOIN LATERAL (
-        SELECT event.sequence, event.type
-        FROM workbench.run_events event
-        WHERE event.run_id = run.id
-        ORDER BY event.sequence DESC
-        LIMIT 1
-      ) terminal_event ON TRUE
-      WHERE run.id = $1
-    `, [candidate.runId]);
-    const row = result.rows[0];
-    const attribution = persistedTerminalSseAbortAttribution({
-      afterSequence: candidate.afterSequence,
-      failure: candidate.failure,
-      persistedRun: row
-        ? {
-            status: row.status,
-            eventSequence: Number(row.event_sequence),
-            terminalEventSequence: Number(row.terminal_event_sequence),
-            terminalEventType: row.terminal_event_type,
-          }
-        : null,
-      responseStatus: candidate.responseStatus,
-    });
-    if (!attribution) continue;
-    candidate.failure.abortAttribution = attribution;
-    attributed.push(candidate.failure);
+    // Playwright can report the stream abort immediately after the terminal SSE
+    // frame while the API transaction is still committing the Run terminal row.
+    // Give that bounded commit race a chance to settle, but keep the underlying
+    // attribution predicate strict: only a 200 stream with a fully persisted,
+    // sequence-matched terminal event may be treated as expected cleanup.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const result = await queryDatabase(`
+        SELECT
+          run.status::text,
+          run.event_sequence,
+          terminal_event.sequence AS terminal_event_sequence,
+          terminal_event.type AS terminal_event_type
+        FROM workbench.runs run
+        LEFT JOIN LATERAL (
+          SELECT event.sequence, event.type
+          FROM workbench.run_events event
+          WHERE event.run_id = run.id
+          ORDER BY event.sequence DESC
+          LIMIT 1
+        ) terminal_event ON TRUE
+        WHERE run.id = $1
+      `, [candidate.runId]);
+      const row = result.rows[0];
+      const attribution = persistedTerminalSseAbortAttribution({
+        afterSequence: candidate.afterSequence,
+        failure: candidate.failure,
+        persistedRun: row
+          ? {
+              status: row.status,
+              eventSequence: Number(row.event_sequence),
+              terminalEventSequence: Number(row.terminal_event_sequence),
+              terminalEventType: row.terminal_event_type,
+            }
+          : null,
+        responseStatus: candidate.responseStatus,
+      });
+      if (attribution) {
+        candidate.failure.abortAttribution = attribution;
+        attributed.push(candidate.failure);
+        break;
+      }
+      if (attempt < 19) await delay(100);
+    }
   }
   return attributed;
 }
