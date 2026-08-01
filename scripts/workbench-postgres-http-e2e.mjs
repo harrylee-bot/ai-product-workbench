@@ -123,6 +123,7 @@ const recoveryScenarioTimeoutMs = positiveInteger(
   runRealStackBrowser ? 360_000 : scenarioTimeoutMs,
 );
 const controlledProviderDelayMs = runRealStackBrowser ? 3_000 : 250;
+const controlledProviderHeartbeatMs = 2_000;
 const generationVisualViewports = [
   { width: 375, height: 812 },
   { width: 768, height: 1024 },
@@ -3856,12 +3857,12 @@ async function writeSuccessfulRuntimeStream(
       }, String(index + 3));
       await delay(controlledProviderDelayMs);
     }
-    if (draftGate) await draftGate.wait();
+    if (draftGate) await waitForControlledProviderGate(response, draftGate);
     sendSse(response, "values", {
       node: "generate_prd",
       values: { messages: draftSnapshot },
     }, String(stageSnapshots.length + 3));
-    if (finalizationGate) await finalizationGate.wait();
+    if (finalizationGate) await waitForControlledProviderGate(response, finalizationGate);
     else await delay(controlledProviderDelayMs);
     sendSse(response, "values", {
       node: "finalize",
@@ -5685,6 +5686,22 @@ function controlledGate() {
       releasePromise();
     },
   };
+}
+
+async function waitForControlledProviderGate(response, gate) {
+  while (true) {
+    const released = await Promise.race([
+      gate.wait().then(() => true),
+      delay(controlledProviderHeartbeatMs, false),
+    ]);
+    if (released) return;
+    if (response.destroyed || response.writableEnded) {
+      throw new Error("controlled provider stream closed before the visual gate was released");
+    }
+    // Comment-only SSE frames reset the real adapter's idle budget without
+    // advancing the durable provider cursor or changing business state.
+    response.write(": workbench-e2e-provider-heartbeat\n\n");
+  }
 }
 
 function spawnService(name, command, args, environment) {

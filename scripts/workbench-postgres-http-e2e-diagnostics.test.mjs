@@ -501,13 +501,24 @@ test("the real-stack PRD draft gate preserves pending evidence and always releas
   const streamStart = source.indexOf("async function writeSuccessfulRuntimeStream");
   const streamEnd = source.indexOf("async function writePrototypePatchRuntimeStream", streamStart);
   const stream = source.slice(streamStart, streamEnd);
-  const draftGateWait = stream.indexOf("if (draftGate) await draftGate.wait();");
+  const draftGateWait = stream.indexOf("if (draftGate) await waitForControlledProviderGate(response, draftGate);");
   const draftSnapshotEmission = stream.indexOf("values: { messages: draftSnapshot }");
+  const finalizationGateWait = stream.indexOf("if (finalizationGate) await waitForControlledProviderGate(response, finalizationGate);");
+  const finalizationEmission = stream.indexOf('node: "finalize"', draftSnapshotEmission);
   assert.ok(draftGateWait >= 0, "the browser PRD stream must wait for draft evidence capture");
   assert.ok(
     draftSnapshotEmission >= 0 && draftGateWait < draftSnapshotEmission,
     "the browser PRD draft gate must be awaited before the draft snapshot is emitted",
   );
+  assert.ok(
+    finalizationGateWait >= 0 && finalizationEmission >= 0 && finalizationGateWait < finalizationEmission,
+    "the browser PRD finalization gate must be awaited before finalization is emitted",
+  );
+  const heartbeatStart = source.indexOf("async function waitForControlledProviderGate");
+  const heartbeatEnd = source.indexOf("function spawnService", heartbeatStart);
+  const heartbeat = source.slice(heartbeatStart, heartbeatEnd);
+  assert.match(heartbeat, /controlledProviderHeartbeatMs/u);
+  assert.match(heartbeat, /response\.write\(": workbench-e2e-provider-heartbeat\\n\\n"\)/u);
 
   const browserStart = source.indexOf("async function runRealStackBrowserScenario");
   const browserEnd = source.indexOf("async function captureActiveGenerationVisualEvidence", browserStart);
