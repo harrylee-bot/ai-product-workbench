@@ -6044,7 +6044,8 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
     for (const viewport of generationVisualViewports) {
       await page.setViewportSize(viewport);
       await pendingDocument.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-      const observation = await pendingDocument.evaluate(async (element) => {
+      await waitForStableViewportRect(pendingDocument, viewport, "pending PRD document");
+      const observation = await pendingDocument.evaluate(async (element, options) => {
         const metric = (selector) => {
           const candidate = document.querySelector(selector);
           if (!(candidate instanceof HTMLElement)) return null;
@@ -6061,13 +6062,19 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
         const spinner = element.querySelector(".workbench-artifact-spinner");
         const spinnerSample = () => spinner instanceof HTMLElement
           ? {
+              connected: spinner.isConnected,
               animationDuration: getComputedStyle(spinner).animationDuration,
               animationIterationCount: getComputedStyle(spinner).animationIterationCount,
               transform: getComputedStyle(spinner).transform,
             }
           : null;
-        const firstSpinnerFrame = spinnerSample();
-        await new Promise((resolve) => setTimeout(resolve, 120));
+        const spinnerFrames = [];
+        for (let index = 0; index < options.sampleCount; index += 1) {
+          const frame = spinnerSample();
+          spinnerFrames.push(frame);
+          if (!frame?.connected || index === options.sampleCount - 1) break;
+          await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
+        }
         const rect = element.getBoundingClientRect();
         return {
           ariaLive: element.getAttribute("aria-live"),
@@ -6082,7 +6089,7 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
             status: "active",
             motionKind: "prd",
           },
-          spinnerFrames: [firstSpinnerFrame, spinnerSample()],
+          spinnerFrames,
           rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
           occluders: {
             composer: metric("[data-project-composer]"),
@@ -6091,6 +6098,9 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
             utilityPill: metric("[data-utility-pill]"),
           },
         };
+      }, {
+        intervalMs: motionFrameSampleIntervalMs,
+        sampleCount: motionFrameSampleCount,
       });
       const screenshotPath = path.join(
         outputDir,
@@ -6107,6 +6117,31 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
     }
   }
   return evidence;
+}
+
+async function waitForStableViewportRect(locator, viewport, label) {
+  let previousRect = null;
+  let stableSamples = 0;
+  await waitFor(async () => {
+    const rect = await locator.boundingBox();
+    if (!rect) {
+      previousRect = null;
+      stableSamples = 0;
+      return false;
+    }
+    const insideViewport = rect.x >= 0
+      && rect.y >= 0
+      && rect.x + rect.width <= viewport.width
+      && rect.y + rect.height <= viewport.height;
+    const stable = insideViewport
+      && previousRect !== null
+      && ["x", "y", "width", "height"].every((key) => (
+        Math.abs(rect[key] - previousRect[key]) <= 0.5
+      ));
+    stableSamples = stable ? stableSamples + 1 : 0;
+    previousRect = rect;
+    return stableSamples >= 2;
+  }, scenarioTimeoutMs, `${label} did not settle inside ${viewport.width}x${viewport.height}`);
 }
 
 function assertPendingDocumentVisualEvidence(evidence) {
@@ -6129,20 +6164,42 @@ function assertPendingDocumentVisualEvidence(evidence) {
       && item.rect.bottom <= height,
       `pending PRD document escaped the viewport at ${item.viewport}`,
     );
-    assert.ok(item.spinnerFrames.every(Boolean), `pending PRD spinner style was unavailable at ${item.viewport}`);
+    assert.equal(
+      item.spinnerFrames.length,
+      motionFrameSampleCount,
+      `pending PRD spinner frame matrix was incomplete at ${item.viewport}`,
+    );
+    assert.ok(
+      item.spinnerFrames.every((frame) => frame?.connected),
+      `pending PRD spinner was replaced during sampling at ${item.viewport}`,
+    );
     for (const [name, rect] of Object.entries(item.occluders)) {
       assert.ok(
         !rectanglesOverlap(item.rect, rect),
         `pending PRD document was obscured by ${name} at ${item.viewport}`,
       );
     }
+    const spinnerTransforms = new Set(item.spinnerFrames.map((frame) => frame.transform));
     if (item.reducedMotion) {
-      assert.equal(item.spinnerFrames[1].animationDuration, "0.001s", `pending PRD spinner did not reduce motion at ${item.viewport}`);
-      assert.equal(item.spinnerFrames[1].animationIterationCount, "1", `pending PRD spinner kept repeating at ${item.viewport}`);
-      assert.equal(item.spinnerFrames[0].transform, item.spinnerFrames[1].transform, `pending PRD spinner moved with reduced motion at ${item.viewport}`);
+      assert.ok(
+        item.spinnerFrames.every((frame) => frame.animationDuration === "0.001s"),
+        `pending PRD spinner did not reduce motion at ${item.viewport}`,
+      );
+      assert.ok(
+        item.spinnerFrames.every((frame) => frame.animationIterationCount === "1"),
+        `pending PRD spinner kept repeating at ${item.viewport}`,
+      );
+      assert.equal(spinnerTransforms.size, 1, `pending PRD spinner moved with reduced motion at ${item.viewport}`);
     } else {
-      assert.notEqual(item.spinnerFrames[1].animationDuration, "0.001s", `pending PRD spinner used reduced duration at ${item.viewport}`);
-      assert.notEqual(item.spinnerFrames[0].transform, item.spinnerFrames[1].transform, `pending PRD spinner did not advance at ${item.viewport}`);
+      assert.ok(
+        item.spinnerFrames.every((frame) => frame.animationDuration !== "0.001s"),
+        `pending PRD spinner used reduced duration at ${item.viewport}`,
+      );
+      assert.ok(
+        item.spinnerFrames.every((frame) => frame.animationIterationCount === "infinite"),
+        `pending PRD spinner did not keep progressing at ${item.viewport}`,
+      );
+      assert.ok(spinnerTransforms.size > 1, `pending PRD spinner did not advance at ${item.viewport}`);
     }
   }
 }

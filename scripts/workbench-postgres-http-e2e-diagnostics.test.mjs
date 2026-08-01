@@ -551,15 +551,21 @@ test("the real-stack visual lane separates active motion from pending document a
 
   const activeStart = source.indexOf("function assertActiveGenerationVisualEvidence");
   const activeEnd = source.indexOf("async function captureStableMotionFrames", activeStart);
+  const pendingCaptureStart = source.indexOf("async function capturePendingDocumentVisualEvidence", activeEnd);
+  const pendingLayoutWaitStart = source.indexOf("async function waitForStableViewportRect", pendingCaptureStart);
   const pendingStart = source.indexOf("function assertPendingDocumentVisualEvidence", activeStart);
   const pendingEnd = source.indexOf("function browserUrlClass", pendingStart);
   assert.ok(
     activeStart >= 0
       && activeEnd > activeStart
-      && pendingStart > activeEnd
+      && pendingCaptureStart > activeEnd
+      && pendingLayoutWaitStart > pendingCaptureStart
+      && pendingStart > pendingLayoutWaitStart
       && pendingEnd > pendingStart,
   );
   const activeAssertions = source.slice(activeStart, activeEnd);
+  const pendingCapture = source.slice(pendingCaptureStart, pendingLayoutWaitStart);
+  const pendingLayoutWait = source.slice(pendingLayoutWaitStart, pendingStart);
   const pendingAssertions = source.slice(pendingStart, pendingEnd);
   const pendingSemanticAssertions = [
     ...source.matchAll(/assert\.(?:equal|ok|deepEqual)\(\s*item\.(?:ariaLive|hasSkeleton|hasSpinner)\b/gu),
@@ -576,6 +582,14 @@ test("the real-stack visual lane separates active motion from pending document a
   assert.match(pendingAssertions, /item\.hasSpinner/u);
   assert.match(pendingAssertions, /pending PRD document escaped the viewport/u);
   assert.match(pendingAssertions, /pending PRD document was obscured by/u);
+  assert.match(pendingCapture, /await waitForStableViewportRect\(pendingDocument, viewport/u);
+  assert.match(pendingCapture, /connected: spinner\.isConnected/u);
+  assert.match(pendingCapture, /sampleCount: motionFrameSampleCount/u);
+  assert.match(pendingLayoutWait, /stableSamples >= 2/u);
+  assert.match(pendingLayoutWait, /rect\.x \+ rect\.width <= viewport\.width/u);
+  assert.match(pendingAssertions, /spinnerFrames\.every\(\(frame\) => frame\?\.connected\)/u);
+  assert.match(pendingAssertions, /spinnerTransforms\.size > 1/u);
+  assert.match(pendingAssertions, /spinnerTransforms\.size, 1/u);
   assert.match(source, /selected action remained visible during/u);
   assert.match(source, /\["utilityPill", "composer"\]/u);
   assert.match(source, /\["suggestions", "composer"\]/u);
