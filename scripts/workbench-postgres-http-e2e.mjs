@@ -5321,7 +5321,15 @@ async function runRealStackBrowserScenario({
     };
     page.on("request", captureProductPreviewRequest);
     try {
-      await page.getByRole("button", { name: "预览项目" }).click();
+      const previewAction = page.locator('[data-project-action="preview"]');
+      await previewAction.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      assert.equal(
+        await previewAction.getAttribute("aria-label"),
+        "预览项目",
+        "product Preview action lost its accessible name",
+      );
+      assert.equal(await previewAction.isEnabled(), true, "product Preview action was disabled");
+      await previewAction.click({ timeout: scenarioTimeoutMs });
       const productPreview = page.locator("[data-project-preview]");
       await productPreview.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
       const productPreviewFrame = productPreview.locator("iframe[data-preview-capability]");

@@ -467,6 +467,21 @@ test("the real-stack browser records bounded Playwright cleanup before writing e
   assert.doesNotMatch(source, /await context\?\.close\(\)|await browser\?\.close\(\)/u);
 });
 
+test("the real-stack product Preview flow uses the stable action hook and preserves accessibility", async () => {
+  const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
+
+  const action = source.indexOf('const previewAction = page.locator(\'[data-project-action="preview"]\');');
+  const visible = source.indexOf('previewAction.waitFor({ state: "visible", timeout: scenarioTimeoutMs })', action);
+  const accessibleName = source.indexOf('previewAction.getAttribute("aria-label")', visible);
+  const enabled = source.indexOf("previewAction.isEnabled()", accessibleName);
+  const click = source.indexOf("previewAction.click({ timeout: scenarioTimeoutMs })", enabled);
+  assert.ok(
+    action >= 0 && action < visible && visible < accessibleName && accessibleName < enabled && enabled < click,
+    "the Preview action must be visible, accessibly named, and enabled before the flow clicks it",
+  );
+  assert.doesNotMatch(source, /getByRole\("button", \{ name: "预览项目" \}\)\.click\(\)/u);
+});
+
 test("the real-stack visual sampler rejects detached nodes without weakening frame movement", async () => {
   const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
 
