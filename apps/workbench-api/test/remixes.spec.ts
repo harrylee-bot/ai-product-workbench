@@ -249,6 +249,15 @@ function createHarness(share = sourceShare()) {
 }
 
 describe("Project remix command", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("copies a ready immutable release into a new Project and remaps all Board artifact ids", async () => {
     const { tx, db, service } = createHarness();
 
