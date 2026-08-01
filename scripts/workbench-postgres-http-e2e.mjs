@@ -131,13 +131,13 @@ const recoveryScenarioTimeoutMs = positiveInteger(
 );
 const controlledProviderDelayMs = runRealStackBrowser ? 3_000 : 250;
 const controlledProviderHeartbeatMs = 2_000;
+const runtimeTerminalJobStates = new Set(["cancelled", "completed", "failed"]);
 const runtimeProcessConvergenceTimeoutMs = positiveInteger(
   "WORKBENCH_E2E_RUNTIME_PROCESS_CONVERGENCE_TIMEOUT_MS",
   120_000,
 );
 const runtimeExecuteQueueName = "runtime.execute";
 const runtimeCancelQueueName = "runtime.cancel";
-const runtimeTerminalJobStates = new Set(["cancelled", "completed", "failed"]);
 const generationVisualViewports = [
   { width: 375, height: 812 },
   { width: 768, height: 1024 },
@@ -687,6 +687,10 @@ async function runSigkillTakeoverScenario({ client, worker, spawnRuntimeWorker }
   const takeover = await waitForRuntimeProcessClaim(runId, "process-sigkill-recovery", initial.ownerId);
   assert.ok(takeover.epoch > initial.epoch, "replacement Worker did not advance the execution epoch");
   assert.notEqual(takeover.ownerId, initial.ownerId, "replacement Worker reused the stale execution owner");
+  assert.equal(initial.epoch, initial.attemptEpoch, "initial Run and Runtime attempt epochs diverged");
+  assert.equal(takeover.epoch, takeover.attemptEpoch, "takeover Run and Runtime attempt epochs diverged");
+  assert.equal(takeover.attemptId, initial.attemptId, "takeover changed the Runtime attempt identity");
+  assert.equal(takeover.externalRunId, initial.externalRunId, "takeover changed the provider Run identity");
   await assertStaleRuntimeClaimFenced({
     runId,
     attemptId: initial.attemptId,
@@ -757,9 +761,27 @@ async function runSigtermCancellationScenario({ client, worker, spawnRuntimeWork
     "Runtime Worker did not enter its SIGTERM shutdown path",
   );
   fakeRuntime.disconnectProcessFault(runId);
+  await waitFor(
+    () => worker.log.value().includes("[worker] shutdown complete SIGTERM"),
+    runtimeProcessConvergenceTimeoutMs,
+    "Runtime Worker did not report completed SIGTERM shutdown",
+  );
   const terminated = await waitForServiceExit(worker, runtimeProcessConvergenceTimeoutMs);
   assert.equal(terminated.code, 0, "Runtime Worker did not complete graceful SIGTERM shutdown");
   assert.equal(terminated.signal, null, "Runtime Worker was force-killed during SIGTERM shutdown");
+  const shutdownLog = worker.log.value();
+  for (const phase of [
+    "reconcilers-stopped",
+    "queue-stopped",
+    "database-disconnected",
+    "telemetry-stopped",
+  ]) {
+    assert.equal(
+      shutdownLog.includes(`[worker] shutdown phase=${phase}`),
+      true,
+      `Runtime Worker did not report SIGTERM shutdown phase ${phase}`,
+    );
+  }
 
   const cancel = await client.json("POST", `/runs/${runId}/cancel`, {
     headers: { "Idempotency-Key": `e2e-process-cancel-${randomUUID()}` },
@@ -787,6 +809,12 @@ async function runSigtermCancellationScenario({ client, worker, spawnRuntimeWork
     evidence: {
       deliveredSignal: "SIGTERM",
       gracefulExitCode: terminated.code,
+      gracefulShutdownPhases: [
+        "reconcilers-stopped",
+        "queue-stopped",
+        "database-disconnected",
+        "telemetry-stopped",
+      ],
       runIdSha256: sha256(runId),
       runtimeAttemptIdSha256: sha256(initial.attemptId),
       externalRunIdSha256: sha256(initial.externalRunId),
