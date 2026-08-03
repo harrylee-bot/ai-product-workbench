@@ -11,6 +11,7 @@ import {
   WORKBENCH_RUNTIME_TOOLS,
   WORKBENCH_TOOL_GROUP,
 } from "./deerflow-workbench-tool-contract.mjs";
+import { readDeploymentEnv } from "./workbench-origin-manifest.mjs";
 
 const PRD_REFERENCE_READER_TOOL = Object.freeze({
   name: "read_file",
@@ -23,11 +24,12 @@ try {
   const providerEnvPath = argumentValue("--provider-env");
   const config = readConfig(configPath);
   const providerEnv = readProviderEnv(providerEnvPath);
-  validateConfig(config, providerEnv);
+  const databaseBackend = validateConfig(config, providerEnv);
   console.log(JSON.stringify({
     status: "valid",
     configSha256: sha256(readFileSync(configPath)),
     model: providerEnv.WORKBENCH_DEERFLOW_PROVIDER_MODEL,
+    databaseBackend,
     workbenchToolCount: config.tools.length,
   }));
 } catch (error) {
@@ -56,14 +58,9 @@ function readProviderEnv(providerEnvPath) {
   requireArgument(providerEnvPath, "--provider-env");
   const stat = lstatSync(providerEnvPath);
   assert(stat.isFile() && !stat.isSymbolicLink(), "provider environment must be a regular file");
-  const values = Object.create(null);
-  for (const [index, line] of readFileSync(providerEnvPath, "utf8").split(/\r?\n/u).entries()) {
-    if (!line.trim() || line.trimStart().startsWith("#")) continue;
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/u.exec(line);
-    assert(match, `provider environment line ${index + 1} is invalid`);
-    assert(!(match[1] in values), `${match[1]} occurs more than once in provider environment`);
-    values[match[1]] = match[2];
-  }
+  const values = Object.fromEntries(readDeploymentEnv(readFileSync(providerEnvPath), {
+    label: "DeerFlow provider environment",
+  }));
   for (const key of ["OPENAI_API_KEY", "WORKBENCH_DEERFLOW_PROVIDER_BASE_URL", "WORKBENCH_DEERFLOW_PROVIDER_MODEL"]) {
     assert(typeof values[key] === "string" && values[key].length > 0, `${key} is required in provider environment`);
   }
@@ -85,6 +82,8 @@ function validateConfig(config, providerEnv) {
   assert(model.api_key === "$OPENAI_API_KEY", "model api_key must reference OPENAI_API_KEY without embedding a secret");
   assert(model.base_url === "$WORKBENCH_DEERFLOW_PROVIDER_BASE_URL", "model base_url must reference the approved provider environment value");
 
+  const databaseBackend = validateDatabase(config.database, providerEnv);
+
   assert(isPlainObject(config.sandbox), "sandbox configuration is required");
   assert(config.sandbox.use === "deerflow.sandbox.local:LocalSandboxProvider", "sandbox must use the audited local provider");
   assert(config.sandbox.allow_host_bash === false, "sandbox host bash must remain disabled");
@@ -102,6 +101,87 @@ function validateConfig(config, providerEnv) {
     const matches = config.tools.filter((tool) => tool?.name === expectedTool.name);
     assert(matches.length === 1 && deepEqual(matches[0], expectedTool), `effective config must contain the canonical ${expectedTool.name} tool`);
   }
+  assert(
+    deepEqual(config.tool_groups, [WORKBENCH_TOOL_GROUP]),
+    "effective config tool_groups must exactly equal the canonical Workbench allowlist",
+  );
+  assert(
+    deepEqual(config.tools, WORKBENCH_RUNTIME_TOOLS),
+    "effective config tools must exactly equal the canonical Workbench allowlist",
+  );
+  return databaseBackend;
+}
+
+function validateDatabase(database, providerEnv) {
+  assert(isPlainObject(database), "database configuration is required");
+  assert(database.backend !== "memory", "database.backend=memory is not allowed for production persistence");
+  assert(database.backend === "sqlite" || database.backend === "postgres", "database.backend must be sqlite or postgres");
+
+  if (database.backend === "sqlite") {
+    validateSqliteDatabase(database);
+    return "sqlite";
+  }
+
+  validatePostgresDatabase(database, providerEnv);
+  return "postgres";
+}
+
+function validateSqliteDatabase(database) {
+  const sqliteDir = database.sqlite_dir;
+  assert(typeof sqliteDir === "string" && sqliteDir.length > 0, "database.sqlite_dir is required for the sqlite backend");
+  assert(sqliteDir === sqliteDir.trim(), "database.sqlite_dir must not contain leading or trailing whitespace");
+  assert(!sqliteDir.includes("\\"), "database.sqlite_dir must use a POSIX relative path");
+  assert(!sqliteDir.startsWith("/") && !/^[A-Za-z]:/u.test(sqliteDir), "database.sqlite_dir must be relative");
+  assert(
+    !sqliteDir.includes(".."),
+    "database.sqlite_dir must remain beneath .deer-flow/ and contain no ..",
+  );
+
+  const segments = sqliteDir.split("/");
+  assert(
+    segments[0] === ".deer-flow"
+      && segments.length > 1
+      && segments.slice(1).every((segment) => segment.length > 0 && segment !== "." && segment !== ".."),
+    "database.sqlite_dir must remain beneath .deer-flow/ and contain no .. path segment",
+  );
+}
+
+function validatePostgresDatabase(database, providerEnv) {
+  const reference = database.postgres_url;
+  assert(
+    typeof reference === "string" && /^\$[A-Za-z_][A-Za-z0-9_]*$/u.test(reference),
+    "database.postgres_url must be an exact environment variable reference",
+  );
+
+  const variableName = reference.slice(1);
+  assert(
+    Object.hasOwn(providerEnv, variableName),
+    `database.postgres_url environment variable ${variableName} must be declared in provider environment`,
+  );
+  const resolved = providerEnv[variableName];
+  assert(
+    typeof resolved === "string" && resolved.length > 0 && resolved === resolved.trim(),
+    `database.postgres_url environment variable ${variableName} is required and must be non-empty`,
+  );
+
+  let parsed;
+  try {
+    parsed = new URL(resolved);
+  } catch {
+    assert(false, `database.postgres_url environment variable ${variableName} must be a valid PostgreSQL URL`);
+  }
+  assert(
+    parsed.protocol === "postgres:" || parsed.protocol === "postgresql:",
+    `database.postgres_url environment variable ${variableName} must use PostgreSQL`,
+  );
+  assert(
+    parsed.hostname,
+    `database.postgres_url environment variable ${variableName} must name a PostgreSQL host`,
+  );
+  assert(
+    !parsed.search && !parsed.hash && !/[?#]/u.test(resolved),
+    `database.postgres_url environment variable ${variableName} must not contain a query or fragment`,
+  );
 }
 
 function argumentValue(name) {

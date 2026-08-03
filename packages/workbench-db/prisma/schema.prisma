@@ -877,6 +877,7 @@ model RuntimeAttempt {
   prototypePatchApplications PrototypePatchApplication[]
   externalEvents             RuntimeExternalEvent[]
   providerState              RuntimeProviderState?
+  providerCancellationResolution RuntimeProviderCancellationResolution?
 
   @@unique([runId, attempt])
   @@unique([id, runId])
@@ -885,6 +886,19 @@ model RuntimeAttempt {
   @@index([externalThreadId, status])
   @@index([status, executionLeaseExpiresAt])
   @@map("runtime_attempts")
+}
+
+model RuntimeProviderCancellationResolution {
+  runtimeAttemptId String         @id @map("runtime_attempt_id")
+  runId            String         @map("run_id")
+  failureCode      String         @map("failure_code") @db.VarChar(120)
+  outcome          String         @db.VarChar(32)
+  convergedAt      DateTime       @default(now()) @map("converged_at") @db.Timestamptz(6)
+  runtimeAttempt   RuntimeAttempt @relation(fields: [runtimeAttemptId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict, map: "runtime_provider_cancellation_resolutions_attempt_fkey")
+
+  @@unique([runtimeAttemptId, runId], map: "runtime_provider_cancellation_resolutions_attempt_run_key")
+  @@index([runId, convergedAt])
+  @@map("runtime_provider_cancellation_resolutions")
 }
 
 model RuntimeProviderState {

@@ -119,10 +119,24 @@
         "provider": { "type": ["object", "null"] }
       }
     },
+    "runtimeWorkerExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scopeId", "environmentId", "keyId", "signerId", "trustPolicySha256", "uid", "gid"],
+      "properties": {
+        "scopeId": { "const": "production-runtime.worker-execution" },
+        "environmentId": { "$ref": "#/$defs/identifier" },
+        "keyId": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "signerId": { "$ref": "#/$defs/identifier" },
+        "trustPolicySha256": { "$ref": "#/$defs/sha256" },
+        "uid": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "gid": { "type": "string", "pattern": "^[1-9][0-9]*$" }
+      }
+    },
     "deploymentConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "manifestSha256", "configSha256", "migrationSha256", "effectiveConfigSha256", "secretVersionsSha256", "identity", "dependencies"],
+      "required": ["schemaVersion", "manifestSha256", "configSha256", "migrationSha256", "effectiveConfigSha256", "secretVersionsSha256", "runtimeWorkerExecution", "identity", "dependencies"],
       "properties": {
         "schemaVersion": { "const": "workbench.production-deployment-configuration.v1" },
         "manifestSha256": { "$ref": "#/$defs/sha256" },
@@ -130,6 +144,7 @@
         "migrationSha256": { "$ref": "#/$defs/sha256" },
         "effectiveConfigSha256": { "$ref": "#/$defs/sha256" },
         "secretVersionsSha256": { "$ref": "#/$defs/sha256" },
+        "runtimeWorkerExecution": { "$ref": "#/$defs/runtimeWorkerExecution" },
         "identity": { "$ref": "#/$defs/identity" },
         "dependencies": {
           "type": "array",

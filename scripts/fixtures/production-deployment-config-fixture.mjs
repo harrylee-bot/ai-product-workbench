@@ -1,10 +1,29 @@
-import { INFRASTRUCTURE_IMAGE_DEFINITIONS } from "../production-deployment-config.mjs";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  EFFECTIVE_CONFIG_FIELDS,
+  INFRASTRUCTURE_IMAGE_DEFINITIONS,
+  PRODUCTION_SECRET_DEFINITIONS,
+} from "../production-deployment-config.mjs";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const fixtureProviderEnvironmentPath = path.join(repoRoot, "scripts/fixtures/deerflow-provider-env.fixture");
+const fixtureDeerFlowConfigPath = path.join(repoRoot, "deploy/deerflow-config.base.example.yaml");
 
 export function productionDeploymentConfigFixtureEnvironment({
   enterpriseSsoEnabled = false,
   overrides = {},
 } = {}) {
   const environment = {
+    WORKBENCH_ENVIRONMENT_ID: "workbench-production",
+    WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID: `sha256:${"c".repeat(64)}`,
+    WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID: "runtime-worker-production",
+    WORKBENCH_RUNTIME_WORKER_UID: "1000",
+    WORKBENCH_RUNTIME_WORKER_GID: "1000",
+    WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256: "d".repeat(64),
     WORKBENCH_WEB_ORIGIN: "https://workbench.example.test",
     WORKBENCH_PREVIEW_ORIGIN: "https://preview.example.test",
     WORKBENCH_ENTERPRISE_SSO_ENABLED: String(enterpriseSsoEnabled),
@@ -54,6 +73,20 @@ export function productionDeploymentConfigFixtureEnvironment({
     ])),
     ...overrides,
   };
+  for (const [name, type] of EFFECTIVE_CONFIG_FIELDS) {
+    if (!(name in environment)) environment[name] = fixtureEffectiveValue(name, type);
+  }
+  for (const [pathName, digestName] of [
+    ["WORKBENCH_DEERFLOW_BASE_CONFIG_PATH", "WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256"],
+    ["DEER_FLOW_CONFIG_PATH", "WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256"],
+  ]) {
+    if (!Object.hasOwn(overrides, digestName)) {
+      environment[digestName] = createHash("sha256").update(readFileSync(environment[pathName])).digest("hex");
+    }
+  }
+  for (const [name, sourceType] of PRODUCTION_SECRET_DEFINITIONS) {
+    if (!(name in environment)) environment[name] = sourceType === "file" ? path.resolve("package.json") : "";
+  }
   const deployed = new Map(INFRASTRUCTURE_IMAGE_DEFINITIONS.map((definition) => [
     definition.name,
     environment[definition.environment],
@@ -129,10 +162,52 @@ export function productionDeploymentConfigFixtureEnvironment({
     }, 8)] : []),
   ].sort((left, right) => left.name.localeCompare(right.name, "en"));
   environment.WORKBENCH_PRODUCTION_DEPENDENCY_ATTESTATIONS_JSON = JSON.stringify(dependencies);
-  environment.WORKBENCH_PRODUCTION_SECRET_VERSIONS_JSON = JSON.stringify([
-    { name: "better-auth", version: "v17", attestationSha256: "8".repeat(64) },
-    { name: "docling-api", version: "v4", attestationSha256: "9".repeat(64) },
-    { name: "object-storage-roles", version: "v23", attestationSha256: "a".repeat(64) },
-  ]);
+  environment.WORKBENCH_PRODUCTION_SECRET_VERSIONS_JSON = JSON.stringify(
+    PRODUCTION_SECRET_DEFINITIONS.map(([name]) => ({
+      name,
+      version: "fixture-v1",
+      attestationSha256: "8".repeat(64),
+      valueSha256: secretValueSha256(environment, name),
+    })),
+  );
   return new Map(Object.entries(environment));
+}
+
+function fixtureEffectiveValue(name, type) {
+  if (name === "OTEL_EXPORTER_OTLP_ENDPOINT") return "";
+  if (
+    name === "WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE"
+  ) return fixtureProviderEnvironmentPath;
+  if (name === "WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH") return path.join(repoRoot, "package.json");
+  if (name === "WORKBENCH_DEERFLOW_BASE_CONFIG_PATH" || name === "DEER_FLOW_CONFIG_PATH") {
+    return fixtureDeerFlowConfigPath;
+  }
+  if (type === "boolean") return "false";
+  if (type === "positive-integer") return "1";
+  if (type === "uid") return "0";
+  if (type === "port") return "8080";
+  if (type === "unprivileged-port") return "8080";
+  if (type === "private-ipv4") return name === "WORKBENCH_EDGE_WIREGUARD_IP" ? "10.88.0.1" : "10.88.0.2";
+  if (type === "wireguard-endpoint") return "edge.example.test:51820";
+  if (type === "https-url") return "https://fixture.example.test";
+  if (type === "url") return "https://fixture.example.test";
+  if (type === "internal-url") return "http://fixture.internal.example.test:8001/api";
+  if (type === "digest") return `sha256:${"1".repeat(64)}`;
+  if (type === "sha256") return "1".repeat(64);
+  if (type === "commit") return "1".repeat(40);
+  if (type === "immutable-image") return `registry.example.test/fixture/${name.toLowerCase()}@sha256:${"1".repeat(64)}`;
+  if (type === "identifier") return "fixture";
+  if (type === "path") return "/tmp/workbench-fixture";
+  if (type === "absolute-path") return `/tmp/${name.toLowerCase().replaceAll("_", "-")}`;
+  return "fixture";
+}
+
+function secretValueSha256(environment, name) {
+  const value = [
+    "WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE",
+    "WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH",
+  ].includes(name)
+    ? readFileSync(environment[name])
+    : Buffer.from(environment[name], "utf8");
+  return createHash("sha256").update(value).digest("hex");
 }

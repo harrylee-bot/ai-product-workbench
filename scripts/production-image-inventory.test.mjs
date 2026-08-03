@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -464,73 +464,103 @@ test("production acceptance workflow fails closed without same-run G4 download o
   );
 });
 
-test("verifies the exact manifest blob before reading or parsing it", () => {
+test("verifies and parses one frozen manifest read even if the source path changes", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "workbench-image-manifest-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, "production-image-manifest.json");
+  const bundlePath = path.join(root, "production-image-manifest.bundle.json");
+  const originalManifest = `${JSON.stringify(candidateManifest())}\n`;
+  const replacementManifest = `${JSON.stringify({ candidate: { sourceCommit: "b".repeat(40) } })}\n`;
+  await writeFile(manifestPath, originalManifest);
+  await writeFile(bundlePath, "{\"bundle\":true}\n");
   const events = [];
   const manifest = loadVerifiedProductionImageManifest({
-    manifestPath: "fixtures/production-image-manifest.json",
-    bundlePath: "fixtures/production-image-manifest.bundle.json",
+    manifestPath,
+    bundlePath,
     certificateIdentity,
     certificateOidcIssuer,
     verifyBlob: (input) => {
       events.push("verify");
-      assert.match(input.manifestPath, /production-image-manifest\.json$/u);
-      assert.match(input.bundlePath, /production-image-manifest\.bundle\.json$/u);
+      assert.equal(input.manifestPath, manifestPath);
+      assert.equal(input.bundlePath, bundlePath);
       assert.equal(input.certificateIdentity, certificateIdentity);
       assert.equal(input.certificateOidcIssuer, certificateOidcIssuer);
+      assert.equal(input.manifestBytes.toString("utf8"), originalManifest);
+      assert.equal(input.bundleBytes.toString("utf8"), "{\"bundle\":true}\n");
+      writeFileSync(manifestPath, replacementManifest);
       return true;
     },
-    readManifest: () => {
-      events.push("read");
-      return JSON.stringify(candidateManifest());
+    readManifest: (filePath) => {
+      events.push("read-manifest");
+      return readFileSync(filePath);
+    },
+    readBundle: (filePath) => {
+      events.push("read-bundle");
+      return readFileSync(filePath);
     },
   });
   assert.equal(manifest.candidate.sourceCommit, commit);
-  assert.deepEqual(events, ["verify", "read"]);
+  assert.deepEqual(events, ["read-manifest", "read-bundle", "verify"]);
 
-  let readAttempted = false;
+  let manifestReads = 0;
   assert.throws(() => loadVerifiedProductionImageManifest({
-    manifestPath: "fixtures/production-image-manifest.json",
-    bundlePath: "fixtures/production-image-manifest.bundle.json",
+    manifestPath,
+    bundlePath,
     certificateIdentity,
     certificateOidcIssuer,
     verifyBlob: () => {
       throw new Error("signature rejected");
     },
-    readManifest: () => {
-      readAttempted = true;
-      return "{}";
+    readManifest: (filePath) => {
+      manifestReads += 1;
+      return readFileSync(filePath);
     },
+    readBundle: (filePath) => readFileSync(filePath),
   }), /signature rejected/u);
-  assert.equal(readAttempted, false);
+  assert.equal(manifestReads, 1);
 });
 
 test("Cosign manifest verification uses exact identity flags", () => {
   let invocation;
+  let frozenManifestPath;
+  let frozenBundlePath;
+  const manifestBytes = Buffer.from("signed manifest\n");
+  const bundleBytes = Buffer.from("signed bundle\n");
   assert.equal(verifyCosignManifestBlob({
     manifestPath: "/release/production-image-manifest.json",
     bundlePath: "/release/production-image-manifest.bundle.json",
     certificateIdentity,
     certificateOidcIssuer,
+    manifestBytes,
+    bundleBytes,
     execute: (command, args, options) => {
       invocation = { command, args, options };
+      frozenBundlePath = args[2];
+      frozenManifestPath = args.at(-1);
+      assert.equal(readFileSync(frozenManifestPath, "utf8"), manifestBytes.toString("utf8"));
+      assert.equal(readFileSync(frozenBundlePath, "utf8"), bundleBytes.toString("utf8"));
+      assert.equal(statSync(frozenManifestPath).mode & 0o777, 0o600);
+      assert.equal(statSync(frozenBundlePath).mode & 0o777, 0o600);
     },
   }), true);
-  assert.deepEqual(invocation, {
-    command: "cosign",
-    args: [
-      "verify-blob",
-      "--bundle", "/release/production-image-manifest.bundle.json",
-      "--certificate-identity", certificateIdentity,
-      "--certificate-oidc-issuer", certificateOidcIssuer,
-      "/release/production-image-manifest.json",
-    ],
-    options: { stdio: ["ignore", "ignore", "pipe"] },
-  });
+  assert.equal(invocation.command, "cosign");
+  assert.deepEqual(invocation.args.slice(0, 2), ["verify-blob", "--bundle"]);
+  assert.deepEqual(invocation.args.slice(3, -1), [
+    "--certificate-identity", certificateIdentity,
+    "--certificate-oidc-issuer", certificateOidcIssuer,
+  ]);
+  assert.deepEqual(invocation.options, { stdio: ["ignore", "ignore", "pipe"] });
+  assert.equal(path.basename(frozenManifestPath), "production-image-manifest.json");
+  assert.equal(path.basename(frozenBundlePath), "production-image-manifest.bundle.json");
+  assert.equal(existsSync(frozenManifestPath), false);
+  assert.equal(existsSync(frozenBundlePath), false);
   assert.throws(() => verifyCosignManifestBlob({
     manifestPath: "/release/production-image-manifest.json",
     bundlePath: "/release/production-image-manifest.bundle.json",
     certificateIdentity,
     certificateOidcIssuer,
+    manifestBytes,
+    bundleBytes,
     execute: () => {
       throw new Error("invalid signature");
     },
@@ -751,7 +781,7 @@ test("binds the DeerFlow Validator Node image to the deployment environment", ()
   }), /does not match the deployment environment/u);
 });
 
-test("keeps the exact previous DeerFlow candidate available for rollback", () => {
+test("rejects the pre-Validator-Node DeerFlow candidate even when selected for rollback", () => {
   const legacyCommit = "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1";
   const manifest = candidateManifest(["deerflow"]);
   const deerflow = manifest.images[0];
@@ -774,12 +804,29 @@ test("keeps the exact previous DeerFlow candidate available for rollback", () =>
     ["WORKBENCH_DEERFLOW_COMMIT", "d".repeat(40)],
   ]);
 
-  assert.equal(verifyProductionImageManifest({
-    manifest,
-    expectedCommit: legacyCommit,
-    deploymentEnvironment,
-    onlyImageId: "deerflow",
-  }), true);
+  assert.throws(
+    () => verifyProductionImageManifest({
+      manifest,
+      expectedCommit: legacyCommit,
+      deploymentEnvironment,
+      onlyImageId: "deerflow",
+    }),
+    /requires WORKBENCH_DEERFLOW_NODE_IMAGE_REF/u,
+  );
+
+  deploymentEnvironment.set(
+    "WORKBENCH_DEERFLOW_NODE_IMAGE_REF",
+    `node:22-bookworm-slim@sha256:${"9".repeat(64)}`,
+  );
+  assert.throws(
+    () => verifyProductionImageManifest({
+      manifest,
+      expectedCommit: legacyCommit,
+      deploymentEnvironment,
+      onlyImageId: "deerflow",
+    }),
+    /build configuration does not match the deployment environment/u,
+  );
 });
 
 test("binds inspected image labels to source and canonical build configuration", () => {

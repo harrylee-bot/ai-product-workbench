@@ -5,8 +5,8 @@
   "agent": {
     "path": "deerflow/agents/lead_agent/agent.py",
     "upstreamSha256": "9052cfadca31817a927e83ad2dff01bfe5afdf5acdae337cc8f30eb1a8d8469f",
-    "patchedSha256": "6d03a535d9d4f45d3a1725363ef80e943af5db934df2ec068f4427e6b0c8295d",
-    "anchor": "    # Hide deferred tool schemas from model binding until tool_search promotes them.\n",
+    "patchedSha256": "3dce9051f0ce8248c44f7e6a9e4b8b186ef061a39bce28548cb40557dc1c255a",
+    "anchor": "    # Coalesce every SystemMessage into a single leading one before the request\n",
     "insertion": "    # Product Workbench tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n        workbench_knowledge_enabled_from_runnable_config,\n        workbench_requested_artifact_kinds_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(\n            workbench_canvas_policy_from_runnable_config(config),\n            workbench_requested_artifact_kinds_from_runnable_config(config),\n            workbench_knowledge_enabled_from_runnable_config(config),\n        )\n    )\n\n"
   },
   "deferredMiddleware": {
@@ -15,18 +15,35 @@
   },
   "toolScopeMiddleware": {
     "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
-    "sha256": "4dc59eab698b6c77e82fe374593c709273de97b5adaec3f4ea3708f316f8f554"
+    "sha256": "53c106401b04a598d37f4ce3c9edd69e1613c5d13fa91d939b7a9f14ac7de10a"
   },
   "additionalSources": [
     {
       "path": "deerflow/tools/builtins/task_tool.py",
       "upstreamSha256": "bbbf58869ea4e24a8c230695478fb5d09fd35c2e4dbb2c16bc5052871027ee95",
-      "patchedSha256": "482292649c09ca8112ab30bd5e96baa9032aeccbfe3e3770000e1fbb41309317",
+      "patchedSha256": "13cb41b838d20a664438318a0e207ef6f8c80e7bc4923bab1e6a0ae0c2c101d8",
       "replacements": [
         {
           "anchor": "    # Create executor\n",
           "position": "before",
           "insertion": "    # Product Workbench publication, Knowledge, PRD reference, and Canvas tools are parent-run scoped. A\n    # subagent must never rediscover them from the inherited global tool group.\n    _workbench_parent_run_tool_names = frozenset(\n        {\n            \"workbench_generation_stage_update\",\n            \"workbench_artifact_draft_publish\",\n            \"workbench_prototype_patch_publish\",\n            \"workbench_knowledge_retrieve\",\n            \"read_file\",\n            \"get_visible_screens\",\n            \"get_selected_screens\",\n            \"view_screen\",\n            \"select_screen\",\n            \"quick_edit\",\n            \"duplicate_screen\",\n            \"rename_screen\",\n            \"navigate_canvas\",\n        }\n    )\n    tools = [\n        tool\n        for tool in tools\n        if getattr(tool, \"name\", None) not in _workbench_parent_run_tool_names\n    ]\n\n"
+        },
+        {
+          "anchor": "            \"workbench_knowledge_retrieve\",\n",
+          "position": "before",
+          "insertion": "            \"workbench_runtime_result_submit\",\n"
+        }
+      ]
+    },
+    {
+      "path": "deerflow/runtime/runs/manager.py",
+      "upstreamSha256": "ffd222f06bd46894196ed016d5f78efeb1078511e2b35a0ecab6c59c9d33463a",
+      "patchedSha256": "c8e849c5dfb53495594e139c3adecd04e570a57942940b5f46b93d14be8732b1",
+      "replacements": [
+        {
+          "anchor": "        store_limit = max(0, limit - len(memory_records))\n",
+          "position": "replace",
+          "insertion": "        # Every in-memory run may occupy one row in the store's newest-first\n        # window. Reserve those duplicate slots before merging the unique page.\n        store_limit = limit + len(records_by_id)\n"
         }
       ]
     }
@@ -35,7 +52,7 @@
     {
       "path": "app/gateway/services.py",
       "upstreamSha256": "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34",
-      "patchedSha256": "46c8c98fbdf94876603012d922c91ee7a2ece03c07a6ccf30d63a43086e1fdcb",
+      "patchedSha256": "0ed419e8c8812ca4db2f00d8012d82a9a8017c7142dde1f5f9a067eca676da56",
       "replacements": [
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
@@ -86,6 +103,50 @@
           "anchor": "        merge_run_context_overrides(config, getattr(body, \"context\", None))\n",
           "position": "replace",
           "insertion": "        merge_run_context_overrides(\n            config,\n            getattr(body, \"context\", None),\n            allow_workbench_context=trusted_internal_caller,\n        )\n        _apply_workbench_lead_recursion_limit(\n            config,\n            trusted_internal_caller=trusted_internal_caller,\n        )\n"
+        },
+        {
+          "anchor": "async def apply_checkpoint_to_run_config(\n",
+          "position": "before",
+          "insertion": "def _bind_server_run_id(config: dict[str, Any], run_id: str) -> None:\n    \"\"\"Bind checkpoint metadata to the server-created Run identity.\"\"\"\n    candidate = config.get(\"metadata\")\n    metadata = dict(candidate) if isinstance(candidate, Mapping) else {}\n    metadata[\"run_id\"] = run_id\n    config[\"metadata\"] = metadata\n\n\n"
+        },
+        {
+          "anchor": "        config = build_run_config(thread_id, sanitized_request_config, body.metadata, assistant_id=body.assistant_id)\n",
+          "position": "replace",
+          "insertion": "        config = build_run_config(thread_id, sanitized_request_config, body.metadata, assistant_id=body.assistant_id)\n        _bind_server_run_id(config, record.run_id)\n"
+        }
+      ]
+    },
+    {
+      "path": "app/gateway/routers/threads.py",
+      "upstreamSha256": "19784e84a87c9a63b10a3188a1c3c6d6f9d13234599a57bad22ef252140cd7f3",
+      "patchedSha256": "115109b776847239570786e2448539e41bbbc99c28e63bcc2d989625cfa4a6e1",
+      "replacements": [
+        {
+          "anchor": "class ThreadHistoryRequest(BaseModel):\n",
+          "position": "before",
+          "insertion": "_WORKBENCH_RUN_HISTORY_METADATA_KEYS: frozenset[str] = frozenset(\n    {\n        \"run_id\",\n        \"workbench_run_id\",\n        \"workbench_runtime_attempt_id\",\n        \"workbench_provider_idempotency_key\",\n        \"workbench_attempt\",\n    }\n)\n_WORKBENCH_RUN_HISTORY_METADATA_VALUE_MAX_LENGTH = 128\n\n\n"
+        },
+        {
+          "anchor": "    limit: int = Field(default=10, ge=1, le=100, description=\"Maximum entries\")\n    before: str | None = Field(default=None, description=\"Cursor for pagination\")\n",
+          "position": "replace",
+          "insertion": "    limit: int = Field(default=10, ge=1, le=100, description=\"Maximum entries\")\n    before: str | None = Field(default=None, description=\"Cursor for pagination\")\n    metadata: dict[str, Any] = Field(default_factory=dict, description=\"Checkpoint metadata filter\")\n\n    @field_validator(\"metadata\")\n    @classmethod\n    def _validate_workbench_run_filter(cls, value: dict[str, Any]) -> dict[str, Any]:\n        if not value:\n            return value\n        if set(value) != _WORKBENCH_RUN_HISTORY_METADATA_KEYS:\n            raise ValueError(\"History metadata filter must contain exactly the Workbench Run binding keys\")\n        for key in _WORKBENCH_RUN_HISTORY_METADATA_KEYS:\n            candidate = value[key]\n            if key == \"workbench_attempt\":\n                if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 1:\n                    raise ValueError(\"History metadata attempt must be a positive integer\")\n                continue\n            if key == \"workbench_provider_idempotency_key\":\n                if (\n                    not isinstance(candidate, str)\n                    or len(candidate) != 69\n                    or not candidate.startswith(\"wbrt:\")\n                    or any(character not in \"0123456789abcdef\" for character in candidate[5:])\n                ):\n                    raise ValueError(\"History provider idempotency key must use the Workbench format\")\n                continue\n            if (\n                not isinstance(candidate, str)\n                or not candidate\n                or len(candidate) > _WORKBENCH_RUN_HISTORY_METADATA_VALUE_MAX_LENGTH\n                or candidate.strip() != candidate\n                or any(\n                    not character.isascii()\n                    or not (character.isalnum() or character in \"-_\")\n                    for character in candidate\n                )\n            ):\n                raise ValueError(\"History metadata filter values must be bounded identifiers\")\n        return value\n"
+        },
+        {
+          "anchor": "        async for checkpoint_tuple in checkpointer.alist(config, limit=body.limit):\n",
+          "position": "replace",
+          "insertion": "        async for checkpoint_tuple in checkpointer.alist(\n            config,\n            filter=body.metadata or None,\n            limit=body.limit,\n        ):\n"
+        }
+      ]
+    },
+    {
+      "path": "app/gateway/routers/thread_runs.py",
+      "upstreamSha256": "7f303c5e61ef202000010d93b8761cfbb0ec445f9b79131bcd3e70d3ebcdda70",
+      "patchedSha256": "f829a02bf04c15806c92afaccda2e57a858a67317e1c6091edfdfa4767aafa63",
+      "replacements": [
+        {
+          "anchor": "async def list_runs(thread_id: str, request: Request) -> list[RunResponse]:\n    \"\"\"List all runs for a thread.\"\"\"\n    run_mgr = get_run_manager(request)\n    user_id = await get_current_user(request)\n    records = await run_mgr.list_by_thread(thread_id, user_id=user_id)\n    return [_record_to_response(r) for r in records]\n",
+          "position": "replace",
+          "insertion": "async def list_runs(\n    thread_id: str,\n    request: Request,\n    limit: int = Query(default=100, ge=1, le=100),\n    offset: int = Query(default=0, ge=0, le=10_000),\n) -> list[RunResponse]:\n    \"\"\"List a bounded page of runs for a thread, newest first.\"\"\"\n    run_mgr = get_run_manager(request)\n    user_id = await get_current_user(request)\n    page_end = offset + limit\n    records = await run_mgr.list_by_thread(\n        thread_id,\n        user_id=user_id,\n        limit=page_end,\n    )\n    return [_record_to_response(r) for r in records[offset:page_end]]\n"
         }
       ]
     }
@@ -94,9 +155,9 @@
     "sha256": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb"
   },
   "contractTest": {
-    "sha256": "e1cceaabf262977601a165986ced2ae0144872bd9dabbe0a0c2f88f673aa6344"
+    "sha256": "662d5666d7cf39faa2b0998a3cea7c60d39018cf9e6e3f9485c5623c7c7bd251"
   },
   "requestContextTest": {
-    "sha256": "a4cb17db889064abe9a6360e24aca1e861cfd9c99ee5b35298e0dd84beae2fe1"
+    "sha256": "094b82db107fe27157304097ec0da85b58491dc89b648418756b58a10e296e58"
   }
 }

@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { TextDecoder } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
@@ -11,21 +12,50 @@ const PROHIBITED_COOKIE_DOMAIN_KEYS = Object.freeze([
   "WORKBENCH_COOKIE_DOMAIN",
 ]);
 
-export function readDeploymentEnv(source) {
+export function readDeploymentEnv(source, { label = "deployment environment" } = {}) {
+  const text = decodeEnvironmentSource(source, label);
   const values = new Map();
-  for (const [index, rawLine] of source.split(/\r?\n/u).entries()) {
+  for (const [index, rawLine] of text.split(/\r?\n/u).entries()) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
+    if (rawLine !== line) {
+      throw new Error(`${label} entry at line ${index + 1} must not have leading or trailing whitespace`);
+    }
     const separator = rawLine.indexOf("=");
-    if (separator <= 0) throw new Error(`invalid environment entry at line ${index + 1}`);
-    const name = rawLine.slice(0, separator).trim();
+    if (separator <= 0) throw new Error(`invalid ${label} entry at line ${index + 1}`);
+    const name = rawLine.slice(0, separator);
     if (!/^[A-Z][A-Z0-9_]*$/u.test(name)) {
-      throw new Error(`invalid environment name at line ${index + 1}`);
+      throw new Error(`invalid ${label} name at line ${index + 1}`);
     }
     if (values.has(name)) throw new Error(`${name} must occur exactly once`);
-    values.set(name, stripMatchingQuotes(rawLine.slice(separator + 1).trim()));
+    values.set(name, parseCanonicalEnvironmentValue(rawLine.slice(separator + 1), name, index + 1, label));
   }
   return values;
+}
+
+function decodeEnvironmentSource(source, label) {
+  if (typeof source === "string") return source;
+  if (!(source instanceof Uint8Array)) throw new Error(`${label} must be UTF-8 text`);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(source);
+  } catch {
+    throw new Error(`${label} must contain valid UTF-8`);
+  }
+}
+
+function parseCanonicalEnvironmentValue(encoded, name, lineNumber, label) {
+  if (encoded.startsWith('"') || encoded.startsWith("'")) {
+    throw new Error(`${name} at line ${lineNumber} must not use quoted syntax in ${label}`);
+  }
+  if (/[\s$\\]/u.test(encoded)) {
+    throw new Error(
+      `${name} at line ${lineNumber} must not contain whitespace, $, or a backslash`,
+    );
+  }
+  if (/[\u0000-\u001f\u007f]/u.test(encoded)) {
+    throw new Error(`${name} at line ${lineNumber} contains a forbidden control character`);
+  }
+  return encoded;
 }
 
 export function deriveOriginManifest(environment) {
@@ -161,13 +191,6 @@ function optionalBoolean(environment, name, fallback) {
   throw new Error(`${name} must be true or false`);
 }
 
-function stripMatchingQuotes(value) {
-  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
 function parseArguments(argv) {
   const result = { format: "json" };
   for (let index = 0; index < argv.length; index += 1) {
@@ -183,7 +206,7 @@ function parseArguments(argv) {
 
 function main() {
   const args = parseArguments(process.argv.slice(2));
-  const source = readFileSync(resolve(args.envFile), "utf8");
+  const source = readFileSync(resolve(args.envFile));
   const manifest = deriveOriginManifest(readDeploymentEnv(source));
   process.stdout.write(args.format === "caddy-env"
     ? renderCaddyEnvironment(manifest)

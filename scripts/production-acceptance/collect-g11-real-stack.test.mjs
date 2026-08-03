@@ -67,6 +67,7 @@ test("production G11 capture plan is the exact protected 54 visual plus 198 flow
 test("production G11 collector builds and verifies the complete signed closure before atomic publication", async (t) => {
   const fixture = await collectorFixture(t);
   const captureInputs = [];
+  const activeCaptureResources = new Set();
   let activeCaptures = 0;
   let maximumActiveCaptures = 0;
   const verifyCalls = [];
@@ -80,6 +81,9 @@ test("production G11 collector builds and verifies the complete signed closure b
     captureTrace: async (input) => {
       __g11HarnessTestOnly.validateScenarioSecrets(input.scenarioSecrets, input.scenarioId);
       captureInputs.push(input);
+      const resourceKey = `${input.scenarioBinding.projectId}\0${input.scenarioBinding.threadId}`;
+      assert.equal(activeCaptureResources.has(resourceKey), false, `concurrent capture resource collision: ${resourceKey}`);
+      activeCaptureResources.add(resourceKey);
       activeCaptures += 1;
       maximumActiveCaptures = Math.max(maximumActiveCaptures, activeCaptures);
       try {
@@ -135,6 +139,7 @@ test("production G11 collector builds and verifies the complete signed closure b
         };
       } finally {
         activeCaptures -= 1;
+        activeCaptureResources.delete(resourceKey);
       }
     },
     now: monotonicClock("2026-07-29T00:00:00Z"),
@@ -157,6 +162,8 @@ test("production G11 collector builds and verifies the complete signed closure b
   assert.equal(captureInputs.length, 252);
   assert.equal(maximumActiveCaptures > 1, true);
   assert.equal(maximumActiveCaptures <= 6, true);
+  assert.equal(new Set(captureInputs.map(({ scenarioBinding }) => scenarioBinding.projectId)).size, 252);
+  assert.equal(new Set(captureInputs.map(({ scenarioBinding }) => scenarioBinding.threadId)).size, 252);
   assert.equal(verifyCalls.length, 1);
   assert.equal(verifyCalls[0].evidenceRoot.startsWith(fixture.outputDirectory), false);
   assert.equal(result.outputDirectory, fixture.outputDirectory);
@@ -174,11 +181,32 @@ test("production G11 collector builds and verifies the complete signed closure b
 
   const observerSignatures = [];
   for (const flow of manifest.flows) {
+    const flowPath = path.join(
+      fixture.outputDirectory,
+      flow.evidence[0].uri.replace(/^file:\.\//u, ""),
+    );
     const observerPath = path.join(
       fixture.outputDirectory,
       flow.evidence[1].uri.replace(/^file:\.\//u, ""),
     );
-    observerSignatures.push(JSON.parse(await readFile(observerPath, "utf8")).signature.value);
+    const flowReceipt = JSON.parse(await readFile(flowPath, "utf8"));
+    const observerReceipt = JSON.parse(await readFile(observerPath, "utf8"));
+    assert.equal(flowReceipt.coverage.length, 18);
+    assert.equal(new Set(flowReceipt.coverage.map(({ scenarioBinding }) => scenarioBinding.projectId)).size, 18);
+    assert.equal(new Set(flowReceipt.coverage.map(({ scenarioBinding }) => scenarioBinding.threadId)).size, 18);
+    assert.deepEqual(
+      observerReceipt.captureObservations.map(({ traceId, scenarioBinding, scenarioPlanSha256 }) => ({
+        traceId,
+        scenarioBinding,
+        scenarioPlanSha256,
+      })),
+      flowReceipt.coverage.map(({ traceId, scenarioBinding, scenarioPlanSha256 }) => ({
+        traceId,
+        scenarioBinding,
+        scenarioPlanSha256,
+      })),
+    );
+    observerSignatures.push(observerReceipt.signature.value);
   }
   assert.equal(new Set(observerSignatures).size, 11);
   const allEntries = await readdir(fixture.outputDirectory, { recursive: true });
@@ -217,6 +245,28 @@ test("production G11 collector fails before capture when an authority callback i
   assert.equal(captureCount, 0);
 });
 
+test("production G11 collector rejects reused mutable capture resources before launching a browser", async (t) => {
+  const fixture = await collectorFixture(t);
+  let captureCount = 0;
+  const dependencies = {
+    assertCandidateSource: async () => undefined,
+    captureTrace: async () => { captureCount += 1; },
+    now: () => "2026-07-29T00:00:00Z",
+    playwrightVersion: "1.61.1",
+    verifyManifest: async () => undefined,
+  };
+  const options = {
+    ...fixture.options,
+    resolveScenarioBinding: async ({ scenarioId }) => scenarioBindingForTrace(scenarioId, "shared-capture"),
+  };
+
+  await assert.rejects(
+    __testOnly.collectProductionG11RealStackWithDependencies(options, dependencies),
+    /reuse projectId; every capture requires isolated mutable resources/u,
+  );
+  assert.equal(captureCount, 0);
+});
+
 async function collectorFixture(t) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "workbench-g11-collector-")));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -224,7 +274,9 @@ async function collectorFixture(t) {
   const temporaryDirectory = path.join(root, "native-traces");
   const collectorSigner = trustedSigner("collector-prod");
   const observerSigner = trustedSigner("observer-prod");
+  const runtimeWorkerSigner = trustedSigner("runtime-worker-prod");
   const commitSha = "b".repeat(40);
+  const trustPolicySha256 = "5".repeat(64);
   const binding = {
     candidateId: `sha256:${"a".repeat(64)}`,
     deployId: "deploy-prod-20260729",
@@ -253,20 +305,33 @@ async function collectorFixture(t) {
       planId: "production-plan-20260729-g11",
       createdAtUtc: "2026-07-28T23:00:00Z",
       plannerId: "release-planner-prod",
+      deploymentConfig: {
+        runtimeWorkerExecution: {
+          scopeId: "production-runtime.worker-execution",
+          environmentId: binding.environmentId,
+          keyId: runtimeWorkerSigner.keyId,
+          signerId: runtimeWorkerSigner.signerId,
+          trustPolicySha256,
+          uid: "1000",
+          gid: "1000",
+        },
+      },
       binding,
       environment,
     },
     payloadSha256: "4".repeat(64),
   };
   const trustPolicy = {
-    sha256: "5".repeat(64),
+    sha256: trustPolicySha256,
     environmentId: binding.environmentId,
     keys: new Map([
       [collectorSigner.keyId, collectorSigner.key],
       [observerSigner.keyId, observerSigner.key],
+      [runtimeWorkerSigner.keyId, runtimeWorkerSigner.key],
     ]),
     approvalAuthorities: [],
     receiptAuthorities: [
+      { scopeId: "production-runtime.worker-execution", signerId: runtimeWorkerSigner.signerId, keyId: runtimeWorkerSigner.keyId },
       { scopeId: "production-g11.browser-evidence-collector", signerId: collectorSigner.signerId, keyId: collectorSigner.keyId },
       { scopeId: "production-g11.server-observer", signerId: observerSigner.signerId, keyId: observerSigner.keyId },
     ],
@@ -310,12 +375,21 @@ async function collectorFixture(t) {
       observedAtUtc: collectionStartedAtUtc,
       tls: { webVerified: true, previewVerified: true },
     }),
-    observeServerFlow: async ({ observerCheckIds }) => ({
-      checks: Object.fromEntries(observerCheckIds.map((checkId) => [checkId, passingObserverValue(checkId)])),
+    observeServerFlow: async ({ coverage, observerCheckIds }) => ({
+      captureObservations: coverage.map(({ traceId, scenarioBinding, scenarioPlanSha256 }) => ({
+        traceId,
+        scenarioBinding,
+        scenarioPlanSha256,
+        checks: Object.fromEntries(observerCheckIds.map((checkId) => [
+          checkId,
+          passingObserverValue(checkId),
+        ])),
+      })),
       observedAtUtc: "2026-07-29T00:02:00Z",
     }),
     outputDirectory,
     plan,
+    resolveScenarioBinding: async ({ scenarioId, traceId }) => scenarioBindingForTrace(scenarioId, traceId),
     resolveScenarioSecrets: async ({ scenarioId, traceId }) => ({
       account: `${scenarioId}-${traceId}@example.com`,
       password: secretSentinel,
@@ -342,7 +416,6 @@ async function collectorFixture(t) {
         securityReview: "PASS",
       })),
     }),
-    scenarioBindings: scenarioBindings(),
     signCollectorAttestation: async ({ payload }) => (
       sign(null, Buffer.from(payload, "utf8"), collectorSigner.privateKey).toString("base64url")
     ),
@@ -355,24 +428,17 @@ async function collectorFixture(t) {
   return { options, outputDirectory, plan, secretSentinel };
 }
 
-function scenarioBindings() {
-  const common = { projectId: "project-prod-a", threadId: "thread-prod-a" };
-  return {
-    "visual-prd-active": { ...common },
-    "visual-prd-pending": { ...common },
-    "visual-prototype-after-prd": { ...common },
-    "account-project": { deniedProjectId: "project-denied-a", ...common },
-    prd: { ...common },
-    "mixed-rejection": { ...common },
-    "prototype-after-prd": { ...common },
-    "refresh-reconnect": { ...common },
-    "preview-import-export": { ...common },
-    "run-canvas-sse-artifact": { ...common },
-    "accessibility-preview-security": { ...common },
-    "long-run-7686-plus": { ...common, runId: "run-long-a" },
-    "knowledge-null-valid": { knowledgeReleaseId: "knowledge-release-a", ...common },
-    "provider-state-integrity": { artifactVersionId: "artifact-version-a", ...common, runId: "run-provider-a" },
-  };
+function scenarioBindingForTrace(scenarioId, traceId) {
+  const common = { projectId: `project-${traceId}`, threadId: `thread-${traceId}` };
+  if (scenarioId === "account-project") return { deniedProjectId: `denied-${traceId}`, ...common };
+  if (scenarioId === "long-run-7686-plus") return { ...common, runId: `run-${traceId}` };
+  if (scenarioId === "knowledge-null-valid") {
+    return { knowledgeReleaseId: "knowledge-release-a", ...common };
+  }
+  if (scenarioId === "provider-state-integrity") {
+    return { artifactVersionId: `artifact-${traceId}`, ...common, runId: `run-${traceId}` };
+  }
+  return common;
 }
 
 function passingObserverValue(checkId) {

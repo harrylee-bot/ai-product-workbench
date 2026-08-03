@@ -163,6 +163,12 @@ plan 中冻结的 commit。`outputDirectory` 必须不存在并位于源码仓�
 显式提供 deployment、隔离 synthetic dataset、server observation、scenario secret、图片隐私审查、
 collector 签名和 server-observer 签名回调；缺少任一回调即失败，不能注入 test-only capture 实现。
 
+`resolveScenarioBinding` 是逐 capture 回调，不是逐 scenario 的共享 fixture。Collector 必须先为完整
+252 个 capture 逐一解析 binding，再启动任何浏览器；每次调用均携带受保护的 `traceId`、scenario、
+browser、viewport 和 motion identity。解析后的 `projectId`、`threadId`、`deniedProjectId`、`runId`
+和 `artifactVersionId` 在全部 252 个 capture 范围内均不得复用。任一缺失、不合法或复用必须在第一次
+浏览器启动前终止采集，不能用串行执行、清理后重建或不同浏览器 context 来替代独立可变资源。
+
 `collectorAttestation.source` 必须精确引用
 `file:./raw/g11/collector/collect-g11-real-stack.mjs`，kind 为 `browser-collector-source`。Verifier 会把
 该文件的字节和 SHA-256 与冻结候选中受保护的 collector 源码逐字节比较，并同时重算
@@ -188,9 +194,16 @@ attestation 里自报工具版本或摘要不成立。
 
 `raw/g11/manifest.json` 不属于这 495 项；它作为单独的 canonical manifest reference 加入每个正式
 G11 observation，所以每项 observation 的完整 evidence 集合是一个 manifest 加上述 495 项。11 个
-flow 必须各有一份 browser flow receipt 和一份 Ed25519 server-observer receipt；observer key 必须只
-用于 `production-g11.server-observer` scope，receipt 必须绑定同一 plan、deployment、scenario plan、
-origin policy、18 个 capture coverage 和 server checks，且 11 个签名值不得复用。
+flow 必须各有一份 `workbench.production-g11-flow-evidence.v3` browser flow receipt 和一份 Ed25519
+`workbench.production-g11-server-observer-receipt.v2`；observer key 必须只用于
+`production-g11.server-observer` scope，且 11 个签名值不得复用。
+
+每份 flow receipt 的 18 条 coverage 必须分别携带该 capture 的 `traceId`、`scenarioBinding` 和
+`scenarioPlanSha256`。对应的单份签名 observer receipt 必须包含正好 18 条 `captureObservations`，逐条
+以同一三元组绑定 server checks；遗漏、重复、错绑或改用 flow 首条 binding 代替均失败。最终
+`checks` 只能由这 18 条 observation 聚合产生：布尔项要求全部为 true；`long-run-7686-plus` 的数值
+下界取 18 个观测值的最小值；其他非负整数计数求和。签名 payload 覆盖完整 coverage、
+`captureObservations` 与 aggregate，不接受一份 scenario 级 server 自报结果复制到 18 个 capture。
 
 ### Route 与 SSE 合同
 
@@ -227,9 +240,12 @@ RunEvent allowlist 精确为：`run.queued`、`run.started`、`run.generation.st
 | `long-run-7686-plus` | 7,686 | `run.started`、`run.completed` |
 | `provider-state-integrity` | 4 | `message.delta`、`activity.changed`、`artifact.draft.created`、`artifact.version.created` |
 
-`mixed-rejection` 必须保留零副作用语义：其 protected flow 允许零条 SSE，但 browser 与 server checks
-必须共同证明 Run、queue publish、Runtime attempt、ArtifactVersion、provider invocation 和 SSE event
-计数均未增加。
+`mixed-rejection` 必须先从真实 Composer 提交中文自然语言
+`生成一份需求文档和页面原型`，证明本地化错误可见、原 prompt 保留，且没有 active、loading 或
+generation motion UI；随后在同一 browser context 中单独调用 direct API，证明返回 400。该 protected
+flow 允许零条 SSE，但 browser 与 server checks 必须共同证明 Run、queue publish、Runtime attempt、
+ArtifactVersion、provider invocation 和 SSE event 计数均未增加。Composer 拦截不能替代 direct API
+合同，direct API 的 400 也不能替代真实 Composer 用户路径。
 
 调用 runner 时显式传入 evidence root：
 

@@ -9,6 +9,8 @@ import {
   RuntimeAttemptService,
   type RuntimeExecutionClaim,
 } from "../src/runtime/runtime-attempt.service.js";
+import { runtimeProviderCancellationUnconfirmedCode } from "../src/runs/runtime-cancellation-state.js";
+import { RuntimeExecutionReconciler } from "../src/runs/runtime-execution-reconciler.js";
 import type {
   RuntimeArtifactTarget,
 } from "../src/runtime/runtime.port.js";
@@ -360,6 +362,18 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
           artifacts: [draft],
         },
       );
+      const onRuntimeAttemptResolved = vi.fn();
+      await expect((processor as unknown as RunProcessor).execute(
+        fixture.runId,
+        [],
+        undefined,
+        undefined,
+        { onRuntimeAttemptResolved },
+      )).resolves.toEqual({
+        runId: fixture.runId,
+        artifactCount: 1,
+      });
+      expect(onRuntimeAttemptResolved).toHaveBeenCalledExactlyOnceWith(fixture.runtimeAttemptId);
 
       await expect(worker.run.findUniqueOrThrow({ where: { id: fixture.runId } })).resolves.toMatchObject({
         status: "succeeded",
@@ -816,6 +830,337 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
   }, 120_000);
 });
 
+describeWithPostgres("Run processor PostgreSQL failed provider cancellation convergence", () => {
+  it("converges provider cancellation while keeping the terminal attempt failed", async () => {
+    const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedRunFixture(worker, "submission");
+    const failedAt = new Date();
+    await worker.run.update({
+      where: { id: fixture.runId },
+      data: {
+        status: "failed",
+        finishedAt: failedAt,
+        errorCode: runtimeProviderCancellationUnconfirmedCode,
+        errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        errorRetryable: true,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      },
+    });
+    await worker.runtimeAttempt.update({
+      where: { id: fixture.runtimeAttemptId! },
+      data: {
+        status: "failed",
+        finishedAt: failedAt,
+        errorCode: runtimeProviderCancellationUnconfirmedCode,
+        errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        errorRetryable: true,
+        submissionUnknownAt: failedAt,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      },
+    });
+    const sequencedRun = await worker.run.update({
+      where: { id: fixture.runId },
+      data: { eventSequence: { increment: 1 } },
+      select: { eventSequence: true, traceId: true },
+    });
+    await worker.runEvent.create({
+      data: {
+        runId: fixture.runId,
+        sequence: sequencedRun.eventSequence,
+        type: "run.failed",
+        traceId: sequencedRun.traceId,
+        payload: {
+          code: runtimeProviderCancellationUnconfirmedCode,
+          message: runtimeProviderCancellationUnconfirmedCode,
+          retryable: true,
+        },
+      },
+    });
+    const runtime = {
+      execute: vi.fn(async () => {
+        throw new Error("runtime.execute must not reopen a failed Run");
+      }),
+      cancel: vi.fn(async (
+        _scope: unknown,
+        onExternalRunRecovered: (externalRunId: string) => Promise<void>,
+      ) => {
+        await onExternalRunRecovered(fixture.externalRunId);
+        return {
+          disposition: "already_terminal" as const,
+          externalRunId: fixture.externalRunId,
+          externalStatus: "success",
+        };
+      }),
+    };
+    const processor = new RunProcessor(worker, runtime as never, noKnowledgeToolGrants());
+    const executeQueue = { send: vi.fn(async () => "unexpected-job") };
+    const executionReconciler = new RuntimeExecutionReconciler(
+      worker,
+      executeQueue as never,
+      10,
+      60_000,
+    );
+
+    try {
+      await expect(processor.cancel(fixture.runId)).resolves.toEqual({
+        runId: fixture.runId,
+        cancelled: false,
+        cancellationConverged: true,
+      });
+      await expect(processor.cancel(fixture.runId)).resolves.toEqual({
+        runId: fixture.runId,
+        cancelled: false,
+        cancellationConverged: true,
+      });
+      await expect(processor.execute(fixture.runId)).resolves.toEqual({
+        runId: fixture.runId,
+        skipped: true,
+      });
+      await executionReconciler.runOnce();
+
+      await expect(worker.run.findUniqueOrThrow({ where: { id: fixture.runId } }))
+        .resolves.toMatchObject({
+          status: "failed",
+          finishedAt: failedAt,
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+          executionOwnerId: null,
+          executionLeaseExpiresAt: null,
+        });
+      await expect(worker.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+          status: "failed",
+          finishedAt: failedAt,
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+          externalRunId: fixture.externalRunId,
+        executionOwnerId: null,
+          executionLeaseExpiresAt: null,
+        });
+      await expect(worker.runtimeProviderCancellationResolution.findUniqueOrThrow({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+        runId: fixture.runId,
+        failureCode: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        outcome: "already_terminal",
+        convergedAt: expect.any(Date),
+      });
+      await expect(worker.runtimeProviderCancellationResolution.update({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        data: { outcome: "cancelled" },
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_APPEND_ONLY/u);
+      await expect(worker.runtimeProviderCancellationResolution.delete({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_APPEND_ONLY/u);
+      const attempt = await worker.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+        select: { runtimeBindingId: true },
+      });
+      await expect(worker.runtimeAttempt.delete({
+        where: { id: fixture.runtimeAttemptId! },
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_APPEND_ONLY/u);
+      await expect(worker.runtimeBinding.delete({
+        where: { id: attempt.runtimeBindingId },
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_APPEND_ONLY/u);
+      await expect(worker.runtimeProviderCancellationResolution.count({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toBe(1);
+      await expect(worker.runtimeAttempt.count({
+        where: { id: fixture.runtimeAttemptId! },
+      })).resolves.toBe(1);
+      await expect(worker.runtimeBinding.count({
+        where: { id: attempt.runtimeBindingId },
+      })).resolves.toBe(1);
+      expect(runtime.cancel).toHaveBeenCalledTimes(1);
+      expect(runtime.execute).not.toHaveBeenCalled();
+      expect(executeQueue.send).not.toHaveBeenCalled();
+      await expect(worker.runEvent.count({
+        where: { runId: fixture.runId, type: "run.cancelled" },
+      })).resolves.toBe(0);
+      await expect(worker.runEvent.findMany({
+        where: { runId: fixture.runId, type: "run.failed" },
+        select: { payload: true },
+      })).resolves.toEqual([{
+        payload: {
+          code: runtimeProviderCancellationUnconfirmedCode,
+          message: runtimeProviderCancellationUnconfirmedCode,
+          retryable: true,
+        },
+      }]);
+      await expect(worker.run.delete({ where: { id: fixture.runId } })).resolves.toMatchObject({
+        id: fixture.runId,
+      });
+      await expect(worker.runtimeProviderCancellationResolution.count({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toBe(0);
+      await expect(worker.runtimeAttempt.count({
+        where: { id: fixture.runtimeAttemptId! },
+      })).resolves.toBe(0);
+    } finally {
+      await cleanupFixture(worker, fixture);
+      await worker.$disconnect();
+    }
+  }, 120_000);
+
+  it("serializes concurrent cleanup handlers before the provider cancellation call", async () => {
+    const firstWorker = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const secondWorker = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedRunFixture(firstWorker, "submission");
+    await markProviderCancellationPending(firstWorker, fixture, {
+      externalRunId: fixture.externalRunId,
+    });
+    const providerCallStarted = deferred<void>();
+    const releaseProviderCall = deferred<void>();
+    const runtime = {
+      cancel: vi.fn(async (scope: { externalRunId: string | null }) => {
+        providerCallStarted.resolve();
+        await releaseProviderCall.promise;
+        return {
+          disposition: "cancelled" as const,
+          externalRunId: scope.externalRunId!,
+          externalStatus: "cancelled",
+        };
+      }),
+    };
+    const firstProcessor = new RunProcessor(
+      firstWorker,
+      runtime as never,
+      noKnowledgeToolGrants(),
+    );
+    const secondProcessor = new RunProcessor(
+      secondWorker,
+      runtime as never,
+      noKnowledgeToolGrants(),
+    );
+    let firstCleanup: ReturnType<RunProcessor["cancel"]> | null = null;
+
+    try {
+      firstCleanup = firstProcessor.cancel(fixture.runId);
+      await providerCallStarted.promise;
+
+      await expect(secondProcessor.cancel(fixture.runId))
+        .rejects.toThrow("RUNTIME_EXECUTION_CLAIM_BUSY");
+      expect(runtime.cancel).toHaveBeenCalledTimes(1);
+
+      releaseProviderCall.resolve();
+      await expect(firstCleanup).resolves.toEqual({
+        runId: fixture.runId,
+        cancelled: false,
+        cancellationConverged: true,
+      });
+      await expect(secondProcessor.cancel(fixture.runId)).resolves.toEqual({
+        runId: fixture.runId,
+        cancelled: false,
+        cancellationConverged: true,
+      });
+
+      expect(runtime.cancel).toHaveBeenCalledTimes(1);
+      await expect(firstWorker.runtimeProviderCancellationResolution.findUniqueOrThrow({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+        runId: fixture.runId,
+        outcome: "cancelled",
+      });
+    } finally {
+      releaseProviderCall.resolve();
+      await firstCleanup?.catch(() => undefined);
+      await cleanupFixture(firstWorker, fixture);
+      await Promise.all([firstWorker.$disconnect(), secondWorker.$disconnect()]);
+    }
+  }, 120_000);
+
+  it("rejects absence resolution when a late external Run id commits first", async () => {
+    const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const lateWriter = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedRunFixture(worker, "submission");
+    await markProviderCancellationPending(worker, fixture, {
+      startedAt: new Date(Date.now() - 60_000),
+    });
+    const absenceCheckStarted = deferred<void>();
+    const releaseAbsenceCheck = deferred<void>();
+    const runtime = {
+      cancel: vi.fn(async (scope: { externalRunId: string | null }) => {
+        if (scope.externalRunId === null) {
+          absenceCheckStarted.resolve();
+          await releaseAbsenceCheck.promise;
+          return {
+            disposition: "not_found" as const,
+            externalRunId: null,
+            externalStatus: null,
+          };
+        }
+        return {
+          disposition: "cancelled" as const,
+          externalRunId: scope.externalRunId,
+          externalStatus: "cancelled",
+        };
+      }),
+    };
+    const processor = new RunProcessor(
+      worker,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      undefined,
+      1_000,
+    );
+    const lateAttemptService = new RuntimeAttemptService(lateWriter, 120_000);
+    let absenceCleanup: ReturnType<RunProcessor["cancel"]> | null = null;
+
+    try {
+      absenceCleanup = processor.cancel(fixture.runId);
+      await absenceCheckStarted.promise;
+      await lateAttemptService.attachExternalRunForCleanup(
+        fixture.runtimeAttemptId!,
+        fixture.externalRunId,
+      );
+      releaseAbsenceCheck.resolve();
+
+      await expect(absenceCleanup).rejects.toThrow(
+        runtimeProviderCancellationUnconfirmedCode,
+      );
+      await expect(worker.runtimeProviderCancellationResolution.count({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toBe(0);
+      await expect(worker.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+        status: "failed",
+        externalRunId: fixture.externalRunId,
+        executionOwnerId: null,
+        executionLeaseExpiresAt: null,
+      });
+
+      await expect(processor.cancel(fixture.runId)).resolves.toEqual({
+        runId: fixture.runId,
+        cancelled: false,
+        cancellationConverged: true,
+      });
+      expect(runtime.cancel).toHaveBeenCalledTimes(2);
+      expect(runtime.cancel.mock.calls.map(([scope]) => scope.externalRunId)).toEqual([
+        null,
+        fixture.externalRunId,
+      ]);
+      await expect(worker.runtimeProviderCancellationResolution.findUniqueOrThrow({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+        runId: fixture.runId,
+        outcome: "cancelled",
+      });
+    } finally {
+      releaseAbsenceCheck.resolve();
+      await absenceCleanup?.catch(() => undefined);
+      await cleanupFixture(worker, fixture);
+      await Promise.all([worker.$disconnect(), lateWriter.$disconnect()]);
+    }
+  }, 120_000);
+});
+
 describeWithPostgres("Run processor PostgreSQL external finalization crash replay", () => {
   it("replays a committed finalization after its response is lost without duplicating tail or activity effects", async () => {
     const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
@@ -921,7 +1266,7 @@ describeWithPostgres("Run processor PostgreSQL external finalization crash repla
   }, 120_000);
 });
 
-type FixtureKind = "prepare" | "wait" | "publish";
+type FixtureKind = "prepare" | "submission" | "wait" | "publish";
 
 type RunFixture = {
   principalId: string;
@@ -1090,13 +1435,15 @@ async function seedRunFixture(
             .digest("hex")}`,
         },
       });
-      await tx.runtimeAttempt.update({
-        where: { id: ids.runtimeAttemptId },
-        data: {
-          externalRunId: ids.externalRunId,
-          status: "running",
-        },
-      });
+      if (kind !== "submission") {
+        await tx.runtimeAttempt.update({
+          where: { id: ids.runtimeAttemptId },
+          data: {
+            externalRunId: ids.externalRunId,
+            status: "running",
+          },
+        });
+      }
     }
   });
   return ids;
@@ -1782,6 +2129,50 @@ async function claimRunFixture(db: PrismaClient, fixture: RunFixture) {
     fixture.runtimeAttemptId,
     `run-processor-pg:${randomUUID()}`,
   );
+}
+
+async function markProviderCancellationPending(
+  db: PrismaClient,
+  fixture: RunFixture,
+  options: {
+    externalRunId?: string | null;
+    startedAt?: Date;
+  } = {},
+) {
+  if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
+  const failedAt = new Date();
+  const externalRunId = options.externalRunId ?? null;
+  await db.$transaction([
+    db.run.update({
+      where: { id: fixture.runId },
+      data: {
+        status: "failed",
+        finishedAt: failedAt,
+        errorCode: runtimeProviderCancellationUnconfirmedCode,
+        errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        errorRetryable: true,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      },
+    }),
+    db.runtimeAttempt.update({
+      where: { id: fixture.runtimeAttemptId },
+      data: {
+        status: "failed",
+        startedAt: options.startedAt,
+        finishedAt: failedAt,
+        errorCode: runtimeProviderCancellationUnconfirmedCode,
+        errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        errorRetryable: true,
+        externalRunId,
+        submissionUnknownAt: externalRunId === null ? failedAt : null,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      },
+    }),
+  ]);
 }
 
 async function cleanupFixture(db: PrismaClient, fixture: RunFixture) {

@@ -49,7 +49,7 @@ test("rejects a missing schema or placeholder password", () => {
   assert.match(result.stderr, /placeholder|select the workbench schema/u);
 });
 
-test("reserves forensic release authority for the migrator role", () => {
+test("reserves evidence mutation and forensic release authority for the migrator role", () => {
   const provisioner = readFileSync(resolve("scripts/provision-workbench-database-roles.mjs"), "utf8");
   assert.match(
     provisioner,
@@ -84,6 +84,18 @@ test("reserves forensic release authority for the migrator role", () => {
   assert.match(
     provisioner,
     /GRANT SELECT, INSERT, UPDATE ON TABLE[^\n]+runtime_provider_states/u,
+  );
+  assert.match(
+    provisioner,
+    /ALTER DEFAULT PRIVILEGES[^\n]+REVOKE UPDATE, DELETE, TRUNCATE ON TABLES FROM \$\{runtimeRole\}/u,
+  );
+  assert.match(
+    provisioner,
+    /REVOKE UPDATE, DELETE, TRUNCATE ON TABLE[^\n]+runtime_provider_cancellation_resolutions/u,
+  );
+  assert.match(
+    provisioner,
+    /GRANT SELECT, INSERT ON TABLE[^\n]+runtime_provider_cancellation_resolutions/u,
   );
 });
 

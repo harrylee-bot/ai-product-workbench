@@ -786,7 +786,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         }
 
         if (part.event === "error") {
-          throw new Error(`DEERFLOW_RUN_ERROR:${boundedDiagnostic(part.data)}`);
+          throw new Error("DEERFLOW_RUN_ERROR");
         }
         if (part.event === "values") {
           finalState = part.data;
@@ -949,13 +949,27 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           undefined,
           signal,
         );
-    if (!run) return { externalRunId: null, externalStatus: null, found: false };
+    if (!run) {
+      return {
+        disposition: "not_found",
+        externalRunId: null,
+        externalStatus: null,
+      };
+    }
     if (!cancellation.externalRunId) await onExternalRunRecovered(run.run_id);
     if (!TERMINAL_EXTERNAL_RUN_STATUSES.has(run.status)) {
       await client.runs.cancel(cancellation.externalThreadId, run.run_id, true, "interrupt", { signal });
-      return { externalRunId: run.run_id, externalStatus: "interrupted", found: true };
+      return {
+        disposition: "cancelled",
+        externalRunId: run.run_id,
+        externalStatus: "interrupted",
+      };
     }
-    return { externalRunId: run.run_id, externalStatus: run.status, found: true };
+    return {
+      disposition: "already_terminal",
+      externalRunId: run.run_id,
+      externalStatus: run.status,
+    };
   }
 
   private buildRunRequest(
@@ -1358,7 +1372,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       throw error;
     }
     if (!response.ok) {
-      throw new Error(`DEERFLOW_UPLOAD_FAILED:${response.status}:${await safeResponseText(response)}`);
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error("DEERFLOW_UPLOAD_FAILED");
     }
     const payload = gatewayUploadResponseSchema.parse(
       JSON.parse(await boundedResponseText(response, MAX_GATEWAY_RESPONSE_SIZE)),
@@ -2516,16 +2531,4 @@ function externalRunIdFromEvent(event: string, data: unknown) {
 
 export function runtimeThreadUuid(workbenchThreadId: string) {
   return uuidV5(`workbench:deerflow-thread:v1:${workbenchThreadId}`, uuidV5.URL);
-}
-
-function boundedDiagnostic(value: unknown) {
-  try {
-    return canonicalJson(value).slice(0, 800);
-  } catch {
-    return String(value).slice(0, 800);
-  }
-}
-
-async function safeResponseText(response: Response) {
-  return (await boundedResponseText(response, 8_192).catch(() => "")).trim().slice(0, 800);
 }

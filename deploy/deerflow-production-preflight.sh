@@ -6,8 +6,6 @@ ENV_FILE=${WORKBENCH_ENV_FILE:-$APP_DIR/deploy/workbench.env}
 COMPOSE_FILE=${WORKBENCH_DEERFLOW_COMPOSE_FILE:-$APP_DIR/deploy/deerflow-runtime-compose.yml}
 FRAGMENT_FILE=$APP_DIR/integrations/deerflow/runtime-tools/config.fragment.yaml
 TOOL_SCOPE_PATCH_MANIFEST=$APP_DIR/integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/manifest.json
-# Only this already-signed candidate may use the pre-Node rollback contract.
-LEGACY_VALIDATOR_NODE_ROLLBACK_COMMIT=4bf8c155678f2b5baf0ab42e938cfbeca09abdf1
 
 fail() {
   printf '%s\n' "deerflow production preflight: $*" >&2
@@ -45,21 +43,16 @@ file_owner() {
 
 deerflow_home=$(require_env DEER_FLOW_HOME)
 base_config=$(require_env WORKBENCH_DEERFLOW_BASE_CONFIG_PATH)
+expected_base_config_sha256=$(require_env WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256)
 effective_config=$(require_env DEER_FLOW_CONFIG_PATH)
+expected_effective_config_sha256=$(require_env WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256)
 provider_env=$(require_env WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE)
 internal_network=$(require_env WORKBENCH_INTERNAL_NETWORK_NAME)
 internal_token=$(require_env WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN)
 expected_commit=$(require_env WORKBENCH_DEERFLOW_COMMIT)
 workbench_source_commit=$(require_env WORKBENCH_SOURCE_COMMIT)
 base_image_ref=$(require_env WORKBENCH_DEERFLOW_BASE_IMAGE_REF)
-if [ "$workbench_source_commit" = "$LEGACY_VALIDATOR_NODE_ROLLBACK_COMMIT" ]; then
-  validator_node_image_count=$(grep -c '^WORKBENCH_DEERFLOW_NODE_IMAGE_REF=' "$ENV_FILE" || true)
-  [ "$validator_node_image_count" -eq 0 ] \
-    || fail "legacy DeerFlow rollback candidate must not define WORKBENCH_DEERFLOW_NODE_IMAGE_REF"
-  validator_node_image_ref=
-else
-  validator_node_image_ref=$(require_env WORKBENCH_DEERFLOW_NODE_IMAGE_REF)
-fi
+validator_node_image_ref=$(require_env WORKBENCH_DEERFLOW_NODE_IMAGE_REF)
 image_ref=$(require_env WORKBENCH_DEERFLOW_IMAGE_REF)
 image_digest=$(require_env WORKBENCH_DEERFLOW_IMAGE_DIGEST)
 image_inventory=$(require_env WORKBENCH_IMAGE_INVENTORY_PATH)
@@ -83,6 +76,15 @@ printf '%s' "$tool_scope_patch_sha256" | grep -Eq '^[0-9a-f]{64}$' \
 [ "$base_config" != "$effective_config" ] || fail "base and effective config paths must differ"
 [ ! -L "$provider_env" ] || fail "provider environment must not be a symlink"
 [ ! -L "$base_config" ] || fail "base config must not be a symlink"
+[ ! -L "$effective_config" ] || fail "effective config must not be a symlink"
+base_config_sha256=$(sha256sum "$base_config" 2>/dev/null | awk '{print $1}') \
+  || fail "cannot hash base DeerFlow config"
+effective_config_sha256=$(sha256sum "$effective_config" 2>/dev/null | awk '{print $1}') \
+  || fail "cannot hash effective DeerFlow config"
+[ "$base_config_sha256" = "$expected_base_config_sha256" ] \
+  || fail "base DeerFlow config does not match the signed SHA-256"
+[ "$effective_config_sha256" = "$expected_effective_config_sha256" ] \
+  || fail "effective DeerFlow config does not match the signed SHA-256"
 grep -Fq 'REPLACE_WITH_' "$provider_env" && fail "provider environment still contains placeholders"
 
 provider_mode=$(file_mode "$provider_env") || fail "cannot inspect provider environment permissions"
@@ -125,10 +127,8 @@ printf '%s' "$workbench_source_commit" | grep -Eq '^[0-9a-f]{40}$' \
   || fail "WORKBENCH_SOURCE_COMMIT must be a lowercase Git commit"
 printf '%s' "$base_image_ref" | grep -Eq '@sha256:[0-9a-f]{64}$' \
   || fail "WORKBENCH_DEERFLOW_BASE_IMAGE_REF must be an immutable digest reference"
-if [ -n "$validator_node_image_ref" ]; then
-  printf '%s' "$validator_node_image_ref" | grep -Eq '@sha256:[0-9a-f]{64}$' \
-    || fail "WORKBENCH_DEERFLOW_NODE_IMAGE_REF must be an immutable digest reference"
-fi
+printf '%s' "$validator_node_image_ref" | grep -Eq '@sha256:[0-9a-f]{64}$' \
+  || fail "WORKBENCH_DEERFLOW_NODE_IMAGE_REF must be an immutable digest reference"
 printf '%s' "$cosign_identity" | grep -Eq '^https://[^[:space:]]+$' \
   || fail "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY must be an exact HTTPS identity"
 printf '%s' "$cosign_issuer" | grep -Eq '^https://[^[:space:]]+$' \
@@ -188,13 +188,8 @@ printf '%s' "$image_labels" | grep -Fq "\"io.workbench.deerflow.source-commit\":
   || fail "DeerFlow image is not bound to WORKBENCH_DEERFLOW_COMMIT"
 printf '%s' "$image_labels" | grep -Fq "\"io.workbench.deerflow.base-image\":\"$base_image_ref\"" \
   || fail "DeerFlow image is not bound to WORKBENCH_DEERFLOW_BASE_IMAGE_REF"
-if [ -n "$validator_node_image_ref" ]; then
-  printf '%s' "$image_labels" | grep -Fq "\"io.workbench.deerflow.validator-node-image\":\"$validator_node_image_ref\"" \
-    || fail "DeerFlow image is not bound to WORKBENCH_DEERFLOW_NODE_IMAGE_REF"
-else
-  ! printf '%s' "$image_labels" | grep -Fq '"io.workbench.deerflow.validator-node-image"' \
-    || fail "legacy DeerFlow rollback image unexpectedly declares a Validator Node runtime"
-fi
+printf '%s' "$image_labels" | grep -Fq "\"io.workbench.deerflow.validator-node-image\":\"$validator_node_image_ref\"" \
+  || fail "DeerFlow image is not bound to WORKBENCH_DEERFLOW_NODE_IMAGE_REF"
 printf '%s' "$image_labels" | grep -Fq "\"io.workbench.deerflow.tool-scope-patch-sha256\":\"$tool_scope_patch_sha256\"" \
   || fail "DeerFlow image is not bound to the audited per-Run tool-scope patch"
 
@@ -205,24 +200,22 @@ cosign verify \
   "$image_ref" >/dev/null \
   || fail "deployed DeerFlow image signature verification failed"
 
-if [ -n "$validator_node_image_ref" ]; then
-  validator_probe='from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result; result = validate_runtime_result({}); assert result["protocol"] == "workbench.runtime.validation.v1" and result["ok"] is False and result["issues"]'
-  docker run --rm \
-    --network none \
-    --read-only \
-    --user 65532:65532 \
-    --cap-drop ALL \
-    --security-opt no-new-privileges:true \
-    --pids-limit 64 \
-    --tmpfs /tmp:rw,nosuid,nodev,size=67108864,uid=65532,gid=65532,mode=1770 \
-    --env UV_CACHE_DIR=/tmp/uv-cache \
-    --env PYTHONDONTWRITEBYTECODE=1 \
-    --entrypoint /bin/sh \
-    "$image_ref" \
-    -ec "cd /app/backend && PYTHONPATH=/app/backend/packages/harness:/app/backend uv run --no-sync python -c '$validator_probe'" \
-    >/dev/null \
-    || fail "WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED"
-fi
+validator_probe='from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result; result = validate_runtime_result({}); assert result["protocol"] == "workbench.runtime.validation.v1" and result["ok"] is False and result["issues"]'
+docker run --rm \
+  --network none \
+  --read-only \
+  --user 65532:65532 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --pids-limit 64 \
+  --tmpfs /tmp:rw,nosuid,nodev,size=67108864,uid=65532,gid=65532,mode=1770 \
+  --env UV_CACHE_DIR=/tmp/uv-cache \
+  --env PYTHONDONTWRITEBYTECODE=1 \
+  --entrypoint /bin/sh \
+  "$image_ref" \
+  -ec "cd /app/backend && PYTHONPATH=/app/backend/packages/harness:/app/backend uv run --no-sync python -c '$validator_probe'" \
+  >/dev/null \
+  || fail "WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED"
 
 docker network inspect "$internal_network" >/dev/null 2>&1 \
   || fail "missing Workbench internal network: $internal_network"

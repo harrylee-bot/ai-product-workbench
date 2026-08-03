@@ -102,7 +102,7 @@ export async function createDiagnosticG11Fixture({
         for (const motion of MOTIONS) {
           const key = `${browser}-${state}-${viewport.id}-${motion}`;
           const captureId = `capture-${key}`;
-          const scenarioBinding = diagnosticScenarioBinding(`visual-${state}`);
+          const scenarioBinding = diagnosticScenarioBinding(`visual-${state}`, captureId);
           const scenarioPlan = productionG11ScenarioPlan({ scenarioId: `visual-${state}`, scenarioBinding });
           const asset = assets.get(key);
           const screenshot = await addBytesArtifact(
@@ -237,8 +237,6 @@ export async function createDiagnosticG11Fixture({
 
   const flows = [];
   for (const [flowId, checks] of Object.entries(flowChecks)) {
-    const scenarioBinding = diagnosticScenarioBinding(flowId);
-    const scenarioPlan = productionG11ScenarioPlan({ scenarioId: flowId, scenarioBinding });
     const traces = [];
     const coverage = [];
     for (const browser of BROWSERS) {
@@ -246,6 +244,8 @@ export async function createDiagnosticG11Fixture({
         for (const motion of MOTIONS) {
           const key = `${flowId}-${browser}-${viewport.id}-${motion}`;
           const traceId = `flow-${key}`;
+          const scenarioBinding = diagnosticScenarioBinding(flowId, traceId);
+          const scenarioPlan = productionG11ScenarioPlan({ scenarioId: flowId, scenarioBinding });
           const browserVersion = browsers.find(({ name }) => name === browser).version;
           const nativeTraceSha256 = diagnosticNativeTraceSha256(traceId, { browser, viewport, motion });
           const trace = await addBytesArtifact(
@@ -274,6 +274,8 @@ export async function createDiagnosticG11Fixture({
             viewport: viewport.id,
             motion,
             traceId,
+            scenarioBinding,
+            scenarioPlanSha256: productionG11ScenarioPlanSha256({ scenarioId: flowId, scenarioBinding }),
             nativeTraceSha256,
             startedAtUtc: FLOW_TRACE_STARTED_AT,
             finishedAtUtc: FLOW_TRACE_FINISHED_AT,
@@ -296,8 +298,10 @@ export async function createDiagnosticG11Fixture({
         }
       }
     }
+    const scenarioBinding = coverage[0].scenarioBinding;
+    const scenarioPlan = productionG11ScenarioPlan({ scenarioId: flowId, scenarioBinding });
     const receipt = await addJsonArtifact(addArtifact, `flows/${flowId}.json`, "browser-flow-receipt", {
-      schemaVersion: "workbench.production-g11-flow-evidence.v2",
+      schemaVersion: "workbench.production-g11-flow-evidence.v3",
       receiptId: `flow-receipt-${flowId}`,
       plan: planIdentity,
       binding,
@@ -313,8 +317,14 @@ export async function createDiagnosticG11Fixture({
       coverage,
     }, evidence);
     const observerChecks = Object.fromEntries(scenarioPlan.observerCheckIds.map((checkId) => [checkId, checks[checkId]]));
+    const captureObservations = coverage.map(({ traceId, scenarioBinding: captureBinding, scenarioPlanSha256 }) => ({
+      traceId,
+      scenarioBinding: captureBinding,
+      scenarioPlanSha256,
+      checks: structuredClone(observerChecks),
+    }));
     const observerReceipt = {
-      schemaVersion: "workbench.production-g11-server-observer-receipt.v1",
+      schemaVersion: "workbench.production-g11-server-observer-receipt.v2",
       receiptId: `server-observer-${flowId}`,
       plan: planIdentity,
       binding,
@@ -326,6 +336,7 @@ export async function createDiagnosticG11Fixture({
       originPolicySha256: productionG11OriginPolicySha256(deploymentIdentity),
       flowId,
       coverage,
+      captureObservations,
       checks: observerChecks,
       observedAtUtc: "2026-07-19T06:39:00Z",
       signedAtUtc: "2026-07-19T06:41:00Z",
@@ -407,7 +418,7 @@ export async function createDiagnosticG11Fixture({
   ), 0) + Object.keys(flowChecks).reduce((sum, flowId) => (
     sum + scenarioAssertionCount(productionG11ScenarioPlan({
       scenarioId: flowId,
-      scenarioBinding: diagnosticScenarioBinding(flowId),
+      scenarioBinding: diagnosticScenarioBinding(flowId, `diagnostic-${flowId}`),
     })) * (BROWSERS.length * VIEWPORTS.length * MOTIONS.length)
   ), 0);
   const collectorAttestation = {
@@ -711,17 +722,17 @@ function diagnosticNativeTraceSha256(traceId, { browser, viewport, motion }) {
   return sha256Bytes(temporaryNativeTrace);
 }
 
-function diagnosticScenarioBinding(scenarioId) {
+function diagnosticScenarioBinding(scenarioId, traceId) {
   const binding = {
-    projectId: "project-diagnostic",
-    threadId: "thread-diagnostic",
+    projectId: `project-${traceId}`,
+    threadId: `thread-${traceId}`,
   };
-  if (scenarioId === "account-project") binding.deniedProjectId = "project-denied";
-  if (scenarioId === "long-run-7686-plus") binding.runId = "run-diagnostic";
+  if (scenarioId === "account-project") binding.deniedProjectId = `denied-${traceId}`;
+  if (scenarioId === "long-run-7686-plus") binding.runId = `run-${traceId}`;
   if (scenarioId === "knowledge-null-valid") binding.knowledgeReleaseId = "knowledge-release-diagnostic";
   if (scenarioId === "provider-state-integrity") {
-    binding.artifactVersionId = "artifact-version-diagnostic";
-    binding.runId = "run-diagnostic";
+    binding.artifactVersionId = `artifact-${traceId}`;
+    binding.runId = `run-${traceId}`;
   }
   return binding;
 }

@@ -7,6 +7,7 @@ import {
   recordRuntimeTransactionMetric,
 } from "@workbench/workbench-telemetry";
 import { lockRunStatus } from "../runs/run-state-lock.js";
+import { runtimeProviderCancellationUnconfirmedCode } from "../runs/runtime-cancellation-state.js";
 import {
   rebuildRuntimeProviderTextState,
   assertRuntimeProviderProjection,
@@ -33,13 +34,16 @@ type RuntimeBindingRecord = {
 type ClaimScopeRow = {
   databaseNow: Date;
   runStatus: string;
+  runErrorCode: string | null;
   runOwnerId: string | null;
   runEpoch: number;
   runLeaseExpiresAt: Date | null;
   attemptStatus: string;
+  attemptErrorCode: string | null;
   attemptOwnerId: string | null;
   attemptEpoch: number;
   attemptLeaseExpiresAt: Date | null;
+  providerCancellationResolutionId: string | null;
   externalRunId: string | null;
   providerIdempotencyKey: string | null;
   submissionUnknownAt: Date | null;
@@ -188,6 +192,133 @@ export class RuntimeAttemptService {
       recordRuntimeLivenessMetric({ operation: "lease-takeover", outcome: "recovered" });
     }
     return result.claim;
+  }
+
+  async claimProviderCancellation(
+    runId: string,
+    attemptId: string,
+    ownerId: string,
+    leaseMs: number,
+  ): Promise<RuntimeExecutionClaim | null> {
+    assertOwnerId(ownerId);
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1) {
+      throw new Error("RUNTIME_PROVIDER_CANCELLATION_LEASE_INVALID");
+    }
+    return this.db.$transaction(async (tx) => {
+      const scope = await this.lockScope(tx, runId, attemptId);
+      if (scope.providerCancellationResolutionId !== null) return null;
+      if (
+        scope.runStatus !== "failed"
+        || scope.runErrorCode !== runtimeProviderCancellationUnconfirmedCode
+        || scope.attemptStatus !== "failed"
+        || scope.attemptErrorCode !== runtimeProviderCancellationUnconfirmedCode
+      ) {
+        throw new RuntimeExecutionFencedError("RUNTIME_PROVIDER_CANCELLATION_CLAIM_FENCED");
+      }
+      if (
+        activeLease(scope.runOwnerId, scope.runLeaseExpiresAt, scope.databaseNow)
+        || activeLease(scope.attemptOwnerId, scope.attemptLeaseExpiresAt, scope.databaseNow)
+      ) {
+        throw new RuntimeExecutionClaimBusyError();
+      }
+      const epoch = Math.max(scope.runEpoch, scope.attemptEpoch) + 1;
+      const leaseExpiresAt = new Date(scope.databaseNow.getTime() + leaseMs);
+      const runClaimed = await tx.run.updateMany({
+        where: {
+          id: runId,
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          executionEpoch: scope.runEpoch,
+        },
+        data: {
+          executionOwnerId: ownerId,
+          executionEpoch: epoch,
+          executionHeartbeatAt: scope.databaseNow,
+          executionLeaseExpiresAt: leaseExpiresAt,
+        },
+      });
+      const attemptClaimed = await tx.runtimeAttempt.updateMany({
+        where: {
+          id: attemptId,
+          runId,
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          executionEpoch: scope.attemptEpoch,
+          providerCancellationResolution: { is: null },
+        },
+        data: {
+          executionOwnerId: ownerId,
+          executionEpoch: epoch,
+          executionHeartbeatAt: scope.databaseNow,
+          executionLeaseExpiresAt: leaseExpiresAt,
+        },
+      });
+      if (runClaimed.count !== 1 || attemptClaimed.count !== 1) {
+        throw new RuntimeExecutionClaimBusyError();
+      }
+      return { runId, attemptId, ownerId, epoch };
+    });
+  }
+
+  async resolveProviderCancellation(
+    claim: RuntimeExecutionClaim,
+    input: {
+      failureCode: string;
+      outcome: "cancelled" | "already_terminal" | "external_run_absent";
+      externalRunId: string | null;
+    },
+  ): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      const scope = await this.assertProviderCancellationClaimTx(tx, claim);
+      if (input.outcome === "external_run_absent") {
+        if (input.externalRunId !== null || scope.externalRunId !== null) {
+          throw new Error(runtimeProviderCancellationUnconfirmedCode);
+        }
+      } else if (
+        input.externalRunId === null
+        || scope.externalRunId !== input.externalRunId
+      ) {
+        throw new Error("RUNTIME_PROVIDER_CANCELLATION_EXTERNAL_RUN_CONFLICT");
+      }
+      await tx.runtimeProviderCancellationResolution.create({
+        data: {
+          runtimeAttemptId: claim.attemptId,
+          runId: claim.runId,
+          failureCode: input.failureCode,
+          outcome: input.outcome,
+        },
+      });
+      const runReleased = await tx.run.updateMany({
+        where: providerCancellationRunClaimWhere(claim),
+        data: releasedLease(),
+      });
+      const attemptReleased = await tx.runtimeAttempt.updateMany({
+        where: providerCancellationAttemptClaimWhere(claim),
+        data: releasedLease(),
+      });
+      if (runReleased.count !== 1 || attemptReleased.count !== 1) {
+        throw new RuntimeExecutionFencedError("RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_FENCED");
+      }
+    });
+  }
+
+  async releaseProviderCancellation(claim: RuntimeExecutionClaim): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      const scope = await this.lockScope(tx, claim.runId, claim.attemptId);
+      if (scope.providerCancellationResolutionId !== null) return;
+      assertProviderCancellationClaim(scope, claim);
+      const runReleased = await tx.run.updateMany({
+        where: providerCancellationRunClaimWhere(claim),
+        data: releasedLease(),
+      });
+      const attemptReleased = await tx.runtimeAttempt.updateMany({
+        where: providerCancellationAttemptClaimWhere(claim),
+        data: releasedLease(),
+      });
+      if (runReleased.count !== 1 || attemptReleased.count !== 1) {
+        throw new RuntimeExecutionFencedError("RUNTIME_PROVIDER_CANCELLATION_RELEASE_FENCED");
+      }
+    });
   }
 
   async heartbeat(claim: RuntimeExecutionClaim): Promise<void> {
@@ -509,7 +640,7 @@ export class RuntimeAttemptService {
     }
   }
 
-  async markSubmissionUnknown(claim: RuntimeExecutionClaim, detail: string): Promise<void> {
+  async markSubmissionUnknown(claim: RuntimeExecutionClaim): Promise<void> {
     await this.db.$transaction(async (tx) => {
       const scope = await this.assertClaimTx(tx, claim);
       if (scope.externalRunId) {
@@ -538,7 +669,7 @@ export class RuntimeAttemptService {
           status: "submission_unknown",
           submissionUnknownAt: scope.submissionUnknownAt ?? scope.databaseNow,
           errorCode: "RUNTIME_SUBMISSION_UNKNOWN",
-          errorDetail: detail,
+          errorDetail: "RUNTIME_SUBMISSION_UNKNOWN",
           errorRetryable: false,
           ...releasedLease(),
         },
@@ -547,7 +678,7 @@ export class RuntimeAttemptService {
         where: claimRunWhere(claim),
         data: {
           errorCode: "RUNTIME_SUBMISSION_UNKNOWN",
-          errorDetail: detail,
+          errorDetail: "RUNTIME_SUBMISSION_UNKNOWN",
           errorRetryable: false,
           ...releasedLease(),
         },
@@ -587,21 +718,62 @@ export class RuntimeAttemptService {
     });
   }
 
-  async attachExternalRunForCancellation(attemptId: string, externalRunId: string) {
+  async attachExternalRunForCleanup(attemptId: string, externalRunId: string) {
     assertExternalRunId(externalRunId);
     return this.db.$transaction(async (tx) => {
-      const attempt = await tx.runtimeAttempt.findUniqueOrThrow({ where: { id: attemptId } });
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "runtime_attempts" WHERE "id" = ${attemptId} FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new Error("RUNTIME_ATTEMPT_NOT_FOUND");
+      const attempt = await tx.runtimeAttempt.findUniqueOrThrow({
+        where: { id: attemptId },
+        include: { providerCancellationResolution: true },
+      });
       if (attempt.externalRunId) {
         if (attempt.externalRunId !== externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_CONFLICT");
         return attempt;
       }
-      if (attempt.status !== "cancelling") {
+      if (
+        !["pending", "submitting", "submission_unknown", "running", "cancelling"].includes(
+          attempt.status,
+        )
+        && !(
+          attempt.status === "failed"
+          && attempt.errorCode === runtimeProviderCancellationUnconfirmedCode
+          && attempt.providerCancellationResolution === null
+        )
+      ) {
         throw new Error("RUNTIME_EXTERNAL_RUN_ATTACH_STATE_INVALID");
       }
-      return tx.runtimeAttempt.update({
-        where: { id: attemptId },
+      const attached = await tx.runtimeAttempt.updateMany({
+        where: {
+          id: attemptId,
+          externalRunId: null,
+          providerCancellationResolution: { is: null },
+          OR: [
+            {
+              status: {
+                in: ["pending", "submitting", "submission_unknown", "running", "cancelling"],
+              },
+            },
+            {
+              status: "failed",
+              errorCode: runtimeProviderCancellationUnconfirmedCode,
+            },
+          ],
+        },
         data: { externalRunId },
       });
+      if (attached.count === 1) {
+        return tx.runtimeAttempt.findUniqueOrThrow({ where: { id: attemptId } });
+      }
+      const current = await tx.runtimeAttempt.findUniqueOrThrow({
+        where: { id: attemptId },
+        include: { providerCancellationResolution: true },
+      });
+      if (current.externalRunId === externalRunId) return current;
+      if (current.externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_CONFLICT");
+      throw new Error("RUNTIME_EXTERNAL_RUN_ATTACH_STATE_INVALID");
     });
   }
 
@@ -847,6 +1019,23 @@ export class RuntimeAttemptService {
     return scope;
   }
 
+  private async assertProviderCancellationClaimTx(
+    tx: Prisma.TransactionClient,
+    claim: RuntimeExecutionClaim,
+  ): Promise<ClaimScopeRow> {
+    const scope = await this.lockScope(tx, claim.runId, claim.attemptId);
+    assertProviderCancellationClaim(scope, claim);
+    if (
+      !scope.runLeaseExpiresAt
+      || scope.runLeaseExpiresAt.getTime() <= scope.databaseNow.getTime()
+      || !scope.attemptLeaseExpiresAt
+      || scope.attemptLeaseExpiresAt.getTime() <= scope.databaseNow.getTime()
+    ) {
+      throw new RuntimeExecutionFencedError("RUNTIME_PROVIDER_CANCELLATION_LEASE_EXPIRED");
+    }
+    return scope;
+  }
+
   private async ensureProviderProjectionTx(
     tx: Prisma.TransactionClient,
     scope: {
@@ -874,23 +1063,47 @@ export class RuntimeAttemptService {
     }
 
     const [previous, draft] = await Promise.all([
-      tx.runtimeAttempt.findFirst({
-        where: {
-          runId: scope.runId,
-          attempt: { lt: scope.attempt },
-          providerState: { isNot: null },
-        },
-        orderBy: { attempt: "desc" },
-        select: { providerState: true },
-      }),
+      scope.attempt > 1
+        ? tx.runtimeAttempt.findUnique({
+            where: {
+              runId_attempt: {
+                runId: scope.runId,
+                attempt: scope.attempt - 1,
+              },
+            },
+            select: {
+              id: true,
+              runId: true,
+              attempt: true,
+              externalEventSequence: true,
+              providerState: true,
+            },
+          })
+        : Promise.resolve(null),
       tx.runDraft.findUnique({
         where: { runId: scope.runId },
         select: { content: true },
       }),
     ]);
+    if (scope.attempt > 1 && !previous?.providerState) {
+      throw new Error("RUNTIME_PROVIDER_STATE_BACKFILL_REQUIRED");
+    }
     const previousProjection = previous?.providerState
       ? providerProjectionFromRow(previous.providerState)
       : null;
+    if (
+      previous
+      && (
+        !previousProjection
+        || previous.id !== previousProjection.runtimeAttemptId
+        || previous.runId !== scope.runId
+        || previous.attempt !== scope.attempt - 1
+        || previousProjection.runId !== scope.runId
+        || previousProjection.lastAppliedSequence !== previous.externalEventSequence
+      )
+    ) {
+      throw new Error("RUNTIME_PROVIDER_STATE_BACKFILL_REQUIRED");
+    }
     const durableText = runtimeDraftText(draft?.content);
     if (!previousProjection && durableText !== "") {
       throw new Error("RUNTIME_PROVIDER_STATE_BACKFILL_REQUIRED");
@@ -934,7 +1147,7 @@ export class RuntimeAttemptService {
 
   async recordRetryableError(
     claim: RuntimeExecutionClaim,
-    error: { code: string; detail: string },
+    error: { code: string },
   ) {
     return this.db.$transaction(async (tx) => {
       await this.assertClaimTx(tx, claim);
@@ -945,7 +1158,7 @@ export class RuntimeAttemptService {
         },
         data: {
           errorCode: error.code,
-          errorDetail: error.detail,
+          errorDetail: error.code,
           errorRetryable: true,
           ...releasedLease(),
         },
@@ -969,10 +1182,12 @@ export class RuntimeAttemptService {
       SELECT
         CURRENT_TIMESTAMP AS "databaseNow",
         run."status"::TEXT AS "runStatus",
+        run."error_code" AS "runErrorCode",
         run."execution_owner_id" AS "runOwnerId",
         run."execution_epoch" AS "runEpoch",
         run."execution_lease_expires_at" AS "runLeaseExpiresAt",
         attempt."status"::TEXT AS "attemptStatus",
+        attempt."error_code" AS "attemptErrorCode",
         attempt."execution_owner_id" AS "attemptOwnerId",
         attempt."execution_epoch" AS "attemptEpoch",
         attempt."execution_lease_expires_at" AS "attemptLeaseExpiresAt",
@@ -981,9 +1196,12 @@ export class RuntimeAttemptService {
         attempt."submission_unknown_at" AS "submissionUnknownAt",
         attempt."external_event_sequence" AS "externalEventSequence",
         attempt."last_external_event_id" AS "lastExternalEventId"
-        , attempt."attempt" AS "attempt"
+        , attempt."attempt" AS "attempt",
+        resolution."runtime_attempt_id" AS "providerCancellationResolutionId"
       FROM "runs" AS run
       JOIN "runtime_attempts" AS attempt ON attempt."run_id" = run."id"
+      LEFT JOIN "runtime_provider_cancellation_resolutions" AS resolution
+        ON resolution."runtime_attempt_id" = attempt."id"
       WHERE run."id" = ${runId}
         AND attempt."id" = ${attemptId}
       FOR UPDATE OF run, attempt
@@ -1102,6 +1320,46 @@ function claimAttemptWhere(claim: RuntimeExecutionClaim) {
     executionOwnerId: claim.ownerId,
     executionEpoch: claim.epoch,
   };
+}
+
+function providerCancellationRunClaimWhere(claim: RuntimeExecutionClaim) {
+  return {
+    id: claim.runId,
+    status: "failed" as const,
+    errorCode: runtimeProviderCancellationUnconfirmedCode,
+    executionOwnerId: claim.ownerId,
+    executionEpoch: claim.epoch,
+  };
+}
+
+function providerCancellationAttemptClaimWhere(claim: RuntimeExecutionClaim) {
+  return {
+    id: claim.attemptId,
+    runId: claim.runId,
+    status: "failed" as const,
+    errorCode: runtimeProviderCancellationUnconfirmedCode,
+    executionOwnerId: claim.ownerId,
+    executionEpoch: claim.epoch,
+  };
+}
+
+function assertProviderCancellationClaim(
+  scope: ClaimScopeRow,
+  claim: RuntimeExecutionClaim,
+) {
+  if (
+    scope.providerCancellationResolutionId !== null
+    || scope.runStatus !== "failed"
+    || scope.runErrorCode !== runtimeProviderCancellationUnconfirmedCode
+    || scope.attemptStatus !== "failed"
+    || scope.attemptErrorCode !== runtimeProviderCancellationUnconfirmedCode
+    || scope.runOwnerId !== claim.ownerId
+    || scope.runEpoch !== claim.epoch
+    || scope.attemptOwnerId !== claim.ownerId
+    || scope.attemptEpoch !== claim.epoch
+  ) {
+    throw new RuntimeExecutionFencedError("RUNTIME_PROVIDER_CANCELLATION_CLAIM_FENCED");
+  }
 }
 
 function releasedLease() {

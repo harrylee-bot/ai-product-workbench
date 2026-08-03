@@ -114,7 +114,7 @@ const SSE_CAPTURE_SPECS = new Map([
   }],
 ]);
 const COLLECTOR_SIGNATURE_SCHEMA = "workbench.production-g11-collector-attestation-signature.v1";
-const G11_BROWSER_HARNESS_SHA256 = "e442e6ac1e602ff46390d1dec9e9d0198a4aadc1b5e77a8a30c2734b6df8afa7";
+const G11_BROWSER_HARNESS_SHA256 = "219acbab693a9db411109a18a0053980083fae5ab38b71db55e453163377de5e";
 const MIN_SCREENSHOT_ENTROPY = 0.05;
 const MIN_NORMAL_FRAME_PIXEL_RATIO = 0.0025;
 const MAX_REDUCED_FRAME_PIXEL_RATIO = 0.0001;
@@ -1161,7 +1161,7 @@ function validateFlowReceipt({ receipt, flow, manifest, plan, traceArtifacts, fi
     "finishedAtUtc", "status", "scenarioBinding", "checks", "renderedStates", "coverage",
   ], label, findings);
   const fixed = {
-    schemaVersion: "workbench.production-g11-flow-evidence.v2",
+    schemaVersion: "workbench.production-g11-flow-evidence.v3",
     plan: manifest.plan,
     binding: plan.payload.binding,
     environment: plan.payload.environment,
@@ -1207,11 +1207,18 @@ function validateFlowReceipt({ receipt, flow, manifest, plan, traceArtifacts, fi
   let unexpectedRuntimeFailureCount = 0;
   let assertionCount = 0;
   let coveragePassed = true;
+  const captureIdentityOwners = new Map([
+    ["projectId", new Map()],
+    ["threadId", new Map()],
+    ["deniedProjectId", new Map()],
+    ["runId", new Map()],
+    ["artifactVersionId", new Map()],
+  ]);
   for (const [coverageIndex, cell] of receipt.coverage.entries()) {
     const cellLabel = `${label} coverage[${coverageIndex}]`;
     if (!hasExactKeys(cell, [
-      "browser", "browserVersion", "viewport", "motion", "traceId", "nativeTraceSha256", "startedAtUtc",
-      "finishedAtUtc", "status", "steps",
+      "browser", "browserVersion", "viewport", "motion", "traceId", "scenarioBinding", "scenarioPlanSha256",
+      "nativeTraceSha256", "startedAtUtc", "finishedAtUtc", "status", "steps",
       "consoleCaptureComplete", "networkCaptureComplete", "runtimeCaptureComplete",
       "unexpectedConsoleErrorCount", "unexpectedNetworkFailureCount", "unexpectedRuntimeFailureCount", "trace",
     ], cellLabel, findings)) coveragePassed = false;
@@ -1242,8 +1249,24 @@ function validateFlowReceipt({ receipt, flow, manifest, plan, traceArtifacts, fi
       motion: cell?.motion,
       traceId: cell?.traceId,
       viewport: VIEWPORTS.find(({ id }) => id === cell?.viewport),
-      scenarioBinding: flow.scenarioBinding,
+      scenarioBinding: cell?.scenarioBinding,
     }, cellLabel, findings);
+    if (!validSha256(cell?.scenarioPlanSha256)
+      || cell.scenarioPlanSha256 !== scenario?.scenarioPlanSha256) {
+      findings.push(`${cellLabel} scenarioPlanSha256 does not bind its capture-specific resources`);
+      coveragePassed = false;
+    }
+    for (const [identityKey, owners] of captureIdentityOwners) {
+      const identity = cell?.scenarioBinding?.[identityKey];
+      if (identity === undefined) continue;
+      const previousTraceId = owners.get(identity);
+      if (previousTraceId) {
+        findings.push(`${cellLabel} reuses ${identityKey} from ${previousTraceId}`);
+        coveragePassed = false;
+      } else {
+        owners.set(identity, cell?.traceId);
+      }
+    }
     const expectedSteps = scenario?.scenarioPlan.browserSteps.map(({ stepId }) => stepId) ?? [];
     const steps = Array.isArray(cell?.steps) ? cell.steps : [];
     const actualSteps = steps.map((step) => step?.stepId);
@@ -1308,6 +1331,10 @@ function validateFlowReceipt({ receipt, flow, manifest, plan, traceArtifacts, fi
     findings.push(`${label} coverage must contain exactly 18 unique browser/viewport/motion cells`);
     coveragePassed = false;
   }
+  if (!canonicalEqual(receipt.scenarioBinding, receipt.coverage[0]?.scenarioBinding)) {
+    findings.push(`${label} primary scenarioBinding must equal its first deterministic capture binding`);
+    coveragePassed = false;
+  }
   const passed = valid
     && coveragePassed
     && flowPassesChecks(flow)
@@ -1331,8 +1358,8 @@ async function validateServerObserverReceipt({ receipt, flow, flowReceipt, manif
   const label = `${flow.flowId} server observer receipt`;
   if (!hasExactKeys(receipt, [
     "schemaVersion", "receiptId", "plan", "binding", "environment", "deployment", "scenarioId", "scenarioBinding",
-    "scenarioPlanSha256", "originPolicySha256", "flowId", "coverage", "checks", "observedAtUtc", "signedAtUtc",
-    "trustPolicySha256", "scopeId", "signerId", "signature",
+    "scenarioPlanSha256", "originPolicySha256", "flowId", "coverage", "captureObservations", "checks",
+    "observedAtUtc", "signedAtUtc", "trustPolicySha256", "scopeId", "signerId", "signature",
   ], label, findings)) return;
   let scenarioPlan;
   try {
@@ -1344,7 +1371,7 @@ async function validateServerObserverReceipt({ receipt, flow, flowReceipt, manif
   const observerCheckIds = productionG11FlowCheckSpec(flow.flowId)?.observerCheckIds ?? [];
   const expectedChecks = Object.fromEntries(observerCheckIds.map((checkId) => [checkId, flow.checks[checkId]]));
   const fixed = {
-    schemaVersion: "workbench.production-g11-server-observer-receipt.v1",
+    schemaVersion: "workbench.production-g11-server-observer-receipt.v2",
     plan: manifest.plan,
     binding: plan.payload.binding,
     environment: plan.payload.environment,
@@ -1361,6 +1388,17 @@ async function validateServerObserverReceipt({ receipt, flow, flowReceipt, manif
   };
   for (const [key, expected] of Object.entries(fixed)) {
     if (!canonicalEqual(receipt[key], expected)) findings.push(`${label} ${key} mismatch`);
+  }
+  const observedChecks = validateCaptureObserverCoverage({
+    captureObservations: receipt.captureObservations,
+    coverage: flowReceipt.coverage,
+    flowId: flow.flowId,
+    observerCheckIds,
+    label,
+    findings,
+  });
+  if (!canonicalEqual(observedChecks, expectedChecks)) {
+    findings.push(`${label} aggregate checks were not derived from all 18 capture observations`);
   }
   if (!validIdentifier(receipt.receiptId) || !validIdentifier(receipt.signerId)
     || !validateEvidenceTime(receipt.observedAtUtc, flowReceipt.startedAtUtc, flowReceipt.finishedAtUtc, label, findings)
@@ -1400,6 +1438,71 @@ async function validateServerObserverReceipt({ receipt, flow, flowReceipt, manif
   } catch {
     findings.push(`${label} signature verification failed`);
   }
+}
+
+function validateCaptureObserverCoverage({
+  captureObservations,
+  coverage,
+  flowId,
+  observerCheckIds,
+  label,
+  findings,
+}) {
+  if (!Array.isArray(coverage) || coverage.some((captured) => (
+    !captured || typeof captured !== "object" || Array.isArray(captured)
+  ))) {
+    findings.push(`${label} coverage entries must be objects before observer binding`);
+    return null;
+  }
+  if (!Array.isArray(captureObservations) || captureObservations.length !== coverage.length) {
+    findings.push(`${label} must include one server observation for every capture binding`);
+    return null;
+  }
+  const observations = new Map();
+  for (const [index, observation] of captureObservations.entries()) {
+    const observationLabel = `${label} captureObservations[${index}]`;
+    if (!hasExactKeys(observation, [
+      "traceId", "scenarioBinding", "scenarioPlanSha256", "checks",
+    ], observationLabel, findings)) continue;
+    if (observations.has(observation.traceId)) {
+      findings.push(`${observationLabel} duplicates traceId ${observation.traceId}`);
+      continue;
+    }
+    if (!observation.checks || typeof observation.checks !== "object" || Array.isArray(observation.checks)
+      || !canonicalEqual(Object.keys(observation.checks).sort(compareStrings), [...observerCheckIds].sort(compareStrings))) {
+      findings.push(`${observationLabel} checks do not match the protected observer partition`);
+      continue;
+    }
+    if (Object.values(observation.checks).some((value) => (
+      typeof value !== "boolean" && (!Number.isInteger(value) || value < 0)
+    ))) {
+      findings.push(`${observationLabel} checks must be booleans or non-negative integers`);
+      continue;
+    }
+    observations.set(observation.traceId, observation);
+  }
+  for (const captured of coverage) {
+    const observed = observations.get(captured.traceId);
+    if (!observed
+      || !canonicalEqual(observed.scenarioBinding, captured.scenarioBinding)
+      || observed.scenarioPlanSha256 !== captured.scenarioPlanSha256) {
+      findings.push(`${label} does not bind server checks to ${captured.traceId}`);
+    }
+  }
+  if (observations.size !== coverage.length) return null;
+  return Object.fromEntries(observerCheckIds.map((checkId) => {
+    const values = coverage.map(({ traceId }) => observations.get(traceId).checks[checkId]);
+    if (values.every((value) => typeof value === "boolean")) {
+      return [checkId, values.every((value) => value === true)];
+    }
+    if (!values.every((value) => Number.isInteger(value) && value >= 0)) return [checkId, null];
+    return [
+      checkId,
+      flowId === "long-run-7686-plus"
+        ? Math.min(...values)
+        : values.reduce((sum, value) => sum + value, 0),
+    ];
+  }));
 }
 
 function validateDistinctVisualStates(verifiedCells, findings) {

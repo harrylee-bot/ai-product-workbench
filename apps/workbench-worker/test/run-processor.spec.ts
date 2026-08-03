@@ -19,8 +19,14 @@ import {
 } from "../src/runs/run-processor.js";
 import { PrismaCanvasToolGrantIssuer } from "../src/runtime/canvas-tool-grant.service.js";
 import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
-import { RuntimeSubmissionUnknownError } from "../src/runtime/runtime.port.js";
+import {
+  RuntimeSubmissionUnknownError,
+  type RuntimeCancellationResult,
+  type RuntimePort,
+  type RuntimeSubmissionState,
+} from "../src/runtime/runtime.port.js";
 import { RuntimeLivenessError } from "../src/runtime/runtime-liveness.js";
+import { runtimeProviderCancellationUnconfirmedCode } from "../src/runs/runtime-cancellation-state.js";
 import { runtimePrdResultFixture } from "./runtime-prd-result.fixture.js";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
@@ -114,6 +120,36 @@ describe("Runtime retry classification", () => {
       .toBe("RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT");
     expect(publicErrorMessage(prismaError)).not.toContain("runtimeProviderState.update");
   });
+
+  it("publishes only controlled error codes and rejects provider text at every nesting depth", () => {
+    const secrets = [
+      "Bearer provider-bearer-secret",
+      `wbkg1.${"a".repeat(64)}.${"b".repeat(43)}`,
+      `wbct1.${"c".repeat(64)}.${"d".repeat(43)}`,
+      "postgresql://runtime:database-secret@postgres.internal/workbench",
+      "prompt: reproduce the customer's private roadmap",
+      "response body: upstream returned private generated content",
+    ];
+    for (const secret of secrets) {
+      expect(publicErrorMessage(new Error(secret))).toBe("Runtime execution failed");
+      expect(publicErrorMessage(new Error("SDK request failed", {
+        cause: new Error(secret),
+      }))).toBe("Runtime execution failed");
+    }
+
+    const liveness = new RuntimeLivenessError("RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT", true);
+    const submissionUnknown = new RuntimeSubmissionUnknownError(
+      "RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE",
+      { cause: new Error(secrets.join(" ")) },
+    );
+    expect(publicErrorMessage(new Error("wrapper", { cause: liveness })))
+      .toBe("RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT");
+    expect(publicErrorMessage(new RuntimeCancelledError())).toBe("RUNTIME_CANCELLED");
+    expect(publicErrorMessage(submissionUnknown))
+      .toBe("RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE");
+    expect(runtimeExecutionErrorCode(submissionUnknown))
+      .toBe("RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE");
+  });
 });
 
 describe("Runtime wall-clock terminalization", () => {
@@ -128,9 +164,9 @@ describe("Runtime wall-clock terminalization", () => {
     const runtime = {
       execute: vi.fn(async () => new Promise<never>(() => undefined)),
       cancel: vi.fn(async () => ({
+        disposition: "cancelled" as const,
         externalRunId: "external-run-1",
         externalStatus: "interrupted",
-        found: true,
       })),
     };
     const db = {
@@ -214,6 +250,401 @@ describe("Runtime wall-clock terminalization", () => {
       executionClaim,
     );
   });
+
+  it("terminalizes an expired UNKNOWN attempt instead of resetting its retry budget", async () => {
+    const harness = wallClockRecoveryHarness({
+      startedAt: now,
+      submissions: [{
+        mode: "reconcile",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      }],
+      execute: async () => new Promise<never>(() => undefined),
+      cancel: async () => ({
+        disposition: "not_found",
+        externalRunId: null,
+        externalStatus: null,
+      }),
+    });
+
+    const execution = harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    });
+    const observed = execution.catch((error: unknown) => error);
+    for (let index = 0; index < 10 && harness.runtime.execute.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    await vi.advanceTimersByTimeAsync(900);
+    await expect(observed).resolves.toMatchObject({
+      code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      retryable: false,
+    });
+
+    expect(harness.attempts.claim).toHaveBeenCalledTimes(1);
+    expect(harness.runtime.execute).toHaveBeenCalledTimes(1);
+    expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
+      false,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+        submissionUnknown: true,
+      },
+    );
+  });
+
+  it("terminalizes an expired joined attempt when its final cleanup also times out", async () => {
+    let providerCancelSignal: AbortSignal | undefined;
+    const harness = wallClockRecoveryHarness({
+      startedAt: new Date(now.getTime() - 900),
+      submissions: [{
+        mode: "join",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+        externalRunId: "external-run-1",
+        lastExternalEventId: null,
+      }],
+      execute: async () => new Promise<never>(() => undefined),
+      cancel: async (_cancellation, _onExternalRunRecovered, signal) => {
+        providerCancelSignal = signal;
+        return new Promise<never>(() => undefined);
+      },
+    });
+
+    const execution = harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    });
+    const observed = execution.catch((error: unknown) => error);
+    for (let index = 0; index < 10 && harness.runtime.execute.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    await vi.advanceTimersByTimeAsync(100);
+    expect(harness.runtime.cancel).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(providerCancelSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(observed).resolves.toMatchObject({
+      code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      retryable: false,
+    });
+    expect(providerCancelSignal?.aborted).toBe(true);
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
+      false,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+        submissionUnknown: false,
+      },
+    );
+  });
+
+  it("terminalizes an expired submit intent only when it was never authorized", async () => {
+    const execute = vi.fn<RuntimePort["execute"]>(async () => {
+      throw new Error("runtime.execute must not run for an expired pending submission");
+    });
+    const harness = wallClockRecoveryHarness({
+      startedAt: new Date(now.getTime() - 900),
+      submissions: [{
+        mode: "submit",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      }],
+      execute,
+      cancel: async () => ({
+        disposition: "not_found",
+        externalRunId: null,
+        externalStatus: null,
+      }),
+    });
+
+    await expect(harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    })).rejects.toMatchObject({
+      code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      retryable: false,
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(harness.attempts.authorizeSubmission).not.toHaveBeenCalled();
+    expect(harness.runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ externalRunId: null }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
+      false,
+      executionClaim,
+    );
+  });
+});
+
+describe("Runtime provider liveness retry exhaustion", () => {
+  it("confirms provider interruption before failing an exhausted stream-idle Run", async () => {
+    const idleTimeout = new RuntimeLivenessError(
+      "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+      true,
+    );
+    const harness = runtimeLivenessHarness({
+      executionError: idleTimeout,
+      submission: {
+        mode: "join",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+        externalRunId: "external-run-1",
+        lastExternalEventId: "provider-event-7",
+      },
+      cancel: async () => ({
+        disposition: "cancelled",
+        externalRunId: "external-run-1",
+        externalStatus: "interrupted",
+      }),
+    });
+
+    await expect(harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    })).rejects.toBe(idleTimeout);
+
+    expect(harness.runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeAttemptId: "runtime-attempt-1",
+        externalThreadId: "external-thread-1",
+        externalRunId: "external-run-1",
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      idleTimeout,
+      true,
+      executionClaim,
+    );
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+  });
+
+  it("terminalizes an exhausted ambiguous submission when metadata lookup finds no Run", async () => {
+    const submissionTimeout = new RuntimeLivenessError(
+      "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+      true,
+    );
+    const ambiguity = new RuntimeSubmissionUnknownError("RUNTIME_SUBMISSION_UNKNOWN", {
+      cause: submissionTimeout,
+    });
+    const harness = runtimeLivenessHarness({
+      executionError: ambiguity,
+      submission: {
+        mode: "submit",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+      submissionStarted: true,
+      cancel: async () => ({
+        disposition: "not_found",
+        externalRunId: null,
+        externalStatus: null,
+      }),
+    });
+
+    await expect(harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    })).rejects.toBe(submissionTimeout);
+
+    expect(harness.attempts.authorizeSubmission).toHaveBeenCalledWith(executionClaim);
+    expect(harness.runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ externalRunId: null }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      submissionTimeout,
+      true,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        submissionUnknown: true,
+      },
+    );
+  });
+
+  it("terminalizes a known external Run when final provider cancellation times out", async () => {
+    vi.useFakeTimers();
+    try {
+      const idleTimeout = new RuntimeLivenessError(
+        "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        true,
+      );
+      let providerSignal: AbortSignal | undefined;
+      const harness = runtimeLivenessHarness({
+        executionError: idleTimeout,
+        submission: {
+          mode: "join",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+          externalRunId: "external-run-1",
+          lastExternalEventId: null,
+        },
+        deadlineCancelMs: 100,
+        cancel: async (_cancellation, _onExternalRunRecovered, signal) => {
+          providerSignal = signal;
+          return new Promise<never>(() => undefined);
+        },
+      });
+
+      const execution = harness.processor.execute("run-1", [], undefined, {
+        retryCount: 5,
+        retryLimit: 5,
+      });
+      const observed = execution.catch((error: unknown) => error);
+      for (let index = 0; index < 10 && harness.runtime.cancel.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+      expect(harness.runtime.cancel).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(99);
+      expect(providerSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(observed).resolves.toBe(idleTimeout);
+      expect(providerSignal?.aborted).toBe(true);
+      expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+      expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+      expect(harness.failRun).toHaveBeenCalledWith(
+        "run-1",
+        "runtime-attempt-1",
+        idleTimeout,
+        true,
+        executionClaim,
+        {
+          code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+          detailCode: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+          submissionUnknown: false,
+        },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records late provider success as settled and terminalizes with the local failure", async () => {
+    const submissionTimeout = new RuntimeLivenessError(
+      "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+      true,
+    );
+    const ambiguity = new RuntimeSubmissionUnknownError("RUNTIME_SUBMISSION_UNKNOWN", {
+      cause: submissionTimeout,
+    });
+    const harness = runtimeLivenessHarness({
+      executionError: ambiguity,
+      submission: {
+        mode: "submit",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+      submissionStarted: true,
+      cancel: async (_cancellation, onExternalRunRecovered) => {
+        await onExternalRunRecovered("external-run-late");
+        return {
+          disposition: "already_terminal",
+          externalRunId: "external-run-late",
+          externalStatus: "success",
+        };
+      },
+    });
+
+    await expect(harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    })).rejects.toBe(submissionTimeout);
+
+    expect(harness.attempts.attachExternalRunForCleanup).toHaveBeenCalledWith(
+      executionClaim.attemptId,
+      "external-run-late",
+    );
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.attempts.attachExternalRunForCleanup.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.failRun.mock.invocationCallOrder[0]!,
+    );
+    expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      submissionTimeout,
+      true,
+      executionClaim,
+    );
+  });
+
+  it("persists a recovered external Run id after cleanup timeout releases the claim", async () => {
+    vi.useFakeTimers();
+    try {
+      const idleTimeout = new RuntimeLivenessError(
+        "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        true,
+      );
+      const providerCancellation = deferred<RuntimeCancellationResult>();
+      let recoverExternalRun!: () => Promise<void>;
+      const harness = runtimeLivenessHarness({
+        executionError: idleTimeout,
+        submission: {
+          mode: "submit",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+        },
+        deadlineCancelMs: 100,
+        cancel: async (_cancellation, onExternalRunRecovered) => {
+          recoverExternalRun = async () => {
+            await onExternalRunRecovered("external-run-late");
+            providerCancellation.resolve({
+              disposition: "already_terminal",
+              externalRunId: "external-run-late",
+              externalStatus: "success",
+            });
+          };
+          return providerCancellation.promise;
+        },
+      });
+
+      const execution = harness.processor.execute("run-1", [], undefined, {
+        retryCount: 5,
+        retryLimit: 5,
+      });
+      const observed = execution.catch((error: unknown) => error);
+      for (let index = 0; index < 10 && harness.runtime.cancel.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+      await vi.advanceTimersByTimeAsync(100);
+
+      await expect(observed).resolves.toBe(idleTimeout);
+      expect(harness.failRun).toHaveBeenCalledTimes(1);
+      await recoverExternalRun();
+      expect(harness.attempts.attachExternalRunForCleanup).toHaveBeenCalledWith(
+        "runtime-attempt-1",
+        "external-run-late",
+      );
+      expect(harness.attempts.attachExternalRunForCleanup.mock.invocationCallOrder[0]).toBeGreaterThan(
+        harness.failRun.mock.invocationCallOrder[0]!,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function durableExecutionPrepared() {
@@ -256,6 +687,130 @@ function emptyProviderTextState(visibleAssistantText = "") {
     redactionBuffer: "",
     committedFinalization: null,
   };
+}
+
+type RuntimeCancelStub = (
+  cancellation: unknown,
+  onExternalRunRecovered: (externalRunId: string) => Promise<void>,
+  signal?: AbortSignal,
+) => Promise<RuntimeCancellationResult>;
+
+function wallClockRecoveryHarness(input: {
+  startedAt: Date;
+  submissions: RuntimeSubmissionState[];
+  execute: RuntimePort["execute"];
+  cancel: RuntimeCancelStub;
+}) {
+  const runtime = {
+    execute: vi.fn(input.execute),
+    cancel: vi.fn(input.cancel),
+  };
+  const db = {
+    run: { findUnique: vi.fn(async () => ({ status: "running" })) },
+  };
+  const processor = new RunProcessor(
+    db as never,
+    runtime as never,
+    noKnowledgeToolGrants(),
+    undefined,
+    prototypePatchCoordinator() as never,
+    undefined,
+    { maximumWallClockMs: 900, deadlineCancelMs: 100 },
+  );
+  let submissionIndex = 0;
+  const attempts = {
+    ensure: vi.fn(async () => ({ id: "runtime-attempt-1", startedAt: input.startedAt })),
+    claim: vi.fn(async () => executionClaim),
+    submissionContext: vi.fn(async () => (
+      input.submissions[Math.min(submissionIndex++, input.submissions.length - 1)]!
+    )),
+    providerTextState: vi.fn(async () => emptyProviderTextState()),
+    authorizeSubmission: vi.fn(async () => undefined),
+    attachExternalRun: vi.fn(async () => undefined),
+    attachExternalRunForCleanup: vi.fn(async () => undefined),
+    markSubmissionUnknown: vi.fn(async () => undefined),
+    recordRetryableError: vi.fn(async () => undefined),
+  };
+  const internals = processor as unknown as ProcessorInternals & {
+    bindings: { ensure: ReturnType<typeof vi.fn> };
+    attempts: typeof attempts;
+  };
+  const publishResult = vi.fn(async () => undefined);
+  Object.assign(internals, {
+    prepare: vi.fn(async () => durableExecutionPrepared()),
+    bindings: {
+      ensure: vi.fn(async () => ({
+        id: "binding-1",
+        adapter: "deerflow",
+        externalThreadId: "external-thread-1",
+      })),
+    },
+    attempts,
+    publishResult,
+  });
+  const failRun = vi.spyOn(internals, "failRun").mockResolvedValue(undefined);
+  return { attempts, failRun, processor, publishResult, runtime };
+}
+
+function runtimeLivenessHarness(input: {
+  executionError: Error;
+  submission: RuntimeSubmissionState;
+  submissionStarted?: boolean;
+  cancel: RuntimeCancelStub;
+  deadlineCancelMs?: number;
+}) {
+  const runtime = {
+    execute: vi.fn(async (_execution: unknown, observer: {
+      onSubmissionStarted(): Promise<void>;
+    }) => {
+      if (input.submissionStarted) await observer.onSubmissionStarted();
+      throw input.executionError;
+    }),
+    cancel: vi.fn(input.cancel),
+  };
+  const db = {
+    run: { findUnique: vi.fn(async () => ({ status: "running" })) },
+  };
+  const processor = new RunProcessor(
+    db as never,
+    runtime as never,
+    noKnowledgeToolGrants(),
+    undefined,
+    prototypePatchCoordinator() as never,
+    undefined,
+    {
+      maximumWallClockMs: 10_000,
+      deadlineCancelMs: input.deadlineCancelMs ?? 100,
+    },
+  );
+  const attempts = {
+    ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
+    claim: vi.fn(async () => executionClaim),
+    submissionContext: vi.fn(async () => input.submission),
+    providerTextState: vi.fn(async () => emptyProviderTextState()),
+    authorizeSubmission: vi.fn(async () => undefined),
+    attachExternalRun: vi.fn(async () => undefined),
+    attachExternalRunForCleanup: vi.fn(async () => undefined),
+    markSubmissionUnknown: vi.fn(async () => undefined),
+    recordRetryableError: vi.fn(async () => undefined),
+  };
+  const internals = processor as unknown as ProcessorInternals & {
+    bindings: { ensure: ReturnType<typeof vi.fn> };
+    attempts: typeof attempts;
+  };
+  Object.assign(internals, {
+    prepare: vi.fn(async () => durableExecutionPrepared()),
+    bindings: {
+      ensure: vi.fn(async () => ({
+        id: "binding-1",
+        adapter: "deerflow",
+        externalThreadId: "external-thread-1",
+      })),
+    },
+    attempts,
+  });
+  const failRun = vi.spyOn(internals, "failRun").mockResolvedValue(undefined);
+  return { attempts, failRun, processor, runtime };
 }
 
 function deferred<T>() {
@@ -2060,6 +2615,10 @@ describe("Runtime Artifact draft staging and publication", () => {
 
 type ProcessorInternals = {
   prepare(runId: string, approvalIds: string[]): Promise<unknown>;
+  recoverPublishedSuccess(runId: string): Promise<{
+    runtimeAttemptId: string;
+    artifactCount: number;
+  } | null>;
   persistProgress(claim: typeof executionClaim, event: {
     type: "phase";
     phase: "generating";
@@ -2105,7 +2664,18 @@ type ProcessorInternals = {
     draft: unknown,
     artifactIndex: number,
   ): Promise<{ id: string; artifactId: string; version: number }>;
-  failRun(runId: string, runtimeAttemptId: string | null, error: unknown, retryable: boolean): Promise<void>;
+  failRun(
+    runId: string,
+    runtimeAttemptId: string | null,
+    error: unknown,
+    retryable: boolean,
+    claim?: typeof executionClaim | null,
+    context?: {
+      code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED";
+      detailCode: string;
+      submissionUnknown: boolean;
+    } | null,
+  ): Promise<void>;
   finalizeCancellation(runId: string, reason: string, runtimeAttemptId?: string): Promise<void>;
 };
 
@@ -3464,6 +4034,52 @@ describe("Run durable snapshots", () => {
     expect(tx.runEvent.create).not.toHaveBeenCalled();
   });
 
+  it("recovers a committed successful result and its exact RuntimeAttempt", async () => {
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({ status: "succeeded", attempt: 2, eventSequence: 9 })),
+      },
+      runtimeAttempt: {
+        findUnique: vi.fn(async () => ({
+          id: "runtime-attempt-2",
+          runId: "run-1",
+          attempt: 2,
+          status: "succeeded",
+        })),
+      },
+      runEvent: {
+        findMany: vi.fn(async () => [{
+          sequence: 9,
+          type: "run.completed",
+          payload: { artifactCount: 4 },
+        }]),
+      },
+    };
+    const processor = new RunProcessor(
+      db as never,
+      {} as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals;
+    vi.spyOn(internals, "prepare").mockResolvedValue(null);
+    const onRuntimeAttemptResolved = vi.fn();
+
+    await expect(processor.execute("run-1", [], undefined, undefined, {
+      onRuntimeAttemptResolved,
+    })).resolves.toEqual({ runId: "run-1", artifactCount: 4 });
+
+    expect(onRuntimeAttemptResolved).toHaveBeenCalledExactlyOnceWith("runtime-attempt-2");
+    expect(db.runEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        runId: "run-1",
+        type: { in: ["run.completed", "run.failed", "run.cancelled"] },
+      },
+      take: 2,
+    }));
+  });
+
   it("keeps a running run and its attempt non-terminal when a retry remains", async () => {
     const retryableError = new Error("socket closed before the runtime stream completed");
     const runtime = {
@@ -3546,7 +4162,6 @@ describe("Run durable snapshots", () => {
 
     expect(recordRetryableError).toHaveBeenCalledWith(executionClaim, {
       code: "RUNTIME_EXECUTION_RETRYABLE",
-      detail: retryableError.message,
     });
     expect(knowledgeToolGrants.issue).toHaveBeenCalledWith({
       runId: "run-1",
@@ -3614,10 +4229,14 @@ describe("Run durable snapshots", () => {
       publishResult,
     });
 
-    await expect(processor.execute("run-1")).resolves.toEqual({
+    const onRuntimeAttemptResolved = vi.fn();
+    await expect(processor.execute("run-1", [], undefined, undefined, {
+      onRuntimeAttemptResolved,
+    })).resolves.toEqual({
       runId: "run-1",
       artifactCount: 0,
     });
+    expect(onRuntimeAttemptResolved).toHaveBeenCalledWith("runtime-attempt-1");
 
     expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
       submission: {
@@ -3907,7 +4526,6 @@ describe("Run durable snapshots", () => {
 
     expect(markSubmissionUnknown).toHaveBeenCalledWith(
       executionClaim,
-      "provider lookup unavailable",
     );
     expect(knowledgeToolGrants.issue).not.toHaveBeenCalled();
     expect(canvasToolGrants.issue).not.toHaveBeenCalled();
@@ -4181,7 +4799,11 @@ describe("Run durable snapshots", () => {
       ) => {
         // The provider races cancellation with submission and reveals the id late.
         await onExternalRunCreated("external-run-late");
-        return { found: false };
+        return {
+          disposition: "not_found" as const,
+          externalRunId: null,
+          externalStatus: null,
+        };
       }),
     };
     const db = {
@@ -4217,7 +4839,7 @@ describe("Run durable snapshots", () => {
           externalRunId: null,
           startedAt: new Date(),
         })),
-        attachExternalRunForCancellation: attachExternalRun,
+        attachExternalRunForCleanup: attachExternalRun,
       },
     });
     const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
@@ -4230,7 +4852,11 @@ describe("Run durable snapshots", () => {
 
   it("finalizes missing external cancellation only after the recovery window", async () => {
     const runtime = {
-      cancel: vi.fn(async () => ({ found: false })),
+      cancel: vi.fn(async () => ({
+        disposition: "not_found" as const,
+        externalRunId: null,
+        externalStatus: null,
+      })),
     };
     const db = {
       run: {
@@ -4707,18 +5333,29 @@ describe("Run durable snapshots", () => {
       where: { id: "run-1", status: { in: ["queued", "running"] } },
       data: expect.objectContaining({
         status: "failed",
+        errorCode: "RUNTIME_EXECUTION_FAILED",
+        errorDetail: "RUNTIME_EXECUTION_FAILED",
         errorRetryable: false,
       }),
     });
     expect(tx.runEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         type: "run.failed",
-        payload: expect.objectContaining({ retryable: false }),
+        payload: {
+          code: "RUNTIME_EXECUTION_FAILED",
+          message: "RUNTIME_EXECUTION_FAILED",
+          retryable: false,
+        },
       }),
     });
     expect(tx.runtimeAttempt.updateMany).toHaveBeenCalledWith({
       where: { id: "runtime-attempt-1" },
-      data: expect.objectContaining({ status: "failed", errorRetryable: false }),
+      data: expect.objectContaining({
+        status: "failed",
+        errorCode: "RUNTIME_EXECUTION_FAILED",
+        errorDetail: "RUNTIME_EXECUTION_FAILED",
+        errorRetryable: false,
+      }),
     });
     expect(tx.canvasAgentSession.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["canvas-session-failed"] }, status: "active" },
@@ -4770,6 +5407,81 @@ describe("Run durable snapshots", () => {
       },
     });
     expect(tx.runDraft.deleteMany).toHaveBeenCalledWith({ where: { runId: "run-1" } });
+  });
+
+  it("persists an unconfirmed provider cancellation as a failed Run with UNKNOWN evidence", async () => {
+    const tx = eventTransaction();
+    tx.runtimeAttempt.findUnique.mockResolvedValue({
+      id: "runtime-attempt-1",
+      runId: "run-1",
+      status: "submitting",
+      startedAt: now,
+      submissionUnknownAt: null,
+    });
+    const { processor } = processorWithTransaction(tx);
+    const liveness = new RuntimeLivenessError("RUNTIME_PROVIDER_SUBMISSION_TIMEOUT", true);
+
+    await processor.failRun(
+      "run-1",
+      "runtime-attempt-1",
+      liveness,
+      true,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        submissionUnknown: true,
+      },
+    );
+
+    expect(tx.run.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "run-1",
+        status: "running",
+        executionOwnerId: executionClaim.ownerId,
+        executionEpoch: executionClaim.epoch,
+      },
+      data: expect.objectContaining({
+        status: "failed",
+        errorCode: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        errorRetryable: true,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      }),
+    });
+    expect(tx.runtimeAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "runtime-attempt-1",
+        runId: "run-1",
+        executionOwnerId: executionClaim.ownerId,
+        executionEpoch: executionClaim.epoch,
+      },
+      data: expect.objectContaining({
+        status: "failed",
+        errorCode: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        errorRetryable: true,
+        submissionUnknownAt: expect.any(Date),
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      }),
+    });
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "run.failed",
+        payload: {
+          code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+          message: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+          retryable: true,
+        },
+      }),
+    });
+    expect(tx.runEvent.create.mock.calls.some(
+      ([{ data }]) => data.type === "run.cancelled",
+    )).toBe(false);
   });
 
   it("stores cancellation and removes the Run's staging version and temporary Artifact", async () => {
@@ -5208,3 +5920,215 @@ describe("Run durable snapshots", () => {
     }] as never)).toThrow("RUNTIME_SOURCE_BLOB_INVALID");
   });
 });
+
+describe("Provider cancellation convergence", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("converges an already-terminal provider Run without restoring runtime execution", async () => {
+    const resolution = providerCancellationResolutionHarness();
+    const runtime = {
+      cancel: vi.fn(async () => ({
+        disposition: "already_terminal" as const,
+        externalRunId: "external-run-1",
+        externalStatus: "success",
+      })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            id: "runtime-attempt-1",
+            status: "failed",
+            errorCode: runtimeProviderCancellationUnconfirmedCode,
+            externalThreadId: "external-thread-1",
+            externalRunId: "external-run-1",
+            startedAt: now,
+            providerCancellationResolution: null,
+          }],
+        })),
+      },
+      $transaction: resolution.transaction,
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+    );
+
+    await expect(processor.cancel("run-1")).resolves.toEqual({
+      runId: "run-1",
+      cancelled: false,
+      cancellationConverged: true,
+    });
+    expect(runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        runtimeAttemptId: "runtime-attempt-1",
+        externalRunId: "external-run-1",
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(resolution.create).toHaveBeenCalledWith({
+      data: {
+        runtimeAttemptId: "runtime-attempt-1",
+        runId: "run-1",
+        failureCode: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        outcome: "already_terminal",
+      },
+    });
+  });
+
+  it("keeps a failed Run pending while provider absence is still within the recovery window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const recoveryWindowMs = 10_000;
+    const resolution = providerCancellationResolutionHarness(null);
+    const runtime = {
+      cancel: vi.fn(async () => ({
+        disposition: "not_found" as const,
+        externalRunId: null,
+        externalStatus: null,
+      })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            id: "runtime-attempt-1",
+            status: "failed",
+            errorCode: runtimeProviderCancellationUnconfirmedCode,
+            externalThreadId: "external-thread-1",
+            externalRunId: null,
+            startedAt: new Date(now.getTime() - recoveryWindowMs + 1),
+            providerCancellationResolution: null,
+          }],
+        })),
+      },
+      $transaction: resolution.transaction,
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      undefined,
+      recoveryWindowMs,
+    );
+
+    await expect(processor.cancel("run-1")).rejects.toThrow(
+      runtimeProviderCancellationUnconfirmedCode,
+    );
+    expect(resolution.create).not.toHaveBeenCalled();
+  });
+
+  it("converges a failed Run exactly at the external Run recovery-window boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const recoveryWindowMs = 10_000;
+    const resolution = providerCancellationResolutionHarness(null);
+    const runtime = {
+      cancel: vi.fn(async () => ({
+        disposition: "not_found" as const,
+        externalRunId: null,
+        externalStatus: null,
+      })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            id: "runtime-attempt-1",
+            status: "failed",
+            errorCode: runtimeProviderCancellationUnconfirmedCode,
+            externalThreadId: "external-thread-1",
+            externalRunId: null,
+            startedAt: new Date(now.getTime() - recoveryWindowMs),
+            providerCancellationResolution: null,
+          }],
+        })),
+      },
+      $transaction: resolution.transaction,
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      undefined,
+      recoveryWindowMs,
+    );
+
+    await expect(processor.cancel("run-1")).resolves.toEqual({
+      runId: "run-1",
+      cancelled: false,
+      cancellationConverged: true,
+      externalRunAbsent: true,
+    });
+    expect(resolution.create).toHaveBeenCalledWith({
+      data: {
+        runtimeAttemptId: "runtime-attempt-1",
+        runId: "run-1",
+        failureCode: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        outcome: "external_run_absent",
+      },
+    });
+  });
+});
+
+function providerCancellationResolutionHarness(externalRunId: string | null = "external-run-1") {
+  const state = {
+    ownerId: null as string | null,
+    epoch: 0,
+    leaseExpiresAt: null as Date | null,
+    resolutionId: null as string | null,
+  };
+  const updateMany = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    state.ownerId = (data.executionOwnerId ?? null) as string | null;
+    if (typeof data.executionEpoch === "number") state.epoch = data.executionEpoch;
+    state.leaseExpiresAt = (data.executionLeaseExpiresAt ?? null) as Date | null;
+    return { count: 1 };
+  });
+  const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    state.resolutionId = String(data.runtimeAttemptId);
+    return data;
+  });
+  const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({
+    $queryRaw: vi.fn(async () => [{
+      databaseNow: now,
+      runStatus: "failed",
+      runErrorCode: runtimeProviderCancellationUnconfirmedCode,
+      runOwnerId: state.ownerId,
+      runEpoch: state.epoch,
+      runLeaseExpiresAt: state.leaseExpiresAt,
+      attemptStatus: "failed",
+      attemptErrorCode: runtimeProviderCancellationUnconfirmedCode,
+      attemptOwnerId: state.ownerId,
+      attemptEpoch: state.epoch,
+      attemptLeaseExpiresAt: state.leaseExpiresAt,
+      providerCancellationResolutionId: state.resolutionId,
+      externalRunId,
+      providerIdempotencyKey: null,
+      submissionUnknownAt: now,
+      externalEventSequence: 0,
+      lastExternalEventId: null,
+      attempt: 1,
+    }]),
+    run: { updateMany },
+    runtimeAttempt: { updateMany },
+    runtimeProviderCancellationResolution: { create },
+  }));
+  return { create, transaction };
+}

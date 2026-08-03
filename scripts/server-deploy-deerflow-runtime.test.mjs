@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -81,15 +82,19 @@ function runDeployment({
   mkdirSync(configDir, { recursive: true });
   mkdirSync(runtimeHome, { recursive: true });
   mkdirSync(fakeBinDir, { recursive: true });
-  writeFileSync(join(configDir, "config.base.yaml"), "models: []\n");
-  writeFileSync(effectiveConfig, "models: []\n");
+  const deerflowConfigSource = "models: []\n";
+  const deerflowConfigSha256 = createHash("sha256").update(deerflowConfigSource).digest("hex");
+  writeFileSync(join(configDir, "config.base.yaml"), deerflowConfigSource);
+  writeFileSync(effectiveConfig, deerflowConfigSource);
   writeFileSync(composeFile, "services: {}\n");
   writeFileSync(composeOverlay, "services: {}\n");
   writeFileSync(deerflowComposeFile, "services: {}\n");
   writeFileSync(commandLogPath, "");
   writeFileSync(envFile, [
     `WORKBENCH_DEERFLOW_BASE_CONFIG_PATH=${join(configDir, "config.base.yaml")}`,
+    `WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256=${deerflowConfigSha256}`,
     `DEER_FLOW_CONFIG_PATH=${effectiveConfig}`,
+    `WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256=${deerflowConfigSha256}`,
     `DEER_FLOW_HOME=${runtimeHome}`,
     `WORKBENCH_DEERFLOW_IMAGE_REF=registry.example.test/workbench/deerflow@sha256:${"c".repeat(64)}`,
     "WORKBENCH_INTERNAL_NETWORK_NAME=workbench_internal",

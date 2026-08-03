@@ -180,7 +180,7 @@ WORKBENCH_COMPOSE_OVERLAY="$PWD/deploy/workbench-server-validation-compose.yml" 
 WORKBENCH_COMPOSE_PROFILES="local-object-storage local-docling" \
 WORKBENCH_DEPLOY_IMAGE_MODE=build \
 WORKBENCH_PREFLIGHT_SCRIPT="$PWD/deploy/workbench-server-preflight.sh" \
-bash deploy/server-deploy.sh
+./deploy/server-deploy.sh
 
 # 只通过该脚本适配和 reload 带环境占位的 Caddy 配置；不要直接 systemctl reload。
 sudo WORKBENCH_APP_DIR="$PWD" \
@@ -204,10 +204,14 @@ sudo WORKBENCH_APP_DIR="$PWD" \
 WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 \
 WORKBENCH_ENV_FILE=/etc/workbench/release/workbench.env \
 DEPLOY_TARGET=all \
-bash deploy/server-deploy.sh
+./deploy/server-deploy.sh
 ```
 
 生产候选必须先把 CI 生成的 `production-image-manifest.json`、对应的 `production-image-manifest.bundle.json` 和批准的环境文件放到服务器，再运行同一个编排器。服务器会先用配置的 GitHub Actions 精确 certificate identity 与 OIDC issuer 执行 `cosign verify-blob`；签名未通过时不会解析清单、拉取镜像或变更服务：
+
+同一次 release chain 还会生成并签名 `production-deployment-config.json`。其中 `secretVersions.entries` 必须与代码定义的生产秘密清单完全一致、按名称排序且不得缺项或增项；每项固定包含 `name`、`version`、`attestationSha256` 和 `valueSha256`。服务器预检会重新计算实际环境变量秘密的 UTF-8 字节哈希，并按原始文件字节计算 DeerFlow provider env、base/effective config 与 secret-channel attestation 的哈希；任一值、文件或 metadata hash 漂移都会拒绝部署。fresh host 上 effective config 的字节校验发生在确定性 merge 完成后、DeerFlow 启动前。CI 只接收这些版本与哈希元数据，不读取或签入秘密明文。
+
+生产主环境文件和 DeerFlow provider env 只接受无引号的 canonical dotenv 字面值；值不得包含空白、`$` 或反斜杠，也不得以单引号或双引号开头。含内嵌双引号但没有空白的 canonical JSON 可以直接写入，`#` 只有紧跟在值中时才是普通字符。变量插值、转义、行尾注释以及首尾空白都会被拒绝，因此 Node 校验器、Docker Compose 和部署 shell 消费的是同一个字节串。生产秘密应使用 base64url 等允许字符集；数据库 URL 内的密码和 OTLP header 值必须先做 URL/percent encoding。
 
 生产 GitHub Actions 环境还必须提供 `WORKBENCH_NODE_IMAGE`、`WORKBENCH_NGINX_IMAGE`、`WORKBENCH_POSTGRES_IMAGE` 和 `WORKBENCH_CI_POSTGRES_IMAGE`，且每个值都必须是带 `@sha256:<64hex>` 的不可变 OCI 引用。`WORKBENCH_DOCLING_IMAGE`、`WORKBENCH_CLAMAV_IMAGE`、`WORKBENCH_MINIO_IMAGE`、`WORKBENCH_MINIO_MC_IMAGE` 和 `WORKBENCH_DEX_IMAGE` 如果被配置，也必须使用同样的 digest；生产拓扑不允许启用 `local-object-storage` 或 `local-docling`，因此 MinIO、Dex 和 Docling 的 tag fallback 只属于本地/验证环境。Node/Nginx digest 会同时作为 Docker build args 写入镜像构建配置并纳入签名 evidence。
 
@@ -216,18 +220,23 @@ bash deploy/server-deploy.sh
 # WORKBENCH_IMAGE_INVENTORY_PATH=/etc/workbench/release/production-image-manifest.json
 # WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=/etc/workbench/release/production-image-manifest.bundle.json
 WORKBENCH_ENV_FILE=/etc/workbench/release/workbench.env \
-bash deploy/server-deploy.sh
+./deploy/server-deploy.sh
 ```
 
-生产主机还必须预先安装 Docker Compose v2、Cosign，并已对候选镜像仓库完成只读登录；编排器不会在服务器构建或推送镜像。
+生产主机还必须预先安装 Docker Compose v2、Cosign，并已对候选镜像仓库完成只读登录；编排器不会在服务器构建或推送镜像。生产 pinned 入口必须从 release 根目录直接执行 `./deploy/server-deploy.sh`，由签名脚本的 `#!/bin/bash -p` 启动 privileged Bash；不得使用 `bash deploy/server-deploy.sh`、`env bash` 或其他解释器调用绕过该入口。脚本会在执行任何外部命令前把 `PATH` 固定为 `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`。这些系统目录及其中的 `/bin/bash`、`node`、`docker`、`cosign` 等二进制必须由 root 管理，且不得对非 root 用户可写。
 
-编排器会校验 Web/API/所有 Worker/Quartz、Import Worker 以及派生 DeerFlow 的镜像、SBOM、漏洞报告、provenance 和签名都绑定同一 `WORKBENCH_SOURCE_COMMIT`，然后只用 `--no-build` 启动。候选切换失败时，clean host 会自动停止半启动拓扑；已有拓扑不会被未经批准的自动动作覆盖。回滚必须显式指向上一份签名环境与 Compose 文件，上一份环境还必须固定该候选自己的 manifest、bundle、精确 certificate identity 与 issuer：
+生产源码不能从可变工作树直接启动：每个候选必须先落到独立、完整的 release 目录（例如 `/opt/workbench-releases/<candidate>`），再由固定受信 UID 持有。`package.json` 与 `package-lock.json` 已纳入签名源码清单；Node 依赖必须由受信发布流程严格按该 lockfile 完整安装，并在部署前随整棵 release 一起封印，部署主机不得重新安装、更新或替换 `node_modules`。release 整棵目录、环境文件、镜像与部署配置 manifest/bundle、trust policy、DeerFlow provider/base config、secret-channel attestation 和 Runtime Worker 私钥都不得对 group/other 可写；regular file 不得通过外部 hard link 共享可变 inode。release 根目录与外部输入必须使用不含 symlink 路径组件的规范绝对路径；release 树内的 symlink 只能解析到同一 release。默认受信 UID 为 `0`；非 root-owned 安装必须把固定 UID 写入签名环境的 `WORKBENCH_RELEASE_OWNER_UID`，调用进程若同时提供该变量则必须精确一致。当前候选与回滚候选分别按各自签名环境中的 owner UID 验证，二者可以不同；递归回滚执行会显式切换到回滚候选的 owner UID。
+
+`server-deploy.sh` 会在任何 pinned Compose、stop、queue migration 或 rollback teardown 前递归验证该 sealed release，并再次校验签名部署配置；`stop` 和 `rollback` 不会因跳过完整 readiness preflight 而跳过这两个信任门槛。生产 `WORKBENCH_COMPOSE_OVERLAY` 与 `WORKBENCH_COMPOSE_PROFILES` 一律拒绝，Compose 的 project directory、回滚 preflight、DeerFlow Compose 和递归 deploy exec 都固定到已验证 release。这个合同防止非受信本地账号通过可写 pathname 在校验后替换候选字节；它不声称抵抗已经取得 root 或 `CAP_DAC_OVERRIDE` 的主机攻击者。
+
+编排器会校验 Web/API/所有 Worker/Quartz、Import Worker 以及派生 DeerFlow 的镜像、SBOM、漏洞报告、provenance 和签名都绑定同一 `WORKBENCH_SOURCE_COMMIT`，然后只用 `--no-build` 启动。候选切换失败时，clean host 会自动停止半启动拓扑；已有拓扑不会被未经批准的自动动作覆盖。回滚必须显式指向上一份签名环境和完整候选 checkout；Compose 只能使用该 checkout 内已被源码清单覆盖的 `deploy/workbench-compose.yml`，上一份环境还必须固定该候选自己的 manifest、bundle、精确 certificate identity 与 issuer。回滚候选不会获得旧合同例外：缺少当前 DeerFlow Validator Node 镜像绑定、镜像标签或隔离启动探针的候选一律 fail closed：
 
 ```bash
 WORKBENCH_ROLLBACK_ENV_FILE=/etc/workbench/releases/<previous>/workbench.env \
-WORKBENCH_ROLLBACK_COMPOSE_FILE=/etc/workbench/releases/<previous>/workbench-compose.yml \
+WORKBENCH_ROLLBACK_APP_DIR=/opt/workbench-releases/<previous> \
+WORKBENCH_ROLLBACK_COMPOSE_FILE=/opt/workbench-releases/<previous>/deploy/workbench-compose.yml \
 DEPLOY_TARGET=rollback \
-bash deploy/server-deploy.sh
+./deploy/server-deploy.sh
 ```
 
 回滚会在拆除当前栈之前停止同一组队列参与者，并以一次性授权运行上一签名候选的 migrator 来恢复其 queue policy；旧策略恢复失败或队列未排空时保持 fail closed，不会继续启动旧服务。数据库迁移仍是前向兼容合同；发生不可逆迁移后不能假装通过镜像回滚，必须按备份/restore 与 forward-repair runbook 处理。

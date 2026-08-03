@@ -96,6 +96,58 @@ test("catalog is complete and ledger controls cannot add unapproved tools", asyn
   );
 });
 
+test("acceptance plan refuses an environment outside the signed deployment configuration", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "workbench-plan-runtime-binding-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const catalog = await loadProductionAcceptanceControlCatalog();
+  const candidate = {
+    candidateId: `sha256:${"1".repeat(64)}`,
+    sourceCommit: "2".repeat(40),
+    signedTag: "workbench-plan-binding-test",
+    chainId: `sha256:${"3".repeat(64)}`,
+  };
+  const imageManifest = productionImageManifestFixture(candidate);
+  const imageManifestPath = path.join(root, "production-image-manifest.json");
+  const imageManifestRaw = Buffer.from(canonicalJsonFile(imageManifest), "utf8");
+  await writeFile(imageManifestPath, imageManifestRaw);
+  const deploymentConfig = createProductionDeploymentConfig({
+    candidateId: candidate.candidateId,
+    sourceCommit: candidate.sourceCommit,
+    signedTag: candidate.signedTag,
+    releaseChainId: candidate.chainId,
+    imageManifest,
+    imageManifestSha256: sha256Bytes(imageManifestRaw),
+    githubRunId: "81234",
+    githubRunAttempt: 1,
+    infrastructureEnvironment: productionDeploymentConfigFixtureEnvironment(),
+  });
+  const deploymentConfigPath = path.join(root, "production-deployment-config.json");
+  const deploymentConfigRaw = Buffer.from(canonicalJsonFile(deploymentConfig), "utf8");
+  await writeFile(deploymentConfigPath, deploymentConfigRaw);
+
+  await assert.rejects(
+    createProductionAcceptancePlan({
+      catalogPath: DEFAULT_CONTROL_CATALOG_PATH,
+      catalogSha256: catalog.sha256,
+      imageManifestPath,
+      imageManifestSha256: sha256Bytes(imageManifestRaw),
+      deploymentConfigManifestPath: deploymentConfigPath,
+      deploymentConfigManifestSha256: sha256Bytes(deploymentConfigRaw),
+      candidateId: candidate.candidateId,
+      commitSha: candidate.sourceCommit,
+      tag: candidate.signedTag,
+      releaseChainId: candidate.chainId,
+      deployId: "deploy-binding-test",
+      environmentId: "production-b",
+      environmentDescription: "Mismatched production environment.",
+      region: "cn-east-1",
+      plannerId: "planner-binding-test",
+      createdAtUtc: PLAN_CREATED_AT,
+    }),
+    /signed deployment environment differs/u,
+  );
+});
+
 test("production observation workflow is read-only, pinned, and independent from G12", async () => {
   const workflow = YAML.parse(await readFile(
     path.join(repoRoot, ".github/workflows/workbench-production-observation.yml"),
@@ -600,6 +652,30 @@ test("G11 verifier derives pixels, motion, and flow coverage from referenced art
     await assertContractFailure(
       () => loadG11Fixture(fixture, manifest),
       /server observer receipt signature verification failed/u,
+    );
+  });
+
+  await t.test("rejects a validly signed observer aggregate that omits a capture binding", async (t) => {
+    const fixture = await createPreparedFixture();
+    t.after(fixture.cleanup);
+    const manifest = structuredClone(fixture.g11.manifest);
+    const flow = manifest.flows.find(({ flowId }) => flowId === "mixed-rejection");
+    const reference = flow.evidence.find(({ kind }) => kind === "server-observer-receipt");
+    const receiptPath = g11ArtifactPath(fixture.evidenceRoot, reference);
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    receipt.captureObservations.pop();
+    receipt.signature.value = sign(
+      null,
+      Buffer.from(canonicalJson(productionG11ServerObserverReceiptPayload(receipt)), "utf8"),
+      fixture.observerSigner.privateKey,
+    ).toString("base64url");
+    const bytes = Buffer.from(canonicalJsonFile(receipt), "utf8");
+    await writeFile(receiptPath, bytes);
+    reference.sha256 = sha256Bytes(bytes);
+
+    await assertContractFailure(
+      () => loadG11Fixture(fixture, manifest),
+      /one server observation for every capture binding/u,
     );
   });
 });
@@ -1200,6 +1276,60 @@ async function createPreparedFixture() {
   const imageManifestRaw = Buffer.from(canonicalJsonFile(imageManifest), "utf8");
   await writeFile(imageManifestPath, imageManifestRaw);
   const imageManifestSha256 = sha256Bytes(imageManifestRaw);
+  const approvalSigners = new Map();
+  const trustKeys = [];
+  const approvalAuthorities = [];
+  for (const role of ["Security", "Data", "Operations", "Release"]) {
+    const signer = createTrustedSigner(`approver-${role.toLowerCase()}`);
+    approvalSigners.set(role, { ...signer, approverId: `approver-${role.toLowerCase()}` });
+    trustKeys.push(signer.trustEntry);
+    approvalAuthorities.push({ role, approverId: `approver-${role.toLowerCase()}`, keyId: signer.keyId });
+  }
+  const runtimeWorkerSigner = createTrustedSigner("runtime-worker-production");
+  const collectorSigner = createTrustedSigner("production-browser-collector");
+  const observerSigner = createTrustedSigner("production-server-observer");
+  trustKeys.push(runtimeWorkerSigner.trustEntry, collectorSigner.trustEntry, observerSigner.trustEntry);
+  const hardCutReceiptSigners = {
+    acceptance: createTrustedSigner("acceptance-automation"),
+    traffic: createTrustedSigner("traffic-automation"),
+    closure: createTrustedSigner("closure-automation"),
+  };
+  trustKeys.push(...Object.values(hardCutReceiptSigners).map((signer) => signer.trustEntry));
+  const receiptAuthorities = [{
+    scopeId: "production-runtime.worker-execution",
+    signerId: runtimeWorkerSigner.signerId,
+    keyId: runtimeWorkerSigner.keyId,
+  }, {
+    scopeId: "production-g11.browser-evidence-collector",
+    signerId: collectorSigner.signerId,
+    keyId: collectorSigner.keyId,
+  }, {
+    scopeId: "production-g11.server-observer",
+    signerId: observerSigner.signerId,
+    keyId: observerSigner.keyId,
+  }];
+  for (const [scopeId, signer] of [
+    ["hard-cut.production-acceptance", hardCutReceiptSigners.acceptance],
+    ["hard-cut.traffic-switch", hardCutReceiptSigners.traffic],
+    ["hard-cut.rollback-window-closure", hardCutReceiptSigners.closure],
+    ...["container", "database", "image", "log", "network", "object-prefix", "secret", "volume"]
+      .map((kind) => [`legacy-${kind}`, hardCutReceiptSigners.closure]),
+  ]) receiptAuthorities.push({ scopeId, signerId: signer.signerId, keyId: signer.keyId });
+  const trustPolicyDocument = {
+    schemaVersion: "workbench.production-trust-policy.v1",
+    environmentId: "production-a",
+    keys: trustKeys,
+    approvalAuthorities,
+    receiptAuthorities,
+  };
+  const trustPolicyPath = path.join(root, "trust-policy.json");
+  const trustPolicyRaw = Buffer.from(canonicalJsonFile(trustPolicyDocument), "utf8");
+  await writeFile(trustPolicyPath, trustPolicyRaw);
+  const trustPolicySha256 = sha256Bytes(trustPolicyRaw);
+  const trustPolicy = await loadProductionTrustPolicy({
+    policyPath: trustPolicyPath,
+    expectedSha256: trustPolicySha256,
+  });
   const deploymentConfig = createProductionDeploymentConfig({
     candidateId: candidate.candidateId,
     sourceCommit: candidate.sourceCommit,
@@ -1209,7 +1339,14 @@ async function createPreparedFixture() {
     imageManifestSha256,
     githubRunId: "81234",
     githubRunAttempt: 1,
-    infrastructureEnvironment: productionDeploymentConfigFixtureEnvironment(),
+    infrastructureEnvironment: productionDeploymentConfigFixtureEnvironment({
+      overrides: {
+        WORKBENCH_ENVIRONMENT_ID: trustPolicy.environmentId,
+        WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID: runtimeWorkerSigner.keyId,
+        WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID: runtimeWorkerSigner.signerId,
+        WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256: trustPolicy.sha256,
+      },
+    }),
   });
   const deploymentConfigManifestPath = path.join(root, "production-deployment-config.json");
   const deploymentConfigBundlePath = path.join(root, "production-deployment-config.bundle.json");
@@ -1239,55 +1376,6 @@ async function createPreparedFixture() {
   });
   const planPath = path.join(root, "production-acceptance-plan.json");
   await writeCanonical(planPath, plan);
-  const approvalSigners = new Map();
-  const trustKeys = [];
-  const approvalAuthorities = [];
-  for (const role of ["Security", "Data", "Operations", "Release"]) {
-    const signer = createTrustedSigner(`approver-${role.toLowerCase()}`);
-    approvalSigners.set(role, { ...signer, approverId: `approver-${role.toLowerCase()}` });
-    trustKeys.push(signer.trustEntry);
-    approvalAuthorities.push({ role, approverId: `approver-${role.toLowerCase()}`, keyId: signer.keyId });
-  }
-  const collectorSigner = createTrustedSigner("production-browser-collector");
-  const observerSigner = createTrustedSigner("production-server-observer");
-  trustKeys.push(collectorSigner.trustEntry, observerSigner.trustEntry);
-  const hardCutReceiptSigners = {
-    acceptance: createTrustedSigner("acceptance-automation"),
-    traffic: createTrustedSigner("traffic-automation"),
-    closure: createTrustedSigner("closure-automation"),
-  };
-  trustKeys.push(...Object.values(hardCutReceiptSigners).map((signer) => signer.trustEntry));
-  const receiptAuthorities = [{
-    scopeId: "production-g11.browser-evidence-collector",
-    signerId: collectorSigner.signerId,
-    keyId: collectorSigner.keyId,
-  }, {
-    scopeId: "production-g11.server-observer",
-    signerId: observerSigner.signerId,
-    keyId: observerSigner.keyId,
-  }];
-  for (const [scopeId, signer] of [
-    ["hard-cut.production-acceptance", hardCutReceiptSigners.acceptance],
-    ["hard-cut.traffic-switch", hardCutReceiptSigners.traffic],
-    ["hard-cut.rollback-window-closure", hardCutReceiptSigners.closure],
-    ...["container", "database", "image", "log", "network", "object-prefix", "secret", "volume"]
-      .map((kind) => [`legacy-${kind}`, hardCutReceiptSigners.closure]),
-  ]) receiptAuthorities.push({ scopeId, signerId: signer.signerId, keyId: signer.keyId });
-  const trustPolicyDocument = {
-    schemaVersion: "workbench.production-trust-policy.v1",
-    environmentId: plan.payload.binding.environmentId,
-    keys: trustKeys,
-    approvalAuthorities,
-    receiptAuthorities,
-  };
-  const trustPolicyPath = path.join(root, "trust-policy.json");
-  const trustPolicyRaw = Buffer.from(canonicalJsonFile(trustPolicyDocument), "utf8");
-  await writeFile(trustPolicyPath, trustPolicyRaw);
-  const trustPolicySha256 = sha256Bytes(trustPolicyRaw);
-  const trustPolicy = await loadProductionTrustPolicy({
-    policyPath: trustPolicyPath,
-    expectedSha256: trustPolicySha256,
-  });
   const g11 = await createG11Fixture({
     evidenceRoot,
     plan,
@@ -1457,7 +1545,10 @@ function passingG11FlowChecks() {
       checksumVerified: true,
     },
     "mixed-rejection": {
-      problemStatus: 422,
+      composerLocalizedError: true,
+      composerPromptPreserved: true,
+      composerActiveUiAbsent: true,
+      problemStatus: 400,
       queuePublishCount: 0,
       runCount: 0,
       runtimeAttemptCount: 0,
@@ -1645,10 +1736,10 @@ async function rewriteG11FlowTrace(evidenceRoot, flow, selectStepIds, mutateMeta
     finishedAtUtc: coverage.finishedAtUtc,
     nativeTraceSha256: coverage.nativeTraceSha256,
     scenarioId: receipt.flowId,
-    scenarioBinding: receipt.scenarioBinding,
+    scenarioBinding: coverage.scenarioBinding,
     scenarioPlan: productionG11ScenarioPlan({
       scenarioId: receipt.flowId,
-      scenarioBinding: receipt.scenarioBinding,
+      scenarioBinding: coverage.scenarioBinding,
     }),
     originPolicySha256: productionG11OriginPolicySha256(receipt.deployment),
     mutateMetadata,

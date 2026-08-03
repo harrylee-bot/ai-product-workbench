@@ -22,9 +22,8 @@ import { execFile } from "node:child_process";
 const execFileAsync = promisify(execFile);
 const DEFAULT_HEAP_MIB = 4096;
 const DEFAULT_PASSES = 2;
-// Release evidence uses 15360 MiB because a nominal 16 GiB host exposes less
-// after kernel and hypervisor reservations. CI may set a stricter lower bound
-// appropriate for another Linux runner without changing the executed scope.
+// A nominal 16 GiB host exposes slightly less after kernel and hypervisor
+// reservations. CI may raise this floor, but it must never lower it.
 const DEFAULT_CI_MINIMUM_MEMORY_MIB = 15 * 1024;
 const RSS_SAMPLE_INTERVAL_MS = 50;
 
@@ -127,6 +126,12 @@ export function parseConfiguration({ argv, env, memoryLimitMiB, platform = proce
       "WORKBENCH_TYPECHECK_MIN_MEMORY_MIB",
     )
     : null;
+
+  if (ci && minimumMemoryMiB < DEFAULT_CI_MINIMUM_MEMORY_MIB) {
+    throw new Error(
+      `WORKBENCH_TYPECHECK_MIN_MEMORY_MIB must be at least ${DEFAULT_CI_MINIMUM_MEMORY_MIB} MiB`,
+    );
+  }
 
   if (Number.isInteger(memoryLimitMiB) && memoryLimitMiB > 0 && heapMiB >= memoryLimitMiB) {
     throw new Error(

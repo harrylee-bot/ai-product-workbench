@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable, Mapping
 import hashlib
 import json
 import posixpath
+import re
 from typing import Any
 
 try:
@@ -24,8 +25,13 @@ except ImportError:  # pragma: no cover - DeerFlow's pinned Python is 3.12.
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain.agents.middleware.types import (
+    ExtendedModelResponse,
+    ModelCallResult,
+    ModelRequest,
+    ModelResponse,
+)
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
@@ -107,6 +113,18 @@ _PRD_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1"
 _PRD_CLARIFICATION_SYSTEM_POLICY = """<workbench_prd_clarification_policy>
 This PRD-only Workbench Run cannot resume free-form clarification. The ask_clarification tool is unavailable. Ignore any general instruction that requires clarification for this Run. Do not ask a question or end early. Keep unsupported high-risk behavior out of committed scope, record conservative typed assumptions or acceptance boundaries, then publish the complete PRD draft and submit the Runtime result.
 </workbench_prd_clarification_policy>"""
+_TOOL_CATALOG_PROTOCOL = "workbench.runtime.tool-catalog-observation.v1"
+_TOOL_CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
+_TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
+_WORKBENCH_TOOL_NAMES = frozenset(
+    {
+        ARTIFACT_DRAFT_TOOL_NAME,
+        GENERATION_STAGE_TOOL_NAME,
+        KNOWLEDGE_TOOL_NAME,
+        RUNTIME_RESULT_TOOL_NAME,
+        *PROTOTYPE_ONLY_TOOL_NAMES,
+    }
+)
 
 
 def normalize_workbench_canvas_policy(value: Any) -> dict[str, list[str]] | None:
@@ -170,7 +188,10 @@ def workbench_knowledge_enabled_from_runnable_config(config: Any) -> Any:
     scope = context.get("workbench")
     if not isinstance(scope, Mapping):
         return None
-    return scope.get("knowledgeEnabled")
+    # A valid Workbench scope without a grant is an explicit negative. Keep
+    # malformed/non-Workbench contexts as ``None`` so callers can distinguish
+    # fail-closed input from a bound catalog observation.
+    return scope.get("knowledgeEnabled", False)
 
 
 def _tool_name(tool: Any) -> str | None:
@@ -487,6 +508,70 @@ def _current_batch_calls(request: ToolCallRequest) -> list[dict[str, Any]]:
     return []
 
 
+def _tool_catalog_observation(visible: list[Any]) -> dict[str, Any]:
+    """Build a deterministic, non-secret record of the model-bound tool catalog."""
+    names = [_tool_name(tool) for tool in visible]
+    if (
+        any(
+            not isinstance(name, str)
+            or _TOOL_NAME_PATTERN.fullmatch(name) is None
+            or (name.startswith("workbench_") and name not in _WORKBENCH_TOOL_NAMES)
+            for name in names
+        )
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError("WORKBENCH_TOOL_CATALOG_INVALID")
+    payload = {
+        "protocol": _TOOL_CATALOG_PROTOCOL,
+        "knowledgeVisible": KNOWLEDGE_TOOL_NAME in names,
+        "toolNames": names,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return {
+        **payload,
+        "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    }
+
+
+def _stamp_ai_message(message: AIMessage, observation: Mapping[str, Any]) -> AIMessage:
+    response_metadata = dict(message.response_metadata or {})
+    response_metadata[_TOOL_CATALOG_METADATA_KEY] = dict(observation)
+    return message.model_copy(update={"response_metadata": response_metadata})
+
+
+def _stamp_model_response(
+    response: ModelResponse[Any],
+    observation: Mapping[str, Any],
+) -> ModelResponse[Any]:
+    return ModelResponse(
+        result=[
+            _stamp_ai_message(message, observation)
+            if isinstance(message, AIMessage)
+            else message
+            for message in response.result
+        ],
+        structured_response=response.structured_response,
+    )
+
+
+def _stamp_catalog_observation(
+    result: ModelCallResult,
+    observation: Mapping[str, Any] | None,
+) -> ModelCallResult:
+    if observation is None:
+        return result
+    if isinstance(result, AIMessage):
+        return _stamp_ai_message(result, observation)
+    if isinstance(result, ExtendedModelResponse):
+        return ExtendedModelResponse(
+            model_response=_stamp_model_response(result.model_response, observation),
+            command=result.command,
+        )
+    if isinstance(result, ModelResponse):
+        return _stamp_model_response(result, observation)
+    return result
+
+
 def _error_tool_message(request: ToolCallRequest, code: str, instruction: str) -> ToolMessage:
     name = request.tool_call.get("name")
     call_id = request.tool_call.get("id")
@@ -518,6 +603,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         )
         self._prototype_enabled = normalized_kinds is not None and "prototype" in normalized_kinds
         self._prd_gate_enabled = normalized_kinds == ["prd"]
+        self._knowledge_catalog_bound = isinstance(knowledge_enabled, bool)
         self._knowledge_enabled = knowledge_enabled is True
 
     def _filter_tools(self, request: ModelRequest) -> ModelRequest:
@@ -550,6 +636,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     else _PRD_CLARIFICATION_SYSTEM_POLICY
                 ))
         return request if not overrides else request.override(**overrides)
+
+    def _catalog_observation(self, request: ModelRequest) -> dict[str, Any] | None:
+        if not self._knowledge_catalog_bound:
+            return None
+        return _tool_catalog_observation(list(request.tools))
 
     def _blocked_tool_message(self, request: ToolCallRequest) -> ToolMessage | None:
         name = request.tool_call.get("name")
@@ -852,7 +943,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
-        return handler(self._filter_tools(request))
+        scoped_request = self._filter_tools(request)
+        return _stamp_catalog_observation(
+            handler(scoped_request),
+            self._catalog_observation(scoped_request),
+        )
 
     @override
     def wrap_tool_call(
@@ -874,7 +969,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
-        return await handler(self._filter_tools(request))
+        scoped_request = self._filter_tools(request)
+        return _stamp_catalog_observation(
+            await handler(scoped_request),
+            self._catalog_observation(scoped_request),
+        )
 
     @override
     async def awrap_tool_call(

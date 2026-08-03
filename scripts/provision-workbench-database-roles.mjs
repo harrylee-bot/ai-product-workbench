@@ -84,7 +84,11 @@ async function grantRuntimePrivileges(client, runtimeRole, migratorRole) {
   await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${appSchema} TO ${runtimeRole}`);
   await client.query(`GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA ${appSchema} TO ${runtimeRole}`);
   await client.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${appSchema} TO ${runtimeRole}`);
-  await client.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorRole} IN SCHEMA ${appSchema} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${runtimeRole}`);
+  // New application tables start with append-safe privileges. The explicit
+  // all-table grant above promotes ordinary tables after each migration, then
+  // the evidence-table exceptions below are re-applied in the same transaction.
+  await client.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorRole} IN SCHEMA ${appSchema} GRANT SELECT, INSERT ON TABLES TO ${runtimeRole}`);
+  await client.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorRole} IN SCHEMA ${appSchema} REVOKE UPDATE, DELETE, TRUNCATE ON TABLES FROM ${runtimeRole}`);
   await client.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorRole} IN SCHEMA ${appSchema} GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${runtimeRole}`);
   await client.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorRole} IN SCHEMA ${appSchema} GRANT EXECUTE ON FUNCTIONS TO ${runtimeRole}`);
 
@@ -98,6 +102,11 @@ async function grantRuntimePrivileges(client, runtimeRole, migratorRole) {
   // advance it. Direct deletion/truncation is reserved for migrator-led repair.
   await client.query(`REVOKE DELETE, TRUNCATE ON TABLE ${appSchema}."runtime_provider_states" FROM ${runtimeRole}`);
   await client.query(`GRANT SELECT, INSERT, UPDATE ON TABLE ${appSchema}."runtime_provider_states" TO ${runtimeRole}`);
+
+  // Provider cancellation convergence is append-only operational evidence.
+  // Runtime may record and inspect a resolution, but never rewrite or erase it.
+  await client.query(`REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${appSchema}."runtime_provider_cancellation_resolutions" FROM ${runtimeRole}`);
+  await client.query(`GRANT SELECT, INSERT ON TABLE ${appSchema}."runtime_provider_cancellation_resolutions" TO ${runtimeRole}`);
 
   // Runtime records and deduplicates integrity incidents, but neither runtime
   // nor table-wide grants may erase evidence or issue a forensic retention release.

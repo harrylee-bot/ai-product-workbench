@@ -3,10 +3,18 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
   lstatSync,
+  mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
+  rmSync,
+  writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,8 +22,10 @@ import YAML from "yaml";
 
 import { canonicalJson } from "./evidence-ledger.mjs";
 import { productionImageDigestBinding } from "./production-image-inventory.mjs";
+import { readDeploymentEnv } from "./workbench-origin-manifest.mjs";
 
 export const PRODUCTION_DEPLOYMENT_CONFIG_SCHEMA_VERSION = "workbench.production-deployment-configuration.v1";
+export const RUNTIME_WORKER_EXECUTION_SCOPE_ID = "production-runtime.worker-execution";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = path.resolve(moduleDirectory, "..");
@@ -27,11 +37,50 @@ const VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u;
 const RUN_ID_PATTERN = /^[1-9][0-9]*$/u;
 const IMAGE_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$/u;
 
-export const PRODUCTION_CONFIG_PATHS = Object.freeze([
-  "deploy/caddy-workbench.service.d/override.conf",
+export const DEERFLOW_PRODUCTION_HOST_READ_PATHS = Object.freeze([
+  "apps/workbench-worker/src/runtime/deerflow-runtime.adapter.ts",
+  "deploy/deerflow-config.base.example.yaml",
   "deploy/deerflow-extensions.production.json",
   "deploy/deerflow-production-preflight.sh",
   "deploy/deerflow-runtime-compose.yml",
+  "deploy/workbench.env.example",
+  "integrations/deerflow/Dockerfile",
+  "integrations/deerflow/runtime-tools/config.fragment.yaml",
+  "integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_tool.py",
+  "integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs",
+  "integrations/deerflow/runtime-tools/runtime-result-validator.entry.ts",
+  "integrations/deerflow/runtime-tools/test_prd_reference_tool.py",
+  "integrations/deerflow/skills/requirement-doc-template/SKILL.md",
+  "integrations/deerflow/skills/requirement-doc-template/agents/openai.yaml",
+  "integrations/deerflow/skills/requirement-doc-template/assets/requirement-template.docx",
+  "integrations/deerflow/skills/requirement-doc-template/references/quality-standards.md",
+  "integrations/deerflow/skills/requirement-doc-template/references/structure.md",
+  "integrations/deerflow/skills/requirement-doc-template/scripts/docx_quality_check.py",
+  "integrations/deerflow/skills/workbench/SKILL.md",
+  "integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/apply.py",
+  "integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/manifest.json",
+  "integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/test_workbench_request_context.py",
+  "integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/test_workbench_tool_scope_middleware.py",
+  "integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/workbench_tool_scope_middleware.py",
+  "packages/workbench-contracts/src/approvals.ts",
+  "packages/workbench-contracts/src/artifacts.ts",
+  "packages/workbench-contracts/src/canonical-json.ts",
+  "packages/workbench-contracts/src/canvas-agent-tools.ts",
+  "packages/workbench-contracts/src/citations.ts",
+  "packages/workbench-contracts/src/common.ts",
+  "packages/workbench-contracts/src/design-presets.ts",
+  "packages/workbench-contracts/src/design-systems.ts",
+  "packages/workbench-contracts/src/files.ts",
+  "packages/workbench-contracts/src/import-sources.ts",
+  "packages/workbench-contracts/src/prd.ts",
+  "packages/workbench-contracts/src/prototype-patches.ts",
+  "packages/workbench-contracts/src/prototype.ts",
+  "packages/workbench-contracts/src/runs.ts",
+  "packages/workbench-contracts/src/runtime.ts",
+]);
+
+export const PRODUCTION_CONFIG_PATHS = Object.freeze([
+  "deploy/caddy-workbench.service.d/override.conf",
   "deploy/edge/workbench-edge-preflight.sh",
   "deploy/edge/workbench-edge.Caddyfile",
   "deploy/edge/workbench-origin-wireguard-preflight.sh",
@@ -46,6 +95,29 @@ export const PRODUCTION_CONFIG_PATHS = Object.freeze([
   "deploy/workbench-preview-nginx.conf",
   "deploy/workbench-production-preflight.sh",
   "deploy/workbench-production.Caddyfile",
+  "package-lock.json",
+  "package.json",
+  "scripts/assert-deerflow-production-deployment.mjs",
+  "scripts/assert-deerflow-runtime-config.mjs",
+  "scripts/assert-deerflow-secret-channel-attestation.mjs",
+  "scripts/assert-production-deployment-config.mjs",
+  "scripts/assert-runtime-worker-execution-identity.mjs",
+  "scripts/assert-sealed-production-release.mjs",
+  "scripts/assert-workbench-database-role-contract.mjs",
+  "scripts/assert-workbench-postgres-extensions.mjs",
+  "scripts/deerflow-workbench-tool-contract.mjs",
+  "scripts/evidence-ledger.mjs",
+  "scripts/generate-workbench-runtime-result-validator.mjs",
+  "scripts/merge-deerflow-config.mjs",
+  "scripts/production-deployment-config.mjs",
+  "scripts/production-image-inventory.mjs",
+  "scripts/provision-workbench-database-roles.mjs",
+  "scripts/prepare-runtime-worker-execution-private-key.mjs",
+  "scripts/reconcile-workbench-runtime-queues.mjs",
+  "scripts/workbench-origin-manifest.mjs",
+  "scripts/workbench-production-trust-policy.mjs",
+  "scripts/write-production-build-configuration.mjs",
+  ...DEERFLOW_PRODUCTION_HOST_READ_PATHS,
 ]);
 
 export const INFRASTRUCTURE_IMAGE_DEFINITIONS = Object.freeze([
@@ -66,9 +138,37 @@ export const INFRASTRUCTURE_IMAGE_DEFINITIONS = Object.freeze([
 ]);
 
 export const EFFECTIVE_CONFIG_FIELDS = Object.freeze([
+  ["WORKBENCH_ENVIRONMENT_ID", "identifier"],
+  ["WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID", "digest"],
+  ["WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID", "identifier"],
+  ["WORKBENCH_RUNTIME_WORKER_UID", "positive-integer"],
+  ["WORKBENCH_RUNTIME_WORKER_GID", "positive-integer"],
+  ["WORKBENCH_RELEASE_OWNER_UID", "uid"],
+  ["WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256", "sha256"],
   ["WORKBENCH_WEB_ORIGIN", "https-url"],
   ["WORKBENCH_PREVIEW_ORIGIN", "https-url"],
+  ["WORKBENCH_EDGE_WIREGUARD_IP", "private-ipv4"],
+  ["WORKBENCH_ORIGIN_WIREGUARD_IP", "private-ipv4"],
+  ["WORKBENCH_EDGE_WIREGUARD_ENDPOINT", "wireguard-endpoint"],
+  ["WORKBENCH_ORIGIN_HTTP_PORT", "unprivileged-port"],
   ["WORKBENCH_ENTERPRISE_SSO_ENABLED", "boolean"],
+  ["WORKBENCH_PUBLIC_REGISTRATION_ENABLED", "boolean"],
+  ["WORKBENCH_INVITATION_TTL_HOURS", "positive-integer"],
+  ["WORKBENCH_AUTH_CLIENT_IP_HEADER", "identifier"],
+  ["WORKBENCH_AUTH_DB_POOL_MAX", "positive-integer"],
+  ["WORKBENCH_POSTGRES_DB", "identifier"],
+  ["WORKBENCH_POSTGRES_USER", "identifier"],
+  ["WORKBENCH_POSTGRES_MIGRATOR_USER", "identifier"],
+  ["WORKBENCH_POSTGRES_RUNTIME_USER", "identifier"],
+  ["WORKBENCH_DATABASE_SCHEMA", "identifier"],
+  ["WORKBENCH_BFF_MAX_REQUEST_BYTES", "positive-integer"],
+  ["WORKBENCH_API_MAX_REQUEST_BYTES", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_BASE_URL", "string"],
+  ["OTEL_SDK_DISABLED", "boolean"],
+  ["OTEL_EXPORTER_OTLP_ENDPOINT", "url-or-empty"],
+  ["OTEL_EXPORTER_OTLP_PROTOCOL", "identifier"],
+  ["OTEL_TRACES_SAMPLER", "identifier"],
+  ["OTEL_TRACES_SAMPLER_ARG", "string"],
   ["WORKBENCH_S3_INTERNAL_ENDPOINT", "url"],
   ["WORKBENCH_S3_EGRESS_UPSTREAM_HOST", "hostname"],
   ["WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL", "https-url"],
@@ -85,25 +185,155 @@ export const EFFECTIVE_CONFIG_FIELDS = Object.freeze([
   ["WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS", "positive-integer"],
   ["WORKBENCH_RUNTIME_EXECUTION_DEADLINE_CANCEL_MS", "positive-integer"],
   ["WORKBENCH_RUNTIME_PROVIDER_STATE_MODE", "provider-state-mode"],
+  ["WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS", "positive-integer"],
   ["WORKBENCH_RUNTIME_EXECUTION_RECONCILE_BATCH_SIZE", "positive-integer"],
+  ["WORKBENCH_DEERFLOW_LANGGRAPH_URL", "internal-url"],
+  ["WORKBENCH_DEERFLOW_GATEWAY_URL", "internal-url"],
+  ["WORKBENCH_DEERFLOW_ASSISTANT_ID", "identifier"],
+  ["WORKBENCH_DEERFLOW_MODEL_CATALOG_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_DEERFLOW_READINESS_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_DEERFLOW_STREAM_MODE", "string"],
   ["WORKBENCH_DEERFLOW_TIMEOUT_MS", "positive-integer"],
   ["WORKBENCH_DEERFLOW_SUBMISSION_TIMEOUT_MS", "positive-integer"],
   ["WORKBENCH_DEERFLOW_IDLE_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_DEERFLOW_HOST_PORT", "port"],
+  ["WORKBENCH_DEERFLOW_COMMIT", "commit"],
+  ["WORKBENCH_DEERFLOW_BASE_IMAGE_REF", "immutable-image"],
+  ["WORKBENCH_DEERFLOW_NODE_IMAGE_REF", "immutable-image"],
+  ["WORKBENCH_DEERFLOW_IMAGE_DIGEST", "digest"],
+  ["WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE", "absolute-path"],
+  ["DEER_FLOW_HOME", "absolute-path"],
+  ["WORKBENCH_DEERFLOW_BASE_CONFIG_PATH", "absolute-path"],
+  ["WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256", "sha256"],
+  ["DEER_FLOW_CONFIG_PATH", "absolute-path"],
+  ["WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256", "sha256"],
+  ["WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH", "absolute-path"],
+  ["WORKBENCH_INTERNAL_NETWORK_NAME", "string"],
+  ["WORKBENCH_KNOWLEDGE_TOOL_URL", "https-url"],
+  ["WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_READINESS_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_CANVAS_TOOL_URL", "https-url"],
+  ["WORKBENCH_CANVAS_VISUAL_URL", "https-url"],
+  ["WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS", "positive-integer"],
+  ["WORKBENCH_CANVAS_COMMAND_TTL_SECONDS", "positive-integer"],
+  ["WORKBENCH_CANVAS_INVOCATION_LEASE_SECONDS", "positive-integer"],
+  ["WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_BATCH_SIZE", "positive-integer"],
+  ["WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_INTERVAL_MS", "positive-integer"],
+  ["WORKBENCH_FILE_VERIFY_CONCURRENCY", "positive-integer"],
+  ["WORKBENCH_FILE_EXTRACT_CONCURRENCY", "positive-integer"],
+  ["WORKBENCH_BLOB_GC_CONCURRENCY", "positive-integer"],
+  ["WORKBENCH_BLOB_GC_GRACE_MS", "positive-integer"],
+  ["WORKBENCH_BLOB_GC_RECONCILIATION_INTERVAL_MS", "positive-integer"],
+  ["WORKBENCH_BLOB_GC_BATCH_SIZE", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_BUILD_CONCURRENCY", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID", "identifier"],
+  ["WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256", "sha256"],
+  ["WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR", "absolute-path"],
+  ["WORKBENCH_KNOWLEDGE_VAULT_HOST_DIR", "absolute-path"],
+  ["WORKBENCH_STORAGE_HOST_DIR", "absolute-path"],
+  ["WORKBENCH_KNOWLEDGE_TOKENIZER_MAX_FILE_BYTES", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_MAX_ASSET_FILE_BYTES", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_MAX_ASSET_TOTAL_BYTES", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_MAX_ASSETS", "positive-integer"],
   ["WORKBENCH_CLAMAV_HOST", "hostname"],
   ["WORKBENCH_CLAMAV_PORT", "port"],
+  ["WORKBENCH_CLAMAV_TIMEOUT_MS", "positive-integer"],
   ["WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS", "positive-integer"],
   ["WORKBENCH_CLAMAV_STREAM_MAX_BYTES", "positive-integer"],
+  ["WORKBENCH_FILE_SCAN_MODE", "identifier"],
+  ["WORKBENCH_FILE_PARSER", "identifier"],
+  ["WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION", "positive-integer"],
   ["WORKBENCH_DOCLING_URL", "url"],
+  ["WORKBENCH_DOCLING_RESULTS_REPLAYABLE", "boolean"],
+  ["WORKBENCH_DOCLING_SUBMIT_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_DOCLING_POLL_TIMEOUT_MS", "positive-integer"],
   ["WORKBENCH_FILE_PARSER_VERSION", "string"],
   ["WORKBENCH_DOCLING_RESULT_RETENTION_SECONDS", "positive-integer"],
+  ["WORKBENCH_DOCLING_REAPER_INTERVAL_MS", "positive-integer"],
+  ["WORKBENCH_IMPORT_CLAMAV_STREAM_MAX_BYTES", "positive-integer"],
+  ["WORKBENCH_IMPORT_CONCURRENCY", "positive-integer"],
+  ["WORKBENCH_IMPORT_MAX_ATTEMPTS", "positive-integer"],
+  ["WORKBENCH_IMPORT_MAX_SOURCE_BYTES", "positive-integer"],
+  ["WORKBENCH_IMPORT_MAX_URL_BYTES", "positive-integer"],
+  ["WORKBENCH_IMPORT_MAX_GITHUB_BYTES", "positive-integer"],
+  ["WORKBENCH_IMPORT_MAX_FIGMA_BYTES", "positive-integer"],
+  ["WORKBENCH_IMPORT_MAX_GITHUB_FILES", "positive-integer"],
+  ["WORKBENCH_IMPORT_REQUEST_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_IMPORT_MAX_REDIRECTS", "positive-integer"],
+  ["WORKBENCH_IMPORT_STALE_RUNNING_MS", "positive-integer"],
+  ["WORKBENCH_IMPORT_RECONCILE_INTERVAL_MS", "positive-integer"],
+  ["WORKBENCH_IMPORT_PENDING_BLOB_PREFIX", "string"],
+  ["WORKBENCH_CANONICAL_BLOB_PREFIX", "string"],
+  ["WORKBENCH_EXPORT_CONCURRENCY", "positive-integer"],
+  ["WORKBENCH_EXPORT_MAX_INPUT_BYTES", "positive-integer"],
+  ["WORKBENCH_EXPORT_MAX_OUTPUT_BYTES", "positive-integer"],
+  ["WORKBENCH_EXPORT_BROWSER_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_EXPORT_RECONCILE_INTERVAL_MS", "positive-integer"],
+  ["WORKBENCH_EXPORT_STALE_RUNNING_MS", "positive-integer"],
+  ["WORKBENCH_PREVIEW_GATEWAY_PORT", "port"],
+  ["WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS", "positive-integer"],
+  ["WORKBENCH_PREVIEW_MAX_HTML_BYTES", "positive-integer"],
+  ["WORKBENCH_PREVIEW_MAX_CONCURRENCY", "positive-integer"],
+  ["WORKBENCH_GATEWAY_PORT", "port"],
   ["WORKBENCH_TEI_URL", "https-url"],
   ["WORKBENCH_TEI_IMAGE_DIGEST", "digest"],
+  ["WORKBENCH_TEI_REQUEST_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_TEI_MAX_REQUEST_BYTES", "positive-integer"],
+  ["WORKBENCH_TEI_MAX_RESPONSE_BYTES", "positive-integer"],
   ["WORKBENCH_KNOWLEDGE_RERANKER_URL", "https-url"],
   ["WORKBENCH_KNOWLEDGE_RERANKER_IMAGE_DIGEST", "digest"],
-  ["WORKBENCH_KNOWLEDGE_RERANKER_MODEL_ID", "string"],
+  ["WORKBENCH_KNOWLEDGE_RERANKER_MODEL_ID", "identifier"],
   ["WORKBENCH_KNOWLEDGE_RERANKER_MODEL_REVISION", "string"],
   ["WORKBENCH_KNOWLEDGE_RERANKER_TEI_VERSION", "string"],
+  ["WORKBENCH_KNOWLEDGE_RERANKER_MAX_INPUT_TOKENS", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_RERANKER_TIMEOUT_MS", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_RERANKER_MAX_REQUEST_BYTES", "positive-integer"],
+  ["WORKBENCH_KNOWLEDGE_RERANKER_MAX_RESPONSE_BYTES", "positive-integer"],
+  ["WORKBENCH_COSIGN_CERTIFICATE_IDENTITY", "https-url"],
+  ["WORKBENCH_COSIGN_OIDC_ISSUER", "https-url"],
 ]);
+
+export const PRODUCTION_SECRET_DEFINITIONS = Object.freeze([
+  ["WORKBENCH_POSTGRES_PASSWORD", "environment"],
+  ["WORKBENCH_POSTGRES_ADMIN_URL", "environment"],
+  ["WORKBENCH_POSTGRES_MIGRATOR_PASSWORD", "environment"],
+  ["WORKBENCH_MIGRATOR_DATABASE_URL", "environment"],
+  ["WORKBENCH_POSTGRES_RUNTIME_PASSWORD", "environment"],
+  ["WORKBENCH_DATABASE_URL", "environment"],
+  ["OTEL_EXPORTER_OTLP_HEADERS", "environment"],
+  ["WORKBENCH_BETTER_AUTH_SECRET", "environment"],
+  ["WORKBENCH_OIDC_CLIENT_SECRET", "environment"],
+  ["WORKBENCH_EDGE_ORIGIN_AUTH_SECRET", "environment"],
+  ["WORKBENCH_INVITATION_TOKEN_SECRET", "environment"],
+  ["WORKBENCH_INVITATION_TOKEN_PREVIOUS_SECRETS", "environment"],
+  ["WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN", "environment"],
+  ["WORKBENCH_KNOWLEDGE_TOOL_SECRET", "environment"],
+  ["WORKBENCH_CANVAS_TOOL_SECRET", "environment"],
+  ["WORKBENCH_DOCLING_API_KEY", "environment"],
+  ["WORKBENCH_TEI_API_KEY", "environment"],
+  ["WORKBENCH_KNOWLEDGE_RERANKER_API_KEY", "environment"],
+  ["WORKBENCH_IMPORT_GITHUB_TOKEN", "environment"],
+  ["WORKBENCH_IMPORT_FIGMA_TOKEN", "environment"],
+  ["WORKBENCH_API_STAGING_S3_ACCESS_KEY_ID", "environment"],
+  ["WORKBENCH_API_STAGING_S3_SECRET_ACCESS_KEY", "environment"],
+  ["WORKBENCH_API_READY_BLOB_S3_ACCESS_KEY_ID", "environment"],
+  ["WORKBENCH_API_READY_BLOB_S3_SECRET_ACCESS_KEY", "environment"],
+  ["WORKBENCH_API_CANVAS_VISUAL_S3_ACCESS_KEY_ID", "environment"],
+  ["WORKBENCH_API_CANVAS_VISUAL_S3_SECRET_ACCESS_KEY", "environment"],
+  ["WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID", "environment"],
+  ["WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY", "environment"],
+  ["WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID", "environment"],
+  ["WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY", "environment"],
+  ["WORKBENCH_IMPORT_S3_ACCESS_KEY_ID", "environment"],
+  ["WORKBENCH_IMPORT_S3_SECRET_ACCESS_KEY", "environment"],
+  ["WORKBENCH_EXPORT_S3_ACCESS_KEY_ID", "environment"],
+  ["WORKBENCH_EXPORT_S3_SECRET_ACCESS_KEY", "environment"],
+  ["WORKBENCH_PREVIEW_TOKEN_SECRET", "environment"],
+  ["WORKBENCH_PREVIEW_S3_ACCESS_KEY_ID", "environment"],
+  ["WORKBENCH_PREVIEW_S3_SECRET_ACCESS_KEY", "environment"],
+  ["WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE", "file"],
+  ["WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH", "file"],
+].sort(([left], [right]) => left.localeCompare(right, "en")));
 
 const BASE_DEPENDENCY_NAMES = Object.freeze([
   "clamav",
@@ -302,6 +532,8 @@ export function loadVerifiedProductionDeploymentConfig({
   certificateIdentity,
   certificateOidcIssuer,
   expected = {},
+  repoRoot,
+  verifySourceFiles = false,
   verifyBlob = verifyCosignDeploymentConfigBlob,
   readManifest = (filePath) => readFileSync(filePath),
 } = {}) {
@@ -309,21 +541,24 @@ export function loadVerifiedProductionDeploymentConfig({
   const resolvedBundlePath = requiredRegularFile(bundlePath, "deployment configuration signature bundle");
   assertHttps(certificateIdentity, "deployment configuration certificate identity");
   assertHttps(certificateOidcIssuer, "deployment configuration certificate OIDC issuer");
+  const bytes = Buffer.from(readManifest(resolvedManifestPath));
+  const bundleBytes = readFileSync(resolvedBundlePath);
   const verified = verifyBlob({
     manifestPath: resolvedManifestPath,
     bundlePath: resolvedBundlePath,
     certificateIdentity,
     certificateOidcIssuer,
+    manifestBytes: bytes,
+    bundleBytes,
   });
   assert(verified === true, "deployment configuration signature verification failed");
-  const bytes = Buffer.from(readManifest(resolvedManifestPath));
   let document;
   try {
     document = JSON.parse(bytes.toString("utf8"));
   } catch {
     throw new Error("deployment configuration manifest JSON is invalid");
   }
-  verifyProductionDeploymentConfig(document, expected);
+  verifyProductionDeploymentConfig(document, expected, { repoRoot, verifySourceFiles });
   const manifestSha256 = sha256(bytes);
   return {
     document,
@@ -354,6 +589,7 @@ export function loadProductionDeploymentConfigBinding({
 
 export function deploymentConfigBinding(document, manifestSha256) {
   assert(SHA256_PATTERN.test(manifestSha256 ?? ""), "deployment configuration manifest SHA-256 is invalid");
+  const effective = document.effectiveConfig.values;
   return {
     schemaVersion: document.schemaVersion,
     manifestSha256,
@@ -361,9 +597,109 @@ export function deploymentConfigBinding(document, manifestSha256) {
     migrationSha256: document.migrations.sha256,
     effectiveConfigSha256: document.effectiveConfig.sha256,
     secretVersionsSha256: document.secretVersions.sha256,
+    runtimeWorkerExecution: {
+      scopeId: RUNTIME_WORKER_EXECUTION_SCOPE_ID,
+      environmentId: effective.WORKBENCH_ENVIRONMENT_ID,
+      keyId: effective.WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID,
+      signerId: effective.WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID,
+      trustPolicySha256: effective.WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256,
+      uid: effective.WORKBENCH_RUNTIME_WORKER_UID,
+      gid: effective.WORKBENCH_RUNTIME_WORKER_GID,
+    },
     identity: document.identity,
     dependencies: document.dependencies,
   };
+}
+
+export function verifyProductionDeploymentRuntimeBinding(binding, {
+  environmentId,
+  trustPolicy,
+} = {}) {
+  assertObject(binding, "deployment configuration binding");
+  const runtime = binding.runtimeWorkerExecution;
+  assertObject(runtime, "deployment runtimeWorkerExecution binding");
+  assertExactKeys(runtime, [
+    "environmentId",
+    "gid",
+    "keyId",
+    "scopeId",
+    "signerId",
+    "trustPolicySha256",
+    "uid",
+  ], "deployment runtimeWorkerExecution binding");
+  assert(runtime.scopeId === RUNTIME_WORKER_EXECUTION_SCOPE_ID, "deployment Runtime Worker execution scope is invalid");
+  assert(IDENTIFIER_PATTERN.test(runtime.environmentId ?? ""), "deployment Runtime Worker environment is invalid");
+  assert(PREFIXED_SHA256_PATTERN.test(runtime.keyId ?? ""), "deployment Runtime Worker key ID is invalid");
+  assert(IDENTIFIER_PATTERN.test(runtime.signerId ?? ""), "deployment Runtime Worker signer ID is invalid");
+  assert(SHA256_PATTERN.test(runtime.trustPolicySha256 ?? ""), "deployment Runtime Worker trust policy SHA-256 is invalid");
+  for (const name of ["uid", "gid"]) {
+    assert(
+      /^[1-9][0-9]*$/u.test(runtime[name] ?? "") && Number.isSafeInteger(Number(runtime[name])),
+      `deployment Runtime Worker ${name} is invalid`,
+    );
+  }
+  if (environmentId !== undefined) {
+    assert(runtime.environmentId === environmentId, "signed deployment environment differs from the acceptance environment");
+  }
+  if (trustPolicy !== undefined) {
+    assert(trustPolicy?.sha256 === runtime.trustPolicySha256, "signed deployment trust policy SHA-256 mismatch");
+    assert(trustPolicy?.environmentId === runtime.environmentId, "signed deployment trust policy environment mismatch");
+    assert(Array.isArray(trustPolicy?.approvalAuthorities), "production trust policy approval authorities are invalid");
+    assert(Array.isArray(trustPolicy?.receiptAuthorities), "production trust policy receipt authorities are invalid");
+    const authorities = trustPolicy.receiptAuthorities.filter(({ scopeId }) => scopeId === runtime.scopeId);
+    assert(authorities.length === 1, "Runtime Worker execution scope must have exactly one trust authority");
+    const authority = authorities[0];
+    assert(authority.keyId === runtime.keyId, "signed deployment Runtime Worker key differs from the trust policy");
+    assert(authority.signerId === runtime.signerId, "signed deployment Runtime Worker signer differs from the trust policy");
+    assert(trustPolicy.keys instanceof Map && trustPolicy.keys.has(runtime.keyId), "signed deployment Runtime Worker key is absent from the trust policy");
+    assert(
+      !trustPolicy.approvalAuthorities.some(({ keyId }) => keyId === runtime.keyId),
+      "Runtime Worker execution key must not authorize production approvals",
+    );
+    assert(
+      !trustPolicy.receiptAuthorities.some(({ scopeId, keyId }) => (
+        scopeId !== runtime.scopeId && keyId === runtime.keyId
+      )),
+      "Runtime Worker execution key must be dedicated to its receipt scope",
+    );
+  }
+  return true;
+}
+
+export function verifyProductionDeploymentEnvironment(document, environment = process.env) {
+  verifyProductionDeploymentConfig(document);
+  for (const name of LOCAL_VALIDATION_IMAGE_KEYS) {
+    assert(!readOptionalEnvironmentValue(environment, name), `${name} must be empty for the production topology`);
+  }
+  const identity = createIdentityBinding(environment);
+  const effectiveConfig = createEffectiveConfig(environment);
+  const deployedImages = INFRASTRUCTURE_IMAGE_DEFINITIONS.map((definition) => {
+    const imageRef = readEnvironmentValue(environment, definition.environment);
+    assert(IMAGE_REFERENCE_PATTERN.test(imageRef), `${definition.environment} must be a complete immutable OCI image reference`);
+    return {
+      name: definition.name,
+      environment: definition.environment,
+      imageRef,
+      digest: imageRef.slice(imageRef.lastIndexOf("@") + 1),
+      composeBindings: [...definition.composeBindings],
+    };
+  });
+  const dependencies = createDependencyBindings({
+    source: readJsonEnvironment(environment, "WORKBENCH_PRODUCTION_DEPENDENCY_ATTESTATIONS_JSON"),
+    deployedImages,
+    effectiveConfig: effectiveConfig.values,
+    identity,
+  });
+  const secretVersions = createSecretVersionBindings(
+    readJsonEnvironment(environment, "WORKBENCH_PRODUCTION_SECRET_VERSIONS_JSON"),
+  );
+  assertDeepEqual(document.effectiveConfig, effectiveConfig, "signed deployment effective configuration differs from the deployment environment");
+  assertDeepEqual(document.identity, identity, "signed deployment identity differs from the deployment environment");
+  assertDeepEqual(document.dependencies, dependencies, "signed deployment dependencies differ from the deployment environment");
+  assertDeepEqual(document.secretVersions, secretVersions, "signed deployment secret versions differ from the deployment environment");
+  verifyDeerFlowConfigValueBindings(effectiveConfig.values);
+  verifySecretValueBindings(document.secretVersions, environment);
+  return true;
 }
 
 export function verifyCosignDeploymentConfigBlob({
@@ -371,18 +707,29 @@ export function verifyCosignDeploymentConfigBlob({
   bundlePath,
   certificateIdentity,
   certificateOidcIssuer,
+  manifestBytes,
+  bundleBytes,
   execute = execFileSync,
 }) {
+  const verifiedManifestBytes = Buffer.from(manifestBytes ?? readFileSync(manifestPath));
+  const verifiedBundleBytes = Buffer.from(bundleBytes ?? readFileSync(bundlePath));
+  const verificationDirectory = mkdtempSync(path.join(tmpdir(), "workbench-deployment-config-verify-"));
+  const frozenManifestPath = path.join(verificationDirectory, "deployment-config.json");
+  const frozenBundlePath = path.join(verificationDirectory, "deployment-config.bundle.json");
   try {
+    writeFileSync(frozenManifestPath, verifiedManifestBytes, { flag: "wx", mode: 0o600 });
+    writeFileSync(frozenBundlePath, verifiedBundleBytes, { flag: "wx", mode: 0o600 });
     execute("cosign", [
       "verify-blob",
-      "--bundle", bundlePath,
+      "--bundle", frozenBundlePath,
       "--certificate-identity", certificateIdentity,
       "--certificate-oidc-issuer", certificateOidcIssuer,
-      manifestPath,
+      frozenManifestPath,
     ], { stdio: ["ignore", "ignore", "pipe"] });
   } catch {
     throw new Error("deployment configuration signature verification failed");
+  } finally {
+    rmSync(verificationDirectory, { recursive: true, force: true });
   }
   return true;
 }
@@ -504,7 +851,10 @@ function verifyIdentityBinding(identity) {
 function createEffectiveConfig(environment) {
   const values = {};
   for (const [name, type] of EFFECTIVE_CONFIG_FIELDS) {
-    values[name] = normalizeEffectiveValue(readEnvironmentValue(environment, name), name, type);
+    const raw = type === "url-or-empty"
+      ? readRequiredEnvironmentValueAllowEmpty(environment, name)
+      : readEnvironmentValue(environment, name);
+    values[name] = normalizeEffectiveValue(raw, name, type);
   }
   return { sha256: sha256(canonicalJson(values)), values };
 }
@@ -530,9 +880,14 @@ function verifyEffectiveConfig(effectiveConfig) {
 
 function normalizeEffectiveValue(value, name, type) {
   const trimmed = value.trim();
+  if (type === "url-or-empty") {
+    if (trimmed.length === 0) return "";
+    return normalizeUrl(trimmed, name);
+  }
   assert(trimmed.length > 0, `${name} is required for the effective production configuration`);
   if (type === "https-url") return normalizeUrl(trimmed, name, { httpsOnly: true });
   if (type === "url") return normalizeUrl(trimmed, name);
+  if (type === "internal-url") return normalizeUrl(trimmed, name, { allowPort: true });
   if (type === "boolean") {
     const normalized = trimmed.toLowerCase();
     assert(normalized === "true" || normalized === "false", `${name} must be true or false`);
@@ -556,12 +911,71 @@ function normalizeEffectiveValue(value, name, type) {
     assert(/^[1-9][0-9]*$/u.test(trimmed) && Number.isSafeInteger(Number(trimmed)), `${name} must be a positive integer`);
     return String(Number(trimmed));
   }
+  if (type === "uid") {
+    assert(/^(?:0|[1-9][0-9]*)$/u.test(trimmed) && Number(trimmed) <= 4_294_967_294, `${name} must be a valid UID`);
+    return String(Number(trimmed));
+  }
   if (type === "port") {
     assert(/^[1-9][0-9]*$/u.test(trimmed) && Number(trimmed) <= 65535, `${name} must be a valid port`);
     return String(Number(trimmed));
   }
+  if (type === "unprivileged-port") {
+    assert(
+      /^[1-9][0-9]*$/u.test(trimmed) && Number(trimmed) >= 1024 && Number(trimmed) <= 65535,
+      `${name} must be an unprivileged port`,
+    );
+    return String(Number(trimmed));
+  }
+  if (type === "private-ipv4") {
+    const octets = trimmed.split(".");
+    assert(
+      octets.length === 4
+        && octets.every((octet) => /^(?:0|[1-9][0-9]{0,2})$/u.test(octet) && Number(octet) <= 255),
+      `${name} must be a canonical RFC1918 IPv4 address`,
+    );
+    const [first, second] = octets.map(Number);
+    assert(
+      first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168),
+      `${name} must be a canonical RFC1918 IPv4 address`,
+    );
+    return octets.join(".");
+  }
+  if (type === "wireguard-endpoint") {
+    assert(
+      /^(?=.{1,253}:51820$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?:51820$/u.test(trimmed),
+      `${name} must be a canonical hostname on port 51820`,
+    );
+    return trimmed;
+  }
   if (type === "digest") {
     assert(PREFIXED_SHA256_PATTERN.test(trimmed), `${name} must be an immutable SHA-256 digest`);
+    return trimmed;
+  }
+  if (type === "immutable-image") {
+    assert(IMAGE_REFERENCE_PATTERN.test(trimmed), `${name} must be an immutable OCI image reference`);
+    return trimmed;
+  }
+  if (type === "commit") {
+    assert(COMMIT_PATTERN.test(trimmed), `${name} must be a lowercase 40-character Git SHA`);
+    return trimmed;
+  }
+  if (type === "path") {
+    assert(!/[\0\r\n]/u.test(trimmed), `${name} is invalid`);
+    return trimmed;
+  }
+  if (type === "absolute-path") {
+    assert(
+      path.isAbsolute(trimmed) && path.normalize(trimmed) === trimmed && !/[\0\r\n:]/u.test(trimmed),
+      `${name} must be a normalized absolute path`,
+    );
+    return trimmed;
+  }
+  if (type === "sha256") {
+    assert(SHA256_PATTERN.test(trimmed), `${name} must be a SHA-256 digest`);
+    return trimmed;
+  }
+  if (type === "identifier") {
+    assert(IDENTIFIER_PATTERN.test(trimmed), `${name} must be an identifier`);
     return trimmed;
   }
   if (type === "hostname") {
@@ -625,10 +1039,11 @@ function validateDependencyTarget(dependency, { effectiveConfig, identity, deplo
     reranker: effectiveConfig.WORKBENCH_KNOWLEDGE_RERANKER_URL,
     "enterprise-identity": identity.provider?.issuer,
   };
+  assert(
+    dependency.kind === "external-service",
+    `${label} (${dependency.name}) must be an external-service dependency`,
+  );
   assert(dependency.endpoint === endpoints[dependency.name], `${label}.endpoint differs from the effective deployment`);
-  if (["edge-gateway", "object-storage", "enterprise-identity"].includes(dependency.name)) {
-    assert(dependency.kind === "external-service", `${label} must be an external-service dependency`);
-  }
   if (dependency.name === "docling" && dependency.kind === "external-service") {
     assert(dependency.version === effectiveConfig.WORKBENCH_FILE_PARSER_VERSION, `${label}.version differs from WORKBENCH_FILE_PARSER_VERSION`);
   }
@@ -653,18 +1068,105 @@ function verifySecretVersionBindings(value) {
   assertObject(value, "deployment secretVersions");
   assertExactKeys(value, ["entries", "sha256"], "deployment secretVersions");
   assert(Array.isArray(value.entries) && value.entries.length > 0, "deployment secretVersions.entries must be non-empty");
+  assertDeepEqual(
+    value.entries.map((entry) => entry?.name),
+    PRODUCTION_SECRET_DEFINITIONS.map(([name]) => name),
+    "deployment secretVersions must contain the exact production secret inventory",
+  );
   let previous = "";
   for (const [index, entry] of value.entries.entries()) {
     const label = `deployment secretVersions.entries[${index}]`;
     assertObject(entry, label);
-    assertExactKeys(entry, ["attestationSha256", "name", "version"], label);
+    assertExactKeys(entry, ["attestationSha256", "name", "valueSha256", "version"], label);
     assert(IDENTIFIER_PATTERN.test(entry.name ?? ""), `${label}.name is invalid`);
     assert(IDENTIFIER_PATTERN.test(entry.version ?? ""), `${label}.version is invalid`);
     assert(SHA256_PATTERN.test(entry.attestationSha256 ?? ""), `${label}.attestationSha256 is invalid`);
+    assert(SHA256_PATTERN.test(entry.valueSha256 ?? ""), `${label}.valueSha256 is invalid`);
     assert(!previous || previous.localeCompare(entry.name, "en") < 0, "deployment secretVersions.entries must be sorted and unique");
     previous = entry.name;
   }
   assert(value.sha256 === sha256(canonicalJson(value.entries)), "deployment secretVersions SHA-256 mismatch");
+}
+
+function verifySecretValueBindings(secretVersions, environment) {
+  const entries = new Map(secretVersions.entries.map((entry) => [entry.name, entry]));
+  for (const [name, sourceType] of PRODUCTION_SECRET_DEFINITIONS) {
+    const entry = entries.get(name);
+    assert(entry, `deployment secret inventory is missing ${name}`);
+    let bytes;
+    if (sourceType === "environment") {
+      bytes = Buffer.from(readRequiredEnvironmentValueAllowEmpty(environment, name), "utf8");
+    } else {
+      const sourcePath = readRequiredEnvironmentValueAllowEmpty(environment, name);
+      bytes = readStableRegularFile(sourcePath, name);
+      if (name === "WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE") {
+        readDeploymentEnv(bytes, { label: "DeerFlow provider environment" });
+      }
+    }
+    assert(sha256(bytes) === entry.valueSha256, `${name} does not match the signed secret value binding`);
+  }
+}
+
+function verifyDeerFlowConfigValueBindings(effectiveConfig) {
+  const basePath = effectiveConfig.WORKBENCH_DEERFLOW_BASE_CONFIG_PATH;
+  const baseBytes = readStableRegularFile(basePath, "WORKBENCH_DEERFLOW_BASE_CONFIG_PATH");
+  assert(
+    sha256(baseBytes) === effectiveConfig.WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256,
+    "WORKBENCH_DEERFLOW_BASE_CONFIG_PATH does not match WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256",
+  );
+
+  const generatedPath = effectiveConfig.DEER_FLOW_CONFIG_PATH;
+  if (!pathEntryExists(generatedPath, "DEER_FLOW_CONFIG_PATH")) return;
+  const generatedBytes = readStableRegularFile(generatedPath, "DEER_FLOW_CONFIG_PATH");
+  assert(
+    sha256(generatedBytes) === effectiveConfig.WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256,
+    "DEER_FLOW_CONFIG_PATH does not match WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256",
+  );
+}
+
+function pathEntryExists(sourcePath, label) {
+  try {
+    lstatSync(path.resolve(sourcePath));
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw new Error(`${label} could not be inspected`);
+  }
+}
+
+function readStableRegularFile(sourcePath, label) {
+  const resolved = path.resolve(sourcePath);
+  let descriptor;
+  try {
+    const before = lstatSync(resolved, { bigint: true });
+    assert(before.isFile() && !before.isSymbolicLink(), `${label} must be a regular non-symlink file`);
+    descriptor = openSync(resolved, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor, { bigint: true });
+    assert(
+      opened.isFile()
+        && opened.dev === before.dev
+        && opened.ino === before.ino
+        && opened.size === before.size,
+      `${label} changed before it could be read`,
+    );
+    const bytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor, { bigint: true });
+    assert(
+      after.dev === opened.dev
+        && after.ino === opened.ino
+        && after.size === opened.size
+        && after.ctimeNs === opened.ctimeNs
+        && after.mtimeNs === opened.mtimeNs
+        && BigInt(bytes.length) === opened.size,
+      `${label} changed while it was being read`,
+    );
+    return bytes;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(label)) throw error;
+    throw new Error(`${label} must be a stable regular non-symlink file`);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
 function verifyImageDigestList(images, label, expectedCount) {
@@ -714,7 +1216,7 @@ function readJsonEnvironment(environment, name) {
   }
 }
 
-function normalizeUrl(value, label, { httpsOnly = false } = {}) {
+function normalizeUrl(value, label, { httpsOnly = false, allowPort = false } = {}) {
   let parsed;
   try {
     parsed = new URL(value);
@@ -723,9 +1225,18 @@ function normalizeUrl(value, label, { httpsOnly = false } = {}) {
   }
   assert(["http:", "https:"].includes(parsed.protocol), `${label} must use HTTP or HTTPS`);
   if (httpsOnly) assert(parsed.protocol === "https:", `${label} must use HTTPS`);
-  assert(!parsed.username && !parsed.password && !parsed.hash, `${label} must not contain credentials or a fragment`);
-  assert(!parsed.port, `${label} must not use a non-standard port`);
+  assert(
+    !parsed.username && !parsed.password && !parsed.search && !parsed.hash,
+    `${label} must be free of credentials, queries, and fragments`,
+  );
+  if (!allowPort) assert(!parsed.port, `${label} must not use a non-standard port`);
   return parsed.href.replace(/\/$/u, "");
+}
+
+function readRequiredEnvironmentValueAllowEmpty(environment, name) {
+  const value = environment instanceof Map ? environment.get(name) : environment?.[name];
+  assert(typeof value === "string", `${name} is required`);
+  return value;
 }
 
 function requiredRegularFile(filePath, label) {

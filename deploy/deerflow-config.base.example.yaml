@@ -1,5 +1,9 @@
 config_version: 1
 
+database:
+  backend: sqlite
+  sqlite_dir: .deer-flow/data
+
 models:
   - name: gpt-5.5
     display_name: GPT-5.5

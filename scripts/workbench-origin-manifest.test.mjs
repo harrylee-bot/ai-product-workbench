@@ -96,6 +96,42 @@ test("rejects duplicate environment keys", () => {
   );
 });
 
+test("rejects Compose interpolation and other non-canonical dotenv syntax", () => {
+  for (const source of [
+    "UNTRACKED=runtime-secret-a\nWORKBENCH_BETTER_AUTH_SECRET=$UNTRACKED\n",
+    "WORKBENCH_BETTER_AUTH_SECRET=\"$UNTRACKED\"\n",
+    "WORKBENCH_BETTER_AUTH_SECRET=runtime-secret # mutable comment\n",
+    "WORKBENCH_BETTER_AUTH_SECRET=runtime\\-secret\n",
+  ]) {
+    assert.throws(
+      () => readDeploymentEnv(source),
+      /must not contain|must not use quoted syntax/u,
+    );
+  }
+});
+
+test("accepts canonical unquoted values whose bytes Compose preserves", () => {
+  const parsed = readDeploymentEnv([
+    'WORKBENCH_PRODUCTION_SECRET_VERSIONS_JSON=[{"name":"fixture"}]',
+    "WORKBENCH_BETTER_AUTH_SECRET=base64url_A-Za-z0-9-_",
+    "FRAGMENT_SAFE=value#literal",
+    "EMPTY=",
+    "",
+  ].join("\n"));
+
+  assert.equal(parsed.get("WORKBENCH_PRODUCTION_SECRET_VERSIONS_JSON"), '[{"name":"fixture"}]');
+  assert.equal(parsed.get("WORKBENCH_BETTER_AUTH_SECRET"), "base64url_A-Za-z0-9-_");
+  assert.equal(parsed.get("FRAGMENT_SAFE"), "value#literal");
+  assert.equal(parsed.get("EMPTY"), "");
+});
+
+test("rejects invalid UTF-8 before parsing environment values", () => {
+  assert.throws(
+    () => readDeploymentEnv(Buffer.from([0x4b, 0x45, 0x59, 0x3d, 0xff, 0x0a])),
+    /must contain valid UTF-8/u,
+  );
+});
+
 function environment(overrides = {}) {
   return new Map(Object.entries({
     WORKBENCH_WEB_ORIGIN: "https://workbench.example.test",

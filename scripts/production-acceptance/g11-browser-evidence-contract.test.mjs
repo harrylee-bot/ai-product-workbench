@@ -48,10 +48,10 @@ const FLOWS = {
     steps: [["requestAccepted", "submit-prd", "locator.click", ["prd-agent-panel-visible:visible", "prd-motion-visible:visible"]], ["loadingCompositionRendered", "observe-prd-loading", "expect.toBeVisible", ["prd-pending-visible:visible", "prd-skeleton-visible:visible"]], ["activePanelContextRendered", "observe-prd-context", "expect.toBeVisible", ["prd-prompt-context-visible:visible", "prd-activity-context-visible:visible"]], ["stageSequenceContinuous", "observe-prd-sequence", "page.evaluate", ["prd-stage-sequence-continuous:condition"]], ["readyArtifactPersisted", "observe-prd-ready", "page.evaluate", ["prd-run-complete:visible", "prd-artifact-version-visible:condition"]], ["checksumVerified", "verify-artifact-checksum", "page.evaluate", ["prd-artifact-checksum-valid:condition"]]],
   },
   "mixed-rejection": {
-    keys: ["problemStatus", "queuePublishCount", "runCount", "runtimeAttemptCount", "artifactVersionCount", "providerInvocationCount", "sseEventCount"],
-    browser: ["problemStatus", "runCount", "sseEventCount"], observer: ["queuePublishCount", "runtimeAttemptCount", "artifactVersionCount", "providerInvocationCount"], states: ["mixed-request-rejected"],
-    steps: [["problemStatus", "submit-mixed-intent", "page.evaluate", ["mixed-problem-status-422:condition"]], ["runCount", "verify-mixed-run-count", "page.evaluate", ["mixed-run-count-unchanged:condition"]], ["sseEventCount", "verify-mixed-sse-count", "page.evaluate", ["mixed-sse-count-unchanged:condition"]]],
-    errors: [["mixed-request-rejection", "POST", "web", "api", [422]]],
+    keys: ["composerLocalizedError", "composerPromptPreserved", "composerActiveUiAbsent", "problemStatus", "queuePublishCount", "runCount", "runtimeAttemptCount", "artifactVersionCount", "providerInvocationCount", "sseEventCount"],
+    browser: ["composerLocalizedError", "composerPromptPreserved", "composerActiveUiAbsent", "problemStatus", "runCount", "sseEventCount"], observer: ["queuePublishCount", "runtimeAttemptCount", "artifactVersionCount", "providerInvocationCount"], states: ["mixed-composer-rejected", "mixed-direct-api-rejected"],
+    steps: [["composerLocalizedError", "submit-mixed-composer", "locator.click", ["mixed-composer-localized-error-visible:condition"]], ["composerPromptPreserved", "verify-mixed-composer-prompt", "page.evaluate", ["mixed-composer-prompt-preserved:condition"]], ["composerActiveUiAbsent", "verify-mixed-composer-inactive", "page.evaluate", ["mixed-composer-active-ui-absent:count"]], ["problemStatus", "submit-mixed-direct-api", "page.evaluate", ["mixed-problem-status-400:condition"]], ["runCount", "verify-mixed-run-count", "page.evaluate", ["mixed-run-count-unchanged:condition"]], ["sseEventCount", "verify-mixed-sse-count", "page.evaluate", ["mixed-sse-count-unchanged:condition"]]],
+    errors: [["mixed-request-rejection", "POST", "web", "api", [400]]],
   },
   "prototype-after-prd": {
     browser: ["startedAfterPrd", "nullGapPrdMotionAbsent", "thinkingGapPrdMotionAbsent", "prototypeMotionRendered"], observer: ["readyArtifactPersisted"], states: ["prototype-null-gap", "prototype-thinking-gap", "design-system", "mapping-components", "creating-flows", "generating-ui", "screen-streaming", "summarizing", "screen-stable", "prototype-ready"],
@@ -111,7 +111,7 @@ function actualSteps(steps) {
 function passingChecks(flowId, keys) {
   const checks = Object.fromEntries(keys.map((key) => [key, true]));
   if (flowId === "mixed-rejection") {
-    Object.assign(checks, { problemStatus: 422, queuePublishCount: 0, runCount: 0, runtimeAttemptCount: 0, artifactVersionCount: 0, providerInvocationCount: 0, sseEventCount: 0 });
+    Object.assign(checks, { problemStatus: 400, queuePublishCount: 0, runCount: 0, runtimeAttemptCount: 0, artifactVersionCount: 0, providerInvocationCount: 0, sseEventCount: 0 });
   }
   if (flowId === "long-run-7686-plus") Object.assign(checks, { minimumEventCount: 7686, observedEventCount: 7686 });
   if (flowId === "provider-state-integrity") {
@@ -121,7 +121,7 @@ function passingChecks(flowId, keys) {
 }
 
 function failingValue(flowId, key) {
-  if (flowId === "mixed-rejection") return key === "problemStatus" ? 400 : 1;
+  if (flowId === "mixed-rejection") return key === "problemStatus" ? 422 : 1;
   if (flowId === "long-run-7686-plus") return key === "minimumEventCount" || key === "observedEventCount" ? 7685 : false;
   if (flowId === "provider-state-integrity" && key.endsWith("Count")) return 1;
   return false;

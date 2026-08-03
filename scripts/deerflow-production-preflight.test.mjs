@@ -28,6 +28,17 @@ test("DeerFlow preflight requires a fixed provider model id", () => {
   assert.match(result.stderr, /WORKBENCH_DEERFLOW_PROVIDER_MODEL must occur exactly once/u);
 });
 
+test("DeerFlow preflight binds the base and effective config bytes", () => {
+  for (const [name, overrides, expected] of [
+    ["base", { baseConfigSha256: "0".repeat(64) }, /base DeerFlow config does not match the signed SHA-256/u],
+    ["effective", { effectiveConfigSha256: "0".repeat(64) }, /effective DeerFlow config does not match the signed SHA-256/u],
+  ]) {
+    const result = runPreflight(validProviderEnv(), null, overrides);
+    assert.notEqual(result.status, 0, `${name} config drift must fail`);
+    assert.match(result.stderr, expected);
+  }
+});
+
 test("DeerFlow preflight rejects provider base URLs that are not safe HTTPS origins", () => {
   const result = runPreflight([
     "OPENAI_API_KEY=test-key-with-enough-entropy",
@@ -141,7 +152,7 @@ test("DeerFlow preflight fails closed when the Validator image probe fails", () 
   assert.match(result.stderr, /WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED/u);
 });
 
-test("DeerFlow preflight preserves the exact previous candidate as a legacy rollback", () => {
+test("DeerFlow preflight rejects the pre-Validator-Node candidate during rollback", () => {
   const result = runPreflight(validProviderEnv(), {
     configOwner: "65532:65532",
     homeOwner: "65532:65532",
@@ -151,31 +162,9 @@ test("DeerFlow preflight preserves the exact previous candidate as a legacy roll
     labelNodeImageRef: null,
   });
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /deerflow production preflight: ok/u);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /WORKBENCH_DEERFLOW_NODE_IMAGE_REF must occur exactly once/u);
   assert.doesNotMatch(result.stderr, /validator-probe-arg=/u);
-});
-
-test("DeerFlow preflight rejects a Node environment binding on the legacy rollback candidate", () => {
-  const result = runPreflight(validProviderEnv(), null, {
-    workbenchSourceCommit: "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
-  });
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /legacy DeerFlow rollback candidate must not define WORKBENCH_DEERFLOW_NODE_IMAGE_REF/u);
-});
-
-test("DeerFlow preflight rejects a Node image label on the legacy rollback candidate", () => {
-  const result = runPreflight(validProviderEnv(), {
-    configOwner: "65532:65532",
-    homeOwner: "65532:65532",
-  }, {
-    workbenchSourceCommit: "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
-    nodeImageRef: null,
-  });
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /legacy DeerFlow rollback image unexpectedly declares a Validator Node runtime/u);
 });
 
 function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
@@ -203,8 +192,10 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
   writeFileSync(join(runtimeToolsDir, "config.fragment.yaml"), readFixture(fragment));
   writeFileSync(join(patchDir, "manifest.json"), readFixture(patchManifest));
   writeFileSync(join(deployDir, "deerflow-runtime-compose.yml"), "services: {}\n");
-  writeFileSync(join(etcDir, "config.base.yaml"), "models: []\ntool_groups: []\ntools: []\n");
-  writeFileSync(effectiveConfig, "models: []\ntool_groups: []\ntools: []\n", { mode: 0o600 });
+  const baseConfigSource = "models: []\ntool_groups: []\ntools: []\n";
+  const effectiveConfigSource = "models: []\ntool_groups: []\ntools: []\n";
+  writeFileSync(join(etcDir, "config.base.yaml"), baseConfigSource);
+  writeFileSync(effectiveConfig, effectiveConfigSource, { mode: 0o600 });
   chmodSync(effectiveConfig, 0o600);
   writeFileSync(join(etcDir, "provider.env"), providerEnvSource, { mode: 0o600 });
   chmodSync(join(etcDir, "provider.env"), 0o600);
@@ -223,10 +214,16 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
     ? `node:22-bookworm-slim@sha256:${"d".repeat(64)}`
     : overrides.nodeImageRef;
   const workbenchSourceCommit = overrides.workbenchSourceCommit ?? "a".repeat(40);
+  const baseConfigSha256 = overrides.baseConfigSha256
+    ?? createHash("sha256").update(baseConfigSource).digest("hex");
+  const effectiveConfigSha256 = overrides.effectiveConfigSha256
+    ?? createHash("sha256").update(effectiveConfigSource).digest("hex");
   writeFileSync(envFile, [
     `DEER_FLOW_HOME=${runtimeHome}`,
     `WORKBENCH_DEERFLOW_BASE_CONFIG_PATH=${join(etcDir, "config.base.yaml")}`,
+    `WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256=${baseConfigSha256}`,
     `DEER_FLOW_CONFIG_PATH=${effectiveConfig}`,
+    `WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256=${effectiveConfigSha256}`,
     `WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE=${join(etcDir, "provider.env")}`,
     "WORKBENCH_DEERFLOW_HOST_PORT=2026",
     "WORKBENCH_INTERNAL_NETWORK_NAME=workbench_internal",

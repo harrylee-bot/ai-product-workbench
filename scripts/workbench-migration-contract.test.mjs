@@ -50,6 +50,10 @@ const runtimeProviderStateMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260723010000_runtime_provider_state_v2/migration.sql",
   import.meta.url,
 ), "utf8");
+const runtimeProviderCancellationResolutionMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260803010000_runtime_provider_cancellation_resolution/migration.sql",
+  import.meta.url,
+), "utf8");
 const prdV2ArtifactVersionGuardsMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260723020000_prd_v2_artifact_version_guards/migration.sql",
   import.meta.url,
@@ -88,7 +92,7 @@ test("export packaging backfill restores the mutation guard", () => {
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 68, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 69, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -258,6 +262,37 @@ test("Runtime provider state v2 is scoped, monotonic, bounded, and finalization-
   assert.match(runtimeProviderStateMigration, /COMMIT;\s*$/u);
   assert.doesNotMatch(runtimeProviderStateMigration, /DELETE FROM "runtime_external_events"/u);
   assert.doesNotMatch(runtimeProviderStateMigration, /UPDATE "runtime_external_events"/u);
+});
+
+test("Runtime provider cancellation resolution is append-only and Run-lifecycle-bound", () => {
+  assert.match(runtimeProviderCancellationResolutionMigration, /^BEGIN;/u);
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /FOREIGN KEY \("runtime_attempt_id", "run_id"\)[\s\S]*ON DELETE CASCADE/u,
+  );
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /IF TG_OP = 'DELETE' AND pg_trigger_depth\(\) > 1 THEN/u,
+  );
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /SELECT EXISTS \(SELECT 1 FROM %I\."runs" WHERE "id" = \$1\)/u,
+  );
+  assert.match(runtimeProviderCancellationResolutionMigration, /TG_TABLE_SCHEMA/u);
+  assert.match(runtimeProviderCancellationResolutionMigration, /IF NOT owning_run_exists THEN/u);
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_APPEND_ONLY/u,
+  );
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /BEFORE UPDATE OR DELETE ON "runtime_provider_cancellation_resolutions"/u,
+  );
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /BEFORE TRUNCATE ON "runtime_provider_cancellation_resolutions"/u,
+  );
+  assert.match(runtimeProviderCancellationResolutionMigration, /COMMIT;\s*$/u);
 });
 
 test("PRD ArtifactVersion guards bind v1 and v2 schemas to their exact protocols", () => {

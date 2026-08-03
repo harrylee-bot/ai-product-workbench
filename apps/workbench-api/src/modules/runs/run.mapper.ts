@@ -96,7 +96,7 @@ function mapFailure(run: {
   }
   return {
     code: run.errorCode,
-    message: run.errorDetail,
+    message: run.errorCode,
     retryable: run.errorRetryable,
   };
 }

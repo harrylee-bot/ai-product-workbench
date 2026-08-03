@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import types
@@ -29,6 +30,23 @@ def install_import_stubs() -> bool:
     class AgentState(dict):
         pass
 
+    class AIMessage:
+        def __init__(self, content="", *, response_metadata=None, **values):
+            self.content = content
+            self.response_metadata = dict(response_metadata or {})
+            self.__dict__.update(values)
+
+        def model_copy(self, *, update):
+            values = dict(self.__dict__)
+            values.update(update)
+            content = values.pop("content", "")
+            response_metadata = values.pop("response_metadata", {})
+            return AIMessage(
+                content=content,
+                response_metadata=response_metadata,
+                **values,
+            )
+
     class SystemMessage:
         def __init__(self, *, content):
             self.content = content
@@ -40,6 +58,20 @@ def install_import_stubs() -> bool:
 
     class Command:
         pass
+
+    class ModelResponse:
+        @classmethod
+        def __class_getitem__(cls, _item):
+            return cls
+
+        def __init__(self, result, structured_response=None):
+            self.result = list(result)
+            self.structured_response = structured_response
+
+    class ExtendedModelResponse:
+        def __init__(self, model_response, command=None):
+            self.model_response = model_response
+            self.command = command
 
     modules = {
         "langchain": types.ModuleType("langchain"),
@@ -56,9 +88,11 @@ def install_import_stubs() -> bool:
     modules["langchain.agents"].AgentState = AgentState
     modules["langchain.agents.middleware"].AgentMiddleware = AgentMiddleware
     model_types = modules["langchain.agents.middleware.types"]
+    model_types.ExtendedModelResponse = ExtendedModelResponse
     model_types.ModelCallResult = object
     model_types.ModelRequest = object
-    model_types.ModelResponse = object
+    model_types.ModelResponse = ModelResponse
+    modules["langchain_core.messages"].AIMessage = AIMessage
     modules["langchain_core.messages"].SystemMessage = SystemMessage
     modules["langchain_core.messages"].ToolMessage = ToolMessage
     modules["langgraph.prebuilt.tool_node"].ToolCallRequest = object
@@ -98,6 +132,22 @@ workbench_requested_artifact_kinds_from_runnable_config = (
 workbench_knowledge_enabled_from_runnable_config = (
     middleware_module.workbench_knowledge_enabled_from_runnable_config
 )
+AIMessage = middleware_module.AIMessage
+ExtendedModelResponse = middleware_module.ExtendedModelResponse
+ModelResponse = middleware_module.ModelResponse
+
+if not USING_IMPORT_STUBS:
+    from deerflow.agents.middlewares.deferred_tool_filter_middleware import (
+        DeferredToolFilterMiddleware,
+    )
+    from deerflow.runtime.serialization import serialize_channel_values_for_api
+    from langchain_core.messages import HumanMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, MessagesState, StateGraph
+
+
+CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
+CATALOG_PROTOCOL = "workbench.runtime.tool-catalog-observation.v1"
 
 
 class FakeTool:
@@ -106,14 +156,16 @@ class FakeTool:
 
 
 class FakeModelRequest:
-    def __init__(self, tools, system_message=None):
+    def __init__(self, tools, system_message=None, state=None):
         self.tools = list(tools)
         self.system_message = system_message
+        self.state = dict(state or {})
 
     def override(self, **overrides):
         return FakeModelRequest(
             overrides.get("tools", self.tools),
             overrides.get("system_message", self.system_message),
+            overrides.get("state", self.state),
         )
 
 
@@ -364,12 +416,195 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 {"context": {"workbench": []}}
             )
         )
+        self.assertIs(
+            workbench_knowledge_enabled_from_runnable_config(
+                {"context": {"workbench": {"runId": "run-1"}}}
+            ),
+            False,
+        )
 
     def test_knowledge_tool_is_visible_only_for_the_exact_true_grant(self) -> None:
         for disabled in (None, False, 1, "true", {}, []):
             with self.subTest(disabled=disabled):
                 self.assertNotIn(KNOWLEDGE_TOOL_NAME, self.visible_names(None, None, disabled))
         self.assertIn(KNOWLEDGE_TOOL_NAME, self.visible_names(None, None, True))
+
+    def test_model_result_catalog_observation_is_hashed_and_tracks_knowledge_visibility(self) -> None:
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                middleware = WorkbenchToolScopeMiddleware(None, None, enabled)
+                original = AIMessage(
+                    content="done",
+                    response_metadata={"provider_request_id": "provider-1"},
+                )
+                scoped_requests = []
+                observed = middleware.wrap_model_call(
+                    FakeModelRequest(self.all_tools),
+                    lambda scoped: (
+                        scoped_requests.append(scoped)
+                        or ModelResponse(result=[original], structured_response={"ok": True})
+                    ),
+                )
+                self.assertIsInstance(observed, ModelResponse)
+                self.assertEqual(observed.structured_response, {"ok": True})
+                self.assertEqual(len(scoped_requests), 1)
+                self.assertIsNone(scoped_requests[0].system_message)
+                self.assertIsNot(observed.result[0], original)
+                self.assertNotIn(CATALOG_METADATA_KEY, original.response_metadata)
+                self.assertEqual(
+                    observed.result[0].response_metadata["provider_request_id"],
+                    "provider-1",
+                )
+                payload = observed.result[0].response_metadata[CATALOG_METADATA_KEY]
+                self.assertEqual(
+                    set(payload),
+                    {"protocol", "knowledgeVisible", "toolNames", "sha256"},
+                )
+                self.assertEqual(payload["protocol"], CATALOG_PROTOCOL)
+                self.assertEqual(payload["knowledgeVisible"], enabled)
+                self.assertEqual(KNOWLEDGE_TOOL_NAME in payload["toolNames"], enabled)
+                self.assertEqual(len(payload["toolNames"]), len(set(payload["toolNames"])))
+                digest_payload = {
+                    "knowledgeVisible": payload["knowledgeVisible"],
+                    "protocol": payload["protocol"],
+                    "toolNames": payload["toolNames"],
+                }
+                canonical = json.dumps(digest_payload, sort_keys=True, separators=(",", ":"))
+                self.assertEqual(payload["sha256"], hashlib.sha256(canonical.encode("utf-8")).hexdigest())
+
+    def test_catalog_observation_overwrites_untrusted_metadata_and_supports_all_result_shapes(self) -> None:
+        forged = {
+            "protocol": CATALOG_PROTOCOL,
+            "knowledgeVisible": False,
+            "toolNames": [],
+            "sha256": "0" * 64,
+            "extra": "forged",
+        }
+        middleware = WorkbenchToolScopeMiddleware(None, None, True)
+        original = AIMessage(
+            content="done",
+            response_metadata={CATALOG_METADATA_KEY: forged},
+        )
+
+        direct = middleware.wrap_model_call(
+            FakeModelRequest([FakeTool(KNOWLEDGE_TOOL_NAME)]),
+            lambda _scoped: original,
+        )
+        extended = middleware.wrap_model_call(
+            FakeModelRequest([FakeTool(KNOWLEDGE_TOOL_NAME)]),
+            lambda _scoped: ExtendedModelResponse(
+                model_response=ModelResponse(result=[original]),
+                command="keep-command",
+            ),
+        )
+
+        for stamped in (direct, extended.model_response.result[0]):
+            with self.subTest(result_type=type(stamped).__name__):
+                observation = stamped.response_metadata[CATALOG_METADATA_KEY]
+                self.assertEqual(set(observation), {
+                    "protocol", "knowledgeVisible", "toolNames", "sha256",
+                })
+                self.assertTrue(observation["knowledgeVisible"])
+                self.assertEqual(observation["toolNames"], [KNOWLEDGE_TOOL_NAME])
+                self.assertNotEqual(observation["sha256"], forged["sha256"])
+        self.assertEqual(extended.command, "keep-command")
+        self.assertIs(original.response_metadata[CATALOG_METADATA_KEY], forged)
+
+    def test_model_bound_catalog_observation_rejects_noncanonical_or_unknown_tools(self) -> None:
+        invalid_catalogs = (
+            [FakeTool("safe_tool"), FakeTool("safe_tool")],
+            [FakeTool("workbench_unknown_tool")],
+            [FakeTool("Read_File")],
+            [FakeTool("read-file")],
+        )
+        middleware = WorkbenchToolScopeMiddleware(None, None, False)
+        for tools in invalid_catalogs:
+            with self.subTest(names=[tool.name for tool in tools]):
+                with self.assertRaisesRegex(ValueError, "WORKBENCH_TOOL_CATALOG_INVALID"):
+                    middleware.wrap_model_call(
+                        FakeModelRequest(tools),
+                        lambda _scoped: AIMessage(content="done"),
+                    )
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires pinned LangChain/LangGraph dependencies")
+    def test_catalog_observation_survives_message_reducer_and_checkpoint(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, None, True)
+        provider_message = AIMessage(
+            content="persisted",
+            response_metadata={"model_name": "fixture-model"},
+        )
+
+        def model_node(_state):
+            response = middleware.wrap_model_call(
+                FakeModelRequest([
+                    FakeTool("safe_tool"),
+                    FakeTool(KNOWLEDGE_TOOL_NAME),
+                ]),
+                lambda _scoped: ModelResponse(result=[provider_message]),
+            )
+            return {"messages": response.result}
+
+        builder = StateGraph(MessagesState)
+        builder.add_node("model", model_node)
+        builder.add_edge(START, "model")
+        builder.add_edge("model", END)
+        checkpointer = InMemorySaver()
+        graph = builder.compile(checkpointer=checkpointer)
+        config = {"configurable": {"thread_id": "catalog-checkpoint-test"}}
+
+        graph.invoke({"messages": [HumanMessage(content="start")]}, config)
+        checkpoint = checkpointer.get_tuple(config)
+        self.assertIsNotNone(checkpoint)
+        persisted = checkpoint.checkpoint["channel_values"]["messages"][-1]
+        self.assertIsInstance(persisted, AIMessage)
+        self.assertEqual(persisted.response_metadata["model_name"], "fixture-model")
+        observation = persisted.response_metadata[CATALOG_METADATA_KEY]
+        self.assertEqual(set(observation), {
+            "protocol", "knowledgeVisible", "toolNames", "sha256",
+        })
+        self.assertEqual(observation["protocol"], CATALOG_PROTOCOL)
+        self.assertTrue(observation["knowledgeVisible"])
+        self.assertEqual(
+            observation["toolNames"],
+            ["safe_tool", KNOWLEDGE_TOOL_NAME],
+        )
+        serialized = serialize_channel_values_for_api({"messages": [persisted]})
+        self.assertEqual(
+            serialized["messages"][0]["response_metadata"][CATALOG_METADATA_KEY],
+            observation,
+        )
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires pinned DeerFlow dependencies")
+    def test_workbench_registration_after_deferred_filter_observes_effective_catalog(self) -> None:
+        deferred = DeferredToolFilterMiddleware(frozenset({"promoted_tool"}), "catalog-1")
+        workbench = WorkbenchToolScopeMiddleware(None, None, True)
+        tools = [
+            FakeTool("safe_tool"),
+            FakeTool("promoted_tool"),
+            FakeTool(KNOWLEDGE_TOOL_NAME),
+        ]
+
+        def invoke(state):
+            return deferred.wrap_model_call(
+                FakeModelRequest(tools, state=state),
+                lambda deferred_request: workbench.wrap_model_call(
+                    deferred_request,
+                    lambda _scoped: ModelResponse(result=[AIMessage(content="done")]),
+                ),
+            )
+
+        hidden = invoke({})
+        promoted = invoke({
+            "promoted": {"catalog_hash": "catalog-1", "names": ["promoted_tool"]},
+        })
+        self.assertEqual(
+            hidden.result[0].response_metadata[CATALOG_METADATA_KEY]["toolNames"],
+            ["safe_tool", KNOWLEDGE_TOOL_NAME],
+        )
+        self.assertEqual(
+            promoted.result[0].response_metadata[CATALOG_METADATA_KEY]["toolNames"],
+            ["safe_tool", "promoted_tool", KNOWLEDGE_TOOL_NAME],
+        )
 
     def test_knowledge_execution_is_blocked_without_calling_the_handler(self) -> None:
         called = False
@@ -1090,6 +1325,36 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
 
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_model_result_is_stamped_after_scope_filtering(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, None, False)
+        original = AIMessage(
+            content="done",
+            response_metadata={"model_name": "fixture-model"},
+        )
+        scoped_names = []
+
+        async def model_handler(request):
+            scoped_names.extend(tool.name for tool in request.tools)
+            return ModelResponse(result=[original])
+
+        result = await middleware.awrap_model_call(
+            FakeModelRequest([
+                FakeTool("safe_tool"),
+                FakeTool(KNOWLEDGE_TOOL_NAME),
+            ]),
+            model_handler,
+        )
+
+        self.assertEqual(scoped_names, ["safe_tool"])
+        self.assertIsNot(result.result[0], original)
+        self.assertEqual(result.result[0].response_metadata["model_name"], "fixture-model")
+        observation = result.result[0].response_metadata[CATALOG_METADATA_KEY]
+        self.assertEqual(set(observation), {
+            "protocol", "knowledgeVisible", "toolNames", "sha256",
+        })
+        self.assertFalse(observation["knowledgeVisible"])
+        self.assertEqual(observation["toolNames"], ["safe_tool"])
+
     async def test_async_authorized_knowledge_is_visible_and_executes(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, None, True)
 
@@ -1189,6 +1454,7 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         parent_run_tools = [
             FakeTool(KNOWLEDGE_TOOL_NAME),
             FakeTool("workbench_artifact_draft_publish"),
+            FakeTool("workbench_runtime_result_submit"),
             FakeTool("view_screen"),
         ]
         captured_executor_kwargs = None

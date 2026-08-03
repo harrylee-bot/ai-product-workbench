@@ -47,7 +47,7 @@
         "values": {
           "type": "object",
           "minProperties": 1,
-          "additionalProperties": { "type": "string", "minLength": 1 }
+          "additionalProperties": { "type": "string" }
         }
       }
     },
@@ -118,11 +118,12 @@
     "secretVersion": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version", "attestationSha256"],
+      "required": ["name", "version", "attestationSha256", "valueSha256"],
       "properties": {
         "name": { "$ref": "#/$defs/identifier" },
         "version": { "$ref": "#/$defs/identifier" },
-        "attestationSha256": { "$ref": "#/$defs/sha256" }
+        "attestationSha256": { "$ref": "#/$defs/sha256" },
+        "valueSha256": { "$ref": "#/$defs/sha256" }
       }
     },
     "identity": {

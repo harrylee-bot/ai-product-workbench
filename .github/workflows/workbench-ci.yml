@@ -271,6 +271,61 @@ jobs:
           echo "count=$count" >> "$GITHUB_OUTPUT"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
+  typecheck-linux-16g:
+    name: Typecheck / Linux 16 GiB
+    if: ${{ vars.WORKBENCH_TYPECHECK_RUNNER != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs: [candidate-source-policy, release-chain]
+    # The required-ci aggregate treats this conditional job as BLOCKED when
+    # the repository has no explicitly configured 16 GiB Linux runner.
+    runs-on: ${{ vars.WORKBENCH_TYPECHECK_RUNNER }}
+    timeout-minutes: 30
+    env:
+      CI: true
+      NODE_OPTIONS: --max-old-space-size=4096
+      WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 15360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate clean Web route types
+        run: npm --workspace @workbench/web run typegen
+
+      - name: Check types twice on 16 GiB Linux
+        id: typecheck
+        run: |
+          set -euo pipefail
+          evidence_dir="output/typecheck-ci"
+          rm -rf "$evidence_dir"
+          mkdir -p "$evidence_dir"
+          set +e
+          npm run typecheck:ci 2>&1 | tee "$evidence_dir/typecheck.log"
+          typecheck_status="${PIPESTATUS[0]}"
+          set -e
+          sha256sum "$evidence_dir/typecheck.log" > "$evidence_dir/typecheck.log.sha256"
+          exit "$typecheck_status"
+
+      - name: Upload Linux typecheck evidence
+        if: always() && steps.typecheck.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: typecheck-linux-${{ env.WORKBENCH_CANDIDATE_SHA }}-${{ github.run_attempt }}
+          path: output/typecheck-ci/
+          if-no-files-found: error
+          retention-days: 14
+
   quality:
     name: Contracts, architecture, tests, and build
     needs: [candidate-source-policy, release-chain]
@@ -296,9 +351,6 @@ jobs:
     env:
       CI: true
       NODE_OPTIONS: --max-old-space-size=4096
-      # The hosted lane is a fast gate at runner capacity. Release evidence
-      # separately reruns this exact candidate at >=15360 MiB on Linux.
-      WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 7168
       WORKBENCH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=workbench
       WORKBENCH_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=workbench
 
@@ -385,28 +437,12 @@ jobs:
       - name: Generate clean Web route types
         run: npm --workspace @workbench/web run typegen
 
-      - name: Check types
-        id: typecheck
-        run: |
-          set -euo pipefail
-          evidence_dir="output/typecheck-ci"
-          rm -rf "$evidence_dir"
-          mkdir -p "$evidence_dir"
-          set +e
-          npm run typecheck:ci | tee "$evidence_dir/typecheck.log"
-          typecheck_status="${PIPESTATUS[0]}"
-          set -e
-          sha256sum "$evidence_dir/typecheck.log" > "$evidence_dir/typecheck.log.sha256"
-          exit "$typecheck_status"
-
-      - name: Upload Linux typecheck evidence
-        if: always() && steps.typecheck.outcome != 'skipped'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: typecheck-linux-${{ env.WORKBENCH_CANDIDATE_SHA }}-${{ github.run_attempt }}
-          path: output/typecheck-ci/
-          if-no-files-found: error
-          retention-days: 14
+      - name: Check all workspace types on hosted runner
+        # This required pass covers the complete dynamic workspace inventory;
+        # the dedicated lane above adds the two-pass 16 GiB evidence contract.
+        env:
+          CI: "false"
+        run: npm run typecheck
 
       - name: Check Workbench lint
         run: npm run lint:workbench
@@ -465,12 +501,22 @@ jobs:
           rm -rf "$evidence_dir"
           mkdir -p "$evidence_dir"
           log_file="$(mktemp)"
+          cleanup_runtime_process_log() {
+            rm -f "$log_file"
+          }
+          trap cleanup_runtime_process_log EXIT
           set +e
           npm run runtime:process-convergence:postgres >"$log_file" 2>&1
           convergence_status="$?"
           set -e
-          cat "$log_file"
-          rm -f "$log_file"
+          node scripts/redact-runtime-process-log.mjs \
+            --raw "$log_file" \
+            --output "$evidence_dir/command-status.json" \
+            --exit-code "$convergence_status" \
+            --candidate "$WORKBENCH_CANDIDATE_SHA"
+          sha256sum "$evidence_dir/command-status.json" \
+            > "$evidence_dir/command-status.json.sha256"
+          cat "$evidence_dir/command-status.json"
           exit "$convergence_status"
 
       - name: Upload process-level Runtime convergence evidence
@@ -481,6 +527,8 @@ jobs:
           path: |
             output/runtime-process-convergence/evidence.json
             output/runtime-process-convergence/evidence.json.sha256
+            output/runtime-process-convergence/command-status.json
+            output/runtime-process-convergence/command-status.json.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -893,7 +941,7 @@ jobs:
   production-images:
     name: Production image / ${{ matrix.name }}
     if: github.event_name == 'push' && github.ref == 'refs/heads/production'
-    needs: [release-chain, release-chain-signing, quality, deployment-config]
+    needs: [release-chain, release-chain-signing, typecheck-linux-16g, quality, deployment-config]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -1272,13 +1320,169 @@ jobs:
           CANDIDATE_ID: ${{ needs.release-chain.outputs.candidate_id }}
           SIGNED_TAG: ${{ needs.release-chain.outputs.signed_tag }}
           RELEASE_CHAIN_ID: ${{ needs.release-chain.outputs.chain_id }}
+          WORKBENCH_ENVIRONMENT_ID: ${{ vars.WORKBENCH_ENVIRONMENT_ID }}
+          WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID: ${{ vars.WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID }}
+          WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID: ${{ vars.WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID }}
+          WORKBENCH_RUNTIME_WORKER_UID: ${{ vars.WORKBENCH_RUNTIME_WORKER_UID }}
+          WORKBENCH_RUNTIME_WORKER_GID: ${{ vars.WORKBENCH_RUNTIME_WORKER_GID }}
+          WORKBENCH_RELEASE_OWNER_UID: ${{ vars.WORKBENCH_RELEASE_OWNER_UID }}
+          WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256: ${{ vars.WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256 }}
+          WORKBENCH_WEB_ORIGIN: ${{ vars.WORKBENCH_WEB_ORIGIN }}
+          WORKBENCH_PREVIEW_ORIGIN: ${{ vars.WORKBENCH_PREVIEW_ORIGIN }}
+          WORKBENCH_EDGE_WIREGUARD_IP: ${{ vars.WORKBENCH_EDGE_WIREGUARD_IP }}
+          WORKBENCH_ORIGIN_WIREGUARD_IP: ${{ vars.WORKBENCH_ORIGIN_WIREGUARD_IP }}
+          WORKBENCH_EDGE_WIREGUARD_ENDPOINT: ${{ vars.WORKBENCH_EDGE_WIREGUARD_ENDPOINT }}
+          WORKBENCH_ORIGIN_HTTP_PORT: ${{ vars.WORKBENCH_ORIGIN_HTTP_PORT }}
+          WORKBENCH_ENTERPRISE_SSO_ENABLED: ${{ vars.WORKBENCH_ENTERPRISE_SSO_ENABLED }}
+          WORKBENCH_S3_INTERNAL_ENDPOINT: ${{ vars.WORKBENCH_S3_INTERNAL_ENDPOINT }}
+          WORKBENCH_S3_EGRESS_UPSTREAM_HOST: ${{ vars.WORKBENCH_S3_EGRESS_UPSTREAM_HOST }}
+          WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: ${{ vars.WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL }}
+          WORKBENCH_S3_BUCKET: ${{ vars.WORKBENCH_S3_BUCKET }}
+          WORKBENCH_S3_REGION: ${{ vars.WORKBENCH_S3_REGION }}
+          WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: ${{ vars.WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE }}
+          WORKBENCH_S3_CONDITIONAL_CREATE_MODE: ${{ vars.WORKBENCH_S3_CONDITIONAL_CREATE_MODE }}
+          WORKBENCH_RUNTIME_WORKER_REPLICAS: ${{ vars.WORKBENCH_RUNTIME_WORKER_REPLICAS }}
+          WORKBENCH_RUNTIME_CONCURRENCY: ${{ vars.WORKBENCH_RUNTIME_CONCURRENCY }}
+          WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS: ${{ vars.WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS }}
+          WORKBENCH_RUNTIME_CANCELLATION_QUERY_BATCH_SIZE: ${{ vars.WORKBENCH_RUNTIME_CANCELLATION_QUERY_BATCH_SIZE }}
+          WORKBENCH_RUNTIME_EXECUTION_LEASE_MS: ${{ vars.WORKBENCH_RUNTIME_EXECUTION_LEASE_MS }}
+          WORKBENCH_RUNTIME_EXECUTION_HEARTBEAT_MS: ${{ vars.WORKBENCH_RUNTIME_EXECUTION_HEARTBEAT_MS }}
+          WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS: ${{ vars.WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS }}
+          WORKBENCH_RUNTIME_EXECUTION_DEADLINE_CANCEL_MS: ${{ vars.WORKBENCH_RUNTIME_EXECUTION_DEADLINE_CANCEL_MS }}
+          WORKBENCH_RUNTIME_PROVIDER_STATE_MODE: ${{ vars.WORKBENCH_RUNTIME_PROVIDER_STATE_MODE }}
+          WORKBENCH_RUNTIME_EXECUTION_RECONCILE_BATCH_SIZE: ${{ vars.WORKBENCH_RUNTIME_EXECUTION_RECONCILE_BATCH_SIZE }}
+          WORKBENCH_DEERFLOW_TIMEOUT_MS: ${{ vars.WORKBENCH_DEERFLOW_TIMEOUT_MS }}
+          WORKBENCH_DEERFLOW_SUBMISSION_TIMEOUT_MS: ${{ vars.WORKBENCH_DEERFLOW_SUBMISSION_TIMEOUT_MS }}
+          WORKBENCH_DEERFLOW_IDLE_TIMEOUT_MS: ${{ vars.WORKBENCH_DEERFLOW_IDLE_TIMEOUT_MS }}
+          WORKBENCH_CLAMAV_HOST: ${{ vars.WORKBENCH_CLAMAV_HOST }}
+          WORKBENCH_CLAMAV_PORT: ${{ vars.WORKBENCH_CLAMAV_PORT }}
+          WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS: ${{ vars.WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS }}
+          WORKBENCH_CLAMAV_STREAM_MAX_BYTES: ${{ vars.WORKBENCH_CLAMAV_STREAM_MAX_BYTES }}
+          WORKBENCH_DOCLING_URL: ${{ vars.WORKBENCH_DOCLING_URL }}
+          WORKBENCH_FILE_PARSER_VERSION: ${{ vars.WORKBENCH_FILE_PARSER_VERSION }}
+          WORKBENCH_DOCLING_RESULT_RETENTION_SECONDS: ${{ vars.WORKBENCH_DOCLING_RESULT_RETENTION_SECONDS }}
+          WORKBENCH_TEI_URL: ${{ vars.WORKBENCH_TEI_URL }}
+          WORKBENCH_TEI_IMAGE_DIGEST: ${{ vars.WORKBENCH_TEI_IMAGE_DIGEST }}
+          WORKBENCH_KNOWLEDGE_RERANKER_URL: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_URL }}
+          WORKBENCH_KNOWLEDGE_RERANKER_IMAGE_DIGEST: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_IMAGE_DIGEST }}
+          WORKBENCH_KNOWLEDGE_RERANKER_MODEL_ID: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_MODEL_ID }}
+          WORKBENCH_KNOWLEDGE_RERANKER_MODEL_REVISION: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_MODEL_REVISION }}
+          WORKBENCH_KNOWLEDGE_RERANKER_TEI_VERSION: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_TEI_VERSION }}
+          WORKBENCH_PUBLIC_REGISTRATION_ENABLED: ${{ vars.WORKBENCH_PUBLIC_REGISTRATION_ENABLED }}
+          WORKBENCH_INVITATION_TTL_HOURS: ${{ vars.WORKBENCH_INVITATION_TTL_HOURS }}
+          WORKBENCH_AUTH_CLIENT_IP_HEADER: ${{ vars.WORKBENCH_AUTH_CLIENT_IP_HEADER }}
+          WORKBENCH_AUTH_DB_POOL_MAX: ${{ vars.WORKBENCH_AUTH_DB_POOL_MAX }}
+          WORKBENCH_POSTGRES_DB: ${{ vars.WORKBENCH_POSTGRES_DB }}
+          WORKBENCH_POSTGRES_USER: ${{ vars.WORKBENCH_POSTGRES_USER }}
+          WORKBENCH_POSTGRES_MIGRATOR_USER: ${{ vars.WORKBENCH_POSTGRES_MIGRATOR_USER }}
+          WORKBENCH_POSTGRES_RUNTIME_USER: ${{ vars.WORKBENCH_POSTGRES_RUNTIME_USER }}
+          WORKBENCH_DATABASE_SCHEMA: ${{ vars.WORKBENCH_DATABASE_SCHEMA }}
+          WORKBENCH_BFF_MAX_REQUEST_BYTES: ${{ vars.WORKBENCH_BFF_MAX_REQUEST_BYTES }}
+          WORKBENCH_API_MAX_REQUEST_BYTES: ${{ vars.WORKBENCH_API_MAX_REQUEST_BYTES }}
+          WORKBENCH_KNOWLEDGE_BASE_URL: ${{ vars.WORKBENCH_KNOWLEDGE_BASE_URL }}
+          OTEL_SDK_DISABLED: ${{ vars.OTEL_SDK_DISABLED }}
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          OTEL_EXPORTER_OTLP_PROTOCOL: ${{ vars.OTEL_EXPORTER_OTLP_PROTOCOL }}
+          OTEL_TRACES_SAMPLER: ${{ vars.OTEL_TRACES_SAMPLER }}
+          OTEL_TRACES_SAMPLER_ARG: ${{ vars.OTEL_TRACES_SAMPLER_ARG }}
+          WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS: ${{ vars.WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS }}
+          WORKBENCH_DEERFLOW_LANGGRAPH_URL: ${{ vars.WORKBENCH_DEERFLOW_LANGGRAPH_URL }}
+          WORKBENCH_DEERFLOW_GATEWAY_URL: ${{ vars.WORKBENCH_DEERFLOW_GATEWAY_URL }}
+          WORKBENCH_DEERFLOW_ASSISTANT_ID: ${{ vars.WORKBENCH_DEERFLOW_ASSISTANT_ID }}
+          WORKBENCH_DEERFLOW_MODEL_CATALOG_TIMEOUT_MS: ${{ vars.WORKBENCH_DEERFLOW_MODEL_CATALOG_TIMEOUT_MS }}
+          WORKBENCH_DEERFLOW_READINESS_TIMEOUT_MS: ${{ vars.WORKBENCH_DEERFLOW_READINESS_TIMEOUT_MS }}
+          WORKBENCH_DEERFLOW_STREAM_MODE: ${{ vars.WORKBENCH_DEERFLOW_STREAM_MODE }}
+          WORKBENCH_DEERFLOW_HOST_PORT: ${{ vars.WORKBENCH_DEERFLOW_HOST_PORT }}
+          WORKBENCH_DEERFLOW_COMMIT: ${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+          WORKBENCH_DEERFLOW_BASE_IMAGE_REF: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+          WORKBENCH_DEERFLOW_NODE_IMAGE_REF: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+          WORKBENCH_DEERFLOW_IMAGE_DIGEST: ${{ vars.WORKBENCH_DEERFLOW_IMAGE_DIGEST }}
+          WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE: ${{ vars.WORKBENCH_DEERFLOW_PROVIDER_ENV_FILE }}
+          DEER_FLOW_HOME: ${{ vars.DEER_FLOW_HOME }}
+          WORKBENCH_DEERFLOW_BASE_CONFIG_PATH: ${{ vars.WORKBENCH_DEERFLOW_BASE_CONFIG_PATH }}
+          WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256: ${{ vars.WORKBENCH_DEERFLOW_BASE_CONFIG_SHA256 }}
+          DEER_FLOW_CONFIG_PATH: ${{ vars.DEER_FLOW_CONFIG_PATH }}
+          WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256: ${{ vars.WORKBENCH_DEERFLOW_EFFECTIVE_CONFIG_SHA256 }}
+          WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH: ${{ vars.WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH }}
+          WORKBENCH_INTERNAL_NETWORK_NAME: ${{ vars.WORKBENCH_INTERNAL_NETWORK_NAME }}
+          WORKBENCH_KNOWLEDGE_TOOL_URL: ${{ vars.WORKBENCH_KNOWLEDGE_TOOL_URL }}
+          WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS: ${{ vars.WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS }}
+          WORKBENCH_KNOWLEDGE_READINESS_TIMEOUT_MS: ${{ vars.WORKBENCH_KNOWLEDGE_READINESS_TIMEOUT_MS }}
+          WORKBENCH_CANVAS_TOOL_URL: ${{ vars.WORKBENCH_CANVAS_TOOL_URL }}
+          WORKBENCH_CANVAS_VISUAL_URL: ${{ vars.WORKBENCH_CANVAS_VISUAL_URL }}
+          WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS: ${{ vars.WORKBENCH_CANVAS_TOOL_MAX_TTL_SECONDS }}
+          WORKBENCH_CANVAS_COMMAND_TTL_SECONDS: ${{ vars.WORKBENCH_CANVAS_COMMAND_TTL_SECONDS }}
+          WORKBENCH_CANVAS_INVOCATION_LEASE_SECONDS: ${{ vars.WORKBENCH_CANVAS_INVOCATION_LEASE_SECONDS }}
+          WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_BATCH_SIZE: ${{ vars.WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_BATCH_SIZE }}
+          WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_INTERVAL_MS: ${{ vars.WORKBENCH_CANVAS_EXPIRY_RECONCILIATION_INTERVAL_MS }}
+          WORKBENCH_FILE_VERIFY_CONCURRENCY: ${{ vars.WORKBENCH_FILE_VERIFY_CONCURRENCY }}
+          WORKBENCH_FILE_EXTRACT_CONCURRENCY: ${{ vars.WORKBENCH_FILE_EXTRACT_CONCURRENCY }}
+          WORKBENCH_BLOB_GC_CONCURRENCY: ${{ vars.WORKBENCH_BLOB_GC_CONCURRENCY }}
+          WORKBENCH_BLOB_GC_GRACE_MS: ${{ vars.WORKBENCH_BLOB_GC_GRACE_MS }}
+          WORKBENCH_BLOB_GC_RECONCILIATION_INTERVAL_MS: ${{ vars.WORKBENCH_BLOB_GC_RECONCILIATION_INTERVAL_MS }}
+          WORKBENCH_BLOB_GC_BATCH_SIZE: ${{ vars.WORKBENCH_BLOB_GC_BATCH_SIZE }}
+          WORKBENCH_KNOWLEDGE_BUILD_CONCURRENCY: ${{ vars.WORKBENCH_KNOWLEDGE_BUILD_CONCURRENCY }}
+          WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID: ${{ vars.WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID }}
+          WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256: ${{ vars.WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256 }}
+          WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR: ${{ vars.WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR }}
+          WORKBENCH_KNOWLEDGE_VAULT_HOST_DIR: ${{ vars.WORKBENCH_KNOWLEDGE_VAULT_HOST_DIR }}
+          WORKBENCH_STORAGE_HOST_DIR: ${{ vars.WORKBENCH_STORAGE_HOST_DIR }}
+          WORKBENCH_KNOWLEDGE_TOKENIZER_MAX_FILE_BYTES: ${{ vars.WORKBENCH_KNOWLEDGE_TOKENIZER_MAX_FILE_BYTES }}
+          WORKBENCH_KNOWLEDGE_MAX_ASSET_FILE_BYTES: ${{ vars.WORKBENCH_KNOWLEDGE_MAX_ASSET_FILE_BYTES }}
+          WORKBENCH_KNOWLEDGE_MAX_ASSET_TOTAL_BYTES: ${{ vars.WORKBENCH_KNOWLEDGE_MAX_ASSET_TOTAL_BYTES }}
+          WORKBENCH_KNOWLEDGE_MAX_ASSETS: ${{ vars.WORKBENCH_KNOWLEDGE_MAX_ASSETS }}
+          WORKBENCH_CLAMAV_TIMEOUT_MS: ${{ vars.WORKBENCH_CLAMAV_TIMEOUT_MS }}
+          WORKBENCH_FILE_SCAN_MODE: ${{ vars.WORKBENCH_FILE_SCAN_MODE }}
+          WORKBENCH_FILE_PARSER: ${{ vars.WORKBENCH_FILE_PARSER }}
+          WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION: ${{ vars.WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION }}
+          WORKBENCH_DOCLING_RESULTS_REPLAYABLE: ${{ vars.WORKBENCH_DOCLING_RESULTS_REPLAYABLE }}
+          WORKBENCH_DOCLING_SUBMIT_TIMEOUT_MS: ${{ vars.WORKBENCH_DOCLING_SUBMIT_TIMEOUT_MS }}
+          WORKBENCH_DOCLING_POLL_TIMEOUT_MS: ${{ vars.WORKBENCH_DOCLING_POLL_TIMEOUT_MS }}
+          WORKBENCH_DOCLING_REAPER_INTERVAL_MS: ${{ vars.WORKBENCH_DOCLING_REAPER_INTERVAL_MS }}
+          WORKBENCH_IMPORT_CLAMAV_STREAM_MAX_BYTES: ${{ vars.WORKBENCH_IMPORT_CLAMAV_STREAM_MAX_BYTES }}
+          WORKBENCH_IMPORT_CONCURRENCY: ${{ vars.WORKBENCH_IMPORT_CONCURRENCY }}
+          WORKBENCH_IMPORT_MAX_ATTEMPTS: ${{ vars.WORKBENCH_IMPORT_MAX_ATTEMPTS }}
+          WORKBENCH_IMPORT_MAX_SOURCE_BYTES: ${{ vars.WORKBENCH_IMPORT_MAX_SOURCE_BYTES }}
+          WORKBENCH_IMPORT_MAX_URL_BYTES: ${{ vars.WORKBENCH_IMPORT_MAX_URL_BYTES }}
+          WORKBENCH_IMPORT_MAX_GITHUB_BYTES: ${{ vars.WORKBENCH_IMPORT_MAX_GITHUB_BYTES }}
+          WORKBENCH_IMPORT_MAX_FIGMA_BYTES: ${{ vars.WORKBENCH_IMPORT_MAX_FIGMA_BYTES }}
+          WORKBENCH_IMPORT_MAX_GITHUB_FILES: ${{ vars.WORKBENCH_IMPORT_MAX_GITHUB_FILES }}
+          WORKBENCH_IMPORT_REQUEST_TIMEOUT_MS: ${{ vars.WORKBENCH_IMPORT_REQUEST_TIMEOUT_MS }}
+          WORKBENCH_IMPORT_MAX_REDIRECTS: ${{ vars.WORKBENCH_IMPORT_MAX_REDIRECTS }}
+          WORKBENCH_IMPORT_STALE_RUNNING_MS: ${{ vars.WORKBENCH_IMPORT_STALE_RUNNING_MS }}
+          WORKBENCH_IMPORT_RECONCILE_INTERVAL_MS: ${{ vars.WORKBENCH_IMPORT_RECONCILE_INTERVAL_MS }}
+          WORKBENCH_IMPORT_PENDING_BLOB_PREFIX: ${{ vars.WORKBENCH_IMPORT_PENDING_BLOB_PREFIX }}
+          WORKBENCH_CANONICAL_BLOB_PREFIX: ${{ vars.WORKBENCH_CANONICAL_BLOB_PREFIX }}
+          WORKBENCH_EXPORT_CONCURRENCY: ${{ vars.WORKBENCH_EXPORT_CONCURRENCY }}
+          WORKBENCH_EXPORT_MAX_INPUT_BYTES: ${{ vars.WORKBENCH_EXPORT_MAX_INPUT_BYTES }}
+          WORKBENCH_EXPORT_MAX_OUTPUT_BYTES: ${{ vars.WORKBENCH_EXPORT_MAX_OUTPUT_BYTES }}
+          WORKBENCH_EXPORT_BROWSER_TIMEOUT_MS: ${{ vars.WORKBENCH_EXPORT_BROWSER_TIMEOUT_MS }}
+          WORKBENCH_EXPORT_RECONCILE_INTERVAL_MS: ${{ vars.WORKBENCH_EXPORT_RECONCILE_INTERVAL_MS }}
+          WORKBENCH_EXPORT_STALE_RUNNING_MS: ${{ vars.WORKBENCH_EXPORT_STALE_RUNNING_MS }}
+          WORKBENCH_PREVIEW_GATEWAY_PORT: ${{ vars.WORKBENCH_PREVIEW_GATEWAY_PORT }}
+          WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS: ${{ vars.WORKBENCH_PREVIEW_TOKEN_MAX_TTL_SECONDS }}
+          WORKBENCH_PREVIEW_MAX_HTML_BYTES: ${{ vars.WORKBENCH_PREVIEW_MAX_HTML_BYTES }}
+          WORKBENCH_PREVIEW_MAX_CONCURRENCY: ${{ vars.WORKBENCH_PREVIEW_MAX_CONCURRENCY }}
+          WORKBENCH_GATEWAY_PORT: ${{ vars.WORKBENCH_GATEWAY_PORT }}
+          WORKBENCH_TEI_REQUEST_TIMEOUT_MS: ${{ vars.WORKBENCH_TEI_REQUEST_TIMEOUT_MS }}
+          WORKBENCH_TEI_MAX_REQUEST_BYTES: ${{ vars.WORKBENCH_TEI_MAX_REQUEST_BYTES }}
+          WORKBENCH_TEI_MAX_RESPONSE_BYTES: ${{ vars.WORKBENCH_TEI_MAX_RESPONSE_BYTES }}
+          WORKBENCH_KNOWLEDGE_RERANKER_MAX_INPUT_TOKENS: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_MAX_INPUT_TOKENS }}
+          WORKBENCH_KNOWLEDGE_RERANKER_TIMEOUT_MS: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_TIMEOUT_MS }}
+          WORKBENCH_KNOWLEDGE_RERANKER_MAX_REQUEST_BYTES: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_MAX_REQUEST_BYTES }}
+          WORKBENCH_KNOWLEDGE_RERANKER_MAX_RESPONSE_BYTES: ${{ vars.WORKBENCH_KNOWLEDGE_RERANKER_MAX_RESPONSE_BYTES }}
+          WORKBENCH_COSIGN_CERTIFICATE_IDENTITY: ${{ vars.WORKBENCH_COSIGN_CERTIFICATE_IDENTITY }}
+          WORKBENCH_COSIGN_OIDC_ISSUER: ${{ vars.WORKBENCH_COSIGN_OIDC_ISSUER }}
+          WORKBENCH_OIDC_PROVIDER_ISSUER: ${{ vars.WORKBENCH_OIDC_PROVIDER_ISSUER }}
+          WORKBENCH_OIDC_CLIENT_ID: ${{ vars.WORKBENCH_OIDC_CLIENT_ID }}
+          WORKBENCH_IDENTITY_HOSTNAME: ${{ vars.WORKBENCH_IDENTITY_HOSTNAME }}
+          WORKBENCH_PRODUCTION_DEPENDENCY_ATTESTATIONS_JSON: ${{ vars.WORKBENCH_PRODUCTION_DEPENDENCY_ATTESTATIONS_JSON }}
+          WORKBENCH_PRODUCTION_SECRET_VERSIONS_JSON: ${{ vars.WORKBENCH_PRODUCTION_SECRET_VERSIONS_JSON }}
           WORKBENCH_POSTGRES_IMAGE: ${{ vars.WORKBENCH_POSTGRES_IMAGE }}
           WORKBENCH_NGINX_IMAGE: ${{ vars.WORKBENCH_NGINX_IMAGE }}
-          WORKBENCH_DOCLING_IMAGE: ${{ vars.WORKBENCH_DOCLING_IMAGE }}
-          WORKBENCH_CLAMAV_IMAGE: ${{ vars.WORKBENCH_CLAMAV_IMAGE }}
-          WORKBENCH_MINIO_IMAGE: ${{ vars.WORKBENCH_MINIO_IMAGE }}
-          WORKBENCH_MINIO_MC_IMAGE: ${{ vars.WORKBENCH_MINIO_MC_IMAGE }}
-          WORKBENCH_DEX_IMAGE: ${{ vars.WORKBENCH_DEX_IMAGE }}
+          WORKBENCH_DEX_IMAGE: ""
+          WORKBENCH_MINIO_IMAGE: ""
+          WORKBENCH_MINIO_MC_IMAGE: ""
         run: |
           set -euo pipefail
           mkdir -p output/deployment-config
@@ -1334,3 +1538,45 @@ jobs:
           name: production-deployment-config-${{ github.run_attempt }}
           path: output/deployment-config/
           if-no-files-found: error
+
+  required-ci:
+    name: Required CI gate
+    if: always()
+    needs:
+      - candidate-source-policy
+      - release-chain
+      - release-chain-signing
+      - typecheck-linux-16g
+      - quality
+      - real-stack-browser
+      - deployment-config
+      - pr-production-image-selection
+      - pr-production-images
+      - pr-production-images-fork-policy
+      - production-images
+      - image-evidence
+      - deployment-config-evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SHA }}
+          persist-credentials: false
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Evaluate event-aware required results
+        env:
+          WORKBENCH_CI_EVENT_NAME: ${{ github.event_name }}
+          WORKBENCH_CI_REF: ${{ github.ref }}
+          WORKBENCH_CI_PR_IS_INTERNAL: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+          WORKBENCH_CI_PR_CHANGED_IMAGE_COUNT: ${{ needs.pr-production-image-selection.outputs.count }}
+          WORKBENCH_CI_JOB_RESULTS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/workbench-ci-required-gate.mjs

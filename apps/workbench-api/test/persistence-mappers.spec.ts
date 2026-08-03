@@ -1,4 +1,5 @@
 import { mapRunApproval } from "../src/modules/runs/run-approval.mapper.js";
+import { publicRunEventPayload } from "../src/modules/runs/run-event.store.js";
 import { mapRun } from "../src/modules/runs/run.mapper.js";
 import { mapThreadEntry } from "../src/modules/threads/thread.mapper.js";
 
@@ -123,6 +124,34 @@ describe("persisted JSON mappers", () => {
         },
       }],
     })).toThrow();
+
+    expect(mapRun({
+      ...persisted,
+      status: "failed",
+      errorCode: "RUNTIME_EXECUTION_FAILED",
+      errorDetail: "Bearer historical-provider-secret prompt: private response body",
+      errorRetryable: false,
+      finishedAt: now,
+    }).failure).toEqual({
+      code: "RUNTIME_EXECUTION_FAILED",
+      message: "RUNTIME_EXECUTION_FAILED",
+      retryable: false,
+    });
+
+    const unconfirmedCode = "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED";
+    const snapshotFailure = mapRun({
+      ...persisted,
+      status: "failed",
+      errorCode: unconfirmedCode,
+      errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+      errorRetryable: true,
+      finishedAt: now,
+    }).failure;
+    expect(snapshotFailure).toEqual(publicRunEventPayload("run.failed", {
+      code: unconfirmedCode,
+      message: unconfirmedCode,
+      retryable: true,
+    }));
   });
 
   it("rejects unversioned or envelope-mismatched ThreadEntry content", () => {

@@ -209,6 +209,16 @@ assert(envExample.includes("WORKBENCH_NODE_IMAGE=node:22-alpine"), "deployment e
 assert(compose.services?.["workbench-api"]?.build?.args?.NODE_IMAGE?.includes("WORKBENCH_NODE_IMAGE"), "API build must consume the pinned Node base image input");
 assert(compose.services?.knowledge?.build?.args?.NGINX_IMAGE?.includes("WORKBENCH_NGINX_IMAGE"), "Quartz build must consume the pinned Nginx base image input");
 assert(serverDeploy.includes("base greenfield Compose without a validation overlay"), "production must reject the validation overlay");
+assert(
+  serverDeploy.includes('assert_sealed_release "$APP_DIR" "$ENV_FILE" "Production"')
+    && serverDeploy.indexOf('assert_sealed_release "$APP_DIR" "$ENV_FILE" "Production"')
+      < serverDeploy.indexOf("PINNED_COMMAND_ENV=()"),
+  "pinned deployment must seal the release and external inputs before constructing Compose commands",
+);
+assert(
+  serverDeploy.includes('docker compose --project-directory "$APP_DIR/deploy" --env-file "$ENV_FILE" -f "$COMPOSE_FILE"'),
+  "pinned Compose must resolve only from the sealed release project directory",
+);
 assert(serverDeploy.indexOf("prepare_deerflow_runtime") < serverDeploy.indexOf("compose_up"), "DeerFlow must be ready before Workbench consumers start");
 assert(serverDeploy.includes("down --remove-orphans"), "deployment must have a deterministic shutdown path");
 assert(
@@ -230,9 +240,19 @@ assert(
 const rollbackBody = caseBody(serverDeploy, "rollback");
 const rollbackMigrate = rollbackBody.indexOf('"${ROLLBACK_COMPOSE[@]}" run --rm --no-deps migrate');
 const rollbackDown = rollbackBody.indexOf('"${COMPOSE[@]}" down --remove-orphans');
+const rollbackSeal = rollbackBody.indexOf('assert_sealed_release "$ROLLBACK_APP_DIR" "$ROLLBACK_ENV_FILE" "Rollback"');
 assert(
   rollbackMigrate >= 0 && rollbackDown > rollbackMigrate,
   "rollback must restore queue policy with the previous candidate migrator before teardown",
+);
+assert(
+  rollbackSeal >= 0 && rollbackSeal < rollbackMigrate,
+  "rollback must seal and source-verify the previous candidate before queue migration or teardown",
+);
+assert(
+  rollbackBody.includes('docker compose --project-directory "$ROLLBACK_APP_DIR/deploy"')
+    && rollbackBody.includes('exec "$rollback_deploy_script"'),
+  "rollback Compose and recursive execution must stay inside the sealed previous release",
 );
 
 for (const [target, requiredMarkers] of [

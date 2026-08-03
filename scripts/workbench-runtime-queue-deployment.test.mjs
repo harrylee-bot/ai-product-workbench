@@ -50,6 +50,39 @@ test("the migrator reconciles Runtime queues before services start", async () =>
   }
   assert.match(compose, /WORKBENCH_MIGRATOR_DATABASE_URL/u);
   assert.match(compose, /WORKBENCH_POSTGRES_ADMIN_URL/u);
+  const topology = YAML.parse(compose);
+  const worker = topology.services?.["workbench-worker"];
+  assert.equal(
+    worker?.environment?.WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_PATH,
+    "/run/secrets/workbench-runtime-worker-execution-private-key",
+  );
+  assert.match(worker?.environment?.WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID, /^\$\{WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID:\?/u);
+  assert.match(worker?.environment?.WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID, /^\$\{WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID:\?/u);
+  assert.equal(
+    worker?.user,
+    "${WORKBENCH_RUNTIME_WORKER_UID:?WORKBENCH_RUNTIME_WORKER_UID is required}:${WORKBENCH_RUNTIME_WORKER_GID:?WORKBENCH_RUNTIME_WORKER_GID is required}",
+  );
+  assert.equal(worker?.secrets?.length, 1);
+  assert.deepEqual(worker.secrets[0], {
+    source: "workbench-runtime-worker-execution-private-key",
+    target: "workbench-runtime-worker-execution-private-key",
+    uid: "${WORKBENCH_RUNTIME_WORKER_UID:?WORKBENCH_RUNTIME_WORKER_UID is required}",
+    gid: "${WORKBENCH_RUNTIME_WORKER_GID:?WORKBENCH_RUNTIME_WORKER_GID is required}",
+    mode: "0400",
+  });
+  assert.match(
+    topology.secrets?.["workbench-runtime-worker-execution-private-key"]?.file,
+    /^\$\{WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH:\?/u,
+  );
+  assert.equal(
+    topology.services?.["workbench-web"]?.environment?.WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_PATH,
+    undefined,
+  );
+  assert.match(envExample, /^WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID=sha256:/mu);
+  assert.match(envExample, /^WORKBENCH_RUNTIME_WORKER_UID=1000$/mu);
+  assert.match(envExample, /^WORKBENCH_RUNTIME_WORKER_GID=1000$/mu);
+  assert.match(envExample, /^WORKBENCH_RUNTIME_WORKER_REPLICAS=10$/mu);
+  assert.match(envExample, /^WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256=/mu);
 
   const workflow = YAML.parse(workflowSource);
   assert.equal(

@@ -350,6 +350,7 @@ services:
 
   workbench-worker:
     image: ${WORKBENCH_RUNTIME_WORKER_IMAGE_REF:-workbench-runtime-worker:local}
+    user: "${WORKBENCH_RUNTIME_WORKER_UID:?WORKBENCH_RUNTIME_WORKER_UID is required}:${WORKBENCH_RUNTIME_WORKER_GID:?WORKBENCH_RUNTIME_WORKER_GID is required}"
     build:
       context: ..
       dockerfile: apps/workbench-worker/Dockerfile
@@ -372,6 +373,12 @@ services:
       OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
       OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
       WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
+      WORKBENCH_ENVIRONMENT_ID: ${WORKBENCH_ENVIRONMENT_ID:?WORKBENCH_ENVIRONMENT_ID is required}
+      WORKBENCH_SOURCE_COMMIT: ${WORKBENCH_SOURCE_COMMIT:?WORKBENCH_SOURCE_COMMIT is required}
+      WORKBENCH_RUNTIME_WORKER_IMAGE_REF: ${WORKBENCH_RUNTIME_WORKER_IMAGE_REF:?WORKBENCH_RUNTIME_WORKER_IMAGE_REF is required}
+      WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID: ${WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID:?WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID is required}
+      WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID: ${WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID:?WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID is required}
+      WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_PATH: /run/secrets/workbench-runtime-worker-execution-private-key
       WORKBENCH_RUNTIME_CONCURRENCY: ${WORKBENCH_RUNTIME_CONCURRENCY:-2}
       WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS: ${WORKBENCH_RUNTIME_CANCELLATION_POLL_INTERVAL_MS:-1000}
       WORKBENCH_RUNTIME_CANCELLATION_QUERY_BATCH_SIZE: ${WORKBENCH_RUNTIME_CANCELLATION_QUERY_BATCH_SIZE:-100}
@@ -403,6 +410,12 @@ services:
       WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE: ${WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE:-false}
       WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID: ${WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID:?WORKBENCH_RUNTIME_READY_BLOB_S3_ACCESS_KEY_ID is required}
       WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY: ${WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY:?WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY is required}
+    secrets:
+      - source: workbench-runtime-worker-execution-private-key
+        target: workbench-runtime-worker-execution-private-key
+        uid: "${WORKBENCH_RUNTIME_WORKER_UID:?WORKBENCH_RUNTIME_WORKER_UID is required}"
+        gid: "${WORKBENCH_RUNTIME_WORKER_GID:?WORKBENCH_RUNTIME_WORKER_GID is required}"
+        mode: "0400"
     read_only: true
     security_opt: [no-new-privileges:true]
     tmpfs: [/tmp]
@@ -487,8 +500,8 @@ services:
       WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID: ${WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID:?WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID is required}
       WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY: ${WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY:?WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY is required}
     volumes:
-      - ../knowledge-vault:/workspace/knowledge-vault:ro
-      - ../storage:/workspace/storage:ro
+      - ${WORKBENCH_KNOWLEDGE_VAULT_HOST_DIR:?WORKBENCH_KNOWLEDGE_VAULT_HOST_DIR is required}:/workspace/knowledge-vault:ro
+      - ${WORKBENCH_STORAGE_HOST_DIR:?WORKBENCH_STORAGE_HOST_DIR is required}:/workspace/storage:ro
       - ${WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR:?WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR is required}:/models/embedding-tokenizer:ro
     read_only: true
     security_opt: [no-new-privileges:true]
@@ -770,6 +783,10 @@ services:
       timeout: 5s
       retries: 4
     networks: [workbench-internal, workbench-ingress]
+
+secrets:
+  workbench-runtime-worker-execution-private-key:
+    file: ${WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH:?WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH is required}
 
 volumes:
   workbench-postgres-data:

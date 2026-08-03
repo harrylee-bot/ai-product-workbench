@@ -374,7 +374,13 @@ assert(
 );
 const productionImageMatrix = ci.jobs?.["production-images"]?.strategy?.matrix?.include ?? [];
 assert(
-  equal(ci.jobs?.["production-images"]?.needs, ["release-chain", "release-chain-signing", "quality", "deployment-config"]),
+  equal(ci.jobs?.["production-images"]?.needs, [
+    "release-chain",
+    "release-chain-signing",
+    "typecheck-linux-16g",
+    "quality",
+    "deployment-config",
+  ]),
   "production images must wait for the verified release chain, release-chain signing, quality, and deployment configuration gates",
 );
 assert(

@@ -24,6 +24,10 @@ import {
   parseConfiguration,
   parsePeakRssKiB,
 } from "./workbench-typecheck-ci.mjs";
+import {
+  evaluateWorkbenchCiGate,
+  parseWorkbenchCiGateEnvironment,
+} from "./workbench-ci-required-gate.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -60,14 +64,14 @@ test("defaults to two 4096 MiB passes and validates configured memory", () => {
     }).minimumMemoryMiB,
     15 * 1024,
   );
-  assert.equal(
-    parseConfiguration({
+  assert.throws(
+    () => parseConfiguration({
       argv: [],
       env: { CI: "true", WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: "7168" },
       memoryLimitMiB: 7_942,
       platform: "linux",
-    }).minimumMemoryMiB,
-    7 * 1024,
+    }),
+    /must be at least 15360 MiB/u,
   );
   assert.equal(
     parseConfiguration({
@@ -266,6 +270,110 @@ test("the aggregate continues after a workspace failure and reports every target
   ]);
 });
 
+test("required CI gate accepts only event-appropriate successful jobs", () => {
+  assert.equal(evaluateWorkbenchCiGate({
+    eventName: "pull_request",
+    ref: "refs/pull/42/merge",
+    internalPullRequest: true,
+    changedImageCount: "0",
+    jobs: ciJobResults({ "pr-production-image-selection": "success" }),
+  }).status, "PASS");
+
+  assert.equal(evaluateWorkbenchCiGate({
+    eventName: "pull_request",
+    ref: "refs/pull/42/merge",
+    internalPullRequest: true,
+    changedImageCount: "3",
+    jobs: ciJobResults({
+      "pr-production-image-selection": "success",
+      "pr-production-images": "success",
+    }),
+  }).status, "PASS");
+
+  assert.equal(evaluateWorkbenchCiGate({
+    eventName: "push",
+    ref: "refs/heads/main",
+    internalPullRequest: false,
+    changedImageCount: "",
+    jobs: ciJobResults(),
+  }).status, "PASS");
+
+  assert.equal(evaluateWorkbenchCiGate({
+    eventName: "push",
+    ref: "refs/heads/production",
+    internalPullRequest: false,
+    changedImageCount: "",
+    jobs: ciJobResults({
+      "release-chain-signing": "success",
+      "production-images": "success",
+      "image-evidence": "success",
+      "deployment-config-evidence": "success",
+    }),
+  }).status, "PASS");
+});
+
+test("required CI gate never converts missing execution or fork policy into PASS", () => {
+  const missingTypecheck = evaluateWorkbenchCiGate({
+    eventName: "pull_request",
+    ref: "refs/pull/42/merge",
+    internalPullRequest: true,
+    changedImageCount: "0",
+    jobs: ciJobResults({
+      "typecheck-linux-16g": "skipped",
+      "pr-production-image-selection": "success",
+    }),
+  });
+  assert.equal(missingTypecheck.status, "BLOCKED");
+  assert.match(missingTypecheck.findings[0].message, /WORKBENCH_TYPECHECK_RUNNER/u);
+
+  const skippedImages = evaluateWorkbenchCiGate({
+    eventName: "pull_request",
+    ref: "refs/pull/42/merge",
+    internalPullRequest: true,
+    changedImageCount: "2",
+    jobs: ciJobResults({ "pr-production-image-selection": "success" }),
+  });
+  assert.equal(skippedImages.status, "BLOCKED");
+  assert(skippedImages.findings.some(({ message }) => message.includes("pr-production-images")));
+
+  const failedRealStack = evaluateWorkbenchCiGate({
+    eventName: "push",
+    ref: "refs/heads/main",
+    internalPullRequest: false,
+    changedImageCount: "",
+    jobs: ciJobResults({ "real-stack-browser": "failure" }),
+  });
+  assert.equal(failedRealStack.status, "FAIL");
+
+  const fork = evaluateWorkbenchCiGate({
+    eventName: "pull_request",
+    ref: "refs/pull/43/merge",
+    internalPullRequest: false,
+    changedImageCount: "",
+    jobs: ciJobResults({ "pr-production-images-fork-policy": "failure" }),
+  });
+  assert.equal(fork.status, "BLOCKED");
+  assert(fork.findings.some(({ code }) => code === "FORK_PR_REQUIRES_TRUSTED_RERUN"));
+});
+
+test("required CI gate parses only structured terminal needs results", () => {
+  const parsed = parseWorkbenchCiGateEnvironment({
+    WORKBENCH_CI_EVENT_NAME: "push",
+    WORKBENCH_CI_REF: "refs/heads/main",
+    WORKBENCH_CI_PR_IS_INTERNAL: "false",
+    WORKBENCH_CI_PR_CHANGED_IMAGE_COUNT: "",
+    WORKBENCH_CI_JOB_RESULTS_JSON: JSON.stringify(Object.fromEntries(
+      Object.entries(ciJobResults()).map(([jobId, result]) => [jobId, { result, outputs: {} }]),
+    )),
+  });
+  assert.equal(parsed.jobs.quality, "success");
+  assert.equal(parsed.internalPullRequest, false);
+  assert.throws(
+    () => parseWorkbenchCiGateEnvironment({ WORKBENCH_CI_JOB_RESULTS_JSON: "not-json" }),
+    /must be valid JSON/u,
+  );
+});
+
 test("root typecheck scripts share the dynamic orchestrator", async () => {
   const packageData = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8"));
   assert.equal(packageData.scripts.typecheck, "node scripts/workbench-typecheck-ci.mjs --passes=1");
@@ -273,27 +381,99 @@ test("root typecheck scripts share the dynamic orchestrator", async () => {
   assert.match(packageData.scripts["dev:workbench:test"], /workbench-typecheck-ci\.test\.mjs/u);
 
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/workbench-ci.yml"), "utf8");
-  assert.match(workflow, /WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 7168/u);
+  assert.match(workflow, /WORKBENCH_TYPECHECK_MIN_MEMORY_MIB: 15360/u);
   assert.match(workflow, /name: Upload Linux typecheck evidence/u);
   const parsedWorkflow = YAML.parse(workflow);
+  const linuxTypecheck = parsedWorkflow.jobs["typecheck-linux-16g"];
   const quality = parsedWorkflow.jobs.quality;
+  const requiredCi = parsedWorkflow.jobs["required-ci"];
   assert.equal(
     parsedWorkflow.env.WORKBENCH_CANDIDATE_SHA,
     "${{ github.event.pull_request.head.sha || github.sha }}",
   );
   assert.equal(quality.steps.find((step) => step.name === "Checkout").with.ref, "${{ env.WORKBENCH_CANDIDATE_SHA }}");
+  assert.deepEqual(linuxTypecheck.needs, ["candidate-source-policy", "release-chain"]);
+  assert.equal(
+    linuxTypecheck.if,
+    "${{ vars.WORKBENCH_TYPECHECK_RUNNER != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}",
+  );
+  assert.equal(
+    linuxTypecheck["runs-on"],
+    "${{ vars.WORKBENCH_TYPECHECK_RUNNER }}",
+  );
+  assert.equal(linuxTypecheck.env.WORKBENCH_TYPECHECK_MIN_MEMORY_MIB, 15360);
+  assert.equal(linuxTypecheck.env.NODE_OPTIONS, "--max-old-space-size=4096");
+  const linuxTypecheckRun = linuxTypecheck.steps.find(
+    (step) => step.name === "Check types twice on 16 GiB Linux",
+  ).run;
+  assert.match(linuxTypecheckRun, /npm run typecheck:ci 2>&1 \| tee/u);
+  assert.match(linuxTypecheckRun, /typecheck_status="\$\{PIPESTATUS\[0\]\}"/u);
+  assert.equal(
+    linuxTypecheck.steps.find((step) => step.name === "Checkout").with.ref,
+    "${{ env.WORKBENCH_CANDIDATE_SHA }}",
+  );
   assert.equal(quality.env.NODE_OPTIONS, "--max-old-space-size=4096");
+  assert.equal(quality.env.WORKBENCH_TYPECHECK_MIN_MEMORY_MIB, undefined);
   assert.match(
-    quality.steps.find((step) => step.name === "Upload Linux typecheck evidence").with.name,
+    linuxTypecheck.steps.find((step) => step.name === "Upload Linux typecheck evidence").with.name,
     /env\.WORKBENCH_CANDIDATE_SHA/u,
   );
+  const hostedTypecheck = quality.steps.find(
+    (step) => step.name === "Check all workspace types on hosted runner",
+  );
+  assert.equal(hostedTypecheck.run, "npm run typecheck");
+  assert.equal(hostedTypecheck.env.CI, "false");
   assert.equal(quality.steps.find((step) => step.name === "Check Workbench lint").run, "npm run lint:workbench");
   assert.equal(quality.steps.find((step) => step.name === "Run server and worker tests").run, "npm test");
   assert.equal(quality.steps.find((step) => step.name === "Build production artifacts").run, "npm run build");
+  assert(
+    parsedWorkflow.jobs["production-images"].needs.includes("typecheck-linux-16g"),
+    "production image publication must depend on the 16 GiB Linux typecheck",
+  );
+  assert.equal(requiredCi.if, "always()");
+  assert.deepEqual(requiredCi.needs, [
+    "candidate-source-policy",
+    "release-chain",
+    "release-chain-signing",
+    "typecheck-linux-16g",
+    "quality",
+    "real-stack-browser",
+    "deployment-config",
+    "pr-production-image-selection",
+    "pr-production-images",
+    "pr-production-images-fork-policy",
+    "production-images",
+    "image-evidence",
+    "deployment-config-evidence",
+  ]);
+  const requiredGateStep = requiredCi.steps.find(
+    (step) => step.name === "Evaluate event-aware required results",
+  );
+  assert.equal(requiredGateStep.run, "node scripts/workbench-ci-required-gate.mjs");
+  assert.equal(requiredGateStep.env.WORKBENCH_CI_JOB_RESULTS_JSON, "${{ toJSON(needs) }}");
   for (const stepName of ["Check Workbench lint", "Run server and worker tests", "Build production artifacts"]) {
     assert.equal(quality.steps.find((step) => step.name === stepName).env?.NODE_OPTIONS, undefined);
   }
 });
+
+function ciJobResults(overrides = {}) {
+  return {
+    "candidate-source-policy": "success",
+    "release-chain": "success",
+    "release-chain-signing": "skipped",
+    "typecheck-linux-16g": "success",
+    quality: "success",
+    "real-stack-browser": "success",
+    "deployment-config": "success",
+    "pr-production-image-selection": "skipped",
+    "pr-production-images": "skipped",
+    "pr-production-images-fork-policy": "skipped",
+    "production-images": "skipped",
+    "image-evidence": "skipped",
+    "deployment-config-evidence": "skipped",
+    ...overrides,
+  };
+}
 
 async function writeJson(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });

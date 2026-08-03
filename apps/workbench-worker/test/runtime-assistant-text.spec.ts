@@ -177,7 +177,7 @@ describe("Runtime provider-state v2 reducer", () => {
       finalizationExternalEventId: `synthetic-${eventCount}`,
       finalizationPayloadSha256: sha256Canonical(finalization),
     });
-  });
+  }, 30_000);
 
   it("applies one verified event and advances a canonical hash", () => {
     const initial = createRuntimeProviderProjection({

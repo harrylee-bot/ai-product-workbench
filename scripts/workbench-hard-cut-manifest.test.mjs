@@ -356,6 +356,7 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
     signedTag: "workbench-v1.0.0-rc1",
     chainId: `sha256:${"b".repeat(64)}`,
   };
+  const environmentId = "production-a";
   const productionImageManifest = productionImageManifestFixture(candidate);
   const productionImageManifestRaw = Buffer.from(`${JSON.stringify(productionImageManifest)}\n`);
   const productionImageManifestSha256 = sha256Bytes(productionImageManifestRaw);
@@ -364,6 +365,53 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
     name: image.id,
     digest: image.digest,
   }));
+  const approvalSigners = new Map();
+  const approvalAuthorities = [];
+  const trustedKeys = [];
+  for (const role of ["Security", "Data", "Operations", "Release"]) {
+    const approverId = `approver-${role.toLowerCase()}`;
+    const signer = createTrustedSigner(approverId);
+    approvalSigners.set(role, { ...signer, approverId });
+    approvalAuthorities.push({ role, approverId, keyId: signer.keyId });
+    trustedKeys.push(signer.trustEntry);
+  }
+  const runtimeWorkerSigner = createTrustedSigner("runtime-worker-production");
+  const collectorSigner = createTrustedSigner("production-browser-collector");
+  const observerSigner = createTrustedSigner("production-server-observer");
+  trustedKeys.push(
+    runtimeWorkerSigner.trustEntry,
+    collectorSigner.trustEntry,
+    observerSigner.trustEntry,
+  );
+  const receiptAuthorities = [{
+    scopeId: "production-runtime.worker-execution",
+    signerId: runtimeWorkerSigner.signerId,
+    keyId: runtimeWorkerSigner.keyId,
+  }, {
+    scopeId: "legacy-production-database",
+    signerId: "hard-cut-automation",
+    keyId: trustedKeys[0].keyId,
+  }, {
+    scopeId: "production-g11.browser-evidence-collector",
+    signerId: collectorSigner.signerId,
+    keyId: collectorSigner.keyId,
+  }, {
+    scopeId: "production-g11.server-observer",
+    signerId: observerSigner.signerId,
+    keyId: observerSigner.keyId,
+  }];
+  const trustPolicyRaw = Buffer.from(`${JSON.stringify({
+    schemaVersion: "workbench.production-trust-policy.v1",
+    environmentId,
+    keys: trustedKeys,
+    approvalAuthorities,
+    receiptAuthorities,
+  })}\n`);
+  await writeFile(trustPolicyPath, trustPolicyRaw);
+  const trustPolicy = await loadProductionTrustPolicy({
+    policyPath: trustPolicyPath,
+    expectedSha256: sha256Bytes(trustPolicyRaw),
+  });
   const deploymentConfigDocument = createProductionDeploymentConfig({
     candidateId: candidate.candidateId,
     sourceCommit: candidate.sourceCommit,
@@ -373,7 +421,14 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
     imageManifestSha256: productionImageManifestSha256,
     githubRunId: "81234",
     githubRunAttempt: 1,
-    infrastructureEnvironment: productionDeploymentConfigFixtureEnvironment(),
+    infrastructureEnvironment: productionDeploymentConfigFixtureEnvironment({
+      overrides: {
+        WORKBENCH_ENVIRONMENT_ID: trustPolicy.environmentId,
+        WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID: runtimeWorkerSigner.keyId,
+        WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID: runtimeWorkerSigner.signerId,
+        WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256: trustPolicy.sha256,
+      },
+    }),
   });
   const deploymentConfigManifestPath = path.join(root, "production-deployment-config.json");
   const deploymentConfigBundlePath = path.join(root, "production-deployment-config.bundle.json");
@@ -401,7 +456,7 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
     candidateBinding: {
       candidateId: candidate.candidateId,
       deployId: "deploy-production-a",
-      environmentId: "production-a",
+      environmentId,
       commitSha: candidate.sourceCommit,
       tag: candidate.signedTag,
       releaseChainId: candidate.chainId,
@@ -449,81 +504,6 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
   };
   const planRaw = Buffer.from(canonicalJsonFile(plan), "utf8");
   const planSha256 = addFile("governance/production-acceptance-plan.json", planRaw);
-  const approvalSigners = new Map();
-  const approvalAuthorities = [];
-  const trustedKeys = ["Security", "Data", "Operations", "Release"].map((role) => {
-    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const approverId = `approver-${role.toLowerCase()}`;
-    const publicKeyBytes = Buffer.from(publicKey.export({ type: "spki", format: "der" }));
-    const publicKeySha256 = sha256Bytes(publicKeyBytes);
-    const keyId = `sha256:${publicKeySha256}`;
-    approvalSigners.set(role, { privateKey, keyId, approverId });
-    approvalAuthorities.push({ role, approverId, keyId });
-    return {
-      keyId,
-      algorithm: "Ed25519",
-      publicKeySpkiBase64: publicKeyBytes.toString("base64"),
-      publicKeySha256,
-      validFromUtc: "2026-07-01T00:00:00Z",
-      validUntilUtc: "2026-08-01T00:00:00Z",
-      revokedAtUtc: null,
-    };
-  });
-  const collectorPair = generateKeyPairSync("ed25519");
-  const collectorPublicKeyBytes = Buffer.from(collectorPair.publicKey.export({ type: "spki", format: "der" }));
-  const collectorPublicKeySha256 = sha256Bytes(collectorPublicKeyBytes);
-  const collectorSigner = {
-    privateKey: collectorPair.privateKey,
-    signerId: "production-browser-collector",
-    keyId: `sha256:${collectorPublicKeySha256}`,
-  };
-  trustedKeys.push({
-    keyId: collectorSigner.keyId,
-    algorithm: "Ed25519",
-    publicKeySpkiBase64: collectorPublicKeyBytes.toString("base64"),
-    publicKeySha256: collectorPublicKeySha256,
-    validFromUtc: "2026-07-01T00:00:00Z",
-    validUntilUtc: "2026-08-01T00:00:00Z",
-    revokedAtUtc: null,
-  });
-  const observerPair = generateKeyPairSync("ed25519");
-  const observerPublicKeyBytes = Buffer.from(observerPair.publicKey.export({ type: "spki", format: "der" }));
-  const observerPublicKeySha256 = sha256Bytes(observerPublicKeyBytes);
-  const observerSigner = {
-    privateKey: observerPair.privateKey,
-    signerId: "production-server-observer",
-    keyId: `sha256:${observerPublicKeySha256}`,
-  };
-  trustedKeys.push({
-    keyId: observerSigner.keyId,
-    algorithm: "Ed25519",
-    publicKeySpkiBase64: observerPublicKeyBytes.toString("base64"),
-    publicKeySha256: observerPublicKeySha256,
-    validFromUtc: "2026-07-01T00:00:00Z",
-    validUntilUtc: "2026-08-01T00:00:00Z",
-    revokedAtUtc: null,
-  });
-  const receiptAuthorities = [{
-    scopeId: "legacy-production-database",
-    signerId: "hard-cut-automation",
-    keyId: trustedKeys[0].keyId,
-  }, {
-    scopeId: "production-g11.browser-evidence-collector",
-    signerId: collectorSigner.signerId,
-    keyId: collectorSigner.keyId,
-  }, {
-    scopeId: "production-g11.server-observer",
-    signerId: observerSigner.signerId,
-    keyId: observerSigner.keyId,
-  }];
-  const trustPolicyRaw = Buffer.from(`${JSON.stringify({
-    schemaVersion: "workbench.production-trust-policy.v1",
-    environmentId: manifest.candidateBinding.environmentId,
-    keys: trustedKeys,
-    approvalAuthorities,
-    receiptAuthorities,
-  })}\n`);
-  await writeFile(trustPolicyPath, trustPolicyRaw);
   const g11Evidence = await createHardCutG11Evidence({
     addFile,
     binding: manifest.candidateBinding,
@@ -806,7 +786,10 @@ function hardCutPassingG11FlowChecks() {
       checksumVerified: true,
     },
     "mixed-rejection": {
-      problemStatus: 422,
+      composerLocalizedError: true,
+      composerPromptPreserved: true,
+      composerActiveUiAbsent: true,
+      problemStatus: 400,
       queuePublishCount: 0,
       runCount: 0,
       runtimeAttemptCount: 0,
@@ -922,6 +905,27 @@ function replacePackageFile(document, filePath, raw) {
   const file = document.files.find((candidate) => candidate.path === filePath);
   file.sha256 = sha256Bytes(raw);
   file.contentBase64 = raw.toString("base64");
+}
+
+function createTrustedSigner(signerId) {
+  const pair = generateKeyPairSync("ed25519");
+  const publicKeyBytes = Buffer.from(pair.publicKey.export({ type: "spki", format: "der" }));
+  const publicKeySha256 = sha256Bytes(publicKeyBytes);
+  const keyId = `sha256:${publicKeySha256}`;
+  return {
+    ...pair,
+    signerId,
+    keyId,
+    trustEntry: {
+      keyId,
+      algorithm: "Ed25519",
+      publicKeySpkiBase64: publicKeyBytes.toString("base64"),
+      publicKeySha256,
+      validFromUtc: "2026-07-01T00:00:00Z",
+      validUntilUtc: "2026-08-01T00:00:00Z",
+      revokedAtUtc: null,
+    },
+  };
 }
 
 function productionImageManifestFixture(candidate) {

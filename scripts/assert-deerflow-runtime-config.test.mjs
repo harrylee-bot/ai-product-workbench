@@ -22,11 +22,184 @@ test("accepts the pinned OpenAI-compatible model and canonical Workbench tools",
     assert.equal(result.status, 0, result.stderr);
     const report = JSON.parse(result.stdout);
     assert.equal(report.status, "valid");
+    assert.equal(report.databaseBackend, "sqlite");
     assert.equal(report.workbenchToolCount, WORKBENCH_RUNTIME_TOOLS.length);
   } finally {
     fixture.cleanup();
   }
 });
+
+test("accepts durable SQLite persistence beneath the DeerFlow home", () => {
+  const fixture = createFixture({
+    config: {
+      ...validConfig(),
+      database: {
+        backend: "sqlite",
+        sqlite_dir: ".deer-flow/data",
+      },
+    },
+  });
+  try {
+    const result = runCheck(fixture);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).databaseBackend, "sqlite");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("rejects the in-memory DeerFlow database backend", () => {
+  const fixture = createFixture({
+    config: {
+      ...validConfig(),
+      database: { backend: "memory" },
+    },
+  });
+  try {
+    const result = runCheck(fixture);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /database\.backend=memory is not allowed/u);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+for (const [label, sqliteDir, expectedMessage] of [
+  ["missing", undefined, /database\.sqlite_dir is required/u],
+  ["absolute", "/var/lib/deerflow", /database\.sqlite_dir must be relative/u],
+  ["escaping", ".deer-flow/../outside", /beneath \.deer-flow/u],
+  ["outside", "runtime/data", /beneath \.deer-flow/u],
+]) {
+  test(`rejects ${label} SQLite persistence path`, () => {
+    const database = { backend: "sqlite" };
+    if (sqliteDir !== undefined) database.sqlite_dir = sqliteDir;
+    const fixture = createFixture({
+      config: {
+        ...validConfig(),
+        database,
+      },
+    });
+    try {
+      const result = runCheck(fixture);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, expectedMessage);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+}
+
+test("accepts a PostgreSQL URL through an exact environment reference", () => {
+  const fixture = createFixture({
+    config: {
+      ...validConfig(),
+      database: {
+        backend: "postgres",
+        postgres_url: "$DEER_FLOW_DATABASE_URL",
+      },
+    },
+    providerEnv: providerEnvSource("DEER_FLOW_DATABASE_URL=postgresql://deerflow.example.test/runtime"),
+  });
+  try {
+    const result = runCheck(fixture);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).databaseBackend, "postgres");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("rejects a PostgreSQL URL available only to the preflight process", () => {
+  const variableName = "WORKBENCH_RUNTIME_CONFIG_TEST_DATABASE_URL";
+  const fixture = createFixture({
+    config: {
+      ...validConfig(),
+      database: {
+        backend: "postgres",
+        postgres_url: `$${variableName}`,
+      },
+    },
+  });
+  try {
+    const result = runCheck(fixture, {
+      [variableName]: "postgres://deerflow.example.test/runtime",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      new RegExp(`database\\.postgres_url environment variable ${variableName} must be declared in provider environment`, "u"),
+    );
+    assert.doesNotMatch(result.stderr, /deerflow\.example\.test/u);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("rejects provider values that Compose could interpolate from an unsigned variable", () => {
+  const fixture = createFixture({
+    providerEnv: [
+      "UNTRACKED=runtime-secret-a",
+      "OPENAI_API_KEY=$UNTRACKED",
+      "WORKBENCH_DEERFLOW_PROVIDER_BASE_URL=https://provider.example.test",
+      "WORKBENCH_DEERFLOW_PROVIDER_MODEL=gpt-5.5",
+      "",
+    ].join("\n"),
+  });
+  try {
+    const result = runCheck(fixture);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /OPENAI_API_KEY.*must not contain/u);
+    assert.doesNotMatch(result.stderr, /runtime-secret-a/u);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("rejects a missing PostgreSQL URL environment reference", () => {
+  const fixture = createFixture({
+    config: {
+      ...validConfig(),
+      database: {
+        backend: "postgres",
+        postgres_url: "$WORKBENCH_MISSING_DEERFLOW_DATABASE_URL",
+      },
+    },
+  });
+  try {
+    const result = runCheck(fixture);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /database\.postgres_url environment variable WORKBENCH_MISSING_DEERFLOW_DATABASE_URL must be declared in provider environment/u);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+for (const [label, value, expectedMessage] of [
+  ["non-PostgreSQL", "sqlite:///tmp/deerflow.db", /must use PostgreSQL/u],
+  ["query-bearing", "postgresql://deerflow.example.test/runtime?sslmode=require", /query or fragment/u],
+  ["fragment-bearing", "postgresql://deerflow.example.test/runtime#fragment", /query or fragment/u],
+]) {
+  test(`rejects a ${label} PostgreSQL URL`, () => {
+    const fixture = createFixture({
+      config: {
+        ...validConfig(),
+        database: {
+          backend: "postgres",
+          postgres_url: "$DEER_FLOW_DATABASE_URL",
+        },
+      },
+      providerEnv: providerEnvSource(`DEER_FLOW_DATABASE_URL=${value}`),
+    });
+    try {
+      const result = runCheck(fixture);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, expectedMessage);
+      assert.doesNotMatch(result.stderr, /deerflow\.example\.test/u);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+}
 
 test("rejects the legacy model and sandbox shape before runtime startup", () => {
   const fixture = createFixture({
@@ -93,18 +266,34 @@ for (const [mutation, article] of [["missing", "a"], ["altered", "an"]]) {
   });
 }
 
+test("rejects any tool or tool group outside the exact Workbench allowlist", () => {
+  const fixture = createFixture({
+    config: {
+      ...validConfig(),
+      tool_groups: [WORKBENCH_TOOL_GROUP, { name: "injected" }],
+      tools: [
+        ...WORKBENCH_RUNTIME_TOOLS,
+        { name: "injected_exec", group: "injected", use: "attacker_package:execute" },
+      ],
+    },
+  });
+  try {
+    const result = runCheck(fixture);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /must exactly equal the canonical Workbench allowlist/u);
+    assert.doesNotMatch(result.stderr, /attacker_package/u);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 function createFixture({ config = validConfig(), providerEnv = null } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "workbench-deerflow-runtime-config-"));
   const configPath = path.join(root, "config.yaml");
   const providerEnvPath = path.join(root, "provider.env");
   writeFileSync(configPath, YAML.stringify(config), { mode: 0o600 });
   chmodSync(configPath, 0o600);
-  writeFileSync(providerEnvPath, providerEnv || [
-    "OPENAI_API_KEY=test-key",
-    "WORKBENCH_DEERFLOW_PROVIDER_BASE_URL=https://provider.example.test",
-    "WORKBENCH_DEERFLOW_PROVIDER_MODEL=gpt-5.5",
-    "",
-  ].join("\n"), { mode: 0o600 });
+  writeFileSync(providerEnvPath, providerEnv || providerEnvSource(), { mode: 0o600 });
   chmodSync(providerEnvPath, 0o600);
   return {
     configPath,
@@ -116,6 +305,10 @@ function createFixture({ config = validConfig(), providerEnv = null } = {}) {
 function validConfig() {
   return {
     config_version: 1,
+    database: {
+      backend: "sqlite",
+      sqlite_dir: ".deer-flow/data",
+    },
     models: [{
       name: "gpt-5.5",
       use: "langchain_openai:ChatOpenAI",
@@ -132,10 +325,20 @@ function validConfig() {
   };
 }
 
-function runCheck(fixture) {
+function providerEnvSource(extraLine = "") {
+  return [
+    "OPENAI_API_KEY=test-key",
+    "WORKBENCH_DEERFLOW_PROVIDER_BASE_URL=https://provider.example.test",
+    "WORKBENCH_DEERFLOW_PROVIDER_MODEL=gpt-5.5",
+    extraLine,
+    "",
+  ].filter((line, index, lines) => line || index === lines.length - 1).join("\n");
+}
+
+function runCheck(fixture, environment = {}) {
   return spawnSync(process.execPath, [
     scriptPath,
     "--config", fixture.configPath,
     "--provider-env", fixture.providerEnvPath,
-  ], { encoding: "utf8" });
+  ], { encoding: "utf8", env: { ...process.env, ...environment } });
 }

@@ -10,6 +10,7 @@ import {
   sha256Bytes,
   sha256Canonical,
 } from "../evidence-ledger.mjs";
+import { verifyProductionDeploymentRuntimeBinding } from "../production-deployment-config.mjs";
 import { loadProductionTrustPolicy } from "../workbench-production-trust-policy.mjs";
 import {
   ProductionAcceptanceContractError,
@@ -41,7 +42,7 @@ const g11ManifestVerifierPath = path.join(repoRoot, "scripts/production-acceptan
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const G11_MANIFEST_SCHEMA_SHA256 = "b076b48d943e6bb57c93d991011becc886759c3cb51fee541da7f4c0b0010dd4";
-const G11_MANIFEST_VERIFIER_SHA256 = "a3b9d0c2606d419c825b036146cfee3290ce492ee7a97f44b6fb7719bc318b22";
+const G11_MANIFEST_VERIFIER_SHA256 = "aa5a543610eaabacd96fccf907558525eae900e3a440afe9fe8cd9cb084ce92e";
 let observationValidatorPromise;
 
 export async function runProductionControl({
@@ -92,6 +93,16 @@ export async function runProductionControl({
     }).catch(() => {
       throw new ProductionAcceptanceContractError(["G11 external production trust policy validation failed"]);
     });
+    try {
+      verifyProductionDeploymentRuntimeBinding(loadedPlan.plan.payload.deploymentConfig, {
+        environmentId: loadedPlan.plan.payload.binding.environmentId,
+        trustPolicy,
+      });
+    } catch (error) {
+      throw new ProductionAcceptanceContractError([
+        `G11 signed deployment trust binding validation failed: ${error instanceof Error ? error.message : String(error)}`,
+      ]);
+    }
     g11Evidence = await loadProductionG11RealStackManifest({
       reference: result.execution.evidence,
       evidenceRoot,

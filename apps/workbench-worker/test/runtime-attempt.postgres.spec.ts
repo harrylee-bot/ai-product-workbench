@@ -7,6 +7,7 @@ import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { RunEventStore } from "../src/runs/run-event.store.js";
 import {
   createRuntimeFinalizationPayload,
+  createRuntimeProviderProjection,
   createRuntimeProviderTextCheckpoint,
   projectIncompleteVisibleAssistantText,
   sha256Canonical,
@@ -709,6 +710,95 @@ describeWithPostgres("RuntimeAttempt PostgreSQL fault and concurrency fences", (
 });
 
 describeWithPostgres("RuntimeProviderState PostgreSQL invariants", () => {
+  it("inherits only from the direct predecessor and blocks a missing predecessor projection", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const directPredecessorId = `${fixture.runtimeAttemptId}_direct`;
+    const currentAttemptId = `${fixture.runtimeAttemptId}_current`;
+    const firstProjection = createRuntimeProviderProjection({
+      runtimeAttemptId: fixture.runtimeAttemptId!,
+      runId: fixture.runId,
+    });
+
+    try {
+      await db.$transaction(async (tx) => {
+        await tx.run.update({
+          where: { id: fixture.runId },
+          data: { attempt: 3 },
+        });
+        await tx.runtimeAttempt.createMany({
+          data: [
+            {
+              id: directPredecessorId,
+              runId: fixture.runId,
+              runtimeBindingId: fixture.binding.id,
+              attempt: 2,
+              adapter: fixture.binding.adapter,
+              externalThreadId: fixture.binding.externalThreadId,
+            },
+            {
+              id: currentAttemptId,
+              runId: fixture.runId,
+              runtimeBindingId: fixture.binding.id,
+              attempt: 3,
+              adapter: fixture.binding.adapter,
+              externalThreadId: fixture.binding.externalThreadId,
+            },
+          ],
+        });
+        await tx.runtimeProviderState.create({ data: providerProjectionData(firstProjection) });
+      });
+
+      const service = new RuntimeAttemptService(db, 120_000);
+      await expect(service.claim(
+        fixture.runId,
+        currentAttemptId,
+        `runtime-predecessor-pg:${randomUUID()}`,
+      )).rejects.toThrow("RUNTIME_PROVIDER_STATE_BACKFILL_REQUIRED");
+      await expect(db.runtimeProviderState.findUnique({
+        where: { runtimeAttemptId: currentAttemptId },
+      })).resolves.toBeNull();
+
+      const directProjection = createRuntimeProviderProjection({
+        runtimeAttemptId: directPredecessorId,
+        runId: fixture.runId,
+        snapshot: {
+          rawAssistantText: "wbkg1.",
+          visibleAssistantText: "",
+          redactionBuffer: "wbkg1.",
+        },
+      });
+      await db.runtimeProviderState.create({ data: providerProjectionData(directProjection) });
+
+      await expect(service.claim(
+        fixture.runId,
+        currentAttemptId,
+        `runtime-predecessor-pg:${randomUUID()}`,
+      )).resolves.toMatchObject({
+        runId: fixture.runId,
+        attemptId: currentAttemptId,
+        epoch: 1,
+      });
+      await expect(db.runtimeProviderState.findUniqueOrThrow({
+        where: { runtimeAttemptId: currentAttemptId },
+        select: {
+          lastAppliedSequence: true,
+          rawAssistantText: true,
+          visibleAssistantText: true,
+          redactionBuffer: true,
+        },
+      })).resolves.toEqual({
+        lastAppliedSequence: 0,
+        rawAssistantText: "wbkg1.",
+        visibleAssistantText: "",
+        redactionBuffer: "wbkg1.",
+      });
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
   it("accepts a scoped initial projection and rejects invalid shape and scope", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
     const fixture = await seedAttemptFixture(db, true);
@@ -1108,6 +1198,22 @@ type AttemptFixture = {
     externalThreadId: string;
   };
 };
+
+function providerProjectionData(state: ReturnType<typeof createRuntimeProviderProjection>) {
+  return {
+    runtimeAttemptId: state.runtimeAttemptId,
+    runId: state.runId,
+    projectionVersion: state.projectionVersion,
+    lastAppliedSequence: state.lastAppliedSequence,
+    lastExternalEventId: state.lastExternalEventId,
+    rawAssistantText: state.rawAssistantText,
+    visibleAssistantText: state.visibleAssistantText,
+    redactionBuffer: state.redactionBuffer,
+    finalizationExternalEventId: state.finalizationExternalEventId,
+    finalizationPayloadSha256: state.finalizationPayloadSha256,
+    stateSha256: state.stateSha256,
+  };
+}
 
 function initialProviderState(fixture: AttemptFixture) {
   if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,11 +10,39 @@ const preflight = resolve("deploy/workbench-production-preflight.sh");
 const originManifest = resolve("scripts/workbench-origin-manifest.mjs");
 const originCaddy = resolve("deploy/workbench-production.Caddyfile");
 const originWireguardPreflight = resolve("deploy/edge/workbench-origin-wireguard-preflight.sh");
+const runtimeWorkerExecutionIdentity = resolve("scripts/assert-runtime-worker-execution-identity.mjs");
+
+test("production preflight verifies the signed deployment configuration against its env file", () => {
+  const source = readFileSync(preflight, "utf8");
+  const envExample = readFileSync(resolve("deploy/workbench.env.example"), "utf8");
+  assert.match(source, /DEPLOYMENT_CONFIG_SCRIPT=.*assert-production-deployment-config\.mjs/u);
+  assert.match(source, /node "\$DEPLOYMENT_CONFIG_SCRIPT" --env-file "\$ENV_FILE"/u);
+  for (const name of [
+    "WORKBENCH_CANDIDATE_ID",
+    "WORKBENCH_SIGNED_TAG",
+    "WORKBENCH_RELEASE_CHAIN_ID",
+    "WORKBENCH_RELEASE_CHAIN_RUN_ID",
+    "WORKBENCH_RELEASE_CHAIN_RUN_ATTEMPT",
+    "WORKBENCH_DEPLOYMENT_CONFIG_MANIFEST_PATH",
+    "WORKBENCH_DEPLOYMENT_CONFIG_BUNDLE_PATH",
+    "WORKBENCH_DEPLOYMENT_CONFIG_MANIFEST_SHA256",
+    "WORKBENCH_PRODUCTION_DEPENDENCY_ATTESTATIONS_JSON",
+    "WORKBENCH_PRODUCTION_SECRET_VERSIONS_JSON",
+  ]) {
+    assert.equal((envExample.match(new RegExp(`^${name}=`, "gmu")) ?? []).length, 1, `${name} must occur once`);
+  }
+});
 
 test("production preflight rejects validation-only Compose profiles", () => {
   const result = runPreflight({ WORKBENCH_COMPOSE_PROFILES: "local-object-storage local-docling" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /must not enable local Compose profiles/u);
+});
+
+test("production preflight rejects relative runtime data directories", () => {
+  const result = runPreflight({ WORKBENCH_STORAGE_HOST_DIR: "relative/storage" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /WORKBENCH_STORAGE_HOST_DIR must be an absolute directory/u);
 });
 
 test("production preflight keeps public registration and origin checks fail closed", () => {
@@ -58,6 +87,14 @@ test("production preflight rejects a mutable Node base image", () => {
   const result = runPreflight({ WORKBENCH_NODE_IMAGE: "node:22-alpine" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /WORKBENCH_NODE_IMAGE must be an immutable digest reference/u);
+});
+
+test("production preflight rejects a Runtime Worker signing key outside the trust policy", () => {
+  const result = runPreflight({
+    WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID: `sha256:${"0".repeat(64)}`,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /execution signing identity is invalid/u);
 });
 
 test("production preflight rejects an S3 tunnel target that differs from the SDK endpoint", () => {
@@ -126,13 +163,20 @@ test("production preflight rejects dormant OIDC secrets while enterprise SSO is 
 });
 
 function runPreflight(overrides) {
-  const appDir = mkdtempSync(join(tmpdir(), "workbench-production-preflight-"));
+  const appDir = realpathSync(mkdtempSync(join(tmpdir(), "workbench-production-preflight-")));
   const deployDir = join(appDir, "deploy");
   const scriptsDir = join(appDir, "scripts");
+  const tokenizerDir = join(appDir, "tokenizer");
+  const knowledgeVaultDir = join(appDir, "knowledge-vault");
+  const storageDir = join(appDir, "storage");
   mkdirSync(deployDir);
   mkdirSync(scriptsDir);
-  mkdirSync(join(appDir, "knowledge-vault"));
-  writeFileSync(join(appDir, "knowledge-vault/README.md"), "# fixture\n");
+  mkdirSync(tokenizerDir);
+  mkdirSync(knowledgeVaultDir);
+  mkdirSync(storageDir);
+  writeFileSync(join(tokenizerDir, "tokenizer.json"), "{}\n");
+  writeFileSync(join(tokenizerDir, "tokenizer_config.json"), "{}\n");
+  writeFileSync(join(knowledgeVaultDir, "README.md"), "# fixture\n");
   writeFileSync(join(deployDir, "workbench-compose.yml"), "services: {}\n");
   writeFileSync(join(deployDir, "workbench-production.Caddyfile"), readFileSync(originCaddy, "utf8"));
   writeFileSync(
@@ -150,6 +194,7 @@ function runPreflight(overrides) {
     "AllowedIPs = 10.88.0.1/32",
     "",
   ].join("\n"));
+  const executionIdentity = createExecutionIdentity(deployDir);
   const env = {
     WORKBENCH_WEB_ORIGIN: "https://workbench.example.test",
     WORKBENCH_PREVIEW_ORIGIN: "https://preview.example.test",
@@ -177,12 +222,22 @@ function runPreflight(overrides) {
     WORKBENCH_EDGE_WIREGUARD_ENDPOINT: "8.130.160.177:51820",
     WORKBENCH_ORIGIN_HTTP_PORT: "8080",
     WORKBENCH_EDGE_ORIGIN_AUTH_SECRET: "A".repeat(64),
-    WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR: "/srv/tokenizer",
+    WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR: tokenizerDir,
+    WORKBENCH_KNOWLEDGE_VAULT_HOST_DIR: knowledgeVaultDir,
+    WORKBENCH_STORAGE_HOST_DIR: storageDir,
     WORKBENCH_IMAGE_INVENTORY_PATH: "/srv/image-manifest.json",
     WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH: "/srv/image-manifest.bundle.json",
     WORKBENCH_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/production",
     WORKBENCH_COSIGN_OIDC_ISSUER: "https://token.actions.githubusercontent.com",
     WORKBENCH_SOURCE_COMMIT: "a".repeat(40),
+    WORKBENCH_ENVIRONMENT_ID: executionIdentity.environmentId,
+    WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH: executionIdentity.privateKeyPath,
+    WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID: executionIdentity.keyId,
+    WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID: executionIdentity.signerId,
+    WORKBENCH_RUNTIME_WORKER_UID: String(executionIdentity.uid),
+    WORKBENCH_RUNTIME_WORKER_GID: String(executionIdentity.gid),
+    WORKBENCH_PRODUCTION_TRUST_POLICY_PATH: executionIdentity.trustPolicyPath,
+    WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256: executionIdentity.trustPolicySha256,
     WORKBENCH_FILE_SCAN_MODE: "clamav",
     WORKBENCH_POSTGRES_IMAGE: `pgvector/pgvector:pg16@sha256:${"b".repeat(64)}`,
     WORKBENCH_NGINX_IMAGE: `nginx:stable-alpine@sha256:${"c".repeat(64)}`,
@@ -203,10 +258,71 @@ function runPreflight(overrides) {
         WORKBENCH_ORIGIN_MANIFEST_SCRIPT: originManifest,
         WORKBENCH_ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT: originWireguardPreflight,
         WORKBENCH_ORIGIN_WIREGUARD_CONFIG: wireguardConfig,
+        WORKBENCH_RUNTIME_WORKER_EXECUTION_IDENTITY_SCRIPT: runtimeWorkerExecutionIdentity,
         ...overrides,
       },
     });
   } finally {
     rmSync(appDir, { recursive: true, force: true });
   }
+}
+
+function createExecutionIdentity(directory) {
+  const signers = Array.from({ length: 5 }, () => trustSigner());
+  const [worker, security, data, operations, release] = signers;
+  const privateKeyPath = join(directory, "runtime-worker-execution.key");
+  const trustPolicyPath = join(directory, "production-trust-policy.json");
+  writeFileSync(privateKeyPath, worker.privateKey.export({ type: "pkcs8", format: "pem" }), {
+    mode: 0o400,
+  });
+  chmodSync(privateKeyPath, 0o400);
+  const privateKeyMetadata = statSync(privateKeyPath);
+  const policy = {
+    schemaVersion: "workbench.production-trust-policy.v1",
+    environmentId: "workbench-production",
+    keys: signers.map(({ record }) => record),
+    approvalAuthorities: [
+      ["Security", "security-approver", security.keyId],
+      ["Data", "data-approver", data.keyId],
+      ["Operations", "operations-approver", operations.keyId],
+      ["Release", "release-approver", release.keyId],
+    ].map(([role, approverId, keyId]) => ({ role, approverId, keyId })),
+    receiptAuthorities: [{
+      scopeId: "production-runtime.worker-execution",
+      signerId: "runtime-worker-production",
+      keyId: worker.keyId,
+    }],
+  };
+  const policySource = `${JSON.stringify(policy, null, 2)}\n`;
+  writeFileSync(trustPolicyPath, policySource);
+  return {
+    environmentId: policy.environmentId,
+    privateKeyPath,
+    keyId: worker.keyId,
+    signerId: policy.receiptAuthorities[0].signerId,
+    uid: privateKeyMetadata.uid,
+    gid: privateKeyMetadata.gid,
+    trustPolicyPath,
+    trustPolicySha256: createHash("sha256").update(policySource).digest("hex"),
+  };
+}
+
+function trustSigner() {
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const spki = publicKey.export({ type: "spki", format: "der" });
+  const sha256 = createHash("sha256").update(spki).digest("hex");
+  const keyId = `sha256:${sha256}`;
+  return {
+    privateKey,
+    keyId,
+    record: {
+      keyId,
+      algorithm: "Ed25519",
+      publicKeySpkiBase64: spki.toString("base64"),
+      publicKeySha256: sha256,
+      validFromUtc: "2026-01-01T00:00:00.000Z",
+      validUntilUtc: "2030-01-01T00:00:00.000Z",
+      revokedAtUtc: null,
+    },
+  };
 }

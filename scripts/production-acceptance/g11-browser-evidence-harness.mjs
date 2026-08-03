@@ -51,6 +51,9 @@ const VIEWPORTS = new Map(G11_VIEWPORTS.map((viewport) => [viewport.id, viewport
 const OPERATION_TIMEOUT_MS = 15 * 60_000;
 const CLEANUP_TIMEOUT_MS = 60_000;
 const MAX_STEPS = 5_000;
+const PROTECTED_MIXED_COMPOSER_PROMPT = "生成一份需求文档和页面原型";
+const PROTECTED_MIXED_REJECTION_MESSAGE =
+  "一次运行只能生成需求文档或原型。请先完成需求文档，再发起原型生成。";
 
 export async function collectG11SanitizedBrowserTrace({
   ...rawInput
@@ -1345,9 +1348,27 @@ async function executeProtectedAction({ assert, input, page, scenario, sseEvents
     case "verify-artifact-checksum":
       await assert.condition("prd-artifact-checksum-valid", () => verifyVisibleArtifact(page));
       return;
-    case "submit-mixed-intent": {
+    case "submit-mixed-composer":
       state.mixedBaselineRunCount = await browserRunCount(page, input.scenarioBinding.threadId);
       state.mixedBaselineSseCount = sseEvents.length;
+      await submitPrompt(page, PROTECTED_MIXED_COMPOSER_PROMPT);
+      await assert.condition("mixed-composer-localized-error-visible", () => waitForCondition(
+        () => page.getByText(PROTECTED_MIXED_REJECTION_MESSAGE, { exact: true }).first().isVisible(),
+      ));
+      return;
+    case "verify-mixed-composer-prompt":
+      await assert.condition("mixed-composer-prompt-preserved", async () => (
+        await (await visibleComposerInput(page)).inputValue() === PROTECTED_MIXED_COMPOSER_PROMPT
+      ));
+      return;
+    case "verify-mixed-composer-inactive":
+      await assert.count(
+        "mixed-composer-active-ui-absent",
+        '[data-phase="generating"], [data-workbench-artifact-state="pending"], [data-canvas-generation-motion]',
+        0,
+      );
+      return;
+    case "submit-mixed-direct-api": {
       const result = await browserJson(
         page,
         `/api/v1/threads/${encodeURIComponent(input.scenarioBinding.threadId)}/submission-intents`,
@@ -1358,7 +1379,7 @@ async function executeProtectedAction({ assert, input, page, scenario, sseEvents
         },
       );
       state.mixedProblemStatus = result.status;
-      await assert.condition("mixed-problem-status-422", () => state.mixedProblemStatus === 422);
+      await assert.condition("mixed-problem-status-400", () => state.mixedProblemStatus === 400);
       return;
     }
     case "verify-mixed-run-count":
@@ -1623,15 +1644,19 @@ async function exportSucceeded(page) {
 }
 
 async function submitPrompt(page, prompt) {
-  const composer = await firstVisibleLocator(page, [
-    'textarea[aria-label="提示词"]',
-    'input[placeholder="您想更改或创建什么内容?"]',
-  ]);
+  const composer = await visibleComposerInput(page);
   await composer.fill(prompt);
   await (await firstVisibleLocator(page, [
     { role: "button", name: "提交提示", exact: true },
     { role: "button", name: "提交项目请求", exact: true },
   ])).click();
+}
+
+function visibleComposerInput(page) {
+  return firstVisibleLocator(page, [
+    'textarea[aria-label="提示词"]',
+    'input[placeholder="您想更改或创建什么内容?"]',
+  ]);
 }
 
 async function openBoundProject(page, input) {

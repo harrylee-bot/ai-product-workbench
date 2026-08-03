@@ -7,6 +7,8 @@ COMPOSE_FILE=${WORKBENCH_COMPOSE_FILE:-$APP_DIR/deploy/workbench-compose.yml}
 CADDY_FILE=${WORKBENCH_CADDY_FILE:-$APP_DIR/deploy/workbench-production.Caddyfile}
 ORIGIN_MANIFEST_SCRIPT=${WORKBENCH_ORIGIN_MANIFEST_SCRIPT:-$APP_DIR/scripts/workbench-origin-manifest.mjs}
 DATABASE_ROLE_CONTRACT_SCRIPT=${WORKBENCH_DATABASE_ROLE_CONTRACT_SCRIPT:-$APP_DIR/scripts/assert-workbench-database-role-contract.mjs}
+RUNTIME_WORKER_EXECUTION_IDENTITY_SCRIPT=${WORKBENCH_RUNTIME_WORKER_EXECUTION_IDENTITY_SCRIPT:-$APP_DIR/scripts/assert-runtime-worker-execution-identity.mjs}
+DEPLOYMENT_CONFIG_SCRIPT=${WORKBENCH_DEPLOYMENT_CONFIG_SCRIPT:-$APP_DIR/scripts/assert-production-deployment-config.mjs}
 ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT=${WORKBENCH_ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT:-$APP_DIR/deploy/edge/workbench-origin-wireguard-preflight.sh}
 ORIGIN_WIREGUARD_CONFIG=${WORKBENCH_ORIGIN_WIREGUARD_CONFIG:-/etc/wireguard/wg0.conf}
 
@@ -20,9 +22,8 @@ fail() {
 [ -f "$CADDY_FILE" ] || fail "missing $CADDY_FILE"
 [ -f "$ORIGIN_MANIFEST_SCRIPT" ] || fail "missing $ORIGIN_MANIFEST_SCRIPT"
 [ -f "$DATABASE_ROLE_CONTRACT_SCRIPT" ] || fail "missing $DATABASE_ROLE_CONTRACT_SCRIPT"
+[ -f "$RUNTIME_WORKER_EXECUTION_IDENTITY_SCRIPT" ] || fail "missing $RUNTIME_WORKER_EXECUTION_IDENTITY_SCRIPT"
 [ -f "$ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT" ] || fail "missing $ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT"
-[ -r "$APP_DIR/knowledge-vault/README.md" ] || fail "knowledge-vault is missing"
-
 env_value() {
   key=$1
   count=$(grep -c "^${key}=" "$ENV_FILE" || true)
@@ -61,6 +62,18 @@ validate_private_ipv4() {
   esac
 }
 
+validate_absolute_directory() {
+  name=$1
+  value=$2
+  case "$value" in
+    /*) ;;
+    *) fail "$name must be an absolute directory" ;;
+  esac
+  [ -d "$value" ] && [ ! -L "$value" ] || fail "$name must be a regular directory"
+  canonical=$(cd -P "$value" && pwd)
+  [ "$canonical" = "$value" ] || fail "$name must be a canonical non-symlink directory"
+}
+
 require_env WORKBENCH_WEB_ORIGIN >/dev/null
 require_env WORKBENCH_PREVIEW_ORIGIN >/dev/null
 require_env WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL >/dev/null
@@ -87,11 +100,21 @@ origin_wireguard_ip=$(require_env WORKBENCH_ORIGIN_WIREGUARD_IP)
 origin_http_port=$(require_env WORKBENCH_ORIGIN_HTTP_PORT)
 edge_origin_auth_secret=$(require_env WORKBENCH_EDGE_ORIGIN_AUTH_SECRET)
 tokenizer_dir=$(require_env WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR)
+knowledge_vault_dir=$(require_env WORKBENCH_KNOWLEDGE_VAULT_HOST_DIR)
+storage_dir=$(require_env WORKBENCH_STORAGE_HOST_DIR)
 image_inventory=$(require_env WORKBENCH_IMAGE_INVENTORY_PATH)
 image_inventory_bundle=$(require_env WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH)
 cosign_identity=$(require_env WORKBENCH_COSIGN_CERTIFICATE_IDENTITY)
 cosign_issuer=$(require_env WORKBENCH_COSIGN_OIDC_ISSUER)
 source_commit=$(require_env WORKBENCH_SOURCE_COMMIT)
+environment_id=$(require_env WORKBENCH_ENVIRONMENT_ID)
+runtime_worker_execution_private_key=$(require_env WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH)
+runtime_worker_execution_key_id=$(require_env WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID)
+runtime_worker_execution_signer_id=$(require_env WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID)
+runtime_worker_uid=$(require_env WORKBENCH_RUNTIME_WORKER_UID)
+runtime_worker_gid=$(require_env WORKBENCH_RUNTIME_WORKER_GID)
+production_trust_policy=$(require_env WORKBENCH_PRODUCTION_TRUST_POLICY_PATH)
+production_trust_policy_sha256=$(require_env WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256)
 scan_mode=$(require_env WORKBENCH_FILE_SCAN_MODE)
 postgres_image=$(require_env WORKBENCH_POSTGRES_IMAGE)
 nginx_image=$(require_env WORKBENCH_NGINX_IMAGE)
@@ -144,10 +167,24 @@ case "$enterprise_sso_enabled" in
 esac
 [ "$auth_ip_header" = "x-workbench-client-ip" ] || fail "WORKBENCH_AUTH_CLIENT_IP_HEADER must be x-workbench-client-ip"
 [ "$scan_mode" = "clamav" ] || fail "production uploads require WORKBENCH_FILE_SCAN_MODE=clamav"
+validate_absolute_directory WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR "$tokenizer_dir"
+validate_absolute_directory WORKBENCH_KNOWLEDGE_VAULT_HOST_DIR "$knowledge_vault_dir"
+validate_absolute_directory WORKBENCH_STORAGE_HOST_DIR "$storage_dir"
+[ -r "$knowledge_vault_dir/README.md" ] || fail "knowledge-vault is missing"
 printf '%s' "$database_url" | grep -Eq '@postgres([:/?]|$)' || fail "WORKBENCH_DATABASE_URL must address the Compose postgres service"
 node "$DATABASE_ROLE_CONTRACT_SCRIPT" --env-file="$ENV_FILE" \
   || fail "database role separation contract is invalid"
 printf '%s' "$source_commit" | grep -Eq '^[0-9a-f]{40}$' || fail "WORKBENCH_SOURCE_COMMIT must be a lowercase Git commit"
+node "$RUNTIME_WORKER_EXECUTION_IDENTITY_SCRIPT" \
+  --private-key "$runtime_worker_execution_private_key" \
+  --expected-key-id "$runtime_worker_execution_key_id" \
+  --signer-id "$runtime_worker_execution_signer_id" \
+  --environment-id "$environment_id" \
+  --trust-policy "$production_trust_policy" \
+  --trust-policy-sha256 "$production_trust_policy_sha256" \
+  --expected-private-key-uid "$runtime_worker_uid" \
+  --expected-private-key-gid "$runtime_worker_gid" >/dev/null \
+  || fail "Runtime Worker execution signing identity is invalid"
 printf '%s' "$cosign_identity" | grep -Eq '^https://[^[:space:]]+$' \
   || fail "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY must be an exact HTTPS identity"
 printf '%s' "$cosign_issuer" | grep -Eq '^https://[^[:space:]]+$' \
@@ -206,6 +243,10 @@ node "$APP_DIR/scripts/production-image-inventory.mjs" \
   --env-file "$ENV_FILE" \
   --inspect-local-images \
   --exclude-image deerflow
+
+[ -f "$DEPLOYMENT_CONFIG_SCRIPT" ] || fail "missing $DEPLOYMENT_CONFIG_SCRIPT"
+node "$DEPLOYMENT_CONFIG_SCRIPT" --env-file "$ENV_FILE" >/dev/null \
+  || fail "signed production deployment configuration does not match this deployment"
 
 [ -r "$tokenizer_dir/tokenizer.json" ] || fail "tokenizer.json is missing"
 [ -r "$tokenizer_dir/tokenizer_config.json" ] || fail "tokenizer_config.json is missing"

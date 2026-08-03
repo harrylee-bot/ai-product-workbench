@@ -41,11 +41,13 @@ import { artifactVersionScreenIds } from "../artifacts/artifact-screen-reference
 import { DesignPresetsService } from "../design-presets/design-presets.service.js";
 import { lockActiveProject } from "../projects/project-lock.js";
 import { RuntimeModelsService } from "../runtime/runtime-models.service.js";
-import { RunEventStore } from "./run-event.store.js";
+import { publicRunEventPayload, RunEventStore } from "./run-event.store.js";
 import { mapRun, orderedRunSourceSnapshots } from "./run.mapper.js";
 
 const activeStatuses = ["queued", "running", "waiting_input", "cancelling"] as const;
 const terminalStatuses = new Set(["succeeded", "failed", "cancelled"]);
+const runtimeProviderCancellationUnconfirmedCode =
+  "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED";
 type RunCursor = { createdAt: string; id: string };
 type AuthorizedEventPollRow = {
   runId: string;
@@ -87,6 +89,26 @@ export class RunsService {
     const source = await this.access.findRun(principalId, sourceRunId, "edit");
     if (source.status !== "failed" || source.errorRetryable !== true) {
       throw runRetryConflictProblem("Only a failed Run explicitly marked retryable can be retried");
+    }
+    if (source.errorCode === runtimeProviderCancellationUnconfirmedCode) {
+      const runtimeAttempt = await this.db.runtimeAttempt.findUnique({
+        where: {
+          runId_attempt: {
+            runId: source.id,
+            attempt: source.attempt,
+          },
+        },
+        select: {
+          providerCancellationResolution: {
+            select: { runtimeAttemptId: true },
+          },
+        },
+      });
+      if (!runtimeAttempt?.providerCancellationResolution) {
+        throw runRetryConflictProblem(
+          "Provider cancellation must converge before the failed Run can be retried",
+        );
+      }
     }
     // A retry replays the immutable source request. Clearing the Canvas
     // snapshot here would make the application request diverge from the DB
@@ -600,7 +622,7 @@ export class RunsService {
         type: row.eventType,
         occurredAt: row.occurredAt.toISOString(),
         traceId: row.traceId,
-        payload: row.payload,
+        payload: publicRunEventPayload(row.eventType, row.payload),
       })];
     });
     return { events, status };

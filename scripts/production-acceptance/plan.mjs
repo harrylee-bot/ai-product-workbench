@@ -10,7 +10,10 @@ import {
   sha256Bytes,
   sha256Canonical,
 } from "../evidence-ledger.mjs";
-import { loadProductionDeploymentConfigBinding } from "../production-deployment-config.mjs";
+import {
+  loadProductionDeploymentConfigBinding,
+  verifyProductionDeploymentRuntimeBinding,
+} from "../production-deployment-config.mjs";
 import { verifyProductionImageManifest } from "../production-image-inventory.mjs";
 import {
   CONTROL_CATALOG_SCHEMA_VERSION,
@@ -117,6 +120,13 @@ export async function createProductionAcceptancePlan({
       `production deployment configuration validation failed: ${error instanceof Error ? error.message : String(error)}`,
     ]);
   }
+  try {
+    verifyProductionDeploymentRuntimeBinding(deploymentConfig.binding, { environmentId });
+  } catch (error) {
+    throw new ProductionAcceptanceContractError([
+      `production deployment runtime binding validation failed: ${error instanceof Error ? error.message : String(error)}`,
+    ]);
+  }
   const binding = {
     candidateId,
     deployId,
@@ -189,12 +199,18 @@ export async function loadProductionAcceptancePlan({ planPath, catalog } = {}) {
   if (plan.payloadSha256 !== expectedSeal) {
     throw new ProductionAcceptanceContractError(["production acceptance plan payload seal mismatch"]);
   }
+  assertPlanDeploymentBinding(plan);
   if (catalog) assertPlanMatchesCatalog(plan, catalog);
   return Object.freeze({ plan, raw: artifact.bytes, sha256: sha256Bytes(artifact.bytes), path: artifact.path });
 }
 
 export function assertPlanMatchesCatalog(plan, catalog) {
   const findings = [];
+  try {
+    assertPlanDeploymentBinding(plan);
+  } catch (error) {
+    findings.push(error instanceof Error ? error.message : String(error));
+  }
   if (plan?.payload?.catalog?.schemaVersion !== CONTROL_CATALOG_SCHEMA_VERSION) {
     findings.push("plan control catalog schemaVersion mismatch");
   }
@@ -226,6 +242,23 @@ export function assertPlanMatchesCatalog(plan, catalog) {
     findings.push("plan gates and control IDs must exactly match the protected catalog");
   }
   if (findings.length > 0) throw new ProductionAcceptanceContractError(findings);
+  return true;
+}
+
+export function assertPlanDeploymentBinding(plan) {
+  const environmentId = plan?.payload?.environment?.environmentId;
+  if (plan?.payload?.binding?.environmentId !== environmentId) {
+    throw new ProductionAcceptanceContractError([
+      "plan acceptance binding environment differs from the declared production environment",
+    ]);
+  }
+  try {
+    verifyProductionDeploymentRuntimeBinding(plan?.payload?.deploymentConfig, { environmentId });
+  } catch (error) {
+    throw new ProductionAcceptanceContractError([
+      `plan signed deployment runtime binding mismatch: ${error instanceof Error ? error.message : String(error)}`,
+    ]);
+  }
   return true;
 }
 

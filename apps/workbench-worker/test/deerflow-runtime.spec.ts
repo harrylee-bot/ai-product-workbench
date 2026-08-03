@@ -951,6 +951,41 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).not.toHaveBeenCalled();
   });
 
+  it("drops DeerFlow SSE error payloads before constructing an exception", async () => {
+    const providerPayload = {
+      authorization: "Bearer provider-bearer-secret",
+      knowledgeToken: `wbkg1.${"a".repeat(64)}.${"b".repeat(43)}`,
+      canvasToken: `wbct1.${"c".repeat(64)}.${"d".repeat(43)}`,
+      databaseUrl: "postgresql://runtime:database-secret@postgres.internal/workbench",
+      prompt: "private customer prompt",
+      responseBody: "private provider response body",
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([
+          { id: "provider-error-event", event: "error", data: providerPayload },
+        ], { runId: "external_run_error" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    const failure = await adapter.execute(execution(), observer()).then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe("DEERFLOW_RUN_ERROR");
+    for (const secret of Object.values(providerPayload)) {
+      expect((failure as Error).message).not.toContain(secret);
+    }
+  });
+
   it("preserves identical provider payloads when their explicit event IDs differ", async () => {
     const repeatedPayload = { repeated: true };
     const finalState = {
@@ -3503,15 +3538,68 @@ describe("DeerFlow runtime adapter", () => {
     }, recovered);
 
     expect(result).toEqual({
+      disposition: "cancelled",
       externalRunId: "external_run_1",
       externalStatus: "interrupted",
-      found: true,
     });
     const cancelRequest = requests.at(-1);
     expect(cancelRequest?.url.pathname).toBe("/api/threads/deer_thread_1/runs/external_run_1/cancel");
     expect(cancelRequest?.url.searchParams.get("wait")).toBe("1");
     expect(cancelRequest?.url.searchParams.get("action")).toBe("interrupt");
     expect(cancelRequest?.init.method).toBe("POST");
+    expect(recovered).not.toHaveBeenCalled();
+  });
+
+  it("reports an already-terminal provider run as settled without another cancel request", async () => {
+    const requests: Array<{ url: URL; init: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      requests.push({ url, init });
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_1") {
+        return Response.json({ ...runtimeRun("external_run_1"), status: "success" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const recovered = vi.fn(async () => undefined);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.cancel({
+      runId: "run_1",
+      runtimeAttemptId: "attempt_1",
+      principalId: "principal_1",
+      externalThreadId: "deer_thread_1",
+      externalRunId: "external_run_1",
+    }, recovered)).resolves.toEqual({
+      disposition: "already_terminal",
+      externalRunId: "external_run_1",
+      externalStatus: "success",
+    });
+    expect(requests).toHaveLength(1);
+    expect(recovered).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing provider run without claiming cleanup convergence", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs") return Response.json([]);
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const recovered = vi.fn(async () => undefined);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.cancel({
+      runId: "run_1",
+      runtimeAttemptId: "attempt_1",
+      principalId: "principal_1",
+      externalThreadId: "deer_thread_1",
+      externalRunId: null,
+    }, recovered)).resolves.toEqual({
+      disposition: "not_found",
+      externalRunId: null,
+      externalStatus: null,
+    });
     expect(recovered).not.toHaveBeenCalled();
   });
 
@@ -3808,6 +3896,69 @@ describe("DeerFlow runtime adapter", () => {
     expect(serialized).not.toContain("tenant/private");
     expect(serialized).not.toContain("must-not-leak.example");
     expect(serialized).not.toContain("artifact_url");
+  });
+
+  it("does not read or expose a failed upload response body", async () => {
+    const original = Buffer.from("source bytes");
+    const providerBody = [
+      "Bearer provider-bearer-secret",
+      `wbkg1.${"a".repeat(64)}.${"b".repeat(43)}`,
+      `wbct1.${"c".repeat(64)}.${"d".repeat(43)}`,
+      "postgresql://runtime:database-secret@postgres.internal/workbench",
+      "prompt: private customer prompt",
+      "response body: private generated content",
+    ].join(" ");
+    const response = new Response(providerBody, { status: 502 });
+    const getReader = vi.spyOn(response.body!, "getReader");
+    const storage = {
+      getObject: vi.fn(async () => ({
+        body: Readable.from([original]),
+        byteSize: original.byteLength,
+        mediaType: "text/plain",
+      })),
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.origin === "http://gateway.test") {
+        await readNodeBody(init.body as unknown as Readable);
+        return response;
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), storage as never);
+
+    const failure = await adapter.execute(execution({
+      request: {
+        ...execution().request,
+        sourceIds: ["source-private"],
+      },
+      sources: [{
+        position: 0,
+        blobId: "blob-private",
+        originalName: "brief.txt",
+        mediaType: "text/plain",
+        byteSize: original.byteLength,
+        sha256: sha256(original),
+        original: {
+          storageKey: "tenant/private/original",
+          mediaType: "text/plain",
+          byteSize: original.byteLength,
+          sha256: sha256(original),
+        },
+        extraction: null,
+      }],
+    }), observer()).then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe("DEERFLOW_UPLOAD_FAILED");
+    expect((failure as Error).message).not.toContain(providerBody);
+    expect(getReader).not.toHaveBeenCalled();
   });
 
   it("commits integrity evidence before rejecting corrupted S3 bytes and sends zero provider POSTs", async () => {

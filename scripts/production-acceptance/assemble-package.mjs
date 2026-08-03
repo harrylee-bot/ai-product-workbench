@@ -20,7 +20,10 @@ import {
   sha256Canonical,
   verifyEvidenceLedger,
 } from "../evidence-ledger.mjs";
-import { loadVerifiedProductionDeploymentConfig } from "../production-deployment-config.mjs";
+import {
+  loadVerifiedProductionDeploymentConfig,
+  verifyProductionDeploymentRuntimeBinding,
+} from "../production-deployment-config.mjs";
 import { loadProductionImageDigestBinding } from "../production-image-inventory.mjs";
 import { validateHardCutManifest } from "../workbench-hard-cut-manifest.mjs";
 import {
@@ -176,6 +179,21 @@ export async function assembleProductionAcceptancePackage({
   if (deploymentConfig.manifestSha256 !== binding.digests.deploymentConfigManifestSha256) {
     throw new ProductionAcceptanceContractError([
       "production deployment configuration manifest differs from the sealed acceptance binding",
+    ]);
+  }
+  if (canonicalJson(deploymentConfig.binding) !== canonicalJson(collection.plan.payload.deploymentConfig)) {
+    throw new ProductionAcceptanceContractError([
+      "verified deployment configuration differs from the sealed acceptance plan",
+    ]);
+  }
+  try {
+    verifyProductionDeploymentRuntimeBinding(deploymentConfig.binding, {
+      environmentId: binding.environmentId,
+      trustPolicy,
+    });
+  } catch (error) {
+    throw new ProductionAcceptanceContractError([
+      `signed deployment trust binding validation failed: ${error instanceof Error ? error.message : String(error)}`,
     ]);
   }
 
@@ -363,6 +381,14 @@ async function loadAndVerifyCollection({ collectionDirectory, catalog, trustPoli
   if (loadedPlan.sha256 !== summary.payload.plan.sha256) findings.push("collection plan SHA-256 mismatch");
   if (canonicalJson(loadedPlan.plan.payload.binding) !== canonicalJson(summary.payload.binding)) {
     findings.push("collection binding differs from its sealed plan");
+  }
+  try {
+    verifyProductionDeploymentRuntimeBinding(loadedPlan.plan.payload.deploymentConfig, {
+      environmentId: summary.payload.binding.environmentId,
+      trustPolicy,
+    });
+  } catch (error) {
+    findings.push(`collection signed deployment trust binding is invalid: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const actualGateIds = summary.payload.gates.map((gate) => gate?.gateId);

@@ -48,15 +48,21 @@ const FLOW_CHECKS = new Map([
   ])],
   ["mixed-rejection", Object.freeze({
     keys: Object.freeze([
-      "problemStatus", "queuePublishCount", "runCount", "runtimeAttemptCount", "artifactVersionCount",
-      "providerInvocationCount", "sseEventCount",
+      "composerLocalizedError", "composerPromptPreserved", "composerActiveUiAbsent", "problemStatus",
+      "queuePublishCount", "runCount", "runtimeAttemptCount", "artifactVersionCount", "providerInvocationCount",
+      "sseEventCount",
     ]),
-    browserCheckIds: Object.freeze(["problemStatus", "runCount", "sseEventCount"]),
+    browserCheckIds: Object.freeze([
+      "composerLocalizedError", "composerPromptPreserved", "composerActiveUiAbsent", "problemStatus", "runCount",
+      "sseEventCount",
+    ]),
     observerCheckIds: Object.freeze([
       "queuePublishCount", "runtimeAttemptCount", "artifactVersionCount", "providerInvocationCount",
     ]),
     passes(checks) {
-      return checks.problemStatus === 422
+      return checks.problemStatus === 400
+        && ["composerLocalizedError", "composerPromptPreserved", "composerActiveUiAbsent"]
+          .every((key) => checks[key] === true)
         && [
           "queuePublishCount", "runCount", "runtimeAttemptCount", "artifactVersionCount",
           "providerInvocationCount", "sseEventCount",
@@ -144,7 +150,7 @@ const FLOW_RENDERED_STATES = new Map([
     "collecting-prd-context", "structuring-prd", "drafting-prd", "validating-prd", "failure",
     "cancelled", "retry", "ready", "historical-prd-selected",
   ]],
-  ["mixed-rejection", ["mixed-request-rejected"]],
+  ["mixed-rejection", ["mixed-composer-rejected", "mixed-direct-api-rejected"]],
   ["prototype-after-prd", [
     "prototype-null-gap", "prototype-thinking-gap", "design-system", "mapping-components",
     "creating-flows", "generating-ui", "screen-streaming", "summarizing", "screen-stable",
@@ -229,8 +235,17 @@ const FLOW_BROWSER_STEPS = new Map([
     ]),
   ]],
   ["mixed-rejection", [
-    step("problemStatus", "submit-mixed-intent", "page.evaluate", [
-      assertion("mixed-problem-status-422", "condition"),
+    step("composerLocalizedError", "submit-mixed-composer", "locator.click", [
+      assertion("mixed-composer-localized-error-visible", "condition"),
+    ]),
+    step("composerPromptPreserved", "verify-mixed-composer-prompt", "page.evaluate", [
+      assertion("mixed-composer-prompt-preserved", "condition"),
+    ]),
+    step("composerActiveUiAbsent", "verify-mixed-composer-inactive", "page.evaluate", [
+      assertion("mixed-composer-active-ui-absent", "count"),
+    ]),
+    step("problemStatus", "submit-mixed-direct-api", "page.evaluate", [
+      assertion("mixed-problem-status-400", "condition"),
     ]),
     step("runCount", "verify-mixed-run-count", "page.evaluate", [
       assertion("mixed-run-count-unchanged", "condition"),
@@ -369,7 +384,7 @@ const EXPECTED_HTTP_ERRORS = new Map([
     httpError("unauthenticated-access-rejection", "GET", "web", "api", "projects.bootstrap", "projectId", [401]),
   ])],
   ["mixed-rejection", Object.freeze([
-    httpError("mixed-request-rejection", "POST", "web", "api", "threads.submission-intents", "threadId", [422]),
+    httpError("mixed-request-rejection", "POST", "web", "api", "threads.submission-intents", "threadId", [400]),
   ])],
 ]);
 

@@ -2,7 +2,15 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync } from "node:fs";
+import {
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,11 +24,6 @@ const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const CHAIN_ID_PATTERN = /^sha256:[a-f0-9]{64}$/u;
-// The prior signed candidate predates the Validator Node build input; no other
-// candidate is allowed to omit the runtime binding.
-const LEGACY_DEERFLOW_VALIDATOR_NODE_ROLLBACK_COMMITS = new Set([
-  "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
-]);
 const PULL_REQUEST_IMAGE_PROBES = Object.freeze({
   api: { probe: "node-config-fail-fast", command_path: "apps/workbench-api/dist/main.js" },
   "api-migrator": { probe: "migrator-config-fail-fast", command_path: "" },
@@ -181,20 +184,25 @@ export function loadVerifiedProductionImageManifest({
   certificateIdentity,
   certificateOidcIssuer,
   verifyBlob = verifyCosignManifestBlob,
-  readManifest = (path) => readFileSync(path, "utf8"),
+  readManifest = (path) => readFileSync(path),
+  readBundle = (path) => readFileSync(path),
 }) {
   const resolvedManifestPath = requiredPath(manifestPath, "production image manifest");
   const resolvedBundlePath = requiredPath(bundlePath, "production image manifest bundle");
   assertHttpsIdentity(certificateIdentity, "production image manifest certificate identity");
   assertHttpsIdentity(certificateOidcIssuer, "production image manifest certificate OIDC issuer");
+  const manifestBytes = Buffer.from(readManifest(resolvedManifestPath));
+  const bundleBytes = Buffer.from(readBundle(resolvedBundlePath));
   const verified = verifyBlob({
     manifestPath: resolvedManifestPath,
     bundlePath: resolvedBundlePath,
     certificateIdentity,
     certificateOidcIssuer,
+    manifestBytes,
+    bundleBytes,
   });
   assert(verified === true, "production image manifest signature verification failed");
-  return JSON.parse(readManifest(resolvedManifestPath));
+  return JSON.parse(manifestBytes.toString("utf8"));
 }
 
 export function verifyCosignManifestBlob({
@@ -202,18 +210,29 @@ export function verifyCosignManifestBlob({
   bundlePath,
   certificateIdentity,
   certificateOidcIssuer,
+  manifestBytes,
+  bundleBytes,
   execute = execFileSync,
 }) {
+  const verifiedManifestBytes = Buffer.from(manifestBytes ?? readFileSync(manifestPath));
+  const verifiedBundleBytes = Buffer.from(bundleBytes ?? readFileSync(bundlePath));
+  const verificationDirectory = mkdtempSync(join(tmpdir(), "workbench-image-manifest-verify-"));
+  const frozenManifestPath = join(verificationDirectory, "production-image-manifest.json");
+  const frozenBundlePath = join(verificationDirectory, "production-image-manifest.bundle.json");
   try {
+    writeFileSync(frozenManifestPath, verifiedManifestBytes, { flag: "wx", mode: 0o600 });
+    writeFileSync(frozenBundlePath, verifiedBundleBytes, { flag: "wx", mode: 0o600 });
     execute("cosign", [
       "verify-blob",
-      "--bundle", bundlePath,
+      "--bundle", frozenBundlePath,
       "--certificate-identity", certificateIdentity,
       "--certificate-oidc-issuer", certificateOidcIssuer,
-      manifestPath,
+      frozenManifestPath,
     ], { stdio: ["ignore", "ignore", "pipe"] });
   } catch {
     throw new Error("production image manifest signature verification failed");
+  } finally {
+    rmSync(verificationDirectory, { recursive: true, force: true });
   }
   return true;
 }
@@ -362,7 +381,13 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
   }
   assertDeepEqual(
     ci.jobs?.["production-images"]?.needs,
-    ["release-chain", "release-chain-signing", "quality", "deployment-config"],
+    [
+      "release-chain",
+      "release-chain-signing",
+      "typecheck-linux-16g",
+      "quality",
+      "deployment-config",
+    ],
     "production image publication must wait for the verified chain and G3 gates",
   );
   assertDeepEqual(
@@ -1053,9 +1078,7 @@ function assertBuildConfigurationMatchesDeployment(record, expectedCommit, envir
     case "deerflow":
       expectedBuildArgs = {
         DEERFLOW_BASE_IMAGE: required("WORKBENCH_DEERFLOW_BASE_IMAGE_REF"),
-        ...(!LEGACY_DEERFLOW_VALIDATOR_NODE_ROLLBACK_COMMITS.has(expectedCommit)
-          ? { DEERFLOW_NODE_IMAGE: required("WORKBENCH_DEERFLOW_NODE_IMAGE_REF") }
-          : {}),
+        DEERFLOW_NODE_IMAGE: required("WORKBENCH_DEERFLOW_NODE_IMAGE_REF"),
         DEERFLOW_SOURCE_COMMIT: required("WORKBENCH_DEERFLOW_COMMIT"),
         WORKBENCH_SOURCE_COMMIT: expectedCommit,
       };
@@ -1356,7 +1379,7 @@ function main() {
     certificateOidcIssuer: args.certificateOidcIssuer,
   });
   const deploymentEnvironment = args.envFile
-    ? readDeploymentEnv(readFileSync(resolve(args.envFile), "utf8"))
+    ? readDeploymentEnv(readFileSync(resolve(args.envFile)))
     : undefined;
   verifyProductionImageManifest({
     manifest,

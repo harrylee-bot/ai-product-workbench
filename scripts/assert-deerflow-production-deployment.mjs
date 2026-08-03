@@ -119,6 +119,8 @@ assert(configuredModel.api_key === "$OPENAI_API_KEY", "the DeerFlow base-config 
 assert(configuredModel.base_url === "$WORKBENCH_DEERFLOW_PROVIDER_BASE_URL", "the DeerFlow base-config example must reference the approved provider URL by environment name");
 assert(baseConfigExample.sandbox?.use === "deerflow.sandbox.local:LocalSandboxProvider", "the DeerFlow base-config example must select the local provider explicitly");
 assert(baseConfigExample.sandbox?.allow_host_bash === false, "the DeerFlow base-config example must disable host bash");
+assert(baseConfigExample.database?.backend === "sqlite", "the DeerFlow base-config example must select a durable SQLite backend");
+assert(baseConfigExample.database?.sqlite_dir === ".deer-flow/data", "the DeerFlow base-config example must keep SQLite data beneath .deer-flow");
 
 const deerflowDockerfile = readText("integrations/deerflow/Dockerfile");
 for (const requiredLine of [
@@ -174,7 +176,7 @@ assert(
   "DeerFlow lead-agent upstream source hash drifted",
 );
 assert(
-  patchManifest.agent?.patchedSha256 === "6d03a535d9d4f45d3a1725363ef80e943af5db934df2ec068f4427e6b0c8295d",
+  patchManifest.agent?.patchedSha256 === "3dce9051f0ce8248c44f7e6a9e4b8b186ef061a39bce28548cb40557dc1c255a",
   "DeerFlow lead-agent patched source hash drifted",
 );
 assert(
@@ -183,14 +185,16 @@ assert(
 );
 assert(
   Array.isArray(patchManifest.additionalSources)
-    && patchManifest.additionalSources.length === 1,
-  "DeerFlow source patch must declare the audited subagent tool filter",
+    && patchManifest.additionalSources.length === 2,
+  "DeerFlow source patch must declare the audited subagent filter and RunManager merge patches",
 );
-const subagentToolPatch = patchManifest.additionalSources[0];
+const subagentToolPatch = patchManifest.additionalSources.find(
+  (entry) => entry?.path === "deerflow/tools/builtins/task_tool.py",
+);
 assert(
-  subagentToolPatch.path === "deerflow/tools/builtins/task_tool.py"
+  subagentToolPatch?.path === "deerflow/tools/builtins/task_tool.py"
     && subagentToolPatch.upstreamSha256 === "bbbf58869ea4e24a8c230695478fb5d09fd35c2e4dbb2c16bc5052871027ee95"
-    && subagentToolPatch.patchedSha256 === "482292649c09ca8112ab30bd5e96baa9032aeccbfe3e3770000e1fbb41309317",
+    && subagentToolPatch.patchedSha256 === "13cb41b838d20a664438318a0e207ef6f8c80e7bc4923bab1e6a0ae0c2c101d8",
   "DeerFlow subagent tool filter must bind the audited upstream and patched hashes",
 );
 assert(
@@ -204,19 +208,41 @@ assert(
       && replacement.insertion.includes('"read_file"')
       && replacement.insertion.includes('"navigate_canvas"')
       && replacement.insertion.includes("getattr(tool, \"name\", None)")
-  )),
+  ))
+    && subagentToolPatch.replacements?.some((replacement) => (
+      replacement.position === "before"
+        && replacement.anchor.includes('"workbench_knowledge_retrieve"')
+        && replacement.insertion.includes('"workbench_runtime_result_submit"')
+    )),
   "DeerFlow subagent patch must remove parent-run publication, Knowledge, PRD reference, and Canvas tools before executor creation",
+);
+const runManagerPatch = patchManifest.additionalSources.find(
+  (entry) => entry?.path === "deerflow/runtime/runs/manager.py",
+);
+assert(
+  runManagerPatch?.upstreamSha256 === "ffd222f06bd46894196ed016d5f78efeb1078511e2b35a0ecab6c59c9d33463a"
+    && runManagerPatch.patchedSha256 === "c8e849c5dfb53495594e139c3adecd04e570a57942940b5f46b93d14be8732b1",
+  "DeerFlow RunManager merge patch must bind the audited upstream and patched hashes",
+);
+const runManagerPatchText = JSON.stringify(runManagerPatch.replacements ?? []);
+assert(
+  runManagerPatchText.includes("store_limit = max(0, limit - len(memory_records))")
+    && runManagerPatchText.includes("store_limit = limit + len(records_by_id)")
+    && runManagerPatchText.includes("duplicate slots"),
+  "DeerFlow RunManager must fetch through memory/store duplicates before trimming the unique newest page",
 );
 assert(
   Array.isArray(patchManifest.gatewaySources)
-    && patchManifest.gatewaySources.length === 1,
-  "DeerFlow source patch must declare the audited Gateway context patch",
+    && patchManifest.gatewaySources.length === 3,
+  "DeerFlow source patch must declare the audited Gateway context, checkpoint-history, and run-pagination patches",
 );
-const gatewayContextPatch = patchManifest.gatewaySources[0];
+const gatewayContextPatch = patchManifest.gatewaySources.find(
+  (entry) => entry?.path === "app/gateway/services.py",
+);
 assert(
-  gatewayContextPatch.path === "app/gateway/services.py"
+  gatewayContextPatch?.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34"
-    && gatewayContextPatch.patchedSha256 === "46c8c98fbdf94876603012d922c91ee7a2ece03c07a6ccf30d63a43086e1fdcb",
+    && gatewayContextPatch.patchedSha256 === "0ed419e8c8812ca4db2f00d8012d82a9a8017c7142dde1f5f9a067eca676da56",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -234,8 +260,15 @@ assert(
     ))
     && gatewayContextPatch.replacements?.some((replacement) => (
       replacement.insertion.includes("sanitized_request_config")
+    ))
+    && gatewayContextPatch.replacements?.some((replacement) => (
+      replacement.insertion.includes("def _bind_server_run_id")
+        && replacement.insertion.includes('metadata["run_id"] = run_id')
+    ))
+    && gatewayContextPatch.replacements?.some((replacement) => (
+      replacement.insertion.includes("_bind_server_run_id(config, record.run_id)")
     )),
-  "DeerFlow Gateway patch must gate and redact request-scoped Workbench context",
+  "DeerFlow Gateway patch must gate request context and bind checkpoint metadata to the server Run",
 );
 const gatewayContextPatchText = JSON.stringify(gatewayContextPatch.replacements ?? []);
 assert(
@@ -246,8 +279,50 @@ assert(
     && gatewayContextPatchText.includes('requestedArtifactKinds\\") == [\\"prd\\"]'),
   "DeerFlow Gateway patch must grant the bounded 200-step budget only to trusted PRD-only Runs",
 );
+const checkpointHistoryPatch = patchManifest.gatewaySources.find(
+  (entry) => entry?.path === "app/gateway/routers/threads.py",
+);
 assert(
-  patchManifest.agent?.insertion?.includes("WorkbenchToolScopeMiddleware(")
+  checkpointHistoryPatch?.upstreamSha256 === "19784e84a87c9a63b10a3188a1c3c6d6f9d13234599a57bad22ef252140cd7f3"
+    && checkpointHistoryPatch?.patchedSha256 === "115109b776847239570786e2448539e41bbbc99c28e63bcc2d989625cfa4a6e1",
+  "DeerFlow checkpoint-history patch must bind the audited upstream and patched hashes",
+);
+const checkpointHistoryPatchText = JSON.stringify(checkpointHistoryPatch.replacements ?? []);
+assert(
+  checkpointHistoryPatchText.includes("Checkpoint metadata filter")
+    && checkpointHistoryPatchText.includes("filter=body.metadata or None")
+    && checkpointHistoryPatchText.includes("_WORKBENCH_RUN_HISTORY_METADATA_KEYS")
+    && checkpointHistoryPatchText.includes("workbench_provider_idempotency_key")
+    && checkpointHistoryPatchText.includes("workbench_attempt")
+    && checkpointHistoryPatchText.includes("History metadata attempt must be a positive integer")
+    && checkpointHistoryPatchText.includes("History metadata filter values must be bounded identifiers")
+    && checkpointHistoryPatchText.includes("character.isascii()"),
+  "DeerFlow history endpoint must forward only a bounded exact Workbench Run metadata filter",
+);
+const runPaginationPatch = patchManifest.gatewaySources.find(
+  (entry) => entry?.path === "app/gateway/routers/thread_runs.py",
+);
+assert(
+  runPaginationPatch?.upstreamSha256 === "7f303c5e61ef202000010d93b8761cfbb0ec445f9b79131bcd3e70d3ebcdda70"
+    && runPaginationPatch?.patchedSha256 === "f829a02bf04c15806c92afaccda2e57a858a67317e1c6091edfdfa4767aafa63",
+  "DeerFlow run-list pagination patch must bind the audited upstream and patched hashes",
+);
+const runPaginationReplacement = runPaginationPatch.replacements?.find(
+  (replacement) => replacement.anchor.includes("async def list_runs(thread_id: str, request: Request)")
+    && replacement.position === "replace",
+);
+assert(
+  runPaginationReplacement?.insertion.includes("limit: int = Query(default=100, ge=1, le=100)")
+    && runPaginationReplacement.insertion.includes("offset: int = Query(default=0, ge=0, le=10_000)")
+    && runPaginationReplacement.insertion.includes("page_end = offset + limit")
+    && runPaginationReplacement.insertion.includes("limit=page_end")
+    && runPaginationReplacement.insertion.includes("records[offset:page_end]"),
+  "DeerFlow run-list endpoint must apply bounded limit/offset pagination through the existing RunManager",
+);
+assert(
+  patchManifest.agent?.anchor
+    === "    # Coalesce every SystemMessage into a single leading one before the request\n"
+    && patchManifest.agent?.insertion?.includes("WorkbenchToolScopeMiddleware(")
     && patchManifest.agent.insertion.includes("workbench_canvas_policy_from_runnable_config(config)")
     && patchManifest.agent.insertion.includes(
       "workbench_requested_artifact_kinds_from_runnable_config(config)",
@@ -255,7 +330,7 @@ assert(
     && patchManifest.agent.insertion.includes(
       "workbench_knowledge_enabled_from_runnable_config(config)",
     ),
-  "DeerFlow lead-agent patch must freeze per-Run Canvas, Artifact, and Knowledge policies into the middleware",
+  "DeerFlow lead-agent patch must register Workbench scope after deferred filtering and freeze per-Run policies",
 );
 assert(
   sha256(toolScopeMiddlewareSource)
@@ -274,6 +349,29 @@ assert(
     && toolScopeMiddlewareSource.includes('context.get("workbench")')
     && !toolScopeMiddlewareSource.includes("runtime.config"),
   "Workbench tool-scope middleware must read only graph-factory RunnableConfig policy channels",
+);
+assert(
+  toolScopeMiddlewareSource.includes(
+    '_TOOL_CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"',
+  )
+    && toolScopeMiddlewareSource.includes("def _stamp_ai_message(")
+    && toolScopeMiddlewareSource.includes('message.model_copy(update={"response_metadata": response_metadata})')
+    && toolScopeMiddlewareSource.includes("def _stamp_catalog_observation(")
+    && toolScopeMiddlewareSource.includes("await handler(scoped_request)")
+    && !toolScopeMiddlewareSource.includes("<workbench_tool_catalog_observation>"),
+  "Workbench catalog evidence must stamp sync/async AIMessage response metadata after filtering",
+);
+assert(
+  patchContractTestSource.includes(
+    "test_catalog_observation_survives_message_reducer_and_checkpoint",
+  )
+    && patchContractTestSource.includes(
+      "test_workbench_registration_after_deferred_filter_observes_effective_catalog",
+    )
+    && patchContractTestSource.includes("InMemorySaver()")
+    && patchContractTestSource.includes('checkpoint["channel_values"]["messages"][-1]')
+    && patchContractTestSource.includes("serialize_channel_values_for_api"),
+  "Workbench catalog contract must prove real LangGraph reducer/checkpoint persistence",
 );
 const prdReferencePins = [
   [
@@ -504,6 +602,22 @@ assert(
   "DeerFlow request-context contract must cover caller auth, redaction, and malformed scope",
 );
 assert(
+  patchRequestContextTestSource.includes("test_run_list_honors_bounded_offset_pages_beyond_default_cap")
+    && patchRequestContextTestSource.includes("offset=100")
+    && patchRequestContextTestSource.includes("offset=10_000")
+    && patchRequestContextTestSource.includes('"limit": 200')
+    && patchRequestContextTestSource.includes('"limit": 10_100'),
+  "DeerFlow request-context contract must exercise paginated run recovery beyond the default 100-run page",
+);
+assert(
+  patchRequestContextTestSource.includes("test_real_run_manager_deduplicates_store_rows_without_underfilling")
+    && patchRequestContextTestSource.includes("class RecordingMemoryRunStore(MemoryRunStore)")
+    && patchRequestContextTestSource.includes("self.list_limits.append(limit)")
+    && patchRequestContextTestSource.includes("self.assertEqual(store.list_limits, [5])")
+    && patchRequestContextTestSource.includes('[live.run_id, "stored-3", "stored-2", "stored-1"]'),
+  "DeerFlow source-patch contract must dynamically prove real RunManager de-duplication without page under-fill",
+);
+assert(
   /self\._knowledge_enabled = knowledge_enabled is True/u.test(toolScopeMiddlewareSource)
     && /name == KNOWLEDGE_TOOL_NAME and not self\._knowledge_enabled/u.test(toolScopeMiddlewareSource)
     && toolScopeMiddlewareSource.includes("WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"),
@@ -547,6 +661,7 @@ const taskToolPatch = patchManifest.additionalSources.find(
 const taskToolPatchText = JSON.stringify(taskToolPatch?.replacements ?? []);
 assert(
   taskToolPatchText.includes("workbench_knowledge_retrieve")
+    && taskToolPatchText.includes("workbench_runtime_result_submit")
     && taskToolPatchText.includes("read_file")
     && taskToolPatchText.includes("_workbench_parent_run_tool_names")
     && taskToolPatchText.includes('if getattr(tool, \\"name\\", None) not in _workbench_parent_run_tool_names'),
@@ -556,6 +671,7 @@ assert(
   patchContractTestSource.includes("test_async_authorized_knowledge_is_visible_and_executes")
     && patchContractTestSource.includes("test_concurrent_opposite_knowledge_scopes_do_not_leak")
     && patchContractTestSource.includes("test_real_subagent_executor_removes_parent_run_tools")
+    && patchContractTestSource.includes('FakeTool("workbench_runtime_result_submit")')
     && patchContractTestSource.includes('patch.object(task_module, "SubagentExecutor", FakeExecutor)')
     && patchContractTestSource.includes('[tool.name for tool in captured_executor_kwargs["tools"]]'),
   "DeerFlow source-patch contract must dynamically prove async Knowledge isolation and subagent executor filtering",

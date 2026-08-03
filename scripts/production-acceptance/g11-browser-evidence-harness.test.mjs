@@ -47,7 +47,7 @@ test("G11 network capture drains public serverAddr and requires exactly one prot
       pathClass: "api",
       routeTemplateId: "threads.submission-intents",
       routeBindingSha256: productionG11RouteBindingSha256("threads.submission-intents", { threadId: "thread-stable-1" }),
-      statusCodes: [422],
+      statusCodes: [400],
     }],
     new Map([
       [origins.web, new Set(["8.8.8.8"])],
@@ -63,7 +63,7 @@ test("G11 network capture drains public serverAddr and requires exactly one prot
   capture.onResponse({
     request: () => request,
     serverAddr: async () => ({ ipAddress: "8.8.8.8", port: 443 }),
-    status: () => 422,
+    status: () => 400,
   });
   await capture.drain();
   capture.assertExpectedRejections();
@@ -76,7 +76,7 @@ test("G11 network capture drains public serverAddr and requires exactly one prot
     routeTemplateId: "threads.submission-intents",
     routeBindingSha256: productionG11RouteBindingSha256("threads.submission-intents", { threadId: "thread-stable-1" }),
     resourceType: "fetch",
-    statusCode: 422,
+    statusCode: 400,
     failureClass: "none",
     outcomeClass: "expected-http-error",
     expectationRuleId: "mixed-request-rejection",
@@ -97,7 +97,7 @@ test("G11 network capture drains public serverAddr and requires exactly one prot
       pathClass: "api",
       routeTemplateId: "threads.submission-intents",
       routeBindingSha256: productionG11RouteBindingSha256("threads.submission-intents", { threadId: "thread-stable-1" }),
-      statusCodes: [422],
+      statusCodes: [400],
     }],
     new Map([
       [origins.web, new Set(["8.8.8.8"])],
@@ -109,7 +109,7 @@ test("G11 network capture drains public serverAddr and requires exactly one prot
     duplicateCapture.onResponse({
       request: () => duplicateRequest,
       serverAddr: async () => ({ ipAddress: "8.8.8.8", port: 443 }),
-      status: () => 422,
+      status: () => 400,
     });
   }
   await duplicateCapture.drain();
@@ -141,7 +141,7 @@ test("G11 origin and endpoint checks reject suffix, private IPv6, DNS rebinding,
     pathClass: "api",
     routeTemplateId: "threads.submission-intents",
     routeBindingSha256: productionG11RouteBindingSha256("threads.submission-intents", { threadId: "thread-stable-1" }),
-    statusCodes: [422],
+    statusCodes: [400],
   }];
   const rebinding = __g11HarnessTestOnly.createNetworkCapture(
     origins,
@@ -157,7 +157,7 @@ test("G11 origin and endpoint checks reject suffix, private IPv6, DNS rebinding,
   rebinding.onResponse({
     request: () => request,
     serverAddr: async () => ({ ipAddress: "9.9.9.9", port: 443 }),
-    status: () => 422,
+    status: () => 400,
   });
   await assert.rejects(rebinding.drain(), /approved hostname\/IP boundary/u);
 

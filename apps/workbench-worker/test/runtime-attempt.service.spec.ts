@@ -11,6 +11,7 @@ import {
   RuntimeAttemptService,
   type RuntimeExecutionClaim,
 } from "../src/runtime/runtime-attempt.service.js";
+import { runtimeProviderCancellationUnconfirmedCode } from "../src/runs/runtime-cancellation-state.js";
 import { runtimeExternalFinalizationEvent } from "../src/runtime/runtime.port.js";
 
 const binding = {
@@ -24,13 +25,16 @@ const initialNow = new Date("2026-07-19T00:00:00.000Z");
 type HarnessState = {
   databaseNow: Date;
   runStatus: string;
+  runErrorCode: string | null;
   runOwnerId: string | null;
   runEpoch: number;
   runLeaseExpiresAt: Date | null;
   attemptStatus: string;
+  attemptErrorCode: string | null;
   attemptOwnerId: string | null;
   attemptEpoch: number;
   attemptLeaseExpiresAt: Date | null;
+  providerCancellationResolutionId: string | null;
   externalRunId: string | null;
   providerIdempotencyKey: string | null;
   submissionUnknownAt: Date | null;
@@ -52,13 +56,16 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
   const state: HarnessState = {
     databaseNow: initialNow,
     runStatus: "running",
+    runErrorCode: null,
     runOwnerId: null,
     runEpoch: 0,
     runLeaseExpiresAt: null,
     attemptStatus: "pending",
+    attemptErrorCode: null,
     attemptOwnerId: null,
     attemptEpoch: 0,
     attemptLeaseExpiresAt: null,
+    providerCancellationResolutionId: null,
     externalRunId: null,
     providerIdempotencyKey: null,
     submissionUnknownAt: null,
@@ -68,6 +75,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
     ...overrides,
   };
   const externalEvents = new Map<string, Record<string, unknown>>();
+  let providerCancellationResolution: Record<string, unknown> | null = null;
   let providerProjection = createRuntimeProviderProjection({
     runtimeAttemptId: "runtime-attempt-1",
     runId: "run-1",
@@ -82,6 +90,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
         && ((where.status as { in: string[] }).in).includes(state.runStatus)))
     && (where.executionOwnerId === undefined || where.executionOwnerId === state.runOwnerId)
     && (where.executionEpoch === undefined || where.executionEpoch === state.runEpoch)
+    && (where.errorCode === undefined || where.errorCode === state.runErrorCode)
   );
   const attemptMatches = (where: Record<string, unknown>) => (
     (where.id === undefined || where.id === "runtime-attempt-1")
@@ -93,6 +102,11 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
         && ((where.status as { in: string[] }).in).includes(state.attemptStatus)))
     && (where.executionOwnerId === undefined || where.executionOwnerId === state.attemptOwnerId)
     && (where.executionEpoch === undefined || where.executionEpoch === state.attemptEpoch)
+    && (where.errorCode === undefined || where.errorCode === state.attemptErrorCode)
+    && (where.providerCancellationResolution === undefined
+      || (typeof where.providerCancellationResolution === "object"
+        && (where.providerCancellationResolution as { is?: unknown }).is === null
+        && state.providerCancellationResolutionId === null))
     && (where.providerIdempotencyKey === undefined
       || where.providerIdempotencyKey === state.providerIdempotencyKey)
     && (where.externalRunId === undefined || where.externalRunId === state.externalRunId)
@@ -101,6 +115,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
   );
   const assignRun = (data: Record<string, unknown>) => {
     if ("status" in data) state.runStatus = data.status as string;
+    if ("errorCode" in data) state.runErrorCode = data.errorCode as string | null;
     if ("executionOwnerId" in data) state.runOwnerId = data.executionOwnerId as string | null;
     if ("executionEpoch" in data) state.runEpoch = data.executionEpoch as number;
     if ("executionLeaseExpiresAt" in data) {
@@ -109,6 +124,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
   };
   const assignAttempt = (data: Record<string, unknown>) => {
     if ("status" in data) state.attemptStatus = data.status as string;
+    if ("errorCode" in data) state.attemptErrorCode = data.errorCode as string | null;
     if ("executionOwnerId" in data) state.attemptOwnerId = data.executionOwnerId as string | null;
     if ("executionEpoch" in data) state.attemptEpoch = data.executionEpoch as number;
     if ("executionLeaseExpiresAt" in data) {
@@ -132,8 +148,12 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
     id: "runtime-attempt-1",
     runId: "run-1",
     status: state.attemptStatus,
+    errorCode: state.attemptErrorCode,
     externalRunId: state.externalRunId,
     providerIdempotencyKey: state.providerIdempotencyKey,
+    providerCancellationResolution: providerCancellationResolution === null
+      ? null
+      : { ...providerCancellationResolution },
   });
 
   const tx = {
@@ -214,6 +234,13 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
         return { count: 1 };
       }),
     },
+    runtimeProviderCancellationResolution: {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        providerCancellationResolution = { ...data };
+        state.providerCancellationResolutionId = String(data.runtimeAttemptId);
+        return providerCancellationResolution;
+      }),
+    },
   };
   const db = {
     $queryRaw: vi.fn(async () => []),
@@ -223,6 +250,9 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
         [...externalEvents].map(([key, value]) => [key, { ...value }]),
       );
       const projectionSnapshot = { ...providerProjection };
+      const providerCancellationResolutionSnapshot = providerCancellationResolution === null
+        ? null
+        : { ...providerCancellationResolution };
       try {
         return await callback(tx);
       } catch (error) {
@@ -230,6 +260,7 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
         externalEvents.clear();
         for (const [key, value] of eventSnapshot) externalEvents.set(key, value);
         providerProjection = projectionSnapshot;
+        providerCancellationResolution = providerCancellationResolutionSnapshot;
         throw error;
       }
     }),
@@ -239,9 +270,20 @@ function harness(overrides: Partial<HarnessState> = {}, leaseMs = 45_000) {
     tx,
     state,
     externalEvents,
+    providerCancellationResolution: () => providerCancellationResolution,
     providerProjection: () => providerProjection,
     service: new RuntimeAttemptService(db as never, leaseMs),
   };
+}
+
+function providerCancellationHarness(overrides: Partial<HarnessState> = {}) {
+  return harness({
+    runStatus: "failed",
+    runErrorCode: runtimeProviderCancellationUnconfirmedCode,
+    attemptStatus: "failed",
+    attemptErrorCode: runtimeProviderCancellationUnconfirmedCode,
+    ...overrides,
+  });
 }
 
 const claimA: RuntimeExecutionClaim = {
@@ -296,6 +338,148 @@ describe("RuntimeAttemptService", () => {
     },
   );
 
+  it("attaches a late external Run id without reopening a failed cancellation attempt", async () => {
+    const row = {
+      id: "runtime-attempt-1",
+      status: "failed",
+      errorCode: runtimeProviderCancellationUnconfirmedCode,
+      externalRunId: null as string | null,
+      providerCancellationResolution: null,
+    };
+    const runtimeAttempt = {
+      findUniqueOrThrow: vi.fn(async () => ({ ...row })),
+      updateMany: vi.fn(async ({ data }: { data: { externalRunId: string } }) => {
+        row.externalRunId = data.externalRunId;
+        return { count: 1 };
+      }),
+    };
+    const tx = { $queryRaw: vi.fn(async () => [{ id: row.id }]), runtimeAttempt };
+    const service = new RuntimeAttemptService({
+      $transaction: vi.fn(async (callback: (transaction: typeof tx) => unknown) => callback(tx)),
+    } as never);
+
+    await expect(service.attachExternalRunForCleanup(
+      row.id,
+      "external-run-late",
+    )).resolves.toEqual({
+      ...row,
+      externalRunId: "external-run-late",
+    });
+    expect(runtimeAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: row.id,
+        externalRunId: null,
+        providerCancellationResolution: { is: null },
+        OR: [
+          {
+            status: {
+              in: ["pending", "submitting", "submission_unknown", "running", "cancelling"],
+            },
+          },
+          {
+            status: "failed",
+            errorCode: runtimeProviderCancellationUnconfirmedCode,
+          },
+        ],
+      },
+      data: { externalRunId: "external-run-late" },
+    });
+    expect(row).toMatchObject({
+      status: "failed",
+      errorCode: runtimeProviderCancellationUnconfirmedCode,
+    });
+  });
+
+  it("attaches cleanup evidence while an execution attempt is still active", async () => {
+    const row = {
+      id: "runtime-attempt-active",
+      status: "submitting",
+      errorCode: null,
+      externalRunId: null as string | null,
+      providerCancellationResolution: null,
+    };
+    const runtimeAttempt = {
+      findUniqueOrThrow: vi.fn(async () => ({ ...row })),
+      updateMany: vi.fn(async ({ data }: { data: { externalRunId: string } }) => {
+        row.externalRunId = data.externalRunId;
+        return { count: 1 };
+      }),
+    };
+    const service = new RuntimeAttemptService({
+      $transaction: vi.fn(async (callback: (transaction: { runtimeAttempt: typeof runtimeAttempt }) => unknown) => (
+        callback({
+          $queryRaw: vi.fn(async () => [{ id: row.id }]),
+          runtimeAttempt,
+        } as never)
+      )),
+    } as never);
+
+    await expect(service.attachExternalRunForCleanup(row.id, "external-run-active"))
+      .resolves.toMatchObject({
+        status: "submitting",
+        externalRunId: "external-run-active",
+      });
+    expect(runtimeAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: row.id,
+        externalRunId: null,
+      }),
+    }));
+  });
+
+  it("rejects a conflicting external Run id recovered by a concurrent canceller", async () => {
+    const unresolved = {
+      id: "runtime-attempt-1",
+      status: "failed",
+      errorCode: runtimeProviderCancellationUnconfirmedCode,
+      externalRunId: null,
+      providerCancellationResolution: null,
+    };
+    const runtimeAttempt = {
+      findUniqueOrThrow: vi.fn()
+        .mockResolvedValueOnce(unresolved)
+        .mockResolvedValueOnce({ ...unresolved, externalRunId: "external-run-winner" }),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    };
+    const tx = { $queryRaw: vi.fn(async () => [{ id: unresolved.id }]), runtimeAttempt };
+    const service = new RuntimeAttemptService({
+      $transaction: vi.fn(async (callback: (transaction: typeof tx) => unknown) => callback(tx)),
+    } as never);
+
+    await expect(service.attachExternalRunForCleanup(
+      unresolved.id,
+      "external-run-loser",
+    )).rejects.toThrow("RUNTIME_EXTERNAL_RUN_ID_CONFLICT");
+  });
+
+  it("rejects a late external Run id after the cleanup resolution is durable", async () => {
+    const row = {
+      id: "runtime-attempt-settled",
+      status: "failed",
+      errorCode: runtimeProviderCancellationUnconfirmedCode,
+      externalRunId: null,
+      providerCancellationResolution: {
+        runtimeAttemptId: "runtime-attempt-settled",
+        outcome: "external_run_absent",
+      },
+    };
+    const runtimeAttempt = {
+      findUniqueOrThrow: vi.fn(async () => row),
+      updateMany: vi.fn(),
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: row.id }]),
+      runtimeAttempt,
+    };
+    const service = new RuntimeAttemptService({
+      $transaction: vi.fn(async (callback: (transaction: typeof tx) => unknown) => callback(tx)),
+    } as never);
+
+    await expect(service.attachExternalRunForCleanup(row.id, "external-run-too-late"))
+      .rejects.toThrow("RUNTIME_EXTERNAL_RUN_ATTACH_STATE_INVALID");
+    expect(runtimeAttempt.updateMany).not.toHaveBeenCalled();
+  });
+
   it("allows only one worker to hold a live Run and Attempt claim", async () => {
     const { service, state } = harness({}, 10_000);
 
@@ -310,6 +494,296 @@ describe("RuntimeAttemptService", () => {
       attemptEpoch: 1,
       runLeaseExpiresAt: new Date("2026-07-19T00:00:10.000Z"),
       attemptLeaseExpiresAt: new Date("2026-07-19T00:00:10.000Z"),
+    });
+  });
+
+  it("claims an unresolved provider cancellation with the requested lease", async () => {
+    const { service, state } = providerCancellationHarness({
+      runEpoch: 3,
+      attemptEpoch: 5,
+    });
+
+    await expect(service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    )).resolves.toEqual({
+      runId: "run-1",
+      attemptId: "runtime-attempt-1",
+      ownerId: "cleanup-a:test",
+      epoch: 6,
+    });
+    expect(state).toMatchObject({
+      runOwnerId: "cleanup-a:test",
+      runEpoch: 6,
+      runLeaseExpiresAt: new Date("2026-07-19T00:00:12.000Z"),
+      attemptOwnerId: "cleanup-a:test",
+      attemptEpoch: 6,
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:00:12.000Z"),
+    });
+  });
+
+  it("does not claim a provider cancellation that already has a resolution", async () => {
+    const { service, state, tx } = providerCancellationHarness({
+      providerCancellationResolutionId: "runtime-attempt-1",
+    });
+
+    await expect(service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    )).resolves.toBeNull();
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(tx.runtimeAttempt.updateMany).not.toHaveBeenCalled();
+    expect(state.runOwnerId).toBeNull();
+    expect(state.attemptOwnerId).toBeNull();
+  });
+
+  it("rejects a provider cancellation claim while either durable lease is active", async () => {
+    const { service, tx } = providerCancellationHarness({
+      runOwnerId: "cleanup-existing:test",
+      runLeaseExpiresAt: new Date("2026-07-19T00:00:01.000Z"),
+    });
+
+    await expect(service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    )).rejects.toThrow("RUNTIME_EXECUTION_CLAIM_BUSY");
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(tx.runtimeAttempt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a provider cancellation claim outside the unresolved failure state", async () => {
+    const { service, tx } = providerCancellationHarness({
+      attemptErrorCode: "RUNTIME_EXECUTION_FAILED",
+    });
+
+    await expect(service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    )).rejects.toThrow("RUNTIME_PROVIDER_CANCELLATION_CLAIM_FENCED");
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(tx.runtimeAttempt.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("persists a provider cancellation resolution and releases its lease", async () => {
+    const context = providerCancellationHarness({ externalRunId: "external-run-1" });
+    const claim = await context.service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    );
+    expect(claim).not.toBeNull();
+
+    await context.service.resolveProviderCancellation(claim!, {
+      failureCode: runtimeProviderCancellationUnconfirmedCode,
+      outcome: "cancelled",
+      externalRunId: "external-run-1",
+    });
+
+    expect(context.providerCancellationResolution()).toEqual({
+      runtimeAttemptId: "runtime-attempt-1",
+      runId: "run-1",
+      failureCode: runtimeProviderCancellationUnconfirmedCode,
+      outcome: "cancelled",
+    });
+    expect(context.state).toMatchObject({
+      providerCancellationResolutionId: "runtime-attempt-1",
+      runOwnerId: null,
+      runLeaseExpiresAt: null,
+      attemptOwnerId: null,
+      attemptLeaseExpiresAt: null,
+    });
+  });
+
+  it("rejects an absent resolution after a late external Run id is attached", async () => {
+    const context = providerCancellationHarness();
+    const claim = await context.service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    );
+    expect(claim).not.toBeNull();
+    context.state.externalRunId = "external-run-late";
+
+    await expect(context.service.resolveProviderCancellation(claim!, {
+      failureCode: runtimeProviderCancellationUnconfirmedCode,
+      outcome: "external_run_absent",
+      externalRunId: null,
+    })).rejects.toThrow(runtimeProviderCancellationUnconfirmedCode);
+
+    expect(context.tx.runtimeProviderCancellationResolution.create).not.toHaveBeenCalled();
+    expect(context.providerCancellationResolution()).toBeNull();
+    expect(context.state).toMatchObject({
+      externalRunId: "external-run-late",
+      providerCancellationResolutionId: null,
+      runOwnerId: "cleanup-a:test",
+      attemptOwnerId: "cleanup-a:test",
+    });
+  });
+
+  it("rejects a non-absent resolution for a conflicting external Run id", async () => {
+    const context = providerCancellationHarness({ externalRunId: "external-run-1" });
+    const claim = await context.service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    );
+    expect(claim).not.toBeNull();
+
+    await expect(context.service.resolveProviderCancellation(claim!, {
+      failureCode: runtimeProviderCancellationUnconfirmedCode,
+      outcome: "already_terminal",
+      externalRunId: "external-run-conflict",
+    })).rejects.toThrow("RUNTIME_PROVIDER_CANCELLATION_EXTERNAL_RUN_CONFLICT");
+
+    expect(context.tx.runtimeProviderCancellationResolution.create).not.toHaveBeenCalled();
+    expect(context.providerCancellationResolution()).toBeNull();
+    expect(context.state).toMatchObject({
+      providerCancellationResolutionId: null,
+      runOwnerId: "cleanup-a:test",
+      attemptOwnerId: "cleanup-a:test",
+    });
+  });
+
+  it("releases an unresolved provider cancellation claim", async () => {
+    const context = providerCancellationHarness();
+    const claim = await context.service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    );
+    expect(claim).not.toBeNull();
+
+    await expect(context.service.releaseProviderCancellation(claim!)).resolves.toBeUndefined();
+    expect(context.state).toMatchObject({
+      runOwnerId: null,
+      runLeaseExpiresAt: null,
+      attemptOwnerId: null,
+      attemptLeaseExpiresAt: null,
+      providerCancellationResolutionId: null,
+    });
+  });
+
+  it("fences and rolls back a provider cancellation release lost to a concurrent update", async () => {
+    const context = providerCancellationHarness();
+    const claim = await context.service.claimProviderCancellation(
+      "run-1",
+      "runtime-attempt-1",
+      "cleanup-a:test",
+      12_000,
+    );
+    expect(claim).not.toBeNull();
+    context.tx.runtimeAttempt.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(context.service.releaseProviderCancellation(claim!))
+      .rejects.toThrow("RUNTIME_PROVIDER_CANCELLATION_RELEASE_FENCED");
+    expect(context.state).toMatchObject({
+      runOwnerId: "cleanup-a:test",
+      runLeaseExpiresAt: new Date("2026-07-19T00:00:12.000Z"),
+      attemptOwnerId: "cleanup-a:test",
+      attemptLeaseExpiresAt: new Date("2026-07-19T00:00:12.000Z"),
+    });
+  });
+
+  it("requires and inherits only the direct predecessor projection", async () => {
+    let predecessorProviderState: ReturnType<typeof createRuntimeProviderProjection> | null = null;
+    const runtimeAttempt = {
+      findUnique: vi.fn(async () => ({
+        id: "runtime-attempt-2",
+        runId: "run-1",
+        attempt: 2,
+        externalEventSequence: 0,
+        providerState: predecessorProviderState,
+      })),
+      updateMany: vi.fn(),
+    };
+    const runtimeProviderState = {
+      findUnique: vi.fn(async () => null),
+      create: vi.fn(),
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{
+        databaseNow: initialNow,
+        runStatus: "running",
+        runOwnerId: null,
+        runEpoch: 0,
+        runLeaseExpiresAt: null,
+        attemptStatus: "pending",
+        attemptOwnerId: null,
+        attemptEpoch: 0,
+        attemptLeaseExpiresAt: null,
+        externalRunId: null,
+        providerIdempotencyKey: null,
+        submissionUnknownAt: null,
+        externalEventSequence: 0,
+        lastExternalEventId: null,
+        attempt: 3,
+      }]),
+      runtimeAttempt,
+      runtimeProviderState,
+      runDraft: { findUnique: vi.fn(async () => null) },
+      run: { updateMany: vi.fn() },
+    };
+    const service = new RuntimeAttemptService({
+      $transaction: vi.fn(async (callback: (transaction: typeof tx) => unknown) => callback(tx)),
+    } as never);
+
+    await expect(service.claim("run-1", "runtime-attempt-3", "worker-a:test"))
+      .rejects.toThrow("RUNTIME_PROVIDER_STATE_BACKFILL_REQUIRED");
+
+    expect(runtimeAttempt.findUnique).toHaveBeenCalledWith({
+      where: { runId_attempt: { runId: "run-1", attempt: 2 } },
+      select: {
+        id: true,
+        runId: true,
+        attempt: true,
+        externalEventSequence: true,
+        providerState: true,
+      },
+    });
+    expect(runtimeProviderState.create).not.toHaveBeenCalled();
+    expect(runtimeAttempt.updateMany).not.toHaveBeenCalled();
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+
+    predecessorProviderState = createRuntimeProviderProjection({
+      runtimeAttemptId: "runtime-attempt-2",
+      runId: "run-1",
+      snapshot: {
+        rawAssistantText: "wbkg1.",
+        visibleAssistantText: "",
+        redactionBuffer: "wbkg1.",
+      },
+    });
+    runtimeAttempt.updateMany.mockResolvedValue({ count: 1 });
+    tx.run.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(service.claim("run-1", "runtime-attempt-3", "worker-a:test"))
+      .resolves.toEqual({
+        runId: "run-1",
+        attemptId: "runtime-attempt-3",
+        ownerId: "worker-a:test",
+        epoch: 1,
+      });
+    expect(runtimeProviderState.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runtimeAttemptId: "runtime-attempt-3",
+        runId: "run-1",
+        lastAppliedSequence: 0,
+        rawAssistantText: "wbkg1.",
+        visibleAssistantText: "",
+        redactionBuffer: "wbkg1.",
+      }),
     });
   });
 
@@ -383,7 +857,7 @@ describe("RuntimeAttemptService", () => {
       .rejects.toThrow("RUNTIME_SUBMISSION_RECONCILIATION_REQUIRED");
     expect(state.attemptStatus).toBe("submitting");
 
-    await service.markSubmissionUnknown(recoveryClaim, "provider lookup returned no matching Run");
+    await service.markSubmissionUnknown(recoveryClaim);
     expect(state).toMatchObject({
       attemptStatus: "submission_unknown",
       submissionUnknownAt: state.databaseNow,
@@ -398,7 +872,7 @@ describe("RuntimeAttemptService", () => {
     await service.submissionContext(claim);
     await service.authorizeSubmission(claim);
 
-    await service.markSubmissionUnknown(claim, "connection closed after request body");
+    await service.markSubmissionUnknown(claim);
 
     expect(state.attemptStatus).toBe("submission_unknown");
     expect(state.submissionUnknownAt).toEqual(initialNow);
@@ -435,7 +909,7 @@ describe("RuntimeAttemptService", () => {
     });
     const claim = await service.claim("run-1", "runtime-attempt-1", "worker-a:test");
 
-    await service.markSubmissionUnknown(claim, "attach commit response was lost");
+    await service.markSubmissionUnknown(claim);
 
     expect(state).toMatchObject({
       attemptStatus: "running",
@@ -824,7 +1298,6 @@ describe("RuntimeAttemptService", () => {
 
     await service.recordRetryableError(claim, {
       code: "RUNTIME_EXECUTION_RETRYABLE",
-      detail: "socket closed",
     });
 
     expect(state.attemptStatus).toBe("pending");

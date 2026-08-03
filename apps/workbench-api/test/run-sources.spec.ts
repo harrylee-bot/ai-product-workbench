@@ -356,6 +356,7 @@ function createHarness(options: {
   };
   const db = {
     run: { findUnique: vi.fn().mockResolvedValue(options.existing ?? null) },
+    runtimeAttempt: { findUnique: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
   };
   const access = {
@@ -609,6 +610,68 @@ describe("Run immutable Import Source snapshots", () => {
       response: expect.objectContaining({ code: "RUN_RETRY_NOT_ALLOWED" }),
     });
     expect(harness.tx.run.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed while provider cancellation has no durable resolution", async () => {
+    const harness = createHarness();
+    harness.access.findRun = vi.fn().mockResolvedValue(persistedRun({
+      status: "failed",
+      attempt: 3,
+      errorCode: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+      errorDetail: "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
+      errorRetryable: true,
+      finishedAt: now,
+    }));
+    harness.db.runtimeAttempt.findUnique.mockResolvedValue({
+      providerCancellationResolution: null,
+    });
+
+    await expect(harness.service.retry(
+      "principal_1",
+      "run_1",
+      "retry:cancellation-pending:12345678",
+    )).rejects.toMatchObject({
+      status: 409,
+      response: expect.objectContaining({ code: "RUN_RETRY_NOT_ALLOWED" }),
+    });
+    expect(harness.db.runtimeAttempt.findUnique).toHaveBeenCalledWith({
+      where: { runId_attempt: { runId: "run_1", attempt: 3 } },
+      select: {
+        providerCancellationResolution: {
+          select: { runtimeAttemptId: true },
+        },
+      },
+    });
+    expect(harness.runtimeModels.assertAvailable).not.toHaveBeenCalled();
+    expect(harness.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("allows a retry after the matching provider cancellation resolution exists", async () => {
+    const harness = createHarness();
+    harness.access.findRun = vi.fn().mockResolvedValue(persistedRun({
+      status: "failed",
+      attempt: 3,
+      errorCode: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+      errorDetail: "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
+      errorRetryable: true,
+      finishedAt: now,
+    }));
+    harness.db.runtimeAttempt.findUnique.mockResolvedValue({
+      providerCancellationResolution: { runtimeAttemptId: "runtime_attempt_3" },
+    });
+
+    await expect(harness.service.retry(
+      "principal_1",
+      "run_1",
+      "retry:cancellation-converged:12345678",
+    )).resolves.toMatchObject({
+      id: "run_retry_1",
+      retryOfRunId: "run_1",
+    });
+    expect(harness.runtimeModels.assertAvailable).toHaveBeenCalledWith("quality", "generate");
+    expect(harness.tx.run.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ retryOfRunId: "run_1" }),
+    });
   });
 
   it("locks ready Import Sources and snapshots their manifests in request order before queueing", async () => {

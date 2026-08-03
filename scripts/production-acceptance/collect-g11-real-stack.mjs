@@ -21,6 +21,7 @@ import {
   sha256Bytes,
   sha256Canonical,
 } from "../evidence-ledger.mjs";
+import { verifyProductionDeploymentRuntimeBinding } from "../production-deployment-config.mjs";
 import {
   resolveReceiptAuthority,
   verifyTrustedEd25519Signature,
@@ -82,9 +83,9 @@ const OPTION_KEYS = Object.freeze([
   "observeServerFlow",
   "outputDirectory",
   "plan",
+  "resolveScenarioBinding",
   "resolveScenarioSecrets",
   "reviewImages",
-  "scenarioBindings",
   "signCollectorAttestation",
   "signServerObserverReceipt",
   "temporaryDirectory",
@@ -226,11 +227,18 @@ async function collectProductionG11RealStackWithDependencies(options, dependenci
       evidence,
     });
 
-    const origins = productionG11OriginPolicy(deployment);
     const captures = productionG11CapturePlan();
+    const origins = productionG11OriginPolicy(deployment);
+    const captureBindings = await resolveCaptureBindings({
+      captures,
+      datasetReceipt,
+      deployment,
+      input,
+      planIdentity,
+    });
     const captureResults = new Map();
     await mapWithConcurrency(captures, input.captureConcurrency, async (capture) => {
-      const scenarioBinding = structuredClone(input.scenarioBindings[capture.scenarioId]);
+      const scenarioBinding = structuredClone(captureBindings.get(capture.traceId));
       productionG11ScenarioPlan({ scenarioId: capture.scenarioId, scenarioBinding });
       let scenarioSecrets = await input.resolveScenarioSecrets(deepFreeze({
         datasetId: datasetReceipt.datasetId,
@@ -304,7 +312,6 @@ async function collectProductionG11RealStackWithDependencies(options, dependenci
         flowId,
         captures: flowCaptures,
         captureResults,
-        scenarioBinding: structuredClone(input.scenarioBindings[flowId]),
         planIdentity,
         binding,
         environment,
@@ -335,7 +342,7 @@ async function collectProductionG11RealStackWithDependencies(options, dependenci
       flows.push({
         flowId,
         status: flowResult.receipt.status,
-        scenarioBinding: structuredClone(input.scenarioBindings[flowId]),
+        scenarioBinding: structuredClone(flowResult.receipt.scenarioBinding),
         checks: structuredClone(flowResult.receipt.checks),
         evidence: [receiptReference, observerReference, ...flowResult.traceReferences],
       });
@@ -392,7 +399,7 @@ async function collectProductionG11RealStackWithDependencies(options, dependenci
     const assertionCount = captures.reduce((sum, capture) => {
       const scenario = productionG11ScenarioPlan({
         scenarioId: capture.scenarioId,
-        scenarioBinding: input.scenarioBindings[capture.scenarioId],
+        scenarioBinding: captureBindings.get(capture.traceId),
       });
       return sum + scenario.browserSteps.reduce((stepSum, step) => stepSum + step.assertions.length, 0);
     }, 0);
@@ -516,7 +523,6 @@ async function buildFlowEvidence({
   flowId,
   captures,
   captureResults,
-  scenarioBinding,
   planIdentity,
   binding,
   environment,
@@ -527,20 +533,31 @@ async function buildFlowEvidence({
   now,
 }) {
   if (captures.length !== 18) throw new Error(`${flowId} must contain exactly 18 browser captures`);
+  const primaryCapture = captureResults.get(captures[0].traceId);
+  const scenarioBinding = structuredClone(primaryCapture.scenarioBinding);
   const scenario = productionG11ScenarioPlan({ scenarioId: flowId, scenarioBinding });
   const coverage = captures.map((capture) => {
     const result = captureResults.get(capture.traceId);
+    const captureScenario = productionG11ScenarioPlan({
+      scenarioId: flowId,
+      scenarioBinding: result.scenarioBinding,
+    });
     return {
       browser: capture.browserName,
       browserVersion: result.browserVersion,
       viewport: capture.viewport.id,
       motion: capture.motion,
       traceId: capture.traceId,
+      scenarioBinding: structuredClone(result.scenarioBinding),
+      scenarioPlanSha256: productionG11ScenarioPlanSha256({
+        scenarioId: flowId,
+        scenarioBinding: result.scenarioBinding,
+      }),
       nativeTraceSha256: result.nativeTraceSha256,
       startedAtUtc: result.startedAtUtc,
       finishedAtUtc: result.finishedAtUtc,
       status: "PASS",
-      steps: scenario.browserSteps.map(({ stepId, actionId, apiName }) => ({
+      steps: captureScenario.browserSteps.map(({ stepId, actionId, apiName }) => ({
         stepId,
         actionId,
         apiName,
@@ -571,15 +588,21 @@ async function buildFlowEvidence({
     traceWindow: { startedAtUtc, finishedAtUtc: latestTraceFinishedAtUtc },
     observerCheckIds: structuredClone(scenario.observerCheckIds),
   }));
-  validateObserverResult(observation, scenario.observerCheckIds, latestTraceFinishedAtUtc);
+  const observerChecks = validateObserverResult({
+    value: observation,
+    coverage,
+    expectedCheckIds: scenario.observerCheckIds,
+    flowId,
+    latestTraceFinishedAtUtc,
+  });
   const browserChecks = passingBrowserChecks(flowId);
   const checks = Object.fromEntries((productionG11FlowCheckSpec(flowId)?.keys ?? []).map((checkId) => [
     checkId,
-    Object.hasOwn(browserChecks, checkId) ? browserChecks[checkId] : observation.checks[checkId],
+    Object.hasOwn(browserChecks, checkId) ? browserChecks[checkId] : observerChecks[checkId],
   ]));
   const status = productionG11FlowChecksPass(flowId, checks) ? "PASS" : "FAIL";
   const receipt = {
-    schemaVersion: "workbench.production-g11-flow-evidence.v2",
+    schemaVersion: "workbench.production-g11-flow-evidence.v3",
     receiptId: `flow-receipt-${flowId}`,
     plan: structuredClone(planIdentity),
     binding: structuredClone(binding),
@@ -602,7 +625,7 @@ async function buildFlowEvidence({
     observerSignedAtUtc,
   );
   const observerReceipt = {
-    schemaVersion: "workbench.production-g11-server-observer-receipt.v1",
+    schemaVersion: "workbench.production-g11-server-observer-receipt.v2",
     receiptId: `server-observer-${flowId}`,
     plan: structuredClone(planIdentity),
     binding: structuredClone(binding),
@@ -614,7 +637,8 @@ async function buildFlowEvidence({
     originPolicySha256: productionG11OriginPolicySha256(deployment),
     flowId,
     coverage: structuredClone(coverage),
-    checks: structuredClone(observation.checks),
+    captureObservations: structuredClone(observation.captureObservations),
+    checks: structuredClone(observerChecks),
     observedAtUtc: observation.observedAtUtc,
     signedAtUtc: observerSignedAtUtc,
     trustPolicySha256: trustPolicy.sha256,
@@ -838,26 +862,64 @@ function passingBrowserChecks(flowId) {
   if (!spec) throw new Error(`${flowId} is not a protected G11 flow`);
   const checks = Object.fromEntries(spec.browserCheckIds.map((checkId) => [checkId, true]));
   if (flowId === "mixed-rejection") {
-    Object.assign(checks, { problemStatus: 422, runCount: 0, sseEventCount: 0 });
+    Object.assign(checks, { problemStatus: 400, runCount: 0, sseEventCount: 0 });
   }
   return checks;
 }
 
-function validateObserverResult(value, expectedCheckIds, latestTraceFinishedAtUtc) {
-  exactKeys(value, ["checks", "observedAtUtc"], "server observer result");
-  if (!value.checks || typeof value.checks !== "object" || Array.isArray(value.checks)) {
-    throw new Error("server observer result checks must be an object");
-  }
-  if (canonicalJson(Object.keys(value.checks).sort()) !== canonicalJson([...expectedCheckIds].sort())) {
-    throw new Error("server observer result checks do not match the protected observer partition");
-  }
+function validateObserverResult({ value, coverage, expectedCheckIds, flowId, latestTraceFinishedAtUtc }) {
+  exactKeys(value, ["captureObservations", "observedAtUtc"], "server observer result");
   if (!validUtc(value.observedAtUtc)) throw new Error("server observer result observedAtUtc is invalid");
   assertTimeOrder(latestTraceFinishedAtUtc, value.observedAtUtc, "server observation time");
-  for (const check of Object.values(value.checks)) {
-    if (typeof check !== "boolean" && (!Number.isInteger(check) || check < 0)) {
-      throw new Error("server observer checks must contain only booleans or non-negative integers");
+  if (!Array.isArray(value.captureObservations) || value.captureObservations.length !== coverage.length) {
+    throw new Error("server observer result must cover all 18 capture bindings");
+  }
+  const observations = new Map();
+  for (const captureObservation of value.captureObservations) {
+    exactKeys(captureObservation, [
+      "traceId", "scenarioBinding", "scenarioPlanSha256", "checks",
+    ], "server observer capture result");
+    if (observations.has(captureObservation.traceId)) {
+      throw new Error("server observer result contains a duplicate capture binding");
+    }
+    if (!captureObservation.checks || typeof captureObservation.checks !== "object"
+      || Array.isArray(captureObservation.checks)
+      || canonicalJson(Object.keys(captureObservation.checks).sort())
+        !== canonicalJson([...expectedCheckIds].sort())) {
+      throw new Error("server observer capture checks do not match the protected observer partition");
+    }
+    for (const check of Object.values(captureObservation.checks)) {
+      if (typeof check !== "boolean" && (!Number.isInteger(check) || check < 0)) {
+        throw new Error("server observer checks must contain only booleans or non-negative integers");
+      }
+    }
+    observations.set(captureObservation.traceId, captureObservation);
+  }
+  for (const captured of coverage) {
+    const observed = observations.get(captured.traceId);
+    if (!observed
+      || !canonicalEqual(observed.scenarioBinding, captured.scenarioBinding)
+      || observed.scenarioPlanSha256 !== captured.scenarioPlanSha256) {
+      throw new Error("server observer result does not bind every browser capture identity");
     }
   }
+  return aggregateObserverChecks(flowId, value.captureObservations, expectedCheckIds);
+}
+
+function aggregateObserverChecks(flowId, captureObservations, expectedCheckIds) {
+  return Object.fromEntries(expectedCheckIds.map((checkId) => {
+    const values = captureObservations.map(({ checks }) => checks[checkId]);
+    if (values.every((value) => typeof value === "boolean")) {
+      return [checkId, values.every((value) => value === true)];
+    }
+    if (!values.every((value) => Number.isInteger(value) && value >= 0)) {
+      throw new Error("server observer checks change type across capture bindings");
+    }
+    const aggregate = flowId === "long-run-7686-plus"
+      ? Math.min(...values)
+      : values.reduce((sum, value) => sum + value, 0);
+    return [checkId, aggregate];
+  }));
 }
 
 function validateDeploymentReceiptInput({
@@ -1016,6 +1078,10 @@ function validateOptions(options) {
     || !Array.isArray(options.trustPolicy?.receiptAuthorities)) {
     throw new Error("collector requires the loaded external production trust policy for the plan environment");
   }
+  verifyProductionDeploymentRuntimeBinding(options.plan.payload.deploymentConfig, {
+    environmentId: options.plan.payload.binding.environmentId,
+    trustPolicy: options.trustPolicy,
+  });
   exactKeys(options.browserVersions, G11_BROWSERS, "browserVersions");
   for (const browserName of G11_BROWSERS) {
     const version = options.browserVersions[browserName];
@@ -1024,17 +1090,9 @@ function validateOptions(options) {
       throw new Error(`${browserName} browserVersion is invalid`);
     }
   }
-  const scenarioIds = [
-    ...G11_VISUAL_STATES.map((state) => `visual-${state}`),
-    ...productionG11FlowIds(),
-  ];
-  exactKeys(options.scenarioBindings, scenarioIds, "scenarioBindings");
-  for (const scenarioId of scenarioIds) {
-    productionG11ScenarioPlan({ scenarioId, scenarioBinding: options.scenarioBindings[scenarioId] });
-  }
   for (const callback of [
-    "collectDatasetReceipt", "observeDeployment", "observeServerFlow", "resolveScenarioSecrets",
-    "reviewImages", "signCollectorAttestation", "signServerObserverReceipt",
+    "collectDatasetReceipt", "observeDeployment", "observeServerFlow", "resolveScenarioBinding",
+    "resolveScenarioSecrets", "reviewImages", "signCollectorAttestation", "signServerObserverReceipt",
   ]) {
     if (typeof options[callback] !== "function") throw new Error(`${callback} must be an explicit production callback`);
   }
@@ -1045,6 +1103,50 @@ function validateOptions(options) {
     if (typeof value !== "string" || !path.isAbsolute(value)) throw new Error(`${key} must be an absolute path`);
   }
   return { ...options, captureConcurrency };
+}
+
+async function resolveCaptureBindings({ captures, datasetReceipt, deployment, input, planIdentity }) {
+  const bindings = new Map();
+  for (const capture of captures) {
+    const resolved = await input.resolveScenarioBinding(deepFreeze({
+      datasetId: datasetReceipt.datasetId,
+      datasetSha256: datasetReceipt.datasetSha256,
+      plan: structuredClone(planIdentity),
+      deployment: structuredClone(deployment),
+      scenarioId: capture.scenarioId,
+      traceId: capture.traceId,
+      browserName: capture.browserName,
+      viewport: structuredClone(capture.viewport),
+      motion: capture.motion,
+    }));
+    const scenarioBinding = structuredClone(resolved);
+    productionG11ScenarioPlan({ scenarioId: capture.scenarioId, scenarioBinding });
+    bindings.set(capture.traceId, deepFreeze(scenarioBinding));
+  }
+  assertIndependentCaptureBindings(captures, bindings);
+  return bindings;
+}
+
+function assertIndependentCaptureBindings(captures, bindings) {
+  if (bindings.size !== captures.length) {
+    throw new Error("every G11 capture must resolve exactly one scenario binding");
+  }
+  const protectedIdentityKeys = ["projectId", "threadId", "deniedProjectId", "runId", "artifactVersionId"];
+  const identities = new Map(protectedIdentityKeys.map((key) => [key, new Map()]));
+  for (const capture of captures) {
+    const scenarioBinding = bindings.get(capture.traceId);
+    for (const key of protectedIdentityKeys) {
+      const value = scenarioBinding[key];
+      if (value === undefined) continue;
+      const previousTraceId = identities.get(key).get(value);
+      if (previousTraceId) {
+        throw new Error(
+          `G11 captures ${previousTraceId} and ${capture.traceId} reuse ${key}; every capture requires isolated mutable resources`,
+        );
+      }
+      identities.get(key).set(value, capture.traceId);
+    }
+  }
 }
 
 function validateDependencies(value) {

@@ -25,7 +25,10 @@ import {
   verifyTrustedEd25519Signature,
 } from "./workbench-production-trust-policy.mjs";
 import { loadProductionImageDigestBinding } from "./production-image-inventory.mjs";
-import { loadVerifiedProductionDeploymentConfig } from "./production-deployment-config.mjs";
+import {
+  loadVerifiedProductionDeploymentConfig,
+  verifyProductionDeploymentRuntimeBinding,
+} from "./production-deployment-config.mjs";
 import {
   assertGateEntriesMatchCatalog,
   CONTROL_CATALOG_PACKAGE_PATH,
@@ -288,6 +291,14 @@ export async function verifyHardCutAcceptancePackage({
   const manifest = manifestDescriptor ? parseManifest(files.get(manifestDescriptor.path), findings) : null;
   if (manifest) validateManifestBinding(manifest, document.candidate, productionBinding, controlCatalog, findings);
   validateApprovalTrustEnvironment(trustPolicy, manifest?.candidateBinding?.environmentId, findings);
+  try {
+    verifyProductionDeploymentRuntimeBinding(document.deploymentConfig, {
+      environmentId: manifest?.candidateBinding?.environmentId,
+      trustPolicy,
+    });
+  } catch (error) {
+    findings.push(`package signed deployment trust binding is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   validateGates(
     document.gates,
@@ -384,6 +395,7 @@ function validateDeploymentConfig(value, expected, findings) {
     "migrationSha256",
     "effectiveConfigSha256",
     "secretVersionsSha256",
+    "runtimeWorkerExecution",
     "identity",
     "dependencies",
   ], "package.deploymentConfig", findings);
@@ -1005,6 +1017,7 @@ export function productionApprovalSignaturePayload({
       migrationSha256: deploymentConfig.migrationSha256,
       effectiveConfigSha256: deploymentConfig.effectiveConfigSha256,
       secretVersionsSha256: deploymentConfig.secretVersionsSha256,
+      runtimeWorkerExecution: structuredClone(deploymentConfig.runtimeWorkerExecution),
       identity: deploymentConfig.identity,
       dependencies: deploymentConfig.dependencies,
     },

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MotionConfig } from "framer-motion";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -89,6 +89,42 @@ describe("ProjectTranscriptPanel", () => {
     expect(screen.queryByText("正在生成需求文档")).toBeNull();
     expect(card.querySelector(".workbench-status-spinner")).not.toBeNull();
     expect(card.querySelectorAll(".workbench-agent-bubble > span > span")).toHaveLength(2);
+  });
+
+  it("preserves active PRD context and focus across collapse and expand", async () => {
+    const { container } = renderPanel({
+      generationStage: "structuring-prd",
+      prompt: "生成支付改造需求说明书",
+      runPhaseLabel: "正在生成需求文档",
+    });
+    const card = getAgentCard(container);
+    const collapseButton = within(card).getByRole("button", { name: "收起 Agent 状态" });
+
+    collapseButton.focus();
+    expect(document.activeElement).toBe(collapseButton);
+    fireEvent.click(collapseButton);
+
+    const expandButton = within(card).getByRole("button", { name: "展开 Agent 状态" });
+    expect(card.dataset.expanded).toBe("false");
+    expect(card.style.height).toBe("52px");
+    expect(card.style.width).toBe("64px");
+    expect(card.dataset.prdBodyless).toBeUndefined();
+    expect(expandButton.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(expandButton);
+    await waitFor(() => {
+      expect(within(card).queryByText("生成支付改造需求说明书")).toBeNull();
+      expect(within(card).queryByText("规划结构")).toBeNull();
+    });
+
+    fireEvent.click(expandButton);
+
+    expect(card.dataset.expanded).toBe("true");
+    expect(card.style.height).toBe("auto");
+    expect(card.style.width).toBe("280px");
+    expect(card.dataset.prdBodyless).toBeUndefined();
+    expect(within(card).getByText("生成支付改造需求说明书")).not.toBeNull();
+    expect(within(card).getByText("正在处理需求文档，当前阶段：规划结构")).not.toBeNull();
+    expect(within(card).getByText("规划结构")).not.toBeNull();
   });
 
   it.each([

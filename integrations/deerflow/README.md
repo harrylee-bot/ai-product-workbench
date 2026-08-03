@@ -110,8 +110,8 @@ Smoke 使用随机 Workbench principal，先验证：
 
 先在真实 Workbench 数据库准备一次性验收夹具：
 
-- 一个通过正常 Workbench API 创建的 `queued` Run，prompt 明确要求先调用 `workbench_knowledge_retrieve`，并包含验收 query，但不得包含预期 probe 或 citation；Run 必须 pin 到目标 `ready` KnowledgeRelease，且尚未产生 RuntimeAttempt 或 output entry。
-- 准备和执行期间暂停该验收 Run 的队列消费，避免生产 Worker 抢占。RuntimeBinding 和 RuntimeAttempt 由 smoke 内的真实 `RunProcessor` 按正常路径创建，不能手工写业务表。
+- 两个通过正常 Workbench API 创建的 `queued` Run：有效范围 Run 的 prompt 明确要求先调用 `workbench_knowledge_retrieve`，并 pin 到目标 `ready` KnowledgeRelease；对照 Run 不 pin KnowledgeRelease。两个 prompt 均不得包含预期 probe 或 citation，且两者都尚未产生 RuntimeAttempt 或 output entry。
+- 只在准备夹具期间暂停目标队列消费并清除 API 已发布但尚未领取的夹具 job；执行 smoke 前必须恢复候选 Runtime Worker。smoke 只通过持久化队列触发两个 Run，不在本地实例化 `RunProcessor`，也不能手工写业务表。
 - Run 的 Principal 必须为 active ProjectMember；Project、Thread 必须 active；workspace-scoped release 必须属于同一 Workspace。
 - 目标 release 中应有一个不会出现在 prompt 的高熵 probe，以及可唯一定位的 citation id 或 sourcePath 片段。
 
@@ -125,6 +125,11 @@ npm run runtime:deerflow:knowledge:smoke:test
 
 ```bash
 NODE_ENV=production \
+WORKBENCH_ENVIRONMENT_ID="<trust-policy environment id>" \
+WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID="sha256:<trusted worker SPKI digest>" \
+WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID="<trusted worker signer id>" \
+WORKBENCH_PRODUCTION_TRUST_POLICY_PATH="/absolute/path/to/production-trust-policy.json" \
+WORKBENCH_PRODUCTION_TRUST_POLICY_SHA256="<exact trust-policy SHA-256>" \
 WORKBENCH_KNOWLEDGE_SMOKE_RUN_ID="<queued-run-id>" \
 WORKBENCH_KNOWLEDGE_SMOKE_PRINCIPAL_ID="<active-principal-id>" \
 WORKBENCH_KNOWLEDGE_SMOKE_PROJECT_ID="<active-project-id>" \
@@ -132,10 +137,14 @@ WORKBENCH_KNOWLEDGE_SMOKE_RELEASE_ID="<ready-release-id>" \
 WORKBENCH_KNOWLEDGE_SMOKE_QUERY="<query present in the stored Run prompt>" \
 WORKBENCH_KNOWLEDGE_SMOKE_EXPECTED_PROBE="<high-entropy text only present in the release>" \
 WORKBENCH_KNOWLEDGE_SMOKE_EXPECTED_CITATION="<citation id or sourcePath fragment>" \
+WORKBENCH_KNOWLEDGE_SMOKE_NULL_RUN_ID="<queued null-release run id>" \
+WORKBENCH_KNOWLEDGE_SMOKE_NULL_PRINCIPAL_ID="<active null-release principal id>" \
+WORKBENCH_KNOWLEDGE_SMOKE_NULL_PROJECT_ID="<active null-release project id>" \
+WORKBENCH_KNOWLEDGE_SMOKE_NULL_QUERY="<query present in the null-release Run prompt>" \
 npm run runtime:deerflow:knowledge:smoke
 ```
 
-该命令通过真实 `RunProcessor` 和 `PrismaKnowledgeToolGrantIssuer` 签发短期 capability，由 `lead_agent` 的 request-scoped `runtime.context.secrets` 调用已注册的 `workbench_knowledge_retrieve`。验收必须同时满足：
+该命令把两个 job 写入真实 pg-boss 队列，并要求候选容器中的 Runtime Worker 执行真实 `RunProcessor`。Worker 必须返回由容器私钥签名的执行收据；smoke 使用哈希固定的外部 production trust policy 验证签名、候选 SHA、镜像 digest、环境、job、RuntimeAttempt、结果哈希和容器副本身份。随后 `PrismaKnowledgeToolGrantIssuer` 签发短期 capability，由 `lead_agent` 的 request-scoped `runtime.context.secrets` 调用已注册的 `workbench_knowledge_retrieve`。验收必须同时满足：
 
 1. Workbench immutable invocation ledger 中存在 `succeeded` response，release id、probe 和 citation 都匹配。
 2. DeerFlow ToolMessage 中存在同一次 trusted tool 调用，且与 ledger response 共享完全一致的 citation 指纹；只在 assistant 文本中伪造结果不能通过。

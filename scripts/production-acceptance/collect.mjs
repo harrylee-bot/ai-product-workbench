@@ -21,6 +21,7 @@ import {
   sha256Canonical,
   verifyEvidenceLedger,
 } from "../evidence-ledger.mjs";
+import { verifyProductionDeploymentRuntimeBinding } from "../production-deployment-config.mjs";
 import { loadProductionTrustPolicy } from "../workbench-production-trust-policy.mjs";
 import {
   CONTROL_CATALOG_PACKAGE_PATH,
@@ -70,6 +71,16 @@ export async function collectProductionAcceptanceEvidence({
   }).catch(() => {
     throw new ProductionAcceptanceContractError(["external production trust policy validation failed"]);
   });
+  try {
+    verifyProductionDeploymentRuntimeBinding(plan.payload.deploymentConfig, {
+      environmentId: plan.payload.binding.environmentId,
+      trustPolicy,
+    });
+  } catch (error) {
+    throw new ProductionAcceptanceContractError([
+      `signed deployment trust binding validation failed: ${error instanceof Error ? error.message : String(error)}`,
+    ]);
+  }
   const sourceRoot = await canonicalDirectory(evidenceRoot, "evidence root");
   const observationRoot = await canonicalDirectory(observationsDirectory, "observations directory");
   assertWithin(sourceRoot, observationRoot, "observations directory must be inside the evidence root");

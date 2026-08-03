@@ -71,6 +71,21 @@ testWithAdmin("transfers existing schema ownership and keeps runtime append-only
       phase: "grant",
     });
 
+    const postGrantMigrator = new Client({
+      connectionString: roleConnection(databaseUrl, migratorRole, migratorPassword),
+    });
+    await postGrantMigrator.connect();
+    try {
+      await postGrantMigrator.query(`
+        CREATE TABLE workbench.post_grant_default_privilege_fixture (
+          id TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
+    } finally {
+      await postGrantMigrator.end();
+    }
+
     const runtime = new Client({
       connectionString: roleConnection(databaseUrl, runtimeRole, runtimePassword),
     });
@@ -129,6 +144,89 @@ testWithAdmin("transfers existing schema ownership and keeps runtime append-only
       );
       await assert.rejects(
         runtime.query("TRUNCATE workbench.runtime_provider_states"),
+        /permission denied/u,
+      );
+      const cancellationResolutionPrivileges = await runtime.query(`
+        SELECT
+          has_table_privilege(current_user, 'workbench.runtime_provider_cancellation_resolutions', 'SELECT') AS "canSelect",
+          has_table_privilege(current_user, 'workbench.runtime_provider_cancellation_resolutions', 'INSERT') AS "canInsert",
+          has_table_privilege(current_user, 'workbench.runtime_provider_cancellation_resolutions', 'UPDATE') AS "canUpdate",
+          has_table_privilege(current_user, 'workbench.runtime_provider_cancellation_resolutions', 'DELETE') AS "canDelete",
+          has_table_privilege(current_user, 'workbench.runtime_provider_cancellation_resolutions', 'TRUNCATE') AS "canTruncate"
+      `);
+      assert.deepEqual(cancellationResolutionPrivileges.rows[0], {
+        canSelect: true,
+        canInsert: true,
+        canUpdate: false,
+        canDelete: false,
+        canTruncate: false,
+      });
+      await runtime.query(`
+        INSERT INTO workbench.runtime_provider_cancellation_resolutions
+          (runtime_attempt_id, run_id, failure_code, outcome)
+        VALUES
+          ('attempt_resolution_role_1', 'run_resolution_role_1', 'RUNTIME_TIMEOUT', 'cancelled')
+      `);
+      await assert.rejects(
+        runtime.query(`
+          UPDATE workbench.runtime_provider_cancellation_resolutions
+          SET outcome = 'already_terminal'
+          WHERE runtime_attempt_id = 'attempt_resolution_role_1'
+        `),
+        /permission denied/u,
+      );
+      await assert.rejects(
+        runtime.query("DELETE FROM workbench.runtime_provider_cancellation_resolutions"),
+        /permission denied/u,
+      );
+      await assert.rejects(
+        runtime.query("TRUNCATE workbench.runtime_provider_cancellation_resolutions"),
+        /permission denied/u,
+      );
+      const cancellationResolution = await runtime.query(`
+        SELECT run_id AS "runId", failure_code AS "failureCode", outcome
+        FROM workbench.runtime_provider_cancellation_resolutions
+        WHERE runtime_attempt_id = 'attempt_resolution_role_1'
+      `);
+      assert.deepEqual(cancellationResolution.rows, [{
+        runId: "run_resolution_role_1",
+        failureCode: "RUNTIME_TIMEOUT",
+        outcome: "cancelled",
+      }]);
+
+      const defaultPrivileges = await runtime.query(`
+        SELECT
+          has_table_privilege(current_user, 'workbench.post_grant_default_privilege_fixture', 'SELECT') AS "canSelect",
+          has_table_privilege(current_user, 'workbench.post_grant_default_privilege_fixture', 'INSERT') AS "canInsert",
+          has_table_privilege(current_user, 'workbench.post_grant_default_privilege_fixture', 'UPDATE') AS "canUpdate",
+          has_table_privilege(current_user, 'workbench.post_grant_default_privilege_fixture', 'DELETE') AS "canDelete",
+          has_table_privilege(current_user, 'workbench.post_grant_default_privilege_fixture', 'TRUNCATE') AS "canTruncate"
+      `);
+      assert.deepEqual(defaultPrivileges.rows[0], {
+        canSelect: true,
+        canInsert: true,
+        canUpdate: false,
+        canDelete: false,
+        canTruncate: false,
+      });
+      await runtime.query(`
+        INSERT INTO workbench.post_grant_default_privilege_fixture (id, value)
+        VALUES ('default_role_1', 'append-only')
+      `);
+      await assert.rejects(
+        runtime.query(`
+          UPDATE workbench.post_grant_default_privilege_fixture
+          SET value = 'tampered'
+          WHERE id = 'default_role_1'
+        `),
+        /permission denied/u,
+      );
+      await assert.rejects(
+        runtime.query("DELETE FROM workbench.post_grant_default_privilege_fixture"),
+        /permission denied/u,
+      );
+      await assert.rejects(
+        runtime.query("TRUNCATE workbench.post_grant_default_privilege_fixture"),
         /permission denied/u,
       );
       await assert.rejects(runtime.query("CREATE SCHEMA runtime_escape"), /permission denied/u);
@@ -297,6 +395,12 @@ async function createAdminOwnedFixture(databaseUrl) {
         runtime_attempt_id TEXT PRIMARY KEY,
         state_sha256 CHAR(64) NOT NULL
       );
+      CREATE TABLE workbench.runtime_provider_cancellation_resolutions (
+        runtime_attempt_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        failure_code VARCHAR(120) NOT NULL,
+        outcome VARCHAR(32) NOT NULL
+      );
     `);
     await admin.query("SET search_path TO workbench");
     await admin.query(readFileSync(
@@ -324,7 +428,8 @@ async function assertFixtureOwnership(databaseUrl, migratorRole) {
       WHERE namespace.nspname IN ('workbench', 'workbench_jobs')
         AND relation.relname IN (
           'fixture_table', 'fixture_view', 'fixture_materialized',
-          'fixture_sequence', 'fixture_job', 'runtime_provider_states'
+          'fixture_sequence', 'fixture_job', 'runtime_provider_states',
+          'runtime_provider_cancellation_resolutions'
         )
       UNION ALL
       SELECT 'function:' || proname, pg_get_userbyid(proowner)
@@ -345,6 +450,7 @@ async function assertFixtureOwnership(databaseUrl, migratorRole) {
       "relation:fixture_sequence",
       "relation:fixture_table",
       "relation:fixture_view",
+      "relation:runtime_provider_cancellation_resolutions",
       "relation:runtime_provider_states",
       "schema:workbench",
       "schema:workbench_jobs",
