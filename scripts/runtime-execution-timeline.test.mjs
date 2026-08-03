@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildRuntimeExecutionTimeline } from "./runtime-execution-timeline.mjs";
 
 const root = new URL("../", import.meta.url);
+
+test("the real-stack E2E entrypoint is valid executable JavaScript", () => {
+  const entrypoint = fileURLToPath(new URL("scripts/workbench-postgres-http-e2e.mjs", root));
+  const result = spawnSync(process.execPath, ["--check", entrypoint], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+});
 
 test("pins the 900-second root cause and the independent application liveness budgets", async () => {
   const [

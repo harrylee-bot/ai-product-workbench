@@ -1096,8 +1096,6 @@ async function assertRuntimeProcessTerminalState(runId, expectedStatus, { requir
   };
 }
 
-const runtimeTerminalJobStates = new Set(["cancelled", "completed", "failed"]);
-
 async function runtimeQueueJobs(runId) {
   const result = await queryDatabase(`
     SELECT
