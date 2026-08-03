@@ -16,6 +16,21 @@ test("the real-stack E2E entrypoint is valid executable JavaScript", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+test("crash fault injection preserves the execution lease timestamp shape", async () => {
+  const entrypoint = await read("scripts/workbench-postgres-http-e2e.mjs");
+  const start = entrypoint.indexOf("async function expireRuntimeExecutionAfterCrash(");
+  const end = entrypoint.indexOf("async function exhaustRuntimeCancelJob(", start);
+
+  assert(start >= 0 && end > start, "Runtime crash fault injection must remain present");
+  const faultInjection = entrypoint.slice(start, end);
+  const pairedLeaseUpdate = /SET execution_heartbeat_at = clock_timestamp\(\) - interval '2 seconds',\s*execution_lease_expires_at = clock_timestamp\(\) - interval '1 second'/gu;
+  assert.equal(
+    [...faultInjection.matchAll(pairedLeaseUpdate)].length,
+    2,
+    "Run and Runtime attempt leases must preserve lease_expires_at > heartbeat_at",
+  );
+});
+
 test("pins the 900-second root cause and the independent application liveness budgets", async () => {
   const [
     packageJson,

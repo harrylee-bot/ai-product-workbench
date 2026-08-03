@@ -915,12 +915,14 @@ async function expireRuntimeExecutionAfterCrash(runId, activeJobId) {
   const result = await queryDatabase(`
     WITH expired_run AS (
       UPDATE workbench.runs
-      SET execution_lease_expires_at = clock_timestamp() - interval '1 second'
+      SET execution_heartbeat_at = clock_timestamp() - interval '2 seconds',
+          execution_lease_expires_at = clock_timestamp() - interval '1 second'
       WHERE id = $1 AND status = 'running'
       RETURNING id
     ), expired_attempt AS (
       UPDATE workbench.runtime_attempts
-      SET execution_lease_expires_at = clock_timestamp() - interval '1 second'
+      SET execution_heartbeat_at = clock_timestamp() - interval '2 seconds',
+          execution_lease_expires_at = clock_timestamp() - interval '1 second'
       WHERE run_id = $1 AND status = 'running'
       RETURNING id
     ), exhausted_job AS (
