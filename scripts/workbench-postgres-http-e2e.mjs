@@ -971,7 +971,7 @@ async function exhaustRuntimeCancelJob(runId) {
         RETURNING id
       ), aged_run AS (
         UPDATE workbench.runs
-        SET updated_at = clock_timestamp() - interval '5 seconds'
+        SET updated_at = (clock_timestamp() AT TIME ZONE 'UTC') - interval '5 seconds'
         WHERE id = $1 AND status = 'cancelling'
         RETURNING id
       )

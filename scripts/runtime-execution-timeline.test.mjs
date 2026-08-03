@@ -31,6 +31,20 @@ test("crash fault injection preserves the execution lease timestamp shape", asyn
   );
 });
 
+test("cancellation fault injection ages Prisma timestamps in UTC", async () => {
+  const entrypoint = await read("scripts/workbench-postgres-http-e2e.mjs");
+  const start = entrypoint.indexOf("async function exhaustRuntimeCancelJob(");
+  const end = entrypoint.indexOf("async function forceQueueSupervision(", start);
+
+  assert(start >= 0 && end > start, "Runtime cancellation fault injection must remain present");
+  const faultInjection = entrypoint.slice(start, end);
+  assert.match(
+    faultInjection,
+    /SET updated_at = \(clock_timestamp\(\) AT TIME ZONE 'UTC'\) - interval '5 seconds'/u,
+  );
+  assert.doesNotMatch(faultInjection, /SET updated_at = clock_timestamp\(\)/u);
+});
+
 test("pins the 900-second root cause and the independent application liveness budgets", async () => {
   const [
     packageJson,
