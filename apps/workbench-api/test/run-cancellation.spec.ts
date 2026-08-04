@@ -61,7 +61,8 @@ function rawSqlText(value: unknown) {
 }
 
 function createHarness(options: {
-  status?: "running" | "cancelling" | "cancelled";
+  status?: "running" | "waiting_input" | "cancelling" | "cancelled";
+  attemptStatus?: "submitting" | "running" | "waiting_input";
   transactionReplay?: ReturnType<typeof receipt> | null;
 } = {}) {
   let run = persistedRun({
@@ -96,7 +97,9 @@ function createHarness(options: {
       findUniqueOrThrow: vi.fn().mockImplementation(async () => run),
     },
     runtimeAttempt: {
-      findFirst: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(options.attemptStatus
+        ? { id: "runtime_attempt_1", status: options.attemptStatus }
+        : null),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
   };
@@ -214,6 +217,21 @@ describe("Run cancellation durable idempotency", () => {
     expect(harness.events.append).not.toHaveBeenCalled();
     expect(harness.queue.sendInTransaction).not.toHaveBeenCalled();
     expect(harness.getReceipt()).toMatchObject({ runId: "run_1", principalId: "principal_1" });
+  });
+
+  it("clears waiting-input attempt completion evidence when cancellation reopens it", async () => {
+    const harness = createHarness({ status: "waiting_input", attemptStatus: "waiting_input" });
+
+    await expect(harness.service.cancel("principal_1", "run_1", idempotencyKey))
+      .resolves.toMatchObject({ status: "cancelling" });
+    expect(harness.tx.runtimeAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "runtime_attempt_1",
+        runId: "run_1",
+        status: { in: ["submitting", "running", "waiting_input"] },
+      },
+      data: { status: "cancelling", finishedAt: null },
+    });
   });
 
   it("rejects reuse of the same caller key for another Run", async () => {

@@ -93,7 +93,7 @@ export class RuntimeWallClockBudget {
   rebase(startedAtMs: number): void {
     if (!Number.isFinite(startedAtMs)) throw new Error("RUNTIME_EXECUTION_STARTED_AT_INVALID");
     this.stop();
-    const remainingMs = this.maximumWallClockMs - Math.max(0, Date.now() - startedAtMs);
+    const remainingMs = this.maximumWallClockMs - Math.max(0, performance.now() - startedAtMs);
     if (remainingMs <= 0) {
       recordRuntimeLivenessMetric({
         operation: "wall-clock",
@@ -153,12 +153,15 @@ export class RuntimeProviderCancellationBudget {
   }
 }
 
-export async function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) throw abortReason(signal);
+export function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(abortReason(signal));
-    signal.addEventListener("abort", abort, { once: true });
     operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
   });
 }
 

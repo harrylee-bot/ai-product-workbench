@@ -88,33 +88,31 @@ test("pins the 900-second root cause and the independent application liveness bu
     /function finalRuntimeProviderLivenessError\([\s\S]*?candidate instanceof RuntimeLivenessError\s*&& candidate\.code !== "RUNTIME_PROVIDER_CANCEL_TIMEOUT"/u,
   );
 
-  const cleanup = processor.indexOf("const cleanup = await this.cancelLivenessExceededProvider({");
-  const reconcileKnownRun = processor.indexOf("await this.attempts.recordRetryableError(claim, {", cleanup);
-  const reconcileUnknownSubmission = processor.indexOf("await this.attempts.markSubmissionUnknown(claim);", cleanup);
-  const unresolvedTerminalize = processor.indexOf(
-    "await this.failRun(runId, runtimeAttemptId, failure, retryable, claim, failureContext);",
+  const providerMayExist = processor.indexOf("const providerMayExist = Boolean(");
+  const terminalize = processor.indexOf("const terminalization = await this.failRun(", providerMayExist);
+  const cleanup = processor.indexOf("await this.reconcileTerminalLivenessProvider({", terminalize);
+  const markSubmissionUnknown = processor.indexOf(
+    "await this.attempts.markSubmissionUnknown(claim);",
     cleanup,
   );
-  const terminalize = processor.indexOf("await this.failRun(runId, runtimeAttemptId, failure, retryable, claim);", cleanup);
-  assert(cleanup >= 0, "terminal provider liveness errors must enter the shared cancellation path");
-  assert(unresolvedTerminalize > cleanup, "unconfirmed cleanup must become a durable terminal failure");
-  assert(terminalize > cleanup, "local terminalization must follow provider cancellation cleanup");
-  assert(cleanup < reconcileKnownRun && cleanup < reconcileUnknownSubmission);
-  assert(unresolvedTerminalize < terminalize);
-  assert(reconcileKnownRun < terminalize && reconcileUnknownSubmission < terminalize);
-  const cleanupPath = processor.slice(cleanup, terminalize);
-  assert.match(cleanupPath, /if \(runtimeProviderCleanupConverged\(cleanup\.result\)\)/u);
+  assert(providerMayExist >= 0, "terminal liveness handling must classify provider side effects");
+  assert(terminalize > providerMayExist, "provider cleanup intent must be durable before side effects");
+  assert(cleanup > terminalize, "provider cleanup must follow local terminalization");
+  assert(markSubmissionUnknown > cleanup, "submission retry handling must remain outside terminal cleanup");
+  const terminalCleanupPath = processor.slice(providerMayExist, markSubmissionUnknown);
   assert.match(
-    cleanupPath,
-    /failureContext = \{[\s\S]*?code: runtimeProviderCancellationUnconfirmedCode,[\s\S]*?submissionUnknown: !externalRunId/u,
+    terminalCleanupPath,
+    /code: runtimeProviderCancellationUnconfirmedCode,[\s\S]*?detailCode: terminalLivenessError\.code,[\s\S]*?if \(terminalization === "terminalized"\)[\s\S]*?reconcileTerminalLivenessProvider/u,
   );
-  assert.match(
-    cleanupPath,
-    /error instanceof RuntimeSubmissionUnknownError[\s\S]*?!providerCleanupConverged[\s\S]*?!failureContext[\s\S]*?this\.attempts\.markSubmissionUnknown/u,
-  );
+  assert.doesNotMatch(processor, /cancelLivenessExceededProvider/u);
   assert.match(
     processor,
-    /private async cancelLivenessExceededProvider\([\s\S]*?new RuntimeProviderCancellationBudget\(this\.executionDeadlineCancelMs\)[\s\S]*?raceWithAbort\(this\.runtime\.cancel\([\s\S]*?this\.attempts\.attachExternalRunForCleanup\([\s\S]*?input\.runtimeAttemptId,[\s\S]*?candidateExternalRunId,[\s\S]*?cancellationBudget\.signal\), cancellationBudget\.signal\)/u,
+    /const remainingOperationMs = operation\.monotonicDeadlineAtMs - performance\.now\(\)[\s\S]*?this\.runtime\.cancel\([\s\S]*?externalRunId: operation\.externalRunId,[\s\S]*?this\.attempts\.attachExternalRunForCleanup\([\s\S]*?operation\.epoch,[\s\S]*?externalRunId[\s\S]*?operationBudget\.signal/u,
+  );
+  assert.doesNotMatch(
+    processor,
+    /operation\.deadlineAt\.getTime\(\) - Date\.now\(\)/u,
+    "provider cancellation timers must not mix the database and host wall clocks",
   );
 });
 

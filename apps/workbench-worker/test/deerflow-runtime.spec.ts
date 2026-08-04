@@ -3579,6 +3579,166 @@ describe("DeerFlow runtime adapter", () => {
     expect(recovered).not.toHaveBeenCalled();
   });
 
+  it("reports a supplied external run ID as absent when the exact lookup returns 404", async () => {
+    const requests: Array<{ url: URL; init: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      requests.push({ url, init });
+      return new Response("missing", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const recovered = vi.fn(async () => undefined);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.cancel({
+      runId: "run_1",
+      runtimeAttemptId: "attempt_1",
+      principalId: "principal_1",
+      externalThreadId: "deer_thread_1",
+      externalRunId: "external_run_missing",
+    }, recovered)).resolves.toEqual({
+      disposition: "external_run_absent",
+      externalRunId: "external_run_missing",
+      externalStatus: null,
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url.pathname).toBe(
+      "/api/threads/deer_thread_1/runs/external_run_missing",
+    );
+    expect(recovered).not.toHaveBeenCalled();
+  });
+
+  it("reports a supplied external run ID as absent when cancellation returns 404", async () => {
+    const requests: Array<{ url: URL; init: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      requests.push({ url, init });
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_deleted") {
+        return Response.json(runtimeRun("external_run_deleted"));
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_deleted/cancel") {
+        return new Response("missing", { status: 404 });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const recovered = vi.fn(async () => undefined);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.cancel({
+      runId: "run_1",
+      runtimeAttemptId: "attempt_1",
+      principalId: "principal_1",
+      externalThreadId: "deer_thread_1",
+      externalRunId: "external_run_deleted",
+    }, recovered)).resolves.toEqual({
+      disposition: "external_run_absent",
+      externalRunId: "external_run_deleted",
+      externalStatus: null,
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.url.pathname).toBe(
+      "/api/threads/deer_thread_1/runs/external_run_deleted/cancel",
+    );
+    expect(recovered).not.toHaveBeenCalled();
+  });
+
+  it("keeps a recovery-list 404 unresolved when no exact external run ID is known", async () => {
+    const fetchMock = vi.fn(async () => new Response("missing", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const recovered = vi.fn(async () => undefined);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.cancel({
+      runId: "run_1",
+      runtimeAttemptId: "attempt_1",
+      principalId: "principal_1",
+      externalThreadId: "deer_thread_1",
+      externalRunId: null,
+    }, recovered)).rejects.toMatchObject({ status: 404 });
+    expect(recovered).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 500])(
+    "does not translate provider HTTP %i into external-run absence",
+    async (status) => {
+      const fetchMock = vi.fn(async () => new Response("provider error", { status }));
+      vi.stubGlobal("fetch", fetchMock);
+      const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+      await expect(adapter.cancel({
+        runId: "run_1",
+        runtimeAttemptId: "attempt_1",
+        principalId: "principal_1",
+        externalThreadId: "deer_thread_1",
+        externalRunId: "external_run_1",
+      }, vi.fn(async () => undefined))).rejects.toMatchObject({ status });
+    },
+  );
+
+  it("does not translate a cancellation HTTP 500 into external-run absence", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_1") {
+        return Response.json(runtimeRun("external_run_1"));
+      }
+      return new Response("provider error", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.cancel({
+      runId: "run_1",
+      runtimeAttemptId: "attempt_1",
+      principalId: "principal_1",
+      externalThreadId: "deer_thread_1",
+      externalRunId: "external_run_1",
+    }, vi.fn(async () => undefined))).rejects.toMatchObject({ status: 500 });
+  });
+
+  it("does not infer absence from an unstructured 404 error message", async () => {
+    const providerError = new Error("HTTP 404: missing");
+    const fetchMock = vi.fn(async () => {
+      throw providerError;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.cancel({
+      runId: "run_1",
+      runtimeAttemptId: "attempt_1",
+      principalId: "principal_1",
+      externalThreadId: "deer_thread_1",
+      externalRunId: "external_run_1",
+    }, vi.fn(async () => undefined))).rejects.toBe(providerError);
+  });
+
+  it("keeps an aborted provider lookup unresolved", async () => {
+    const controller = new AbortController();
+    const timeoutError = new DOMException("provider request timed out", "TimeoutError");
+    const fetchMock = vi.fn(async (
+      _input: string | URL | Request,
+      init: RequestInit = {},
+    ): Promise<Response> => new Promise((_resolve, reject) => {
+      const rejectAbort = () => reject(init.signal?.reason);
+      if (init.signal?.aborted) rejectAbort();
+      else init.signal?.addEventListener("abort", rejectAbort, { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    const cancellation = adapter.cancel({
+      runId: "run_1",
+      runtimeAttemptId: "attempt_1",
+      principalId: "principal_1",
+      externalThreadId: "deer_thread_1",
+      externalRunId: "external_run_1",
+    }, vi.fn(async () => undefined), controller.signal);
+    controller.abort(timeoutError);
+
+    await expect(cancellation).rejects.toBe(timeoutError);
+  });
+
   it("reports a missing provider run without claiming cleanup convergence", async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = new URL(String(input));

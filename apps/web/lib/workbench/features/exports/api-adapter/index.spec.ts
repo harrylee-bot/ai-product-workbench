@@ -1,4 +1,5 @@
 import type {
+  ExternalExportDelivery,
   ExportJob,
   ProjectPreview,
 } from "@workbench/workbench-contracts";
@@ -43,6 +44,37 @@ const projectPreview: ProjectPreview = {
 const previewToken = {
   url: "https://preview.example/preview/capability",
   expiresAt: "2026-07-13T01:00:00.000Z",
+};
+const externalDelivery: ExternalExportDelivery = {
+  id: "delivery-1",
+  exportJobId: exportJob.id,
+  createdById: "principal-1",
+  target: "netlify",
+  authentication: "authenticated",
+  status: "running",
+  revision: 1,
+  attempt: 1,
+  payload: {
+    exportJobId: exportJob.id,
+    releaseId,
+    format: "html",
+    packaging: "zip",
+    selection: { kind: "release" },
+    output: {
+      mediaType: "application/zip",
+      byteSize: 10,
+      sha256: "a".repeat(64),
+      fileName: "project.zip",
+    },
+  },
+  remoteReference: null,
+  failure: null,
+  createdAt: timestamp,
+  confirmedAt: timestamp,
+  startedAt: timestamp,
+  transferAuthorizedAt: null,
+  finishedAt: null,
+  updatedAt: timestamp,
 };
 
 describe("Exports API contracts", () => {
@@ -140,6 +172,22 @@ describe("Exports API contracts", () => {
     const create = requests.find((item) => item.url.endsWith("/projects/project-1/previews"));
     expect(create?.headers.get("idempotency-key")).toBe("preview:req_123");
     await expect(create?.clone().json()).resolves.toEqual(request);
+  });
+
+  it("forwards the polling AbortSignal to External Export delivery reads", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const api = createApi(async (request) => {
+      requestSignal = request.signal;
+      return Response.json(externalDelivery, { headers: { ETag: '"1"' } });
+    });
+    const controller = new AbortController();
+
+    await expect(api.getExternalExportDelivery(externalDelivery.id, controller.signal))
+      .resolves.toEqual({ value: externalDelivery, etag: '"1"' });
+    expect(requestSignal?.aborted).toBe(false);
+
+    controller.abort();
+    expect(requestSignal?.aborted).toBe(true);
   });
 
   it("rejects undisclosed capability fields, spoofed Blob bodies, and missing ETags", async () => {

@@ -187,6 +187,11 @@ export type RuntimeCancellationResult =
       externalStatus: null;
     }
   | {
+      disposition: "external_run_absent";
+      externalRunId: string;
+      externalStatus: null;
+    }
+  | {
       disposition: "cancelled" | "already_terminal";
       externalRunId: string;
       externalStatus: string;

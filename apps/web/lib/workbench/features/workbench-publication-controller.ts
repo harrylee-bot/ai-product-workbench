@@ -86,8 +86,14 @@ type ActiveExternalDeliverySession = {
   delivery: ExternalExportDelivery;
 };
 
+type ExternalDeliveryErrorOwnership = {
+  value: unknown;
+};
+
 const previewPollIntervalMs = 500;
 const previewPollTimeoutMs = 2 * 60 * 1_000;
+const externalDeliveryPollIntervalMs = 1_000;
+const externalDeliveryPollMaxRetryDelayMs = 30_000;
 
 export function useWorkbenchPublicationController({
   boardController,
@@ -157,6 +163,15 @@ export function useWorkbenchPublicationController({
   const downloadOperationRef = useWorkbenchProjectRef(session, () => 0);
   const externalDeliveryOperationRef = useWorkbenchProjectRef(session, () => false);
   const currentExportIdRef = useWorkbenchProjectRef(session, () => "");
+  const currentExternalDeliveryIdentityRef = useWorkbenchProjectRef(session, () => "");
+  const externalDeliveryPollErrorRef = useWorkbenchProjectRef<ExternalDeliveryErrorOwnership | null>(
+    session,
+    () => null,
+  );
+  const externalDeliveryHydrationErrorRef = useWorkbenchProjectRef<ExternalDeliveryErrorOwnership | null>(
+    session,
+    () => null,
+  );
   const activeExportId = activeExportSession?.projectId === projectId
     ? activeExportSession.job.id
     : "";
@@ -169,23 +184,46 @@ export function useWorkbenchPublicationController({
     ? activeExternalDeliverySession.delivery
     : null;
   currentExportIdRef.current = activeExport?.id ?? "";
+  const commitActiveExternalDelivery = useCallback((delivery: ExternalExportDelivery | null) => {
+    currentExternalDeliveryIdentityRef.current = externalDeliveryPollingIdentity(projectId, delivery);
+    const pollError = externalDeliveryPollErrorRef.current;
+    const hydrationError = externalDeliveryHydrationErrorRef.current;
+    externalDeliveryPollErrorRef.current = null;
+    externalDeliveryHydrationErrorRef.current = null;
+    if (pollError || hydrationError) {
+      setExportOperationError((current: unknown) => (
+        (pollError && Object.is(current, pollError.value))
+        || (hydrationError && Object.is(current, hydrationError.value))
+          ? null
+          : current
+      ));
+    }
+    setActiveExternalDeliverySession(delivery ? { projectId, delivery } : null);
+  }, [
+    currentExternalDeliveryIdentityRef,
+    externalDeliveryHydrationErrorRef,
+    externalDeliveryPollErrorRef,
+    projectId,
+    setActiveExternalDeliverySession,
+    setExportOperationError,
+  ]);
   const cancelExport = useCancelWorkbenchExportJob(projectId, activeExportId);
 
   useEffect(() => {
     if (!canShare) setShareSession(null);
     if (!canExport) {
       setActiveExportSession(null);
-      setActiveExternalDeliverySession(null);
+      commitActiveExternalDelivery(null);
       hydratedExportProjectRef.current = "";
       hydratedExternalDeliveryRef.current = "";
     }
   }, [
     canExport,
     canShare,
+    commitActiveExternalDelivery,
     hydratedExportProjectRef,
     hydratedExternalDeliveryRef,
     setActiveExportSession,
-    setActiveExternalDeliverySession,
     setShareSession,
   ]);
 
@@ -195,33 +233,65 @@ export function useWorkbenchPublicationController({
     const hydrationKey = `${projectId}:${exportId}`;
     if (hydratedExternalDeliveryRef.current === hydrationKey) return;
     hydratedExternalDeliveryRef.current = hydrationKey;
-
-    void exportOperations.listExternalExportDeliveries(exportId)
-      .then((result) => {
-        if (!session.isCurrent()
-          || currentExportIdRef.current !== exportId
-          || hydratedExternalDeliveryRef.current !== hydrationKey) {
-          return;
-        }
+    const deliveryIdentity = currentExternalDeliveryIdentityRef.current;
+    let completed = false;
+    let consecutiveFailures = 0;
+    let disposed = false;
+    let timer: number | null = null;
+    const isCurrent = () => !disposed
+      && session.isCurrent()
+      && currentExportIdRef.current === exportId
+      && hydratedExternalDeliveryRef.current === hydrationKey
+      && currentExternalDeliveryIdentityRef.current === deliveryIdentity;
+    const scheduleRetry = (): void => {
+      if (!isCurrent()) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        void hydrate();
+      }, externalDeliveryRetryDelay(consecutiveFailures));
+    };
+    const hydrate = async (): Promise<void> => {
+      try {
+        const result = await exportOperations.listExternalExportDeliveries(exportId);
+        if (!isCurrent()) return;
+        consecutiveFailures = 0;
         const restored = selectLatestRestorableExternalDelivery(result.items);
-        setActiveExternalDeliverySession(restored ? { projectId, delivery: restored } : null);
-      })
-      .catch((error) => {
-        if (session.isCurrent()
-          && currentExportIdRef.current === exportId
-          && hydratedExternalDeliveryRef.current === hydrationKey) {
-          setExportOperationError(error);
-        }
-      });
+        completed = true;
+        commitActiveExternalDelivery(restored);
+      } catch (error) {
+        if (!isCurrent()) return;
+        consecutiveFailures += 1;
+        const previousError = externalDeliveryHydrationErrorRef.current;
+        const nextError = { value: error };
+        externalDeliveryHydrationErrorRef.current = nextError;
+        setExportOperationError((current: unknown) => (
+          current === null
+          || (previousError && Object.is(current, previousError.value))
+            ? error
+            : current
+        ));
+        scheduleRetry();
+      }
+    };
+    void hydrate();
+    return () => {
+      disposed = true;
+      if (timer !== null) window.clearTimeout(timer);
+      if (!completed && hydratedExternalDeliveryRef.current === hydrationKey) {
+        hydratedExternalDeliveryRef.current = "";
+      }
+    };
   }, [
     activeExport,
     canExport,
+    commitActiveExternalDelivery,
+    currentExternalDeliveryIdentityRef,
     currentExportIdRef,
     exportOperations,
+    externalDeliveryHydrationErrorRef,
     hydratedExternalDeliveryRef,
     projectId,
     session,
-    setActiveExternalDeliverySession,
     setExportOperationError,
   ]);
 
@@ -253,25 +323,82 @@ export function useWorkbenchPublicationController({
   ]);
 
   useEffect(() => {
-    if (!activeExternalDelivery || !["queued", "running", "cancelling"].includes(activeExternalDelivery.status)) return;
-    const timer = window.setTimeout(() => {
-      void exportOperations.getExternalExportDelivery(activeExternalDelivery.id)
-        .then((result) => {
-          if (session.isCurrent()) {
-            setActiveExternalDeliverySession({ projectId, delivery: result.value });
-          }
-        })
-        .catch((error) => {
-          if (session.isCurrent()) setExportOperationError(error);
-        });
-    }, 1_000);
-    return () => window.clearTimeout(timer);
+    if (!canExport || !activeExternalDelivery || !externalDeliveryNeedsPolling(activeExternalDelivery)) return;
+
+    // One abortable chain owns retries for this exact persisted delivery revision.
+    const deliveryId = activeExternalDelivery.id;
+    const exportJobId = activeExternalDelivery.exportJobId;
+    const deliveryRevision = activeExternalDelivery.revision;
+    const deliveryStatus = activeExternalDelivery.status;
+    const pollingIdentity = externalDeliveryPollingIdentity(projectId, activeExternalDelivery);
+    const controller = new AbortController();
+    let consecutiveFailures = 0;
+    let timer: number | null = null;
+
+    const isCurrent = () => (
+      !controller.signal.aborted
+      && session.isCurrent()
+      && currentExternalDeliveryIdentityRef.current === pollingIdentity
+    );
+    const schedule = (delayMs: number): void => {
+      if (!isCurrent()) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        void poll();
+      }, delayMs);
+    };
+    const poll = async (): Promise<void> => {
+      try {
+        const result = await exportOperations.getExternalExportDelivery(
+          deliveryId,
+          controller.signal,
+        );
+        if (!isCurrent()) return;
+        if (result.value.id !== deliveryId
+          || result.value.exportJobId !== exportJobId
+          || result.etag !== `"${result.value.revision}"`) {
+          throw new Error("External Export delivery identity changed while polling");
+        }
+        if (result.value.revision < deliveryRevision
+          || (result.value.revision === deliveryRevision && result.value.status !== deliveryStatus)) {
+          throw new Error("External Export delivery revision regressed while polling");
+        }
+
+        consecutiveFailures = 0;
+        commitActiveExternalDelivery(result.value);
+        if (externalDeliveryNeedsPolling(result.value)) {
+          schedule(externalDeliveryPollIntervalMs);
+        }
+      } catch (error) {
+        if (!isCurrent()) return;
+        consecutiveFailures += 1;
+        const previousError = externalDeliveryPollErrorRef.current;
+        const nextError = { value: error };
+        externalDeliveryPollErrorRef.current = nextError;
+        setExportOperationError((current: unknown) => (
+          current === null
+          || (previousError && Object.is(current, previousError.value))
+            ? error
+            : current
+        ));
+        schedule(externalDeliveryRetryDelay(consecutiveFailures));
+      }
+    };
+
+    schedule(externalDeliveryPollIntervalMs);
+    return () => {
+      controller.abort();
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [
     activeExternalDelivery,
+    canExport,
+    commitActiveExternalDelivery,
+    currentExternalDeliveryIdentityRef,
+    externalDeliveryPollErrorRef,
     exportOperations,
     projectId,
     session,
-    setActiveExternalDeliverySession,
     setExportOperationError,
   ]);
 
@@ -420,7 +547,7 @@ export function useWorkbenchPublicationController({
       });
       if (session.isCurrent()) {
         setActiveExportSession({ projectId: requestProjectId, job: result.value });
-        setActiveExternalDeliverySession(null);
+        commitActiveExternalDelivery(null);
         hydratedExternalDeliveryRef.current = `${requestProjectId}:${result.value.id}`;
       }
       return result.value;
@@ -430,6 +557,7 @@ export function useWorkbenchPublicationController({
     }
   }, [
     canExport,
+    commitActiveExternalDelivery,
     createExport,
     ensureRelease,
     exportCapabilitiesQuery,
@@ -437,7 +565,6 @@ export function useWorkbenchPublicationController({
     projectId,
     session,
     setActiveExportSession,
-    setActiveExternalDeliverySession,
     setExportOperationError,
   ]);
 
@@ -552,7 +679,7 @@ export function useWorkbenchPublicationController({
         { target: descriptor.externalTarget },
       );
       if (session.isCurrent()) {
-        setActiveExternalDeliverySession({ projectId, delivery: result.value });
+        commitActiveExternalDelivery(result.value);
       }
       return result.value;
     } catch (error) {
@@ -565,10 +692,10 @@ export function useWorkbenchPublicationController({
     activeExport,
     beginExternalDeliveryOperation,
     canExport,
+    commitActiveExternalDelivery,
     exportOperations,
     projectId,
     session,
-    setActiveExternalDeliverySession,
     setExportOperationError,
   ]);
 
@@ -584,21 +711,33 @@ export function useWorkbenchPublicationController({
       || activeExternalDelivery.exportJobId !== activeExport.id) {
       throw new Error("The active external delivery does not match the selected Export target");
     }
+    const requestDelivery = activeExternalDelivery;
+    const requestIdentity = externalDeliveryPollingIdentity(projectId, requestDelivery);
     const finishOperation = beginExternalDeliveryOperation();
     setExportOperationError(null);
     try {
-      const etag = `"${activeExternalDelivery.revision}"`;
+      const etag = `"${requestDelivery.revision}"`;
       const result = action === "confirm"
-        ? await exportOperations.confirmExternalExportDelivery(activeExternalDelivery.id, etag)
+        ? await exportOperations.confirmExternalExportDelivery(requestDelivery.id, etag)
         : action === "retry"
-          ? await exportOperations.retryExternalExportDelivery(activeExternalDelivery.id, etag)
-          : await exportOperations.cancelExternalExportDelivery(activeExternalDelivery.id, etag);
-      if (session.isCurrent()) {
-        setActiveExternalDeliverySession({ projectId, delivery: result.value });
+          ? await exportOperations.retryExternalExportDelivery(requestDelivery.id, etag)
+          : await exportOperations.cancelExternalExportDelivery(requestDelivery.id, etag);
+      if (session.isCurrent() && currentExternalDeliveryIdentityRef.current === requestIdentity) {
+        if (result.value.id !== requestDelivery.id
+          || result.value.exportJobId !== requestDelivery.exportJobId
+          || result.value.revision < requestDelivery.revision
+          || (result.value.revision === requestDelivery.revision
+            && result.value.status !== requestDelivery.status)
+          || result.etag !== `"${result.value.revision}"`) {
+          throw new Error("External Export delivery mutation response was stale");
+        }
+        commitActiveExternalDelivery(result.value);
       }
       return result.value;
     } catch (error) {
-      if (session.isCurrent()) setExportOperationError(error);
+      if (session.isCurrent() && currentExternalDeliveryIdentityRef.current === requestIdentity) {
+        setExportOperationError(error);
+      }
       throw error;
     } finally {
       finishOperation();
@@ -607,10 +746,11 @@ export function useWorkbenchPublicationController({
     activeExternalDelivery,
     activeExport,
     beginExternalDeliveryOperation,
+    commitActiveExternalDelivery,
+    currentExternalDeliveryIdentityRef,
     exportOperations,
     projectId,
     session,
-    setActiveExternalDeliverySession,
     setExportOperationError,
   ]);
 
@@ -728,6 +868,29 @@ export function useWorkbenchPublicationController({
     prepareExternalDelivery,
     toggleShare,
   };
+}
+
+function externalDeliveryNeedsPolling(delivery: ExternalExportDelivery): boolean {
+  return delivery.status === "queued"
+    || delivery.status === "running"
+    || delivery.status === "cancelling";
+}
+
+function externalDeliveryPollingIdentity(
+  projectId: string,
+  delivery: ExternalExportDelivery | null,
+): string {
+  return delivery
+    ? `${projectId}:${delivery.id}:${delivery.exportJobId}:${delivery.revision}:${delivery.status}`
+    : "";
+}
+
+function externalDeliveryRetryDelay(consecutiveFailures: number): number {
+  const exponent = Math.min(Math.max(0, consecutiveFailures - 1), 10);
+  return Math.min(
+    externalDeliveryPollIntervalMs * (2 ** exponent),
+    externalDeliveryPollMaxRetryDelayMs,
+  );
 }
 
 export async function waitForPreviewExport(

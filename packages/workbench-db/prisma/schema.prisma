@@ -863,6 +863,9 @@ model RuntimeAttempt {
   executionEpoch             Int                         @default(0) @map("execution_epoch")
   executionHeartbeatAt       DateTime?                   @map("execution_heartbeat_at") @db.Timestamptz(6)
   executionLeaseExpiresAt    DateTime?                   @map("execution_lease_expires_at") @db.Timestamptz(6)
+  providerCancellationOperationEpoch      Int       @default(0) @map("provider_cancellation_operation_epoch")
+  providerCancellationOperationStartedAt  DateTime? @map("provider_cancellation_operation_started_at") @db.Timestamptz(6)
+  providerCancellationOperationDeadlineAt DateTime? @map("provider_cancellation_operation_deadline_at") @db.Timestamptz(6)
   startedAt                  DateTime?                   @map("started_at")
   finishedAt                 DateTime?                   @map("finished_at")
   errorCode                  String?                     @map("error_code")
@@ -881,6 +884,7 @@ model RuntimeAttempt {
 
   @@unique([runId, attempt])
   @@unique([id, runId])
+  @@unique([id, runId, providerCancellationOperationEpoch], map: "runtime_attempts_provider_cancel_operation_scope_key")
   @@unique([adapter, externalRunId])
   @@index([runtimeBindingId, status])
   @@index([externalThreadId, status])
@@ -891,12 +895,15 @@ model RuntimeAttempt {
 model RuntimeProviderCancellationResolution {
   runtimeAttemptId String         @id @map("runtime_attempt_id")
   runId            String         @map("run_id")
+  operationEpoch   Int            @map("operation_epoch")
+  externalRunId    String         @map("external_run_id") @db.VarChar(512)
   failureCode      String         @map("failure_code") @db.VarChar(120)
   outcome          String         @db.VarChar(32)
   convergedAt      DateTime       @default(now()) @map("converged_at") @db.Timestamptz(6)
-  runtimeAttempt   RuntimeAttempt @relation(fields: [runtimeAttemptId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict, map: "runtime_provider_cancellation_resolutions_attempt_fkey")
+  runtimeAttempt   RuntimeAttempt @relation(fields: [runtimeAttemptId, runId, operationEpoch], references: [id, runId, providerCancellationOperationEpoch], onDelete: Cascade, onUpdate: Restrict, map: "runtime_provider_cancellation_resolutions_attempt_fkey")
 
   @@unique([runtimeAttemptId, runId], map: "runtime_provider_cancellation_resolutions_attempt_run_key")
+  @@unique([runtimeAttemptId, runId, operationEpoch], map: "runtime_provider_cancel_resolutions_operation_scope_key")
   @@index([runId, convergedAt])
   @@map("runtime_provider_cancellation_resolutions")
 }

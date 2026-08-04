@@ -92,7 +92,7 @@ test("plan mode performs no database or Git commands and needs no secrets", asyn
   const plan = JSON.parse(stdout);
   assert.equal(plan.mode, "PLAN");
   assert.equal(plan.executionRequested, false);
-  assert.equal(plan.candidate.migrationCount, 69);
+  assert.equal(plan.candidate.migrationCount, 70);
   assert.match(plan.requiredConfirmation, /^G5-RECOVERY-DRILL:/u);
   await assert.rejects(stat(fixture.output), { code: "ENOENT" });
 });
@@ -507,7 +507,7 @@ function validOptions(output, overrides = {}) {
     sourceDatabase: "workbench_g5_source_test",
     restoreDatabase,
     confirmRestoreDatabase: overrides.confirmRestoreDatabase ?? restoreDatabase,
-    expectedMigrationCount: "69",
+    expectedMigrationCount: "70",
     maxRpoSeconds: "60",
     maxRtoSeconds: "900",
     output,
@@ -526,7 +526,7 @@ function validArguments(output) {
     "--source-database", "workbench_g5_source_test",
     "--restore-database", "workbench_g5_restore_test",
     "--confirm-restore-database", "workbench_g5_restore_test",
-    "--expected-migration-count", "69",
+    "--expected-migration-count", "70",
     "--max-rpo-seconds", "60",
     "--max-rto-seconds", "900",
     "--output", output,

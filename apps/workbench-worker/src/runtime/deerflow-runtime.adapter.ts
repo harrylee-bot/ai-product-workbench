@@ -940,15 +940,31 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     signal?: AbortSignal,
   ): Promise<RuntimeCancellationResult> {
     const client = this.client(cancellation.principalId);
-    const run = cancellation.externalRunId
-      ? await client.runs.get(cancellation.externalThreadId, cancellation.externalRunId, { signal })
-      : await this.findExternalRun(
-          client,
+    let run: Run | null;
+    if (cancellation.externalRunId) {
+      try {
+        run = await client.runs.get(
           cancellation.externalThreadId,
-          cancellation.runtimeAttemptId,
-          undefined,
-          signal,
+          cancellation.externalRunId,
+          { signal },
         );
+      } catch (error) {
+        if (!isSdkHttpStatus(error, 404)) throw error;
+        return {
+          disposition: "external_run_absent",
+          externalRunId: cancellation.externalRunId,
+          externalStatus: null,
+        };
+      }
+    } else {
+      run = await this.findExternalRun(
+        client,
+        cancellation.externalThreadId,
+        cancellation.runtimeAttemptId,
+        undefined,
+        signal,
+      );
+    }
     if (!run) {
       return {
         disposition: "not_found",
@@ -958,7 +974,22 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     }
     if (!cancellation.externalRunId) await onExternalRunRecovered(run.run_id);
     if (!TERMINAL_EXTERNAL_RUN_STATUSES.has(run.status)) {
-      await client.runs.cancel(cancellation.externalThreadId, run.run_id, true, "interrupt", { signal });
+      try {
+        await client.runs.cancel(
+          cancellation.externalThreadId,
+          run.run_id,
+          true,
+          "interrupt",
+          { signal },
+        );
+      } catch (error) {
+        if (!isSdkHttpStatus(error, 404)) throw error;
+        return {
+          disposition: "external_run_absent",
+          externalRunId: cancellation.externalRunId ?? run.run_id,
+          externalStatus: null,
+        };
+      }
       return {
         disposition: "cancelled",
         externalRunId: run.run_id,
@@ -2517,6 +2548,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function isSdkHttpStatus(error: unknown, status: number) {
+  return error instanceof Error
+    && "status" in error
+    && typeof error.status === "number"
+    && error.status === status;
 }
 
 function stringValue(value: unknown) {

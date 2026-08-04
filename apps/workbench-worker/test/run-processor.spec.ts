@@ -36,6 +36,34 @@ const executionClaim = {
   ownerId: "runtime-worker:test",
   epoch: 1,
 };
+const providerCleanupClaim = {
+  ...executionClaim,
+  ownerId: "runtime-cleanup:test",
+  epoch: 2,
+};
+function providerCancellationOperationStubs(externalRunId: string | null) {
+  return {
+    claimProviderCancellation: vi.fn(async () => ({
+      disposition: "claimed" as const,
+      claim: providerCleanupClaim,
+    })),
+    releaseProviderCancellation: vi.fn(async () => undefined),
+    startProviderCancellationOperation: vi.fn(async (
+      _runId: string,
+      _attemptId: string,
+      hardDeadlineMs: number,
+    ) => ({
+      runId: executionClaim.runId,
+      attemptId: executionClaim.attemptId,
+      epoch: 1,
+      externalRunId,
+      deadlineAt: new Date(Date.now() + hardDeadlineMs),
+      monotonicDeadlineAtMs: performance.now() + hardDeadlineMs,
+    })),
+    finishProviderCancellationOperation: vi.fn(async () => true),
+    settleProviderCancellationOperation: vi.fn(async () => "finished" as const),
+  };
+}
 const noKnowledgeToolGrants = () => ({ issue: vi.fn(async () => null) });
 const prototypePatchCoordinator = () => ({
   persistPatch: vi.fn(),
@@ -187,6 +215,7 @@ describe("Runtime wall-clock terminalization", () => {
         ensure: ReturnType<typeof vi.fn>;
         claim: ReturnType<typeof vi.fn>;
         submissionContext: ReturnType<typeof vi.fn>;
+        executionLivenessClock: ReturnType<typeof vi.fn>;
         providerTextState: ReturnType<typeof vi.fn>;
         attachExternalRun: ReturnType<typeof vi.fn>;
       };
@@ -209,11 +238,13 @@ describe("Runtime wall-clock terminalization", () => {
           externalRunId: "external-run-1",
           lastExternalEventId: null,
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
         attachExternalRun: vi.fn(async () => undefined),
+        ...providerCancellationOperationStubs("external-run-1"),
       },
     });
-    const failRun = vi.spyOn(internals, "failRun").mockResolvedValue(undefined);
+    const failRun = vi.spyOn(internals, "failRun").mockResolvedValue("terminalized");
 
     const execution = processor.execute("run-1", [], undefined, {
       retryCount: 0,
@@ -248,6 +279,11 @@ describe("Runtime wall-clock terminalization", () => {
       expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
       false,
       executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+        submissionUnknown: false,
+      },
     );
   });
 
@@ -333,7 +369,7 @@ describe("Runtime wall-clock terminalization", () => {
       code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
       retryable: false,
     });
-    expect(providerCancelSignal?.aborted).toBe(true);
+    expect(providerCancelSignal?.aborted).toBe(false);
     expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
     expect(harness.failRun).toHaveBeenCalledWith(
       "run-1",
@@ -377,11 +413,7 @@ describe("Runtime wall-clock terminalization", () => {
 
     expect(execute).not.toHaveBeenCalled();
     expect(harness.attempts.authorizeSubmission).not.toHaveBeenCalled();
-    expect(harness.runtime.cancel).toHaveBeenCalledWith(
-      expect.objectContaining({ externalRunId: null }),
-      expect.any(Function),
-      expect.any(AbortSignal),
-    );
+    expect(harness.runtime.cancel).not.toHaveBeenCalled();
     expect(harness.failRun).toHaveBeenCalledWith(
       "run-1",
       "runtime-attempt-1",
@@ -433,6 +465,11 @@ describe("Runtime provider liveness retry exhaustion", () => {
       idleTimeout,
       true,
       executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        submissionUnknown: false,
+      },
     );
     expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
     expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
@@ -515,7 +552,7 @@ describe("Runtime provider liveness retry exhaustion", () => {
         retryLimit: 5,
       });
       const observed = execution.catch((error: unknown) => error);
-      for (let index = 0; index < 10 && harness.runtime.cancel.mock.calls.length === 0; index += 1) {
+      for (let index = 0; index < 25 && harness.runtime.cancel.mock.calls.length === 0; index += 1) {
         await Promise.resolve();
       }
       expect(harness.runtime.cancel).toHaveBeenCalledTimes(1);
@@ -524,7 +561,7 @@ describe("Runtime provider liveness retry exhaustion", () => {
       await vi.advanceTimersByTimeAsync(1);
 
       await expect(observed).resolves.toBe(idleTimeout);
-      expect(providerSignal?.aborted).toBe(true);
+      expect(providerSignal?.aborted).toBe(false);
       expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
       expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
       expect(harness.failRun).toHaveBeenCalledWith(
@@ -539,6 +576,8 @@ describe("Runtime provider liveness retry exhaustion", () => {
           submissionUnknown: false,
         },
       );
+      await vi.advanceTimersByTimeAsync(44_900);
+      expect(providerSignal?.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -576,10 +615,11 @@ describe("Runtime provider liveness retry exhaustion", () => {
 
     expect(harness.attempts.attachExternalRunForCleanup).toHaveBeenCalledWith(
       executionClaim.attemptId,
+      1,
       "external-run-late",
     );
     expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
-    expect(harness.attempts.attachExternalRunForCleanup.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(harness.attempts.attachExternalRunForCleanup.mock.invocationCallOrder[0]).toBeGreaterThan(
       harness.failRun.mock.invocationCallOrder[0]!,
     );
     expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
@@ -589,6 +629,11 @@ describe("Runtime provider liveness retry exhaustion", () => {
       submissionTimeout,
       true,
       executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        submissionUnknown: true,
+      },
     );
   });
 
@@ -607,6 +652,7 @@ describe("Runtime provider liveness retry exhaustion", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         },
+        submissionStarted: true,
         deadlineCancelMs: 100,
         cancel: async (_cancellation, onExternalRunRecovered) => {
           recoverExternalRun = async () => {
@@ -636,6 +682,7 @@ describe("Runtime provider liveness retry exhaustion", () => {
       await recoverExternalRun();
       expect(harness.attempts.attachExternalRunForCleanup).toHaveBeenCalledWith(
         "runtime-attempt-1",
+        1,
         "external-run-late",
       );
       expect(harness.attempts.attachExternalRunForCleanup.mock.invocationCallOrder[0]).toBeGreaterThan(
@@ -724,10 +771,20 @@ function wallClockRecoveryHarness(input: {
     submissionContext: vi.fn(async () => (
       input.submissions[Math.min(submissionIndex++, input.submissions.length - 1)]!
     )),
+    executionLivenessClock: vi.fn(async () => ({
+      databaseNow: now,
+      startedAt: input.startedAt,
+    })),
     providerTextState: vi.fn(async () => emptyProviderTextState()),
     authorizeSubmission: vi.fn(async () => undefined),
     attachExternalRun: vi.fn(async () => undefined),
-    attachExternalRunForCleanup: vi.fn(async () => undefined),
+    attachExternalRunForCleanup: vi.fn(async (_attemptId, _epoch, externalRunId) => ({
+      externalRunId,
+      operationCurrent: true,
+    })),
+    ...providerCancellationOperationStubs(
+      "externalRunId" in input.submissions[0]! ? input.submissions[0]!.externalRunId : null,
+    ),
     markSubmissionUnknown: vi.fn(async () => undefined),
     recordRetryableError: vi.fn(async () => undefined),
   };
@@ -748,7 +805,7 @@ function wallClockRecoveryHarness(input: {
     attempts,
     publishResult,
   });
-  const failRun = vi.spyOn(internals, "failRun").mockResolvedValue(undefined);
+  const failRun = vi.spyOn(internals, "failRun").mockResolvedValue("terminalized");
   return { attempts, failRun, processor, publishResult, runtime };
 }
 
@@ -787,10 +844,17 @@ function runtimeLivenessHarness(input: {
     ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
     claim: vi.fn(async () => executionClaim),
     submissionContext: vi.fn(async () => input.submission),
+    executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
     providerTextState: vi.fn(async () => emptyProviderTextState()),
     authorizeSubmission: vi.fn(async () => undefined),
     attachExternalRun: vi.fn(async () => undefined),
-    attachExternalRunForCleanup: vi.fn(async () => undefined),
+    attachExternalRunForCleanup: vi.fn(async (_attemptId, _epoch, externalRunId) => ({
+      externalRunId,
+      operationCurrent: true,
+    })),
+    ...providerCancellationOperationStubs(
+      "externalRunId" in input.submission ? input.submission.externalRunId : null,
+    ),
     markSubmissionUnknown: vi.fn(async () => undefined),
     recordRetryableError: vi.fn(async () => undefined),
   };
@@ -809,7 +873,7 @@ function runtimeLivenessHarness(input: {
     },
     attempts,
   });
-  const failRun = vi.spyOn(internals, "failRun").mockResolvedValue(undefined);
+  const failRun = vi.spyOn(internals, "failRun").mockResolvedValue("terminalized");
   return { attempts, failRun, processor, runtime };
 }
 
@@ -2675,7 +2739,7 @@ type ProcessorInternals = {
       detailCode: string;
       submissionUnknown: boolean;
     } | null,
-  ): Promise<void>;
+  ): Promise<"terminalized" | "fenced">;
   finalizeCancellation(runId: string, reason: string, runtimeAttemptId?: string): Promise<void>;
 };
 
@@ -2868,11 +2932,18 @@ function rawSqlText(query: unknown): string {
 function eventTransaction() {
   let sequence = 0;
   return {
-    $queryRaw: vi.fn(async (query: unknown) => (
-      rawSqlText(query).includes('FROM "artifact_version_assets"')
-        ? []
-        : [{ id: "board-1", status: "running" }]
-    )),
+    $queryRaw: vi.fn(async (query: unknown) => {
+      const sql = rawSqlText(query);
+      if (sql.includes('FROM "artifact_version_assets"')) return [];
+      if (sql.includes("clock_timestamp()")) return [{ databaseNow: now }];
+      if (sql.includes('FROM "runs"')) {
+        return [{ status: "cancelling", startedAt: now }];
+      }
+      if (sql.includes('FROM "runtime_attempts"')) {
+        return [{ status: "running", startedAt: now, submissionUnknownAt: null }];
+      }
+      return [{ id: "board-1", status: "running" }];
+    }),
     run: {
       findUniqueOrThrow: vi.fn(async () => ({ status: "running" })),
       update: vi.fn(async () => eventRun(++sequence)),
@@ -4151,6 +4222,7 @@ describe("Run durable snapshots", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
         recordRetryableError,
       },
@@ -4224,6 +4296,7 @@ describe("Run durable snapshots", () => {
           externalRunId: "external-run-authoritative",
           lastExternalEventId: "provider-event-7",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
       },
       publishResult,
@@ -4304,6 +4377,7 @@ describe("Run durable snapshots", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
       },
       persistProgress,
@@ -4385,6 +4459,7 @@ describe("Run durable snapshots", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
       },
       persistProgress,
@@ -4455,6 +4530,7 @@ describe("Run durable snapshots", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
       },
       persistProgress,
@@ -4513,6 +4589,7 @@ describe("Run durable snapshots", () => {
           mode: "reconcile",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
         markSubmissionUnknown,
       },
@@ -4634,6 +4711,7 @@ describe("Run durable snapshots", () => {
           externalRunId: "external-run-1",
           lastExternalEventId: null,
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
         processExternalEvent: vi.fn(async (
           _claim: unknown,
@@ -4707,6 +4785,7 @@ describe("Run durable snapshots", () => {
           externalRunId: "external-run-1",
           startedAt: new Date(),
         })),
+        ...providerCancellationOperationStubs("external-run-1"),
       },
     });
     const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
@@ -4716,6 +4795,72 @@ describe("Run durable snapshots", () => {
     expect(runtime.cancel).toHaveBeenCalledTimes(1);
     expect(finalizeCancellation).not.toHaveBeenCalled();
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("uses the monotonic operation budget when the host wall clock is ahead of PostgreSQL", async () => {
+    const runtime = {
+      cancel: vi.fn(async () => ({
+        disposition: "already_terminal" as const,
+        externalRunId: "external-run-1",
+        externalStatus: "interrupted",
+      })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "cancelling",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            id: "runtime-attempt-1",
+            status: "running",
+            externalThreadId: "external-thread-1",
+            externalRunId: "external-run-1",
+          }],
+        })),
+      },
+    };
+    const operationStubs = providerCancellationOperationStubs("external-run-1");
+    operationStubs.startProviderCancellationOperation.mockResolvedValue({
+      runId: "run-1",
+      attemptId: "runtime-attempt-1",
+      epoch: 1,
+      externalRunId: "external-run-1",
+      deadlineAt: new Date(0),
+      monotonicDeadlineAtMs: performance.now() + 30_000,
+    });
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+    );
+    const internals = processor as unknown as ProcessorInternals;
+    Object.assign(internals, {
+      attempts: {
+        beginCancellation: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          status: "cancelling",
+          externalThreadId: "external-thread-1",
+          externalRunId: "external-run-1",
+          startedAt: new Date(),
+        })),
+        ...operationStubs,
+      },
+    });
+    const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation")
+      .mockResolvedValue(undefined);
+
+    await expect(processor.cancel("run-1")).resolves.toEqual({
+      runId: "run-1",
+      cancelled: true,
+    });
+
+    expect(runtime.cancel).toHaveBeenCalledTimes(1);
+    expect(operationStubs.settleProviderCancellationOperation).toHaveBeenCalledTimes(1);
+    expect(finalizeCancellation).toHaveBeenCalledWith(
+      "run-1",
+      "Cancelled by user",
+      "runtime-attempt-1",
+    );
   });
 
   it("returns control without finalizing when the cancellation provider ignores abort", async () => {
@@ -4765,6 +4910,7 @@ describe("Run durable snapshots", () => {
             externalRunId: "external-run-1",
             startedAt: new Date(),
           })),
+          ...providerCancellationOperationStubs("external-run-1"),
         },
       });
       const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
@@ -4783,7 +4929,7 @@ describe("Run durable snapshots", () => {
         code: "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
         retryable: true,
       });
-      expect(providerSignal?.aborted).toBe(true);
+      expect(providerSignal?.aborted).toBe(false);
       expect(finalizeCancellation).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
@@ -4791,7 +4937,10 @@ describe("Run durable snapshots", () => {
   });
 
   it("keeps cancellation pending when an external Run may still appear", async () => {
-    const attachExternalRun = vi.fn(async () => undefined);
+    const attachExternalRun = vi.fn(async (_attemptId, _epoch, externalRunId) => ({
+      externalRunId,
+      operationCurrent: true,
+    }));
     const runtime = {
       cancel: vi.fn(async (
         _scope: unknown,
@@ -4840,17 +4989,22 @@ describe("Run durable snapshots", () => {
           startedAt: new Date(),
         })),
         attachExternalRunForCleanup: attachExternalRun,
+        ...providerCancellationOperationStubs(null),
       },
     });
     const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
 
     await expect(processor.cancel("run-1")).rejects.toThrow("RUNTIME_EXTERNAL_RUN_UNRESOLVED");
 
-    expect(attachExternalRun).toHaveBeenCalledWith("runtime-attempt-1", "external-run-late");
+    expect(attachExternalRun).toHaveBeenCalledWith(
+      "runtime-attempt-1",
+      1,
+      "external-run-late",
+    );
     expect(finalizeCancellation).not.toHaveBeenCalled();
   });
 
-  it("finalizes missing external cancellation only after the recovery window", async () => {
+  it("keeps unknown external cancellation unresolved after the recovery window", async () => {
     const runtime = {
       cancel: vi.fn(async () => ({
         disposition: "not_found" as const,
@@ -4892,20 +5046,15 @@ describe("Run durable snapshots", () => {
           externalRunId: null,
           startedAt: new Date(Date.now() - recoveryWindowMs - 1),
         })),
+        ...providerCancellationOperationStubs(null),
       },
     });
     const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
 
-    await expect(processor.cancel("run-1")).resolves.toEqual({
-      runId: "run-1",
-      cancelled: true,
-      externalRunAbsent: true,
-    });
-    expect(finalizeCancellation).toHaveBeenCalledWith(
-      "run-1",
-      "Cancelled after external Run creation window elapsed",
-      "runtime-attempt-1",
+    await expect(processor.cancel("run-1")).rejects.toThrow(
+      "RUNTIME_EXTERNAL_RUN_UNRESOLVED",
     );
+    expect(finalizeCancellation).not.toHaveBeenCalled();
   });
 
   it("stores runtime phase state before appending its event", async () => {
@@ -5977,6 +6126,8 @@ describe("Provider cancellation convergence", () => {
       data: {
         runtimeAttemptId: "runtime-attempt-1",
         runId: "run-1",
+        operationEpoch: 1,
+        externalRunId: "external-run-1",
         failureCode: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
         outcome: "already_terminal",
       },
@@ -5987,7 +6138,10 @@ describe("Provider cancellation convergence", () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     const recoveryWindowMs = 10_000;
-    const resolution = providerCancellationResolutionHarness(null);
+    const resolution = providerCancellationResolutionHarness(
+      null,
+      "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+    );
     const runtime = {
       cancel: vi.fn(async () => ({
         disposition: "not_found" as const,
@@ -6030,11 +6184,14 @@ describe("Provider cancellation convergence", () => {
     expect(resolution.create).not.toHaveBeenCalled();
   });
 
-  it("converges a failed Run exactly at the external Run recovery-window boundary", async () => {
+  it("keeps a failed Run unresolved at the external Run recovery-window boundary", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     const recoveryWindowMs = 10_000;
-    const resolution = providerCancellationResolutionHarness(null);
+    const resolution = providerCancellationResolutionHarness(
+      null,
+      "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+    );
     const runtime = {
       cancel: vi.fn(async () => ({
         disposition: "not_found" as const,
@@ -6071,34 +6228,43 @@ describe("Provider cancellation convergence", () => {
       recoveryWindowMs,
     );
 
-    await expect(processor.cancel("run-1")).resolves.toEqual({
-      runId: "run-1",
-      cancelled: false,
-      cancellationConverged: true,
-      externalRunAbsent: true,
-    });
-    expect(resolution.create).toHaveBeenCalledWith({
-      data: {
-        runtimeAttemptId: "runtime-attempt-1",
-        runId: "run-1",
-        failureCode: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
-        outcome: "external_run_absent",
-      },
-    });
+    await expect(processor.cancel("run-1")).rejects.toThrow(
+      runtimeProviderCancellationUnconfirmedCode,
+    );
+    expect(resolution.create).not.toHaveBeenCalled();
   });
 });
 
-function providerCancellationResolutionHarness(externalRunId: string | null = "external-run-1") {
+function providerCancellationResolutionHarness(
+  externalRunId: string | null = "external-run-1",
+  runErrorDetail = "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+) {
   const state = {
     ownerId: null as string | null,
     epoch: 0,
     leaseExpiresAt: null as Date | null,
+    operationEpoch: 0,
+    operationStartedAt: null as Date | null,
+    operationDeadlineAt: null as Date | null,
     resolutionId: null as string | null,
   };
   const updateMany = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-    state.ownerId = (data.executionOwnerId ?? null) as string | null;
+    if ("executionOwnerId" in data) {
+      state.ownerId = data.executionOwnerId as string | null;
+    }
     if (typeof data.executionEpoch === "number") state.epoch = data.executionEpoch;
-    state.leaseExpiresAt = (data.executionLeaseExpiresAt ?? null) as Date | null;
+    if ("executionLeaseExpiresAt" in data) {
+      state.leaseExpiresAt = data.executionLeaseExpiresAt as Date | null;
+    }
+    if (typeof data.providerCancellationOperationEpoch === "number") {
+      state.operationEpoch = data.providerCancellationOperationEpoch;
+    }
+    if ("providerCancellationOperationStartedAt" in data) {
+      state.operationStartedAt = data.providerCancellationOperationStartedAt as Date | null;
+    }
+    if ("providerCancellationOperationDeadlineAt" in data) {
+      state.operationDeadlineAt = data.providerCancellationOperationDeadlineAt as Date | null;
+    }
     return { count: 1 };
   });
   const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -6107,9 +6273,10 @@ function providerCancellationResolutionHarness(externalRunId: string | null = "e
   });
   const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({
     $queryRaw: vi.fn(async () => [{
-      databaseNow: now,
+      databaseNow: new Date(),
       runStatus: "failed",
       runErrorCode: runtimeProviderCancellationUnconfirmedCode,
+      runErrorDetail,
       runOwnerId: state.ownerId,
       runEpoch: state.epoch,
       runLeaseExpiresAt: state.leaseExpiresAt,
@@ -6118,6 +6285,9 @@ function providerCancellationResolutionHarness(externalRunId: string | null = "e
       attemptOwnerId: state.ownerId,
       attemptEpoch: state.epoch,
       attemptLeaseExpiresAt: state.leaseExpiresAt,
+      providerCancellationOperationEpoch: state.operationEpoch,
+      providerCancellationOperationStartedAt: state.operationStartedAt,
+      providerCancellationOperationDeadlineAt: state.operationDeadlineAt,
       providerCancellationResolutionId: state.resolutionId,
       externalRunId,
       providerIdempotencyKey: null,

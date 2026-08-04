@@ -54,6 +54,10 @@ const runtimeProviderCancellationResolutionMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260803010000_runtime_provider_cancellation_resolution/migration.sql",
   import.meta.url,
 ), "utf8");
+const runtimeProviderCancellationOperationMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260804010000_runtime_provider_cancellation_operation/migration.sql",
+  import.meta.url,
+), "utf8");
 const prdV2ArtifactVersionGuardsMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260723020000_prd_v2_artifact_version_guards/migration.sql",
   import.meta.url,
@@ -92,7 +96,7 @@ test("export packaging backfill restores the mutation guard", () => {
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 69, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 70, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -293,6 +297,87 @@ test("Runtime provider cancellation resolution is append-only and Run-lifecycle-
     /BEFORE TRUNCATE ON "runtime_provider_cancellation_resolutions"/u,
   );
   assert.match(runtimeProviderCancellationResolutionMigration, /COMMIT;\s*$/u);
+});
+
+test("Runtime provider cancellation operations are epoch-fenced and resolution-bound", () => {
+  assert.match(runtimeProviderCancellationOperationMigration, /^BEGIN;/u);
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /provider_cancellation_operation_epoch.*INTEGER NOT NULL DEFAULT 0/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /provider_cancellation_operation_started_at.*TIMESTAMPTZ/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /provider_cancellation_operation_deadline_at.*TIMESTAMPTZ/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /runtime_attempts_provider_cancellation_operation_insert_guard/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /BEFORE INSERT ON "runtime_attempts"/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /runtime_attempts_provider_cancellation_operation_update_guard/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /RUNTIME_PROVIDER_CANCELLATION_OPERATION_TAKEOVER_INVALID/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_SCOPE_INVALID/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /RUNTIME_PROVIDER_CANCELLATION_OPERATION_NOT_ACTIVE/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /ADD COLUMN "operation_epoch" INTEGER NOT NULL/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /ADD COLUMN "external_run_id" VARCHAR\(512\) NOT NULL/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /FOREIGN KEY \("runtime_attempt_id", "run_id", "operation_epoch"\)/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /fresh_now := clock_timestamp\(\)/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /NEW\."updated_at" := GREATEST\(\s*clock_timestamp\(\),\s*OLD\."updated_at",\s*NEW\."built_at"\s*\)/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /CREATE CONSTRAINT TRIGGER "runtime_provider_cancellation_resolutions_cleared_guard"/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /DEFERRABLE INITIALLY DEFERRED/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /run_error_code IS NOT DISTINCT FROM 'RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED'/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /attempt_error_code IS DISTINCT FROM 'RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED'/u,
+  );
+  assert.doesNotMatch(
+    runtimeProviderCancellationOperationMigration,
+    /(?:run_error_code|attempt_error_code|(?:OLD|NEW)\."error_code")\s*(?:=|<>)\s*'RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED'/u,
+  );
+  assert.match(runtimeProviderCancellationOperationMigration, /COMMIT;\s*$/u);
 });
 
 test("PRD ArtifactVersion guards bind v1 and v2 schemas to their exact protocols", () => {

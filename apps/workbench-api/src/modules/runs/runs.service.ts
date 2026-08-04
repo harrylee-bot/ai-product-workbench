@@ -669,7 +669,7 @@ export class RunsService {
                 runId,
                 status: { in: ["submitting", "running", "waiting_input"] },
               },
-              data: { status: "cancelling" },
+              data: { status: "cancelling", finishedAt: null },
             });
           }
 

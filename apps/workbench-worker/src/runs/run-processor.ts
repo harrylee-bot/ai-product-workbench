@@ -64,6 +64,8 @@ import {
   RuntimeExecutionCancelledError,
   RuntimeExecutionFencedError,
   type RuntimeExecutionClaim,
+  type RuntimeProviderCancellationOperation,
+  type RuntimeProviderCancellationOperationSettlement,
   type RuntimeProviderStateMode,
   type RuntimeProviderStateShadowFinding,
 } from "../runtime/runtime-attempt.service.js";
@@ -165,11 +167,12 @@ type RuntimePersistenceContext = {
   artifactTargets: RuntimeArtifactTarget[];
 };
 
-type RuntimeLivenessCleanup = {
-  attempted: boolean;
-  externalRunId: string | null;
-  result: Awaited<ReturnType<RuntimePort["cancel"]>> | null;
+type RuntimeProviderCancellationInvocation = {
+  operation: RuntimeProviderCancellationOperation;
+  result: Promise<Awaited<ReturnType<RuntimePort["cancel"]>>>;
 };
+
+type RuntimeProviderCancellationResult = Awaited<ReturnType<RuntimePort["cancel"]>>;
 
 type RuntimeFailureContext = {
   code: typeof runtimeProviderCancellationUnconfirmedCode;
@@ -177,10 +180,7 @@ type RuntimeFailureContext = {
   submissionUnknown: boolean;
 };
 
-type RuntimeProviderCancellationResolutionOutcome =
-  | "cancelled"
-  | "already_terminal"
-  | "external_run_absent";
+type RuntimeFailureDisposition = "terminalized" | "fenced";
 
 export type RuntimeExecutionHooks = {
   onRuntimeAttemptResolved?: (runtimeAttemptId: string) => void;
@@ -199,6 +199,7 @@ export class RunProcessor {
   private readonly executionMaximumWallClockMs: number;
   private readonly executionDeadlineCancelMs: number;
   private readonly providerCancellationLeaseMs: number;
+  private readonly providerCancellationOperationHardDeadlineMs: number;
   private readonly cancellationPollIntervalMs: number;
   private readonly cancellationQueryBatchSize: number;
 
@@ -239,6 +240,7 @@ export class RunProcessor {
       leaseMs,
       this.executionDeadlineCancelMs + this.executionHeartbeatMs + 5_000,
     );
+    this.providerCancellationOperationHardDeadlineMs = this.providerCancellationLeaseMs;
     this.cancellationPollIntervalMs = execution.cancellationPollIntervalMs ?? 1_000;
     this.cancellationQueryBatchSize = execution.cancellationQueryBatchSize ?? 100;
     if (!Number.isSafeInteger(this.cancellationPollIntervalMs)
@@ -250,6 +252,10 @@ export class RunProcessor {
       || this.cancellationQueryBatchSize < 1
       || this.cancellationQueryBatchSize > 1_000) {
       throw new Error("RUNTIME_CANCELLATION_QUERY_BATCH_SIZE_INVALID");
+    }
+    if (!Number.isSafeInteger(this.cancellationRecoveryWindowMs)
+      || this.cancellationRecoveryWindowMs < 1) {
+      throw new Error("RUNTIME_CANCELLATION_RECOVERY_WINDOW_INVALID");
     }
     if (this.executionHeartbeatMs >= leaseMs) {
       throw new Error("RUNTIME_EXECUTION_HEARTBEAT_INTERVAL_INVALID");
@@ -272,7 +278,7 @@ export class RunProcessor {
     retry = { retryCount: 0, retryLimit: 0 },
     hooks: RuntimeExecutionHooks = {},
   ) {
-    const handlerStartedAtMs = Date.now();
+    const handlerStartedAtMs = performance.now();
     let prepared: Awaited<ReturnType<RunProcessor["prepare"]>>;
     try {
       prepared = await this.prepare(runId, approvalIds);
@@ -310,6 +316,7 @@ export class RunProcessor {
 
     let fullText = prepared.previousAssistantText;
     let runtimeAttemptId: string | null = null;
+    let runtimeAttemptMonotonicStartedAtMs = handlerStartedAtMs;
     let claim: RuntimeExecutionClaim | null = null;
     let submission: RuntimeSubmissionState | null = null;
     let submissionStarted = false;
@@ -337,13 +344,15 @@ export class RunProcessor {
       heartbeatTimer = this.startExecutionHeartbeat(claim, controller);
       submission = await this.attempts.submissionContext(claim);
       externalRunId = submission.mode === "join" ? submission.externalRunId : null;
-      const attemptStartedAtMs = runtimeAttempt.startedAt instanceof Date
-        ? runtimeAttempt.startedAt.getTime()
-        : handlerStartedAtMs;
-      attemptWallClockExpired = Date.now() - attemptStartedAtMs >= this.executionMaximumWallClockMs;
+      const executionClock = await this.attempts.executionLivenessClock(claim);
+      const durableElapsedMs = executionClock.startedAt
+        ? Math.max(0, executionClock.databaseNow.getTime() - executionClock.startedAt.getTime())
+        : Math.max(0, performance.now() - handlerStartedAtMs);
+      runtimeAttemptMonotonicStartedAtMs = performance.now() - durableElapsedMs;
+      attemptWallClockExpired = durableElapsedMs >= this.executionMaximumWallClockMs;
       const wallClockStartedAtMs = attemptWallClockExpired && submission.mode !== "submit"
         ? handlerStartedAtMs - (this.executionMaximumWallClockMs - this.executionDeadlineCancelMs)
-        : attemptStartedAtMs;
+        : runtimeAttemptMonotonicStartedAtMs;
       wallClock.rebase(wallClockStartedAtMs);
       if (wallClock.signal.aborted) throw wallClock.signal.reason;
       const providerTextState = await this.attempts.providerTextState(claim);
@@ -482,9 +491,14 @@ export class RunProcessor {
       wallClockOutcome = "ok";
       return { runId, artifactCount: outcome.artifacts.length };
     } catch (caught) {
-      const error = wallClock.signal.aborted
+      const durableWallClockExpired = performance.now() - runtimeAttemptMonotonicStartedAtMs
+        >= this.executionMaximumWallClockMs;
+      const wallClockFailure = wallClock.signal.aborted
         ? wallClock.signal.reason
-        : caught;
+        : durableWallClockExpired
+          ? new RuntimeLivenessError("RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED", false)
+          : null;
+      const error = wallClockFailure ?? caught;
       const status = await this.db.run.findUnique({ where: { id: runId }, select: { status: true } });
       if (status?.status === "cancelling" || status?.status === "cancelled" || error instanceof RuntimeCancelledError) {
         wallClockOutcome = "cancelled";
@@ -494,55 +508,74 @@ export class RunProcessor {
       if (error instanceof RuntimeExecutionClaimBusyError || error instanceof RuntimeExecutionFencedError) {
         return { runId, skipped: true };
       }
+      const queueAbortWon = Boolean(
+        jobSignal?.aborted
+        && caught === jobSignal.reason
+        && wallClockFailure === null,
+      );
+      if (queueAbortWon && claim) {
+        try {
+          await this.attempts.release(claim);
+        } catch (releaseError) {
+          if (releaseError instanceof RuntimeExecutionFencedError) {
+            return { runId, skipped: true };
+          }
+          throw releaseError;
+        }
+        throw caught;
+      }
       const terminalLivenessError = finalRuntimeProviderLivenessError(error, retry);
-      let failure = error;
-      let providerCleanupConverged = false;
-      let failureContext: RuntimeFailureContext | null = null;
-      if (terminalLivenessError && claim && runtimeAttemptId) {
-        const cleanup = await this.cancelLivenessExceededProvider({
-          claim,
+      const failure = terminalLivenessError ?? error;
+      const providerMayExist = Boolean(
+        terminalLivenessError
+        && claim
+        && runtimeAttemptId
+        && externalThreadId
+        && (
+          externalRunId
+          || submissionStarted
+          || submission?.mode === "join"
+          || submission?.mode === "reconcile"
+        ),
+      );
+      if (terminalLivenessError && claim && runtimeAttemptId && providerMayExist) {
+        const retryable = isRetryableRuntimeError(terminalLivenessError);
+        const terminalization = await this.failRun(
+          runId,
           runtimeAttemptId,
-          principalId: prepared.run.createdById,
-          externalThreadId,
-          externalRunId,
-        });
-        externalRunId = cleanup.externalRunId ?? externalRunId;
-        if (runtimeProviderCleanupConverged(cleanup.result)) {
-          failure = terminalLivenessError;
-          providerCleanupConverged = true;
-        } else if (
-          cleanup.attempted
-          && !(
-            terminalLivenessError.code === "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED"
-            && attemptWallClockExpired
-            && submission?.mode === "submit"
-            && !submissionStarted
-            && !externalRunId
-          )
-        ) {
-          failure = terminalLivenessError;
-          failureContext = {
+          terminalLivenessError,
+          retryable,
+          claim,
+          {
             code: runtimeProviderCancellationUnconfirmedCode,
             detailCode: terminalLivenessError.code,
-            submissionUnknown: !externalRunId
-              && (submissionStarted || submission?.mode === "reconcile"),
-          };
+            submissionUnknown: externalRunId === null,
+          },
+        );
+        if (terminalization === "terminalized") {
+          await this.reconcileTerminalLivenessProvider({
+            runId,
+            principalId: prepared.run.createdById,
+            attemptId: runtimeAttemptId,
+            externalThreadId: externalThreadId!,
+            externalRunId,
+          });
         }
+        if (terminalLivenessError.code !== "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED") {
+          wallClockOutcome = "error";
+        }
+        throw terminalLivenessError;
       }
       if (
         error instanceof RuntimeSubmissionUnknownError
         && claim
-        && !providerCleanupConverged
-        && !failureContext
       ) {
         await this.attempts.markSubmissionUnknown(claim);
         wallClockOutcome = "error";
         return { runId, submissionUnknown: true };
       }
       const retryable = isRetryableRuntimeError(failure);
-      if (failureContext) {
-        await this.failRun(runId, runtimeAttemptId, failure, retryable, claim, failureContext);
-      } else if (retryable && retry.retryCount < retry.retryLimit) {
+      if (retryable && retry.retryCount < retry.retryLimit) {
         if (claim) {
           const code = runtimeExecutionErrorCode(failure, "RUNTIME_EXECUTION_RETRYABLE");
           await this.attempts.recordRetryableError(claim, {
@@ -561,7 +594,7 @@ export class RunProcessor {
         recordRuntimeLivenessMetric({
           operation: "wall-clock",
           outcome: wallClockOutcome,
-          durationMs: Math.max(0, Date.now() - handlerStartedAtMs),
+          durationMs: Math.max(0, performance.now() - handlerStartedAtMs),
           ...(wallClockOutcome === "error" ? { errorCode: "RUNTIME_EXECUTION_FAILED" } : {}),
         });
       }
@@ -572,58 +605,138 @@ export class RunProcessor {
     }
   }
 
-  private async cancelLivenessExceededProvider(input: {
-    claim: RuntimeExecutionClaim;
-    runtimeAttemptId: string;
+  private async reconcileTerminalLivenessProvider(input: {
+    runId: string;
     principalId: string;
-    externalThreadId: string | null;
+    attemptId: string;
+    externalThreadId: string;
     externalRunId: string | null;
-  }): Promise<RuntimeLivenessCleanup> {
-    if (!input.externalThreadId) {
-      return { attempted: false, externalRunId: input.externalRunId, result: null };
-    }
+  }): Promise<void> {
     const startedAt = performance.now();
-    const cancellationBudget = new RuntimeProviderCancellationBudget(this.executionDeadlineCancelMs);
-    let recoveredExternalRunId = input.externalRunId;
     try {
-      const result = await raceWithAbort(this.runtime.cancel({
-        runId: input.claim.runId,
-        runtimeAttemptId: input.runtimeAttemptId,
-        principalId: input.principalId,
-        externalThreadId: input.externalThreadId,
-        externalRunId: input.externalRunId,
-      }, async (candidateExternalRunId) => {
-        await this.attempts.attachExternalRunForCleanup(
-          input.runtimeAttemptId,
-          candidateExternalRunId,
-        );
-        recoveredExternalRunId = candidateExternalRunId;
-      }, cancellationBudget.signal), cancellationBudget.signal);
-      recoveredExternalRunId = result.externalRunId ?? recoveredExternalRunId;
-      const cleanupConverged = runtimeProviderCleanupConverged(result);
+      const result = await this.reconcileFailedProviderCancellation(
+        input.runId,
+        input.principalId,
+        {
+          id: input.attemptId,
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          externalThreadId: input.externalThreadId,
+          externalRunId: input.externalRunId,
+        },
+      );
       recordRuntimeLivenessMetric({
         operation: "cancel",
-        outcome: result.disposition === "cancelled"
-          ? "cancelled"
-          : cleanupConverged ? "recovered" : "error",
+        outcome: "cancellationConverged" in result && result.cancellationConverged
+          ? "recovered"
+          : "error",
         durationMs: performance.now() - startedAt,
-        ...(result.disposition === "not_found"
-          ? { errorCode: "RUNTIME_EXTERNAL_RUN_UNRESOLVED" }
-          : {}),
       });
-      return { attempted: true, externalRunId: recoveredExternalRunId, result };
     } catch {
       recordRuntimeLivenessMetric({
         operation: "cancel",
-        outcome: cancellationBudget.signal.aborted ? "timeout" : "error",
+        outcome: "error",
         durationMs: performance.now() - startedAt,
-        errorCode: cancellationBudget.signal.aborted
-          ? "RUNTIME_PROVIDER_CANCEL_TIMEOUT"
-          : "RUNTIME_PROVIDER_CANCEL_FAILED",
+        errorCode: "RUNTIME_PROVIDER_CANCEL_FAILED",
       });
-      return { attempted: true, externalRunId: recoveredExternalRunId, result: null };
-    } finally {
-      cancellationBudget.stop();
+    }
+  }
+
+  private async beginProviderCancellationInvocation(input: {
+    runId: string;
+    runtimeAttemptId: string;
+    principalId: string;
+    externalThreadId: string;
+    externalRunId: string | null;
+    claim?: RuntimeExecutionClaim;
+    onExternalRunRecovered?: (externalRunId: string) => void;
+    onProviderResultSettled?: (
+      operation: RuntimeProviderCancellationOperation,
+      result: RuntimeProviderCancellationResult,
+    ) => Promise<void>;
+  }): Promise<RuntimeProviderCancellationInvocation> {
+    const operation = await this.attempts.startProviderCancellationOperation(
+      input.runId,
+      input.runtimeAttemptId,
+      this.providerCancellationOperationHardDeadlineMs,
+      input.claim,
+    );
+    if (!operation) {
+      throw new RuntimeExecutionFencedError(
+        "RUNTIME_PROVIDER_CANCELLATION_OPERATION_PENDING",
+      );
+    }
+    const remainingOperationMs = operation.monotonicDeadlineAtMs - performance.now();
+    if (!Number.isFinite(remainingOperationMs) || remainingOperationMs <= 0) {
+      throw new RuntimeExecutionFencedError(
+        "RUNTIME_PROVIDER_CANCELLATION_OPERATION_DEADLINE_EXPIRED",
+      );
+    }
+    const operationBudget = new RuntimeProviderCancellationBudget(
+      Math.max(1, Math.ceil(remainingOperationMs)),
+    );
+    const providerResult = Promise.resolve().then(() => this.runtime.cancel({
+      runId: input.runId,
+      runtimeAttemptId: input.runtimeAttemptId,
+      principalId: input.principalId,
+      externalThreadId: input.externalThreadId,
+      externalRunId: operation.externalRunId,
+    }, async (externalRunId) => {
+      const attachment = await this.attempts.attachExternalRunForCleanup(
+        input.runtimeAttemptId,
+        operation.epoch,
+        externalRunId,
+      );
+      if (!attachment.operationCurrent) return;
+      input.onExternalRunRecovered?.(externalRunId);
+    }, operationBudget.signal));
+    const settle = async (result: RuntimeProviderCancellationResult) => {
+      if (result.disposition === "not_found") {
+        if (await this.attempts.finishProviderCancellationOperation(operation)) return;
+        throw new RuntimeExecutionFencedError(
+          "RUNTIME_PROVIDER_CANCELLATION_OPERATION_SETTLEMENT_FENCED",
+        );
+      }
+      const settlement = await this.attempts.settleProviderCancellationOperation(operation, {
+        outcome: result.disposition,
+        externalRunId: result.externalRunId,
+      });
+      this.assertProviderCancellationOperationSettlement(settlement);
+    };
+    return {
+      operation,
+      result: providerResult.then(
+        async (result) => {
+          await (input.onProviderResultSettled
+            ? input.onProviderResultSettled(operation, result)
+            : settle(result));
+          return result;
+        },
+        async (error: unknown) => {
+          if (!await this.attempts.finishProviderCancellationOperation(operation)) {
+            throw new RuntimeExecutionFencedError(
+              "RUNTIME_PROVIDER_CANCELLATION_OPERATION_SETTLEMENT_FENCED",
+            );
+          }
+          throw error;
+        },
+      ).finally(() => operationBudget.stop()),
+    };
+  }
+
+  private assertProviderCancellationOperationSettlement(
+    settlement: RuntimeProviderCancellationOperationSettlement,
+  ): void {
+    if (settlement === "fenced") {
+      throw new RuntimeExecutionFencedError(
+        "RUNTIME_PROVIDER_CANCELLATION_OPERATION_SETTLEMENT_FENCED",
+      );
+    }
+    if (settlement === "unconfirmed") {
+      throw new Error(runtimeProviderCancellationUnconfirmedCode);
+    }
+    if (settlement === "external_run_conflict") {
+      throw new Error("RUNTIME_PROVIDER_CANCELLATION_EXTERNAL_RUN_CONFLICT");
     }
   }
 
@@ -675,7 +788,6 @@ export class RunProcessor {
       return this.reconcileFailedProviderCancellation(
         runId,
         run.createdById,
-        run.errorDetail,
         initialAttempt,
         jobSignal,
       );
@@ -696,47 +808,37 @@ export class RunProcessor {
     );
     let result: Awaited<ReturnType<RuntimePort["cancel"]>>;
     try {
-      result = await raceWithAbort(this.runtime.cancel({
+      const invocation = await this.beginProviderCancellationInvocation({
         runId,
         runtimeAttemptId: attempt.id,
         principalId: run.createdById,
         externalThreadId: attempt.externalThreadId,
         externalRunId: attempt.externalRunId,
-      }, async (externalRunId) => {
-        await this.attempts.attachExternalRunForCleanup(attempt.id, externalRunId);
-      }, cancellationBudget.signal), cancellationBudget.signal);
+      });
+      result = await raceWithAbort(invocation.result, cancellationBudget.signal);
     } finally {
       cancellationBudget.stop();
     }
     if (result.disposition === "not_found") {
-      const submissionAgeMs = attempt.startedAt
-        ? Date.now() - attempt.startedAt.getTime()
-        : 0;
-      if (submissionAgeMs < this.cancellationRecoveryWindowMs) {
-        throw new Error("RUNTIME_EXTERNAL_RUN_UNRESOLVED");
-      }
-      await this.finalizeCancellation(
-        runId,
-        "Cancelled after external Run creation window elapsed",
-        attempt.id,
-      );
-      return { runId, cancelled: true, externalRunAbsent: true };
+      throw new Error("RUNTIME_EXTERNAL_RUN_UNRESOLVED");
     }
     await this.finalizeCancellation(runId, "Cancelled by user", attempt.id);
-    return { runId, cancelled: true };
+    return {
+      runId,
+      cancelled: true,
+      ...(result.disposition === "external_run_absent" ? { externalRunAbsent: true } : {}),
+    };
   }
 
   private async reconcileFailedProviderCancellation(
     runId: string,
     principalId: string,
-    detailCode: string | null,
     attempt: {
       id: string;
       status: string;
       errorCode: string | null;
       externalThreadId: string;
       externalRunId: string | null;
-      startedAt: Date | null;
     },
     jobSignal?: AbortSignal,
   ) {
@@ -746,15 +848,19 @@ export class RunProcessor {
     ) {
       throw new Error("RUNTIME_PROVIDER_CANCELLATION_ATTEMPT_INVALID");
     }
-    const claim = await this.attempts.claimProviderCancellation(
+    const claimResult = await this.attempts.claimProviderCancellation(
       runId,
       attempt.id,
       `runtime-cleanup:${randomUUID()}`,
       this.providerCancellationLeaseMs,
     );
-    if (!claim) {
+    if (claimResult.disposition === "resolved") {
       return { runId, cancelled: false, cancellationConverged: true };
     }
+    if (claimResult.disposition === "busy") {
+      return { runId, cancelled: false, cancellationPending: true };
+    }
+    const claim = claimResult.claim;
     let resolved = false;
     try {
       const cancellationBudget = new RuntimeProviderCancellationBudget(
@@ -763,69 +869,52 @@ export class RunProcessor {
       );
       let result: Awaited<ReturnType<RuntimePort["cancel"]>>;
       try {
-        result = await raceWithAbort(this.runtime.cancel({
+        const invocation = await this.beginProviderCancellationInvocation({
           runId,
           runtimeAttemptId: attempt.id,
           principalId,
           externalThreadId: attempt.externalThreadId,
           externalRunId: attempt.externalRunId,
-        }, async (externalRunId) => {
-          await this.attempts.attachExternalRunForCleanup(attempt.id, externalRunId);
-        }, cancellationBudget.signal), cancellationBudget.signal);
+          claim,
+          onProviderResultSettled: async (operation, providerResult) => {
+            if (providerResult.disposition === "not_found") {
+              if (!await this.attempts.finishProviderCancellationOperation(operation)) {
+                throw new RuntimeExecutionFencedError(
+                  "RUNTIME_PROVIDER_CANCELLATION_OPERATION_SETTLEMENT_FENCED",
+                );
+              }
+              return;
+            }
+            const settlement = await this.attempts.settleProviderCancellationOperation(
+              operation,
+              {
+                outcome: providerResult.disposition,
+                externalRunId: providerResult.externalRunId,
+              },
+            );
+            this.assertProviderCancellationOperationSettlement(settlement);
+          },
+        });
+        result = await raceWithAbort(invocation.result, cancellationBudget.signal);
       } finally {
         cancellationBudget.stop();
       }
 
       if (result.disposition !== "not_found") {
-        await this.markFailedProviderCancellationConverged(
-          claim,
-          detailCode,
-          result.disposition,
-          result.externalRunId,
-        );
         resolved = true;
-        return { runId, cancelled: false, cancellationConverged: true };
-      }
-      if (result.disposition === "not_found") {
-        const submissionAgeMs = attempt.startedAt
-          ? Date.now() - attempt.startedAt.getTime()
-          : 0;
-        if (submissionAgeMs >= this.cancellationRecoveryWindowMs) {
-          await this.markFailedProviderCancellationConverged(
-            claim,
-            detailCode,
-            "external_run_absent",
-            null,
-          );
-          resolved = true;
-          return {
-            runId,
-            cancelled: false,
-            cancellationConverged: true,
-            externalRunAbsent: true,
-          };
-        }
+        return {
+          runId,
+          cancelled: false,
+          cancellationConverged: true,
+          ...(result.disposition === "external_run_absent"
+            ? { externalRunAbsent: true }
+            : {}),
+        };
       }
       throw new Error(runtimeProviderCancellationUnconfirmedCode);
     } finally {
       if (!resolved) await this.attempts.releaseProviderCancellation(claim);
     }
-  }
-
-  private async markFailedProviderCancellationConverged(
-    claim: RuntimeExecutionClaim,
-    detailCode: string | null,
-    outcome: RuntimeProviderCancellationResolutionOutcome,
-    externalRunId: string | null,
-  ) {
-    const settledCode = detailCode && detailCode !== runtimeProviderCancellationUnconfirmedCode
-      ? detailCode
-      : "RUNTIME_EXECUTION_FAILED";
-    await this.attempts.resolveProviderCancellation(claim, {
-      failureCode: settledCode,
-      outcome,
-      externalRunId,
-    });
   }
 
   private async recoverPublishedSuccess(runId: string) {
@@ -962,6 +1051,7 @@ export class RunProcessor {
         createdOutputEntry = true;
       }
 
+      const runStartedAt = run.startedAt ?? await databaseClockTimestamp(tx);
       const started = await tx.run.updateMany({
         where: { id: runId, status: "queued" },
         data: {
@@ -970,7 +1060,7 @@ export class RunProcessor {
           phaseLabel: "正在理解需求",
           progress: null,
           attempt: { increment: 1 },
-          startedAt: run.startedAt ?? new Date(),
+          startedAt: runStartedAt,
           outputEntryId: entryId,
         },
       });
@@ -1018,7 +1108,7 @@ export class RunProcessor {
     context: RuntimePersistenceContext,
     initialFullText: string,
     effects: RuntimeProgressEvent[],
-  ) {
+  ): Promise<string> {
     let fullText = initialFullText;
     for (const event of effects) {
       if (event.type === "text.delta") {
@@ -1091,14 +1181,19 @@ export class RunProcessor {
 
   private async waitForInput(claim: RuntimeExecutionClaim, input: RuntimeInputRequired) {
     const { runId, attemptId: runtimeAttemptId } = claim;
-    await this.db.$transaction(async (tx) => {
-      await this.assertActiveClaimTx(tx, claim);
+    return this.db.$transaction(async (tx) => {
+      const claimScope = await this.assertActiveClaimTx(tx, claim);
       const run = await tx.run.findUniqueOrThrow({ where: { id: runId } });
       if (run.status !== "running") throw new RuntimeCancelledError();
       const runtimeAttempt = await tx.runtimeAttempt.findUniqueOrThrow({ where: { id: runtimeAttemptId } });
       if (runtimeAttempt.runId !== runId || runtimeAttempt.status !== "running") {
         throw new Error("RUNTIME_ATTEMPT_WAIT_STATE_INVALID");
       }
+      const finishedAt = runtimeLifecycleTimestamp(
+        claimScope.databaseNow,
+        run.startedAt,
+        runtimeAttempt.startedAt,
+      );
       const waiting = await tx.run.updateMany({
         where: {
           id: runId,
@@ -1120,12 +1215,12 @@ export class RunProcessor {
         },
         data: {
           status: "waiting_input",
-          finishedAt: new Date(),
+          finishedAt,
           ...releasedExecutionLease(),
         },
       });
       if (attemptWaiting.count !== 1) throw new Error("RUNTIME_ATTEMPT_WAIT_STATE_INVALID");
-      await this.cancelCanvasSessionsTx(tx, runId, new Date(), runtimeAttemptId);
+      await this.cancelCanvasSessionsTx(tx, runId, finishedAt, runtimeAttemptId);
 
       for (const request of input.approvals) {
         let approval = await tx.runApproval.findUnique({
@@ -1503,7 +1598,7 @@ export class RunProcessor {
   ) {
     const { runId, attemptId: runtimeAttemptId } = claim;
     await this.db.$transaction(async (tx) => {
-      await this.assertActiveClaimTx(tx, claim);
+      const claimScope = await this.assertActiveClaimTx(tx, claim);
       const run = await tx.run.findUniqueOrThrow({ where: { id: runId } });
       if (run.status !== "running") throw new RuntimeExecutionFencedError();
       const request = startRunRequestSchema.parse(run.request);
@@ -1668,7 +1763,11 @@ export class RunProcessor {
           artifactEvents,
         );
       }
-      const finishedAt = new Date();
+      const finishedAt = runtimeLifecycleTimestamp(
+        claimScope.databaseNow,
+        run.startedAt,
+        runtimeAttempt.startedAt,
+      );
       const completed = await tx.run.updateMany({
         where: {
           id: runId,
@@ -2402,19 +2501,32 @@ export class RunProcessor {
     retryable: boolean,
     claim: RuntimeExecutionClaim | null = null,
     context: RuntimeFailureContext | null = null,
-  ) {
+  ): Promise<RuntimeFailureDisposition> {
     const code = context?.code ?? runtimeExecutionErrorCode(error);
     const detailCode = context?.detailCode ?? code;
     const message = code;
-    await this.db.$transaction(async (tx) => {
+    return this.db.$transaction(async (tx): Promise<RuntimeFailureDisposition> => {
       if (claim) {
         try {
           await this.attempts.assertClaimTx(tx, claim);
         } catch (claimError) {
-          if (claimError instanceof RuntimeExecutionFencedError) return;
+          if (claimError instanceof RuntimeExecutionFencedError) return "fenced";
           throw claimError;
         }
       }
+      const runLifecycle = await lockRunLifecycleState(tx, runId);
+      if (!runLifecycle) return "fenced";
+      const attempt = runtimeAttemptId
+        ? await lockRuntimeAttemptLifecycleState(tx, runId, runtimeAttemptId)
+        : null;
+      const attemptCanFail = attempt
+        && !["waiting_input", "succeeded", "failed", "cancelled"].includes(attempt.status);
+      const databaseNow = await databaseClockTimestamp(tx);
+      const failedAt = runtimeLifecycleTimestamp(
+        databaseNow,
+        runLifecycle.startedAt,
+        attemptCanFail ? attempt.startedAt : null,
+      );
       const updated = await tx.run.updateMany({
         where: claim
           ? {
@@ -2426,42 +2538,38 @@ export class RunProcessor {
           : { id: runId, status: { in: ["queued", "running"] } },
         data: {
           status: "failed",
-          finishedAt: new Date(),
+          finishedAt: failedAt,
           errorCode: code,
           errorDetail: detailCode,
           errorRetryable: retryable,
           ...releasedExecutionLease(),
         },
       });
-      if (updated.count !== 1) return;
-      const failedAt = new Date();
-      if (runtimeAttemptId) {
-        const attempt = await tx.runtimeAttempt.findUnique({ where: { id: runtimeAttemptId } });
-        if (attempt && !["waiting_input", "succeeded", "failed", "cancelled"].includes(attempt.status)) {
-          const attemptFailed = await tx.runtimeAttempt.updateMany({
-            where: claim
-              ? {
-                  id: runtimeAttemptId,
-                  runId,
-                  executionOwnerId: claim.ownerId,
-                  executionEpoch: claim.epoch,
-                }
-              : { id: runtimeAttemptId },
-            data: {
-              status: "failed",
-              startedAt: attempt.startedAt ?? failedAt,
-              finishedAt: failedAt,
-              errorCode: code,
-              errorDetail: detailCode,
-              errorRetryable: retryable,
-              ...(context?.submissionUnknown
-                ? { submissionUnknownAt: attempt.submissionUnknownAt ?? failedAt }
-                : {}),
-              ...releasedExecutionLease(),
-            },
-          });
-          if (attemptFailed.count !== 1) throw new RuntimeExecutionFencedError();
-        }
+      if (updated.count !== 1) return "fenced";
+      if (runtimeAttemptId && attemptCanFail) {
+        const attemptFailed = await tx.runtimeAttempt.updateMany({
+          where: claim
+            ? {
+                id: runtimeAttemptId,
+                runId,
+                executionOwnerId: claim.ownerId,
+                executionEpoch: claim.epoch,
+              }
+            : { id: runtimeAttemptId },
+          data: {
+            status: "failed",
+            startedAt: attempt.startedAt ?? failedAt,
+            finishedAt: failedAt,
+            errorCode: code,
+            errorDetail: detailCode,
+            errorRetryable: retryable,
+            ...(context?.submissionUnknown
+              ? { submissionUnknownAt: attempt.submissionUnknownAt ?? failedAt }
+              : {}),
+            ...releasedExecutionLease(),
+          },
+        });
+        if (attemptFailed.count !== 1) throw new RuntimeExecutionFencedError();
       }
       await this.cancelCanvasSessionsTx(tx, runId, failedAt);
       await tx.runDraft.deleteMany({ where: { runId } });
@@ -2472,6 +2580,7 @@ export class RunProcessor {
         message,
         retryable,
       });
+      return "terminalized";
     });
   }
 
@@ -2485,12 +2594,25 @@ export class RunProcessor {
     reason: string,
     runtimeAttemptId?: string,
   ) {
+    const runLifecycle = await lockRunLifecycleState(tx, runId);
+    if (!runLifecycle || runLifecycle.status !== "cancelling") return;
+    const attempt = runtimeAttemptId
+      ? await lockRuntimeAttemptLifecycleState(tx, runId, runtimeAttemptId)
+      : null;
+    const attemptCanCancel = attempt
+      && !["succeeded", "failed", "cancelled"].includes(attempt.status);
+    const databaseNow = await databaseClockTimestamp(tx);
+    const cancelledAt = runtimeLifecycleTimestamp(
+      databaseNow,
+      runLifecycle.startedAt,
+      attemptCanCancel ? attempt.startedAt : null,
+    );
     const updated = await tx.run.updateMany({
       where: { id: runId, status: "cancelling" },
       data: {
         status: "cancelled",
         cancellationReason: reason,
-        finishedAt: new Date(),
+        finishedAt: cancelledAt,
         errorCode: null,
         errorDetail: null,
         errorRetryable: null,
@@ -2498,23 +2620,19 @@ export class RunProcessor {
       },
     });
     if (updated.count !== 1) return;
-    const cancelledAt = new Date();
-    if (runtimeAttemptId) {
-      const attempt = await tx.runtimeAttempt.findUnique({ where: { id: runtimeAttemptId } });
-      if (attempt && !["succeeded", "failed", "cancelled"].includes(attempt.status)) {
-        await tx.runtimeAttempt.update({
-          where: { id: runtimeAttemptId },
-          data: {
-            status: "cancelled",
-            startedAt: attempt.startedAt ?? cancelledAt,
-            finishedAt: cancelledAt,
-            errorCode: null,
-            errorDetail: null,
-            errorRetryable: null,
-            ...releasedExecutionLease(),
-          },
-        });
-      }
+    if (runtimeAttemptId && attemptCanCancel) {
+      await tx.runtimeAttempt.update({
+        where: { id: runtimeAttemptId },
+        data: {
+          status: "cancelled",
+          startedAt: attempt.startedAt ?? cancelledAt,
+          finishedAt: cancelledAt,
+          errorCode: null,
+          errorDetail: null,
+          errorRetryable: null,
+          ...releasedExecutionLease(),
+        },
+      });
     }
     await this.cancelCanvasSessionsTx(tx, runId, cancelledAt);
     await this.prototypePatches.discardRunTx(tx, runId, cancelledAt);
@@ -3546,6 +3664,66 @@ function releasedExecutionLease() {
   };
 }
 
+async function databaseClockTimestamp(tx: Prisma.TransactionClient): Promise<Date> {
+  const rows = await tx.$queryRaw<Array<{ databaseNow: Date }>>(Prisma.sql`
+    SELECT clock_timestamp() AS "databaseNow"
+  `);
+  const databaseNow = rows[0]?.databaseNow;
+  if (!(databaseNow instanceof Date) || !Number.isFinite(databaseNow.getTime())) {
+    throw new Error("RUNTIME_DATABASE_CLOCK_INVALID");
+  }
+  return databaseNow;
+}
+
+async function lockRunLifecycleState(
+  tx: Prisma.TransactionClient,
+  runId: string,
+): Promise<{ status: string; startedAt: Date | null } | null> {
+  const rows = await tx.$queryRaw<Array<{ status: string; startedAt: Date | null }>>(Prisma.sql`
+    SELECT "status"::TEXT AS "status", "started_at" AS "startedAt"
+    FROM "runs"
+    WHERE "id" = ${runId}
+    FOR UPDATE
+  `);
+  return rows[0] ?? null;
+}
+
+async function lockRuntimeAttemptLifecycleState(
+  tx: Prisma.TransactionClient,
+  runId: string,
+  runtimeAttemptId: string,
+): Promise<{
+  status: string;
+  startedAt: Date | null;
+  submissionUnknownAt: Date | null;
+} | null> {
+  const rows = await tx.$queryRaw<Array<{
+    status: string;
+    startedAt: Date | null;
+    submissionUnknownAt: Date | null;
+  }>>(Prisma.sql`
+    SELECT
+      "status"::TEXT AS "status",
+      "started_at" AS "startedAt",
+      "submission_unknown_at" AS "submissionUnknownAt"
+    FROM "runtime_attempts"
+    WHERE "id" = ${runtimeAttemptId}
+      AND "run_id" = ${runId}
+    FOR UPDATE
+  `);
+  return rows[0] ?? null;
+}
+
+function runtimeLifecycleTimestamp(
+  databaseNow: Date,
+  ...startedAt: Array<Date | null | undefined>
+): Date {
+  return startedAt.reduce<Date>(
+    (latest, candidate) => candidate && candidate > latest ? candidate : latest,
+    databaseNow,
+  );
+}
+
 class RunTransitionRejectedError extends Error {
   constructor(status: string | null) {
     super(`RUN_TRANSITION_REJECTED:${status ?? "missing"}`);
@@ -3749,12 +3927,6 @@ function finalRuntimeProviderLivenessError(
     candidate = candidate.cause;
   }
   return null;
-}
-
-function runtimeProviderCleanupConverged(
-  result: Awaited<ReturnType<RuntimePort["cancel"]>> | null,
-): boolean {
-  return result !== null && result.disposition !== "not_found";
 }
 
 export function runtimeExecutionErrorCode(

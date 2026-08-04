@@ -183,9 +183,13 @@ export class WorkbenchExportsApi {
     return versioned(externalExportDeliverySchema, result.data, result.response, "create external export delivery");
   }
 
-  async getExternalExportDelivery(deliveryId: string): Promise<Versioned<ExternalExportDelivery>> {
+  async getExternalExportDelivery(
+    deliveryId: string,
+    signal?: AbortSignal,
+  ): Promise<Versioned<ExternalExportDelivery>> {
     const result = await this.api.GET("/export-deliveries/{deliveryId}", {
       params: { path: { deliveryId } },
+      signal,
     });
     return versioned(externalExportDeliverySchema, result.data, result.response, "get external export delivery");
   }

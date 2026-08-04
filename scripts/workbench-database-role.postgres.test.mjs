@@ -162,10 +162,28 @@ testWithAdmin("transfers existing schema ownership and keeps runtime append-only
         canTruncate: false,
       });
       await runtime.query(`
+        BEGIN;
+        UPDATE workbench.runtime_attempts
+        SET provider_cancellation_operation_epoch = 1,
+            provider_cancellation_operation_started_at = clock_timestamp(),
+            provider_cancellation_operation_deadline_at = clock_timestamp() + INTERVAL '1 minute'
+        WHERE id = 'attempt_resolution_role_1';
         INSERT INTO workbench.runtime_provider_cancellation_resolutions
-          (runtime_attempt_id, run_id, failure_code, outcome)
+          (runtime_attempt_id, run_id, operation_epoch, external_run_id, failure_code, outcome)
         VALUES
-          ('attempt_resolution_role_1', 'run_resolution_role_1', 'RUNTIME_TIMEOUT', 'cancelled')
+          (
+            'attempt_resolution_role_1',
+            'run_resolution_role_1',
+            1,
+            'external_resolution_role_1',
+            'RUNTIME_TIMEOUT',
+            'cancelled'
+          );
+        UPDATE workbench.runtime_attempts
+        SET provider_cancellation_operation_started_at = NULL,
+            provider_cancellation_operation_deadline_at = NULL
+        WHERE id = 'attempt_resolution_role_1';
+        COMMIT;
       `);
       await assert.rejects(
         runtime.query(`
@@ -184,12 +202,18 @@ testWithAdmin("transfers existing schema ownership and keeps runtime append-only
         /permission denied/u,
       );
       const cancellationResolution = await runtime.query(`
-        SELECT run_id AS "runId", failure_code AS "failureCode", outcome
+        SELECT run_id AS "runId",
+               operation_epoch AS "operationEpoch",
+               external_run_id AS "externalRunId",
+               failure_code AS "failureCode",
+               outcome
         FROM workbench.runtime_provider_cancellation_resolutions
         WHERE runtime_attempt_id = 'attempt_resolution_role_1'
       `);
       assert.deepEqual(cancellationResolution.rows, [{
         runId: "run_resolution_role_1",
+        operationEpoch: 1,
+        externalRunId: "external_resolution_role_1",
         failureCode: "RUNTIME_TIMEOUT",
         outcome: "cancelled",
       }]);
@@ -395,14 +419,53 @@ async function createAdminOwnedFixture(databaseUrl) {
         runtime_attempt_id TEXT PRIMARY KEY,
         state_sha256 CHAR(64) NOT NULL
       );
-      CREATE TABLE workbench.runtime_provider_cancellation_resolutions (
-        runtime_attempt_id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        failure_code VARCHAR(120) NOT NULL,
-        outcome VARCHAR(32) NOT NULL
+      CREATE TABLE workbench.runs (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        error_code TEXT
+      );
+      CREATE TABLE workbench.runtime_attempts (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES workbench.runs(id) ON DELETE CASCADE,
+        external_run_id TEXT,
+        status TEXT NOT NULL,
+        error_code TEXT,
+        CONSTRAINT runtime_attempts_id_run_id_key UNIQUE (id, run_id),
+        CONSTRAINT runtime_attempts_external_run_id_length_check CHECK (
+          external_run_id IS NULL OR length(external_run_id) BETWEEN 1 AND 512
+        )
       );
     `);
     await admin.query("SET search_path TO workbench");
+    await admin.query(readFileSync(
+      "packages/workbench-db/prisma/migrations/20260803010000_runtime_provider_cancellation_resolution/migration.sql",
+      "utf8",
+    ));
+    await admin.query(readFileSync(
+      "packages/workbench-db/prisma/migrations/20260804010000_runtime_provider_cancellation_operation/migration.sql",
+      "utf8",
+    ));
+    await admin.query(`
+      INSERT INTO workbench.runs (id, status, error_code)
+      VALUES (
+        'run_resolution_role_1',
+        'failed',
+        'RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED'
+      );
+      INSERT INTO workbench.runtime_attempts (
+        id,
+        run_id,
+        external_run_id,
+        status,
+        error_code
+      ) VALUES (
+        'attempt_resolution_role_1',
+        'run_resolution_role_1',
+        'external_resolution_role_1',
+        'failed',
+        'RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED'
+      );
+    `);
     await admin.query(readFileSync(
       "packages/workbench-db/prisma/migrations/20260720030000_ready_object_integrity_incidents/migration.sql",
       "utf8",

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { hashRequest } from "../src/common/idempotency.js";
 import { AccessService } from "../src/modules/access/access.service.js";
@@ -97,6 +97,74 @@ describeWithPostgres("Run cancellation PostgreSQL idempotency", () => {
       await setup.$disconnect();
     }
   }, 120_000);
+
+  it("clears finished_at when a waiting-input attempt enters cancelling", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedFixture(db);
+    const bindingId = `runtime_binding_${fixture.suffix}`;
+    const attemptId = `runtime_attempt_${fixture.suffix}`;
+    const startedAt = new Date(Date.now() - 1_000);
+    const finishedAt = new Date();
+    const queue = { sendInTransaction: vi.fn().mockResolvedValue("cancel-waiting-job") };
+
+    try {
+      await db.runtimeBinding.create({
+        data: {
+          id: bindingId,
+          threadId: fixture.threadId,
+          adapter: "test-runtime",
+          externalThreadId: `external_thread_${fixture.suffix}`,
+          metadata: {},
+        },
+      });
+      await db.run.update({
+        where: { id: fixture.runId },
+        data: { status: "waiting_input", attempt: 1, startedAt },
+      });
+      await db.runtimeAttempt.create({
+        data: {
+          id: attemptId,
+          runId: fixture.runId,
+          runtimeBindingId: bindingId,
+          attempt: 1,
+          adapter: "test-runtime",
+          externalThreadId: `external_thread_${fixture.suffix}`,
+        },
+      });
+      await db.runtimeAttempt.update({
+        where: { id: attemptId },
+        data: {
+          status: "submitting",
+          providerIdempotencyKey: `wbrt:${createHash("sha256").update(attemptId).digest("hex")}`,
+          startedAt,
+        },
+      });
+      await db.runtimeAttempt.update({
+        where: { id: attemptId },
+        data: {
+          status: "running",
+          externalRunId: `external_run_${fixture.suffix}`,
+        },
+      });
+      await db.runtimeAttempt.update({
+        where: { id: attemptId },
+        data: { status: "waiting_input", finishedAt },
+      });
+
+      await expect(service(db, queue).cancel(
+        fixture.principalId,
+        fixture.runId,
+        `run-cancel-waiting:${fixture.suffix}`,
+      )).resolves.toMatchObject({ id: fixture.runId, status: "cancelling" });
+      await expect(db.runtimeAttempt.findUniqueOrThrow({ where: { id: attemptId } }))
+        .resolves.toMatchObject({ status: "cancelling", finishedAt: null });
+      expect(queue.sendInTransaction).toHaveBeenCalledTimes(1);
+    } finally {
+      await db.workspace.deleteMany({ where: { id: fixture.workspaceId } });
+      await db.principal.deleteMany({ where: { id: fixture.principalId } });
+      await db.$disconnect();
+    }
+  }, 120_000);
 });
 
 function service(
@@ -179,5 +247,5 @@ async function seedFixture(db: PrismaClient) {
     }
   });
 
-  return { suffix, principalId, workspaceId, runId, otherRunId };
+  return { suffix, principalId, workspaceId, threadId, runId, otherRunId };
 }
