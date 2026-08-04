@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ExternalExportDelivery } from "@workbench/workbench-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { WorkbenchApiError } from "../api/problem-details";
 import { useWorkbenchPublicationController } from "./workbench-publication-controller";
 
 const mocks = vi.hoisted(() => ({
@@ -335,6 +336,65 @@ describe("Workbench export recovery", () => {
     rendered.unmount();
   });
 
+  it("fences an obsolete hydration request when the same Export hydration restarts", async () => {
+    const succeeded = exportJob({
+      id: "export-hydration-generation",
+      format: "html",
+      packaging: "zip",
+      status: "succeeded",
+      revision: 2,
+      output: output("blob-hydration-generation"),
+      startedAt: "2026-07-15T05:30:00.000Z",
+      finishedAt: "2026-07-15T05:30:01.000Z",
+    });
+    const obsolete = externalDelivery({
+      id: "delivery-obsolete-hydration",
+      exportJobId: succeeded.id,
+      status: "succeeded",
+      revision: 4,
+      remoteReference: "https://deploy.example/obsolete-hydration",
+      finishedAt: "2026-07-15T05:30:05.000Z",
+    });
+    const current = externalDelivery({
+      id: "delivery-current-hydration",
+      exportJobId: succeeded.id,
+      status: "running",
+      revision: 2,
+      attempt: 1,
+    });
+    const firstHydration = deferred<{ items: ExternalDeliveryFixture[] }>();
+    const secondHydration = deferred<{ items: ExternalDeliveryFixture[] }>();
+    mocks.jobsByProject = { "project-a": [succeeded] };
+    mocks.details[succeeded.id] = { value: succeeded, etag: '"2"' };
+    mocks.listDeliveries
+      .mockReturnValueOnce(firstHydration.promise)
+      .mockReturnValueOnce(secondHydration.promise);
+
+    const rendered = renderController("project-a");
+    await flushEffects();
+    expect(mocks.listDeliveries).toHaveBeenCalledOnce();
+
+    rendered.rerender({ currentProjectId: "project-a", canExport: false });
+    await flushEffects();
+    rendered.rerender({ currentProjectId: "project-a", canExport: true });
+    await flushEffects();
+    await flushEffects();
+    expect(mocks.listDeliveries).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      firstHydration.resolve({ items: [obsolete] });
+      await firstHydration.promise;
+    });
+    expect(rendered.result.current.activeExternalDelivery).toBeNull();
+
+    await act(async () => {
+      secondHydration.resolve({ items: [current] });
+      await secondHydration.promise;
+    });
+    expect(rendered.result.current.activeExternalDelivery).toEqual(current);
+    rendered.unmount();
+  });
+
   it("single-flights external delivery preparation", async () => {
     const succeeded = exportJob({
       id: "export-single-flight",
@@ -528,6 +588,69 @@ describe("Workbench export recovery", () => {
     });
     expect(rendered.result.current.activeExternalDelivery).toEqual(completed);
     expect(rendered.result.current.exportError).toBeNull();
+    rendered.unmount();
+  });
+
+  it("reports a 412 mutation failure after polling completes the same delivery", async () => {
+    vi.useFakeTimers();
+    const succeeded = exportJob({
+      id: "export-mutation-error-fence",
+      format: "html",
+      packaging: "zip",
+      status: "succeeded",
+      revision: 2,
+      output: output("blob-mutation-error-fence"),
+      startedAt: "2026-07-15T07:30:00.000Z",
+      finishedAt: "2026-07-15T07:30:01.000Z",
+    });
+    const running = externalDelivery({
+      id: "delivery-mutation-error-fence",
+      exportJobId: succeeded.id,
+      status: "running",
+      revision: 2,
+      attempt: 1,
+      confirmedAt: "2026-07-15T07:30:02.000Z",
+      startedAt: "2026-07-15T07:30:03.000Z",
+    });
+    const completed = externalDelivery({
+      ...running,
+      status: "succeeded",
+      revision: 3,
+      remoteReference: "https://deploy.example/mutation-error-fence",
+      transferAuthorizedAt: "2026-07-15T07:30:04.000Z",
+      finishedAt: "2026-07-15T07:30:05.000Z",
+      updatedAt: "2026-07-15T07:30:05.000Z",
+    });
+    const cancellation = deferred<{ value: ExternalDeliveryFixture; etag: string }>();
+    const cancellationError = new WorkbenchApiError({
+      type: "about:blank",
+      title: "Precondition failed",
+      status: 412,
+      code: "REVISION_MISMATCH",
+      detail: "External Export delivery revision does not match",
+    });
+    mocks.jobsByProject = { "project-a": [succeeded] };
+    mocks.details[succeeded.id] = { value: succeeded, etag: '"2"' };
+    mocks.deliveriesByExport[succeeded.id] = [running];
+    mocks.getDelivery.mockResolvedValue({ value: completed, etag: '"3"' });
+    mocks.cancelDelivery.mockReturnValue(cancellation.promise);
+
+    const rendered = renderController("project-a");
+    await flushEffects();
+    let cancelOperation!: Promise<unknown>;
+    act(() => {
+      cancelOperation = rendered.result.current.cancelExternalDelivery("Netlify")
+        .catch((error: unknown) => error);
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    expect(rendered.result.current.activeExternalDelivery).toEqual(completed);
+
+    await act(async () => {
+      cancellation.reject(cancellationError);
+      await cancelOperation;
+    });
+    expect(rendered.result.current.activeExternalDelivery).toEqual(completed);
+    expect(rendered.result.current.exportError).toBe(cancellationError);
     rendered.unmount();
   });
 

@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { WorkbenchApiError } from "../../lib/workbench/api/problem-details";
 import { ExportDialog } from "./workbench-export-dialog";
 
 const selection = { kind: "board_nodes" as const, nodeIds: ["node-a"] };
@@ -176,6 +177,63 @@ describe("ExportDialog persisted job state", () => {
     expect(screen.getByText("画布节点 1 个")).toBeTruthy();
     expect(screen.getByText("workbench-export.zip")).toBeTruthy();
     expect(screen.getByText(/2\.0 KB/)).toBeTruthy();
+  });
+
+  it("announces a cancellation conflict without regressing a completed delivery", async () => {
+    const job = {
+      ...exportJob({ format: "html", status: "succeeded" }),
+      packaging: "zip" as const,
+    };
+    const completedDelivery = {
+      ...externalDelivery(job.id),
+      status: "succeeded" as const,
+      revision: 3,
+      remoteReference: "https://deploy.example/completed",
+      confirmedAt: "2026-07-18T00:00:01.000Z",
+      startedAt: "2026-07-18T00:00:02.000Z",
+      transferAuthorizedAt: "2026-07-18T00:00:03.000Z",
+      finishedAt: "2026-07-18T00:00:04.000Z",
+      updatedAt: "2026-07-18T00:00:04.000Z",
+    };
+    const conflict = new WorkbenchApiError({
+      type: "about:blank",
+      title: "Precondition failed",
+      status: 412,
+      code: "REVISION_MISMATCH",
+      detail: "External Export delivery revision does not match",
+    });
+    const onCancelExternalDelivery = vi.fn(async () => undefined);
+    render(<ExportDialog
+      activeExport={job}
+      activeExportSelection={selection}
+      activeExternalDelivery={completedDelivery}
+      busy={false}
+      capabilities={netlifyCapabilities}
+      capabilitiesError={null}
+      capabilitiesPending={false}
+      error={conflict}
+      hasSelection
+      onCancelExport={vi.fn()}
+      onCancelExternalDelivery={onCancelExternalDelivery}
+      onConfirmExternalDelivery={vi.fn()}
+      onCopyCode={vi.fn()}
+      onDownload={vi.fn()}
+      onOpenChange={vi.fn()}
+      onPrepareExternalDelivery={vi.fn()}
+      onRetryCapabilities={vi.fn(async () => undefined)}
+      onRetryExternalDelivery={vi.fn()}
+      onSelectAll={vi.fn()}
+      onStartExport={vi.fn()}
+      open
+      selection={selection}
+    />);
+
+    expect((await screen.findByRole("alert")).textContent)
+      .toBe("发布状态已更新，本次操作未生效，请查看最新状态。");
+    const revokeButton = await screen.findByRole("button", { name: "撤销发布 Netlify" });
+    expect(revokeButton).toHaveProperty("disabled", false);
+    fireEvent.click(revokeButton);
+    await waitFor(() => expect(onCancelExternalDelivery).toHaveBeenCalledWith("Netlify"));
   });
 
   it("keeps the selected external target while its matching Export becomes ready", async () => {

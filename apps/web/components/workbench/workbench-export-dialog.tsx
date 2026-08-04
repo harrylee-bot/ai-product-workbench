@@ -22,6 +22,7 @@ import {
 import { useEffect, useState, type ComponentType, type SVGProps } from "react";
 
 import { cn } from "@/lib/utils";
+import { isWorkbenchApiError } from "@/lib/workbench/api";
 import {
   exportSelectionsEqual,
   exportTargetAvailability,
@@ -137,6 +138,11 @@ export function ExportDialog({
   const externalDeliveryMatches = descriptor.externalTarget !== null
     && activeExternalDelivery?.target === descriptor.externalTarget
     && activeExternalDelivery.exportJobId === activeExport?.id;
+  const externalDeliveryCancellable = externalDeliveryMatches && (
+    activeExternalDelivery?.status === "queued"
+    || activeExternalDelivery?.status === "running"
+    || activeExternalDelivery?.status === "succeeded"
+  );
   const selectionTitle = selection.kind === "artifact"
     ? "当前产物版本"
     : selection.kind === "board_nodes" ? "当前选择" : "当前项目画布";
@@ -146,18 +152,20 @@ export function ExportDialog({
       ? `已固定 ${selection.nodeIds.length} 个画布节点`
       : "按当前画布选择范围导出";
   const exportButtonLabel = busy
-    ? exportRunning ? `正在取消 ${selectedTarget}...` : "正在发布当前版本..."
+    ? externalDeliveryCancellable || exportRunning
+      ? `正在取消 ${selectedTarget}...`
+      : "正在发布当前版本..."
     : externalDeliveryMatches && activeExternalDelivery?.status === "pending_confirmation"
       ? `确认发布至 ${selectedTarget}`
       : externalDeliveryMatches && activeExternalDelivery?.status === "cancelling"
         ? `正在取消 ${selectedTarget}...`
-        : externalDeliveryMatches && (activeExternalDelivery?.status === "queued" || activeExternalDelivery?.status === "running")
-          ? `取消发布 ${selectedTarget}`
+        : externalDeliveryCancellable
+          ? activeExternalDelivery?.status === "succeeded"
+            ? `撤销发布 ${selectedTarget}`
+            : `取消发布 ${selectedTarget}`
           : externalDeliveryMatches && activeExternalDelivery?.status === "failed"
             ? `重试发布 ${selectedTarget}`
-            : externalDeliveryMatches && activeExternalDelivery?.status === "succeeded"
-              ? `已发布至 ${selectedTarget}`
-              : exportRunning
+            : exportRunning
                 ? `取消导出 ${selectedTarget}`
                 : exportSucceeded
                   ? descriptor.delivery === "clipboard"
@@ -276,17 +284,25 @@ export function ExportDialog({
                 )}
               </div>
               <div className="border-t border-white/[0.12] p-[12px]">
+                {error !== null && error !== undefined && (
+                  <p
+                    aria-live="assertive"
+                    className="mb-[8px] break-words text-[10px] leading-[15px] text-[#f2a7a7]"
+                    data-export-operation-error
+                    role="alert"
+                  >
+                    {exportOperationErrorMessage(error)}
+                  </p>
+                )}
                 <button
                   className="h-[32px] w-full rounded-full bg-[#c9b3ff] text-[12px] font-semibold text-[#241832]"
-                  disabled={busy || (externalDeliveryMatches && (
-                    activeExternalDelivery?.status === "succeeded"
-                    || activeExternalDelivery?.status === "cancelling"
-                  ))}
+                  disabled={busy || (externalDeliveryMatches
+                    && activeExternalDelivery?.status === "cancelling")}
                   onClick={() => {
                     let operation: Promise<unknown>;
                     if (externalDeliveryMatches && activeExternalDelivery?.status === "pending_confirmation") {
                       operation = onConfirmExternalDelivery(selectedTarget);
-                    } else if (externalDeliveryMatches && (activeExternalDelivery?.status === "queued" || activeExternalDelivery?.status === "running")) {
+                    } else if (externalDeliveryCancellable) {
                       operation = onCancelExternalDelivery(selectedTarget);
                     } else if (externalDeliveryMatches && activeExternalDelivery?.status === "failed") {
                       operation = onRetryExternalDelivery(selectedTarget);
@@ -361,4 +377,12 @@ function externalSelectionSummary(selection: ExportSelection) {
   if (selection.kind === "artifact") return selection.screenId ? "产物界面 1 个" : "产物版本 1 个";
   if (selection.kind === "release") return "项目发布版本";
   return "项目画布";
+}
+
+function exportOperationErrorMessage(error: unknown): string {
+  if (isWorkbenchApiError(error) && error.status === 412) {
+    return "发布状态已更新，本次操作未生效，请查看最新状态。";
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "导出操作失败，请重试。";
 }
