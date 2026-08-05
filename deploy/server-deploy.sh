@@ -200,10 +200,10 @@ rollback_clean_host() {
   }
   [ "$deployment_mutated" = "1" ] || return 0
   echo "Deployment failed on a clean host; removing partially started services." >&2
-  "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
   if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
     WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
   fi
+  "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
   return "$status"
 }
 
@@ -680,10 +680,10 @@ case "$DEPLOY_TARGET" in
     ;;
   stop)
     trap - ERR
-    "${COMPOSE[@]}" down --remove-orphans
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
       WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans
     fi
+    "${COMPOSE[@]}" down --remove-orphans
     ;;
   rollback)
     [ -n "$ROLLBACK_ENV_FILE" ] || { echo "WORKBENCH_ROLLBACK_ENV_FILE is required for rollback" >&2; exit 64; }
@@ -751,10 +751,10 @@ case "$DEPLOY_TARGET" in
       exit "$rollback_migration_status"
     fi
     runtime_queue_reconciled=1
-    "${COMPOSE[@]}" down --remove-orphans
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
       WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans
     fi
+    "${COMPOSE[@]}" down --remove-orphans
     WORKBENCH_ENV_FILE="$ROLLBACK_ENV_FILE" \
       WORKBENCH_COMPOSE_FILE="$ROLLBACK_COMPOSE_FILE" \
       WORKBENCH_COMPOSE_OVERLAY= \

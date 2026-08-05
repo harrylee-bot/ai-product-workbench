@@ -160,11 +160,40 @@ test("rollback restores queue policy with the previous candidate before teardown
     result.lines,
     (line) => line.includes(result.rollbackEnv) && line.includes(" run --rm --no-deps migrate"),
   );
-  const downIndex = findLine(result.lines, (line) => line.includes(" down --remove-orphans"));
+  const deerflowDownIndex = findLine(result.lines, (line) => (
+    line.includes("deerflow-runtime-compose.yml") && line.includes(" down --remove-orphans")
+  ));
+  const workbenchDownIndex = findLine(result.lines, (line) => (
+    line.includes("workbench-compose.yml") && line.includes(" down --remove-orphans")
+  ));
   assert.ok(stopIndex >= 0, "rollback must stop the active queue participants");
   assert.ok(rollbackMigrateIndex > stopIndex, "the previous migrator must run after the active participants stop");
   assert.match(result.lines[rollbackMigrateIndex], /^allow=1 /u);
-  assert.ok(downIndex > rollbackMigrateIndex, "rollback must restore the old queue policy before stack teardown");
+  assert.ok(
+    deerflowDownIndex > rollbackMigrateIndex,
+    "rollback must restore the old queue policy before stack teardown",
+  );
+  assert.ok(
+    workbenchDownIndex > deerflowDownIndex,
+    "rollback must detach DeerFlow before removing the Workbench-owned internal network",
+  );
+});
+
+test("stop detaches DeerFlow before removing the Workbench-owned internal network", () => {
+  const result = runDeployment({ deployTarget: "stop", manageDeerflowRuntime: true });
+
+  assert.equal(result.status, 0, result.stderr);
+  const deerflowDownIndex = findLine(result.lines, (line) => (
+    line.includes("deerflow-runtime-compose.yml") && line.includes(" down --remove-orphans")
+  ));
+  const workbenchDownIndex = findLine(result.lines, (line) => (
+    line.includes("workbench-compose.yml") && line.includes(" down --remove-orphans")
+  ));
+  assert.ok(deerflowDownIndex >= 0, "stop must tear down the managed DeerFlow stack");
+  assert.ok(
+    workbenchDownIndex > deerflowDownIndex,
+    "stop must detach DeerFlow before removing the Workbench-owned internal network",
+  );
 });
 
 test("rollback reconciliation failure keeps the active stack from teardown", () => {
