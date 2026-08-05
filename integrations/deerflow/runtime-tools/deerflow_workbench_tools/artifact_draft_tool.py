@@ -8,6 +8,7 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
+from .prd_reference_normalizer import normalize_prd_bidirectional_references
 from .runtime_result_validator import validate_runtime_artifact_draft
 
 
@@ -62,7 +63,8 @@ def workbench_artifact_draft_publish(
     if not isinstance(draft_kind, str) or draft_kind not in requested_artifact_kinds:
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED")
 
-    validation = validate_runtime_artifact_draft(draft)
+    normalized_draft, normalizations = normalize_prd_bidirectional_references(draft)
+    validation = validate_runtime_artifact_draft(normalized_draft)
     payload: dict[str, Any] = {
         "protocol": ARTIFACT_DRAFT_PROTOCOL,
         "runId": run_id,
@@ -81,15 +83,23 @@ def workbench_artifact_draft_publish(
         "checksum": hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest(),
     }
     if validation["ok"] is True:
-        artifact["draft"] = draft
+        artifact["draft"] = normalized_draft
     else:
         artifact["issues"] = validation["issues"]
     response = {
         "protocol": "workbench.runtime.artifact-draft-ack.v1",
         "ok": validation["ok"],
         "artifactIndex": artifact_index,
+        "candidateChecksum": validation["candidateChecksum"],
+        "normalizations": normalizations,
         "issues": validation["issues"],
     }
+    if validation["ok"] is False:
+        response["repairInstruction"] = (
+            "Edit only the returned issue paths in the immediately preceding complete "
+            "draft argument, preserve every other field, and publish that complete draft again. "
+            "The listed reciprocal-reference normalizations are applied automatically on every retry."
+        )
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
 
 

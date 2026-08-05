@@ -8,6 +8,7 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
+from .prd_reference_normalizer import normalize_runtime_result_prd_references
 from .runtime_result_validator import validate_runtime_result
 
 
@@ -46,7 +47,8 @@ def workbench_runtime_result_submit(
         "WORKBENCH_TOOL_CALL_ID_INVALID",
         maximum_length=512,
     )
-    validation = validate_runtime_result(candidate)
+    normalized_candidate, normalizations = normalize_runtime_result_prd_references(candidate)
+    validation = validate_runtime_result(normalized_candidate)
     if validation["ok"] is not True:
         artifact = _validated_artifact(
             run_id,
@@ -56,13 +58,22 @@ def workbench_runtime_result_submit(
             issues=validation["issues"],
         )
         return (
-            json.dumps(validation, ensure_ascii=False, separators=(",", ":")),
+            json.dumps({
+                **validation,
+                "normalizations": normalizations,
+                "repairInstruction": (
+                    "Edit only the returned issue paths in the immediately preceding complete "
+                    "candidate argument and preserve every other field. Reciprocal PRD "
+                    "reference normalizations are reapplied automatically."
+                ),
+            }, ensure_ascii=False, separators=(",", ":")),
             artifact,
         )
 
     content = json.dumps({
         "protocol": "workbench.runtime.validation.v1",
         "ok": True,
+        "normalizations": normalizations,
         "message": "Validated. Return only a concise user-facing completion message.",
     }, ensure_ascii=False, separators=(",", ":"))
     return content, _validated_artifact(
@@ -70,7 +81,7 @@ def workbench_runtime_result_submit(
         runtime_attempt_id,
         tool_call_id,
         True,
-        result=candidate,
+        result=normalized_candidate,
         result_checksum=validation["candidateChecksum"],
     )
 
