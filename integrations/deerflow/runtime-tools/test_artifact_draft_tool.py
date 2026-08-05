@@ -137,6 +137,82 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertEqual(invalid_artifact["ok"], False)
         self.assertNotIn("draft", invalid_artifact)
 
+    def test_closes_existing_prd_requirement_criterion_links_before_validation(self) -> None:
+        asymmetric = copy.deepcopy(self.prd_draft)
+        requirement = asymmetric["content"]["sections"]["businessRequirements"]["coreRules"]["blocks"][1]
+        requirement["acceptanceCriterionIds"] = []
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.prd_runtime,
+            0,
+            asymmetric,
+        )
+
+        response = json.loads(content)
+        normalized_requirement = artifact["draft"]["content"]["sections"]["businessRequirements"]["coreRules"]["blocks"][1]
+        self.assertEqual(response["ok"], True)
+        self.assertEqual(normalized_requirement["acceptanceCriterionIds"], ["criterion-main"])
+        self.assertEqual(response["normalizations"][0]["addedId"], "criterion-main")
+        self.assertEqual(requirement["acceptanceCriterionIds"], [])
+
+    def test_closes_existing_prd_criterion_requirement_links_before_validation(self) -> None:
+        asymmetric = copy.deepcopy(self.prd_draft)
+        criterion = asymmetric["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]["blocks"][0]
+        criterion["requirementIds"] = []
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.prd_runtime,
+            0,
+            asymmetric,
+        )
+
+        response = json.loads(content)
+        normalized_criterion = artifact["draft"]["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]["blocks"][0]
+        self.assertEqual(response["ok"], True)
+        self.assertEqual(normalized_criterion["requirementIds"], ["requirement-main"])
+        self.assertEqual(response["normalizations"][0]["addedId"], "requirement-main")
+        self.assertEqual(criterion["requirementIds"], [])
+
+    def test_does_not_normalize_prd_links_when_referenced_ids_are_duplicated(self) -> None:
+        invalid = copy.deepcopy(self.prd_draft)
+        core_rule_blocks = invalid["content"]["sections"]["businessRequirements"]["coreRules"]["blocks"]
+        duplicate_requirement = copy.deepcopy(core_rule_blocks[1])
+        duplicate_requirement["acceptanceCriterionIds"] = []
+        core_rule_blocks.append(duplicate_requirement)
+        criterion = invalid["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]["blocks"][0]
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.prd_runtime,
+            0,
+            invalid,
+        )
+
+        response = json.loads(content)
+        self.assertEqual(response["ok"], False)
+        self.assertEqual(response["normalizations"], [])
+        self.assertEqual(criterion["requirementIds"], ["requirement-main"])
+        self.assertNotIn("draft", artifact)
+
+    def test_does_not_hide_an_unknown_prd_acceptance_criterion(self) -> None:
+        invalid = copy.deepcopy(self.prd_draft)
+        requirement = invalid["content"]["sections"]["businessRequirements"]["coreRules"]["blocks"][1]
+        requirement["acceptanceCriterionIds"] = ["criterion-missing"]
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.prd_runtime,
+            0,
+            invalid,
+        )
+
+        response = json.loads(content)
+        self.assertEqual(response["ok"], False)
+        self.assertEqual(response["normalizations"][0]["addedId"], "criterion-main")
+        self.assertTrue(any(
+            "unknown acceptance criterion" in issue["message"]
+            for issue in response["issues"]
+        ))
+        self.assertNotIn("draft", artifact)
+
     def test_rejects_an_unstable_artifact_index(self) -> None:
         with self.assertRaisesRegex(ValueError, "WORKBENCH_ARTIFACT_DRAFT_INDEX_INVALID"):
             workbench_artifact_draft_publish.func(self.runtime, 20, self.draft)
