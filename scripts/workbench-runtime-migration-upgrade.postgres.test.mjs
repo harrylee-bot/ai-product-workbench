@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cp, mkdtemp, mkdir, readdir, rm } from "node:fs/promises";
 import os from "node:os";
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import canonicalizeModule from "canonicalize";
 import pg from "pg";
 
-const { Client } = pg;
+const { Client, escapeLiteral } = pg;
 const canonicalize = canonicalizeModule;
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(
@@ -21,13 +21,18 @@ const prismaRoot = path.join(repoRoot, "packages/workbench-db/prisma");
 const migrationsRoot = path.join(prismaRoot, "migrations");
 const providerStateMigration = "20260723010000_runtime_provider_state_v2";
 const subprocessTimeoutMs = 120_000;
+const faultBarrierTimeoutMs = 15_000;
 const testTimeoutMs = 600_000;
+const backfillFaultLockKeys = [20_260_723, 1];
+const backfillFaultClientConnectionCheckMs = 100;
+const backfillFaultTrigger = "runtime_provider_state_backfill_test_barrier";
+const backfillFaultFunction = "runtime_provider_state_backfill_test_barrier";
 const configuredAdminUrl =
   process.env.WORKBENCH_RUNTIME_MIGRATION_UPGRADE_TEST_ADMIN_URL?.trim();
 const testWithAdmin = configuredAdminUrl ? test : test.skip;
 
 testWithAdmin(
-  "upgrades legacy runtime events and backfills provider-state v2 in PostgreSQL",
+  "upgrades legacy runtime events and recovers provider-state backfill across pre/post-commit SIGKILL",
   { timeout: testTimeoutMs },
   async (t) => {
     const suffix = `${process.pid}_${Math.random().toString(16).slice(2, 10)}`
@@ -176,6 +181,24 @@ testWithAdmin(
       await upgraded.end();
     }
 
+    const expectedProjection = projectionFixture(fixture);
+    await faultInjectBackfillSigkill({
+      database,
+      databaseConnectionUrl,
+      prismaDatabaseUrl,
+      runId: fixture.runId,
+      barrierAttemptId: fixture.attemptId,
+      expectedCommittedStates: [],
+    });
+    const committedBeforeCheckpoint = await faultInjectBackfillSigkill({
+      database,
+      databaseConnectionUrl,
+      prismaDatabaseUrl,
+      runId: fixture.runId,
+      barrierAttemptId: fixture.secondAttemptId,
+      expectedCommittedStates: [providerStateSnapshot(expectedProjection)],
+    });
+
     const interruptedBackfill = await executeBackfill({
       database,
       prismaDatabaseUrl,
@@ -183,8 +206,7 @@ testWithAdmin(
       maxBatches: 1,
       expectedExitCode: 3,
     });
-    const expectedProjection = projectionFixture(fixture);
-    assert.equal(interruptedBackfill.checkpoint.status, "created");
+    assert.equal(interruptedBackfill.checkpoint.status, "verified");
     assert.equal(interruptedBackfill.checkpoint.eventCount, 2);
     assert.equal(interruptedBackfill.checkpoint.lastSequence, 2);
     assert.equal(
@@ -237,6 +259,23 @@ testWithAdmin(
     try {
       await verified.query("SET search_path TO workbench, public");
       await assertLegacyHistoryPreserved(verified, fixture);
+      const recoveredStates = await providerStateSnapshots(
+        verified,
+        fixture.runId,
+      );
+      assert.deepEqual(
+        recoveredStates[0],
+        committedBeforeCheckpoint[0],
+        "restart rewrote the already committed provider-state projection",
+      );
+      assert.deepEqual(
+        providerStateContents(recoveredStates),
+        [
+          providerStateSnapshot(expectedProjection),
+          providerStateSnapshot(expectedSecondProjection),
+        ],
+        "restart did not converge to exactly one complete projection per attempt",
+      );
       const projections = await verified.query(
         `
       SELECT
@@ -603,6 +642,262 @@ async function seedLegacyRuntimeHistory(client, fixture) {
   }
 }
 
+async function faultInjectBackfillSigkill({
+  database,
+  databaseConnectionUrl,
+  prismaDatabaseUrl,
+  runId,
+  barrierAttemptId,
+  expectedCommittedStates,
+}) {
+  const control = new Client({
+    connectionString: databaseConnectionUrl,
+    application_name: "workbench-runtime-upgrade-backfill-fault",
+  });
+  let backfill = null;
+  let lockHeld = false;
+  await control.connect();
+  try {
+    await control.query("SET search_path TO workbench, public");
+    await installBackfillFaultBarrier(control, barrierAttemptId);
+    await control.query(
+      "SELECT pg_advisory_lock($1, $2)",
+      backfillFaultLockKeys,
+    );
+    lockHeld = true;
+    backfill = startBackfill({
+      database,
+      prismaDatabaseUrl: withClientConnectionCheck(prismaDatabaseUrl),
+      batchSize: 2,
+      maxBatches: 1,
+    });
+
+    const blockedBackend = await waitForAdvisoryWaiter(control);
+    const committedBeforeKill = await providerStateSnapshots(control, runId);
+    assert.deepEqual(
+      providerStateContents(committedBeforeKill),
+      expectedCommittedStates,
+      "backfill exposed a partial attempt while blocked before commit",
+    );
+
+    assert.equal(
+      killBackfillProcessGroup(backfill.child),
+      true,
+      "failed to deliver SIGKILL to the backfill process",
+    );
+    const outcome = await backfill.completion;
+    assert.equal(
+      outcome.signal,
+      "SIGKILL",
+      "backfill process did not terminate from SIGKILL",
+    );
+    assert.doesNotMatch(
+      outcome.stdout,
+      /workbench\.runtime-provider-state-backfill-(?:checkpoint|result)\./u,
+      "killed backfill emitted a checkpoint or terminal result before page commit",
+    );
+    await waitForBackendExit(control, blockedBackend);
+    const committedAfterKill = await providerStateSnapshots(control, runId);
+    assert.deepEqual(
+      committedAfterKill,
+      committedBeforeKill,
+      "SIGKILL changed the committed provider-state set",
+    );
+    return committedAfterKill;
+  } finally {
+    if (backfill && !backfill.completed) {
+      killBackfillProcessGroup(backfill.child);
+    }
+    if (backfill) await backfill.completion;
+    if (lockHeld) {
+      await control.query(
+        "SELECT pg_advisory_unlock($1, $2)",
+        backfillFaultLockKeys,
+      );
+    }
+    await removeBackfillFaultBarrier(control);
+    await control.end();
+  }
+}
+
+async function installBackfillFaultBarrier(client, attemptId) {
+  await removeBackfillFaultBarrier(client);
+  await client.query(`
+    CREATE FUNCTION workbench.${backfillFaultFunction}()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $function$
+    BEGIN
+      PERFORM pg_advisory_xact_lock(${backfillFaultLockKeys[0]}, ${backfillFaultLockKeys[1]});
+      RETURN NEW;
+    END;
+    $function$
+  `);
+  await client.query(`
+    CREATE TRIGGER ${backfillFaultTrigger}
+    AFTER INSERT ON workbench.runtime_provider_states
+    FOR EACH ROW
+    WHEN (NEW."runtime_attempt_id" = ${escapeLiteral(attemptId)})
+    EXECUTE FUNCTION workbench.${backfillFaultFunction}()
+  `);
+}
+
+async function removeBackfillFaultBarrier(client) {
+  await client.query(`
+    DROP TRIGGER IF EXISTS ${backfillFaultTrigger}
+    ON workbench.runtime_provider_states
+  `);
+  await client.query(`
+    DROP FUNCTION IF EXISTS workbench.${backfillFaultFunction}()
+  `);
+}
+
+async function waitForAdvisoryWaiter(client) {
+  const deadline = Date.now() + faultBarrierTimeoutMs;
+  let observedCount = 0;
+  while (Date.now() < deadline) {
+    const result = await client.query(
+      `
+      SELECT
+        activity."pid",
+        activity."backend_start"::text AS "backendStart"
+      FROM pg_locks AS lock
+      INNER JOIN pg_stat_activity AS activity
+        ON activity."pid" = lock."pid"
+      WHERE lock."locktype" = 'advisory'
+        AND lock."database" = (
+          SELECT "oid" FROM pg_database WHERE "datname" = current_database()
+        )
+        AND lock."classid" = $1::oid
+        AND lock."objid" = $2::oid
+        AND lock."objsubid" = 2
+        AND NOT lock."granted"
+      ORDER BY activity."pid"
+      `,
+      backfillFaultLockKeys,
+    );
+    observedCount = result.rowCount ?? result.rows.length;
+    if (observedCount === 1) return result.rows[0];
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(
+    `backfill advisory waiter count did not reach 1 (observed ${observedCount})`,
+  );
+}
+
+async function waitForBackendExit(client, backend) {
+  assert.ok(Number.isSafeInteger(backend.pid) && backend.pid > 0);
+  assert.equal(typeof backend.backendStart, "string");
+  assert.ok(backend.backendStart.length > 0);
+  const deadline = Date.now() + faultBarrierTimeoutMs;
+  while (Date.now() < deadline) {
+    const result = await client.query(
+      `
+      SELECT NOT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE "pid" = $1
+          AND "backend_start" = $2::timestamptz
+      ) AS "exited"
+      `,
+      [backend.pid, backend.backendStart],
+    );
+    if (result.rows[0]?.exited === true) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`backfill PostgreSQL backend ${backend.pid} did not exit`);
+}
+
+async function providerStateSnapshots(client, runId) {
+  const result = await client.query(
+    `
+      SELECT
+        state."runtime_attempt_id" AS "runtimeAttemptId",
+        state."run_id" AS "runId",
+        state."projection_version" AS "projectionVersion",
+        state."last_applied_sequence" AS "lastAppliedSequence",
+        state."last_external_event_id" AS "lastExternalEventId",
+        state."raw_assistant_text" AS "rawAssistantText",
+        state."visible_assistant_text" AS "visibleAssistantText",
+        state."redaction_buffer" AS "redactionBuffer",
+        state."finalization_external_event_id" AS "finalizationExternalEventId",
+        state."finalization_payload_sha256" AS "finalizationPayloadSha256",
+        state."state_sha256" AS "stateSha256",
+        state."built_at" AS "builtAt",
+        state."updated_at" AS "updatedAt"
+      FROM workbench.runtime_provider_states AS state
+      INNER JOIN workbench.runtime_attempts AS attempt
+        ON attempt."id" = state."runtime_attempt_id"
+      WHERE state."run_id" = $1
+      ORDER BY attempt."attempt"
+    `,
+    [runId],
+  );
+  return result.rows;
+}
+
+function providerStateSnapshot(projection) {
+  const { protocol, ...snapshot } = projection;
+  assert.equal(protocol, "workbench.runtime-provider-state.v2");
+  return snapshot;
+}
+
+function providerStateContents(snapshots) {
+  return snapshots.map(({ builtAt, updatedAt, ...snapshot }) => {
+    assert.ok(builtAt instanceof Date, "provider-state builtAt must be a Date");
+    assert.ok(
+      updatedAt instanceof Date,
+      "provider-state updatedAt must be a Date",
+    );
+    return snapshot;
+  });
+}
+
+function startBackfill(input) {
+  const invocation = backfillInvocation(input);
+  const child = spawn(invocation.executable, invocation.args, {
+    cwd: invocation.options.cwd,
+    detached: process.platform !== "win32",
+    env: invocation.options.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  let spawnError = null;
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  child.once("error", (error) => {
+    spawnError = error;
+  });
+  const backfill = { child, completed: false, completion: null };
+  backfill.completion = new Promise((resolve) => {
+    child.once("close", (code, signal) => {
+      backfill.completed = true;
+      resolve({ code, signal, spawnError, stdout, stderr });
+    });
+  });
+  return backfill;
+}
+
+function killBackfillProcessGroup(child) {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null)
+    return false;
+  if (process.platform === "win32") return child.kill("SIGKILL");
+  try {
+    process.kill(-child.pid, "SIGKILL");
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
 async function executeBackfill({
   database,
   prismaDatabaseUrl,
@@ -611,36 +906,19 @@ async function executeBackfill({
   afterAttemptId = null,
   expectedExitCode,
 }) {
-  const adminRole = decodeURIComponent(new URL(configuredAdminUrl).username);
-  assert.ok(adminRole, "upgrade test admin URL must include a username");
-  const args = [
-    "scripts/backfill-workbench-runtime-provider-state.mts",
-    `--expected-database=${database}`,
-    `--batch-size=${batchSize}`,
-    `--max-batches=${maxBatches}`,
-  ];
-  if (afterAttemptId) args.push(`--after-attempt-id=${afterAttemptId}`);
-  const options = {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      NODE_ENV: "test",
-      OTEL_SDK_DISABLED: "true",
-      WORKBENCH_CANDIDATE_SHA: "c".repeat(40),
-      WORKBENCH_MIGRATOR_DATABASE_URL: prismaDatabaseUrl,
-      WORKBENCH_POSTGRES_MIGRATOR_USER: adminRole,
-    },
-    encoding: "utf8",
-    timeout: subprocessTimeoutMs,
-    killSignal: "SIGKILL",
-    maxBuffer: 16 * 1024 * 1024,
-  };
+  const invocation = backfillInvocation({
+    database,
+    prismaDatabaseUrl,
+    batchSize,
+    maxBatches,
+    afterAttemptId,
+  });
   let stdout;
   try {
     ({ stdout } = await execFileAsync(
-      path.join(repoRoot, "node_modules/.bin/tsx"),
-      args,
-      options,
+      invocation.executable,
+      invocation.args,
+      invocation.options,
     ));
     assert.equal(
       expectedExitCode,
@@ -669,6 +947,54 @@ async function executeBackfill({
   assert.ok(checkpoint, `backfill checkpoint missing from stdout: ${stdout}`);
   assert.ok(result, `backfill result missing from stdout: ${stdout}`);
   return { checkpoint, result };
+}
+
+function backfillInvocation({
+  database,
+  prismaDatabaseUrl,
+  batchSize,
+  maxBatches,
+  afterAttemptId = null,
+}) {
+  const adminRole = decodeURIComponent(new URL(configuredAdminUrl).username);
+  assert.ok(adminRole, "upgrade test admin URL must include a username");
+  const args = [
+    "--import",
+    "tsx",
+    "scripts/backfill-workbench-runtime-provider-state.mts",
+    `--expected-database=${database}`,
+    `--batch-size=${batchSize}`,
+    `--max-batches=${maxBatches}`,
+  ];
+  if (afterAttemptId) args.push(`--after-attempt-id=${afterAttemptId}`);
+  return {
+    executable: process.execPath,
+    args,
+    options: {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        OTEL_SDK_DISABLED: "true",
+        WORKBENCH_CANDIDATE_SHA: "c".repeat(40),
+        WORKBENCH_MIGRATOR_DATABASE_URL: prismaDatabaseUrl,
+        WORKBENCH_POSTGRES_MIGRATOR_USER: adminRole,
+      },
+      encoding: "utf8",
+      timeout: subprocessTimeoutMs,
+      killSignal: "SIGKILL",
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  };
+}
+
+function withClientConnectionCheck(databaseUrlValue) {
+  const url = new URL(databaseUrlValue);
+  url.searchParams.set(
+    "options",
+    `-c client_connection_check_interval=${backfillFaultClientConnectionCheckMs}ms`,
+  );
+  return url.href;
 }
 
 async function assertLegacyHistoryPreserved(client, fixture) {

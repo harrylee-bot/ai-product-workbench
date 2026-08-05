@@ -1257,7 +1257,7 @@ describeWithPostgres("Run processor PostgreSQL failed provider cancellation conv
         runId: fixture.runId,
         skipped: true,
       });
-      await executionReconciler.runOnce();
+      await expect(executionReconciler.reconcileRun(fixture.runId)).resolves.toBe(false);
 
       await expect(worker.run.findUniqueOrThrow({ where: { id: fixture.runId } }))
         .resolves.toMatchObject({

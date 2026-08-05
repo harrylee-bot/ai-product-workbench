@@ -3831,6 +3831,7 @@ async function startFakeDeerFlow(expectedToken) {
   const storageObjects = new Map();
   const browserPrdDraftGate = controlledGate();
   const browserPrdFinalizationGate = controlledGate();
+  const browserPrototypeFinalizationGate = controlledGate();
   const state = {
     threadCreates: 0,
     successRuns: 0,
@@ -3874,6 +3875,7 @@ async function startFakeDeerFlow(expectedToken) {
       storageObjects,
       browserPrdDraftGate,
       browserPrdFinalizationGate,
+      browserPrototypeFinalizationGate,
     ).catch((error) => {
       state.requests.push({ errorClass: diagnosticErrorClass(error) });
       if (!response.headersSent) {
@@ -3907,6 +3909,9 @@ async function startFakeDeerFlow(expectedToken) {
     releaseBrowserPrdFinalization() {
       browserPrdFinalizationGate.release();
     },
+    releaseBrowserPrototypeFinalization() {
+      browserPrototypeFinalizationGate.release();
+    },
     disconnectProcessFault(workbenchRunId) {
       const fault = state.processFaults.get(workbenchRunId);
       assert.ok(fault, "controlled provider process fault was not registered");
@@ -3920,6 +3925,7 @@ async function startFakeDeerFlow(expectedToken) {
     async close() {
       browserPrdDraftGate.release();
       browserPrdFinalizationGate.release();
+      browserPrototypeFinalizationGate.release();
       for (const fault of state.processFaults.values()) {
         fault.recoveryGate.release();
         fault.closeInitialStream?.();
@@ -3939,6 +3945,7 @@ async function handleFakeDeerFlow(
   storageObjects,
   browserPrdDraftGate,
   browserPrdFinalizationGate,
+  browserPrototypeFinalizationGate,
 ) {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const storagePrefix = `/${fakeStorageBucket}/`;
@@ -4372,7 +4379,9 @@ async function handleFakeDeerFlow(
         operation: { kind: "create" },
         content: interactiveBrowserPrototypeDocument(),
         citations: [],
-      }, "Controlled browser prototype ready");
+      }, "Controlled browser prototype ready", {
+        finalizationGate: browserPrototypeFinalizationGate,
+      });
       run.status = "success";
     } else {
       state.successRuns += 1;
@@ -4727,7 +4736,13 @@ async function writeGeneratePrototypeRuntimeStream(response, requestBody) {
   );
 }
 
-async function writePrototypeCreateRuntimeStream(response, requestBody, draft, message) {
+async function writePrototypeCreateRuntimeStream(
+  response,
+  requestBody,
+  draft,
+  message,
+  { finalizationGate = null } = {},
+) {
   const scope = runtimeScopeFromRequest(requestBody);
   const messages = [{ type: "human", content: "Workbench Prototype generation request" }];
   const stageMessages = [];
@@ -4746,6 +4761,7 @@ async function writePrototypeCreateRuntimeStream(response, requestBody, draft, m
     draftToolCallId,
     validatedArtifactDraftArtifact(draft, { ...scope, toolCallId: draftToolCallId }),
   ));
+  const draftSnapshot = structuredClone(messages);
   const result = {
     protocol: "workbench.runtime.result.v1",
     message,
@@ -4776,10 +4792,22 @@ async function writePrototypeCreateRuntimeStream(response, requestBody, draft, m
     }, String(index + 2));
   }
   await delay(controlledProviderDelayMs);
-  sendSse(response, "values", {
-    node: "finalize",
-    values: { messages },
-  }, String(stageMessages.length + 2));
+  if (finalizationGate) {
+    sendSse(response, "values", {
+      node: "generate_prototype",
+      values: { messages: draftSnapshot },
+    }, String(stageMessages.length + 2));
+    await waitForControlledProviderGate(response, finalizationGate);
+    sendSse(response, "values", {
+      node: "finalize",
+      values: { messages },
+    }, String(stageMessages.length + 3));
+  } else {
+    sendSse(response, "values", {
+      node: "finalize",
+      values: { messages },
+    }, String(stageMessages.length + 2));
+  }
   response.end();
 }
 
@@ -5958,37 +5986,120 @@ async function runRealStackBrowserScenario({
     assert.equal(await page.locator('[data-phase="generating"]').count(), 0, "mixed Composer request left an active Run UI");
     await mixedComposer.fill("");
 
-    await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    await page.evaluate(() => {
-      const observations = [];
-      const observer = new MutationObserver(() => {
-        observations.push(...[...document.querySelectorAll("[data-canvas-generation-motion]")]
-          .map((element) => element.getAttribute("data-canvas-generation-motion")));
-      });
-      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-canvas-generation-motion"] });
-      globalThis.__workbenchPrototypeMotionObservations = observations;
-      globalThis.__workbenchPrototypeMotionObserver = observer;
-    });
-    await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).click();
-    await mixedErrorToast.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
-    await page.locator('[data-canvas-generation-motion="prototype"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const prototypeObservations = await page.evaluate(() => {
-      globalThis.__workbenchPrototypeMotionObserver?.disconnect();
-      return globalThis.__workbenchPrototypeMotionObservations ?? [];
-    });
-    assert.ok(!prototypeObservations.includes("prd"), "prototype Run mounted a PRD generation wash after the stale PRD artifact");
     const prototypeVisualEvidence = [];
-    await captureActiveGenerationVisualEvidence({
-      evidence: prototypeVisualEvidence,
-      kind: "prototype",
-      outputDir,
-      page,
-    });
-    evidenceManifest.prototypeVisualEvidence = prototypeVisualEvidence;
-    assertActiveGenerationVisualEvidence(prototypeVisualEvidence, "prototype");
+    const prototypeCheckpointResponses = [];
+    const capturePrototypeCheckpointResponse = (response) => {
+      const url = new URL(response.url());
+      const route = /^\/api\/v1\/runs\/([^/]+)\/artifact-drafts\/([^/]+)\/checkpoint$/u.exec(
+        url.pathname,
+      );
+      if (url.origin !== webOrigin || response.request().method() !== "GET" || !route) return;
+      prototypeCheckpointResponses.push({
+        artifactVersionId: decodeURIComponent(route[2]),
+        response,
+        runId: decodeURIComponent(route[1]),
+      });
+    };
+    page.on("response", capturePrototypeCheckpointResponse);
+    let prototypeCheckpointIdentity = null;
+    try {
+      await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      await page.evaluate(() => {
+        const observations = [];
+        const observer = new MutationObserver(() => {
+          observations.push(...[...document.querySelectorAll("[data-canvas-generation-motion]")]
+            .map((element) => element.getAttribute("data-canvas-generation-motion")));
+        });
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-canvas-generation-motion"] });
+        globalThis.__workbenchPrototypeMotionObservations = observations;
+        globalThis.__workbenchPrototypeMotionObserver = observer;
+      });
+      await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).click();
+      await mixedErrorToast.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+      await page.locator('[data-canvas-generation-motion="prototype"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      const prototypeObservations = await page.evaluate(() => {
+        globalThis.__workbenchPrototypeMotionObserver?.disconnect();
+        return globalThis.__workbenchPrototypeMotionObservations ?? [];
+      });
+      assert.ok(!prototypeObservations.includes("prd"), "prototype Run mounted a PRD generation wash after the stale PRD artifact");
+      await captureActiveGenerationVisualEvidence({
+        evidence: prototypeVisualEvidence,
+        kind: "prototype",
+        outputDir,
+        page,
+      });
+      evidenceManifest.prototypeVisualEvidence = prototypeVisualEvidence;
+      assertActiveGenerationVisualEvidence(prototypeVisualEvidence, "prototype");
 
-    await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const artifactPersistence = await assertBrowserArtifactPersistence(projectId);
+      await waitFor(
+        () => prototypeCheckpointResponses.length >= 1,
+        scenarioTimeoutMs,
+        "prototype projector did not request its staging checkpoint",
+      );
+      const stagingEntry = prototypeCheckpointResponses[0];
+      const stagingFinishError = await stagingEntry.response.finished();
+      assert.equal(stagingEntry.response.status(), 200, "prototype staging checkpoint did not return 200");
+      assert.equal(stagingFinishError, null, "prototype staging checkpoint response did not finish");
+      const stagingCheckpoint = await stagingEntry.response.json();
+      assert.equal(prototypeCheckpointResponses.length, 1, "prototype requested multiple checkpoints before finalization");
+      assert.equal(stagingCheckpoint.protocol, "workbench.prototype-patch-checkpoint.v1");
+      assert.equal(stagingCheckpoint.status, "staging", "prototype checkpoint advanced before finalization release");
+      assert.equal(stagingCheckpoint.runId, stagingEntry.runId, "prototype staging checkpoint Run identity drifted");
+      assert.equal(
+        stagingCheckpoint.artifactVersionId,
+        stagingEntry.artifactVersionId,
+        "prototype staging checkpoint ArtifactVersion identity drifted",
+      );
+      prototypeCheckpointIdentity = {
+        artifactVersionId: stagingEntry.artifactVersionId,
+        runId: stagingEntry.runId,
+      };
+
+      fakeRuntime.releaseBrowserPrototypeFinalization();
+      await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      await waitFor(
+        () => prototypeCheckpointResponses.length >= 2,
+        scenarioTimeoutMs,
+        "prototype projector did not request its ready checkpoint",
+      );
+      const readyCheckpointResponses = await Promise.all(prototypeCheckpointResponses.slice(1).map(async (entry) => {
+        const { response } = entry;
+        const finishError = await response.finished();
+        return {
+          body: finishError === null ? await response.json() : null,
+          artifactVersionId: entry.artifactVersionId,
+          finishError,
+          runId: entry.runId,
+          status: response.status(),
+        };
+      }));
+      assert.ok(
+        readyCheckpointResponses.every((response) => response.status === 200 && response.finishError === null),
+        "prototype ready checkpoint responses did not finish successfully",
+      );
+      assert.ok(
+        readyCheckpointResponses.every((response) => (
+          response.body.protocol === "workbench.prototype-patch-checkpoint.v1"
+          && response.runId === prototypeCheckpointIdentity.runId
+          && response.artifactVersionId === prototypeCheckpointIdentity.artifactVersionId
+          && response.body.runId === prototypeCheckpointIdentity.runId
+          && response.body.artifactVersionId === prototypeCheckpointIdentity.artifactVersionId
+        )),
+        "prototype ready checkpoints did not match the staged Run and ArtifactVersion",
+      );
+      assert.ok(
+        readyCheckpointResponses.some((response) => response.body.status === "ready"),
+        "prototype projector did not settle its authoritative ready checkpoint",
+      );
+    } finally {
+      fakeRuntime.releaseBrowserPrototypeFinalization();
+      page.off("response", capturePrototypeCheckpointResponse);
+    }
+    assert.ok(prototypeCheckpointIdentity, "prototype checkpoint identity was not captured");
+    const artifactPersistence = await assertBrowserArtifactPersistence(
+      projectId,
+      prototypeCheckpointIdentity,
+    );
     evidenceManifest.artifactPersistence = artifactPersistence;
     await runScriptedHardNavigation({
       action: () => page.goto(projectUrl, { waitUntil: "networkidle" }),
@@ -7257,15 +7368,17 @@ async function captureBrowserPreviewFailure({ bffRequests, outputDir, page, proj
   return diagnostics;
 }
 
-async function assertBrowserArtifactPersistence(projectId) {
+async function assertBrowserArtifactPersistence(projectId, expectedPrototypeCheckpoint) {
   const result = await queryDatabase(`
     SELECT
+      run.id AS run_id,
       run.status::text AS run_status,
       run.event_sequence,
       run.request->'requestedArtifactKinds' AS requested_artifact_kinds,
       artifact.kind::text AS artifact_kind,
       artifact.revision AS artifact_revision,
       version.version,
+      version.id AS artifact_version_id,
       version.status::text AS version_status,
       version.checksum,
       version.content,
@@ -7311,6 +7424,16 @@ async function assertBrowserArtifactPersistence(projectId) {
     assert.ok(Number(row.version) >= 1, `browser ${expectedKind} ArtifactVersion version was invalid`);
     assert.equal(row.version_status, "ready", `browser ${expectedKind} ArtifactVersion was not ready`);
     if (expectedKind === "prototype") {
+      assert.equal(
+        row.run_id,
+        expectedPrototypeCheckpoint.runId,
+        "browser Prototype persistence belonged to a different Run than its checkpoint",
+      );
+      assert.equal(
+        row.artifact_version_id,
+        expectedPrototypeCheckpoint.artifactVersionId,
+        "browser Prototype persistence belonged to a different ArtifactVersion than its checkpoint",
+      );
       assert.ok(
         Array.isArray(row.content.actions) && row.content.actions.length > 0,
         "browser Prototype fixture was not interactive and could not enter product Preview",

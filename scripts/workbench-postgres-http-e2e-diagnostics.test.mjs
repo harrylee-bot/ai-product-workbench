@@ -572,6 +572,128 @@ test("the real-stack PRD draft gate preserves pending evidence and always releas
   );
 });
 
+test("the real-stack Prototype finalization gate settles staging and ready checkpoints before navigation", async () => {
+  const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
+
+  const fakeRuntimeStart = source.indexOf("async function startFakeDeerFlow");
+  const fakeRuntimeEnd = source.indexOf("async function handleFakeDeerFlow", fakeRuntimeStart);
+  const fakeRuntime = source.slice(fakeRuntimeStart, fakeRuntimeEnd);
+  const cleanupStart = fakeRuntime.indexOf("async close() {");
+  const cleanupEnd = fakeRuntime.indexOf("for (const socket of sockets)", cleanupStart);
+  const cleanup = fakeRuntime.slice(cleanupStart, cleanupEnd);
+  assert.match(fakeRuntime, /const browserPrototypeFinalizationGate = controlledGate\(\);/u);
+  assert.match(
+    fakeRuntime,
+    /releaseBrowserPrototypeFinalization\(\) \{\s+browserPrototypeFinalizationGate\.release\(\);/u,
+  );
+  assert.match(cleanup, /browserPrototypeFinalizationGate\.release\(\);/u);
+  assert.match(source, /finalizationGate: browserPrototypeFinalizationGate,/u);
+
+  const streamStart = source.indexOf("async function writePrototypeCreateRuntimeStream");
+  const streamEnd = source.indexOf("function sourcePrototypeDocument", streamStart);
+  const stream = source.slice(streamStart, streamEnd);
+  const draftSnapshot = stream.indexOf("const draftSnapshot = structuredClone(messages);");
+  const resultMessage = stream.indexOf("const result = {", draftSnapshot);
+  const draftEmission = stream.indexOf("values: { messages: draftSnapshot }", resultMessage);
+  const finalizationGateWait = stream.indexOf(
+    "await waitForControlledProviderGate(response, finalizationGate);",
+    draftEmission,
+  );
+  const finalizationEmission = stream.indexOf('node: "finalize"', finalizationGateWait);
+  assert.ok(
+    draftSnapshot >= 0
+      && draftSnapshot < resultMessage
+      && resultMessage < draftEmission
+      && draftEmission < finalizationGateWait
+      && finalizationGateWait < finalizationEmission,
+    "the controlled Prototype stream must publish only its draft snapshot before awaiting finalization",
+  );
+
+  const browserStart = source.indexOf("async function runRealStackBrowserScenario");
+  const browserEnd = source.indexOf("async function captureActiveGenerationVisualEvidence", browserStart);
+  const browserScenario = source.slice(browserStart, browserEnd);
+  const checkpointCollection = browserScenario.indexOf("const prototypeCheckpointResponses = [];");
+  const responseListener = browserScenario.indexOf(
+    'page.on("response", capturePrototypeCheckpointResponse);',
+    checkpointCollection,
+  );
+  const prototypeSubmission = browserScenario.indexOf(
+    'await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).click();',
+    responseListener,
+  );
+  const prototypeVisualCapture = browserScenario.indexOf(
+    "await captureActiveGenerationVisualEvidence({",
+    prototypeSubmission,
+  );
+  const stagingCheckpointWait = browserScenario.indexOf(
+    "() => prototypeCheckpointResponses.length >= 1",
+    prototypeVisualCapture,
+  );
+  const stagingCheckpointFinished = browserScenario.indexOf(
+    "await stagingEntry.response.finished()",
+    stagingCheckpointWait,
+  );
+  const stagingStatus = browserScenario.indexOf(
+    'assert.equal(stagingCheckpoint.status, "staging"',
+    stagingCheckpointFinished,
+  );
+  const finalizationRelease = browserScenario.indexOf(
+    "fakeRuntime.releaseBrowserPrototypeFinalization();",
+    stagingStatus,
+  );
+  const prototypeComplete = browserScenario.indexOf(
+    "await page.locator('[data-phase=\"complete\"]')",
+    finalizationRelease,
+  );
+  const readyCheckpointWait = browserScenario.indexOf(
+    "() => prototypeCheckpointResponses.length >= 2",
+    prototypeComplete,
+  );
+  const readyCheckpointFinished = browserScenario.indexOf(
+    "await response.finished()",
+    readyCheckpointWait,
+  );
+  const readyIdentity = browserScenario.indexOf(
+    "response.body.runId === prototypeCheckpointIdentity.runId",
+    readyCheckpointFinished,
+  );
+  const readyStatus = browserScenario.indexOf(
+    'response.body.status === "ready"',
+    readyIdentity,
+  );
+  const responseListenerRemoval = browserScenario.indexOf(
+    'page.off("response", capturePrototypeCheckpointResponse);',
+    readyStatus,
+  );
+  const persistenceIdentity = browserScenario.indexOf(
+    "projectId,\n      prototypeCheckpointIdentity,",
+    responseListenerRemoval,
+  );
+  const nextNavigation = browserScenario.indexOf(
+    "await runScriptedHardNavigation({",
+    persistenceIdentity,
+  );
+  assert.ok(
+    checkpointCollection >= 0
+      && checkpointCollection < responseListener
+      && responseListener < prototypeSubmission
+      && prototypeSubmission < prototypeVisualCapture
+      && prototypeVisualCapture < stagingCheckpointWait
+      && stagingCheckpointWait < stagingCheckpointFinished
+      && stagingCheckpointFinished < stagingStatus
+      && stagingStatus < finalizationRelease
+      && finalizationRelease < prototypeComplete
+      && prototypeComplete < readyCheckpointWait
+      && readyCheckpointWait < readyCheckpointFinished
+      && readyCheckpointFinished < readyIdentity
+      && readyIdentity < readyStatus
+      && readyStatus < responseListenerRemoval
+      && responseListenerRemoval < persistenceIdentity
+      && persistenceIdentity < nextNavigation,
+    "the Prototype flow must bind staged and ready checkpoints before persistence proof and navigation",
+  );
+});
+
 test("the real-stack visual lane separates active motion from pending document assertions", async () => {
   const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
 
